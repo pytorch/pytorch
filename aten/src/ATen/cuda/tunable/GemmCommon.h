@@ -233,10 +233,10 @@ struct GemmParams : OpParams {
   std::string BLASSignature() const override {
     std::string alpha_str = to_string_opmath<T>(alpha);
     std::string beta_str = to_string_opmath<T>(beta);
-    return fmt::sprintf("-m %ld -n %ld -k %ld --lda %ld --ldb %ld --ldc %ld --ldd %ld --stride_a 0 --stride_b 0 -- stride_c 0 --stride_d 0 "
-      "--alpha %s --beta %s --transA %c --transB %c --batch_count 1 --a_type %s --b_type %s --c_type %s --d_type %s --compute_type %s",
+    return fmt::sprintf("- { function: matmul, M: %ld, N: %ld, K: %ld, lda: %ld, ldb: %ld, ldc: %ld, ldd: %ld, stride_a: 0, stride_b: 0, stride_c: 0, stride_d: 0, "
+      "alpha: %s, beta: %s, transA: %c, transB: %c, batch_count: 1, a_type: %s, b_type: %s, c_type: %s, d_type: %s, scale_type: %s, bias_type: %s, compute_type: %s }",
       m, n, k, lda, ldb, ldc, ldc, alpha_str, beta_str, transa, transb,
-      TypeName<T>(T{}), TypeName<T>(T{}), TypeName<T>(T{}), TypeName<T>(T{}), ComputeTypeFor<T>());
+      BLASTypeName<T>(T{}), BLASTypeName<T>(T{}), BLASTypeName<T>(T{}), BLASTypeName<T>(T{}), ComputeTypeFor<T>(), ComputeTypeFor<T>(), ComputeTypeFor<T>());
   }
 
   std::string Signature() const override {
@@ -327,10 +327,10 @@ struct GemmAndBiasParams : OpParams {
   std::string BLASSignature() const override {
     std::string alpha_str = to_string_opmath<T>(alpha);
     std::string activation_str = to_string_epilogue(activation);
-    return fmt::sprintf("-m %ld -n %ld -k %ld --lda %ld --ldb %ld --ldc %ld --ldd %ld --stride_a 0 --stride_b 0 -- stride_c 0 --stride_d 0 "
-      "--alpha %s --transA %c --transB %c --batch_count 1 --a_type %s --b_type %s --c_type %s --d_type %s --activation %s --bias_type %s --compute_type %s",
+    return fmt::sprintf("- { function: matmul, M: %ld, N: %ld, K: %ld, lda: %ld, ldb: %ld, ldc: %ld, ldd: %ld, stride_a: 0, stride_b: 0,  stride_c: 0, stride_d: 0 "
+      "alpha: %s, transA: %c, transB: %c, batch_count: 1, a_type: %s, b_type: %s, c_type: %s, d_type: %s, activation: %s, bias_type: %s, scale_type: %s, compute_type: %s }",
       m, n, k, lda, ldb, ldc, ldc, alpha_str, transa, transb,
-      TypeName<T>(T{}), TypeName<T>(T{}), TypeName<T>(T{}), TypeName<T>(T{}), activation_str, TypeName<T>(T{}), ComputeTypeFor<T>());
+      BLASTypeName<T>(T{}), BLASTypeName<T>(T{}), BLASTypeName<T>(T{}), BLASTypeName<T>(T{}), activation_str, BLASTypeName<T>(T{}), ComputeTypeFor<T>(), ComputeTypeFor<T>(), ComputeTypeFor<T>());
   }
 
   std::string Signature() const override {
@@ -422,10 +422,10 @@ struct GemmStridedBatchedParams : OpParams {
   std::string BLASSignature() const override {
     std::string alpha_str = to_string_opmath<T>(alpha);
     std::string beta_str = to_string_opmath<T>(beta);
-    return fmt::sprintf("-m %ld -n %ld -k %ld --lda %ld --ldb %ld --ldc %ld --ldd %ld --stride_a %ld --stride_b %ld --stride_c %ld --stride_d %ld "
-      "--alpha %s --beta %s --transA %c --transB %c --batch_count %ld --a_type %s --b_type %s --c_type %s --d_type %s --compute_type %s",
+    return fmt::sprintf("- { function: matmul, M: %ld, N: %ld, K: %ld, lda: %ld, ldb: %ld, ldc: %ld, ldd: %ld, stride_a: %ld, stride_b: %ld, stride_c: %ld, stride_d: %ld, "
+      "alpha: %s, beta: %s, transA: %c, transB: %c, batch_count: %ld, a_type: %s, b_type: %s, c_type: %s, d_type: %s, scale_type: %s, compute_type: %s }",
       m, n, k, lda, ldb, ldc, ldc, stride_a, stride_b, stride_c, stride_c, alpha_str, beta_str, transa, transb, batch,
-      TypeName<T>(T{}), TypeName<T>(T{}), TypeName<T>(T{}), TypeName<T>(T{}), ComputeTypeFor<T>());
+      BLASTypeName<T>(T{}), BLASTypeName<T>(T{}), BLASTypeName<T>(T{}), BLASTypeName<T>(T{}), ComputeTypeFor<T>(), ComputeTypeFor<T>());
   }
 
   std::string Signature() const override {
@@ -528,9 +528,9 @@ struct ScaledGemmParams : OpParams {
     std::string bias_dtype_str = c10::toString(bias_dtype);
 
     // Excluding use_fast_accum and use_rowise booleans for now
-    return fmt::sprintf("-m %ld -n %ld -k %ld --lda %ld --ldb %ld --ldc %ld --ldd %ld --stride_a 0 --stride_b 0 -- stride_c 0 --stride_d 0 "
-      "--transA %c --transB %c --batch_count 1 --scaleA s --scaleB s --a_type %s --b_type %s --c_type %s --d_type %s --bias_type %s --compute_type %s",
-      m, n, k, lda, ldb, ldc, ldc, transa, transb, a_dtype_str, b_dtype_str, c_dtype_str, c_dtype_str, bias_dtype_str, ComputeTypeFor<T>());
+    return fmt::sprintf("- { function: matmul, M: %ld, N: %ld, K: %ld, lda: %ld, ldb: %ld, ldc: %ld, ldd: %ld, stride_a: 0, stride_b: 0,  stride_c: 0, stride_d: 0, "
+      "transA: %c, transB: %c, batch_count: 1, scaleA: s, scaleB: s, a_type: %s, b_type: %s, c_type: %s, d_type: %s, bias_type: %s, scale_type: %s, compute_type: %s }",
+      m, n, k, lda, ldb, ldc, ldc, transa, transb, a_dtype_str, b_dtype_str, c_dtype_str, c_dtype_str, bias_dtype_str, ComputeTypeFor<T>(), ComputeTypeFor<T>());
   }
 
   std::string Signature() const override {
