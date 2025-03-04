@@ -41,9 +41,6 @@ from torch.utils._pytree import (
 
 
 __all__ = [
-    "PyTreeSpec",
-    "TreeSpec",
-    "LeafSpec",
     "keystr",
     "key_get",
     "register_pytree_node",
@@ -943,16 +940,6 @@ del _Asterisk
 def treespec_pprint(treespec: TreeSpec) -> str:
     dummy_tree = tree_unflatten([_asterisk] * treespec.num_leaves, treespec)
     return repr(dummy_tree)
-
-
-class _LeafSpecMetaa(type(TreeSpec)):  # type: ignore[misc]
-    def __instancecheck__(self, instance: object) -> bool:
-        return _is_pytreespec_instance(instance) and instance.is_leaf()
-
-
-class LeafSpec(TreeSpec, metaclass=_LeafSpecMetaa):
-    def __new__(cls) -> "LeafSpec":
-        return optree.treespec_leaf(none_is_leaf=True)  # type: ignore[return-value]
 
 
 def tree_flatten_with_path(
