@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import copy
 import dataclasses
 import functools
 import itertools
@@ -212,6 +213,7 @@ def validate_ir(node_or_nodes: Optional[_NodeOrNodes]) -> None:
                     Expr,
                     int,
                     EffectfulKernel,
+                    ShapeAsConstantBuffer,
                 ),
             ), (
                 f"Found {type(nodes)}, which is not a supported top level IR node. See [Note: Inductor IR]"
@@ -1859,7 +1861,7 @@ class WelfordReduction(Reduction):
         #         device,
         #         dst_dtype,
         #         cls._unroll_reduction_fn(
-        #             inner_fn, reduction_ranges, reduction_type, src_dtype
+        #             inner_fn, reduction_ranges, reduction_type, src_dtype,
         #         ),
         #         ranges,
         #     )
@@ -4661,6 +4663,12 @@ class ConcatKernel(NopKernel):
             offsets_end.append(new_size[dim])
 
         output_stride = FlexibleLayout.contiguous_strides(new_size)
+        if config.comprehensive_padding:
+            # Ensure the output stride matches the alignment requirements
+            output_stride = Layout._pad_strides(
+                output_stride, new_size, inputs[0].dtype
+            )
+
         # If any of the inputs is in CL format, use CL format for the output
         for i in range(len(inputs)):
             x = inputs[i]
@@ -5170,7 +5178,7 @@ class ExternKernel(InputsKernel):
             # TODO(jansel): impose layout preference on realized buffer
             x.realize()
             return x
-        if isinstance(x, (NonTensorObj)):
+        if isinstance(x, (NonTensorObj, ShapeAsConstantBuffer)):
             return x
         return cls.copy_input(x)
 
@@ -5850,6 +5858,8 @@ class UserDefinedTritonKernel(ExternKernel):
             if kernel.arg_names.index(kwarg) in kernel.constexprs:
                 constexpr_indices.append(idx)
 
+        # Create a copy of triton_meta to avoid modifying the original version.
+        triton_meta = copy.deepcopy(triton_meta)
         if not triton_version_uses_attrs_dict():
             """
             Filter out None args.
@@ -6348,14 +6358,16 @@ class AssertScalar(ExternKernel):
         return free_unbacked_symbols(self.scalar)
 
     def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
+        if not config.scalar_asserts:
+            return
         # NB: It is EXTREMELY important not to simplify the scalar under assertion here,
         # because simplify is done with respect to runtime asserts.  So if you have
         # "u0 == 0" in the runtime asserts, if you subsequently try to
         # simplify(u0 == 0), you will get True (because we've already runtime assert'ed
         # that it's true).  But we're code generating the actual runtime assert here!!
         symbol = next(iter(self.get_unbacked_symbol_uses()))
-        symbol_str = f"std::to_string({symbol})"
         if V.graph.cpp_wrapper:
+            symbol_str = f"std::to_string({symbol})"
             sizevar = V.graph.wrapper_code.codegen_cpp_sizevar(
                 self.scalar, simplify=False
             )
@@ -7045,6 +7057,8 @@ class MutableBox(IRNode):
 class TensorBox(MutableBox):
     @staticmethod
     def create(data):  # type: ignore[no-untyped-def]
+        if isinstance(data, ShapeAsConstantBuffer):
+            return data
         return TensorBox(StorageBox(data))
 
 
