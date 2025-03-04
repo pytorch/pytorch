@@ -495,7 +495,7 @@ def gen_nn_functional(fm: FileManager) -> None:
                     )
                 )
             ],
-            "cross_entropy_loss": {
+            "cross_entropy_loss": [
                 "def cross_entropy_loss({}) -> Tensor: ...".format(
                     ", ".join(
                         [
@@ -508,8 +508,22 @@ def gen_nn_functional(fm: FileManager) -> None:
                         ]
                     )
                 )
-            },
-            "upsample_trilinear3d": {
+            ],
+            "elu": [
+                "def elu({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "self: Tensor",
+                            "alpha: int = 1",
+                            "scale: int = 1",
+                            "input_scale: int = 1",
+                            "*",
+                            "out: Tensor",
+                        ]
+                    )
+                )
+            ],
+            "upsample_trilinear3d": [
                 "def upsample_trilinear3d({}) -> Tensor: ...".format(
                     ", ".join(
                         [
@@ -520,7 +534,7 @@ def gen_nn_functional(fm: FileManager) -> None:
                         ]
                     )
                 )
-            },
+            ],
         }
     )
 
