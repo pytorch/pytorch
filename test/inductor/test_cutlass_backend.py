@@ -1147,8 +1147,6 @@ class TestCutlassBackend(TestCase):
 
         M = 128
 
-        A = torch.randn(M, M).cuda().half()
-
         with config.patch(
             {
                 "max_autotune": True,
@@ -1157,15 +1155,19 @@ class TestCutlassBackend(TestCase):
                 "autotune_fallback_to_aten": False,
             }
         ):
-            expected = torch.mm(A, A)
-            actual = torch.compile(torch.mm)(A, A)
+            # testing compiling with same layout pair
+            compiled = torch.compile(torch.mm)
+            A = torch.randn(M, M).cuda().half()
 
-            torch.testing.assert_close(actual, expected)
+            torch.testing.assert_close(A @ A, compiled(A, A))
+            torch.testing.assert_close(A @ A.t(), compiled(A, A.t()))
 
-            expected = torch.mm(A, A.t())
-            actual = torch.compile(torch.mm)(A, A.t())
+            # testing compiling with opposite layout pair
+            compiled = torch.compile(torch.mm)
+            A = torch.randn(M, M).cuda().half()
 
-            torch.testing.assert_close(actual, expected)
+            torch.testing.assert_close(A @ A.t(), compiled(A, A.t()))
+            torch.testing.assert_close(A @ A, compiled(A, A))
 
 
 if __name__ == "__main__":
