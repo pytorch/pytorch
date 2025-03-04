@@ -11,7 +11,6 @@ It includes:
 import contextlib
 import importlib
 import logging
-import re
 from typing import Union
 
 import torch
@@ -91,34 +90,3 @@ class TestCase(TorchTestCase):
         if self._prior_is_grad_enabled is not torch.is_grad_enabled():
             log.warning("Running test changed grad mode")
             torch.set_grad_enabled(self._prior_is_grad_enabled)
-
-    # strip_torchdynamo_verbose_log=True removes "Set TORCHDYNAMO_VERBOSE=1..."
-    # from output to reduce expecttest spam
-    def assertExpectedInline(
-        self, actual, *args, skip=0, strip_torchdynamo_verbose_log=True, **kwargs
-    ):
-        actual = actual if isinstance(actual, str) else str(actual)
-        if strip_torchdynamo_verbose_log:
-            actual = re.sub(
-                r"(?s)\n[^\n]*Set TORCHDYNAMO_VERBOSE=1[^\n]*\n", "", actual
-            )
-        return super().assertExpectedInline(actual, *args, skip=skip + 1, **kwargs)
-
-    def assertExpectedInlineMunged(
-        self,
-        *args,
-        skip=0,
-        post_munge=None,
-        strip_torchdynamo_verbose_log=True,
-        **kwargs,
-    ):
-        def wrapper(s):
-            if post_munge:
-                s = post_munge(s)
-            return re.sub(r"(?s)\n[^\n]*Set TORCHDYNAMO_VERBOSE=1[^\n]*\n", "", s)
-
-        new_post_munge = wrapper if strip_torchdynamo_verbose_log else post_munge
-
-        return super().assertExpectedInlineMunged(
-            *args, skip=skip + 1, post_munge=new_post_munge, **kwargs
-        )

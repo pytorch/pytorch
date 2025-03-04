@@ -48,8 +48,7 @@ from user code:
    File "test_exc.py", line N, in fn001
     fn002(x)
   File "test_exc.py", line N, in fn002
-    torch._dynamo.graph_break()
-""",
+    torch._dynamo.graph_break()""",
         )
 
     @torch._dynamo.config.patch(verbose=True, suppress_errors=True)
@@ -117,9 +116,7 @@ torch._dynamo.exc.InternalTorchDynamoError: NotImplementedError:
 
 from user code:
    File "test_exc.py", line N, in fn001
-    comptime(f)
-
-""",
+    comptime(f)""",
         )
 
     @torch._dynamo.config.patch(inject_BUILD_SET_unimplemented_TESTING_ONLY=True)
@@ -155,8 +152,7 @@ from user code:
 
 from user code:
    File "test_exc.py", line N, in fn001
-    comptime(f)
-""",
+    comptime(f)""",
         )
 
     @make_logging_test(graph_breaks=True)
@@ -221,8 +217,7 @@ User code traceback:
             ),
             """\
 backend='relu_compile_error_TESTING_ONLY' raised:
-ReluCompileError:
-""",
+ReluCompileError:""",
         )
 
     @skipIf(not TEST_Z3, "z3 not installed")
