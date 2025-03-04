@@ -1844,6 +1844,23 @@ def is_welford_reduction(reduction_type: str) -> bool:
     return reduction_type.startswith("welford")
 
 
+@functools.lru_cache(None)
+def is_tf32_supported() -> bool:
+    import triton
+
+    if not torch.version.hip:
+        return True
+    else:
+        gcn_arch = str(torch.cuda.get_device_properties(0).gcnArchName.split(":", 1)[0])
+        if "gfx90a" not in gcn_arch:
+            return False
+        triton_version = tuple(int(v) for v in triton.__version__.split("."))
+        if triton_version < (3, 3, 0):
+            return False
+        else:
+            return True
+
+
 def reduction_num_outputs(reduction_type: str) -> int:
     return 3 if is_welford_reduction(reduction_type) else 1
 
