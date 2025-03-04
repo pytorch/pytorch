@@ -13,6 +13,7 @@ from torch._higher_order_ops.utils import (
     _has_potential_branch_input_mutation,
     _maybe_compile_and_run_fn,
     autograd_not_implemented,
+    first_slice_copy,
     reenter_make_fx,
     unique_graph_id,
     UnsupportedAliasMutationException,
@@ -269,10 +270,6 @@ def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
 
     scans = _scan(init, xs)
     return scans
-
-
-def first_slice_copy(t: torch.Tensor, dim: int = 0) -> torch.Tensor:
-    return torch.select_copy(t, dim, 0)
 
 
 # We also do a clone with contiguous_format. This is to be consistent with

@@ -1426,7 +1426,8 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
     ) -> VariableTracker:
         import functools
 
-        from torch._higher_order_ops.scan import first_slice_copy, stack_y
+        from torch._higher_order_ops.scan import stack_y
+        from torch._higher_order_ops.utils import first_slice_copy
 
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
 
