@@ -1,8 +1,6 @@
 @echo off
 setlocal
 
-set "ORIG_PATH=%PATH%"
-
 if "%PACKAGE_TYPE%" == "wheel" goto wheel
 if "%PACKAGE_TYPE%" == "libtorch" goto libtorch
 
@@ -52,3 +50,5 @@ if ERRORLEVEL 1 exit /b 1
 if ERRORLEVEL 1 exit /b 1
 
 :end
+
+popd
