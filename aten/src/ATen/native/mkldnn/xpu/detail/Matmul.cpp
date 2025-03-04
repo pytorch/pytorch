@@ -30,9 +30,8 @@ sycl::event matmul(
       "oneDNN input matrixes must have the same ranks");
   TORCH_CHECK(result.defined(), "oneDNN matmul result should be defined");
 
-  at::Device cur_device = at::Device(at::kXPU, c10::xpu::current_device());
-  auto engine = GpuEngineManager::Instance().get_engine(cur_device);
-  auto stream = GpuStreamManager::Instance().get_stream();
+  auto& engine = GpuEngineManager::Instance().get_engine();
+  auto& stream = GpuStreamManager::Instance().get_stream();
 
   at::Tensor m1 = mat1;
   at::Tensor m2 = mat2;
