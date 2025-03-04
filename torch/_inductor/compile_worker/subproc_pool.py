@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import functools
 import itertools
 import logging
@@ -13,7 +12,9 @@ import traceback
 import typing
 from concurrent.futures import Future, ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
-from typing import Any, Callable, Dict
+from enum import Enum
+from typing import Any, Callable, IO, Optional, TypeVar
+from typing_extensions import Never, ParamSpec
 
 # _thread_safe_fork is needed because the subprocesses in the pool can read
 # justknobs, e.g., in the Triton compiler. For internal, the import installs
@@ -25,12 +26,15 @@ from torch._inductor.compile_worker.watchdog import _async_compile_initializer
 
 log = logging.getLogger(__name__)
 
+_P = ParamSpec("_P")
+_T = TypeVar("_T")
 
-def _pack_msg(job_id, length):
+
+def _pack_msg(job_id: int, length: int) -> bytes:
     return struct.pack("nn", job_id, length)
 
 
-def _unpack_msg(data):
+def _unpack_msg(data: bytes) -> tuple[int, int]:
     if not data:
         return -1, -1
     return struct.unpack("nn", data)
@@ -39,7 +43,7 @@ def _unpack_msg(data):
 msg_bytes = len(_pack_msg(0, 0))
 
 
-def _send_msg(write_pipe, job_id, job_data=b""):
+def _send_msg(write_pipe: IO[bytes], job_id: int, job_data: bytes = b"") -> None:
     length = len(job_data)
     write_pipe.write(_pack_msg(job_id, length))
     if length > 0:
@@ -47,13 +51,13 @@ def _send_msg(write_pipe, job_id, job_data=b""):
     write_pipe.flush()
 
 
-def _recv_msg(read_pipe):
+def _recv_msg(read_pipe: IO[bytes]) -> tuple[int, bytes]:
     job_id, length = _unpack_msg(read_pipe.read(msg_bytes))
     data = read_pipe.read(length) if length > 0 else b""
     return job_id, data
 
 
-def _get_ld_library_path():
+def _get_ld_library_path() -> str:
     path = os.environ.get("LD_LIBRARY_PATH", "")
     if config.is_fbcode():
         from libfb.py.parutil import get_runtime_path
@@ -73,7 +77,7 @@ class _SubprocExceptionInfo:
     use it for the message in the exception thrown in the main process.
     """
 
-    def __init__(self, details) -> None:
+    def __init__(self, details: str) -> None:
         self.details = details
 
 
@@ -82,8 +86,26 @@ class SubprocException(Exception):
     Thrown when a job in a subprocess raises an Exception.
     """
 
-    def __init__(self, details) -> None:
+    def __init__(self, details: str) -> None:
         super().__init__(f"An exception occurred in a subprocess:\n\n{details}")
+
+
+class SubprocPickler:
+    """
+    Allows a caller to provide a custom pickler for passing data with the
+    subprocess.
+    """
+
+    def dumps(self, obj: object) -> bytes:
+        return pickle.dumps(obj, pickle.HIGHEST_PROTOCOL)
+
+    def loads(self, data: bytes) -> object:
+        return pickle.loads(data)
+
+
+class SubprocKind(Enum):
+    FORK = "fork"
+    SPAWN = "spawn"
 
 
 class SubprocPool:
@@ -92,8 +114,15 @@ class SubprocPool:
     a subprocess.Popen() to try to avoid issues with forking/spawning
     """
 
-    def __init__(self, nprocs: int) -> None:
+    def __init__(
+        self,
+        nprocs: int,
+        pickler: Optional[SubprocPickler] = None,
+        kind: SubprocKind = SubprocKind.FORK,
+    ) -> None:
         entry = os.path.join(os.path.dirname(__file__), "__main__.py")
+        self.pickler = pickler or SubprocPickler()
+        self.kind = kind
 
         subproc_read_fd, write_fd = os.pipe()
         read_fd, subproc_write_fd = os.pipe()
@@ -103,6 +132,8 @@ class SubprocPool:
         cmd = [
             sys.executable,
             entry,
+            f"--pickler={self.pickler.__class__.__module__}.{self.pickler.__class__.__name__}",
+            f"--kind={self.kind.value}",
             f"--workers={nprocs}",
             f"--parent={os.getpid()}",
             f"--read-fd={str(subproc_read_fd)}",
@@ -127,7 +158,7 @@ class SubprocPool:
         self.read_thread = threading.Thread(target=self._read_thread, daemon=True)
 
         self.futures_lock = threading.Lock()
-        self.pending_futures: Dict[int, Future[Any]] = {}
+        self.pending_futures: dict[int, Future[Any]] = {}
         self.job_id_count = itertools.count()
 
         self.running = True
@@ -136,11 +167,13 @@ class SubprocPool:
         # before any access.
         self.read_thread.start()
 
-    def submit(self, job_fn: Callable[..., Any], *args):
-        if args:
-            job_fn = functools.partial(job_fn, *args)
-        job_data = pickle.dumps(job_fn, pickle.HIGHEST_PROTOCOL)
-        future: Future[Any]
+    def submit(
+        self, job_fn: Callable[_P, _T], *args: _P.args, **kwargs: _P.kwargs
+    ) -> Future[_T]:
+        if args or kwargs:
+            job_fn = functools.partial(job_fn, *args, **kwargs)
+        job_data = self.pickler.dumps(job_fn)
+        future: Future[_T]
         with self.futures_lock:
             job_id = next(self.job_id_count)
             self.pending_futures[job_id] = future = Future()
@@ -151,34 +184,51 @@ class SubprocPool:
             _send_msg(self.write_pipe, job_id, job_data)
         return future
 
-    def _read_thread(self):
-        try:
-            while True:
+    def _read_thread(self) -> None:
+        while True:
+            data = b""
+            try:
                 job_id, data = _recv_msg(self.read_pipe)
-                if job_id < 0:
-                    if self.running:
-                        log.warning("SubprocPool unclean exit")
-                    self.read_pipe.close()
-                    return
-                result = pickle.loads(data)
-                with self.futures_lock:
-                    if not self.running:
-                        return
-                    if isinstance(result, _SubprocExceptionInfo):
-                        # An exception occurred in the submitted job
-                        self.pending_futures[job_id].set_exception(
-                            SubprocException(result.details)
-                        )
-                    elif isinstance(result, Exception):
-                        # An exception occurred in some of our subprocess machinery.
-                        self.pending_futures[job_id].set_exception(result)
-                    else:
-                        self.pending_futures[job_id].set_result(result)
-                    del self.pending_futures[job_id]
-        except Exception:
-            log.exception("failure in SubprocPool._read_thread")
+            except Exception:
+                # Something went wrong during the read. There's no way we have a
+                # valid job_id.
+                log.exception("failure in subproc_pool._recv_msg")
+                job_id = -1
 
-    def shutdown(self):
+            if job_id < 0:
+                # read_pipe returned None or got exception
+                if self.running:
+                    log.warning("SubprocPool unclean exit")
+                    self.running = False
+                self.read_pipe.close()
+                # Cancel all the pending futures.
+                self.shutdown()
+                return
+
+            try:
+                result = self.pickler.loads(data)
+            except Exception as e:
+                # Something went wrong unpickling. We have a job_id so just
+                # notify that particular future and continue on.
+                log.exception("unpickle failure in SubprocPool._read_thread")
+                result = e
+
+            with self.futures_lock:
+                if not self.running:
+                    return
+                if isinstance(result, _SubprocExceptionInfo):
+                    # An exception occurred in the submitted job
+                    self.pending_futures[job_id].set_exception(
+                        SubprocException(result.details)
+                    )
+                elif isinstance(result, Exception):
+                    # An exception occurred in some of our subprocess machinery.
+                    self.pending_futures[job_id].set_exception(result)
+                else:
+                    self.pending_futures[job_id].set_result(result)
+                del self.pending_futures[job_id]
+
+    def shutdown(self) -> None:
         try:
             with self.write_lock:
                 if not self.running:
@@ -200,7 +250,16 @@ class SubprocPool:
 class SubprocMain:
     """Communicates with a SubprocPool in the parent process, called by __main__.py"""
 
-    def __init__(self, nprocs, read_pipe, write_pipe) -> None:
+    def __init__(
+        self,
+        pickler: SubprocPickler,
+        kind: SubprocKind,
+        nprocs: int,
+        read_pipe: IO[bytes],
+        write_pipe: IO[bytes],
+    ) -> None:
+        self.pickler = pickler
+        self.kind = kind
         self.read_pipe = read_pipe
         self.write_pipe = write_pipe
         self.write_lock = threading.Lock()
@@ -208,10 +267,10 @@ class SubprocMain:
         self.pool = self._new_pool(nprocs, True)
         self.running = True
 
-    def _new_pool(self, nprocs, warm):
+    def _new_pool(self, nprocs: int, warm: bool) -> ProcessPoolExecutor:
         pool = ProcessPoolExecutor(
             nprocs,
-            mp_context=multiprocessing.get_context("fork"),
+            mp_context=multiprocessing.get_context(self.kind.value),
             initializer=functools.partial(_async_compile_initializer, os.getpid()),
         )
         multiprocessing.util.Finalize(None, pool.shutdown, exitpriority=sys.maxsize)
@@ -219,14 +278,14 @@ class SubprocMain:
             _warm_process_pool(pool, nprocs)
         return pool
 
-    def main(self):
+    def main(self) -> None:
         while True:
             job_id, data = _recv_msg(self.read_pipe)
             if job_id < 0:
                 return self._shutdown()
             self.submit(job_id, data)
 
-    def _shutdown(self):
+    def _shutdown(self) -> None:
         with self.write_lock:
             self.running = False
             try:
@@ -237,7 +296,7 @@ class SubprocMain:
             self.read_pipe.close()
         self.pool.shutdown()
 
-    def submit(self, job_id, data):
+    def submit(self, job_id: int, data: bytes) -> None:
         while self.running:
             try:
                 self._submit_inner(job_id, data)
@@ -248,43 +307,43 @@ class SubprocMain:
                 # recreating the pool and resubmitting.
                 self.pool = self._new_pool(self.nprocs, False)
 
-    def _submit_inner(self, job_id, data):
-        future = self.pool.submit(functools.partial(SubprocMain.do_job, data))
+    def _submit_inner(self, job_id: int, data: bytes) -> None:
+        future = self.pool.submit(
+            functools.partial(SubprocMain.do_job, self.pickler, data)
+        )
 
-        def callback(_):
+        def callback(_: Future[Any]) -> None:
             if not self.running:
                 return
             try:
                 result = future.result()
             except Exception as e:
                 log.exception("Error in subprocess")
-                result = pickle.dumps(e, pickle.HIGHEST_PROTOCOL)
+                result = self.pickler.dumps(e)
             assert isinstance(result, bytes)
             with self.write_lock:
                 if self.running:
                     _send_msg(self.write_pipe, job_id, result)
+            return
 
         future.add_done_callback(callback)
 
     @staticmethod
-    def do_job(data):
+    def do_job(pickler: SubprocPickler, data: bytes) -> bytes:
         # do the pickle/unpickle in the sub-subproc
-        job = pickle.loads(data)
+        job = typing.cast(Callable[[], object], pickler.loads(data))
+
         try:
             result = job()
-        except Exception as e:
+        except Exception:
             result = _SubprocExceptionInfo(traceback.format_exc())
-        return pickle.dumps(result, pickle.HIGHEST_PROTOCOL)
+        return pickler.dumps(result)
 
 
 AnyPool = typing.Union[ProcessPoolExecutor, SubprocPool]
 
 
-def _warm_process_pool(pool: AnyPool, n: int):
-    if isinstance(pool, SubprocPool):
-        return  # no need
-    assert isinstance(pool, ProcessPoolExecutor)
-
+def _warm_process_pool(pool: ProcessPoolExecutor, n: int) -> None:
     # We have to fork processes for compiler workers, but the more memory and other resources that are loaded, the
     # slower the os.fork time is, quite drastically. It also holds the GIL so we can't put it on another thread.
 
@@ -300,7 +359,6 @@ def _warm_process_pool(pool: AnyPool, n: int):
 
     # We force them to start here with some YOLOing of the internal methods.
 
-    # TODO(masnesral): Are these still relevant?
     if hasattr(pool, "_start_queue_management_thread"):
         pool._start_queue_management_thread()
     else:
@@ -314,5 +372,5 @@ class TestException(RuntimeError):
     pass
 
 
-def raise_testexc():
+def raise_testexc() -> Never:
     raise TestException

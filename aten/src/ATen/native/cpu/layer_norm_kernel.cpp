@@ -296,7 +296,7 @@ void layer_norm_backward_frame(
 }
 
 template <typename T, typename T2, typename opmath_t,
-          typename std::enable_if_t<is_reduced_floating_point_v<T> && std::is_same<T2, float>::value, int> = 0>
+          typename std::enable_if_t<is_reduced_floating_point_v<T> && std::is_same_v<T2, float>, int> = 0>
 void layer_norm_backward_frame(
     const T* dY_data,
     const T* X_data,
@@ -512,8 +512,8 @@ void LayerNormBackwardKernelImplInternal(
   const T2* gamma_data =
       gamma.defined() ? gamma.template const_data_ptr<T2>() : nullptr;
   T* dX_data = dX->defined() ? dX->template data_ptr<T>() : nullptr;
-  T2* dgamma_data = dgamma->defined() ? dgamma->template data_ptr<T2>() : nullptr;
-  T2* dbeta_data = dbeta->defined() ? dbeta->template data_ptr<T2>() : nullptr;
+  T2* const dgamma_data = dgamma->defined() ? dgamma->template data_ptr<T2>() : nullptr;
+  T2* const dbeta_data = dbeta->defined() ? dbeta->template data_ptr<T2>() : nullptr;
   const opmath_t scale = opmath_t(1) / static_cast<opmath_t>(N);
   const bool gamma_null = gamma_data == nullptr;
   const bool dX_null = dX_data == nullptr;
@@ -566,11 +566,9 @@ void LayerNormBackwardKernelImplInternal(
           dbeta_v += buffer_data[num_threads * N + i * N + j];
         }
         if (!dgamma_null) {
-          // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
           dgamma_data[j] = dgamma_v;
         }
         if (!dbeta_null) {
-          // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
           dbeta_data[j] = dbeta_v;
         }
       }
@@ -609,7 +607,7 @@ void LayerNormBackwardKernelImpl(
 
 } // namespace
 
-REGISTER_DISPATCH(LayerNormKernel, &LayerNormKernelImpl);
-REGISTER_DISPATCH(LayerNormBackwardKernel, &LayerNormBackwardKernelImpl);
+REGISTER_DISPATCH(LayerNormKernel, &LayerNormKernelImpl)
+REGISTER_DISPATCH(LayerNormBackwardKernel, &LayerNormBackwardKernelImpl)
 
 } // namespace at::native

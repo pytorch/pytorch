@@ -12,8 +12,7 @@
 #include <ATen/ops/channel_shuffle_native.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 #ifdef USE_PYTORCH_QNNPACK
 namespace {
@@ -120,5 +119,4 @@ class QChannelShuffle final : public c10::OperatorKernel {
 
 } // namespace
 
-} // namespace native
-} // namespace at
+} // namespace at::native

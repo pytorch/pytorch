@@ -2,6 +2,7 @@
 import os
 from unittest.mock import patch
 
+import torch
 import torch.distributed.checkpoint as dcp
 import torch.nn as nn
 from torch.distributed._tensor.device_mesh import init_device_mesh
@@ -40,21 +41,19 @@ class TestSaveAndLoadAPI(DTensorTestBase):
         device_mesh = init_device_mesh(self.device_type, (self.world_size,))
         model = FSDP(model, device_mesh=device_mesh)
         dcp.save(model.state_dict(), checkpoint_id=os.path.join(self.temp_dir, "first"))
-        sd = dcp.load(
-            model.state_dict(), checkpoint_id=os.path.join(self.temp_dir, "first")
-        )
+        dcp.load(model.state_dict(), checkpoint_id=os.path.join(self.temp_dir, "first"))
 
         with patch.object(
             dcp.FileSystemReader, "validate_checkpoint_id", return_value=False
-        ) as m1:
+        ):
             with patch.object(
                 dcp.FileSystemWriter, "validate_checkpoint_id", return_value=False
-            ) as m2:
+            ):
                 dcp.save(
                     model.state_dict(),
                     checkpoint_id=os.path.join(self.temp_dir, "second"),
                 )
-                sd = dcp.load(
+                dcp.load(
                     model.state_dict(),
                     checkpoint_id=os.path.join(self.temp_dir, "second"),
                 )
@@ -62,7 +61,25 @@ class TestSaveAndLoadAPI(DTensorTestBase):
         with self.assertRaisesRegex(RuntimeError, "Cannot detect"):
             dcp.save(model.state_dict(), checkpoint_id="abc://abc.abc")
         with self.assertRaisesRegex(RuntimeError, "Cannot detect"):
-            sd = dcp.load(model.state_dict(), checkpoint_id="abc://abc.abc")
+            dcp.load(model.state_dict(), checkpoint_id="abc://abc.abc")
+
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_assert_same_keys(self):
+        """Test the `_assert_same_keys` function."""
+        model = MyTestModule()
+        state_dict = model.state_dict()
+        # Check across ranks; expect true
+        dcp.utils._assert_same_keys(state_dict)
+
+        # Introduces difference; expect false
+        if self.rank == 0:
+            state_dict["abc"] = torch.rand(1)
+        else:
+            state_dict["def"] = torch.rand(1)
+
+        with self.assertRaises(AssertionError):
+            dcp.utils._assert_same_keys(state_dict)
 
 
 if __name__ == "__main__":

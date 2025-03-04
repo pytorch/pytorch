@@ -28,8 +28,7 @@
 
 #include <algorithm>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(qrelu_stub);
 DEFINE_DISPATCH(qrelu_leaky_stub);
@@ -233,4 +232,4 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
 
 } // namespace
 
-}}  // namespace at::native
+}  // namespace at::native

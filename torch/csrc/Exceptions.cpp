@@ -118,9 +118,9 @@ could not be completed because the input matrix is singular.",
 
 namespace torch {
 
-void processErrorMsgInplace(std::string& str) {
+static void processErrorMsgInplace(std::string& str) {
   // Translate Aten types to their respective pytorch ones
-  constexpr std::array<std::pair<c10::string_view, c10::string_view>, 64>
+  constexpr std::array<std::pair<std::string_view, std::string_view>, 64>
       changes{{
           // TODO: remove torch.(cuda.|)sparse.*Tensor items?
           {"Variable[SparseCUDAByteType]", "torch.cuda.sparse.ByteTensor"},
@@ -204,15 +204,14 @@ std::string processErrorMsg(std::string str) {
 }
 
 static std::string formatMessage(const char* format, va_list fmt_args) {
-  static const size_t ERROR_BUF_SIZE = 1024;
-  // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-  char error_buf[ERROR_BUF_SIZE];
-  vsnprintf(error_buf, ERROR_BUF_SIZE, format, fmt_args);
-
-  // Ensure that the string is null terminated
-  error_buf[sizeof(error_buf) / sizeof(*error_buf) - 1] = 0;
-
-  return std::string(error_buf);
+  constexpr size_t ERROR_BUF_SIZE = 1024;
+  std::string error_buf(ERROR_BUF_SIZE, '\0');
+  auto res = vsnprintf(error_buf.data(), ERROR_BUF_SIZE, format, fmt_args);
+  if (res < 0) {
+    res = 0;
+  }
+  error_buf.resize(res);
+  return error_buf;
 }
 
 void translate_exception_to_python(const std::exception_ptr& e_ptr) {
@@ -251,7 +250,7 @@ PyWarningHandler::PyWarningHandler() noexcept(true)
 }
 
 // Get the Python warning type for a warning
-PyObject* map_warning_to_python_type(const c10::Warning& warning) {
+static PyObject* map_warning_to_python_type(const c10::Warning& warning) {
   struct Visitor {
     PyObject* operator()(const c10::UserWarning&) const {
       return PyExc_UserWarning;

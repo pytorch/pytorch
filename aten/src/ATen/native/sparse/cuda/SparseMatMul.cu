@@ -207,12 +207,12 @@ struct CusparseMatrixMultiplyOp {
 
   CusparseMatrixMultiplyOp() {
     static_assert(
-      std::is_same<c10::Half, scalar_t>::value ||
-          std::is_same<c10::BFloat16, scalar_t>::value ||
-          std::is_same<float, scalar_t>::value ||
-          std::is_same<double, scalar_t>::value ||
-          std::is_same<c10::complex<float>, scalar_t>::value ||
-          std::is_same<c10::complex<double>, scalar_t>::value,
+      std::is_same_v<c10::Half, scalar_t> ||
+          std::is_same_v<c10::BFloat16, scalar_t> ||
+          std::is_same_v<float, scalar_t> ||
+          std::is_same_v<double, scalar_t> ||
+          std::is_same_v<c10::complex<float>, scalar_t> ||
+          std::is_same_v<c10::complex<double>, scalar_t>,
       "cusparseSpGEMM only supports data type of half, bfloat16, float, double and complex float, double.");
     // SpGEMM Computation
     TORCH_CUDASPARSE_CHECK(cusparseSpGEMM_createDescr(&spgemmDesc));
@@ -669,12 +669,12 @@ void sparse_sparse_matmul_cuda_kernel(
     const Tensor& mat2) {
 
   static_assert(
-    std::is_same<c10::Half, scalar_t>::value ||
-        std::is_same<c10::BFloat16, scalar_t>::value ||
-        std::is_same<float, scalar_t>::value ||
-        std::is_same<double, scalar_t>::value ||
-        std::is_same<c10::complex<float>, scalar_t>::value ||
-        std::is_same<c10::complex<double>, scalar_t>::value,
+    std::is_same_v<c10::Half, scalar_t> ||
+        std::is_same_v<c10::BFloat16, scalar_t> ||
+        std::is_same_v<float, scalar_t> ||
+        std::is_same_v<double, scalar_t> ||
+        std::is_same_v<c10::complex<float>, scalar_t> ||
+        std::is_same_v<c10::complex<double>, scalar_t>,
     "sparse_sparse_matmul_cuda_kernel only supports data type of half, bfloat16, float, double and complex float, double.");
 
   // older versions of cusparse on Windows segfault for complex128 dtype

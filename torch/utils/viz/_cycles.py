@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import gc
 import sys
-from typing import Any, Dict, List, NamedTuple, Optional, Tuple
+from typing import Any, NamedTuple, Optional
 import types
 import weakref
 import json
@@ -101,7 +101,7 @@ def annotated_references(obj):
     need for a list.  Descriptions are currently strings.
 
     """
-    references: Dict[int, List[str]] = {}
+    references: dict[int, list[str]] = {}
 
     def add_reference(name, obj):
         references.setdefault(id(obj), []).append(name)
@@ -258,7 +258,7 @@ class Node(NamedTuple):
     label: str
     context: Optional[str]
     root: bool
-    referrents: List[Tuple[str, int]]
+    referrents: list[tuple[str, int]]
 
 def create_graph(objects, *, context=None, filter=None):
     if context is None:
@@ -266,8 +266,9 @@ def create_graph(objects, *, context=None, filter=None):
     if filter is None:
         filter = is_cuda_tensor
 
+    objects = [obj for obj in objects if not isinstance(obj, weakref.ProxyTypes)]
     nodes = [Node(object_annotation(obj), context(obj), filter(obj), []) for obj in objects]
-    node_referrers: List[List[int]] = [[] for obj in objects]
+    node_referrers: list[list[int]] = [[] for obj in objects]
 
     id_to_node = {id(obj): i for i, obj in enumerate(objects)}
     for obj in objects:
@@ -279,7 +280,6 @@ def create_graph(objects, *, context=None, filter=None):
             tidx = id_to_node.get(rid, None)
             if tidx is None:
                 continue
-            t = nodes[tidx]
             labels = references.get(rid, ["?"])
             node_referrers[tidx].append(fidx)
             for label in labels:
@@ -294,8 +294,8 @@ def create_graph(objects, *, context=None, filter=None):
         to_keep.add(idx)
         referrers = node_referrers[idx]
         to_search.extend(referrers)
-    id_to_filtered_id: Dict[int, int] = {}
-    filtered: List[Any] = []
+    id_to_filtered_id: dict[int, int] = {}
+    filtered: list[Any] = []
     for i, n in enumerate(nodes):
         if i in to_keep:
             id_to_filtered_id[i] = len(id_to_filtered_id)
@@ -320,7 +320,7 @@ def cuda_allocation_context():
         addr = seg['address']
         for blk in seg['blocks']:
             if blk['state'] == 'active_allocated':
-                frames, real_size = _block_extra(blk)
+                frames, _real_size = _block_extra(blk)
                 addr_to_frame[addr] = frames
             addr += blk['size']
 
@@ -363,16 +363,14 @@ _template = """
 
     #main {
       flex: 2;
-      overflow: auto;
+      height: 60vh;
+      overflow: clip;
     }
 
     #preContainer {
       flex: 1;
+      height: 40vh;
       overflow: auto;
-    }
-
-    svg {
-        overflow: scroll;
     }
 
     pre {
@@ -392,8 +390,61 @@ _template = """
 <script src='https://cdnjs.cloudflare.com/ajax/libs/viz.js/1.8.0/viz-lite.js'></script>
 <script>
 let dot = $DOT
-let image = Viz(dot, {format: 'svg'});
-document.getElementById('main').innerHTML = image
+let image = Viz(dot, {format: 'svg', 'totalMemory': 1024*1024*1024});
+let main = document.getElementById('main')
+main.innerHTML = image
+let svg = main.firstElementChild
+// Panning and zooming logic
+let isPanning = false;
+let startX, startY;
+let viewBox = { x: 0, y: 0, width: parseFloat(svg.getAttribute('width')), height: parseFloat(svg.getAttribute('height')) };
+svg.removeAttribute('width');
+svg.removeAttribute('height');
+function updateViewBox() {
+    svg.setAttribute('viewBox', `${viewBox.x} ${viewBox.y} ${viewBox.width} ${viewBox.height}`);
+}
+updateViewBox()
+svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+svg.addEventListener('mousedown', function(e) {
+    isPanning = true;
+    startX = e.clientX;
+    startY = e.clientY;
+});
+svg.addEventListener('mousemove', function(e) {
+    if (!isPanning) return;
+    const dx = (e.clientX - startX) * (viewBox.width / svg.clientWidth);
+    const dy = (e.clientY - startY) * (viewBox.height / svg.clientHeight);
+    viewBox.x -= dx;
+    viewBox.y -= dy;
+    startX = e.clientX;
+    startY = e.clientY;
+    updateViewBox();
+});
+svg.addEventListener('mouseup', function() {
+    isPanning = false;
+});
+svg.addEventListener('mouseleave', function() {
+    isPanning = false;
+});
+svg.addEventListener('wheel', function(e) {
+    e.preventDefault();
+    const zoomFactor = 0.1;
+    const zoomAmount = e.deltaY > 0 ? 1 + zoomFactor : 1 - zoomFactor;
+    // Calculate mouse position relative to the SVG
+    const rect = svg.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+    const mouseXRel = mouseX / svg.clientWidth;
+    const mouseYRel = mouseY / svg.clientHeight;
+    // Adjust viewBox to zoom around the mouse position
+    const newWidth = viewBox.width * zoomAmount;
+    const newHeight = viewBox.height * zoomAmount;
+    viewBox.x += (viewBox.width - newWidth) * mouseXRel;
+    viewBox.y += (viewBox.height - newHeight) * mouseYRel;
+    viewBox.width = newWidth;
+    viewBox.height = newHeight;
+    updateViewBox();
+});
 $LISTENERS
 </script>
 </body>

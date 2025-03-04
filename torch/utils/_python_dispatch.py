@@ -3,8 +3,9 @@ import contextlib
 
 import warnings
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Set, Union, Protocol, Tuple, Sequence, overload, Deque, Type
-from typing_extensions import TypeGuard
+from typing import Any, Optional, Union, Protocol, overload
+from collections.abc import Sequence
+from typing_extensions import TypeIs
 from collections import deque
 
 import torch
@@ -68,15 +69,15 @@ class TorchDispatchMode:
             assert isinstance(_dispatch_key, torch._C.DispatchKey)
             self.__dict__["_dispatch_key"] = _dispatch_key
 
-        self.old_dispatch_mode_flags: Deque[bool] = deque()
-        self.old_non_infra_dispatch_mode_flags: Deque[bool] = deque()
+        self.old_dispatch_mode_flags: deque[bool] = deque()
+        self.old_non_infra_dispatch_mode_flags: deque[bool] = deque()
 
     def _lazy_init_old_dispatch_mode_flags(self):
         if not hasattr(self, "old_dispatch_mode_flags"):
-            self.old_dispatch_mode_flags: Deque[bool] = deque()  # type: ignore[no-redef]
+            self.old_dispatch_mode_flags: deque[bool] = deque()  # type: ignore[no-redef]
 
         if not hasattr(self, "old_non_infra_dispatch_mode_flags"):
-            self.old_non_infra_dispatch_mode_flags: Deque[bool] = deque()  # type: ignore[no-redef]
+            self.old_non_infra_dispatch_mode_flags: deque[bool] = deque()  # type: ignore[no-redef]
 
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
@@ -293,7 +294,7 @@ class BaseTorchDispatchMode(TorchDispatchMode):
 
 # Subtypes which have __tensor_flatten__ and __tensor_unflatten__.
 class TensorWithFlatten(Protocol):
-    def __tensor_flatten__(self) -> Tuple[Sequence[str], object]:
+    def __tensor_flatten__(self) -> tuple[Sequence[str], object]:
         ...
 
     @staticmethod
@@ -307,7 +308,7 @@ class TensorWithFlatten(Protocol):
     shape: torch._C.Size
 
     @overload
-    def stride(self, dim: None = None) -> Tuple[int, ...]:
+    def stride(self, dim: None = None) -> tuple[int, ...]:
         ...
 
     @overload
@@ -315,7 +316,7 @@ class TensorWithFlatten(Protocol):
         ...
 
     @overload
-    def size(self, dim: None = None) -> Tuple[int, ...]:
+    def size(self, dim: None = None) -> tuple[int, ...]:
         ...
 
     @overload
@@ -365,7 +366,7 @@ class TensorWithFlatten(Protocol):
 
 
 
-def is_traceable_wrapper_subclass(t: object) -> TypeGuard[TensorWithFlatten]:
+def is_traceable_wrapper_subclass(t: object) -> TypeIs[TensorWithFlatten]:
     """
     Returns whether or not a tensor subclass that implements __torch_dispatch__
     is 'traceable' with torch.compile.
@@ -402,7 +403,7 @@ def is_traceable_wrapper_subclass(t: object) -> TypeGuard[TensorWithFlatten]:
         and hasattr(t, "__tensor_unflatten__")
     )
 
-def is_traceable_wrapper_subclass_type(t: Type) -> TypeGuard[Type[TensorWithFlatten]]:
+def is_traceable_wrapper_subclass_type(t: type) -> TypeIs[type[TensorWithFlatten]]:
     """Same as above, but takes a type argument instead of an instance."""
     return (issubclass(t, torch.Tensor) and t != torch.Tensor
             and hasattr(t, "__tensor_flatten__") and hasattr(t, "__tensor_unflatten__"))
@@ -463,7 +464,6 @@ def _correct_storage_aliasing(func, schema_info, args, outs):
     assert isinstance(func, torch._ops.OpOverload)
     assert isinstance(args, tuple)
     assert isinstance(outs, (list, tuple))
-    flat_outs = torch.utils._pytree.tree_leaves(outs)
 
     def alias_non_inplace_storage(arg, ret):
         # This is hopefully a reasonable assert:
@@ -516,19 +516,19 @@ and output of type {type(ret)}. But expected types to match."""
 # and sometimes use torchscript schema parsing (for custom ops, for which torchgen parsing is untested).
 @dataclass
 class AliasInfo:
-    alias_set: Set[str]
+    alias_set: set[str]
     is_write: bool
     name: Optional[str]
 
 
 @dataclass
 class SchemaInfo:
-    args: List[AliasInfo]
-    outs: List[AliasInfo]
+    args: list[AliasInfo]
+    outs: list[AliasInfo]
 
 
 # Can't import torch._ops.OpOverload due to circular reference
-parsed_schema_map: Dict[Any, SchemaInfo] = {}
+parsed_schema_map: dict[Any, SchemaInfo] = {}
 
 
 # Given an OpOverload, returns schema information on it.
@@ -550,8 +550,8 @@ def get_alias_info(func) -> SchemaInfo:
         # which torchgen chokes on.
         torchgen_schema_str = re.sub(r"=\[[0, ]+\]", "=0", torchgen_schema_str)
         torchgen_schema_str = re.sub(r"=\[[1, ]+\]", "=1", torchgen_schema_str)
-        # for aten::rot90
-        torchgen_schema_str = torchgen_schema_str.replace("=[0, 1]", "=[0,1]")
+        # for aten::rot90 / aten:fft_*
+        torchgen_schema_str = re.sub(r"=\[(-?[0-9]+), (-?[0-9]+)\]", r"=[\1,\2]", torchgen_schema_str)
         torchgen_schema = torchgen.model.FunctionSchema.parse(torchgen_schema_str)
         arg_schemas = [
             AliasInfo(

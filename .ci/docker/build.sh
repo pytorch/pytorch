@@ -86,6 +86,10 @@ CMAKE_VERSION=3.18.5
 
 _UCX_COMMIT=7bb2722ff2187a0cad557ae4a6afa090569f83fb
 _UCC_COMMIT=20eae37090a4ce1b32bcce6144ccad0b49943e0b
+if [[ "$image" == *rocm* ]]; then
+  _UCX_COMMIT=cc312eaa4655c0cc5c2bcd796db938f90563bcf6
+  _UCC_COMMIT=0c0fc21559835044ab107199e334f7157d6a0d3d
+fi
 
 # It's annoying to rename jobs every time you want to rewrite a
 # configuration, so we hardcode everything here rather than do it
@@ -93,20 +97,6 @@ _UCC_COMMIT=20eae37090a4ce1b32bcce6144ccad0b49943e0b
 case "$image" in
   pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9)
     CUDA_VERSION=12.4.1
-    CUDNN_VERSION=9
-    ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=9
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    KATEX=yes
-    UCX_COMMIT=${_UCX_COMMIT}
-    UCC_COMMIT=${_UCC_COMMIT}
-    CONDA_CMAKE=yes
-    TRITON=yes
-    ;;
-  pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9)
-    CUDA_VERSION=12.1.1
     CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
@@ -134,40 +124,25 @@ case "$image" in
     TRITON=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
-  pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9-inductor-benchmarks)
-    CUDA_VERSION=12.1.1
-    CUDNN_VERSION=9
-    ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=9
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    KATEX=yes
-    UCX_COMMIT=${_UCX_COMMIT}
-    UCC_COMMIT=${_UCC_COMMIT}
-    CONDA_CMAKE=yes
-    TRITON=yes
-    INDUCTOR_BENCHMARKS=yes
-    ;;
-  pytorch-linux-focal-cuda12.1-cudnn9-py3.12-gcc9-inductor-benchmarks)
-    CUDA_VERSION=12.1.1
-    CUDNN_VERSION=9
-    ANACONDA_PYTHON_VERSION=3.12
-    GCC_VERSION=9
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    KATEX=yes
-    UCX_COMMIT=${_UCX_COMMIT}
-    UCC_COMMIT=${_UCC_COMMIT}
-    CONDA_CMAKE=yes
-    TRITON=yes
-    INDUCTOR_BENCHMARKS=yes
-    ;;
   pytorch-linux-focal-cuda12.4-cudnn9-py3.12-gcc9-inductor-benchmarks)
     CUDA_VERSION=12.4.1
     CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.12
+    GCC_VERSION=9
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    KATEX=yes
+    UCX_COMMIT=${_UCX_COMMIT}
+    UCC_COMMIT=${_UCC_COMMIT}
+    CONDA_CMAKE=yes
+    TRITON=yes
+    INDUCTOR_BENCHMARKS=yes
+    ;;
+  pytorch-linux-focal-cuda12.4-cudnn9-py3.13-gcc9-inductor-benchmarks)
+    CUDA_VERSION=12.4.1
+    CUDNN_VERSION=9
+    ANACONDA_PYTHON_VERSION=3.13
     GCC_VERSION=9
     PROTOBUF=yes
     DB=yes
@@ -193,48 +168,6 @@ case "$image" in
     CONDA_CMAKE=yes
     TRITON=yes
     ;;
-  pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9)
-    CUDA_VERSION=12.4.1
-    CUDNN_VERSION=9
-    ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=9
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    KATEX=yes
-    UCX_COMMIT=${_UCX_COMMIT}
-    UCC_COMMIT=${_UCC_COMMIT}
-    CONDA_CMAKE=yes
-    TRITON=yes
-    ;;
-  pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9)
-    CUDA_VERSION=12.1.1
-    CUDNN_VERSION=9
-    ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=9
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    KATEX=yes
-    UCX_COMMIT=${_UCX_COMMIT}
-    UCC_COMMIT=${_UCC_COMMIT}
-    CONDA_CMAKE=yes
-    TRITON=yes
-    ;;
-  pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9)
-    CUDA_VERSION=12.4.1
-    CUDNN_VERSION=9
-    ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=9
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    KATEX=yes
-    UCX_COMMIT=${_UCX_COMMIT}
-    UCC_COMMIT=${_UCC_COMMIT}
-    CONDA_CMAKE=yes
-    TRITON=yes
-    ;;
   pytorch-linux-focal-py3-clang10-onnx)
     ANACONDA_PYTHON_VERSION=3.9
     CLANG_VERSION=10
@@ -243,16 +176,6 @@ case "$image" in
     VISION=yes
     CONDA_CMAKE=yes
     ONNX=yes
-    ;;
-  pytorch-linux-focal-py3-clang9-android-ndk-r21e)
-    ANACONDA_PYTHON_VERSION=3.9
-    CLANG_VERSION=9
-    LLVMDEV=yes
-    PROTOBUF=yes
-    ANDROID=yes
-    ANDROID_NDK_VERSION=r21e
-    GRADLE_VERSION=6.8.3
-    NINJA_VERSION=1.9.0
     ;;
   pytorch-linux-focal-py3.9-clang10)
     ANACONDA_PYTHON_VERSION=3.9
@@ -287,25 +210,33 @@ case "$image" in
     ;;
   pytorch-linux-focal-rocm-n-1-py3)
     ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=9
+    GCC_VERSION=11
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    ROCM_VERSION=6.1
+    ROCM_VERSION=6.2.4
     NINJA_VERSION=1.9.0
     CONDA_CMAKE=yes
     TRITON=yes
+    KATEX=yes
+    UCX_COMMIT=${_UCX_COMMIT}
+    UCC_COMMIT=${_UCC_COMMIT}
+    INDUCTOR_BENCHMARKS=yes
     ;;
   pytorch-linux-focal-rocm-n-py3)
     ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=9
+    GCC_VERSION=11
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    ROCM_VERSION=6.2
+    ROCM_VERSION=6.3
     NINJA_VERSION=1.9.0
     CONDA_CMAKE=yes
     TRITON=yes
+    KATEX=yes
+    UCX_COMMIT=${_UCX_COMMIT}
+    UCC_COMMIT=${_UCC_COMMIT}
+    INDUCTOR_BENCHMARKS=yes
     ;;
   pytorch-linux-jammy-xpu-2024.0-py3)
     ANACONDA_PYTHON_VERSION=3.9
@@ -314,6 +245,17 @@ case "$image" in
     DB=yes
     VISION=yes
     XPU_VERSION=0.5
+    NINJA_VERSION=1.9.0
+    CONDA_CMAKE=yes
+    TRITON=yes
+    ;;
+  pytorch-linux-jammy-xpu-2025.0-py3)
+    ANACONDA_PYTHON_VERSION=3.9
+    GCC_VERSION=11
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    XPU_VERSION=2025.0
     NINJA_VERSION=1.9.0
     CONDA_CMAKE=yes
     TRITON=yes
@@ -414,9 +356,6 @@ case "$image" in
     DB=yes
     VISION=yes
     CONDA_CMAKE=yes
-    # snadampal: skipping sccache due to the following issue
-    # https://github.com/pytorch/pytorch/issues/121559
-    SKIP_SCCACHE_INSTALL=yes
     # snadampal: skipping llvm src build install because the current version
     # from pytorch/llvm:9.0.1 is x86 specific
     SKIP_LLVM_SRC_BUILD_INSTALL=yes
@@ -429,9 +368,6 @@ case "$image" in
     DB=yes
     VISION=yes
     CONDA_CMAKE=yes
-    # snadampal: skipping sccache due to the following issue
-    # https://github.com/pytorch/pytorch/issues/121559
-    SKIP_SCCACHE_INSTALL=yes
     # snadampal: skipping llvm src build install because the current version
     # from pytorch/llvm:9.0.1 is x86 specific
     SKIP_LLVM_SRC_BUILD_INSTALL=yes
@@ -508,8 +444,6 @@ docker build \
        --build-arg "CUDA_VERSION=${CUDA_VERSION}" \
        --build-arg "CUDNN_VERSION=${CUDNN_VERSION}" \
        --build-arg "TENSORRT_VERSION=${TENSORRT_VERSION}" \
-       --build-arg "ANDROID=${ANDROID}" \
-       --build-arg "ANDROID_NDK=${ANDROID_NDK_VERSION}" \
        --build-arg "GRADLE_VERSION=${GRADLE_VERSION}" \
        --build-arg "VULKAN_SDK_VERSION=${VULKAN_SDK_VERSION}" \
        --build-arg "SWIFTSHADER=${SWIFTSHADER}" \
@@ -517,7 +451,7 @@ docker build \
        --build-arg "NINJA_VERSION=${NINJA_VERSION:-}" \
        --build-arg "KATEX=${KATEX:-}" \
        --build-arg "ROCM_VERSION=${ROCM_VERSION:-}" \
-       --build-arg "PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH:-gfx906;gfx90a}" \
+       --build-arg "PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH:-gfx90a;gfx942}" \
        --build-arg "IMAGE_NAME=${IMAGE_NAME}" \
        --build-arg "UCX_COMMIT=${UCX_COMMIT}" \
        --build-arg "UCC_COMMIT=${UCC_COMMIT}" \

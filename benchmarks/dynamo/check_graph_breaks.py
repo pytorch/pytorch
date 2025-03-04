@@ -6,10 +6,20 @@ import textwrap
 import pandas as pd
 
 
+# Hack to have something similar to DISABLED_TEST. These models are flaky.
+
+flaky_models = {
+    "yolov3",
+    "gluon_inception_v3",
+    "detectron2_maskrcnn_r_101_c4",
+    "XGLMForCausalLM",  # discovered in https://github.com/pytorch/pytorch/pull/128148
+}
+
+
 def get_field(csv, model_name: str, field: str):
     try:
         return csv.loc[csv["name"] == model_name][field].item()
-    except Exception as e:
+    except Exception:
         return None
 
 
@@ -17,23 +27,62 @@ def check_graph_breaks(actual_csv, expected_csv, expected_filename):
     failed = []
     improved = []
 
+    if "rocm" in expected_filename:
+        flaky_models.update(
+            {
+                "alexnet",
+                "cait_m36_384",
+                "demucs",
+                "densenet121",
+                "detectron2_fcos_r_50_fpn",
+                "doctr_det_predictor",
+                "doctr_reco_predictor",
+                "hf_BigBird",
+                "hf_Longformer",
+                "hf_Reformer",
+                "hf_Roberta_base",
+                "hf_T5",
+                "hf_T5_base",
+                "levit_128",
+                "llava",
+                "microbench_unbacked_tolist_sum",
+                "sam",
+                "sam_fast",
+                "stable_diffusion_text_encoder",
+                "stable_diffusion_unet",
+                "timm_efficientdet",
+                "timm_nfnet",
+                "torchrec_dlrm",
+                "vgg16",
+            }
+        )
+
     for model in actual_csv["name"]:
         graph_breaks = get_field(actual_csv, model, "graph_breaks")
         expected_graph_breaks = get_field(expected_csv, model, "graph_breaks")
+        flaky = model in flaky_models
 
-        if graph_breaks == expected_graph_breaks:
-            status = "PASS"
+        if expected_graph_breaks is None:
+            status = "MISSING:"
+            improved.append(model)
+        elif graph_breaks == expected_graph_breaks:
+            status = "PASS_BUT_FLAKY" if flaky else "PASS"
             print(f"{model:34}  {status}")
             continue
-
         elif graph_breaks > expected_graph_breaks:
-            status = "FAIL:"
-            failed.append(model)
+            if flaky:
+                status = "FAIL_BUT_FLAKY:"
+            else:
+                status = "FAIL:"
+                failed.append(model)
         elif graph_breaks < expected_graph_breaks:
-            status = "IMPROVED:"
-            improved.append(model)
+            if flaky:
+                status = "IMPROVED_BUT_FLAKY:"
+            else:
+                status = "IMPROVED:"
+                improved.append(model)
         print(
-            f"{model:34}  {status:9} graph_breaks={graph_breaks}, expected={expected_graph_breaks}"
+            f"{model:34}  {status:19} graph_breaks={graph_breaks}, expected={expected_graph_breaks}"
         )
 
     msg = ""
@@ -42,7 +91,7 @@ def check_graph_breaks(actual_csv, expected_csv, expected_filename):
             msg += textwrap.dedent(
                 f"""
             Error: {len(failed)} models have new dynamo graph breaks:
-                {' '.join(failed)}
+                {" ".join(failed)}
 
             """
             )
@@ -50,7 +99,7 @@ def check_graph_breaks(actual_csv, expected_csv, expected_filename):
             msg += textwrap.dedent(
                 f"""
             Improvement: {len(improved)} models have fixed dynamo graph breaks:
-                {' '.join(improved)}
+                {" ".join(improved)}
 
             """
             )

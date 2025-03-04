@@ -1,3 +1,21 @@
+"""
+This package implements variable tracking and symbolic execution capabilities for Dynamo,
+which are essential for converting Python code into FX graphs. It provides a comprehensive
+set of variable types that handle different Python constructs during tracing.
+
+Each variable type (like BuiltinVariable, TensorVariable, NNModuleVariable, etc.) is responsible
+for tracking and symbolically executing operations on specific Python objects. This enables
+Dynamo to:
+- Track the flow of values through Python code
+- Maintain correct semantics during graph conversion
+- Handle complex Python features like context managers, iterators, and custom objects
+- Support both eager and symbolic execution modes
+
+The VariableTracker base class provides the foundation for all variable types, with each
+subclass implementing specific behavior for different Python constructs. This modular design
+allows Dynamo to accurately trace and optimize Python code while preserving its semantics.
+"""
+
 from .base import VariableTracker
 from .builtin import BuiltinVariable
 from .constant import ConstantVariable, EnumVariable
@@ -18,20 +36,29 @@ from .ctx_manager import (
     SetFwdGradEnabledContextManager,
     StreamContextVariable,
     StreamVariable,
+    TemporarilyPopInterpreterStackCtxManagerVariable,
     VmapIncrementNestingCtxManagerVariable,
     WithExitFunctionVariable,
 )
 from .dicts import (
     ConstDictVariable,
-    CustomizedDictVariable,
     DefaultDictVariable,
+    DictKeySetVariable,
     FrozensetVariable,
+    MappingProxyVariable,
+    NNModuleHooksDictVariable,
     SetVariable,
 )
 from .distributed import BackwardHookVariable, DistributedVariable, PlacementVariable
 from .functions import (
+    BuiltinMethodVariable,
+    CollectionsNamedTupleFunction,
     CreateTMADescriptorVariable,
+    FunctionDecoratedByContextlibContextManagerVariable,
     FunctoolsPartialVariable,
+    FunctoolsWrapsVariable,
+    LocalGeneratorFunctionVariable,
+    LocalGeneratorObjectVariable,
     NestedUserFunctionVariable,
     PolyfilledFunctionVariable,
     SkipFunctionVariable,
@@ -47,6 +74,7 @@ from .higher_order_ops import (
 from .iter import (
     CountIteratorVariable,
     CycleIteratorVariable,
+    FilterVariable,
     IteratorVariable,
     ItertoolsVariable,
     MapVariable,
@@ -60,7 +88,6 @@ from .lists import (
     ListVariable,
     NamedTupleVariable,
     RangeVariable,
-    RestrictedListSubclassVariable,
     SliceVariable,
     TupleIteratorVariable,
     TupleVariable,
@@ -68,14 +95,12 @@ from .lists import (
 from .misc import (
     AutogradFunctionContextVariable,
     AutogradFunctionVariable,
-    ClosureVariable,
+    CellVariable,
     DeletedVariable,
     ExceptionVariable,
     GetAttrVariable,
-    InspectSignatureVariable,
     LambdaVariable,
     MethodWrapperVariable,
-    NewCellVariable,
     NewGlobalVariable,
     NumpyVariable,
     PythonModuleVariable,
@@ -87,6 +112,7 @@ from .misc import (
     TorchVersionVariable,
     TypingVariable,
     UnknownVariable,
+    WeakRefVariable,
 )
 from .nn_module import (
     FSDPManagedNNModuleVariable,
@@ -110,8 +136,10 @@ from .user_defined import (
     MutableMappingVariable,
     RemovableHandleVariable,
     UserDefinedClassVariable,
+    UserDefinedDictVariable,
+    UserDefinedListVariable,
     UserDefinedObjectVariable,
-    WeakRefVariable,
+    UserDefinedTupleVariable,
 )
 
 
@@ -122,24 +150,22 @@ __all__ = [
     "BaseListVariable",
     "BuiltinVariable",
     "CatchWarningsCtxManagerVariable",
-    "ClosureVariable",
     "ConstantVariable",
     "ConstDictVariable",
     "ContextWrappingVariable",
     "CountIteratorVariable",
     "CreateTMADescriptorVariable",
     "CUDADeviceVariable",
-    "CustomizedDictVariable",
     "CycleIteratorVariable",
     "DataPtrVariable",
     "DefaultDictVariable",
     "DeletedVariable",
     "DeterministicAlgorithmsVariable",
+    "DictKeySetVariable",
     "EnumVariable",
     "FakeItemVariable",
     "GetAttrVariable",
     "GradModeVariable",
-    "InspectSignatureVariable",
     "IteratorVariable",
     "ItertoolsVariable",
     "LambdaVariable",
@@ -148,7 +174,7 @@ __all__ = [
     "ListVariable",
     "NamedTupleVariable",
     "NestedUserFunctionVariable",
-    "NewCellVariable",
+    "CellVariable",
     "NewGlobalVariable",
     "NNModuleVariable",
     "NumpyNdarrayVariable",
@@ -161,12 +187,12 @@ __all__ = [
     "RegexPatternVariable",
     "RemovableHandleVariable",
     "RepeatIteratorVariable",
-    "RestrictedListSubclassVariable",
     "SDPAParamsVariable",
     "SkipFunctionVariable",
     "SliceVariable",
     "StringFormatVariable",
     "SuperVariable",
+    "TemporarilyPopInterpreterStackCtxManagerVariable",
     "TensorVariable",
     "TMADescriptorVariable",
     "TorchCtxManagerClassVariable",
@@ -178,9 +204,11 @@ __all__ = [
     "UnspecializedPythonVariable",
     "UntypedStorageVariable",
     "UserDefinedClassVariable",
+    "UserDefinedTupleVariable",
     "UserDefinedObjectVariable",
     "UserFunctionVariable",
     "UserMethodVariable",
     "VariableTracker",
     "WithExitFunctionVariable",
+    "MappingProxyVariable",
 ]

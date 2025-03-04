@@ -112,7 +112,7 @@ class TORCH_API ExprHandle {
   }
 
 #define IMM_EXPR_DECLARE(Type, Name) ExprHandle(Type v);
-  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_EXPR_DECLARE);
+  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_EXPR_DECLARE)
 #undef IMM_EXPR_DECLARE
 
   template <class Op>
@@ -274,7 +274,7 @@ class TORCH_API Buf : public ExprNode<Buf> {
 
   ExprPtr initializer() const {
     return initializer_;
-  };
+  }
 
   ExprPtr qzero() const {
     return qzero_;
@@ -411,7 +411,7 @@ class TORCH_API BufHandle : public ExprHandle {
 class TORCH_API VarHandle : public ExprHandle {
  public:
   // Creates an empty VarHandle whose base Var is set to nullptr.
-  VarHandle() : ExprHandle() {}
+  VarHandle() = default;
 
   explicit VarHandle(Dtype dtype) : ExprHandle(Var::make(dtype)) {}
 

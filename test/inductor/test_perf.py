@@ -501,6 +501,9 @@ class FusionTests(TestCase):
         expected_numel = (
             1 + hidden_size * 2 + 4 * 2048 * hidden_size * 2 + 4 * 2048 * 2 + 1
         )
+        if config.triton.cooperative_reductions:
+            expected_numel = 134225922
+
         self.assertExpectedInline(count_numel(f, *inp, True), str(expected_numel))
         self.assertExpectedInline(count_numel(f, *inp, False), str(expected_numel))
 
@@ -532,6 +535,52 @@ class FusionTests(TestCase):
         actual_numel_amax_no_keep_dim = count_numel(f, *inp, False)
         self.assertEqual(actual_numel_amax_keep_dim, actual_numel_amax_no_keep_dim)
         self.assertGreaterAlmostEqual(actual_numel_amax_keep_dim, str(expected_numel))
+
+    def test_create_block_mask(self):
+        def mk_3d_flex_natten_mask(dims, kernel_size):
+            T, H, W = dims
+            K_T, K_H, K_W = kernel_size
+            spatial = H * W
+
+            def get_x_y_t(idx: int) -> tuple[int, int, int]:
+                t = idx // spatial
+                s = idx % spatial
+                x = s // W
+                y = s % W
+                return x, y, t
+
+            def get_mask(b, h, q_idx, kv_idx):
+                q_x, q_y, q_t = get_x_y_t(q_idx)
+                kv_x, kv_y, kv_t = get_x_y_t(kv_idx)
+                kernel_x = q_x.clamp(K_W // 2, (W - 1) - K_W // 2)
+                kernel_y = q_y.clamp(K_H // 2, (H - 1) - K_H // 2)
+                kernel_t = q_t.clamp(K_T // 2, (T - 1) - K_T // 2)
+                hori_mask = (kernel_x - kv_x).abs() <= K_W // 2
+                vert_mask = (kernel_y - kv_y).abs() <= K_H // 2
+                temp_mask = (kernel_t - kv_t).abs() <= K_T // 2
+                return hori_mask & vert_mask & temp_mask
+
+            return get_mask
+
+        T = 4
+        H = 16
+        W = 16
+        t = 5
+        h = 5
+        w = 5
+        data_size = (T, H, W)
+        kernel_size = (t, h, w)
+        S = T * H * W
+        from torch.nn.attention.flex_attention import create_block_mask
+
+        mask_mod = mk_3d_flex_natten_mask(data_size, kernel_size)
+
+        torch.compile(create_block_mask)(mask_mod, None, None, S, S)
+        numel = int(count_numel(create_block_mask, mask_mod, None, None, S, S))
+
+        # We should be writing way less than a quadratic amount of bytes here
+        # With fusion, we should only be writing a linear number of bytes
+        self.assertLess(numel * 5, S * S)
 
 
 class SchedulerFusionTests(TestCase):
@@ -931,12 +980,10 @@ class InplacingTests(TestCase):
             tl.store(out_ptr + offsets, output, mask=mask)
             tl.store(out2_ptr + offsets, output, mask=mask)
 
-        from typing import List
-
         from torch._library import capture_triton, triton_op
 
         @triton_op("mylib::sin_kernel", mutates_args={})
-        def sin_kernel(x: torch.Tensor) -> List[torch.Tensor]:
+        def sin_kernel(x: torch.Tensor) -> list[torch.Tensor]:
             n_elements = x.numel()
             out = torch.empty_like(x)
             out2 = torch.empty_like(x)
@@ -1099,7 +1146,7 @@ class InplacingTests(TestCase):
                     x = x + torch.ops.mylib.foo(q, k_cache, v_cache)
                 return x
 
-            compiled_out, (code,) = run_and_get_code(
+            _, (code,) = run_and_get_code(
                 torch.compile(f, fullgraph=True),
             )
 

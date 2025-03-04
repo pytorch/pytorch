@@ -13,7 +13,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     TestCase,
     xfailIfTorchDynamo,
-    xpassIfTorchDynamo,
+    xpassIfTorchDynamo_np,
 )
 
 
@@ -152,7 +152,7 @@ class TestPutAlongAxis(TestCase):
 
             assert_equal(i_min, i_max)
 
-    @xpassIfTorchDynamo  # (
+    @xpassIfTorchDynamo_np  # (
     # reason="RuntimeError: Expected index [1, 2, 5] to be smaller than self [3, 4, 1] apart from dimension 1")
     def test_broadcast(self):
         """Test that non-indexing dimensions are broadcast in both directions"""
@@ -162,7 +162,7 @@ class TestPutAlongAxis(TestCase):
         assert_equal(take_along_axis(a, ai, axis=1), 20)
 
 
-@xpassIfTorchDynamo  # (reason="apply_along_axis not implemented")
+@xpassIfTorchDynamo_np  # (reason="apply_along_axis not implemented")
 class TestApplyAlongAxis(TestCase):
     def test_simple(self):
         a = np.ones((20, 10), "d")
@@ -741,7 +741,7 @@ class TestSqueeze(TestCase):
         assert_(a.flags.f_contiguous)
         assert_(b.flags.f_contiguous)
 
-    @xpassIfTorchDynamo  # (reason="XXX: noop in torch, while numpy raises")
+    @xpassIfTorchDynamo_np  # (reason="XXX: noop in torch, while numpy raises")
     def test_squeeze_axis_handling(self):
         with assert_raises(ValueError):
             np.squeeze(np.array([[1], [2], [3]]), axis=0)

@@ -298,7 +298,8 @@ inline void expectThrows(Functor&& functor, const char* expectMessageContains) {
   } catch (const Exception& e) {
     if (std::string(e.what()).find(expectMessageContains) ==
         std::string::npos) {
-      AT_ERROR(
+      TORCH_CHECK(
+          false,
           "Expected error message to contain \"",
           expectMessageContains,
           "\" but error message was: ",
@@ -306,7 +307,8 @@ inline void expectThrows(Functor&& functor, const char* expectMessageContains) {
     }
     return;
   }
-  AT_ERROR(
+  TORCH_CHECK(
+      false,
       "Expected to throw exception containing \"",
       expectMessageContains,
       "\" but didn't throw");

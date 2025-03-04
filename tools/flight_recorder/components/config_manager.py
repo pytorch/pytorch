@@ -5,7 +5,14 @@
 # LICENSE file in the root directory of this source tree.
 
 import argparse
-from typing import Optional, Sequence
+import logging
+from collections.abc import Sequence
+from typing import Optional
+
+from tools.flight_recorder.components.fr_logger import FlightRecorderLogger
+
+
+logger: FlightRecorderLogger = FlightRecorderLogger()
 
 
 class JobConfig:
@@ -28,6 +35,15 @@ class JobConfig:
             nargs="+",
             type=int,
             help="List of ranks we want to show traces for.",
+        )
+        self.parser.add_argument(
+            "--allow-incomplete-ranks",
+            action="store_true",
+            help=(
+                "FR trace require all ranks to have dumps for analysis. "
+                "This flag allows best-effort partial analysis of results "
+                "and printing of collected data."
+            ),
         )
         self.parser.add_argument(
             "--pg-filters",
@@ -57,11 +73,13 @@ class JobConfig:
     ) -> argparse.Namespace:
         args = self.parser.parse_args(args)
         if args.selected_ranks is not None:
-            assert (
-                args.just_print_entries
-            ), "Not support selecting ranks without printing entries"
+            assert args.just_print_entries, (
+                "Not support selecting ranks without printing entries"
+            )
         if args.pg_filters is not None:
-            assert (
-                args.just_print_entries
-            ), "Not support selecting pg filters without printing entries"
+            assert args.just_print_entries, (
+                "Not support selecting pg filters without printing entries"
+            )
+        if args.verbose:
+            logger.set_log_level(logging.DEBUG)
         return args

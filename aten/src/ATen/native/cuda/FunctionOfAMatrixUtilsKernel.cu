@@ -109,6 +109,6 @@ void _compute_linear_combination_cuda_kernel(
 
 }
 
-REGISTER_DISPATCH(_compute_linear_combination_stub, &_compute_linear_combination_cuda_kernel);
+REGISTER_DISPATCH(_compute_linear_combination_stub, &_compute_linear_combination_cuda_kernel)
 
 } // namespace at::native

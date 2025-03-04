@@ -5,7 +5,7 @@ import logging
 import math
 import operator
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import Any, Callable, Optional, Union
 
 import sympy
 
@@ -60,7 +60,7 @@ try:
     def z3str(e: z3.ExprRef) -> str:
         assert z3.is_expr(e), f"unsupported expression type: {e}"
 
-        def get_args_str(e: z3.ExprRef) -> List[str]:
+        def get_args_str(e: z3.ExprRef) -> list[str]:
             return [z3str(e.arg(i)) for i in range(e.num_args())]
 
         # First, we simplify the given expression.
@@ -139,6 +139,22 @@ try:
         string = op + " " + " ".join(args)
         return f"({string.rstrip()})"
 
+    # We need to convert to/from BitVec in order to use z3 bitwise ops.
+    # We assume that integers are 64 bit.
+    # If all args are boolean, then use the boolean bitwise op implementation instead, if provided.
+    def _bitwise_op(bitwise_func, bool_func):
+        @functools.wraps(bitwise_func)
+        def wrapper(self, *args):
+            if bool_func is not None and all(
+                isinstance(arg, z3.BoolRef) for arg in args
+            ):
+                return bool_func(*args)
+
+            wrapped_args = tuple(z3.Int2BV(a, 64) for a in args)
+            return z3.BV2Int(bitwise_func(*wrapped_args))
+
+        return wrapper
+
     # Implementation of Python semantics as Z3 expressions.
     #
     # Z3 Real-Int theory has operators with semantics that differ that of
@@ -162,6 +178,9 @@ try:
         @staticmethod
         def to_int(x: z3.ArithRef) -> z3.ArithRef:
             return x if x.is_int() else z3.ToInt(x)
+
+        def sym_sum(self, args: z3.ArithRef) -> z3.ArithRef:
+            return sum(args)
 
         # Implements Python division semantics.
         def div(self, numerator: z3.ArithRef, denominator: z3.ArithRef) -> z3.ArithRef:
@@ -187,6 +206,9 @@ try:
             return z3.If(
                 self.floor(number) < number, self.floor(number + 1), number
             )  # type: ignore[return-value]
+
+        def trunc(self, number: z3.ArithRef) -> z3.ArithRef:
+            return z3.If(number >= 0, self.floor(number), self.ceil(number))  # type: ignore[return-value]
 
         def max(self, a: z3.ArithRef, b: z3.ArithRef) -> z3.ArithRef:
             return z3.If(a > b, a, b)  # type: ignore[return-value]
@@ -231,6 +253,11 @@ try:
                 self.floor(number + 0.5),
             )
 
+        bitwise_and = _bitwise_op(operator.and_, z3.And)
+        bitwise_or = _bitwise_op(operator.or_, z3.Or)
+        lshift = _bitwise_op(operator.lshift, None)
+        rshift = _bitwise_op(operator.rshift, None)
+
     # Lifts a callable to be used in Z3.
     #
     # This function replaces the given 'op' by a function that:
@@ -244,7 +271,7 @@ try:
         # This is needed because the argument of some FX nodes were
         # literal integers, instead of booleans. So, whenever this flag
         # is set, we also convert ints to booleans.
-        boolean_ops = {operator.not_, operator.and_, operator.or_}
+        boolean_ops = {operator.not_}
         as_bool = op in boolean_ops
 
         # Lifts the function into 'z3.ExprRef' domain.
@@ -265,7 +292,10 @@ try:
             @functools.wraps(func)
             def wrapper(*args):
                 # Lifts the arguments into a list of Z3 inhabitants.
-                wrapped_args = (wrap(a) for a in args)
+                if len(args) == 1 and isinstance(args[0], (list, tuple)):
+                    wrapped_args = (tuple(wrap(a) for a in args[0]),)
+                else:
+                    wrapped_args = tuple(wrap(a) for a in args)
                 # Run the function on the Z3 expressions.
                 return func(*wrapped_args)
 
@@ -275,8 +305,10 @@ try:
         replacement_map = {
             # Operator module.
             operator.not_: lift(z3.Not),
-            operator.and_: lift(z3.And),
-            operator.or_: lift(z3.Or),
+            operator.and_: lift(ops.bitwise_and),
+            operator.or_: lift(ops.bitwise_or),
+            operator.lshift: lift(ops.lshift),
+            operator.rshift: lift(ops.rshift),
             operator.floordiv: lift(ops.floordiv),
             operator.truediv: lift(ops.div),
             operator.mod: lift(ops.mod),
@@ -285,10 +317,12 @@ try:
             # Math module.
             math.ceil: lift(ops.ceil),
             math.floor: lift(ops.floor),
+            math.trunc: lift(ops.trunc),
             # Torch module.
             torch.sym_float: lift(ops.to_real),
             torch.sym_max: lift(ops.max),
             torch.sym_min: lift(ops.min),
+            torch.sym_sum: lift(ops.sym_sum),
             torch.sym_ite: lift(lambda b, t, f: t if b else f),
             torch._sym_sqrt: lift(ops.sqrt),  # type: ignore[attr-defined]
             # Not lifted because we only use this function as a
@@ -316,13 +350,13 @@ try:
             super().__init__(module, garbage_collect_values=True)
 
         def placeholder(
-            self, target: Target, args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+            self, target: Target, args: tuple[Argument, ...], kwargs: dict[str, Any]
         ) -> Any:
             symbol = fx_traceback.get_current_meta()["symbol"]
             return self.validator.z3var(symbol)
 
         def call_function(
-            self, target: Target, args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+            self, target: Target, args: tuple[Argument, ...], kwargs: dict[str, Any]
         ) -> Any:
             if target != torch._assert:
                 # Lift and runs the node target function
@@ -409,6 +443,10 @@ try:
                 "and_": z3.And,
                 "or_": z3.Or,
                 "not_": z3.Not,
+                "bitwise_and": self._ops.bitwise_and,
+                "bitwise_or": self._ops.bitwise_or,
+                "lshift": self._ops.lshift,
+                "rshift": self._ops.rshift,
                 "floor": self._ops.floor,
                 "ceil": self._ops.ceil,
                 "minimum": self._ops.min,
@@ -443,21 +481,21 @@ try:
             log.debug("new instance")
 
             # Mapping of SymPy symbols to Z3 variables.
-            self.symbols: Dict[sympy.Symbol, z3.ExprRef] = {}
+            self.symbols: dict[sympy.Symbol, z3.ExprRef] = {}
 
             # Set of source Z3 expressions.
             # They represent the generated guards without any kind of
             # simplification or transformation.
-            self._source_exprs: Set[z3.BoolRef] = set()
+            self._source_exprs: set[z3.BoolRef] = set()
 
             # Set of target Z3 expressions.
             # They represent the actual checked guards at runtime. They might
             # be simplified or transformed versions of the source guards.
-            self._target_exprs: Set[z3.BoolRef] = set()
+            self._target_exprs: set[z3.BoolRef] = set()
 
             # Set of Z3 expressions representing assertions over both the
             # source and target expressions.
-            self._assertions: Set[z3.BoolRef] = set()
+            self._assertions: set[z3.BoolRef] = set()
 
         # Retrieves the corresponding Z3 variable.
         def z3var(self, symbol: sympy.Symbol) -> z3.ExprRef:
@@ -465,7 +503,7 @@ try:
             return self.symbols[symbol]
 
         # Create a variable in Z3 of 'type' for 'symbol', if it doesn't already exists.
-        def add_var(self, symbol: sympy.Symbol, type: Type) -> z3.ExprRef:
+        def add_var(self, symbol: sympy.Symbol, type: type) -> z3.ExprRef:
             if symbol in self.symbols:
                 return self.symbols[symbol]
 
@@ -719,6 +757,8 @@ def bisect(shape_env):
             return fake
         if isinstance(fake, torch.SymInt):
             return torch.SymInt(fake.node.with_shape_env(shape_env))
+        if isinstance(fake, torch.SymFloat):
+            return torch.SymFloat(fake.node.with_shape_env(shape_env))
         assert isinstance(fake, FakeTensorMeta)
         return FakeTensorMeta(
             tuple(new_with_shape_env(shape_env, s) for s in fake.size()),
@@ -729,7 +769,7 @@ def bisect(shape_env):
 
     # Checks whether the given shape_env fails when produce_guards is called.
     def check_shapeenv_fails(
-        shape_env: ShapeEnv, tracked_fakes: Optional[List[Any]]
+        shape_env: ShapeEnv, tracked_fakes: Optional[list[Any]]
     ) -> Optional[ValidationException]:
         assert tracked_fakes is not None
         try:
@@ -779,7 +819,13 @@ def bisect(shape_env):
     ]
 
     # Preparing the indices for binary search.
+    # The overall invariants are
+    # - for all i < left, assert_node[i] doesn't fail
+    # - for all i >= right, assert_node[i] fails
+    # - `right in exception` always holds
+    # - `left <= right` always holds
     left, mid, right = 0, 0, len(assert_nodes) - 1
+    exception[right] = check_node_fails(assert_nodes[right])
 
     while left < right:
         mid = (left + right) // 2

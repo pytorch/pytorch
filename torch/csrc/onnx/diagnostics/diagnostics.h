@@ -18,6 +18,7 @@ enum class Level : uint8_t {
   kError,
 };
 
+// NOLINTNEXTLINE(*array*)
 static constexpr const char* const kPyLevelNames[] = {
     "NONE",
     "NOTE",

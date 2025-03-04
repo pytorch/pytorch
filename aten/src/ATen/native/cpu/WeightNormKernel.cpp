@@ -437,7 +437,7 @@ void weight_norm_backward_kernel(
 
 } // anonymous namespace
 
-REGISTER_DISPATCH(weight_norm_stub, &weight_norm_kernel);
-REGISTER_DISPATCH(weight_norm_backward_stub, &weight_norm_backward_kernel);
+REGISTER_DISPATCH(weight_norm_stub, &weight_norm_kernel)
+REGISTER_DISPATCH(weight_norm_backward_stub, &weight_norm_backward_kernel)
 
 } // at::native

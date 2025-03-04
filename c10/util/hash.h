@@ -293,7 +293,7 @@ template <typename T>
 struct hash {
   size_t operator()(const T& o) const {
     return _hash_detail::dispatch_hash(o);
-  };
+  }
 };
 
 // Specialization for std::tuple

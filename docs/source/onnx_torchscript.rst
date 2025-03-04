@@ -2,7 +2,7 @@ TorchScript-based ONNX Exporter
 ===============================
 
 .. note::
-    To export an ONNX model using TorchDynamo instead of TorchScript, see :func:`torch.onnx.dynamo_export`.
+    To export an ONNX model using TorchDynamo instead of TorchScript, please see :doc:`Learn more about the TorchDynamo-based ONNX Exporter <onnx_dynamo>`
 
 .. contents:: :local:
 
@@ -697,7 +697,6 @@ Functions
 ^^^^^^^^^
 
 .. autofunction:: export
-.. autofunction:: export_to_pretty_string
 .. autofunction:: register_custom_op_symbolic
 .. autofunction:: unregister_custom_op_symbolic
 .. autofunction:: select_model_mode_for_export

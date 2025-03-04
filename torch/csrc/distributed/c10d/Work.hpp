@@ -37,7 +37,8 @@ enum class OpType : std::uint8_t {
 // TODO: support different types of failures/errors
 enum class WorkResult : std::uint8_t {
   SUCCESS = 0,
-  FAILURE = 1,
+  TIMEOUT = 1,
+  COMM_ERROR = 2,
   UNKNOWN = 100,
 };
 

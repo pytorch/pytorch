@@ -1448,7 +1448,7 @@ void TensorExprKernel::bindConstant(const torch::jit::Value* v) {
       ToDtype(scalar_type));
 
   if (!const_tensor.is_contiguous()) {
-    const_tensor = const_tensor.clone().contiguous();
+    const_tensor = const_tensor.clone(at::MemoryFormat::Contiguous);
     unpacked_constant_tensors_.push_back(const_tensor);
   }
 
@@ -1763,8 +1763,7 @@ void TensorExprKernel::compile() {
 
   // Move output operands from `bufs_` to `bufOutputs_`
   for (auto i : c10::irange(graph_->outputs().size())) {
-    auto outputs = graph_->outputs();
-    auto& output = outputs.at(i);
+    auto& output = graph_->outputs().at(i);
     if (!bufs_.count(output)) {
       throw malformed_input("cannot find output Tensor");
     }

@@ -1,15 +1,16 @@
 # mypy: allow-untyped-defs
 import copy
 from queue import SimpleQueue
-from typing import List, Dict, Optional as _Optional, Tuple
+from typing import Optional as _Optional
 
 import torch.fx
-from torch.fx.graph_module import GraphModule
-from torch.fx.graph import Graph
-from torch.fx.node import Node
-from torch.fx.passes.tools_common import NodeList, NodeSet, legalize_graph
-from torch.fx.passes.utils import lift_subgraph_as_module
 from torch.fx._compatibility import compatibility
+from torch.fx.graph import Graph
+from torch.fx.graph_module import GraphModule
+from torch.fx.node import Node
+from torch.fx.passes.tools_common import legalize_graph, NodeList, NodeSet
+from torch.fx.passes.utils import lift_subgraph_as_module
+
 
 @compatibility(is_backward_compatible=False)
 def topo_sort(nodes: NodeList) -> NodeList:
@@ -35,7 +36,9 @@ def topo_sort(nodes: NodeList) -> NodeList:
                 if indegree_map[n] == 0:
                     candidates.put(n)
 
-    assert len(nodes) == len(sorted_nodes), "topological sorted nodes doesn't have same length as input nodes"
+    assert len(nodes) == len(
+        sorted_nodes
+    ), "topological sorted nodes doesn't have same length as input nodes"
 
     return sorted_nodes
 
@@ -94,9 +97,10 @@ def fuse_as_graphmodule(
     gm: GraphModule,
     nodes: NodeList,
     module_name: str,
-    partition_lookup_table: _Optional[Dict[Node, None]] = None,
-) -> Tuple[GraphModule, Tuple[Node, ...], Tuple[Node, ...]]:
-
+    partition_lookup_table: _Optional[dict[Node, None]] = None,
+    *,
+    always_return_tuple: bool = False,
+) -> tuple[GraphModule, tuple[Node, ...], tuple[Node, ...]]:
     """
     Fuse nodes in graph_module into a GraphModule.
 
@@ -108,6 +112,8 @@ def fuse_as_graphmodule(
         module_name: class name for the fused GraphModule
 
         partition_lookup_table (Optional[Dict[Node, None]]): optional dict of nodes to speed up lookup
+
+        always_return_tuple (bool): whether to always return a tuple, even if there is only one output
 
     Returns:
         fused_gm (GraphModule): fused graph module, where its node is a copy of `nodes` in `gm`
@@ -121,9 +127,13 @@ def fuse_as_graphmodule(
     # assumption: nodes are already sorted in topo order
 
     for node in nodes:
-        assert node.graph.owning_module is gm, f"{node} doesn't belong to passed in graph module {gm._get_name()}"
+        assert (
+            node.graph.owning_module is gm
+        ), f"{node} doesn't belong to passed in graph module {gm._get_name()}"
         assert not node._erased, f"{node} has been removed from owning graph"
-        assert node in gm.graph._find_nodes_lookup_table, f"{node} is not found in graph module {gm._get_name()}"
+        assert (
+            node in gm.graph._find_nodes_lookup_table
+        ), f"{node} is not found in graph module {gm._get_name()}"
 
     # validates partition doesn't introduce dependency circles in the graph
     assert validate_partition(nodes), "Invalid partition, found dependency cycles"
@@ -134,8 +144,10 @@ def fuse_as_graphmodule(
 
     subgraph = Graph()
 
-    node_to_placeholder: Dict[Node, Node] = {}  # mapping of nodes from old graph to placeholder in new graph
-    node_map: Dict[Node, Node] = {}       # mapping of nodes from old graph to new graph
+    node_to_placeholder: dict[
+        Node, Node
+    ] = {}  # mapping of nodes from old graph to placeholder in new graph
+    node_map: dict[Node, Node] = {}  # mapping of nodes from old graph to new graph
 
     # handles inputs through graph.node_copy's arg_transform functions
     def remap_inputs(x):
@@ -164,7 +176,7 @@ def fuse_as_graphmodule(
         node_map[node] = new_node
 
     # handles outputs
-    output_mapping: Dict[Node, Node] = {}  # mapping from old output to new outputs
+    output_mapping: dict[Node, Node] = {}  # mapping from old output to new outputs
 
     for node in nodes:
         for user_node in node.users:
@@ -175,39 +187,45 @@ def fuse_as_graphmodule(
     # outs contain nodes in the new subgraph
     outs = tuple(output_mapping.values())
 
-    # Take care of the args of FX output node. If there's a single
-    # output then the output node args is like (output_single), else
-    # if there're multiple outputs then the output node args is like
-    # ((output_0, output_1, ...)).
-    subgraph.output(outs[0] if len(outs) == 1 else outs)
+    if always_return_tuple:
+        # always return a tuple, even if there is only one output
+        subgraph.output(outs)
+    else:
+        # If there's a single output then return it directly, otherwise return a tuple.
+        subgraph.output(outs[0] if len(outs) == 1 else outs)
 
     # lint to ensure correctness
     subgraph.lint()
     fused_gm: GraphModule
-    fused_gm, _ = lift_subgraph_as_module(gm, subgraph, comp_name="", class_name=module_name)
+    fused_gm, _ = lift_subgraph_as_module(
+        gm, subgraph, comp_name="", class_name=module_name
+    )
 
     # sub_gm's input nodes in the original module
-    original_inputs: Tuple[Node, ...] = tuple(node_to_placeholder.keys())
+    original_inputs: tuple[Node, ...] = tuple(node_to_placeholder.keys())
 
     # sub_gm's outputs node in the original module
-    original_outputs: Tuple[Node, ...] = tuple(output_mapping.keys())
+    original_outputs: tuple[Node, ...] = tuple(output_mapping.keys())
 
     return fused_gm, original_inputs, original_outputs
 
 
 @compatibility(is_backward_compatible=False)
-def insert_subgm(gm: GraphModule, sub_gm: GraphModule, orig_inputs: Tuple[Node, ...], orig_outputs: Tuple[Node, ...]):
+def insert_subgm(
+    gm: GraphModule,
+    sub_gm: GraphModule,
+    orig_inputs: tuple[Node, ...],
+    orig_outputs: tuple[Node, ...],
+):
     # add sub_gm into gm
     submodule_name = sub_gm.__class__.__name__
     gm.add_submodule(submodule_name, sub_gm)
 
     # Create a call_module node in main graph.
-    module_node = gm.graph.call_module(
-        submodule_name,
-        args=orig_inputs,
-        kwargs=None)
+    module_node = gm.graph.call_module(submodule_name, args=orig_inputs, kwargs=None)
 
-    if len(orig_outputs) == 1:
+    output_node = sub_gm.graph.output_node()
+    if len(orig_outputs) == 1 and not isinstance(output_node.args[0], tuple):
         # main_remapping[comp.orig_outputs[0]] = module_node
         orig_outputs[0].replace_all_uses_with(module_node, propagate_meta=True)
     else:
@@ -216,24 +234,37 @@ def insert_subgm(gm: GraphModule, sub_gm: GraphModule, orig_inputs: Tuple[Node, 
             proxy_out = torch.fx.Proxy(module_node)[i].node  # type: ignore[index]
             orig_output.replace_all_uses_with(proxy_out, propagate_meta=True)
 
-        module_node.meta["val"] = tuple(orig_output.meta.get("val", None) for orig_output in orig_outputs)
+        module_node.meta["val"] = tuple(
+            orig_output.meta.get("val", None) for orig_output in orig_outputs
+        )
     return gm
+
 
 @compatibility(is_backward_compatible=False)
 def erase_nodes(gm: GraphModule, nodes: NodeList):
-
     # erase original nodes in inversed topological order
     for node in reversed(nodes):
         gm.graph.erase_node(node)
 
 
 @compatibility(is_backward_compatible=False)
-def fuse_by_partitions(gm: GraphModule, partitions: List[Dict[Node, None]], prefix: str = "fused_") -> GraphModule:
+def fuse_by_partitions(
+    gm: GraphModule,
+    partitions: list[dict[Node, None]],
+    prefix: str = "fused_",
+    always_return_tuple: bool = False,
+) -> GraphModule:
     for partition_id, partition in enumerate(partitions):
         sorted_nodes = topo_sort(list(partition))
 
         submodule_name = prefix + str(partition_id)
-        sub_gm, orig_inputs, orig_outputs = fuse_as_graphmodule(gm, sorted_nodes, submodule_name, partition)
+        sub_gm, orig_inputs, orig_outputs = fuse_as_graphmodule(
+            gm,
+            sorted_nodes,
+            submodule_name,
+            partition,
+            always_return_tuple=always_return_tuple,
+        )
 
         insert_subgm(gm, sub_gm, orig_inputs, orig_outputs)
 

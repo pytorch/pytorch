@@ -1,8 +1,6 @@
 #pragma once
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 constexpr auto philox_random_string = R"(
 
@@ -99,6 +97,4 @@ __device__  __inline__ float Uint32ToFloat(unsigned int x) {
 
 )";
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

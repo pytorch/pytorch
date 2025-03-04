@@ -156,6 +156,7 @@ const Tensor& resize__plumbing(
       "resize_: batching rule only supports None or Contiguous MemoryFormat");
   auto maybe_layer = maybeCurrentDynamicLayer();
   vmap_check_escaped(maybe_layer, "resize__plumbing");
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   int64_t cur_level = maybe_layer->layerId();
   if (!isBatchedAtLevel(self, cur_level)) {
     c10::impl::ExcludeDispatchKeyGuard guard2(DispatchKey::FuncTorchBatched);
@@ -168,7 +169,7 @@ const Tensor& resize__plumbing(
   // TODO: The following algorithm only works for batch dim == 0.
   // To get it to work for something else we need the ability to modify
   // the BatchDims attribute of BatchedTensorImpl
-  TORCH_INTERNAL_ASSERT(self_bdim.value() == 0, "NYI: resize_ batch rule for batch dim != 0");
+  TORCH_INTERNAL_ASSERT(self_bdim == 0, "NYI: resize_ batch rule for batch dim != 0");
 
   // Resize the wrapped tensor
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);

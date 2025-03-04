@@ -3,7 +3,7 @@
 
 import warnings
 from typing import Any
-from typing_extensions import TypeGuard
+from typing_extensions import TypeIs
 
 import torch
 from torch.overrides import get_default_nowrap_functions
@@ -15,7 +15,7 @@ __all__ = [
 ]
 
 
-def is_masked_tensor(obj: Any, /) -> TypeGuard["MaskedTensor"]:
+def is_masked_tensor(obj: Any, /) -> TypeIs["MaskedTensor"]:
     r"""Returns True if the input is a MaskedTensor, else False
 
     Args:
@@ -170,7 +170,7 @@ class MaskedTensor(torch.Tensor):
         if data.requires_grad:
             warnings.warn(
                 "It is not recommended to create a MaskedTensor with a tensor that requires_grad. "
-                "To avoid this, you can use data.clone().detach()",
+                "To avoid this, you can use data.detach().clone()",
                 UserWarning,
                 stacklevel=2,
             )

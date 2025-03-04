@@ -6,77 +6,7 @@
 #include <torch/csrc/distributed/c10d/Functional.hpp>
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
-#include <torch/csrc/distributed/c10d/RankLocal.hpp>
 #include <utility>
-
-namespace {
-
-class WorkRegistry {
- public:
-  void register_work(
-      const at::Tensor& tensor,
-      const c10::intrusive_ptr<c10d::Work>& work) {
-    auto storage = tensor.storage().getWeakStorageImpl();
-    std::unique_lock lock(lock_);
-    auto [it, inserted] = registry_.try_emplace(std::move(storage), work);
-    TORCH_CHECK(
-        inserted || it->second != work,
-        "The tensor storage is already associated with another work.");
-  }
-
-  c10::intrusive_ptr<c10d::Work> pop_work(const at::Tensor& tensor) {
-    const auto storage = tensor.storage().getWeakStorageImpl();
-    std::unique_lock lock(lock_);
-    auto it = registry_.find(storage);
-    if (it == registry_.end()) {
-      return nullptr;
-    }
-    auto work = it->second;
-    registry_.erase(it);
-    return work;
-  }
-
-  ~WorkRegistry() {
-    // If there are still unwaited work objects, their corresponding process
-    // groups should have already been destroyed at this stage. Any attempts to
-    // wait for these work objects or to destroy them will only result in
-    // confusing errors. Therefore, we simply issue a warning and intentionally
-    // allow the unwaited work objects to leak.
-    if (!registry_.empty()) {
-      TORCH_WARN(
-          "At the time of process termination, there are still ",
-          registry_.size(),
-          " unwaited c10d_functional collective calls. "
-          "Please review your program to ensure c10d_functional.wait_tensor() "
-          "is invoked on all tensors returned from c10d_functional collective "
-          "ops before they are used.");
-    }
-    for (auto& it : registry_) {
-      it.second.release();
-    }
-  }
-
- private:
-  std::unordered_map<
-      c10::weak_intrusive_ptr<c10::StorageImpl>,
-      c10::intrusive_ptr<c10d::Work>>
-      registry_;
-  std::mutex lock_;
-};
-
-static WorkRegistry process_registry;
-
-} // namespace
-
-namespace c10d {
-
-void register_work(
-    const at::Tensor& tensor,
-    const c10::intrusive_ptr<c10d::Work>& work) {
-  RankLocal<WorkRegistry>::get().register_work(tensor, work);
-}
-
-} // namespace c10d
 
 namespace {
 
@@ -158,6 +88,7 @@ std::vector<at::Tensor> all_reduce_coalesced(
 at::Tensor allocate_all_gather_output(
     const at::Tensor& input,
     int64_t group_size) {
+  TORCH_CHECK(input.is_contiguous());
   auto output_size = input.sizes().vec();
   output_size[0] *= group_size;
   return at::empty(
@@ -173,6 +104,7 @@ std::vector<at::Tensor> all_gather_into_tensor_coalesced(
   std::vector<at::Tensor> outputs;
   outputs.reserve(inputs.size());
   for (const auto& tensor : inputs) {
+    TORCH_CHECK(tensor.is_contiguous());
     outputs.push_back(allocate_all_gather_output(tensor, group_size));
   }
 
@@ -188,6 +120,7 @@ at::Tensor all_gather_into_tensor(
     const at::Tensor& input,
     int64_t group_size,
     std::string group_name) {
+  TORCH_CHECK(input.is_contiguous());
   std::vector<at::Tensor> inputs{input};
   return all_gather_into_tensor_coalesced(
       inputs, group_size, std::move(group_name))[0];
@@ -198,6 +131,7 @@ at::Tensor& all_gather_into_tensor_out(
     int64_t group_size,
     const std::string& group_name,
     at::Tensor& output) {
+  TORCH_CHECK(input.is_contiguous());
   c10d::AllgatherOptions opts;
 
   auto group = c10d::resolve_process_group(group_name);
@@ -209,6 +143,7 @@ at::Tensor& all_gather_into_tensor_out(
 at::Tensor allocate_reduce_scatter_output(
     const at::Tensor& input,
     const int64_t group_size) {
+  TORCH_CHECK(input.is_contiguous());
   auto output_size = input.sizes().vec();
   if (output_size[0] % group_size != 0) {
     LOG(WARNING) << "The first dimension of the reduce_scatter input ("
@@ -233,6 +168,7 @@ std::vector<at::Tensor> reduce_scatter_tensor_coalesced(
   std::vector<at::Tensor> outputs;
   outputs.reserve(inputs.size());
   for (const auto& tensor : inputs) {
+    TORCH_CHECK(tensor.is_contiguous());
     outputs.push_back(allocate_reduce_scatter_output(tensor, group_size));
   }
 
@@ -249,6 +185,7 @@ at::Tensor reduce_scatter_tensor(
     std::string reduce_op,
     int64_t group_size,
     std::string group_name) {
+  TORCH_CHECK(input.is_contiguous());
   std::vector<at::Tensor> inputs{input};
   return reduce_scatter_tensor_coalesced(
       inputs, std::move(reduce_op), group_size, std::move(group_name))[0];
@@ -260,6 +197,7 @@ at::Tensor all_to_all_single(
     std::vector<int64_t> input_split_sizes,
     // NOLINTNEXTLINE(performance-unnecessary-value-param)
     std::string group_name) {
+  TORCH_CHECK(input.is_contiguous());
   std::vector<int64_t> output_sizes = input.sizes().vec();
   output_sizes[0] = std::accumulate(
       output_split_sizes.begin(), output_split_sizes.end(), int64_t(0));
@@ -294,14 +232,6 @@ at::Tensor broadcast(
     std::string group_name) {
   auto output = input.clone(at::MemoryFormat::Contiguous);
   return broadcast_(output, src, std::move(group_name));
-}
-
-at::Tensor wait_tensor(const at::Tensor& tensor) {
-  auto work = c10d::RankLocal<WorkRegistry>::get().pop_work(tensor);
-  if (work != nullptr) {
-    work->wait();
-  }
-  return tensor;
 }
 
 } // namespace
@@ -389,7 +319,7 @@ TORCH_LIBRARY(_c10d_functional, m) {
   m.def(
       "wait_tensor(Tensor tensor) -> Tensor",
       torch::dispatch(
-          c10::DispatchKey::CompositeExplicitAutograd, ::wait_tensor),
+          c10::DispatchKey::CompositeExplicitAutograd, c10d::wait_tensor),
       {at::Tag::pt2_compliant_tag});
 }
 
@@ -438,7 +368,7 @@ class AllToAllSingle : public torch::autograd::Function<AllToAllSingle> {
     // TODO: track active cuda stream in wait
     out = c10::Dispatcher::singleton()
               .findSchemaOrThrow("_c10d_functional::wait_tensor", "")
-              .typed<decltype(wait_tensor)>()
+              .typed<decltype(c10d::wait_tensor)>()
               .call(out);
 
     return {out, at::Tensor(), at::Tensor(), at::Tensor()};
@@ -493,7 +423,7 @@ class ReduceScatterTensor
     // TODO: track active cuda stream in wait
     out = c10::Dispatcher::singleton()
               .findSchemaOrThrow("_c10d_functional::wait_tensor", "")
-              .typed<decltype(wait_tensor)>()
+              .typed<decltype(c10d::wait_tensor)>()
               .call(out);
 
     return {
@@ -549,7 +479,7 @@ class AllGatherIntoTensor
     // TODO: track active cuda stream in wait
     out = c10::Dispatcher::singleton()
               .findSchemaOrThrow("_c10d_functional::wait_tensor", "")
-              .typed<decltype(wait_tensor)>()
+              .typed<decltype(c10d::wait_tensor)>()
               .call(out);
 
     return {

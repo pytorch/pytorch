@@ -1,13 +1,18 @@
 #pragma once
 
+#include <atomic>
+
 #if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 900) && CUDART_VERSION >= 12010
 #define NVCC_SUPPORTS_MULTICAST 1
 #endif
 
 #include <ATen/ATen.h>
-
+#if !defined(USE_ROCM)
 #include <cuda_bf16.h>
-
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 600)
+#include <cuda/atomic>
+#endif
+#endif
 namespace c10d::symmetric_memory {
 
 template <typename T>
@@ -37,40 +42,16 @@ inline constexpr bool dependent_bool_value = Value;
 template <class... Args>
 inline constexpr bool dependent_false = dependent_bool_value<false, Args...>;
 
-template <auto... Args>
-inline constexpr bool dependent_false_nt =
-    dependent_bool_value<false, decltype(Args)...>;
-
-enum class MemOpSem {
-  Relaxed,
-  Acquire,
-  Release,
-  AcqRel,
-};
-
-#define CAS_ASM(addr, compare, val, old_val, sem)                 \
-  asm volatile("atom.global" sem ".sys.cas.b32 %0, [%1], %2, %3;" \
-               : "=r"(old_val)                                    \
-               : "l"(addr), "r"(compare), "r"(val)                \
-               : "memory");
-
-template <MemOpSem Sem>
+template <std::memory_order Sem>
 __device__ __forceinline__ uint32_t
 cas(uint32_t* addr, uint32_t compare, uint32_t val) {
-#if defined(USE_ROCM) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
-  CUDA_KERNEL_ASSERT(false);
+#if !defined(USE_ROCM) && defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 600)
+  cuda::atomic_ref<uint32_t, cuda::thread_scope_system> ref(*addr);
+  ref.compare_exchange_strong(compare, val, cuda::std::memory_order(Sem));
+  return compare;
 #else
-  uint32_t old_val;
-  if constexpr (Sem == MemOpSem::Relaxed) {
-    CAS_ASM(addr, compare, val, old_val, ".relaxed");
-  } else if constexpr (Sem == MemOpSem::Acquire) {
-    CAS_ASM(addr, compare, val, old_val, ".acquire");
-  } else if constexpr (Sem == MemOpSem::Release) {
-    CAS_ASM(addr, compare, val, old_val, ".release");
-  } else {
-    static_assert(dependent_false_nt<Sem>);
-  }
-  return old_val;
+  CUDA_KERNEL_ASSERT(false);
+  return 0;
 #endif
 }
 
@@ -95,7 +76,7 @@ __device__ __forceinline__ size_t global_timer_ns() {
 
 constexpr size_t ns_per_ms = 1e6;
 
-template <MemOpSem Sem>
+template <std::memory_order Sem>
 __device__ __forceinline__ bool try_put_signal(
     uint32_t* addr,
     size_t timeout_ms) {
@@ -108,7 +89,7 @@ __device__ __forceinline__ bool try_put_signal(
   return true;
 }
 
-template <MemOpSem Sem>
+template <std::memory_order Sem>
 __device__ __forceinline__ bool try_wait_signal(
     uint32_t* addr,
     size_t timeout_ms) {
@@ -121,13 +102,13 @@ __device__ __forceinline__ bool try_wait_signal(
   return true;
 }
 
-template <MemOpSem Sem>
+template <std::memory_order Sem>
 __device__ __forceinline__ void put_signal(uint32_t* addr) {
   while (cas<Sem>(addr, 0, 1) != 0)
     ;
 }
 
-template <MemOpSem Sem>
+template <std::memory_order Sem>
 __device__ __forceinline__ void wait_signal(uint32_t* addr) {
   while (cas<Sem>(addr, 1, 0) != 1)
     ;
@@ -140,51 +121,51 @@ __device__ __forceinline__ void wait_signal(uint32_t* addr) {
 // Pattern 0: Ensures that all writes to symm_mem buffers from previous
 // kernels across all devices are visible to the current kernel:
 //
-//   sync_remote_blocks<MemOpSem::Relaxed>(...);
+//   sync_remote_blocks<std::memory_order_relaxed>(...);
 //   __syncthreads();
 //
 // Pattern 1: Ensures that all writes to symm_mem buffers from the current
 // block are visible to all remote blocks with matching blockIdx:
 //
 //   __syncthreads();
-//   sync_remote_blocks<MemOpSem::AcqRel>(...);
+//   sync_remote_blocks<std::memory_order_acq_rel>(...);
 //   __syncthreads();
 //
 // Pattern 2: Ensures that symm_mem buffers read by the current kernel are safe
 // for writing by subsequent kernels across all devices.
 //
 //   __syncthreads();
-//   sync_remote_blocks<MemOpSem::Relaxed>(...);
-template <MemOpSem Sem>
+//   sync_remote_blocks<std::memory_order_relaxed>(...);
+template <std::memory_order Sem>
 __device__ __forceinline__ void sync_remote_blocks(
     uint32_t** signal_pads,
     size_t rank,
     size_t world_size);
 
 template <>
-__device__ __forceinline__ void sync_remote_blocks<MemOpSem::Relaxed>(
+__device__ __forceinline__ void sync_remote_blocks<std::memory_order_relaxed>(
     uint32_t** signal_pads,
     size_t rank,
     size_t world_size) {
   if (threadIdx.x < world_size) {
     auto target_rank = threadIdx.x;
-    put_signal<MemOpSem::Relaxed>(
+    put_signal<std::memory_order_relaxed>(
         signal_pads[target_rank] + blockIdx.x * world_size + rank);
-    wait_signal<MemOpSem::Relaxed>(
+    wait_signal<std::memory_order_relaxed>(
         signal_pads[rank] + blockIdx.x * world_size + target_rank);
   }
 }
 
 template <>
-__device__ __forceinline__ void sync_remote_blocks<MemOpSem::AcqRel>(
+__device__ __forceinline__ void sync_remote_blocks<std::memory_order_acq_rel>(
     uint32_t** signal_pads,
     size_t rank,
     size_t world_size) {
   if (threadIdx.x < world_size) {
     auto target_rank = threadIdx.x;
-    put_signal<MemOpSem::Release>(
+    put_signal<std::memory_order_release>(
         signal_pads[target_rank] + blockIdx.x * world_size + rank);
-    wait_signal<MemOpSem::Acquire>(
+    wait_signal<std::memory_order_acquire>(
         signal_pads[rank] + blockIdx.x * world_size + target_rank);
   }
 }
@@ -418,9 +399,8 @@ __device__ __inline__ Vec<Alignment> add_vec(
 // With world_size specialization: perform balanced load from all peers before
 // performing reduction.
 template <typename T, int alignment, int k_world_size>
-__device__ inline
-    typename std::enable_if<(k_world_size > 0), Vec<alignment>>::type
-    load_and_reduce(T** ptrs, size_t rank, size_t world_size, size_t offset) {
+__device__ inline std::enable_if_t<(k_world_size > 0), Vec<alignment>>
+load_and_reduce(T** ptrs, size_t rank, size_t world_size, size_t offset) {
   Vec<alignment> vecs[k_world_size];
 #pragma unroll k_world_size
   for (size_t step = 0; step < k_world_size; ++step) {
@@ -438,9 +418,8 @@ __device__ inline
 // Without world_size specialization: perform ordered (unbalanced) load and
 // accumulate on each load.
 template <typename T, int alignment, int k_world_size>
-__device__ inline
-    typename std::enable_if<(k_world_size <= 0), Vec<alignment>>::type
-    load_and_reduce(T** ptrs, size_t rank, size_t world_size, size_t offset) {
+__device__ inline std::enable_if_t<(k_world_size <= 0), Vec<alignment>>
+load_and_reduce(T** ptrs, size_t rank, size_t world_size, size_t offset) {
   Vec<alignment> acc{};
   for (size_t step = 0; step < world_size; ++step) {
     auto vec = ld_vec<alignment>(ptrs[step] + offset);

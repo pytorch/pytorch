@@ -588,7 +588,7 @@ SparseTensor& copy_sparse_wrapper_(
   {
     NoNamesGuard guard;
     if (!self.is_sparse() || !src.is_sparse()) {
-      AT_ERROR(
+      TORCH_CHECK(false,
           "copy_() between dense and sparse Tensors is not implemented! Found self type = ",
           self.toString(),
           " and src type = ",
@@ -795,7 +795,7 @@ SparseTensor sparse_mask(const Tensor& t, const SparseTensor& mask) {
 
   if (t.layout() == at::kSparse) {
     if (!t._nnz()) {
-      auto res = mask.clone().to(t.device(), t.scalar_type());
+      auto res = mask.to(t.device(), t.scalar_type(), /*non_blocking=*/false, /*copy=*/true);
       res._values().zero_();
       return res;
     }

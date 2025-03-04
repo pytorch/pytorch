@@ -268,7 +268,7 @@ at::Tensor LazyNativeFunctions::_to_copy(
             std::move(node), lazy_self->GetDevice()));
     return result;
   }
-};
+}
 
 at::Tensor LazyNativeFunctions::empty_symint(
     at::SymIntArrayRef sym_size,

@@ -13,6 +13,9 @@ inline void FunctionSchema::checkArg(
     // Fast-path for the common case
     return;
   }
+  if (value.isGenericDict() && value.toGenericDict().empty()) {
+    return;
+  }
   if (!value.type<T>()->isSubtypeOf(*argument.type())) {
     TORCH_CHECK(
         false,
@@ -55,7 +58,7 @@ inline void FunctionSchema::checkAndNormalizeInputs(
       inputs.push_back(*argument.default_value());
       continue;
     }
-    AT_ERROR(
+    TORCH_CHECK(false,
         name(),
         "() is missing value for argument '",
         argument.name(),

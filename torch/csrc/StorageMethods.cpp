@@ -5,6 +5,7 @@
 #include <structmember.h>
 
 #include <c10/core/CPUAllocator.h>
+#include <c10/util/overflows.h>
 #include <libshm.h>
 #include <torch/csrc/CudaIPCTypes.h>
 #include <torch/csrc/Device.h>
@@ -49,9 +50,6 @@ static PyObject* THPStorage_nbytes(PyObject* self, PyObject* noargs) {
 
 static PyObject* THPStorage_dataPtr(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  // PyLong_FromVoidPtr should not need to mutate the pointer in order
-  // to extract a new long object from it.
-
   auto self_ = THPStorage_Unpack(self);
   // See Note [Invalid Python Storages]
   auto invalid = self_.data() == nullptr &&
@@ -59,7 +57,7 @@ static PyObject* THPStorage_dataPtr(PyObject* self, PyObject* noargs) {
   TORCH_CHECK(
       !invalid,
       "Attempted to access the data pointer on an invalid python storage.")
-  return PyLong_FromVoidPtr(self_.mutable_data());
+  return torch::autograd::utils::wrap(self_.mutable_data());
   END_HANDLE_TH_ERRORS
 }
 
@@ -312,10 +310,14 @@ static PyObject* THPStorage_fromBuffer(
   }
 
   uint8_t* src = (uint8_t*)buffer.buf;
+  auto fake_mode_active =
+      c10::impl::TorchDispatchModeTLS::get_mode(
+          c10::impl::TorchDispatchModeKey::FAKE) != std::nullopt;
   auto storage = c10::make_intrusive<at::StorageImpl>(
       c10::StorageImpl::use_byte_size_t(),
       size_bytes,
-      c10::GetDefaultCPUAllocator(),
+      fake_mode_active ? c10::GetAllocator(c10::DeviceType::Meta)
+                       : c10::GetDefaultCPUAllocator(),
       /*resizable=*/true);
 
   static const std::unordered_map<
@@ -333,14 +335,17 @@ static PyObject* THPStorage_fromBuffer(
           {at::kComplexFloat, decodeWrapper<c10::complex<float>>},
           {at::kComplexDouble, decodeWrapper<c10::complex<double>>}};
 
-  if (is_endian_independent) {
-    memcpy(storage->mutable_data(), src + offset, count);
-  } else {
-    auto it = decode_map.find(scalar_type);
-    if (it != decode_map.end()) {
-      it->second(storage->mutable_data(), src + offset, do_byte_swap, count);
+  // don't actually do a memcp if we are running with FakeTensorMode
+  if (!fake_mode_active) {
+    if (is_endian_independent) {
+      memcpy(storage->mutable_data(), src + offset, count);
     } else {
-      TORCH_CHECK(false, "Unknown type: ", scalar_type);
+      auto it = decode_map.find(scalar_type);
+      if (it != decode_map.end()) {
+        it->second(storage->mutable_data(), src + offset, do_byte_swap, count);
+      } else {
+        TORCH_CHECK(false, "Unknown type: ", scalar_type);
+      }
     }
   }
 
@@ -392,7 +397,7 @@ static PyObject* THPStorage_fromFile(
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPStorage_writeFile(PyObject* self, PyObject* args) {
+static PyObject* THPStorage_writeFile(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
   THPStorage_assertNotNull(self);
   const auto& storage = THPStorage_Unpack(self);
@@ -428,7 +433,7 @@ PyObject* THPStorage_writeFile(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPStorage_newWithFile(PyObject* _unused, PyObject* args) {
+static PyObject* THPStorage_newWithFile(PyObject* _unused, PyObject* args) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       PyTuple_Size(args) == 2, "_new_with_file takes exactly two arguments");
@@ -517,7 +522,7 @@ static PyObject* THPStorage_setFromFile(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPStorage__setCdata(PyObject* _self, PyObject* new_cdata) {
+static PyObject* THPStorage__setCdata(PyObject* _self, PyObject* new_cdata) {
   HANDLE_TH_ERRORS
   auto self = (THPStorage*)_self;
   TORCH_CHECK(
@@ -534,7 +539,7 @@ PyObject* THPStorage__setCdata(PyObject* _self, PyObject* new_cdata) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPStorage_byteswap(PyObject* self, PyObject* args) {
+static PyObject* THPStorage_byteswap(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(PyTuple_GET_SIZE(args) == 1, "tuple of 1 item expected");
   PyObject* _elem_size = PyTuple_GET_ITEM(args, 0);

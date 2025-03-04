@@ -274,7 +274,7 @@ def shard_module(module: nn.Module, plan: ShardingPlan, src_rank=0, process_grou
                 mod, param_name, spec, src_rank=src_rank, process_group=process_group
             )
         elif isinstance(spec, Sharder):
-            parent_mod_path, _, mod_name = name.rpartition(".")
+            parent_mod_path, _, _mod_name = name.rpartition(".")
             if name == "":
                 raise KeyError("Module path must not be empty for custom sharder!")
             mod = module.get_submodule(name)

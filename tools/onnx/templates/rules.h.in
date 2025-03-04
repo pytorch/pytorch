@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 
 /**
 ${generated_comment}

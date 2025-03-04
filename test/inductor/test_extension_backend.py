@@ -7,6 +7,7 @@ import torch
 import torch._dynamo
 import torch.utils.cpp_extension
 from torch._C import FileCheck
+from torch.testing._internal.common_utils import skipIfWindows
 
 
 try:
@@ -32,7 +33,7 @@ from torch._inductor.codegen.common import (
     get_wrapper_codegen_for_device,
     register_backend_for_device,
 )
-from torch.testing._internal.common_utils import IS_FBCODE, IS_MACOS
+from torch.testing._internal.common_utils import IS_FBCODE, IS_MACOS, xfailIfS390X
 
 
 try:
@@ -50,6 +51,7 @@ run_and_get_cpp_code = test_torchinductor.run_and_get_cpp_code
 TestCase = test_torchinductor.TestCase
 
 
+@xfailIfS390X
 class BaseExtensionBackendTests(TestCase):
     module = None
 
@@ -89,9 +91,9 @@ class BaseExtensionBackendTests(TestCase):
 
         torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
 
+        cls.lock.release()
         if os.path.exists(cls.lock_file):
             os.remove(cls.lock_file)
-        cls.lock.release()
 
     def setUp(self):
         torch._dynamo.reset()
@@ -113,6 +115,7 @@ class BaseExtensionBackendTests(TestCase):
 
 @unittest.skipIf(IS_FBCODE, "cpp_extension doesn't work in fbcode right now")
 class ExtensionBackendTests(BaseExtensionBackendTests):
+    @skipIfWindows
     def test_open_device_registration(self):
         torch.utils.rename_privateuse1_backend("extension_device")
         torch._register_device_module("extension_device", self.module)
@@ -156,7 +159,10 @@ class ExtensionBackendTests(BaseExtensionBackendTests):
                 metrics.reset()
                 opt_fn = torch.compile()(fn)
                 _, code = run_and_get_cpp_code(opt_fn, x, y, z)
-                if cpu_vec_isa.valid_vec_isa_list():
+                if (
+                    cpu_vec_isa.valid_vec_isa_list()
+                    and os.getenv("ATEN_CPU_CAPABILITY") != "default"
+                ):
                     load_expr = "loadu"
                 else:
                     load_expr = " = in_ptr0[static_cast<long>(i0)];"

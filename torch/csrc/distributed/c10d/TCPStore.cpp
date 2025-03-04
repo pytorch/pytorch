@@ -5,31 +5,15 @@
 #include <torch/csrc/distributed/c10d/Backoff.hpp>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
 #include <torch/csrc/distributed/c10d/TCPStoreBackend.hpp>
+#include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/logging.h>
 
-#include <fcntl.h>
 #include <chrono>
 #include <fstream>
-#include <random>
+#include <optional>
 #include <thread>
 #include <unordered_map>
 #include <utility>
-
-#ifdef _WIN32
-#include <io.h>
-#include <winsock2.h>
-#else
-#include <poll.h>
-#include <unistd.h>
-#endif
-
-#ifdef _WIN32
-#include <torch/csrc/distributed/c10d/WinSockUtils.hpp>
-#else
-#include <torch/csrc/distributed/c10d/UnixSockUtils.hpp>
-#endif
-
-#include <torch/csrc/distributed/c10d/socket.h>
 
 namespace c10d {
 namespace detail {
@@ -143,11 +127,10 @@ class TCPClient {
     }
   }
   template <typename T>
-  bool receiveValueWithTimeout(T& t, std::chrono::milliseconds timeout) {
+  std::optional<T> receiveValueWithTimeout(std::chrono::milliseconds timeout) {
     if (!socket_.waitForInput(timeout))
-      return false;
-    t = tcputil::recvValue<T>(socket_.handle());
-    return true;
+      return {};
+    return tcputil::recvValue<T>(socket_.handle());
   }
   void setTimeout(std::chrono::milliseconds value);
 
@@ -200,8 +183,10 @@ void TCPClient::setTimeout(std::chrono::milliseconds value) {
 
 class SendBuffer {
   // ethernet mtu 1500 - 40 (ip v6 header) - 20 (tcp header)
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const size_t FLUSH_WATERMARK = 1440;
   std::vector<uint8_t> buffer;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   detail::TCPClient& client;
 
   void maybeFlush() {
@@ -261,7 +246,8 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
   STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.TCPStore__init);
 
   if (opts.useLibUV) {
-    TORCH_CHECK(
+    TORCH_CHECK_WITH(
+        DistStoreError,
         ::c10d::detail::is_libuv_tcpstore_backend_available(),
         "use_libuv was requested but PyTorch was build without libuv support");
 
@@ -279,10 +265,26 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
 
   Socket::initialize();
 
+  addr_.port = opts.port;
+
   if (opts.isServer) {
-    server_ = detail::TCPServer::start(opts);
-    // server successfully started
-    C10D_DEBUG("The server has started on port = {}.", server_->port());
+    try {
+      server_ = detail::TCPServer::start(opts);
+      // server successfully started
+      C10D_DEBUG("The server has started on port = {}.", server_->port());
+      addr_.port = server_->port();
+    } catch (const SocketError& e) {
+      bool useAgentStore = getCvarBool({"TORCHELASTIC_USE_AGENT_STORE"}, false);
+      int masterPort = getCvarInt({"MASTER_PORT"}, 0);
+      if (useAgentStore && masterPort == opts.port) {
+        C10D_ERROR(
+            "The server socket on {} has failed to bind. "
+            "TORCHELASTIC_USE_AGENT_STORE is enabled so ignoring the error.",
+            opts.port);
+      } else {
+        throw;
+      }
+    }
 
     std::ifstream maxconnFile("/proc/sys/net/core/somaxconn");
     if (maxconnFile.good() && numWorkers_.has_value()) {
@@ -302,10 +304,6 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
         C10D_INFO("failed to parse somaxconn proc file due to {}", e.what());
       }
     }
-
-    addr_.port = server_->port();
-  } else {
-    addr_.port = opts.port;
   }
 
   // Try connecting several times -- if the server listen backlog is full it may
@@ -365,7 +363,7 @@ TCPStore::~TCPStore() = default;
 
 void TCPStore::waitForWorkers() {
   STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.TCPStore__waitForWorkers);
-  if (numWorkers_ == std::nullopt) {
+  if (!numWorkers_.has_value()) {
     return;
   }
 
@@ -524,7 +522,8 @@ bool TCPStore::check(const std::vector<std::string>& keys) {
   if (response == detail::CheckResponseType::NOT_READY) {
     return false;
   }
-  TORCH_CHECK(false, "ready or not_ready response expected");
+  TORCH_CHECK_WITH(
+      DistStoreError, false, "ready or not_ready response expected");
 }
 
 void TCPStore::wait(const std::vector<std::string>& keys) {
@@ -557,11 +556,12 @@ void TCPStore::doWait(
     buffer.flush();
   }
 
-  detail::WaitResponseType response;
-  if (client_->receiveValueWithTimeout<detail::WaitResponseType>(
-          response, timeout)) {
-    if (response != detail::WaitResponseType::STOP_WAITING) {
-      TORCH_CHECK(false, "Stop_waiting response is expected");
+  auto response_opt =
+      client_->receiveValueWithTimeout<detail::WaitResponseType>(timeout);
+  if (response_opt.has_value()) {
+    if (response_opt != detail::WaitResponseType::STOP_WAITING) {
+      TORCH_CHECK_WITH(
+          DistStoreError, false, "Stop_waiting response is expected");
     }
     return;
   }
@@ -572,16 +572,18 @@ void TCPStore::doWait(
     buffer.flush();
   }
 
-  response = client_->receiveValue<detail::WaitResponseType>();
+  auto response = client_->receiveValue<detail::WaitResponseType>();
   // this can happen if the server responds before we cancel, just ignore it
   if (response != detail::WaitResponseType::WAIT_CANCELED) {
     if (response != detail::WaitResponseType::STOP_WAITING) {
-      TORCH_CHECK(false, "Stop_waiting response is expected");
+      TORCH_CHECK_WITH(
+          DistStoreError, false, "Stop_waiting response is expected");
     }
 
     response = client_->receiveValue<detail::WaitResponseType>(); // ignore
     if (response != detail::WaitResponseType::WAIT_CANCELED) {
-      TORCH_CHECK(false, "wait_canceled response is expected");
+      TORCH_CHECK_WITH(
+          DistStoreError, false, "wait_canceled response is expected");
     }
   }
   C10_THROW_ERROR(
@@ -633,13 +635,14 @@ void TCPStore::multiSet(
     const std::vector<std::string>& keys,
     const std::vector<std::vector<uint8_t>>& values) {
   STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.TCPStore__multiSet);
-  TORCH_CHECK(
+  TORCH_CHECK_WITH(
+      DistStoreError,
       keys.size() == values.size(),
       "multiSet keys and values vectors must be of same size");
   const std::lock_guard<std::mutex> lock(activeOpLock_);
 
   detail::SendBuffer buffer(*client_, detail::QueryType::MULTI_SET);
-  buffer.appendValue<std::int64_t>(keys.size());
+  buffer.appendValue<std::int64_t>(static_cast<int64_t>(keys.size()));
   for (auto i : c10::irange(keys.size())) {
     buffer.appendString(keyPrefix_ + keys[i]);
     buffer.appendBytes(values[i]);

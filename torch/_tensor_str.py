@@ -3,7 +3,7 @@ import contextlib
 import dataclasses
 import math
 import textwrap
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 import torch
 from torch import inf
@@ -95,7 +95,7 @@ def set_printoptions(
     PRINT_OPTS.sci_mode = sci_mode
 
 
-def get_printoptions() -> Dict[str, Any]:
+def get_printoptions() -> dict[str, Any]:
     r"""Gets the current options for printing, as a dictionary that
     can be passed as ``**kwargs`` to set_printoptions().
     """
@@ -150,7 +150,17 @@ class _Formatter:
                 # no valid number, do nothing
                 return
 
+            if tensor.dtype == torch.float8_e8m0fnu:  # type: ignore[attr-defined]
+                # float8_e8m0fnu is special and does not define arithmetic ops,
+                # and printing code further in this file assumes the existence
+                # of various arithmetic ops to figure out what to print. We hack
+                # and convert to float here to make printing work correctly.
+                # TODO(#113663): also add the other float8 dtypes here after arithmetic
+                # support for them is removed
+                nonzero_finite_vals = nonzero_finite_vals.float()
+
             # Convert to double for easy calculation. HalfTensor overflows with 1e8, and there's no div() on CPU.
+
             nonzero_finite_abs = tensor_totype(nonzero_finite_vals.abs())
             nonzero_finite_min = tensor_totype(nonzero_finite_abs.min())
             nonzero_finite_max = tensor_totype(nonzero_finite_abs.max())
@@ -328,18 +338,14 @@ def _tensor_str(self, indent):
     if self.is_neg():
         self = self.resolve_neg()
 
+    # TODO: Remove me when `masked_select` is implemented for FP8
     if self.dtype in [
-        torch.float16,
-        torch.bfloat16,
         torch.float8_e5m2,
         torch.float8_e5m2fnuz,
         torch.float8_e4m3fn,
         torch.float8_e4m3fnuz,
     ]:
-        self = self.float()
-
-    if self.dtype is torch.complex32:
-        self = self.cfloat()
+        self = self.half()
 
     if self.dtype.is_complex:
         # handle the conjugate bit
@@ -688,14 +694,10 @@ def _functorch_wrapper_str_intern(tensor, *, tensor_contents=None):
         bdim = torch._C._functorch.maybe_get_bdim(tensor)
         assert bdim != -1
         return (
-            f"BatchedTensor(lvl={level}, bdim={bdim}, value=\n"
-            f"{indented_value_repr}\n"
-            f")"
+            f"BatchedTensor(lvl={level}, bdim={bdim}, value=\n{indented_value_repr}\n)"
         )
     if torch._C._functorch.is_gradtrackingtensor(tensor):
-        return (
-            f"GradTrackingTensor(lvl={level}, value=\n" f"{indented_value_repr}\n" f")"
-        )
+        return f"GradTrackingTensor(lvl={level}, value=\n{indented_value_repr}\n)"
     if torch._C._functorch.is_functionaltensor(tensor):
         return f"FunctionalTensor(lvl={level}, value=\\\n{value_repr})"
 
@@ -704,5 +706,5 @@ def _functorch_wrapper_str_intern(tensor, *, tensor_contents=None):
 
 def _str(self, *, tensor_contents=None):
     with torch.no_grad(), torch.utils._python_dispatch._disable_current_modes():
-        guard = torch._C._DisableFuncTorch()
+        guard = torch._C._DisableFuncTorch()  # noqa: F841
         return _str_intern(self, tensor_contents=tensor_contents)

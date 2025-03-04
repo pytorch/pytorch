@@ -6,7 +6,6 @@
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
-#include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/csrc/jit/passes/onnx/pattern_conversion/pattern_encapsulation.h>
 
 #include <c10/util/irange.h>
@@ -655,7 +654,7 @@ void InplaceConverter::gatherAttrNameInitialValueMap(
     auto moduleNames =
         findSubModuleAttr(n->inputs().at(0), name, attrModule, graph_);
 
-    std::string fullName("");
+    std::string fullName;
     for (auto& name : moduleNames) {
       fullName += name + '.';
     }

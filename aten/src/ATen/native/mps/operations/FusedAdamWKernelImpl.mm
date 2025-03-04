@@ -3,7 +3,6 @@
 
 #include <ATen/Dispatch.h>
 #include <ATen/native/ForeachUtils.h>
-#include <ATen/native/mps/operations/FusedOptimizerOps.h>
 #include <ATen/native/mps/operations/MultiTensorApply.h>
 #include <vector>
 

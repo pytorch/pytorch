@@ -1,0 +1,211 @@
+[
+  {
+    "char": 0,
+    "code": "SET_LINTER",
+    "description": null,
+    "line": 0,
+    "name": "Add import for OrderedSet",
+    "original": null,
+    "path": "tools/test/set_linter_testdata/python_code.py.txt",
+    "replacement": null,
+    "severity": "error"
+  },
+  {
+    "char": 4,
+    "code": "SET_LINTER",
+    "description": null,
+    "line": 4,
+    "name": "Builtin `set` is deprecated",
+    "original": null,
+    "path": "tools/test/set_linter_testdata/python_code.py.txt",
+    "replacement": null,
+    "severity": "error"
+  },
+  {
+    "char": 4,
+    "code": "SET_LINTER",
+    "description": null,
+    "line": 6,
+    "name": "Builtin `set` is deprecated",
+    "original": null,
+    "path": "tools/test/set_linter_testdata/python_code.py.txt",
+    "replacement": null,
+    "severity": "error"
+  },
+  {
+    "char": 3,
+    "code": "SET_LINTER",
+    "description": null,
+    "line": 9,
+    "name": "Builtin `set` is deprecated",
+    "original": null,
+    "path": "tools/test/set_linter_testdata/python_code.py.txt",
+    "replacement": null,
+    "severity": "error"
+  },
+  {
+    "char": 7,
+    "code": "SET_LINTER",
+    "description": null,
+    "line": 32,
+    "name": "Builtin `set` is deprecated",
+    "original": null,
+    "path": "tools/test/set_linter_testdata/python_code.py.txt",
+    "replacement": null,
+    "severity": "error"
+  },
+  {
+    "char": 9,
+    "code": "SET_LINTER",
+    "description": null,
+    "line": 32,
+    "name": "Builtin `set` is deprecated",
+    "original": null,
+    "path": "tools/test/set_linter_testdata/python_code.py.txt",
+    "replacement": null,
+    "severity": "error"
+  },
+  {
+    "char": 7,
+    "code": "SET_LINTER",
+    "description": null,
+    "line": 33,
+    "name": "Builtin `set` is deprecated",
+    "original": null,
+    "path": "tools/test/set_linter_testdata/python_code.py.txt",
+    "replacement": null,
+    "severity": "error"
+  },
+  {
+    "char": 12,
+    "code": "SET_LINTER",
+    "description": null,
+    "line": 33,
+    "name": "Builtin `set` is deprecated",
+    "original": null,
+    "path": "tools/test/set_linter_testdata/python_code.py.txt",
+    "replacement": null,
+    "severity": "error"
+  },
+  {
+    "char": 15,
+    "code": "SET_LINTER",
+    "description": null,
+    "line": 35,
+    "name": "Builtin `set` is deprecated",
+    "original": null,
+    "path": "tools/test/set_linter_testdata/python_code.py.txt",
+    "replacement": null,
+    "severity": "error"
+  },
+  {
+    "char": 36,
+    "code": "SET_LINTER",
+    "description": null,
+    "line": 35,
+    "name": "Builtin `set` is deprecated",
+    "original": null,
+    "path": "tools/test/set_linter_testdata/python_code.py.txt",
+    "replacement": null,
+    "severity": "error"
+  },
+  {
+    "char": 17,
+    "code": "SET_LINTER",
+    "description": null,
+    "line": 38,
+    "name": "Builtin `set` is deprecated",
+    "original": null,
+    "path": "tools/test/set_linter_testdata/python_code.py.txt",
+    "replacement": null,
+    "severity": "error"
+  },
+  {
+    "char": 22,
+    "code": "SET_LINTER",
+    "description": null,
+    "line": 38,
+    "name": "Builtin `set` is deprecated",
+    "original": null,
+    "path": "tools/test/set_linter_testdata/python_code.py.txt",
+    "replacement": null,
+    "severity": "error"
+  },
+  {
+    "char": 30,
+    "code": "SET_LINTER",
+    "description": null,
+    "line": 38,
+    "name": "Builtin `set` is deprecated",
+    "original": null,
+    "path": "tools/test/set_linter_testdata/python_code.py.txt",
+    "replacement": null,
+    "severity": "error"
+  },
+  {
+    "char": 50,
+    "code": "SET_LINTER",
+    "description": null,
+    "line": 38,
+    "name": "Builtin `set` is deprecated",
+    "original": null,
+    "path": "tools/test/set_linter_testdata/python_code.py.txt",
+    "replacement": null,
+    "severity": "error"
+  },
+  {
+    "char": 10,
+    "code": "SET_LINTER",
+    "description": null,
+    "line": 41,
+    "name": "Builtin `set` is deprecated",
+    "original": null,
+    "path": "tools/test/set_linter_testdata/python_code.py.txt",
+    "replacement": null,
+    "severity": "error"
+  },
+  {
+    "char": 51,
+    "code": "SET_LINTER",
+    "description": null,
+    "line": 41,
+    "name": "Builtin `set` is deprecated",
+    "original": null,
+    "path": "tools/test/set_linter_testdata/python_code.py.txt",
+    "replacement": null,
+    "severity": "error"
+  },
+  {
+    "char": 75,
+    "code": "SET_LINTER",
+    "description": null,
+    "line": 41,
+    "name": "Builtin `set` is deprecated",
+    "original": null,
+    "path": "tools/test/set_linter_testdata/python_code.py.txt",
+    "replacement": null,
+    "severity": "error"
+  },
+  {
+    "char": 77,
+    "code": "SET_LINTER",
+    "description": null,
+    "line": 41,
+    "name": "Builtin `set` is deprecated",
+    "original": null,
+    "path": "tools/test/set_linter_testdata/python_code.py.txt",
+    "replacement": null,
+    "severity": "error"
+  },
+  {
+    "char": null,
+    "code": "SET_LINTER",
+    "description": null,
+    "line": null,
+    "name": "Suggested fixes for set_linter",
+    "original": "# Basic tests\n\nignored = set()  # noqa: set_linter\na = set()\nb = \"set()\"\nc = set\nd = c.set\nf = (\n   set(\n   )\n)\nignored = (\n   set(  # noqa: set_linter\n   )\n)\n\n# Non-sets\n\nd = {}\nlong_string = \"\"\" set()\nset() set x.set set()\n\\\"\"\"\"\n\nclass A:\n    def set(self, x):\n        self.x = x\n\nset = A().set\n\n# Braced sets\n\nset1 = {1}\nset2 = {1, 2}\n\niterator_set = {i for i in range(10)}\n\n# A dict with two sets.\ndict_set = {\"a\": {2, 3}, \"b\": {i for i in range(3)}}\n\n# A set containing an object constructed with a dict and a set\nsos_set = {Something({i: i + 1 for i in range(3)}, {i + 1 for i in range(3)})}\n",
+    "path": "tools/test/set_linter_testdata/python_code.py.txt",
+    "replacement": "# Basic tests\n\nignored = set()  # noqa: set_linter\na = OrderedSet()\nb = \"set()\"\nc = OrderedSet\nd = c.set\nf = (\n   OrderedSet(\n   )\n)\nignored = (\n   set(  # noqa: set_linter\n   )\n)\n\n# Non-sets\n\nd = {}\nlong_string = \"\"\" set()\nset() set x.set set()\n\\\"\"\"\"\n\nclass A:\n    def set(self, x):\n        self.x = x\n\nset = A().set\n\n# Braced sets\n\nset1 = OrderedSet([1])\nset2 = OrderedSet([1, 2])\n\niterator_set = OrderedSet([i for i in range(10)])\n\n# A dict with two sets.\ndict_set = {\"a\": OrderedSet([2, 3]), \"b\": OrderedSet([i for i in range(3)])}\n\n# A set containing an object constructed with a dict and a set\nfrom torchOrderedSet([utils._ordered_set import OrdOrderedSet([redSet\nsos_set = {Somet])ing({i: i + ]) for i in range(3)}, {i + 1 for i in range(3)})}\n",
+    "severity": "error"
+  }
+]

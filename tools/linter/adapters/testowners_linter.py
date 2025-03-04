@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import urllib.error
 from enum import Enum
 from typing import Any, NamedTuple
 from urllib.request import urlopen
@@ -46,11 +47,18 @@ OWNERS_PREFIX = "# Owner(s): "
 
 
 def get_pytorch_labels() -> Any:
-    labels = (
-        urlopen("https://ossci-metrics.s3.amazonaws.com/pytorch_labels.json")
-        .read()
-        .decode("utf-8")
-    )
+    url = "https://ossci-metrics.s3.amazonaws.com/pytorch_labels.json"
+    try:
+        labels = urlopen(url).read().decode("utf-8")
+    except urllib.error.URLError:
+        # This is an FB-only hack, if the json isn't available we may
+        # need to use a forwarding proxy to get out
+        proxy_url = "http://fwdproxy:8080"
+        proxy_handler = urllib.request.ProxyHandler(
+            {"http": proxy_url, "https": proxy_url}
+        )
+        context = urllib.request.build_opener(proxy_handler)
+        labels = context.open(url).read().decode("utf-8")
     return json.loads(labels)
 
 

@@ -11,7 +11,7 @@
 C10_DEFINE_bool(
     caffe2_report_cpu_memory_usage,
     false,
-    "If set, print out detailed memory usage");
+    "If set, print out detailed memory usage")
 
 namespace c10 {
 
@@ -75,9 +75,6 @@ ProfiledCPUMemoryReporter& profiledCPUMemoryReporter() {
 template <uint32_t PreGuardBytes, uint32_t PostGuardBytes>
 class DefaultMobileCPUAllocator final : public at::Allocator {
  public:
-  DefaultMobileCPUAllocator() = default;
-  ~DefaultMobileCPUAllocator() override = default;
-
   static void deleter(void* const pointer) {
     if (C10_UNLIKELY(!pointer)) {
       return;
@@ -199,7 +196,7 @@ at::Allocator* GetDefaultCPUAllocator() {
   return &g_cpu_alloc;
 }
 
-REGISTER_ALLOCATOR(DeviceType::CPU, &g_cpu_alloc);
+REGISTER_ALLOCATOR(DeviceType::CPU, &g_cpu_alloc)
 
 #endif /* C10_Mobile */
 

@@ -10,8 +10,7 @@
 
 #include <ostream>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Transformer ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -139,5 +138,4 @@ class TORCH_API TransformerImpl : public Cloneable<TransformerImpl> {
 /// module storage semantics.
 TORCH_MODULE(Transformer);
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

@@ -1,24 +1,34 @@
 from __future__ import annotations
 
 import logging
-from typing import List, Union
+import os
+from typing import Any, Union
+
+from sympy import Integer, Number, Symbol
+from sympy.logic.boolalg import BooleanAtom
 
 import torch
 import torch.fx as fx
+from torch._dynamo.exc import TensorifyScalarRestartAnalysis
+from torch._dynamo.symbolic_convert import TensorifyState
+from torch._dynamo.utils import get_metrics_context
 from torch._prims_common import get_computation_dtype
 from torch._subclasses import fake_tensor  # noqa: TCH001
-from torch._utils_internal import JustKnobsConfig
+from torch._subclasses.fake_tensor import FakeTensor
+from torch._utils_internal import justknobs_check
 from torch.fx._utils import lazy_format_graph_code
-from torch.fx.experimental.symbolic_shapes import ShapeEnv  # noqa: TCH001
+from torch.fx.experimental.symbolic_shapes import guard_scalar, ShapeEnv  # noqa: TCH001
 from torch.fx.graph_module import GraphModule  # noqa: TCH001
 
 # TODO: refactor
 from torch.fx.passes.runtime_assert import _get_sym_val
 from torch.fx.proxy import MetaProxy
+from torch.utils._sympy.interp import _run_sympy_handler, sympy_interp
 from torch.utils._sympy.reference import TensorReferenceAnalysis
+from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 
-__all__: List[str] = []
+__all__: list[str] = []
 
 log = logging.getLogger(__name__)
 graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
@@ -64,10 +74,16 @@ graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
 
 
 SUPPORTED_OPS = {
-    torch.ops.aten.mul.Tensor,
-    torch.ops.aten.add.Tensor,
-    torch.ops.aten.sub.Tensor,
-    torch.ops.aten.div.Tensor,
+    torch.ops.aten.mul.Tensor: torch.ops.aten.mul.Tensor,
+    torch.ops.aten.add.Tensor: torch.ops.aten.add.Tensor,
+    torch.ops.aten.sub.Tensor: torch.ops.aten.sub.Tensor,
+    torch.ops.aten.div.Tensor: torch.ops.aten.div.Tensor,
+    torch.ops.aten.gt.Scalar: torch.ops.aten.gt.Tensor,
+    torch.ops.aten.lt.Scalar: torch.ops.aten.lt.Tensor,
+    torch.ops.aten.ge.Scalar: torch.ops.aten.ge.Tensor,
+    torch.ops.aten.le.Scalar: torch.ops.aten.le.Tensor,
+    torch.ops.aten.eq.Scalar: torch.ops.aten.eq.Tensor,
+    torch.ops.aten.ne.Scalar: torch.ops.aten.ne.Tensor,
 }
 
 
@@ -90,11 +106,12 @@ def tensorify_python_scalars(
     """
     import sympy
 
-    knob = JustKnobsConfig(
-        name="pytorch/compiler:tensorify_python_scalars",
-        env_name="TENSORIFY_PYTHON_SCALARS",
-        default=True,
-    ).get()
+    knob = True
+    if (env := os.getenv("TENSORIFY_PYTHON_SCALARS")) is not None:
+        if env in ("0", "FALSE"):
+            knob = False
+    else:
+        knob = justknobs_check("pytorch/compiler:tensorify_python_scalars")
     if not knob:
         return None
 
@@ -102,12 +119,14 @@ def tensorify_python_scalars(
     tracer = fx.proxy.GraphAppendingTracer(graph)
     expr_to_sym_proxy: dict[sympy.Expr, MetaProxy] = {}
     expr_to_tensor_proxy: dict[sympy.Expr, MetaProxy] = {}
+    tensorified_symbols: set[sympy.Symbol] = set()
+    should_restart = False
 
     first_non_placeholder = None
     placeholders = set()
     for node in graph.nodes:
         if node.op != "placeholder":
-            first_none_placeholder = node
+            first_non_placeholder = node
             break
         else:
             placeholders.add(node)
@@ -117,10 +136,6 @@ def tensorify_python_scalars(
     def _sympy_interp(expr: sympy.Expr) -> MetaProxy:
         # sympy_interp() with hash consing, and special handling for
         # generating constants correctly
-        from sympy import Integer, Number, Symbol
-        from sympy.logic.boolalg import BooleanAtom
-
-        from torch.utils._sympy.interp import _run_sympy_handler, sympy_interp
 
         # hash cons
         if isinstance(expr, Symbol) and expr not in expr_to_tensor_proxy:
@@ -177,26 +192,24 @@ def tensorify_python_scalars(
             nodes[i + 1] if node not in placeholders else first_non_placeholder
         ):
             # Look for tensor.item() calls on placeholders
-            if unbacked_bindings := node.meta.get("unbacked_bindings"):
-                for s in unbacked_bindings.keys():
-                    if (
-                        node is not None
-                        and node.op == "call_function"
-                        and node.target is torch.ops.aten._local_scalar_dense.default
-                    ):
-                        dtype = node.args[0].meta["val"].dtype
-                        if dtype != torch.float64:
-                            continue
+            if (
+                node is not None
+                and node.op == "call_function"
+                and node.target is torch.ops.aten._local_scalar_dense.default
+            ):
+                dtype = node.args[0].meta["val"].dtype
+                if dtype != torch.float64:
+                    continue
 
-                        assert isinstance(node.args[0], fx.Node), node.args[0]
+                assert isinstance(node.args[0], fx.Node), node.args[0]
 
-                        expr_to_tensor_proxy[s] = MetaProxy(
-                            node.args[0], tracer=tracer, fake_mode=fake_mode
-                        )
-                        expr_to_sym_proxy[s] = MetaProxy(
-                            node, tracer=tracer, fake_mode=fake_mode
-                        )
-
+                s = node.meta["val"].node.expr
+                expr_to_tensor_proxy[s] = MetaProxy(
+                    node.args[0], tracer=tracer, fake_mode=fake_mode
+                )
+                expr_to_sym_proxy[s] = MetaProxy(
+                    node, tracer=tracer, fake_mode=fake_mode
+                )
             elif (sym_expr := _get_sym_val(node)) is not None:
                 if sym_expr not in expr_to_sym_proxy and not isinstance(
                     sym_expr, (sympy.Number, sympy.logic.boolalg.BooleanAtom)
@@ -205,9 +218,31 @@ def tensorify_python_scalars(
                         node, tracer=tracer, fake_mode=fake_mode
                     )
 
+            # Specialize all dimensions that contain symfloats. Here's
+            # an example test that requires this:
+            # PYTORCH_OPINFO_SAMPLE_INPUT_INDEX=4 python test/inductor/test_torchinductor_opinfo.py TestInductorOpInfoCUDA.test_comprehensive_nn_functional_interpolate_bicubic_cuda_float32 # noqa: B950
+            val = node.meta.get("val")
+            if isinstance(val, FakeTensor):
+                for dim in val.shape:
+                    if isinstance(dim, torch.SymInt):
+                        for s in dim.node.expr.free_symbols:
+                            name = str(s)
+                            if symbol_is_type(
+                                s, SymT.FLOAT
+                            ) and not TensorifyState.should_specialize(name):
+                                # In principle, we could support float input that
+                                # is used to do size compute. The problem is that
+                                # we don't actually want to tensorify the compute
+                                # in this case, which means we need codegen support for
+                                # all symfloats.
+                                TensorifyState.specialize(name)
+                                should_restart = True
+
             # Look for functions to convert
-            if node.op == "call_function" and node.target in SUPPORTED_OPS:
-                args = []
+            if node.op == "call_function" and (
+                replacement_op := SUPPORTED_OPS.get(node.target)
+            ):
+                args: list[Any] = []
                 transform = False
                 compute_dtype = get_computation_dtype(node.meta["val"].dtype)
 
@@ -224,17 +259,28 @@ def tensorify_python_scalars(
                             transform = False
                             break
 
-                        if proxy.node.meta["val"].dtype != compute_dtype:
+                        # We use _expr instead of expr b/c we want the symbol not the replacement
+                        tensorified_symbols.add(a.meta["val"].node._expr)
+
+                        # The upcasting is irrelevant when the compute dtype is bool. This happens
+                        # in cases where we are tensorifying a comparison operator such as
+                        # torch.ops.aten.gt.Tensor
+                        if (
+                            compute_dtype != torch.bool
+                            and proxy.node.meta["val"].dtype != compute_dtype
+                        ):
                             proxy = torch.ops.prims.convert_element_type.default(
                                 proxy, compute_dtype
                             )
 
                         args.append(proxy)
-                    else:
+                    elif isinstance(a, fx.Node):
                         args.append(MetaProxy(a, tracer=tracer, fake_mode=fake_mode))
+                    else:
+                        args.append(a)
 
                 if transform:
-                    replacement_proxy = node.target(*args)
+                    replacement_proxy = replacement_op(*args)
 
                     if compute_dtype != node.meta["val"].dtype:
                         replacement_proxy = (
@@ -245,13 +291,75 @@ def tensorify_python_scalars(
                         )
 
                     node.replace_all_uses_with(replacement_proxy.node)
-
                     graph.erase_node(node)
 
-    # DCE symbols (which are guaranteed to be pure) only
-    for proxy in reversed(expr_to_sym_proxy.values()):
-        if len(proxy.node.users) == 0 and proxy.node.op != "placeholder":
-            graph.erase_node(proxy.node)
+                    metrics_context = get_metrics_context()
+                    if metrics_context.in_progress():
+                        metrics_context.set(
+                            "tensorify_float_success", True, overwrite=True
+                        )
+
+    failed_tensorify_ops: set[str] = set()
+
+    # Now do one more pass that specializes all symfloats we didn't manage
+    # to tensorify away.
+    for node in reversed(graph.nodes):
+        if node.op == "output" or node.op == "placeholder":
+            continue
+
+        with graph.inserting_before(node):
+            if len(node.users) == 0 and not node.is_impure():
+                graph.erase_node(node)
+                continue
+
+            if isinstance(
+                (val := node.meta.get("val")),
+                (torch.SymFloat, torch.SymInt, torch.SymBool),
+            ):
+                if all(
+                    symbol_is_type(s, SymT.FLOAT) for s in val.node.expr.free_symbols
+                ):
+                    # If all symbols are backed symfloats, we can just specialize the whole node
+                    # and get more precise guards. eg.
+                    #
+                    # zf = a.item()
+                    # zf2 = zf // 2
+                    # op(.. zf2 ..)
+                    #
+                    # It's better to guard on zf // 2 == 2.0 than zf == 5.0
+
+                    failed_tensorify_ops.update(str(key) for key in node.users.keys())
+
+                    node.replace_all_uses_with(guard_scalar(val))
+                    graph.erase_node(node)
+
+    # Sometimes by the time we get to tensorify, there have already been
+    # specializations, eg. in python_arg_parser.h. In these cases,
+    # placeholder nodes no longer have a reference to their original
+    # symfloat and thus we need to deduce specializations have happend
+    # via shape_env.replacements. NB: there's an important invariant here
+    # that symfloats keep consistent names across restarts.
+    for k, v in shape_env.var_to_val.items():
+        if symbol_is_type(k, SymT.FLOAT) and isinstance(v, sympy.core.numbers.Float):
+            name = str(k)
+            if (
+                not TensorifyState.should_specialize(name)
+                and k not in tensorified_symbols
+            ):
+                TensorifyState.specialize(name)
+                should_restart = True
+
+    if should_restart:
+        # Sledgehammer time. Restart dynamo analysis, keeping track of which input sources
+        # are no longer needed and should be specialized. Restarting analysis is necessary
+        # because we need to instruct Dynamo to NOT make these as inputs.
+        metrics_context = get_metrics_context()
+        if metrics_context.in_progress():
+            metrics_context.set(
+                "tensorify_float_failure", failed_tensorify_ops, overwrite=True
+            )
+            metrics_context.set("tensorify_float_success", True, overwrite=True)
+        raise TensorifyScalarRestartAnalysis
 
     graph_code_log.debug(
         "%s", lazy_format_graph_code("tensorify_python_scalars", gm, colored=True)

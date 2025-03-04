@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Dict, Optional
+from typing import Optional
 import torch
 from torch._ops import OpOverload, HigherOrderOperator
 from torch._export.error import InternalError
@@ -9,7 +9,7 @@ from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
 __all__ = ["ReplaceViewOpsWithViewCopyOpsPass"]
 
 
-_NON_FUNCTIONAL_OPS_TO_FUNCTIONAL_OPS: Dict[OpOverload, OpOverload] = {
+_NON_FUNCTIONAL_OPS_TO_FUNCTIONAL_OPS: dict[OpOverload, OpOverload] = {
     torch.ops.aten._unsafe_view.default: torch.ops.aten.view_copy.default,
 }
 

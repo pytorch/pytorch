@@ -1,36 +1,12 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import warnings
+from typing import Any, TypeVar
 
-import triton
-import triton.language as tl
-
-
-# In the latest triton, math functions were shuffled around into different modules:
-# https://github.com/openai/triton/pull/3172
-try:
-    from triton.language.extra import libdevice
-
-    libdevice = tl.extra.libdevice  # noqa: F811
-    math = tl.math
-except ImportError:
-    if hasattr(tl.extra, "cuda") and hasattr(tl.extra.cuda, "libdevice"):
-        libdevice = tl.extra.cuda.libdevice
-        math = tl.math
-    elif hasattr(tl.extra, "intel") and hasattr(tl.extra.intel, "libdevice"):
-        libdevice = tl.extra.intel.libdevice
-        math = tl.math
-    else:
-        libdevice = tl.math
-        math = tl
+from .triton_compat import _log2, libdevice, math, tl, triton  # noqa: F401
 
 
-try:
-    from triton.language.standard import _log2
-except ImportError:
-
-    def _log2(x):
-        raise NotImplementedError
+_T = TypeVar("_T")
 
 
 def set_driver_to_cpu():
@@ -51,12 +27,26 @@ def set_driver_to_gpu():
     driver = triton.runtime.driver
     for name, backend in triton.backends.backends.items():
         if backend.driver.is_active() and name != "cpu":
-            if isinstance(driver.active, backend.driver):
+            # After https://github.com/triton-lang/triton/commit/b844d519bc5e86edf00fe6b3c6c2d1badcd509a4,
+            # `driver.active` can be of `LazyProxy` type and the sign of this - `_obj` attribute.
+            if (
+                isinstance(driver.active, backend.driver)
+                or hasattr(driver.active, "_obj")
+                and isinstance(driver.active._obj, backend.driver)
+            ):
                 # Don't re-initialize backend if it is already active
                 return
             driver.set_active(backend.driver())
             return
     raise RuntimeError("Could not find an active GPU backend")
+
+
+def get_backend_options():
+    driver = triton.runtime.driver
+    target = driver.active.get_current_target()
+    backend = triton.compiler.compiler.make_backend(target)
+    options = backend.parse_options(dict())
+    return options.__dict__
 
 
 @triton.jit
@@ -204,7 +194,7 @@ def device_assert_then(cond, msg, r):
 
 @triton.jit
 def randint64(seed, offset, low, high):
-    r0, r1, r2, r3 = tl.randint4x(seed, offset)
+    r0, r1, _r2, _r3 = tl.randint4x(seed, offset)
     r0 = r0.to(tl.uint64)
     r1 = r1.to(tl.uint64)
     result = r0 | (r1 << 32)
@@ -495,8 +485,8 @@ def _compare_and_swap_with_index(
     # slice left/right with 'stride' 2**(n_dims - i - 1)
     right_mask = tl.arange(0, 2)[None, :, None].to(idtype)
     left_mask = (1 - right_mask).to(idtype)
-    ileft = tl.broadcast_to(tl.sum(iy * left_mask, 1)[:, None, :], shape)
-    iright = tl.broadcast_to(tl.sum(iy * right_mask, 1)[:, None, :], shape)
+    ileft = tl.broadcast_to(tl.sum(iy * left_mask, 1).to(idtype)[:, None, :], shape)
+    iright = tl.broadcast_to(tl.sum(iy * right_mask, 1).to(idtype)[:, None, :], shape)
     ileft = tl.reshape(ileft, x.shape)
     iright = tl.reshape(iright, x.shape)
     left = ileft.to(x.dtype, bitcast=True)
@@ -536,7 +526,7 @@ def _compare_and_swap_with_index(
     cond = (right_valid_mask > left_valid_mask) | (
         (right_valid_mask == left_valid_mask) & cond
     )
-    cond = cond ^ flip
+    cond = (cond ^ flip).to(tl.int1)
     ret = ix ^ tl.where(cond, ileft ^ iright, tl.zeros_like(ix))
     new_idxs = idxs ^ tl.where(cond, left_idx ^ right_idx, tl.zeros_like(idxs))
 
@@ -614,3 +604,73 @@ def select_one(x, mask, dim, keep_dims=False):
     ix = x.to(idtype, bitcast=True)
     iy = tl.sum(ix * mask, dim, keep_dims=keep_dims)
     return iy.to(x.dtype, bitcast=True)
+
+
+@triton.jit
+def x_grid_barrier(sem):
+    """
+    Wait for all other thread blocks in grid sharing same y/z program_id
+    to reach this barrier before returning.
+
+    Args:
+        sem: an uint32 semaphores, zero or 0x80000000 initialized.  Must be unique to each y/z program ID.
+    """
+    # ensure stores before this are visible
+    tl.debug_barrier()
+
+    one_i32 = 1
+    one_u32 = one_i32.to(tl.uint32)  # type: ignore[attr-defined]
+    expected = tl.num_programs(0).to(tl.uint32)
+    if tl.program_id(0) == 0:
+        nb = 0x80000000 - (expected - one_u32)
+    else:
+        nb = one_u32
+
+    old_arrive = tl.atomic_add(sem, nb, sem="release")
+
+    bar_flipped = False
+    while not bar_flipped:
+        # want a `ld.acquire.gpu.u32 $0,[$1];` but Triton doesn't have it
+        current_arrive = tl.atomic_add(sem, 0, sem="acquire")
+        # current_arrive = tl.load(sem, volatile=True)
+        bar_flipped = ((old_arrive ^ current_arrive) & 0x80000000) != 0
+
+    # TODO(jansel): is this needed?
+    tl.debug_barrier()
+
+
+def triton_builtin(f: _T) -> _T:
+    """
+    Decorator to mark a function as a Triton built-in function.  These functions
+    are evaluated at compile time.
+
+    Args:
+        f (function): The function to be marked as a Triton built-in.
+
+    Returns:
+        function: The same function, marked as a Triton built-in.
+    """
+    f.__triton_builtin__ = True  # type: ignore[attr-defined]
+    return f
+
+
+@triton_builtin
+def constexpr_next_power_of_2(
+    n: tl.constexpr, *, _builder: object = None
+) -> tl.constexpr:
+    """
+    A version triton.next_power_of_two that can be used within a kernel on constants.
+    """
+    assert isinstance(n, tl.constexpr)
+    return tl.constexpr(triton.next_power_of_2(n.value))
+
+
+@triton_builtin
+def if_mask(mask: Any, val, *, _builder: object = None) -> tl.constexpr:
+    """
+    Work around triton compile error: `ValueError: `other` cannot be provided without `mask``
+    A compile-time to check to return either `val` or `None` depending on the value of mask.
+    """
+    if isinstance(mask, tl.constexpr) and mask.value is None:
+        return tl.constexpr(None)
+    return val

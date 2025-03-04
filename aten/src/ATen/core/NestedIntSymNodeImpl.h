@@ -67,7 +67,7 @@ class TORCH_API NestedIntSymNodeImpl : public SymNodeImpl {
 
   c10::SymNode wrap_int(int64_t num) override {
     return SymNode(c10::make_intrusive<ConstantSymNodeImpl<int64_t>>(num));
-  };
+  }
 
   int64_t guard_int(const char* file, int64_t line) override {
     TORCH_CHECK(false);

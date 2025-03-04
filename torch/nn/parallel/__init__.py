@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from typing_extensions import deprecated
 
 from torch.nn.parallel.data_parallel import data_parallel, DataParallel

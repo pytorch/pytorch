@@ -64,7 +64,7 @@ struct ArgumentInfo {
 };
 
 static_assert(
-    std::is_standard_layout<ArgumentInfo>::value,
+    std::is_standard_layout_v<ArgumentInfo>,
     "ArgumentInfo is to be a POD struct");
 static_assert(
     sizeof(ArgumentInfo) == sizeof(ArgumentInfo::plain_data_type),
@@ -101,12 +101,12 @@ struct ArgumentSpec {
     const at::Tensor* t = reinterpret_cast<const at::Tensor*>(&input);
     arg.defined_ = t->defined();
     if (arg.defined_) {
-      arg.requires_grad_ = with_grad && autograd::Variable(*t).requires_grad();
+      arg.requires_grad_ = with_grad && t->requires_grad();
       arg.dim_ = t->dim();
       at::Device device = t->device();
       arg.dev_type_ =
           // NOLINTNEXTLINE(bugprone-signed-char-misuse)
-          static_cast<std::underlying_type<DeviceType>::type>(device.type());
+          static_cast<std::underlying_type_t<DeviceType>>(device.type());
       // NOLINTNEXTLINE(bugprone-signed-char-misuse)
       arg.device_ = device.index();
       arg.type_ = static_cast<unsigned>(t->scalar_type());
@@ -240,7 +240,7 @@ struct CompleteArgumentInfo;
 
 struct CompleteArgumentSpec {
   CompleteArgumentSpec(bool with_grad, at::ArrayRef<IValue> inputs)
-      : hash_code(0), ninputs(inputs.size()) {
+      : ninputs(inputs.size()) {
     int32_t all_dims = 0;
     const auto num_inputs = inputs.size();
     for (const auto i : c10::irange(num_inputs)) {
@@ -266,8 +266,8 @@ struct CompleteArgumentSpec {
           pod.type = static_cast<int>(t.scalar_type());
           at::Device device = t.device();
           // NOLINTNEXTLINE(bugprone-signed-char-misuse)
-          pod.dev_type = static_cast<std::underlying_type<DeviceType>::type>(
-              device.type());
+          pod.dev_type =
+              static_cast<std::underlying_type_t<DeviceType>>(device.type());
           // NOLINTNEXTLINE(bugprone-signed-char-misuse)
           pod.device = device.index();
           pod.requires_grad = with_grad && t.requires_grad();
@@ -325,7 +325,7 @@ struct CompleteArgumentSpec {
   int64_t* sizes_strides() {
     return data.data() + ninputs;
   }
-  size_t hash_code; // precomputed on construction
+  size_t hash_code{0}; // precomputed on construction
   size_t ninputs;
   // layout is ninputs of TensorPOD (each 64-bit) followed by their size and
   // stride info for 3 tensors:
