@@ -1153,7 +1153,9 @@ class GraphLowering(torch.fx.Interpreter):
                     if torch._library.utils.is_builtin(target):
                         decided_constraint = require_contiguous  # type: ignore[assignment]
                     else:
-                        decided_constraint = constrain_to_fx_strides  # type: ignore[assignment]
+                        # maybe_layout_constraints will decide the layout constraint for the custom op
+                        # lazily
+                        decided_constraint = None  # type: ignore[assignment]
 
                 # for implicitly fallback ops, we conservatively requires
                 # contiguous input since some eager kernels does not
