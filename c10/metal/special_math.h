@@ -457,14 +457,14 @@ inline ::metal::enable_if_t<is_scalar_floating_point_v<T>, T> sinc(T a) {
   if (a == static_cast<T>(0)) {
     return static_cast<T>(1);
   }
-  auto product = M_PI_F * float(a);
+  auto product = M_PI_F * static_cast<float>(a);
   return static_cast<T>(::metal::precise::sin(product) / product);
 }
 
 // Complex sinc2 implementation
 template <typename T>
 inline ::metal::enable_if_t<is_complex_v<T>, T> sinc(T inp) {
-  auto a = float2(inp) * M_PI_F;
+  auto a = static_cast<float2>(inp) * M_PI_F;
   const float a2 = a.x * a.x + a.y * a.y;
   if (a2 == 0) {
     return 0;
