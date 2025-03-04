@@ -1468,6 +1468,8 @@ def library_paths(device_type: str = "cpu") -> list[str]:
                 # _find_cuda_home) - in that case we stay with 'lib64'.
                 lib_dir = 'lib'
 
+        if os.path.exists(_join_cuda_home(lib_dir, "stubs")):
+            paths.append(_join_cuda_home(lib_dir, "stubs"))
         paths.append(_join_cuda_home(lib_dir))
         if CUDNN_HOME is not None:
             paths.append(os.path.join(CUDNN_HOME, lib_dir))
