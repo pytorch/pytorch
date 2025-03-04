@@ -11631,7 +11631,10 @@ class CommonTemplate:
             net = torch.compile(model)
             out = net(input_t)
 
-    @requires_gpu()
+    @skip_if_cpp_wrapper(
+        "Without major redesign, cpp_wrapper will not support custom ops that are "
+        "defined in Python."
+    )
     @config.patch(implicit_fallbacks=True)
     def test_custom_op_default_layout_constraint(self):
         with torch.library._scoped_library("mylib", "DEF") as lib:
