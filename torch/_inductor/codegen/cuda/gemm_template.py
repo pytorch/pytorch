@@ -304,7 +304,7 @@ bool initialize_block(
   if (block.size()<=0) return false;
   Element scope_max(static_cast<Element>(max)), scope_min(static_cast<Element>(min));
   cutlass::reference::device::BlockFillRandomUniform(
-    (Element*)block.get(), block.size(), seed, scope_max, scope_min, 0);
+    (Element*)block.get(), block.size(), seed, scope_max, scope_min);
 
   return true;
 }
@@ -1310,6 +1310,9 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
     ) -> list[str]:
         if input_nodes[2] is None:
             del arg_names[2]
+        else:
+            # Reorder them as Bias, A, B
+            arg_names[0:3] = [arg_names[2], arg_names[0], arg_names[1]]
         return arg_names
 
     def render_gemm_arguments(
