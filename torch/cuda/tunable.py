@@ -154,7 +154,7 @@ configuration on N GPUs.::
 
 Note that the usage of the ``mgpu_tune_gemm_in_file`` API is different from its single GPU counterpart
 (``tune_gemm_in_file``). The body of the Python script that calls the API must be wrapped in ``main()`` as shown
-due to the use of concurrent futures module. The argument to `mgpu_tune_gemm_in_file` must contain a wild card
+due to the use of concurrent futures module. The argument to ``mgpu_tune_gemm_in_file`` must contain a wild card
 expression (? or *) to generate the list of untuned files containing the GEMMs to be processed. The `num_gpus`
 must between 1 and the total number of GPUs available.
 
