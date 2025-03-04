@@ -86,6 +86,7 @@ class CUDAKernel(Kernel):
         matches = [
             arg for arg in self.layout_args.values() if arg.matches(node, attr, dim)
         ]
+        assert all(match == matches[0] for match in matches) if matches else True, "All matching layout args should be identical"
         return None if len(matches) == 0 else matches[0]
 
     def add_layout_arg(
