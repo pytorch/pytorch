@@ -93,6 +93,8 @@ def mps_ops_grad_modifier(ops):
         'linalg.solve_ex': [torch.float16, torch.float32],  # missing `aten::lu_solve`.
         'linalg.tensorsolve': [torch.float16, torch.float32],  # missing `aten::lu_solve`.
         'linalg.det': [torch.float16, torch.float32],  # missing aten::lu_solve.out
+        'linalg.slogdet': [torch.float16, torch.float32],  # missing aten::lu_solve.out
+        'logdet': [torch.float16, torch.float32],  # missing aten::lu_solve.out
         'aminmax': [torch.float32, torch.float16],
         'special.i1': [torch.float16],  # "i1_backward" not implemented for 'Half'
 
@@ -593,11 +595,9 @@ def mps_ops_modifier(ops):
         'linalg.norm': [torch.float32],
         'linalg.normsubgradients_at_zero': [torch.float32],
         'linalg.qr': None,
-        'linalg.slogdet': None,
         'linalg.svdvals': None,
         'linalg.vecdot': None,
         'logcumsumexp': None,
-        'logdet': None,
         'lu_solve': None,
         'masked.median': None,
         'matrix_exp': None,
