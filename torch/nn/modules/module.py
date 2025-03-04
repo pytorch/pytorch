@@ -1384,9 +1384,9 @@ class Module:
             hook (Callable): The user-defined hook to be registered.
             prepend (bool): If true, the provided ``hook`` will be fired before
                 all existing ``backward_pre`` hooks on this
-                :class:`torch.nn.modules.Module`. Otherwise, the provided
+                :class:`torch.nn.Module`. Otherwise, the provided
                 ``hook`` will be fired after all existing ``backward_pre`` hooks
-                on this :class:`torch.nn.modules.Module`. Note that global
+                on this :class:`torch.nn.Module`. Note that global
                 ``backward_pre`` hooks registered with
                 :func:`register_module_full_backward_pre_hook` will fire before
                 all hooks registered by this method.
@@ -1464,9 +1464,9 @@ class Module:
             hook (Callable): The user-defined hook to be registered.
             prepend (bool): If true, the provided ``hook`` will be fired before
                 all existing ``backward`` hooks on this
-                :class:`torch.nn.modules.Module`. Otherwise, the provided
+                :class:`torch.nn.Module`. Otherwise, the provided
                 ``hook`` will be fired after all existing ``backward`` hooks on
-                this :class:`torch.nn.modules.Module`. Note that global
+                this :class:`torch.nn.Module`. Note that global
                 ``backward`` hooks registered with
                 :func:`register_module_full_backward_hook` will fire before
                 all hooks registered by this method.
@@ -1628,9 +1628,9 @@ class Module:
             hook (Callable): The user defined hook to be registered.
             prepend (bool): If true, the provided ``hook`` will be fired before
                 all existing ``forward_pre`` hooks on this
-                :class:`torch.nn.modules.Module`. Otherwise, the provided
+                :class:`torch.nn.Module`. Otherwise, the provided
                 ``hook`` will be fired after all existing ``forward_pre`` hooks
-                on this :class:`torch.nn.modules.Module`. Note that global
+                on this :class:`torch.nn.Module`. Note that global
                 ``forward_pre`` hooks registered with
                 :func:`register_module_forward_pre_hook` will fire before all
                 hooks registered by this method.
@@ -1689,9 +1689,9 @@ class Module:
             hook (Callable): The user defined hook to be registered.
             prepend (bool): If ``True``, the provided ``hook`` will be fired
                 before all existing ``forward`` hooks on this
-                :class:`torch.nn.modules.Module`. Otherwise, the provided
+                :class:`torch.nn.Module`. Otherwise, the provided
                 ``hook`` will be fired after all existing ``forward`` hooks on
-                this :class:`torch.nn.modules.Module`. Note that global
+                this :class:`torch.nn.Module`. Note that global
                 ``forward`` hooks registered with
                 :func:`register_module_forward_hook` will fire before all hooks
                 registered by this method.
