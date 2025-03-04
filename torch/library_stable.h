@@ -7,7 +7,7 @@
 #include <optional>
 #include <string>
 
-class StableLibrary final {
+class TORCH_API StableLibrary final {
   private:
     class TorchLibraryOpaque;
     using TorchLibraryHandle = TorchLibraryOpaque*;
@@ -42,7 +42,7 @@ class StableLibrary final {
     StableLibrary& impl(const char* name, void (*fn)(void **, int64_t, int64_t));
 };
 
-class StableTorchLibraryInit final {
+class TORCH_API StableTorchLibraryInit final {
   private:
     using InitFn = void(StableLibrary&);
     StableLibrary lib_;

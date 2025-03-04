@@ -10,6 +10,7 @@
 #include <ATen/core/stack.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/bit_cast.h>
 #include <torch/csrc/inductor/aoti_runtime/utils.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
 #include <torch/library.h>
@@ -43,6 +44,7 @@ class VoidStarConverter: public c10::OperatorKernel {
     VoidStarConverter(void (*fn)(void **, int64_t, int64_t)) : fn_(fn) {}
 
     void operator()(const c10::OperatorHandle& op, c10::DispatchKeySet keyset, torch::jit::Stack* stack) {
+      static_assert(sizeof(void*) >= sizeof(int64_t), "StableLibrary assumes a 64-bit system architecture");
       const auto& schema = op.schema();
       const auto num_returns = schema.returns().size();
       const auto num_arguments = schema.arguments().size();
@@ -53,8 +55,19 @@ class VoidStarConverter: public c10::OperatorKernel {
       for (size_t idx = 0; idx < num_arguments; idx++) {  // rbarnes will prefer a c10::irange instead of this loop!
         const c10::IValue& arg = torch::jit::peek(stack, idx, num_arguments);
         if (arg.isInt()) {
+          TORCH_WARN("dealt with an Int");
           ministack[idx] = reinterpret_cast<void *>(arg.toInt());
+        } else if (arg.isDouble()) {
+          TORCH_WARN("dealt with a double");
+          ministack[idx] = c10::bit_cast<void *>(arg.toDouble());
+        } else if (arg.isBool()) {
+          TORCH_WARN("dealt with a bool");
+          ministack[idx] = reinterpret_cast<void *>(static_cast<int64_t>(arg.toBool()));
+        } else if (arg.isNone()) {
+          TORCH_WARN("dealt with a None");
+          ministack[idx] = nullptr;
         } else if (arg.isTensor()) {
+          TORCH_WARN("dealt with a Tensor");
           AtenTensorHandle ath = torch::aot_inductor::new_tensor_handle(std::move(const_cast<at::Tensor&>(arg.toTensor())));
           ministack[idx] = reinterpret_cast<void *>(ath);
         } else {
