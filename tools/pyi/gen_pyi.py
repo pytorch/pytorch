@@ -520,7 +520,7 @@ def gen_nn_functional(fm: FileManager) -> None:
                         ]
                     )
                 )
-            }
+            },
         }
     )
 
