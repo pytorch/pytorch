@@ -565,4 +565,93 @@ def scaled_dot_product_efficient_attention_backward_strategy(
 )
 def scaled_scaled_dot_product_cudnn_attention_strategy(
     mesh: DeviceMesh, op_schema: OpSchema
-) -> OpStrategy: ...
+) -> OpStrategy:
+    assert (
+        len(op_schema.args_schema) == 8
+    ), f"scaled_scaled_dot_product_cudnn_attention expects 8 args, got {len(op_schema.args_schema)}"
+
+    (
+        query_strategy,
+        key_strategy,
+        value_strategy,
+        attn_bias_strategy,
+        compute_log_sumexp,
+        dropout_p,
+        is_causal,
+        return_debug_mask,
+    ) = op_schema.args_schema
+    has_attn_bias = attn_bias_strategy is not None
+    assert isinstance(query_strategy, OpStrategy)
+    # assuming q/k/v have the same shape
+
+    single_mesh_dim_strategies = []
+
+    # placement list stores placements of [outputs, inputs]
+    # in the spda case, we have 2 valid tensor outputs and 3 tensor inputs
+    # first we can always accept full replication for both inputs and outputs
+    all_replicate: PlacementList = [
+        Replicate(),  # output
+        Replicate(),  # logsumexp
+        None,  # cum_seq_q
+        None,  # cum_seq_k
+        None,  # max_q
+        None,  # max_k
+        None,  # philox_seed
+        None,  # philox_offset
+        Replicate(),  # debug_attn_mask is not supproted by pytorch and is an empty tensor
+        Replicate(),  # q
+        Replicate(),  # k
+        Replicate(),  # v
+    ]
+    if has_attn_bias:
+        all_replicate.append(Replicate())  # attn bias
+
+    single_mesh_dim_strategies.append(all_replicate)
+
+    # second we can accept the sharding pattern of tensor parallelism, which
+    # shard on the num of head dim
+    qkv_sharding = Shard(1)  # num head dim
+    output_sharding = Shard(1)  # num head dim
+    logsumexp_sharding = Shard(1)  # num head dim
+    if return_debug_mask:
+        debug_attn_mask_sharding: Placement = Shard(1)  # num head dim
+    else:
+        # empty debug mask, replicated
+        debug_attn_mask_sharding = Replicate()
+
+    num_heads_dim_sharding: PlacementList = [
+        output_sharding,
+        logsumexp_sharding,
+        None,  # cum_seq_q
+        None,  # cum_seq_k
+        None,  # max_q
+        None,  # max_k
+        Replicate(),  # rng_state
+        None,  # unused
+        debug_attn_mask_sharding,
+        qkv_sharding,
+        qkv_sharding,
+        qkv_sharding,
+    ]
+    single_mesh_dim_strategies.append(num_heads_dim_sharding)
+
+    # Context Parallelism: shards on the sequence dim
+    single_mesh_dim_strategies.append(
+        [
+            Shard(2),  # output
+            Shard(2),  # logsumexp
+            None,  # cum_seq_q
+            None,  # cum_seq_k
+            None,  # max_q
+            None,  # max_k
+            Replicate(),  # rng_state
+            None,  # unused
+            Shard(2),  # debugattn
+            Shard(2),  # q
+            Shard(2),  # k
+            Shard(2),  # v
+        ]
+    )
+    return expand_to_full_mesh_op_strategy(
+        mesh, op_schema, single_mesh_dim_strategies, input_index=9
+    )
