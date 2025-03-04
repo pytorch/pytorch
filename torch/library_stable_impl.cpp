@@ -17,6 +17,7 @@
 
 
 class StableLibrary::TorchLibraryOpaque {
+  public:
     // TODO: support other Kinds lol, you'll need to translate between StableLibrary::Kind and Library::Kind
     TorchLibraryOpaque(StableLibrary::Kind kind, std::string ns, std::optional<c10::DispatchKey> k, const char* file, uint32_t line)
         : library_(torch::Library::Kind::IMPL, std::move(ns), k, file, line) {}
@@ -30,8 +31,8 @@ class StableLibrary::TorchLibraryOpaque {
     void impl(const char* name, torch::CppFunction fn) {
       library_.impl(name, std::move(fn));
     }
-private:
-    torch::Library library_; // Actual Library object
+  private:
+      torch::Library library_; // Actual Library object
 };
 
 

@@ -1,0 +1,27 @@
+import torch
+from torch import Tensor
+
+
+lib = torch.library._scoped_library("libtorch_agnostic", "FRAGMENT")
+lib.define("sgd_out_of_place(Tensor param, Tensor grad, double weight_decay, double lr, bool maximize) -> Tensor")
+
+
+def sgd_out_of_place(param, grad, weight_decay, lr, maximize) -> Tensor:
+    """
+    Computes a single step of SGD on a single parameter Tensor with grad.
+
+    Assumes:
+    - param and grad are the same shape and are 1D.
+    - param and grad are float and on CPU
+
+    Args:
+        param: a 1D tensor of floats
+        grad: a 1D tensor of floats
+        weight_decay: a python double between 0 and 1
+        lr: a python double
+
+    Returns:
+        a 1D float Tensor the same shape as param
+
+    """
+    return torch.ops.libtorch_agnostic.sgd_out_of_place.default(params, grad, weight_decay, lr, maximize)
