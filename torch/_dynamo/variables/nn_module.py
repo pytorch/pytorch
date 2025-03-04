@@ -170,6 +170,10 @@ class NNModuleVariable(VariableTracker):
         self.value = value
         assert self.source
         self.nn_module_stack_source = self.source
+        for p in value.parameters():
+            if p is torch.Size:
+                p = p.numel()
+            counters["paramaters"]["total"] += p
 
     def get_nn_module_stack_source(self):
         return self.nn_module_stack_source or self.source
