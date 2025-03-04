@@ -47,6 +47,7 @@ env:
   PYTORCH_ROOT: /pytorch
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
   SKIP_ALL_TESTS: 0
+  USE_SEQUENTIAL: !{{ "1" if use_sequential else "0" }}
 !{{ common.concurrency(build_environment) }}
 
 jobs:
