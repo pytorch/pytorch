@@ -194,7 +194,7 @@ jobs:
           WORKFLOW_RUN_ID: ${{ github.run_id }}
         run: |
           python3 -m pip install psutil==5.9.1 nvidia-ml-py==11.525.84 dataclasses_json==0.6.7
-          python3 -m tools.stats.monitor > "usage_log_build_${JOB_NAME}_${JOB_ID}.txt" 2>&1 &
+          python3 -m tools.stats.monitor > usage_log.txt 2>&1 &
           echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
       - name: Download pytest cache
