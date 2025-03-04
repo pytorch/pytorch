@@ -445,14 +445,14 @@ class Module:
     _is_full_backward_hook: Optional[bool]
     _forward_hooks: dict[int, Callable]
     # Marks whether the corresponding _forward_hooks accept kwargs or not.
-    # As JIT does not support Set[int], this dict is used as a set, where all
+    # As JIT does not support set[int], this dict is used as a set, where all
     # hooks represented in this dict accept kwargs.
     _forward_hooks_with_kwargs: dict[int, bool]
     # forward hooks that should always be called even if an exception is raised
     _forward_hooks_always_called: dict[int, bool]
     _forward_pre_hooks: dict[int, Callable]
     # Marks whether the corresponding _forward_hooks accept kwargs or not.
-    # As JIT does not support Set[int], this dict is used as a set, where all
+    # As JIT does not support set[int], this dict is used as a set, where all
     # hooks represented in this dict accept kwargs.
     _forward_pre_hooks_with_kwargs: dict[int, bool]
     _state_dict_hooks: dict[int, Callable]
