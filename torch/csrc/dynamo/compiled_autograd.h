@@ -1102,8 +1102,8 @@ struct IValuePacker {
       TORCH_INTERNAL_ASSERT(false, "IValuePacker not implemented for type");
       return at::NoneType::get();
     }
-  }
 #endif
+  }
 };
 
 template <>
