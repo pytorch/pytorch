@@ -201,10 +201,7 @@ class PyCodegen:
                     gb_type="Reconstruction failure: source.reconstruct not implemented",
                     context=str(source),
                     explanation=f"Dynamo has no bytecode reconstruction implemented for {type(source)} variable {source}.",
-                    hints=[
-                        "Report an issue to PyTorch if you need reconstrtuction support. Note that objects that don't have"
-                        "reconstruction rules may be fundamentally unreconstructable.",
-                    ],
+                    hints=[*graph_break_hints.DYNAMO_BUG],
                 )
 
             self._output.append(create_dup_top())
