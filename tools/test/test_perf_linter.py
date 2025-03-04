@@ -20,6 +20,16 @@ def linty_code() -> None:
     x = dict()
     x = list  (  )
     x = dict  (  )
+    if x in (1, 2, 3):
+        pass
+    if x in [1, 2, 3]:
+        pass
+    if x in [1, 2, y]:
+        pass
+    if x in {1, OrderedSet, 3}:
+        pass
+    if node.op in ("placeholder", "get_attr", "output"):
+        pass
 """
 
 
@@ -37,6 +47,13 @@ def not_linty_code() -> None:
         (x == 0 for x in range(10))
     )
     self.x = (x == 0 for x in range(10))
+    if x in (1, 2, y):
+        pass
+    if x in {1, True, False, None, ..., "x", 1.5, -1}:
+        pass
+    if x in [1] + y:
+        pass
+    res = x in [1, 2, 3]
 """
 
 
@@ -69,6 +86,16 @@ def linty_code() -> None:
     x = {}
     x =   [  ]
     x =   {  }
+    if x in {1, 2, 3}:
+        pass
+    if x in {1, 2, 3}:
+        pass
+    if x in (1, 2, y):
+        pass
+    if x in (1, OrderedSet, 3):
+        pass
+    if node.op in {"placeholder", "get_attr", "output"}:
+        pass
 """,
         )
         self.assertExpectedInline(
@@ -264,6 +291,7 @@ None:10:9: list()/dict() is slow! Use []/{} instead.
    10 |     x = list  (  )
                 ^^^^
    11 |     x = dict  (  )
+   12 |     if x in (1, 2, 3):
 
 None:10:15: list()/dict() is slow! Use []/{} instead.
     8 |     x = list()
@@ -271,6 +299,7 @@ None:10:15: list()/dict() is slow! Use []/{} instead.
    10 |     x = list  (  )
                       ^
    11 |     x = dict  (  )
+   12 |     if x in (1, 2, 3):
 
 None:10:18: list()/dict() is slow! Use []/{} instead.
     8 |     x = list()
@@ -278,30 +307,115 @@ None:10:18: list()/dict() is slow! Use []/{} instead.
    10 |     x = list  (  )
                          ^
    11 |     x = dict  (  )
+   12 |     if x in (1, 2, 3):
 
 None:11:9: list()/dict() is slow! Use []/{} instead.
     9 |     x = dict()
    10 |     x = list  (  )
    11 |     x = dict  (  )
                 ^^^^
+   12 |     if x in (1, 2, 3):
+   13 |         pass
 
 None:11:15: list()/dict() is slow! Use []/{} instead.
     9 |     x = dict()
    10 |     x = list  (  )
    11 |     x = dict  (  )
                       ^
+   12 |     if x in (1, 2, 3):
+   13 |         pass
 
 None:11:18: list()/dict() is slow! Use []/{} instead.
     9 |     x = dict()
    10 |     x = list  (  )
    11 |     x = dict  (  )
                          ^
+   12 |     if x in (1, 2, 3):
+   13 |         pass
+
+None:12:13: `in (...)` is slower than `in {...}` for constant sets.
+   10 |     x = list  (  )
+   11 |     x = dict  (  )
+   12 |     if x in (1, 2, 3):
+                    ^
+   13 |         pass
+   14 |     if x in [1, 2, 3]:
+
+None:12:21: `in (...)` is slower than `in {...}` for constant sets.
+   10 |     x = list  (  )
+   11 |     x = dict  (  )
+   12 |     if x in (1, 2, 3):
+                            ^
+   13 |         pass
+   14 |     if x in [1, 2, 3]:
+
+None:14:13: `in (...)` is slower than `in {...}` for constant sets.
+   12 |     if x in (1, 2, 3):
+   13 |         pass
+   14 |     if x in [1, 2, 3]:
+                    ^
+   15 |         pass
+   16 |     if x in [1, 2, y]:
+
+None:14:21: `in (...)` is slower than `in {...}` for constant sets.
+   12 |     if x in (1, 2, 3):
+   13 |         pass
+   14 |     if x in [1, 2, 3]:
+                            ^
+   15 |         pass
+   16 |     if x in [1, 2, y]:
+
+None:16:13: `in {...}` is slower than `in (...)` for non-constant sets.
+   14 |     if x in [1, 2, 3]:
+   15 |         pass
+   16 |     if x in [1, 2, y]:
+                    ^
+   17 |         pass
+   18 |     if x in {1, OrderedSet, 3}:
+
+None:16:21: `in {...}` is slower than `in (...)` for non-constant sets.
+   14 |     if x in [1, 2, 3]:
+   15 |         pass
+   16 |     if x in [1, 2, y]:
+                            ^
+   17 |         pass
+   18 |     if x in {1, OrderedSet, 3}:
+
+None:18:13: `in {...}` is slower than `in (...)` for non-constant sets.
+   16 |     if x in [1, 2, y]:
+   17 |         pass
+   18 |     if x in {1, OrderedSet, 3}:
+                    ^
+   19 |         pass
+   20 |     if node.op in ("placeholder", "get_attr", "output"):
+
+None:18:30: `in {...}` is slower than `in (...)` for non-constant sets.
+   16 |     if x in [1, 2, y]:
+   17 |         pass
+   18 |     if x in {1, OrderedSet, 3}:
+                                     ^
+   19 |         pass
+   20 |     if node.op in ("placeholder", "get_attr", "output"):
+
+None:20:19: `in (...)` is slower than `in {...}` for constant sets.
+   18 |     if x in {1, OrderedSet, 3}:
+   19 |         pass
+   20 |     if node.op in ("placeholder", "get_attr", "output"):
+                          ^
+   21 |         pass
+
+None:20:55: `in (...)` is slower than `in {...}` for constant sets.
+   18 |     if x in {1, OrderedSet, 3}:
+   19 |         pass
+   20 |     if node.op in ("placeholder", "get_attr", "output"):
+                                                              ^
+   21 |         pass
 """,
         )
 
     def test_not_linty(self) -> None:
         output, replacement = lint_function(not_linty_code)
-        self.assertFalse(output.strip())
+        self.assertEqual(output.strip(), "")
 
 
 if __name__ == "__main__":

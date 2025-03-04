@@ -61,10 +61,45 @@ perf_linter makes the following suggestions:
     >>> timeit.timeit('{}', number=10000000)
     0.17520155780948699
 
+4) In set that is not a constant (the set must be constructed every time which is O(n)):
+
+    >>> timeit.timeit("'b' in {0, 'x', 2.1, None, list}", number=10000000)
+    4.499352910090238
+    >>> timeit.timeit("'b' in (0, 'x', 2.1, None, list)", number=10000000)
+    2.098188409814611
+    >>> dis.dis(lambda: 'b' in {0, 'x', 2.1, None, list})
+        0 RESUME                   0
+        2 LOAD_CONST               1 ('b')
+        4 LOAD_CONST               2 (0)
+        6 LOAD_CONST               3 ('x')
+        8 LOAD_CONST               4 (2.1)
+        10 LOAD_CONST               0 (None)
+        12 LOAD_GLOBAL              0 (list)
+        22 BUILD_SET                5
+        24 CONTAINS_OP              0
+        26 RETURN_VALUE
+
+5) In tuple/list that is a constant (promoting to a frozenset makes it O(1)):
+
+    >>> timeit.timeit("'b' in (0, 'x', 2.1, None)", number=10000000)
+    1.3769164041150361
+    >>> timeit.timeit("'b' in [0, 'x', 2.1, None]", number=10000000)
+    1.5355216681491584
+    >>> timeit.timeit("'b' in {0, 'x', 2.1, None}", number=10000000)
+    0.46735053788870573
+    >>> dis.dis(lambda: 'b' in {0, 'x', 2.1, None})
+        0 RESUME                   0
+        2 LOAD_CONST               1 ('b')
+        4 LOAD_CONST               2 (frozenset({0, 'x', 2.1, None}))
+        6 CONTAINS_OP              0
+        8 RETURN_VALUE
+
 """
 ERROR1 = "Generators are slow! Use list comprehensions instead."
 ERROR2 = "list(x) is slow! Use [*x] instead."
 ERROR3 = "list()/dict() is slow! Use []/{} instead."
+ERROR4 = "`in {...}` is slower than `in (...)` for non-constant sets, set must be built every time."
+ERROR5 = "`in (...)` is slower than `in {...}` for constant sets, set becomes a code constant."
 
 
 class GenExprState(enum.Enum):
@@ -205,6 +240,48 @@ def lint_empty_constructors(
             return  # only one lint per line
 
 
+def is_constant(tok: TokenInfo) -> bool:
+    return (
+        tok.type == token.NUMBER
+        or (tok.type == token.STRING and tok.string[0] in ('"', "'"))
+        or tok.string in {"True", "False", "None", "...", "-", ","}
+    )
+
+
+def lint_const_set_contains(
+    tl: list[TokenInfo], brackets: dict[int, int]
+) -> Iterator[_linter.LintResult]:
+    """Check `x in (a, b, c)` versus `x in {a, b, c}`"""
+    for start, end in brackets.items():
+        if not (
+            start > 0
+            and tl[start - 1].string == "in"
+            and end + 1 < len(tl)
+            and tl[end + 1].string == ":"
+            and tl[start].string in "({["
+            and all(tok.string != "for" for tok in tl[:start])
+        ):
+            continue
+
+        current_type = tl[start].string
+        non_constants = 0
+        commas = 0
+        banned = 0
+        for tok in iter_tokens_skip_braces(tl, brackets, start, end):
+            commas += int(tok.string == ",")
+            banned += int(tok.string in {":", "for", "in"})
+            non_constants += int(not is_constant(tok))
+
+        if banned > 0 or commas == 0:
+            continue
+        elif current_type != "{" and non_constants == 0:
+            yield _linter.LintResult(ERROR5, *tl[start].start, "{", 1)
+            yield _linter.LintResult(ERROR5, *tl[end].start, "}", 1)
+        elif current_type != "(" and non_constants > 0:
+            yield _linter.LintResult(ERROR4, *tl[start].start, "(", 1)
+            yield _linter.LintResult(ERROR4, *tl[end].start, ")", 1)
+
+
 def iter_tokens_skip_braces(
     tl: list[TokenInfo], brackets: dict[int, int], start: int, end: int
 ) -> Iterator[TokenInfo]:
@@ -237,6 +314,7 @@ class PerfLinter(_linter.FileLinter):
                 lint_generators,
                 lint_list_constructors,
                 lint_empty_constructors,
+                lint_const_set_contains,
             ):
                 lints = [*linter(tl, brackets)]
                 if lints:
