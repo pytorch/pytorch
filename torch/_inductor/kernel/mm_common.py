@@ -111,10 +111,7 @@ def filtered_configs(
                     #  block_m and block_n must be a multiple of matrix_instr_nonkdim
                     kpack = 1
                     continue
-                
-                # Hit numerical issue when block_k = 16, kpack = 2
-                if block_k == 16:
-                    kpack = 1
+
                 if (
                     block_m,
                     block_n,

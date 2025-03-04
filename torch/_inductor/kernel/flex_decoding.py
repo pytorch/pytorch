@@ -519,6 +519,10 @@ def create_flex_decoding_kernel(*args, **kwargs):
     # Mark SPARSE_KV_BLOCK_SIZE as static shapes and add guards.
     SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_KV_BLOCK_SIZE)
 
+    # ROCm specific considerations
+    if torch.version.hip:
+        kernel_options["kpack"] = 2
+
     original_kernel_options = kernel_options.copy()
     # Note, we don't need to pass in the captured buffers explicitly
     # because they're implicitly added by the score_mod function

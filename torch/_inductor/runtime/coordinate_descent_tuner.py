@@ -21,7 +21,7 @@ def get_field(config, name):
     elif name == "num_stages":
         return config.num_stages
     elif name == "waves_per_eu":
-        return config.kwargs.get(name, int(8 // config.num_warps)
+        return config.kwargs.get(name, int(8 // config.num_warps))
     else:
         return config.kwargs.get(name, None)
 
@@ -113,7 +113,7 @@ class CoordescTuner:
             return val > self.get_warpsmax()
         if name == "waves_per_eu":
             return val > 8
-        
+
         return False
 
     def get_neighbour_values(self, name, orig_val, radius=1, include_self=False):
