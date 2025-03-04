@@ -351,7 +351,7 @@ jobs:
           build-time: ${{ steps.build.outputs.build_time }}
 
       - name: Upload utilization stats
-        if: ${{ always() && steps.test.conclusion && steps.test.conclusion != 'skipped' && !inputs.disable-monitor }}
+        if: ${{ always() && steps.build.conclusion && steps.build.conclusion != 'skipped' && !inputs.disable-monitor }}
         continue-on-error: true
         uses: ./.github/actions/upload-utilization-stats
         with:
