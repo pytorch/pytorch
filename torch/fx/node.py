@@ -779,9 +779,10 @@ class Node(_NodeBase):
                 # impure since it mutates inputs
                 return True
 
-            if getattr(self.target, "_nondeterministic_seeded", False):
-                # impure since it mutates RNG state
-                return impure_random
+            if impure_random:
+                if getattr(self.target, "_nondeterministic_seeded", False):
+                    # impure since it mutates RNG state
+                    return True
 
             return self.target in _side_effectful_functions
 

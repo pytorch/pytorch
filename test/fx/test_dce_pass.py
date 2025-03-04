@@ -232,6 +232,19 @@ class TestDCE(TestCase):
         # %add_ node should not be removed because it has side effects.
         self._run_dce_and_test(TestModule(), expect_dce_changes=False)
 
+    def test_impure_random(self):
+        """
+        Test that DCE doesn't remove call_function for torch.rand.
+        """
+
+        class TestModule(torch.nn.Module):
+            def forward(self, a: torch.Tensor) -> torch.Tensor:
+                x = torch.rand([10])
+                return a * 2
+
+        # %torch.rand should not be removed because it has side effects.
+        self._run_dce_and_test(TestModule(), expect_dce_changes=False)
+
     def test_impure_kwargs(self):
         """
         Test that DCE doesn't remove call_function nodes with side effects on kwargs.
