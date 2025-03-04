@@ -6,6 +6,7 @@ import os
 import sys
 from typing import TYPE_CHECKING
 
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -203,7 +204,10 @@ class UploadUtilizationData:
 
     def start(self) -> None:
         metadata, valid_records, _ = self.get_log_data(
-            self.info.workflow_run_id, self.info.job_id, self.info.run_attempt, self.artifact_prefix
+            self.info.workflow_run_id,
+            self.info.job_id,
+            self.info.run_attempt,
+            self.artifact_prefix,
         )
 
         if not metadata:
@@ -273,7 +277,11 @@ class UploadUtilizationData:
         upload_to_s3(bucket_name, key, docs)
 
     def get_log_data(
-        self, workflow_run_id: int, job_id: int, workflow_run_attempt: int, artifact_prefix:str = JOB_TEST_ARTIFACT_PREFIX
+        self,
+        workflow_run_id: int,
+        job_id: int,
+        workflow_run_attempt: int,
+        artifact_prefix: str = JOB_TEST_ARTIFACT_PREFIX,
     ) -> tuple[
         Optional[UtilizationMetadata], list[UtilizationRecord], list[UtilizationRecord]
     ]:
@@ -358,24 +366,26 @@ class UploadUtilizationData:
         result_logs, error_logs = self._process_utilization_records(lines)
         return metadata, result_logs, error_logs
 
-def handle_file(file_path: Path):
-    if file_path.match('*.zip'):
+
+def handle_file(file_path: Path) -> str:
+    if file_path.match("*.zip"):
         print(f"extracting {TEST_USAGE_LOG_FILENAME} from zip file {file_path}")
-        return unzip_file(file_path,TEST_USAGE_LOG_FILENAME)
-    elif file_path.match('*.txt'):
+        return unzip_file(file_path, TEST_USAGE_LOG_FILENAME)
+    elif file_path.match("*.txt"):
         print(f"extracting {file_path}")
         return read_file(file_path)
-    else:
-        print(f"{file_path} is not a supported file type")
-        return ""
+    print(f"{file_path} is not a supported file type")
+    return ""
+
 
 def read_file(file_path: Path) -> str:
     try:
-        with open(file_path, "r") as f:
+        with open(file_path) as f:
             return f.read()
     except Exception as e:
-       print(f"::warning trying to download test log {object} failed by: {e}")
-       return ""
+        print(f"::warning trying to download test log {object} failed by: {e}")
+        return ""
+
 
 def unzip_file(path: Path, file_name: str) -> str:
     try:
@@ -440,7 +450,8 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default=JOB_TEST_ARTIFACT_PREFIX,
         required=False,
-        help="artifact prefix to download raw utilizarion data from s3")
+        help="artifact prefix to download raw utilizarion data from s3",
+    )
 
     return parser.parse_args()
 
