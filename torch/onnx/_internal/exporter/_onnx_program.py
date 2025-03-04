@@ -90,8 +90,24 @@ ONNXProgram(
 
     def __call__(self, *args, **kwargs) -> Sequence[torch.Tensor]:
         """Run the ONNX model with the same arguments you would provide to the GraphModule."""
+        return self.compute_values(None, args, kwargs)
+
+    def compute_values(self, value_names: Sequence[str] | None, args=(), kwargs=None) -> Sequence[torch.Tensor]:
+        """Compute the values of the specified names in the ONNX model.
+
+        This method is used to compute the values of the specified names in the ONNX model.
+        The values are returned as a dictionary mapping names to tensors.
+
+        Args:
+            value_names: The names of the values to compute.
+
+        Returns:
+            A dictionary mapping names to tensors.
+        """
         import onnxruntime as ort
 
+        if kwargs is None:
+            kwargs = {}
         flatten_args = _process_args(args, kwargs)
 
         if self._inference_session is None:
@@ -107,7 +123,7 @@ ONNXProgram(
         run_options = ort.RunOptions()
         run_options.log_severity_level = 3  # 3: Error
         logger.debug("Running the inference session with %s arguments.", len(ort_input))
-        outputs = self._inference_session.run(None, ort_input, run_options=run_options)
+        outputs = self._inference_session.run(value_names, ort_input, run_options=run_options)
         logger.debug("Inference session run completed.")
         # TODO(justinchuby): Maybe output complex tensors as needed
         return tuple(torch.from_numpy(output) for output in outputs)

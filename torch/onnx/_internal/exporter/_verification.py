@@ -13,6 +13,7 @@ from typing import Any, TYPE_CHECKING
 
 import torch
 from torch.utils import _pytree
+from torch.onnx._internal._lazy_import import onnxscript_ir as ir
 
 
 if TYPE_CHECKING:
@@ -109,3 +110,95 @@ def verify_onnx_program(
             )
         )
     return results
+
+
+def _create_value_mapping(graph: ir.Graph) -> dict[str, ir.Value]:
+    """Return a dictionary mapping names to values in the graph.
+
+    The mapping does not include values from subgraphs.
+
+    Args:
+        graph: The graph to extract the mapping from.
+
+    Returns:
+        A dictionary mapping names to values.
+    """
+    values = {}
+    values.update(graph.initializers)
+    # The names of the values can be None or "", which we need to exclude
+    for input in graph.inputs:
+        if not input.name:
+            continue
+        values[input.name] = input
+    for node in graph:
+        for value in node.outputs:
+            if not value.name:
+                continue
+            values[value.name] = value
+    return values
+
+
+class VerificationInterpreter(torch.fx.Interpreter):
+    def __init__(self, onnx_program: torch.onnx.ONNXProgram):
+        if onnx_program.exported_program is None:
+            raise ValueError(
+                "The ONNX program does not contain an exported_program. "
+                "Please provide an exported_program to verify the ONNX program."
+            )
+        super().__init__(onnx_program.exported_program.graph_module)
+        self._onnx_program = onnx_program
+        self._onnx_values = _create_value_mapping(onnx_program.model.graph)
+        self.verification_info: list[VerificationInfo] = []
+        self._args = []
+
+    def run(
+        self,
+        *args,
+        initial_env: dict[torch.fx.Node, Any] | None = None,
+        enable_io_processing: bool = True,
+    ) -> Any:
+        self.verification_info = []
+        self.args = args
+        return super().run(
+            *args,
+            initial_env=initial_env,
+            enable_io_processing=enable_io_processing,
+        )
+
+    def run_node(self, n: torch.fx.Node) -> Any:
+        """
+        Run a specific node ``n`` and return the result.
+        Calls into placeholder, get_attr, call_function,
+        call_method, call_module, or output depending
+        on ``node.op``
+
+        Args:
+            n (Node): The Node to execute
+
+        Returns:
+            Any: The result of executing ``n``
+        """
+        result = super().run_node(n)
+        node_name = n.name
+        if node_name in self._onnx_values:
+            # If the node name is in the ONNX values, we need to set the value
+            # in the ONNX program
+            (onnx_result,) = self._onnx_program.compute_values([node_name], self.args)
+            max_absolute_difference, max_relative_difference, abs_diff, rel_diff = (
+                _compare_tensors(
+                    result,
+                    onnx_result,
+                )
+            )
+            self.verification_info.append(
+                VerificationInfo(
+                    name=node_name,
+                    max_abs_diff=max_absolute_difference,
+                    max_rel_diff=max_relative_difference,
+                    abs_diff_hist=torch.histogram(abs_diff),
+                    rel_diff_hist=torch.histogram(rel_diff),
+                    expected_dtype=result.dtype,
+                    actual_dtype=onnx_result.dtype,
+                )
+            )
+        return result
