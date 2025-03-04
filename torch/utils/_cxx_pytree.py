@@ -94,13 +94,14 @@ def _reverse_args(func: UnflattenFunc) -> OpTreeUnflattenFunc:
 
 def register_pytree_node(
     cls: type[Any],
-    flatten_func: FlattenFunc = None,
-    unflatten_func: UnflattenFunc = None,
+    flatten_func: FlattenFunc = None,  # type: ignore[assignment] # the type is guaranteed
+    unflatten_func: UnflattenFunc = None,  # type: ignore[assignment] # the type is guaranteed
     *,
     serialized_type_name: Optional[str] = None,
     to_dumpable_context: Optional[ToDumpableContextFn] = None,
     from_dumpable_context: Optional[FromDumpableContextFn] = None,
     flatten_with_keys_func: Optional[FlattenWithKeysFunc] = None,
+    # TODO(XuehaiPan): remove these deprecated arguments and remove the type ignore above
     flatten_fn: Optional[FlattenFunc] = None,
     unflatten_fn: Optional[UnflattenFunc] = None,
     flatten_with_keys_fn: Optional[FlattenWithKeysFunc] = None,
