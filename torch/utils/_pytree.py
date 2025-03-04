@@ -127,13 +127,13 @@ FlattenWithKeysFunc = Callable[[PyTree], tuple[list[tuple[KeyEntry, Any]], Any]]
 # - unflatten_func should take a flat list of values and some context
 #   (returned by flatten_func). It returns the collection by reconstructing
 #   it from the list and the context.
-# - flatten_with_keys_fn, which is a callable that takes a
+# - flatten_with_keys_func, which is a callable that takes a
 #   pytree and returns a list of (keypath, value) pairs and a context.
 class NodeDef(NamedTuple):
     type: type[Any]
     flatten_func: FlattenFunc
     unflatten_func: UnflattenFunc
-    flatten_with_keys_func: Optional[FlattenWithKeysFunc]
+    flatten_with_keys_func: Optional[FlattenWithKeysFunc] = None
 
     @property
     @deprecated(
