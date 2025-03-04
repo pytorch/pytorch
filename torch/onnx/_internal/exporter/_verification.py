@@ -186,7 +186,10 @@ class VerificationInterpreter(torch.fx.Interpreter):
         if node_name not in self._onnx_values:
             return result
         (onnx_result,) = self._onnx_program.compute_values([node_name], self.args)
-        result_ = torch.tensor(result)
+        if not isinstance(result, torch.Tensor):
+            result_ = torch.tensor(result)
+        else:
+            result_ = result
         max_absolute_difference, max_relative_difference, abs_diff, rel_diff = (
             _compare_tensors(
                 result_,
