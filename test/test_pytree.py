@@ -1180,7 +1180,9 @@ if "optree" in sys.modules:
         self.assertEqual(point.y, torch.tensor(2))
 
     def test_constant(self):
-        @dataclass
+        # Either use `frozen=True` or `unsafe_hash=True` so we have a
+        # non-default `__hash__`.
+        @dataclass(unsafe_hash=True)
         class Config:
             norm: str
 
@@ -1201,6 +1203,21 @@ if "optree" in sys.modules:
             self.assertFalse(True)  # must raise error before this
         except TypeError as e:
             msg = "register_constant(cls) expects `cls` to have a non-default `__eq__` implementation."
+            self.assertIn(msg, str(e))
+
+    def test_constant_default_hash_error(self):
+        class Config:
+            def __init__(self, norm: str):
+                self.norm = norm
+
+            def __eq__(self, other):
+                return self.norm == other.norm
+
+        try:
+            py_pytree.register_constant(Config)
+            self.assertFalse(True)  # must raise error before this
+        except TypeError as e:
+            msg = "register_constant(cls) expects `cls` to have a non-default `__hash__` implementation."
             self.assertIn(msg, str(e))
 
     def test_tree_map_with_path_multiple_trees(self):
