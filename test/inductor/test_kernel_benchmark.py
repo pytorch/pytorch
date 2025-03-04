@@ -15,7 +15,6 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_inductor_cache
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import xfailIfSM89
-from torch.testing._internal.common_device_type import expectedFailureXPU
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -136,7 +135,6 @@ class TestKernelBenchmark(TestCase):
 
     # TODO: Currently the Triton mm template +  relu fusion causes slowdown on XPU,
     # Need to refine the template and config for XPU.
-    @expectedFailureXPU
     @config.patch(
         max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
     )
