@@ -942,27 +942,48 @@ c10::intrusive_ptr<Block> CUDASymmetricMemoryAllocator::find_block(void* ptr) {
 //
 // static RegisterCUDASymmetricMemoryAllocator register_allocator_;
 
+struct NVSHMEMAllocation {
+  void* ptr;
+  size_t buffer_size;
+  int device_idx;
+
+  NVSHMEMAllocation(void* ptr, size_t buffer_size, int device_idx)
+      : ptr(ptr), buffer_size(buffer_size), device_idx(device_idx) {}
+};
+
 class NVSHMEMSymmetricMemory : public SymmetricMemory {
  public:
   NVSHMEMSymmetricMemory(
-      size_t buffer_size,
-      int device_idx,
-      int rank,
-      int world_size)
-      : buffer_size_(buffer_size),
-        device_idx_(device_idx),
-        rank_(rank),
-        world_size_(world_size) {
-    c10::cuda::CUDAGuard guard(device_idx);
+      std::shared_ptr<NVSHMEMAllocation> allocation,
+      const std::string& group_name)
+      : allocation_(allocation),
+        buffer_size_(allocation->buffer_size),
+        device_idx_(allocation->device_idx),
+        group_name_(group_name) {
+    c10::cuda::CUDAGuard guard(device_idx_);
 
-    void* buffer_ptr = nvshmem_extension::nvshmem_malloc(buffer_size_);
+    auto global_rank = get_group_info("0").rank;
+    auto group_info = get_group_info(group_name_);
+    auto store = group_info.store;
+    rank_ = group_info.rank;
+    world_size_ = group_info.world_size;
+    rank_to_global_rank_ =
+        store_all_gather(store, rank_, world_size_, global_rank);
+    LOG(INFO) << "[rank " << rank_ << "]"
+              << "rank_to_global_rank: " << rank_to_global_rank_;
+
     for (int r = 0; r < world_size_; ++r) {
-      buffers_.push_back(nvshmem_extension::nvshmem_ptr(buffer_ptr, r));
+      buffers_.push_back(nvshmem_extension::nvshmem_ptr(
+          allocation->ptr, rank_to_global_rank_[r]));
     }
 
+    // TODO: use the same allocation for signal pad
     void* signal_pad_ptr = nvshmem_extension::nvshmem_malloc(signal_pad_size);
+    AT_CUDA_CHECK(cudaMemset(signal_pad_ptr, 0, signal_pad_size));
+
     for (int r = 0; r < world_size_; ++r) {
-      signal_pads_.push_back(nvshmem_extension::nvshmem_ptr(signal_pad_ptr, r));
+      signal_pads_.push_back(nvshmem_extension::nvshmem_ptr(
+          signal_pad_ptr, rank_to_global_rank_[r]));
     }
 
     const size_t arr_size = sizeof(void*) * world_size_;
@@ -977,6 +998,14 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
         signal_pads_dev_,
         signal_pads_.data(),
         arr_size,
+        cudaMemcpyHostToDevice));
+
+    rank_to_global_rank_dev_ = reinterpret_cast<int*>(
+        c10::cuda::CUDACachingAllocator::raw_alloc(sizeof(int) * world_size_));
+    AT_CUDA_CHECK(cudaMemcpy(
+        rank_to_global_rank_dev_,
+        rank_to_global_rank_.data(),
+        sizeof(int) * world_size_,
         cudaMemcpyHostToDevice));
   }
 
@@ -1146,7 +1175,16 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
     return world_size_;
   }
 
+  virtual std::vector<int> get_rank_to_global_rank() override {
+    return rank_to_global_rank_;
+  };
+
+  int* get_rank_to_global_rank_dev() override {
+    return rank_to_global_rank_dev_;
+  };
+
  private:
+  std::shared_ptr<NVSHMEMAllocation> allocation_;
   size_t buffer_size_;
   std::vector<void*> buffers_;
   std::vector<void*> signal_pads_;
@@ -1155,6 +1193,10 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
   int world_size_;
   void** buffers_dev_;
   void** signal_pads_dev_;
+  std::string group_name_;
+
+  std::vector<int> rank_to_global_rank_;
+  int* rank_to_global_rank_dev_;
 };
 
 class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
@@ -1163,21 +1205,22 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
       size_t size,
       int device_idx,
       const std::optional<std::string>& group_name) override {
-    if (group_name == std::nullopt) {
-      TORCH_CHECK(
-          false, "NVSHMEMSymmetricMemoryAllocator::alloc requires group_name");
-    }
-    auto group_info = get_group_info(*group_name);
+    TORCH_CHECK(
+        group_name == std::nullopt,
+        "NVSHMEMSymmetricMemoryAllocator::alloc "
+        "must not be called with a group_name");
+
+    auto group_info = get_group_info("0");
     auto store = group_info.store;
     int rank = group_info.rank;
     int world_size = group_info.world_size;
 
     nvshmem_extension::initialize_nvshmem_with_store(store, rank, world_size);
-    auto symm_mem = c10::make_intrusive<NVSHMEMSymmetricMemory>(
-        size, device_idx, rank, world_size);
-    void* ptr = symm_mem->get_buffer_ptrs()[rank];
+    auto ptr = nvshmem_extension::nvshmem_malloc(size);
+    auto allocation =
+        std::make_shared<NVSHMEMAllocation>(ptr, size, device_idx);
     // TODO: thread safety
-    ptr_to_symm_mem_[ptr] = symm_mem;
+    allocations_.emplace(ptr, allocation);
     return ptr;
   }
 
@@ -1198,11 +1241,20 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
   c10::intrusive_ptr<SymmetricMemory> rendezvous(
       void* ptr,
       const std::optional<std::string>& group_name) override {
-    auto it = ptr_to_symm_mem_.find(ptr);
-    if (it == ptr_to_symm_mem_.end()) {
-      return nullptr;
+    TORCH_CHECK(group_name.has_value());
+    {
+      auto it = symm_mems_.find(std::make_tuple(ptr, *group_name));
+      if (it != symm_mems_.end()) {
+        return it->second;
+      }
     }
-    return it->second;
+    auto it = allocations_.find(ptr);
+    TORCH_CHECK(it != allocations_.end());
+    auto symm_mem =
+        c10::make_intrusive<NVSHMEMSymmetricMemory>(it->second, *group_name);
+
+    symm_mems_[std::make_tuple(ptr, *group_name)] = symm_mem;
+    return symm_mem;
   };
 
   bool has_multicast_support(int device_idx) override {
@@ -1213,6 +1265,10 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
  private:
   std::unordered_map<void*, c10::intrusive_ptr<SymmetricMemory>>
       ptr_to_symm_mem_;
+
+  std::unordered_map<void*, std::shared_ptr<NVSHMEMAllocation>> allocations_;
+  std::map<std::tuple<void*, std::string>, c10::intrusive_ptr<SymmetricMemory>>
+      symm_mems_;
 };
 
 struct RegisterNVSHMEMSymmetricMemoryAllocator {

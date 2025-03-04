@@ -994,10 +994,12 @@ elseif(USE_CUDA)
     )
     set_target_properties(nvshmem_extension PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
     target_compile_options(nvshmem_extension PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-rdc=true>)
+    target_compile_options(nvshmem_extension PRIVATE "-U__CUDA_NO_HALF_OPERATORS__")
     target_link_libraries(nvshmem_extension PRIVATE
         ${NVSHMEM_LIB_DIR}/libnvshmem.a
         ${NVSHMEM_LIB_DIR}/nvshmem_bootstrap_uid.so
     )
+    target_link_libraries(nvshmem_extension PRIVATE mlx5)
     target_link_libraries(torch_cuda PRIVATE nvshmem_extension)
     install(TARGETS nvshmem_extension EXPORT Caffe2Targets DESTINATION lib)
     install(

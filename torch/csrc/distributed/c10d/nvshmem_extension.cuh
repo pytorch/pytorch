@@ -15,6 +15,11 @@ void* nvshmem_malloc(size_t size);
 
 void* nvshmem_ptr(const void* dest, int pe);
 
-at::Tensor nvshmem_hello(at::Tensor& input);
+at::Tensor nvshmem_broadcast(at::Tensor& input, const std::string& group_name);
+
+at::Tensor nvshmem_reduce_scatter_out(
+    at::Tensor& input,
+    std::string group_name,
+    at::Tensor& out);
 
 } // namespace c10d::nvshmem_extension

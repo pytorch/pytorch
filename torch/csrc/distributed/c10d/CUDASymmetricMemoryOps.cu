@@ -719,5 +719,8 @@ TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
   m.impl("stream_write_value32_", ::stream_write_value32_);
   m.impl("memset32_", ::memset32_);
 
-  m.impl("nvshmem_hello", c10d::nvshmem_extension::nvshmem_hello);
+  m.impl("nvshmem_broadcast", c10d::nvshmem_extension::nvshmem_broadcast);
+  m.impl(
+      "nvshmem_reduce_scatter_out",
+      c10d::nvshmem_extension::nvshmem_reduce_scatter_out);
 }
