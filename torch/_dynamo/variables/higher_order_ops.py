@@ -228,9 +228,9 @@ def _assert_tensors_nonaliasing(inputs, outputs):
     output_tensor_ids = {
         id(t) for t in pytree.tree_leaves(outputs) if isinstance(t, torch.Tensor)
     }
-    assert input_tensor_ids.isdisjoint(
-        output_tensor_ids
-    ), "inputs to function body cannot alias outputs"
+    assert input_tensor_ids.isdisjoint(output_tensor_ids), (
+        "inputs to function body cannot alias outputs"
+    )
 
 
 def _check_supported_callable_arg(
@@ -676,9 +676,9 @@ def speculate_subgraph(
                     ][-len(lifted_freevars) :]
                     assert len(after_phs) == len(lifted_freevars)
                     for child_proxy, ph in zip(lifted_freevars.values(), after_phs):
-                        assert (
-                            child_proxy.node is ph
-                        ), "The order of placeholders is different from the order of lifted_freevars"
+                        assert child_proxy.node is ph, (
+                            "The order of placeholders is different from the order of lifted_freevars"
+                        )
 
                     graph.lint()
 
@@ -826,9 +826,9 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         for i, k in enumerate(["pred", "true_fn", "false_fn", "operands"]):
             if v := kwargs.pop(k, None):
-                assert i == len(
-                    args
-                ), "did not provide the right number of non-keyword args"
+                assert i == len(args), (
+                    "did not provide the right number of non-keyword args"
+                )
                 args.append(v)
 
         if kwargs:
@@ -934,13 +934,6 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
         if not same_treespec.as_python_constant():
             unimplemented("Expected branches to return the same pytree structure.")
-
-        check_meta_consistency_vt(
-            true_r.unpack_var_sequence(tx),
-            false_r.unpack_var_sequence(tx),
-            "true_fn_output",
-            "false_fn_output",
-        )
 
         (
             true_graph,
@@ -1060,9 +1053,9 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # Input checks
         for i, k in enumerate(["cond_fn", "body_fn", "operands"]):
             if v := kwargs.pop(k, None):
-                assert i == len(
-                    args
-                ), "did not provide the right number of non-keyword args"
+                assert i == len(args), (
+                    "did not provide the right number of non-keyword args"
+                )
                 args.append(v)
 
         if kwargs:
@@ -1367,15 +1360,11 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             if _has_potential_branch_input_mutation(
                 combine_gm, sub_args_fake, pre_dispatch=pre_dispatch
             ):
-                raise RuntimeError(
-                    "Combine_fn might be modifying the input!"
-                )  # noqa: F541
+                raise RuntimeError("Combine_fn might be modifying the input!")  # noqa: F541
             if _has_potential_branch_input_alias(
                 combine_gm, sub_args_fake, pre_dispatch=pre_dispatch
             ):
-                raise RuntimeError(
-                    "Combine_fn might be aliasing the input!"
-                )  # noqa: F541
+                raise RuntimeError("Combine_fn might be aliasing the input!")  # noqa: F541
 
         combine_freevars_proxy = tuple(combine_lifted_freevars.keys())
 
@@ -1436,12 +1425,10 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
 
-        def arg_extractor(combine_fn, init, xs, reverse, additional_inputs):
-            return combine_fn, init, xs, reverse, additional_inputs
+        def arg_extractor(combine_fn, init, xs, additional_inputs):
+            return combine_fn, init, xs, additional_inputs
 
-        combine_fn, init, xs, reverse, additional_inputs = arg_extractor(
-            *args, **kwargs
-        )
+        combine_fn, init, xs, additional_inputs = arg_extractor(*args, **kwargs)
         assert isinstance(additional_inputs, variables.BaseListVariable)
 
         if xs.python_type() != list:
@@ -1549,7 +1536,6 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             init_proxy,
             xs_proxy,
             # dim.as_proxy(),
-            reverse.as_proxy(),
             additional_inputs_proxy,
         )
 
@@ -2645,8 +2631,9 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 return v.proxy.tracer is not fwd_tracer
             return True
 
-        with tx.output.subtracer(fwd_fn, fwd_tracer), tx.strict_translation_mode(
-            is_strict_for
+        with (
+            tx.output.subtracer(fwd_fn, fwd_tracer),
+            tx.strict_translation_mode(is_strict_for),
         ):
             try:
                 (bwd_out, _), bwd_graph, bwd_freevars = speculate_subgraph(
@@ -2751,9 +2738,9 @@ class AutogradFunctionApplyVariable(VariableTracker):
             if isinstance(x, torch.fx.Proxy):
                 return x.node
             else:
-                assert variables.ConstantVariable.is_literal(
-                    x
-                ), f"Only constant is allowed. Got {x}"
+                assert variables.ConstantVariable.is_literal(x), (
+                    f"Only constant is allowed. Got {x}"
+                )
                 return x
 
         new_fwd_graph_outputs = (fwd_out.as_proxy(), fwd_proxy_of_bwd_freevars)

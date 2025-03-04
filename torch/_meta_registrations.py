@@ -220,7 +220,7 @@ def cummaxmin(self, dim):
 def logcumsumexp(self, dim):
     # Checks that dim is within bounds
     maybe_wrap_dim(dim, self.ndim)
-    return torch.empty_like(self).contiguous()
+    return torch.empty_like(self, memory_format=torch.contiguous_format)
 
 
 # Stride-related code from _exec_fft in aten/src/ATen/native/mkl/SpectralOps.cpp
@@ -2182,7 +2182,7 @@ def meta_baddbmm(self, batch1, batch2, *, beta=1, alpha=1):
 @out_wrapper()
 def meta_bernoulli(self, *, generator=None):
     # https://github.com/pytorch/pytorch/issues/88612
-    return torch.empty_like(self).contiguous()
+    return torch.empty_like(self, memory_format=torch.contiguous_format)
 
 
 @register_meta(aten.bernoulli_.float)
@@ -2193,7 +2193,7 @@ def meta_bernoulli_(self, p=0.5, generator=None):
 @register_meta(aten.bernoulli.p)
 def meta_bernoulli_p(self, p=0.5, generator=None):
     # https://github.com/pytorch/pytorch/issues/88612
-    return torch.empty_like(self).contiguous()
+    return torch.empty_like(self, memory_format=torch.contiguous_format)
 
 
 @register_meta([aten.poisson.default, aten.poisson.out])
@@ -5575,6 +5575,14 @@ def meta__scaled_dot_product_flash_attention(
     # capturing or not, but at the time of tracing we don't know if we
     # are going to use cudagraphs or not, so we return meta tensors here
     # it's possible we'll need to have some special handling in inductor for sdpa
+    # See [Note] BC breaking change to flash seed/offset
+    if torch.version.hip and torch.cuda.is_available():
+        # Maintian old path on AMD
+        seed = torch.empty((), dtype=torch.long, device="meta")
+        offset = torch.empty((), dtype=torch.long, device="meta")
+    else:
+        seed = torch.empty((2), dtype=torch.uint64, device="meta")
+        offset = torch.empty((), dtype=torch.uint64, device="meta")
 
     return (
         attention,
@@ -5583,8 +5591,8 @@ def meta__scaled_dot_product_flash_attention(
         None,
         max_seqlen_batch_q,
         max_seqlen_batch_k,
-        torch.empty((), dtype=torch.long, device="meta"),
-        torch.empty((), dtype=torch.long, device="meta"),
+        seed,
+        offset,
         debug_mask,
     )
 
@@ -5596,6 +5604,47 @@ def meta__scaled_dot_product_cudnn_attention(
     value: Tensor,
     attn_bias: Optional[Tensor],
     compute_log_sumexp: bool,
+    dropout_p: float = 0.0,
+    is_causal: bool = False,
+    return_debug_mask: bool = False,
+    scale: Optional[float] = None,
+):
+    B = query.size(0)
+    H = query.size(1)
+    S_Q = query.size(2)
+    S_KV = key.size(2)
+    D_V = value.size(-1)
+
+    res = torch.empty((B, H, S_Q, D_V), dtype=query.dtype, device=query.device)
+    logsum_exp = torch.empty(
+        (B, H, S_Q),
+        dtype=torch.float,
+        device=query.device,
+    )
+
+    # See Note [Seed and Offset]
+    seed = torch.empty((), dtype=torch.long, device="meta")
+    offset = torch.empty((), dtype=torch.long, device="meta")
+
+    return (
+        res,
+        logsum_exp,
+        None,
+        None,
+        S_Q,
+        S_KV,
+        seed,
+        offset,
+        None,
+    )
+
+
+@register_meta([aten._scaled_dot_product_fused_attention_overrideable])
+def meta__scaled_dot_product_fused_attention_overrideable(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    attn_bias: Optional[Tensor] = None,
     dropout_p: float = 0.0,
     is_causal: bool = False,
     return_debug_mask: bool = False,
@@ -5908,11 +5957,17 @@ def meta__flash_attention_forward(
 
     # Cuda Path
     attention = torch.empty_like(query)
-    logsumexp = torch.empty(
-        (batch_size, num_heads, max_seqlen_batch_q),
-        dtype=torch.float,
-        device=query.device,
-    )
+    if cum_seq_q is None:
+        logsumexp = torch.empty(
+            (batch_size, num_heads, max_seqlen_batch_q),
+            dtype=torch.float,
+            device=query.device,
+        )
+    else:
+        total_q = query.size(0)
+        logsumexp = torch.empty(
+            (num_heads, total_q), dtype=torch.float, device=query.device
+        )
 
     if return_debug_mask:
         blocksize_c = 128 if head_dim > 64 else 256
@@ -5929,12 +5984,21 @@ def meta__flash_attention_forward(
     else:
         debug_mask = torch.empty(0, dtype=query.dtype, device=query.device)
 
-    # See Note [Seed and Offset]:
+    # See Note [Seed and Offset]
+    # See [Note] BC breaking change to flash seed/offset
+    seed, offset = None, None
+    if torch.version.hip and torch.cuda.is_available():
+        # Maintian old path on AMD
+        seed = torch.empty((), dtype=torch.long, device="meta")
+        offset = torch.empty((), dtype=torch.long, device="meta")
+    else:
+        seed = torch.empty((2), dtype=torch.uint64, device="meta")
+        offset = torch.empty((), dtype=torch.uint64, device="meta")
     return (
         attention,
         logsumexp,
-        torch.empty((), dtype=torch.long, device="meta"),
-        torch.empty((), dtype=torch.long, device="meta"),
+        seed,
+        offset,
         debug_mask,
     )
 
@@ -6718,8 +6782,10 @@ def mkldnn_rnn_layer_backward(
 @out_wrapper()
 def meta_bucketize(self, boundaries, *, out_int32=False, right=False):
     return torch.empty_like(
-        self, dtype=torch.int32 if out_int32 else torch.int64
-    ).contiguous()
+        self,
+        dtype=torch.int32 if out_int32 else torch.int64,
+        memory_format=torch.contiguous_format,
+    )
 
 
 @register_meta([aten.histc])
@@ -6862,8 +6928,9 @@ def t_(self):
         sparse_dim = self.sparse_dim()
         dense_dim = self.dense_dim()
         assert sparse_dim <= 2 and dense_dim == 0, (
-            f"t_ expects a tensor with <= 2 sparse and 0 dense dimensions, but got {sparse_dim} sparse and {dense_dim} dense dimensions"
-        )  # noqa: B950
+            f"t_ expects a tensor with <= 2 sparse and 0 dense dimensions, "
+            f"but got {sparse_dim} sparse and {dense_dim} dense dimensions"
+        )
     else:
         assert self.dim() <= 2, (
             f"t_ expects a tensor with <= 2 dimensions, but self is {ndims}D"
@@ -6915,7 +6982,9 @@ def meta_searchsorted(
 
     dtype = torch.int32 if out_int32 else torch.int64
     if isinstance(self, torch.Tensor):
-        return torch.empty_like(self, dtype=dtype).contiguous()
+        return torch.empty_like(
+            self, dtype=dtype, memory_format=torch.contiguous_format
+        )
     else:  # Scalar
         return torch.empty((), dtype=dtype, device=sorted_sequence.device)
 
