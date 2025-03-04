@@ -865,7 +865,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
 
         Arguments:
             values: (List[int]): :class:`list` of values.
-            disallowed_indices (Optional[Set[int]]): indices that are
+            disallowed_indices (Optional[set[int]]): indices that are
                 disallowed from being the returned min index.
         """
         min_index = -1
@@ -901,7 +901,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
             bucket_offset (int): offset giving the index of the first element
                 in ``bucket_params`` in the bucket's full parameter list.
             assigned_rank (int): group rank to assign to.
-            assigned_ranks_per_bucket (List[Set[int]]): :class:`set` of group ranks
+            assigned_ranks_per_bucket (list[set[int]]): :class:`set` of group ranks
                 assigned to each bucket.
         """
         overlap_info = self._overlap_info

@@ -1903,6 +1903,9 @@ def fallback_handler(kernel, add_to_fallback_set=True):
             wrap_tensors, ir.FallbackKernel.create(kernel, *args, **kwargs)
         )
 
+    # This lets us detect that a lowering is a fallback handler.
+    handler._is_fallback_handler = True  # type: ignore[attr-defined]
+
     return handler
 
 
@@ -2773,6 +2776,16 @@ make_fallback(
 )
 make_fallback(
     aten._scaled_dot_product_flash_attention_for_cpu_backward.default,
+    sdpa_constraint,
+    warn=False,
+)
+make_fallback(
+    aten._scaled_dot_product_fused_attention_overrideable.default,
+    sdpa_constraint,
+    warn=False,
+)
+make_fallback(
+    aten._scaled_dot_product_fused_attention_overrideable_backward.default,
     sdpa_constraint,
     warn=False,
 )
