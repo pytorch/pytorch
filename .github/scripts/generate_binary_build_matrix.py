@@ -276,11 +276,11 @@ def generate_libtorch_matrix(
                     ),
                     "libtorch_variant": libtorch_variant,
                     "libtorch_config": abi_version
-                        if os in ("windows", "windows-arm64")
-                        else "",
+                    if os in ("windows", "windows-arm64")
+                    else "",
                     "devtoolset": abi_version
-                        if os not in ("windows", "windows-arm64")
-                        else "",
+                    if os not in ("windows", "windows-arm64")
+                    else "",
                     "container_image": (
                         LIBTORCH_CONTAINER_IMAGES[(arch_version, abi_version)]
                         if os not in ("windows", "windows-arm64")
