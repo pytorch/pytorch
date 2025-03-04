@@ -4597,7 +4597,11 @@ class CommonTemplate:
             check_lowp=False,
         )
 
-    def test_conv3d_channels_last(self):
+    @parametrize(
+        "use_block_ptr",
+        [subtest(False), subtest(True, decorators=[skip_if_not_triton])],
+    )
+    def test_conv3d_channels_last(self, use_block_ptr: bool):
         if self.device == GPU_TYPE:
             raise unittest.SkipTest("only support cpu conv3d channels_last")
 
@@ -4605,21 +4609,30 @@ class CommonTemplate:
             torch.nn.Conv3d(3, 3, 1, 1),
             ToTuple(),
         )
-        # only weight is channels_last
-        self.common(
-            m.to(memory_format=torch.channels_last_3d),
-            (torch.randn([2, 3, 16, 16, 16]),),
-        )
-        # only activation is channels_last
-        self.common(
-            m,
-            (torch.randn([2, 3, 16, 16, 16]).to(memory_format=torch.channels_last_3d),),
-        )
-        # activation and weight are all channels_last
-        self.common(
-            m.to(memory_format=torch.channels_last_3d),
-            (torch.randn([2, 3, 16, 16, 16]).to(memory_format=torch.channels_last_3d),),
-        )
+        with config.patch({"triton.use_block_ptr": use_block_ptr}):
+            # only weight is channels_last
+            self.common(
+                m.to(memory_format=torch.channels_last_3d),
+                (torch.randn([2, 3, 16, 16, 16]),),
+            )
+            # only activation is channels_last
+            self.common(
+                m,
+                (
+                    torch.randn([2, 3, 16, 16, 16]).to(
+                        memory_format=torch.channels_last_3d
+                    ),
+                ),
+            )
+            # activation and weight are all channels_last
+            self.common(
+                m.to(memory_format=torch.channels_last_3d),
+                (
+                    torch.randn([2, 3, 16, 16, 16]).to(
+                        memory_format=torch.channels_last_3d
+                    ),
+                ),
+            )
 
     @skip_if_gpu_halide  # slow
     @xfail_if_mps  # Non-divisible input sizes are not implemented on MPS device
