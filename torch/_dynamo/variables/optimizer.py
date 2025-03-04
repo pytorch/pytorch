@@ -139,7 +139,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
         # Note: this allows us to intercept the call in call_method
         # in the typical case, we return a UserMethodVariable
         # which will directly inline
-        if name in ("_init_group", "step"):
+        if name in {"_init_group", "step"}:
             return GetAttrVariable(self, name, source=AttrSource(self.source, name))
 
         if name == "param_groups":
@@ -377,9 +377,9 @@ class OptimizerVariable(UserDefinedObjectVariable):
         """Update the args and kwargs to the traced optimizer call"""
         for arg, py_arg in zip(args, py_args):
             if isinstance(arg, ListVariable):
-                assert isinstance(py_arg, list), (
-                    "py_arg should be a list in optimizer variable"
-                )
+                assert isinstance(
+                    py_arg, list
+                ), "py_arg should be a list in optimizer variable"
                 for i, val in enumerate(py_arg):
                     tx.output.side_effects.mutation(arg)
                     if isinstance(val, torch.Tensor):

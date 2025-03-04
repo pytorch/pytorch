@@ -141,7 +141,7 @@ class SideEffects:
             store_attr_mutations={
                 k: dict(v) for k, v in self.store_attr_mutations.items()
             },
-            keepalive=list(self.keepalive),
+            keepalive=[*self.keepalive],
             save_for_backward=self.save_for_backward,
             tensor_hooks=self.tensor_hooks,
         )

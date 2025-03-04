@@ -46,7 +46,7 @@ class AST_Rewriter(ast.NodeTransformer):
         globals_dict = copy.copy(fn.__globals__)
         keys_before = set(globals_dict.keys())
         exec(code, globals_dict)
-        new_keys = list(set(globals_dict.keys()) - keys_before)
+        new_keys = [*(set(globals_dict.keys()) - keys_before)]
         assert len(new_keys) == 1
         fn_compiled = globals_dict[new_keys[0]]
 

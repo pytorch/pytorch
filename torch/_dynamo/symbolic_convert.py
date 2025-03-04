@@ -290,7 +290,7 @@ class LocalState:
 
     def render(self) -> str:
         return "\n".join(
-            f"{k}: {v.render()}" for k, v in self.automatic_dynamic.items()
+            [f"{k}: {v.render()}" for k, v in self.automatic_dynamic.items()]
         )
 
 
@@ -464,7 +464,7 @@ def _detect_and_normalize_assert_statement(
         # (PRECALL for Python 3.11, CALL for Python 3.12+)
         current_instruction_pointer += 1
         inst = self.instructions[current_instruction_pointer]
-        if inst.opname not in ("CALL_FUNCTION", "PRECALL", "CALL"):
+        if inst.opname not in {"CALL_FUNCTION", "PRECALL", "CALL"}:
             return False
 
         # for Python 3.11, PRECALL should be followed by CALL, then RAISE_VARARGS
@@ -987,7 +987,7 @@ class InstructionTranslatorBase(
         cur_offset = self.current_instruction.offset
         assert self.instruction_pointer is not None
         for inst in self.instructions[self.instruction_pointer :]:
-            if inst.opname in ("RETURN_VALUE", "RETURN_CONST"):
+            if inst.opname in {"RETURN_VALUE", "RETURN_CONST"}:
                 return False
             if inst.opname in JUMP_OPNAMES:
                 jump_offset = inst.argval
@@ -1174,7 +1174,7 @@ class InstructionTranslatorBase(
                 # an exception table entry, so we also assume that we
                 # are still in the same block. It is probably safe to do
                 # this in 3.11, even though we haven't encountered this case before.
-                if self.block_stack and inst.opname not in ("NOP", "JUMP_BACKWARD"):
+                if self.block_stack and inst.opname not in {"NOP", "JUMP_BACKWARD"}:
                     # If we really escape from a block and the current
                     # instruction is not in another block, then there
                     # should be no other nested blocks that we are in.
@@ -1248,9 +1248,9 @@ class InstructionTranslatorBase(
                     self.output.cleanup()
 
     def push(self, val: Optional[VariableTracker]):
-        assert val is None or isinstance(val, VariableTracker), (
-            f"push expects VariableTracker, got {typestr(val)}"
-        )
+        assert val is None or isinstance(
+            val, VariableTracker
+        ), f"push expects VariableTracker, got {typestr(val)}"
         self.stack.append(val)  # type: ignore[arg-type]
 
     def push_many(self, vals: list[VariableTracker]):
@@ -2160,9 +2160,9 @@ class InstructionTranslatorBase(
         if isinstance(obj, NNModuleVariable) and not isinstance(val, ConstantVariable):
             # We don't allow side effects during export on non-constant values
             # https://github.com/pytorch/torchdynamo/issues/1475
-            assert not self.export, (
-                f"Mutating module attribute {inst.argval} during export."
-            )
+            assert (
+                not self.export
+            ), f"Mutating module attribute {inst.argval} during export."
 
         try:
             BuiltinVariable(setattr).call_function(
@@ -2413,7 +2413,7 @@ class InstructionTranslatorBase(
         suffix = inst.argval >> 8  # high byte
         seq = self.pop()
         if seq.has_force_unpack_var_sequence(self):
-            vals = list(seq.force_unpack_var_sequence(self))
+            vals = [*seq.force_unpack_var_sequence(self)]
             assert len(vals) >= prefix + suffix
             vals_prefix = vals[:prefix]
             vals_list = vals[prefix : len(vals) - suffix]
@@ -2963,7 +2963,7 @@ class InstructionTranslatorBase(
             additional_stack_frames = []
         return "".join(
             traceback.format_list(
-                [self.frame_summary()] + list(reversed(additional_stack_frames))
+                [self.frame_summary()] + [*reversed(additional_stack_frames)]
             )
         )
 
@@ -3179,9 +3179,9 @@ class InstructionTranslator(InstructionTranslatorBase):
             self.one_graph: bool = one_graph
             self.export = export
             if self.export:
-                assert self.one_graph, (
-                    "Export without one graph - something has gone wrong."
-                )
+                assert (
+                    self.one_graph
+                ), "Export without one graph - something has gone wrong."
 
             self.symbolic_locals = {}
             # Populate `symbolic_locals` with non-cell variables.
@@ -3334,14 +3334,18 @@ class InstructionTranslator(InstructionTranslatorBase):
         )
         # NOTE: do not use isinstance, since it realizes lazy VT's
         argnames = tuple(
-            k
-            for k in all_argnames
-            if not type.__instancecheck__(NullVariable, self.symbolic_locals[k])
+            [
+                k
+                for k in all_argnames
+                if not type.__instancecheck__(NullVariable, self.symbolic_locals[k])
+            ]
         )
         argnames_null = tuple(
-            k
-            for k in all_argnames
-            if type.__instancecheck__(NullVariable, self.symbolic_locals[k])
+            [
+                k
+                for k in all_argnames
+                if type.__instancecheck__(NullVariable, self.symbolic_locals[k])
+            ]
         )
         if sys.version_info < (3, 12):
             assert len(argnames_null) == 0, "variables should not be NULL in < 3.12"
@@ -3409,11 +3413,11 @@ class InstructionTranslator(InstructionTranslatorBase):
             self.f_code,
             self.lineno,
             inst.offset,
-            tuple(b.target.offset for b in self.block_stack),
+            tuple([b.target.offset for b in self.block_stack]),
             stack_len,
             argnames,
             argnames_null,
-            tuple(b.resume_fn() for b in self.block_stack),
+            tuple([b.resume_fn() for b in self.block_stack]),
             tuple(stack_ctx_vars),
             tuple(argnames_ctx_vars),
             tuple(null_idxes),
@@ -3542,9 +3546,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
             # _origin marks this as coming from an internal dynamo known function that is safe to
             # trace through.
-            if hasattr(getattr(func, "fn", None), "_origin") and func.fn._origin in [
+            if hasattr(getattr(func, "fn", None), "_origin") and func.fn._origin in (
                 produce_trampoline_autograd_apply,
-            ]:
+            ):
                 # Known sound
                 return trace_rules.SkipResult(
                     False, "allowlist in dynamo known function"

@@ -110,7 +110,7 @@ def _topological_sort_passes(
                     candidates.put(n)
 
     # Check if there are unvisited nodes (aka cycles in the graph)
-    cycle_passes = list(filter(lambda p: indegree_map[p] != 0, indegree_map.keys()))
+    cycle_passes = [*filter(lambda p: indegree_map[p] != 0, indegree_map.keys())]
     if len(cycle_passes) != 0:
         error = (
             f"Circular dependency detected within the following passes: {cycle_passes}"
@@ -235,7 +235,7 @@ class PassManager:
         """
         sig = inspect.signature(check)
 
-        if len(list(sig.parameters.values())) != 1:
+        if len([*sig.parameters.values()]) != 1:
             raise TypeError(
                 "PassManager check function should only take in one variable, a module"
             )

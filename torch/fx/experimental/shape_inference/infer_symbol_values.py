@@ -60,7 +60,7 @@ def infer_symbol_values(
                 left_equation *= sp.sympify(left_element)
         right_equation = sp.cancel(right_equation / left_equation)
 
-        right_vars = list(right_equation.free_symbols)
+        right_vars = [*right_equation.free_symbols]
         for right_var in right_vars:
             if sp.sympify(right_var) == sp.sympify("s0"):
                 right_equation = sp.cancel(right_equation / right_var)

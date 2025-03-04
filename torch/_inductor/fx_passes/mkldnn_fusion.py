@@ -76,7 +76,7 @@ if torch._C._has_mkldnn:
                 and node.meta["val"].device.type == "cpu"
             ):
                 act = node.args[0]
-                users = list(act.users)
+                users = [*act.users]
                 if _is_valid_grouped_gemm_fusion(users):
                     with graph.inserting_before(node):
                         grouped_gemm_node = graph.create_node(
@@ -314,7 +314,7 @@ if torch._C._has_mkldnn:
             extra_check=_is_valid_computation_unary_fusion(computation_op, lowp_dtype),
         )
         def fn(match, *args, **kwargs):
-            computation_args = list(args)[:-3] + [
+            computation_args = [*args][:-3] + [
                 unary_attr.op_name,
                 unary_attr.scalars_attr,
                 unary_attr.algorithm_attr,
@@ -345,7 +345,7 @@ if torch._C._has_mkldnn:
                     else kwargs.get("to_fp16")
                 )
                 matched = matched and dtype1 == torch.float and dtype2 == lowp_dtype
-            computation_args = list(args)
+            computation_args = [*args]
             counters["inductor"]["mkldnn_unary_fusion_matcher_count"] += 1
             counters["inductor"]["mkldnn_unary_fusion_matcher_nodes"] += len(
                 match.nodes
@@ -395,7 +395,7 @@ if torch._C._has_mkldnn:
                     else kwargs.get("to_fp16")
                 )
                 matched = matched and dtype1 == torch.float and dtype2 == lowp_dtype
-            computation_args = list(args)
+            computation_args = [*args]
             counters["inductor"]["mkldnn_unary_fusion_matcher_count"] += 1
             counters["inductor"]["mkldnn_unary_fusion_matcher_nodes"] += len(
                 match.nodes
@@ -540,14 +540,14 @@ if torch._C._has_mkldnn:
                         return True
                     elif isinstance(
                         _current_node, torch.fx.Node
-                    ) and _current_node.op not in ["placeholder", "output", "get_attr"]:
+                    ) and _current_node.op not in {"placeholder", "output", "get_attr"}:
                         for input in _current_node.all_input_nodes:
                             _node_list.append(input)  # noqa: PERF402
             return False
 
         return [
             user
-            for user in list(extra_input_node.users)
+            for user in [*extra_input_node.users]
             if not _is_ancestor_node(compute_node, user)
         ]
 
@@ -558,9 +558,9 @@ if torch._C._has_mkldnn:
             binary_nodes = filter_nodes(match.nodes, binary_op)
 
             def _get_compute_node(_binary_node, _other_index):
-                assert len(_binary_node.all_input_nodes) == 2, (
-                    "Binary node should have 2 input nodes."
-                )
+                assert (
+                    len(_binary_node.all_input_nodes) == 2
+                ), "Binary node should have 2 input nodes."
                 _compute_index = 1 if (_other_index == 0) else 0
                 return _binary_node.args[_compute_index]
 
@@ -601,7 +601,7 @@ if torch._C._has_mkldnn:
             other = kwargs.get("other")
             assert isinstance(other, ir.TensorBox)
             binary_attr = _binary_attr[binary_op]
-            args_list = list(args)
+            args_list = [*args]
             computation_args = [args_list[0], other] + args_list[1:-3] + [binary_attr]
             if len(args_list) > 6:
                 if unary_attr is not None:
@@ -646,7 +646,7 @@ if torch._C._has_mkldnn:
             other = kwargs.get("other")
             assert isinstance(other, ir.TensorBox)
             binary_attr = _binary_attr[binary_op]
-            args_list = list(args)
+            args_list = [*args]
             computation_args = [args_list[0], other] + args_list[1:-3] + [binary_attr]
             if len(args_list) > 6:
                 if unary_attr is not None:
@@ -664,9 +664,9 @@ if torch._C._has_mkldnn:
             )
             # Make sure the other is not an alias or mutation(fx side doesn't has such info).
             other.realize()
-            if not _can_be_inplace(other) or other.data.shape != list(
-                match.nodes[0].meta["val"].size()
-            ):
+            if not _can_be_inplace(other) or other.data.shape != [
+                *match.nodes[0].meta["val"].size()
+            ]:
                 return L[outplace_fusion_op](*computation_args)
             return L[inplace_fusion_op](*computation_args)
 
@@ -961,7 +961,7 @@ if torch._C._has_mkldnn:
             graph = match.graph
             add_node = match.output_node()
             linear_node = add_node.args[0]
-            new_args = list(linear_node.args)
+            new_args = [*linear_node.args]
             new_args[2] = add_node.args[1]
             repl = graph.call_function(
                 mkldnn._linear_pointwise.default, tuple(new_args)
@@ -1310,9 +1310,9 @@ if torch._C._has_mkldnn:
                 )
                 batch_size = input.meta.get("val").shape[0]
                 if has_free_symbols(batch_size):
-                    assert is_lp_weight or mkldnn._is_mkldnn_acl_supported(), (
-                        f"only bf16/fp16 weight prepacking supports dynamic shape inputs but got {weight_dtype}"
-                    )
+                    assert (
+                        is_lp_weight or mkldnn._is_mkldnn_acl_supported()
+                    ), f"only bf16/fp16 weight prepacking supports dynamic shape inputs but got {weight_dtype}"
                 # For bfloat16 dynamic shape path, using input size hint to pack weight for a better performance.
                 packed_weight_inputs = (
                     transpose_weight_node,
@@ -1389,7 +1389,7 @@ if torch._C._has_mkldnn:
 
         for node in gm.graph.nodes:
             if node.target in packed_weight_ops and len(node.args[0].users) > 1:
-                for user_node in list(node.args[0].users.keys()):
+                for user_node in [*node.args[0].users.keys()]:
                     if (
                         user_node.target == node.target
                         and user_node != node

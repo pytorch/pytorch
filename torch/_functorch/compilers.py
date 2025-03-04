@@ -135,7 +135,7 @@ class DebugInterpreter(fx.Interpreter):
             return int(r)
 
         def subst_symint_tuple(nis):
-            return tuple(subst_symint(ni) for ni in nis)
+            return tuple([subst_symint(ni) for ni in nis])
 
         def check_significant_strides(a, b):
             if subst_symint(a.numel()) > 0:
@@ -318,7 +318,7 @@ def get_inputs(input_data_path):
                 input = type(random.rand())
             else:
                 type, shape, _stride, dtype, device = meta
-                if dtype in {
+                if dtype in (
                     torch.int,
                     torch.int32,
                     torch.int64,
@@ -327,7 +327,7 @@ def get_inputs(input_data_path):
                     torch.uint8,
                     int,
                     float,
-                }:
+                ):
                     input = torch.randint(0, 1, shape, dtype=dtype, device=device)
                 else:
                     input = torch.rand(shape, dtype=dtype, device=device)

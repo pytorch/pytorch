@@ -85,7 +85,7 @@ def pretty_print_buckets(buckets: list[Bucket], bucket_bytes_cap: int):
     for idx, bucket in enumerate(reversed(buckets)):
         if len(bucket.params) > 0:
             rows.append((idx, bucket.size, bucket.params[0]))
-            rows.extend((None, None, param) for param in bucket.params[1:])
+            rows.extend([(None, None, param) for param in bucket.params[1:]])
         if bucket.opcount_increased_to_capture_external_output > 0:
             extended_buckets.append(
                 (
@@ -390,9 +390,9 @@ class DDPOptimizer:
             self.first_bucket_cap = bucket_bytes_cap
 
         self.bucket_bytes_cap = bucket_bytes_cap
-        assert self.first_bucket_cap <= self.bucket_bytes_cap, (
-            "First bucket should be smaller/equal to other buckets to get comms warmed up ASAP"
-        )
+        assert (
+            self.first_bucket_cap <= self.bucket_bytes_cap
+        ), "First bucket should be smaller/equal to other buckets to get comms warmed up ASAP"
 
         self.backend_compile_fn = backend_compile_fn
 
@@ -435,7 +435,7 @@ class DDPOptimizer:
         buckets = [Bucket()]  # (size, param_names)
         processed_modules = set()
         for node in reversed(gm.graph.nodes):
-            if node.op in ("output", "placeholder"):
+            if node.op in {"output", "placeholder"}:
                 continue
 
             if (

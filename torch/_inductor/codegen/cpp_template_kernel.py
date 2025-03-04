@@ -126,7 +126,7 @@ class CppTemplateKernel(CppKernel):
         return DTYPE_TO_CPP[node.get_dtype()]
 
     def acc_dtype(self, node: ir.Buffer) -> str:
-        if node.get_dtype() in [torch.float32, torch.bfloat16, torch.half]:
+        if node.get_dtype() in (torch.float32, torch.bfloat16, torch.half):
             return "float"
         else:
             raise NotImplementedError(f"Unsupported dtype: {node.get_dtype()}")
@@ -266,9 +266,9 @@ class CppTemplateKernel(CppKernel):
 
             body = LoopBody(
                 fn,
-                (list(var_ranges.keys()), ()),
+                ([*var_ranges.keys()], ()),
                 var_ranges,
-                list(var_ranges.keys()),
+                [*var_ranges.keys()],
                 tuple(),
             )
             bodies.append(body)
@@ -320,9 +320,9 @@ class CppTemplateKernel(CppKernel):
 
             body = LoopBody(
                 fn,
-                (list(var_ranges.keys()), ()),
+                ([*var_ranges.keys()], ()),
                 var_ranges,
-                list(var_ranges.keys()),
+                [*var_ranges.keys()],
                 tuple(),
             )
             bodies.append(body)
@@ -418,7 +418,7 @@ class CppTemplateKernel(CppKernel):
                 localize_epilogue_nodes = []
                 all_read_names = []
                 for epilogue in epilogue_nodes:
-                    all_read_names.extend(list(epilogue.get_read_names()))
+                    all_read_names.extend([*epilogue.get_read_names()])
                 localize_epilogue_nodes.extend(scope.localize_nodes(epilogue_nodes))
                 final_offsets.extend([offsets] * len(localize_epilogue_nodes))
                 output_names.extend(

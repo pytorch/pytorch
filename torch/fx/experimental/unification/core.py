@@ -34,7 +34,7 @@ _reify
 
 @dispatch(list, dict)  # type: ignore[no-redef]
 def _reify(t, s):
-    return list(reify(iter(t), s))
+    return [*reify(iter(t), s)]
 
 
 _reify

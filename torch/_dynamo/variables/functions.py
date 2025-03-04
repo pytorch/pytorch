@@ -99,7 +99,7 @@ def wrap_bound_arg(tx: "InstructionTranslator", val, source=None):
 
 
 def wrap_args_kwargs(tx: "InstructionTranslator", result):
-    for k, v in list(result.items()):
+    for k, v in [*result.items()]:
         if isinstance(v, (tuple, dict)):
             # args/kwargs
             result[k] = wrap_bound_arg(tx, v)
@@ -198,7 +198,7 @@ class BaseUserFunctionVariable(VariableTracker):
         return variables.ConstantVariable.create(result)
 
     def inspect_parameter_names(self):
-        return list(inspect.signature(self.get_function()).parameters)
+        return [*inspect.signature(self.get_function()).parameters]
 
     def closure_vars(self, tx):
         return {}
@@ -226,9 +226,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         else:
             self.is_constant = False
 
-        assert isinstance(fn, (types.FunctionType, torch.jit.ScriptFunction)), (
-            f"expected FunctionType found {typestr(fn)} {fn}"
-        )
+        assert isinstance(
+            fn, (types.FunctionType, torch.jit.ScriptFunction)
+        ), f"expected FunctionType found {typestr(fn)} {fn}"
         # TODO(anijain2305) - Replace directly calling UserFunctionVariable with
         # VariableBuilder, which handles the wrapping of _torchdynamo_inline.
         # unpack @torch._dynamo.optimize()(fn) wrapped function
@@ -396,10 +396,10 @@ Applying `nonstrict_trace` to function <{fn_name}>; however, `nonstrict_trace` c
                 from torch.distributed.fsdp._fully_shard._fsdp_state import FSDPState
             except Exception:
                 FSDPState = None
-            if FSDPState is not None and self.fn in [
+            if FSDPState is not None and self.fn in (
                 FSDPState._pre_forward,
                 FSDPState._post_forward,
-            ]:
+            ):
                 with torch._dynamo.side_effects.allow_side_effects_under_checkpoint(tx):
                     return super().call_function(tx, args, kwargs)
         return super().call_function(tx, args, kwargs)
@@ -1084,7 +1084,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             self.f_globals,
             self.fn_name.as_python_constant(),
             tuple(self.defaults.items) if self.defaults else None,
-            tuple(make_cell(None) for _ in range(len(self.get_code().co_freevars))),
+            tuple([make_cell(None) for _ in range(len(self.get_code().co_freevars))]),
         )
         if self.kwdefaults:
             func.__kwdefaults__ = self.kwdefaults.keys_as_python_constant()
@@ -1635,7 +1635,7 @@ class PolyfilledFunctionVariable(VariableTracker):
                 tx.output.create_proxy(
                     "call_function",
                     torch.sym_sum,
-                    (tuple(a.as_proxy() for a in args[0].items),),
+                    (tuple([a.as_proxy() for a in args[0].items]),),
                     {},
                 ),
                 sym_num=torch.sym_sum(
@@ -1810,7 +1810,7 @@ class DynamoTritonHOPifier(TritonHOPifier):
         # TMA descriptor-related metadata to a separate argument,
         # so that we can reconstruct the TMA descriptors downstream
         tma_descriptor_metadata: TMADescriptorMetadata = {}
-        for k in list(combined_args_raw.keys()):
+        for k in [*combined_args_raw.keys()]:
             v = combined_args_raw[k]
             if isinstance(v, TMADescriptorVariable):
                 tma_descriptor_metadata[k] = v.to_metadata()

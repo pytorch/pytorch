@@ -61,14 +61,14 @@ def _extract_tensor_metadata(
     if is_quantized:
         qscheme = result.qscheme()
         qparams["qscheme"] = qscheme
-        if qscheme in {torch.per_tensor_affine, torch.per_tensor_symmetric}:
+        if qscheme in (torch.per_tensor_affine, torch.per_tensor_symmetric):
             qparams["scale"] = result.q_scale()  # type: ignore[assignment]
             qparams["zero_point"] = result.q_zero_point()  # type: ignore[assignment]
-        elif qscheme in {
+        elif qscheme in (
             torch.per_channel_affine,
             torch.per_channel_affine_float_qparams,
             torch.per_channel_symmetric,
-        }:
+        ):
             # In this branch, scale and zero_point are expected to be tensors,
             # we store the values as immutable_list in TensorMetadata for
             # easier serialization downstream

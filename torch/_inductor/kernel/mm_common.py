@@ -36,7 +36,7 @@ def triton_config(num_stages, num_warps, **kwargs):
 
 def build_rocm_gemm_configs(configs):
     rocm_num_stages = get_backend_num_stages()
-    return tuple((c[0], c[1], c[2], rocm_num_stages, c[4]) for c in configs)
+    return tuple([(c[0], c[1], c[2], rocm_num_stages, c[4]) for c in configs])
 
 
 def filtered_configs(
@@ -357,39 +357,53 @@ scaled_persistent_mm_kernel_configs = [
 
 # Create filtered list of configs based on cond evaluation
 mm_platform_configs = tuple(
-    cast(tuple[int, int, int, int, int], config["config"])
-    for config in mm_kernel_configs
-    if config["cond"]
+    [
+        cast(tuple[int, int, int, int, int], config["config"])
+        for config in mm_kernel_configs
+        if config["cond"]
+    ]
 )
 extra_mm_platform_configs = tuple(
-    cast(tuple[int, int, int, int, int], config["config"])
-    for config in extra_mm_kernel_configs
-    if config["cond"]
+    [
+        cast(tuple[int, int, int, int, int], config["config"])
+        for config in extra_mm_kernel_configs
+        if config["cond"]
+    ]
 )
 int8_platform_configs = tuple(
-    cast(tuple[int, int, int, int, int], config["config"])
-    for config in int8_mm_kernel_configs
-    if config["cond"]
+    [
+        cast(tuple[int, int, int, int, int], config["config"])
+        for config in int8_mm_kernel_configs
+        if config["cond"]
+    ]
 )
 mixed_mm_platform_configs = tuple(
-    cast(tuple[int, int, int, int, int], config["config"])
-    for config in mixed_mm_kernel_configs
-    if config["cond"]
+    [
+        cast(tuple[int, int, int, int, int], config["config"])
+        for config in mixed_mm_kernel_configs
+        if config["cond"]
+    ]
 )
 persistent_mm_platform_configs = tuple(
-    cast(tuple[int, int, int, int, int], config["config"])
-    for config in persistent_mm_kernel_configs
-    if config["cond"]
+    [
+        cast(tuple[int, int, int, int, int], config["config"])
+        for config in persistent_mm_kernel_configs
+        if config["cond"]
+    ]
 )
 scaled_mm_platform_configs = tuple(
-    cast(tuple[int, int, int, int, int], config["config"])
-    for config in scaled_mm_kernel_configs
-    if config["cond"]
+    [
+        cast(tuple[int, int, int, int, int], config["config"])
+        for config in scaled_mm_kernel_configs
+        if config["cond"]
+    ]
 )
 scaled_persistent_mm_platform_configs = tuple(
-    cast(tuple[int, int, int, int, int], config["config"])
-    for config in scaled_persistent_mm_kernel_configs
-    if config["cond"]
+    [
+        cast(tuple[int, int, int, int, int], config["config"])
+        for config in scaled_persistent_mm_kernel_configs
+        if config["cond"]
+    ]
 )
 
 # On ROCm convert num_stages to improve performance

@@ -338,10 +338,10 @@ if HAS_PYDOT:
                 assert tm.qparams is not None
                 assert "qscheme" in tm.qparams
                 qscheme = tm.qparams["qscheme"]
-                if qscheme in {
+                if qscheme in (
                     torch.per_tensor_affine,
                     torch.per_tensor_symmetric,
-                }:
+                ):
                     result += "|" + "q_scale" + "=" + str(tm.qparams["scale"]) + r"\n"
                     result += (
                         "|"
@@ -350,11 +350,11 @@ if HAS_PYDOT:
                         + str(tm.qparams["zero_point"])
                         + r"\n"
                     )
-                elif qscheme in {
+                elif qscheme in (
                     torch.per_channel_affine,
                     torch.per_channel_symmetric,
                     torch.per_channel_affine_float_qparams,
-                }:
+                ):
                     result += (
                         "|"
                         + "q_per_channel_scale"
@@ -382,7 +382,7 @@ if HAS_PYDOT:
             return result
 
         def _get_tensor_label(self, t: torch.Tensor) -> str:
-            return str(t.dtype) + str(list(t.shape)) + r"\n"
+            return str(t.dtype) + str([*t.shape]) + r"\n"
 
         # when parse_stack_trace=True
         # print file:lineno code

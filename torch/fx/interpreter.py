@@ -150,7 +150,7 @@ class Interpreter:
         self.args_iter: Iterator[Any] = iter(args)
         pbar = tqdm(
             total=len(self.graph.nodes),
-            desc=f"{self.name}: {str(list(self.graph.nodes)) if config.verbose_progress else ''}",
+            desc=f"{self.name}: {str([*self.graph.nodes]) if config.verbose_progress else ''}",
             initial=0,
             position=0,
             leave=True,
@@ -264,7 +264,7 @@ class Interpreter:
         if target.startswith("*"):
             # For a starred parameter e.g. `*args`, retrieve all
             # remaining values from the args list.
-            return list(self.args_iter)
+            return [*self.args_iter]
         else:
             try:
                 return next(self.args_iter)
@@ -587,7 +587,7 @@ class Transformer(Interpreter):
 
             new_output_node = self.new_graph.output(map_aggregate(result, strip_proxy))
             # also preserve the metadata from the old output node, if it exists
-            old_output_node = list(self.graph.nodes)[-1]
+            old_output_node = [*self.graph.nodes][-1]
             assert old_output_node.op == "output"
             for k, v in old_output_node.meta.items():
                 new_output_node.meta[k] = v

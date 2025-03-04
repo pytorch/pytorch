@@ -134,9 +134,9 @@ class LazyVariableTracker(VariableTracker):
         elif value_cls is list:
             result = [cls.realize_all(v, cache) for v in value]
         elif value_cls is tuple:
-            result = tuple(cls.realize_all(v, cache) for v in value)
+            result = tuple([cls.realize_all(v, cache) for v in value])
         elif value_cls in (dict, collections.OrderedDict):
-            result = {k: cls.realize_all(v, cache) for k, v in list(value.items())}
+            result = {k: cls.realize_all(v, cache) for k, v in [*value.items()]}
         else:
             result = value
 

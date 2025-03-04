@@ -575,9 +575,9 @@ def register_onednn_fusion_ops():
             algorithm,
             layout=None,
         ):
-            assert packed_weight.get_dtype() is torch.int8, (
-                "Only int8 weights are supported by oneDNN qlinear."
-            )
+            assert (
+                packed_weight.get_dtype() is torch.int8
+            ), "Only int8 weights are supported by oneDNN qlinear."
             x_size = x.get_size()
             if len(x_size) > 2:
                 # GEMM template needs 2D input, normalize input shape here
@@ -760,7 +760,7 @@ def register_onednn_fusion_ops():
                                 inner_fn=inner_fn_cast_output_to_bf16,
                                 ranges=output_buf.get_size(),
                             )
-                        elif output_dtype in [torch.uint8, torch.int8]:
+                        elif output_dtype in (torch.uint8, torch.int8):
                             from .lowering import _create_constants
 
                             requant_input_loader = output_buf.make_loader()
@@ -943,7 +943,7 @@ def register_onednn_fusion_ops():
                 if output_dtype in [
                     torch.float32,
                     torch.bfloat16,
-                ] and x2.get_dtype() in [torch.float32, torch.bfloat16]:
+                ] and x2.get_dtype() in (torch.float32, torch.bfloat16):
                     if x2.get_dtype() != output_dtype:
                         # For int8-mixed-bf16 quantization and inplace add,
                         # there is case when accum dtype is float32 but output dtype is bfloat16.
@@ -951,9 +951,9 @@ def register_onednn_fusion_ops():
                         # we will do accum dtype convertion here.
                         x2 = to_dtype(x2, output_dtype)
                 else:
-                    assert x2.get_dtype() == output_dtype, (
-                        "dtype of accum for qlinear post op sum should be the same as output"
-                    )
+                    assert (
+                        x2.get_dtype() == output_dtype
+                    ), "dtype of accum for qlinear post op sum should be the same as output"
             x2_dtype = x2.get_dtype()
             bias_dtype = bias.get_dtype() if bias is not None else None
             choices: list[ChoiceCaller] = []
@@ -1092,7 +1092,7 @@ def register_onednn_fusion_ops():
                                 inner_fn=inner_fn_cast_output_to_bf16,
                                 ranges=output_buf.get_size(),
                             )
-                        elif output_dtype in [torch.uint8, torch.int8]:
+                        elif output_dtype in (torch.uint8, torch.int8):
                             from .lowering import _create_constants
 
                             requant_input_loader = output_buf.make_loader()

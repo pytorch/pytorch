@@ -94,8 +94,8 @@ def broadcast_types(t1, t2):
         s1 = len(t1.__args__)
         s2 = len(t2.__args__)
 
-        new_t1 = list(t1.__args__)
-        new_t2 = list(t2.__args__)
+        new_t1 = [*t1.__args__]
+        new_t2 = [*t2.__args__]
 
         # We make the types the same length which is the first requirement
         # for consistency
@@ -263,7 +263,7 @@ def transpose_inference_rule(n: Node):
 
         elif isinstance(t, TensorType):
             if 0 <= dim1 < len(t.__args__) and 0 <= dim2 < len(t.__args__):
-                new_type = list(t.__args__)
+                new_type = [*t.__args__]
                 new_type[dim1], new_type[dim2] = new_type[dim2], new_type[dim1]
                 final = TensorType(new_type)
                 n.type = get_greatest_upper_bound(n.type, final)
@@ -465,7 +465,7 @@ def maxpool2d_check(typ, module_instance):
     Applies the maxpool2d shape information to the input
     this affects the last two dimensions
     """
-    new_type_list = list(typ.__args__)
+    new_type_list = [*typ.__args__]
     if len(new_type_list) == 4 or len(new_type_list) == 3:
         w_in = new_type_list[-1]
         h_in = new_type_list[-2]
@@ -509,7 +509,7 @@ def linear_check(tensor_type, module_instance):
     """
     if len(tensor_type.__args__) >= 2:
         if is_consistent(module_instance.in_features, tensor_type.__args__[-1]):
-            new_type_args = list(tensor_type.__args__)
+            new_type_args = [*tensor_type.__args__]
             new_type_args[-1] = module_instance.out_features
             return TensorType(tuple(new_type_args))
         else:
@@ -540,13 +540,13 @@ def adaptiveavgpool2d_check(tensor_type, module_instance):
     if isinstance(output_size, int):
         output_size = [output_size, output_size]
     elif isinstance(output_size, tuple):
-        output_size = list(output_size)
+        output_size = [*output_size]
         if output_size[0] is None:
             output_size[0] = output_size[1]
         if output_size[1] is None:
             output_size[1] = output_size[0]
 
-    new_type_list = list(tensor_type.__args__)
+    new_type_list = [*tensor_type.__args__]
 
     if len(tensor_type.__args__) == 4 or len(tensor_type.__args__) == 3:
         new_type_list[-1] = output_size[1]
@@ -580,7 +580,7 @@ def flatten_check(tensor_type, start_dim, end_dim):
     end_dim = l + end_dim + 1 if end_dim < 0 else end_dim + 1
 
     if 0 <= start_dim <= (l - 1) and 0 <= end_dim <= l and start_dim < end_dim:
-        my_args = list(tensor_type.__args__)
+        my_args = [*tensor_type.__args__]
         lhs = my_args[0:start_dim]
         rhs = my_args[end_dim:]
         mid = my_args[start_dim:end_dim]

@@ -100,7 +100,7 @@ if python_pytree._cxx_pytree_dynamo_traceable:
         tree: PyTree,
         is_leaf: Callable[[PyTree], bool] | None = None,
     ) -> list[Any]:
-        return list(tree_iter(tree, is_leaf=is_leaf))
+        return [*tree_iter(tree, is_leaf=is_leaf)]
 
     __all__ += ["tree_leaves"]
 
@@ -143,8 +143,8 @@ if python_pytree._cxx_pytree_dynamo_traceable:
                 num_children = 0
             else:
                 assert callable(self._unflatten_func)
-                num_nodes = sum((spec.num_nodes for spec in self._children), start=1)
-                num_leaves = sum(spec.num_leaves for spec in self._children)
+                num_nodes = sum(([spec.num_nodes for spec in self._children]), start=1)
+                num_leaves = sum([spec.num_leaves for spec in self._children])
                 num_children = len(self._children)
 
             object.__setattr__(self, "num_nodes", num_nodes)
@@ -193,13 +193,13 @@ if python_pytree._cxx_pytree_dynamo_traceable:
             return self.num_nodes == 1 and self.num_leaves == 1
 
         def children(self) -> list[PyTreeSpec]:
-            return list(self._children)
+            return [*self._children]
 
         def child(self, index: int) -> PyTreeSpec:
             return self._children[index]
 
         def entries(self) -> list[Any]:
-            return list(self._entries)
+            return [*self._entries]
 
         def entry(self, index: int) -> Any:
             return self._entries[index]
@@ -295,7 +295,7 @@ if python_pytree._cxx_pytree_dynamo_traceable:
 
         def unflatten(self, leaves: Iterable[Any]) -> PyTree:
             if not isinstance(leaves, (list, tuple)):
-                leaves = list(leaves)
+                leaves = [*leaves]
             if len(leaves) != self.num_leaves:
                 raise ValueError(
                     f"treespec.unflatten(leaves): `leaves` has length {len(leaves)} "
@@ -350,7 +350,7 @@ if python_pytree._cxx_pytree_dynamo_traceable:
             )
 
             # Recursively flatten the children
-            subspecs = tuple(helper(child, leaves) for child in children)
+            subspecs = tuple([helper(child, leaves) for child in children])
             return PyTreeSpec(subspecs, type(node), metadata, entries, unflatten_func)  # type: ignore[arg-type]
 
         leaves: list[Any] = []

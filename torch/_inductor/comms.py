@@ -150,7 +150,7 @@ def _schedule_for_comm(
             return self.score < other.score
 
     unmet_deps: dict[BaseSchedulerNode, OrderedSet[str]] = {
-        snode: OrderedSet(dep.name for dep in snode.unmet_dependencies)
+        snode: OrderedSet([dep.name for dep in snode.unmet_dependencies])
         for snode in snodes
     }
 
@@ -218,9 +218,9 @@ def _schedule_for_comm(
             schedule(snode)
 
     for snode, deps in unmet_deps.items():
-        assert len(deps) == 0, (
-            f"Detected unscheduled nodes. Nodes with unmet dependencies: {unmet_deps}"
-        )
+        assert (
+            len(deps) == 0
+        ), f"Detected unscheduled nodes. Nodes with unmet dependencies: {unmet_deps}"
     return scheduled
 
 
@@ -343,7 +343,7 @@ def remove_fsdp2_unsharded_param_graph_input_usage(graph: torch.fx.Graph):
     is actually a per-unsharded-param decision, since for each unsharded param, we look at its resize sequence pattern
     (in `check_resize_pattern()`) to determine if its set of resize and copy nodes can be removed.
     """
-    node_list = list(graph.nodes)
+    node_list = [*graph.nodes]
 
     # Find all graph inputs and their resize counts
     graph_input_to_resized_to_full_node_idxes = defaultdict(list)
@@ -501,8 +501,10 @@ Graph: {graph}
                     and node.target != torch.ops.inductor.resize_storage_bytes_.default
                 ):  # TODO(yf225): implement replacement in kwargs
                     new_args = tuple(
-                        replacement if arg is unsharded_param else arg
-                        for arg in node.args
+                        [
+                            replacement if arg is unsharded_param else arg
+                            for arg in node.args
+                        ]
                     )
                     node.args = new_args
 
@@ -564,7 +566,7 @@ def reinplace_fsdp_all_gather(graph: torch.fx.Graph) -> None:
 
     def remove_unused_getitem(g):
         # Remove `getitem_X = all_gather_copy_in[1]` which is never used.
-        node_list = list(g.nodes)
+        node_list = [*g.nodes]
         for n in node_list:
             if (
                 n.target == operator.getitem

@@ -163,7 +163,7 @@ class TritonBenchmarker(Benchmarker):
         this is the requested return mode. Otherwise, this is the median.
         """
         do_bench_params = inspect.signature(self.triton_do_bench).parameters
-        for kwarg in list(kwargs.keys()):
+        for kwarg in [*kwargs.keys()]:
             if kwarg not in do_bench_params:
                 del kwargs[kwarg]
         if "quantiles" in kwargs:

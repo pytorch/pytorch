@@ -95,7 +95,7 @@ class ROCmTemplateKernel(ROCmKernel):
         if input_reorder is not None:
             assert len(inputs) == len(input_reorder)
         else:
-            input_reorder = list(range(len(inputs)))
+            input_reorder = [*range(len(inputs))]
 
         for idx in input_reorder:
             name = names[idx]
@@ -163,7 +163,7 @@ class ROCmTemplateKernel(ROCmKernel):
         if V.graph.cpp_wrapper:
             kernel_args.extend(size_args)
         else:
-            kernel_args.extend(f"c_int({sarg})" for sarg in size_args)
+            kernel_args.extend([f"c_int({sarg})" for sarg in size_args])
 
         if V.graph.cpp_wrapper:
             arg_types.extend(["int"] * len(node.template.size_args()))

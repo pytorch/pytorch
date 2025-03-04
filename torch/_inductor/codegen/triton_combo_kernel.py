@@ -72,7 +72,7 @@ def _default_custom_combo_kernel_horizontal_partition(
     # first partition nodes based on number of block dimensions
     tilings = [node_info_map[n][1] for n in nodes]
 
-    max_dims = max(len(t) for t in tilings)
+    max_dims = max([len(t) for t in tilings])
     nodes_per_ndim: list[list[BaseSchedulerNode]] = []
     for i in range(2, max_dims + 1):
         group_per_dim = [n for n, t in zip(nodes, tilings) if len(t) == i]
@@ -110,13 +110,13 @@ def _default_custom_combo_kernel_horizontal_partition(
                 len(large_pointwise),
             )
             not_reduction = [n for n in not_reduction if n not in large_pointwise]
-            nodes_per_ndim.extend([node] for node in large_pointwise)
+            nodes_per_ndim.extend([[node] for node in large_pointwise])
 
         nodes_per_ndim.extend(
-            g for g in (not_reduction, short_reduction, long_reduction) if g
+            [g for g in (not_reduction, short_reduction, long_reduction) if g]
         )
 
-    assert sum(len(p) for p in nodes_per_ndim) == len(nodes)
+    assert sum([len(p) for p in nodes_per_ndim]) == len(nodes)
     return nodes_per_ndim
 
 
@@ -328,7 +328,7 @@ class ComboKernel(Kernel):
             x_blocks_list: list[Union[str, int]],
             dynamic_shape: bool,
         ) -> tuple[Any, ...]:
-            xnumel = list(x_blocks_list)
+            xnumel = [*x_blocks_list]
             ynumel: Any = [e[-2] if len(e) > 1 else None for e in sub_kernel_numels]
             znumel: Any = [e[-3] if len(e) > 2 else None for e in sub_kernel_numels]
 
@@ -595,9 +595,9 @@ class ComboKernel(Kernel):
             num_persistent_reduction = len(
                 [e for e in heuristics_list if e == "persistent_reduction"]
             )
-            assert num_reduction == 0, (
-                "combining pointwise and reduction are not supported yet."
-            )
+            assert (
+                num_reduction == 0
+            ), "combining pointwise and reduction are not supported yet."
             heuristics = (
                 "pointwise_with_reduction"
                 if num_persistent_reduction > 0
@@ -754,7 +754,7 @@ class ComboKernel(Kernel):
                 if tree.prefix == "x" and sub_kernel.no_x_dim:
                     continue
                 block_names[f"{tree.prefix.upper()}BLOCK"] = tree.prefix
-        self.block_args = list(block_names.keys())
+        self.block_args = [*block_names.keys()]
 
         return [ConstexprArg(x) for x in block_names.keys()]
 
@@ -786,13 +786,13 @@ class ComboKernel(Kernel):
                         name, tree, suffix=str(num)
                     )
                 if not tree.is_reduction:
-                    assert isinstance(grid[i][num], str), (
-                        f"Grid {grid[i][num]} should be a dynamic shape."
-                    )
+                    assert isinstance(
+                        grid[i][num], str
+                    ), f"Grid {grid[i][num]} should be a dynamic shape."
                     numel_sign = grid[i][num][0] if grid[i][num][0] == "-" else ""
-                    assert grid[i][num] == numel_sign + numel_name, (
-                        f"numel args mismatch: {grid[i][num]} vs {numel_name}"
-                    )
+                    assert (
+                        grid[i][num] == numel_sign + numel_name
+                    ), f"numel args mismatch: {grid[i][num]} vs {numel_name}"
                     grid[i][num] = -expr if numel_sign == "-" else expr
 
                 if not tree.is_reduction or sub_kernel.inside_reduction:
@@ -809,13 +809,13 @@ class ComboKernel(Kernel):
                     continue
                 expr = V.graph.sizevars.size_hint(tree.numel)
                 if not tree.is_reduction:
-                    assert isinstance(grid[i][num], str), (
-                        f"Grid {grid[i][num]} should be a dynamic shape."
-                    )
+                    assert isinstance(
+                        grid[i][num], str
+                    ), f"Grid {grid[i][num]} should be a dynamic shape."
                     numel_sign = grid[i][num][0] if grid[i][num][0] == "-" else ""
-                    assert grid[i][num] == numel_sign + numel_name, (
-                        f"grid mismatch: {grid[i][num]} vs {numel_name}"
-                    )
+                    assert (
+                        grid[i][num] == numel_sign + numel_name
+                    ), f"grid mismatch: {grid[i][num]} vs {numel_name}"
                     grid[i][num] = -expr if numel_sign == "-" else expr
                 if not tree.is_reduction or sub_kernel.inside_reduction:
                     extra_args.append(expr)
@@ -860,7 +860,7 @@ class ComboKernel(Kernel):
             )
         )
         code.writeline(
-            f"def {name or str(Placeholder.KERNEL_NAME)}({', '.join(x.full_name() for x in argdefs)}):"
+            f"def {name or str(Placeholder.KERNEL_NAME)}({', '.join([x.full_name() for x in argdefs])}):"
         )
 
         with code.indent():
@@ -949,14 +949,16 @@ class ComboKernel(Kernel):
                 self.add_numel_to_call_args_and_grid_benchmark(extra_args, grid_tuple)
                 # convert nested list to list of str
                 grid_tuple = tuple(
-                    "[" + ", ".join(pexpr(item) for item in e) + ",]"
-                    for e in grid_tuple
+                    [
+                        "[" + ", ".join([pexpr(item) for item in e]) + ",]"
+                        for e in grid_tuple
+                    ]
                 )
                 extra_args_str = ", ".join(map(str, extra_args)) + ", "
                 min_blocks = None
             else:
                 min_blocks = max(self.min_x_blocks_list) * len(self.sub_kernels)
-            grid_str = ", ".join(pexpr(item) for item in grid_tuple)
+            grid_str = ", ".join([pexpr(item) for item in grid_tuple])
             grid_extra_kwargs = (
                 f"num_kernels={len(self.sub_kernels)}, "
                 f"min_blocks={min_blocks}, "
@@ -1054,9 +1056,9 @@ class ComboKernel(Kernel):
         wrapper = V.graph.wrapper_code
         assert self.dispatch_class is not None
         dynamic_shape = self.dynamic_shape_args != []
-        grid = list(
-            self.dispatch_class.grid(self.grids, self.x_numels_list, dynamic_shape)
-        )
+        grid = [
+            *self.dispatch_class.grid(self.grids, self.x_numels_list, dynamic_shape)
+        ]
         num_kernels = len(self.sub_kernels)
         min_blocks = (
             max(self.min_x_blocks_list) * num_kernels if not dynamic_shape else None
@@ -1081,7 +1083,7 @@ class ComboKernel(Kernel):
         # autotuning is enabled
         grid = wrapper.generate_default_grid(
             name,
-            list(grid),
+            [*grid],
             grid_callable=grid_combo_kernels,
             num_kernels=num_kernels,
             min_blocks=min_blocks,

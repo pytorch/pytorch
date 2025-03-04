@@ -151,7 +151,7 @@ class TracingOpsHandler(WrapperHandler):
 
     def output(self, *args: tuple[object]) -> None:
         self.tracer.create_node(
-            "output", "output", (tuple(self.tracer.create_arg(a) for a in args),), {}
+            "output", "output", (tuple([self.tracer.create_arg(a) for a in args]),), {}
         )
 
 

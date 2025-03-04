@@ -400,9 +400,9 @@ class NNModuleVariable(VariableTracker):
                     self.convert_to_unspecialized(tx)
 
                 # Unroll sequential
-                assert not is_lazy, (
-                    "Expected lazy sequential isn't a valid combination?"
-                )
+                assert (
+                    not is_lazy
+                ), "Expected lazy sequential isn't a valid combination?"
                 assert not kwargs
                 (arg,) = args
                 # TODO: Use named_children when it supports remove_duplicate=False.
@@ -522,7 +522,7 @@ class NNModuleVariable(VariableTracker):
                 ),
             )
 
-        if name in ["_call_impl", "_wrapped_call_impl"]:
+        if name in {"_call_impl", "_wrapped_call_impl"}:
             # Example: `self.layer.__call__(x)`
             # This is used for explicit calling `__call__` in a forward function.
             # Dynamo inlines `__call__`, includes hooks.
@@ -709,7 +709,7 @@ class NNModuleVariable(VariableTracker):
                 src = AttrSource(AttrSource(self.source, name), "__func__")
                 return tx.inline_user_function_return(
                     variables.UserFunctionVariable(fn, source=src),
-                    [self] + list(args),
+                    [self] + [*args],
                     kwargs,
                 )
 
@@ -723,7 +723,7 @@ class NNModuleVariable(VariableTracker):
                     result = []
 
                     # Turn the slice into the list of integers
-                    keys = list(range(len(module)))[args[0].as_python_constant()]
+                    keys = [*range(len(module))][args[0].as_python_constant()]
                     for idx, submod in enumerate(module[args[0].as_python_constant()]):
                         key = keys[idx]
                         src = NNModuleSource(GetItemSource(self.source, key))
@@ -950,7 +950,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         )
         with ctx:
             return variables.UserFunctionVariable(fn, source=source).call_function(
-                tx, [self] + list(args), kwargs
+                tx, [self] + [*args], kwargs
             )
 
     def call_method(
@@ -960,7 +960,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        if name in ["_call_impl", "_wrapped_call_impl"]:
+        if name in {"_call_impl", "_wrapped_call_impl"}:
             fn = getattr(self.value_type, name)
             if self.source:
                 source = AttrSource(AttrSource(self.source, "__class__"), name)
@@ -968,7 +968,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 source = None
 
             return variables.UserFunctionVariable(fn, source=source).call_function(
-                tx, [self] + list(args), kwargs
+                tx, [self] + [*args], kwargs
             )
 
         if name not in getattr(self.value, "__dict__", {}):
@@ -1052,12 +1052,12 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
 
     def var_getattr(self, tx: "InstructionTranslator", name):
         # Allow skipping of empty hook dict guards on inbuilt nn modules
-        if name in (
+        if name in {
             "_backward_hooks",
             "_backward_pre_hooks",
             "_forward_hooks",
             "_forward_pre_hooks",
-        ):
+        }:
             # For empty hooks, make an EMPTY_NN_MODULE_HOOKS_DICT. This allows us to control the installation of empty
             # hooks guard via skip_nnmodule_hook_guards
             if not tx.output.side_effects.has_pending_mutation_of_attr(self, name):
@@ -1103,7 +1103,10 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 return key, value
 
             result = dict(
-                build_key_value(i, k, v) for i, (k, v) in enumerate(hooks_dict.items())
+                [
+                    build_key_value(i, k, v)
+                    for i, (k, v) in enumerate(hooks_dict.items())
+                ]
             )
 
             return variables.NNModuleHooksDictVariable(
@@ -1154,9 +1157,9 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
 
     def __init__(self, value, **kwargs) -> None:
         source = kwargs.get("source", None)
-        assert source is not None, (
-            "FSDPManagedNNModule depends on having an accurate source to control guarding."
-        )
+        assert (
+            source is not None
+        ), "FSDPManagedNNModule depends on having an accurate source to control guarding."
 
         super().__init__(value=value, **kwargs)
         self.source = source

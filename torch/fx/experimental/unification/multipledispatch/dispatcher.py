@@ -181,7 +181,7 @@ class Dispatcher:
                 in (Parameter.POSITIONAL_ONLY, Parameter.POSITIONAL_OR_KEYWORD)
             )
 
-            annotations = tuple(param.annotation for param in params)
+            annotations = tuple([param.annotation for param in params])
 
             if all(ann is not Parameter.empty for ann in annotations):
                 return annotations
@@ -219,7 +219,7 @@ class Dispatcher:
         for index, typ in enumerate(signature, start=1):
             if not isinstance(typ, (type, list)):
                 str_sig = ", ".join(
-                    c.__name__ if isinstance(c, type) else str(c) for c in signature
+                    [c.__name__ if isinstance(c, type) else str(c) for c in signature]
                 )
                 raise TypeError(
                     f"Tried to dispatch on non-type: {typ}\n"
@@ -434,7 +434,7 @@ def str_signature(sig):
     >>> str_signature((int, float))
     'int, float'
     """
-    return ", ".join(cls.__name__ for cls in sig)
+    return ", ".join([cls.__name__ for cls in sig])
 
 
 def warning_text(name, amb):
@@ -442,7 +442,7 @@ def warning_text(name, amb):
     text = f"\nAmbiguities exist in dispatched function {name}\n\n"
     text += "The following signatures may result in ambiguous behavior:\n"
     for pair in amb:
-        text += "\t" + ", ".join("[" + str_signature(s) + "]" for s in pair) + "\n"
+        text += "\t" + ", ".join(["[" + str_signature(s) + "]" for s in pair]) + "\n"
     text += "\n\nConsider making the following additions:\n\n"
     text += "\n\n".join(
         [

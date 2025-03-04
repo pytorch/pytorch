@@ -404,10 +404,10 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
     for i, node in enumerate(reversed(graph.nodes)):
         node_order[node] = len(graph.nodes) - i - 1
         storage_to_nodes[get_node_storage(node)].append(node)
-        if node.target == aten.copy_.default and node.args[0].op in (
+        if node.target == aten.copy_.default and node.args[0].op in {
             "placeholder",
             "get_attr",
-        ):
+        }:
             dst = node.args[0]
             src = node.args[1]
             # If the target is a getitem and it indexes a possible clone,
@@ -473,7 +473,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
 
         if isinstance(mutated_arg, (list, tuple)):
             # TODO Using _overlap here causes a several issues.
-            unique_storages = OrderedSet(get_node_storage(arg) for arg in mutated_arg)
+            unique_storages = OrderedSet([get_node_storage(arg) for arg in mutated_arg])
             if len(unique_storages) != len(mutated_arg):
                 # At least two Tensors in mutated_arg alias each other, so we can't reinplace it.
                 # We can probably do better (that is, reinplace one of them and clone the other)
@@ -493,7 +493,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             if _overlap([mutated_arg.meta["val"], v.meta["val"]])
         ]
 
-        if mutated_arg.op in ("placeholder", "get_attr"):
+        if mutated_arg.op in {"placeholder", "get_attr"}:
             # Get the first copy_ node that mutates the mutated_arg.
             copy_node = copy_nodes.get(mutated_arg, None)
             if copy_node is None:

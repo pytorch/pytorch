@@ -360,15 +360,17 @@ def _get_chunked_inputs(flat_args, flat_in_dims, batch_size, chunk_size):
         split_idxs = tuple(itertools.accumulate(chunk_sizes))
 
     flat_args_chunks = tuple(
-        (
-            t.tensor_split(split_idxs, dim=in_dim)
-            if in_dim is not None
-            else [
-                t,
-            ]
-            * len(split_idxs)
-        )
-        for t, in_dim in zip(flat_args, flat_in_dims)
+        [
+            (
+                t.tensor_split(split_idxs, dim=in_dim)
+                if in_dim is not None
+                else [
+                    t,
+                ]
+                * len(split_idxs)
+            )
+            for t, in_dim in zip(flat_args, flat_in_dims)
+        ]
     )
 
     # transpose chunk dim and flatten structure
@@ -390,7 +392,7 @@ def _flatten_chunks_output(chunks_output_):
 
     # transpose chunk dim and flatten structure
     # flat_output_chunks is flat list of chunks
-    flat_output_chunks = list(zip(*flat_chunks_output))
+    flat_output_chunks = [*zip(*flat_chunks_output)]
     return flat_output_chunks, arg_spec
 
 
@@ -459,7 +461,7 @@ def _chunked_vmap(
 
 # Vmap refactored helper functions:
 def _check_randomness_arg(randomness):
-    if randomness not in ["error", "different", "same"]:
+    if randomness not in {"error", "different", "same"}:
         raise RuntimeError(
             f"Only allowed values for randomness are 'error', 'different', or 'same'. Got {randomness}"
         )

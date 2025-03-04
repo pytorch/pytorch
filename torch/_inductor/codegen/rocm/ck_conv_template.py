@@ -465,9 +465,9 @@ class CKGroupedConvFwdTemplate(CKTemplate):
     def gen_ops(self):
         unfiltered_instances = gen_conv_ops_library()
 
-        filtered_instances = list(
-            filter(lambda op: self.filter_op(op), unfiltered_instances)
-        )
+        filtered_instances = [
+            *filter(lambda op: self.filter_op(op), unfiltered_instances)
+        ]
         # NB: when using a fixed list order, most likely we will pick the subset of instances
         # which are very similar to each other. Randomizing the choice seems to solve this.
         random.seed(-11)

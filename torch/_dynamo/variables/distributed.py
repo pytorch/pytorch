@@ -307,7 +307,7 @@ class ProcessGroupVariable(DistributedVariable):
     def var_getattr(self, tx: "InstructionTranslator", name):
         if name == "group_name":
             return variables.ConstantVariable.create(self.value.group_name)
-        if name in ["rank", "size"]:
+        if name in {"rank", "size"}:
             return variables.LambdaVariable(
                 lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)
             )
@@ -406,7 +406,7 @@ class BackwardHookVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if name in ("setup_input_hook", "setup_output_hook"):
+        if name in {"setup_input_hook", "setup_output_hook"}:
             return self._setup_hook(tx, name, *args, **kwargs)
         return super().call_method(tx, name, args, kwargs)
 

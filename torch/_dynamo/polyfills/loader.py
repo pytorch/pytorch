@@ -23,8 +23,10 @@ POLYFILLED_MODULE_NAMES: tuple[str, ...] = (
     "fx",
 )
 POLYFILLED_MODULES: tuple["ModuleType", ...] = tuple(
-    importlib.import_module(f".{submodule}", package=polyfills.__name__)
-    for submodule in POLYFILLED_MODULE_NAMES
+    [
+        importlib.import_module(f".{submodule}", package=polyfills.__name__)
+        for submodule in POLYFILLED_MODULE_NAMES
+    ]
 )
 
 

@@ -109,7 +109,7 @@ def _freeze(
         )
     else:
         inputs = aot_autograd_gm.graph.find_nodes(op="placeholder")
-        preserved_arg_indices = list(range(len(inputs)))
+        preserved_arg_indices = [*range(len(inputs))]
 
     # TODO - further restrict cse ? right now needed to dedup aliasing ops
     cse_graph = fx_graph_cse(aot_autograd_gm.graph)
@@ -167,12 +167,12 @@ def invalidate_eager_modules():
             if not isinstance(mod, torch.nn.Module):
                 continue
 
-            for attr_name, tensor in list(
-                itertools.chain(
+            for attr_name, tensor in [
+                *itertools.chain(
                     mod.named_parameters(recurse=False),
                     mod.named_buffers(recurse=False),
                 )
-            ):
+            ]:
                 with torch._dispatch.python.no_python_dispatcher():
                     e_t = ErasedTensor(tensor, attr_name, mod)
                 if isinstance(tensor, torch.nn.Parameter):
@@ -183,11 +183,11 @@ def invalidate_eager_modules():
 
 def discard_traced_gm_params(mod: torch.fx.GraphModule):
     with torch.utils._python_dispatch._disable_current_modes():
-        for attr_name, tensor in list(
-            itertools.chain(
+        for attr_name, tensor in [
+            *itertools.chain(
                 mod.named_parameters(recurse=False), mod.named_buffers(recurse=False)
             )
-        ):
+        ]:
             with torch._dispatch.python.no_python_dispatcher():
                 e_t = ErasedTensor(tensor, attr_name, mod)
             if isinstance(tensor, torch.nn.Parameter):

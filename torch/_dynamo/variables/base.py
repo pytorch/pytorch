@@ -470,10 +470,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             "Please report an issue to PyTorch.",
         ]
         # additional hint for method calls on improperly constructed iterators
-        if isinstance(self, variables.UserDefinedObjectVariable) and name in (
+        if isinstance(self, variables.UserDefinedObjectVariable) and name in {
             "__iter__",
             "__next__",
-        ):
+        }:
             hints.append(
                 "Dynamo does not fully support tracing builtin iterators (e.g. `map`, `zip`, `enumerate`) "
                 "passed in from uncompiled to compiled regions (e.g. `torch.compile(fn)(enumerate(...))`). "

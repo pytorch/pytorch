@@ -158,7 +158,7 @@ class CppBmmTemplate(CppGemmTemplate):
             for i, buf in enumerate(call_args):
                 if buf == self.b_index:
                     arg_defs[i] = ArgName(b_index)
-            call = f"{function_name}({', '.join(x.full_name() for x in arg_defs)});"
+            call = f"{function_name}({', '.join([x.full_name() for x in arg_defs])});"
             return call
 
         assert placeholder not in kernel.render_hooks

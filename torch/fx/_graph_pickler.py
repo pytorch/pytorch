@@ -229,7 +229,7 @@ class _TensorPickleData:
 
         # Some debugging/verification
         for k in MetaTensorDesc._UNSERIALIZABLE:
-            if k in ("fake_mode", "view_func"):
+            if k in {"fake_mode", "view_func"}:
                 continue
             assert (
                 getattr(self.metadata, k) is None

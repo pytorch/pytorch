@@ -127,17 +127,17 @@ def _autograd_grad(
     outputs, inputs, grad_outputs=None, retain_graph=False, create_graph=True
 ):
     if grad_outputs is None:
-        diff_outputs = tuple(out for out in outputs if out.requires_grad)
+        diff_outputs = tuple([out for out in outputs if out.requires_grad])
     else:
         result = tuple(
-            (out, go) for out, go in zip(outputs, grad_outputs) if out.requires_grad
+            [(out, go) for out, go in zip(outputs, grad_outputs) if out.requires_grad]
         )
         if len(result) == 0:
             diff_outputs, grad_outputs = (), ()
         else:
             diff_outputs, grad_outputs = zip(*result)
     if len(diff_outputs) == 0:
-        return tuple(torch.zeros_like(inp) for inp in inputs)
+        return tuple([torch.zeros_like(inp) for inp in inputs])
     grad_inputs = torch.autograd.grad(
         diff_outputs,
         inputs,
@@ -147,8 +147,10 @@ def _autograd_grad(
         allow_unused=True,
     )
     grad_inputs = tuple(
-        torch.zeros_like(inp) if gi is None else gi
-        for gi, inp in zip(grad_inputs, inputs)
+        [
+            torch.zeros_like(inp) if gi is None else gi
+            for gi, inp in zip(grad_inputs, inputs)
+        ]
     )
     return grad_inputs
 
@@ -579,7 +581,7 @@ def jacrev(
 
         # NB: vjp already checks that all outputs are tensors
         # Step 1: Construct grad_outputs by splitting the standard basis
-        flat_output_numels = tuple(out.numel() for out in flat_output)
+        flat_output_numels = tuple([out.numel() for out in flat_output])
 
         primals = _slice_argnums(args, argnums)
         flat_primals, primals_spec = tree_flatten(primals)
@@ -628,7 +630,7 @@ def jacrev(
             # Iterate and concat the jacobians of different
             # inputs.
             for idx in range(len(flat_primals)):
-                r = tuple(r_[idx] for r_ in chunked_results)
+                r = tuple([r_[idx] for r_ in chunked_results])
                 flat_results.append(torch.cat(r, 0))
 
             return flat_results
@@ -696,8 +698,10 @@ def jacrev(
         ]
         flat_input_flat_output = [
             tuple(
-                split.view(out.shape + primal.shape)
-                for split, out in zip(splits, flat_output)
+                [
+                    split.view(out.shape + primal.shape)
+                    for split, out in zip(splits, flat_output)
+                ]
             )
             for splits, primal in zip(flat_jacobians_per_input, flat_primals)
         ]
@@ -713,13 +717,15 @@ def jacrev(
         flat_output_flat_input = tuple(zip(*flat_input_flat_output))
 
         flat_output_input = tuple(
-            tree_unflatten(flat_input, primals_spec)
-            for flat_input in flat_output_flat_input
+            [
+                tree_unflatten(flat_input, primals_spec)
+                for flat_input in flat_output_flat_input
+            ]
         )
 
         if isinstance(argnums, int):
             flat_output_input = tuple(
-                _safe_zero_index(flat_input) for flat_input in flat_output_input
+                [_safe_zero_index(flat_input) for flat_input in flat_output_input]
             )
         output_input = tree_unflatten(flat_output_input, output_spec)
         if has_aux:
@@ -808,15 +814,19 @@ def _chunked_standard_basis_for_(tensors, tensor_numels, chunk_size=None):
 
     for chunk_idx, total_numel in enumerate(chunk_numels):
         chunks = tuple(
-            tensor.new_zeros(total_numel, tensor_numel)
-            for tensor, tensor_numel in zip(tensors, tensor_numels)
+            [
+                tensor.new_zeros(total_numel, tensor_numel)
+                for tensor, tensor_numel in zip(tensors, tensor_numels)
+            ]
         )
 
         for chunk, diag_start_idx in zip(chunks, diag_start_indices):
             chunk.diagonal(diag_start_idx + chunk_idx * chunk_size).fill_(1)
         chunks = tuple(
-            chunk.view(total_numel, *tensor.shape)
-            for chunk, tensor in zip(chunks, tensors)
+            [
+                chunk.view(total_numel, *tensor.shape)
+                for chunk, tensor in zip(chunks, tensors)
+            ]
         )
         yield chunks
 
@@ -851,7 +861,7 @@ def _replace_args(old_args, new_args, argnums):
                 f"new_args should be of size 1, was of size {len(new_args)}"
             )
         return tuple(
-            new_args[0] if i == argnums else old_args[i] for i in range(len(old_args))
+            [new_args[0] if i == argnums else old_args[i] for i in range(len(old_args))]
         )
     if isinstance(argnums, tuple):
         if len(new_args) != len(argnums):
@@ -863,7 +873,7 @@ def _replace_args(old_args, new_args, argnums):
         def get_right_elem(i):
             return new_args[argnums.index(i)] if i in argnums else old_args[i]
 
-        return tuple(get_right_elem(i) for i in range(len(old_args)))
+        return tuple([get_right_elem(i) for i in range(len(old_args))])
     raise RuntimeError(f"argnums must be int or Tuple[int, ...], got: {type(argnums)}")
 
 
@@ -871,7 +881,9 @@ def _validate_and_wrap_argnums(argnums, num_args):
     if isinstance(argnums, int):
         return _validate_and_wrap_argnum(argnums, num_args)
     if isinstance(argnums, tuple):
-        return tuple(_validate_and_wrap_argnum(argnum, num_args) for argnum in argnums)
+        return tuple(
+            [_validate_and_wrap_argnum(argnum, num_args) for argnum in argnums]
+        )
     raise AssertionError("Should never get here")
 
 
@@ -887,7 +899,7 @@ def _slice_argnums(args, argnums, as_tuple=True):
             return (args[argnums],)
         else:
             return args[argnums]
-    return tuple(args[i] for i in argnums)
+    return tuple([args[i] for i in argnums])
 
 
 JVP_NESTING = 0
@@ -1092,7 +1104,7 @@ def _jvp_with_argnums(
             ctx = fwAD.dual_level if JVP_NESTING == 1 else contextlib.nullcontext
             with ctx():
                 flat_duals = tuple(
-                    fwAD.make_dual(p, t) for p, t in zip(flat_primals, flat_tangents)
+                    [fwAD.make_dual(p, t) for p, t in zip(flat_primals, flat_tangents)]
                 )
                 duals = tree_unflatten(flat_duals, primals_spec)
                 if argnums is not None:
@@ -1254,7 +1266,7 @@ def jacfwd(
         error_if_complex("jacfwd", args, is_input=True)
         primals = args if argnums is None else _slice_argnums(args, argnums)
         flat_primals, primals_spec = tree_flatten(primals)
-        flat_primals_numels = tuple(p.numel() for p in flat_primals)
+        flat_primals_numels = tuple([p.numel() for p in flat_primals])
         flat_basis = _construct_standard_basis_for(flat_primals, flat_primals_numels)
         basis = tree_unflatten(flat_basis, primals_spec)
 
@@ -1285,21 +1297,25 @@ def jacfwd(
         # assert_non_empty_output(jac_outs, 'jacfwd(f, ...)(*args)')
 
         jac_outs_ins = tuple(
-            tuple(
-                safe_unflatten(jac_out_in, -1, primal.shape)
-                for primal, jac_out_in in zip(
-                    flat_primals,
-                    jac_out.movedim(0, -1).split(flat_primals_numels, dim=-1),
+            [
+                tuple(
+                    [
+                        safe_unflatten(jac_out_in, -1, primal.shape)
+                        for primal, jac_out_in in zip(
+                            flat_primals,
+                            jac_out.movedim(0, -1).split(flat_primals_numels, dim=-1),
+                        )
+                    ]
                 )
-            )
-            for jac_out in jac_outs
+                for jac_out in jac_outs
+            ]
         )
         jac_outs_ins = tuple(
-            tree_unflatten(jac_ins, primals_spec) for jac_ins in jac_outs_ins
+            [tree_unflatten(jac_ins, primals_spec) for jac_ins in jac_outs_ins]
         )
 
         if isinstance(argnums, int):
-            jac_outs_ins = tuple(jac_ins[0] for jac_ins in jac_outs_ins)
+            jac_outs_ins = tuple([jac_ins[0] for jac_ins in jac_outs_ins])
         if has_aux:
             return tree_unflatten(jac_outs_ins, spec), aux
         return tree_unflatten(jac_outs_ins, spec)
@@ -1726,13 +1742,13 @@ def linearize(func: Callable, *primals) -> tuple[Any, Callable]:
     flat_primals, primals_argspec = tree_flatten(primals)
 
     # tangents for tracing
-    flat_tangents = tuple(p.new_empty(()).expand_as(p) for p in flat_primals)
+    flat_tangents = tuple([p.new_empty(()).expand_as(p) for p in flat_primals])
 
     # function to trace
     def trace_fn(flat_tangents):
         with fwAD.dual_level():
             flat_duals = tuple(
-                fwAD.make_dual(p, t) for p, t in zip(flat_primals, flat_tangents)
+                [fwAD.make_dual(p, t) for p, t in zip(flat_primals, flat_tangents)]
             )
             duals = tree_unflatten(flat_duals, primals_argspec)
             output = func(*duals)
@@ -1748,9 +1764,9 @@ def linearize(func: Callable, *primals) -> tuple[Any, Callable]:
     )
 
     # Hold only the meta-data regarding the primals.
-    flat_primals_shape = tuple(p.shape for p in flat_primals)
-    flat_primals_device = tuple(p.device for p in flat_primals)
-    flat_primals_dtype = tuple(p.dtype for p in flat_primals)
+    flat_primals_shape = tuple([p.shape for p in flat_primals])
+    flat_primals_device = tuple([p.device for p in flat_primals])
+    flat_primals_dtype = tuple([p.dtype for p in flat_primals])
 
     def forward_ad_checks(flat_tangents):
         for idx, t in enumerate(flat_tangents):

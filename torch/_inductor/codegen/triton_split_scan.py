@@ -57,9 +57,9 @@ class TritonSplitScanKernel(TritonKernel):
 
     def initialize_range_tree(self, pid_cache):
         prefixes = ["y", "x", "r0_"]
-        assert len(self.numels) <= len(prefixes), (
-            "z dimension not supported for split scan"
-        )
+        assert len(self.numels) <= len(
+            prefixes
+        ), "z dimension not supported for split scan"
         active_prefixes = prefixes[len(prefixes) - len(self.numels) :]
 
         grid_dims = {"r0_": 0, "x": 1, "y": 2}
@@ -130,7 +130,7 @@ class TritonSplitScanKernel(TritonKernel):
             f"{scratch_elems_per_block} * {runtime_rblocks}"
         )
 
-        masks = OrderedSet(f"{tree.prefix}mask" for tree in self.range_trees)
+        masks = OrderedSet([f"{tree.prefix}mask" for tree in self.range_trees])
         self.filter_masks(masks)
         assert not self._load_mask, "ops.scan not supported inside ops.masked"
 

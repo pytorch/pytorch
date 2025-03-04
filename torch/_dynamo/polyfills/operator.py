@@ -58,7 +58,7 @@ def attrgetter(*attrs: str) -> Callable[[Any], Any | tuple[Any, ...]]:
     else:
 
         def getter(obj: Any) -> tuple[Any, ...]:  # type: ignore[misc]
-            return tuple(resolve_attr(obj, attr) for attr in attrs)
+            return tuple([resolve_attr(obj, attr) for attr in attrs])
 
     return getter
 
@@ -88,7 +88,7 @@ def itemgetter(*items: Any) -> Callable[[Any], Any | tuple[Any, ...]]:
     else:
 
         def getter(obj: Any) -> tuple[Any, ...]:  # type: ignore[misc]
-            return tuple(obj[item] for item in items)
+            return tuple([obj[item] for item in items])
 
     return getter
 

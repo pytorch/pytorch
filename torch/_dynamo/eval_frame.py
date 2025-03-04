@@ -156,7 +156,7 @@ _set_stance._dynamo_forbidden = True  # type: ignore[attr-defined]
 def _callback_from_stance(callback):
     if _stance.stance == "default":
         # force_backend
-        if _stance.backend is not None and callback not in (False, None):
+        if _stance.backend is not None and callback not in {False, None}:
             hooks = Hooks()
             callback = convert_frame.catch_errors_wrapper(
                 convert_frame.convert_frame(  # type: ignore[arg-type]
@@ -174,7 +174,7 @@ def _callback_from_stance(callback):
         # run mode
         return False
     elif _stance.stance == "fail_on_recompile":
-        if callback in (False, None):
+        if callback in {False, None}:
             return callback
 
         def fail_callback(*args, **kwargs):
@@ -615,7 +615,7 @@ class _TorchDynamoContext:
 
         # If the function is called using torch._dynamo.optimize decorator, we
         # should prevent any type of skipping.
-        if callback not in (None, False):
+        if callback not in {None, False}:
             if not hasattr(fn, "__code__"):
                 raise RuntimeError(
                     textwrap.dedent(
@@ -851,9 +851,9 @@ def is_inductor_supported():
 
 def check_for_incompatible_configs():
     # Some of the configs should be mutually exclusive
-    assert not (config.suppress_errors and config.fail_on_recompile_limit_hit), (
-        "Dynamo configs suppress_error and fail_on_recompile_limit_hit can not both be active at the same time."
-    )
+    assert not (
+        config.suppress_errors and config.fail_on_recompile_limit_hit
+    ), "Dynamo configs suppress_error and fail_on_recompile_limit_hit can not both be active at the same time."
 
 
 def optimize(*args, **kwargs):
@@ -862,9 +862,9 @@ def optimize(*args, **kwargs):
         if ca_kwargs_override:
             # NOTE: The process of translating other `torch.compile` kwargs to `torch._dynamo.optimize` kwargs
             # is more complicated, we will add it in the future when needed.
-            assert set(ca_kwargs_override.keys()) == {"fullgraph"}, (
-                f"Only `fullgraph` kwarg override is supported for now, but got {ca_kwargs_override.keys()}"
-            )
+            assert (
+                set(ca_kwargs_override.keys()) == {"fullgraph"}
+            ), f"Only `fullgraph` kwarg override is supported for now, but got {ca_kwargs_override.keys()}"
             kwargs["nopython"] = ca_kwargs_override["fullgraph"]
         return optimize(*args, **kwargs)
 
@@ -1209,7 +1209,7 @@ def rewrite_signature(
             torch.SymFloat,
             torch.SymBool,
             torch._C.ScriptObject,
-        ] + list(common_constant_types)
+        ] + [*common_constant_types]
 
         def is_supported_type(val):
             return isinstance(val, tuple(supported_types))
@@ -1280,7 +1280,7 @@ def rewrite_signature(
 
     assert graph_captured_output is not None
     matched_output_elements_positions = produce_matching(
-        "outputs", list(graph_captured_output) + flat_args, flat_results_traced
+        "outputs", [*graph_captured_output] + flat_args, flat_results_traced
     )
 
     new_graph = FlattenInputOutputSignature(
@@ -1298,7 +1298,7 @@ def rewrite_signature(
     def argument_names(f_sig, args, kwargs) -> list[str]:
         def signature_to_fullargspec(sig: inspect.Signature):
             # Get a list of Parameter objects from the Signature object
-            params = list(sig.parameters.values())
+            params = [*sig.parameters.values()]
             # Separate positional arguments, keyword-only arguments and varargs/varkw
             args = [
                 p.name
@@ -1318,10 +1318,12 @@ def rewrite_signature(
             )
             # Get default values for positional arguments and keyword-only arguments
             defaults = tuple(
-                p.default
-                for p in params
-                if p.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD
-                and p.default is not inspect.Parameter.empty
+                [
+                    p.default
+                    for p in params
+                    if p.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD
+                    and p.default is not inspect.Parameter.empty
+                ]
             )
             kwonlydefaults = {
                 p.name: p.default
@@ -1365,15 +1367,15 @@ def rewrite_signature(
                 assert unprovided_arg in kwargs, f"Missing argument {unprovided_arg}"
 
         # 4. Keyword arguments provided in `kwargs`.
-        input_strs += list(kwargs.keys())
+        input_strs += [*kwargs.keys()]
 
         # 5. Keyword-only arguments with default values if not provided are not exported
         # as part of the function signature.
         for kwonly_arg in fullargspec.kwonlyargs:
             kwonlydefaults = fullargspec.kwonlydefaults or {}
-            assert kwonly_arg in kwargs or kwonly_arg in kwonlydefaults, (
-                f"Missing keyword only argument {kwonly_arg}"
-            )
+            assert (
+                kwonly_arg in kwargs or kwonly_arg in kwonlydefaults
+            ), f"Missing keyword only argument {kwonly_arg}"
 
         return input_strs
 
@@ -1477,9 +1479,7 @@ def export(
         check_if_dynamo_supported()
         torch._C._log_api_usage_once("torch._dynamo.export")
         if decomposition_table is not None:
-            assert aten_graph, (
-                "Specifying a decomposition_table table or tracing mode is illegal without setting aten_graph=True"
-            )
+            assert aten_graph, "Specifying a decomposition_table table or tracing mode is illegal without setting aten_graph=True"
         if pre_dispatch:
             assert aten_graph, "pre_dispatch=True can only be used when aten_graph=True"
         f = innermost_fn(f)
@@ -1494,9 +1494,9 @@ def export(
 
         def guard_export_print(guards: _guards.GuardsSet):
             nonlocal out_guards
-            assert out_guards is None, (
-                "whole graph export entails exactly one guard export"
-            )
+            assert (
+                out_guards is None
+            ), "whole graph export entails exactly one guard export"
             out_guards = guards
 
         example_inputs = []
@@ -1505,9 +1505,9 @@ def export(
             gm: torch.fx.GraphModule, inner_example_inputs
         ):
             nonlocal graph
-            assert graph is None, (
-                "Tried to emit a second graph during export. Tracing through 'f' must produce a single graph."
-            )
+            assert (
+                graph is None
+            ), "Tried to emit a second graph during export. Tracing through 'f' must produce a single graph."
             graph = gm
 
             nonlocal fake_mode, example_inputs
@@ -1649,9 +1649,7 @@ def export(
             raise constraint_violation_error
 
         if graph is None:
-            assert same_signature, (
-                "Failed to produce a graph during tracing as no tensor operations were found and same_signature is False."
-            )
+            assert same_signature, "Failed to produce a graph during tracing as no tensor operations were found and same_signature is False."
             # If the module does not contain any tensor computation, we would create a graph with inputs and outputs.
             # To be consitant with the graph traced by dynano, `graph` will have only tensor inputs as placeholders
             # and tensor outputs as output nodes. non-tensor inputs and outputs will be added when rewriting signature.
@@ -1666,7 +1664,7 @@ def export(
             if out_guards is None:
                 out_guards = _guards.GuardsSet()
             assert out_guards is not None  # suppress mypy error
-            parameter_names = list(original_signature.parameters.keys())
+            parameter_names = [*original_signature.parameters.keys()]
             fx_graph = torch.fx.Graph()
             for i, name in enumerate(parameter_names):
                 if torch.is_tensor(flat_args[i]):

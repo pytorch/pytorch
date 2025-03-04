@@ -123,7 +123,7 @@ null_ctx_type = type(nullcontext)
 # This could plausibly be handled at the Dynamo level.
 pytree.register_pytree_node(
     torch.Size,
-    lambda xs: (list(xs), None),
+    lambda xs: ([*xs], None),
     lambda xs, _: tuple(xs),
     flatten_with_keys_fn=lambda xs: (
         [(pytree.SequenceKey(i), x) for i, x in enumerate(xs)],
@@ -135,7 +135,7 @@ pytree.register_pytree_node(
 
 def fake_signature(fn: Callable[_P, R], nargs: int) -> Callable[_P, R]:
     """FX gets confused by varargs, de-confuse it"""
-    argnames = ",".join(f"arg{i}" for i in range(nargs))
+    argnames = ",".join([f"arg{i}" for i in range(nargs)])
     return eval(f"lambda {argnames}: fn({argnames})", {"fn": fn})
 
 
@@ -794,11 +794,11 @@ def proxy_call(
         return r
 
     # For pre-autograd tracing, we do not want to run CompositeImplicit decomps.
-    if not pre_dispatch and func not in [
+    if not pre_dispatch and func not in (
         torch.ops.aten.size.default,
         torch.ops.aten.stride.default,
         torch.ops.aten.storage_offset.default,
-    ]:
+    ):
         with proxy_mode:
             r = func.decompose(*args, **kwargs)
             if r is not NotImplemented:
@@ -1025,7 +1025,7 @@ class PythonKeyTracer(Tracer):
         self.script_object_tracker = WeakIdKeyDictionary(
             dict=None, ref_type=_WeakHashRef
         )
-        self.sympy_expr_tracker = dict()
+        self.sympy_expr_tracker = {}
 
         # Stores the torch function that was called during tracing
         self.torch_fn_metadata = None
@@ -1312,11 +1312,11 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
             node = self.tracer.create_node("call_function", func, args, {})  # type: ignore[arg-type]
             if func == torch.amp.autocast_mode._enter_autocast:
                 self.enter_autocast_nodes.append(node)
-            if func in [
+            if func in (
                 torch._C._set_grad_enabled,
                 torch.amp.autocast_mode._enter_autocast,
                 torch.amp.autocast_mode._exit_autocast,
-            ]:
+            ):
                 node.meta["val"] = None
             return node
             # Don't actually run the function! We just want to trace the calls
@@ -1411,18 +1411,22 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         if len(args) == 1 and isinstance(args[0], (list, tuple)):
             n_args = (
                 tuple(
-                    get_proxy_slot(a, self.tracer).force().node
-                    if isinstance(a, py_sym_types)
-                    else a
-                    for a in args[0]
+                    [
+                        get_proxy_slot(a, self.tracer).force().node
+                        if isinstance(a, py_sym_types)
+                        else a
+                        for a in args[0]
+                    ]
                 ),
             )
         else:
             n_args = tuple(
-                get_proxy_slot(a, self.tracer).force().node
-                if isinstance(a, py_sym_types)
-                else a
-                for a in args
+                [
+                    get_proxy_slot(a, self.tracer).force().node
+                    if isinstance(a, py_sym_types)
+                    else a
+                    for a in args
+                ]
             )
 
         # func doesn't have a __torch_function__ that Proxy can interpose, so
@@ -1821,7 +1825,7 @@ class _ModuleStackTracer(PythonKeyTracer):
         node = super().create_node(*args, **kwargs)  # type: ignore[arg-type]
 
         # nn_module_stack
-        if node.op not in ["placeholder", "output"]:
+        if node.op not in {"placeholder", "output"}:
             if "nn_module_stack" not in node.meta:
                 node.meta["nn_module_stack"] = self.module_stack
             # convert nn_module_stack from Dict[key, (FQN, class)] -> Dict[str, Tuple[str, str]]
@@ -1844,7 +1848,7 @@ class _ModuleStackTracer(PythonKeyTracer):
             )
 
         # stack_trace
-        if "stack_trace" not in node.meta and node.op not in ["placeholder", "output"]:
+        if "stack_trace" not in node.meta and node.op not in {"placeholder", "output"}:
             user_frame_summary = CapturedTraceback.extract().summary()
             if user_frame_summary:
                 # we retain frames from forward() calls, or ops

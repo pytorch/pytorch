@@ -288,7 +288,7 @@ class OpsWrapper(DefaultHandler):
     @staticmethod
     def _unwrap(x):
         if isinstance(x, (list, tuple)):
-            return tuple(OpsWrapper._unwrap(v) for v in x)
+            return tuple([OpsWrapper._unwrap(v) for v in x])
         if isinstance(x, OpsValue):
             return x.value
         return x
@@ -296,7 +296,7 @@ class OpsWrapper(DefaultHandler):
     @staticmethod
     def _wrap(x):
         if isinstance(x, (list, tuple)):
-            return tuple(OpsValue(v) for v in x)
+            return tuple([OpsValue(v) for v in x])
         return OpsValue(x)
 
     @staticmethod

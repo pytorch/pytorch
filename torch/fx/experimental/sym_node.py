@@ -467,7 +467,7 @@ class SymNode:
                 self,
                 handle_sym_dispatch(
                     torch.sym_sum,
-                    (tuple(wrap_node(a) for a in args),),
+                    (tuple([wrap_node(a) for a in args]),),
                     {},
                 ),
             )
@@ -484,7 +484,7 @@ class SymNode:
             out_hint = sum(size_hints)
 
         fx_node, _ = self.shape_env._create_fx_call_function(
-            torch.sym_sum, (tuple(a.fx_node for a in args),)
+            torch.sym_sum, (tuple([a.fx_node for a in args]),)
         )
 
         # NB: Only for integers!
@@ -864,13 +864,13 @@ def _optimized_add(
 
     # (a0+a2) + a1 => (a0+a1+a2)
     if lhs_is_optimized_summation and rhs.is_symbol:
-        new_args = _binary_search_insert_arg(list(lhs._args), rhs)
+        new_args = _binary_search_insert_arg([*lhs._args], rhs)
         if new_args is not None:
             return make_optimized(new_args)
 
     # a1 + (a0+a2)=> (a0+a1+a2)
     if rhs_is_optimized_summation and lhs.is_symbol:
-        new_args = _binary_search_insert_arg(list(rhs._args), lhs)
+        new_args = _binary_search_insert_arg([*rhs._args], lhs)
         if new_args is not None:
             return make_optimized(new_args)
 
@@ -1086,7 +1086,7 @@ del name, sym_name, math_op_names, current_module  # type: ignore[possibly-undef
 
 def sympy_is_contiguous(sizes, strides):
     dim = len(sizes)
-    return sympy_is_contiguous_generic(sizes, strides, list(range(dim - 1, -1, -1)))
+    return sympy_is_contiguous_generic(sizes, strides, [*range(dim - 1, -1, -1)])
 
 
 def sympy_is_contiguous_generic(sizes, strides, dim_order):
@@ -1674,7 +1674,7 @@ def _make_user_magic(method, user_type):
         # need to handle them specially too.
         # Also, note that int_truediv doesn't go through this path: both
         # arguments are "int" so there isn't any promotion
-        if method not in [
+        if method not in {
             "add",
             "sub",
             "mul",
@@ -1691,7 +1691,7 @@ def _make_user_magic(method, user_type):
             "lt",
             "le",
             "ge",
-        ]:
+        }:
             return self, other
         f_self = isinstance(self, (float, torch.SymFloat))
         f_other = isinstance(other, (float, torch.SymFloat))

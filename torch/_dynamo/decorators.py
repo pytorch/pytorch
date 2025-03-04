@@ -352,17 +352,19 @@ def substitute_in_graph(
                     # Ignore annotations for parameters and return type
                     return (
                         tuple(
-                            p.name
-                            for p in sig.parameters.values()
-                            if (
-                                p.kind
-                                not in {
-                                    p.KEYWORD_ONLY,
-                                    # the name of *args and **kwargs is not important
-                                    p.VAR_POSITIONAL,
-                                    p.VAR_KEYWORD,
-                                }
-                            )
+                            [
+                                p.name
+                                for p in sig.parameters.values()
+                                if (
+                                    p.kind
+                                    not in {
+                                        p.KEYWORD_ONLY,
+                                        # the name of *args and **kwargs is not important
+                                        p.VAR_POSITIONAL,
+                                        p.VAR_KEYWORD,
+                                    }
+                                )
+                            ]
                         ),
                         {
                             p.name
