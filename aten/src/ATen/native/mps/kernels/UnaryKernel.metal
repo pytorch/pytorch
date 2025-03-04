@@ -108,7 +108,6 @@ kernel void sinc_complex_kernel(
   output[index] = vec2type_t<T0>(sinc(float2(input[index])));
 }
 
-
 #define INSTANTIATE_UNARY_KERNELS2(DTYPE0, DTYPE1)                             \
   template [[host_name("erfinv_" #DTYPE0 "_" #DTYPE1)]] kernel void            \
   erfinv_kernel(                                                               \
@@ -131,7 +130,6 @@ kernel void sinc_complex_kernel(
       device DTYPE0* output [[buffer(0)]],                                     \
       constant DTYPE1* input [[buffer(1)]],                                    \
       uint id [[thread_position_in_grid]]);
-
 
 #if __METAL_VERSION__ >= 310
 INSTANTIATE_UNARY_KERNELS2(bfloat, bfloat);
