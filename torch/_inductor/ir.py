@@ -5078,7 +5078,7 @@ class ExternKernel(InputsKernel):
             return self.python_kernel_name
 
     @staticmethod
-    def copy_input(x: IRNode) -> Pointwise:
+    def copy_input(x: IRNode) -> Union[TensorBox, ShapeAsConstantBuffer]:
         pw = Pointwise.create(
             device=x.get_device(),
             dtype=x.get_dtype(),
@@ -5087,7 +5087,6 @@ class ExternKernel(InputsKernel):
             origin_node=x.get_origin_node(),
             traceback=x.get_traceback(),
         )
-        assert isinstance(pw, Pointwise)
         pw.realize()
         return pw
 
@@ -5811,12 +5810,11 @@ class ExternKernelAlloc(ExternKernel):
         op_overload: Optional[_OpOverloads] = None,
     ) -> None:
         unwrapped_inputs = self.unwrap_storage(inputs)
-        assert isinstance(unwrapped_inputs, Sequence)
-        assert all(isinstance(i, Buffer) for i in unwrapped_inputs)
+        assert all(isinstance(i, IRNode) for i in unwrapped_inputs)
         super().__init__(
             None,
             layout,
-            cast(Sequence[Buffer], unwrapped_inputs),
+            cast(Sequence[IRNode], unwrapped_inputs),
             constant_args,
             kwargs or {},
             None,
