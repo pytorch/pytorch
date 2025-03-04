@@ -818,6 +818,8 @@ def _is_leaf(tree: PyTree, is_leaf: Optional[Callable[[PyTree], bool]] = None) -
 # num_leaves: the number of leaves
 @dataclasses.dataclass(init=True, frozen=True, eq=True, repr=False)
 class PyTreeSpec:
+    """Representing the structure of the pytree."""
+
     type: Any
     context: Context
     children_specs: list["TreeSpec"]
@@ -864,9 +866,12 @@ class PyTreeSpec:
         return NotImplemented
 
     def is_leaf(self) -> bool:
+        """Test whether the treespec represents a leaf."""
         return self.num_nodes == 1 and self.num_leaves == 1
 
-    def flatten_up_to(self, tree: PyTree) -> list[PyTree]:
+    def flatten_up_to(self, full_tree: PyTree) -> list[PyTree]:
+        """Flatten the subtrees in ``full_tree`` up to the structure of this treespec and return a list of subtrees."""
+
         def helper(treespec: TreeSpec, tree: PyTree, subtrees: list[PyTree]) -> None:
             if treespec.is_leaf():
                 subtrees.append(tree)
@@ -946,10 +951,11 @@ class PyTreeSpec:
                 helper(subspec, subtree, subtrees)
 
         subtrees: list[PyTree] = []
-        helper(self, tree, subtrees)
+        helper(self, full_tree, subtrees)
         return subtrees
 
     def unflatten(self, leaves: Iterable[Any]) -> PyTree:
+        """Reconstruct a pytree from the leaves."""
         if not isinstance(leaves, (list, tuple)):
             leaves = list(leaves)
         if len(leaves) != self.num_leaves:
