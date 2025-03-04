@@ -1,6 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # implement matrix related ops for distributed tensor
 
+from typing import Optional
 
 import torch
 from torch.distributed.device_mesh import DeviceMesh
@@ -566,21 +567,22 @@ def scaled_dot_product_efficient_attention_backward_strategy(
 def scaled_scaled_dot_product_cudnn_attention_strategy(
     mesh: DeviceMesh, op_schema: OpSchema
 ) -> OpStrategy:
-    assert (
-        len(op_schema.args_schema) == 8
-    ), f"scaled_scaled_dot_product_cudnn_attention expects 8 args, got {len(op_schema.args_schema)}"
-
     (
-        query_strategy,
-        key_strategy,
-        value_strategy,
+        query_strategy,  # query
+        _,  # key
+        _,  # value
         attn_bias_strategy,
-        compute_log_sumexp,
-        dropout_p,
-        is_causal,
-        return_debug_mask,
+        _,  # compute_log_sumexp
+        _,  # dropout_p
+        _,  # is_causal
+        *rest_args,
     ) = op_schema.args_schema
+    return_debug_mask = len(op_schema.args_schema) >= 8 and rest_args[0]
     has_attn_bias = attn_bias_strategy is not None
+    debug_attn_mask_sharding: Optional[Placement] = (
+        Replicate() if return_debug_mask else None
+    )
+
     assert isinstance(query_strategy, OpStrategy)
     # assuming q/k/v have the same shape
 
@@ -598,7 +600,9 @@ def scaled_scaled_dot_product_cudnn_attention_strategy(
         None,  # max_k
         None,  # philox_seed
         None,  # philox_offset
-        Replicate(),  # debug_attn_mask is not supproted by pytorch and is an empty tensor
+        # TODO: debug_attn_mask is not supproted by pytorch and is always an empty tensor
+        # https://github.com/pytorch/pytorch/blob/60205b0eb2602317856312a66d955c88334ade0b/aten/src/ATen/native/transformers/cuda/attention.cu#L839-L840
+        debug_attn_mask_sharding,  # debug_attn_mask
         Replicate(),  # q
         Replicate(),  # k
         Replicate(),  # v
@@ -626,8 +630,8 @@ def scaled_scaled_dot_product_cudnn_attention_strategy(
         None,  # cum_seq_k
         None,  # max_q
         None,  # max_k
-        Replicate(),  # rng_state
-        None,  # unused
+        None,  # philox_seed
+        None,  # philox_offset
         debug_attn_mask_sharding,
         qkv_sharding,
         qkv_sharding,
@@ -636,6 +640,12 @@ def scaled_scaled_dot_product_cudnn_attention_strategy(
     single_mesh_dim_strategies.append(num_heads_dim_sharding)
 
     # Context Parallelism: shards on the sequence dim
+    if return_debug_mask:
+        debug_attn_mask_sharding: Placement = Shard(2)  # seq dim
+    else:
+        # empty debug mask, replicated
+        debug_attn_mask_sharding = Replicate()
+
     single_mesh_dim_strategies.append(
         [
             Shard(2),  # output
@@ -644,9 +654,9 @@ def scaled_scaled_dot_product_cudnn_attention_strategy(
             None,  # cum_seq_k
             None,  # max_q
             None,  # max_k
-            Replicate(),  # rng_state
-            None,  # unused
-            Shard(2),  # debugattn
+            None,  # philox_seed
+            None,  # philox_offset
+            None,  # debug_attn_mask
             Shard(2),  # q
             Shard(2),  # k
             Shard(2),  # v

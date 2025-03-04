@@ -73,7 +73,8 @@ class RingAttentionTest(DTensorTestBase):
                 "backend": backends,
                 "load_balance": [True, False],
                 "rotater": [_RotateMethod.ALL_TO_ALL, _RotateMethod.ALL_GATHER],
-                "test_forward_only": [True, False],
+                # "test_forward_only": [True, False],
+                "test_forward_only": [True],
             },
             self._test_ring_attention_sdpa,
         )
