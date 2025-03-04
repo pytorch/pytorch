@@ -151,10 +151,10 @@ def populate_builtin_to_tensor_fn_map():
             most_recent_func = func
             return func(*args, **kwargs)
 
-    inp0 = torch.ones(1, device="cpu")
-    inp1 = torch.ones(1, device="cpu")
-    inp0_int = torch.ones(1, dtype=torch.int32, device="cpu")
-    inp1_int = torch.ones(1, dtype=torch.int32, device="cpu")
+    inp0 = torch.ones(1)
+    inp1 = torch.ones(1)
+    inp0_int = torch.ones(1, dtype=torch.int32)
+    inp1_int = torch.ones(1, dtype=torch.int32)
     with GetMethodMode():
         setups_and_oplists = [
             (lambda o: o(inp0), un_ops),
@@ -261,9 +261,9 @@ class SymbolicTorchFunctionState:
 
         TorchFunctionModeStackVariable.reset()
 
-        self.mode_stack: collections.deque[
-            TorchFunctionModeVariable
-        ] = collections.deque()
+        self.mode_stack: collections.deque[TorchFunctionModeVariable] = (
+            collections.deque()
+        )
 
         for i, val in enumerate(py_stack):
             self.mode_stack.append(
@@ -587,9 +587,9 @@ class TensorWithTFOverrideVariable(TensorVariable):
         import torch
 
         kwargs = dict(tensor_var.__dict__)
-        assert (
-            kwargs.pop("class_type") is torch.Tensor
-        ), "invalid class type in TensorWithTFOverrideVariable.from_tensor_var"
+        assert kwargs.pop("class_type") is torch.Tensor, (
+            "invalid class type in TensorWithTFOverrideVariable.from_tensor_var"
+        )
         var = cls(torch_function_fn=torch_function_fn, class_type=class_type, **kwargs)
         var.install_global(tx)
         return var

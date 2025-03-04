@@ -12,7 +12,7 @@ from torch.testing._internal.common_device_type import (
     skipCPUIf,
     skipGPUIf,
 )
-from torch.testing._internal.common_utils import parametrize
+from torch.testing._internal.common_utils import parametrize, skipIfXpu
 from torch.testing._internal.inductor_utils import HAS_GPU
 
 
@@ -38,6 +38,10 @@ class TestUnbackedSymints(InductorTestCase):
 
         torch.testing.assert_close(actual, expected)
 
+    @skipIfXpu(
+        msg="The OP aten.nonzero implemented by XPU has different memory layout with fake tensor."
+        " Remove this skip after #146883 fixed."
+    )
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_expand_ok_with_runtime_assert(self, device):
@@ -385,9 +389,6 @@ class TestUnbackedSymints(InductorTestCase):
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch(capture_dynamic_output_shape_ops=True)
     def test_issue_143498(self, device):
-        if device == "cpu":
-            raise unittest.SkipTest("CPU Failure")
-
         class Model(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()

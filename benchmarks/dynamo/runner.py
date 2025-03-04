@@ -711,7 +711,7 @@ class ParsePerformanceLogs(Parser):
             for idx, (batch_a, batch_b) in enumerate(
                 zip(batch_sizes, frame_batch_sizes)
             ):
-                assert batch_a == batch_b or batch_a == 0 or batch_b == 0, print(
+                assert batch_a == batch_b or batch_a == 0 or batch_b == 0, (
                     f"a={batch_a}, b={batch_b}"
                 )
                 batch_sizes[idx] = max(batch_a, batch_b)
