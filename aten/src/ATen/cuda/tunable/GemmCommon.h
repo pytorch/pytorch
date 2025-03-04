@@ -154,6 +154,11 @@ inline std::string ComputeTypeFor<Float8_e5m2>() {
 }
 
 template <>
+inline std::string ComputeTypeFor<Float8_e4m3fnuz>() {
+  return "f32_r";
+}
+
+template <>
 inline std::string ComputeTypeFor<Float8_e5m2fnuz>() {
   return "f32_r";
 }
