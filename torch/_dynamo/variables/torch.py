@@ -210,6 +210,14 @@ def get_overridable_functions():
     return funcs
 
 
+def is_python_dispatcher_op_overload(op):
+    return (
+        isinstance(op, torch._ops.CustomOpOverload)
+        or isinstance(op, torch._ops.OpOverload)
+        and isinstance(op._op, torch._ops.CustomOpOverload)
+    )
+
+
 class BaseTorchVariable(VariableTracker):
     """common base for all torch.* functions, classes, modules and other things"""
 
@@ -983,11 +991,12 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         args: Sequence[VariableTracker],
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        import torch._higher_order_ops.flat_apply as flat_apply
+
         from . import ConstantVariable, SymNodeVariable, TensorVariable
         from .builder import wrap_fx_proxy
 
         if self.nonstrict_traceable:
-            import torch._higher_order_ops.flat_apply as flat_apply
             from torch._higher_order_ops.flat_apply import (
                 func_to_graphable,
                 is_graphable_type,
@@ -1114,11 +1123,7 @@ This error is most likely due to a call to `nonstrict_trace`-ed function, where 
                 return result
 
         # If the function is custom op, we need to wrap it as flat_apply call in the fx graph.
-        if isinstance(
-            self.value, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)
-        ) and any(not isinstance(x, (variables.ConstantVariable)) for x in args):
-            from torch._higher_order_ops.flat_apply import flat_apply
-
+        if is_python_dispatcher_op_overload(self.value):
             if isinstance(self.value, torch._ops.OpOverload):
                 opoverload = self.value
             else:
@@ -1135,7 +1140,9 @@ This error is most likely due to a call to `nonstrict_trace`-ed function, where 
                 pytree.tree_flatten
             ).call_function(tx, [packed_input_vt], {})
 
+            assert isinstance(flat_args_and_spec, variables.TupleVariable)
             flat_args_vt, in_spec_vt = flat_args_and_spec.items
+            assert isinstance(flat_args_vt, variables.ListVariable)
             in_spec = in_spec_vt.as_python_constant()
             in_spec_proxy = tx.output.register_static_attr_and_return_proxy(
                 f"{opoverload._namespace}_{opoverload._opname}_input_spec", in_spec

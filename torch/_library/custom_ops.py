@@ -346,7 +346,7 @@ class CustomOpDef:
                         )
                         return result
 
-                    need_python_dispatch = isinstance(
+                    need_python_dispatch = hasattr(self, "_opoverload") and isinstance(
                         self._opoverload, torch._ops.CustomOpOverload
                     )
 
@@ -361,9 +361,9 @@ class CustomOpDef:
                             )
                     else:
                         if need_python_dispatch:
-                            self._opoverload.py_impl(
-                                _C._dispatch_key_for_device(device_type)
-                            )(backend_impl)
+                            dispatch_key = _C._dispatch_key_for_device(device_type)
+                            dispatch_key = getattr(_C.DispatchKey, dispatch_key)
+                            self._opoverload.py_impl(dispatch_key)(backend_impl)
                         else:
                             self._lib.impl(
                                 self._name,

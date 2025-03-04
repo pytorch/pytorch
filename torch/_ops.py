@@ -320,6 +320,7 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
             TransformType,
             DispatchKey,
         ],
+        with_keyset: bool = False,
     ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
         if isinstance(k, DispatchKey) and not self.non_fallthrough_keys.has(k):
             self.non_fallthrough_keys = self.non_fallthrough_keys.add(k)
@@ -1236,11 +1237,11 @@ class OpOverloadPacket:
             op_, op_dk_, tags = op_dk_tags
             schema = torch._C._get_schema(self._qualified_op_name, use_key)
             if _has_pytree_object_arg(schema):
-                overload = CustomOpOverload(self, op_, op_dk_, schema, tags)
+                overload = CustomOpOverload(self, op_, op_dk_, schema, tags)  # type: ignore[assignment]
             elif _has_script_object_arg(schema):
-                overload = TorchBindOpOverload(self, op_, op_dk_, schema, tags)
+                overload = TorchBindOpOverload(self, op_, op_dk_, schema, tags)  # type: ignore[assignment]
             else:
-                overload = OpOverload(self, op_, op_dk_, schema, tags)
+                overload = OpOverload(self, op_, op_dk_, schema, tags)  # type: ignore[assignment]
             # cache the overload object
             setattr(self, key, overload)
             self._dir.append(key)
