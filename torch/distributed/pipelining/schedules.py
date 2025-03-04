@@ -504,7 +504,13 @@ or equal to the number of stages ({self._num_stages})."
 
         # Split target into microbatches
         if target is not None:
-            targets_split = list(torch.tensor_split(target, self._n_microbatches))
+            if self._args_chunk_spec is not None:
+                dim = self._args_chunk_spec[0].split_dim
+            else:
+                dim = 0
+            targets_split = list(
+                torch.tensor_split(target, self._n_microbatches, dim=dim)
+            )
         else:
             targets_split = None
 
@@ -1237,6 +1243,13 @@ class PipelineScheduleMulti(_PipelineSchedule):
         # Split target into microbatches
         if target is not None:
             targets_split = list(torch.tensor_split(target, self._n_microbatches))
+            if self._args_chunk_spec is not None:
+                dim = self._args_chunk_spec[0].split_dim
+            else:
+                dim = 0
+            targets_split = list(
+                torch.tensor_split(target, self._n_microbatches, dim=dim)
+            )
         else:
             targets_split = None
 

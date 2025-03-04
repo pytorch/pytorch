@@ -27,6 +27,7 @@ from torch.distributed.pipelining import (
     ScheduleLoopedBFS,
     ScheduleZBVZeroBubble,
 )
+from torch.distributed.pipelining.microbatch import TensorChunkSpec
 from torch.distributed.pipelining.schedules import _PipelineScheduleRuntime
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
@@ -114,6 +115,44 @@ class ScheduleTest(MultiProcContinousTest):
                 x_clone = mod_ref(x_clone)
 
             torch.testing.assert_close(x_clone, out)
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @parametrize("ScheduleClass", [ScheduleGPipe])
+    def test_custom_chunking(self, ScheduleClass):
+        num_microbatches = 4
+        mod = MultiMLP(d_hid // num_microbatches, n_layers=self.world_size)
+        mod.to(self.device)
+
+        x = torch.randn(batch_size, d_hid, device=self.device)
+
+        # Create a pipeline
+        stage = PipelineStage(
+            mod,
+            self.rank,
+            self.world_size,
+            self.device,
+        )
+
+        # Attach to a schedule
+        loss_fn = torch.nn.MSELoss(reduction="sum")
+        schedule = ScheduleClass(
+            stage,
+            num_microbatches,
+            scale_grads=False,
+            loss_fn=loss_fn,
+            args_chunk_spec=(TensorChunkSpec(1),),
+        )
+
+        # Run
+        num_iters = 2
+        for _ in range(num_iters):
+            if self.rank == 0:
+                schedule.step(x)
+            elif self.rank == self.world_size - 1:
+                target = torch.randn(batch_size, d_hid, device=self.device)
+                losses = []
+                schedule.step(target=target, losses=losses)
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")

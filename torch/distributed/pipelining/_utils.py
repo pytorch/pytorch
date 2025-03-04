@@ -67,10 +67,6 @@ def validate_tensor_metadata(desc, expected, given):
         raise PipeliningShapeError(
             f"{desc} has a dtype mismatch: expected {expected.dtype} actual {given.dtype}"
         )
-    if not expected.stride() == given.stride():
-        raise PipeliningShapeError(
-            f"{desc} has a stride mismatch: expected {expected.stride()} actual {given.stride()}"
-        )
 
 
 def validate_tensors_metadata(
