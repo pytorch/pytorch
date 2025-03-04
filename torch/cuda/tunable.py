@@ -116,7 +116,7 @@ There are several use cases for offline tuning.
 
 One use case involves a workload with a high-memory utilization, where regular tuning might lead to running out of memory.
 
-Another use case would be a workload that is compute intensive to run and it would be more resource efficient to collect
+Another use case is for compute-intensive workloads. In such cases, it is more resource-efficient to collect
 the GEMMs for the workload once, and then tune repeatedly with different tuning parameters or libraries.
 
 Workflow
