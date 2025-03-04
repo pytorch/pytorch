@@ -996,8 +996,8 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
                     outputTensor,
                     inputTensor,
                     outputTensor.sizes(),
-                    outputTensor.strides(),
                     inputTensor.strides(),
+                    outputTensor.strides(),
                     inputTensor.ndimension());
         if (extra) {
           mtl_setBytes(computeEncoder, *extra, 7);
