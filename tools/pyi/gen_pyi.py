@@ -393,6 +393,11 @@ def gen_nn_functional(fm: FileManager) -> None:
                         "tuple[Tensor, Tensor]",
                     )
                 ],
+                f"adaptive_avg_pool{d}d": [
+                    f"def adaptive_avg_pool{d}d({{}}) -> Tensor: ...".format(
+                        ", ".join([f"{INPUT}", "output_size: Union[_int, _size]"])
+                    )
+                ],
             }
         )
 
@@ -491,6 +496,31 @@ def gen_nn_functional(fm: FileManager) -> None:
                             "is_causal: bool = False",
                             "scale: Optional[float] = None",
                             "enable_gqa: bool = False",
+                        ]
+                    )
+                )
+            ],
+            "binary_cross_entropy": [
+                "def binary_cross_entropy({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            f"{INPUT}",
+                            "target: Tensor",
+                            "weight: Optional[Tensor] = None",
+                            "reduction: str = ...",
+                        ]
+                    )
+                )
+            ],
+            "col2im": [
+                "def col2im({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            f"{INPUT}",
+                            "output_size: Union[_int, _size]",
+                            f"{KERNEL_SIZE}",
+                            "dilation: Union[_int, _size]",
+                            f"{STRIDE_PADDING}",
                         ]
                     )
                 )
