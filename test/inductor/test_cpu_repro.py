@@ -1028,6 +1028,21 @@ class CPUReproTests(TestCase):
         a = torch.randn(1, 3)
         self.common(fn, (a,))
 
+    def test_tanh_atan2(self):
+        # https://github.com/pytorch/pytorch/issues/148241
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.shrink = nn.Tanhshrink()
+
+            def forward(self, x):
+                x = self.shrink(x)
+                x = torch.atan2(x, x)
+                return x
+
+        x = torch.randn(1, 3, 64, 64)
+        self.common(Model(), (x,))
+
     def test_index_propagation_issue_102065(self):
         def fn(x):
             x = torch.arange(x.numel())

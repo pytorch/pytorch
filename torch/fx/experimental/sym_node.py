@@ -1265,7 +1265,17 @@ def _make_node_magic(method, func):
 
                 def get_id(sym_node) -> Optional[int]:
                     # We don't want to return an ID if the input is a constant
-                    return None if sym_node.constant is not None else id(sym_node)
+                    import sympy
+
+                    if sym_node.constant is not None:
+                        return None
+                    elif id(sym_node) == id(result):
+                        return None
+                    elif isinstance(sym_node.expr, (sympy.Integer, sympy.Float)):
+                        return None
+                    elif sym_node.expr in (sympy.true, sympy.false):
+                        return None
+                    return id(sym_node)
 
                 dtrace_structured(
                     "expression_created",
