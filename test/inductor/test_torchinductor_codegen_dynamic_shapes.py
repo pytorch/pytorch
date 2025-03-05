@@ -42,9 +42,9 @@ def check_codegen(
     self: TestCase,
     model,
     example_inputs,
-    device,
     kwargs=None,
     *,
+    device: torch.types.Device,
     is_cpp_code: bool,
 ):
     kwargs = kwargs or {}
