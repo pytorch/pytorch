@@ -1778,7 +1778,9 @@ class MetaConverter(Generic[_TensorT]):
                         callback,
                         AttrSource(source, "grad"),
                         symbolic_context,
-                    )
+                        # There's a failure in the test below because the meta_tensor(...) and r.grad devices don't match
+                        # PYTORCH_TEST_WITH_DYNAMO=1 pytest test/test_python_dispatch.py -k test_subclass_autograd_device_check -rs -sv  # noqa: B950
+                    ).to(r.device)
                 torch._C._set_conj(r, t.is_conj)
                 torch._C._set_neg(r, t.is_neg)
             # This can be skipped if necessary for performance reasons

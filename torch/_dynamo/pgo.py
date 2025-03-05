@@ -255,6 +255,10 @@ class FrameStateSizeEntry:
             return True
         if self.stride is auto_unset:
             return False
+        if dim >= len(self.stride):
+            # PYTORCH_TEST_WITH_DYNAMO=1 python test/test_cpp_api_parity.py TestCppApiParity.test_torch_nn_EmbeddingBag_sparse
+            # self.stride at some point is an empty tuple
+            return False
         return self.stride[dim] is auto_dynamic
 
     @staticmethod
