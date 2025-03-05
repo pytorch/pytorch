@@ -215,11 +215,10 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                     ) {
                     """
 
-                if config.aot_inductor.debug_compile:
-                    self.generate_input_output_runtime_checks()
-                    run_impl_proto += """
-                        __check_inputs_outputs(input_handles, output_handles);
-                    """
+                self.generate_input_output_runtime_checks()
+                run_impl_proto += """
+                    __check_inputs_outputs(input_handles, output_handles);
+                """
 
                 if config.aot_inductor.use_minimal_arrayref_interface:
                     self.prefix.splice(
@@ -817,6 +816,27 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         """Returns a newly-created, temporary RAII tensor handle containing the
         reinterpreted tensor data.  Callers of this function are responsible for saving
         the handle if persistent access is needed."""
+        dim = str(len(size))
+
+        def create_reinterpret_call() -> str:
+            args = [
+                f"{data.get_name()}",
+                dim,
+                self.codegen_int_array_var(
+                    self.codegen_shape_tuple(size),
+                    writeline,
+                    known_statically=self.is_statically_known_list_of_ints(size),
+                    graph=self.get_codegened_graph(),
+                ),
+                self.codegen_int_array_var(
+                    self.codegen_shape_tuple(stride),
+                    writeline,
+                    known_statically=self.is_statically_known_list_of_ints(stride),
+                    graph=self.get_codegened_graph(),
+                ),
+                offset,
+            ]
+            return f"wrap_with_raii_handle_if_needed(reinterpret_tensor_wrapper({', '.join(args)}))"
 
         def create_new_tensor_handle() -> tuple[str, list[str]]:
             # Calling reset() on ArrayRefTensor does nothing, since the array is
@@ -825,12 +845,16 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             if (name := data.get_name()) in self.stack_allocated_buffers:
                 return name, []
 
-            tmp_AtenTensorHandle = f"tmp_{name}_{next(self.tmp_tensor_id)}"
-            tmp_call_strs = [
-                f"AtenTensorHandle {tmp_AtenTensorHandle};",
-                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_tensor_handle({data.get_name()}, &{tmp_AtenTensorHandle}));",
-            ]
-            return f"RAIIAtenTensorHandle({tmp_AtenTensorHandle})", tmp_call_strs
+            # TODO (benjaminglass1): uncomment this and remove  create_reinterpret_view
+            # after the AOTI forwards compatibility window has passed.
+            #
+            # tmp_AtenTensorHandle = f"tmp_{name}_{next(self.tmp_tensor_id)}"
+            # tmp_call_strs = [
+            #     f"AtenTensorHandle {tmp_AtenTensorHandle};",
+            #     f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_tensor_handle({data.get_name()}, &{tmp_AtenTensorHandle}));",
+            # ]
+            # return f"RAIIAtenTensorHandle({tmp_AtenTensorHandle})", tmp_call_strs
+            return create_reinterpret_call(), []
 
         if (
             size == data.layout.size

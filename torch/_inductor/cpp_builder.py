@@ -723,10 +723,7 @@ def _setup_standard_sys_libs(
         include_dirs.append(build_paths.linux_kernel_include)
         include_dirs.append("include")
 
-        if aot_mode and not use_relative_path:
-            linker_script = _LINKER_SCRIPT
-        else:
-            linker_script = os.path.basename(_LINKER_SCRIPT)
+        linker_script = os.path.basename(_LINKER_SCRIPT)
 
         if _is_clang(cpp_compiler):
             passthrough_args.append(" --rtlib=compiler-rt")
