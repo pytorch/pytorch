@@ -7580,13 +7580,16 @@ class CommonTemplate:
         )
 
     def test_indirect_broadcast_embedding(self):
-        B, T, D, V = (8, 2048, 4096, 8192)
+        B, T, D, V = (8, 2048, 4096, 2048)
         op = nn.Embedding(V, D).to(self.device).to(torch.float32)
         shared_weight = op.weight.data
+        tmp_op = nn.Embedding(V, D).to(self.device).to(torch.float32)
+        tmp_op.weight.data.copy_(shared_weight)
         _input = torch.randint(0, V, (B, T), device=self.device)
         self.common(op, (_input,))
+        compiled_op = torch.compile(tmp_op)
         code = run_and_get_triton_code(
-            torch.compile(op),
+            compiled_op,
             _input,
         )
         # Check if the indices tensor are accessed via x dimension and the tiling works
@@ -7598,6 +7601,14 @@ class CommonTemplate:
             "tmp0 = tl.load(in_ptr0 + (x1), None,",
         ]:
             self.assertTrue(string in code)
+        if DO_PERF_TEST:
+            from triton.testing import do_bench
+
+            torch_ms = do_bench(lambda: op(_input))
+            print(f"{torch_ms=:.3f}")
+            inductor_ms = do_bench(lambda: compiled_op(_input))
+            print(f"{inductor_ms=:.3f}")
+            print(f"speedup={torch_ms/inductor_ms:.2f}x")
 
     def test_roi_align(self):
         if not has_torchvision_roi_align():
