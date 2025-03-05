@@ -140,8 +140,6 @@ ONNXProgram(
         """Run the ONNX model with the same arguments you would provide to the GraphModule."""
         import onnxruntime as ort
 
-        if kwargs is None:
-            kwargs = {}
         flatten_args = _process_args(args, kwargs)
 
         if self._inference_session is None:
