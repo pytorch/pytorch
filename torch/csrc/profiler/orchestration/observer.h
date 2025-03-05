@@ -60,6 +60,7 @@ struct TORCH_API ExperimentalConfig {
       bool adjust_profiler_step = false,
       bool disable_external_correlation = false,
       bool profile_all_threads = false,
+      bool capture_overload_names = false,
       bool adjust_timestamps = false);
   explicit operator bool() const;
 
@@ -94,6 +95,10 @@ struct TORCH_API ExperimentalConfig {
    * that are not spawned from the main thread on which the
    * profiler was enabled, similar to on_demand mode */
   bool profile_all_threads;
+
+  /* controls whether overload names are queried from an ATen
+   * function schema and stored in the profile  */
+  bool capture_overload_names;
 
   /*
    * Controls whether or not timestamp adjustment occurs after profiling.
