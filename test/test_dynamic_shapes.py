@@ -432,11 +432,12 @@ class TestPySymInt(TestCase):
         else:
             result = expand_x + expand_x
 
-        gt_op, _bt = shape_env.guards[-1]
+        gt_op, _bt, is_size_obv = shape_env.guards[-1]
         self.assertTrue(isinstance(gt_op, sympy.core.relational.StrictGreaterThan))
         self.assertTrue(str(x.shape[0]), str(gt_op.args[0]))
         self.assertTrue(str(expand_x.shape[1]), str(x.shape[0]))
         self.assertTrue(str(expand_x.shape[1]), str(result.shape[0]))
+        self.assertFalse(is_size_obv)
 
     def test_floordiv_static(self):
         shape_env = ShapeEnv()
