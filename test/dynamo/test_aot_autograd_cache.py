@@ -35,6 +35,7 @@ from torch.testing._internal.common_utils import (
     skipIfWindows,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_triton
+from torch.testing._internal.triton_utils import requires_cuda
 from torch.testing._internal.two_tensor import TwoTensor
 
 
@@ -723,6 +724,7 @@ class AOTAutogradCacheTests(InductorTestCase):
             result = f()
             self.assertEqual(result[0].device, torch.device("cuda:1"))
 
+    @requires_cuda
     @inductor_config.patch("fx_graph_cache", True)
     @inductor_config.patch("fx_graph_remote_cache", False)
     @functorch_config.patch({"enable_autograd_cache": True})
