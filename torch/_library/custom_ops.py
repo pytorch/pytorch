@@ -347,7 +347,7 @@ class CustomOpDef:
                         return result
 
                     need_python_dispatch = hasattr(self, "_opoverload") and isinstance(
-                        self._opoverload, torch._ops.CustomOpOverload
+                        self._opoverload, torch._ops.PythonDispatcherOpOverload
                     )
 
                     if device_type is None:
@@ -623,7 +623,9 @@ class CustomOpDef:
         )
         self._opoverload = utils.lookup_op(self._qualname)
 
-        need_python_dispatch = isinstance(self._opoverload, torch._ops.CustomOpOverload)
+        need_python_dispatch = isinstance(
+            self._opoverload, torch._ops.PythonDispatcherOpOverload
+        )
 
         def fake_impl(*args, **kwargs):
             if self._abstract_fn is None:

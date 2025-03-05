@@ -945,9 +945,9 @@ class OpOverload(OperatorBase):
     # TODO: add more methods to expose information about input and output arguments
 
 
-class CustomOpOverload(OpOverload):
+class PythonDispatcherOpOverload(OpOverload):
     def __repr__(self):
-        return "<CustomOpOverload(op='{}.{}', overload='{}')>".format(
+        return "<PythonDispatcherOpOverload(op='{}.{}', overload='{}')>".format(
             *self._schema.name.split("::"), self._overloadname
         )
 
@@ -1237,7 +1237,7 @@ class OpOverloadPacket:
             op_, op_dk_, tags = op_dk_tags
             schema = torch._C._get_schema(self._qualified_op_name, use_key)
             if _has_pytree_object_arg(schema):
-                overload = CustomOpOverload(self, op_, op_dk_, schema, tags)  # type: ignore[assignment]
+                overload = PythonDispatcherOpOverload(self, op_, op_dk_, schema, tags)  # type: ignore[assignment]
             elif _has_script_object_arg(schema):
                 overload = TorchBindOpOverload(self, op_, op_dk_, schema, tags)  # type: ignore[assignment]
             else:
