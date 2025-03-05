@@ -44,6 +44,8 @@ def _compare_tensors(
     if expected.dtype == torch.bool:
         expected = expected.to(torch.float32)
         actual = actual.to(torch.float32)
+    if torch.is_complex(expected):
+        expected = torch.view_as_real(expected)
     abs_diff = torch.abs(expected - actual)
     eps = 1e-7
     normalizer = torch.abs(expected) + eps
