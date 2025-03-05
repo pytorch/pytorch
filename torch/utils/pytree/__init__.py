@@ -176,15 +176,19 @@ def register_pytree_node(  # type: ignore[no-any-unimported]
             how to convert the custom json dumpable representation of the context back to the
             original context. This is used for json deserialization, which is being used in
             :mod:`torch.export` right now.
+        flatten_with_keys_func (callable, optional): An optional keyword argument to specify how to
+            access each pytree leaf's keypath when flattening and tree-mapping.
 
     Example::
 
         >>> # xdoctest: +SKIP
+        >>> from collections import UserList
+        ... class MyList(UserList): pass
         >>> # Registry a Python type with lambda functions
-        >>> register_pytree_node(
-        ...     set,
-        ...     lambda s: (sorted(s), None),
-        ...     lambda children, _: set(children),
+        ... register_pytree_node(
+        ...     MyList,
+        ...     lambda lst: (list(lst), None),
+        ...     lambda children, _: MyList(children),
         ... )
     """
     _register_pytree_node(
@@ -205,8 +209,7 @@ def __getattr__(name: str) -> _Any:
         # Lazy import
         import torch.utils._cxx_pytree as cxx  # noqa: F811
 
-        globals()["cxx"] = cxx
-        _sys.modules[f"{__name__}.cxx"] = cxx
+        _sys.modules[f"{__name__}.cxx"] = globals()["cxx"] = cxx
         return cxx
 
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
