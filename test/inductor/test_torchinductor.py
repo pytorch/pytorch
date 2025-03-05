@@ -12769,26 +12769,6 @@ class CommonTemplate:
 
                 assert len(inps) == 0
 
-    @torch._inductor.config.patch("graph_partition", True)
-    def test_graph_partition_fused_scheduler_node(self):
-        def foo(x):
-            x = x * 20
-            x_alias = x[0]
-            y = x * 10
-            y_alias = y[0]
-            torch._dynamo.graph_break()
-            ind = torch.tensor(4, device=GPU_TYPE)
-            x_alias2 = x[ind:]
-            y_alias2 = y[ind:]
-            return x, x_alias, x_alias2, y_alias, y_alias2
-
-        foo = torch.compile(foo)
-        x = torch.rand([20, 20], device=GPU_TYPE)
-        _, code = run_and_get_code(foo, x)
-
-        if not config.cpp_wrapper:
-            FileCheck().check("def partition_0(args):").run(code[0])
-
 
 @dataclasses.dataclass
 class TestFailure:
@@ -14198,6 +14178,26 @@ if HAS_GPU:
             compiled_out = f_compiled(x_cloned, y_cloned)
 
             self.assertEqual(eager_out, compiled_out)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_fused_scheduler_node(self):
+            def foo(x):
+                x = x * 20
+                x_alias = x[0]
+                y = x * 10
+                y_alias = y[0]
+                torch._dynamo.graph_break()
+                ind = torch.tensor(4, device=GPU_TYPE)
+                x_alias2 = x[ind:]
+                y_alias2 = y[ind:]
+                return x, x_alias, x_alias2, y_alias, y_alias2
+
+            foo = torch.compile(foo)
+            x = torch.rand([20, 20], device=GPU_TYPE)
+            _, code = run_and_get_code(foo, x)
+
+            if not config.cpp_wrapper:
+                FileCheck().check("def partition_0(args):").run(code[0])
 
     class RNNTest(TestCase):
         device_type = GPU_TYPE
