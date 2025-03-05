@@ -1825,6 +1825,10 @@ class BenchmarkRunner:
         return set()
 
     @property
+    def disable_cudagraph_models(self):
+        return set()
+
+    @property
     def guard_on_nn_module_models(self):
         return set()
 
@@ -3833,6 +3837,9 @@ def run(runner, args, original_dir=None):
         )
         experiment = coverage_experiment
         output_filename = "coverage.csv"
+
+    if args.only in runner.disable_cudagraph_models:
+        args.disable_cudagraphs = True
 
     if args.inductor or args.backend == "inductor" or args.export_aot_inductor:
         inductor_config.triton.cudagraphs = not args.disable_cudagraphs
