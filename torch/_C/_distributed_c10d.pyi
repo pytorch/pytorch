@@ -2,7 +2,7 @@
 # mypy: disable-error-code="type-arg"
 from datetime import timedelta
 from enum import Enum
-from typing import Any, overload
+from typing import Any, Optional, overload
 
 import torch
 from torch import Tensor
@@ -134,6 +134,8 @@ class BroadcastOptions:
 class AllreduceOptions:
     reduceOp: ReduceOp
     timeout: timedelta
+    asyncOp: bool
+    sparseIndices: Optional[Tensor]
 
 class AllreduceCoalescedOptions(AllreduceOptions): ...
 
@@ -142,6 +144,7 @@ class ReduceOptions:
     rootRank: int
     rootTensor: int
     timeout: timedelta
+    asyncOp: bool
 
 class AllgatherOptions:
     timeout: timedelta
@@ -150,6 +153,7 @@ class AllgatherOptions:
 class GatherOptions:
     rootRank: int
     timeout: timedelta
+    asyncOp: bool
 
 class ScatterOptions:
     rootRank: int
@@ -165,9 +169,11 @@ class BarrierOptions:
     device_ids: list[int]
     device: torch.device
     timeout: timedelta
+    asyncOp: bool
 
 class AllToAllOptions:
     timeout: timedelta
+    asyncOp: bool
 
 class Store:
     def set(self, key: str, value: str): ...
