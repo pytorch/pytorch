@@ -3256,16 +3256,14 @@ class Layout(OutputSpec):
         offset: Expr = Integer(0),
     ) -> None:
         if stride is None:
-            self.stride = FlexibleLayout.contiguous_strides(size)
-        else:
-            self.stride = stride
-
+            stride = FlexibleLayout.contiguous_strides(size)
         self.device = device
         self.dtype = dtype
-        assert len(size) == len(self.stride), f"size={size}, stride={self.stride}"
+        assert len(size) == len(stride), f"size={size}, stride={stride}"
         assert all(isinstance(s, (Expr, int)) for s in size)
-        self.size = size
-        self.offset = offset
+        self.size: Sequence[Expr] = size
+        self.stride: Sequence[Expr] = stride
+        self.offset: Expr = offset
 
     def __str__(self) -> str:
         offset = ""
@@ -3740,7 +3738,7 @@ class MutationLayoutSHOULDREMOVE(Layout):
         V.graph.mark_buffer_mutated(name)
 
     @property
-    def stride(self) -> Sequence[Expr]:
+    def stride(self) -> Sequence[Expr]:  # type: ignore[override]
         return self.real_layout().stride
 
     @stride.setter
