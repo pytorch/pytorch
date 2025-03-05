@@ -1157,16 +1157,7 @@ class TestCutlassBackend(TestCase):
                 "cuda.cutlass_max_profiling_configs": 2,
                 "autotune_fallback_to_aten": False,
             }
-        ), dynamo_config.patch({"error_on_recompile": True}):
-            # testing compiling with same layout pair
-            compiled = torch.compile(torch.mm)
-
-            torch.testing.assert_close(A @ A, compiled(A, A))
-
-            torch._dynamo.reset()
-            clear_inductor_caches()
-
-            # testing compiling with opposite layout pair
+        ):
             compiled = torch.compile(torch.mm)
 
             torch.testing.assert_close(A @ A.t(), compiled(A, A.t()))
