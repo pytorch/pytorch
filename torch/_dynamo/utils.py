@@ -1219,6 +1219,7 @@ class CompilationMetrics:
     guard_latency_us: Optional[float] = None
     recompile_reason: Optional[str] = None
     num_graph_breaks: Optional[int] = None
+    ir_count: Optional[int] = None
 
     @classmethod
     def create(cls, metrics: dict[str, Any]):
