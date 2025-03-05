@@ -372,7 +372,7 @@ def generate_wheels_matrix(
                         "package_type": package_type,
                         "pytorch_extra_install_requirements": (
                             PYTORCH_EXTRA_INSTALL_REQUIREMENTS[
-                                f"{desired_cuda[2:4]}.{desired_cuda[4:]}" # for cuda-aarch64: cu126 -> 12.6
+                                f"{desired_cuda[2:4]}.{desired_cuda[4:]}"  # for cuda-aarch64: cu126 -> 12.6
                             ]
                             if os == "linux-aarch64"
                             else PYTORCH_EXTRA_INSTALL_REQUIREMENTS[arch_version]
