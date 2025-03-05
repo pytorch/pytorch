@@ -419,7 +419,9 @@ def flex_attention_functionalize(
         functional_score_mod = ctx.functionalize(score_mod)
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
         with TransformGetItemToIndex():
-            _check_mutation_and_alias(score_mod, example_vals, "flex_attention", pre_dispatch)
+            _check_mutation_and_alias(
+                score_mod, example_vals, "flex_attention", pre_dispatch
+            )
 
         out = flex_attention(
             query_unwrapped,
