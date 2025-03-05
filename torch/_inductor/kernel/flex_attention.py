@@ -144,7 +144,7 @@ def get_float32_precision():
 
     # On ROCm benchmark TF32 and FP32 as TF32 (after triton 3.3) as perf is inconsistent
     if torch.version.hip:
-        if is_tf32_supported:
+        if is_tf32_supported():
             return ["'ieee'", "'tf32'"]
         else:
             return ["'ieee'"]
@@ -1475,7 +1475,7 @@ def flex_attention(
                 )
             continue
 
-        for precision in fp32_precision():
+        for precision in fp32_precision:
             cur_kernel_options = original_kernel_options.copy()
             # Performance tuning
             # Triton parameters
