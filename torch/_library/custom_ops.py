@@ -338,12 +338,14 @@ class CustomOpDef:
                             fn = self._backend_fns[device_type]
                             return inspect.getmodule(fn)
 
-                        utils.check_aliasing_constraint(
-                            self._name,
-                            utils.iter_tensors(args, kwargs),
-                            result,
-                            get_module,
-                        )
+                        # XXX Takes 40us of 160us ~25% of the call
+                        # 2us per tensor arg
+                        # utils.check_aliasing_constraint(
+                        #    self._name,
+                        #    utils.iter_tensors(args, kwargs),
+                        #    result,
+                        #    get_module,
+                        #)
                         return result
 
                     if device_type is None:
@@ -359,7 +361,8 @@ class CustomOpDef:
 
                 # Wrap function to choose between the default implementation or the device-specific
                 # implementation depending on if the kernel is disabled.
-                @torch._disable_dynamo
+                # XXX Dynamo disable is costly 240ms -> 170ms
+                # @torch._disable_dynamo
                 def wrapped_fn(*args, **kwargs):
                     if device_type in self._disabled_kernel:
                         return self._init_fn(*args, **kwargs)
