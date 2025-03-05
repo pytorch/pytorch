@@ -7579,6 +7579,26 @@ class CommonTemplate:
             ),
         )
 
+    def test_indirect_broadcast_embedding(self):
+        B, T, D, V = (8, 2048, 4096, 8192)
+        op = nn.Embedding(V, D).to(self.device).to(torch.float32)
+        shared_weight = op.weight.data
+        _input = torch.randint(0, V, (B, T), device=self.device)
+        self.common(op, (_input,))
+        code = run_and_get_triton_code(
+            torch.compile(op),
+            _input,
+        )
+        # Check if the indices tensor are accessed via x dimension and the tiling works
+        for string in [
+            "xnumel = 16384",
+            "xoffset = tl.program_id(0) * XBLOCK",
+            "xindex = xoffset + tl.arange(0, XBLOCK)[:, None]",
+            "x1 = xindex",
+            "tmp0 = tl.load(in_ptr0 + (x1), None,",
+        ]:
+            self.assertTrue(string, code)
+
     def test_roi_align(self):
         if not has_torchvision_roi_align():
             raise unittest.SkipTest("requires torchvision")
