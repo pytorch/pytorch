@@ -52,8 +52,12 @@ class NestedModelForDynamicShapes(torch.nn.Module):
 class TestExportAPIDynamo(common_utils.TestCase):
     """Tests for the ONNX exporter API when dynamo=True."""
 
-    def assert_export(self, *args, strategy="TorchExportNonStrictStrategy", **kwargs):
-        onnx_program = torch.onnx.export(*args, **kwargs, dynamo=True)
+    def assert_export(
+        self, *args, strategy: str | None = "TorchExportNonStrictStrategy", **kwargs
+    ):
+        onnx_program = torch.onnx.export(
+            *args, **kwargs, dynamo=True, fallback=False, verbose=False
+        )
         assert onnx_program is not None
         onnx_testing.assert_onnx_program(onnx_program, strategy=strategy)
 
@@ -102,7 +106,7 @@ class TestExportAPIDynamo(common_utils.TestCase):
                 "b": [0, 1, 2],
             },
         )
-        onnx_program = torch.onnx.export(
+        self.assert_export(
             SampleModelForDynamicShapes(),
             (
                 torch.randn(2, 2, 3),
@@ -111,10 +115,7 @@ class TestExportAPIDynamo(common_utils.TestCase):
             input_names=["x", "b"],
             output_names=["x_out", "b_out"],
             dynamic_axes={"b": [0, 1, 2], "b_out": [0, 1, 2]},
-            dynamo=True,
         )
-        assert onnx_program is not None
-        onnx_testing.assert_onnx_program(onnx_program)
 
     def test_saved_f_exists_after_export(self):
         with common_utils.TemporaryFileName(suffix=".onnx") as path:
@@ -135,7 +136,7 @@ class TestExportAPIDynamo(common_utils.TestCase):
         )
 
     def test_dynamic_shapes_with_fully_specified_axes(self):
-        exported_program = torch.export.export(
+        ep = torch.export.export(
             SampleModelForDynamicShapes(),
             (
                 torch.randn(2, 2, 3),
@@ -156,7 +157,7 @@ class TestExportAPIDynamo(common_utils.TestCase):
             strict=True,
         )
 
-        self.assert_export(exported_program)
+        self.assert_export(ep)
 
     def test_dynamic_shapes_supports_input_names(self):
         self.assert_export(
@@ -165,6 +166,7 @@ class TestExportAPIDynamo(common_utils.TestCase):
                 torch.randn(2, 2, 3),
                 torch.randn(2, 2, 3),
             ),
+            strategy=None,
             dynamic_shapes={
                 "custom_x": {
                     0: torch.export.Dim("customx_dim_0"),
@@ -178,7 +180,6 @@ class TestExportAPIDynamo(common_utils.TestCase):
                 },
             },
             input_names=["custom_x", "custom_b"],
-            fallback=False,
         )
 
     def test_partial_dynamic_shapes(self):

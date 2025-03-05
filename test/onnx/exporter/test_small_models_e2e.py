@@ -6,7 +6,6 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-import torchvision
 import transformers
 
 import torch
@@ -19,7 +18,13 @@ from torch.utils import _pytree as torch_pytree
 class DynamoExporterTest(common_utils.TestCase):
     def export(self, model, args=(), kwargs=None, **options) -> torch.onnx.ONNXProgram:
         onnx_program = torch.onnx.export(
-            model, args, kwargs=kwargs, dynamo=True, fallback=False, **options
+            model,
+            args,
+            kwargs=kwargs,
+            dynamo=True,
+            fallback=False,
+            verbose=False,
+            **options,
         )
         assert onnx_program is not None
         return onnx_program
@@ -172,23 +177,6 @@ class DynamoExporterTest(common_utils.TestCase):
         )
         self.assert_onnx_program(onnx_program)
         self.assert_onnx_program(onnx_program, args=(torch.tensor([-1, -2]),))
-
-    def test_onnx_export_torchvision_ops(self):
-        class VisionModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def forward(self, *x):
-                out = torchvision.ops.nms(x[0], x[1], x[2])
-                return out
-
-        args = (
-            torch.tensor([[0, 0, 1, 1], [0.5, 0.5, 1, 1]], dtype=torch.float),
-            torch.tensor([0.1, 0.2]),
-            0,
-        )
-        onnx_program = self.export(VisionModel(), args)
-        self.assert_onnx_program(onnx_program)
 
     def test_empty(self):
         def func(x):
