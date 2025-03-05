@@ -165,15 +165,6 @@ enum ErrorHandlingMode {
   LOG(WARNING) << logPrefix() << "Hash of " << phase << " to NCCL " << opType \
                << " with size " << numel << " is " << hashValue;
 
-// If set, ProcessGroupNCCL doesn't use recordStream calls to ensure
-// caching allocator safety for tensors used on both user-facing and
-// internal comm streams.
-// Instead, it stashes live references to those tensors until after
-// user-facing streams are synced with comm streams.
-// See stashed_for_allocator_safety_ below.
-static std::vector<std::string> TORCH_NCCL_AVOID_RECORD_STREAMS = {
-    "TORCH_NCCL_AVOID_RECORD_STREAMS"};
-
 // If set, ProcessGroupNCCL registers postAlloc and preFree hooks to cuda cache
 // allocator so that whenever a tensor is allocated or freed, ProcessGroupNCCL
 // can register/deregister the tensor on all available NCCL communicators.
@@ -382,9 +373,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Clone of blockingWait_ from ProcessGroupNCCL.
     bool blockingWait_{false};
 
-    // Clone of avoidRecordStreams_ from ProcessGroupNCCL.
-    bool avoidRecordStreams_{false};
-
     // Clone of opTimeout_ from ProcessGroupNCCL.
     std::chrono::milliseconds opTimeout_{};
 
@@ -439,7 +427,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // give a more descriptive message when representing the Work as a string.
     std::shared_ptr<std::vector<at::Tensor>> outputs_;
 
-    // TORCH_NCCL_AVOID_RECORD_STREAMS implementation helper.
     // Stores references to participating non-output tensors (ie inputs,
     // flattened intermediates).
     // We'll clear this list in synchronizeStream, just after user-facing
@@ -879,7 +866,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       Fn fn,
       OpType opType,
       const char* profilingTitle = nullptr,
-      bool avoidRecordStreams = false,
       bool nanCheck = true);
 
   template <typename Fn, typename PreProcess, typename PostProcess>
@@ -891,7 +877,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       PostProcess post,
       OpType opType,
       const char* profilingTitle = nullptr,
-      bool avoidRecordStreams = false,
       bool nanCheck = true);
 
   template <typename Fn, typename PreProcess, typename PostProcess>
@@ -903,7 +888,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       PostProcess post,
       OpType opType,
       const char* profilingTitle = nullptr,
-      bool avoidRecordStreams = false,
       bool nanCheck = true);
 
   template <typename Fn>
@@ -912,8 +896,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       std::vector<at::Tensor>& output,
       Fn fn,
       OpType opType,
-      const char* profilingTitle = nullptr,
-      bool avoidRecordStreams = false);
+      const char* profilingTitle = nullptr);
 
   // Helper that encapsulates work shared across point-to-point communication
   // primitives. It is the same structure as the helper used for collective
@@ -1267,9 +1250,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Flag to enable the print of hash value of input/output of collectives for
   // verification.
   std::atomic<bool> enableCollecticeHashDebug_{};
-
-  // Whether or not TORCH_NCCL_AVOID_RECORD_STREAMS was set
-  bool avoidRecordStreams_ = false;
 
   // Whether the NCCL watchdog should rethrow CUDA errors.
   bool rethrowCUDAErrors_ = false;
