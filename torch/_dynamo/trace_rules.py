@@ -3749,6 +3749,13 @@ def lookup_inner(
     is_direct_call=True,
     reasons: Union[None, set[str]] = None,
 ):
+    # We want `def inner()` in nn/modules/module.py to be traced through instead of being skipped.
+    # TOOD: Is there a better way to do this?
+    if name == "_nn_module_call_impl_inner":
+        if reasons is not None:
+            reasons.add("func name is _nn_module_call_impl_inner")
+        return UserFunctionVariable
+
     # Step 1: lookup obj's tracing rule in `torch_name_rule_map`.
     # The rules defined in `torch_name_rule_map` mainly includes two parts:
     # - Manually defined rules for any functions.

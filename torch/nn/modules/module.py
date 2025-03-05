@@ -1764,7 +1764,11 @@ class Module:
         result = None
         called_always_called_hooks = set()
 
-        def inner():
+        # NOTE: frames in torch/ are skipped by default, which causes the module's
+        # forward pre-hook, forward, and forward post-hook to always be in separate graphs.
+        # To work around this issue, we explicitly add "don't skip _nn_module_call_impl_inner" to trace_rules.py,
+        # so that all the forward hooks can be in the same graph as forward.
+        def _nn_module_call_impl_inner():
             nonlocal result, args, kwargs
 
             full_backward_hooks, non_full_backward_hooks = [], []
@@ -1851,10 +1855,10 @@ class Module:
         # reason.  Don't try to run the always called hooks in event of
         # exception.
         if torch.compiler.is_compiling():
-            return inner()
+            return _nn_module_call_impl_inner()
 
         try:
-            return inner()
+            return _nn_module_call_impl_inner()
         except Exception:
             # run always called hooks if they have not already been run
             # For now only forward hooks have the always_call option but perhaps
