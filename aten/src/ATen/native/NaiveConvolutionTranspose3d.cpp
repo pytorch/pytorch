@@ -126,6 +126,33 @@ static inline void slow_conv_transpose3d_shape_check(
   if (weight.defined()) {
     const int64_t n_input_plane = weight.size(0);
     check_dim_size(input, ndim, dimf, n_input_plane);
+    // add check to ensure that weight has the dimensions we expect, i.e n_input_plane x n_output_plane x kernel_depth x kernel_height x kernel_width
+    // weight shall have 5 dims, which wree already checked, so we can safely call check_dim_size with 5 as dim
+    // check_dim_size will throw a generic error, to be more informative, we will do TORCH_CHECK manually
+    TORCH_CHECK(
+      weight.size(2) == kernel_depth,
+      "Expected weight to have size ",
+      kernel_depth,
+      " at dimension ",
+      3,
+      " but got ",
+      weight.size(2));
+    TORCH_CHECK(
+      weight.size(3) == kernel_height,
+      "Expected weight to have size ",
+      kernel_height,
+      " at dimension ",
+      4,
+      " but got ",
+      weight.size(3));
+    TORCH_CHECK(
+      weight.size(4) == kernel_width,
+      "Expected weight to have size ",
+      kernel_width,
+      " at dimension ",
+      5,
+      " but got ",
+      weight.size(4));
   }
 
   const int64_t input_width = input.size(dimw);
