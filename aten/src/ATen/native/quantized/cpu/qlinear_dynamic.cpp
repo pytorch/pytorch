@@ -722,9 +722,18 @@ at::Tensor PackedLinearWeightsACL::apply_dynamic_impl(
   auto input_dims = input_reshaped.sizes().vec();
 
   int64_t m = input_dims[0];
-  auto key = std::make_tuple(
-      m, ReluFused, static_cast<int64_t>(at::get_num_threads()));
-  auto acl_gemm = get_acl_dynamic_quant_matmul(key);
+  at::native::acl_utils::QuantMatmulCacheKey key = std::make_tuple(
+      m, /* M */
+      ReluFused, /* FUSE_RELU */
+      static_cast<int64_t>(at::get_num_threads()), /* NUM_THREADS */
+      1, /* INPUT_SCALE */
+      0, /* INPUT_OFFSET */
+      1, /* OUTPUT_SCALE */
+      0, /* OUTPUT_OFFSET */
+      true /* SIGNED_INPUT */
+  );
+  auto acl_gemm =
+      get_acl_quant_matmul<at::native::acl_utils::DynamicQuantMatmul>(key);
 
   if (acl_gemm) {
     // Find quantization parameters
@@ -754,10 +763,10 @@ at::Tensor PackedLinearWeightsACL::apply_dynamic_impl(
         /*force_scale_power_of_two=*/false,
         /*reduce_range=*/reduce_range);
 
-    acl_gemm->src_fp32_tensor.allocator()->import_memory(
+    acl_gemm->src_tensor.allocator()->import_memory(
         (float*)input_contig.data_ptr());
 
-    acl_gemm->src_s8_tensor.info()->set_quantization_info(
+    acl_gemm->src_q_tensor.info()->set_quantization_info(
         arm_compute::QuantizationInfo(
             q_params.scale, q_params.zero_point, true));
 
@@ -771,7 +780,7 @@ at::Tensor PackedLinearWeightsACL::apply_dynamic_impl(
 
     // We set the offset to "-zero_point" for the GEMM, but to "zero_point" for
     // the quantization layer This is a known inconsistency in ACL.
-    acl_gemm->src_s8_tensor.info()->set_quantization_info(
+    acl_gemm->src_q_tensor.info()->set_quantization_info(
         arm_compute::QuantizationInfo(
             q_params.scale, -q_params.zero_point, true));
 
@@ -781,12 +790,12 @@ at::Tensor PackedLinearWeightsACL::apply_dynamic_impl(
     acl_gemm->gemm.run();
 
     if (ReluFused) {
-      acl_gemm->acl_relu.run();
+      acl_gemm->relu.run();
     }
 
     // this will not free memory, it will just tell ACL that we're no longer
     // using the pointer
-    acl_gemm->src_fp32_tensor.allocator()->free();
+    acl_gemm->src_tensor.allocator()->free();
     acl_gemm->dst_tensor.allocator()->free();
 
     auto out_sizes = input.sizes().vec();
@@ -818,7 +827,6 @@ at::Tensor PackedLinearWeightsACL::apply_dynamic_relu(
 }
 
 #endif // #if AT_MKLDNN_ACL_ENABLED()
-
 #endif // #if AT_MKLDNN_ENABLED()
 
 namespace at::native {
