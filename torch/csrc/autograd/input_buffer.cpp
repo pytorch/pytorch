@@ -82,6 +82,23 @@ bool can_accumulate_inplace(const Variable& v) {
       at::caching::adjusted_use_count(v) == 1 && v.has_storage() &&
       v.storage().use_count() == 1);
 }
+
+inline void sync_streams(
+    std::optional<c10::Stream>& stream_be_synced,
+    std::optional<c10::Stream>& sync_stream,
+    Variable& var,
+    const c10::DeviceType device_type) {
+  TORCH_INTERNAL_ASSERT(sync_stream.has_value());
+  if (!stream_be_synced) {
+    return;
+  }
+  c10::OptionalDeviceGuard device_guard{stream_be_synced->device()};
+  auto event = c10::Event{device_type};
+  event.record(*stream_be_synced);
+  sync_stream->wait(event);
+  record_stream_any_impl(var, *sync_stream);
+}
+
 } // anonymous namespace
 
 static void accumulate(
@@ -126,21 +143,18 @@ static void accumulate(
   }
 }
 
-inline void sync_streams(
-    std::optional<c10::Stream>& stream_be_synced,
-    std::optional<c10::Stream>& sync_stream,
-    Variable& var,
-    const c10::DeviceType device_type) {
-  TORCH_INTERNAL_ASSERT(sync_stream.has_value());
-  if (!stream_be_synced) {
-    return;
+void execute_accumulation(
+    std::vector<Variable>& buffer,
+    size_t pos,
+    Variable&& var,
+    const std::optional<c10::Stream>& accumulate_stream) {
+  TORCH_INTERNAL_ASSERT(accumulate_stream.has_value());
+  if (buffer[pos].defined()) {
+    c10::OptionalStreamGuard stream_guard{accumulate_stream};
+    accumulate(buffer, pos, std::move(var));
+  } else {
+    buffer[pos] = std::move(var);
   }
-  c10::OptionalDeviceGuard device_guard{stream_be_synced->device()};
-  auto event = c10::Event{device_type};
-  event.record(*stream_be_synced);
-  sync_stream->wait(event);
-  const auto guard = c10::impl::VirtualGuardImpl(device_type);
-  record_stream_any_impl(var, *sync_stream);
 }
 
 void InputBuffer::add(
@@ -171,7 +185,7 @@ void InputBuffer::add(
   //       (4a) Uses the producer stream as the accumulation stream
   //       (4b) Accumulates
   //       (4c) Syncs the consumer's stream with the accumulation stream if it
-  //       is not null
+  //       is not null.
   //  (5) var is an accelerator variable and it does not share a device
   //  with the consumer or producer.
   //      Accumulation happens on the var device's stream.
@@ -205,44 +219,30 @@ void InputBuffer::add(
         // (3a)
         opt_accumulate_stream = opt_consumer_stream;
         opt_sync_stream = opt_producer_stream;
-        sync_streams(opt_sync_stream, opt_accumulate_stream, var, device_type);
-
         // (3b)
-        if (buffer[pos].defined()) {
-          c10::OptionalStreamGuard stream_guard{opt_accumulate_stream};
-          accumulate(buffer, pos, std::move(var));
-        } else {
-          buffer[pos] = std::move(var);
-        }
+        sync_streams(opt_sync_stream, opt_accumulate_stream, var, device_type);
+        // (3c)
+        execute_accumulation(
+            buffer, pos, std::move(var), opt_accumulate_stream);
         return;
       } else if (on_producer && !on_consumer) {
         // (4a)
         opt_accumulate_stream = opt_producer_stream;
         opt_sync_stream = opt_consumer_stream;
-        if (buffer[pos].defined()) {
-          c10::OptionalStreamGuard stream_guard{opt_accumulate_stream};
-          accumulate(buffer, pos, std::move(var));
-        } else {
-          buffer[pos] = std::move(var);
-        }
-
         // (4b)
+        execute_accumulation(
+            buffer, pos, std::move(var), opt_accumulate_stream);
+        // (4c)
         sync_streams(opt_sync_stream, opt_accumulate_stream, var, device_type);
         return;
       } else {
-        // (5a)
         opt_accumulate_stream = getStreamForDeviceIdx(device.value());
         opt_sync_stream = opt_producer_stream;
+        // (5a)
         sync_streams(opt_sync_stream, opt_accumulate_stream, var, device_type);
-
         // (5b)
-        if (buffer[pos].defined()) {
-          c10::OptionalStreamGuard stream_guard{opt_accumulate_stream};
-          accumulate(buffer, pos, std::move(var));
-        } else {
-          buffer[pos] = std::move(var);
-        }
-
+        execute_accumulation(
+            buffer, pos, std::move(var), opt_accumulate_stream);
         // (5c)
         opt_sync_stream = opt_accumulate_stream;
         opt_accumulate_stream = opt_consumer_stream;
