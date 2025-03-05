@@ -77,6 +77,7 @@ def _import_cxx_pytree_and_store() -> _ModuleType:
     #     import torch.utils.pytree
     #
     #     torch.utils.pytree.cxx
+    #     torch.utils.pytree.cxx.tree_map
     #
     _sys.modules[f"{__name__}.cxx"] = globals()["cxx"] = cxx
     return cxx
@@ -110,7 +111,7 @@ else:
                         f"Please import {self.__name__!r} explicitly first."
                     )
 
-                # Lazy import
+                # Lazy import on first member access
                 cxx = _import_cxx_pytree_and_store()
 
             return getattr(cxx, name)
@@ -122,6 +123,7 @@ else:
 
     # This allows the following statements to work properly:
     #
+    #     import torch.utils.pytree.cxx
     #     from torch.utils.pytree.cxx import tree_map
     #
     _sys.modules[f"{__name__}.cxx"] = CxxModule(f"{__name__}.cxx")
