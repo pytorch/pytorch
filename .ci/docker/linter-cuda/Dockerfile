@@ -18,15 +18,14 @@ COPY ./common/install_user.sh install_user.sh
 RUN bash ./install_user.sh && rm install_user.sh
 
 # Install conda and other packages (e.g., numpy, pytest)
-ARG ANACONDA_PYTHON_VERSION
-ARG CONDA_CMAKE
-ENV ANACONDA_PYTHON_VERSION=$ANACONDA_PYTHON_VERSION
-ENV PATH /opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/bin:/opt/conda/bin:$PATH
-COPY requirements-ci.txt /opt/conda/requirements-ci.txt
-COPY ./common/install_conda.sh install_conda.sh
-COPY ./common/common_utils.sh common_utils.sh
-COPY ./common/install_magma_conda.sh install_magma_conda.sh
-RUN bash ./install_conda.sh && rm install_conda.sh install_magma_conda.sh common_utils.sh /opt/conda/requirements-ci.txt
+ARG PYTHON_VERSION
+ARG PIP_CMAKE
+# Put venv into the env vars so users don't need to activate it
+ENV PATH /var/lib/jenkins/ci_env/bin:$PATH
+ENV VIRTUAL_ENV /var/lib/jenkins/ci_env
+COPY requirements-ci.txt /opt/requirements-ci.txt
+COPY ./common/install_python.sh install_python.sh
+RUN bash ./install_python.sh && rm install_python.sh /opt/requirements-ci.txt
 
 # Install cuda and cudnn
 ARG CUDA_VERSION
@@ -37,9 +36,10 @@ ENV PATH /usr/local/nvidia/bin:/usr/local/cuda/bin:$PATH
 
 # Note that Docker build forbids copying file outside the build context
 COPY ./common/install_linter.sh install_linter.sh
-COPY ./common/common_utils.sh common_utils.sh
 RUN bash ./install_linter.sh
-RUN rm install_linter.sh common_utils.sh
+RUN rm install_linter.sh
+
+RUN chown -R jenkins:jenkins /var/lib/jenkins/ci_env
 
 USER jenkins
 CMD ["bash"]
