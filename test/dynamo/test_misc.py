@@ -91,8 +91,14 @@ from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing._internal.logging_utils import logs_to_string
 
 
+pytree_modules = {
+    "python": python_pytree,
+}
+
 if python_pytree._cxx_pytree_dynamo_traceable:
     import torch.utils._cxx_pytree as cxx_pytree
+
+    pytree_modules["cxx"] = cxx_pytree
 else:
     cxx_pytree = None
 
@@ -10136,11 +10142,7 @@ def ___make_guard_fn():
         self.assertEqual(actual, expected)
 
     def test_pytree_tree_leaves(self):
-        implemtations = [("python", python_pytree)]
-        if cxx_pytree is not None:
-            implemtations.append(("cxx", cxx_pytree))
-
-        for name, module in implemtations:
+        for name, module in pytree_modules.items():
             with self.subTest(f"pytree implement: {name}"):
 
                 def fn(x):
@@ -10170,11 +10172,7 @@ def ___make_guard_fn():
                 self.assertEqual(actual, expected)
 
     def test_pytree_tree_flatten_unflatten(self):
-        implemtations = [("python", python_pytree)]
-        if cxx_pytree is not None:
-            implemtations.append(("cxx", cxx_pytree))
-
-        for name, module in implemtations:
+        for name, module in pytree_modules.items():
             with self.subTest(f"pytree implement: {name}"):
 
                 def fn(x, y):
@@ -10221,11 +10219,7 @@ def ___make_guard_fn():
             self.assertEqual(actual, expected)
 
     def test_pytree_tree_map(self):
-        implemtations = [("python", python_pytree)]
-        if cxx_pytree is not None:
-            implemtations.append(("cxx", cxx_pytree))
-
-        for name, module in implemtations:
+        for name, module in pytree_modules.items():
             with self.subTest(f"pytree implement: {name}"):
 
                 def fn(x, y):
