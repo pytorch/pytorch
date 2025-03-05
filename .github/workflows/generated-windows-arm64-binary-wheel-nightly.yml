@@ -74,8 +74,6 @@ jobs:
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
-          repository:  "iremyux/pytorch"
-          ref: "nightly-for-win-arm64"
           path: "pytorch"
       - name: Bootstrap Build Tools
         shell: cmd
@@ -92,8 +90,6 @@ jobs:
       - name: Git checkout PyTorch - recursive
         uses: actions/checkout@v4
         with:
-          repository:  "iremyux/pytorch"
-          ref: "nightly-for-win-arm64"
           path: "pytorch"
           submodules: recursive
       - name: Bootstrap Python
@@ -165,8 +161,6 @@ jobs:
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
-          repository:  "iremyux/pytorch"
-          ref: "nightly-for-win-arm64"
           path: "pytorch"
       - name: Bootstrap Git
         shell: cmd
@@ -179,8 +173,6 @@ jobs:
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
-          repository:  "iremyux/pytorch"
-          ref: "nightly-for-win-arm64"
           path: "pytorch"
           submodules: recursive
       - name: Bootstrap APL
