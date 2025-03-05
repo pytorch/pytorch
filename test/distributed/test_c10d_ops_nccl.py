@@ -302,10 +302,10 @@ class ProcessGroupNCCLOpTest(MultiProcContinousTest):
         pg = self.pg
         rank = self.rank_to_GPU[self.rank][0]
         with torch.cuda.device(rank):
-            for _ in range(10):
+            for _ in range(100):
                 xs = [torch.FloatTensor([1]).cuda(rank)]
-                for _ in range(30):
-                    pg.allreduce(xs[0]).wait()
+                for _ in range(50):
+                    pg.allreduce(xs[0])
 
                 graph = torch.cuda.CUDAGraph()
                 with torch.cuda.graph(graph):
@@ -315,7 +315,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinousTest):
                     pg.allreduce(xs[0]).wait()
                     xs[0] += 0.0
 
-                for _ in range(100):
+                for _ in range(1400):
                     graph.replay()
 
     @requires_nccl()
