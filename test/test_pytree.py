@@ -44,7 +44,8 @@ else:
 try:
     import torch.utils.pytree as pytree
 except ImportError:
-    pass
+    # Just re-test the python implementation
+    pytree = python_pytree
 else:
     if not IS_FBCODE or not pytree.PYTORCH_USE_CXX_PYTREE:
         pytree_modules["generic"] = pytree
@@ -230,6 +231,10 @@ class TestGenericPytree(TestCase):
                 (cxx_pytree, lambda tup: cxx_pytree.tree_structure((0,) * len(tup))),
                 name="cxx",
             ),
+            subtest(
+                (pytree, lambda tup: pytree.tree_structure((0,) * len(tup))),
+                name="generic",
+            ),
         ],
     )
     def test_flatten_unflatten_tuple(self, pytree, gen_expected_fn):
@@ -264,6 +269,10 @@ class TestGenericPytree(TestCase):
             subtest(
                 (cxx_pytree, lambda lst: cxx_pytree.tree_structure([0] * len(lst))),
                 name="cxx",
+            ),
+            subtest(
+                (pytree, lambda lst: pytree.tree_structure([0] * len(lst))),
+                name="generic",
             ),
         ],
     )
@@ -303,6 +312,13 @@ class TestGenericPytree(TestCase):
                     lambda dct: cxx_pytree.tree_structure(dict.fromkeys(dct, 0)),
                 ),
                 name="cxx",
+            ),
+            subtest(
+                (
+                    pytree,
+                    lambda dct: pytree.tree_structure(dict.fromkeys(dct, 0)),
+                ),
+                name="generic",
             ),
         ],
     )
@@ -346,6 +362,13 @@ class TestGenericPytree(TestCase):
                     ),
                 ),
                 name="cxx",
+            ),
+            subtest(
+                (
+                    pytree,
+                    lambda odict: pytree.tree_structure(OrderedDict.fromkeys(odict, 0)),
+                ),
+                name="generic",
             ),
         ],
     )
@@ -391,6 +414,15 @@ class TestGenericPytree(TestCase):
                 ),
                 name="cxx",
             ),
+            subtest(
+                (
+                    pytree,
+                    lambda ddct: pytree.tree_structure(
+                        defaultdict(ddct.default_factory, dict.fromkeys(ddct, 0))
+                    ),
+                ),
+                name="generic",
+            ),
         ],
     )
     def test_flatten_unflatten_defaultdict(self, pytree, gen_expected_fn):
@@ -432,6 +464,13 @@ class TestGenericPytree(TestCase):
                     ),
                 ),
                 name="cxx",
+            ),
+            subtest(
+                (
+                    pytree,
+                    lambda deq: pytree.tree_structure(deque(deq, maxlen=deq.maxlen)),
+                ),
+                name="generic",
             ),
         ],
     )
