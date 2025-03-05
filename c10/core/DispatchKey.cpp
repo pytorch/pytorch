@@ -32,6 +32,8 @@ const char* toString(BackendComponent t) {
       return "VEBit";
     case BackendComponent::MTIABit:
       return "MTIA";
+    case BackendComponent::MAIABit:
+      return "MAIA";
     case BackendComponent::PrivateUse1Bit:
       return "PrivateUse1Bit";
     case BackendComponent::PrivateUse2Bit:
