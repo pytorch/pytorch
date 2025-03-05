@@ -50,6 +50,8 @@ from torch.onnx._internal.exporter._verification import (
 from torch.types import Number
 
 
+# TODO: Update deprecation messages to recommend the new classes
+
 VerificationInfo.__module__ = "torch.onnx.verification"
 VerificationInterpreter.__module__ = "torch.onnx.verification"
 verify_onnx_program.__module__ = "torch.onnx.verification"
