@@ -730,7 +730,7 @@ def forward(self, x_1, output_1):
                 output,
                 n_elements,
                 BLOCK_SIZE=16,
-                CONSTANT_NAME=tl.constexpr("CONSTANT_C"),
+                CONSTANT_NAME="CONSTANT_C",
             )
             return output
 
