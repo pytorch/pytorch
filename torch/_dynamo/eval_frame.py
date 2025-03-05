@@ -174,8 +174,7 @@ def _callback_from_stance(callback):
     if _stance.stance == "default":
         # force_backend
         if _stance.backend is not None and callback not in (False, None):
-            hooks = Hooks()
-            callback = _create_wrapped_callback(get_compiler_fn(_stance.backend), hooks)
+            callback = _create_wrapped_callback(get_compiler_fn(_stance.backend))
 
         return callback
     elif _stance.stance == "eager_then_compile":
@@ -209,7 +208,8 @@ def _callback_from_stance(callback):
         raise RuntimeError(f"invalid torch.compile stance '{_stance}'")
 
 
-def _create_wrapped_callback(compiler_fn, hooks, dynamism=None):
+def _create_wrapped_callback(compiler_fn, dynamism=None):
+    hooks = Hooks()
     return convert_frame.catch_errors_wrapper(
         convert_frame.convert_frame(  # type: ignore[arg-type]
             compiler_fn,
@@ -224,7 +224,7 @@ def _get_or_add_example_inputs(frame):
     key = frame.f_code.co_filename + str(frame.f_code.co_firstlineno)
     example_inputs = get_example_inputs(key)
 
-    if len(example_inputs) == 0:
+    if len(example_inputs) < 2:
         example_inputs.append(clone_and_convert_to_meta(frame.f_locals))
 
     return example_inputs
@@ -235,10 +235,6 @@ def _create_eager_then_compile_callback(callback):
         frame = args[0]
         example_inputs = _get_or_add_example_inputs(frame)
 
-        if len(example_inputs) < 2:
-            example_inputs.append(clone_and_convert_to_meta(frame.f_locals))
-
-        dynamism = track_dynamism_across_examples(example_inputs)
         if len(example_inputs) == 1:
             return ConvertFrameReturn(
                 frame_exec_strategy=FrameExecStrategy(
@@ -246,9 +242,9 @@ def _create_eager_then_compile_callback(callback):
                 )
             )
 
+        dynamism = track_dynamism_across_examples(example_inputs)
         compiler_fn = callback._torchdynamo_orig_callable._torchdynamo_orig_callable
-        hooks = Hooks()
-        return _create_wrapped_callback(compiler_fn, hooks, dynamism)(*args, **kwargs)
+        return _create_wrapped_callback(compiler_fn, dynamism)(*args, **kwargs)
 
     return eager_then_compile
 
@@ -258,13 +254,13 @@ def _create_aot_eager_then_compile_callback(callback):
         frame = args[0]
         example_inputs = _get_or_add_example_inputs(frame)
 
-        hooks = Hooks()
-        if len(example_inputs) <= 1:
+        if len(example_inputs) == 1:
             aot_eager_fn = get_compiler_fn("aot_eager")
-            return _create_wrapped_callback(aot_eager_fn, hooks)(*args, **kwargs)
-        else:
-            compiler_fn = callback._torchdynamo_orig_callable._torchdynamo_orig_callable
-            return _create_wrapped_callback(compiler_fn, hooks)(*args, **kwargs)
+            return _create_wrapped_callback(aot_eager_fn)(*args, **kwargs)
+
+        dynamism = track_dynamism_across_examples(example_inputs)
+        compiler_fn = callback._torchdynamo_orig_callable._torchdynamo_orig_callable
+        return _create_wrapped_callback(compiler_fn, dynamism)(*args, **kwargs)
 
     return aot_eager_then_compile
 
