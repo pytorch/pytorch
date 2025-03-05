@@ -2655,11 +2655,12 @@ class TestPatternMatcher(TestPatternMatcherBase):
             lambda x, y: y.add_(x),
         ]
         fake_quant_x2_list = [False, True] if int8_mixed_bf16 else [False]
-        cases = itertools.product(add_fn_list, fake_quant_x2_list)
-        for add_fn, fq_x2 in cases:
+        shape_list = [(4, 4), [4, 4, 4]]
+        cases = itertools.product(add_fn_list, fake_quant_x2_list, shape_list)
+        for add_fn, fq_x2, shape in cases:
             mod = M(add_fn, use_relu, fq_x2).eval().to(device=device)
             v = torch.randn(
-                (4, 4), dtype=torch.float32, requires_grad=False, device=device
+                shape, dtype=torch.float32, requires_grad=False, device=device
             ).add(1)
 
             def matcher_check_fn():
@@ -2669,6 +2670,10 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 )
                 # pattern = [dequant_per_tensor, (convert_dtype), dequant_per_channel, (convert_dtype), permute, addmm]
                 nodes_per_match = 6 if int8_mixed_bf16 else 4
+                if len(shape) == 3:
+                    # pattern = [dequant_per_tensor, (convert_dtype), (view), \
+                    #   dequant_per_channel, (convert_dtype), (view), permute, addmm]
+                    nodes_per_match += 2
                 self.assertEqual(
                     counters["inductor"]["qlinear_weight_prepack_matcher_nodes"],
                     4 * nodes_per_match,
