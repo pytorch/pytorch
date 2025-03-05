@@ -2052,9 +2052,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     continue
 
                 advancements = self.pointer_advancements[symt]
-                assert block_ptr not in advancements, (
-                    "duplicate advancement for pointer '{block_ptr}' at type '{symt}'"
-                )
+                assert (
+                    block_ptr not in advancements
+                ), "duplicate advancement for pointer '{block_ptr}' at type '{symt}'"
                 advancements[block_ptr] = advance_offsets
         else:
             block_ptr = indexing.format(var)
@@ -2062,9 +2062,29 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
     def codegen_block_ptr_store_line(self, name, indexing, block_ptr, value, other=""):
         # Stores require an explicit broadcast.
-        value = indexing.codegen_broadcast_and_reshape(
-            value, indexing.final_shape, indexing.block_shape, False
-        )
+
+        # Check if the value to be stored is a constant since constants
+        # cannot be reshaped to a different size
+        fx_node = V.interpreter.current_node
+        assert fx_node.name == "store"
+        fx_value_node = fx_node.args[3]
+        assert V.interpreter.env[fx_value_node] == value
+        if fx_value_node.name == "constant":
+            assert isinstance(value, CSEVariable)
+            # See `_shaped_constant`. Tensor constants are only created
+            # if the dtype is not float32.
+            if value.dtype is not torch.float32:
+                value = triton_reshape(
+                    str(value), [sympy.S.One], [sympy.S.One] * len(indexing.block_shape)
+                )
+            value = f"tl.broadcast_to({value}, {V.kernel.index_to_str(indexing.block_shape)})"
+        else:
+            value = indexing.codegen_broadcast_and_reshape(
+                value,
+                indexing.final_shape,
+                indexing.block_shape,
+                False,
+            )
 
         # workaround https://github.com/openai/triton/issues/2814
         value = f"{value}.to({triton_store_type(V.graph.get_dtype(name))})"
@@ -3039,9 +3059,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.filter_masks(masks)
         masks = sorted(masks)
         assert not self._load_mask, "ops.sort not supported inside ops.masked"
-        assert self.persistent_reduction, (
-            "ops.sort is only supported in persistent reductions"
-        )
+        assert (
+            self.persistent_reduction
+        ), "ops.sort is only supported in persistent reductions"
 
         cse_compute = functools.partial(self.cse.generate, self.compute)
         dim = self.triton_tensor_ndim() - self.num_reduction_dims
@@ -4321,9 +4341,9 @@ def debug_triton_code(node: BaseSchedulerNode) -> list[str]:
         device = node.get_device()
         assert device is not None
         backend = node.scheduler.get_backend(device)
-        assert isinstance(backend, (SIMDScheduling, CUDACombinedScheduling)), (
-            f"Scheduling backend should be SIMD or CUDACombined when generating debug Triton strings, got: {type(backend)}"
-        )
+        assert isinstance(
+            backend, (SIMDScheduling, CUDACombinedScheduling)
+        ), f"Scheduling backend should be SIMD or CUDACombined when generating debug Triton strings, got: {type(backend)}"
 
         with V.graph.set_current_device(device):
             # Don't increment kernel count when generating debug string.
