@@ -586,17 +586,10 @@ bool ProcessGroupNCCL::WorkNCCL::startedGPUExecutionInternal() const {
   if (!timingEnabled_) {
     return false;
   }
-  auto mode = cudaStreamCaptureModeThreadLocal;
-  // push
-  cudaThreadExchangeStreamCaptureMode(&mode);
   // Checking the work's corresponding CUDA event's status
   if (!ncclStartEvent_->query()) {
-    // pop
-    cudaThreadExchangeStreamCaptureMode(&mode);
     return false;
   }
-  // pop
-  cudaThreadExchangeStreamCaptureMode(&mode);
   return true;
 }
 
@@ -608,15 +601,9 @@ bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecutionInternal() const {
   // example, when doing a `cudaDeviceSynchronize` or even
   // `cudaStreamSynchronize`.
   auto mode = cudaStreamCaptureModeThreadLocal;
-  // push
-  cudaThreadExchangeStreamCaptureMode(&mode);
   if (!ncclEndEvent_->query()) {
-    // pop
-    cudaThreadExchangeStreamCaptureMode(&mode);
     return false;
   }
-  // pop
-  cudaThreadExchangeStreamCaptureMode(&mode);
   return true;
 }
 
@@ -2330,6 +2317,10 @@ void ProcessGroupNCCL::watchdogHandler() {
         pgStatus_->lastStartedNumelIn = work.numelIn_;
         pgStatus_->lastStartedNumelOut = work.numelOut_;
       }
+
+      // allow watchdog event queries from a side thread
+      at::cuda::CUDAGuard guard(work.ncclEndEvent_->device_index());
+      at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeThreadLocal};
 
       // Clean up completed work
       if (work.isCompleted()) {
