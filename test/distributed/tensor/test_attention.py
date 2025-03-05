@@ -21,7 +21,6 @@ from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import parallelize_module
 from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.testing._internal.common_cuda import (
-    PLATFORM_SUPPORTS_CUDNN_ATTENTION,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_FUSED_ATTENTION,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
@@ -42,8 +41,6 @@ if PLATFORM_SUPPORTS_FLASH_ATTENTION:
     backends.append(SDPBackend.FLASH_ATTENTION)
 if PLATFORM_SUPPORTS_MEM_EFF_ATTENTION:
     backends.append(SDPBackend.EFFICIENT_ATTENTION)
-if PLATFORM_SUPPORTS_CUDNN_ATTENTION:
-    backends.append(SDPBackend.CUDNN_ATTENTION)
 
 rotater_enum_to_str = {
     _RotateMethod.ALL_GATHER: "allgather",
@@ -89,10 +86,6 @@ class RingAttentionTest(DTensorTestBase):
         rotater: _RotateMethod,
         test_forward_only: bool,
     ) -> None:
-        # TODO: DTensor does not support backward on SDPBackend.CUDNN_ATTENTION so far
-        if not test_forward_only and backend == SDPBackend.CUDNN_ATTENTION:
-            return
-
         def fn_eval(fn, *args, **kwargs):
             if test_forward_only:
                 with torch.no_grad():
@@ -116,10 +109,7 @@ class RingAttentionTest(DTensorTestBase):
         nheads = 8
         torch.manual_seed(10)
         dtype = (
-            torch.bfloat16
-            if backend == SDPBackend.FLASH_ATTENTION
-            or backend == SDPBackend.CUDNN_ATTENTION
-            else torch.float32
+            torch.bfloat16 if backend == SDPBackend.FLASH_ATTENTION else torch.float32
         )
 
         _cp_options.enable_load_balance = load_balance
