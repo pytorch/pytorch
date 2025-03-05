@@ -4888,7 +4888,6 @@ class CommonTemplate:
 
         self.assertEqual(eager_delta, compile_delta)
 
-    @skipIfNNModuleInlined("https://github.com/pytorch/pytorch/issues/128198")
     def test_buffer_batch_norm(self):
         class MyModel(torch.nn.Module):
             def __init__(self) -> None:
