@@ -103,6 +103,11 @@ jobs:
         shell: cmd
         run: |
           "pytorch/.ci/pytorch/windows/arm64/bootstrap_python.bat"
+      - name: Pip test
+        shell: cmd
+        run: |
+          where python
+          pip install psutil
       - name: Bootstrap APL
         shell: cmd
         run: |
