@@ -23,5 +23,4 @@ maximize = False
 new_param = ops.sgd_out_of_place(param, grad, weight_decay, lr, maximize)
 # expected = param - lr * (grad + weight_decay * param)
 torch._fused_sgd_((param,), (grad,), (), weight_decay=weight_decay, momentum=0.0, lr=lr, dampening=0.0, nesterov=False, maximize=maximize, is_first_step=False)
-
 assert torch.equal(new_param, param), f"{new_param=}, {param=}"

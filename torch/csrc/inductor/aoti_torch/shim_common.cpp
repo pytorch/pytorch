@@ -1,5 +1,6 @@
 #include <ATen/native/quantized/cpu/qlinear.h>
 #include <c10/core/DeviceType.h>
+#include <c10/core/DispatchKey.h>
 #include <c10/core/GradMode.h>
 #include <c10/core/Layout.h>
 #include <c10/core/MemoryFormat.h>
@@ -11,10 +12,13 @@
 #include <torch/csrc/inductor/aoti_torch/proxy_executor.h>
 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
+#include <torch/csrc/inductor/aoti_runtime/utils.h>
 #include <torch/csrc/inductor/inductor_ops.h>
 #include <torch/csrc/jit/serialization/pickle.h>
+#include <torch/library.h>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <fstream>
 #include <iostream>
 
@@ -1290,4 +1294,121 @@ AOTITorchError aoti_torch_cpu__weight_int4pack_mm_cpu_tensor(
         *tensor_handle_to_tensor_pointer(qScaleAndZeros));
     *ret0 = new_tensor_handle(std::move(tmp_result));
   });
+}
+
+// should TorchLibraryOpaque be a uniq_ptr?
+class TorchLibraryOpaque {
+  public:
+    TorchLibraryOpaque(torch::Library lib) : lib_(std::move(lib)) {}
+    
+    TorchLibraryOpaque(const TorchLibraryOpaque&) = delete;
+    TorchLibraryOpaque& operator=(const TorchLibraryOpaque&) = delete;
+    TorchLibraryOpaque(TorchLibraryOpaque&&) = default;
+    TorchLibraryOpaque& operator=(TorchLibraryOpaque&&) = default;
+    ~TorchLibraryOpaque() = default;
+  
+    torch::Library lib_;  // should this be private?
+};
+
+
+template <typename T>
+uint64_t from(T val) {
+  static_assert(sizeof(T) <= sizeof(uint64_t), "StableLibrary stack does not support parameter types larger than 64 bits.");
+  return *reinterpret_cast<uint64_t*>(&val);
+}
+
+template <typename T>
+T to(uint64_t val) {
+  return *reinterpret_cast<T*>(&val);
+}
+
+class StableIValueConverter: public c10::OperatorKernel {
+  public:
+    StableIValueConverter(void (*fn)(uint64_t*, int64_t, int64_t)) : fn_(fn) {}
+
+    void operator()(const c10::OperatorHandle& op, c10::DispatchKeySet keyset, torch::jit::Stack* stack) {
+      const auto& schema = op.schema();
+      const auto num_returns = schema.returns().size();
+      const auto num_arguments = schema.arguments().size();
+      // to make this faster, you can make this a C array on the stack --> though this may cause a stackoverflow
+      uint64_t *ministack = (uint64_t*)malloc((num_arguments + num_returns) * sizeof(uint64_t));
+      // std::unique_ptr<void *[]> ministack = std::make_unique<void*[]>(num_arguments + num_returns);
+
+      for (size_t idx = 0; idx < num_arguments; idx++) {  // rbarnes will prefer a c10::irange instead of this loop!
+        const c10::IValue& arg = torch::jit::peek(stack, idx, num_arguments);
+        if (arg.isInt()) {
+          TORCH_WARN("dealt with an Int");
+          ministack[idx] = from(arg.toInt());
+        } else if (arg.isDouble()) {
+          TORCH_WARN("dealt with a double");
+          ministack[idx] = from(arg.toDouble());
+        } else if (arg.isBool()) {
+          TORCH_WARN("dealt with a bool");
+          ministack[idx] = from(arg.toBool());
+        } else if (arg.isNone()) {
+          TORCH_WARN("dealt with a None");
+          ministack[idx] = from(nullptr);
+        } else if (arg.isTensor()) {
+          TORCH_WARN("dealt with a Tensor");
+          AtenTensorHandle ath = torch::aot_inductor::new_tensor_handle(std::move(const_cast<at::Tensor&>(arg.toTensor())));
+          ministack[idx] = from(ath);
+        } else {
+          TORCH_CHECK(false, "Other types of IValues not yet handled!");
+        }
+      }
+
+      // second function is going to take a stack of uint64_ts, cast them to our
+      // schema values, and run the function and modify the uint64_t stack
+      fn_(ministack, num_arguments, num_returns);
+
+      // now pop all inputs on stack. if we pop earlier, Tensors would go out of scope
+      // before calling the function
+      torch::jit::drop(stack, num_arguments);
+
+      // read the output from the end of the stack and wrap that back into
+      // IValue from void*?
+      for (size_t idx = 0; idx < num_returns; idx++) {
+        const c10::TypePtr& ret_type = schema.returns()[idx].type();
+        if (*ret_type == *c10::getTypePtr<at::Tensor>()) {
+          auto ret_raiiath = torch::aot_inductor::RAIIAtenTensorHandle(to<AtenTensorHandle>(ministack[num_arguments + idx]));
+          at::Tensor out = *torch::aot_inductor::tensor_handle_to_tensor_pointer(ret_raiiath.get());
+          torch::jit::push(stack, c10::IValue(out));
+        } else {
+          TORCH_CHECK(false, "Only Tensor return types are currently supported!");
+        }
+      }
+
+      free(ministack);
+    }
+
+  private:
+    void (*fn_)(uint64_t*, int64_t, int64_t);
+};
+
+AOTITorchError aoti_torch_library_init_for_impl(
+  const char *ns,
+  const char *k,
+  const char *file,
+  uint32_t line,
+  TorchLibraryHandle *ret_new_torch_lib) {
+    AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+      *ret_new_torch_lib = new TorchLibraryOpaque(torch::Library(
+        torch::Library::Kind::IMPL,
+        std::string(ns),
+        c10::parseDispatchKey(std::string(k)),
+        file,
+        line));
+    });
+  }
+
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_library_impl(
+    TorchLibraryHandle self,
+    const char* name,
+    void (*fn)(uint64_t*, int64_t, int64_t)
+) {
+   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+     self->lib_.impl(name, torch::CppFunction::makeFromBoxedFunctor(
+      std::move(std::make_unique<StableIValueConverter>(fn))));
+   });
 }

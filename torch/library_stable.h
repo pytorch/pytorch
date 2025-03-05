@@ -1,19 +1,13 @@
 // this file can only have stable stuff! Akin to shim.h
+// but unlike shim.h, this file can contain header-only C++
+// code for better UX.
 
-#include <c10/macros/Macros.h>     // used for C10_UID, verified to be header-only
-#include <c10/core/DispatchKey.h>  // used for DispatchKey, enum verified to be header-only
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
-
-#include <optional>
-#include <string>
 
 class TORCH_API StableLibrary final {
   private:
-    class TorchLibraryOpaque;
-    using TorchLibraryHandle = TorchLibraryOpaque*;
-    TorchLibraryHandle lib_;  // pimpl unique_ptr
+    TorchLibraryHandle lib_;
   public:
-    // a pointer to a real Library
     // a kind
     enum Kind {
       // DEF, // from TORCH_LIBRARY (no qualifier)
@@ -28,10 +22,16 @@ class TORCH_API StableLibrary final {
     /// constructors directly
     StableLibrary(
         Kind kind,
-        std::string ns,
-        std::optional<c10::DispatchKey> k,
+        const char* ns,
+        const char* k,
         const char* file,
-        uint32_t line);
+        uint32_t line) {
+      if (kind==IMPL) {
+        aoti_torch_library_init_for_impl(ns, k, file, line, &lib_);
+      } else {
+        std::cout << "ERROR: StableLibrary constructor not yet implemented for kind=" << kind << std::endl;
+      }
+    }
 
     StableLibrary(const StableLibrary&) = delete;
     StableLibrary& operator=(const StableLibrary&) = delete;
@@ -39,7 +39,10 @@ class TORCH_API StableLibrary final {
     StableLibrary& operator=(StableLibrary&&) = default;
     ~StableLibrary() = default;
 
-    StableLibrary& impl(const char* name, void (*fn)(uint64_t*, int64_t, int64_t));
+    StableLibrary& impl(const char* name, void (*fn)(uint64_t*, int64_t, int64_t)) {
+      aoti_torch_library_impl(lib_, name, fn);
+      return *this;
+    }
 };
 
 class TORCH_API StableTorchLibraryInit final {
@@ -52,7 +55,7 @@ class TORCH_API StableTorchLibraryInit final {
       StableLibrary::Kind kind,
       InitFn* fn,
       const char* ns,
-      std::optional<c10::DispatchKey> k,
+      const char* k,
       const char* file,
       uint32_t line)
       : lib_(kind, ns, k, file, line) {
@@ -61,18 +64,29 @@ class TORCH_API StableTorchLibraryInit final {
 };
 
 
-#define STABLE_TORCH_LIBRARY_IMPL(ns, k, m) _STABLE_TORCH_LIBRARY_IMPL(ns, k, m, C10_UID)
+// macros copied from c10/macros/Macros.h
+#ifdef __COUNTER__
+#define STABLE_UID __COUNTER__
+#else
+#define STABLE_UID __LINE__
+#endif
+
+#define STABLE_CONCATENATE_IMPL(s1, s2) s1##s2
+#define STABLE_CONCATENATE(s1, s2) STABLE_CONCATENATE_IMPL(s1, s2)
+// end of macros copied from c10/macros/Macros.h
+
+#define STABLE_TORCH_LIBRARY_IMPL(ns, k, m) _STABLE_TORCH_LIBRARY_IMPL(ns, k, m, STABLE_UID)
 
 #define _STABLE_TORCH_LIBRARY_IMPL(ns, k, m, uid)                         \
-  static void C10_CONCATENATE(                                            \
+  static void STABLE_CONCATENATE(                                            \
       STABLE_TORCH_LIBRARY_IMPL_init_##ns##_##k##_, uid)(StableLibrary&);       \
-  static const StableTorchLibraryInit C10_CONCATENATE(           \
+  static const StableTorchLibraryInit STABLE_CONCATENATE(           \
       STABLE_TORCH_LIBRARY_IMPL_static_init_##ns##_##k##_, uid)(                 \
       StableLibrary::IMPL,                                               \
-      &C10_CONCATENATE(STABLE_TORCH_LIBRARY_IMPL_init_##ns##_##k##_, uid), \
+      &STABLE_CONCATENATE(STABLE_TORCH_LIBRARY_IMPL_init_##ns##_##k##_, uid), \
       #ns,                                                                \
-      std::make_optional(c10::DispatchKey::k),                            \
+      #k,                            \
       __FILE__,                                                           \
       __LINE__);                                                          \
-  void C10_CONCATENATE(                                                   \
+  void STABLE_CONCATENATE(                                                   \
       STABLE_TORCH_LIBRARY_IMPL_init_##ns##_##k##_, uid)(StableLibrary & m)
