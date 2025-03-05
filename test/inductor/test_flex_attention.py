@@ -45,9 +45,8 @@ from torch.utils._triton import has_triton
 # Use this decorator only when hitting Triton bugs on H100
 running_on_a100_only = skipUnless(
     (torch.cuda.is_available() and has_triton())
-    and 
-    (torch.cuda.get_device_capability() == (8, 0) or torch.version.hip),
-    "Requires Triton + A100 or Triton + ROCm"
+    and (torch.cuda.get_device_capability() == (8, 0) or torch.version.hip),
+    "Requires Triton + A100 or Triton + ROCm",
 )
 
 Tolerances = namedtuple("Tolerances", ["atol", "rtol"])
