@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from __future__ import annotations
 
 
@@ -13,11 +12,12 @@ import math
 from typing import Any, TYPE_CHECKING
 
 import torch
-from torch.onnx._internal._lazy_import import onnxscript_ir as ir
 from torch.utils import _pytree
 
 
 if TYPE_CHECKING:
+    from onnxscript import ir
+
     from torch.onnx._internal.exporter import _onnx_program
 
 
@@ -32,6 +32,47 @@ class VerificationInfo:
     actual_dtype: torch.dtype
     # NOTE: We don't need to include shape because the expected shape is already known
     # and checked by the runtime
+
+    @classmethod
+    def from_tensors(
+        cls,
+        name: str,
+        expected: torch.Tensor | int | float | bool,
+        actual: torch.Tensor | int | float | bool,
+    ) -> VerificationInfo:
+        """Create a VerificationInfo object from two tensors.
+
+        Args:
+            name: The name of the value.
+            expected: The expected tensor.
+            actual: The actual tensor.
+
+        Returns:
+            VerificationInfo: The VerificationInfo object.
+        """
+        if not isinstance(expected, torch.Tensor):
+            expected = torch.tensor(expected)
+        if not isinstance(actual, torch.Tensor):
+            actual = torch.tensor(actual)
+
+        max_abs_diff, max_rel_diff, abs_diff, rel_diff = _compare_tensors(
+            expected, actual
+        )
+        bins = torch.tensor(
+            [0.0, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0, 10, 1000000],
+            dtype=torch.float,
+        )
+        abs_diff_hist = (torch.histogram(abs_diff.float(), bins=bins),)
+        rel_diff_hist = (torch.histogram(rel_diff.float(), bins=bins),)
+        return cls(
+            name=name,
+            max_abs_diff=max_abs_diff,
+            max_rel_diff=max_rel_diff,
+            abs_diff_hist=abs_diff_hist,
+            rel_diff_hist=rel_diff_hist,
+            expected_dtype=expected.dtype,
+            actual_dtype=actual.dtype,
+        )
 
 
 def _compare_tensors(
@@ -88,26 +129,11 @@ def verify_onnx_program(
         torch_outputs, onnx_outputs, onnx_program.model.graph.outputs
     ):
         name = output_val.name
-        max_abs_diff, max_rel_diff, abs_diff, rel_diff = _compare_tensors(
-            torch_output, onnx_output
-        )
-        abs_diff = abs_diff.flatten()
-        rel_diff = rel_diff.flatten()
-        bins = torch.tensor(
-            [0.0, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0, 10, 1000000],
-            dtype=torch.float,
-        )
-        abs_diff_hist = torch.histogram(abs_diff.float(), bins=bins)
-        rel_diff_hist = torch.histogram(rel_diff.float(), bins=bins)
         results.append(
-            VerificationInfo(
+            VerificationInfo.from_tensors(
                 name=str(name),
-                max_abs_diff=max_abs_diff,
-                max_rel_diff=max_rel_diff,
-                abs_diff_hist=abs_diff_hist,
-                rel_diff_hist=rel_diff_hist,
-                expected_dtype=torch_output.dtype,
-                actual_dtype=onnx_output.dtype,
+                expected=torch_output,
+                actual=onnx_output,
             )
         )
     return results
@@ -140,7 +166,36 @@ def _create_value_mapping(graph: ir.Graph) -> dict[str, ir.Value]:
 
 
 class VerificationInterpreter(torch.fx.Interpreter):
-    def __init__(self, onnx_program: torch.onnx.ONNXProgram):
+    """Interpreter for verifying converted ONNX model accuracy by comparing intermediate values.
+
+    To compare models, first initialize the interpreter with an ONNX program.
+    Then, call the :meth:`run` method with the input arguments to execute the model.
+    The :meth:`run` method will execute the model and populate the
+    :attr:`verification_infos` attribute with the verification information for each value.
+
+    ::
+        onnx_program = torch.onnx.export(model, args, dynamo=True)
+        interpreter = VerificationInterpreter(onnx_program)
+        interpreter.run(*args)
+        verification_infos = interpreter.verification_infos
+        for info in verification_infos:
+            print("value name:", info.name, info)
+
+    The verification information includes the maximum absolute difference, maximum relative
+    difference, and histograms of absolute and relative differences between the expected
+    and actual values. See :class:`VerificationInfo` for more details.
+
+    Attributes:
+        verification_infos: A list of verification information for each value.
+            It is populated when the `run` method is called.
+    """
+
+    def __init__(self, onnx_program: torch.onnx.ONNXProgram) -> None:
+        """Initialize the VerificationInterpreter with an ONNX program.
+
+        Args:
+            onnx_program: The ONNX program to verify.
+        """
         if onnx_program.exported_program is None:
             raise ValueError(
                 "The ONNX program does not contain an exported_program. "
@@ -149,8 +204,8 @@ class VerificationInterpreter(torch.fx.Interpreter):
         super().__init__(onnx_program.exported_program.module())
         self._onnx_program = onnx_program
         self._onnx_values = _create_value_mapping(onnx_program.model.graph)
-        self.verification_info: list[VerificationInfo] = []
-        self._args = []
+        self._args: list[Any] = []
+        self.verification_infos: list[VerificationInfo] = []
 
     def run(
         self,
@@ -158,7 +213,20 @@ class VerificationInterpreter(torch.fx.Interpreter):
         initial_env: dict[torch.fx.Node, Any] | None = None,
         enable_io_processing: bool = True,
     ) -> Any:
-        self.verification_info = []
+        """Run the interpreter with the given input arguments.
+
+        This method executes the model and populates the :attr:`verification_infos` attribute
+        with the verification information for each value.
+
+        Args:
+            args: The input arguments for the model.
+            initial_env: The initial environment for the interpreter.
+            enable_io_processing: Whether to enable IO processing.
+
+        Returns:
+            Any: The result of executing the model.
+        """
+        self.verification_infos = []
         self.args = args
         return super().run(
             *args,
@@ -167,18 +235,6 @@ class VerificationInterpreter(torch.fx.Interpreter):
         )
 
     def run_node(self, n: torch.fx.Node) -> Any:
-        """
-        Run a specific node ``n`` and return the result.
-        Calls into placeholder, get_attr, call_function,
-        call_method, call_module, or output depending
-        on ``node.op``
-
-        Args:
-            n (Node): The Node to execute
-
-        Returns:
-            Any: The result of executing ``n``
-        """
         result = super().run_node(n)
         if n.op != "call_function":
             return result
@@ -186,29 +242,11 @@ class VerificationInterpreter(torch.fx.Interpreter):
         if node_name not in self._onnx_values:
             return result
         (onnx_result,) = self._onnx_program.compute_values([node_name], self.args)
-        if not isinstance(result, torch.Tensor):
-            result_ = torch.tensor(result)
-        else:
-            result_ = result
-        max_absolute_difference, max_relative_difference, abs_diff, rel_diff = (
-            _compare_tensors(
-                result_,
-                onnx_result,
-            )
-        )
-        bins = torch.tensor(
-            [0.0, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0, 10, 1000000],
-            dtype=torch.float,
-        )
-        self.verification_info.append(
-            VerificationInfo(
+        self.verification_infos.append(
+            VerificationInfo.from_tensors(
                 name=node_name,
-                max_abs_diff=max_absolute_difference,
-                max_rel_diff=max_relative_difference,
-                abs_diff_hist=torch.histogram(abs_diff.float(), bins=bins),
-                rel_diff_hist=torch.histogram(rel_diff.float(), bins=bins),
-                expected_dtype=result_.dtype,
-                actual_dtype=onnx_result.dtype,
+                expected=result,
+                actual=onnx_result,
             )
         )
         return result
