@@ -46,24 +46,12 @@ jobs:
       matrix:
         py_vers: [ "3.9", "3.10", "3.11", "3.12", "3.13", "3.13t" ]
         device: ["cuda", "rocm", "xpu"]
-        docker-image: ["pytorch/manylinux-builder:cpu", "pytorch/manylinux2_28-builder:cpu"]
-        exclude:
-          # TODO: Remove this for rocm when manylinux2_28 migration for xpu is done
-          - device: "rocm"
-            docker-image: "pytorch/manylinux-builder:cpu"
-          # TODO: Remove this for cuda when manylinux2_28 migration for xpu is done
-          - device: "cuda"
-            docker-image: "pytorch/manylinux-builder:cpu"
-          - device: "xpu"
-            docker-image: "pytorch/manylinux2_28-builder:cpu"
+        docker-image: ["pytorch/manylinux2_28-builder:cpu"]
         include:
           - device: "rocm"
             rocm_version: "6.3"
           - device: "cuda"
             rocm_version: ""
-          # TODO: Remove this for xpu when manylinux2_28 migration for xpu is done
-          - device: "xpu"
-            docker-image: "pytorch/manylinux-builder:cpu"
     timeout-minutes: 40
     env:
       DOCKER_IMAGE: ${{ matrix.device == 'rocm' && format('pytorch/manylinux2_28-builder:rocm{0}', matrix.rocm_version) || matrix.docker-image }}
@@ -143,14 +131,13 @@ jobs:
             docker exec -t "${container_name}" dnf install clang lld -y
             WITH_CLANG_LDD="--with-clang-ldd"
           fi
-          # TODO: Remove this conditional block when manylinux2_28 migration for xpu is done
           if [[ "${BUILD_DEVICE}" == xpu ]]; then
-            docker exec -t "${container_name}" yum install -y devtoolset-11-gcc-c++
-            docker exec -t "${container_name}" bash -c "source /opt/rh/devtoolset-11/enable && ${PYTHON_EXECUTABLE} /pytorch/.github/scripts/build_triton_wheel.py --device=$BUILD_DEVICE $RELEASE"
+            docker exec -t "${container_name}" bash -c "dnf install -y gcc-toolset-13-gcc-c++"
+            docker exec -t "${container_name}" bash -c "source /opt/rh/gcc-toolset-13/enable && ${PYTHON_EXECUTABLE} /pytorch/.github/scripts/build_triton_wheel.py --device=$BUILD_DEVICE $RELEASE"
           else
             docker exec -t "${container_name}" bash -c "${PYTHON_EXECUTABLE} /pytorch/.github/scripts/build_triton_wheel.py --device=$BUILD_DEVICE $RELEASE $WITH_CLANG_LDD"
           fi
-          if [[ "${{ matrix.device }}" == "cuda" ]]; then
+          if [[ ("${{ matrix.device }}" == "cuda" || "${{ matrix.device }}" == "xpu") ]]; then
             docker exec -t "${container_name}"  bash -c "auditwheel repair --plat ${PLATFORM} //artifacts/*.whl"
           else
             docker exec -t "${container_name}"  bash -c "mkdir //artifacts/wheelhouse"

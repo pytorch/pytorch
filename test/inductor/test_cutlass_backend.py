@@ -1148,6 +1148,7 @@ class TestCutlassBackend(TestCase):
         max_autotune_gemm_backends = "CUTLASS"
 
         M = 128
+        A = torch.randn(M, M).cuda().half()
 
         with config.patch(
             {
@@ -1156,20 +1157,19 @@ class TestCutlassBackend(TestCase):
                 "cuda.cutlass_max_profiling_configs": 2,
                 "autotune_fallback_to_aten": False,
             }
-        ):
+        ), dynamo_config.patch({"error_on_recompile": True}):
             # testing compiling with same layout pair
             compiled = torch.compile(torch.mm)
-            A = torch.randn(M, M).cuda().half()
 
             torch.testing.assert_close(A @ A, compiled(A, A))
-            torch.testing.assert_close(A @ A.t(), compiled(A, A.t()))
+
+            torch._dynamo.reset()
+            clear_inductor_caches()
 
             # testing compiling with opposite layout pair
             compiled = torch.compile(torch.mm)
-            A = torch.randn(M, M).cuda().half()
 
             torch.testing.assert_close(A @ A.t(), compiled(A, A.t()))
-            torch.testing.assert_close(A @ A, compiled(A, A))
 
 
 if __name__ == "__main__":
