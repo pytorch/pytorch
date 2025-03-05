@@ -1373,12 +1373,18 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @patches
     @torch.no_grad
     @dtypes(torch.bfloat16)
-    @parametrize("batch_size", (32,))
+    @parametrize(
+        "batch_size",
+        (
+            1,
+            32,
+        ),
+    )
     @parametrize("in_features", (128, 144))
     @parametrize("out_features", (64, 65))
     def test_int8_woq_mm(self, dtype, batch_size, in_features, out_features):
         # x will be reshaped from 3d to 2d
-        second_dim_size = 8
+        second_dim_size = 1
 
         def _convert_weight_to_int8pack(w):
             scale, zp = _calculate_dynamic_per_channel_qparams(
@@ -1416,9 +1422,13 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         w_int8pack, w_scales = _convert_weight_to_int8pack(w)
         mod = M(w_int8pack).eval()
         self.common(mod, (x, w_scales))
-        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
-        vec_amx = VecAMX()
-        self._check_amx_counter(vec_amx)
+        if batch_size >= 32:
+            self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
+            vec_amx = VecAMX()
+            self._check_amx_counter(vec_amx)
+        else:
+            # Should use eager mode ATen kernel
+            self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 0)
 
     @unittest.skipIf(
         not torch._C._cpu._is_amx_tile_supported(), "AMX ISA support is required"

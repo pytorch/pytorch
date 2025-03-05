@@ -13,7 +13,12 @@ from .select_algorithm import (
     ExternKernelChoice,
     realize_inputs,
 )
-from .utils import use_aten_gemm_kernels, use_cpp_gemm_template, use_max_autotune
+from .utils import (
+    has_free_symbols,
+    use_aten_gemm_kernels,
+    use_cpp_gemm_template,
+    use_max_autotune,
+)
 from .virtualized import V
 
 
@@ -56,7 +61,7 @@ def register_woq_mm_ops() -> None:
         *,
         layout: Any = None,
     ) -> Any:
-        _, _, _, layout, mat1, mat2 = mm_args(
+        m, n, k, layout, mat1, mat2 = mm_args(
             input, weight, layout=layout, mat2_transposed=True
         )
         assert (
@@ -72,21 +77,49 @@ def register_woq_mm_ops() -> None:
             else []
         )
 
-        # scale is applied as an epilogue, and the scale tensor is expanded (with a view op)
-        # for broadcasting, as it's 1D.
-        def _mul_epilogue(buf: torch.Tensor) -> Any:
-            return create_epilogue_with_attr(
-                buf, "mul", other=realize_inputs(expand(scale, layout.size))
-            )
+        def _use_autotuning() -> bool:
+            nonlocal m, n, k
+            if has_free_symbols(
+                (
+                    n,
+                    k,
+                )
+            ):
+                # dynamic N & K dims can't be handled by the GEMM template
+                return False
+            if has_free_symbols((m,)):
+                # M has dynamic shape
+                # If the traced value of M would be less than 32,
+                # ATen _weight_int8pack_mm kernel would be used.
+                if V.graph.sizevars.size_hints([m])[0] >= 32:
+                    return True
+                else:
+                    return False
+            elif m < 32:
+                # For small M dimension, the ATen _weight_int8pack_mm kernel performs better E2E
+                # with large N & K used in LLMs.
+                # Ref: https://github.com/pytorch/pytorch/issues/148494
+                # This workaround may be removed later.
+                return False
+            else:
+                return True
 
-        if use_cpp_gemm_template(aten_layout, mat1, mat2, mat2_transposed=True):
-            CppGemmTemplate.add_choices(
-                choices,
-                aten_layout,
-                [mat1, mat2, scale],
-                trans_w=True,
-                epilogue_creator=_mul_epilogue,  # type: ignore[arg-type]
-            )
+        if _use_autotuning():
+            # scale is applied as an epilogue, and the scale tensor is expanded (with a view op)
+            # for broadcasting, as it's 1D.
+            def _mul_epilogue(buf: torch.Tensor) -> Any:
+                return create_epilogue_with_attr(
+                    buf, "mul", other=realize_inputs(expand(scale, layout.size))
+                )
+
+            if use_cpp_gemm_template(aten_layout, mat1, mat2, mat2_transposed=True):
+                CppGemmTemplate.add_choices(
+                    choices,
+                    aten_layout,
+                    [mat1, mat2, scale],
+                    trans_w=True,
+                    epilogue_creator=_mul_epilogue,  # type: ignore[arg-type]
+                )
 
         if (
             len(choices) == 0
