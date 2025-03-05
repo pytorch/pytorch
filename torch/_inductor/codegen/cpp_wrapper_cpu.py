@@ -34,8 +34,7 @@ from .wrapper import (
 
 
 class HasWriteLine(Protocol):
-    def writeline(self, line: Union[LineContext, DeferredLineBase, str]) -> None:
-        ...
+    def writeline(self, line: Union[LineContext, DeferredLineBase, str]) -> None: ...
 
 
 class CppWrapperCpu(PythonWrapperCodegen):
