@@ -180,47 +180,16 @@ def _callback_from_stance(callback):
     if _stance.stance == "default":
         # force_backend
         if _stance.backend is not None and callback not in (False, None):
-            hooks = Hooks()
-            callback = convert_frame.catch_errors_wrapper(
-                convert_frame.convert_frame(  # type: ignore[arg-type]
-                    get_compiler_fn(_stance.backend),
-                    hooks,
-                ),
-                hooks,
-            )
+            callback = _create_wrapped_callback(get_compiler_fn(_stance.backend))
 
         return callback
     elif _stance.stance == "eager_then_compile":
         if callback not in (False, None):
-
-            def eager_then_compile(*args, **kwargs):
-                frame = args[0]
-                key = frame.f_code.co_filename + str(frame.f_code.co_firstlineno)
-                example_inputs = get_example_inputs(key)
-
-                if len(example_inputs) < 2:
-                    example_inputs.append(clone_and_convert_to_meta(frame.f_locals))
-
-                dynamism = track_dynamism_across_examples(example_inputs)
-                if len(example_inputs) == 1:
-                    return ConvertFrameReturn(
-                        frame_exec_strategy=FrameExecStrategy(
-                            FrameAction.DEFAULT, FrameAction.DEFAULT
-                        )
-                    )
-
-                compiler_fn = callback._torchdynamo_orig_callable._torchdynamo_orig_callable.compiler_fn
-                hooks = Hooks()
-                return convert_frame.catch_errors_wrapper(
-                    convert_frame.convert_frame(  # type: ignore[arg-type]
-                        compiler_fn,
-                        hooks,
-                        dynamism=dynamism,
-                    ),
-                    hooks,
-                )(*args, **kwargs)
-
-            return eager_then_compile
+            return _create_delayed_compile_callback(callback, _stance.stance)
+        return callback
+    elif _stance.stance == "aot_eager_then_compile":
+        if callback not in (False, None):
+            return _create_delayed_compile_callback(callback, _stance.stance)
         return callback
     elif _stance.stance == "force_eager":
         # disable
@@ -243,6 +212,51 @@ def _callback_from_stance(callback):
         return fail_callback
     else:
         raise RuntimeError(f"invalid torch.compile stance '{_stance}'")
+
+
+def _create_wrapped_callback(compiler_fn, dynamism=None):
+    hooks = Hooks()
+    return convert_frame.catch_errors_wrapper(
+        convert_frame.convert_frame(  # type: ignore[arg-type]
+            compiler_fn,
+            hooks,
+            dynamism=dynamism,
+        ),
+        hooks,
+    )
+
+
+def _get_or_add_example_inputs(frame):
+    key = frame.f_code.co_filename + str(frame.f_code.co_firstlineno)
+    example_inputs = get_example_inputs(key)
+
+    if len(example_inputs) < 2:
+        example_inputs.append(clone_and_convert_to_meta(frame.f_locals))
+
+    return example_inputs
+
+
+def _create_delayed_compile_callback(callback, stance):
+    def callback_fn(*args, **kwargs):
+        frame = args[0]
+        example_inputs = _get_or_add_example_inputs(frame)
+
+        if len(example_inputs) == 1:
+            if stance == "eager_then_compile":
+                return ConvertFrameReturn(
+                    frame_exec_strategy=FrameExecStrategy(
+                        FrameAction.DEFAULT, FrameAction.DEFAULT
+                    )
+                )
+            elif stance == "aot_eager_then_compile":
+                aot_eager_fn = get_compiler_fn("aot_eager")
+                return _create_wrapped_callback(aot_eager_fn)(*args, **kwargs)
+
+        dynamism = track_dynamism_across_examples(example_inputs)
+        compiler_fn = callback._torchdynamo_orig_callable._torchdynamo_orig_callable
+        return _create_wrapped_callback(compiler_fn, dynamism)(*args, **kwargs)
+
+    return callback_fn
 
 
 def _is_skip_guard_eval_unsafe_stance():
