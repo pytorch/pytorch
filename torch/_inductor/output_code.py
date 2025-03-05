@@ -189,7 +189,6 @@ def cudagraph_post_compile(
     runs it on compiled_graph.
     Mutates the `compiled_graph.current_callable` and `cudagraphs`
     """
-    assert not config.graph_partition
     assert compiled_graph.current_callable is not None
     assert compiled_graph.cudagraph_info is not None
     cached_info = compiled_graph.cudagraph_info
@@ -252,8 +251,14 @@ def cudagraph_partition_post_compile(
     Assuming all partition functions are cudagraphified and share the same order
     as `compiled_graph.partition_maps`. See [Note: Graph Partition Map for CUDAGraph].
     """
+    assert compiled_graph.cudagraph_info is not None
+    cudagraph_fail_reasons = compiled_graph.cudagraph_info.cudagraph_fail_reasons
 
-    if compiled_graph.partition_maps is None or len(compiled_graph.partition_maps) == 0:
+    if (
+        cudagraph_fail_reasons
+        or compiled_graph.partition_maps is None
+        or len(compiled_graph.partition_maps) == 0
+    ):
         # cudagraphify is not called if there are no partitions
         BoxedBool.disable(cudagraphs)
         try_handle_backward_generation(compiled_graph)
@@ -263,7 +268,6 @@ def cudagraph_partition_post_compile(
 
     assert compiled_graph.current_callable is not None
     assert compiled_graph.recursively_apply_fns is not None
-    assert compiled_graph.cudagraph_info is not None
     is_inference = compiled_graph.fx_kwargs["is_inference"]
     is_backward = compiled_graph.fx_kwargs["is_backward"]
     static_input_idxs = compiled_graph.fx_kwargs["static_input_idxs"] or ()
@@ -487,9 +491,6 @@ class CompiledFxGraph(OutputCode):
         cudagraph_info = None
 
         def _init_and_get_cudagraph() -> Optional[CudagraphCachedInfo]:
-            if config.graph_partition:
-                return get_cudagraph_info(gm)
-
             # check cudagraph disabling reasons from inductor lowering
             if self.disabled_cudagraphs_reason:
                 if "cuda" in self.device_types:
@@ -581,27 +582,28 @@ class CompiledFxGraph(OutputCode):
         set_tracing_context_output_strides(example_inputs, self)
 
         if cudagraphs:
-            if config.graph_partition:
-                # bypass cudagraph checks at graph level and cudagraphify each partition
-                cudagraph_partition_post_compile(
-                    example_inputs,
-                    self,
-                    cudagraphs,
-                    constants.unwrap(self),
-                )
-            else:
-                if self.disabled_cudagraphs_reason:
-                    # It's possible that cudagraphs is enabled, but was disabled
-                    # during a previous compilation we're loading from the cache.
-                    # If so, we need to disable it on this new process too.
+            if self.disabled_cudagraphs_reason:
+                # It's possible that cudagraphs is enabled, but was disabled
+                # during a previous compilation we're loading from the cache.
+                # If so, we need to disable it on this new process too.
 
-                    if "cuda" in self.device_types:
-                        log_cudagraph_skip_and_bump_counter(
-                            f"skipping cudagraphs due to {self.disabled_cudagraphs_reason}"
-                        )
-                    else:
-                        counters["inductor"]["cudagraph_skips"] += 1
-                    BoxedBool.disable(cudagraphs)
+                if "cuda" in self.device_types:
+                    log_cudagraph_skip_and_bump_counter(
+                        f"skipping cudagraphs due to {self.disabled_cudagraphs_reason}"
+                    )
+                else:
+                    counters["inductor"]["cudagraph_skips"] += 1
+                BoxedBool.disable(cudagraphs)
+            else:
+                if config.graph_partition:
+                    # with graph_partition=True, we skip some cudagraph checks if it's supported
+                    # with partition. So we have to use cudagraph_partition_post_compile.
+                    cudagraph_partition_post_compile(
+                        example_inputs,
+                        self,
+                        cudagraphs,
+                        constants.unwrap(self),
+                    )
                 else:
                     cudagraph_post_compile(
                         example_inputs,

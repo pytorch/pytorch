@@ -1216,7 +1216,11 @@ class _InProcessFxCompile(FxCompile):
                         return CompiledAOTI(compiled_fn)
 
                     # TODO: Hoist this above V.aot_compilation
-                    if cudagraphs and not V.graph.disable_cudagraphs_reason:
+                    if (
+                        cudagraphs
+                        and not V.graph.disable_cudagraphs_reason
+                        and not config.graph_partition
+                    ):
                         from torch._inductor.cudagraph_utils import (
                             check_lowering_disable_cudagraph,
                         )

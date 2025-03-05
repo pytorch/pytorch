@@ -2622,6 +2622,26 @@ if HAS_CUDA:
             # 0 cudagraph since all ops are on cpu
             self.assertEqual(self.get_manager() is None, True)
 
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_forward_with_skipped_cudagraphed_backward(self):
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return x * x * x
+
+            for _ in range(3):
+                inp = torch.rand([20, 20], device="cuda", requires_grad=True)
+                out = foo(inp)
+
+                with config.patch(always_complex_memory_overlap_TESTING_ONLY=True):
+                    back_inp = torch.empty_strided([20, 20], [0, 1], device="cuda")
+                    out.backward(back_inp)
+
+            # we should not have cudagraph'd the backwards
+            new_id = self.get_manager().new_graph_id().id
+            self.assertEqual(new_id, 1)
+
+            self.assertFalse(self.get_manager().running_forwards_with_pending_backwards)
+
     class TestSAC(TestCase):
         def _make_observer_mode(self):
             class ObserverMode(TorchDispatchMode):
