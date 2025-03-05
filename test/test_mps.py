@@ -93,6 +93,8 @@ def mps_ops_grad_modifier(ops):
         'linalg.solve_ex': [torch.float16, torch.float32],  # missing `aten::lu_solve`.
         'linalg.tensorsolve': [torch.float16, torch.float32],  # missing `aten::lu_solve`.
         'linalg.det': [torch.float16, torch.float32],  # missing aten::lu_solve.out
+        'linalg.slogdet': [torch.float16, torch.float32],  # missing aten::lu_solve.out
+        'logdet': [torch.float16, torch.float32],  # missing aten::lu_solve.out
         'aminmax': [torch.float32, torch.float16],
         'special.i1': [torch.float16],  # "i1_backward" not implemented for 'Half'
 
@@ -593,11 +595,9 @@ def mps_ops_modifier(ops):
         'linalg.norm': [torch.float32],
         'linalg.normsubgradients_at_zero': [torch.float32],
         'linalg.qr': None,
-        'linalg.slogdet': None,
         'linalg.svdvals': None,
         'linalg.vecdot': None,
         'logcumsumexp': None,
-        'logdet': None,
         'lu_solve': None,
         'masked.median': None,
         'matrix_exp': None,
@@ -6854,6 +6854,12 @@ class TestMPS(TestCaseMPS):
 
         helper((2, 8, 4, 5))
 
+        # Test complex half
+        x = torch.rand(8, device='mps', dtype=torch.chalf)
+        rc_h = x.sqrt()
+        rc_f = x.cfloat().sqrt().chalf()
+        self.assertEqual(rc_h, rc_f)
+
     # Test selu, elu, celu
     def test_elu(self):
         def helper(shape, alpha=1.0, memory_format=torch.contiguous_format):
@@ -8504,6 +8510,15 @@ class TestMPS(TestCaseMPS):
                 mps_x = cpu_x.detach().clone().to('mps')
                 cpu_y = torch.empty(shape, device='cpu', dtype=dtype).t()
                 mps_y = cpu_y.detach().clone().to('mps')
+                op(cpu_x, out=cpu_y)
+                op(mps_x, out=mps_y)
+                self.assertEqual(mps_y, cpu_y)
+
+                # test for non contiguous input/output with similar strides
+                cpu_x = torch.randn(shape, device='cpu', dtype=dtype).mT
+                mps_x = cpu_x.to('mps')
+                cpu_y = torch.empty_like(cpu_x)
+                mps_y = cpu_y.to('mps')
                 op(cpu_x, out=cpu_y)
                 op(mps_x, out=mps_y)
                 self.assertEqual(mps_y, cpu_y)
