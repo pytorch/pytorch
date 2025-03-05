@@ -179,11 +179,11 @@ def _callback_from_stance(callback):
         return callback
     elif _stance.stance == "eager_then_compile":
         if callback not in (False, None):
-            return _create_eager_then_compile_callback(callback, _stance.stance)
+            return _create_delayed_compile_callback(callback, _stance.stance)
         return callback
     elif _stance.stance == "aot_eager_then_compile":
         if callback not in (False, None):
-            return _create_eager_then_compile_callback(callback, _stance.stance)
+            return _create_delayed_compile_callback(callback, _stance.stance)
         return callback
     elif _stance.stance == "force_eager":
         # disable
@@ -230,7 +230,7 @@ def _get_or_add_example_inputs(frame):
     return example_inputs
 
 
-def _create_eager_then_compile_callback(callback, stance):
+def _create_delayed_compile_callback(callback, stance):
     def callback_fn(*args, **kwargs):
         frame = args[0]
         example_inputs = _get_or_add_example_inputs(frame)
