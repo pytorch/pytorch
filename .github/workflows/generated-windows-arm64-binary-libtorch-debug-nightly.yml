@@ -15,6 +15,7 @@ on:
       - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
       - 'ciflow/binaries/*'
       - 'ciflow/binaries_libtorch/*'
+      - 'ciflow/win-arm64/*'
   workflow_dispatch:
 
 env:
