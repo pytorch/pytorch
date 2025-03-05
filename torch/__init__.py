@@ -1171,14 +1171,14 @@ def get_default_device() -> "torch.device":
             return torch.tensor([]).device
 
     # Get device from any active DeviceContext.
-    device_modes = next(
+    device_mode = next(
         filter(
             lambda mode: isinstance(mode, DeviceContext),
             reversed(_get_current_function_mode_stack()),
         ),
         None,
     )
-    if device_modes:
+    if device_mode:
         device = device_modes.device
         return _get_device_with_index(device)
 
