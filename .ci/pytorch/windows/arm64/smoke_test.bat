@@ -47,5 +47,3 @@ if ERRORLEVEL 1 exit /b 1
 if ERRORLEVEL 1 exit /b 1
 
 :end
-
-popd
