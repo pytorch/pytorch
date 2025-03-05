@@ -8523,7 +8523,7 @@ class TestMPS(TestCaseMPS):
                 op(mps_x, out=mps_y)
                 self.assertEqual(mps_y, cpu_y)
                 # test for sliced inputs and outputs with similar strides
-                mps_x, mps_y = torch.randn((2, shape[0]*2, shape[1]*2), device='mps', dtype=dtype).unbind(0)
+                mps_x, mps_y = torch.randn((2, shape[0] * 2, shape[1] * 2), device='mps', dtype=dtype).unbind(0)
                 op(mps_x[::2, ::2], out=mps_y[::2, ::2])
                 self.assertEqual(mps_y[::2, ::2], op(mps_x[::2, ::2].contiguous()))
 

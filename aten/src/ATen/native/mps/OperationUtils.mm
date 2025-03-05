@@ -980,8 +980,8 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
     if (!is_dense_strided) {
       inputTensor = inputTensor.contiguous();
       if (!outputTensor.is_contiguous()) {
-          outputTensor = outputTensor.contiguous();
-          needs_output_copy = true;
+        outputTensor = outputTensor.contiguous();
+        needs_output_copy = true;
       }
     }
 
