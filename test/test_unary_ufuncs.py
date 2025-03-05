@@ -272,6 +272,9 @@ class TestUnaryUfuncs(TestCase):
     @suppress_warnings
     @ops(reference_filtered_ops)
     def test_reference_numerics_normal(self, device, dtype, op):
+        if dtype in (torch.bool,):
+            raise self.skipTest("bool does not work, see pytorch issue #148143")
+
         tensors = generate_elementwise_unary_tensors(
             op, device=device, dtype=dtype, requires_grad=False
         )
