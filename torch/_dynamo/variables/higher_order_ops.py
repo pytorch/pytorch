@@ -167,14 +167,13 @@ def _collect_fake_inputs(tx, inputs):
 def _check_mutation_and_alias(graph_module, inputs_fake, name, pre_dispatch):
     from torch._higher_order_ops.utils import has_potential_input_alias_or_mutation
 
-    inp_mutation, aliases = has_potential_input_alias_or_mutation(
+    aliases, inp_mutation = has_potential_input_alias_or_mutation(
         graph_module, inputs_fake, pre_dispatch=pre_dispatch
     )
-
-    if inp_mutation:
-        raise RuntimeError(f"{name} might be modifying the input!")  # noqa: F541
     if aliases:
         raise RuntimeError(f"{name} might be aliasing the input or the output!")  # noqa: F541
+    if inp_mutation:
+        raise RuntimeError(f"{name} might be modifying the input!")  # noqa: F541
 
 
 def check_mutation_and_alias(tx, graph_module, inputs, name, pre_dispatch=False):
@@ -3061,14 +3060,14 @@ class BaseHOPVariable(WrapHigherOrderVariable):
         )
         assert len(p_kwargs) == 0
 
-        from torch._higher_order_ops.utils import potential_input_mutation_or_alias
+        from torch._higher_order_ops.utils import potential_input_alias_or_mutation
 
         fake_inputs = [
             node.meta["example_value"]
             for node in body_gmod.graph.nodes
             if node.op == "placeholder"
         ]
-        input_mutations, aliases = potential_input_mutation_or_alias(
+        input_mutations, aliases = potential_input_alias_or_mutation(
             body_gmod, fake_inputs
         )
         if len(input_mutations) > 0:
@@ -3114,23 +3113,23 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
 
         # TODO(anijain2305) - This might be too big of a limitation. Consider
         # supporting mutation/aliasing in HOP itself to remove this restriction.
-        from torch._higher_order_ops.utils import potential_input_mutation_or_alias
+        from torch._higher_order_ops.utils import has_potential_input_alias_or_mutation
 
-        input_mutations, aliases = potential_input_mutation_or_alias(
+        aliases, input_mutations = has_potential_input_alias_or_mutation(
             body_gmod, fake_inputs
         )
-        if len(input_mutations) > 0:
-            # TODO: Investigate here further which node is exactly mutating the inputs
-            raise RuntimeError(
-                f"{self.value._name} where the inputs are mutated."
-                + f"In particular, these nodes are mutating the inputs {[el for el in input_mutations]}."  # noqa: C416
-                + "Please ensure that this doesn't happen."
-            )
-        if len(aliases) > 0:
+        if aliases:
             # TODO: Investigate here further which node is exactly aliasing
             raise RuntimeError(
                 f"{self.value._name} where aliases appear."
                 + f"In particular, these nodes are aliasing the inputs {[el for el in aliases]}."  # noqa: C416
+                + "Please ensure that this doesn't happen."
+            )
+        if input_mutations:
+            # TODO: Investigate here further which node is exactly mutating the inputs
+            raise RuntimeError(
+                f"{self.value._name} where the inputs are mutated."
+                + f"In particular, these nodes are mutating the inputs {[el for el in input_mutations]}."  # noqa: C416
                 + "Please ensure that this doesn't happen."
             )
 

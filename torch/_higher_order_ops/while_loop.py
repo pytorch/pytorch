@@ -467,8 +467,8 @@ def while_loop_func(ctx, cond_fn, body_fn, carried_inputs, additional_inputs):
         functional_body_fn = ctx.functionalize(_maybe_run_with_interpreter(body_fn))
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
         for fn, fn_name in [
-            (functional_cond_fn, "cond_fn"),
-            (functional_body_fn, "body_fn"),
+            (cond_fn, "cond_fn"),
+            (body_fn, "body_fn"),
         ]:
             _check_mutation_and_alias(fn, unwrapped_inputs, fn_name, pre_dispatch)
         ret = while_loop_op(

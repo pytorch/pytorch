@@ -163,7 +163,7 @@ def _maybe_fake_tracing(fn, inputs: list[Any], pre_dispatch):
         )(*inputs)
 
 
-def potential_input_mutation_or_alias(gm, inputs, pre_dispatch=False):
+def potential_input_alias_or_mutation(gm, inputs, pre_dispatch=False):
     try:
         gm = _maybe_fake_tracing(gm, inputs, pre_dispatch)
     except UnsupportedAliasMutationException:
@@ -177,22 +177,30 @@ def potential_input_mutation_or_alias(gm, inputs, pre_dispatch=False):
         ph.meta.get("val", None) for ph in gm.graph.find_nodes(op="placeholder")
     ]
     (
-        inp_mutation,
         inp_inp_alias_map,
         inp_out_alias_map,
         out_out_alias_map,
+        inp_mutation,
     ) = check_input_alias_and_mutation(gm, example_inputs)
-    return inp_mutation, (inp_inp_alias_map,
-                          inp_out_alias_map,
-                          out_out_alias_map)
+    return (inp_inp_alias_map, inp_out_alias_map, out_out_alias_map), inp_mutation
+
 
 def has_potential_input_alias_or_mutation(gm, inputs, pre_dispatch=False):
-    inp_mutation, (inp_inp_alias_map,
-                   inp_out_alias_map,
-                   out_out_alias_map) = potential_input_mutation_or_alias(gm, inputs, pre_dispatch)
-    return len(inp_mutation) > 0, any((len(inp_inp_alias_map) > 0,
-                                       len(inp_out_alias_map) > 0,
-                                       len(out_out_alias_map) > 0))
+    (
+        inp_inp_alias_map,
+        inp_out_alias_map,
+        out_out_alias_map,
+    ), inp_mutation = potential_input_alias_or_mutation(gm, inputs, pre_dispatch)
+    return (
+        any(
+            (
+                len(inp_inp_alias_map) > 0,
+                len(inp_out_alias_map) > 0,
+                len(out_out_alias_map) > 0,
+            )
+        ),
+        len(inp_mutation) > 0,
+    )
 
 
 def unique_graph_id(proxy_mode, prefix):
@@ -518,7 +526,7 @@ def validate_subgraph_args_types(lifted_args: Union[tuple[Any, ...], list[Any]])
     ), f"{lifted_args} can only be of {allowed_types} but got {tuple(type(arg) for arg in lifted_args)}"
 
 
-# TODO: Return a more detailed information as to which node 
+# TODO: Return a more detailed information as to which node
 # causes a mutation or an alias. This may requires a per operator tensor version checking
 def check_input_alias_and_mutation(
     gm: torch.fx.GraphModule,
@@ -586,4 +594,4 @@ def check_input_alias_and_mutation(
             for i, inp in enumerate(cloned)
             if isinstance(inp, torch.Tensor) and _tensor_storage(inp) in out_storage_map
         }
-        return mutated_inputs, inp_inp_alias_map, inp_out_alias_map, out_out_alias_map
+        return inp_inp_alias_map, inp_out_alias_map, out_out_alias_map, mutated_inputs

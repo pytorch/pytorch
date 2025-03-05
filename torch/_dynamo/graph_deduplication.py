@@ -13,7 +13,7 @@ from collections.abc import Iterable
 from typing import Any
 
 import torch.fx
-from torch._higher_order_ops.utils import potential_input_mutation_or_alias
+from torch._higher_order_ops.utils import has_potential_input_alias_or_mutation
 from torch.utils._pytree import tree_flatten
 
 from .graph_region_tracker import Node, Region
@@ -129,17 +129,19 @@ def _replace_region_with_subgraph(
     invoke_args = (get_subgraph_node, subgraph_name, tuple(sub_args))
     fake_inputs = [node.meta["example_value"] for node in sub_args]
 
-    input_mutations, aliases = potential_input_mutation_or_alias(sub_gm, fake_inputs)
-    if len(input_mutations) > 0:
+    aliases, input_mutations = has_potential_input_alias_or_mutation(
+        sub_gm, fake_inputs
+    )
+    if aliases:
         log.debug(
-            f"NYI: Failed to substitute region {region} due to input mutations."
-            + f"In particular, these nodes are mutating the inputs {[el for el in input_mutations.items()]}."
+            f"NYI: Failed to substitute region {region} due to aliases."  # noqa: G004
+            f"In particular, these nodes are aliasing the inputs {[el for el in aliases]}."  # noqa: G004, C416
         )
         return
-    if len(aliases) > 0:
+    if input_mutations:
         log.debug(
-            f"NYI: Failed to substitute region {region} due to aliases."
-            + f"In particular, these nodes are aliasing the inputs {[el for el in aliases.items()]}."
+            f"NYI: Failed to substitute region {region} due to input mutations."  # noqa: G004
+            f"In particular, these nodes are mutating the inputs {[el for el in input_mutations]}."  # noqa: G004, C416
         )
         return
 

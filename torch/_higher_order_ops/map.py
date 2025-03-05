@@ -4,10 +4,7 @@ import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._dispatch.python import suspend_functionalization
 from torch._functorch.aot_autograd import AOTConfig, create_joint
-from torch._higher_order_ops.utils import (
-    _maybe_run_with_interpreter,
-    reenter_make_fx,
-)
+from torch._higher_order_ops.utils import _maybe_run_with_interpreter, reenter_make_fx
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._subclasses.functional_tensor import disable_functional_mode
@@ -240,7 +237,7 @@ def map_fake_tensor_mode(mode, f, xs, args):
 @map_impl.py_functionalize_impl
 def map_functionalize(ctx, f, xs, pos_args):
     from torch._dynamo.variables.higher_order_ops import _check_mutation_and_alias
-    
+
     unwrapped_xs = ctx.unwrap_tensors(xs)
     unwrapped_args = ctx.unwrap_tensors(pos_args)
     wrapped_fn = ctx.functionalize(_maybe_run_with_interpreter(f))
@@ -249,6 +246,6 @@ def map_functionalize(ctx, f, xs, pos_args):
         with disable_proxy_modes_tracing():
             example_inputs = (*_unstack_pytree(unwrapped_xs)[0], *unwrapped_args)
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
-        _check_mutation_and_alias(wrapped_fn, example_inputs, 'torch.map', pre_dispatch)
+        _check_mutation_and_alias(f, example_inputs, "torch.map", pre_dispatch)
         map_return = map_impl(wrapped_fn, unwrapped_xs, unwrapped_args)
         return ctx.wrap_tensors(map_return)

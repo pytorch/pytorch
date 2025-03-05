@@ -272,7 +272,7 @@ def _(ctx, subgraph, identifier, operands):
         functionalized_subgraph = ctx.functionalize(subgraph)
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
         _check_mutation_and_alias(
-            functionalized_subgraph, unwrapped_operands, "invoke_subgraph", pre_dispatch
+            subgraph, unwrapped_operands, "invoke_subgraph", pre_dispatch
         )
         out = invoke_subgraph(functionalized_subgraph, identifier, unwrapped_operands)
     return ctx.wrap_tensors(out)

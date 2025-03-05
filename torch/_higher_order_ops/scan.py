@@ -14,7 +14,7 @@ from torch._higher_order_ops.utils import (
     autograd_not_implemented,
     reenter_make_fx,
     unique_graph_id,
-    validate_subgraph_args_types
+    validate_subgraph_args_types,
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -443,7 +443,7 @@ def scan_fake_tensor_mode(mode, combine_fn, init, xs, additional_inputs):
 @scan_op.py_functionalize_impl
 def scan_functionalize(ctx, combine_fn, init, xs, additional_inputs):
     from torch._dynamo.variables.higher_order_ops import _check_mutation_and_alias
-    
+
     unwrapped_xs = ctx.unwrap_tensors(xs)
     unwrapped_init = ctx.unwrap_tensors(init)
     unwrapped_additional_inputs = ctx.unwrap_tensors(additional_inputs)
@@ -460,7 +460,7 @@ def scan_functionalize(ctx, combine_fn, init, xs, additional_inputs):
                 unwrapped_additional_inputs,
             )
         )
-        _check_mutation_and_alias(functional_combine_fn, sample_inputs, 'Combine_fn', pre_dispatch)
+        _check_mutation_and_alias(combine_fn, sample_inputs, "Combine_fn", pre_dispatch)
         ret = scan_op(
             functional_combine_fn,
             unwrapped_init,
