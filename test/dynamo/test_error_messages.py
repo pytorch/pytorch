@@ -961,10 +961,9 @@ from user code:
                 s,
             )
 
-        # get the 2nd torch._dynamo.graph_break() (actually 4rd logged graph break because of lack of
-        # nested graph break support)
+        # check the log for the 2nd torch._dynamo.graph_break()
         self.assertExpectedInline(
-            post_munge(munge_exc(records[3].getMessage(), skip=0)),
+            post_munge(munge_exc(records[-1].getMessage(), skip=0)),
             """\
 Graph break in user code at test_error_messages.py:N
 Graph Break Reason: Call to `torch._dynamo.graph_break()`
@@ -989,6 +988,44 @@ User code traceback:
     torch._dynamo.graph_break()
 """,
         )
+
+    @make_logging_test(graph_breaks=True)
+    def test_graph_break_traceback_above_dynamo_shows_user_code(self, records):
+        @torch.compile(backend="eager")
+        # NOTE: comments in this test are used to differentiate lines!
+        def f1(x):
+            torch._dynamo.graph_break()  # 0
+            torch._dynamo.graph_break()  # 1
+            torch._dynamo.graph_break()
+
+        @torch.compile(backend="eager")
+        def f2(x):
+            if x.sum() > 0:  # 0
+                x = x + 1
+            if x.sum() > 0:  # 1
+                x = x + 1
+            if x.sum() > 0:
+                x = x + 1
+
+        class Foo:
+            def __setattr__(self, name, value):
+                torch._dynamo.graph_break()
+
+        @torch.compile(backend="eager")
+        def f3(x):
+            Foo().attr = x  # 0
+            Foo().attr = x  # 1
+            Foo().attr = x
+
+        f1(torch.randn(3))
+        self.assertIn("torch._dynamo.graph_break()  # 0", records[-1].getMessage())
+        self.assertIn("torch._dynamo.graph_break()  # 1", records[-1].getMessage())
+        f2(torch.ones(3))
+        self.assertIn("if x.sum() > 0:  # 0", records[-1].getMessage())
+        self.assertIn("if x.sum() > 0:  # 1", records[-1].getMessage())
+        f3(torch.randn(3))
+        self.assertIn("Foo().attr = x  # 0", records[-1].getMessage())
+        self.assertIn("Foo().attr = x  # 1", records[-1].getMessage())
 
 
 if __name__ == "__main__":

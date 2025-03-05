@@ -603,9 +603,9 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             # 3.13 requires stack[-1] to be bool type
             self.output.add_output_instructions([create_instruction("TO_BOOL")])
 
-        self.output.add_output_instructions(
-            [create_instruction(inst.opname, target=if_jump[0])] + if_next + if_jump
-        )
+        jump_inst = create_instruction(inst.opname, target=if_jump[0])
+        jump_inst.copy_positions(inst)
+        self.output.add_output_instructions([jump_inst] + if_next + if_jump)
 
     def inner(self: "InstructionTranslatorBase", inst: Instruction):
         value: VariableTracker = self.pop()
@@ -873,9 +873,9 @@ def break_graph_if_unsupported(*, push):
                     self.output.add_output_instructions(
                         [create_instruction("KW_NAMES", argval=kw_names)]
                     )
-                self.output.add_output_instructions(
-                    create_call_function(inst.arg, False)
-                )
+                call_insts = create_call_function(inst.arg, False)
+                call_insts[-1].copy_positions(inst)
+                self.output.add_output_instructions(call_insts)
             else:
                 # copy instruction, but without exception table data
                 assert inst.target is None
@@ -3134,6 +3134,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         one_graph,
         export,
         export_constraints,
+        dynamism,
         frame_state,
         speculation_log: SpeculationLog,
         distributed_state: Optional[DistributedState],
@@ -3187,10 +3188,19 @@ class InstructionTranslator(InstructionTranslatorBase):
             self.symbolic_locals = {}
             # Populate `symbolic_locals` with non-cell variables.
             cell_and_freevars: set[str] = set(self.cell_and_freevars())
+
             for name, value in f_locals.items():
                 if name not in cell_and_freevars:
+                    local_dynamism = None
+                    if dynamism:
+                        local_dynamism = frozenset(dynamism.get(name, {}).items())
                     var = LazyVariableTracker.create(
-                        value, LocalSource(name, is_input=True)
+                        value,
+                        LocalSource(
+                            name,
+                            is_input=True,
+                            dynamism=local_dynamism,
+                        ),
                     )
                     self.symbolic_locals[name] = var
 
