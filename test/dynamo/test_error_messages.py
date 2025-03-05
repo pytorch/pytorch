@@ -976,11 +976,11 @@ User code traceback:
   File "test_error_messages.py", line N, in test_nested_compile_user_frames
     torch.compile(fn, backend="eager")(torch.randn(3))
   File "test_error_messages.py", line N, in fn
-    def fn(x):
+    gn(x + 1)
   File "test_error_messages.py", line N, in gn
-    def gn(x):
+    hn(x + 1)
   File "test_error_messages.py", line N, in hn
-    def hn(x):
+    torch._dynamo.graph_break()
 
 ========== `torch.compile` tracing started here ==========
 
