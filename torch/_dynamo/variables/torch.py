@@ -213,8 +213,8 @@ def get_overridable_functions():
 def is_python_dispatcher_op_overload(op):
     return (
         isinstance(op, torch._ops.CustomOpOverload)
-        or isinstance(op, torch._ops.OpOverload)
-        and isinstance(op._op, torch._ops.CustomOpOverload)
+        or isinstance(op, torch._ops.OpOverloadPacket)
+        and op._has_pytree_arg_overload
     )
 
 

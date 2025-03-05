@@ -2,6 +2,7 @@
 # ruff: noqa: F841
 
 import collections
+import dataclasses
 import itertools
 import os
 import re
@@ -48,6 +49,12 @@ from torch._custom_op.impl import custom_op  # usort: skip
 # Needed by TestTypeConversion.test_string_type:
 MyList = list
 MyTensor = torch.Tensor
+
+
+@dataclasses.dataclass
+class Point:
+    x: torch.Tensor
+    y: torch.Tensor
 
 
 def requires_compile(fun):
@@ -2459,6 +2466,27 @@ class TestCustomOpAPI(TestCase):
                     "_torch_testing::foo",
                     lambda info, in_dims, x, *, y: (x, 0),
                 )
+
+    def test_dict_input(self):
+        @torch.library.custom_op("mylib::foo", mutates_args=())
+        def foo(d: dict, t: torch.Tensor) -> torch.Tensor:
+            return torch.sin(d["x"] - d["y"] + t)
+
+        d = {"x": torch.randn(2, 3), "y": torch.randn(2, 3)}
+        t = torch.randn(2, 3)
+        y = torch.ops.mylib.foo(d, t)
+        self.assertEqual(y, torch.sin(d["x"] - d["y"] + t))
+
+    def test_dataclass_input(self):
+        torch.utils._pytree.register_dataclass(Point)
+
+        @torch.library.custom_op("mylib::foo", mutates_args=())
+        def foo(a: Point) -> torch.Tensor:
+            return torch.sqrt(torch.sum((a.x - a.y) ** 2))
+
+        x = Point(x=torch.randn(2, 3), y=torch.randn(2, 3))
+        y = torch.ops.mylib.foo(x)
+        self.assertEqual(y, torch.sqrt(torch.sum((x.x - x.y) ** 2)))
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_register_autograd_kwargonly_low_level(self):
