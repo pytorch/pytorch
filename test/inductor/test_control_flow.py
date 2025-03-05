@@ -1508,30 +1508,6 @@ class ScanModels:
 
             return scan_op(combine_fn, init, xs, dim=self.dim, reverse=self.reverse)
 
-    class ScanInScan(torch.nn.Module):
-        def __init__(self, reverse, dim):
-            super().__init__()
-            self.reverse = reverse
-            self.dim = dim
-            self.linear = torch.nn.Linear(4, 4)
-            self.linear2 = torch.nn.Linear(4, 4)
-
-        def forward(self, scan_op, init, xs):
-            def inner_combine_fn(carry, x):
-                prev_sz = x.size()
-                x = self.linear(x.view(-1, x.size(-1)))
-                x_view = x.view(*prev_sz)
-                return carry + torch.sum(x_view, 0, keepdim=True), x_view.clone()
-
-            def outer_combine_fn(carry, x):
-                new_carry = self.linear2(carry)
-                new_carry2, y2 = scan_op(inner_combine_fn, new_carry, x)
-                return new_carry2, y2
-
-            return scan_op(
-                outer_combine_fn, init, xs, reverse=self.reverse, dim=self.dim
-            )
-
     class ScanInCond(torch.nn.Module):
         def __init__(self, reverse, dim):
             super().__init__()
@@ -1840,29 +1816,6 @@ class ScanTests(TestCase):
     @parametrize("dynamic", [True, False])
     @parametrize("reverse", [True, False])
     @parametrize("dim", [0, 1, 3])
-    @parametrize("scan_length", [1, 5])
-    @torch._dynamo.config.patch("capture_scalar_outputs", True)
-    def test_scan_in_scan(self, device, dynamic, reverse, dim, scan_length):
-        init = torch.randn(4, 4)
-        xs = torch.randn(scan_length, 4, 4, 4)
-        xs = xs.movedim(0, dim)
-        self._run_test(
-            model=ScanModels.ScanInScan(reverse=reverse, dim=dim),
-            inputs=(
-                init,
-                xs,
-            ),
-            device=device,
-            dynamic=dynamic,
-        )
-
-    @requires_gpu
-    # TODO(yidi): when setting dynamic=True, some symints are lifted to the subgraph of cond, which
-    # is not supported by cond yet.
-    @parametrize("dynamic", [False])
-    @parametrize("device", ["cpu", GPU_TYPE])
-    @parametrize("reverse", [True, False])
-    @parametrize("dim", [0, 1, 2, 3])
     @parametrize("pred", [True, False])
     @parametrize("scan_length", [1, 5])
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
@@ -1884,9 +1837,8 @@ class ScanTests(TestCase):
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [True, False])
-    # @parametrize("reverse", [True, False])
-    @parametrize("reverse", [False])
-    @parametrize("dim", [0, 1, 2, 3])
+    @parametrize("reverse", [True, False])
+    @parametrize("dim", [0, 1, 3])
     @parametrize("scan_length", [1, 5])
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_cond_in_scan(self, device, dynamic, reverse, dim, scan_length):

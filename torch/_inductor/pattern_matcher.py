@@ -1092,15 +1092,20 @@ class ReplacementPatternEntry(PatternEntry):
                 if node.op == "get_attr":
                     # If the replacement graph contains a HOP, the subgraphs of the HOP are "get_attr" nodes.
                     # We need to fetch the subgraph of the HOP then register the subgraph to the replaced graph's root.
-                    from torch._higher_order_ops.utils import unique_graph_name_with_root
+                    from torch._higher_order_ops.utils import (
+                        unique_graph_name_with_root,
+                    )
+
                     sub_gm = super().get_attr(target, args, kwargs)
-                    if not isinstance(
-                        sub_gm, torch.fx.GraphModule
-                    ):
-                        raise NotImplemented(f"NYI: replacement_graph.{target} is not a graph module. Got {sub_gm}.")
+                    if not isinstance(sub_gm, torch.fx.GraphModule):
+                        raise NotImplementedError(
+                            f"NYI: replacement_graph.{target} is not a graph module. Got {sub_gm}."
+                        )
 
                     assert graph.owning_module is not None
-                    _, graph_name = unique_graph_name_with_root(graph.owning_module, target)
+                    _, graph_name = unique_graph_name_with_root(
+                        graph.owning_module, str(target)
+                    )
                     graph.owning_module.register_module(graph_name, sub_gm)
                     return graph.get_attr(graph_name)
 

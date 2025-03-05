@@ -317,9 +317,7 @@ def _get_subgraph_names(gm: GraphModule) -> Generator[str, None, None]:
             gm.graph.find_nodes(
                 op="call_function", target=torch.ops.higher_order.while_loop
             ),
-            gm.graph.find_nodes(
-                op="call_function", target=torch.ops.higher_order.scan
-            ),
+            gm.graph.find_nodes(op="call_function", target=torch.ops.higher_order.scan),
         )
     ):
         if node.target == torch.ops.higher_order.cond:

@@ -190,6 +190,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     optimus_scuba_log["after_recompile_post_grad"] = upload_graph(gm.graph)
     gm.graph.lint()
 
+
 def lower_scan_to_while_loop(gm: torch.fx.GraphModule):
     graph_pass = PatternMatcherPass()
 
@@ -200,60 +201,85 @@ def lower_scan_to_while_loop(gm: torch.fx.GraphModule):
     def _(match: Match, *args, **kwargs):
         from torch._higher_order_ops.scan import _extract_carry_and_out
 
-        assert (
-            len(kwargs) == 0
-        ), "kwargs of scan are not merged into args before entering lower_scan_to_while_loop_pass"
+        assert len(kwargs) == 0, (
+            "kwargs of scan are not merged into args before entering lower_scan_to_while_loop_pass"
+        )
 
         combine_subgraph, fx_init, fx_xs, fx_additional_inputs = args
         assert combine_subgraph.op == "get_attr", "first arg is not combine_subgraph"
         sub_gm: torch.fx.GraphModule = getattr(gm, combine_subgraph.target)
         cur_node = match.nodes[0]
         num_init_leaves = len(fx_init)
-        # TODO: add a test case for fake_scan_length being an expr
-        fake_scan_length = fx_xs[0].meta["val"].size()[0]
+        _, ys_outputs = _extract_carry_and_out(cur_node.meta["val"], num_init_leaves)
 
         def lower_to_while_loop(*args, **kwargs):
-            assert len(kwargs) == 0
+            """
+            This function constructs the necessary inputs of a `while_loop` and execute the `while_loop`. It has
+            the same behavior of the original `scan`.
 
+            Suppose we have a function f:
+            def f():
+                init = torch.zeros([])
+                xs = torch.arange(4)
+                ys = []
+                for i in range(xs.size(0)):
+                    init = xs[i] + init
+                    ys.append(init)
+                return init, torch.stack(ys)
 
-            def cond_fn_out(*flat_args):
-                loop_idx, _, _, _, _ = pytree.tree_unflatten(flat_args, while_loop_spec)  # type: ignore[has-type]
-                return loop_idx < scan_length  # type: ignore[has-type]
+            We could rewrite it with a scan with the benefits of reducing compilation time/binary size, reducing
+            memory usage, supporting loops over unbacked shapes and cudagraph etc.
+            def g():
+                def step_fn(init: torch.Tensor, x: torch.Tensor):
+                    next_init = x + init
+                    return next_init, next_carry
 
-            def body_fn_out(*flat_args):
-                loop_idx, ys_outs, carry, xs, additional_inputs = pytree.tree_unflatten(
-                    flat_args, while_loop_spec  # type: ignore[has-type]
-                )
+                init = torch.zeros([])
+                xs = torch.arange(4)
+                final_carry, ys  = scan(step_fn, init, xs)
+                return final_carry, ys
 
-                idx_item = loop_idx.item()
+                # Return the final carry and stack the intermediates
 
-                torch.ops.aten._assert_scalar.default(idx_item>=0, "")
-                torch.ops.aten._assert_scalar.default(idx_item<scan_length, "")
-                # torch._check(idx_item >= 0)
-                # torch._check(idx_item < scan_length)
-                scan_idx = idx_item
+            This pass will rewrite scan into:
+            def k():
+                init = torch.zeros([])
+                xs = torch.arange(4)
 
-                # step 1: slice the input tensors
-                sub_xs = [torch.ops.aten.select.int(x, 0, scan_idx) for x in xs]
-                # step 2: run original combine_subgraph
-                next_carry, ys = _extract_carry_and_out(
-                    sub_gm(*(list(carry) + sub_xs + list(additional_inputs))),
-                    num_init_leaves,
-                )
-                # step 3: store the output tensors
-                for y, y_out in zip(ys, ys_outs):
-                    y_out_slice = torch.ops.aten.select.int(y_out, 0, idx_item)
-                    y_out_slice.copy_(y)
-                return loop_idx + 1, *ys_outs, *next_carry, *xs
+                loop_idx = torch.zeros([])
+                ys = torch.empty_strided(_shape_stride_of_ys)
+                def cond_fn(loop_idx, ys, init, xs):
+                    return loop_idx < xs.shape[0]
 
-            def resolve_shape_to_proxy(shape, sub_graph_args):
+                def body_fn(loop_idx, ys, init, xs):
+                    int_idx = loop_idx.item()
+                    next_init, y = step_fn(init, xs[int_idx])
+                    ys[int_idx].copy_(y)
+                    return loop_idx + 1, ys, next_init, xs
+
+                final_carry, _, _, ys = while_loop(cond_fn, body_fn, (loop_idx, ys, init, xs))
+                return final_carry, ys
+
+            Note that in function k, we pre-allocate the output buffer and copy_ each y into the buffer
+            to avoid introducing an extra copy of input. _shape_stride_of_ys can be queried from the
+            metadata of scan's fx_node see Note [Pre-allocate scan's output buffer].
+            """
+
+            def resolve_shape_to_proxy(
+                shape: list[Union[int, torch.SymInt]], bound_symbols: dict[Any, Any]
+            ):
+                """
+                Given a list of shape, this function returns a calculated expression of bound_symbols' values.
+                Though when looked at the returned values, they are the same as shape but when we trace this
+                function, we'll get a graph with call_function nodes that describes how the shape expr is
+                computed from bound_symbols' values.
+
+                Suppose shape is (s1*s2, s1+s2), if bound_symbols = {s1: arg0, s2: arg1}, the result will be
+                (arg0 * arg1, arg0 + arg1).
+                """
                 from torch.utils._sympy.interp import sympy_interp
                 from torch.utils._sympy.reference import PythonReferenceAnalysis
 
-                bound_symbols = {}
-                for arg in sub_graph_args:
-                    if isinstance(arg, torch.SymInt):
-                        bound_symbols[arg.node.expr] = arg
                 ret = []
                 for s in shape:
                     if isinstance(s, torch.SymInt):
@@ -269,39 +295,69 @@ def lower_scan_to_while_loop(gm: torch.fx.GraphModule):
                         ret.append(s)
                 return ret
 
+            assert len(kwargs) == 0
             (
                 init,
                 xs,
                 additional_inputs,
-                scan_length,
             ) = pytree.tree_unflatten(args, tree_spec)
-            _, ys_outputs = _extract_carry_and_out(
-                cur_node.meta["val"], num_init_leaves
+            scan_length = xs[0].size(0)
+            loop_idx = torch.zeros([], dtype=torch.int64, device=torch.device("cpu"))
+
+            # Note [Pre-allocate scan's output buffer]
+            # In order to pre-allocate the output buffer for ys, we rely on the meta of scan's fx_node.
+            # However, the meta consists of concrete symints, we need to bind them with the
+            # proxies in order to trace the torch.empyt_strided call correctly (i.e. resolve_shape_to_proxy).
+            # Note that basic free symbols of tensor's shapes are guaranteed to be lifted as subgraph inputs
+            # in dynamo. See Note [Auto lift basic free symbols when create_graph_input] for how this is done.)
+            bound_symbols = {
+                arg.node.expr: arg
+                for arg in pytree.tree_leaves((args, scan_length))
+                if isinstance(arg, torch.SymInt)
+            }
+            ys_outs = [
+                torch.empty_strided(
+                    resolve_shape_to_proxy(ys_out.size(), bound_symbols),
+                    resolve_shape_to_proxy(ys_out.stride(), bound_symbols),
+                    device=ys_out.device,
+                    dtype=ys_out.dtype,
+                    layout=ys_out.layout,
+                    requires_grad=ys_out.requires_grad,
+                )
+                for ys_out in ys_outputs
+            ]
+
+            while_loop_operands = (loop_idx, ys_outs, init, xs)
+            flat_operands, flat_spec = pytree.tree_flatten(while_loop_operands)
+            _, while_loop_spec = pytree.tree_flatten(
+                (*while_loop_operands, additional_inputs)
             )
-            ys_outs = []
-            for ys_out in ys_outputs:
-                shape_proxies = resolve_shape_to_proxy(
-                    ys_out.size(), pytree.tree_leaves(args)
-                )
-                stride_proxies = resolve_shape_to_proxy(
-                    ys_out.stride(), pytree.tree_leaves(args)
-                )
-                ys_outs.append(
-                    torch.empty_strided(
-                        shape_proxies,
-                        stride_proxies,
-                        device=ys_out.device,
-                        dtype=ys_out.dtype,
-                        layout=ys_out.layout,
-                        requires_grad=ys_out.requires_grad,
-                    )
+
+            def cond_fn_out(*flat_args):
+                loop_idx, _, _, _, _ = pytree.tree_unflatten(flat_args, while_loop_spec)  # type: ignore[has-type]
+                return loop_idx < scan_length  # type: ignore[has-type]
+
+            def body_fn_out(*flat_args):
+                loop_idx, ys_outs, carry, xs, additional_inputs = pytree.tree_unflatten(
+                    flat_args,
+                    while_loop_spec,  # type: ignore[has-type]
                 )
 
-            operands = (torch.zeros([], dtype=torch.int64, device=torch.device("cpu")), ys_outs, init, xs)
-            flat_operands, flat_spec = pytree.tree_flatten(operands)
-            _, while_loop_spec = pytree.tree_flatten(
-                (*operands, additional_inputs)
-            )
+                idx_int = loop_idx.item()
+                torch.ops.aten._assert_scalar.default(idx_int >= 0, "")
+                torch.ops.aten._assert_scalar.default(idx_int < scan_length, "")
+                sub_xs = [torch.ops.aten.select.int(x, 0, idx_int) for x in xs]
+                next_carry, ys = _extract_carry_and_out(
+                    sub_gm(*(list(carry) + sub_xs + list(additional_inputs))),
+                    num_init_leaves,
+                )
+                for y, y_out in zip(ys, ys_outs):
+                    y_out_slice = torch.ops.aten.select.int(y_out, 0, idx_int)
+                    y_out_slice.copy_(y)
+                return loop_idx + 1, *ys_outs, *next_carry, *xs
+
+            # This makes use of the fact that while_loop operands and outputs share
+            # the same tree_spec.
             _, ys_outs, last_carry, _ = pytree.tree_unflatten(
                 torch.ops.higher_order.while_loop(
                     cond_fn_out,
@@ -313,21 +369,11 @@ def lower_scan_to_while_loop(gm: torch.fx.GraphModule):
             )
             return list(last_carry) + list(ys_outs)
 
-        with gm.graph.inserting_before(cur_node):
-            if isinstance(fake_scan_length, torch.SymInt):
-                fx_scan_length = gm.graph.call_function(
-                    torch.ops.aten.sym_size.int, (fx_xs[0], 0)
-                )
-                fx_scan_length.meta["val"] = fake_scan_length
-            else:
-                fx_scan_length = fake_scan_length  # type: ignore[assignment]
-
         lower_to_while_loop_args, tree_spec = pytree.tree_flatten(
             (
                 fx_init,
                 fx_xs,
                 fx_additional_inputs,
-                fx_scan_length,
             )
         )
         match.replace_by_example(
@@ -342,6 +388,7 @@ def lower_scan_to_while_loop(gm: torch.fx.GraphModule):
         op="call_function", target=torch.ops.higher_order.scan
     ):
         raise AssertionError("scan is not lowered to while_loop")
+
 
 @init_once_fakemode
 def lazy_init():

@@ -7561,7 +7561,7 @@ class WhileLoop(ExternKernel):
         from torch._higher_order_ops.utils import check_input_alias_and_mutation
 
         assert body_fn.graph is not None and isinstance(
-            body_fn.graph, torch.fx.GraphModule
+            body_fn.graph.module, torch.fx.GraphModule
         )  # to make linter happy
         mutated_idxs, *_ = check_input_alias_and_mutation(
             body_fn.graph.module, fake_all_inputs
@@ -7601,8 +7601,8 @@ class WhileLoop(ExternKernel):
 
         while_loop.outputs = outputs
         while_loop.mutation_outputs = [
-            MutationOutput(inp.layout, inp, while_loop)
-            for inp in mutated_inputs  # type: ignore[union-attr]
+            MutationOutput(inp.layout, inp, while_loop)  # type: ignore[union-attr]
+            for inp in mutated_inputs
         ]
 
         iter_outputs = iter(outputs)

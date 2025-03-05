@@ -247,7 +247,10 @@ def unique_graph_id(proxy_mode, prefix):
     # I was not sure how to do that. This kinda simulates it.
     return unique_graph_name_with_root(proxy_mode.tracer.root, prefix)
 
-def unique_graph_name_with_root(root: torch.fx.GraphModule, prefix: str) -> tuple[int, str]:
+
+def unique_graph_name_with_root(
+    root: torch.fx.GraphModule, prefix: str
+) -> tuple[int, str]:
     next_name = None
     i = 0
     while not next_name:
