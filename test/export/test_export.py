@@ -5767,7 +5767,7 @@ def forward(self, x):
     bn_running_var = self.bn.running_var
     bn_num_batches_tracked = self.bn.num_batches_tracked;  bn_num_batches_tracked = None
     conv2d = torch.ops.aten.conv2d.default(x, conv_weight, conv_bias);  x = conv_weight = conv_bias = None
-    batch_norm = torch.ops.aten.batch_norm.default(conv2d, bn_weight, bn_bias, bn_running_mean, bn_running_var, False, 0.1, 1e-05, True);  conv2d = bn_weight = bn_bias = bn_running_mean = bn_running_var = None
+    batch_norm = torch.ops.aten.batch_norm.default(conv2d, bn_weight, bn_bias, bn_running_mean, bn_running_var, False, 0.1, 1e-05, False);  conv2d = bn_weight = bn_bias = bn_running_mean = bn_running_var = None
     return pytree.tree_unflatten((batch_norm,), self._out_spec)""",
         )
 
@@ -5787,7 +5787,7 @@ def forward(self, x):
     bn_num_batches_tracked = self.bn.num_batches_tracked
     conv2d = torch.ops.aten.conv2d.default(x, conv_weight, conv_bias);  x = conv_weight = conv_bias = None
     add_ = torch.ops.aten.add_.Tensor(bn_num_batches_tracked, 1);  bn_num_batches_tracked = add_ = None
-    batch_norm = torch.ops.aten.batch_norm.default(conv2d, bn_weight, bn_bias, bn_running_mean, bn_running_var, True, 0.1, 1e-05, True);  conv2d = bn_weight = bn_bias = bn_running_mean = bn_running_var = None
+    batch_norm = torch.ops.aten.batch_norm.default(conv2d, bn_weight, bn_bias, bn_running_mean, bn_running_var, True, 0.1, 1e-05, False);  conv2d = bn_weight = bn_bias = bn_running_mean = bn_running_var = None
     return pytree.tree_unflatten((batch_norm,), self._out_spec)""",
         )
 
@@ -12229,6 +12229,47 @@ class GraphModule(torch.nn.Module):
                 decomp_table=decomp_table,
             )
             FileCheck().check_count(op_name, 1, exactly=True).run(ep.graph_module.code)
+
+    @testing.expectedFailureCppRuntime
+    @requires_cuda
+    def test_bn_dynamic_shapes(self):
+        import torch.nn as nn
+
+        class ConvNN(nn.Module):
+            def __init__(self):
+                super(ConvNN, self).__init__()
+                self.num_output = 0
+                self.relu = nn.ReLU()
+
+                self.conv1 = nn.Conv2d(3, 64, kernel_size=3, padding=1, stride=1)
+                self.batch_norm1 = nn.BatchNorm2d((64))
+
+                self.conv2 = nn.Conv2d(64, 64, kernel_size=3, padding=1, stride=1)
+                self.batch_norm2 = nn.BatchNorm2d((64))
+                self.maxpool1 = nn.MaxPool2d(kernel_size=2)
+                self.early_exit1 = nn.Linear(16384, 10)
+
+            def forward(self, x):
+                x = self.conv1(x)
+                x = self.batch_norm1(x)
+                x = self.relu(x)
+
+                x = self.conv2(x)
+                x = self.batch_norm2(x)
+                x = self.maxpool1(x)
+                x = self.relu(x)
+
+                return x, nn.functional.softmax(
+                    self.early_exit1(x.clone().view(x.size(0), -1)), dim=1
+                )
+
+        x = torch.rand(32, 3, 32, 32).to("cuda")
+        model = ConvNN().to("cuda")
+        model.eval()
+        batch = Dim("batch", max=65535)
+        dynamic_shapes = {"x": {0: batch}}
+
+        export(model, (x,), dynamic_shapes=dynamic_shapes)
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
