@@ -46,7 +46,8 @@ try:
 except ImportError:
     pass
 else:
-    pytree_modules["generic"] = pytree
+    if not IS_FBCODE or not pytree.PYTORCH_USE_CXX_PYTREE:
+        pytree_modules["generic"] = pytree
 
 
 parametrize_pytree_module = parametrize(
