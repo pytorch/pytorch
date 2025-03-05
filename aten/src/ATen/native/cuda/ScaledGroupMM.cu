@@ -432,46 +432,46 @@ void f8f8bf16_grouped_gemm_impl_sm90(
 
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-  auto buf_cpu = mat_a.new_empty(
-      input_args_size, at::TensorOptions().dtype(at::kByte).device(at::kCPU));
-  AT_CUDA_CHECK(cudaMemcpy(
-      (char*)buf_cpu.data_ptr(),
-      buf_ptr,
-      input_args_size,
-      cudaMemcpyDeviceToHost));
-  char* buf_ptr_cpu = (char*)buf_cpu.data_ptr();
-  DtypeA** inputA_ptrs_h = reinterpret_cast<DtypeA**>(buf_ptr_cpu);
-  DtypeB** inputB_ptrs_h =
-      reinterpret_cast<DtypeB**>(inputA_ptrs_h + aligned_group_count);
-  DtypeOutput** output_ptrs_h =
-      reinterpret_cast<DtypeOutput**>(inputB_ptrs_h + aligned_group_count);
-  DtypeScale** inputA_scale_ptrs_h =
-      reinterpret_cast<DtypeScale**>(output_ptrs_h + aligned_group_count);
-  DtypeScale** inputB_scale_ptrs_h =
-      reinterpret_cast<DtypeScale**>(inputA_scale_ptrs_h + aligned_group_count);
-  StrideA* stride_A_h =
-      reinterpret_cast<StrideA*>(inputB_scale_ptrs_h + aligned_group_count);
-  StrideB* stride_B_h = reinterpret_cast<StrideB*>(stride_A_h + group_count);
-  StrideOutput* stride_output_h =
-      reinterpret_cast<StrideOutput*>(stride_B_h + group_count);
-  ProblemShape::UnderlyingProblemShape* problem_sizes_h =
-      reinterpret_cast<ProblemShape::UnderlyingProblemShape*>(
-          stride_output_h + group_count);
+//   auto buf_cpu = mat_a.new_empty(
+//       input_args_size, at::TensorOptions().dtype(at::kByte).device(at::kCPU));
+//   AT_CUDA_CHECK(cudaMemcpy(
+//       (char*)buf_cpu.data_ptr(),
+//       buf_ptr,
+//       input_args_size,
+//       cudaMemcpyDeviceToHost));
+//   char* buf_ptr_cpu = (char*)buf_cpu.data_ptr();
+//   DtypeA** inputA_ptrs_h = reinterpret_cast<DtypeA**>(buf_ptr_cpu);
+//   DtypeB** inputB_ptrs_h =
+//       reinterpret_cast<DtypeB**>(inputA_ptrs_h + aligned_group_count);
+//   DtypeOutput** output_ptrs_h =
+//       reinterpret_cast<DtypeOutput**>(inputB_ptrs_h + aligned_group_count);
+//   DtypeScale** inputA_scale_ptrs_h =
+//       reinterpret_cast<DtypeScale**>(output_ptrs_h + aligned_group_count);
+//   DtypeScale** inputB_scale_ptrs_h =
+//       reinterpret_cast<DtypeScale**>(inputA_scale_ptrs_h + aligned_group_count);
+//   StrideA* stride_A_h =
+//       reinterpret_cast<StrideA*>(inputB_scale_ptrs_h + aligned_group_count);
+//   StrideB* stride_B_h = reinterpret_cast<StrideB*>(stride_A_h + group_count);
+//   StrideOutput* stride_output_h =
+//       reinterpret_cast<StrideOutput*>(stride_B_h + group_count);
+//   ProblemShape::UnderlyingProblemShape* problem_sizes_h =
+//       reinterpret_cast<ProblemShape::UnderlyingProblemShape*>(
+//           stride_output_h + group_count);
 
-  std::cout << "PTRS " << mat_a.data_ptr() << " " << mat_b.data_ptr() << " "
-            << out.data_ptr() << " " << scale_a.data_ptr() << " "
-            << scale_b.data_ptr() << "\n";
-  for (int i = 0; i < group_count; i++) {
-    std::cout << "A " << (void*)inputA_ptrs_h[i] << "\n";
-    std::cout << "B " << (void*)inputB_ptrs_h[i] << "\n";
-    std::cout << "O " << (void*)output_ptrs_h[i] << "\n";
-    std::cout << "A_scale " << (void*)inputA_scale_ptrs_h[i] << "\n";
-    std::cout << "B_scale " << (void*)inputB_scale_ptrs_h[i] << "\n";
-    std::cout << "sizes " << problem_sizes_h[i] << "\n";
-    std::cout << "strideA" << stride_A_h[i] << "\n";
-    std::cout << "strideB" << stride_B_h[i] << "\n";
-    std::cout << "stride_output" << stride_output_h[i] << "\n";
-  }
+//   std::cout << "PTRS " << mat_a.data_ptr() << " " << mat_b.data_ptr() << " "
+//             << out.data_ptr() << " " << scale_a.data_ptr() << " "
+//             << scale_b.data_ptr() << "\n";
+//   for (int i = 0; i < group_count; i++) {
+//     std::cout << "A " << (void*)inputA_ptrs_h[i] << "\n";
+//     std::cout << "B " << (void*)inputB_ptrs_h[i] << "\n";
+//     std::cout << "O " << (void*)output_ptrs_h[i] << "\n";
+//     std::cout << "A_scale " << (void*)inputA_scale_ptrs_h[i] << "\n";
+//     std::cout << "B_scale " << (void*)inputB_scale_ptrs_h[i] << "\n";
+//     std::cout << "sizes " << problem_sizes_h[i] << "\n";
+//     std::cout << "strideA" << stride_A_h[i] << "\n";
+//     std::cout << "strideB" << stride_B_h[i] << "\n";
+//     std::cout << "stride_output" << stride_output_h[i] << "\n";
+//   }
   //   int device_id = 0;
   //   cutlass::KernelHardwareInfo kernel_hw_info =
   //   cutlass::KernelHardwareInfo::make_kernel_hardware_info<Gemm::GemmKernel>(device_id);
