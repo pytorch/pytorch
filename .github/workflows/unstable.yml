@@ -67,4 +67,3 @@ jobs:
           { config: "default", shard: 1, num_shards: 1 },
         ]}
     secrets: inherit
-
