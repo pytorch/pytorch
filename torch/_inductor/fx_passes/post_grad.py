@@ -191,6 +191,62 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     gm.graph.lint()
 
 
+"""
+NOTE [lower scan to while_loop]
+This pass lowers `scan` to  `while_loop` by replacing the scan fx_node with a while_loop hop.
+
+Suppose we have a function f:
+
+def f():
+    init = torch.zeros([])
+    xs = torch.arange(4)
+    ys = []
+    for i in range(xs.size(0)):
+        init = xs[i] + init
+        ys.append(init)
+    return init, torch.stack(ys)
+
+We could rewrite it with a scan with the benefits of reducing compilation time/binary size, reducing
+memory usage, supporting loops over unbacked shapes and cudagraph etc.
+
+def g():
+    def step_fn(init: torch.Tensor, x: torch.Tensor):
+        next_init = x + init
+        return next_init, next_carry
+
+    init = torch.zeros([])
+    xs = torch.arange(4)
+    final_carry, ys  = scan(step_fn, init, xs)
+    return final_carry, ys
+
+    # Return the final carry and stack the intermediates
+
+This pass will rewrite scan into:
+
+def k():
+    init = torch.zeros([])
+    xs = torch.arange(4)
+
+    loop_idx = torch.zeros([])
+    ys = torch.empty_strided(_shape_stride_of_ys)
+    def cond_fn(loop_idx, ys, init, xs):
+        return loop_idx < xs.shape[0]
+
+    def body_fn(loop_idx, ys, init, xs):
+        int_idx = loop_idx.item()
+        next_init, y = step_fn(init, xs[int_idx])
+        ys[int_idx].copy_(y)
+        return loop_idx + 1, ys, next_init, xs
+
+    final_carry, _, _, ys = while_loop(cond_fn, body_fn, (loop_idx, ys, init, xs))
+    return final_carry, ys
+
+Note that in function k, we pre-allocate the output buffer and copy_ each y into the buffer
+to avoid introducing an extra copy of input. _shape_stride_of_ys can be queried from the
+metadata of scan's fx_node see NOTE [Pre-allocate scan's output buffer].
+"""
+
+
 def lower_scan_to_while_loop(gm: torch.fx.GraphModule):
     graph_pass = PatternMatcherPass()
 
@@ -214,57 +270,11 @@ def lower_scan_to_while_loop(gm: torch.fx.GraphModule):
 
         def lower_to_while_loop(*args, **kwargs):
             """
-            This function constructs the necessary inputs of a `while_loop` and execute the `while_loop`. It has
-            the same behavior of the original `scan`.
-
-            Suppose we have a function f:
-            def f():
-                init = torch.zeros([])
-                xs = torch.arange(4)
-                ys = []
-                for i in range(xs.size(0)):
-                    init = xs[i] + init
-                    ys.append(init)
-                return init, torch.stack(ys)
-
-            We could rewrite it with a scan with the benefits of reducing compilation time/binary size, reducing
-            memory usage, supporting loops over unbacked shapes and cudagraph etc.
-            def g():
-                def step_fn(init: torch.Tensor, x: torch.Tensor):
-                    next_init = x + init
-                    return next_init, next_carry
-
-                init = torch.zeros([])
-                xs = torch.arange(4)
-                final_carry, ys  = scan(step_fn, init, xs)
-                return final_carry, ys
-
-                # Return the final carry and stack the intermediates
-
-            This pass will rewrite scan into:
-            def k():
-                init = torch.zeros([])
-                xs = torch.arange(4)
-
-                loop_idx = torch.zeros([])
-                ys = torch.empty_strided(_shape_stride_of_ys)
-                def cond_fn(loop_idx, ys, init, xs):
-                    return loop_idx < xs.shape[0]
-
-                def body_fn(loop_idx, ys, init, xs):
-                    int_idx = loop_idx.item()
-                    next_init, y = step_fn(init, xs[int_idx])
-                    ys[int_idx].copy_(y)
-                    return loop_idx + 1, ys, next_init, xs
-
-                final_carry, _, _, ys = while_loop(cond_fn, body_fn, (loop_idx, ys, init, xs))
-                return final_carry, ys
-
-            Note that in function k, we pre-allocate the output buffer and copy_ each y into the buffer
-            to avoid introducing an extra copy of input. _shape_stride_of_ys can be queried from the
-            metadata of scan's fx_node see Note [Pre-allocate scan's output buffer].
+            The traced graph of this function will be used to replace the originsal scan fx_node.
             """
+            assert len(kwargs) == 0
 
+            # Step 1: construct necessary inputs to while_loop based on scan's input.
             def resolve_shape_to_proxy(
                 shape: list[Union[int, torch.SymInt]], bound_symbols: dict[Any, Any]
             ):
@@ -295,7 +305,6 @@ def lower_scan_to_while_loop(gm: torch.fx.GraphModule):
                         ret.append(s)
                 return ret
 
-            assert len(kwargs) == 0
             (
                 init,
                 xs,
@@ -304,7 +313,7 @@ def lower_scan_to_while_loop(gm: torch.fx.GraphModule):
             scan_length = xs[0].size(0)
             loop_idx = torch.zeros([], dtype=torch.int64, device=torch.device("cpu"))
 
-            # Note [Pre-allocate scan's output buffer]
+            # NOTE [Pre-allocate scan's output buffer]
             # In order to pre-allocate the output buffer for ys, we rely on the meta of scan's fx_node.
             # However, the meta consists of concrete symints, we need to bind them with the
             # proxies in order to trace the torch.empyt_strided call correctly (i.e. resolve_shape_to_proxy).
@@ -333,11 +342,12 @@ def lower_scan_to_while_loop(gm: torch.fx.GraphModule):
                 (*while_loop_operands, additional_inputs)
             )
 
-            def cond_fn_out(*flat_args):
+            # Step 2: create the cond_fn and body_fn for while_loop
+            def cond_fn(*flat_args):
                 loop_idx, _, _, _, _ = pytree.tree_unflatten(flat_args, while_loop_spec)  # type: ignore[has-type]
                 return loop_idx < scan_length  # type: ignore[has-type]
 
-            def body_fn_out(*flat_args):
+            def body_fn(*flat_args):
                 loop_idx, ys_outs, carry, xs, additional_inputs = pytree.tree_unflatten(
                     flat_args,
                     while_loop_spec,  # type: ignore[has-type]
@@ -356,12 +366,11 @@ def lower_scan_to_while_loop(gm: torch.fx.GraphModule):
                     y_out_slice.copy_(y)
                 return loop_idx + 1, *ys_outs, *next_carry, *xs
 
-            # This makes use of the fact that while_loop operands and outputs share
-            # the same tree_spec.
+            # Step 3: call the while_loop operator
             _, ys_outs, last_carry, _ = pytree.tree_unflatten(
                 torch.ops.higher_order.while_loop(
-                    cond_fn_out,
-                    body_fn_out,
+                    cond_fn,
+                    body_fn,
                     tuple(flat_operands),
                     tuple(additional_inputs),
                 ),

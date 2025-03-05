@@ -447,27 +447,15 @@ def while_loop_fake_tensor_mode(
                 carried_inputs, body_outs, "carried_inputs", "body_output"
             )
         # See NOTE [unspecialize int carry with unbacked symints]
-        print("------------------")
-        if isinstance(body_fn, torch.fx.GraphModule):
-            body_fn.print_readable()
-        else:
-            print(None)
-        print(
-            "haha",
-            [t.storage_offset() for t in carried_inputs],
-            [t.storage_offset() for t in body_outs],
+        return pytree.tree_map_only(
+            (int, torch.SymInt),
+            # For while_loop's unbacked symint output, we want them to be bound
+            # to the proxy of while_loop's output.
+            lambda _: _create_unbacked_symint(
+                mode, ignore_fresh_unbacked_symbols=False
+            ),
+            body_outs,
         )
-        new_outs = []
-        for carry, out in zip(carried_inputs, body_outs):
-            if not isinstance(carry, (int, torch.SymInt)):
-                new_outs.append(out)
-                continue
-
-            if carry != out:
-                new_outs.append(
-                    _create_unbacked_symint(mode, ignore_fresh_unbacked_symbols=False)
-                )
-        return new_outs
 
 
 @while_loop_op.py_functionalize_impl
