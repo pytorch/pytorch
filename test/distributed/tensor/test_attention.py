@@ -89,7 +89,7 @@ class RingAttentionTest(DTensorTestBase):
         rotater: _RotateMethod,
         test_forward_only: bool,
     ) -> None:
-        # TODO: SDPBackend.CUDNN_ATTENTION does not support backward so far
+        # TODO: DTensor does not support backward on SDPBackend.CUDNN_ATTENTION so far
         if not test_forward_only and backend == SDPBackend.CUDNN_ATTENTION:
             return
 

@@ -562,7 +562,7 @@ def scaled_dot_product_efficient_attention_backward_strategy(
 
 @register_op_strategy(
     aten._scaled_dot_product_cudnn_attention.default,
-    schema_info=RuntimeSchemaInfo(),  # TODO: fill in a value
+    schema_info=RuntimeSchemaInfo(4),
 )
 def scaled_scaled_dot_product_cudnn_attention_strategy(
     mesh: DeviceMesh, op_schema: OpSchema
@@ -572,7 +572,7 @@ def scaled_scaled_dot_product_cudnn_attention_strategy(
         _,  # key
         _,  # value
         attn_bias_strategy,
-        _,  # compute_log_sumexp
+        compute_log_sumexp,  # compute_log_sumexp
         *rest_args,  # optional args: dropout_p, is_causal, return_debug_mask, scale
     ) = op_schema.args_schema
     return_debug_mask = len(op_schema.args_schema) >= 8 and rest_args[2]
@@ -612,10 +612,11 @@ def scaled_scaled_dot_product_cudnn_attention_strategy(
 
     # second we can accept the sharding pattern of tensor parallelism, which
     # shard on the num of head dim
-    qkv_sharding = Shard(1)  # num head dim
-    output_sharding = Shard(1)  # num head dim
-    logsumexp_sharding = Shard(1)  # num head dim
-    debug_attn_mask_sharding = Shard(1) if return_debug_mask else None  # num head dim
+    tp_sharding = Shard(1)  # num head dim
+    qkv_sharding = tp_sharding
+    output_sharding = tp_sharding
+    logsumexp_sharding = tp_sharding if compute_log_sumexp else Replicate()
+    debug_attn_mask_sharding = tp_sharding if return_debug_mask else None
 
     num_heads_dim_sharding: PlacementList = [
         output_sharding,
@@ -634,22 +635,24 @@ def scaled_scaled_dot_product_cudnn_attention_strategy(
     single_mesh_dim_strategies.append(num_heads_dim_sharding)
 
     # Context Parallelism: shards on the sequence dim
-    debug_attn_mask_sharding = Shard(2) if return_debug_mask else None  # seq dim
+    cp_sharding = Shard(2)  # seq dim
+    logsumexp_sharding = cp_sharding if compute_log_sumexp else Replicate()
+    debug_attn_mask_sharding = cp_sharding if return_debug_mask else None
 
     single_mesh_dim_strategies.append(
         [
-            Shard(2),  # output
-            Shard(2),  # logsumexp
+            cp_sharding,  # output
+            logsumexp_sharding,  # logsumexp
             None,  # cum_seq_q
             None,  # cum_seq_k
             None,  # max_q
             None,  # max_k
             None,  # philox_seed
             None,  # philox_offset
-            None,  # debug_attn_mask
-            Shard(2),  # q
-            Shard(2),  # k
-            Shard(2),  # v
+            debug_attn_mask_sharding,  # debug_attn_mask
+            cp_sharding,  # q
+            cp_sharding,  # k
+            cp_sharding,  # v
         ]
     )
     return expand_to_full_mesh_op_strategy(
