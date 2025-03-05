@@ -99,7 +99,8 @@ else:
                 if name.startswith("_"):
                     raise AttributeError(
                         f"module {self.__name__!r} has not been imported yet: "
-                        f"accessing attribute {name!r}"
+                        f"accessing attribute {name!r}. "
+                        f"Please import {self.__name__!r} explicitly first."
                     )
 
                 # Lazy import
@@ -109,6 +110,15 @@ else:
                 _sys.modules[f"{__name__}.cxx"] = globals()["cxx"] = cxx
 
             return getattr(cxx, name)
+
+        def __setattr__(self, name: str, value: _Any) -> None:
+            # Lazy import
+            cxx = _import_cxx_pytree()
+
+            # Replace the temporary module object (`self`) in sys.modules
+            _sys.modules[f"{__name__}.cxx"] = globals()["cxx"] = cxx
+
+            return setattr(cxx, name, value)
 
     # This allows the following statements to work properly:
     #
