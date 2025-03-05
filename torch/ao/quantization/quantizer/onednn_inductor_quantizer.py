@@ -32,24 +32,24 @@ FilterFn: TypeAlias = Callable[[list[Node]], bool]
 
 
 __all__ = [
-    "_OnednnInductorQuantizationAnnotation",
+    "OnednnInductorQuantizationAnnotation",
     "QUANT_ANNOTATION_KEY",
-    "_CurrentQuantizationMode",
-    "_skip_annotate",
-    "_create_module_name_filter",
-    "_create_operator_type_filter",
-    "_mark_nodes_as_annotated",
-    "_is_node_annotated",
-    "_is_any_annotated",
-    "_is_all_annotated",
-    "_is_quantized_op_pt2e",
-    "_annotate_nodes_not_quantize",
+    "CurrentQuantizationMode",
+    "skip_annotate",
+    "create_module_name_filter",
+    "create_operator_type_filter",
+    "mark_nodes_as_annotated",
+    "is_node_annotated",
+    "is_any_annotated",
+    "is_all_annotated",
+    "is_quantized_op_pt2e",
+    "annotate_nodes_not_quantize",
     "OnednnInductorQuantizer",
 ]
 
 
 @dataclass
-class _OnednnInductorQuantizationAnnotation(QuantizationAnnotation):
+class OnednnInductorQuantizationAnnotation(QuantizationAnnotation):
     # _is_output_of_quantized_pattern:
     #  * Node as output node of a fusion pattern.
     #  * The fusion pattern supports int8 data type.
@@ -61,11 +61,11 @@ class _OnednnInductorQuantizationAnnotation(QuantizationAnnotation):
 QUANT_ANNOTATION_KEY = "quantization_annotation"
 
 
-def _skip_annotate(nodes: list[Node], filter_fn: Optional[FilterFn] = None) -> bool:
+def skip_annotate(nodes: list[Node], filter_fn: Optional[FilterFn] = None) -> bool:
     """Determine whether to skip annotation for a list of nodes."""
 
     # 1) Skip annotate if any node is already annotated
-    if _is_any_annotated(nodes):
+    if is_any_annotated(nodes):
         return True
 
     # 2) Proceed annotate if a) a filter function is provided
@@ -76,7 +76,7 @@ def _skip_annotate(nodes: list[Node], filter_fn: Optional[FilterFn] = None) -> b
     return True
 
 
-def _create_module_name_filter(module_name: str) -> FilterFn:
+def create_module_name_filter(module_name: str) -> FilterFn:
     """Create a filter function for a given module name.
 
     The filter function takes a list of nodes (as determined by the annotate function)
@@ -86,7 +86,7 @@ def _create_module_name_filter(module_name: str) -> FilterFn:
         linear_1: "f32[3, 10]" = torch.ops.aten.linear.default(...) # comes from a module with name `sub.linear1`
         relu: "f32[3, 10]" = torch.ops.aten.relu.default(linear_1); # comes from a module with name `sub.relu1`
 
-    >> module_name_filter = _create_module_name_filter_inner("sub")
+    >> module_name_filter = create_module_name_filter_inner("sub")
     >> print(module_name_filter([relu, linear_1]))
     # True  # These two nodes are determined by `_annotate_linear_unary` function and from "sub".
     """
@@ -101,7 +101,7 @@ def _create_module_name_filter(module_name: str) -> FilterFn:
 
 
 # no change
-def _create_operator_type_filter(
+def create_operator_type_filter(
     operator_type: Callable,
 ) -> FilterFn:
     """Create a filter function for a given operator type.
@@ -113,7 +113,7 @@ def _create_operator_type_filter(
         linear_1: "f32[3, 10]" = torch.ops.aten.linear.default(...) # comes from a module with name `sub.linear1`
         relu: "f32[3, 10]" = torch.ops.aten.relu.default(linear_1); # comes from a module with name `sub.relu1`
 
-    >> operator_type_filter = _create_operator_type_filter(torch.ops.aten.linear.default)
+    >> operator_type_filter = create_operator_type_filter(torch.ops.aten.linear.default)
     >> print(operator_type_filter([relu, linear_1]))
     # True  # These two nodes are determined by `_annotate_linear_unary` function and the second node is `linear`.
     """
@@ -132,18 +132,16 @@ def _create_operator_type_filter(
 
 
 # no change
-def _mark_nodes_as_annotated(nodes: list[Node]):
+def mark_nodes_as_annotated(nodes: list[Node]):
     for node in nodes:
         if node is not None:
             if QUANT_ANNOTATION_KEY not in node.meta:
-                node.meta[
-                    QUANT_ANNOTATION_KEY
-                ] = _OnednnInductorQuantizationAnnotation()
+                node.meta[QUANT_ANNOTATION_KEY] = OnednnInductorQuantizationAnnotation()
             node.meta[QUANT_ANNOTATION_KEY]._annotated = True
 
 
 # no change
-def _is_node_annotated(_node):
+def is_node_annotated(_node):
     """
     return True if the node is annotated, otherwise return False
     """
@@ -154,51 +152,51 @@ def _is_node_annotated(_node):
 
 
 # no change
-def _is_any_annotated(nodes: list[Node]):
+def is_any_annotated(nodes: list[Node]):
     """
     Given a list of nodes (that represents an operator pattern),
     check if any of the node is annotated, return True if any of the node
     is annotated, otherwise return False.
     """
-    return any(_is_node_annotated(node) for node in nodes)
+    return any(is_node_annotated(node) for node in nodes)
 
 
 # no change
-def _is_all_annotated(nodes: list[Node]):
+def is_all_annotated(nodes: list[Node]):
     """
     Given a list of nodes (that represents an operator pattern),
     return True if all of the node is annotated, otherwise return False.
     """
-    return all(_is_node_annotated(node) for node in nodes)
+    return all(is_node_annotated(node) for node in nodes)
 
 
-def _is_quantized_op_pt2e(node: torch.fx.Node):
+def is_quantized_op_pt2e(node: torch.fx.Node):
     """
     Used for pt2e flow to check if the node is a quantized node:
     Case1: the node has been annotated as output node of a fusion pattern.
     Case2: the node has been annotated as single quantized node.
     """
-    if not _is_any_annotated([node]):
+    if not is_any_annotated([node]):
         # The node has not been annotated, directly return False
         return False
     quantization_annotation = node.meta.get(QUANT_ANNOTATION_KEY, None)
-    assert isinstance(quantization_annotation, _OnednnInductorQuantizationAnnotation)
+    assert isinstance(quantization_annotation, OnednnInductorQuantizationAnnotation)
     return quantization_annotation._is_output_of_quantized_pattern
 
 
 # no change
-def _annotate_nodes_not_quantize(nodes: Union[Node, list[Node]]) -> None:
+def annotate_nodes_not_quantize(nodes: Union[Node, list[Node]]) -> None:
     """Annotate nodes to exclude them from quantization (their `quantization_config` is `None`)."""
     if not isinstance(nodes, list):
         nodes = [nodes]
     for node in nodes:
-        node.meta[QUANT_ANNOTATION_KEY] = _OnednnInductorQuantizationAnnotation(
+        node.meta[QUANT_ANNOTATION_KEY] = OnednnInductorQuantizationAnnotation(
             _annotated=True
         )
 
 
 @dataclass
-class _CurrentQuantizationMode:
+class CurrentQuantizationMode:
     r"""Configuration defining the current quantization mode for the quantizer.
 
     All possible current quantization modes are listed below:
@@ -227,7 +225,7 @@ class OnednnInductorQuantizer(Quantizer):
         self.module_name_qconfig: dict[str, Optional[QuantizationConfig]] = {}
 
     # no change
-    def _get_current_quantization_mode(self) -> _CurrentQuantizationMode:
+    def _get_current_quantization_mode(self) -> CurrentQuantizationMode:
         """Retrieves the current quantization mode based on all configurations."""
         qat_state = None
         dynamic_state = None
@@ -259,9 +257,7 @@ class OnednnInductorQuantizer(Quantizer):
                             f"All non-None `input_activation_spec` should have the same `is_dynamic`,"
                             f"but got {dynamic_state} and {input_activation_spec.is_dynamic}."
                         )
-        return _CurrentQuantizationMode(
-            qat_state=qat_state, dynamic_state=dynamic_state
-        )
+        return CurrentQuantizationMode(qat_state=qat_state, dynamic_state=dynamic_state)
 
     # no change
     def _need_skip_config(
@@ -271,7 +267,7 @@ class OnednnInductorQuantizer(Quantizer):
 
         Mixed static/dynamic configurations or mixed QAT/non-QAT configurations are not supported.
         To avoid such a mix, we compare the incoming configuration with current configuration status.
-        Refer the `_CurrentQuantizationMode` definition for all possible modes.
+        Refer the `CurrentQuantizationMode` definition for all possible modes.
         """
         if quantization_config is None:
             return False
@@ -313,7 +309,7 @@ class OnednnInductorQuantizer(Quantizer):
     ) -> None:
         """Helper function to annotate the conv node"""
         if quantization_config is None:
-            _annotate_nodes_not_quantize(conv_node)
+            annotate_nodes_not_quantize(conv_node)
             return
         input_qspec_map = {}
         input_node = conv_node.args[0]
@@ -326,17 +322,13 @@ class OnednnInductorQuantizer(Quantizer):
         if isinstance(bias_node, Node):
             input_qspec_map[bias_node] = get_bias_qspec(quantization_config)
         if annotate_output:
-            conv_node.meta[
-                QUANT_ANNOTATION_KEY
-            ] = _OnednnInductorQuantizationAnnotation(
+            conv_node.meta[QUANT_ANNOTATION_KEY] = OnednnInductorQuantizationAnnotation(
                 input_qspec_map=input_qspec_map,
                 _annotated=True,
                 _is_output_of_quantized_pattern=True,
             )
         else:
-            conv_node.meta[
-                QUANT_ANNOTATION_KEY
-            ] = _OnednnInductorQuantizationAnnotation(
+            conv_node.meta[QUANT_ANNOTATION_KEY] = OnednnInductorQuantizationAnnotation(
                 input_qspec_map=input_qspec_map,
                 _annotated=True,
             )
@@ -350,7 +342,7 @@ class OnednnInductorQuantizer(Quantizer):
     ) -> None:
         """Helper function to annotate the linear node"""
         if quantization_config is None:
-            _annotate_nodes_not_quantize(linear_node)
+            annotate_nodes_not_quantize(linear_node)
             return
         input_qspec_map = {}
         assert linear_node.target in (torch.ops.aten.linear.default,)
@@ -374,7 +366,7 @@ class OnednnInductorQuantizer(Quantizer):
         if annotate_output:
             linear_node.meta[
                 QUANT_ANNOTATION_KEY
-            ] = _OnednnInductorQuantizationAnnotation(
+            ] = OnednnInductorQuantizationAnnotation(
                 input_qspec_map=input_qspec_map,
                 _annotated=True,
                 _is_output_of_quantized_pattern=True,
@@ -382,7 +374,7 @@ class OnednnInductorQuantizer(Quantizer):
         else:
             linear_node.meta[
                 QUANT_ANNOTATION_KEY
-            ] = _OnednnInductorQuantizationAnnotation(
+            ] = OnednnInductorQuantizationAnnotation(
                 input_qspec_map=input_qspec_map, _annotated=True
             )
 
@@ -468,7 +460,7 @@ class OnednnInductorQuantizer(Quantizer):
             ):
                 continue
 
-            if _skip_annotate([binary_node, bn_output_node, conv_node], filter_fn):
+            if skip_annotate([binary_node, bn_output_node, conv_node], filter_fn):
                 continue
 
             self._annotate_conv_node_helper(conv_node, False, quantization_config)
@@ -480,7 +472,7 @@ class OnednnInductorQuantizer(Quantizer):
                 )
                 binary_node.meta[
                     QUANT_ANNOTATION_KEY
-                ] = _OnednnInductorQuantizationAnnotation(
+                ] = OnednnInductorQuantizationAnnotation(
                     input_qspec_map=binary_node_input_qspec_map,
                     # TODO<leslie> Remove the annotate of output in QAT when qat util support pattern matcher.
                     output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
@@ -488,11 +480,11 @@ class OnednnInductorQuantizer(Quantizer):
                     _is_output_of_quantized_pattern=True,
                 )
             else:
-                _annotate_nodes_not_quantize(binary_node)
+                annotate_nodes_not_quantize(binary_node)
             nodes_to_mark_annotated = list(conv_partition.nodes)
             nodes_to_mark_annotated.extend(list(bn_partition.nodes))
             nodes_to_mark_annotated.extend(list(binary_partition.nodes))
-            _mark_nodes_as_annotated(nodes_to_mark_annotated)
+            mark_nodes_as_annotated(nodes_to_mark_annotated)
 
     def _annotate_qat_conv2d_bn(
         self,
@@ -515,24 +507,24 @@ class OnednnInductorQuantizer(Quantizer):
             ):
                 continue
 
-            if _skip_annotate([bn_output_node, conv_node], filter_fn):
+            if skip_annotate([bn_output_node, conv_node], filter_fn):
                 continue
 
             self._annotate_conv_node_helper(conv_node, False, quantization_config)
             if quantization_config is not None:
                 bn_output_node.meta[
                     QUANT_ANNOTATION_KEY
-                ] = _OnednnInductorQuantizationAnnotation(
+                ] = OnednnInductorQuantizationAnnotation(
                     # TODO<leslie> Remove the annotate of output in QAT when qat util support pattern matcher.
                     output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
                     _annotated=True,
                     _is_output_of_quantized_pattern=True,
                 )
             else:
-                _annotate_nodes_not_quantize(bn_output_node)
+                annotate_nodes_not_quantize(bn_output_node)
             nodes_to_mark_annotated = list(conv_partition.nodes)
             nodes_to_mark_annotated.extend(list(bn_partition.nodes))
-            _mark_nodes_as_annotated(nodes_to_mark_annotated)
+            mark_nodes_as_annotated(nodes_to_mark_annotated)
 
     def _annotate_matmul(
         self,
@@ -543,11 +535,11 @@ class OnednnInductorQuantizer(Quantizer):
         for node in model.graph.nodes:
             if node.target != torch.ops.aten.matmul.default:
                 continue
-            if _skip_annotate([node], filter_fn):
+            if skip_annotate([node], filter_fn):
                 continue
 
             if quantization_config is None:
-                _annotate_nodes_not_quantize(node)
+                annotate_nodes_not_quantize(node)
                 continue
 
             input_qspec_map = {}
@@ -556,7 +548,7 @@ class OnednnInductorQuantizer(Quantizer):
                 input_qspec_map[input_node] = get_input_act_qspec(quantization_config)
             matmul_node.meta[
                 QUANT_ANNOTATION_KEY
-            ] = _OnednnInductorQuantizationAnnotation(
+            ] = OnednnInductorQuantizationAnnotation(
                 input_qspec_map=input_qspec_map,
                 _annotated=True,
                 _is_output_of_quantized_pattern=True,
@@ -595,11 +587,11 @@ class OnednnInductorQuantizer(Quantizer):
             ):
                 # No conv node found to be fused with add
                 continue
-            if _skip_annotate([binary_node, conv_node], filter_fn):
+            if skip_annotate([binary_node, conv_node], filter_fn):
                 continue
 
             if quantization_config is None:
-                _annotate_nodes_not_quantize([conv_node, binary_node])
+                annotate_nodes_not_quantize([conv_node, binary_node])
                 continue
 
             self._annotate_conv_node_helper(conv_node, False, quantization_config)
@@ -609,7 +601,7 @@ class OnednnInductorQuantizer(Quantizer):
             )
             binary_node.meta[
                 QUANT_ANNOTATION_KEY
-            ] = _OnednnInductorQuantizationAnnotation(
+            ] = OnednnInductorQuantizationAnnotation(
                 input_qspec_map=binary_node_input_qspec_map,
                 _annotated=True,
                 _is_output_of_quantized_pattern=True,
@@ -635,7 +627,7 @@ class OnednnInductorQuantizer(Quantizer):
             ):
                 raise ValueError(f"{conv_node} is not an aten conv2d operator")
             # skip annotation if it is already annotated
-            if _skip_annotate([conv_node], filter_fn):
+            if skip_annotate([conv_node], filter_fn):
                 continue
             self._annotate_conv_node_helper(conv_node, True, quantization_config)
 
@@ -680,7 +672,7 @@ class OnednnInductorQuantizer(Quantizer):
             ):
                 raise ValueError(f"{linear_node} is not an aten linear operator")
             # skip annotation if it is already annotated
-            if _skip_annotate([linear_node], filter_fn):
+            if skip_annotate([linear_node], filter_fn):
                 continue
             self._annotate_linear_node_helper(linear_node, True, quantization_config)
 
@@ -710,17 +702,17 @@ class OnednnInductorQuantizer(Quantizer):
                 torch.ops.aten.linear.default,
             ):
                 continue
-            if _skip_annotate([unary_node, linear_node], filter_fn):
+            if skip_annotate([unary_node, linear_node], filter_fn):
                 continue
 
             if quantization_config is None:
-                _annotate_nodes_not_quantize([linear_node, unary_node])
+                annotate_nodes_not_quantize([linear_node, unary_node])
                 continue
 
             self._annotate_linear_node_helper(linear_node, False, quantization_config)
             unary_node.meta[
                 QUANT_ANNOTATION_KEY
-            ] = _OnednnInductorQuantizationAnnotation(
+            ] = OnednnInductorQuantizationAnnotation(
                 _annotated=True,
                 _is_output_of_quantized_pattern=True,
             )

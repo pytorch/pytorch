@@ -34,17 +34,17 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import (
 from torch.fx import Node
 
 from .onednn_inductor_quantizer import (
-    _annotate_nodes_not_quantize,
-    _create_module_name_filter,
-    _create_operator_type_filter,
-    _is_all_annotated,
-    _is_any_annotated,
-    _is_quantized_op_pt2e,
-    _mark_nodes_as_annotated,
-    _OnednnInductorQuantizationAnnotation,
-    _skip_annotate,
+    annotate_nodes_not_quantize,
+    create_module_name_filter,
+    create_operator_type_filter,
+    is_all_annotated,
+    is_any_annotated,
+    is_quantized_op_pt2e,
+    mark_nodes_as_annotated,
+    OnednnInductorQuantizationAnnotation,
     OnednnInductorQuantizer,
     QUANT_ANNOTATION_KEY,
+    skip_annotate,
 )
 
 
@@ -62,7 +62,7 @@ __all__ = [
 
 
 @dataclass
-class _X86InductorQuantizationAnnotation(_OnednnInductorQuantizationAnnotation):
+class _X86InductorQuantizationAnnotation(OnednnInductorQuantizationAnnotation):
     # _is_output_of_quantized_pattern:
     #  * Node as output node of a fusion pattern.
     #  * The fusion pattern supports int8 data type.
@@ -342,12 +342,12 @@ class X86InductorQuantizer(OnednnInductorQuantizer):
         """
         for module_name, quantization_config in self.module_name_qconfig.items():
             self._annotate_with_config(
-                model, quantization_config, _create_module_name_filter(module_name)
+                model, quantization_config, create_module_name_filter(module_name)
             )
 
         for operator_type, quantization_config in self.operator_type_qconfig.items():
             self._annotate_with_config(
-                model, quantization_config, _create_operator_type_filter(operator_type)
+                model, quantization_config, create_operator_type_filter(operator_type)
             )
 
         if self.global_config:
@@ -452,7 +452,7 @@ class X86InductorQuantizer(OnednnInductorQuantizer):
             ):
                 continue
 
-            if _skip_annotate(
+            if skip_annotate(
                 [unary_node, binary_node, bn_output_node, conv_node], filter_fn
             ):
                 continue
@@ -479,12 +479,12 @@ class X86InductorQuantizer(OnednnInductorQuantizer):
                     _is_output_of_quantized_pattern=True,
                 )
             else:
-                _annotate_nodes_not_quantize([binary_node, unary_node])
+                annotate_nodes_not_quantize([binary_node, unary_node])
             nodes_to_mark_annotated = list(conv_partition.nodes)
             nodes_to_mark_annotated.extend(list(bn_partition.nodes))
             nodes_to_mark_annotated.extend(list(binary_partition.nodes))
             nodes_to_mark_annotated.extend(list(unary_partition.nodes))
-            _mark_nodes_as_annotated(nodes_to_mark_annotated)
+            mark_nodes_as_annotated(nodes_to_mark_annotated)
 
     def _annotate_qat_conv2d_bn_unary(
         self,
@@ -522,7 +522,7 @@ class X86InductorQuantizer(OnednnInductorQuantizer):
             ):
                 continue
 
-            if _skip_annotate([unary_node, bn_output_node, conv_node], filter_fn):
+            if skip_annotate([unary_node, bn_output_node, conv_node], filter_fn):
                 continue
 
             self._annotate_conv_node_helper(conv_node, False, quantization_config)
@@ -536,11 +536,11 @@ class X86InductorQuantizer(OnednnInductorQuantizer):
                     _is_output_of_quantized_pattern=True,
                 )
             else:
-                _annotate_nodes_not_quantize(unary_node)
+                annotate_nodes_not_quantize(unary_node)
             nodes_to_mark_annotated = list(conv_partition.nodes)
             nodes_to_mark_annotated.extend(list(bn_partition.nodes))
             nodes_to_mark_annotated.extend(list(unary_partition.nodes))
-            _mark_nodes_as_annotated(nodes_to_mark_annotated)
+            mark_nodes_as_annotated(nodes_to_mark_annotated)
 
     def _annotate_conv2d_fusion_pattern(
         self,
@@ -600,11 +600,11 @@ class X86InductorQuantizer(OnednnInductorQuantizer):
             ):
                 # No conv node found to be fused with add
                 continue
-            if _skip_annotate([unary_node, binary_node, conv_node], filter_fn):
+            if skip_annotate([unary_node, binary_node, conv_node], filter_fn):
                 continue
 
             if quantization_config is None:
-                _annotate_nodes_not_quantize([conv_node, binary_node, unary_node])
+                annotate_nodes_not_quantize([conv_node, binary_node, unary_node])
                 continue
 
             self._annotate_conv_node_helper(conv_node, False, quantization_config)
@@ -651,11 +651,11 @@ class X86InductorQuantizer(OnednnInductorQuantizer):
                 or conv_node.target != torch.ops.aten.conv2d.default
             ):
                 continue
-            if _skip_annotate([unary_node, conv_node], filter_fn):
+            if skip_annotate([unary_node, conv_node], filter_fn):
                 continue
 
             if quantization_config is None:
-                _annotate_nodes_not_quantize([conv_node, unary_node])
+                annotate_nodes_not_quantize([conv_node, unary_node])
                 continue
 
             self._annotate_conv_node_helper(conv_node, False, quantization_config)
@@ -672,11 +672,11 @@ class X86InductorQuantizer(OnednnInductorQuantizer):
         if node.target is not torch.ops.aten.max_pool2d.default:
             return
         if quantization_config is None:
-            _annotate_nodes_not_quantize(node)
+            annotate_nodes_not_quantize(node)
             return
 
         maxpool_node = node
-        if _is_any_annotated(
+        if is_any_annotated(
             [
                 maxpool_node,
             ]
@@ -697,7 +697,7 @@ class X86InductorQuantizer(OnednnInductorQuantizer):
         self, node: Node, quantization_config: QuantizationConfig
     ) -> None:
         if quantization_config is None:
-            _annotate_nodes_not_quantize(node)
+            annotate_nodes_not_quantize(node)
             return
         cat_node = node
         input_nodes = cat_node.args[0]
@@ -740,22 +740,22 @@ class X86InductorQuantizer(OnednnInductorQuantizer):
         # Propagate annotation to quantizable patterns.
         if (
             (node.target in propagation_quantizable_ops)
-            and (not _is_any_annotated([node]))
+            and (not is_any_annotated([node]))
             and (node.op == "call_function")
         ):
 
             def is_all_inputs_connected_to_quantized_op(input_nodes):
                 # Ensure all the inputs connect to fusion pattern or quantized node
                 for input_node in input_nodes:
-                    if not _is_quantized_op_pt2e(input_node):
+                    if not is_quantized_op_pt2e(input_node):
                         return False
                 return True
 
-            if _skip_annotate([node], filter_fn):
+            if skip_annotate([node], filter_fn):
                 return
 
             if quantization_config is None:
-                _annotate_nodes_not_quantize(node)
+                annotate_nodes_not_quantize(node)
                 return
 
             if node.target is torch.ops.aten.max_pool2d.default:
@@ -836,10 +836,10 @@ class X86InductorQuantizer(OnednnInductorQuantizer):
         90d19323d96afc53fcc22ba5a7bb3fb07fdd6c1c/intel_extension_for_pytorch/quantization/_utils.py#L495
         """
         edge_or_node: tuple[Node, Node]
-        if (node.target in int8_in_int8_out_ops) and (_is_any_annotated([node])):
+        if (node.target in int8_in_int8_out_ops) and (is_any_annotated([node])):
             if node.target == torch.ops.aten.max_pool2d.default:
                 maxpool_node = node
-                if not _is_all_annotated(
+                if not is_all_annotated(
                     [
                         maxpool_node,
                     ]
@@ -930,11 +930,11 @@ class X86InductorQuantizer(OnednnInductorQuantizer):
                     if unary_node is None
                     else [unary_node, binary_node, linear_node]
                 )
-                if _skip_annotate(node_list, filter_fn):
+                if skip_annotate(node_list, filter_fn):
                     continue
 
                 if quantization_config is None:
-                    _annotate_nodes_not_quantize(node_list)
+                    annotate_nodes_not_quantize(node_list)
                     continue
 
                 self._annotate_linear_node_helper(
