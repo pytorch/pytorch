@@ -227,7 +227,7 @@ void parseKernelArgs(
         *reinterpret_cast<float*>(slot) = static_cast<float>(temp);
         break;
       }
-      case 'd': { // double (64-bit float; fp64)
+      case 'd': { // double (fp64)
         double temp = THPUtils_unpackDouble(item);
         if (PyErr_Occurred()) {
           throw std::runtime_error("Failed to convert argument to double");
@@ -235,8 +235,7 @@ void parseKernelArgs(
         *reinterpret_cast<double*>(slot) = temp;
         break;
       }
-      case 'O': { // pointer; using helper getPointer() (which may call
-                  // data_ptr() if needed)
+      case 'O': { // pointer; grab .data_ptr() if the ptr is to a tensor 
         CUdeviceptr ptr = getPointer(item, i);
         *reinterpret_cast<CUdeviceptr*>(slot) = ptr;
         break;
