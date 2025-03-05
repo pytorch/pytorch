@@ -6854,6 +6854,12 @@ class TestMPS(TestCaseMPS):
 
         helper((2, 8, 4, 5))
 
+        # Test complex half
+        x = torch.rand(8, device='mps', dtype=torch.chalf)
+        rc_h = x.sqrt()
+        rc_f = x.cfloat().sqrt().chalf()
+        self.assertEqual(rc_h, rc_f)
+
     # Test selu, elu, celu
     def test_elu(self):
         def helper(shape, alpha=1.0, memory_format=torch.contiguous_format):
