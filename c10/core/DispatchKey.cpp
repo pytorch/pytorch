@@ -142,6 +142,8 @@ const char* toString(DispatchKey t) {
       return "AutocastCPU";
     case DispatchKey::AutocastMTIA:
       return "AutocastMTIA";
+    case DispatchKey::AutocastMAIA:
+      return "AutocastMAIA";
     case DispatchKey::AutocastXPU:
       return "AutocastXPU";
     case DispatchKey::AutocastIPU:
@@ -299,6 +301,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"Tracer", c10::DispatchKey::Tracer},
       {"AutocastCPU", c10::DispatchKey::AutocastCPU},
       {"AutocastMTIA", c10::DispatchKey::AutocastMTIA},
+      {"AutocastMAIA", c10::DispatchKey::AutocastMAIA},
       {"AutocastXPU", c10::DispatchKey::AutocastXPU},
       {"AutocastIPU", c10::DispatchKey::AutocastIPU},
       {"AutocastHPU", c10::DispatchKey::AutocastHPU},
