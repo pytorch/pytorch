@@ -92,7 +92,6 @@ from torch.testing._internal.common_utils import (
     MACOS_VERSION,
     parametrize,
     serialTest,
-    skipIfNNModuleInlined,
     skipIfRocm,
     skipIfWindows,
     skipIfXpu,
