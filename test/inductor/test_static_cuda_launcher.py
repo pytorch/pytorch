@@ -13,6 +13,7 @@ from torch.testing._internal.triton_utils import requires_cuda
 
 @requires_cuda
 class TestStaticCudaLauncher(TestCase):
+
     def setUp(self):
         # Create a temporary file to store the cubin.
         # We set delete=False so that the file persists after closing.
