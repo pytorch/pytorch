@@ -101,6 +101,55 @@ inline const char* BLASTypeName(c10::complex<float> v) {
   return "f32_r";
 }
 
+inline std::string ScalarTypeToBLASType(c10::ScalarType scalar_type) {
+  std::string BLASType;
+  switch (scalar_type) {
+    case c10::ScalarType::Float:{
+      BLASType = "f32_r";
+      break;
+    }
+    case c10::ScalarType::Double:{
+      BLASType = "f64_r";
+      break;
+    }
+    case c10::ScalarType::BFloat16:{
+      BLASType = "bf16_r";
+      break;
+    }
+    case c10::ScalarType::Half: {
+      BLASType = "f16_r";
+      break;
+    }
+    case c10::ScalarType::Float8_e4m3fn: {
+      BLASType = "f8_r";
+      break;
+    }
+    case c10::ScalarType::Float8_e5m2: {
+      BLASType = "bf8_r";
+      break;
+    }
+    case c10::ScalarType::Float8_e4m3fnuz: {
+      BLASType = "f8_fnuz_r";
+      break;
+    }
+    case c10::ScalarType::Float8_e5m2fnuz: {
+      BLASType = "bf8_fnuz_r";
+      break;
+    }
+    case c10::ScalarType::ComplexFloat:{
+      BLASType = "f32_c";
+      break;
+    }
+    case c10::ScalarType::ComplexDouble:{
+      BLASType = "f64_c";
+      break;
+    }
+    default:
+      BLASType = "unknown";
+  }
+  return BLASType;
+}
+
 // Similar to Compute Type in GemmRocblas.h
 template <typename T>
 inline std::string ComputeTypeFor() {
@@ -529,7 +578,8 @@ struct ScaledGemmParams : OpParams {
     return fmt::sprintf("- { function: matmul, M: %ld, N: %ld, K: %ld, lda: %ld, ldb: %ld, ldc: %ld, ldd: %ld, stride_a: 0, stride_b: 0, stride_c: 0, stride_d: 0, "
       "transA: %c, transB: %c, batch_count: 1, scaleA: s, scaleB: s, a_type: %s, b_type: %s, c_type: %s, d_type: %s, bias_type: %s, scale_type: %s, compute_type: %s }",
       m, n, k, lda, ldb, ldc, ldc, transa, transb,
-      BLASTypeName(a_dtype), BLASTypeName(b_dtype), BLASTypeName(c_dtype), BLASTypeName(bias_dtype), ComputeTypeFor<T>(), ComputeTypeFor<T>());
+      ScalarTypeToBLASType(a_dtype), ScalarTypeToBLASType(b_dtype), ScalarTypeToBLASType(c_dtype), ScalarTypeToBLASType(c_dtype), ScalarTypeToBLASType(bias_dtype),
+      ComputeTypeFor<T>(), ComputeTypeFor<T>());
   }
 
   std::string Signature() const override {
