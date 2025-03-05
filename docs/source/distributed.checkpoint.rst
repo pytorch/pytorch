@@ -27,6 +27,9 @@ Additional resources:
 
 .. currentmodule:: torch.distributed.checkpoint.state_dict_saver
 
+.. autoclass:: torch.distributed.checkpoint.state_dict_saver.AsyncCheckpointerType
+  :members:
+
 .. autofunction::  save
 .. autofunction::  async_save
 .. autofunction::  save_state_dict

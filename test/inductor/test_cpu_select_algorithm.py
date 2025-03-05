@@ -2484,6 +2484,32 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             self.assertEqual(actual, expected, atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 2)
 
+    @patches
+    @inductor_config.patch(freezing=True)
+    @unittest.skipIf(not torch._C._has_mkldnn, "MKLDNN is not enabled")
+    def test_bmm_flexible_layout(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, u, v):
+                view_3 = torch.ops.aten.reshape.default(u, [-1, 512, 64])
+                clone_1 = torch.ops.aten.clone.default(
+                    v, memory_format=torch.contiguous_format
+                )
+                view_7 = torch.ops.aten.reshape.default(clone_1, [-1, 512, 64])
+                permute_6 = torch.ops.aten.permute.default(view_7, [0, 2, 1])
+                div = torch.ops.aten.div.Tensor(permute_6, 8.0)
+                # view_3 is a ReinterpretView and div is a FlexibleLayout which will become FixedLayout
+                bmm = torch.ops.aten.bmm.default(view_3, div)
+                return bmm
+
+        mod = M().eval()
+        u = torch.randn(2, 24, 512, 64)
+        v = torch.randn(48, 512, 64)
+        with verify(u.dtype) as (atol, rtol):
+            self.common(mod, (u, v))
+
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
 class _DynamicShapesTestBase(BaseTestSelectAlgorithm):
