@@ -19,7 +19,7 @@ from torch.distributed.tensor._random import (
 )
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import ColwiseParallel, parallelize_module
-from torch.testing._internal.common_utils import run_tests, TEST_HPU
+from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     skip_if_lt_x_gpu,
@@ -27,8 +27,6 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     with_comms,
 )
 
-
-TYPE_DEVICE = "hpu" if TEST_HPU else "cuda"
 
 
 class DistTensorRandomInitTest(DTensorTestBase):
@@ -50,7 +48,7 @@ class DistTensorRandomInitTest(DTensorTestBase):
             self.assertEqual(local_tensor_clone, dtensor.to_local())
         else:
             # create DTensor from Tensor
-            _tensor = torch.empty(*input_size, device=TYPE_DEVICE)
+            _tensor = torch.empty(*input_size, device=self.device_type)
             dtensor = distribute_tensor(_tensor, device_mesh, [Shard(1)])
 
             # DTensor random init
@@ -212,7 +210,7 @@ class DistTensorRandomInitTest(DTensorTestBase):
             self.assertEqual(model.weight.device, torch.device("meta"))
 
         # actual initialization
-        device = torch.device("cuda", torch.cuda.current_device())
+        device = torch.device(self.device_type, torch.get_device_module(self.device_type).current_device())
         model.to_empty(device=device)
         model.reset_parameters()
         self.assertTrue(
@@ -253,7 +251,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
         device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
         # seed synchronization happens after the first `distribute_tensor` call
         distribute_tensor(
-            torch.empty([self.world_size], device=TYPE_DEVICE), device_mesh, [Shard(0)]
+            torch.empty([self.world_size], device=self.device_type), device_mesh, [Shard(0)]
         )
         self.assertEqual(seed_from_rank_0, random._rng_tracker.get_seed("parallel-rng"))
 
@@ -349,7 +347,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
         size = [4, 4]
 
         dtensor = distribute_tensor(
-            torch.empty(*size, device=TYPE_DEVICE), device_mesh, [Shard(1)]
+            torch.empty(*size, device=self.device_type), device_mesh, [Shard(1)]
         )
 
         # a random op call shifts the offset
@@ -552,7 +550,7 @@ class DistTensorRandomOpsTest3D(DTensorTestBase):
             self.assertEqual(model.weight.device, torch.device("meta"))
 
         # actual initialization
-        device = torch.device("cuda", torch.cuda.current_device())
+        device = torch.device(self.device_type, torch.get_device_module(self.device_type).current_device())
         model.to_empty(device=device)
         model.reset_parameters()
         self.assertTrue(

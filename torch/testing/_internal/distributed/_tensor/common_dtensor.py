@@ -46,18 +46,16 @@ from torch._utils import _get_device_module
 
 if TEST_CUDA:
     DEVICE_TYPE = "cuda"
-    PG_BACKEND = "nccl"
-    DEVICE_COUNT = _get_device_module("cuda").device_count()
 elif TEST_HPU:
     DEVICE_TYPE = "hpu"
-    PG_BACKEND = "hccl"
-    DEVICE_COUNT = _get_device_module("hpu").device_count()
 else:
     DEVICE_TYPE = "cpu"
-    PG_BACKEND = "gloo"
+
 
 NUM_DEVICES = 4
-
+device_module = torch.get_device_module(DEVICE)
+device_count = device_module.device_count()
+BACKEND = dist.get_default_backend_for_device(DEVICE)
 # We use this as a proxy for "multiple GPUs exist"
 if TEST_CUDA and DEVICE_COUNT > 1:
     # when we actually have multiple GPUs, relax the requirement to smaller counts.
@@ -321,7 +319,7 @@ class DTensorTestBase(MultiProcessTestCase):
 
     @property
     def backend(self) -> str:
-        backend = "nccl" if TEST_CUDA else "hccl" if TEST_HPU else "gloo"
+        backend = BACKEND
         return backend
 
     def build_device_mesh(self) -> DeviceMesh:
