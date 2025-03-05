@@ -179,11 +179,11 @@ def _callback_from_stance(callback):
         return callback
     elif _stance.stance == "eager_then_compile":
         if callback not in (False, None):
-            return _create_eager_then_compile_callback(callback)
+            return _create_eager_then_compile_callback(callback, _stance.stance)
         return callback
     elif _stance.stance == "aot_eager_then_compile":
         if callback not in (False, None):
-            return _create_aot_eager_then_compile_callback(callback)
+            return _create_eager_then_compile_callback(callback, _stance.stance)
         return callback
     elif _stance.stance == "force_eager":
         # disable
@@ -230,39 +230,27 @@ def _get_or_add_example_inputs(frame):
     return example_inputs
 
 
-def _create_eager_then_compile_callback(callback):
-    def eager_then_compile(*args, **kwargs):
+def _create_eager_then_compile_callback(callback, stance):
+    def callback_fn(*args, **kwargs):
         frame = args[0]
         example_inputs = _get_or_add_example_inputs(frame)
 
         if len(example_inputs) == 1:
-            return ConvertFrameReturn(
-                frame_exec_strategy=FrameExecStrategy(
-                    FrameAction.DEFAULT, FrameAction.DEFAULT
+            if stance == "eager_then_compile":
+                return ConvertFrameReturn(
+                    frame_exec_strategy=FrameExecStrategy(
+                        FrameAction.DEFAULT, FrameAction.DEFAULT
+                    )
                 )
-            )
+            elif stance == "aot_eager_then_compile":
+                aot_eager_fn = get_compiler_fn("aot_eager")
+                return _create_wrapped_callback(aot_eager_fn)(*args, **kwargs)
 
         dynamism = track_dynamism_across_examples(example_inputs)
         compiler_fn = callback._torchdynamo_orig_callable._torchdynamo_orig_callable
         return _create_wrapped_callback(compiler_fn, dynamism)(*args, **kwargs)
 
-    return eager_then_compile
-
-
-def _create_aot_eager_then_compile_callback(callback):
-    def aot_eager_then_compile(*args, **kwargs):
-        frame = args[0]
-        example_inputs = _get_or_add_example_inputs(frame)
-
-        if len(example_inputs) == 1:
-            aot_eager_fn = get_compiler_fn("aot_eager")
-            return _create_wrapped_callback(aot_eager_fn)(*args, **kwargs)
-
-        dynamism = track_dynamism_across_examples(example_inputs)
-        compiler_fn = callback._torchdynamo_orig_callable._torchdynamo_orig_callable
-        return _create_wrapped_callback(compiler_fn, dynamism)(*args, **kwargs)
-
-    return aot_eager_then_compile
+    return callback_fn
 
 
 def _is_skip_guard_eval_unsafe_stance():
