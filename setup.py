@@ -1363,6 +1363,7 @@ def main():
         "include/sleef.h",
         "_inductor/codegen/*.h",
         "_inductor/codegen/aoti_runtime/*.cpp",
+        "_inductor/script.ld",
         "_export/serde/*.yaml",
         "_export/serde/*.thrift",
         "share/cmake/ATen/*.cmake",
