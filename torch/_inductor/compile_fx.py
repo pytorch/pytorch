@@ -2010,6 +2010,24 @@ def compile_fx(
                     trace_joint=False,
                     decompositions=decompositions,
                 )
+
+                from torch._export.utils import _detect_fake_mode_from_gm
+
+                fake_mode = _detect_fake_mode_from_gm(gm)
+                # aot_export_module doesn't account for constant tensor attributes
+                # so we end up having tensors that don't have fake vals attached.
+                # This can happen when upstream export is non-strict where we
+                # preserve the original module params/buffers. Once AOTI switches
+                # to ep.run_decompositions() flow to lower to post-autograd opset
+                # this will go away.
+                for node in gm.graph.nodes:
+                    if node.op == "get_attr" and "val" not in node.meta:
+                        target = getattr(gm, node.target)
+                        if isinstance(target, torch.Tensor):
+                            node.meta["val"] = fake_mode.from_tensor(
+                                target, static_shapes=True
+                            )
+
             unlifted_gm = _unlift_graph(model_, gm, graph_signature)
             if "dynamo_flat_name_to_original_fqn" in model_.meta:
                 unlifted_gm.meta["dynamo_flat_name_to_original_fqn"] = model_.meta[
