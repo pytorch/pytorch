@@ -195,6 +195,10 @@ jobs:
         shell: cmd
         run: |
           "pytorch/.ci/pytorch/windows/arm64/bootstrap_buildtools.bat"
+      - name: Bootstrap Rust
+        shell: cmd
+        run: |
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_rust.bat"
       - name: Populate binary env
         shell: bash
         run: |

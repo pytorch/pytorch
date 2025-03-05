@@ -10,8 +10,16 @@ exit /b 1
 :wheel
 call %PYTORCH_ROOT%\.ci\pytorch\windows\arm64\bootstrap_tests.bat
 
-echo Print python path...
+:: change to source directory
+pushd %PYTORCH_ROOT%
+
+:: activate venv
+python -m venv .venv
+echo * > .venv\.gitignore
+call .\.venv\Scripts\activate
 where python
+
+echo Print python path...
 python -c "import sys; print(sys.executable)"
 
 echo Running import test...
@@ -24,6 +32,8 @@ if errorlevel 1 exit /b 1
 echo Checking that basic CNN works...
 python %PYTORCH_ROOT%\.ci\pytorch\test_example_code\cnn_smoke_win_arm64.py
 if errorlevel 1 exit /b 1
+
+popd
 
 goto end
 
