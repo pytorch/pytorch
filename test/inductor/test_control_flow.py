@@ -1037,12 +1037,15 @@ class WhileLoopTests(TestCase):
                 cloned_inputs = pytree.tree_map(
                     lambda t: t.clone(), inputs_with_counters
                 )
-                print(
-                    "haha tensor_hash",
-                    hash(cloned_inputs[1]),
-                    f" rand_seed {torch.initial_seed()}",
-                    f" cuda initial_seed {torch.cuda.initial_seed() if torch.cuda.is_initialized() else None}."
-                    f"tensor value: {cloned_inputs[1]}",
+                import logging
+
+                logger = logging.getLogger(__name__)
+                logger.setLevel(logging.DEBUG)
+                logger.critical(
+                    f"haha tensor_hash {str(hash(cloned_inputs[1]))}"  # noqa: G004
+                    f" rand_seed {torch.initial_seed()}"  # noqa: G004
+                    f" cuda initial_seed {torch.cuda.initial_seed() if torch.cuda.is_initialized() else None}."  # noqa: G004
+                    f"tensor value: {cloned_inputs[1]}"  # noqa: G004
                 )
                 result = model(*inputs_with_counters)
                 with torch.no_grad():
@@ -1305,22 +1308,11 @@ class WhileLoopTests(TestCase):
         )
 
     @requires_gpu
-    @parametrize("device", [GPU_TYPE])
-    @parametrize("dynamic", [False])
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [True, False])
     def test_while_loop_with_conv(self, device, dynamic):
         self._run_test(
             model=WhileLoopModels.Conv(device),
-            inputs=(torch.randn(2, 4, 4, 4),),
-            device=device,
-            dynamic=dynamic,
-        )
-
-    @requires_gpu
-    @parametrize("device", [GPU_TYPE])
-    @parametrize("dynamic", [False])
-    def test_while_loop_with_conv_loop1(self, device, dynamic):
-        self._run_test(
-            model=WhileLoopModels.ConvLoop1(device),
             inputs=(torch.randn(2, 4, 4, 4),),
             device=device,
             dynamic=dynamic,

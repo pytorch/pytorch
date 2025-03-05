@@ -7448,15 +7448,37 @@ class WhileLoop(ExternKernel):
         carried_inputs: list[Union[TensorBox, ShapeAsConstantBuffer]],
         additional_inputs: list[Union[TensorBox, ShapeAsConstantBuffer]],
     ):
-        carried_inputs = [cls.realize_input(x) for x in carried_inputs]
-        additional_inputs = [cls.realize_input(x) for x in additional_inputs]
-        all_inputs = carried_inputs + additional_inputs
+        def _require_exact_strides(
+            tensor_boxes: list[TensorBox | ShapeAsConstantBuffer],
+            fake_tensors: list[Union[int, torch.SymInt, torch.Tensor]],
+        ) -> list[TensorBox | ShapeAsConstantBuffer]:
+            assert len(tensor_boxes) == len(fake_tensors)
+            ret = []
+            for tb, fk in zip(tensor_boxes, fake_tensors):
+                if isinstance(fk, torch.Tensor):
+                    ret.append(
+                        ExternKernel.require_exact_strides(
+                            tb, fk.stride(), allow_padding=False
+                        )
+                    )
+                else:
+                    ret.append(tb)
+            return ret
 
         fx_carried_inputs = V.graph.current_node.args[-2]
         fx_additional_inputs = V.graph.current_node.args[-1]
         fx_all_inputs = fx_carried_inputs + fx_additional_inputs  # type: ignore[operator]
         fake_all_inputs = [x.meta["val"] for x in fx_all_inputs]  # type: ignore[union-attr]
         fake_carried_inputs = [x.meta["val"] for x in fx_carried_inputs]  # type: ignore[union-attr]
+        fake_additional_inputs = [x.meta["val"] for x in fx_additional_inputs]  # type: ignore[union-attr]
+
+        carried_inputs = [cls.realize_input(x) for x in carried_inputs]
+        carried_inputs = _require_exact_strides(carried_inputs, fake_carried_inputs)
+        additional_inputs = [cls.realize_input(x) for x in additional_inputs]
+        additional_inputs = _require_exact_strides(
+            additional_inputs, fake_additional_inputs
+        )
+        all_inputs = carried_inputs + additional_inputs
 
         for subgraph in (cond_fn, body_fn):
             if subgraph.graph is None:
@@ -7478,16 +7500,10 @@ class WhileLoop(ExternKernel):
                         assert len(subgraph.graph.graph_outputs) == len(
                             fake_carried_inputs
                         )
-                        subgraph.graph.graph_outputs = [
-                            ExternKernel.require_exact_strides(
-                                out, fake_out.stride(), allow_padding=False
-                            )
-                            if not isinstance(out, ShapeAsConstantBuffer)
-                            else out
-                            for out, fake_out in zip(
-                                subgraph.graph.graph_outputs, fake_carried_inputs
-                            )
-                        ]
+                        subgraph.graph.graph_outputs = _require_exact_strides(  # type: ignore[assignment]
+                            subgraph.graph.graph_outputs,  # type: ignore[arg-type]
+                            fake_carried_inputs,
+                        )
 
         cond_outputs = cond_fn.graph.graph_outputs  # type: ignore[union-attr]
         body_outputs = body_fn.graph.graph_outputs  # type: ignore[union-attr]
@@ -7511,13 +7527,14 @@ class WhileLoop(ExternKernel):
 
         device = all_inputs[0].get_device()
 
+        assert device is not None
         # make sure carried_inputs and body outputs are structurally equivalent
         assert len(carried_inputs) == len(body_outputs), (carried_inputs, body_outputs)
         for i, (op, bo) in enumerate(zip(carried_inputs, body_outputs)):
 
             def _guard_list_equals(
-                lhs_exprs: list[Union[int, sympy.expr]],
-                rhs_exprs: list[Union[int, sympy.expr]],
+                lhs_exprs: Sequence[Any],
+                rhs_exprs: Sequence[Any],
             ) -> None:
                 for lhs, rhs in zip(lhs_exprs, rhs_exprs):
                     V.graph.sizevars.guard_equals(lhs, rhs)
