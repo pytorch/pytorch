@@ -2,7 +2,7 @@
 set -ex
 
 apt-get update
-# Use deadsnakes for in case need older python version
+# Use deadsnakes in case we need an older python version
 sudo add-apt-repository ppa:deadsnakes/ppa
 apt-get install -y python${PYTHON_VERSION} python${PYTHON_VERSION}-dev python3-pip python${PYTHON_VERSION}-venv
 
