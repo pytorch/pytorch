@@ -209,7 +209,7 @@ struct FunctionSignature {
 
 // PythonArgs contains bound Python arguments for an actual invocation
 // along with references to the matched signature.
-struct PythonArgs {
+struct TORCH_PYTHON_API PythonArgs {
   PythonArgs(
       bool traceable,
       const FunctionSignature& signature,
@@ -302,12 +302,12 @@ struct PythonArgs {
   inline bool isNone(int i);
   inline std::optional<c10::DispatchKeySet> toDispatchKeySetOptional(int i);
 
-  // Functions used in performance-critical inline functions should
-  // be `public` so tagging them with `TORCH_PYTHON_API` looks
-  // more appropriate.
-  TORCH_PYTHON_API at::Tensor tensor_slow(int i);
-  TORCH_PYTHON_API at::Scalar scalar_slow(int i);
-  TORCH_PYTHON_API at::Scalar scalar_slow(PyObject* arg);
+ private:
+  // Non-inline functions' symbols are exposed to torch_python DLL
+  // via TORCH_PYTHON_API tag at struct level.
+  at::Tensor tensor_slow(int i);
+  at::Scalar scalar_slow(int i);
+  at::Scalar scalar_slow(PyObject* arg);
 };
 
 // FunctionParameter is a single formal parameter of a Python function.
