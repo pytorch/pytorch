@@ -252,10 +252,18 @@ class VerificationInterpreter(torch.fx.Interpreter):
             actual=onnx_result,
         )
         self.verification_infos.append(info)
-        logger.info(
-            "Verification info for node %s: max_abs_diff: %s, max_rel_diff: %s",
-            node_name,
-            info.max_abs_diff,
-            info.max_rel_diff,
-        )
+        if info.max_abs_diff > 0.01 or info.max_rel_diff > 0.1:
+            logger.warning(
+                "Verification info for node %s: max_abs_diff: %s, max_rel_diff: %s",
+                node_name,
+                info.max_abs_diff,
+                info.max_rel_diff,
+            )
+        else:
+            logger.info(
+                "Verification info for node %s: max_abs_diff: %s, max_rel_diff: %s",
+                node_name,
+                info.max_abs_diff,
+                info.max_rel_diff,
+            )
         return result
