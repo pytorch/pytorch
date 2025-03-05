@@ -637,20 +637,21 @@ of the alloc/free functions that match the signatures specified above.
 
 Mixing different CUDA system allocators in the same program
 -----------------------------------------------------------
-Depending on your use case, :func:`torch.cuda.memory.change_current_allocator` may not be what you
+Depending on your use case, :meth:`~torch.cuda.change_current_allocator` may not be what you
 want to use, since it swaps the CUDA allocator for the entire program (similar to
 ``PYTORCH_CUDA_ALLOC_CONF=backend:cudaMallocAsync``). For instance, if the swapped allocator doesn't
 have caching mechanism, you will lose all the benefits of PyTorch's CUDACachingAllocator. Instead,
 you can selectively mark a region of PyTorch code to use a custom allocator using
 :class:`torch.cuda.MemPool`. This will let you use multiple CUDA system allocators in the same
 PyTorch program, along with most of the benefits of the CUDACachingAllocator (e.g. caching).
-Using :class:`torch.cuda.MemPool`, you can enable several features, such as:
+Using :class:`torch.cuda.MemPool`, you can utilize custom allocators that enable several features,
+such as:
 
 * Allocating output buffers for an all-reduce using ``ncclMemAlloc`` allocator can enable NVLink
   Switch Reductions (NVLS). This can reduce contention between overlapping compute and communication
   kernels on GPU resources (SMs, and Copy Engines), especially on tensor-parallel workloads.
-* Allocating host outputs buffers for an all-gather using ``cuMemCreate`` and specifying
-  ``CU_MEM_LOCATION_TYPE_HOST_NUMA`` can enable Extended GPU Memory (EGM) based memory transfers
+* For Grace CPU based systems, allocating host outputs buffers for an all-gather using ``cuMemCreate``
+  and specifying ``CU_MEM_LOCATION_TYPE_HOST_NUMA`` can enable Extended GPU Memory (EGM) based memory transfers
   from source GPUs to the destination CPU. This accelerates the all-gather since the transfer
   happens over NVLinks, which otherwise would have happened over bandwidth-limited, Network Interface
   Card (NIC) links. Such an accelerated all-gather can in turn speed up model checkpointing.
@@ -666,7 +667,7 @@ Using :class:`torch.cuda.MemPool`, you can enable several features, such as:
     outperforms UVM, since there are no page faults and access patterns remain predictable. When GPU memory gets
     saturated, UVM has to perform costly double transfers, evicting pages to CPU before bringing in new ones.
 
-Like before, the code below shows ``ncclMemAlloc`` wrapped in a :class:`torch.cuda.memory.CUDAPluggableAllocator`.
+The code below shows ``ncclMemAlloc`` wrapped in a :class:`torch.cuda.memory.CUDAPluggableAllocator`.
 
 .. code:: python
 
@@ -725,7 +726,8 @@ Like before, the code below shows ``ncclMemAlloc`` wrapped in a :class:`torch.cu
    default_pg = _get_default_group()
    backend = default_pg._get_backend(device)
 
-   # Note: you can also get the above allocator as follows:
+   # Note: for convenience, ProcessGroupNCCL backend provides
+   # the ncclMemAlloc allocator as backend.mem_allocator
    allocator = backend.mem_allocator
 
 
@@ -768,7 +770,8 @@ be called internally on deletion of the pool, hence returning all the memory to 
    del tensor, del pool
 
 
-The following :class:`torch.cuda.MemPool` ``use_count()`` and ``snapshot()`` APIs can be used for debugging purposes:
+The following :meth:`torch.cuda.MemPool.use_count` and :meth:`torch.cuda.MemPool.snapshot`
+APIs can be used for debugging purposes:
 
 .. code:: python
 
