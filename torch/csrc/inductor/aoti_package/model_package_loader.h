@@ -10,7 +10,8 @@ class TORCH_API AOTIModelPackageLoader {
   AOTIModelPackageLoader(const std::string& model_package_path);
   AOTIModelPackageLoader(
       const std::string& model_package_path,
-      const std::string& model_name);
+      const std::string& model_name,
+      const bool run_single_threaded);
   ~AOTIModelPackageLoader();
 
   AOTIModelContainerRunner* get_runner();

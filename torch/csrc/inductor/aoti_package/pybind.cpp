@@ -18,8 +18,12 @@ class AOTIModelPackageLoaderPybind : public AOTIModelPackageLoader {
 
   AOTIModelPackageLoaderPybind(
       const std::string& model_package_path,
-      const std::string& model_name)
-      : AOTIModelPackageLoader(model_package_path, model_name) {}
+      const std::string& model_name,
+      const bool run_single_threaded)
+      : AOTIModelPackageLoader(
+            model_package_path,
+            model_name,
+            run_single_threaded) {}
 
   py::list boxed_run(py::list& inputs, void* stream_handle = nullptr) {
     std::vector<at::Tensor> input_tensors;
@@ -47,7 +51,7 @@ void initAOTIPackageBindings(PyObject* module) {
   auto m = rootModule.def_submodule("_aoti");
 
   py::class_<AOTIModelPackageLoaderPybind>(m, "AOTIModelPackageLoader")
-      .def(py::init<const std::string&, const std::string&>())
+      .def(py::init<const std::string&, const std::string&, const bool>())
       .def(py::init<const std::string&>())
       .def("get_metadata", &AOTIModelPackageLoaderPybind::get_metadata)
       .def(
