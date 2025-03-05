@@ -26,7 +26,7 @@ echo Installing MSVC %MSVC_VERSION%
     --add Microsoft.VisualStudio.Component.VC.CoreBuildTools ^
     --add Microsoft.VisualStudio.Component.VC.CoreIde ^
     --add Microsoft.VisualStudio.Component.VC.Redist.14.Latest ^
-    --add Microsoft.VisualStudio.Component.VC.14.42.17.12.ARM ^
+    --add Microsoft.VisualStudio.Component.VC.14.42.17.12.ARM64 ^
     --add Microsoft.VisualStudio.Component.VC.14.42.17.12.x86.x64
 
 echo exitcode = %errorlevel%
