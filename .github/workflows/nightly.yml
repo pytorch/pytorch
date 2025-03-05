@@ -52,47 +52,37 @@ jobs:
     secrets:
       GH_PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
 
-  update-vision-commit-hash:
+  update-commit-hashes:
     runs-on: ubuntu-latest
     environment: update-commit-hash
-    if: ${{ github.event_name == 'schedule' && github.repository_owner == 'pytorch' }}
+    strategy:
+      matrix:
+        include:
+          - repo-name: vision
+            repo-owner: pytorch
+            branch: main
+            pin-folder: .github/ci_commit_pins
+          - repo-name: audio
+            repo-owner: pytorch
+            branch: main
+            pin-folder: .github/ci_commit_pins
+          - repo-name: executorch
+            repo-owner: pytorch
+            branch: main
+            pin-folder: .ci/docker/ci_commit_pins
+          - repo-name: triton
+            repo-owner: triton-lang
+            branch: main
+            pin-folder: .ci/docker/ci_commit_pins
+    # Allow this to be triggered on either a schedule or on workflow_dispatch to allow for easier testing
+    if: github.repository_owner == 'pytorch' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
     steps:
-      - name: update-vision-commit-hash
+      - name: "${{ matrix.repo-owner }}/${{ matrix.repo-name }} update-commit-hash"
         uses: pytorch/test-infra/.github/actions/update-commit-hash@main
         with:
-          repo-name: vision
-          branch: main
-          pin-folder: .github/ci_commit_pins
-          test-infra-ref: main
-          updatebot-token: ${{ secrets.UPDATEBOT_TOKEN }}
-          pytorchbot-token: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
-
-  update-audio-commit-hash:
-    runs-on: ubuntu-latest
-    environment: update-commit-hash
-    if: ${{ github.event_name == 'schedule' && github.repository_owner == 'pytorch' }}
-    steps:
-      - name: update-audio-commit-hash
-        uses: pytorch/test-infra/.github/actions/update-commit-hash@main
-        with:
-          repo-name: audio
-          branch: main
-          pin-folder: .github/ci_commit_pins
-          test-infra-ref: main
-          updatebot-token: ${{ secrets.UPDATEBOT_TOKEN }}
-          pytorchbot-token: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
-
-  update-executorch-commit-hash:
-    runs-on: ubuntu-latest
-    environment: update-commit-hash
-    if: ${{ github.event_name == 'schedule' && github.repository_owner == 'pytorch' }}
-    steps:
-      - name: update-executorch-commit-hash
-        uses: pytorch/test-infra/.github/actions/update-commit-hash@main
-        with:
-          repo-name: executorch
-          branch: main
-          pin-folder: .ci/docker/ci_commit_pins
-          test-infra-ref: main
+          repo-owner: ${{ matrix.repo-owner }}
+          repo-name: ${{ matrix.repo-name }}
+          branch: ${{ matrix.branch }}
+          pin-folder: ${{ matrix.pin-folder}}
           updatebot-token: ${{ secrets.UPDATEBOT_TOKEN }}
           pytorchbot-token: ${{ secrets.GH_PYTORCHBOT_TOKEN }}

@@ -77,8 +77,7 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 # bfloat16 is only supported by CUDA 11+
 BFLOAT16_AVAILABLE = torch.cuda.is_available() and (
-    (torch.version.cuda is not None and int(torch.version.cuda.split(".")[0]) >= 11)
-    or torch.version.hip is not None
+    torch.version.cuda is not None or torch.version.hip is not None
 )
 
 
