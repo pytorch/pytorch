@@ -23,7 +23,6 @@ from onnxscript.ir import convenience as ir_convenience
 import torch
 import torch.fx
 from torch.export import graph_signature
-from torch.onnx import _flags
 from torch.onnx._internal._lazy_import import onnxscript_apis
 from torch.onnx._internal.exporter import (
     _analysis,

@@ -1,4 +1,3 @@
-warning: Selection `RUF030` has no effect because preview is not enabled.
 """Strategies for capturing ExportedPrograms."""
 
 # mypy: allow-untyped-defs
