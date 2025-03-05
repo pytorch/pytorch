@@ -93,7 +93,7 @@ else:
                 return f"{__name__}.cxx"
             if name == "__file__":
                 return python.__file__.removesuffix("_python.py") + "_cxx_pytree.py"
-            if name.startswith("__") and name.endswith("__"):
+            if name.startswith("_"):
                 raise AttributeError(
                     f"module {self.__name__!r} has not been imported yet: "
                     f"accessing attribute {name!r}"
