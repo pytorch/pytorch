@@ -872,7 +872,7 @@ def clear_inductor_caches() -> None:
 import gc
 
 
-def unload_xpu_triton_pyds():
+def unload_xpu_triton_pyds() -> None:
     # unload __triton_launcher.pyd
     for module_name in list(sys.modules.keys()):
         if not module_name.startswith("torch._inductor.runtime.compile_tasks."):
