@@ -963,6 +963,9 @@ class BundledShaderLibary : public MetalShaderLibrary {
 void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
                                            const std::string& name,
                                            std::optional<int64_t> extra) {
+  auto inputTensor = iter.input(0);
+  auto outputTensor = iter.output(0);
+  bool is_storage_dense = is_dense_in_storage(inputTensor) && inputTensor.strides().equals(outputTensor.strides());
   uint32_t length = iter.numel();
   if (length == 0) {
     return;
@@ -975,7 +978,7 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
     id<MTLComputePipelineState> cplState = nil;
     cplState = getPipelineStateForFunc(fmt::format("{}_{}_{}_{}",
                                                    name,
-                                                   is_dense ? "dense" : "strided",
+                                                   is_storage_dense ? "dense" : "strided",
                                                    scalarToMetalTypeString(outputTensor),
                                                    scalarToMetalTypeString(inputTensor)));
 
