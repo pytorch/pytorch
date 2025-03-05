@@ -1363,6 +1363,7 @@ def main():
         "include/sleef.h",
         "_inductor/codegen/*.h",
         "_inductor/codegen/aoti_runtime/*.cpp",
+        "_inductor/script.ld",
         "_export/serde/*.yaml",
         "_export/serde/*.thrift",
         "share/cmake/ATen/*.cmake",
@@ -1454,8 +1455,7 @@ def main():
         name=package_name,
         version=version,
         description=(
-            "Tensors and Dynamic neural networks in "
-            "Python with strong GPU acceleration"
+            "Tensors and Dynamic neural networks in Python with strong GPU acceleration"
         ),
         long_description=long_description,
         long_description_content_type="text/markdown",
