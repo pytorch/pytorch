@@ -1237,12 +1237,6 @@ def export(
         # When input is a JIT module, the last strategy will succeed so it is handled
         result: _capture_strategies.Result | None = None
         for strategy_class in _capture_strategies.CAPTURE_STRATEGIES:
-            if (
-                not _flags.ENABLE_DRAFT_EXPORT
-                and strategy_class is _capture_strategies.TorchExportDraftExportStrategy
-            ):
-                # Skip draft export if it is disabled
-                continue
             strategy = strategy_class(  # type: ignore[abstract]
                 verbose=verbose is not False,  # Treat None as verbose
                 dump=dump_exported_program,
