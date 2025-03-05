@@ -577,7 +577,9 @@ def scaled_scaled_dot_product_cudnn_attention_strategy(
     ) = op_schema.args_schema
     return_debug_mask = len(op_schema.args_schema) >= 8 and rest_args[2]
     has_attn_bias = attn_bias_strategy is not None
-    debug_attn_mask_sharding: Optional[Placement] = Replicate()
+    debug_attn_mask_sharding: Optional[Placement] = (
+        Replicate() if return_debug_mask else None
+    )
 
     assert isinstance(query_strategy, OpStrategy)
     # assuming q/k/v have the same shape
