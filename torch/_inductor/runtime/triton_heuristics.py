@@ -2389,7 +2389,7 @@ class StaticallyLaunchedCudaKernel:
             "fp32": "f",
             "f32": "f",
             "fp64": "d",
-            # TODO handle nvTmaDesc?
+            # TODO handle nvTmaDesc/CUtensormap
         }[ty]
 
     def arg_ty_from_signature(self):

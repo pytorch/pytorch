@@ -1,9 +1,13 @@
+#include <cuda.h>
+#include <c10/cuda/CUDAGuard.h>
+#include <c10/cuda/CUDAStream.h>
 #include <torch/csrc/inductor/static_cuda_launcher.h>
 #include <torch/csrc/utils/pythoncapi_compat.h>
 #include <cstdint>
 #include <stdexcept>
 
 #include <torch/csrc/inductor/cpp_wrapper/device_internal/cuda.h>
+#include <torch/csrc/utils/python_numbers.h>
 #include <filesystem>
 #include <optional>
 /**
@@ -46,8 +50,8 @@
 
 static inline CUdeviceptr getPointer(PyObject* obj, int idx) {
   CUdeviceptr data_ptr = 0;
-  if (PyLong_Check(obj)) {
-    data_ptr = PyLong_AsUnsignedLongLong(obj);
+  if (THPUtils_checkLong(obj)) {
+    data_ptr = THPUtils_unpackUInt64(obj);
     return data_ptr;
   }
   if (obj == Py_None) {
@@ -60,11 +64,11 @@ static inline CUdeviceptr getPointer(PyObject* obj, int idx) {
     PyObject* ret = PyObject_Call(ptr, empty_tuple, NULL);
     Py_DECREF(empty_tuple);
     Py_DECREF(ptr);
-    if (!PyLong_Check(ret)) {
+    if (!THPUtils_checkLong(ret)) {
       throw std::runtime_error(
           "data_ptr method of Pointer object must return 64-bit int");
     }
-    data_ptr = PyLong_AsUnsignedLongLong(ret);
+    data_ptr = THPUtils_unpackUInt64(ret);
     if (!data_ptr)
       return data_ptr;
 
@@ -152,7 +156,7 @@ void parseKernelArgs(
 
     switch (typeChar) {
       case 'b': { // (int8_t)
-        long temp = PyLong_AsLong(item);
+        long temp = THPUtils_unpackInt(item);
         if (PyErr_Occurred()) {
           throw std::runtime_error("Failed to convert argument to int8");
         }
@@ -160,7 +164,7 @@ void parseKernelArgs(
         break;
       }
       case 'h': { // (int16_t)
-        long temp = PyLong_AsLong(item);
+        long temp = THPUtils_unpackInt(item);
         if (PyErr_Occurred()) {
           throw std::runtime_error("Failed to convert argument to int16");
         }
@@ -168,7 +172,7 @@ void parseKernelArgs(
         break;
       }
       case 'i': { // (int32_t)
-        long temp = PyLong_AsLong(item);
+        long temp = THPUtils_unpackLong(item);
         if (PyErr_Occurred()) {
           throw std::runtime_error("Failed to convert argument to int32");
         }
@@ -176,7 +180,7 @@ void parseKernelArgs(
         break;
       }
       case 'l': { // (int64_t)
-        long long temp = PyLong_AsLongLong(item);
+        long long temp = THPUtils_unpackLong(item);
         if (PyErr_Occurred()) {
           throw std::runtime_error("Failed to convert argument to int64");
         }
@@ -184,7 +188,7 @@ void parseKernelArgs(
         break;
       }
       case 'B': { // (uint8_t)
-        unsigned long temp = PyLong_AsUnsignedLong(item);
+        unsigned long temp = THPUtils_unpackUInt32(item);
         if (PyErr_Occurred()) {
           throw std::runtime_error("Failed to convert argument to uint8");
         }
@@ -192,7 +196,7 @@ void parseKernelArgs(
         break;
       }
       case 'H': { // (uint16_t)
-        unsigned long temp = PyLong_AsUnsignedLong(item);
+        unsigned long temp = THPUtils_unpackUInt32(item);
         if (PyErr_Occurred()) {
           throw std::runtime_error("Failed to convert argument to uint16");
         }
@@ -200,7 +204,7 @@ void parseKernelArgs(
         break;
       }
       case 'I': { // (uint32_t)
-        unsigned long temp = PyLong_AsUnsignedLong(item);
+        unsigned long temp = THPUtils_unpackUInt32(item);
         if (PyErr_Occurred()) {
           throw std::runtime_error("Failed to convert argument to uint32");
         }
@@ -208,7 +212,7 @@ void parseKernelArgs(
         break;
       }
       case 'K': { // (uint64_t)
-        unsigned long long temp = PyLong_AsUnsignedLongLong(item);
+        unsigned long long temp = THPUtils_unpackUInt64(item);
         if (PyErr_Occurred()) {
           throw std::runtime_error("Failed to convert argument to uint64");
         }
@@ -216,7 +220,7 @@ void parseKernelArgs(
         break;
       }
       case 'f': { // float (fp16, bf16, fp32, f32)
-        double temp = PyFloat_AsDouble(item);
+        double temp = THPUtils_unpackDouble(item);
         if (PyErr_Occurred()) {
           throw std::runtime_error("Failed to convert argument to float");
         }
@@ -224,7 +228,7 @@ void parseKernelArgs(
         break;
       }
       case 'd': { // double (64-bit float; fp64)
-        double temp = PyFloat_AsDouble(item);
+        double temp = THPUtils_unpackDouble(item);
         if (PyErr_Occurred()) {
           throw std::runtime_error("Failed to convert argument to double");
         }

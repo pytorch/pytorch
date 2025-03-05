@@ -1,5 +1,4 @@
 # Owner(s): ["module: inductor"]
-
 import os
 import tempfile
 from typing import Any, Callable
@@ -9,8 +8,10 @@ from torch._dynamo.device_interface import get_interface_for_device
 from torch._inductor.runtime.triton_compat import tl, triton
 from torch._inductor.runtime.triton_heuristics import StaticallyLaunchedCudaKernel
 from torch._inductor.test_case import TestCase
+from torch.testing._internal.triton_utils import requires_cuda
 
 
+@requires_cuda
 class TestStaticCudaLauncher(TestCase):
     def setUp(self):
         # Create a temporary file to store the cubin.

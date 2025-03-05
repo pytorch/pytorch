@@ -1849,7 +1849,6 @@ PyObject* initModule() {
   THPEvent_init(module);
   NodeBase_init(module);
   NodeIter_init(module);
-  ASSERT_TRUE(StaticCudaLauncher_init(module));
   ASSERT_TRUE(THPVariable_initModule(module));
   ASSERT_TRUE(THPFunction_initModule(module));
   ASSERT_TRUE(THPEngine_initModule(module));
@@ -1883,6 +1882,7 @@ PyObject* initModule() {
 #endif
 #ifdef USE_CUDA
   torch::cuda::initModule(module);
+  ASSERT_TRUE(StaticCudaLauncher_init(module));
 #endif
 #ifdef USE_MPS
   torch::mps::initModule(module);
