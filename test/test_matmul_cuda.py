@@ -1182,7 +1182,7 @@ class TestFP8MatmulCuda(TestCase):
         scale_a = torch.arange(m * n_groups, device=device, dtype=torch.float32) / 4
         scale_b = torch.arange(n * n_groups, device=device, dtype=torch.float32) / 4
         offs = torch.arange(k, n_groups * k + 1, k, device=device, dtype=torch.int32)
-        out = torch._scaled_grouped_mm(a, b.t(), scale_a, scale_b, offs_a=offs, offs_b=offs,
+        out = torch._scaled_grouped_mm(a, b.t(), scale_a, scale_b, offs=offs,
                                        out_dtype=torch.bfloat16, use_fast_accum=fast_accum)
         offs_cpu = offs.cpu()
         alist, blist, ascalelist, bscalelist = [], [], [], []
@@ -1211,7 +1211,7 @@ class TestFP8MatmulCuda(TestCase):
         scale_a = torch.arange(n_groups * m, device="cuda", dtype=torch.float32)
         scale_b = torch.ones(n_groups * n, device="cuda", dtype=torch.float32).view(n_groups, n)
 
-        out = torch._scaled_grouped_mm(a, b.transpose(-2, -1), scale_a, scale_b, offs_a=offs,
+        out = torch._scaled_grouped_mm(a, b.transpose(-2, -1), scale_a, scale_b, offs=offs,
                                        out_dtype=torch.bfloat16, use_fast_accum=fast_accum)
 
         offs_cpu = offs.cpu()
@@ -1260,7 +1260,7 @@ class TestFP8MatmulCuda(TestCase):
         scale_b = torch.arange(n_groups * n, device="cuda", dtype=torch.float32)
         offs = torch.arange(n, n_groups * n + 1, n, device="cuda", dtype=torch.int32)
 
-        out = torch._scaled_grouped_mm(a, b.transpose(-2, -1), scale_a, scale_b, offs_b=offs,
+        out = torch._scaled_grouped_mm(a, b.transpose(-2, -1), scale_a, scale_b, offs=offs,
                                        out_dtype=torch.bfloat16, use_fast_accum=fast_accum)
         offs_cpu = offs.cpu()
         blist, bscalelist, outlist = [], [], []

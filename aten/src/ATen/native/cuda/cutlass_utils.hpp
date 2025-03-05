@@ -1,10 +1,13 @@
 #pragma once
 
-#include "cutlass/cutlass.h"
-#include "cutlass/arch/barrier.h"
-#include "cutlass/epilogue/collective/detail.hpp"
+#include <cutlass/cutlass.h>
+#include <cutlass/arch/barrier.h>
+#include <cutlass/epilogue/collective/detail.hpp>
 
-#include "cutlass/epilogue/fusion/sm90_visitor_tma_warpspecialized.hpp"
+#include <cutlass/epilogue/fusion/sm90_visitor_tma_warpspecialized.hpp>
+
+// TODO remove *BroadcastPtrArrays and replace with just Broadcast
+// when  https://github.com/NVIDIA/cutlass/pull/2120/ is in the tagged cutlass version
 
 
 namespace cutlass::epilogue::fusion {

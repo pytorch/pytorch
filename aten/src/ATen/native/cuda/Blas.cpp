@@ -1366,33 +1366,21 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
 namespace {
   c10::SmallVector<int64_t, 3> compute_grouped_gemm_output_size(const Tensor& mat_a,
   const Tensor& mat_b,
-  const std::optional<at::Tensor>& offs_a,
-  const std::optional<at::Tensor>& offs_b
+  const std::optional<at::Tensor>& offs
   ) {
     const bool a_is_2d = mat_a.dim() == 2;
     const bool b_is_2d = mat_b.dim() == 2;
-    if (offs_a.has_value()) {
-      TORCH_CHECK(offs_a->dim() == 1, "offs_a has to be 1D");
-    }
-    if (offs_b.has_value()) {
-      TORCH_CHECK(offs_b->dim() == 1, "offs_b has to be 1D");
-    }
-
     if (a_is_2d) {
       if (b_is_2d) {
-        // we might actually want to send a single offset vector
-        // because offs_a and offs_b, if both specified, have to match
-        // checking number of elements is not enough
-        TORCH_CHECK(offs_a->size(0) == offs_b->size(0), "offsets sizes have to match");
-        return {offs_a->size(0), mat_a.size(0), mat_b.size(1)};
+        return {offs->size(0), mat_a.size(0), mat_b.size(1)};
       } else {
-        TORCH_CHECK(offs_a->size(0) == mat_b.size(0), "matrix batch sizes have to match");
+        TORCH_CHECK(offs->size(0) == mat_b.size(0), "matrix batch sizes have to match");
         return {mat_a.size(0), mat_b.size(-1)};
       }
     } else {
       if (b_is_2d) {
         // this case is not actually encountered for MoE gemms
-        TORCH_CHECK(offs_b->size(0) == mat_a.size(0), "matrix batch sizes have to match");
+        TORCH_CHECK(offs->size(0) == mat_a.size(0), "matrix batch sizes have to match");
         return {mat_a.size(1), mat_b.size(1)};
       } else { // regular bmm
         TORCH_CHECK(mat_a.size(0) == mat_b.size(0), "batched dimension has to match");
@@ -1470,8 +1458,7 @@ _scaled_mm_cuda(const Tensor& mat_a, const Tensor& mat_b,
 Tensor
 _scaled_grouped_mm_cuda(const Tensor& mat_a, const Tensor& mat_b,
 const Tensor& scale_a, const Tensor& scale_b,
-const std::optional<at::Tensor>& offs_a,
-const std::optional<at::Tensor>& offs_b,
+const std::optional<at::Tensor>& offs,
 const std::optional<at::Tensor>& bias,
 const std::optional<at::Tensor>& scale_result,
 std::optional<c10::ScalarType> out_dtype,
@@ -1489,22 +1476,25 @@ bool use_fast_accum) {
   const bool a_is_2d = mat_a.dim() == 2;
   const bool b_is_2d = mat_b.dim() == 2;
 
-  TORCH_CHECK(! (a_is_2d ^ offs_a.has_value()), "have to provide offsets for mat_a if it is 2d");
-  TORCH_CHECK(! (b_is_2d ^ offs_b.has_value()), "have to provide offsets for mat_b if it is 2d");
+  TORCH_CHECK(offs.has_value() ==  (a_is_2d || b_is_2d), "Have to provide offsets if there is a 2d matrix");
 
-
+  if (offs.has_value()) {
+    TORCH_CHECK(offs->dim() == 1, "offs has to be 1D");
+    TORCH_CHECK(offs->dtype() == at::kInt, "Offsets have to be int32");
+  }
+  
   // Both Per-Tensor and Row-wise scaling expect fp32 tensors
   TORCH_CHECK(
       scale_a.scalar_type() == kFloat && scale_b.scalar_type() == kFloat,
       "Both scale_a and scale_b must be float (fp32) tensors.");
 
-  const int scale_multiplier = (mat_a.dim() == 2 && mat_b.dim() == 2) ? offs_a->size(0) : 1;
+  const int scale_multiplier = (mat_a.dim() == 2 && mat_b.dim() == 2) ? offs->size(0) : 1;
   check_scale(mat_a, scale_a, 0 ,0, scale_multiplier);
   check_scale(mat_b, scale_b, 1, 1, scale_multiplier);
 
   const auto out_dtype_ = out_dtype.value_or(mat_a.scalar_type());
   TORCH_CHECK(out_dtype_ == kBFloat16, "Only bf16 high precision output types are supported for grouped gemm");
-  const auto out_size = compute_grouped_gemm_output_size(mat_a, mat_b, offs_a, offs_b);
+  const auto out_size = compute_grouped_gemm_output_size(mat_a, mat_b, offs);
   Tensor out = at::empty(out_size, mat_a.options().dtype(out_dtype_));
 
 
@@ -1513,8 +1503,7 @@ bool use_fast_accum) {
       mat_b,
       scale_a,
       scale_b,
-      offs_a,
-      offs_b,
+      offs,
       bias,
       use_fast_accum,
       out);

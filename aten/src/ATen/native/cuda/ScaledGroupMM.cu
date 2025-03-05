@@ -259,6 +259,8 @@ void f8f8bf16_grouped_gemm_impl_sm90(
   using EpilogueSchedule =
       typename Schedule<FastAccum::value, Pong::value, TB_M, TB_N, TB_K>::
           EpilogueSchedule;
+  // TODO remove *BroadcastPtrArrays and replace with just Broadcast
+  // when  https://github.com/NVIDIA/cutlass/pull/2120/ is in the tagged cutlass version
   // Implement rowwise scaling epilogue.
   using ScaleA = cutlass::epilogue::fusion::Sm90ColBroadcastPtrArray<
       0,
@@ -624,14 +626,13 @@ void f8f8bf16_grouped_mm(
     at::Tensor mat_b, // FP8
     at::Tensor scale_a, // FP32
     at::Tensor scale_b, // FP32
-    std::optional<at::Tensor> offs_a,
-    std::optional<at::Tensor> offs_b,
+    std::optional<at::Tensor> offs,
     std::optional<at::Tensor> bias, // BF16
     bool use_fast_accum,
     at::Tensor& out) {
 #if defined(BUILD_ROWWISE_FP8_KERNEL)
   dispatch_fp8_grouped_gemm_on_bias_dtype(
-      mat_a, mat_b, scale_a, scale_b, offs_a.has_value() ? offs_a : offs_b, bias, use_fast_accum, out);
+      mat_a, mat_b, scale_a, scale_b, offs, bias, use_fast_accum, out);
 #else
   TORCH_CHECK(false, "grouped mm is not supported on your system");
 #endif
