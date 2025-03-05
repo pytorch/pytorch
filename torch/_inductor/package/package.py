@@ -172,16 +172,15 @@ def package_aoti(
         "`torch._inductor.aot_compile(..., options={aot_inductor.package=True})`"
     )
     assert (
-        (
-            isinstance(archive_file, (io.IOBase, IO))
-            and archive_file.writable()
-            and archive_file.seekable()
-        )
-        or (
-            isinstance(archive_file, (str, os.PathLike))
-            and os.fspath(archive_file).endswith(".pt2")
-        )
-    ), f"Expect archive file to be a file ending in .pt2, or is a buffer. Instead got {archive_file}"
+        isinstance(archive_file, (io.IOBase, IO))
+        and archive_file.writable()
+        and archive_file.seekable()
+    ) or (
+        isinstance(archive_file, (str, os.PathLike))
+        and os.fspath(archive_file).endswith(".pt2")
+    ), (
+        f"Expect archive file to be a file ending in .pt2, or is a buffer. Instead got {archive_file}"
+    )
 
     # Save using the PT2 packaging format
     # (https://docs.google.com/document/d/1jLPp8MN8Whs0-VW9PmJ93Yg02W85tpujvHrTa1pc5x8/edit#heading=h.v2y2jgnwc56a)
@@ -279,9 +278,10 @@ def load_package(
     path: FileLike, model_name: str = "model", run_single_threaded: bool = False
 ) -> AOTICompiledModel:  # type: ignore[type-arg]
     assert (
-        (isinstance(path, (io.IOBase, IO)) and path.readable() and path.seekable())
-        or (isinstance(path, (str, os.PathLike)) and os.fspath(path).endswith(".pt2"))
-    ), f"Unable to load package. Path must be a buffer or a file ending in .pt2. Instead got {path}"
+        isinstance(path, (io.IOBase, IO)) and path.readable() and path.seekable()
+    ) or (isinstance(path, (str, os.PathLike)) and os.fspath(path).endswith(".pt2")), (
+        f"Unable to load package. Path must be a buffer or a file ending in .pt2. Instead got {path}"
+    )
 
     if isinstance(path, (io.IOBase, IO)):
         with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
