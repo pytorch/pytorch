@@ -987,7 +987,9 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 super().__init__()
                 self.conv = torch.nn.Conv2d(3, 128, kernel_size=3, stride=1)
                 self.conv2 = torch.nn.Conv2d(128, 128, kernel_size=3, stride=1)
-                self.conv3 = torch.nn.Conv2d(128, 128, kernel_size=3, stride=1, groups=4)
+                self.conv3 = torch.nn.Conv2d(
+                    128, 128, kernel_size=3, stride=1, groups=4
+                )
 
             def forward(self, x):
                 return self.conv3(self.conv2(self.conv(x)))
