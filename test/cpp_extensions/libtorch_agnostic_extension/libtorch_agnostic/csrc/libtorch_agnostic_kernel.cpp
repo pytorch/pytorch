@@ -82,25 +82,32 @@ RAIIATH sgd_out_of_place(
   return RAIIATH(out);
 }
 
+template <typename T>
+uint64_t from(T val) {
+  static_assert(sizeof(T) <= sizeof(uint64_t), "StableLibrary stack does not support parameter types larger than 64 bits.");
+  return *reinterpret_cast<uint64_t*>(&val);
+}
 
-void voidyvoid_boxed_ATH_sgd_out_of_place(void **stack, int64_t num_args, int64_t num_outputs) {
-  RAIIATH param(reinterpret_cast<AtenTensorHandle>(stack[0]));
-  RAIIATH grad(reinterpret_cast<AtenTensorHandle>(stack[1]));
-  double weight_decay;
-  std::memcpy(&weight_decay, &stack[2], sizeof(double));
-  double lr;
-  std::memcpy(&lr, &stack[3], sizeof(double));
-  bool maximize = static_cast<bool>(reinterpret_cast<int64_t>(stack[4]));
+template <typename T>
+T to(uint64_t val) {
+  return *reinterpret_cast<T*>(&val);
+}
+
+void voidyvoid_boxed_ATH_sgd_out_of_place(uint64_t* stack, int64_t num_args, int64_t num_outputs) {
+  RAIIATH param(to<AtenTensorHandle>(stack[0]));
+  RAIIATH grad(to<AtenTensorHandle>(stack[1]));
+  auto weight_decay = to<double>(stack[2]);
+  auto lr = to<double>(stack[3]);
+  auto maximize = to<bool>(stack[4]);
 
   RAIIATH raiiath_res = sgd_out_of_place(
     std::move(param),
     std::move(grad),
-    float(weight_decay),  // weight_decay,
-    lr,  //lr,
-    maximize);  // maximize);
+    float(weight_decay),
+    lr,
+    maximize);
   
-  void *out = reinterpret_cast<void*>(raiiath_res.release());
-  stack[num_args] = out;
+  stack[num_args] = from(raiiath_res.release());
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CPU, m) {

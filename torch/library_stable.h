@@ -39,7 +39,7 @@ class TORCH_API StableLibrary final {
     StableLibrary& operator=(StableLibrary&&) = default;
     ~StableLibrary() = default;
 
-    StableLibrary& impl(const char* name, void (*fn)(void **, int64_t, int64_t));
+    StableLibrary& impl(const char* name, void (*fn)(uint64_t*, int64_t, int64_t));
 };
 
 class TORCH_API StableTorchLibraryInit final {

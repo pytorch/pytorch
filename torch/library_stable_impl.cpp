@@ -39,44 +39,54 @@ class StableLibrary::TorchLibraryOpaque {
 
 using RAIIATH = torch::aot_inductor::RAIIAtenTensorHandle;
 
-class VoidStarConverter: public c10::OperatorKernel {
+template <typename T>
+uint64_t from(T val) {
+  static_assert(sizeof(T) <= sizeof(uint64_t), "StableLibrary stack does not support parameter types larger than 64 bits.");
+  return *reinterpret_cast<uint64_t*>(&val);
+}
+
+template <typename T>
+T to(uint64_t val) {
+  return *reinterpret_cast<T*>(&val);
+}
+
+class StableIValueConverter: public c10::OperatorKernel {
   public:
-    VoidStarConverter(void (*fn)(void **, int64_t, int64_t)) : fn_(fn) {}
+    StableIValueConverter(void (*fn)(uint64_t*, int64_t, int64_t)) : fn_(fn) {}
 
     void operator()(const c10::OperatorHandle& op, c10::DispatchKeySet keyset, torch::jit::Stack* stack) {
-      static_assert(sizeof(void*) >= sizeof(int64_t), "StableLibrary assumes a 64-bit system architecture");
       const auto& schema = op.schema();
       const auto num_returns = schema.returns().size();
       const auto num_arguments = schema.arguments().size();
       // to make this faster, you can make this a C array on the stack --> though this may cause a stackoverflow
-      void **ministack = (void**)malloc((num_arguments + num_returns) * sizeof(void *));
+      uint64_t *ministack = (uint64_t*)malloc((num_arguments + num_returns) * sizeof(uint64_t));
       // std::unique_ptr<void *[]> ministack = std::make_unique<void*[]>(num_arguments + num_returns);
 
       for (size_t idx = 0; idx < num_arguments; idx++) {  // rbarnes will prefer a c10::irange instead of this loop!
         const c10::IValue& arg = torch::jit::peek(stack, idx, num_arguments);
         if (arg.isInt()) {
           TORCH_WARN("dealt with an Int");
-          ministack[idx] = reinterpret_cast<void *>(arg.toInt());
+          ministack[idx] = from(arg.toInt());
         } else if (arg.isDouble()) {
           TORCH_WARN("dealt with a double");
-          ministack[idx] = c10::bit_cast<void *>(arg.toDouble());
+          ministack[idx] = from(arg.toDouble());
         } else if (arg.isBool()) {
           TORCH_WARN("dealt with a bool");
-          ministack[idx] = reinterpret_cast<void *>(static_cast<int64_t>(arg.toBool()));
+          ministack[idx] = from(arg.toBool());
         } else if (arg.isNone()) {
           TORCH_WARN("dealt with a None");
-          ministack[idx] = nullptr;
+          ministack[idx] = from(nullptr);
         } else if (arg.isTensor()) {
           TORCH_WARN("dealt with a Tensor");
           AtenTensorHandle ath = torch::aot_inductor::new_tensor_handle(std::move(const_cast<at::Tensor&>(arg.toTensor())));
-          ministack[idx] = reinterpret_cast<void *>(ath);
+          ministack[idx] = from(ath);
         } else {
           TORCH_CHECK(false, "Other types of IValues not yet handled!");
         }
       }
 
-      // second function is going to take a stack of void*, cast them to our
-      // schema values for now, and run the function and modify the void* stack
+      // second function is going to take a stack of uint64_ts, cast them to our
+      // schema values, and run the function and modify the uint64_t stack
       fn_(ministack, num_arguments, num_returns);
 
       // now pop all inputs on stack. if we pop earlier, Tensors would go out of scope
@@ -88,7 +98,7 @@ class VoidStarConverter: public c10::OperatorKernel {
       for (size_t idx = 0; idx < num_returns; idx++) {
         const c10::TypePtr& ret_type = schema.returns()[idx].type();
         if (*ret_type == *c10::getTypePtr<at::Tensor>()) {
-          auto ret_raiiath = RAIIATH(reinterpret_cast<AtenTensorHandle>(ministack[num_arguments + idx]));
+          auto ret_raiiath = RAIIATH(to<AtenTensorHandle>(ministack[num_arguments + idx]));
           at::Tensor out = *torch::aot_inductor::tensor_handle_to_tensor_pointer(ret_raiiath.get());
           torch::jit::push(stack, c10::IValue(out));
         } else {
@@ -100,7 +110,7 @@ class VoidStarConverter: public c10::OperatorKernel {
     }
 
   private:
-    void (*fn_)(void **, int64_t, int64_t);
+    void (*fn_)(uint64_t*, int64_t, int64_t);
 };
 
 
@@ -108,7 +118,7 @@ StableLibrary::StableLibrary(StableLibrary::Kind kind, std::string ns, std::opti
  : lib_(new TorchLibraryOpaque(StableLibrary::Kind::IMPL, std::move(ns), k, file, line)) {}
 
 
-StableLibrary& StableLibrary::impl(const char* name, void (*fn)(void **, int64_t, int64_t)) {
-  this->lib_->impl(name, torch::CppFunction::makeFromBoxedFunctor(std::move(std::make_unique<VoidStarConverter>(fn))));
+StableLibrary& StableLibrary::impl(const char* name, void (*fn)(uint64_t*, int64_t, int64_t)) {
+  this->lib_->impl(name, torch::CppFunction::makeFromBoxedFunctor(std::move(std::make_unique<StableIValueConverter>(fn))));
   return *this;
 }
