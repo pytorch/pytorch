@@ -62,7 +62,7 @@ PYTORCH_USE_CXX_PYTREE: bool = _os.getenv("PYTORCH_USE_CXX_PYTREE", "0") not in 
 }
 
 
-def _import_cxx_pytree() -> _ModuleType:
+def _import_cxx_pytree_and_store() -> _ModuleType:
     if not python._cxx_pytree_dynamo_traceable:
         raise ImportError(
             "Cannot import package `optree`. "
@@ -72,11 +72,18 @@ def _import_cxx_pytree() -> _ModuleType:
 
     import torch.utils._cxx_pytree as cxx
 
+    # This allows the following statements to work properly:
+    #
+    #     import torch.utils.pytree
+    #
+    #     torch.utils.pytree.cxx
+    #
+    _sys.modules[f"{__name__}.cxx"] = globals()["cxx"] = cxx
     return cxx
 
 
 if PYTORCH_USE_CXX_PYTREE:
-    cxx = _import_cxx_pytree()  # noqa: F811
+    cxx = _import_cxx_pytree_and_store()  # noqa: F811
 else:
     cxx = _sys.modules.get("torch.utils._cxx_pytree")  # type: ignore[assignment]
 
@@ -104,20 +111,13 @@ else:
                     )
 
                 # Lazy import
-                cxx = _import_cxx_pytree()
-
-                # Replace the temporary module object (`self`) in sys.modules
-                _sys.modules[f"{__name__}.cxx"] = globals()["cxx"] = cxx
+                cxx = _import_cxx_pytree_and_store()
 
             return getattr(cxx, name)
 
         def __setattr__(self, name: str, value: _Any) -> None:
             # Lazy import
-            cxx = _import_cxx_pytree()
-
-            # Replace the temporary module object (`self`) in sys.modules
-            _sys.modules[f"{__name__}.cxx"] = globals()["cxx"] = cxx
-
+            cxx = _import_cxx_pytree_and_store()
             return setattr(cxx, name, value)
 
     # This allows the following statements to work properly:
@@ -229,15 +229,6 @@ def register_pytree_node(  # type: ignore[no-any-unimported]
 def __getattr__(name: str) -> _Any:
     if name == "cxx":
         # Lazy import
-        cxx = _import_cxx_pytree()
-
-        # This allows the following statements to work properly:
-        #
-        #     import torch.utils.pytree
-        #
-        #     torch.utils.pytree.cxx
-        #
-        _sys.modules[f"{__name__}.cxx"] = globals()["cxx"] = cxx
-        return cxx
+        return _import_cxx_pytree_and_store()
 
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
