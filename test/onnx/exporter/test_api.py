@@ -157,7 +157,7 @@ class TestExportAPIDynamo(common_utils.TestCase):
             strict=True,
         )
 
-        self.assert_export(ep)
+        self.assert_export(ep, strategy=None)
 
     def test_dynamic_shapes_supports_input_names(self):
         self.assert_export(

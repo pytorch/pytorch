@@ -246,7 +246,7 @@ class DynamoExporterTest(common_utils.TestCase):
 
         class LoggingLoggerModule(torch.nn.Module):
             def forward(self, x):
-                logger.log("abc")
+                logger.info("abc")
                 return x + 1
 
         onnx_program = self.export(LoggingLoggerModule(), (torch.tensor(1),))
