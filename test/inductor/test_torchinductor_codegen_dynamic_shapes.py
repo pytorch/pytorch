@@ -6,11 +6,7 @@ import sys
 import torch
 from torch._inductor.compile_fx import compile_fx
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_utils import (
-    IS_LINUX,
-    TEST_WITH_ASAN,
-    TEST_WITH_ROCM,
-)
+from torch.testing._internal.common_utils import IS_LINUX, TEST_WITH_ROCM
 from torch.testing._internal.inductor_utils import (
     _check_has_dynamic_shape,
     GPU_TYPE,
@@ -419,7 +415,7 @@ if HAS_CPU:
     )
 
 
-if HAS_GPU and not TEST_WITH_ASAN:
+if HAS_GPU:
 
     class DynamicShapesCodegenGPUTests(TestCase):
         maxDiff = None
