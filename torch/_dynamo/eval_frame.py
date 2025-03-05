@@ -63,6 +63,7 @@ from torch._C._dynamo.eval_frame import (  # noqa: F401
     unsupported,
 )
 from torch._dispatch.python import enable_python_dispatcher
+from torch._dynamo.types import ConvertFrameReturn, FrameAction, FrameExecStrategy
 from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch._utils_internal import justknobs_check, log_export_usage
 from torch.export.dynamic_shapes import (
@@ -71,6 +72,10 @@ from torch.export.dynamic_shapes import (
     _RelaxedConstraint,
 )
 from torch.fx import GraphModule
+from torch.fx.experimental._dynamism import (
+    clone_and_convert_to_meta,
+    track_dynamism_across_examples,
+)
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
@@ -83,10 +88,15 @@ from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from . import config, convert_frame, external_utils, trace_rules, utils
 from .backends.registry import CompilerFn, lookup_backend
 from .code_context import code_context
-from .exc import CondOpArgsMismatchError, ShortenTraceback, UserError, UserErrorType
+from .exc import (
+    CondOpArgsMismatchError,
+    ShortenTraceback,
+    Unsupported,
+    UserError,
+    UserErrorType,
+)
 from .hooks import Hooks
 from .mutation_guard import install_generation_tagging_init
-from .types import FrameAction, FrameExecStrategy
 from .utils import common_constant_types, compile_times
 
 
@@ -152,6 +162,19 @@ def _set_stance(stance: DynamoStance) -> DynamoStance:
 
 _set_stance._dynamo_forbidden = True  # type: ignore[attr-defined]
 
+_EXAMPLE_INPUTS: Optional[dict[str, list[Any]]] = None
+
+
+def get_example_inputs(key) -> list[Any]:
+    global _EXAMPLE_INPUTS
+    if _EXAMPLE_INPUTS is None:
+        _EXAMPLE_INPUTS = {}
+
+    if key not in _EXAMPLE_INPUTS:
+        _EXAMPLE_INPUTS[key] = []
+
+    return _EXAMPLE_INPUTS[key]
+
 
 def _callback_from_stance(callback):
     if _stance.stance == "default":
@@ -166,6 +189,38 @@ def _callback_from_stance(callback):
                 hooks,
             )
 
+        return callback
+    elif _stance.stance == "eager_then_compile":
+        if callback not in (False, None):
+
+            def eager_then_compile(*args, **kwargs):
+                frame = args[0]
+                key = frame.f_code.co_filename + str(frame.f_code.co_firstlineno)
+                example_inputs = get_example_inputs(key)
+
+                if len(example_inputs) < 2:
+                    example_inputs.append(clone_and_convert_to_meta(frame.f_locals))
+
+                dynamism = track_dynamism_across_examples(example_inputs)
+                if len(example_inputs) == 1:
+                    return ConvertFrameReturn(
+                        frame_exec_strategy=FrameExecStrategy(
+                            FrameAction.DEFAULT, FrameAction.DEFAULT
+                        )
+                    )
+
+                compiler_fn = callback._torchdynamo_orig_callable._torchdynamo_orig_callable.compiler_fn
+                hooks = Hooks()
+                return convert_frame.catch_errors_wrapper(
+                    convert_frame.convert_frame(  # type: ignore[arg-type]
+                        compiler_fn,
+                        hooks,
+                        dynamism=dynamism,
+                    ),
+                    hooks,
+                )(*args, **kwargs)
+
+            return eager_then_compile
         return callback
     elif _stance.stance == "force_eager":
         # disable
@@ -417,6 +472,7 @@ class _TorchDynamoContext:
         *,
         export=False,
         dynamic=None,
+        dynamism=None,
         compiler_config=None,
     ) -> None:
         super().__init__()
@@ -427,6 +483,7 @@ class _TorchDynamoContext:
         self.first_ctx = first_ctx
         self.export = export
         self._dynamic = dynamic
+        self.dynamism = dynamism
         self.compiler_config = compiler_config
         self.cleanup_fns: list[Callable[[], Any]] = []
         self.enter_exit_hooks = []
@@ -584,6 +641,10 @@ class _TorchDynamoContext:
 
                 try:
                     return fn(*args, **kwargs)
+                except Unsupported as e:
+                    if config.verbose:
+                        raise
+                    raise e.with_traceback(None) from None
                 except ShortenTraceback as e:
                     # Failures in the backend likely don't have useful
                     # data in the TorchDynamo frames, so we strip them out.
@@ -664,6 +725,7 @@ class OptimizeContext(_TorchDynamoContext):
         *,
         export=False,
         dynamic=None,
+        dynamism=None,
         compiler_config=None,
         rebuild_ctx: Optional[
             Callable[[], Union[OptimizeContext, _NullDecorator]]
@@ -680,6 +742,7 @@ class OptimizeContext(_TorchDynamoContext):
             first_ctx=first_ctx,
             export=export,
             dynamic=dynamic,
+            dynamism=dynamism,
             compiler_config=compiler_config,
         )
 
@@ -787,6 +850,7 @@ def _optimize_catch_errors(
     backend_ctx_ctor=null_context,
     export=False,
     dynamic=None,
+    dynamism=None,
     compiler_config=None,
     rebuild_ctx=None,
 ):
@@ -796,6 +860,7 @@ def _optimize_catch_errors(
         first_ctx=True,
         export=export,
         dynamic=dynamic,
+        dynamism=None,
         compiler_config=compiler_config,
         rebuild_ctx=rebuild_ctx,
     )
@@ -880,6 +945,7 @@ def _optimize(
     guard_fail_fn=None,
     disable=False,
     dynamic=None,
+    dynamism=None,
 ) -> Union[OptimizeContext, _NullDecorator]:
     """
     The main entrypoint of TorchDynamo.  Do graph capture and call
@@ -938,10 +1004,11 @@ def _optimize(
     # _optimize_catch_errors in the field _torchdynamo_orig_callable. This can
     # be used by eval_frame.c to insert a guard on the backend.
     return _optimize_catch_errors(
-        convert_frame.convert_frame(backend, hooks=hooks),
+        convert_frame.convert_frame(backend, hooks=hooks, dynamism=dynamism),
         hooks,
         backend_ctx_ctor,
         dynamic=dynamic,
+        dynamism=dynamism,
         compiler_config=(
             backend.get_compiler_config()
             if hasattr(backend, "get_compiler_config")
