@@ -1,6 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # implement matrix related ops for distributed tensor
 
+from typing import Optional
 
 import torch
 from torch.distributed.device_mesh import DeviceMesh
@@ -569,4 +570,104 @@ def scaled_dot_product_efficient_attention_backward_strategy(
         op_schema,
         single_mesh_dim_strategies,
         input_index=4,
+    )
+
+
+@register_op_strategy(
+    aten._scaled_dot_product_cudnn_attention.default,
+    schema_info=RuntimeSchemaInfo(4),
+)
+def scaled_scaled_dot_product_cudnn_attention_strategy(
+    mesh: DeviceMesh, op_schema: OpSchema
+) -> OpStrategy:
+    (
+        query_strategy,  # query
+        _,  # key
+        _,  # value
+        attn_bias_strategy,
+        compute_log_sumexp,  # compute_log_sumexp
+        *rest_args,  # optional args: dropout_p, is_causal, return_debug_mask, scale
+    ) = op_schema.args_schema
+    return_debug_mask = len(op_schema.args_schema) >= 8 and rest_args[2]
+    has_attn_bias = attn_bias_strategy is not None
+    debug_attn_mask_sharding: Optional[Placement] = (
+        Replicate() if return_debug_mask else None
+    )
+
+    assert isinstance(query_strategy, OpStrategy)
+    # assuming q/k/v have the same shape
+
+    single_mesh_dim_strategies = []
+
+    # placement list stores placements of [outputs, inputs]
+    # in the spda case, we have 2 valid tensor outputs and 3 tensor inputs
+    # first we can always accept full replication for both inputs and outputs
+    all_replicate: PlacementList = [
+        Replicate(),  # output
+        Replicate(),  # logsumexp
+        None,  # cum_seq_q
+        None,  # cum_seq_k
+        None,  # max_q
+        None,  # max_k
+        None,  # philox_seed
+        None,  # philox_offset
+        # NOTE: debug_attn_mask is not supproted by pytorch and is always an empty tensor
+        # https://github.com/pytorch/pytorch/blob/60205b0eb2602317856312a66d955c88334ade0b/aten/src/ATen/native/transformers/cuda/attention.cu#L839-L840
+        debug_attn_mask_sharding,  # debug_attn_mask
+        Replicate(),  # q
+        Replicate(),  # k
+        Replicate(),  # v
+    ]
+    if has_attn_bias:
+        all_replicate.append(Replicate())  # attn bias
+
+    single_mesh_dim_strategies.append(all_replicate)
+
+    # second we can accept the sharding pattern of tensor parallelism, which
+    # shard on the num of head dim
+    tp_sharding = Shard(1)  # num head dim
+    qkv_sharding = tp_sharding
+    output_sharding = tp_sharding
+    logsumexp_sharding = tp_sharding if compute_log_sumexp else Replicate()
+    debug_attn_mask_sharding = tp_sharding if return_debug_mask else None
+
+    num_heads_dim_sharding: PlacementList = [
+        output_sharding,
+        logsumexp_sharding,
+        None,  # cum_seq_q
+        None,  # cum_seq_k
+        None,  # max_q
+        None,  # max_k
+        None,  # philox_seed
+        None,  # philox_offset
+        debug_attn_mask_sharding,
+        qkv_sharding,
+        qkv_sharding,
+        qkv_sharding,
+    ]
+    single_mesh_dim_strategies.append(num_heads_dim_sharding)
+
+    # Context Parallelism: shards on the sequence dim
+    cp_sharding = Shard(2)  # seq dim
+    logsumexp_sharding = cp_sharding if compute_log_sumexp else Replicate()
+    debug_attn_mask_sharding = cp_sharding if return_debug_mask else None
+
+    single_mesh_dim_strategies.append(
+        [
+            cp_sharding,  # output
+            logsumexp_sharding,  # logsumexp
+            None,  # cum_seq_q
+            None,  # cum_seq_k
+            None,  # max_q
+            None,  # max_k
+            None,  # philox_seed
+            None,  # philox_offset
+            debug_attn_mask_sharding,  # debug_attn_mask
+            cp_sharding,  # q
+            cp_sharding,  # k
+            cp_sharding,  # v
+        ]
+    )
+    return expand_to_full_mesh_op_strategy(
+        mesh, op_schema, single_mesh_dim_strategies, input_index=9
     )
