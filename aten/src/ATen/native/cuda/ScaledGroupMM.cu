@@ -109,7 +109,6 @@ __global__ void prepare_gemm_data(
     B_ptrs[tid] = B + tid * tensor_StrideB.strides[0];
     inputB_scale_ptrs[tid] = scale_B + tid * b_scale_stride;
   } else if (N < 0) {
-    // TODO double check
     N = delta;
     lda = tensor_StrideA.strides[1];
     ldb = tensor_StrideB.strides[1]; // B is transposed
@@ -117,10 +116,9 @@ __global__ void prepare_gemm_data(
     A_ptrs[tid] = A + tid * tensor_StrideA.strides[0];
     inputA_scale_ptrs[tid] = scale_A + tid * a_scale_stride;
     output_ptrs[tid] = tid == 0 ? output : output + offs[tid - 1];
-    B_ptrs[tid] = tid == 0 ? B : B + offs[tid - 1];
+    B_ptrs[tid] = tid == 0 ? B : B + offs[tid - 1] * ldb;
     inputB_scale_ptrs[tid] = tid == 0 ? scale_B : scale_B + offs[tid - 1];
   } else if (K < 0) {
-    // TODO double check
     // A, B is 2d, output is 3d
     K = delta;
     lda = tensor_StrideA.strides[0];
@@ -128,8 +126,8 @@ __global__ void prepare_gemm_data(
     ldoutput = tensor_StrideOutput.strides[1];
     A_ptrs[tid] = tid == 0 ? A : A + offs[tid - 1];
     B_ptrs[tid] = tid == 0 ? B : B + offs[tid - 1];
-    inputA_scale_ptrs[tid] = tid == 0 ? scale_A : scale_A + tid * M;
-    inputB_scale_ptrs[tid] = tid == 0 ? scale_B : scale_B + tid * N;
+    inputA_scale_ptrs[tid] = scale_A + tid * M;
+    inputB_scale_ptrs[tid] = scale_B + tid * N;
     output_ptrs[tid] = output + tid * tensor_StrideOutput.strides[0];
   } else {
     // A, B, output are 3D
@@ -210,25 +208,6 @@ struct Schedule {
   using ClusterShape = cute::Shape<cute::_2, cute::_2, cute::_1>;
 };
 
-// template <>
-// struct Schedule<true> {
-//   using KernelSchedule =
-//       cutlass::gemm::KernelPtrArrayTmaWarpSpecializedCooperativeFP8FastAccum;
-//   using EpilogueSchedule =
-//       cutlass::epilogue::PtrArrayTmaWarpSpecializedCooperative;
-//   using TileShape = cute::Shape<cute::_256, cute::_128, cute::_128>;
-//   using ClusterShape = cute::Shape<cute::_2, cute::_2, cute::_1>;
-// };
-
-// template <>
-// struct Schedule<false> {
-//   using KernelSchedule =
-//       cutlass::gemm::KernelPtrArrayTmaWarpSpecializedCooperative;
-//   using EpilogueSchedule =
-//       cutlass::epilogue::PtrArrayTmaWarpSpecializedCooperative;
-//   using TileShape = cute::Shape<cute::_128, cute::_128, cute::_128>;
-//   using ClusterShape = cute::Shape<cute::_2, cute::_2, cute::_1>;
-// };
 
 int ceildiv(int a, int b) {
   return (a + b - 1) / b;
@@ -451,6 +430,8 @@ void f8f8bf16_grouped_gemm_impl_sm90(
       a_scale_stride,
       b_scale_stride);
 
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   auto buf_cpu = mat_a.new_empty(
       input_args_size, at::TensorOptions().dtype(at::kByte).device(at::kCPU));
   AT_CUDA_CHECK(cudaMemcpy(
@@ -650,8 +631,9 @@ void f8f8bf16_grouped_mm(
     at::Tensor& out) {
 #if defined(BUILD_ROWWISE_FP8_KERNEL)
   dispatch_fp8_grouped_gemm_on_bias_dtype(
-      mat_a, mat_b, scale_a, scale_b, offs_a, bias, use_fast_accum, out);
+      mat_a, mat_b, scale_a, scale_b, offs_a.has_value() ? offs_a : offs_b, bias, use_fast_accum, out);
 #else
+  TORCH_CHECK(false, "grouped mm is not supported on your system");
 #endif
 }
 

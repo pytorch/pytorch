@@ -1396,8 +1396,7 @@ namespace {
         return {mat_a.size(1), mat_b.size(1)};
       } else { // regular bmm
         TORCH_CHECK(mat_a.size(0) == mat_b.size(0), "batched dimension has to match");
-        return {mat_a.size(0), mat_a.size(1), mat_a.size(-1)};
-
+        return {mat_a.size(0), mat_a.size(1), mat_b.size(-1)};
       }
     }
   }
