@@ -182,11 +182,166 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     GraphTransformObserver(gm, "reinplace_fsdp_all_gather").apply_graph_pass(
         comms.reinplace_fsdp_all_gather
     )
+    GraphTransformObserver(gm, "lower_scan_to_while_loop").apply_gm_pass(
+        lower_scan_to_while_loop
+    )
 
     gm.recompile()
     optimus_scuba_log["after_recompile_post_grad"] = upload_graph(gm.graph)
     gm.graph.lint()
 
+def lower_scan_to_while_loop(gm: torch.fx.GraphModule):
+    graph_pass = PatternMatcherPass()
+
+    @register_graph_pattern(
+        CallFunctionVarArgs(torch.ops.higher_order.scan),
+        pass_dict=graph_pass,
+    )
+    def _(match: Match, *args, **kwargs):
+        from torch._higher_order_ops.scan import _extract_carry_and_out
+
+        assert (
+            len(kwargs) == 0
+        ), "kwargs of scan are not merged into args before entering lower_scan_to_while_loop_pass"
+
+        combine_subgraph, fx_init, fx_xs, fx_additional_inputs = args
+        assert combine_subgraph.op == "get_attr", "first arg is not combine_subgraph"
+        sub_gm: torch.fx.GraphModule = getattr(gm, combine_subgraph.target)
+        cur_node = match.nodes[0]
+        num_init_leaves = len(fx_init)
+        # TODO: add a test case for fake_scan_length being an expr
+        fake_scan_length = fx_xs[0].meta["val"].size()[0]
+
+        def lower_to_while_loop(*args, **kwargs):
+            assert len(kwargs) == 0
+
+
+            def cond_fn_out(*flat_args):
+                loop_idx, _, _, _, _ = pytree.tree_unflatten(flat_args, while_loop_spec)  # type: ignore[has-type]
+                return loop_idx < scan_length  # type: ignore[has-type]
+
+            def body_fn_out(*flat_args):
+                loop_idx, ys_outs, carry, xs, additional_inputs = pytree.tree_unflatten(
+                    flat_args, while_loop_spec  # type: ignore[has-type]
+                )
+
+                idx_item = loop_idx.item()
+
+                torch.ops.aten._assert_scalar.default(idx_item>=0, "")
+                torch.ops.aten._assert_scalar.default(idx_item<scan_length, "")
+                # torch._check(idx_item >= 0)
+                # torch._check(idx_item < scan_length)
+                scan_idx = idx_item
+
+                # step 1: slice the input tensors
+                sub_xs = [torch.ops.aten.select.int(x, 0, scan_idx) for x in xs]
+                # step 2: run original combine_subgraph
+                next_carry, ys = _extract_carry_and_out(
+                    sub_gm(*(list(carry) + sub_xs + list(additional_inputs))),
+                    num_init_leaves,
+                )
+                # step 3: store the output tensors
+                for y, y_out in zip(ys, ys_outs):
+                    y_out_slice = torch.ops.aten.select.int(y_out, 0, idx_item)
+                    y_out_slice.copy_(y)
+                return loop_idx + 1, *ys_outs, *next_carry, *xs
+
+            def resolve_shape_to_proxy(shape, sub_graph_args):
+                from torch.utils._sympy.interp import sympy_interp
+                from torch.utils._sympy.reference import PythonReferenceAnalysis
+
+                bound_symbols = {}
+                for arg in sub_graph_args:
+                    if isinstance(arg, torch.SymInt):
+                        bound_symbols[arg.node.expr] = arg
+                ret = []
+                for s in shape:
+                    if isinstance(s, torch.SymInt):
+                        ret.append(
+                            sympy_interp(
+                                PythonReferenceAnalysis,
+                                bound_symbols,
+                                s.node.expr,
+                            ),
+                        )
+                    else:
+                        assert isinstance(s, int)
+                        ret.append(s)
+                return ret
+
+            (
+                init,
+                xs,
+                additional_inputs,
+                scan_length,
+            ) = pytree.tree_unflatten(args, tree_spec)
+            _, ys_outputs = _extract_carry_and_out(
+                cur_node.meta["val"], num_init_leaves
+            )
+            ys_outs = []
+            for ys_out in ys_outputs:
+                shape_proxies = resolve_shape_to_proxy(
+                    ys_out.size(), pytree.tree_leaves(args)
+                )
+                stride_proxies = resolve_shape_to_proxy(
+                    ys_out.stride(), pytree.tree_leaves(args)
+                )
+                ys_outs.append(
+                    torch.empty_strided(
+                        shape_proxies,
+                        stride_proxies,
+                        device=ys_out.device,
+                        dtype=ys_out.dtype,
+                        layout=ys_out.layout,
+                        requires_grad=ys_out.requires_grad,
+                    )
+                )
+
+            operands = (torch.zeros([], dtype=torch.int64, device=torch.device("cpu")), ys_outs, init, xs)
+            flat_operands, flat_spec = pytree.tree_flatten(operands)
+            _, while_loop_spec = pytree.tree_flatten(
+                (*operands, additional_inputs)
+            )
+            _, ys_outs, last_carry, _ = pytree.tree_unflatten(
+                torch.ops.higher_order.while_loop(
+                    cond_fn_out,
+                    body_fn_out,
+                    tuple(flat_operands),
+                    tuple(additional_inputs),
+                ),
+                flat_spec,
+            )
+            return list(last_carry) + list(ys_outs)
+
+        with gm.graph.inserting_before(cur_node):
+            if isinstance(fake_scan_length, torch.SymInt):
+                fx_scan_length = gm.graph.call_function(
+                    torch.ops.aten.sym_size.int, (fx_xs[0], 0)
+                )
+                fx_scan_length.meta["val"] = fake_scan_length
+            else:
+                fx_scan_length = fake_scan_length  # type: ignore[assignment]
+
+        lower_to_while_loop_args, tree_spec = pytree.tree_flatten(
+            (
+                fx_init,
+                fx_xs,
+                fx_additional_inputs,
+                fx_scan_length,
+            )
+        )
+        match.replace_by_example(
+            lower_to_while_loop,
+            lower_to_while_loop_args,
+            run_functional_passes=False,
+        )
+
+    graph_pass.apply(gm)
+
+    for node in gm.graph.find_nodes(
+        op="call_function", target=torch.ops.higher_order.scan
+    ):
+        raise AssertionError("scan is not lowered to while_loop")
 
 @init_once_fakemode
 def lazy_init():

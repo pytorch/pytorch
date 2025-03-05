@@ -442,15 +442,19 @@ class GraphLowering(torch.fx.Interpreter):
 
     def symbolic_sizes_strides(
         self, ex: torch.Tensor
-    ) -> tuple[Sequence[Union[int, Expr]], Sequence[Union[int, Expr]]]:
+    ) -> tuple[
+        Sequence[Union[int, Expr]], Sequence[Union[int, Expr]], Union[int, Expr]
+    ]:
         """
         Support dynamic shapes and dynamic strides by assigning variables
         to each dimension.  We duck-shape tensors, so if two tensors
         have the same size they get assigned the same symbolic variable.
         """
         if self.reuse_shape_env:
-            return convert_shape_to_inductor(ex.size()), convert_shape_to_inductor(
-                ex.stride()
+            return (
+                convert_shape_to_inductor(ex.size()),
+                convert_shape_to_inductor(ex.stride()),
+                convert_shape_to_inductor([ex.storage_offset()])[0],
             )
         else:
             from torch._dynamo.source import ConstantSource
@@ -467,7 +471,7 @@ class GraphLowering(torch.fx.Interpreter):
             (
                 size,
                 stride,
-                _,
+                offset,
             ) = self._shape_env.create_symbolic_sizes_strides_storage_offset(
                 ex,
                 source,
@@ -475,17 +479,19 @@ class GraphLowering(torch.fx.Interpreter):
 
         r_size = [i.node.expr if isinstance(i, torch.SymInt) else i for i in size]
         r_stride = [i.node.expr if isinstance(i, torch.SymInt) else i for i in stride]
-        return r_size, r_stride
+        r_offset = offset.node.expr if isinstance(offset, torch.SymInt) else offset
+        return r_size, r_stride, r_offset
 
     def static_sizes_strides(
         self, ex: torch.Tensor
-    ) -> tuple[list[sympy.Expr], list[sympy.Expr]]:
+    ) -> tuple[list[sympy.Expr], list[sympy.Expr], sympy.Expr]:
         """
         Primarily used to weights
         """
         size = [sympy.Integer(i) for i in ex.size()]
         stride = [sympy.Integer(i) for i in ex.stride()]
-        return size, stride
+        offset = sympy.Integer(ex.storage_offset())
+        return size, stride, offset
 
     def get_allocation_size(
         self,
@@ -1062,9 +1068,9 @@ class GraphLowering(torch.fx.Interpreter):
         # symbolic shapes.
         if not example._has_symbolic_sizes_strides:
             # the first N inputs are weights
-            sizes, strides = self.static_sizes_strides(example)
+            sizes, strides, offset = self.static_sizes_strides(example)
         else:
-            sizes, strides = self.symbolic_sizes_strides(example)  # type: ignore[assignment]
+            sizes, strides, offset = self.symbolic_sizes_strides(example)  # type: ignore[assignment]
 
         if (
             self.is_backward
@@ -1074,7 +1080,9 @@ class GraphLowering(torch.fx.Interpreter):
             tensor = TensorBox.create(
                 DonatedBuffer(
                     name=target,
-                    layout=FixedLayout(example.device, example.dtype, sizes, strides),
+                    layout=FixedLayout(
+                        example.device, example.dtype, sizes, strides, offset
+                    ),
                 )
             )
         else:
@@ -1082,7 +1090,9 @@ class GraphLowering(torch.fx.Interpreter):
             tensor = TensorBox.create(
                 InputBuffer(
                     name=target,
-                    layout=FixedLayout(example.device, example.dtype, sizes, strides),
+                    layout=FixedLayout(
+                        example.device, example.dtype, sizes, strides, offset
+                    ),
                 )
             )
 
