@@ -60,6 +60,7 @@ from ..utils import (
     is_safe_constant,
     istensor,
     istype,
+    counters,
     nnmodule_has_hooks,
     object_has_getattribute,
     proxy_args_kwargs,
