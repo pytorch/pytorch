@@ -9,6 +9,7 @@
 #include <torch/csrc/autograd/variable_info.h>
 #include <torch/csrc/utils/python_stub.h>
 #include <torch/csrc/utils/torch_dispatch_mode.h>
+#include <type_traits>
 #include <typeindex>
 #include <vector>
 
