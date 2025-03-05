@@ -16,7 +16,8 @@ collection support for PyTorch APIs.
 
 import os as _os
 import sys as _sys
-from typing import Any as _Any, Optional as _Optional
+from types import ModuleType as _ModuleType
+from typing import Any as _Any, Optional as _Optional, TYPE_CHECKING as _TYPE_CHECKING
 
 import torch.utils._pytree as python
 from torch.utils._pytree import (  # these type aliases are identical in both implementations
@@ -27,6 +28,10 @@ from torch.utils._pytree import (  # these type aliases are identical in both im
     ToDumpableContextFunc,
     UnflattenFunc,
 )
+
+
+if _TYPE_CHECKING:
+    import torch.utils._cxx_pytree as cxx
 
 
 __all__ = [
@@ -57,15 +62,21 @@ PYTORCH_USE_CXX_PYTREE: bool = _os.getenv("PYTORCH_USE_CXX_PYTREE", "0") not in 
 }
 
 
-if PYTORCH_USE_CXX_PYTREE:
-    import torch.utils._cxx_pytree as cxx
-
+def _import_cxx_pytree() -> _ModuleType:
     if not python._cxx_pytree_dynamo_traceable:
         raise ImportError(
             "Cannot import package `optree`. "
             "Please install `optree` via `python -m pip install --upgrade optree`. "
             "Or set the environment variable `PYTORCH_USE_CXX_PYTREE=0`."
         )
+
+    import torch.utils._cxx_pytree as cxx
+
+    return cxx
+
+
+if PYTORCH_USE_CXX_PYTREE:
+    cxx = _import_cxx_pytree()  # noqa: F811
 else:
     cxx = _sys.modules.get("torch.utils._cxx_pytree")  # type: ignore[assignment]
 
@@ -76,17 +87,20 @@ if cxx is not None:
 else:
     del cxx
 
-    from types import ModuleType
-
-    class CxxModule(ModuleType):
+    class CxxModule(_ModuleType):
         def __getattr__(self, name: str) -> _Any:
             if name == "__name__":
                 return f"{__name__}.cxx"
             if name == "__file__":
                 return python.__file__.removesuffix("_python.py") + "_cxx_pytree.py"
+            if name.startswith("__") and name.endswith("__"):
+                raise AttributeError(
+                    f"module {self.__name__!r} has not been imported yet: "
+                    f"accessing attribute {name!r}"
+                )
 
             # Lazy import
-            import torch.utils._cxx_pytree as cxx
+            cxx = _import_cxx_pytree()
 
             # Replace the temporary module object (`self`) in sys.modules
             _sys.modules[f"{__name__}.cxx"] = globals()["cxx"] = cxx
@@ -98,7 +112,7 @@ else:
     #
     _sys.modules[f"{__name__}.cxx"] = CxxModule(f"{__name__}.cxx")
 
-    del ModuleType, CxxModule
+    del CxxModule
 
 
 if not PYTORCH_USE_CXX_PYTREE:
@@ -201,11 +215,13 @@ def register_pytree_node(  # type: ignore[no-any-unimported]
 def __getattr__(name: str) -> _Any:
     if name == "cxx":
         # Lazy import
-        import torch.utils._cxx_pytree as cxx  # noqa: F811
+        cxx = _import_cxx_pytree()
 
         # This allows the following statements to work properly:
         #
-        #     from torch.utils.pytree import cxx
+        #     import torch.utils.pytree
+        #
+        #     torch.utils.pytree.cxx
         #
         _sys.modules[f"{__name__}.cxx"] = globals()["cxx"] = cxx
         return cxx
