@@ -6189,6 +6189,11 @@ class InplaceBernoulliFallback(ExternKernel):
         V.graph.register_operation(self)
 
 
+def _str_to_bool(s: str) -> bool:
+    assert s in ("False", "True")
+    return s == "True"
+
+
 # Used to deal with torch.complex types
 class InplaceCopyFallback(ExternKernel):
     """
@@ -6197,7 +6202,10 @@ class InplaceCopyFallback(ExternKernel):
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         (dst, src, non_blocking) = self.codegen_args()
-        wrapper.codegen_device_copy(src, dst, non_blocking)
+
+        # TODO(rec): non_blocking is definitely a `str` here, and definitely
+        # a `bool` elsewhere. Is this pattern, repeated below, a bug?
+        wrapper.codegen_device_copy(src, dst, _str_to_bool(non_blocking))
 
     def should_allocate(self) -> bool:
         return False
@@ -6473,10 +6481,10 @@ class DeviceCopy(ExternKernelOut):
         assert len(args) == 2
         if self.output_view:
             wrapper.codegen_device_copy(
-                args[0], self.output_view.codegen_reference(), args[1]
+                args[0], self.output_view.codegen_reference(), _str_to_bool(args[1])
             )
         else:
-            wrapper.codegen_device_copy(args[0], self.codegen_reference(), args[1])
+            wrapper.codegen_device_copy(args[0], self.codegen_reference(), _str_to_bool(args[1]))
 
 
 class DynamicScalar(ExternKernel):

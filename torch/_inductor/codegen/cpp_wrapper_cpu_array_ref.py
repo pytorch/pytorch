@@ -817,7 +817,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 outputs,
             )
 
-    def codegen_device_copy(self, src, dst, non_blocking: str):
+    def codegen_device_copy(self, src, dst, non_blocking: bool):
         # aoti_torch_tensor_copy_ takes AtenTensorHandle as input,
         # while stack-allocation results in ArrayRefTensor
         # so disable stack allocation here

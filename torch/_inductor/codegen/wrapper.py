@@ -40,6 +40,7 @@ from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .. import async_compile, config, ir
 from ..codecache import output_code_log
+from ..ir import IRNode, ReinterpretView
 from ..runtime import triton_heuristics
 from ..runtime.hints import DeviceProperties
 from ..utils import (
@@ -69,7 +70,6 @@ if TYPE_CHECKING:
     import triton
 
     from ..graph import GraphLowering
-    from ..ir import IRNode
 
 
 pexpr = PythonPrinter().doprint
@@ -739,7 +739,7 @@ class PythonWrapperCodegen(CodeGen):
         subgraph_name: Optional[str],
         parent_wrapper: Optional[PythonWrapperCodegen],
         partition_signatures: Optional[ir.GraphPartitionSignature] = None,
-    ) -> PythonWrapperCodegen:
+    ):
         if is_subgraph:
             assert subgraph_name is not None
             assert parent_wrapper is not None
@@ -1142,8 +1142,6 @@ class PythonWrapperCodegen(CodeGen):
         triton_meta,
         constexprs,
     ):
-        from ..ir import IRNode
-
         grid_fn, code = user_defined_kernel_grid_fn_code(
             kernel_name, configs, grid, wrapper=self
         )
@@ -1530,7 +1528,7 @@ class PythonWrapperCodegen(CodeGen):
                     f"reinterpret_tensor({data.get_name()}, {size}, {stride}, {offset})"
                 )
 
-    def codegen_device_copy(self, src, dst, non_blocking: str):
+    def codegen_device_copy(self, src, dst, non_blocking: bool):
         self.writeline(f"{dst}.copy_({src}, {non_blocking})")
 
     def codegen_multi_output(self, name, value):
@@ -2301,7 +2299,7 @@ class PythonWrapperCodegen(CodeGen):
             )
         elif isinstance(s, torch._ops.OpOverload):
             return _get_qualified_name(s)
-        elif isinstance(s, (ir.Buffer, ir.MutableBox)):
+        elif isinstance(s, (ir.Buffer, ir.MutableBox, ReinterpretView)):
             return s.codegen_reference()
         elif has_triton_package() and isinstance(s, triton.language.dtype):  # type: ignore[possibly-undefined]
             return dtype_to_string(s)
