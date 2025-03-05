@@ -458,7 +458,7 @@ def while_loop_fake_tensor_mode(
 @while_loop_op.py_functionalize_impl
 def while_loop_func(ctx, cond_fn, body_fn, carried_inputs, additional_inputs):
     from torch._dynamo.variables.higher_order_ops import _check_mutation_and_alias
-    
+
     unwrapped_carried_inputs = ctx.unwrap_tensors(carried_inputs)
     unwrapped_additional_inputs = ctx.unwrap_tensors(additional_inputs)
     unwrapped_inputs = unwrapped_carried_inputs + unwrapped_additional_inputs
@@ -467,8 +467,8 @@ def while_loop_func(ctx, cond_fn, body_fn, carried_inputs, additional_inputs):
         functional_body_fn = ctx.functionalize(_maybe_run_with_interpreter(body_fn))
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
         for fn, fn_name in [
-            (cond_fn, "cond_fn"),
-            (body_fn, "body_fn"),
+            (functional_cond_fn, "cond_fn"),
+            (functional_body_fn, "body_fn"),
         ]:
             _check_mutation_and_alias(fn, unwrapped_inputs, fn_name, pre_dispatch)
         ret = while_loop_op(

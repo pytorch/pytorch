@@ -13,7 +13,6 @@ from torch._higher_order_ops.associative_scan import (
     associative_scan,
 )
 from torch._higher_order_ops.scan import _fake_scan, scan
-from torch._higher_order_ops.utils import UnsupportedAliasMutationException
 from torch._higher_order_ops.while_loop import while_loop
 from torch._subclasses.functional_tensor import (
     CppFunctionalizeAPI,
@@ -943,10 +942,10 @@ def forward(self, pred_1):
     @skipIfTorchDynamo("Skip due to graph break when run with dynamo")
     def test_cond_autograd_same_pytree_output(self):
         def true_fn(x):
-            return {"res": [x["t"][0] + 1., (x["t"][2][0] + 2.,)]}
+            return {"res": [x["t"][0] + 1.0, (x["t"][2][0] + 2.0,)]}
 
         def false_fn(x):
-            return {"res": [x["t"][1]["b"] + 1., (x["t"][2][0] + 2.,)]}
+            return {"res": [x["t"][1]["b"] + 1.0, (x["t"][2][0] + 2.0,)]}
 
         a = torch.randn(4, requires_grad=True)
         b = torch.randn(4, requires_grad=True)
@@ -2920,7 +2919,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
     flip_1 = torch.flip(elem_2, [0]);  elem_2 = None
     return (getitem, flip_1)""",  # noqa: B950
         )
-        
+
     @requires_cuda
     def test_scan_input_mutation(self):
         device = torch.device("cuda")
@@ -2949,8 +2948,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
         x = torch.randn(3, 2, 2, device=device)
         y = torch.randn(3, 2, 2, device=device)
         inp = (x, y)
-        init = (torch.randn(2, 2, device=device),
-                torch.randn(2, 2, device=device))
+        init = (torch.randn(2, 2, device=device), torch.randn(2, 2, device=device))
 
         with self.assertRaisesRegex(
             # Should be
@@ -2958,7 +2956,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
             "Combine_fn might be aliasing the input.*",
         ):
             scan(fct_input_output_alias, init, inp, dim=0)
-            
+
     @requires_cuda
     def test_scan_input_output_alias(self):
         device = torch.device("cuda")
@@ -2969,8 +2967,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
         x = torch.randn(3, 2, 2, device=device)
         y = torch.randn(3, 2, 2, device=device)
         inp = (x, y)
-        init = (torch.randn(2, 2, device=device),
-                torch.randn(2, 2, device=device))
+        init = (torch.randn(2, 2, device=device), torch.randn(2, 2, device=device))
 
         with self.assertRaisesRegex(
             # Should be
@@ -2978,7 +2975,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
             "Combine_fn might be aliasing the input.*",
         ):
             scan(fct_input_output_alias, init, inp, dim=0)
-            
+
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     def test_scan_carry_carry_alias(self):
@@ -2991,8 +2988,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
         x = torch.randn(3, 2, 2, device=device)
         y = torch.randn(3, 2, 2, device=device)
         inp = (x, y)
-        init = (torch.randn(2, 2, device=device),
-                torch.randn(2, 2, device=device))
+        init = (torch.randn(2, 2, device=device), torch.randn(2, 2, device=device))
 
         with self.assertRaisesRegex(
             # Should be:
@@ -3013,8 +3009,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
         x = torch.randn(3, 2, 2, device=device)
         y = torch.randn(3, 2, 2, device=device)
         inp = (x, y)
-        init = (torch.randn(2, 2, device=device),
-                torch.randn(2, 2, device=device))
+        init = (torch.randn(2, 2, device=device), torch.randn(2, 2, device=device))
 
         with self.assertRaisesRegex(
             # Should be:
@@ -4339,6 +4334,7 @@ class AssociativeScanTests(TestCase):
             "Combine_fn might be aliasing the input.*",
         ):
             associative_scan(fct_output_output_alias, inp, 0)
+
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @skipIfNoDynamoSupport
@@ -5970,8 +5966,8 @@ def forward(self, arg0_1):
         example_inputs = (torch.ones(3, 2, 4), torch.ones(4))
         functional_f = torch.func.functionalize(f)
         with self.assertRaisesRegex(
-            UnsupportedAliasMutationException,
-            "torch.map is mutating the input!",
+            RuntimeError,
+            "torch.map might be modifying the input!",
         ):
             functional_f(*example_inputs)
 
@@ -5988,8 +5984,8 @@ def forward(self, arg0_1):
         example_inputs = (torch.ones(3, 2, 4), torch.ones(4))
         functional_f = torch.func.functionalize(f)
         with self.assertRaisesRegex(
-            UnsupportedAliasMutationException,
-            "torch.map is mutating the input!",
+            RuntimeError,
+            "torch.map might be modifying the input!",
         ):
             functional_f(*example_inputs)
 
@@ -6029,7 +6025,7 @@ def forward(self, arg0_1):
         example_inputs = (torch.ones(3, 2, 4),)
         functional_f = torch.func.functionalize(f)
         with self.assertRaisesRegex(
-            UnsupportedAliasMutationException,
+            RuntimeError,
             "torch.map might be aliasing the input or the output!",
         ):
             functional_f(*example_inputs)
@@ -7472,7 +7468,7 @@ class GraphModule(torch.nn.Module):
         for f in ALIAS_FN:
             with self.assertRaisesRegex(
                 torch._dynamo.exc.InternalTorchDynamoError,
-                "cond_true might be aliasing the input or the output!"
+                "cond_true might be aliasing the input or the output!",
             ):
                 torch.compile(fn)(f, x)
 
@@ -7489,7 +7485,7 @@ class GraphModule(torch.nn.Module):
         for view_f in ALIAS_FN[1:]:
             with self.assertRaisesRegex(
                 torch._dynamo.exc.InternalTorchDynamoError,
-                "cond_true might be aliasing the input or the output!"
+                "cond_true might be aliasing the input or the output!",
             ):
                 torch.compile(fn)(view_f, x)
 
@@ -7506,12 +7502,14 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(2, 2)
         for f in ALIAS_FN:
             with self.assertRaisesRegex(
-                torch._dynamo.exc.InternalTorchDynamoError, "cond_true might be modifying the input!"
+                torch._dynamo.exc.InternalTorchDynamoError,
+                "cond_true might be modifying the input!",
             ):
                 torch.compile(fn)(f, x)
 
             with self.assertRaisesRegex(
-                torch._dynamo.exc.InternalTorchDynamoError, "cond_true might be modifying the input!"
+                torch._dynamo.exc.InternalTorchDynamoError,
+                "cond_true might be modifying the input!",
             ):
                 with torch.inference_mode(inference_mode):
                     torch.compile(fn)(f, x)
@@ -7840,21 +7838,21 @@ class GraphModule(torch.nn.Module):
         return (sub,)
 
     class cond_true_0(torch.nn.Module):
-        def forward(self, l_x_, s1, s0_true_branch, getitem_2_false_branch, l_z__false_branch):
+        def forward(self, l_x_, s1, s0_cond_true, getitem_2_cond_false, l_z__cond_false):
             l_x__1 = l_x_
             s1_1 = s1
 
-            add: "f32[s0, s1]" = l_x__1 + s0_true_branch;  l_x__1 = s0_true_branch = None
+            add: "f32[s0, s1]" = l_x__1 + s0_cond_true;  l_x__1 = s0_cond_true = None
             getitem: "f32[s0 - 2, s1]" = add[slice(2, None, None)];  add = None
             clone: "f32[s0 - 2, s1]" = getitem.clone();  getitem = None
             return (clone,)
 
     class cond_false_0(torch.nn.Module):
-        def forward(self, l_x_, s1, s0_true_branch, getitem_2_false_branch, l_z__false_branch):
+        def forward(self, l_x_, s1, s0_cond_true, getitem_2_cond_false, l_z__cond_false):
             l_x__1 = l_x_
             s1_1 = s1
 
-            mul: "f32[s0, s1]" = getitem_2_false_branch * l_z__false_branch;  getitem_2_false_branch = l_z__false_branch = None
+            mul: "f32[s0, s1]" = getitem_2_cond_false * l_z__cond_false;  getitem_2_cond_false = l_z__cond_false = None
             add: "f32[s0, s1]" = l_x__1 + mul;  l_x__1 = mul = None
             getitem: "f32[2, s1]" = add[slice(None, 2, None)];  add = None
             clone: "f32[2, s1]" = getitem.clone();  getitem = None

@@ -262,12 +262,18 @@ def _(subgraph, identifier, operands):
 
 @invoke_subgraph.py_functionalize_impl
 def _(ctx, subgraph, identifier, operands):
+    from torch._dynamo.variables.higher_order_ops import _check_mutation_and_alias
+
     unwrapped_operands = ctx.unwrap_tensors(operands)
     with ctx.redispatch_to_next():
         # NB: There is an assumption that subgraph does not mutate inputs and
         # there is no aliasing. Its Dynamo responsibility to prevent formation
         # of invoke_subgraph ops if input aliasing/mutation is detected.
         functionalized_subgraph = ctx.functionalize(subgraph)
+        pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
+        _check_mutation_and_alias(
+            functionalized_subgraph, unwrapped_operands, "invoke_subgraph", pre_dispatch
+        )
         out = invoke_subgraph(functionalized_subgraph, identifier, unwrapped_operands)
     return ctx.wrap_tensors(out)
 
