@@ -203,7 +203,9 @@ def _callback_from_stance(callback):
                         )
                     )
 
-                compiler_fn = callback._torchdynamo_orig_callable._torchdynamo_orig_callable.compiler_fn
+                compiler_fn = (
+                    callback._torchdynamo_orig_callable._torchdynamo_orig_callable
+                )
                 hooks = Hooks()
                 return convert_frame.catch_errors_wrapper(
                     convert_frame.convert_frame(  # type: ignore[arg-type]
@@ -215,6 +217,40 @@ def _callback_from_stance(callback):
                 )(*args, **kwargs)
 
             return eager_then_compile
+        return callback
+    elif _stance.stance == "aot_eager_then_compile":
+        if callback not in (False, None):
+
+            def aot_eager_then_compile(*args, **kwargs):
+                frame = args[0]
+                key = frame.f_code.co_filename + str(frame.f_code.co_firstlineno)
+                example_inputs = get_example_inputs(key)
+
+                if len(example_inputs) == 0:
+                    example_inputs.append(clone_and_convert_to_meta(frame.f_locals))
+                    hooks = Hooks()
+                    aot_eager_fn = get_compiler_fn("aot_eager")
+                    return convert_frame.catch_errors_wrapper(
+                        convert_frame.convert_frame(
+                            aot_eager_fn,
+                            hooks,
+                        ),
+                        hooks,
+                    )(*args, **kwargs)
+                else:
+                    compiler_fn = (
+                        callback._torchdynamo_orig_callable._torchdynamo_orig_callable
+                    )
+                    hooks = Hooks()
+                    return convert_frame.catch_errors_wrapper(
+                        convert_frame.convert_frame(  # type: ignore[arg-type]
+                            compiler_fn,
+                            hooks,
+                        ),
+                        hooks,
+                    )(*args, **kwargs)
+
+            return aot_eager_then_compile
         return callback
     elif _stance.stance == "force_eager":
         # disable
