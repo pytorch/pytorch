@@ -89,9 +89,6 @@ class RingAttentionTest(DTensorTestBase):
         rotater: _RotateMethod,
         test_forward_only: bool,
     ) -> None:
-        if test_forward_only or backend != SDPBackend.CUDNN_ATTENTION:
-            return
-
         def fn_eval(fn, *args, **kwargs):
             if test_forward_only:
                 with torch.no_grad():

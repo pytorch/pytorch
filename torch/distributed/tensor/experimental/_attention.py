@@ -727,7 +727,6 @@ def _templated_ring_attention_backward(
             kwargs[grad_out_name] = dout
             # See https://github.com/pytorch/pytorch/blob/release/2.4/aten/src/ATen/native/native_functions.yaml#L14695
             # for the SDPA kernel definitions.
-            print(f"kwargs: {kwargs.keys()}")
             grad_query_, grad_key_, grad_value_, *rest = op(
                 query=q,
                 key=k,
@@ -915,7 +914,7 @@ def _scaled_dot_product_ring_cudnn_attention_backward(
     return _templated_ring_attention_backward(
         mesh,
         seq_dim,
-        aten._scaled_dot_product_flash_attention_backward.default,
+        aten._scaled_dot_product_cudnn_attention_backward.default,
         grad_out=grad_out,
         grad_out_name="grad_out",
         query=query,
@@ -923,15 +922,15 @@ def _scaled_dot_product_ring_cudnn_attention_backward(
         value=value,
         out=out,
         logsumexp=logsumexp,
-        is_causal=is_causal,
+        philox_seed=philox_seed,
+        philox_offset=philox_offset,
         attn_bias=attn_bias,
         cum_seq_q=cum_seq_q,
         cum_seq_k=cum_seq_k,
         max_q=max_q,
         max_k=max_k,
         dropout_p=dropout_p,
-        philox_seed=philox_seed,
-        philox_offset=philox_offset,
+        is_causal=is_causal,
         scale=scale,
     )
 
@@ -1238,9 +1237,9 @@ class _RoundRobinLoadBalancer(_LoadBalancer):
     def shard(
         cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int
     ) -> torch.Tensor:
-        assert (
-            cls.ROUND_ROBIN_CYCLE == 2
-        ), "The current implementation only works if ROUND_ROBIN_CYCLE is 2."
+        assert cls.ROUND_ROBIN_CYCLE == 2, (
+            "The current implementation only works if ROUND_ROBIN_CYCLE is 2."
+        )
         cp_world_size = mesh.size()
         cp_rank = mesh.get_local_rank()
         assert buffer.size()[seq_dim] % (cp_world_size * 2) == 0
@@ -1254,9 +1253,9 @@ class _RoundRobinLoadBalancer(_LoadBalancer):
     def unshard(
         cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int
     ) -> torch.Tensor:
-        assert (
-            cls.ROUND_ROBIN_CYCLE == 2
-        ), "The current implementation only works if ROUND_ROBIN_CYCLE is 2."
+        assert cls.ROUND_ROBIN_CYCLE == 2, (
+            "The current implementation only works if ROUND_ROBIN_CYCLE is 2."
+        )
         buffer = buffer.contiguous()
         cp_world_size = mesh.size()
 
