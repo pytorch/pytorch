@@ -7189,6 +7189,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         ln = torch.nn.LayerNorm(2, eps=1e-6, elementwise_affine=False)
         self.assertEqual(ln.forward(x), torch.zeros_like(x))
 
+    @onlyCUDA
     def test_layer_norm_backwards_eps(self):
         dtype = torch.float
         m_x_n_list = [(32, 32), (1024, 32), (1024, 1024),
