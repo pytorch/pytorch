@@ -10,6 +10,10 @@ exit /b 1
 :wheel
 call %PYTORCH_ROOT%\.ci\pytorch\windows\arm64\bootstrap_tests.bat
 
+echo Print python path...
+where python
+python -c "import sys; print(sys.executable)"
+
 echo Running import test...
 python -c "import torch"
 
