@@ -265,7 +265,7 @@ class BaseStructuredSparsifier(BaseSparsifier):
                     module.prune_bias = prune_bias
 
                 module.register_forward_hook(
-                    BiasHook(module.parametrizations.weight[0], prune_bias)
+                    BiasHook(module.parametrizations.weight[0], prune_bias)  # type: ignore[union-attr, index]
                 )
 
     def prune(self) -> None:
