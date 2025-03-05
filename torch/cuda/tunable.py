@@ -129,7 +129,7 @@ There are basically two steps:
   PYTORCH_TUNABLEOP_RECORD_UNTUNED=1
   ...
 
-2) Run a Python script that reads the `tunableop_untuned0.csv` and generates the `tunableop_results0.csv`, like:::
+2) Run a Python script that reads the `tunableop_untuned0.csv` and generates the `tunableop_results0.csv`, like::
 
   import torch.cuda.tunable as tunable
   import os
