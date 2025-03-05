@@ -445,10 +445,9 @@ void OSSProxyExecutor::get_input_info_from_serialized(
   // If an argument is not filled and has a default value, we should
   // also prefill the default value.
   for (size_t index = 0; index < schema_args.size(); index++) {
-    if (!filled[index] && schema_args[index].default_value()) {
-      // @lint-ignore CLANGTIDY bugprone-unchecked-optional-access
-      auto default_value = *schema_args[index].default_value();
-      op_kernel.stack_.at(index) = default_value;
+    auto default_value = schema_args[index].default_value();
+    if (!filled[index] && default_value.has_value()) {
+      op_kernel.stack_.at(index) = std::move(default_value.value());
     }
   }
 }
