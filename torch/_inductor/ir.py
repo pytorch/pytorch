@@ -7558,21 +7558,22 @@ class WhileLoop(ExternKernel):
             layout=MultiOutputLayout(device=device),
         )
 
-        # Handling input mutations
         assert body_fn.graph is not None and isinstance(
             body_fn.graph.module, torch.fx.GraphModule
         )  # to make linter happy
+
+        # Handling input mutations
         mutated_idxs = check_input_alias_and_mutation(
             body_fn.graph.module, fake_all_inputs
         )[0]
         mutated_idx_set = OrderedSet(mutated_idxs)
         mutated_inputs = [all_inputs[idx] for idx in mutated_idx_set]
-        new_outputs = {
+        real_outputs = {
             idx: out
             for idx, out in enumerate(body_outputs)
             if idx not in mutated_idx_set
         }
-        outputs = [
+        real_outputs = [
             MultiOutput(
                 FixedLayout(
                     device=output.get_device(),
@@ -7584,9 +7585,21 @@ class WhileLoop(ExternKernel):
                 while_loop,
                 [(list, idx)],
             )
-            for idx, output in new_outputs.items()
+            for idx, output in real_outputs.items()
         ]
-        for inp, out in zip(carried_inputs, outputs):
+        while_loop.outputs = real_outputs
+        while_loop.mutation_outputs = [
+            MutationOutput(inp.layout, inp, while_loop)  # type: ignore[union-attr]
+            for inp in mutated_inputs
+        ]
+
+        outputs_iter = iter(real_outputs)
+        mutated_inputs_iter = iter(mutated_inputs)
+        all_outputs = [
+            next(mutated_inputs_iter) if idx in mutated_idx_set else next(outputs_iter)
+            for idx in range(len(body_outputs))
+        ]
+        for inp, out in zip(carried_inputs, all_outputs):
             if inp.get_name() in V.graph.graph_inputs:
                 # if a carried input of the while_loop is a graph input,
                 # it can be returned as is when the number of iterations
@@ -7594,19 +7607,7 @@ class WhileLoop(ExternKernel):
                 # output buffers corresponding to the graph inputs, as
                 # the inputs may end up being mutated.
                 V.graph.never_reuse_buffers.add(out.get_name())
-
-        while_loop.outputs = outputs
-        while_loop.mutation_outputs = [
-            MutationOutput(inp.layout, inp, while_loop)  # type: ignore[union-attr]
-            for inp in mutated_inputs
-        ]
-
-        outputs_iter = iter(outputs)
-        mutated_inputs_iter = iter(mutated_inputs)
-        return [
-            next(mutated_inputs_iter) if idx in mutated_idx_set else next(outputs_iter)
-            for idx in range(len(body_outputs))
-        ]
+        return all_outputs
 
     def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         wrapper.codegen_while_loop(self)

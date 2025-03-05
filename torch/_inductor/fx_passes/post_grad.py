@@ -197,53 +197,53 @@ This pass lowers `scan` to  `while_loop` by replacing the scan fx_node with a wh
 
 Suppose we have a function f:
 
-def f():
-    init = torch.zeros([])
-    xs = torch.arange(4)
-    ys = []
-    for i in range(xs.size(0)):
-        init = xs[i] + init
-        ys.append(init)
-    return init, torch.stack(ys)
+    def f():
+        init = torch.zeros([])
+        xs = torch.arange(4)
+        ys = []
+        for i in range(xs.size(0)):
+            init = xs[i] + init
+            ys.append(init)
+
+        # Return the final carry and stack the intermediates
+        return init, torch.stack(ys)
 
 We could rewrite it with a scan with the benefits of reducing compilation time/binary size, reducing
 memory usage, supporting loops over unbacked shapes and cudagraph etc.
 
-def g():
-    def step_fn(init: torch.Tensor, x: torch.Tensor):
-        next_init = x + init
-        return next_init, next_carry
+    def g():
+        def step_fn(init: torch.Tensor, x: torch.Tensor):
+            next_init = x + init
+            return next_init, next_init
 
-    init = torch.zeros([])
-    xs = torch.arange(4)
-    final_carry, ys  = scan(step_fn, init, xs)
-    return final_carry, ys
-
-    # Return the final carry and stack the intermediates
+        init = torch.zeros([])
+        xs = torch.arange(4)
+        final_carry, ys = torch._higher_order.scan(step_fn, init, xs)
+        return final_carry, ys
 
 This pass will rewrite scan into:
 
-def k():
-    init = torch.zeros([])
-    xs = torch.arange(4)
+    def k():
+        init = torch.zeros([])
+        xs = torch.arange(4)
 
-    loop_idx = torch.zeros([])
-    ys = torch.empty_strided(_shape_stride_of_ys)
-    def cond_fn(loop_idx, ys, init, xs):
-        return loop_idx < xs.shape[0]
+        # we create a loop_idx and loop through xs.shape[0]
+        loop_idx = torch.zeros([])
+        ys = torch.empty_strided(_shape_stride_of_ys)
+        def cond_fn(loop_idx, ys, init, xs):
+            return loop_idx < xs.shape[0]
 
-    def body_fn(loop_idx, ys, init, xs):
-        int_idx = loop_idx.item()
-        next_init, y = step_fn(init, xs[int_idx])
-        ys[int_idx].copy_(y)
-        return loop_idx + 1, ys, next_init, xs
+        # we pre-allocate the output buffer ys and inplace
+        # copy the y of each intermediate into a slice.
+        # NOTE [Pre-allocate scan's output buffer].
+        def body_fn(loop_idx, ys, init, xs):
+            int_idx = loop_idx.item()
+            next_init, y = step_fn(init, xs[int_idx])
+            ys[int_idx].copy_(y)
+            return loop_idx + 1, ys, next_init, xs
 
-    final_carry, _, _, ys = while_loop(cond_fn, body_fn, (loop_idx, ys, init, xs))
-    return final_carry, ys
-
-Note that in function k, we pre-allocate the output buffer and copy_ each y into the buffer
-to avoid introducing an extra copy of input. _shape_stride_of_ys can be queried from the
-metadata of scan's fx_node see NOTE [Pre-allocate scan's output buffer].
+        final_carry, _, _, ys = torch._higher_order.while_loop(cond_fn, body_fn, (loop_idx, ys, init, xs))
+        return final_carry, ys
 """
 
 
@@ -270,21 +270,19 @@ def lower_scan_to_while_loop(gm: torch.fx.GraphModule):
 
         def lower_to_while_loop(*args, **kwargs):
             """
-            The traced graph of this function will be used to replace the originsal scan fx_node.
+            The traced graph of this function will be used to replace the original scan fx_node.
             """
             assert len(kwargs) == 0
 
-            # Step 1: construct necessary inputs to while_loop based on scan's input.
             def resolve_shape_to_proxy(
                 shape: list[Union[int, torch.SymInt]], bound_symbols: dict[Any, Any]
             ):
                 """
-                Given a list of shape, this function returns a calculated expression of bound_symbols' values.
-                Though when looked at the returned values, they are the same as shape but when we trace this
-                function, we'll get a graph with call_function nodes that describes how the shape expr is
+                Given a list of symints/ints, this function returns a calculated expression of bound_symbols' values.
+                When we trace this function, we'll get a graph with call_function nodes that describes how the shape expr is
                 computed from bound_symbols' values.
 
-                Suppose shape is (s1*s2, s1+s2), if bound_symbols = {s1: arg0, s2: arg1}, the result will be
+                Suppose shape = (s1*s2, s1+s2) and bound_symbols = {s1: arg0, s2: arg1}, the result will be
                 (arg0 * arg1, arg0 + arg1).
                 """
                 from torch.utils._sympy.interp import sympy_interp
@@ -305,6 +303,7 @@ def lower_scan_to_while_loop(gm: torch.fx.GraphModule):
                         ret.append(s)
                 return ret
 
+            # Step 1: construct necessary inputs to while_loop based on scan's input.
             (
                 init,
                 xs,
@@ -315,10 +314,12 @@ def lower_scan_to_while_loop(gm: torch.fx.GraphModule):
 
             # NOTE [Pre-allocate scan's output buffer]
             # In order to pre-allocate the output buffer for ys, we rely on the meta of scan's fx_node.
-            # However, the meta consists of concrete symints, we need to bind them with the
-            # proxies in order to trace the torch.empyt_strided call correctly (i.e. resolve_shape_to_proxy).
-            # Note that basic free symbols of tensor's shapes are guaranteed to be lifted as subgraph inputs
-            # in dynamo. See Note [Auto lift basic free symbols when create_graph_input] for how this is done.)
+            # However, the meta consists of concrete symints, we need to bind those symints with
+            # proxies in order to trace the torch.empyt_strided call correctly.
+            #
+            # Also note that basic free symbols of tensor's shapes are guaranteed to be lifted as subgraph inputs
+            # in dynamo so we can always re-construct the sym expression from placeholders.
+            # See Note [Auto lift basic free symbols when create_graph_input] for how this is done.
             bound_symbols = {
                 arg.node.expr: arg
                 for arg in pytree.tree_leaves((args, scan_length))
@@ -337,20 +338,22 @@ def lower_scan_to_while_loop(gm: torch.fx.GraphModule):
             ]
 
             while_loop_operands = (loop_idx, ys_outs, init, xs)
-            flat_operands, flat_spec = pytree.tree_flatten(while_loop_operands)
-            _, while_loop_spec = pytree.tree_flatten(
+            flat_operands, operands_spec = pytree.tree_flatten(while_loop_operands)
+            _, operands_and_additional_inputs_spec = pytree.tree_flatten(
                 (*while_loop_operands, additional_inputs)
             )
 
             # Step 2: create the cond_fn and body_fn for while_loop
             def cond_fn(*flat_args):
-                loop_idx, _, _, _, _ = pytree.tree_unflatten(flat_args, while_loop_spec)  # type: ignore[has-type]
+                loop_idx, _, _, _, _ = pytree.tree_unflatten(
+                    flat_args, operands_and_additional_inputs_spec
+                )  # type: ignore[has-type]
                 return loop_idx < scan_length  # type: ignore[has-type]
 
             def body_fn(*flat_args):
                 loop_idx, ys_outs, carry, xs, additional_inputs = pytree.tree_unflatten(
                     flat_args,
-                    while_loop_spec,  # type: ignore[has-type]
+                    operands_and_additional_inputs_spec,  # type: ignore[has-type]
                 )
 
                 idx_int = loop_idx.item()
@@ -374,7 +377,7 @@ def lower_scan_to_while_loop(gm: torch.fx.GraphModule):
                     tuple(flat_operands),
                     tuple(additional_inputs),
                 ),
-                flat_spec,
+                operands_spec,
             )
             return list(last_carry) + list(ys_outs)
 

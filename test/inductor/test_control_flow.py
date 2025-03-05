@@ -1039,16 +1039,6 @@ class WhileLoopTests(TestCase):
                 cloned_inputs = pytree.tree_map(
                     lambda t: t.clone(), inputs_with_counters
                 )
-                import logging
-
-                logger = logging.getLogger(__name__)
-                logger.setLevel(logging.DEBUG)
-                logger.critical(
-                    f"haha tensor_hash {str(hash(cloned_inputs[1]))}"  # noqa: G004
-                    f" rand_seed {torch.initial_seed()}"  # noqa: G004
-                    f" cuda initial_seed {torch.cuda.initial_seed() if torch.cuda.is_initialized() else None}."  # noqa: G004
-                    f"tensor value: {cloned_inputs[1]}"  # noqa: G004
-                )
                 result = model(*inputs_with_counters)
                 with torch.no_grad():
                     result_compiled = compiled_model(*inputs_with_counters)
