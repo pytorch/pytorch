@@ -1139,6 +1139,26 @@ class TestCutlassBackend(TestCase):
             num_ops = int(match.group(1))
             self.assertTrue(num_ops > 0, "The number of ops should be greater than 0")
 
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_cutlass_backend_matmul_same_tensor(self):
+        max_autotune_gemm_backends = "CUTLASS"
+
+        M = 128
+        A = torch.randn(M, M).cuda().half()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                "cuda.cutlass_max_profiling_configs": 2,
+                "autotune_fallback_to_aten": False,
+            }
+        ):
+            compiled = torch.compile(torch.mm)
+
+            torch.testing.assert_close(A @ A.t(), compiled(A, A.t()))
+
 
 if __name__ == "__main__":
     from torch._inductor.utils import is_big_gpu
