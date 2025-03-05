@@ -26,25 +26,6 @@ class DynamoExporterHfModelsTest(common_utils.TestCase):
         assert onnx_program is not None
         return onnx_program
 
-    def assert_onnx_program(
-        self,
-        onnx_program,
-        *,
-        rtol: float | None = None,
-        atol: float | None = None,
-        args: tuple[Any, ...] | None = None,
-        kwargs: dict[str, Any] | None = None,
-        strategy: str | None = "TorchExportNonStrictStrategy",
-    ):
-        onnx_testing.assert_onnx_program(
-            onnx_program,
-            rtol=rtol,
-            atol=atol,
-            args=args,
-            kwargs=kwargs,
-            strategy=strategy,
-        )
-
     def test_onnx_export_huggingface_llm_models_with_kv_cache(self):
         model, kwargs, dynamic_axes, input_names, output_names = (
             _prepare_llm_model_gptj_to_test()
@@ -56,7 +37,7 @@ class DynamoExporterHfModelsTest(common_utils.TestCase):
             output_names=output_names,
             dynamic_axes=dynamic_axes,
         )
-        self.assert_onnx_program(onnx_program)
+        onnx_testing.assert_onnx_program(onnx_program)
 
     def test_onnx_export_with_custom_axis_names_in_dynamic_shapes(self):
         model, kwargs, _, input_names, output_names = _prepare_llm_model_gptj_to_test()
@@ -97,7 +78,7 @@ class DynamoExporterHfModelsTest(common_utils.TestCase):
             dynamic_shapes=dynamic_shapes,
             optimize=False,
         )
-        self.assert_onnx_program(onnx_program)
+        onnx_testing.assert_onnx_program(onnx_program)
 
         # Check that the dynamic axes are correctly set in the ONNX model
         for dim, custom_name in zip(

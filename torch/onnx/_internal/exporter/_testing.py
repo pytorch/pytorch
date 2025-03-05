@@ -22,7 +22,7 @@ def assert_onnx_program(
     atol: float | None = None,
     args: tuple[Any, ...] | None = None,
     kwargs: dict[str, Any] | None = None,
-    strategy: str | None = None,
+    strategy: str | None = "TorchExportNonStrictStrategy",
 ) -> None:
     """Assert that the ONNX model produces the same output as the PyTorch ExportedProgram.
 
