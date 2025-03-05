@@ -5,6 +5,7 @@ from collections.abc import Sequence
 from itertools import chain
 from typing import Generic, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
+from typing import Any, Generic, Tuple
 
 
 import torch
