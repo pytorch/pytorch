@@ -1490,7 +1490,11 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             return combine_fn, init, xs, additional_inputs
 
         combine_fn, init, xs, additional_inputs = arg_extractor(*args, **kwargs)
-        assert isinstance(additional_inputs, variables.BaseListVariable)
+        assert isinstance(additional_inputs, variables.TupleVariable)
+
+        # Ensure that all additional_inputs are TensorVariables and no
+        # ints or SymInts as this is not yet supported
+        assert all(isinstance(t, TensorVariable) for t in additional_inputs.items)
 
         if xs.python_type() != list:
             unimplemented(
@@ -1503,11 +1507,6 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
         assert isinstance(init, variables.BaseListVariable)
 
-        # dim_fake = (
-        #     dim.as_proxy()
-        #     if type(dim.as_proxy()) == int
-        #     else get_fake_value(dim.as_proxy().node, tx)
-        # )
         scan_length = get_fake_value(xs.items[0].as_proxy().node, tx).size()[0]
         if scan_length == 0:
             unimplemented(
@@ -1526,14 +1525,13 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             # The sub_args_inp is a slice of original input, e.g. if input.size is (3, 4), and scan dim=0
             # the sub_args_inp shape will be (4, ).
             sub_args_inp = [
-                # _make_inlined(tx, first_slice_copy)(inp, dim) for inp in xs.items
-                _make_inlined(tx, first_slice_copy)(inp)
-                for inp in xs.items
+                _make_inlined(tx, first_slice_copy)(inp) for inp in xs.items
             ]
             sub_args_additional_inputs = [
                 t.call_method(tx, "clone", args=(), kwargs={})
                 for t in additional_inputs.items
             ]
+
         sub_args = sub_args_init + sub_args_inp + sub_args_additional_inputs
         (
             (combine_result, _combine_treespec),
@@ -1548,26 +1546,14 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             source_target=self.value,
             set_subgraph_inputs="flatten_manual",
         )
-        
-        combine_gm = torch.fx.GraphModule(dict(tx.output.nn_modules), combine_graph)
-        
-        # key in the combine_lifted_freevars are proxies in the root tracer.
-        # We use root tracer's proxies to create scan op's inputs.
-        def _check_phs_position_match(
-            combine_graph: torch.fx.Graph, lifted_proxies: list[torch.fx.Proxy]
-        ):
-            lifted_phs = [
-                node for node in combine_graph.nodes if node.op == "placeholder"
-            ][-len(lifted_proxies) :]
-            for ph, lifted_proxy in zip(lifted_phs, lifted_proxies):
-                if ph is not lifted_proxy.node:
-                    unimplemented(
-                        "The postion lifted freevars doesn't match the order of placeholders in subgraph."
-                    )
 
-        _check_phs_position_match(combine_graph, list(combine_lifted_freevars.values()))
-        combine_freevars_proxy = list(combine_lifted_freevars.keys())
-        
+        combine_freevars_proxy = tuple(combine_lifted_freevars.keys())
+
+        if combine_result.python_type() != list:
+            unimplemented(
+                f"Expected combine_fn to return a list if tensor but got {combine_result.python_type()}",
+            )
+            
         xs_proxy = xs.as_proxy()
         init_proxy = init.as_proxy()
         additional_inputs_proxy = additional_inputs.as_proxy() + combine_freevars_proxy

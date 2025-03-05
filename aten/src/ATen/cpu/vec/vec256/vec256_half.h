@@ -217,16 +217,14 @@ Vectorized<Half> inline fmadd(const Vectorized<Half>& a,
 }
 
 CONVERT_VECTORIZED_INIT(Half, half)
-LOAD_FP32_VECTORIZED_INIT(Half, fp16);
+LOAD_FP32_VECTORIZED_INIT(Half, fp16)
 
 #else // defined(CPU_CAPABILITY_AVX2)
 
-#if !defined(__aarch64__) || defined(CPU_CAPABILITY_SVE)
-CONVERT_NON_VECTORIZED_INIT(Half, half);
+#if !(defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__) && !defined(CPU_CAPABILITY_SVE256))
+CONVERT_NON_VECTORIZED_INIT(Half, half)
 #endif
 
-LOAD_FP32_NON_VECTORIZED_INIT(Half, fp16);
+LOAD_FP32_NON_VECTORIZED_INIT(Half, fp16)
 #endif // defined(CPU_CAPABILITY_AVX2)
 }} // namsepace at::vec::CPU_CAPABILITY
-
-#pragma GCC diagnostic pop

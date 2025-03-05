@@ -2018,7 +2018,9 @@ class Scheduler:
         self.compute_ancestors()
 
         metrics.ir_nodes_pre_fusion += len(self.nodes)
-        V.debug.ir_pre_fusion(self.nodes)
+        from torch._inductor.debug import log_ir_post_fusion, log_ir_pre_fusion
+
+        log_ir_pre_fusion(self.nodes)
         self.num_orig_nodes = len(self.nodes)
         self.create_foreach_nodes()
         self.nodes = self.topological_sort_schedule(self.nodes)
@@ -2047,7 +2049,7 @@ class Scheduler:
             self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
         self.process_grouped_nodes()
         self.compute_last_usage()
-        V.debug.ir_post_fusion(self.nodes)
+        log_ir_post_fusion(self.nodes)
         V.debug.graph_diagram(self.nodes)
         self.debug_draw_graph()
 
