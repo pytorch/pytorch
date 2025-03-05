@@ -2467,6 +2467,7 @@ class TestCustomOpAPI(TestCase):
                     lambda info, in_dims, x, *, y: (x, 0),
                 )
 
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_dict_input(self):
         @torch.library.custom_op("mylib::foo", mutates_args=())
         def foo(d: dict, t: torch.Tensor) -> torch.Tensor:
@@ -2477,6 +2478,7 @@ class TestCustomOpAPI(TestCase):
         y = torch.ops.mylib.foo(d, t)
         self.assertEqual(y, torch.sin(d["x"] - d["y"] + t))
 
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_dataclass_input(self):
         torch.utils._pytree.register_dataclass(Point)
 

@@ -282,6 +282,44 @@ class MiscTests(torch._inductor.test_case.TestCase):
             g(x)  # dynamo falls back on the outermost frame
             self.assertEqual(len(counters["graph_break"]), 0)
 
+    def test_custom_op_pytree_input(self):
+        @torch.library.custom_op("mylib::foo", mutates_args=())
+        def foo(d: dict, t: torch.Tensor) -> torch.Tensor:
+            return torch.sin(d["x"] - d["y"] + t)
+
+        @foo.register_fake
+        def _(a: dict, t: torch.Tensor) -> torch.Tensor:
+            return torch.empty_like(t)
+
+        d = {"x": torch.randn(2, 3), "y": torch.randn(2, 3)}
+        t = torch.randn(2, 3)
+
+        cnt = CompileCounterWithBackend("eager")
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(d, t):
+            return torch.ops.mylib.foo(d, t)
+
+        self.assertEqual(fn(d, t), torch.sin(d["x"] - d["y"] + t))
+
+        actual_graph = torch._dynamo.testing.normalize_gm(
+            cnt.graphs[0].print_readable(print_output=False)
+        )
+        self.assertExpectedInline(
+            actual_graph,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_t_: "f32[2, 3]", L_d_y_: "f32[2, 3]", L_d_x_: "f32[2, 3]"):
+        l_t_ = L_t_
+        l_d_y_ = L_d_y_
+        l_d_x_ = L_d_x_
+
+        mylib_foo_input_spec : torch.utils._pytree.TreeSpec = self.mylib_foo_input_spec
+        flat_apply: "f32[2, 3]" = torch.ops.higher_order.flat_apply(torch.ops.mylib.foo.default, mylib_foo_input_spec, l_d_x_, l_d_y_, l_t_);  mylib_foo_input_spec = l_d_x_ = l_d_y_ = l_t_ = None
+        return (flat_apply,)
+""",
+        )
+
     def test_invalid_args_builtin(self):
         @torch.compile(backend="eager")
         def fn(x):
