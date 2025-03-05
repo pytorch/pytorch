@@ -194,7 +194,7 @@ jobs:
           WORKFLOW_RUN_ID: ${{ github.run_id }}
         run: |
           python3 -m pip install psutil==5.9.1 dataclasses_json==0.6.7
-          python3 -m tools.stats.monitor > usage_log.txt 2>&1 &
+          python3 -m tools.stats.monitor > "usage_log_build_${JOB_ID}.txt" 2>&1 &
           echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
       - name: Download pytest cache
@@ -351,7 +351,7 @@ jobs:
             ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
           retention-days: 14
           if-no-files-found: warn
-          path: usage_log_bld_*.txt
+          path: usage_log_build_*.txt
 
       - name: Upload sccache stats
         if: steps.build.outcome != 'skipped' && inputs.build-environment != 'linux-s390x-binary-manywheel'
@@ -370,7 +370,7 @@ jobs:
           workflow_name: ${{ github.workflow }}
           workflow_run_id: ${{github.run_id}}
           workflow_attempt: ${{github.run_attempt}}
-          artifact_prefix: usage_log_bld
+          artifact_prefix: usage_log_build
 
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
