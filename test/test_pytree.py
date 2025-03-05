@@ -27,19 +27,31 @@ from torch.testing._internal.common_utils import (
 )
 
 
+pytree_modules = {
+    "python": python_pytree,
+}
+
+
 if not IS_FBCODE:
     import torch.utils._cxx_pytree as cxx_pytree
+
+    pytree_modules["cxx"] = cxx_pytree
 else:
     # optree is not yet enabled in fbcode, so just re-test the python implementation
     cxx_pytree = python_pytree
 
 
+try:
+    import torch.utils.pytree as pytree
+except ImportError:
+    pass
+else:
+    pytree_modules["generic"] = pytree
+
+
 parametrize_pytree_module = parametrize(
     "pytree",
-    [
-        subtest(python_pytree, name="python"),
-        *([subtest(cxx_pytree, name="cxx")] if not IS_FBCODE else []),
-    ],
+    [subtest(module, name=name) for name, module in pytree_modules.items()],
 )
 
 
