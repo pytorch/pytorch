@@ -322,11 +322,11 @@ class CaptureStructuredTrace(torch._logging._internal.LazyTraceHandler):
                                 # Don't log the expression if we have already
                                 # printed it beforehand
                                 if not res.visited:
+                                    res.visited = True
                                     for arg in res.argument_ids:
                                         _log_expression_created(emit_func, arg)
 
                                 emit_func(res.record)
-                                res.visited = True
 
                         _log_expression_created(
                             super().emit, metadata[key].get("expr_node_id")
