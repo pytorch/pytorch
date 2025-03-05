@@ -615,21 +615,6 @@ static PyObject* unsupported(PyObject* dummy, PyObject* args) {
   return obj2;
 }
 
-static PyObject* skip_code(PyObject* dummy, PyObject* obj) {
-  if (!PyCode_Check(obj)) {
-    PyErr_SetString(PyExc_TypeError, "expected a code object");
-    return NULL;
-  }
-
-  PyCodeObject* code = (PyCodeObject*)obj;
-  ExtraState* extra = get_extra_state(code);
-  if (extra == NULL) {
-    extra = init_and_set_extra_state(code);
-  }
-  extra_state_set_exec_strategy(extra, (FrameExecStrategy){SKIP, DEFAULT});
-  Py_RETURN_NONE;
-}
-
 static PyObject* set_guard_error_hook(PyObject* dummy, PyObject* obj) {
   if (obj == Py_None) {
     obj = NULL;
@@ -676,7 +661,7 @@ static PyMethodDef _methods[] = {
     {"get_eval_frame_callback", get_eval_frame_callback_py, METH_NOARGS, NULL},
     {"reset_code", reset_code, METH_O, NULL},
     {"unsupported", unsupported, METH_VARARGS, NULL},
-    {"skip_code", skip_code, METH_O, NULL},
+    {"set_code_exec_strategy", set_code_exec_strategy, METH_VARARGS, NULL},
     {"set_guard_error_hook", set_guard_error_hook, METH_O, NULL},
     {"raise_sigtrap", raise_sigtrap, METH_NOARGS, NULL},
     {NULL, NULL, 0, NULL}};
