@@ -775,7 +775,6 @@ def extract_loop_body_with_args(
             # check the indirect variable
             indirect_load_dim_indexing_expr = None
             indirect_var = multiplied_symbol
-            # Fix: Check that indirect_var is not None before accessing .name
             if indirect_var is None or not is_indirect(indirect_var.name):
                 continue
             # find out its corresponding set_indirect node, e.g. set_indirect0
@@ -799,7 +798,6 @@ def extract_loop_body_with_args(
                         # argument and the indexX's expression should be in
                         # fn.iter_vars, e.g. index0 = p0
                         indexing = fn.indexing_exprs.get(the_load_index_node.args[0])
-                        # do we need to consider cases like index0 = p0 + 32*p1?
                         if indexing is not None and indexing in fn.iter_vars:
                             indirect_load_dim_indexing_expr = indexing
             if indirect_load_dim_indexing_expr is None:
