@@ -2318,7 +2318,7 @@ void ProcessGroupNCCL::watchdogHandler() {
         pgStatus_->lastStartedNumelOut = work.numelOut_;
       }
 
-      // allow watchdog event queries from a side thread
+
       at::cuda::CUDAGuard guard(work.ncclEndEvent_->device_index());
       at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeThreadLocal};
 
@@ -3590,9 +3590,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
   We disable this event query behavior as they are disallowed during capture
   under the strictest capture mode setting.
   Note that previously recorded events (e.g., before the capture) can be queried
-  as the watchdog capture mode has been changed to thread-local.
-  TODO(eqy): can we re-enable queries during capture entirely given the above?
-  Will they function as expected?
+  as the watchdog capture mode has been changed to thread-local, but user-side
+  event queries (from the main thread) via .is_completed() are still disallowed.
 
   TODO:
    - Is our design for flight recorder safe in this context?  are we recording
