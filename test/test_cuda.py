@@ -4847,6 +4847,7 @@ class TestMemPool(TestCase):
             nelem_1mb = 1024 * 1024 // 4
             with torch.cuda.use_mem_pool(pool):
                 out_0 = torch.randn(nelem_1mb, device="cuda")
+        torch.cuda.memory._set_allocator_settings("expandable_segments:False")
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
