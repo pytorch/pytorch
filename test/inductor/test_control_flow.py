@@ -196,6 +196,19 @@ class CondModels:
 
             return torch.cond(x.shape[0] > 5, true_fn, false_fn, (x,))
 
+    class MismatchedOutputSize(torch.nn.Module):
+        def forward(self, p, x, y, z):
+            a = y.shape[0]
+            b = z.shape[0]
+
+            def true_fn(x):
+                return (x + a)[2:].sin()
+
+            def false_fn(x):
+                return (x + b * z)[:2].cos()
+
+            return y.sum() - torch.cond(x.sum() > 0, true_fn, false_fn, (x,))
+
 
 class CondTests(TestCase):
     def _run_test(
@@ -643,6 +656,21 @@ class CondTests(TestCase):
         self.assertEqual(counters["pre_grad"], 11)
         self.assertEqual(counters["post_grad"], 11)
 
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [True, False])
+    def test_cond_mismatched_branch_output_size(self, device, dynamic):
+        self._run_test(
+            model=CondModels.MismatchedOutputSize(),
+            inputs={
+                torch.randn(10, 20),
+                torch.randn(10, 20),
+                torch.randn(10, 20),
+            },
+            device=device,
+            dynamic=dynamic,
+        )
+
 
 class WhileLoopModels:
     class Simple(torch.nn.Module):
@@ -893,6 +921,32 @@ class WhileLoopModels:
                 body_fn,
                 [c, a, b],
             )
+
+    class MixedDevice(torch.nn.Module):
+        def forward(self, c, a, b):
+            # Force the loop idx on cpu
+            c = c.to(torch.device("cpu"))
+
+            def cond_fn(loop_idx, a, b):
+                return loop_idx < a.shape[0]
+
+            def body_fn(loop_idx, a, b):
+                return loop_idx + 1, a + b, a - b
+
+            return torch._higher_order_ops.while_loop(cond_fn, body_fn, (c, a, b))
+
+    class MixedDevice2(torch.nn.Module):
+        def forward(self, c, a, b):
+            # Force the loop idx on cpu
+            c.to(torch.device("cpu"))
+
+            def cond_fn(loop_idx, a, b):
+                return loop_idx < a.shape[0]
+
+            def body_fn(loop_idx, a, b):
+                return loop_idx + a.sum(), a + b, a - b
+
+            return torch._higher_order_ops.while_loop(cond_fn, body_fn, (c, a, b))
 
 
 class WhileLoopTests(TestCase):
@@ -1156,6 +1210,35 @@ class WhileLoopTests(TestCase):
             device=device,
             dynamic=dynamic,
         )
+
+    @requires_gpu
+    @parametrize("device", [GPU_TYPE])
+    def test_while_loop_models_with_mixed_device(self, device):
+        self._run_test(
+            model=WhileLoopModels.MixedDevice(),
+            inputs=(
+                torch.randn(10, 20),
+                torch.randn(10, 20),
+            ),
+            device=device,
+            dynamic=True,
+        )
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "Expected body_fn_output and carried_inputs to have same metadata but found",
+        ):
+            # Error at front end because device are promoted to a different one
+            # after the first iteration
+            self._run_test(
+                model=WhileLoopModels.MixedDevice2(),
+                inputs=(
+                    torch.randn(10, 20),
+                    torch.randn(10, 20),
+                ),
+                device=device,
+                dynamic=True,
+            )
 
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])

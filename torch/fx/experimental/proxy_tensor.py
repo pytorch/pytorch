@@ -1112,19 +1112,19 @@ class PythonKeyTracer(Tracer):
                 return None
             return extract_val(v.meta["val"])
 
-        if _should_save_arg_kwarg_vals(target, (args, kwargs)):
-            # NOTE "original_arg_kwarg_vals"
+        if _should_save_eager_input_vals(target, (args, kwargs)):
+            # NOTE "eager_input_vals"
             # We save the original (args, kwargs) FakeTensor values for nodes
             # that have exact stride requirements. This is useful downstream.
             # We use this information inside Inductor to ensure that inputs to
             # stride-sensitive operators have the correct strides.
             arg_inp, kwarg_inp = torch.fx.node.map_aggregate((args, kwargs), map_fn)  # type: ignore[misc, arg-type]
-            node.meta["original_arg_kwarg_vals"] = (arg_inp, kwarg_inp)
+            node.meta["eager_input_vals"] = (arg_inp, kwarg_inp)
 
         return node
 
 
-def _should_save_arg_kwarg_vals(
+def _should_save_eager_input_vals(
     target: Any,
     args_kwargs: Optional[tuple[tuple[Argument, ...], dict[str, Argument]]] = None,
 ) -> bool:
@@ -1144,13 +1144,13 @@ def _should_save_arg_kwarg_vals(
     ):
         args = args_kwargs[0]
         if isinstance(args[0], torch._ops.OpOverload):
-            return _should_save_arg_kwarg_vals(args[0], None)
-    if isinstance(target, torch.ops.higher_order.with_effects):
+            return _should_save_eager_input_vals(args[0], None)
+    if target is torch.ops.higher_order.with_effects:
         # TODO: inductor lowering for with_effects needs to be updated to propagate
         # the arg_kwarg_vals
         return False
     if isinstance(target, torch._ops.HigherOrderOperator):
-        if pytree.tree_any(_should_save_arg_kwarg_vals, args_kwargs):
+        if pytree.tree_any(_should_save_eager_input_vals, args_kwargs):
             raise RuntimeError(
                 f"NYI: The HOP {target} has an input that is an OpOverload that "
                 f"needs exact strides. We probably need special logic to "
