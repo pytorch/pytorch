@@ -4501,7 +4501,8 @@ class ShapeEnv:
                     SymT.SIZE, len(self.var_to_val), positive=positive, integer=True
                 )
                 if (
-                    isinstance(source, TensorPropertySource)
+                    not specialize_zero_one
+                    and isinstance(source, TensorPropertySource)
                     and source.prop == TensorProperty.SIZE
                 ):
                     self.size_like.add(sympy_expr)
