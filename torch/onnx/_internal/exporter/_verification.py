@@ -62,8 +62,8 @@ class VerificationInfo:
             [0.0, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0, 10, 1000000],
             dtype=torch.float,
         )
-        abs_diff_hist = (torch.histogram(abs_diff.float(), bins=bins),)
-        rel_diff_hist = (torch.histogram(rel_diff.float(), bins=bins),)
+        abs_diff_hist = torch.histogram(abs_diff.float(), bins=bins)
+        rel_diff_hist = torch.histogram(rel_diff.float(), bins=bins)
         return cls(
             name=name,
             max_abs_diff=max_abs_diff,
