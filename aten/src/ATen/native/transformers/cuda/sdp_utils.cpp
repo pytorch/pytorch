@@ -15,7 +15,6 @@
 #include <c10/util/env.h>
 #include <c10/util/irange.h>
 #include <c10/util/Array.h>
-#include <c10/util/CallOnce.h>
 #include <c10/util/Exception.h>
 
 #if AT_CUDNN_ENABLED()

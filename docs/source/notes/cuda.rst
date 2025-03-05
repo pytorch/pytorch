@@ -639,7 +639,7 @@ Mixing different CUDA system allocators in the same program
 -----------------------------------------------------------
 Depending on your use case, :func:`torch.cuda.memory.change_current_allocator` may not be what you
 want to use, since it swaps the CUDA allocator for the entire program (similar to
-`PYTORCH_CUDA_ALLOC_CONF=backend:cudaMallocAsync`). For instance, if the swapped allocator doesn't
+``PYTORCH_CUDA_ALLOC_CONF=backend:cudaMallocAsync``). For instance, if the swapped allocator doesn't
 have caching mechanism, you will lose all the benefits of PyTorch's CUDACachingAllocator. Instead,
 you can selectively mark a region of PyTorch code to use a custom allocator using
 :class:`torch.cuda.MemPool`. This will let you use multiple CUDA system allocators in the same

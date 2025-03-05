@@ -255,6 +255,23 @@ class TestFixedConfigs(TestCase):
             )
         ]
         self._check(fn, args, persistent=persistent, cfg=cfg)
+        args = [
+            torch.stack(
+                [
+                    torch.tensor(
+                        [0.0] * 150 + [float("inf")] * 150,
+                        device="cuda",
+                        dtype=torch.float32,
+                    ),
+                    torch.tensor(
+                        [0.0] * 150 + [-float("inf")] * 150,
+                        device="cuda",
+                        dtype=torch.float32,
+                    ),
+                ]
+            )
+        ]
+        self._check(fn, args, persistent=persistent, cfg=cfg)
 
     @parametrize("persistent", [False, True])
     @parametrize("rsplit", [32, 33])
