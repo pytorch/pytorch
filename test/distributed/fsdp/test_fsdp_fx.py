@@ -113,7 +113,9 @@ class TestSymbolicTracing(TestCase):
         self.assertEqual(exec_info.visited_params, set(exec_info.param_forward_order))
 
 
-devices = ("cuda", "hpu")
-instantiate_device_type_tests(TestSymbolicTracing, globals(), only_for=devices)
+devices = ("cuda", "hpu", "xpu")
+instantiate_device_type_tests(
+    TestSymbolicTracing, globals(), only_for=devices, allow_xpu=True
+)
 if __name__ == "__main__":
     run_tests()

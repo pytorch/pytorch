@@ -963,9 +963,10 @@ class BundledShaderLibary : public MetalShaderLibrary {
 void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
                                            const std::string& name,
                                            std::optional<int64_t> extra) {
-  auto inputTensor = iter.input(0).contiguous();
+  auto inputTensor = iter.input(0);
   auto outputTensor = iter.output(0);
-  bool needs_output_copy = false;
+  bool same_strides =
+      inputTensor.strides().equals(outputTensor.strides()) && inputTensor.sizes().equals(outputTensor.sizes());
   uint32_t length = outputTensor.numel();
   if (length == 0) {
     return;
@@ -973,17 +974,12 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
   using namespace mps;
   @autoreleasepool {
     id<MTLComputePipelineState> cplState = nil;
-    if (c10::isComplexType(inputTensor.scalar_type())) {
-      auto scalarStr = inputTensor.scalar_type() == kComplexFloat ? "float" : "half";
-      cplState = getPipelineStateForFunc(fmt::format("{}_complex_{}_{}", name, scalarStr, scalarStr));
-    } else {
-      cplState = getPipelineStateForFunc(
-          fmt::format("{}_{}_{}", name, scalarToMetalTypeString(outputTensor), scalarToMetalTypeString(inputTensor)));
-    }
+    cplState = getPipelineStateForFunc(fmt::format(
+        "{}_dense_{}_{}", name, scalarToMetalTypeString(outputTensor), scalarToMetalTypeString(inputTensor)));
 
-    if (!outputTensor.is_contiguous()) {
+    if (!same_strides) {
+      inputTensor = inputTensor.contiguous();
       outputTensor = outputTensor.contiguous();
-      needs_output_copy = true;
     }
 
     MPSStream* mpsStream = getCurrentMPSStream();
@@ -1002,7 +998,7 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
       getMPSProfiler().endProfileKernel(cplState);
     });
   }
-  if (needs_output_copy) {
+  if (!same_strides) {
     iter.output(0).copy_(outputTensor);
   }
 }
