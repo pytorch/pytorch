@@ -8,6 +8,7 @@ __all__ = [
 ]
 
 import dataclasses
+import logging
 import math
 from typing import Any, TYPE_CHECKING
 
@@ -19,6 +20,9 @@ if TYPE_CHECKING:
     from onnxscript import ir
 
     from torch.onnx._internal.exporter import _onnx_program
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass
@@ -209,7 +213,7 @@ class VerificationInterpreter(torch.fx.Interpreter):
 
     def run(
         self,
-        *args,
+        *args: Any,
         initial_env: dict[torch.fx.Node, Any] | None = None,
         enable_io_processing: bool = True,
     ) -> Any:
@@ -242,11 +246,16 @@ class VerificationInterpreter(torch.fx.Interpreter):
         if node_name not in self._onnx_values:
             return result
         (onnx_result,) = self._onnx_program.compute_values([node_name], self.args)
-        self.verification_infos.append(
-            VerificationInfo.from_tensors(
-                name=node_name,
-                expected=result,
-                actual=onnx_result,
-            )
+        info = VerificationInfo.from_tensors(
+            name=node_name,
+            expected=result,
+            actual=onnx_result,
+        )
+        self.verification_infos.append(info)
+        logger.info(
+            "Verification info for node %s: max_abs_diff: %s, max_rel_diff: %s",
+            node_name,
+            info.max_abs_diff,
+            info.max_rel_diff,
         )
         return result
