@@ -99,8 +99,8 @@ fi
 # configuration, so we hardcode everything here rather than do it
 # from scratch
 case "$image" in
-  pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9)
-    CUDA_VERSION=12.4.1
+  pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc9)
+    CUDA_VERSION=12.6.3
     CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
@@ -326,7 +326,7 @@ case "$image" in
     EXECUTORCH=yes
     ;;
   pytorch-linux-jammy-py3.12-halide)
-    CUDA_VERSION=12.4
+    CUDA_VERSION=12.6
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=11
     CONDA_CMAKE=yes
@@ -334,7 +334,7 @@ case "$image" in
     TRITON=yes
     ;;
   pytorch-linux-jammy-py3.12-triton-cpu)
-    CUDA_VERSION=12.4
+    CUDA_VERSION=12.6
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=11
     CONDA_CMAKE=yes
