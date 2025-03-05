@@ -409,9 +409,18 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # inline done by the host compiler
         self.prefix.splice(
             """
+            bool _check_aoti_runtime_check_inputs_env() {
+                const static char* env_var_value = getenv("AOTI_RUNTIME_CHECK_INPUTS");
+                const static bool result = env_var_value != nullptr && env_var_value[0] != '\0';
+                return result;
+            }
+
             AOTI_NOINLINE static void __check_inputs_outputs(
                 AtenTensorHandle* input_handles,
                 AtenTensorHandle* output_handles) {
+                if (!_check_aoti_runtime_check_inputs_env()){
+                    return;
+                }
             """
         )
         with self.prefix.indent():
@@ -476,11 +485,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     ) {
                     """
 
-                if config.aot_inductor.debug_compile:
-                    self.generate_input_output_runtime_checks()
-                    run_impl_proto += """
-                        __check_inputs_outputs(input_handles, output_handles);
-                    """
+                self.generate_input_output_runtime_checks()
+                run_impl_proto += """
+                    __check_inputs_outputs(input_handles, output_handles);
+                """
 
                 self.prefix.splice(run_impl_proto)
         else:
@@ -1561,12 +1569,17 @@ class CppWrapperCpu(PythonWrapperCodegen):
             return f"RAIIAtenTensorHandle({tmp_AtenTensorHandle})", tmp_call_strs
 
         def create_new_tensor_handle() -> tuple[str, list[str]]:
-            tmp_AtenTensorHandle = f"tmp_{data.get_name()}_{next(self.tmp_tensor_id)}"
-            tmp_call_strs = [
-                f"AtenTensorHandle {tmp_AtenTensorHandle};",
-                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_tensor_handle({data.get_name()}, &{tmp_AtenTensorHandle}));",
-            ]
-            return f"RAIIAtenTensorHandle({tmp_AtenTensorHandle})", tmp_call_strs
+            # TODO (benjaminglass1): uncomment this and remove the call to
+            # create_reinterpret_view after the AOTI forwards compatibility window has
+            # passed.
+            #
+            # tmp_AtenTensorHandle = f"tmp_{data.get_name()}_{next(self.tmp_tensor_id)}"
+            # tmp_call_strs = [
+            #     f"AtenTensorHandle {tmp_AtenTensorHandle};",
+            #     f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_tensor_handle({data.get_name()}, &{tmp_AtenTensorHandle}));",
+            # ]
+            # return f"RAIIAtenTensorHandle({tmp_AtenTensorHandle})", tmp_call_strs
+            return create_reinterpret_call(), []
 
         if (
             size == data.layout.size
