@@ -3561,7 +3561,7 @@ class CommonTemplate:
         def fn(a, b, c):
             return torch.addmv(a, b, c)
 
-        cfn = torch.compile(backend='inductor')(fn)
+        cfn = torch.compile(backend="inductor")(fn)
         input = torch.tensor([2], dtype=torch.int32)
         mat = torch.tensor(np.random.randn(0, 0), dtype=torch.int32)
         vec = torch.tensor([])
