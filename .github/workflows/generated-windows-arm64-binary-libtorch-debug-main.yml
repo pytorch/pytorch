@@ -96,6 +96,11 @@ jobs:
         shell: cmd
         run: |
           "pytorch/.ci/pytorch/windows/arm64/bootstrap_python.bat"
+      - name: Print pytorch paths
+        shell: cmd
+        run: |
+          where python
+          python -c "import sys; print(sys.executable)"
       - name: Bootstrap APL
         shell: cmd
         run: |
