@@ -3127,9 +3127,13 @@ if HAS_GPU:
             {"ptr": t, "n_elements": 4, "BLOCK_SIZE": 4},
             ["ptr"],
         ],
-        # Cant optimize since the kernel contains a tl.inline_asm_elementwise
         [
-            inline_asm_kernel,
+            inline_asm_kernel_is_pure_true,
+            {"X": t, "Y": t, "Z": t, "n": 4, "BLOCK": 4},
+            ["Z"],
+        ],
+        [
+            inline_asm_kernel_is_pure_false,
             {"X": t, "Y": t, "Z": t, "n": 4, "BLOCK": 4},
             ["X", "Y", "Z"],
         ],
