@@ -81,7 +81,13 @@ from .bytecode_transformation import (
 )
 from .code_context import code_context
 from .codegen import PyCodegen
-from .exc import ArgsMismatchError, BackendCompilerFailed, unimplemented_v2, Unsupported
+from .exc import (
+    ArgsMismatchError,
+    BackendCompilerFailed,
+    format_graph_break_message,
+    unimplemented_v2,
+    Unsupported,
+)
 from .funcname_cache import get_funcname
 from .guards import GuardBuilder, install_guard
 from .output_graph import GraphCompileReason, OutputGraph
@@ -538,8 +544,27 @@ def log_graph_break(code_options, reason="", exc_info=False, user_stack=None):
 
 
 def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
+    # graph break message fields for data dependent branching
+    _gb_type = "Data-dependent branching"
+    _explanation = (
+        "Detected data-dependent branching (e.g. `if my_tensor.sum() > 0:`). "
+        "Dynamo does not support tracing dynamic control flow."
+    )
+    _hints = [
+        *graph_break_hints.FUNDAMENTAL,
+        "Use `torch.cond` to express dynamic control flow.",
+    ]
+
     def jump_graph_break(self, inst, value, extra_msg=""):
-        log_graph_break(self.code_options, reason="Data-dependent branching")
+        log_graph_break(
+            self.code_options,
+            reason=format_graph_break_message(
+                gb_type=_gb_type,
+                context=f"attempted to jump with {value}",
+                explanation=_explanation,
+                hints=_hints,
+            ),
+        )
         if not self.should_compile_partial_graph():
             unimplemented_v2(
                 gb_type="Should not compile partial graph (data-dependent branching)",
@@ -747,11 +772,11 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                         self.push(value)
                     self.jump(inst)
             else:
-                raise exc.UserError(
-                    exc.UserErrorType.DYNAMIC_CONTROL_FLOW,
-                    "Dynamic control flow is not supported at the moment. Please use "
-                    "torch.cond to explicitly capture the control flow.",
-                    case_name="cond_operands",
+                unimplemented_v2(
+                    gb_type=_gb_type,
+                    context=f"attempted to jump with {value}",
+                    explanation=_explanation,
+                    hints=_hints,
                 )
 
     return inner
@@ -768,15 +793,19 @@ def break_graph_if_unsupported(*, push):
             try:
                 return inner_fn(self, inst)
             except Unsupported as excp:
-                if self.generic_context_manager_depth > 0:
+                if self.active_generic_context_managers:
                     # We don't support graph break under GenericContextWrappingVariable,
                     # If there is, we roll back to the checkpoint and fall back.
                     excp.remove_from_stats()
                     unimplemented_v2(
                         gb_type="Graph break under GenericContextWrappingVariable",
-                        context="",
-                        explanation="Attempted to graph break in an active context manager that doesn't support graph breaking.",
-                        hints=[],
+                        context=f"Active generic context managers: {self.active_generic_context_managers}",
+                        explanation="Attempted to graph break in an active context manager(s) that doesn't support graph breaking.",
+                        hints=[
+                            "Move the offending context manager(s) to outside the compiled region.",
+                            *graph_break_hints.CAUSED_BY_EARLIER_GRAPH_BREAK,
+                        ],
+                        from_exc=excp,
                     )
 
                 if isinstance(excp, exc.UncapturedHigherOrderOpError):
@@ -888,9 +917,13 @@ class BytecodeDistpatchTableMeta(type):
         def _missing(opname, *args):
             unimplemented_v2(
                 gb_type="Missing bytecode handler",
-                context=opname,
-                explanation=f"Dynamo does not know how to handle the bytecode instruction {opname}",
-                hints=[*graph_break_hints.SUPPORTABLE],
+                context=f"{opname} with args {args}",
+                explanation=f"Dynamo does not know how to handle the bytecode instruction `{opname}`.",
+                hints=[
+                    f"Do not trace code that produces the `{opname}` bytecode instruction "
+                    "(see https://docs.python.org/3/library/dis.html for bytecode semantics).",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
             )
 
         dispatch_table = {
@@ -1187,7 +1220,7 @@ class InstructionTranslatorBase(
             except BackendCompilerFailed:
                 raise
             except RuntimeError as e:
-                if hasattr(e, "msg") and "data-dependent" in e.msg:
+                if hasattr(e, "msg") and "Data-dependent" in e.msg:
                     print(
                         "\n"
                         + torch.fx.GraphModule(
@@ -1215,9 +1248,9 @@ class InstructionTranslatorBase(
                     self.output.cleanup()
 
     def push(self, val: Optional[VariableTracker]):
-        assert val is None or isinstance(
-            val, VariableTracker
-        ), f"push expects VariableTracker, got {typestr(val)}"
+        assert val is None or isinstance(val, VariableTracker), (
+            f"push expects VariableTracker, got {typestr(val)}"
+        )
         self.stack.append(val)  # type: ignore[arg-type]
 
     def push_many(self, vals: list[VariableTracker]):
@@ -1707,6 +1740,11 @@ class InstructionTranslatorBase(
         self.call_function(fn, [typ, val, tb], {})
 
     def exception_handler(self, raised_exception):
+        observed_exn_gb_explanation = (
+            "Dynamo found no exception handler at the top-level compiled function "
+            "when encountering an exception. Exception will propagate outside the compiled region."
+        )
+
         if sys.version_info >= (3, 11):
             exn_tab_entry = self.current_instruction.exn_tab_entry
             if exn_tab_entry:
@@ -1734,7 +1772,15 @@ class InstructionTranslatorBase(
                 # instruction translater. We use special exception for this.
                 self.stack.clear()
                 if type(self) is InstructionTranslator:
-                    raise Unsupported("Observed exception")
+                    unimplemented_v2(
+                        gb_type="Observed exception",
+                        context=str(raised_exception),
+                        explanation=observed_exn_gb_explanation,
+                        hints=[
+                            *graph_break_hints.USER_ERROR,
+                            *graph_break_hints.SUPPORTABLE,
+                        ],
+                    )
                 raise raised_exception
         else:
             if len(self.block_stack):
@@ -1754,7 +1800,14 @@ class InstructionTranslatorBase(
                         # instruction translater.
                         self.stack.clear()
                         if type(self) is InstructionTranslator:
-                            raise Unsupported("Observed exception")
+                            unimplemented_v2(
+                                gb_type="Observed exception (EXCEPT_HANDLER)",
+                                context=str(raised_exception),
+                                explanation=observed_exn_gb_explanation
+                                + " This graph break is unexpected.",
+                                hints=[*graph_break_hints.DYNAMO_BUG],
+                            )
+
                         raise raised_exception
                     block_stack_entry = self.block_stack.pop()
 
@@ -1808,7 +1861,15 @@ class InstructionTranslatorBase(
                 # instruction translater. We use special exception for this.
                 self.stack.clear()
                 if type(self) is InstructionTranslator:
-                    raise Unsupported("Observed exception")
+                    unimplemented_v2(
+                        gb_type="Observed exception",
+                        context=str(raised_exception),
+                        explanation=observed_exn_gb_explanation,
+                        hints=[
+                            *graph_break_hints.USER_ERROR,
+                            *graph_break_hints.SUPPORTABLE,
+                        ],
+                    )
                 raise raised_exception
 
     def PUSH_EXC_INFO(self, inst):
@@ -2077,7 +2138,9 @@ class InstructionTranslatorBase(
     def _load_attr(self, inst):
         obj = self.pop()
         result = BuiltinVariable(getattr).call_function(
-            self, [obj, ConstantVariable.create(inst.argval)], {}  # type: ignore[arg-type]
+            self,  # type: ignore[arg-type]
+            [obj, ConstantVariable.create(inst.argval)],
+            {},
         )
         self.push(result)
 
@@ -2097,13 +2160,15 @@ class InstructionTranslatorBase(
         if isinstance(obj, NNModuleVariable) and not isinstance(val, ConstantVariable):
             # We don't allow side effects during export on non-constant values
             # https://github.com/pytorch/torchdynamo/issues/1475
-            assert (
-                not self.export
-            ), f"Mutating module attribute {inst.argval} during export."
+            assert not self.export, (
+                f"Mutating module attribute {inst.argval} during export."
+            )
 
         try:
             BuiltinVariable(setattr).call_function(
-                self, [obj, ConstantVariable.create(inst.argval), val], {}  # type: ignore[arg-type]
+                self,  # type: ignore[arg-type]
+                [obj, ConstantVariable.create(inst.argval), val],
+                {},
             )
             return
         except Unsupported as e:
@@ -2136,7 +2201,9 @@ class InstructionTranslatorBase(
     def DELETE_ATTR(self, inst):
         obj = self.pop()
         BuiltinVariable(delattr).call_function(
-            self, [obj, ConstantVariable.create(inst.argval)], {}  # type: ignore[arg-type]
+            self,  # type: ignore[arg-type]
+            [obj, ConstantVariable.create(inst.argval)],
+            {},
         )
 
     def create_call_resume_at(self, offset):
@@ -2514,7 +2581,11 @@ class InstructionTranslatorBase(
         val = self.stack[-1]
         assert isinstance(val, ExceptionVariable)
         if val.exc_type is StopIteration:
-            new_val = variables.BuiltinVariable(RuntimeError).call_function(self, [], {})  # type: ignore[arg-type]
+            new_val = variables.BuiltinVariable(RuntimeError).call_function(
+                self,  # type: ignore[arg-type]
+                [],
+                {},
+            )
             self.stack[-1] = new_val
 
     def DICT_MERGE(self, inst):
@@ -2721,7 +2792,7 @@ class InstructionTranslatorBase(
             isinstance(ctx, GenericContextWrappingVariable)
             and not ctx.supports_graph_breaks()
         ):
-            self.generic_context_manager_depth += 1
+            self.active_generic_context_managers.append(ctx)
 
         # Need this redundant check for mypy
         assert isinstance(
@@ -2768,9 +2839,9 @@ class InstructionTranslatorBase(
             # In 3.12+, MAKE_CELL is not longer necessarily a prefix instruction.
             # It can be generated by inlined comprehensions.
             assert isinstance(self.symbolic_locals[inst.argval], NullVariable)
-            self.symbolic_locals[
-                inst.argval
-            ] = self.output.side_effects.track_cell_new()
+            self.symbolic_locals[inst.argval] = (
+                self.output.side_effects.track_cell_new()
+            )
         else:
             self.append_prefix_inst(inst)
 
@@ -2975,7 +3046,7 @@ class InstructionTranslatorBase(
         self.current_instruction = create_instruction("NOP")
         self.block_stack = []
         # states before SETUP_WITH for checkpointing and fallback
-        self.generic_context_manager_depth = 0
+        self.active_generic_context_managers: list[GenericContextWrappingVariable] = []
         self.lineno = -1
         self.kw_names = None
         self.accept_prefix_inst = True
@@ -2985,9 +3056,9 @@ class InstructionTranslatorBase(
         # Properties of the input/output code
         self.instructions: list[Instruction] = instructions
         self.indexof: dict[Instruction, int] = get_indexof(self.instructions)
-        self.f_locals: dict[
-            str, Any
-        ] = f_locals  # needed for recording accessed locals for replay
+        self.f_locals: dict[str, Any] = (
+            f_locals  # needed for recording accessed locals for replay
+        )
         self.f_globals: dict[str, Any] = f_globals
         self.f_builtins: dict[str, Any] = f_builtins
         self.code_options: dict[str, Any] = code_options
@@ -3108,9 +3179,9 @@ class InstructionTranslator(InstructionTranslatorBase):
             self.one_graph: bool = one_graph
             self.export = export
             if self.export:
-                assert (
-                    self.one_graph
-                ), "Export without one graph - something has gone wrong."
+                assert self.one_graph, (
+                    "Export without one graph - something has gone wrong."
+                )
 
             self.symbolic_locals = {}
             # Populate `symbolic_locals` with non-cell variables.
@@ -3244,7 +3315,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         return (
             all(b.can_restore() for b in self.block_stack)
             and not self.one_graph
-            and self.generic_context_manager_depth == 0
+            and not self.active_generic_context_managers
         )
 
     def create_call_resume_at(self, inst):
@@ -3753,7 +3824,11 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             module_name = self.f_globals["__name__"]
             module_source = self.import_source(module_name)
             if "torch_package" in module_name:
-                fglobals_value = torch.package.package_importer._package_imported_modules[module_name]  # type: ignore[assignment]
+                fglobals_value = (
+                    torch.package.package_importer._package_imported_modules[
+                        module_name
+                    ]
+                )  # type: ignore[assignment]
             else:
                 fglobals_value = _import_module(module_name)
             fglobals_vt = VariableTracker.build(self, fglobals_value, module_source)
