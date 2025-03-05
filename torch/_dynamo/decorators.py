@@ -21,6 +21,7 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from . import trace_rules, variables
 from .comptime import comptime
 from .eval_frame import (
+    _NullDecorator,
     _set_stance,
     DisableContext,
     DynamoStance,
@@ -30,7 +31,7 @@ from .eval_frame import (
 )
 from .exc import IncorrectUsage
 from .external_utils import is_compiling
-from .utils import is_function
+from .utils import is_compiler_disabled, is_function
 
 
 if TYPE_CHECKING:
@@ -57,11 +58,12 @@ _R = TypeVar("_R")
 
 def run(fn=None):
     """Don't do any dynamic compiles, just use prior optimizations"""
+    ctx = _NullDecorator() if is_compiler_disabled() else RunOnlyContext()
     if fn is not None:
         fn = innermost_fn(fn)
         assert callable(fn)
-        return RunOnlyContext()(fn)
-    return RunOnlyContext()
+        return ctx(fn)
+    return ctx
 
 
 def disable(fn=None, recursive=True):
@@ -75,11 +77,12 @@ def disable(fn=None, recursive=True):
     but still process recursively invoked frames.
     """
     if recursive:
+        ctx = _NullDecorator() if is_compiler_disabled() else DisableContext()
         if fn is not None:
             fn = innermost_fn(fn)
             assert callable(fn)
-            return DisableContext()(fn)
-        return DisableContext()
+            return ctx(fn)
+        return ctx
     else:
         return skip(fn)
 
