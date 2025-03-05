@@ -14,7 +14,6 @@ import operator
 import traceback
 import typing
 import typing_extensions
-import warnings
 import weakref
 from collections import defaultdict
 from collections.abc import Generator, Mapping, Sequence
@@ -1799,7 +1798,7 @@ class _ModuleStackTracer(PythonKeyTracer):
         try:
             return Tracer.call_module(self, m, forward, args, kwargs)
         except _ModuleNotInstalledAsSubmoduleError:
-            warnings.warn(
+            log.debug(
                 f"Unable to find the path of the module {m}. "
                 "This might be because the module was not properly registered "
                 "as a submodule, which is not good practice. We will trace "
