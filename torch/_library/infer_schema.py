@@ -125,6 +125,7 @@ def infer_schema(
 
         if annotation_type not in SUPPORTED_PARAM_TYPES:
             if annotation_type in torch.utils._pytree.SUPPORTED_NODES:
+                # TODO: Move to a separate schema type for pytrees.
                 schema_type = "Any"
             elif annotation_type.__origin__ is tuple:
                 list_type = tuple_to_list(annotation_type)
