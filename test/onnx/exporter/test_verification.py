@@ -55,11 +55,13 @@ class VerificationInterpreterTest(common_utils.TestCase):
                 c = a + b
                 return c - 1
 
+        model = Model()
         args = (torch.tensor([1.0]), torch.tensor([2.0]))
-        onnx_program = torch.onnx.export(Model(), args, dynamo=True)
+        onnx_program = torch.onnx.export(model, args, dynamo=True, verbose=False)
         assert onnx_program is not None
         interpreter = _verification.VerificationInterpreter(onnx_program)
-        interpreter.run(args)
+        results = interpreter.run(args)
+        torch.testing.assert_close(results, model(*args))
         verification_infos = interpreter.verification_infos
         self.assertEqual(len(verification_infos), 3)
         for info in verification_infos:
