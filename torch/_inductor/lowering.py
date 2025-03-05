@@ -1903,6 +1903,9 @@ def fallback_handler(kernel, add_to_fallback_set=True):
             wrap_tensors, ir.FallbackKernel.create(kernel, *args, **kwargs)
         )
 
+    # This lets us detect that a lowering is a fallback handler.
+    handler._is_fallback_handler = True  # type: ignore[attr-defined]
+
     return handler
 
 
@@ -2773,6 +2776,16 @@ make_fallback(
 )
 make_fallback(
     aten._scaled_dot_product_flash_attention_for_cpu_backward.default,
+    sdpa_constraint,
+    warn=False,
+)
+make_fallback(
+    aten._scaled_dot_product_fused_attention_overrideable.default,
+    sdpa_constraint,
+    warn=False,
+)
+make_fallback(
+    aten._scaled_dot_product_fused_attention_overrideable_backward.default,
     sdpa_constraint,
     warn=False,
 )
@@ -5243,7 +5256,8 @@ def _avg_poolnd(
         else:
 
             def fn(idx):
-                return ops.truediv(fn_sum(idx, x_loader), ops.constant(divisor, dtype))
+                # C style integer division as done in native/cpu/AvgPoolKernel.cpp
+                return ops.truncdiv(fn_sum(idx, x_loader), ops.constant(divisor, dtype))
 
     else:
 
@@ -5260,7 +5274,10 @@ def _avg_poolnd(
                 factor = ops.index_expr(hend - hstart, torch.int32)
                 divide_factors.append(factor)
             divide_factor = functools.reduce(ops.mul, divide_factors)
-            return ops.truediv(fn_sum(idx, x_loader), divide_factor)
+            if dtype.is_floating_point:
+                return ops.truediv(fn_sum(idx, x_loader), divide_factor)
+            # C style integer division as done in native/cpu/AvgPoolKernel.cpp
+            return ops.truncdiv(fn_sum(idx, x_loader), divide_factor)
 
     rv = Pointwise.create(
         device=x.get_device(),

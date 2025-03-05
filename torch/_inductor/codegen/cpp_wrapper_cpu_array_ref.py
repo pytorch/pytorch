@@ -230,11 +230,10 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                     ) {
                     """
 
-                if config.aot_inductor.debug_compile:
-                    self.generate_input_output_runtime_checks()
-                    run_impl_proto += """
-                        __check_inputs_outputs(input_handles, output_handles);
-                    """
+                self.generate_input_output_runtime_checks()
+                run_impl_proto += """
+                    __check_inputs_outputs(input_handles, output_handles);
+                """
 
                 if config.aot_inductor.use_minimal_arrayref_interface:
                     self.prefix.splice(
