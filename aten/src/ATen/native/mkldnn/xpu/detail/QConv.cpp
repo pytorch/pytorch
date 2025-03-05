@@ -131,8 +131,8 @@ at::Tensor quantized_convolution(
   // quant, aka mask=0. Per-channel quantization on activation is not
   // supported in conv.
   mask_weight = weight_zero_points.numel() > 1 ? 1 : 0;
-  if(groups>1)
-    mask_weight = 2^0 | 2^1; // 2^0 (group) + 2^1 (output channel)
+  if (groups > 1 && weight_zero_points.numel() > 1)
+    mask_weight = 2 ^ 0 | 2 ^ 1; // 2^0 (group) | 2^1 (output channel)
   dnnl::primitive_attr pattr;
 
   bool src_need_zp = (act_scale != 0);
