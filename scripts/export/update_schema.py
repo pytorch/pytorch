@@ -23,9 +23,9 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    assert os.path.exists(
-        args.prefix
-    ), f"Assuming path {args.prefix} is the root of pytorch directory, but it doesn't exist."
+    assert os.path.exists(args.prefix), (
+        f"Assuming path {args.prefix} is the root of pytorch directory, but it doesn't exist."
+    )
 
     commit = schema_check.update_schema()
 
@@ -40,7 +40,9 @@ if __name__ == "__main__":
                 f"Treespec version downgraded from {commit.base['TREESPEC_VERSION']} to {commit.result['TREESPEC_VERSION']}."
             )
     else:
-        assert args.force_unsafe, "Existing schema yaml file not found, please use --force-unsafe to try again."
+        assert args.force_unsafe, (
+            "Existing schema yaml file not found, please use --force-unsafe to try again."
+        )
 
     next_version, reason = schema_check.check(commit, args.force_unsafe)
 

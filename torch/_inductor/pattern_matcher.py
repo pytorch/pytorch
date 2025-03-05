@@ -90,20 +90,17 @@ NodeOrConstant = Union[Constant, torch.fx.Node]
 class SearchFn(Protocol):
     __name__: str
 
-    def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        ...
+    def __call__(self, *args: Any, **kwargs: Any) -> Any: ...
 
 
 class ReplaceFn(Protocol):
-    def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        ...
+    def __call__(self, *args: Any, **kwargs: Any) -> Any: ...
 
 
 class TraceFn(Protocol):
     def __call__(
         self, fn: Union[SearchFn, ReplaceFn], *args: Any, **kwargs: Any
-    ) -> torch.fx.GraphModule:
-        ...
+    ) -> torch.fx.GraphModule: ...
 
 
 T = TypeVar("T")
@@ -254,17 +251,32 @@ class Match:
             else contextlib.nullcontext()
         )
 
+        def should_propagate_arg_kwarg_vals(nodes: list[torch.fx.Node]) -> bool:
+            if len(nodes) != 1:
+                return False
+            node = nodes[0]
+            if "arg_kwarg_vals" not in node.meta:
+                return False
+            return node.target in OrderedSet(
+                [
+                    torch.ops.higher_order.triton_kernel_wrapper_functional,
+                    torch.ops.higher_order.auto_functionalized,
+                    torch.ops.higher_order.auto_functionalized_v2,
+                ]
+            )
+
         with context:
             if trace_fn is None:
                 trace_fn = functools.partial(
                     fwd_only, run_functional_passes=run_functional_passes
                 )
-            if len(self.nodes) == 1 and "arg_kwarg_vals" in self.nodes[0].meta:
-                # arg_kwarg_vals are the FakeTensor vals we saw during
-                # AOTDispatcher tracing that match the eager-mode metadata.
-                # We want to use these vals to trace out the replacement graph,
-                # so that any arg_kwarg_vals in the replacement graph are
-                # set correctly.
+
+            if should_propagate_arg_kwarg_vals(self.nodes):
+                # Our strategy is:
+                # 1) trace out the graph with arg_kwarg_vals (which have accurate eager-mode metadata)
+                # 2) trace out the graph with vals (which have the accurate Inductor metadata)
+                # 3) Propagate the arg_kwarg_vals from the first graph to the second.
+                # 4) Use the second graph as the replacement graph.
 
                 # Construct a map of node -> FakeTensor val in arg_kwarg_vals
                 node_to_val = {}
@@ -280,12 +292,34 @@ class Match:
                 torch.utils._pytree.tree_map(
                     record, (match_args, match_kwargs), (fake_args, fake_kwargs)
                 )
-
                 # map args to their FakeTensor val in arg_kwarg_vals
                 example_vals = torch.fx.map_arg(args, lambda arg: node_to_val[arg])
+
+                # first graph
+                graph_with_eager_vals = trace_fn(replacement_fn, example_vals)
+
+                # second graph
+                example_vals = torch.fx.map_arg(args, lambda arg: arg.meta["val"])
+                replacement = trace_fn(graph_with_eager_vals, example_vals)
+
+                # propagate metadata from first graph to second
+                # NB: This assertion might not be true in general, but it is true for
+                # the two use cases we have
+                # (triton_kernel_wrapper_functional, auto_functionalized)
+                assert len(graph_with_eager_vals.graph.nodes) == len(
+                    replacement.graph.nodes
+                )
+                for old_node, new_node in zip(
+                    graph_with_eager_vals.graph.nodes, replacement.graph.nodes
+                ):
+                    if "arg_kwarg_vals" in old_node.meta:
+                        new_node.meta["arg_kwarg_vals"] = old_node.meta[
+                            "arg_kwarg_vals"
+                        ]
+
             else:
                 example_vals = torch.fx.map_arg(args, lambda arg: arg.meta["val"])
-            replacement = trace_fn(replacement_fn, example_vals)
+                replacement = trace_fn(replacement_fn, example_vals)
             if len(self.nodes) == 1:
                 for n in replacement.graph.nodes:
                     _transfer_meta(
@@ -389,8 +423,7 @@ class PatternExpr(ABC):
     """
 
     @abstractmethod
-    def _match(self, node: torch.fx.Node, ctx: MatchContext) -> MatchResult:
-        ...
+    def _match(self, node: torch.fx.Node, ctx: MatchContext) -> MatchResult: ...
 
     def match(self, node: torch.fx.Node) -> MatchResult:
         try:
@@ -513,8 +546,7 @@ class _TargetExpr(PatternExpr):
 
     @property
     @abstractmethod
-    def op(self) -> str:
-        ...
+    def op(self) -> str: ...
 
     def fns_repr(self) -> str:
         first_repr = self.fns[0]
@@ -1021,8 +1053,9 @@ class PatternPrettyPrinter:
 
 
 class _PassDictsType(Protocol):
-    def __getitem__(self, k: tuple[str, torch.fx.node.Target]) -> list[PatternEntry]:
-        ...
+    def __getitem__(
+        self, k: tuple[str, torch.fx.node.Target]
+    ) -> list[PatternEntry]: ...
 
 
 @dataclasses.dataclass
@@ -1111,6 +1144,9 @@ class ReplacementPatternEntry(PatternEntry):
                         old_node=node,
                         pass_name="Interpreter_Replacer",
                     )
+                    # This function copy-pastes the replacement graph into
+                    # the graph. If the replacement graph had any arg_kwarg_vals,
+                    # or val/tensor_meta, we propagate those over.
                     if "arg_kwarg_vals" in node.meta:
                         result.meta["arg_kwarg_vals"] = node.meta["arg_kwarg_vals"]
                     if "val" in node.meta and "val" not in result.meta:
@@ -1951,7 +1987,10 @@ def fx_to_pattern(
         get_attr = _not_implemented
 
         def placeholder(
-            self, target: str, args: Sequence[Any], kwargs: Mapping[str, Any]  # type: ignore[override]
+            self,
+            target: str,  # type: ignore[override]
+            args: Sequence[Any],
+            kwargs: Mapping[str, Any],
         ) -> Union[ExclusiveKeywordArg, KeywordArg]:
             n = next(argnum)
             if n < len(argnames):
@@ -1968,7 +2007,10 @@ def fx_to_pattern(
                 return KeywordArg(name)
 
         def call_function(
-            self, target: str, args: Sequence[Any], kwargs: Mapping[str, Any]  # type: ignore[override]
+            self,
+            target: str,  # type: ignore[override]
+            args: Sequence[Any],
+            kwargs: Mapping[str, Any],
         ) -> PatternExpr:
             process_arg_fn = process_arg
             # Indexing is critical for matching getitem nodes, so we can't ignore int args here
