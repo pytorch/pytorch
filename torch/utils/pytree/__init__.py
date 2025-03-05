@@ -221,9 +221,8 @@ def register_pytree_node(  # type: ignore[no-any-unimported]
     """
     _register_pytree_node(
         cls,
-        # intentionally use `*_func` over `*_fn` to match annotations
-        flatten_fn=flatten_func,
-        unflatten_fn=unflatten_func,
+        flatten_func,
+        unflatten_func,
         serialized_type_name=serialized_type_name,
         to_dumpable_context=to_dumpable_context,
         from_dumpable_context=from_dumpable_context,
