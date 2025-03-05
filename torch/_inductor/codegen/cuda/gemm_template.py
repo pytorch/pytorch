@@ -766,7 +766,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             return False
 
         return True
-        
+
     def filter_op(
         self,
         op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
@@ -1214,15 +1214,18 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         self,
         op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
     ) -> bool:
-        # henry I am here
         import cutlass_library.library as cutlass_lib
 
         has_bias = len(self.input_nodes) >= 3 and self.input_nodes[2] is not None
         if has_bias:
             Bias = self.input_nodes[2]
             # bias dtype
-            op.C.element = cutlass_utils.torch_dtype_to_cutlass_type(Bias.get_layout().dtype)
-            assert op.C.element == op.D.element, f"Expect C and D to have the same dtype, found {op.C.element} and {op.D.element}"
+            op.C.element = cutlass_utils.torch_dtype_to_cutlass_type(
+                Bias.get_layout().dtype
+            )
+            assert op.C.element == op.D.element, (
+                f"Expect C and D to have the same dtype, found {op.C.element} and {op.D.element}"
+            )
 
             # Bias layout
             bias_layout = CUTLASSGemmTemplate.cutlass_layout(Bias.get_layout())

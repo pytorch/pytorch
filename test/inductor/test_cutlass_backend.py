@@ -975,7 +975,7 @@ class TestCutlassBackend(TestCase):
 
         This test doesn't compile and check the correctness of the ops.
 
-        NOTE: K has to be even. 
+        NOTE: K has to be even.
         """
 
         inputs = [
@@ -1017,7 +1017,10 @@ class TestCutlassBackend(TestCase):
                 with self.assertRaises(InductorError):
                     torch.compile(torch.mm, dynamic=False)(*input)
 
-                self.assertTrue(sa.called, f"autotune_select_algorithm was not called  with shape M={M}, N={N}, K={K}")
+                self.assertTrue(
+                    sa.called,
+                    f"autotune_select_algorithm was not called  with shape M={M}, N={N}, K={K}",
+                )
                 args, _ = sa.call_args
                 op_name, choices, _, __ = args
                 assert op_name == "mm"
