@@ -186,7 +186,9 @@ ONNXProgram(
                 )
         temporary_outputs = [values[name] for name in value_names]
         with _set_graph_outputs(self.model.graph, temporary_outputs):
-            return self(*args, **kwargs)
+            result = self(*args, **kwargs)
+        self.release()
+        return result
 
     @property
     def model_proto(self) -> onnx.ModelProto:
