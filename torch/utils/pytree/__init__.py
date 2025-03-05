@@ -171,18 +171,12 @@ else:
     )
 
 
-def register_pytree_node(  # type: ignore[no-any-unimported]
+def register_pytree_node(
     cls: type[_Any],
     /,
     # intentionally use `*_func` over `*_fn` to match annotations
     flatten_func: FlattenFunc,
     unflatten_func: UnflattenFunc,
-    *,
-    serialized_type_name: _Optional[str] = None,
-    to_dumpable_context: _Optional[ToDumpableContextFunc] = None,
-    from_dumpable_context: _Optional[FromDumpableContextFunc] = None,
-    # intentionally use `*_func` over `*_fn` to match annotations
-    flatten_with_keys_func: _Optional[FlattenWithKeysFunc] = None,
 ) -> None:
     """Register a container-like type as pytree node.
 
@@ -195,17 +189,6 @@ def register_pytree_node(  # type: ignore[no-any-unimported]
         unflatten_func (callable): A function taking two arguments: the unflattened children, and
             the auxiliary data that was returned by ``flatten_func`` and stored in the treespec.
             The function should return an instance of ``cls``.
-        serialized_type_name (str, optional): A keyword argument used to specify the fully
-            qualified name used when serializing the tree spec.
-        to_dumpable_context (callable, optional): An optional keyword argument to custom specify how
-            to convert the context of the pytree to a custom json dumpable representation. This is
-            used for json serialization, which is being used in :mod:`torch.export` right now.
-        from_dumpable_context (callable, optional): An optional keyword argument to custom specify
-            how to convert the custom json dumpable representation of the context back to the
-            original context. This is used for json deserialization, which is being used in
-            :mod:`torch.export` right now.
-        flatten_with_keys_func (callable, optional): An optional keyword argument to specify how to
-            access each pytree leaf's keypath when flattening and tree-mapping.
 
     Example::
 
@@ -223,11 +206,6 @@ def register_pytree_node(  # type: ignore[no-any-unimported]
         cls,
         flatten_func,
         unflatten_func,
-        serialized_type_name=serialized_type_name,
-        to_dumpable_context=to_dumpable_context,
-        from_dumpable_context=from_dumpable_context,
-        # intentionally use `*_func` over `*_fn` to match annotations
-        flatten_with_keys_fn=flatten_with_keys_func,
     )
 
 
