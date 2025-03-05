@@ -723,6 +723,36 @@ class AOTAutogradCacheTests(InductorTestCase):
             result = f()
             self.assertEqual(result[0].device, torch.device("cuda:1"))
 
+    @inductor_config.patch("fx_graph_cache", True)
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_multiple_compile_triton_kernels(self):
+        """
+        When we cache hit on AOTAutogradCache, we need to still clear
+        CompiledTritonKernels after compiling the kernel.
+        """
+        from torch._inductor.async_compile import CompiledTritonKernels
+
+        @torch.compile
+        def f(x, y):
+            return x.sin() + y
+
+        x = torch.randn(10, device="cuda")
+        y = torch.randn(10, device="cuda")
+        with torch.no_grad():
+            result = f(x, y)
+            self.assertEqual(result, x.sin() + y)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(len(CompiledTritonKernels._cache), 0)
+
+        self._clear_dynamo_and_codecache()
+        with torch.no_grad():
+            result = f(x, y)
+            self.assertEqual(result, x.sin() + y)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+        self.assertEqual(len(CompiledTritonKernels._cache), 0)
+
 
 @inductor_config.patch("fx_graph_cache", True)
 class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
