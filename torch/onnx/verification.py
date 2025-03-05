@@ -6,6 +6,17 @@ ONNX Runtime is required, and is used as the ONNX backend for export verificatio
 
 from __future__ import annotations
 
+
+__all__ = [
+    "OnnxBackend",
+    "VerificationOptions",
+    "verify",
+    "check_export_model_diff",
+    "VerificationInfo",
+    "VerificationInterpreter",
+    "verify_onnx_program",
+]
+
 import contextlib
 import copy
 import dataclasses
@@ -31,8 +42,19 @@ from torch import _C
 from torch.onnx import _constants, _experimental, utils
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import onnx_proto_utils
+from torch.onnx._internal.exporter._verification import (
+    VerificationInfo,
+    VerificationInterpreter,
+    verify_onnx_program,
+)
 from torch.types import Number
 
+
+VerificationInfo.__module__ = "torch.onnx.verification"
+VerificationInterpreter.__module__ = "torch.onnx.verification"
+verify_onnx_program.__module__ = "torch.onnx.verification"
+
+# Everything below are deprecated ##############################################
 
 _ORT_PROVIDERS = ("CPUExecutionProvider",)
 
