@@ -1014,7 +1014,7 @@ class TestCutlassBackend(TestCase):
                 M, K = A.shape
                 _, N = B.shape
 
-                with self.assertRaises(InductorError):
+                with self.assertRaises(InductorError, r".*NoValidChoicesError.*"):
                     torch.compile(torch.mm, dynamic=False)(*input)
 
                 self.assertTrue(
@@ -1035,7 +1035,8 @@ class TestCutlassBackend(TestCase):
                 self.assertGreater(
                     cuda_template_count,
                     0,
-                    f"No CUDATemplateCaller choices found for matrix multiplication with shape M={M}, N={N}, K={K}",
+                    "No CUDATemplateCaller choices found for matmul with shape "
+                    f"M={M}, N={N}, K={K}",
                 )
 
     @unittest.skipIf(not SM80OrLater, "need sm_80")
