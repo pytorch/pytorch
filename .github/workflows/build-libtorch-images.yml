@@ -1,23 +1,24 @@
 name: Build libtorch docker images
 
 on:
-  push:
-    branches:
-      - main
-      - release/*
-    tags:
-      # NOTE: Binary build pipelines should only get triggered on release candidate or nightly builds
-      # Release candidate tags look like: v1.11.0-rc1
-      - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
-    paths:
-      - '.ci/docker/libtorch/*'
-      - '.ci/docker/common/*'
-      - .github/workflows/build-libtorch-images.yml
-  pull_request:
-    paths:
-      - '.ci/docker/libtorch/*'
-      - '.ci/docker/common/*'
-      - .github/workflows/build-libtorch-images.yml
+  workflow_dispatch:
+  # push:
+  #   branches:
+  #     - main
+  #     - release/*
+  #   tags:
+  #     # NOTE: Binary build pipelines should only get triggered on release candidate or nightly builds
+  #     # Release candidate tags look like: v1.11.0-rc1
+  #     - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
+  #   paths:
+  #     - '.ci/docker/libtorch/*'
+  #     - '.ci/docker/common/*'
+  #     - .github/workflows/build-libtorch-images.yml
+  # pull_request:
+  #   paths:
+  #     - '.ci/docker/libtorch/*'
+  #     - '.ci/docker/common/*'
+  #     - .github/workflows/build-libtorch-images.yml
 
 env:
   DOCKER_REGISTRY: "docker.io"

@@ -2,25 +2,25 @@ name: Build manywheel docker images
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-      - release/*
-    tags:
-      # NOTE: Binary build pipelines should only get triggered on release candidate or nightly builds
-      # Release candidate tags look like: v1.11.0-rc1
-      - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
-    paths:
-      - '.ci/docker/common/*'
-      - '.ci/docker/manywheel/*'
-      - '.ci/docker/manywheel/build_scripts/*'
-      - .github/workflows/build-manywheel-images.yml
-  pull_request:
-    paths:
-      - '.ci/docker/common/*'
-      - '.ci/docker/manywheel/*'
-      - '.ci/docker/manywheel/build_scripts/*'
-      - .github/workflows/build-manywheel-images.yml
+  # push:
+  #   branches:
+  #     - main
+  #     - release/*
+  #   tags:
+  #     # NOTE: Binary build pipelines should only get triggered on release candidate or nightly builds
+  #     # Release candidate tags look like: v1.11.0-rc1
+  #     - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
+  #   paths:
+  #     - '.ci/docker/common/*'
+  #     - '.ci/docker/manywheel/*'
+  #     - '.ci/docker/manywheel/build_scripts/*'
+  #     - .github/workflows/build-manywheel-images.yml
+  # pull_request:
+  #   paths:
+  #     - '.ci/docker/common/*'
+  #     - '.ci/docker/manywheel/*'
+  #     - '.ci/docker/manywheel/build_scripts/*'
+  #     - .github/workflows/build-manywheel-images.yml
 
 
 env:
