@@ -1,3 +1,4 @@
+import functools
 import logging
 from collections.abc import Sequence
 from typing import Any, Optional
@@ -508,6 +509,16 @@ def tuned_scaled_mm(
         mat_a, mat_b, layout=layout, out_dtype=out_dtype
     )
 
+    log.info(
+        "Tuned aten._scaled_mm.default: m=%s, n=%s, k=%s, mat1_dtype=%s, mat2_dtype=%s, output_layout=%s",
+        m,
+        n,
+        k,
+        mat_a.get_dtype(),
+        mat_b.get_dtype(),
+        layout,
+    )
+
     check_supported_striding(mat_a, mat_b)
 
     scale_a, scale_b = realize_inputs(scale_a, scale_b)
@@ -553,6 +564,12 @@ def tuned_scaled_mm(
             for config in scaled_mm_configs(m, n, k):
                 if k == 16 and config.kwargs["BLOCK_M"] >= 64:
                     continue  # Triton crashes in this case
+
+                # On NVIDIA B200 GPUs, K dim must be >= 32 for tcgen05.mma.kind::f8f6f4.* PTX instruction to be valid
+                # source: https://docs.nvidia.com/cuda/parallel-thread-execution/#tcgen05-matrix-shape
+                if using_b200() and k < 32:
+                    continue
+
                 kwargs = scaled_mm_options(
                     config, m, n, k, layout, scale_a, scale_b, use_fast_accum
                 )
@@ -584,3 +601,13 @@ def tuned_scaled_mm(
             "All choices for scaled_mm were invalid, using ATen backend as fallback"
         )
         return aten_choice.output_node()
+
+
+@functools.lru_cache
+def using_b200() -> bool:
+    """Returns true if the device is a NVIDIA B200, otherwise returns false."""
+    if not torch.cuda.is_available():
+        return False
+    # compute capability 10.0 or 10.0a is NVIDIA B200
+    device_properties = torch.cuda.get_device_properties(torch.cuda.current_device())
+    return device_properties.major == 10

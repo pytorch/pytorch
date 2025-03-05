@@ -59,7 +59,8 @@ aten = torch.ops.aten
 mm_template = TritonTemplate(
     name="mm",
     grid=mm_grid,
-    source=r"""
+    source=(
+        r"""
 {{def_kernel("A", "B")}}
     M = {{size("A", 0)}}
     N = {{size("B", 1)}}
@@ -124,11 +125,11 @@ mm_template = TritonTemplate(
     # inductor generates a suffix
     {{store_output(("idx_m", "idx_n"), "acc", "mask")}}
 """
-    if torch.version.hip is None
-    # FIXME: To get around rocm failures like https://github.com/pytorch/pytorch/actions/runs/13123783322/job/36617154943
-    # The only difference between the two templates is M >= BLOCK_M and N >= BLOCK_N checking.
-    # See more details in https://github.com/pytorch/pytorch/pull/146293
-    else r"""
+        if torch.version.hip is None
+        # FIXME: To get around rocm failures like https://github.com/pytorch/pytorch/actions/runs/13123783322/job/36617154943
+        # The only difference between the two templates is M >= BLOCK_M and N >= BLOCK_N checking.
+        # See more details in https://github.com/pytorch/pytorch/pull/146293
+        else r"""
 {{def_kernel("A", "B")}}
     M = {{size("A", 0)}}
     N = {{size("B", 1)}}
@@ -192,7 +193,8 @@ mm_template = TritonTemplate(
 
     # inductor generates a suffix
     {{store_output(("idx_m", "idx_n"), "acc", "mask")}}
-""",
+"""
+    ),
 )
 
 persistent_tma_mm_template = TritonTemplate(
@@ -356,6 +358,16 @@ def tuned_mm(mat1, mat2, *, layout=None):
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
     name = "mm"
 
+    log.info(
+        "Tuned aten.mm: m=%s, n=%s, k=%s, mat1_dtype=%s, mat2_dtype=%s, output_layout=%s",
+        m,
+        n,
+        k,
+        mat1.get_dtype(),
+        mat2.get_dtype(),
+        layout,
+    )
+
     aten_layout = layout
     if not use_max_autotune():
         aten_layout = FlexibleLayout(
@@ -471,6 +483,17 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
     m, n, k, layout, mat1, mat2 = mm_args(
         mat1, mat2, layout=layout, out_dtype=torch.int32
     )
+
+    log.info(
+        "Tuned aten._int_mm: m=%s, n=%s, k=%s, mat1_dtype=%s, mat2_dtype=%s, output_layout=%s",
+        m,
+        n,
+        k,
+        mat1.get_dtype(),
+        mat2.get_dtype(),
+        layout,
+    )
+
     static_shape, is_nonzero = _is_static_problem(layout)
     use_cutlass = static_shape and is_nonzero and use_cutlass_template(layout, m, n, k)
 
@@ -515,6 +538,17 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     ordered_kwargs_for_cpp_kernel = ("beta", "alpha")
     m, n, k, layout, mat1, mat2, inp_expanded = mm_args(mat1, mat2, inp, layout=layout)
     static_shape, is_nonzero = _is_static_problem(layout)
+
+    log.info(
+        "Tuned aten.addmm: m=%s, n=%s, k=%s, mat1_dtype=%s, mat2_dtype=%s, output_layout=%s",
+        m,
+        n,
+        k,
+        mat1.get_dtype(),
+        mat2.get_dtype(),
+        layout,
+    )
+
     if (not is_nonzero) or (not use_max_autotune()):
         # Use a FlexibleLayout if we are not autotuning.
         # This allows padding strides for the output.
