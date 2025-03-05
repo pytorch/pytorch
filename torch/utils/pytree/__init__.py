@@ -93,17 +93,21 @@ else:
                 return f"{__name__}.cxx"
             if name == "__file__":
                 return python.__file__.removesuffix("_python.py") + "_cxx_pytree.py"
-            if name.startswith("_"):
-                raise AttributeError(
-                    f"module {self.__name__!r} has not been imported yet: "
-                    f"accessing attribute {name!r}"
-                )
 
-            # Lazy import
-            cxx = _import_cxx_pytree()
+            cxx = globals().get("cxx")
+            if cxx is None:
+                if name.startswith("_"):
+                    raise AttributeError(
+                        f"module {self.__name__!r} has not been imported yet: "
+                        f"accessing attribute {name!r}"
+                    )
 
-            # Replace the temporary module object (`self`) in sys.modules
-            _sys.modules[f"{__name__}.cxx"] = globals()["cxx"] = cxx
+                # Lazy import
+                cxx = _import_cxx_pytree()
+
+                # Replace the temporary module object (`self`) in sys.modules
+                _sys.modules[f"{__name__}.cxx"] = globals()["cxx"] = cxx
+
             return getattr(cxx, name)
 
     # This allows the following statements to work properly:
