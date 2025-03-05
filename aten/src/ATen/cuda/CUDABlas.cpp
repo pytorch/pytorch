@@ -14,6 +14,7 @@
 #include <c10/macros/Export.h>
 #include <c10/util/env.h>
 #include <c10/util/irange.h>
+#include <c10/core/ScalarType.h>
 
 #ifdef USE_ROCM
 #include <hipblaslt/hipblaslt-ext.hpp>
@@ -225,6 +226,20 @@ void* _getWorkspaceWithoutHandle() {
   return workspace_it->second.mutable_get();
 }
 
+void* _getWorkspace(size_t& workspaceSize) {
+#if (defined(USE_ROCM) || defined(FBCODE_CAFFE2))
+  workspaceSize = _getWorkspaceSize();
+  auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
+  auto workspace = allocator.allocate(workspaceSize);
+  auto workspace_ptr = workspace.mutable_get();
+  TORCH_CHECK(workspace_ptr != nullptr, "OOM trying to allocate workspace for cublaslt");
+#else
+  workspaceSize = at::cuda::getChosenWorkspaceSize();
+  auto workspace_ptr = _getWorkspaceWithoutHandle();
+#endif
+  return workspace_ptr;
+}
+
 } // anonymous namespace
 
 namespace at::cuda::blas {
@@ -391,6 +406,14 @@ inline void bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {
   CuBlasLtMatmulDescriptor computeDesc(computeType, scaleType);
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSA, opa);
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSB, opb);
+#ifndef USE_ROCM
+  if (at::globalContext()._SMCarveout_EXPERIMENTAL().has_value()) {
+    computeDesc.setAttribute<int32_t>(
+        CUBLASLT_MATMUL_DESC_SM_COUNT_TARGET,
+        at::cuda::getCurrentDeviceProperties()->multiProcessorCount -
+            at::globalContext()._SMCarveout_EXPERIMENTAL().value());
+  }
+#endif
   CuBlasLtMatrixLayout Adesc(abcType, m, k, lda, opa == CUBLAS_OP_T);
   CuBlasLtMatrixLayout Bdesc(abcType, k, n, ldb, opb == CUBLAS_OP_T);
   CuBlasLtMatrixLayout Cdesc(abcType, m, n, ldc);
@@ -406,13 +429,8 @@ inline void bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {
   }
 
   CuBlasLtMatmulPreference preference;
-#ifdef USE_ROCM
-  // See https://github.com/pytorch/pytorch/issues/73328 for reasoning behind
-  // setting this to 1M.
-  size_t workspaceSize = _getWorkspaceSize();
-#else
-  size_t workspaceSize = getChosenWorkspaceSize();
-#endif
+  size_t workspaceSize = 0;
+  auto workspace_ptr = _getWorkspace(workspaceSize);
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, workspaceSize);
 
 #ifndef USE_ROCM
@@ -422,15 +440,6 @@ inline void bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_A_BYTES, a_alignment);
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_B_BYTES, b_alignment);
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_C_BYTES, c_alignment);
-#endif
-
-#ifdef USE_ROCM
-  auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
-  auto workspace = allocator.allocate(workspaceSize);
-  auto workspace_ptr = workspace.mutable_get();
-  TORCH_CHECK(workspace_ptr != nullptr, "OOM trying to allocate workspace for cublaslt");
-#else
-  auto workspace_ptr = _getWorkspaceWithoutHandle();
 #endif
 
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
@@ -1331,6 +1340,14 @@ void gemm_and_bias(
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSA, transa);
   cublasOperation_t transb = transpose_mat2 ? CUBLAS_OP_T : CUBLAS_OP_N;
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSB, transb);
+#ifndef USE_ROCM
+  if (at::globalContext()._SMCarveout_EXPERIMENTAL().has_value()) {
+    computeDesc.setAttribute<int32_t>(
+        CUBLASLT_MATMUL_DESC_SM_COUNT_TARGET,
+        at::cuda::getCurrentDeviceProperties()->multiProcessorCount -
+            at::globalContext()._SMCarveout_EXPERIMENTAL().value());
+  }
+#endif
   cublasLtEpilogue_t epilogue = CUBLASLT_EPILOGUE_BIAS;
   if (activation == GEMMAndBiasActivationEpilogue::RELU) {
     epilogue = CUBLASLT_EPILOGUE_RELU_BIAS;
@@ -1350,14 +1367,8 @@ void gemm_and_bias(
   CuBlasLtMatrixLayout Cdesc(abcType, m, n, result_ld);
 
   CuBlasLtMatmulPreference preference;
-#ifdef USE_ROCM
-  // See https://github.com/pytorch/pytorch/issues/73328 for reasoning behind
-  // setting this to 1M.
-  size_t workspaceSize = _getWorkspaceSize();
-#else
-  size_t workspaceSize = getChosenWorkspaceSize();
-#endif
-
+  size_t workspaceSize = 0;
+  auto workspace_ptr = _getWorkspace(workspaceSize);
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, workspaceSize);
 
 #ifndef USE_ROCM
@@ -1372,16 +1383,6 @@ void gemm_and_bias(
 #endif
 
   auto stream = c10::cuda::getCurrentCUDAStream();
-
-#ifdef USE_ROCM
-  auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
-  auto workspace = allocator.allocate(workspaceSize);
-  auto workspace_ptr = workspace.mutable_get();
-  TORCH_CHECK(workspace_ptr != nullptr, "OOM trying to allocate workspace for cublaslt");
-#else
-  auto workspace_ptr = _getWorkspaceWithoutHandle();
-#endif
-
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
   int returnedResult = 0;
   cublasLtHandle_t ltHandle = at::cuda::getCurrentCUDABlasLtHandle();
@@ -1519,10 +1520,12 @@ void scaled_gemm(
     const void* mat1_scale_ptr,
     int64_t mat1_ld,
     ScalarType mat1_dtype,
+    ScalarType mat1_scale_dtype,
     const void* mat2_ptr,
     const void* mat2_scale_ptr,
     int64_t mat2_ld,
     ScalarType mat2_dtype,
+    ScalarType mat2_scale_dtype,
     const void* bias_ptr,
     ScalarType bias_dtype,
     void* result_ptr,
@@ -1539,24 +1542,30 @@ void scaled_gemm(
   CuBlasLtMatmulDescriptor computeDesc(computeType, scaleType);
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSA, _cublasOpFromChar(transa));
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSB, _cublasOpFromChar(transb));
+  cublasLtMatmulDescAttributes_t matmulDescA = CUBLASLT_MATMUL_DESC_A_SCALE_POINTER;
+  cublasLtMatmulDescAttributes_t matmulDescB = CUBLASLT_MATMUL_DESC_B_SCALE_POINTER;
 #if defined(USE_ROCM) && defined(HIPBLASLT_VEC_EXT)
   if (use_rowwise) {
-    // swapped
-    computeDesc.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT, mat2_scale_ptr);
-    computeDesc.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT, mat1_scale_ptr);
+    matmulDescA = HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT;
+    matmulDescB = HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT;
   }
-  else
 #else
   // rowwise isn't supported using cublaslt or older hipblaslt
   TORCH_INTERNAL_ASSERT(use_rowwise == false, "rowwise scaled_gemm not supported with blaslt");
 #endif
-  {
-    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_A_SCALE_POINTER, mat1_scale_ptr);
-    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_B_SCALE_POINTER, mat2_scale_ptr);
-  }
+  computeDesc.setAttribute(matmulDescA, mat1_scale_ptr);
+  computeDesc.setAttribute(matmulDescB, mat2_scale_ptr);
   if (result_scale_ptr != nullptr) {
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_D_SCALE_POINTER, result_scale_ptr);
   }
+#ifndef USE_ROCM
+  if (at::globalContext()._SMCarveout_EXPERIMENTAL().has_value()) {
+    computeDesc.setAttribute<int32_t>(
+        CUBLASLT_MATMUL_DESC_SM_COUNT_TARGET,
+        at::cuda::getCurrentDeviceProperties()->multiProcessorCount -
+            at::globalContext()._SMCarveout_EXPERIMENTAL().value());
+  }
+#endif
 #ifndef USE_ROCM
   const int8_t fastAccuMode = use_fast_accum ? 1 : 0;
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_FAST_ACCUM, fastAccuMode);
@@ -1576,17 +1585,18 @@ void scaled_gemm(
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_DATA_TYPE, ScalarTypeToCudaDataType(bias_dtype));
   }
 
-  auto stream = c10::cuda::getCurrentCUDAStream();
-  size_t workspaceSize = _getWorkspaceSize();
-#ifdef USE_ROCM
-  auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
-  auto workspace = allocator.allocate(workspaceSize);
-  auto workspace_ptr = workspace.mutable_get();
-  TORCH_CHECK(workspace_ptr != nullptr, "OOM trying to allocate workspace for cublaslt");
+  if (mat1_scale_dtype == kFloat8_e8m0fnu && mat2_scale_dtype == kFloat8_e8m0fnu) {
+#if CUDA_VERSION >= 12080
+    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_A_SCALE_MODE, CUBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0);
+    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_B_SCALE_MODE, CUBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0);
 #else
-  auto workspace_ptr = _getWorkspaceWithoutHandle();
-#endif
+    TORCH_CHECK(false, "scaled_gemm with `torch.float8_e8m0fnu` scales is only supported for CUDA 12.8 and above");
+#endif // CUDA_VERSION >= 12080
+  }
 
+  auto stream = c10::cuda::getCurrentCUDAStream();
+  size_t workspaceSize = 0;
+  auto workspace_ptr = _getWorkspace(workspaceSize);
   CuBlasLtMatmulPreference preference;
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, workspaceSize);
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
@@ -1725,7 +1735,14 @@ void int8_gemm(
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSA, transa);
   cublasOperation_t transb = transpose_mat2 ? CUBLAS_OP_T : CUBLAS_OP_N;
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSB, transb);
-
+#ifndef USE_ROCM
+  if (at::globalContext()._SMCarveout_EXPERIMENTAL().has_value()) {
+    computeDesc.setAttribute<int32_t>(
+        CUBLASLT_MATMUL_DESC_SM_COUNT_TARGET,
+        at::cuda::getCurrentDeviceProperties()->multiProcessorCount -
+            at::globalContext()._SMCarveout_EXPERIMENTAL().value());
+  }
+#endif
 
   CuBlasLtMatrixLayout Adesc(abType, m, k, mat1_ld, transpose_mat1);
   CuBlasLtMatrixLayout Bdesc(abType, k, n, mat2_ld, transpose_mat2);
