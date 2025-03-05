@@ -7597,7 +7597,7 @@ class CommonTemplate:
             "x1 = xindex",
             "tmp0 = tl.load(in_ptr0 + (x1), None,",
         ]:
-            self.assertTrue(string, code)
+            self.assertTrue(string in code)
 
     def test_roi_align(self):
         if not has_torchvision_roi_align():
