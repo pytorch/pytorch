@@ -991,11 +991,6 @@ blockReduceGammaBetaBackwardsAligned(
       }
     }
 
-#if 0
-    T_ACC partial_dg_sum_reg[rows_per_thread_y];
-    T_ACC partial_db_sum_reg[rows_per_thread_y];
-#endif
-
     #pragma unroll
     for (int i = 0; i < rows_per_thread_y; ++i) {
       T_ACC mean_reg = WARP_SHFL(warp_mean, i, kWarpSize);
