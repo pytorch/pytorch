@@ -411,7 +411,7 @@ class TORCH_API BufHandle : public ExprHandle {
 class TORCH_API VarHandle : public ExprHandle {
  public:
   // Creates an empty VarHandle whose base Var is set to nullptr.
-  VarHandle() : ExprHandle() {}
+  VarHandle() = default;
 
   explicit VarHandle(Dtype dtype) : ExprHandle(Var::make(dtype)) {}
 

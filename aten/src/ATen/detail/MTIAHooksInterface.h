@@ -132,6 +132,10 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
     return 0;
   }
 
+  virtual void resetPeakMemoryStats(DeviceIndex device) const {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+  }
+
 };
 
 struct TORCH_API MTIAHooksArgs {};

@@ -1,3 +1,17 @@
+"""
+Dynamo profiling implementation.
+
+This module provides profiling functionality for Dynamo, including:
+- ProfileMetrics: Class for collecting and aggregating performance metrics like
+  execution time, operator counts, and fusion statistics
+- ProfileResult: Class for analyzing and reporting profiling results
+- Utilities for tracking missed/uncaptured operations
+- Functions for instrumenting FX graphs with profiling capabilities
+
+The profiler helps measure and optimize the performance of Dynamo-compiled code
+by tracking both captured and total operations, timing, and graph statistics.
+"""
+
 import dataclasses
 import os
 from typing import Any
