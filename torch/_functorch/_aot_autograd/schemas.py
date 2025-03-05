@@ -526,7 +526,14 @@ class ViewAndMutationMeta:
             + self.num_outputs_aliased_to_intermediates
         )
 
+        # Record dynamic outputs of the Dynamo traced forward graph
+        # Mark them as dynamic at the end of the runtime wrapper
         self.dynamic_outputs = any(o.dynamic_dims for o in self.output_info)
+
+        # Record dynamic outputs of the partitioned forward graph (original outputs + saved activations + ...)
+        # Mark them as dynamic
+        self.dynamic_tensors_saved_for_backward = {}
+
         # See Note: [AOTAutograd Backward Guards]
         # This is pre-computed for fast asserts on the types of our grad_outputs in the backward.
         # Eventually, we should kill this and replace with real backward guards.
