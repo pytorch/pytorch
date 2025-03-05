@@ -23,9 +23,9 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import Quantization
 from torch.fx import Node
 
 from .onednn_inductor_quantizer import (
-    _create_module_name_filter,
-    _create_operator_type_filter,
-    _OnednnInductorQuantizationAnnotation,
+    create_module_name_filter,
+    create_operator_type_filter,
+    OnednnInductorQuantizationAnnotation,
     OnednnInductorQuantizer,
 )
 
@@ -43,7 +43,7 @@ __all__ = [
 
 
 @dataclass
-class _ArmInductorQuantizationAnnotation(_OnednnInductorQuantizationAnnotation):
+class _ArmInductorQuantizationAnnotation(OnednnInductorQuantizationAnnotation):
     # _is_output_of_quantized_pattern:
     #  * Node as output node of a fusion pattern.
     #  * The fusion pattern supports int8 data type.
@@ -265,12 +265,12 @@ class ArmInductorQuantizer(OnednnInductorQuantizer):
         """
         for module_name, quantization_config in self.module_name_qconfig.items():
             self._annotate_with_config(
-                model, quantization_config, _create_module_name_filter(module_name)
+                model, quantization_config, create_module_name_filter(module_name)
             )
 
         for operator_type, quantization_config in self.operator_type_qconfig.items():
             self._annotate_with_config(
-                model, quantization_config, _create_operator_type_filter(operator_type)
+                model, quantization_config, create_operator_type_filter(operator_type)
             )
 
         if self.global_config:
