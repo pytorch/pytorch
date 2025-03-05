@@ -1189,6 +1189,21 @@ If the above doesn't work, please subtmit an issue to GitHub.
 
         self.assertEqual(fn(x, y), torch.compile(fn)(x, y))
 
+    def test_set_stance_aot_eager_then_compile(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(x, y, z):
+            return x * y * z[0]
+
+        with torch.compiler.set_stance("aot_eager_then_compile"):
+            fn(2, torch.randn(2), {0: torch.randn(2)})
+            fn(3, torch.randn(3), {0: torch.randn(3)})
+            fn(4, torch.randn(4), {0: torch.randn(4)})
+
+        # Would have been 4 without stance
+        self.assertEqual(cnts.op_count, 2)
+
     @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
     def test_mark_static_nn_module(self):
         @torch._dynamo.mark_static
