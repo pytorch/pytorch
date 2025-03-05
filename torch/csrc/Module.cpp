@@ -75,6 +75,7 @@
 #include <torch/csrc/fx/node.h>
 #include <torch/csrc/inductor/aoti_package/pybind.h>
 #include <torch/csrc/inductor/aoti_runner/pybind.h>
+#include <torch/csrc/inductor/static_cuda_launcher.h>
 #include <torch/csrc/instruction_counter/Module.h>
 #include <torch/csrc/jit/python/init.h>
 #include <torch/csrc/jit/python/python_ir.h>
@@ -1881,6 +1882,7 @@ PyObject* initModule() {
 #endif
 #ifdef USE_CUDA
   torch::cuda::initModule(module);
+  ASSERT_TRUE(StaticCudaLauncher_init(module));
 #endif
 #ifdef USE_MPS
   torch::mps::initModule(module);
