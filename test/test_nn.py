@@ -11187,15 +11187,9 @@ class TestNNDeviceType(NNTestCase):
         ref = ref_fn(shape, device=device, dtype=dtype)
         self.assertEqual(inputs.grad, ref)
 
-    @onlyCUDA
+    @onlyNativeDeviceTypes
     @dtypes(torch.half, torch.bfloat16, torch.float)
-    def test_hardswish_grad_corner_cuda(self, device, dtype):
-        self._test_hardswish_grad_corner(device, dtype, 3, torch.ones)
-        self._test_hardswish_grad_corner(device, dtype, -3, torch.zeros)
-
-    @onlyCPU
-    @dtypes(torch.half, torch.bfloat16, torch.float)
-    def test_hardswish_grad_corner_cpu(self, device, dtype):
+    def test_hardswish_grad_corner(self, device, dtype):
         self._test_hardswish_grad_corner(device, dtype, 3, torch.ones)
         self._test_hardswish_grad_corner(device, dtype, -3, torch.zeros)
 
