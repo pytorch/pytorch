@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 import sys
 
+import torch
 from torch import distributed as dist
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -28,6 +29,10 @@ if TEST_WITH_DEV_DBG_ASAN:
 class TestTraversal(FSDPTest):
     @property
     def world_size(self):
+        if torch.cuda.is_available():
+            gpu_cnt = torch.cuda.device_count()
+            if gpu_cnt < 2:
+                return gpu_cnt
         return 2
 
     @skip_if_lt_x_gpu(2)
@@ -56,7 +61,7 @@ class TestTraversal(FSDPTest):
         )
 
 
-devices = ("cuda", "hpu")
+devices = ("cuda", "hpu", "xpu")
 instantiate_device_type_tests(TestTraversal, globals(), only_for=devices)
 if __name__ == "__main__":
     run_tests()

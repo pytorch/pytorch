@@ -36,6 +36,10 @@ device_type = torch.device(get_devtype())
 class TestApply(FSDPTest):
     @property
     def world_size(self):
+        if torch.cuda.is_available():
+            gpu_cnt = torch.cuda.device_count()
+            if gpu_cnt < 2:
+                return gpu_cnt
         return 2
 
     @torch.no_grad()
@@ -109,7 +113,7 @@ class TestApply(FSDPTest):
                 transformer.apply(self._init_linear_weights)
 
 
-devices = ("cuda", "hpu")
-instantiate_device_type_tests(TestApply, globals(), only_for=devices)
+devices = ("cuda", "hpu", "xpu")
+instantiate_device_type_tests(TestApply, globals(), only_for=devices, allow_xpu=True)
 if __name__ == "__main__":
     run_tests()

@@ -8,7 +8,7 @@ import re
 import subprocess
 import sys
 import unittest
-from collections import defaultdict, deque, namedtuple, OrderedDict, UserDict
+from collections import defaultdict, namedtuple, OrderedDict, UserDict
 from dataclasses import dataclass
 from enum import auto
 from typing import Any, NamedTuple
@@ -21,9 +21,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     parametrize,
     run_tests,
-    skipIfTorchDynamo,
     subtest,
-    TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
 
@@ -406,7 +404,9 @@ class TestGenericPytree(TestCase):
                 (
                     py_pytree,
                     lambda deq: py_pytree.TreeSpec(
-                        deque, deq.maxlen, [py_pytree.LeafSpec() for _ in deq]
+                        collections.deque,
+                        deq.maxlen,
+                        [py_pytree.LeafSpec() for _ in deq],
                     ),
                 ),
                 name="py",
@@ -415,7 +415,7 @@ class TestGenericPytree(TestCase):
                 (
                     cxx_pytree,
                     lambda deq: cxx_pytree.tree_structure(
-                        deque(deq, maxlen=deq.maxlen)
+                        collections.deque(deq, maxlen=deq.maxlen)
                     ),
                 ),
                 name="cxx",
@@ -433,11 +433,11 @@ class TestGenericPytree(TestCase):
             unflattened = pytree_impl.tree_unflatten(values, treespec)
             self.assertEqual(unflattened, deq)
             self.assertEqual(unflattened.maxlen, deq.maxlen)
-            self.assertIsInstance(unflattened, deque)
+            self.assertIsInstance(unflattened, collections.deque)
 
-        run_test(deque([]))
-        run_test(deque([1.0, 2]))
-        run_test(deque([torch.tensor([1.0, 2]), 2, 10, 9, 11], maxlen=8))
+        run_test(collections.deque([]))
+        run_test(collections.deque([1.0, 2]))
+        run_test(collections.deque([torch.tensor([1.0, 2]), 2, 10, 9, 11], maxlen=8))
 
     @parametrize(
         "pytree_impl",
@@ -805,7 +805,6 @@ if "optree" in sys.modules:
             py_pytree.TreeSpec(tuple, None, []) != py_pytree.TreeSpec(list, None, []),
         )
 
-    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "Dynamo test in test_treespec_repr_dynamo.")
     def test_treespec_repr(self):
         # Check that it looks sane
         pytree = (0, [0, 0, [0]])
@@ -818,20 +817,6 @@ if "optree" in sys.modules:
                 "    *,\n"
                 "    TreeSpec(list, None, [*])])])"
             ),
-        )
-
-    @unittest.skipIf(not TEST_WITH_TORCHDYNAMO, "Eager test in test_treespec_repr.")
-    def test_treespec_repr_dynamo(self):
-        # Check that it looks sane
-        pytree = (0, [0, 0, [0]])
-        _, spec = py_pytree.tree_flatten(pytree)
-        self.assertExpectedInline(
-            repr(spec),
-            """\
-TreeSpec(tuple, None, [*,
-  TreeSpec(list, None, [*,
-    *,
-    TreeSpec(list, None, [*])])])""",
         )
 
     @parametrize(
@@ -1182,6 +1167,60 @@ TreeSpec(tuple, None, [*,
         )
         self.assertEqual(all_zeros, [dict.fromkeys(range(10), 0)])
 
+    def test_dataclass(self):
+        @dataclass
+        class Point:
+            x: torch.Tensor
+            y: torch.Tensor
+
+        py_pytree.register_dataclass(Point)
+
+        point = Point(torch.tensor(0), torch.tensor(1))
+        point = py_pytree.tree_map(lambda x: x + 1, point)
+        self.assertEqual(point.x, torch.tensor(1))
+        self.assertEqual(point.y, torch.tensor(2))
+
+    def test_constant(self):
+        # Either use `frozen=True` or `unsafe_hash=True` so we have a
+        # non-default `__hash__`.
+        @dataclass(unsafe_hash=True)
+        class Config:
+            norm: str
+
+        py_pytree.register_constant(Config)
+
+        config = Config("l1")
+        elements, spec = py_pytree.tree_flatten(config)
+        self.assertEqual(elements, [])
+        self.assertEqual(spec.context.value, config)
+
+    def test_constant_default_eq_error(self):
+        class Config:
+            def __init__(self, norm: str):
+                self.norm = norm
+
+        try:
+            py_pytree.register_constant(Config)
+            self.assertFalse(True)  # must raise error before this
+        except TypeError as e:
+            msg = "register_constant(cls) expects `cls` to have a non-default `__eq__` implementation."
+            self.assertIn(msg, str(e))
+
+    def test_constant_default_hash_error(self):
+        class Config:
+            def __init__(self, norm: str):
+                self.norm = norm
+
+            def __eq__(self, other):
+                return self.norm == other.norm
+
+        try:
+            py_pytree.register_constant(Config)
+            self.assertFalse(True)  # must raise error before this
+        except TypeError as e:
+            msg = "register_constant(cls) expects `cls` to have a non-default `__hash__` implementation."
+            self.assertIn(msg, str(e))
+
     def test_tree_map_with_path_multiple_trees(self):
         @dataclass
         class ACustomPytree:
@@ -1204,7 +1243,6 @@ TreeSpec(tuple, None, [*,
         from_one_tree = py_pytree.tree_map(lambda a: a + 2, tree1)
         self.assertEqual(from_two_trees, from_one_tree)
 
-    @skipIfTorchDynamo("dynamo pytree tracing doesn't work here")
     def test_tree_flatten_with_path_is_leaf(self):
         leaf_dict = {"foo": [(3)]}
         pytree = (["hello", [1, 2], leaf_dict],)
@@ -1293,7 +1331,6 @@ TreeSpec(tuple, None, [*,
             ],
         )
 
-    @skipIfTorchDynamo("AssertionError in dynamo")
     def test_flatten_flatten_with_key_consistency(self):
         """Check that flatten and flatten_with_key produces consistent leaves/context."""
         reg = py_pytree.SUPPORTED_NODES
@@ -1302,10 +1339,10 @@ TreeSpec(tuple, None, [*,
             list: [1, 2, 3],
             tuple: (1, 2, 3),
             dict: {"foo": 1, "bar": 2},
-            namedtuple: collections.namedtuple("ANamedTuple", ["x", "y"])(1, 2),
+            namedtuple: namedtuple("ANamedTuple", ["x", "y"])(1, 2),
             OrderedDict: OrderedDict([("foo", 1), ("bar", 2)]),
             defaultdict: defaultdict(int, {"foo": 1, "bar": 2}),
-            deque: deque([1, 2, 3]),
+            collections.deque: collections.deque([1, 2, 3]),
             torch.Size: torch.Size([1, 2, 3]),
             immutable_dict: immutable_dict({"foo": 1, "bar": 2}),
             immutable_list: immutable_list([1, 2, 3]),
@@ -1340,21 +1377,12 @@ class TestCxxPytree(TestCase):
     def test_treespec_equality(self):
         self.assertEqual(cxx_pytree.LeafSpec(), cxx_pytree.LeafSpec())
 
-    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "Dynamo test in test_treespec_repr_dynamo.")
     def test_treespec_repr(self):
         # Check that it looks sane
         pytree = (0, [0, 0, [0]])
         _, spec = cxx_pytree.tree_flatten(pytree)
-        self.assertEqual(repr(spec), "PyTreeSpec((*, [*, *, [*]]), NoneIsLeaf)")
-
-    @unittest.skipIf(not TEST_WITH_TORCHDYNAMO, "Eager test in test_treespec_repr.")
-    def test_treespec_repr_dynamo(self):
-        # Check that it looks sane
-        pytree = (0, [0, 0, [0]])
-        _, spec = cxx_pytree.tree_flatten(pytree)
-        self.assertExpectedInline(
-            repr(spec),
-            "PyTreeSpec((*, [*, *, [*]]), NoneIsLeaf, namespace='torch')",
+        self.assertEqual(
+            repr(spec), "PyTreeSpec((*, [*, *, [*]]), NoneIsLeaf, namespace='torch')"
         )
 
     @parametrize(

@@ -7,19 +7,8 @@
 import contextlib
 import copy
 from abc import ABC, abstractmethod
-from typing import (
-    Any,
-    Callable,
-    cast,
-    Dict,
-    Generator,
-    Iterable,
-    Optional,
-    Sequence,
-    Set,
-    Type,
-    Union,
-)
+from collections.abc import Generator, Iterable, Sequence
+from typing import Any, Callable, cast, Optional, Union
 
 import torch.nn as nn
 
@@ -51,7 +40,7 @@ def _post_order_apply(
     not changed.
     """
     # Track visited modules to avoid visiting shared modules multiple times
-    visited_modules: Set[nn.Module] = {root_module}
+    visited_modules: set[nn.Module] = {root_module}
 
     def _post_order_apply_inner(
         module: nn.Module,
@@ -72,9 +61,9 @@ def _post_order_apply(
                 "Non-root modules should have their module name set but got "
                 f"an empty module name for {module}"
             )
-            assert isinstance(
-                optional_module, nn.Module
-            ), f"fn should return None or an nn.Module but got {optional_module}"
+            assert isinstance(optional_module, nn.Module), (
+                f"fn should return None or an nn.Module but got {optional_module}"
+            )
             setattr(parent_module, module_name, optional_module)
 
     _post_order_apply_inner(root_module, "", None)
@@ -82,7 +71,7 @@ def _post_order_apply(
 
 def _construct_wrap_fn(
     root_module: nn.Module,
-    target_module_to_kwargs: Dict[nn.Module, Dict[str, Any]],
+    target_module_to_kwargs: dict[nn.Module, dict[str, Any]],
     fsdp_fn: Callable,
 ) -> Callable[[nn.Module], Optional[nn.Module]]:
     """
@@ -104,10 +93,10 @@ def _construct_wrap_fn(
 
 def _run_mixed_precision_override_policy(
     root_module: nn.Module,
-    module_classes: Iterable[Type[nn.Module]],
-    ignored_modules: Set[nn.Module],
-    root_kwargs: Dict[str, Any],
-    target_module_to_kwargs: Dict[nn.Module, Dict[str, Any]],
+    module_classes: Iterable[type[nn.Module]],
+    ignored_modules: set[nn.Module],
+    root_kwargs: dict[str, Any],
+    target_module_to_kwargs: dict[nn.Module, dict[str, Any]],
 ):
     module_classes_tuple = tuple(set(module_classes))
     for module in root_module.modules():
@@ -141,9 +130,9 @@ class _Policy(ABC):
     def _run_policy(
         self,
         root_module: nn.Module,
-        ignored_modules: Set[nn.Module],
-        root_kwargs: Dict[str, Any],
-    ) -> Dict[nn.Module, Dict[str, Any]]:
+        ignored_modules: set[nn.Module],
+        root_kwargs: dict[str, Any],
+    ) -> dict[nn.Module, dict[str, Any]]:
         """
         This should return a dict ``target_module_to_kwargs`` that maps from
         each target module to wrap to its kwargs.
@@ -155,7 +144,7 @@ def _module_wrap_policy(
     module: nn.Module,
     recurse: bool,
     nonwrapped_numel: int,
-    module_classes: Set[Type[nn.Module]],
+    module_classes: set[type[nn.Module]],
 ) -> bool:
     """
     This auto wrap policy wraps every module that is an instance of any type in
@@ -189,7 +178,7 @@ class ModuleWrapPolicy(_Policy):
     passing in the kwargs given to the root.
     """
 
-    def __init__(self, module_classes: Iterable[Type[nn.Module]]):
+    def __init__(self, module_classes: Iterable[type[nn.Module]]):
         module_classes_set = set(module_classes)
         self._module_classes = module_classes_set
         self._module_classes_str = str(module_classes_set)
@@ -197,11 +186,11 @@ class ModuleWrapPolicy(_Policy):
     def _run_policy(
         self,
         root_module: nn.Module,
-        ignored_modules: Set[nn.Module],
-        root_kwargs: Dict[str, Any],
-    ) -> Dict[nn.Module, Dict[str, Any]]:
+        ignored_modules: set[nn.Module],
+        root_kwargs: dict[str, Any],
+    ) -> dict[nn.Module, dict[str, Any]]:
         module_classes = tuple(self._module_classes)
-        target_module_to_kwargs: Dict[nn.Module, Dict[str, Any]] = {}
+        target_module_to_kwargs: dict[nn.Module, dict[str, Any]] = {}
         for module in root_module.modules():
             if module in ignored_modules:
                 continue
@@ -245,16 +234,16 @@ class CustomPolicy(_Policy):
         >>> fsdp_model = FSDP(model, auto_wrap_policy=policy)
     """
 
-    def __init__(self, lambda_fn: Callable[[nn.Module], Union[bool, Dict[str, Any]]]):
+    def __init__(self, lambda_fn: Callable[[nn.Module], Union[bool, dict[str, Any]]]):
         self._lambda_fn = lambda_fn
 
     def _run_policy(
         self,
         root_module: nn.Module,
-        ignored_modules: Set[nn.Module],
-        root_kwargs: Dict[str, Any],
-    ) -> Dict[nn.Module, Dict[str, Any]]:
-        target_module_to_kwargs: Dict[nn.Module, Dict[str, Any]] = {}
+        ignored_modules: set[nn.Module],
+        root_kwargs: dict[str, Any],
+    ) -> dict[nn.Module, dict[str, Any]]:
+        target_module_to_kwargs: dict[nn.Module, dict[str, Any]] = {}
         for module in root_module.modules():
             if module in ignored_modules:
                 continue
@@ -307,7 +296,7 @@ def transformer_auto_wrap_policy(
     module: nn.Module,
     recurse: bool,
     nonwrapped_numel: int,
-    transformer_layer_cls: Set[Type[nn.Module]],
+    transformer_layer_cls: set[type[nn.Module]],
 ) -> bool:
     """
     See :func:`_module_wrap_policy`, where ``transformer_layer_cls`` is the
@@ -352,8 +341,8 @@ def size_based_auto_wrap_policy(
     nonwrapped_numel: int,
     # Additional custom arguments
     min_num_params: int = int(1e8),
-    force_leaf_modules: Optional[Set[Type[nn.Module]]] = None,
-    exclude_wrap_modules: Optional[Set[Type[nn.Module]]] = None,
+    force_leaf_modules: Optional[set[type[nn.Module]]] = None,
+    exclude_wrap_modules: Optional[set[type[nn.Module]]] = None,
 ) -> bool:
     """
     A size-based auto wrap policy.
@@ -369,9 +358,9 @@ def size_based_auto_wrap_policy(
         min_num_params (int): Customizable policy input that controls the size
             threshold over which a module is ready to be wrapped. This is in
             units of numel.
-        force_leaf_modules (Set[Type[nn.Module]]): Set of module types to keep
+        force_leaf_modules (Optional[set[type[nn.Module]]]): Set of module types to keep
             as leaves, i.e. their children will never be wrapped.
-        exclude_wrap_modules (Set[Type[nn.Module]]): Set of module types to be
+        exclude_wrap_modules (Optional[set[type[nn.Module]]]): Set of module types to be
             excluded in wrapping.
 
     Returns:
@@ -495,8 +484,8 @@ def _recursive_wrap(
     module: nn.Module,
     auto_wrap_policy: Callable,
     wrapper_cls: Callable,
-    ignored_modules: Set[nn.Module],
-    ignored_params: Set[nn.Parameter],
+    ignored_modules: set[nn.Module],
+    ignored_params: set[nn.Parameter],
     only_wrap_children: bool = False,
     **kwargs: Any,
 ) -> tuple[nn.Module, int]:
@@ -508,9 +497,9 @@ def _recursive_wrap(
         module (nn.Module): Module to recursively wrap.
         auto_wrap_policy (Callable): A callable representing a policy that
             determines which modules to recursively wrap with ``wrapper_cls``.
-        ignored_modules (Set[torch.nn.Module]): Modules to ignore when
+        ignored_modules (set[torch.nn.Module]): Modules to ignore when
             wrapping.
-        ignored_params (Set[torch.nn.Parameter]): Parameters to ignore when
+        ignored_params (set[torch.nn.Parameter]): Parameters to ignore when
             wrapping; these should be the parameters contained in the modules
             in ``ignored_modules``.
     Returns:
@@ -573,9 +562,9 @@ class _ConfigAutoWrap:
 
     in_autowrap_context: bool = False  # Context flag
     wrapper_cls: Optional[Callable] = None  # The wrapper class
-    kwargs: Dict[str, Any] = {}  # Wrapper's args
+    kwargs: dict[str, Any] = {}  # Wrapper's args
 
-    def __init__(self, **kwargs: Dict[str, Any]):
+    def __init__(self, **kwargs: dict[str, Any]):
         self.kwargs = kwargs
 
     @staticmethod
@@ -586,9 +575,9 @@ class _ConfigAutoWrap:
             )
         _ConfigAutoWrap.in_autowrap_context = True
         # Get and save the wrapper cls for the context.
-        assert (
-            "wrapper_cls" in kwargs.keys()
-        ), "Expected to pass in wrapper_cls arg into _ConfigAutoWrap."
+        assert "wrapper_cls" in kwargs.keys(), (
+            "Expected to pass in wrapper_cls arg into _ConfigAutoWrap."
+        )
         _ConfigAutoWrap.wrapper_cls = cast(Callable, kwargs["wrapper_cls"])
         del kwargs["wrapper_cls"]
         # Save the rest.

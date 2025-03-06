@@ -17,7 +17,7 @@ import time
 import unittest
 import uuid
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Optional
 from unittest import mock
 from unittest.mock import Mock, patch
 
@@ -256,7 +256,7 @@ class Conf:
 
     entrypoint: Callable
     local_world_size: int
-    args: Tuple = ()
+    args: tuple = ()
     role: str = "default"
     redirects: Std = Std.NONE
     tee: Std = Std.NONE
@@ -394,10 +394,10 @@ class LocalElasticAgentTest(unittest.TestCase):
 
     def run_job(
         self,
-        node_configs: List[Conf],
+        node_configs: list[Conf],
         exit_barrier_timeout: int = 5,
         log_line_prefix_template: Optional[str] = None,
-    ) -> Dict[str, List[RunResult]]:
+    ) -> dict[str, list[RunResult]]:
         """
         Simulates running a distributed job by running multiple agents
         (one on each process). Agent 0 is run on the main process for
@@ -431,7 +431,7 @@ class LocalElasticAgentTest(unittest.TestCase):
         for p in procs:
             p.join()
 
-        results: Dict[str, List[RunResult]] = {}
+        results: dict[str, list[RunResult]] = {}
         while not agent_results.empty():
             role, run_result = agent_results.get()
             results.setdefault(role, []).append(run_result)
@@ -1032,8 +1032,8 @@ class LocalElasticAgentTest(unittest.TestCase):
 
     def assert_rank_consistency(
         self,
-        run_results: Dict[str, List[RunResult]],
-        expected_role_world_sizes: Dict[str, int],
+        run_results: dict[str, list[RunResult]],
+        expected_role_world_sizes: dict[str, int],
     ):
         """
         Asserts that ranks are consecutive w.r.t role_rank. If local world sizes are 4:
@@ -1042,11 +1042,11 @@ class LocalElasticAgentTest(unittest.TestCase):
         ... etc ...
         """
 
-        global_ranks: List[int] = []
+        global_ranks: list[int] = []
         # role -> [role_rank,...]
-        role_ranks: Dict[str, List[int]] = {}
+        role_ranks: dict[str, list[int]] = {}
         # group rank -> [(rank, role_rank),...]
-        grouped_ranks: Dict[int, List[Tuple[int, int]]] = {}
+        grouped_ranks: dict[int, list[tuple[int, int]]] = {}
 
         # global world size == sum of all the role world sizes
         expected_world_size = sum(expected_role_world_sizes.values())

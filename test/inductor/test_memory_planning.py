@@ -3,12 +3,7 @@
 import sys
 import unittest
 
-from torch.testing._internal.common_utils import (
-    IS_CI,
-    IS_WINDOWS,
-    skipIfRocm,
-    skipIfXpu,
-)
+from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_gpu
 
 
@@ -75,15 +70,14 @@ class TestMemoryPlanning(TestCase):
             result, code = run_and_get_cpp_code(compiled, *args)
 
         FileCheck().check(
-            "aoti_torch__alloc_from_pool(pool1, 0, cached_torch_dtype_float32, 2, int_array_4, int_array_5, &tmp_tensor_handle_1)"
-        ).check_next("auto buf0 = RAIIAtenTensorHandle(tmp_tensor_handle_1);").check(
-            "auto buf1 = RAIIAtenTensorHandle(tmp_tensor_handle_2);"
+            "aoti_torch__alloc_from_pool(pool1, 0, cached_torch_dtype_float32, 2, int_array_4, int_array_5, &tmp_tensor_handle_0)"
+        ).check_next("auto buf0 = RAIIAtenTensorHandle(tmp_tensor_handle_0);").check(
+            "auto buf1 = RAIIAtenTensorHandle(tmp_tensor_handle_1);"
         ).run(
             code
         )
         self.assertTrue(same(f(*args), result))
 
-    @skipIfRocm(msg="test_aot_inductor doesn't work on ROCm")
     @skipIfXpu(msg="aoti doesn't work on XPU")
     def test_aoti(self):
         try:
@@ -113,7 +107,7 @@ class TestMemoryPlanning(TestCase):
         ).check_next(
             "int64_t int_array_5[] = {3L, 1L};"
         ).check_next(
-            "AtenTensorHandle tmp_tensor_handle_1;"
+            "AtenTensorHandle tmp_tensor_handle_0;"
         ).check_next(
             "aoti_torch__alloc_from_pool(pool1, 0"
         ).run(

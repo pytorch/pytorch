@@ -105,7 +105,6 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                     ):
                         self.assertEqual(arg1.grad, arg2.grad, atol=atol, rtol=rtol)
 
-    @skipIfRocm
     def _test_sdpa_rewriter_1(self):
         def dot_prod_attention(
             query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
@@ -132,7 +131,6 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                 rtol=rtol,
             )
 
-    @skipIfRocm
     @torch._inductor.config.patch("freezing", True)
     def _test_sdpa_rewriter_1_freezing(self):
         def dot_prod_attention(
@@ -264,7 +262,6 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         _, (source_code,) = run_and_get_code(dot_prod_attention, *args)
         self.assertNotIn("aten._scaled_dot_product_efficient_attention", source_code)
 
-    @skipIfRocm
     def _test_sdpa_rewriter_2(self):
         def dot_prod_attention(
             query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
@@ -279,7 +276,6 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         self._check_common(dot_prod_attention)
         self._check_common(checkpoint_wrapper(dot_prod_attention))
 
-    @skipIfRocm  # AssertionError: expected size 4==4, stride 32==64 at dim=0
     def _test_sdpa_rewriter_3(self):
         def dot_prod_attention(
             query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, training: bool
@@ -296,7 +292,6 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             checkpoint_wrapper(dot_prod_attention), contains=False, has_dropout=True
         )
 
-    @skipIfRocm  # AssertionError: expected size 4==4, stride 32==64 at dim=0
     def _test_sdpa_rewriter_4(self):
         def dot_prod_attention(
             query: torch.Tensor,
@@ -346,7 +341,6 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         self._check_common(sfdp_pattern_5_v2, contains=False)
         self._check_common(checkpoint_wrapper(sfdp_pattern_5_v2), contains=False)
 
-    @skipIfRocm
     def _test_sdpa_rewriter_6(self):
         def sfdp_pattern_6(query, key, value, training):
             attn_mask = torch.ones(
@@ -570,7 +564,6 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                 model, args1=args, contains=False, atol=1e-4, has_fuse_pattern=False
             )
 
-    @skipIfRocm
     def _test_sdpa_rewriter_11(self):
         def dot_prod_attention(
             query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
@@ -611,7 +604,6 @@ class TestSDPAPatternRewriterTemplate(TestCase):
 
         self._check_common(dot_prod_attention, contains=False, has_dropout=True)
 
-    @skipIfRocm
     def _test_sdpa_prev_13(self):
         def dot_prod_attention(
             query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
@@ -628,7 +620,6 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         self._check_common(dot_prod_attention, check_train=False)
         self._check_common(checkpoint_wrapper(dot_prod_attention), check_train=False)
 
-    @skipIfRocm
     def _test_sdpa_prev_14(self):
         def dot_prod_attention(
             query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
@@ -644,7 +635,6 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         self._check_common(dot_prod_attention, check_train=False)
         self._check_common(checkpoint_wrapper(dot_prod_attention), check_train=False)
 
-    @skipIfRocm
     def _test_sdpa_prev_15(self):
         def dot_prod_attention(
             query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
@@ -694,7 +684,6 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             rtol=1e-2,
         )
 
-    @skipIfRocm
     def _test_sdpa_rewriter_14(self):
         def dot_prod_attention(
             query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
@@ -717,7 +706,6 @@ class TestSDPAPatternRewriterTemplate(TestCase):
 
         self._check_common(dot_prod_attention)
 
-    @skipIfRocm
     def _test_sdpa_rewriter_15(self):
         def dot_prod_attention(
             query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
@@ -810,7 +798,6 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             dot_prod_attention, args1=args, contains=False, has_dropout=True
         )
 
-    @skipIfRocm
     def _test_sdpa_rewriter_17(self):
         def dot_prod_attention(
             query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, training

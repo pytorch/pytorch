@@ -4,7 +4,6 @@ import random
 import sys
 from collections import OrderedDict
 from dataclasses import dataclass
-from typing import List
 
 import torch
 import torch.nn as nn
@@ -18,6 +17,7 @@ from torch.testing._internal.common_utils import (
     subtest,
     TEST_HPU,
     TEST_WITH_DEV_DBG_ASAN,
+    TEST_XPU,
     TestCase,
 )
 
@@ -33,7 +33,12 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
-list_device = "hpu" if TEST_HPU else "cuda"
+if TEST_HPU:
+    list_device = "hpu"
+elif TEST_XPU:
+    list_device = "xpu"
+else:
+    list_device = "cuda"
 
 
 class TestUtils(TestCase):
@@ -62,13 +67,13 @@ class TestUtils(TestCase):
         class NonFrozenDataClass:
             some_key: str
             some_float: float
-            some_tensor: List[torch.Tensor]
+            some_tensor: list[torch.Tensor]
 
         @dataclass(frozen=True)
         class FrozenDataClass:
             some_key: str
             some_float: float
-            some_tensor: List[torch.Tensor]
+            some_tensor: list[torch.Tensor]
 
         # create a mixed bag of data.
         data = [1, "str"]
@@ -130,7 +135,7 @@ class TestUtils(TestCase):
         self.assertEqual(torch.sum(x), 0)
 
 
-devices = ("cuda", "hpu")
-instantiate_device_type_tests(TestUtils, globals(), only_for=devices)
+devices = ("cuda", "hpu", "xpu")
+instantiate_device_type_tests(TestUtils, globals(), only_for=devices, allow_xpu=True)
 if __name__ == "__main__":
     run_tests()

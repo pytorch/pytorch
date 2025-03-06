@@ -23,6 +23,7 @@ from torch._inductor.compile_fx import (
     compile_fx_inner,
     complex_memory_overlap,
 )
+from torch._inductor.exc import InductorError
 from torch._inductor.graph import GraphLowering
 from torch._inductor.utils import timed
 from torch._prims_common import is_float_dtype
@@ -36,7 +37,6 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     slowTest,
     TEST_MKL,
-    TEST_WITH_ROCM,
     xfailIfS390X,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -69,12 +69,26 @@ requires_vectorization = unittest.skipUnless(
 )
 
 
-def check_metrics_vec_kernel_count(num_expected_vec_kernels):
-    if (
+def _can_check_vec_metrics():
+    return (
         cpu_vec_isa.valid_vec_isa_list()
         and os.getenv("ATEN_CPU_CAPABILITY") != "default"
-    ):
+        and config.cpp.simdlen != 1
+    )
+
+
+def check_metrics_vec_kernel_count(num_expected_vec_kernels):
+    if _can_check_vec_metrics():
         assert metrics.generated_cpp_vec_kernel_count == num_expected_vec_kernels
+
+
+def simd_lengths_to_test():
+    """Returns a minimal list of simd lengths to cover common cases"""
+    simdlens = [None, 1]
+    valid_isa_list = cpu_vec_isa.valid_vec_isa_list()
+    if valid_isa_list:
+        simdlens.append(valid_isa_list[0].bit_width())
+    return simdlens
 
 
 @contextlib.contextmanager
@@ -188,6 +202,45 @@ class CPUReproTests(TestCase):
                 (v,),
             )
 
+    def test_nn_fold(self):
+        # Fix https://github.com/pytorch/pytorch/issues/147848
+
+        class Model(torch.nn.Module):
+            def __init__(self, output_size, kernel_size, stride) -> None:
+                super().__init__()
+                self.fold = torch.nn.Fold(
+                    output_size=output_size, kernel_size=kernel_size, stride=stride
+                )
+
+            def forward(self, x):
+                x = self.fold(x)
+                return x
+
+        output_sizes = [(64, 64), (64, 64)]
+        kernel_sizes = [(32, 32), (32, 32)]
+        strides = [(1, 1), (2, 2)]
+        input_sizes = [(1, 32 * 32, 1089), (1, 64 * 64, 289)]
+
+        for idx in range(len(output_sizes)):
+            output_size = output_sizes[idx]
+            kernel_size = kernel_sizes[idx]
+            stride = strides[idx]
+            input_size = input_sizes[idx]
+
+            for num_threads in [1, None]:
+                torch._dynamo.reset()
+                metrics.reset()
+                v = torch.randn(*input_size)
+                mod = Model(output_size, kernel_size, stride).eval()
+                with contextlib.nullcontext() if (
+                    num_threads != 1
+                ) else set_num_threads(1):
+                    with torch.no_grad():
+                        self.common(
+                            mod,
+                            (v,),
+                        )
+
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     def test_conv2d_packed(self):
@@ -252,10 +305,15 @@ class CPUReproTests(TestCase):
 
         with torch.no_grad():
             compiled_m = torch.compile(m)
-            with self.assertRaisesRegex(
-                RuntimeError,
-                "output padding must be smaller than either stride or dilation",
-            ):
+            # The cpp_wrapper C-shim can't utilize the Python error API, so error
+            # messages are printed to stderr directly, and the intercepted RuntimeError
+            # is significantly less verbose.
+            msg = (
+                r"aoti_torch_cpu_convolution\(.*\) API call failed"
+                if config.cpp_wrapper
+                else "output padding must be smaller than either stride or dilation"
+            )
+            with self.assertRaisesRegex(RuntimeError, msg):
                 compiled_m(input)
 
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
@@ -584,12 +642,6 @@ class CPUReproTests(TestCase):
         batch_size,
         seq_len,
     ):
-        if (
-            TEST_WITH_ROCM
-            and not unbatched
-            and "gfx94" in torch.cuda.get_device_properties(0).gcnArchName.split(":")[0]
-        ):
-            self.skipTest("Flaky on MI300 with unbatched=False")
         self._test_lstm_packed(
             unbatched,
             input_size,
@@ -700,12 +752,15 @@ class CPUReproTests(TestCase):
         model = M(H=32, W=32, num_channels=4, num_colors=2)
         fn_opt = torch.compile(model, backend="inductor")
         v = (torch.rand(10, 32, 32, 4) > 0.5).to(torch.float32)
-        inps = [
-            v.clone(),
-        ]
-        result, code = run_and_get_cpp_code(fn_opt, *inps)
-        self.assertTrue("aten.set_.source_Tensor" in code)
-        self.assertEqual(model(*inps), result)
+        inp = v.clone()
+        result, code = run_and_get_cpp_code(fn_opt, inp)
+        self.assertIn(
+            "aoti_torch_cpu_set__source_Tensor"
+            if config.cpp_wrapper
+            else "aten.set_.source_Tensor",
+            code,
+        )
+        self.assertEqual(model(inp), result)
 
     @torch._dynamo.config.patch(dynamic_shapes=True)
     @torch._dynamo.config.patch(assume_static_by_default=False)
@@ -895,8 +950,14 @@ class CPUReproTests(TestCase):
         self.assertEqual(out_result, test_concat_with_conv())
 
         # both inputs to conv should be channels last
-        FileCheck().check("empty_strided_cpu((4, 3, 3, 3), (27, 1, 9, 3)").run(code)
-        FileCheck().check("(2, 3, 4, 4), (128, 1, 32, 8)").run(code)
+        if config.cpp_wrapper:
+            FileCheck().check("{2L, 3L, 4L, 4L}").check("{128L, 1L, 32L, 8L}").check(
+                "{4L, 3L, 3L, 3L}"
+            ).check("{27L, 1L, 9L, 3L}").check("aoti_torch_empty_strided").run(code)
+        else:
+            FileCheck().check("(2, 3, 4, 4), (128, 1, 32, 8)").check(
+                "empty_strided_cpu((4, 3, 3, 3), (27, 1, 9, 3)"
+            ).run(code)
 
     @config.patch(implicit_fallbacks=True)
     def test_repeat_interleave(self):
@@ -967,6 +1028,21 @@ class CPUReproTests(TestCase):
         a = torch.randn(1, 3)
         self.common(fn, (a,))
 
+    def test_tanh_atan2(self):
+        # https://github.com/pytorch/pytorch/issues/148241
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.shrink = nn.Tanhshrink()
+
+            def forward(self, x):
+                x = self.shrink(x)
+                x = torch.atan2(x, x)
+                return x
+
+        x = torch.randn(1, 3, 64, 64)
+        self.common(Model(), (x,))
+
     def test_index_propagation_issue_102065(self):
         def fn(x):
             x = torch.arange(x.numel())
@@ -975,6 +1051,19 @@ class CPUReproTests(TestCase):
         self.common(
             fn,
             (torch.randn(8),),
+        )
+
+    def test_low_fp_index_expr_issue_147279(self):
+        # https://github.com/pytorch/pytorch/issues/147279
+        def fn(start, end, dtype, dim):
+            return torch.sum(
+                torch.arange(start=start, end=end, dtype=dtype),
+                dim=dim,
+            )
+
+        self.common(
+            fn,
+            (300, 400, torch.float16, (0,)),
         )
 
     def test_index_put(self):
@@ -2421,8 +2510,13 @@ class CPUReproTests(TestCase):
         with config.patch({"cpp.fallback_scatter_reduce_sum": False}):
             _internal_check(fn, inps, "atomic_add")
 
+        scatter_reduce_func = (
+            "aoti_torch_cpu_scatter_reduce_"
+            if config.cpp_wrapper
+            else "aten.scatter_reduce_"
+        )
         with config.patch({"cpp.fallback_scatter_reduce_sum": True}):
-            _internal_check(fn, inps, "aten.scatter_reduce_")
+            _internal_check(fn, inps, scatter_reduce_func)
 
         if "ATen parallel backend: OpenMP" in torch.__config__.parallel_info():
             with set_num_threads(1):
@@ -2433,11 +2527,11 @@ class CPUReproTests(TestCase):
                     {"fx_graph_cache": False, "fx_graph_remote_cache": False}
                 ):
                     _internal_check(
-                        fn, inps, _target_code_check_not="aten.scatter_reduce_"
+                        fn, inps, _target_code_check_not=scatter_reduce_func
                     )
 
             with config.patch({"cpp.dynamic_threads": True}), set_num_threads(1):
-                _internal_check(fn, inps, "aten.scatter_reduce_")
+                _internal_check(fn, inps, scatter_reduce_func)
 
     @patch("torch.cuda.is_available", lambda: False)
     @requires_vectorization
@@ -2689,6 +2783,15 @@ class CPUReproTests(TestCase):
                 metrics.reset()
                 self.common(fn, (a, b))
 
+    def test_torch_logit(self):
+        # fix https://github.com/pytorch/pytorch/issues/145379
+        def fn(*args):
+            return torch.logit(args[0], args[1])
+
+        input = torch.tensor(0.3, dtype=torch.float64)
+        eps = torch.tensor(0.9, dtype=torch.float64)
+        self.common(fn, (input, eps))
+
     @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
     def test_vec_compare_op_cpu_only(self):
@@ -2770,7 +2873,12 @@ class CPUReproTests(TestCase):
             def f(x, y):
                 return x + y + torch.tensor(1)
 
-            f_opt = torch.compile()(f)
+            f_opt = torch.compile(f)
+            if config.cpp_wrapper:
+                # cpp_wrapper on CPU doesn't work without CPP codegen
+                with self.assertRaises(InductorError):
+                    f_opt(*inps)
+                return
 
             _, code = run_and_get_cpp_code(f_opt, inps[0], inps[1])
             FileCheck().check_not("void kernel").run(code)
@@ -3007,7 +3115,14 @@ class CPUReproTests(TestCase):
                 torch.compile(fn, backend="inductor"),
                 x,
             )
-            self.assertEqual(code.count("empty_strided_cpu("), 3)
+            self.assertEqual(
+                code.count(
+                    "aoti_torch_empty_strided("
+                    if config.cpp_wrapper
+                    else "empty_strided_cpu("
+                ),
+                3,
+            )
 
     @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
     def test_two_local_buffers_in_outer_loop_fusion(self):
@@ -3289,14 +3404,13 @@ class CPUReproTests(TestCase):
             x = x.view(batchsize, -1, height, width)
             return x.contiguous(memory_format=torch.channels_last)
 
-        for simdlen in (None, 256, 1):
+        for simdlen in simd_lengths_to_test():
             with config.patch({"cpp.simdlen": simdlen}):
                 torch._dynamo.reset()
                 metrics.reset()
                 x = torch.randn(64, 58, 28, 28)
                 self.common(channel_shuffle, (x, 2))
-                if simdlen != 1:
-                    check_metrics_vec_kernel_count(2)
+                check_metrics_vec_kernel_count(2)
 
     @slowTest
     @requires_vectorization
@@ -3324,15 +3438,14 @@ class CPUReproTests(TestCase):
                 return self.fc(y)
 
         x = torch.randn(128, 196, 256)
-        for simdlen in (None, 256, 1):
+        for simdlen in simd_lengths_to_test():
             with config.patch({"cpp.simdlen": simdlen}):
                 for eval_mode in [True, False]:
                     torch._dynamo.reset()
                     metrics.reset()
                     m = Model().eval() if eval_mode else Model()
                     self.common(m, (x,))
-                    if simdlen != 1:
-                        check_metrics_vec_kernel_count(8)
+                    check_metrics_vec_kernel_count(8)
 
     @requires_vectorization
     @config.patch("cpp.enable_tiling_heuristics", False)
@@ -3340,7 +3453,7 @@ class CPUReproTests(TestCase):
         def fn(a):
             return a.t().contiguous()
 
-        for simdlen in (None, 256, 1):
+        for simdlen in simd_lengths_to_test():
             with config.patch({"cpp.simdlen": simdlen}):
                 for dtype in (torch.float, torch.bfloat16):
                     for shape in (
@@ -3356,8 +3469,7 @@ class CPUReproTests(TestCase):
                         metrics.reset()
                         x = torch.randn(shape, dtype=dtype)
                         self.common(fn, (x,))
-                        if simdlen != 1:
-                            check_metrics_vec_kernel_count(2)
+                        check_metrics_vec_kernel_count(2)
 
     @torch._dynamo.config.patch(specialize_int=False)
     def test_slice_scatter_issue122291(self):
@@ -3490,8 +3602,10 @@ class CPUReproTests(TestCase):
         opt_fn = torch.compile(fn, backend="inductor")
         _, code = run_and_get_cpp_code(opt_fn, x)
         self.assertTrue(same(fn(x), opt_fn(x)))
-        # def and use
-        FileCheck().check_count("cpp_fused", 2, exactly=True).run(code)
+        # declare, def, and use (declare and def are the same in non-cpp_wrapper mode)
+        FileCheck().check_count(
+            "cpp_fused", 3 if config.cpp_wrapper else 2, exactly=True
+        ).run(code)
 
     def test_invalid_index_of_empty_tensor(self):
         def fn(a):
@@ -4016,6 +4130,35 @@ class CPUReproTests(TestCase):
                     FileCheck().check_count(
                         "__at_align__ std::array", 0, exactly=True
                     ).run(code)
+
+    def test_group_norm_large_input(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.group_norm = torch.nn.GroupNorm(2, 64)
+
+            def forward(self, x):
+                return self.group_norm(x)
+
+        for fmt in [torch.contiguous_format, torch.channels_last]:
+            torch._dynamo.reset()
+            metrics.reset()
+            mod = M().eval()
+            x = torch.randn(2, 64, 168, 168).to(memory_format=fmt)
+            with torch.no_grad():
+                expected = mod(x)
+                compiled_m = torch.compile(mod)
+                actual = compiled_m(x)
+                self.assertEqual(expected, actual)
+                # 2 generated kernels (one for var_mean, the other for result)
+                check_metrics_vec_kernel_count(2)
+                # check that there is no outer loop fusion.
+                self.assertEqual(
+                    len(metrics.cpp_outer_loop_fused_inner_counts),
+                    0,
+                )
+                # check for parallel reduction.
+                self.assertEqual(metrics.parallel_reduction_count, 1)
 
     def test_int_div_vec(self):
         def fn(x, y, mode):
@@ -4859,7 +5002,8 @@ class CPUReproTests(TestCase):
             return float32.to(torch.int64)
 
         x = torch.full((32,), -9223372036854775808, dtype=torch.int64)
-        for simdlen in (None, 256):
+
+        for simdlen in simd_lengths_to_test():
             with config.patch({"cpp.simdlen": simdlen}):
                 torch._dynamo.reset()
                 metrics.reset()
