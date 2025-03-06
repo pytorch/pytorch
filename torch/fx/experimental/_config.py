@@ -92,6 +92,9 @@ use_duck_shape = True
 # Default is False to prevent unintended registration. Set to True to enable.
 meta_nonzero_assume_all_nonzero = False
 
+# applies size-oblivious reasoning to backed symbols
+backed_size_oblivious = False
+
 from torch.utils._config_module import install_config_module
 
 
