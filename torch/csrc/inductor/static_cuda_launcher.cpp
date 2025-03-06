@@ -319,6 +319,19 @@ static PyObject* launch_kernel_inner(
   Py_RETURN_NONE;
 }
 
+#define LAUNCH_KERNEL(N)    \
+launch_kernel_inner<N>(     \
+  func,                     \
+  gridX,                    \
+  gridY,                    \
+  gridZ,                    \
+  numWarps,                 \
+  sharedMemBytes,           \
+  argTypes,                 \
+  varArgs,                  \
+  cudaStream                \
+)                           \
+
 /**
  *  Main entrypoint function called at runtime; called like this in python land:
     launcher(
@@ -361,117 +374,28 @@ static PyObject* launch_kernel(PyObject* self, PyObject* args) {
   CUfunction func = reinterpret_cast<CUfunction>(func_ptr); // NOLINT
   cudaStream_t cudaStream = reinterpret_cast<cudaStream_t>(stream); // NOLINT
   auto num_args = std::strlen(argTypes);
+  // Support up to 10 args by default
   switch (num_args) {
     case 1:
-      return launch_kernel_inner<1>(
-          func,
-          gridX,
-          gridY,
-          gridZ,
-          numWarps,
-          sharedMemBytes,
-          argTypes,
-          varArgs,
-          cudaStream);
+      return LAUNCH_KERNEL(1);
     case 2:
-      return launch_kernel_inner<2>(
-          func,
-          gridX,
-          gridY,
-          gridZ,
-          numWarps,
-          sharedMemBytes,
-          argTypes,
-          varArgs,
-          cudaStream);
+      return LAUNCH_KERNEL(2);
     case 3:
-      return launch_kernel_inner<3>(
-          func,
-          gridX,
-          gridY,
-          gridZ,
-          numWarps,
-          sharedMemBytes,
-          argTypes,
-          varArgs,
-          cudaStream);
+      return LAUNCH_KERNEL(3);
     case 4:
-      return launch_kernel_inner<4>(
-          func,
-          gridX,
-          gridY,
-          gridZ,
-          numWarps,
-          sharedMemBytes,
-          argTypes,
-          varArgs,
-          cudaStream);
+      return LAUNCH_KERNEL(4);
     case 5:
-      return launch_kernel_inner<5>(
-          func,
-          gridX,
-          gridY,
-          gridZ,
-          numWarps,
-          sharedMemBytes,
-          argTypes,
-          varArgs,
-          cudaStream);
+      return LAUNCH_KERNEL(5);
     case 6:
-      return launch_kernel_inner<6>(
-          func,
-          gridX,
-          gridY,
-          gridZ,
-          numWarps,
-          sharedMemBytes,
-          argTypes,
-          varArgs,
-          cudaStream);
+      return LAUNCH_KERNEL(6);
     case 7:
-      return launch_kernel_inner<7>(
-          func,
-          gridX,
-          gridY,
-          gridZ,
-          numWarps,
-          sharedMemBytes,
-          argTypes,
-          varArgs,
-          cudaStream);
+      return LAUNCH_KERNEL(7);
     case 8:
-      return launch_kernel_inner<8>(
-          func,
-          gridX,
-          gridY,
-          gridZ,
-          numWarps,
-          sharedMemBytes,
-          argTypes,
-          varArgs,
-          cudaStream);
+      return LAUNCH_KERNEL(8);
     case 9:
-      return launch_kernel_inner<9>(
-          func,
-          gridX,
-          gridY,
-          gridZ,
-          numWarps,
-          sharedMemBytes,
-          argTypes,
-          varArgs,
-          cudaStream);
+      return LAUNCH_KERNEL(9);
     case 10:
-      return launch_kernel_inner<10>(
-          func,
-          gridX,
-          gridY,
-          gridZ,
-          numWarps,
-          sharedMemBytes,
-          argTypes,
-          varArgs,
-          cudaStream);
+      return LAUNCH_KERNEL(10);
     default:
       throw std::runtime_error(
           "Unsupported number of arguments; must be between 1 and 10");
