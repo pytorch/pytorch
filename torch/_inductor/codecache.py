@@ -2187,7 +2187,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
             extra_parse_arg=cls.extra_parse_arg.format(array_len=num_outputs),
         )
         get_result = cls.load_async(
-            source_code.appsuffix,
+            source_code + suffix,
             device_type,
             submit_fn=submit_fn,
             extra_flags=extra_flags,
