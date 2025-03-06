@@ -4553,6 +4553,72 @@ class AOTInductorTestsTemplate:
         }
         self.check_model(Model(), example_inputs, dynamic_shapes=dynamic_shapes)
 
+    def test_with_cudagraphs(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        # define CUDAGraph handling wrapper (only works with kwargs for simplicity)
+        def cudagraph(f):
+            _graphs = {}
+
+            def f_(**kwargs):
+                key = hash(
+                    tuple(
+                        tuple(kwargs[a].shape)
+                        for a in sorted(kwargs.keys())
+                        if isinstance(kwargs[a], torch.Tensor)
+                    )
+                )
+                if key in _graphs:
+                    wrapped, *_ = _graphs[key]
+                    return wrapped(**kwargs)
+                g = torch.cuda.CUDAGraph()
+                in_tensors = {
+                    k: v.clone() if isinstance(v, torch.Tensor) else v
+                    for k, v in kwargs.items()
+                }
+                f(**in_tensors)  # stream warmup
+                with torch.cuda.graph(g):
+                    out_tensors = f(**in_tensors)
+
+                def wrapped(**kwargs):
+                    for key in kwargs:
+                        in_tensors[key].copy_(kwargs[key])
+                    # [a.copy_(b) for a, b in zip(in_tensors, args)]
+                    g.replay()
+                    return [o.clone() for o in out_tensors]
+
+                _graphs[key] = (wrapped, g, in_tensors, out_tensors)
+                return wrapped(**kwargs)
+
+            return f_
+
+        # define a simple model
+        model = torch.nn.Linear(10, 20).to(device=self.device)
+
+        # export + AOTI
+        model_kwargs = {
+            "input": torch.randn(3, 10, device=self.device),
+        }
+        ep = torch.export.export(model, args=(), kwargs=model_kwargs)
+
+        optimized = torch._inductor.aoti_load_package(
+            torch._inductor.aoti_compile_and_package(
+                ep,
+                inductor_configs={"max_autotune": True},
+            ),
+            # NB: this flag avoids a CUDAGraph + AOTI runtime multi-threading conflict
+            # "Error: operation not permitted when stream is capturing"
+            run_single_threaded=True,
+        )
+
+        # enable CUDAGraphs
+        optimized = cudagraph(optimized)
+
+        # warmup -> run with CUDAGraphs
+        for _ in range(3):
+            optimized(**model_kwargs)
+
 
 class AOTInductorLoggingTest(LoggingTestCase):
     @make_logging_test(dynamic=logging.DEBUG)

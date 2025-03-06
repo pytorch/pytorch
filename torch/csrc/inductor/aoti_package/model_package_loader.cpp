@@ -339,8 +339,10 @@ void AOTIModelPackageLoader::load_metadata(const std::string& cpp_filename) {
 }
 
 AOTIModelPackageLoader::AOTIModelPackageLoader(
-    const std::string& model_package_path)
-    : AOTIModelPackageLoader(model_package_path, "model", false) {}
+    const std::string& model_package_path,
+    const bool run_single_threaded = false)
+    : AOTIModelPackageLoader(model_package_path, "model", run_single_threaded) {
+}
 
 AOTIModelPackageLoader::AOTIModelPackageLoader(
     const std::string& model_package_path,
