@@ -888,20 +888,18 @@ class TestCutlassBackend(TestCase):
             with config.patch(
                 {
                     "max_autotune": True,
-                    # Some Cutlass Kernels fail with IMA on this example, which leads to unrecoverable CUDA errors
-                    # unless we tune in a subproc here.
-                    "autotune_in_subproc": False,
-                    "max_autotune_gemm_backends": "CUTLASS,ATen",
+                    "max_autotune_gemm_backends": "CUTLASS",
                     "cuda.cutlass_max_profiling_configs": 2,
                     "cuda.cutlass_op_allowlist_regex": "",
-                    "cuda.cutlass_op_denylist_regex": "pingpong",  # Pingpong Kernels can lead to numerical issues
+                    "cuda.cutlass_op_denylist_regex": "pingpong",
                 }
             ):
                 with mock.patch(
                     "torch._inductor.kernel.mm.autotune_select_algorithm",
                     wraps=select_no_algorithm,
                 ) as sa:
-                    torch.compile(my_addmm, dynamic=False)(x, a, b, 1.0, 2.0)
+                    with self.assertRaises(InductorError, r".*NoValidChoicesError.*"):
+                        torch.compile(my_addmm, dynamic=False)(x, a, b, 1.0, 2.0)
                     args, _ = sa.call_args
                     op_name, choices, _, __ = args
                     assert op_name == "addmm"
@@ -936,20 +934,18 @@ class TestCutlassBackend(TestCase):
             with config.patch(
                 {
                     "max_autotune": True,
-                    # Some Cutlass Kernels fail with IMA on this example, which leads to unrecoverable CUDA errors
-                    # unless we tune in a subproc here.
-                    "autotune_in_subproc": False,
-                    "max_autotune_gemm_backends": "CUTLASS,ATen",
+                    "max_autotune_gemm_backends": "CUTLASS",
                     "cuda.cutlass_max_profiling_configs": 2,
                     "cuda.cutlass_op_allowlist_regex": "pingpong",
-                    "cuda.cutlass_op_denylist_regex": None,  # Pingpong Kernels can lead to numerical issues
+                    "cuda.cutlass_op_denylist_regex": None,
                 }
             ):
                 with mock.patch(
                     "torch._inductor.kernel.mm.autotune_select_algorithm",
                     wraps=select_no_algorithm,
                 ) as sa:
-                    torch.compile(addmm, dynamic=False)(x, a, b, 1.0, 1.0)
+                    with self.assertRaises(InductorError, r".*NoValidChoicesError.*"):
+                        torch.compile(addmm, dynamic=False)(x, a, b, 1.0, 1.0)
                     args, _ = sa.call_args
                     op_name, choices, _, __ = args
                     assert op_name == "addmm"
@@ -1216,6 +1212,26 @@ class TestCutlassBackend(TestCase):
             assert match, "Expect to find the cutlass configs log"
             num_ops = int(match.group(1))
             self.assertTrue(num_ops > 0, "The number of ops should be greater than 0")
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_cutlass_backend_matmul_same_tensor(self):
+        max_autotune_gemm_backends = "CUTLASS"
+
+        M = 128
+        A = torch.randn(M, M).cuda().half()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                "cuda.cutlass_max_profiling_configs": 2,
+                "autotune_fallback_to_aten": False,
+            }
+        ):
+            compiled = torch.compile(torch.mm)
+
+            torch.testing.assert_close(A @ A.t(), compiled(A, A.t()))
 
 
 if __name__ == "__main__":
