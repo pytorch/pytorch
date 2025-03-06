@@ -84,6 +84,7 @@ from .codegen import PyCodegen
 from .exc import (
     ArgsMismatchError,
     BackendCompilerFailed,
+    collapse_resume_frames,
     format_graph_break_message,
     get_stack_above_dynamo,
     unimplemented_v2,
@@ -499,17 +500,31 @@ def log_graph_break(code_options, reason="", exc_info=False, user_stack=None):
             code_options["co_firstlineno"],
         )
 
-    stack_above_dynamo_formatted = "".join(
-        traceback.format_list(get_stack_above_dynamo())
-    )
+    stack_above_dynamo_formatted = ""
+    if config.verbose:
+        stack_above_dynamo = get_stack_above_dynamo()
+        stack_above_dynamo_formatted = "".join(
+            traceback.format_list(stack_above_dynamo)
+        )
+    else:
+        user_stack = get_stack_above_dynamo() + user_stack
+        user_stack = collapse_resume_frames(user_stack)
     user_stack_formatted = "".join(traceback.format_list(user_stack))
     user_stack_trace = (
         f"Graph break in user code at {frame_loc[0]}:{frame_loc[1]}\n"
         f"Graph Break Reason: {reason}\n"
-        f"User code traceback:\n{stack_above_dynamo_formatted}\n"
-        "========== `torch.compile` tracing started here ==========\n\n"
-        f"{user_stack_formatted}"
+        "User code traceback:\n"
     )
+
+    if config.verbose:
+        user_stack_trace += (
+            f"{stack_above_dynamo_formatted}\n"
+            "========== `torch.compile` tracing started here ==========\n\n"
+            f"{user_stack_formatted}"
+        )
+    else:
+        user_stack_trace += str(user_stack_formatted)
+
     torch._logging.trace_structured(
         "artifact",
         metadata_fn=lambda: {
