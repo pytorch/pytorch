@@ -61,7 +61,7 @@ class TestTraversal(FSDPTest):
         )
 
 
-devices = ("cuda", "hpu")
+devices = ("cuda", "hpu", "xpu")
 instantiate_device_type_tests(TestTraversal, globals(), only_for=devices)
 if __name__ == "__main__":
     run_tests()
