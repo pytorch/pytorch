@@ -4283,6 +4283,7 @@ class CommonTemplate:
                 x.size(-1),
                 stride,
                 padding,
+                dilation=dilation,
             )
             return vals, indices, offsets
 
@@ -5048,12 +5049,10 @@ class CommonTemplate:
         def fn(x):
             return aten.max_pool2d_with_indices(x, [3, 2], [2, 1], [1, 1], [1, 2])
 
-        torch._inductor.metrics.generated_kernel_count = 0
         self.common(
             fn,
             (torch.randn([2, 2, 3, 6]),),
         )
-        assertGeneratedKernelCountEqual(self, 0)
 
     def test_avg_pool2d1(self):
         def fn(x):
