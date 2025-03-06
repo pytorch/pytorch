@@ -1628,15 +1628,15 @@ class GuardBuilder(GuardBuilderBase):
                 DeviceMesh,
             )
 
+        def check_type(obj):
+            import torch.utils._pytree as pytree
+
+            return istype(obj, ok_types) or pytree.is_constant_class(type(obj))
+
         if istype(val, dict):
-            assert all(
-                istype(x, ok_types) for x in itertools.chain(val.keys(), val.values())
-            )
+            assert all(check_type(x) for x in itertools.chain(val.keys(), val.values()))
         else:
-            assert istype(
-                val,
-                ok_types,
-            ), f"Unexpected type {type(val)}, not in {ok_types}"
+            assert check_type(val), f"Unexpected type {type(val)}"
 
         # Special case for nan because float("nan") == float("nan") evaluates to False
         if istype(val, float) and math.isnan(val):
