@@ -383,7 +383,7 @@ void sortKeyValueInplace(
     } else {
       sortCommon<scalar_t>(MediumRadixSort{}, key, value, dim, descending);
     }
-  }), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kByte, kLong);
+  }), AT_EXPAND(AT_INTEGRAL_TYPES_V2));
 
 }
 
