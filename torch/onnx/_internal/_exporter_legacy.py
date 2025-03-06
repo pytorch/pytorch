@@ -30,7 +30,7 @@ from torch.onnx import errors
 from torch.onnx._internal import io_adapter
 from torch.onnx._internal._lazy_import import onnxscript_apis, onnxscript_ir as ir
 from torch.onnx._internal.diagnostics import infra
-from torch.onnx._internal.exporter import _onnx_program
+from torch.onnx._internal.exporter import _constants, _onnx_program
 from torch.onnx._internal.fx import (
     decomposition_table,
     patcher as patcher,
@@ -105,7 +105,7 @@ class OnnxRegistry:
             defaultdict(list)
         )
 
-        self._opset_version = onnxscript_apis.torchlib_opset_version()
+        self._opset_version = _constants.TORCHLIB_OPSET
         warnings.warn(
             f"torch.onnx.dynamo_export only implements opset version {self._opset_version} for now. If you need to use a "
             "different opset version, please register them with register_custom_op."
