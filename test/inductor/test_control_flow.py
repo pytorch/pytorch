@@ -952,7 +952,13 @@ class WhileLoopModels:
         def __init__(self, device):
             super().__init__()
             self.conv2d = torch.nn.Conv2d(
-                4, 4, (3, 3), stride=(1, 1), padding=(1, 1), device=device
+                4,
+                4,
+                (3, 3),
+                stride=(1, 1),
+                padding=(1, 1),
+                device=device,
+                dtype=torch.float64,
             )
 
         def forward(self, c, x):
@@ -1303,7 +1309,7 @@ class WhileLoopTests(TestCase):
     def test_while_loop_with_conv(self, device, dynamic):
         self._run_test(
             model=WhileLoopModels.Conv(device),
-            inputs=(torch.randn(2, 4, 4, 4),),
+            inputs=(torch.randn(2, 4, 4, 4, dtype=torch.float64),),
             device=device,
             dynamic=dynamic,
         )
