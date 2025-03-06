@@ -277,9 +277,9 @@ def pre_grad_passes(
                 for _ in range(counter):
                     pattern_matcher_pass.apply(gm.graph)  # type: ignore[arg-type]
                 if not is_same_dict(counters["inductor"], inductor_before_change):
-                    optimus_scuba_log[
-                        f"{pattern_matcher_pass.pass_name}_pre_grad"
-                    ] = upload_graph(gm.graph)
+                    optimus_scuba_log[f"{pattern_matcher_pass.pass_name}_pre_grad"] = (
+                        upload_graph(gm.graph)
+                    )
             # TODO: move efficient_conv_bn_eval_pass to the fusions dict too.
             efficient_conv_bn_eval_pass.apply(gm.graph)  # type: ignore[arg-type]
 

@@ -399,6 +399,69 @@ class MicroPipelineTPTest(TestCase):
         self.assertIn("fused_scaled_matmul_reduce_scatter", code)
         self.assertNotIn("reduce_scatter_tensor", code)
 
+    @skipIfRocm
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @parametrize("scatter_dim", [2])
+    @fresh_inductor_cache()
+    def test_fuse_scaled_matmul_reduce_scatter_rowwise_scales_reshape_mm_reshape(
+        self, scatter_dim
+    ):
+        group = dist.group.WORLD
+
+        def reshape_mm_reshape(
+            A: torch.Tensor,
+            B: torch.Tensor,
+            A_scale: torch.Tensor,
+            B_scale: torch.Tensor,
+            out_dtype: torch.dtype,
+        ) -> torch.Tensor:
+            """
+            Performs a scaled_mm followed by a reduce scatter,
+            following the reshape -> scaled_mm -> reshape pattern.
+            """
+            orig_shape = A.shape
+
+            # reshape tensor and scale together
+            A = A.reshape(-1, orig_shape[-1])
+            A_scale = A_scale.reshape(-1, A_scale.shape[-1])
+            A_scale = torch.reciprocal(A_scale)
+
+            C = torch._scaled_mm(A, B, A_scale, B_scale, out_dtype=out_dtype)
+
+            # reshape output to have same leading dims as original `A` tensor
+            C = C.view(*orig_shape[:-1], C.shape[-1])
+            return reduce_scatter_tensor(C, "sum", scatter_dim, group)
+
+        A = torch.rand(1, 16, 32, device="cuda").to(torch.float8_e4m3fn)
+        B = torch.rand(64, 32, device="cuda").to(torch.float8_e4m3fn).T
+
+        # A_scale = rowwise scales
+        A_scale = torch.full((1, 16, 1), 0.1, device="cuda")
+
+        # B_scale = rowwise scales transposed for A @ B^T
+        B_scale = torch.full((1, 64), 0.1, device="cuda")
+
+        gm = _make_post_grad_fx(
+            reshape_mm_reshape, A, B, A_scale, B_scale, torch.bfloat16
+        )
+
+        with _test_mode():
+            micro_pipeline_tp_pass(gm.graph)
+
+        self.assertIn("fused_scaled_matmul_reduce_scatter", str(gm.graph))
+        self.assertNotIn("reduce_scatter_tensor", str(gm.graph))
+
+        if torch.cuda.get_device_capability() < (8, 9):
+            return
+
+        with _test_mode():
+            compiled = torch.compile(reshape_mm_reshape)
+            code = run_and_get_triton_code(
+                compiled, A, B, A_scale, B_scale, torch.bfloat16
+            )
+        self.assertIn("fused_scaled_matmul_reduce_scatter", code)
+        self.assertNotIn("reduce_scatter_tensor", code)
+
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @parametrize("shard_dim", [0, 1])
     @fresh_inductor_cache()
