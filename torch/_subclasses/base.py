@@ -37,6 +37,14 @@ def gen_tensor_flatten_fn(
 
     return __tensor_flatten__
 
+def get_cls(module_name: str, class_name: str):
+    if "<locals>" in qualname:
+        raise RuntimeError(
+            "Local subclasses of BaseTensorSubclass are not supported yet"
+        )
+    module = importlib.import_module(module_name)
+    clz = getattr(module, class_name)
+    return clz
 
 def gen_tensor_unflatten_fn(
     module_name: str,
@@ -49,8 +57,7 @@ def gen_tensor_unflatten_fn(
     if meta_attrs is not None:
 
         def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
-            module = importlib.import_module(module_name)
-            clz = getattr(module, class_name)
+            clz = get_cls(module_name, class_name)
             kwargs = inner_tensors
             for a, v in zip(meta_attrs, meta):
                 kwargs[a] = v
@@ -78,6 +85,26 @@ def gen_tensor_unflatten_fn(
         return clz(outer_size=outer_size, outer_stride=outer_stride, **kwargs)
 
     return __tensor_unflatten__
+
+def gen_init(inner_tensors, meta_attrs):
+    def fn(self, *args, **kwargs):
+        for a in itertools.chain(inner_tensors, meta_attrs):
+            setattr(self, a, kwargs[a])
+
+def gen_new(module_name, qualname, inner_tensors, meta_attrs):
+    def fn(cls, *args, **kwargs):
+        main_inner_tensor = inner_tensors[0]
+        outer_size = kwargs[main_inner_tensor].size()
+        outer_stride = kwargs[main_inner_tensor].stride()
+
+        if "outer_size" in kwargs:
+            outer_size = kwargs["outer_size"]
+        if "outer_stride" in kwargs:
+            outer_stride = kwargs["outer_stride"]
+
+        _kwargs = tensor_kwargs_from(main_inner_tensor, outer_stride)
+        out = torch.Tensor._make_wrapper_subclass(cls, outer_size, **_kwargs)
+        return out
 
 
 def gen_torch_function(
@@ -146,6 +173,7 @@ class BaseTensorSubclassMeta(torch._C._TensorMeta):
     def __new__(meta, name, bases, attrs):  # noqa: B902
         if "TSC_INNER_TENSORS" in attrs:
             inner_tensors = attrs["TSC_INNER_TENSORS"]
+            assert len(inner_tensors) > 0, "At least one inner tensor is required"
             meta_attrs = attrs.get("TSC_META", None)
             if "__tensor_flatten__" not in attrs:
                 attrs["__tensor_flatten__"] = gen_tensor_flatten_fn(
@@ -155,10 +183,6 @@ class BaseTensorSubclassMeta(torch._C._TensorMeta):
             if "__tensor_unflatten__" not in attrs:
                 module_name = attrs["__module__"]
                 qualname = attrs["__qualname__"]
-                if "<locals>" in qualname:
-                    raise RuntimeError(
-                        "Local subclasses of BaseTensorSubclass are not supported yet"
-                    )
                 attrs["__tensor_unflatten__"] = staticmethod(
                     gen_tensor_unflatten_fn(
                         module_name,
@@ -175,6 +199,16 @@ class BaseTensorSubclassMeta(torch._C._TensorMeta):
 
             if "__repr__" not in attrs:
                 attrs["__repr__"] = gen_repr(attrs["__qualname__"], inner_tensors)
+
+            if "__init__" not in attrs:
+                attrs["__init__"] = gen_init(inner_tensors, meta_attrs)
+
+            if "__new__" not in attrs:
+                module_name = attrs["__module__"]
+                qualname = attrs["__qualname__"]
+                attrs["__new__"] = staticmethod(
+                    gen_new(module_name, qualname, inner_tensors, meta_attrs)
+                )
 
         if attrs["__qualname__"] == "BaseWithOverride":
             print(f"XXX attrs:{attrs}")

@@ -98,27 +98,27 @@ class BaseWithMeta(BaseTSC):
     TSC_INNER_TENSORS = ["a"]
     TSC_META = ["m"]
 
-    @staticmethod
-    def __new__(
-        cls,
-        a: torch.Tensor,
-        m: str,
-        outer_size=None,
-        outer_stride=None,
-    ):
-        return torch.Tensor._make_wrapper_subclass(
-            cls, outer_size or a.size(), **tensor_kwargs_from(a, outer_stride)
-        )
-
-    def __init__(
-        self,
-        a: torch.Tensor,
-        m: str,
-        outer_size=None,
-        outer_stride=None,
-    ):
-        self.a = a
-        self.m = m
+#    @staticmethod
+#    def __new__(
+#        cls,
+#        a: torch.Tensor,
+#        m: str,
+#        outer_size=None,
+#        outer_stride=None,
+#    ):
+#        return torch.Tensor._make_wrapper_subclass(
+#            cls, outer_size or a.size(), **tensor_kwargs_from(a, outer_stride)
+#        )
+#
+#    def __init__(
+#        self,
+#        a: torch.Tensor,
+#        m: str,
+#        outer_size=None,
+#        outer_stride=None,
+#    ):
+#        self.a = a
+#        self.m = m
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs):
