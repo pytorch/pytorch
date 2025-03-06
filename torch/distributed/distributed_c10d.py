@@ -2511,7 +2511,7 @@ class _CoalescingManager:
     def __init__(self) -> None:
         self.works: list[Work] = []
 
-    def append(self, work: Work):
+    def append(self, work: Optional[Work] = None):
         if work:
             self.works.append(work)
 
@@ -2608,14 +2608,13 @@ def _coalescing_manager(
         # Old style of letting each coll inside the context manager to call into C++ counterpart via python binding
         work = group._end_coalescing(device)
 
-    if work is None:
-        # Nothing captured, or, the backend has sync'ed at CPP level
-        return
-
     if async_ops:
-        cm.append(work)  # type: ignore[possibly-undefined]
-    else:  # Backward compatible with backends that don't sync at CPP level
-        work.wait()  # type: ignore[possibly-undefined]
+        cm.append(work)
+    elif (
+        work is not None
+    ):  # Backward compatible with backends that don't sync at CPP level
+        work.wait()
+    # Otherwise, the backend has sync'ed at CPP level
 
 
 def batch_isend_irecv(p2p_op_list: list[P2POp]) -> list[Work]:

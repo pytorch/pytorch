@@ -3241,9 +3241,12 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
     at::cuda::CUDAGraph::dec_pending_event_queries();
   }
 
+  // Reset coalescing state
   coalescing_state_ = 0;
   coalescedComm_ = nullptr;
-  return work;
+  // If in async mode, return work; otherwise, kernel is enqueued on current
+  // stream, no need to return work
+  return coalescedAsync_ ? work : nullptr;
 }
 
 c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing() {
@@ -3303,6 +3306,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
     } else {
       TORCH_CHECK(coalescedComm_ == ncclComm, MULTI_DEVICE_ERROR_MSG);
     }
+    coalescedAsync_ = asyncOp;
   }
 
   // in asyncOp=false [default] mode, we use currentStream as ncclStream
@@ -3481,6 +3485,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
     } else {
       TORCH_CHECK(coalescedComm_ == ncclComm, MULTI_DEVICE_ERROR_MSG);
     }
+    coalescedAsync_ = asyncOp;
   }
 
   // in asyncOp=false [default] mode, we use currentStream as ncclStream
@@ -3692,6 +3697,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     } else {
       TORCH_CHECK(coalescedComm_ == ncclComm, MULTI_DEVICE_ERROR_MSG);
     }
+    // For now, P2P ops are always put on internal stream
+    coalescedAsync_ = true;
   }
 
   // Used many times below, so we stash the unordered_map lookup
@@ -4410,7 +4417,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather(
     for (const int64_t i : c10::irange(static_cast<int64_t>(num_reduces))) {
       auto& output = outputTensors_[i];
       auto& input = (i == rank_) ? inputTensor : output;
-      auto broadcastOpts = BroadcastOptions{i, int64_t(0), opts.timeout};
+      auto broadcastOpts =
+          BroadcastOptions{i, int64_t(0), opts.timeout, opts.asyncOp};
       _broadcast_oop(output, input, broadcastOpts);
     }
     auto work = endCoalescing(OpType::ALLGATHER);
@@ -4557,7 +4565,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(
           opts.reduceOp,
           static_cast<int64_t>(i),
           static_cast<int64_t>(0),
-          opts.timeout};
+          opts.timeout,
+          opts.asyncOp};
       _reduce_oop(output, input, reduceOpts);
     }
     auto work = endCoalescing(OpType::REDUCE_SCATTER);
