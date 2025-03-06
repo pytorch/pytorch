@@ -42,7 +42,7 @@ class TSBackendImpl : public torch::lazy::BackendImplInterface {
  public:
   TSBackendImpl() {
     // TODO(whc) unify how all our flags are set and parsed as envs
-    static bool env_use_cuda = std::getenv("LTC_TS_CUDA") != nullptr;
+    static bool env_use_cuda = c10::utils::has_env("LTC_TS_CUDA");
     auto type =
         (env_use_cuda || FLAGS_torch_lazy_ts_cuda) ? at::kCUDA : at::kCPU;
     default_device_type_ = std::make_shared<TSBackendDeviceType>(type);

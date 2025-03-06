@@ -16,19 +16,18 @@ using namespace dnnl;
 using namespace at::native;
 using namespace at::native::onednn;
 
-namespace at::native {
-namespace xpu {
+namespace at::native::xpu {
 namespace impl {
 
 struct ConvParams {
   std::vector<int64_t> stride;
   std::vector<int64_t> padding;
   std::vector<int64_t> dilation;
-  bool transposed;
+  bool transposed{};
   std::vector<int64_t> output_padding;
-  int groups;
-  bool benchmark;
-  bool deterministic;
+  int64_t groups{};
+  bool benchmark{};
+  bool deterministic{};
 
   bool is_strided() const;
   bool is_dilated() const;
@@ -58,7 +57,7 @@ std::ostream& operator<<(std::ostream& out, const ConvParams& params) {
 
 bool ConvParams::is_strided() const {
   bool is_strided = false;
-  for (int s : stride) {
+  for (auto s : stride) {
     is_strided |= (s != 1);
   }
   return is_strided;
@@ -66,7 +65,7 @@ bool ConvParams::is_strided() const {
 
 bool ConvParams::is_dilated() const {
   bool is_dilated = false;
-  for (int d : dilation) {
+  for (auto d : dilation) {
     is_dilated |= (d != 1);
   }
   return is_dilated;
@@ -74,7 +73,7 @@ bool ConvParams::is_dilated() const {
 
 bool ConvParams::is_padded() const {
   bool is_padded = false;
-  for (int p : padding) {
+  for (auto p : padding) {
     is_padded |= (p != 0);
   }
   return is_padded;
@@ -82,7 +81,7 @@ bool ConvParams::is_padded() const {
 
 bool ConvParams::is_output_padding_neg() const {
   bool is_non_neg = false;
-  for (int p : output_padding) {
+  for (auto p : output_padding) {
     is_non_neg |= (p < 0);
   }
   return is_non_neg;
@@ -99,7 +98,7 @@ bool ConvParams::is_output_padding_big() const {
 
 bool ConvParams::is_padding_neg() const {
   bool is_non_neg = false;
-  for (int p : padding) {
+  for (auto p : padding) {
     is_non_neg |= (p < 0);
   }
   return is_non_neg;
@@ -107,7 +106,7 @@ bool ConvParams::is_padding_neg() const {
 
 bool ConvParams::is_stride_nonpos() const {
   bool is_nonpos = false;
-  for (int s : stride) {
+  for (auto s : stride) {
     is_nonpos |= (s <= 0);
   }
   return is_nonpos;
@@ -246,7 +245,7 @@ static void check_shape_forward(
       std::ostringstream output_ss;
       std::string separator = "";
 
-      for (int i = 0, len = input_shape.size(); i < len; ++i) {
+      for (size_t i = 0, len = input_shape.size(); i < len; ++i) {
         input_ss << separator << input_shape[i];
         kernel_ss << separator << kernel_shape[i];
         separator = " x ";
@@ -496,8 +495,8 @@ Tensor _convolution_out(
     // (padding_left, padding_right,
     //  padding_top, padding_bottom,
     //  padding_front, padding_back)
-    if (pad_nd.vec().size() > 0) {
-      for (int i = 0; i < dim; ++i) {
+    if (!pad_nd.vec().empty()) {
+      for (int64_t i = 0; i < dim; ++i) {
         padding_front_top_left[i] += pad_nd[2 * dim - 2 * i - 2]; // 4, 2, 0
         padding_back_bottom_right[i] += pad_nd[2 * dim - 2 * i - 1]; // 5, 3, 1
       }
@@ -628,8 +627,8 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
 
   Tensor grad_output_, input_, weight_;
   IntArrayRef stride_, padding_, dilation_, output_padding_;
-  bool transposed_;
-  int64_t groups_;
+  bool transposed_ = false;
+  int64_t groups_ = 0;
   ConvParams params;
   if (3 == ndim) {
     grad_output_ = view4d(grad_output);
@@ -744,5 +743,4 @@ TORCH_LIBRARY_IMPL(aten, XPU, m) {
       TORCH_FN(convolution_backward_overrideable));
 }
 
-} // namespace xpu
-} // namespace at::native
+} // namespace at::native::xpu

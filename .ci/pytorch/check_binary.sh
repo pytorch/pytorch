@@ -387,7 +387,7 @@ fi
 ###############################################################################
 # Check for C++ ABI compatibility between gcc7 and gcc9 compiled binaries
 ###############################################################################
-if [[ "$(uname)" == 'Linux' && ("$PACKAGE_TYPE" == 'conda' || "$PACKAGE_TYPE" == 'manywheel')]]; then
+if [[ "$(uname)" == 'Linux' &&  "$PACKAGE_TYPE" == 'manywheel' ]]; then
   pushd /tmp
   python -c "import torch; exit(0 if torch.compiled_with_cxx11_abi() else (0 if torch._C._PYBIND11_BUILD_ABI == '_cxxabi1011' else 1))"
   popd

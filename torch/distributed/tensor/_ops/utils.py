@@ -3,17 +3,8 @@
 import functools
 import itertools
 import operator
-from typing import (
-    Callable,
-    cast,
-    Iterable,
-    List,
-    Optional,
-    Sequence,
-    Tuple,
-    TypeVar,
-    Union,
-)
+from collections.abc import Iterable, Sequence
+from typing import Callable, cast, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -23,6 +14,7 @@ from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor._op_schema import (
     OpSchema,
     OpStrategy,
+    OutputSharding,
     PlacementList,
     PlacementStrategy,
     RuntimeSchemaInfo,
@@ -44,13 +36,17 @@ _P = ParamSpec("_P")
 # pyre-fixme[3]: Return type must be annotated.
 # pyre-fixme[2]: Parameter must be annotated.
 def register_prop_rule(
-    op: Union[torch._ops.OpOverload, List[torch._ops.OpOverload]],
+    op: Union[torch._ops.OpOverload, list[torch._ops.OpOverload]],
     schema_info: Optional[RuntimeSchemaInfo] = None,
-) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
+) -> Callable[
+    [Callable[[OpSchema], OutputSharding]], Callable[[OpSchema], OutputSharding]
+]:
     # pyre-fixme[53]: Captured variable `func` is not annotated.
     # pyre-fixme[3]: Return type must be annotated.
     # pyre-fixme[2]: Parameter must be annotated.
-    def wrapper(impl: Callable[_P, _T]) -> Callable[_P, _T]:
+    def wrapper(
+        impl: Callable[[OpSchema], OutputSharding],
+    ) -> Callable[[OpSchema], OutputSharding]:
         overloads = op if isinstance(op, list) else [op]
         for overload in overloads:
             DTensor._op_dispatcher.sharding_propagator.register_sharding_prop_rule(
@@ -106,9 +102,9 @@ def register_op_strategy(
 
 
 def as_list(
-    x: Union[List[object], object]
+    x: Union[list[object], object],
     # pyre-fixme[11]: Annotation `immutable_list` is not defined as a type.
-) -> Union[List[object], torch.fx.immutable_collections.immutable_list]:  # type: ignore[valid-type]
+) -> Union[list[object], torch.fx.immutable_collections.immutable_list]:  # type: ignore[valid-type]
     # During tracing, `aten.sum.dim_IntList` uses `immutable_list` for its args,
     # which is an object but treated as a list by the tracer. Therefore, keep
     # `immutable_list` intact here as well.
@@ -183,7 +179,7 @@ def is_tensor_partial(spec: DTensorSpec) -> bool:
 
 def infer_broadcast_dims_map(
     common_shape: torch.Size, input_shape: torch.Size
-) -> List[int]:
+) -> list[int]:
     # infer the broadcast dims map, where it maps from the common shape dim to the input shape dim
     # this is aligned with the broadcast semantics
     common_ndim = len(common_shape)
@@ -196,12 +192,12 @@ def infer_broadcast_dims_map(
 
 
 def map_placements_after_broadcast(
-    placements: Tuple[Placement, ...],
+    placements: tuple[Placement, ...],
     shape: torch.Size,
-    broadcast_dims_map: List[int],
-) -> Tuple[Placement, ...]:
+    broadcast_dims_map: list[int],
+) -> tuple[Placement, ...]:
     """Map each placement based on the output shape after broadcast."""
-    new_placements: List[Placement] = []
+    new_placements: list[Placement] = []
     for placement in placements:
         if isinstance(placement, (Replicate, Partial)):
             new_placements.append(placement)
@@ -228,8 +224,8 @@ def map_placements_after_broadcast(
 
 def generate_redistribute_costs(
     src_strategy: OpStrategy, dst_spec: DTensorSpec
-) -> List[float]:
-    redistribute_costs: List[float] = [
+) -> list[float]:
+    redistribute_costs: list[float] = [
         redistribute_cost(strat.output_spec, dst_spec)
         for strat in src_strategy.strategies
     ]
@@ -240,7 +236,7 @@ def generate_redistribute_costs(
 def expand_to_full_mesh_op_strategy(
     mesh: DeviceMesh,
     op_schema: OpSchema,
-    single_mesh_dim_strategies: List[PlacementList],
+    single_mesh_dim_strategies: list[PlacementList],
     *,
     input_index: int = 1,
     inplace_op: bool = False,
@@ -252,14 +248,14 @@ def expand_to_full_mesh_op_strategy(
 
     all_strategies = []
     for strategy_comb in strategy_combs:
-        spec_list: List[Optional[DTensorSpec]] = []
+        spec_list: list[Optional[DTensorSpec]] = []
         for specs in zip(*strategy_comb):
             if specs[0] is not None:
                 spec_list.append(DTensorSpec(mesh, specs))
             else:
                 spec_list.append(None)
 
-        input_specs: List[DTensorSpec] = [
+        input_specs: list[DTensorSpec] = [
             s for s in spec_list[input_index:] if isinstance(s, DTensorSpec)
         ]
 

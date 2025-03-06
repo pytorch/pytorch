@@ -3,18 +3,12 @@ from typing import Callable
 from torch._utils import CallbackRegistry
 
 
-EventCreationCallbacks: "CallbackRegistry[int]" = CallbackRegistry(
-    "XPU event creation"
-)
-EventDeletionCallbacks: "CallbackRegistry[int]" = CallbackRegistry(
-    "XPU event deletion"
-)
+EventCreationCallbacks: "CallbackRegistry[int]" = CallbackRegistry("XPU event creation")
+EventDeletionCallbacks: "CallbackRegistry[int]" = CallbackRegistry("XPU event deletion")
 EventRecordCallbacks: "CallbackRegistry[int, int]" = CallbackRegistry(
     "XPU event record"
 )
-EventWaitCallbacks: "CallbackRegistry[int, int]" = CallbackRegistry(
-    "XPU event wait"
-)
+EventWaitCallbacks: "CallbackRegistry[int, int]" = CallbackRegistry("XPU event wait")
 MemoryAllocationCallbacks: "CallbackRegistry[int]" = CallbackRegistry(
     "XPU memory allocation"
 )

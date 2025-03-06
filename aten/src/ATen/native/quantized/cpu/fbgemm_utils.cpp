@@ -14,6 +14,7 @@
 #include <ATen/native/TensorFactories.h>
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/quantized/Quantizer.h>
+#include <ATen/native/quantized/library.h>
 #include <c10/core/QScheme.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/util/accumulate.h>
@@ -28,7 +29,6 @@
 #include <utility>
 #endif
 
-int register_embedding_params();
 
 #ifdef USE_FBGEMM
 
@@ -109,18 +109,12 @@ fbgemm::conv_param_t<kSpatialDim> MakeFbgemmConvParam(
     const std::vector<int>& dilations,
     const std::vector<int>& output_padding,
     bool transposed) {
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  std::array<int, kSpatialDim> image_shape_;
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  std::array<int, kSpatialDim> kernels_;
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  std::array<int, kSpatialDim> strides_;
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  std::array<int, kSpatialDim * 2> pads_;
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  std::array<int, kSpatialDim> dilations_;
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  std::array<int, kSpatialDim> output_padding_;
+  std::array<int, kSpatialDim> image_shape_{};
+  std::array<int, kSpatialDim> kernels_{};
+  std::array<int, kSpatialDim> strides_{};
+  std::array<int, kSpatialDim * 2> pads_{};
+  std::array<int, kSpatialDim> dilations_{};
+  std::array<int, kSpatialDim> output_padding_{};
   std::move(image_shape.begin(), image_shape.begin() + image_shape.size(), image_shape_.begin());
   std::move(
       kernels.begin(), kernels.begin() + kernels.size(), kernels_.begin());
@@ -387,10 +381,8 @@ namespace {
   }
 }
 
-template <int kSpatialDim = 2>
-TORCH_API int
-register_conv_params() {
-  static auto register_conv_params =
+template <int kSpatialDim> int register_conv_params() {
+  [[maybe_unused]] static auto register_conv_params =
     torch::selective_class_<ConvPackedParamsBase<kSpatialDim>>(
         "quantized", TORCH_SELECTIVE_CLASS(_hack_int_to_class_name(kSpatialDim)))
     .def_pickle(
@@ -426,11 +418,9 @@ TORCH_API int register_conv_params<2>();
 template
 TORCH_API int register_conv_params<3>();
 
-TORCH_API int register_linear_params();
-
-TORCH_API int register_linear_params() {
+int register_linear_params() {
   using SerializationType = std::tuple<at::Tensor, std::optional<at::Tensor>>;
-  static auto register_linear_params =
+  [[maybe_unused]] static auto register_linear_params =
       torch::selective_class_<LinearPackedParamsBase>(
           "quantized", TORCH_SELECTIVE_CLASS("LinearPackedParamsBase"))
           .def_pickle(
@@ -505,7 +495,7 @@ int register_embedding_params() {
     std::vector<double>,
     std::vector<int64_t>>;
 
-  static auto register_embedding_params =
+  [[maybe_unused]] static auto register_embedding_params =
     torch::selective_class_<EmbeddingPackedParamsBase>(
       "quantized", TORCH_SELECTIVE_CLASS("EmbeddingPackedParamsBase"))
       .def_pickle(

@@ -147,7 +147,7 @@ uint64_t Work::getSequencenumber() const {
 class FutureWrappingWork : public Work {
  public:
   FutureWrappingWork(c10::intrusive_ptr<c10::ivalue::Future> fut)
-      : Work(), _fut(std::move(fut)) {}
+      : _fut(std::move(fut)) {}
 
   ~FutureWrappingWork() override = default;
 

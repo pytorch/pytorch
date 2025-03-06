@@ -57,9 +57,9 @@ By default, the returned Tensor has the same :class:`torch.dtype` and
 .. warning::
 
     When data is a tensor `x`, :func:`new_tensor()` reads out 'the data' from whatever it is passed,
-    and constructs a leaf variable. Therefore ``tensor.new_tensor(x)`` is equivalent to ``x.clone().detach()``
-    and ``tensor.new_tensor(x, requires_grad=True)`` is equivalent to ``x.clone().detach().requires_grad_(True)``.
-    The equivalents using ``clone()`` and ``detach()`` are recommended.
+    and constructs a leaf variable. Therefore ``tensor.new_tensor(x)`` is equivalent to ``x.detach().clone()``
+    and ``tensor.new_tensor(x, requires_grad=True)`` is equivalent to ``x.detach().clone().requires_grad_(True)``.
+    The equivalents using ``detach()`` and ``clone()`` are recommended.
 
 Args:
     data (array_like): The returned Tensor copies :attr:`data`.
@@ -1327,7 +1327,7 @@ cpu(memory_format=torch.preserve_format) -> Tensor
 
 Returns a copy of this object in CPU memory.
 
-If this object is already in CPU memory and on the correct device,
+If this object is already in CPU memory,
 then no copy is performed and the original object is returned.
 
 Args:
@@ -2749,6 +2749,7 @@ add_docstr_all(
     "is_pinned",
     r"""
 Returns true if this tensor resides in pinned memory.
+By default, the device pinned memory on will be the current :ref:`accelerator<accelerators>`.
 """,
 )
 
@@ -5211,9 +5212,11 @@ Here are the ways to call ``to``:
 
     Returns a Tensor with the specified :attr:`device` and (optional)
     :attr:`dtype`. If :attr:`dtype` is ``None`` it is inferred to be ``self.dtype``.
-    When :attr:`non_blocking`, tries to convert asynchronously with respect to
-    the host if possible, e.g., converting a CPU Tensor with pinned memory to a
-    CUDA Tensor.
+    When :attr:`non_blocking` is set to ``True``, the function attempts to perform
+    the conversion asynchronously with respect to the host, if possible. This
+    asynchronous behavior applies to both pinned and pageable memory. However,
+    caution is advised when using this feature. For more information, refer to the
+    `tutorial on good usage of non_blocking and pin_memory <https://pytorch.org/tutorials/intermediate/pinmem_nonblock.html>`__.
     When :attr:`copy` is set, a new Tensor is created even when the Tensor
     already matches the desired conversion.
 
@@ -5224,9 +5227,12 @@ Here are the ways to call ``to``:
    :noindex:
 
     Returns a Tensor with same :class:`torch.dtype` and :class:`torch.device` as
-    the Tensor :attr:`other`. When :attr:`non_blocking`, tries to convert
-    asynchronously with respect to the host if possible, e.g., converting a CPU
-    Tensor with pinned memory to a CUDA Tensor.
+    the Tensor :attr:`other`.
+    When :attr:`non_blocking` is set to ``True``, the function attempts to perform
+    the conversion asynchronously with respect to the host, if possible. This
+    asynchronous behavior applies to both pinned and pageable memory. However,
+    caution is advised when using this feature. For more information, refer to the
+    `tutorial on good usage of non_blocking and pin_memory <https://pytorch.org/tutorials/intermediate/pinmem_nonblock.html>`__.
     When :attr:`copy` is set, a new Tensor is created even when the Tensor
     already matches the desired conversion.
 
@@ -6397,7 +6403,8 @@ See :func:`torch.dsplit`
 add_docstr_all(
     "stft",
     r"""
-stft(frame_length, hop, fft_size=None, return_onesided=True, window=None, pad_end=0) -> Tensor
+stft(frame_length, hop, fft_size=None, return_onesided=True, window=None,
+ pad_end=0, align_to_window=None) -> Tensor
 
 See :func:`torch.stft`
 """,
@@ -6465,6 +6472,7 @@ add_docstr_all(
 pin_memory() -> Tensor
 
 Copies the tensor to pinned memory, if it's not already pinned.
+By default, the device pinned memory on will be the current :ref:`accelerator<accelerators>`.
 """,
 )
 

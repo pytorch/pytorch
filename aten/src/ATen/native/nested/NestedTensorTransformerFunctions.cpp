@@ -5,9 +5,9 @@
 #include <ATen/NestedTensorImpl.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
 
-#include <c10/util/string_view.h>
 #include <c10/util/Exception.h>
 #include <optional>
+#include <string_view>
 
 namespace at::native {
 namespace {

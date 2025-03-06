@@ -1,6 +1,5 @@
 """Utility to lazily import modules."""
 
-# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import importlib
@@ -17,7 +16,7 @@ class _LazyModule:
     def __repr__(self) -> str:
         return f"<lazy module '{self._name}'>"
 
-    def __getattr__(self, attr):
+    def __getattr__(self, attr: str) -> object:
         if self._module is None:
             self._module = importlib.import_module(".", self._name)
         return getattr(self._module, attr)
@@ -30,7 +29,7 @@ class _LazyModule:
 if TYPE_CHECKING:
     import onnx
     import onnxscript
-    import onnxscript._framework_apis.torch_2_6 as onnxscript_apis
+    import onnxscript._framework_apis.torch_2_7 as onnxscript_apis
 
     onnxscript_ir = onnxscript.ir
 
@@ -38,4 +37,4 @@ else:
     onnx = _LazyModule("onnx")
     onnxscript = _LazyModule("onnxscript")
     onnxscript_ir = _LazyModule("onnxscript.ir")
-    onnxscript_apis = _LazyModule("onnxscript._framework_apis.torch_2_6")
+    onnxscript_apis = _LazyModule("onnxscript._framework_apis.torch_2_7")

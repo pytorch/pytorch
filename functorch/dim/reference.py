@@ -139,6 +139,8 @@ def seq(a, b):
 
 
 class isin:
+    __slots__ = ()
+
     def __contains__(self, item):
         for x in self:
             if seq(item, x):
@@ -153,11 +155,11 @@ class isin:
 
 
 class llist(isin, list):
-    pass
+    __slots__ = ()
 
 
 class ltuple(isin, tuple):
-    pass
+    __slots__ = ()
 
 
 empty_dict = {}
@@ -623,9 +625,9 @@ def split(self, split_size_or_sections, dim=0):
             unbound.append(i)
 
     if unbound:
-        assert (
-            total_bound_size <= size
-        ), f"result dimensions are larger than original: {total_bound_size} vs {size} ({split_size_or_sections})"
+        assert total_bound_size <= size, (
+            f"result dimensions are larger than original: {total_bound_size} vs {size} ({split_size_or_sections})"
+        )
         remaining_size = size - total_bound_size
         chunk_size = -(-remaining_size // len(unbound))
         for u in unbound:
@@ -634,9 +636,9 @@ def split(self, split_size_or_sections, dim=0):
             sizes[u] = sz
             remaining_size -= sz
     else:
-        assert (
-            total_bound_size == size
-        ), f"result dimensions do not match original: {total_bound_size} vs {size} ({split_size_or_sections})"
+        assert total_bound_size == size, (
+            f"result dimensions do not match original: {total_bound_size} vs {size} ({split_size_or_sections})"
+        )
     return tuple(
         t.index(dim, d)
         for d, t in zip(split_size_or_sections, _orig_split(self, sizes, dim=dim))

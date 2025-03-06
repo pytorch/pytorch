@@ -393,6 +393,13 @@ class TestTorchFunctionOverride(TestCase):
     def tearDownClass(cls):
         cls._stack.close()
 
+    def test_dtype_override(self):
+        class MyDtype:
+            def __torch_function__(self, *args, **kwargs):
+                return 4
+
+        self.assertEqual(torch.empty(4).view(MyDtype()), 4)
+
     def test_mean_semantics(self):
         """Test that a function with one argument can be overridden"""
         t1 = DiagonalTensor(5, 2)
@@ -682,7 +689,7 @@ def generate_tensor_like_override_tests(cls):
                 return torch.float32
             elif arg_type == "c10::string_view":
                 return ""
-            elif arg_type == "std::string_view":
+            elif arg_type in ("std::string_view", "::std::string_view"):
                 return ""
             elif arg_type == "SymInt":
                 # TODO: generate actual SymbolicInt
@@ -699,8 +706,7 @@ def generate_tensor_like_override_tests(cls):
             for arg in annotated_args[func]:
                 # Guess valid input to aten function based on type of argument
                 t = arg["simple_type"]
-                if t.endswith("?"):
-                    t = t[:-1]
+                t = t.removesuffix("?")
                 if t == "Tensor" and is_method and arg["name"] == "self":
                     # See "Note: properties and __get__"
                     func = func.__get__(instance_gen())

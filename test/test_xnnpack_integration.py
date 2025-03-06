@@ -23,7 +23,7 @@ from torch.utils.mobile_optimizer import optimize_for_mobile
 
 @unittest.skipUnless(
     torch.backends.xnnpack.enabled,
-    " XNNPACK must be enabled for these tests." " Please build with USE_XNNPACK=1.",
+    " XNNPACK must be enabled for these tests. Please build with USE_XNNPACK=1.",
 )
 @unittest.skipIf(
     TEST_WITH_TSAN,
@@ -231,7 +231,7 @@ class TestXNNPACKOps(TestCase):
 
 @unittest.skipUnless(
     torch.backends.xnnpack.enabled,
-    " XNNPACK must be enabled for these tests." " Please build with USE_XNNPACK=1.",
+    " XNNPACK must be enabled for these tests. Please build with USE_XNNPACK=1.",
 )
 @unittest.skipIf(
     TEST_WITH_TSAN,
@@ -753,7 +753,7 @@ class TestXNNPACKSerDes(TestCase):
 
 @unittest.skipUnless(
     torch.backends.xnnpack.enabled,
-    " XNNPACK must be enabled for these tests." " Please build with USE_XNNPACK=1.",
+    " XNNPACK must be enabled for these tests. Please build with USE_XNNPACK=1.",
 )
 @unittest.skipIf(
     TEST_WITH_TSAN,
@@ -1241,7 +1241,7 @@ class TestXNNPACKRewritePass(TestCase):
 
 @unittest.skipUnless(
     torch.backends.xnnpack.enabled,
-    " XNNPACK must be enabled for these tests." " Please build with USE_XNNPACK=1.",
+    " XNNPACK must be enabled for these tests. Please build with USE_XNNPACK=1.",
 )
 @unittest.skipIf(
     TEST_WITH_TSAN,

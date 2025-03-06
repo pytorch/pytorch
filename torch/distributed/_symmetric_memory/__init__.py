@@ -1,13 +1,13 @@
-# mypy: allow-untyped-decorators
 import math
 import os
 import socket
 import uuid
+from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import timedelta
 from enum import Enum
 from functools import partial
-from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
+from typing import Any, Callable, Optional
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -16,7 +16,7 @@ from torch._C._autograd import DeviceType
 from torch._C._distributed_c10d import _SymmetricMemory, Work as _Work
 
 
-_group_name_to_store: Dict[str, c10d.Store] = {}
+_group_name_to_store: dict[str, c10d.Store] = {}
 
 
 def enable_symm_mem_for_group(group_name: str) -> None:
@@ -96,7 +96,7 @@ def is_symm_mem_enabled_for_group(group_name: str) -> bool:
     return _is_test_mode or group_name in _group_name_to_store
 
 
-_group_name_to_workspace_tensor: Dict[str, Optional[torch.Tensor]] = {}
+_group_name_to_workspace_tensor: dict[str, Optional[torch.Tensor]] = {}
 
 
 def get_symm_mem_workspace(group_name: str, min_size: int) -> _SymmetricMemory:
@@ -140,7 +140,7 @@ def get_symm_mem_workspace(group_name: str, min_size: int) -> _SymmetricMemory:
     return _SymmetricMemory.rendezvous(tensor)
 
 
-_backend_streams: Dict[int, torch.cuda.Stream] = {}
+_backend_streams: dict[int, torch.cuda.Stream] = {}
 
 
 def _get_backend_stream(priority: int = 0) -> torch.cuda.Stream:
@@ -150,9 +150,9 @@ def _get_backend_stream(priority: int = 0) -> torch.cuda.Stream:
 
 
 def _pipelined_multi_all_gather_and_consume(
-    shard: List[torch.Tensor],
-    shard_consumer: Callable[[List[torch.Tensor], int], None],
-    ag_out: List[torch.Tensor],
+    shard: list[torch.Tensor],
+    shard_consumer: Callable[[list[torch.Tensor], int], None],
+    ag_out: list[torch.Tensor],
     group_name: str,
     ag_out_needed: bool = True,
 ) -> None:
@@ -196,11 +196,11 @@ def _pipelined_multi_all_gather_and_consume(
         assert x.shape[0] * group_size == y.shape[0]
         assert x.shape[1:] == y.shape[1:]
 
-    def copy_shard(dst: List[torch.Tensor], src: List[torch.Tensor]) -> None:
+    def copy_shard(dst: list[torch.Tensor], src: list[torch.Tensor]) -> None:
         for d, s in zip(dst, src):
             d.copy_(s)
 
-    def get_p2p_bufs(remote_rank: int) -> List[torch.Tensor]:
+    def get_p2p_bufs(remote_rank: int) -> list[torch.Tensor]:
         offset_bytes = 0
         bufs = []
         for x in shard:
@@ -217,7 +217,7 @@ def _pipelined_multi_all_gather_and_consume(
     local_p2p_bufs = get_p2p_bufs(rank)
 
     # shards[i] => shard from rank i
-    shards: List[List[torch.Tensor]] = [[] for _ in range(group_size)]
+    shards: list[list[torch.Tensor]] = [[] for _ in range(group_size)]
     for x in ag_out:
         for i, y in enumerate(x.chunk(group_size)):
             shards[i].append(y)
@@ -277,7 +277,7 @@ def _pipelined_multi_all_gather_and_consume(
             stream = backend_stream
         remote_rank = (step + rank) % group_size
         remote_p2p_bufs = get_p2p_bufs(remote_rank)
-        with torch.cuda.stream(stream):
+        with stream:
             copy_shard(dst=shards[remote_rank], src=remote_p2p_bufs)
             shard_consumer(shards[remote_rank], remote_rank)
 
@@ -288,7 +288,7 @@ def _pipelined_multi_all_gather_and_consume(
             stream = torch.cuda.current_stream()
         else:
             stream = backend_stream
-        with torch.cuda.stream(stream):
+        with stream:
             copy_shard(dst=shards[rank], src=shard)
 
     torch.cuda.current_stream().wait_stream(backend_stream)
@@ -312,7 +312,7 @@ def _pipelined_all_gather_and_consume(
             shard_consumer(shard, src_rank)
     """
 
-    def adapter(shard: List[torch.Tensor], rank: int) -> None:
+    def adapter(shard: list[torch.Tensor], rank: int) -> None:
         shard_consumer(shard[0], rank)
 
     _pipelined_multi_all_gather_and_consume(
@@ -372,7 +372,7 @@ def _pipelined_produce_and_all2all(
             stream = backend_stream
             p2p_buf = local_p2p_buf_0
             remote_p2p_buf = get_p2p_buf(remote_rank, 0)
-        with torch.cuda.stream(stream):
+        with stream:
             # Parallelization strategy: every rank issues independent compute
             # -> barrier -> p2p copy sequences on two streams. In addition to
             # computation/communication overlapping, the strategy allows for
@@ -428,6 +428,10 @@ def _pipelined_produce_and_all2all(
             # The local P2P buffer can only be overwritten by the next
             # chunk_producer after all peers have finished reading from it.
             symm_mem.barrier(channel=step % 2)
+
+    # If the sleep wasn't issued in the above loop, do it now.
+    if group_size == 2:
+        torch.cuda._sleep(100)
 
     chunk_producer(rank, out_chunks[rank])
     torch.cuda.current_stream().wait_stream(backend_stream)
@@ -506,14 +510,14 @@ def _check_and_verify_fp8_all_gather_scale_mode(
 def _fused_all_gather_matmul_impl(
     mm_out_op: torch._ops.OpOverload,
     A_shard: torch.Tensor,
-    Bs: List[torch.Tensor],
+    Bs: list[torch.Tensor],
     A_scale: Optional[torch.Tensor],
-    kwargs_list: List[Dict[str, Any]],
-    out_dtypes: List[Optional[torch.dtype]],
+    kwargs_list: list[dict[str, Any]],
+    out_dtypes: list[Optional[torch.dtype]],
     gather_dim: int,
     group_name: str,
     return_A: bool,
-) -> Tuple[Optional[torch.Tensor], List[torch.Tensor]]:
+) -> tuple[Optional[torch.Tensor], list[torch.Tensor]]:
     if A_shard.dim() < 2:
         raise ValueError("A_shard must be a matrix")
     for B in Bs:
@@ -564,7 +568,7 @@ def _fused_all_gather_matmul_impl(
             A_scale_shard.shape[1],
         )
 
-        def row_wise_sharded_consumer(shard: List[torch.Tensor], rank: int) -> None:
+        def row_wise_sharded_consumer(shard: list[torch.Tensor], rank: int) -> None:
             for idx, (B, kwargs) in enumerate(zip(Bs, kwargs_list)):
                 mm_out_op(
                     shard[0],
@@ -631,12 +635,12 @@ def _fused_all_gather_matmul_impl(
 @torch.library.impl(lib, "fused_all_gather_matmul", "Meta")
 def _fused_all_gather_matmul_fallback(
     A_shard: torch.Tensor,
-    Bs: List[torch.Tensor],
+    Bs: list[torch.Tensor],
     gather_dim: int,
     group_name: str,
     *,
     return_A: bool = True,
-) -> Tuple[Optional[torch.Tensor], List[torch.Tensor]]:
+) -> tuple[Optional[torch.Tensor], list[torch.Tensor]]:
     group_size = c10d._get_group_size_by_name(group_name)
     A = torch.ops._c10d_functional.all_gather_into_tensor(
         A_shard.contiguous(), group_size, group_name
@@ -653,12 +657,12 @@ def _fused_all_gather_matmul_fallback(
 @torch.library.impl(lib, "fused_all_gather_matmul", "CUDA")
 def _fused_all_gather_matmul(
     A_shard: torch.Tensor,
-    Bs: List[torch.Tensor],
+    Bs: list[torch.Tensor],
     gather_dim: int,
     group_name: str,
     *,
     return_A: bool = True,
-) -> Tuple[Optional[torch.Tensor], List[torch.Tensor]]:
+) -> tuple[Optional[torch.Tensor], list[torch.Tensor]]:
     """
     Perform the following logic with micro-pipelined computation and
     communication:
@@ -704,7 +708,7 @@ def _fused_all_gather_matmul(
 
 def _should_use_fused_all_gather_matmul_native(
     A_shard: torch.Tensor,
-    Bs: List[torch.Tensor],
+    Bs: list[torch.Tensor],
     gather_dim: int,
     group_name: str,
 ) -> bool:
@@ -729,7 +733,7 @@ def _fused_all_gather_matmul_native(
     A_shard: torch.Tensor,
     B: torch.Tensor,
     group_name: str,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     symm_mem = rendezvous(A_shard, group_name)
     if symm_mem is None:
         symm_mem = get_symm_mem_workspace(
@@ -764,7 +768,7 @@ def _fused_all_gather_matmul_native(
     for step in range(1, world_size):
         src_rank = (rank + step) % world_size
         src_buf = symm_mem.get_buffer(src_rank, A_shard.shape, A_shard.dtype)
-        with torch.cuda.stream(backend_stream):
+        with backend_stream:
             A_shards[src_rank].copy_(src_buf)
             if not torch.cuda.is_current_stream_capturing():
                 # cuStreamWriteValue32 issues a system level fence before the write
@@ -807,9 +811,9 @@ def _should_use_multimem_all_gather_matmul(
 
 def _multimem_all_gather_matmul(
     A_shard: torch.Tensor,
-    Bs: List[torch.Tensor],
+    Bs: list[torch.Tensor],
     group_name: str,
-) -> List[torch.Tensor]:
+) -> list[torch.Tensor]:
     group = c10d._resolve_process_group(group_name)
     A_shape = torch.Size((A_shard.shape[0] * group.size(), *A_shard.shape[1:]))
     symm_mem = get_symm_mem_workspace(
@@ -823,16 +827,16 @@ def _multimem_all_gather_matmul(
 @torch.library.impl(lib, "fused_all_gather_scaled_matmul", "Meta")
 def _fused_all_gather_scaled_matmul_fallback(
     A_shard: torch.Tensor,
-    Bs: List[torch.Tensor],
+    Bs: list[torch.Tensor],
     A_scale: torch.Tensor,
-    B_scales: List[torch.Tensor],
+    B_scales: list[torch.Tensor],
     gather_dim: int,
     group_name: str,
-    biases: List[Optional[torch.Tensor]],
-    result_scales: List[Optional[torch.Tensor]],
-    out_dtypes: List[Optional[torch.dtype]],
-    use_fast_accum: List[bool],
-) -> Tuple[torch.Tensor, List[torch.Tensor]]:
+    biases: list[Optional[torch.Tensor]],
+    result_scales: list[Optional[torch.Tensor]],
+    out_dtypes: list[Optional[torch.dtype]],
+    use_fast_accum: list[bool],
+) -> tuple[torch.Tensor, list[torch.Tensor]]:
     out_dtypes = _maybe_convert_scalar_types_to_dtypes(out_dtypes)
 
     group_size = c10d._get_group_size_by_name(group_name)
@@ -897,16 +901,16 @@ def _fused_all_gather_scaled_matmul_fallback(
 @torch.library.impl(lib, "fused_all_gather_scaled_matmul", "CUDA")
 def _fused_all_gather_scaled_matmul(
     A_shard: torch.Tensor,
-    Bs: List[torch.Tensor],
+    Bs: list[torch.Tensor],
     A_scale: torch.Tensor,
-    B_scales: List[torch.Tensor],
+    B_scales: list[torch.Tensor],
     gather_dim: int,
     group_name: str,
-    biases: List[Optional[torch.Tensor]],
-    result_scales: List[Optional[torch.Tensor]],
-    out_dtypes: List[Optional[torch.dtype]],
-    use_fast_accum: List[bool],
-) -> Tuple[torch.Tensor, List[torch.Tensor]]:
+    biases: list[Optional[torch.Tensor]],
+    result_scales: list[Optional[torch.Tensor]],
+    out_dtypes: list[Optional[torch.dtype]],
+    use_fast_accum: list[bool],
+) -> tuple[torch.Tensor, list[torch.Tensor]]:
     """
     Perform the following logic with micro-pipelined computation and
     communication:
@@ -977,7 +981,7 @@ def _fused_all_gather_scaled_matmul(
 
 def make_contiguous_for_perm(
     t: torch.Tensor,
-    perm: List[int],
+    perm: list[int],
 ) -> torch.Tensor:
     """
     Restride `t` such that `t.permute(perm)` is contiguous.
@@ -1006,7 +1010,7 @@ def _fused_matmul_reduce_scatter_impl(
     A: torch.Tensor,
     B: torch.Tensor,
     A_scale: Optional[torch.Tensor],
-    kwargs: Dict[str, Any],
+    kwargs: dict[str, Any],
     out_dtype: Optional[torch.dtype],
     reduce_op: str,
     scatter_dim: int,
@@ -1238,8 +1242,8 @@ def restride_A_for_fused_matmul_reduce_scatter(
 
 
 def _maybe_convert_scalar_types_to_dtypes(
-    scalar_types: List[Any],
-) -> List[Optional[torch.dtype]]:
+    scalar_types: list[Any],
+) -> list[Optional[torch.dtype]]:
     """
     When a list of `torch.dtype`s is passed through the dispatcher as
     `ScalarType[]`, it is converted to a list of scalar type enum values. This
@@ -1271,7 +1275,7 @@ def _maybe_convert_scalar_types_to_dtypes(
     if any(not isinstance(x, (type(None), int)) for x in scalar_types):
         return scalar_types
 
-    dtypes: List[Optional[torch.dtype]] = []
+    dtypes: list[Optional[torch.dtype]] = []
     for scalar_type in scalar_types:
         if scalar_type is None:
             dtypes.append(scalar_type)
@@ -1364,7 +1368,7 @@ def _low_contention_all_gather(
     chunks = output.chunk(world_size)
 
     _get_backend_stream().wait_stream(torch.cuda.current_stream())
-    with torch.cuda.stream(_get_backend_stream()):
+    with _get_backend_stream():
         if not input_is_symm_mem:
             local_buf = symm_mem.get_buffer(rank, tensor.shape, tensor.dtype)
             local_buf.copy_(tensor)
@@ -1402,7 +1406,7 @@ def _low_contention_reduce_scatter_with_symm_mem_input(
     chunks = a2a_res.chunk(world_size)
 
     _get_backend_stream().wait_stream(torch.cuda.current_stream())
-    with torch.cuda.stream(_get_backend_stream()):
+    with _get_backend_stream():
         # pull + offline reduction
         symm_mem.barrier()
         for step in range(0, world_size):
@@ -1439,7 +1443,7 @@ def _low_contention_reduce_scatter_with_workspace(
     chunks = tensor.chunk(world_size)
 
     _get_backend_stream().wait_stream(torch.cuda.current_stream())
-    with torch.cuda.stream(_get_backend_stream()):
+    with _get_backend_stream():
         # push + offline reduction
         workspace.barrier()
         for step in range(0, world_size):
@@ -1508,7 +1512,8 @@ def _low_contention_reduce_scatter(
 # =============================================================================
 
 
-from typing import Any, overload, Sequence, TYPE_CHECKING, Union
+from collections.abc import Sequence
+from typing import Any, overload, TYPE_CHECKING, Union
 
 from torch.types import _device, _dtype, _int
 
@@ -1520,8 +1525,7 @@ if TYPE_CHECKING:
 @overload
 def empty(
     *size: _int, dtype: Optional[_dtype] = None, device: Optional[_device] = None
-) -> torch.Tensor:
-    ...
+) -> torch.Tensor: ...
 
 
 @overload
@@ -1530,8 +1534,7 @@ def empty(
     *,
     dtype: Optional[_dtype] = None,
     device: Optional[_device] = None,
-) -> torch.Tensor:
-    ...
+) -> torch.Tensor: ...
 
 
 def empty(  # type: ignore[misc]
