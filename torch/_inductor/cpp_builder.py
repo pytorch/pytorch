@@ -536,14 +536,19 @@ def _get_ffast_math_flags() -> list[str]:
     return flags
 
 
-def _get_optimization_cflags(cpp_compiler: str) -> list[str]:
+def _get_optimization_cflags(
+    cpp_compiler: str, min_optimize: bool = False
+) -> list[str]:
     if _IS_WINDOWS:
-        return ["O2"]
+        return ["O1" if min_optimize else "O2"]
     else:
-        cflags = ["O0", "g"] if config.aot_inductor.debug_compile else ["O3", "DNDEBUG"]
+        cflags = (
+            ["O0", "g"]
+            if config.aot_inductor.debug_compile
+            else ["O1" if min_optimize else "O3", "DNDEBUG"]
+        )
         cflags += _get_ffast_math_flags()
         cflags.append("fno-finite-math-only")
-
         if not config.cpp.enable_unsafe_math_opt_flag:
             cflags.append("fno-unsafe-math-optimizations")
         cflags.append(f"ffp-contract={config.cpp.enable_floating_point_contract_flag}")
@@ -587,6 +592,7 @@ def get_cpp_options(
     compile_only: bool,
     warning_all: bool = True,
     extra_flags: Sequence[str] = (),
+    min_optimize: bool = False,
 ) -> tuple[list[str], list[str], list[str], list[str], list[str], list[str], list[str]]:
     definitions: list[str] = []
     include_dirs: list[str] = []
@@ -598,7 +604,7 @@ def get_cpp_options(
 
     cflags = (
         _get_shared_cflag(compile_only)
-        + _get_optimization_cflags(cpp_compiler)
+        + _get_optimization_cflags(cpp_compiler, min_optimize)
         + _get_warning_all_cflag(warning_all)
         + _get_cpp_std_cflag()
         + _get_os_related_cpp_cflags(cpp_compiler)
@@ -635,6 +641,7 @@ class CppOptions(BuildOptionsBase):
         extra_flags: Sequence[str] = (),
         use_relative_path: bool = False,
         compiler: str = "",
+        min_optimize: bool = False,
     ) -> None:
         super().__init__()
         self._compiler = compiler if compiler else get_cpp_compiler()
@@ -654,6 +661,7 @@ class CppOptions(BuildOptionsBase):
             compile_only=compile_only,
             extra_flags=extra_flags,
             warning_all=warning_all,
+            min_optimize=min_optimize,
         )
 
         _append_list(self._definitions, definitions)
@@ -1105,6 +1113,7 @@ class CppTorchOptions(CppOptions):
         shared: bool = True,
         extra_flags: Sequence[str] = (),
         compiler: str = "",
+        min_optimize: bool = False,
     ) -> None:
         super().__init__(
             compile_only=compile_only,
@@ -1112,6 +1121,7 @@ class CppTorchOptions(CppOptions):
             extra_flags=extra_flags,
             use_relative_path=use_relative_path,
             compiler=compiler,
+            min_optimize=min_optimize,
         )
 
         self._aot_mode = aot_mode
@@ -1275,6 +1285,7 @@ class CppTorchDeviceOptions(CppTorchOptions):
         use_mmap_weights: bool = False,
         shared: bool = True,
         extra_flags: Sequence[str] = (),
+        min_optimize: bool = False,
     ) -> None:
         super().__init__(
             vec_isa=vec_isa,
@@ -1284,6 +1295,7 @@ class CppTorchDeviceOptions(CppTorchOptions):
             use_relative_path=use_relative_path,
             use_mmap_weights=use_mmap_weights,
             extra_flags=extra_flags,
+            min_optimize=min_optimize,
         )
 
         device_definitions: list[str] = []
