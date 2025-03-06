@@ -49,10 +49,8 @@ class ExportStrategiesTest(common_utils.TestCase):
         b = torch.tensor([[1.0]])
 
         strategy = _capture_strategies.JitTraceConvertStrategy()
-        dynamic_shapes = {
-            "a": {0: "dynamic"},
-            "b": {0: "dynamic"},
-        }
+        batch_dim = torch.export.Dim("batch_dim")
+        dynamic_shapes = (0: batch_dim }, {0: batch_dim})
         result = strategy(model, (a, b), kwargs=None, dynamic_shapes=dynamic_shapes)
         if result.exception:
             raise result.exception
