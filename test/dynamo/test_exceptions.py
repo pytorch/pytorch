@@ -642,12 +642,12 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
             pass
         assert sys.exc_info()[0] is None
 
-    @unittest.expectedFailure
     def test_reconstruct___context__(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
             v = ValueError(1, 2, 3)
             v.__context__ = TypeError()
+            v.__cause__ = RuntimeError()
             return t.sin(), v
 
         t = torch.randn(2)
@@ -655,6 +655,27 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(y, t.sin())
         self.assertIsInstance(v, ValueError)
         self.assertIsInstance(v.__context__, TypeError)
+        self.assertIsInstance(v.__cause__, RuntimeError)
+        self.assertTrue(v.__suppress_context__)
+
+    def test_reconstruct_exception_2(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            try:
+                raise ValueError(1, 2, 3)
+            except Exception:
+                try:
+                    raise TypeError(4, 5) from None
+                except Exception as e:
+                    e.__cause__ = RuntimeError(6, 7)
+                    return t.sin(), e
+
+        t = torch.randn(2)
+        y, v = fn(t)
+        self.assertEqual(y, t.sin())
+        self.assertIsInstance(v, TypeError)
+        self.assertIsInstance(v.__context__, ValueError)
+        self.assertIsInstance(v.__cause__, RuntimeError)
 
     def test_raise_GeneratorExit(self):
         # GeneratorExit does not inherit from Exception
