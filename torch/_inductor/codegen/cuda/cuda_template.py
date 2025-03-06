@@ -71,13 +71,14 @@ class CUDATemplate(KernelTemplate):
             A CUDATemplateCaller object representing the generated CUDA template caller.
         """
         kernel_name = f"cuda_{self.name}"
-        with patch.object(
-            V.graph, "get_dtype", self._fake_get_dtype(self.output_node)
-        ), CUDATemplateKernel(
-            kernel_name=kernel_name,
-            runtime_arg_info=self.get_runtime_arg_info(),
-            runtime_arg_values=self.get_runtime_arg_values(**kwargs),
-        ) as kernel:
+        with (
+            patch.object(V.graph, "get_dtype", self._fake_get_dtype(self.output_node)),
+            CUDATemplateKernel(
+                kernel_name=kernel_name,
+                runtime_arg_info=self.get_runtime_arg_info(),
+                runtime_arg_values=self.get_runtime_arg_values(**kwargs),
+            ) as kernel,
+        ):
             code = self.render(kernel=kernel, **kwargs)
             _, call_args, _, _ = kernel.args.python_argdefs()
             autotuning_log.debug("Generated Code:\n%s", code)

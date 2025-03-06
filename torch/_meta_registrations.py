@@ -220,7 +220,7 @@ def cummaxmin(self, dim):
 def logcumsumexp(self, dim):
     # Checks that dim is within bounds
     maybe_wrap_dim(dim, self.ndim)
-    return torch.empty_like(self).contiguous()
+    return torch.empty_like(self, memory_format=torch.contiguous_format)
 
 
 # Stride-related code from _exec_fft in aten/src/ATen/native/mkl/SpectralOps.cpp
@@ -2182,7 +2182,7 @@ def meta_baddbmm(self, batch1, batch2, *, beta=1, alpha=1):
 @out_wrapper()
 def meta_bernoulli(self, *, generator=None):
     # https://github.com/pytorch/pytorch/issues/88612
-    return torch.empty_like(self).contiguous()
+    return torch.empty_like(self, memory_format=torch.contiguous_format)
 
 
 @register_meta(aten.bernoulli_.float)
@@ -2193,7 +2193,7 @@ def meta_bernoulli_(self, p=0.5, generator=None):
 @register_meta(aten.bernoulli.p)
 def meta_bernoulli_p(self, p=0.5, generator=None):
     # https://github.com/pytorch/pytorch/issues/88612
-    return torch.empty_like(self).contiguous()
+    return torch.empty_like(self, memory_format=torch.contiguous_format)
 
 
 @register_meta([aten.poisson.default, aten.poisson.out])
@@ -5607,6 +5607,47 @@ def meta__scaled_dot_product_cudnn_attention(
     )
 
 
+@register_meta([aten._scaled_dot_product_fused_attention_overrideable])
+def meta__scaled_dot_product_fused_attention_overrideable(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    attn_bias: Optional[Tensor] = None,
+    dropout_p: float = 0.0,
+    is_causal: bool = False,
+    return_debug_mask: bool = False,
+    scale: Optional[float] = None,
+):
+    B = query.size(0)
+    H = query.size(1)
+    S_Q = query.size(2)
+    S_KV = key.size(2)
+    D_V = value.size(-1)
+
+    res = torch.empty((B, H, S_Q, D_V), dtype=query.dtype, device=query.device)
+    logsum_exp = torch.empty(
+        (B, H, S_Q),
+        dtype=torch.float,
+        device=query.device,
+    )
+
+    # See Note [Seed and Offset]
+    seed = torch.empty((), dtype=torch.long, device="meta")
+    offset = torch.empty((), dtype=torch.long, device="meta")
+
+    return (
+        res,
+        logsum_exp,
+        None,
+        None,
+        S_Q,
+        S_KV,
+        seed,
+        offset,
+        None,
+    )
+
+
 @register_meta(
     [
         aten._scaled_dot_product_flash_attention_backward,
@@ -6709,8 +6750,10 @@ def mkldnn_rnn_layer_backward(
 @out_wrapper()
 def meta_bucketize(self, boundaries, *, out_int32=False, right=False):
     return torch.empty_like(
-        self, dtype=torch.int32 if out_int32 else torch.int64
-    ).contiguous()
+        self,
+        dtype=torch.int32 if out_int32 else torch.int64,
+        memory_format=torch.contiguous_format,
+    )
 
 
 @register_meta([aten.histc])
@@ -6907,7 +6950,9 @@ def meta_searchsorted(
 
     dtype = torch.int32 if out_int32 else torch.int64
     if isinstance(self, torch.Tensor):
-        return torch.empty_like(self, dtype=dtype).contiguous()
+        return torch.empty_like(
+            self, dtype=dtype, memory_format=torch.contiguous_format
+        )
     else:  # Scalar
         return torch.empty((), dtype=dtype, device=sorted_sequence.device)
 
@@ -7041,6 +7086,60 @@ def meta_polygamma(n: int, self: Tensor) -> Tensor:
 @register_meta(aten._local_scalar_dense)
 def meta_local_scalar_dense(self: Tensor):
     raise RuntimeError("Tensor.item() cannot be called on meta tensors")
+
+
+@register_meta(aten.silu)
+@out_wrapper(exact_dtype=True)
+def silu(self: Tensor) -> Tensor:
+    return torch.empty_like(self)
+
+
+@register_meta(aten.sigmoid)
+@out_wrapper()
+def sigmoid(self: Tensor) -> Tensor:
+    _, result_dtype = elementwise_dtypes(
+        self,
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    )
+    return torch.empty_like(self, dtype=result_dtype)
+
+
+@register_meta(aten._softmax)
+@out_wrapper()
+def softmax(x: Tensor, dim: int, half_to_float: bool) -> Tensor:
+    if half_to_float:
+        assert x.dtype == torch.half
+    computation_dtype, result_dtype = utils.elementwise_dtypes(
+        x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    )
+
+    result_dtype = result_dtype if not half_to_float else computation_dtype
+    res = torch.empty_like(x, dtype=result_dtype, memory_format=torch.contiguous_format)
+    return res
+
+
+@register_meta(aten.embedding)
+@out_wrapper()
+def embedding(
+    weight: Tensor,
+    indices: Tensor,
+    padding_idx: int = -1,
+    scale_grad_by_freq: bool = False,
+    sparse: bool = False,
+) -> Tensor:
+    assert weight.dim() == 2, "'weight' must be 2-D"
+    weight_shape = weight.shape
+    indices_shape = indices.shape
+
+    if indices.ndim == 0:
+        out_shape: tuple[int, ...] = (weight_shape[1],)
+    elif indices.ndim == 1:
+        out_shape = (indices_shape[0], weight_shape[1])
+    else:
+        out_shape = (*indices_shape, weight_shape[1])
+
+    out_dtype = weight.dtype
+    return weight.new_empty(out_shape, dtype=out_dtype)
 
 
 @register_meta(aten._jagged_to_padded_dense_forward.default)
