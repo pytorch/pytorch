@@ -3591,6 +3591,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
   Note that previously recorded events (e.g., before the capture) can be queried
   as the watchdog capture mode has been changed to thread-local, but user-side
   event queries (from the main thread) via .is_completed() are still disallowed.
+  TODO(eqy): Is there a path to allowing workEnqueue during graph capture for
+  watchdog-thread usage only?
 
   TODO:
    - Is our design for flight recorder safe in this context?  are we recording
