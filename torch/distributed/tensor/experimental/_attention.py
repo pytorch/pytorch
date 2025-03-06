@@ -246,43 +246,6 @@ def _scaled_dot_product_ring_efficient_attention(
     )
 
 
-def _scaled_dot_product_ring_cudnn_attention(
-    mesh: DeviceMesh,
-    query: torch.Tensor,
-    key: torch.Tensor,
-    value: torch.Tensor,
-    attn_bias: Optional[torch.Tensor] = None,
-    compute_log_sumexp: bool = True,
-    dropout_p: float = 0.0,
-    is_causal: bool = False,
-    return_debug_mask: bool = False,
-    *,
-    scale: Optional[float] = None,
-) -> tuple[torch.Tensor, ...]:
-    if attn_bias is not None:
-        raise NotImplementedError("attn_bias is not supported yet")
-
-    if not compute_log_sumexp:
-        # CP requires compute_log_sumexp to be True because it always merges LSE
-        compute_log_sumexp = True
-
-    seq_dim = 2
-    return _templated_ring_attention(
-        mesh,
-        seq_dim,
-        aten._scaled_dot_product_cudnn_attention,
-        query=query,
-        key=key,
-        value=value,
-        attn_bias=attn_bias,
-        compute_log_sumexp=compute_log_sumexp,
-        dropout_p=dropout_p,
-        is_causal=is_causal,
-        return_debug_mask=return_debug_mask,
-        scale=scale,
-    )
-
-
 class _AttentionOp(Protocol):
     def __call__(
         self,
@@ -572,19 +535,13 @@ def _sdpa_handler(
 
     if op_call == aten._scaled_dot_product_flash_attention.default:
         local_results = _scaled_dot_product_ring_flash_attention(
-            op_info.mesh,
+            op_info.compute_mesh,
             *op_info.local_args,  # type: ignore[arg-type]
             **op_info.local_kwargs,  # type: ignore[arg-type]
         )
     elif op_call == aten._scaled_dot_product_efficient_attention.default:
         local_results = _scaled_dot_product_ring_efficient_attention(
-            op_info.mesh,
-            *op_info.local_args,  # type: ignore[arg-type]
-            **op_info.local_kwargs,  # type: ignore[arg-type]
-        )
-    elif op_call == aten._scaled_dot_product_cudnn_attention.default:
-        local_results = _scaled_dot_product_ring_cudnn_attention(
-            op_info.mesh,
+            op_info.compute_mesh,
             *op_info.local_args,  # type: ignore[arg-type]
             **op_info.local_kwargs,  # type: ignore[arg-type]
         )
@@ -617,13 +574,13 @@ def _sdpa_backward_handler(
 
     if op_call == aten._scaled_dot_product_flash_attention_backward.default:
         local_results = _scaled_dot_product_ring_flash_attention_backward(
-            op_info.mesh,
+            op_info.compute_mesh,
             *op_info.local_args,  # type: ignore[arg-type]
             **op_info.local_kwargs,  # type: ignore[arg-type]
         )
     elif op_call == aten._scaled_dot_product_efficient_attention_backward.default:
         local_results = _scaled_dot_product_ring_efficient_attention_backward(
-            op_info.mesh,
+            op_info.compute_mesh,
             *op_info.local_args,  # type: ignore[arg-type]
             **op_info.local_kwargs,  # type: ignore[arg-type]
         )
@@ -889,7 +846,6 @@ customized_ops = {
     aten._scaled_dot_product_flash_attention_backward.default: _sdpa_backward_handler,
     aten._scaled_dot_product_efficient_attention.default: _sdpa_handler,
     aten._scaled_dot_product_efficient_attention_backward.default: _sdpa_backward_handler,
-    aten._scaled_dot_product_cudnn_attention.default: _sdpa_handler,
 }
 
 
