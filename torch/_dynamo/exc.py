@@ -129,11 +129,7 @@ class ShortenTraceback(TorchDynamoException):
 
     def remove_dynamo_frames(self) -> typing.Self:
         tb = self.__traceback__
-        if (
-            self.first_useful_frame is None
-            or tb is None
-            or os.environ.get("TORCHDYNAMO_VERBOSE") == "1"
-        ):
+        if self.first_useful_frame is None or tb is None or config.verbose:
             return self
         while tb.tb_frame is not self.first_useful_frame:
             tb = tb.tb_next
@@ -469,6 +465,28 @@ def unimplemented_v2_with_warning(
     unimplemented_v2(gb_type, context, explanation, hints, from_exc=e, log_warning=True)
 
 
+def format_graph_break_message(
+    gb_type: str,
+    context: str,
+    explanation: str,
+    hints: list[str],
+) -> str:
+    explanation = textwrap.indent(explanation, "    ").lstrip()
+    hints_str = "\n".join(
+        "  Hint: " + textwrap.indent(hint, "    ").lstrip() for hint in hints
+    )
+    context = textwrap.indent(context, "    ").lstrip()
+
+    msg = f"""\
+{gb_type}
+  Explanation: {explanation}
+{hints_str}
+
+  Developer debug context: {context}
+"""
+    return msg
+
+
 # TODO replace old unimplemented later
 def unimplemented_v2(
     gb_type: str,
@@ -488,15 +506,8 @@ def unimplemented_v2(
         explanation: User-facing context-dependent explanation for the graph break. Can be dynamic.
         hints: List of user-facing hints for the graph break.
     """
-    hints_str = "\n".join(hints)
-    hints_str = textwrap.indent(hints_str, "  Hint: ")
-    msg = f"""\
-{gb_type}
-  Explanation: {explanation}
-{hints_str}
 
-  Developer debug context: {context}
-"""
+    msg = format_graph_break_message(gb_type, context, explanation, hints)
     if log_warning:
         log.warning(msg)
     if from_exc is not _NOTHING:
@@ -533,11 +544,17 @@ def augment_exc_message(exc: Exception, msg: str = "\n", export: bool = False) -
         msg += f"\nfrom user code:\n {''.join(traceback.format_list(real_stack))}"
 
     if config.replay_record_enabled and hasattr(exc, "record_filename"):
-        msg += f"\nLast frame execution written to {exc.record_filename}. To run only this frame while debugging, run\
+        msg += (
+            f"\nLast frame execution written to {exc.record_filename}. To run only this frame while debugging, run\
  torch._dynamo.replay('{exc.record_filename}').\n"
+        )
 
     if not config.verbose and hasattr(exc, "real_stack"):
-        msg += '\nSet TORCH_LOGS="+dynamo" and TORCHDYNAMO_VERBOSE=1 for more information\n'
+        msg += (
+            "\nSet TORCHDYNAMO_VERBOSE=1 for the internal stack trace "
+            "(please do this especially if you're reporting a bug to PyTorch). "
+            'For even more developer context, set TORCH_LOGS="+dynamo"\n'
+        )
 
     if hasattr(exc, "inner_exception") and hasattr(
         exc.inner_exception, "minifier_path"
