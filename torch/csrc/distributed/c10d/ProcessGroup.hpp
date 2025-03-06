@@ -371,14 +371,13 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       std::vector<std::vector<at::Tensor>>& outputTensorLists,
       std::vector<at::Tensor>& inputTensors,
       const AllgatherOptions& opts = AllgatherOptions()) {
-    static auto op =
-        c10::Dispatcher::singleton()
-            .findSchemaOrThrow("c10d::allgather_coalesced_", "")
-            .typed<c10::intrusive_ptr<Work>(
-                const std::vector<std::vector<at::Tensor>>&,
-                const at::TensorList&,
-                const c10::intrusive_ptr<::c10d::ProcessGroup>&,
-                bool)>();
+    static auto op = c10::Dispatcher::singleton()
+                         .findSchemaOrThrow("c10d::allgather_coalesced_", "")
+                         .typed<c10::intrusive_ptr<Work>(
+                             const std::vector<std::vector<at::Tensor>>&,
+                             const at::TensorList&,
+                             const c10::intrusive_ptr<::c10d::ProcessGroup>&,
+                             bool)>();
 
     auto work = op.call(
         outputTensorLists,

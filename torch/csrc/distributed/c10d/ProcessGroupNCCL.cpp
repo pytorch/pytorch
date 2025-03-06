@@ -4766,11 +4766,24 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::barrier(const BarrierOptions& opts) {
   arOpts.asyncOp = opts.asyncOp;
   auto work = allreduce_impl(barrierTensor, "nccl:all_reduce_barrier", arOpts);
 
-  // Work will take over barrierTensors
-  auto ncclWork = dynamic_cast<ProcessGroupNCCL::WorkNCCL*>(work.get());
-  TORCH_CHECK(ncclWork);
-  ncclWork->isBarrierOp_ = true;
-  return work;
+  if (opts.asyncOp) {
+    // Work will take over barrierTensors
+    auto ncclWork = dynamic_cast<ProcessGroupNCCL::WorkNCCL*>(work.get());
+    // If user specified async, the work should not be nullptr
+    TORCH_CHECK(ncclWork);
+    // Put a marker here so that `work.wait()` issue by users does
+    // barrier-specific thing: CPU sync
+    ncclWork->isBarrierOp_ = true;
+    return work;
+  }
+
+  // Otherwise, we are in sync mode, we directly wait here.
+  // (It is a CPU wait for barrier)
+  auto currentStream = at::cuda::getCurrentCUDAStream(barDevIdx);
+  // CUDAStream wrapper will correctly use a DeviceGuard here
+  currentStream.synchronize();
+  // No work to return
+  return nullptr;
 }
 
 c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall_base(
