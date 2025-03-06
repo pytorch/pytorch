@@ -458,11 +458,13 @@ class TestCutlassBackend(TestCase):
         shapes = shapes[0:1] if not dynamic else shapes
 
         x_shapes = [
-            # lambda M, N: (M, N),
-            # lambda M, N: (M, 1),
-            # lambda M, N: (1, N),
-            lambda M, N: (N,),
+            lambda M, N: (M, N),
+            lambda M, N: (M, 1),
+            lambda M, N: (1, N),
         ]
+        # FIXME: numerical issues when dynamic=True
+        if not dynamic:
+            x_shapes.append(lambda M, N: (N,))
         for x_shape in x_shapes:
             inputs = [
                 (
@@ -475,7 +477,10 @@ class TestCutlassBackend(TestCase):
             dynamic_shapes = (
                 {
                     # henry check if this make sense
-                    "x": {i: Dim.DYNAMIC for i in range(len(x_shape(shapes[0][0], shapes[0][1])))},
+                    "x": {
+                        i: Dim.DYNAMIC
+                        for i in range(len(x_shape(shapes[0][0], shapes[0][1])))
+                    },
                     "a": {0: Dim.DYNAMIC, 1: Dim.DYNAMIC},
                     "b": {0: Dim.DYNAMIC, 1: Dim.DYNAMIC},
                 }
@@ -491,7 +496,7 @@ class TestCutlassBackend(TestCase):
                 }
             ), dynamo_config.patch({"error_on_recompile": dynamic}):
                 torch._dynamo.reset()
-                fresh_inductor_cache()
+                clear_inductor_caches()
                 expected = [model(*input) for input in inputs]
                 if use_aoti:
                     actual = AOTIRunnerUtil.run_multiple(
@@ -502,7 +507,6 @@ class TestCutlassBackend(TestCase):
                     actual = [compiled_model(*input) for input in inputs]
 
                 torch.testing.assert_close(actual, expected)
-
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @parametrize("dynamic", (False,))
