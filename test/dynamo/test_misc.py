@@ -9406,12 +9406,13 @@ def ___make_guard_fn():
 
             @torch.compile(backend="eager", fullgraph=True)
             def func(x):
-                return collections.deque([x, x + 1])
+                return collections.deque([x, x + 1, x + 2], maxlen=2)
 
             x = torch.randn(3, 4)
             out = func(x)
             assert isinstance(out, collections.deque), f"get type: {type(out)}"
-            torch.testing.assert_close(out, collections.deque([x, x + 1]))
+            assert out.maxlen == 2, f"get maxlen: {out.maxlen}"
+            torch.testing.assert_close(out, collections.deque([x + 1, x + 2], maxlen=2))
             """
         ).strip()
 
