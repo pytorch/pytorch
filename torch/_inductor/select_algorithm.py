@@ -1333,27 +1333,14 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         if log_info is None:
             log_info = {}
         self.log_info: dict[str, Any] = log_info
-        if torch.version.hip is None:
-            self.log_info.update(
-                {
-                    "backend": "Triton",
-                    "grid": str(self.bmreq.grid),
-                    "num_stages": self.bmreq.num_stages,
-                    "num_warps": self.bmreq.num_warps,
-                }
-            )
-        else:
-            self.log_info.update(
-                {
-                    "backend": "Triton",
-                    "grid": str(self.bmreq.grid),
-                    "num_stages": self.bmreq.num_stages,
-                    "num_warps": self.bmreq.num_warps,
-                    "matrix_instr_nonkdim": self.bmreq.matrix_instr_nonkdim,
-                    "waves_per_eu": self.bmreq.waves_per_eu,
-                    "kpack": self.bmreq.kpack,
-                }
-            )
+        self.log_info.update(
+            {
+                "backend": "Triton",
+                "grid": str(self.bmreq.grid),
+                "num_stages": self.bmreq.num_stages,
+                "num_warps": self.bmreq.num_warps,
+            }
+        )
         self.mutated_inputs = mutated_inputs
         self.workspace_arg = workspace_arg
         self.allowed_prologue_inps = (
