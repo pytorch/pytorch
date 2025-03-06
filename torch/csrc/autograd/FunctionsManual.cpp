@@ -3866,7 +3866,10 @@ Tensor linalg_lstsq_residuals_jvp(
   auto B = vector_to_matrix(B_);
   auto dB = vector_to_matrix(dB_);
   auto X = vector_to_matrix(X_);
-  auto dL = 2 * ((A.matmul(X) - B) * (dA.matmul(X) - dB)).sum(-2);
+  auto r = A.matmul(X) - B;
+  auto dr = dA.matmul(X) - dB;
+  // Danskin's theorem lets us compute dL as if X did not depend on A and B
+  auto dL = 2 * at::real(r * dr.conj()).sum(-2);
   return dL;
 }
 
@@ -3923,6 +3926,9 @@ std::tuple<Tensor, Tensor> linalg_lstsq_backward(
       auto B_grad_L = matrix_to_vector(-2 * gL * r);
       B_grad = B_grad_X.defined() ? B_grad_X + B_grad_L : B_grad_L;
     }
+  } else { // gX_.defined() == true
+    A_grad = A_grad_X;
+    B_grad = B_grad_X;
   }
 
   return std::make_tuple(A_grad, B_grad);
