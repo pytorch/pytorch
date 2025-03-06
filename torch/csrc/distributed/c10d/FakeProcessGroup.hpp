@@ -6,6 +6,7 @@ namespace c10d {
 
 class FakeWork : public Work {
  public:
+  int seq_id = -1;
   bool wait(std::chrono::milliseconds timeout = kNoTimeout) override {
     return true;
   }

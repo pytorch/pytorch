@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import warnings
 import weakref
-from typing import Callable, List, Optional
+from typing import Callable, Optional
 
 import torch
 from torch.autograd.graph import register_multi_grad_hook
@@ -60,7 +60,7 @@ class ModTracker:
         self._known_modules: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
         self._seen_modules: weakref.WeakSet = weakref.WeakSet()
         self._has_callback = False
-        self._post_bw_callbacks_to_enqueue: List[Callable] = []
+        self._post_bw_callbacks_to_enqueue: list[Callable] = []
         self._user_pre_fw_hook = None
         self._user_post_fw_hook = None
         self._user_pre_bw_hook = None

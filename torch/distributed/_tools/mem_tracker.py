@@ -301,9 +301,9 @@ def _print_state_snapshots_tabular(
                 }
                 last_state_call = state_call
                 for k, v in dev_snap.items():
-                    row[
-                        f"{k.value}" if isinstance(k, _RefType) else f"{k}"
-                    ] = f"{_rounding_fn(v, divisor, 2)} {units}"
+                    row[f"{k.value}" if isinstance(k, _RefType) else f"{k}"] = (
+                        f"{_rounding_fn(v, divisor, 2)} {units}"
+                    )
                 table_data.append(row)
     print(tabulate(table_data, headers="keys", tablefmt="rst"))
 
@@ -881,7 +881,11 @@ class MemTracker(TorchDispatchMode):
             args: tuple[object, ...],
             kwargs: dict[str, object],
         ) -> object:
-            with self if op_call in DTensor._op_dispatcher._custom_op_handlers else nullcontext():
+            with (
+                self
+                if op_call in DTensor._op_dispatcher._custom_op_handlers
+                else nullcontext()
+            ):
                 return self._orig_dtensor_dispatch(op_call, args, kwargs)
 
         DTensor._op_dispatcher.dispatch = track_dtensor_dispatch  # type: ignore[method-assign, assignment]
