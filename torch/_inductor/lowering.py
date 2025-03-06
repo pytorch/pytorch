@@ -1903,9 +1903,6 @@ def fallback_handler(kernel, add_to_fallback_set=True):
             wrap_tensors, ir.FallbackKernel.create(kernel, *args, **kwargs)
         )
 
-    # This lets us detect that a lowering is a fallback handler.
-    handler._is_fallback_handler = True  # type: ignore[attr-defined]
-
     return handler
 
 
