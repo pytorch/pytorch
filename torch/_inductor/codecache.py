@@ -1171,24 +1171,6 @@ class FxGraphCache:
             counters["inductor"]["fxgraph_cache_write_error"] += 1
 
     @staticmethod
-    def _check_for_hop(gm: torch.fx.GraphModule) -> None:
-        for module in gm.modules():
-            if not isinstance(module, torch.fx.GraphModule):
-                continue
-            for node in module.graph.nodes:
-                if (
-                    isinstance(node.target, torch._ops.HigherOrderOperator)
-                    and not node.target.cacheable()
-                ):
-                    raise BypassFxGraphCache(
-                        f"Can't cache HigherOrderOperator: {node.target.name()}"
-                    )
-                if node.op == "getattr" and isinstance(
-                    getattr(gm, node.target), torch._C.ScriptObject
-                ):
-                    raise BypassFxGraphCache("Can't cache torchbind objects")
-
-    @staticmethod
     def _check_can_cache(gm: torch.fx.GraphModule) -> None:
         """
         Check some conditions that would preclude caching and raise BypassFxGraphCache
@@ -1224,8 +1206,22 @@ class FxGraphCache:
             log.debug("fx graph cache no shape env")
             raise BypassFxGraphCache("No shape env")
 
-        # We skip caching if there are any HOPs or torchbind objects.
-        FxGraphCache._check_for_hop(gm)
+        # We skip caching if there are any torchbind objects.
+        for module in gm.modules():
+            if not isinstance(module, torch.fx.GraphModule):
+                continue
+            for node in module.graph.nodes:
+                if (
+                    isinstance(node.target, torch._ops.HigherOrderOperator)
+                    and not node.target.cacheable()
+                ):
+                    raise BypassFxGraphCache(
+                        f"Can't cache HigherOrderOperator: {node.target.name()}"
+                    )
+                if node.op == "getattr" and isinstance(
+                    getattr(gm, node.target), torch._C.ScriptObject
+                ):
+                    raise BypassFxGraphCache("Can't cache torchbind objects")
 
     @staticmethod
     def prepare_key(
@@ -1394,8 +1390,10 @@ class AotCodeCompiler:
     def compile(
         cls,
         graph: GraphLowering,
-        source_code: str,
+        wrapper_code: str,
+        kernel_code: str,
         serialized_extern_kernel_nodes: Optional[str],
+        *,
         device_type: str,
         additional_files: list[str],
     ) -> Union[list[str], str]:
@@ -1431,32 +1429,59 @@ class AotCodeCompiler:
             specified_output_path,
             specified_artifact_name,
         ) = split_aot_inductor_output_path(config.aot_inductor.output_path)
-        key, cpp_path = write(
-            source_code,
-            "cpp",
+
+        # TODO (benjaminglass1): the CMake packaging path doesn't support linking files
+        # built with different flags.  Until that's implemented, append the kernel code
+        # to the wrapper and build everything at max optimization.
+        if config.aot_inductor.package_cpp_only:
+            wrapper_code = "\n".join((wrapper_code, kernel_code))
+            kernel_code = ""
+
+        wrapper_key, wrapper_path = write(
+            wrapper_code,
+            "wrapper.cpp",
+            extra=cpp_command,
+            specified_dir=specified_output_path,
+        )
+        _, kernel_path = write(
+            kernel_code,
+            "kernel.cpp",
             extra=cpp_command,
             specified_dir=specified_output_path,
         )
 
         if config.aot_inductor.package:
-            generated_files.append(cpp_path)
+            generated_files.append(wrapper_path)
+            if not config.aot_inductor.package_cpp_only:
+                generated_files.append(kernel_path)
 
-        output_code_log.info("Output code written to: %s", cpp_path)
+        output_code_log.info("Wrapper code written to: %s", wrapper_path)
+        output_code_log.info("Kernel code written to: %s", kernel_path)
         trace_structured(
             "graph_dump",
             lambda: {
-                "name": "inductor_aot_code",
+                "name": "inductor_aot_wrapper_code",
                 "type": "cpp",
-                "filename": cpp_path,
+                "filename": wrapper_path,
             },
-            payload_fn=lambda: source_code,
+            payload_fn=lambda: wrapper_code,
+        )
+        trace_structured(
+            "graph_dump",
+            lambda: {
+                "name": "inductor_aot_kernel_code",
+                "type": "cpp",
+                "filename": kernel_path,
+            },
+            payload_fn=lambda: kernel_code,
         )
 
         # We use a file lock below to protect FS operations. The lock file
         # is scoped to the 'key', so make sure the consts_s is protected
         # by the same lock:
-        cpp_path_operator = Path(cpp_path)
-        specified_sub_dir = cpp_path_operator.parent / key
+        wrapper_path_operator = Path(wrapper_path)
+        kernel_path_operator = Path(kernel_path)
+        specified_sub_dir = wrapper_path_operator.parent / wrapper_key
         if not specified_sub_dir.exists():
             specified_sub_dir.mkdir(exist_ok=True)
         cmake_path = str(Path(specified_sub_dir) / "CMakeLists.txt")
@@ -1542,10 +1567,14 @@ class AotCodeCompiler:
         from torch.utils._filelock import FileLock
 
         lock_dir = get_lock_dir()
-        lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
+        lock = FileLock(
+            os.path.join(lock_dir, wrapper_key + ".lock"), timeout=LOCK_TIMEOUT
+        )
         with lock:
             if serialized_extern_kernel_nodes:
-                extern_kernel_nodes_json = str(cpp_path_operator.with_suffix(".json"))
+                extern_kernel_nodes_json = str(
+                    wrapper_path_operator.with_suffix(".json")
+                )
                 with open(extern_kernel_nodes_json, "w") as f:
                     f.write(serialized_extern_kernel_nodes)
 
@@ -1557,7 +1586,9 @@ class AotCodeCompiler:
 
             # Save user provided metadata
             meta_json = str(
-                cpp_path_operator.with_name(f"{cpp_path_operator.stem}_metadata.json")
+                wrapper_path_operator.with_name(
+                    f"{wrapper_path_operator.stem}_metadata.json"
+                )
             )
             for k, v in config.aot_inductor.metadata.items():
                 assert isinstance(k, str) and isinstance(v, (str)), (
@@ -1567,13 +1598,22 @@ class AotCodeCompiler:
             with open(meta_json, "w") as f:
                 f.write(json.dumps(config.aot_inductor.metadata))
 
+            kernel_meta_json = str(
+                kernel_path_operator.with_name(
+                    f"{kernel_path_operator.stem}_metadata.json"
+                )
+            )
+            shutil.copy(meta_json, kernel_meta_json)
+
             if config.aot_inductor.package:
                 generated_files.append(meta_json)
+                if not config.aot_inductor.package_cpp_only:
+                    generated_files.append(kernel_meta_json)
 
             output_so = (
                 config.aot_inductor.output_path
                 if specified_artifact_name
-                else str(cpp_path_operator.with_suffix(".so"))
+                else str(wrapper_path_operator.with_suffix(".so"))
             )
             all_cuda = all(
                 graph.get_original_value_of_constant(name).is_cuda
@@ -1627,38 +1667,59 @@ class AotCodeCompiler:
             if config.aot_inductor.force_mmap_weights:
                 use_mmap_weights = True
 
-            object_build_options = CppTorchDeviceOptions(
-                vec_isa=picked_vec_isa,
-                device_type=device_type,
-                aot_mode=graph.aot_mode,
+            compile_command: dict[str, Any] = {
+                "aot_mode": graph.aot_mode,
+                "device_type": device_type,
+                "use_mmap_weights": use_mmap_weights,
+                "use_relative_path": config.is_fbcode(),
+                "vec_isa": picked_vec_isa,
+            }
+            # If we're packaging via CMake, we build the whole code at max optimization.
+            wrapper_build_options = CppTorchDeviceOptions(
                 compile_only=True,
-                use_relative_path=config.is_fbcode(),
-                use_mmap_weights=use_mmap_weights,
+                min_optimize=not config.aot_inductor.package_cpp_only,
+                **compile_command,
             )
-            object_builder = CppBuilder(
-                name=str(cpp_path_operator.stem),
-                sources=cpp_path,
-                output_dir=str(cpp_path_operator.parent),
-                BuildOption=object_build_options,
+            kernel_build_options = CppTorchDeviceOptions(
+                compile_only=True,
+                **compile_command,
             )
-            compile_cmd = object_builder.get_command_line()
-            output_o = object_builder.get_target_file_path()
 
-            log.debug("aot compilation command: %s", compile_cmd)
+            wrapper_builder = CppBuilder(
+                name=str(wrapper_path_operator.stem),
+                sources=wrapper_path,
+                output_dir=str(wrapper_path_operator.parent),
+                BuildOption=wrapper_build_options,
+            )
+            wrapper_compile_cmd = wrapper_builder.get_command_line()
+            wrapper_o = wrapper_builder.get_target_file_path()
+
+            kernel_builder = CppBuilder(
+                name=str(kernel_path_operator.stem),
+                sources=kernel_path,
+                output_dir=str(wrapper_path_operator.parent),
+                BuildOption=kernel_build_options,
+            )
+            kernel_compile_cmd = kernel_builder.get_command_line()
+            kernel_o = kernel_builder.get_target_file_path()
+
+            log.debug("aot wrapper compilation command: %s", wrapper_compile_cmd)
+            log.debug("aot kernel compilation command: %s", kernel_compile_cmd)
             if config.aot_inductor.package_cpp_only:
                 # Not doing the actual compilation here
                 compile_flags = str(
-                    cpp_path_operator.with_name(
-                        f"{cpp_path_operator.stem}_compile_flags.json"
+                    wrapper_path_operator.with_name(
+                        f"{wrapper_path_operator.stem}_compile_flags.json"
                     )
                 )
-                object_build_options.save_flags_to_json(compile_flags)
+                wrapper_build_options.save_flags_to_json(compile_flags)
                 generated_files.append(compile_flags)
-                object_builder.save_compile_cmd_to_cmake(cmake_path)
-                object_builder.save_src_to_cmake(cmake_path, cpp_path)
+                wrapper_builder.save_compile_cmd_to_cmake(cmake_path)
+                wrapper_builder.save_src_to_cmake(cmake_path, wrapper_path)
                 generated_files.append(cmake_path)
             else:
-                object_builder.build()
+                wrapper_builder.build()
+                kernel_builder.build()
 
             if not use_mmap_weights:
                 aot_constants = serialized_weights
@@ -1673,12 +1734,12 @@ class AotCodeCompiler:
             gpu_codecache: Union[ROCmCodeCache, CUDACodeCache] = (
                 ROCmCodeCache() if torch.version.hip else CUDACodeCache()
             )
-            kernels_o = [
+            gpu_kernels_o = [
                 entry.output_path
                 for entry in gpu_codecache.cache.values()
                 if entry.output_path.endswith(".o")
             ]
-            kernels_o = " ".join(kernels_o)
+            gpu_kernels_o = " ".join(gpu_kernels_o)
 
             output_name, output_dir = get_name_and_dir_from_output_file_path(output_so)
             so_build_options = CppTorchDeviceOptions(
@@ -1690,9 +1751,9 @@ class AotCodeCompiler:
 
             so_builder = CppBuilder(
                 name=output_name,
-                sources=[output_o, consts_o, kernels_o]
-                if kernels_o
-                else [output_o, consts_o],
+                sources=[wrapper_o, kernel_o, consts_o, gpu_kernels_o]
+                if gpu_kernels_o
+                else [wrapper_o, kernel_o, consts_o],
                 output_dir=output_dir,
                 BuildOption=so_build_options,
             )
@@ -1702,15 +1763,20 @@ class AotCodeCompiler:
             log.debug("aot linkage command: %s", link_cmd)
 
             # Append cmds to the end of codegen-ed wrapper file
-            with open(cpp_path, "a") as f:
+            with open(wrapper_path, "a") as f:
                 f.write("\n")
-                f.write(f"// Compile cmd\n// {compile_cmd}\n")
+                f.write(f"// Compile cmd\n// {wrapper_compile_cmd}\n")
+                f.write(f"// Link cmd\n// {link_cmd}\n")
+
+            with open(kernel_path, "a") as f:
+                f.write("\n")
+                f.write(f"// Compile cmd\n// {kernel_compile_cmd}\n")
                 f.write(f"// Link cmd\n// {link_cmd}\n")
 
             if config.aot_inductor.package_cpp_only:
                 linker_flags = str(
-                    cpp_path_operator.with_name(
-                        f"{cpp_path_operator.stem}_linker_flags.json"
+                    wrapper_path_operator.with_name(
+                        f"{wrapper_path_operator.stem}_linker_flags.json"
                     )
                 )
                 so_build_options.save_flags_to_json(linker_flags)
@@ -1722,8 +1788,8 @@ class AotCodeCompiler:
 
                 if use_mmap_weights:
                     weight_file = str(
-                        cpp_path_operator.with_name(
-                            f"{cpp_path_operator.stem}_serialized_weights.bin"
+                        wrapper_path_operator.with_name(
+                            f"{wrapper_path_operator.stem}_serialized_weights.bin"
                         )
                     )
                     with open(weight_file, "wb") as f_weights:
@@ -1733,19 +1799,16 @@ class AotCodeCompiler:
                     generated_files.append(weight_file)
 
                 generated_files.append(consts_o)
-                generated_files.append(kernels_o)
+                generated_files.append(gpu_kernels_o)
 
                 so_builder.save_src_to_cmake(cmake_path, consts_o)
-                for kernel_o in kernels_o.split():
-                    so_builder.save_src_to_cmake(cmake_path, kernel_o)
+                for gpu_o in gpu_kernels_o.split():
+                    so_builder.save_src_to_cmake(cmake_path, gpu_o)
                 so_builder.save_link_cmd_to_cmake(cmake_path)
             else:
                 so_builder.build()
 
-                for o_file in [
-                    output_o,
-                    consts_o,
-                ]:
+                for o_file in [wrapper_o, kernel_o, consts_o]:
                     # Remove these as they are not needed anymore
                     os.remove(o_file)
 
