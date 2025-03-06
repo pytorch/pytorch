@@ -39,4 +39,4 @@ from torch.types import (
 
 ${structseq_defs}
 
-all_return_types: list[type] = []
+all_return_types: list[type] = ...

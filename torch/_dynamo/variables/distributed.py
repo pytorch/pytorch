@@ -29,7 +29,7 @@ from torch.fx.experimental._backward_state import BackwardState
 
 from .. import compiled_autograd, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
-from ..exc import unimplemented
+from ..exc import unimplemented_v2
 from ..external_utils import call_module_hooks_from_backward_state
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource
@@ -56,7 +56,14 @@ class DistributedVariable(VariableTracker):
     def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
         if not DistributedVariable.is_available():
-            unimplemented("torch.distributed package is not available!")
+            unimplemented_v2(
+                gb_type="torch.distributed package is not available!",
+                context="",
+                explanation="The PyTorch package doesn't include torch.distributed when builing from source.",
+                hints=[
+                    "Set USE_DISTRIBUTED=1 to enable it when building PyTorch from source."
+                ],
+            )
         self.value = value
 
     def python_type(self):
@@ -260,7 +267,11 @@ class DeviceMeshVariable(DistributedVariable):
         if name == "get_coordinate":
             return ConstantVariable.create(self.value.get_coordinate())
         if name == "get_group":
-            return ProcessGroupVariable(self.value.get_group())
+            const_args = [x.as_python_constant() for x in args]
+            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+            return ProcessGroupVariable(
+                self.value.get_group(*const_args, **const_kwargs)
+            )
         if name == "_get_or_create_default_group":
             return ProcessGroupVariable(self.value._get_or_create_default_group())
         return super().call_method(tx, name, args, kwargs)
@@ -339,7 +350,14 @@ class BackwardHookVariable(VariableTracker):
         user_pre_hooks: VariableTracker,
     ):
         if not compiled_autograd.compiled_autograd_enabled:
-            unimplemented("module-level backwards hooks require compiled autograd")
+            unimplemented_v2(
+                gb_type="Module-level backwards hooks require compiled autograd.",
+                context="",
+                explanation="",
+                hints=[
+                    "Enable compiled autograd by setting torch._dynamo.config.compiled_autograd = True."
+                ],
+            )
 
         def _in_graph_bw_hooks(bw_state: BackwardState):
             """
