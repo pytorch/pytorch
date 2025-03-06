@@ -1,7 +1,8 @@
 # ${generated_comment}
 # mypy: disable-error-code="type-arg"
 
-from typing import Literal, overload, Sequence
+from collections.abc import Sequence
+from typing import Literal, overload
 
 from torch import memory_format, Tensor
 from torch.types import _bool, _device, _dtype, _int, _size
