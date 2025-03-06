@@ -492,12 +492,8 @@ if HAS_CUDA:
                 mut_inp = tmp.clone()
                 mut(mut_inp)  # should not warn since mut has warned
 
-            msg = "skipping cudagraphs due to mutated inputs (1 instances)" + (
-                ". Found from" if not config.graph_partition else ""
-            )
-
             FileCheck().check_count(
-                msg,
+                "skipping cudagraphs due to mutated inputs (1 instances). Found from",
                 1,
                 exactly=True,
             ).run(captured_output[0])
@@ -1862,7 +1858,6 @@ if HAS_CUDA:
             self.assertFalse(self.get_manager().new_graph_id().id == 0)
 
         @torch._dynamo.config.patch("capture_scalar_outputs", True)
-        @torch._inductor.config.patch("graph_partition", False)
         def test_incompatible_cudagraph_ops_item(self):
             @torch.compile(mode="reduce-overhead")
             def foo(x):
@@ -1904,7 +1899,6 @@ if HAS_CUDA:
             )
 
         @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
-        @torch._inductor.config.patch("graph_partition", False)
         def test_incompatible_cudagraph_ops_nonzero(self):
             @torch.compile(mode="reduce-overhead")
             def foo(x):
@@ -2670,6 +2664,32 @@ if HAS_CUDA:
             # we should not have cudagraph'd the y backward
             new_id = self.get_manager().new_graph_id().id
             self.assertEqual(new_id, 3)
+
+        @requires_multigpu()
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_multiple_devices_msg(self):
+            def foo(x, y):
+                return (x + 1, y + 2)
+
+            foo = torch.compile(foo, mode="reduce-overhead")
+            for _ in range(3):
+                foo(torch.ones([10], device="cuda"), torch.ones([20]))
+
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
+
+            with capture_stderr() as captured_output:
+                for _ in range(3):
+                    foo(
+                        torch.ones([10], device="cuda:0"),
+                        torch.ones([10], device="cuda:1"),
+                    )
+
+            FileCheck().check("skipping cudagraphs due to multiple devices").run(
+                captured_output[0]
+            )
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+            new_id = self.get_manager().new_graph_id().id
+            self.assertEqual(new_id, 1)
 
     class TestSAC(TestCase):
         def _make_observer_mode(self):

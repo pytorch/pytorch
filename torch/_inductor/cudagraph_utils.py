@@ -167,6 +167,10 @@ def _get_use_stack_trace(node: torch.fx.Node) -> Optional[str]:
 def check_multiple_devices_or_any_cpu_nodes(
     device_node_mapping: dict[torch.device, torch.fx.Node],
 ) -> Optional[str]:
+    if torch._inductor.config.graph_partition:
+        # graph partition supports splitting on cpu op. So we can ignore cpu nodes.
+        device_node_mapping.pop(torch.device("cpu"), None)
+
     if cpu_node := device_node_mapping.get(torch.device("cpu")):
         msg = f"cpu device ({cpu_node.name})"
         if stack_trace := _get_use_stack_trace(cpu_node):
