@@ -1858,7 +1858,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     timeout=precompilation_timeout_seconds,
                 ):
                     if e := future.exception():
-                        log.error(
+                        log.info(
                             "Exception %s for benchmark choice %s", e, futures[future]
                         )
                     else:
