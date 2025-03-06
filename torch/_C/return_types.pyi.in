@@ -37,6 +37,10 @@ from torch.types import (
     Number,
 )
 
+${return_types___all__}
+
+def pytree_register_structseq(cls: type) -> None: ...
+
 ${structseq_defs}
 
 all_return_types: list[type] = ...
