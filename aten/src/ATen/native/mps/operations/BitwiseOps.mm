@@ -103,14 +103,9 @@ static inline std::string getMetalType(const Tensor& t) {
   return getMetalType(t.scalar_type());
 }
 
-static inline std::string getMetalType(const c10::Scalar& s) {
-  return getMetalType(s.type());
-}
-
-template <typename ScalarOrTensor>
 static id<MTLComputePipelineState> getCPLState(const Tensor& t1,
                                                const Tensor& t2,
-                                               const ScalarOrTensor& t3,
+                                               const Tensor& t3,
                                                const std::string& fname) {
   return lib.getPipelineStateForFunc(fname, {getMetalType(t1), getMetalType(t2), getMetalType(t3)});
 }
