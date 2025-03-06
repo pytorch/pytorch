@@ -3556,6 +3556,17 @@ class CommonTemplate:
             ),
         )
 
+    def test_addmv(self):
+        def fn(a, b, c):
+            return torch.addmv(a, b, c)
+
+        cfn = torch.compile(backend="inductor")(fn)
+        input = torch.tensor([2], dtype=torch.int32)
+        mat = torch.tensor(np.random.randn(0, 0), dtype=torch.int32)
+        vec = torch.tensor([])
+        with torch.no_grad():
+            self.assertEqual(cfn(input, mat, vec), fn(input, mat, vec))
+
     # https://github.com/pytorch/pytorch/issues/98979
     @skipCUDAIf(True, "cuda failed for float64 linear")
     @skipIfXpu(msg="Double and complex datatype matmul is not supported in oneDNN")
@@ -11628,6 +11639,51 @@ class CommonTemplate:
         with torch.no_grad():
             net = torch.compile(model)
             out = net(input_t)
+
+    @skip_if_cpp_wrapper(
+        "Without major redesign, cpp_wrapper will not support custom ops that are "
+        "defined in Python."
+    )
+    @config.patch(implicit_fallbacks=True)
+    def test_custom_op_default_layout_constraint(self):
+        with torch.library._scoped_library("mylib", "DEF") as lib:
+            lib.define(
+                "copy_(Tensor(a!) dst, Tensor src) -> ()",
+                # No need to pass in an explicit tag since the default
+                # behavior for custom op works.
+                # tags=torch.Tag.needs_fixed_stride_order,
+            )
+
+            @torch.library.impl(lib, "copy_", "Meta")
+            def _(dst, src):
+                return None
+
+            @torch.library.impl(lib, "copy_", "CompositeExplicitAutograd")
+            def _(dst, src):
+                if src.is_contiguous():
+                    dst.copy_(src + 1)
+                else:
+                    dst.copy_(src)
+
+            def f(x):
+                full_default_3 = torch.full([3, 3], 7.0, device=self.device)
+                chunk_cat_default_1 = torch.ops.mylib.copy_.default(full_default_3, x)
+                mul_out = torch.mul(full_default_3, full_default_3)
+                return mul_out
+
+            x = (
+                torch.arange(9, dtype=torch.float, device=self.device)
+                .view(3, 3)
+                .t()
+                .contiguous()
+                .t()
+            )
+            eager_out = f(x)
+
+            compiled_inductor_f = torch.compile(f, backend="inductor", fullgraph=True)
+            compiled_inductor_out = compiled_inductor_f(x)
+
+        self.assertTrue(torch.allclose(compiled_inductor_out, eager_out))
 
     @skip_if_gpu_halide  # cuda error
     def test_buffer_use_after_remove(self):
