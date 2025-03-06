@@ -947,6 +947,8 @@ void cuComputeGradInput(
   }
 }
 
+// When the data size is a multiple of the tile size we can use fewer
+// instructions and registers. Example, this is the case when M=256 N=256.
 template <typename T, typename T_ACC,
 unsigned int block_dim_x,
 unsigned int block_dim_y,
@@ -1099,6 +1101,18 @@ blockReduceGammaBetaBackwardsWithChecks(
   }
 }
 
+// block_dim_x is the number of threads in the x dimension per block.
+// block_dim_y is the number of threads in the y dimension per block.
+// rows_per_block_y is the size of the tile (number of data elements)
+// in the y dimension per block.
+// partial_reduction indicates whether we need to reduce across threads
+// or not. If set to true, we will not reduce across threads. This can
+// be faster in the M >> N case but requires another kernel to do a full
+// final reduction.
+// aligned_grid means the data size is a multiple of tile size. In that
+// case we don't need to check for boundary conditions which can provide
+// a further speedup by not needing instructions to check for edge cases
+// and not needing predicate registers.
 template <typename T, typename T_ACC,
 unsigned int block_dim_x, unsigned int block_dim_y,
 unsigned int rows_per_block_y,
@@ -1297,10 +1311,12 @@ void LaunchGammaBetaBackwardCUDAKernel(
     Tensor* dgamma,
     Tensor* dbeta,
     cudaStream_t cuda_stream) {
-  // Two kernels are better if we have large M and small N.
-  // In that case we can parallelize across the M dimension and do a partial
-  // reduction in the first pass. In the second pass we do a full reduction.
-  if (M > 64 * 1024 && N / 32 < 64) {
+  if (M > 64 * 1024 && N / kWarpSize < 64) {
+    // We have a situation where M >> N and N is small.
+    // In this case we can speed up the computation by parallelizing in the M dimension.
+    // We launch multiple blocks in the y-dimension, and compute partial sums for the
+    // gradient in the first pass. Then we do a .sum(0) to do a final reduction.
+    // Although we launch 2 kernels, we can get up to a 10x speedup for large M.
     constexpr int block_dim_x = 32;
     constexpr int block_dim_y = 1;
     constexpr int rows_per_block_y = 32;
@@ -1331,6 +1347,10 @@ void LaunchGammaBetaBackwardCUDAKernel(
     *dgamma = dgamma_blocks.sum(0);
     *dbeta = dbeta_blocks.sum(0);
   } else {
+    // We are in the normal case where M is not that large.
+    // We can change the tile shape (which is the last template parameter) in accordance with M.
+    // For small M it is faster to have a smaller tile, otherwise we could have idle threads.
+    // For larger M we use a bigger tile size.
     if (M < 64) {
       ConfigureAndLaunchGammaBetaBackwardKernel<T, T_ACC, 32, 1, 8>(dY_data, X_data, mean_data, rstd_data, M, N, dgamma, dbeta, cuda_stream);
     } else if (M < 128) {
