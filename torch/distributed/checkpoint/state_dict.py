@@ -166,7 +166,7 @@ def _get_fqns(
     This API is used to convert the name of a parameter to the FQNs. For FSDP
     without `use_orig_params`, the name of FlatParameter can be mapped to
     multiple original parameters. As a result, the return type of this function
-    is `Set[str]`.
+    is `set[str]`.
 
     Args:
         module (nn.Module): the root model.
@@ -1027,7 +1027,7 @@ def get_model_state_dict(
 
     Args:
         model (nn.Module): the nn.Module to the model.
-        submodules (deprecated): Optional[Set[nn.Module]]: only return the model parameters
+        submodules (deprecated): Optional[set[nn.Module]]: only return the model parameters
             that belong to the submodules.
         options (StateDictOptions): the options to control how
             model state_dict and optimizer state_dict should be returned. See
@@ -1067,7 +1067,7 @@ def get_optimizer_state_dict(
         model (nn.Module): the nn.Module to the model.
         optimizers (Union[None, Optimizer, Iterable[Optimizer]]):
             The optimizers that are used to optimize ``model``.
-        submodules (deprecated): Optional[Set[nn.Module]]: only return the model parameters
+        submodules (deprecated): Optional[set[nn.Module]]: only return the model parameters
             that belong to the submodules.
         options (StateDictOptions): the options to control how
             model state_dict and optimizer state_dict should be returned. See
@@ -1156,7 +1156,7 @@ def get_state_dict(
         model (nn.Module): the nn.Module to the model.
         optimizers (Union[None, Optimizer, Iterable[Optimizer]]):
             The optimizers that are used to optimize ``model``.
-        submodules (deprecated): Optional[Set[nn.Module]]: only return the model parameters
+        submodules (deprecated): Optional[set[nn.Module]]: only return the model parameters
             that belong to the submodules.
         options (StateDictOptions): the options to control how
             model state_dict and optimizer state_dict should be returned. See
