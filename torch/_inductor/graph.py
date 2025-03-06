@@ -101,6 +101,7 @@ from .utils import (
     maybe_get_suppress_shape_guards_ctx,
     normalize_name,
     should_assume_input_aligned,
+    ValueWithLineMap,
 )
 from .virtualized import NullHandler, V
 
@@ -281,7 +282,8 @@ class GraphLowering(torch.fx.Interpreter):
         is_backward: bool = False,
         is_const_graph: bool = False,
         const_output_index: Optional[dict[str, int]] = None,
-        const_code: Optional[str] = None,
+        const_wrapper_code: Optional[str] = None,
+        const_kernel_code: Optional[str] = None,
         const_module: Optional[GraphLowering] = None,
         name: Optional[str] = None,
         inputs_to_check: Optional[Sequence[int]] = None,
@@ -297,7 +299,8 @@ class GraphLowering(torch.fx.Interpreter):
         self.is_inference = is_inference
         self.is_backward = is_backward
         self.is_const_graph = is_const_graph
-        self.const_code = const_code
+        self.const_wrapper_code = const_wrapper_code
+        self.const_kernel_code = const_kernel_code
         self.const_module = const_module
         self.inputs_to_check = inputs_to_check
 
@@ -1138,14 +1141,27 @@ class GraphLowering(torch.fx.Interpreter):
                     error.operator_str(target, args, kwargs),
                 )
 
-                decided_constraint = require_contiguous
-
                 # use contiguous unless the (custom) op asks something else
                 # explicitly
                 if torch._C.Tag.needs_fixed_stride_order in target.tags:
                     decided_constraint = constrain_to_fx_strides  # type: ignore[assignment]
                 elif torch._C.Tag.flexible_layout in target.tags:
                     decided_constraint = None  # type: ignore[assignment]
+                else:
+                    # If there are no tags, we do different things depending on
+                    # if it's a builtin ATen/prim ops or custom ops.
+                    # For ATen ops, we require_contiguous to fix https://github.com/pytorch/pytorch/issues/140452
+                    # For custom ops, we constrain_to_fx_strides to maintain the
+                    # behavior of PyTorch 2.5: https://github.com/pytorch/pytorch/issues/148356
+                    #
+                    # For ATen ops, only apply the constraint for backward
+                    # ops since fwd ops should work for any strides.
+                    if torch._library.utils.is_builtin(target) and self.is_backward:
+                        decided_constraint = require_contiguous  # type: ignore[assignment]
+                    else:
+                        # maybe_layout_constraints will decide the layout constraint for the custom op
+                        # lazily
+                        decided_constraint = None  # type: ignore[assignment]
 
                 # for implicitly fallback ops, we conservatively requires
                 # contiguous input since some eager kernels does not
@@ -1864,7 +1880,9 @@ class GraphLowering(torch.fx.Interpreter):
                 self.const_module.wrapper_code.src_to_kernel
             )
 
-    def codegen_with_cpp_wrapper(self) -> tuple[str, list[tuple[int, Node]]]:
+    def codegen_with_cpp_wrapper(
+        self,
+    ) -> tuple[ValueWithLineMap, ValueWithLineMap]:
         """
         For GPU, Triton kernels are autotuned and stored as cubin files
         """
@@ -1974,7 +1992,7 @@ class GraphLowering(torch.fx.Interpreter):
         with config.patch("triton.store_cubin", False):
             self.scheduler = Scheduler(self.operations)
 
-    def codegen(self) -> tuple[str, list[tuple[int, Node]]]:
+    def codegen(self) -> tuple[ValueWithLineMap, ValueWithLineMap]:
         with dynamo_timed("GraphLowering.codegen", log_pt2_compile_event=True):
             self.init_wrapper_code()
 
@@ -2068,7 +2086,9 @@ class GraphLowering(torch.fx.Interpreter):
     def _compile_to_module(self) -> ModuleType:
         from .codecache import PyCodeCache
 
-        code, linemap = (
+        # Currently, if we're here, we don't have to worry about the kernel code, which
+        # is only available in AOTInductor mode.
+        wrapper_code, _ = (
             self.codegen_with_cpp_wrapper() if self.cpp_wrapper else self.codegen()
         )
         if config.triton.autotune_at_compile_time:
@@ -2079,30 +2099,33 @@ class GraphLowering(torch.fx.Interpreter):
                 + self.wrapper_code.kernel_autotune_calls.getvalue()
                 + '"""\n'
             )
-            code = tuning_code + code
+            wrapper_code.value = tuning_code + wrapper_code.value
         if GraphLowering.save_output_code is not None:
-            GraphLowering.save_output_code(code)
-        output_code_log.debug("Output code: \n%s", code)
+            GraphLowering.save_output_code(wrapper_code.value)
+        output_code_log.debug("Output code: \n%s", wrapper_code.value)
 
         inductor_meta = autotune_cache.inductor_meta_from_config()
-        AutotuneCacheBundler.begin_compile(inductor_meta, code=code)
+        AutotuneCacheBundler.begin_compile(inductor_meta, code=wrapper_code.value)
 
         try:
-            linemap = [(line_no, node.stack_trace) for line_no, node in linemap]  # type: ignore[misc]
-            key, path = PyCodeCache.write(code)
+            linemap = [
+                (line_no, node.stack_trace)  # type: ignore[attr-defined]
+                for line_no, node in wrapper_code.line_map
+            ]
+            key, path = PyCodeCache.write(wrapper_code.value)
             output_code_log.debug("Output code written to: %s", path)
         except Exception:
             trace_structured(
                 "inductor_output_code",
                 # Just omit the filename, I still want the code though!
-                payload_fn=lambda: code,
+                payload_fn=lambda: wrapper_code.value,
             )
             raise
         else:
             trace_structured(
                 "inductor_output_code",
                 lambda: {"filename": path},
-                payload_fn=lambda: code,
+                payload_fn=lambda: wrapper_code.value,
             )
         with dynamo_timed("PyCodeCache.load_by_key_path", log_pt2_compile_event=True):
             mod = PyCodeCache.load_by_key_path(
