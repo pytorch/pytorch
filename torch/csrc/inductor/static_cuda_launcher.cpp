@@ -373,6 +373,7 @@ static PyObject* launch_kernel(PyObject* self, PyObject* args) {
   cudaStream_t cudaStream = reinterpret_cast<cudaStream_t>(stream); // NOLINT
   auto num_args = std::strlen(argTypes);
   // Support up to 10 args by default
+  // We use a templated function here to avoid heap allocations for the argument.
   switch (num_args) {
     case 1:
       return LAUNCH_KERNEL(1);
@@ -435,7 +436,7 @@ static PyTypeObject StaticCudaLauncherType = {
     nullptr, // tp_getattro
     nullptr, // tp_setattro
     nullptr, // tp_as_buffer
-    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_DISALLOW_INSTANTIATION,
+    Py_TPFLAGS_DEFAULT,
     "Statically defined launchers for triton compiled CUDA kernels", // tp_doc
     nullptr, // tp_traverse
     nullptr, // tp_clear
