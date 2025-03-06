@@ -32,7 +32,7 @@ import textwrap
 import typing
 from enum import auto, Enum
 from traceback import extract_stack, format_exc, format_list, StackSummary
-from typing import Any, NoReturn, Optional, TYPE_CHECKING
+from typing import Any, NoReturn, TYPE_CHECKING
 
 import torch._guards
 
@@ -70,9 +70,9 @@ class InternalTorchDynamoError(TorchDynamoException):
 
 
 class RestartAnalysis(TorchDynamoException):
-    restart_reason: Optional[str]
+    restart_reason: str | None
 
-    def __init__(self, *args: Any, restart_reason: Optional[str] = None) -> None:
+    def __init__(self, *args: Any, restart_reason: str | None = None) -> None:
         self.restart_reason = restart_reason
         super().__init__(*args)
 
@@ -122,7 +122,7 @@ class ResetRequired(TorchDynamoException):
 
 class ShortenTraceback(TorchDynamoException):
     def __init__(
-        self, *args: Any, first_useful_frame: Optional[types.FrameType], **kwargs: Any
+        self, *args: Any, first_useful_frame: types.FrameType | None, **kwargs: Any
     ) -> None:
         super().__init__(*args, **kwargs)
         self.first_useful_frame = first_useful_frame
@@ -142,7 +142,7 @@ class BackendCompilerFailed(ShortenTraceback):
         self,
         backend_fn: Any,
         inner_exception: Exception,
-        first_useful_frame: Optional[types.FrameType],
+        first_useful_frame: types.FrameType | None,
     ) -> None:
         self.backend_name = getattr(backend_fn, "__name__", "?")
         self.inner_exception = inner_exception
@@ -151,13 +151,13 @@ class BackendCompilerFailed(ShortenTraceback):
 
 
 class Unsupported(TorchDynamoException):
-    def __init__(self, msg: str, *, case_name: Optional[str] = None) -> None:
+    def __init__(self, msg: str, *, case_name: str | None = None) -> None:
         super().__init__(msg)
         self.real_stack = torch._guards.TracingContext.extract_stack()
         self.msg = msg
-        self.category: Optional[str] = None
+        self.category: str | None = None
         self.add_to_stats()
-        self.case_name: Optional[str] = case_name
+        self.case_name: str | None = case_name
 
     def remove_from_stats(self) -> None:
         assert self.category is not None
@@ -221,7 +221,7 @@ class UserErrorType(Enum):
 
 class UserError(Unsupported):
     def __init__(
-        self, error_type: UserErrorType, msg: str, case_name: Optional[str] = None
+        self, error_type: UserErrorType, msg: str, case_name: str | None = None
     ) -> None:
         """
         Type of errors that would be valid in Eager, but not supported in TorchDynamo.
@@ -277,7 +277,7 @@ class ObservedException(TorchDynamoException):
 
 class ObservedUserStopIteration(ObservedException):
     # An UserStopIteraion exception observed during the Dynamo tracing (e.g Dynamo tracing __next__)
-    value: Optional[Any]
+    value: Any | None
 
     # Reference `StopIteration_init` in CPython
     # https://github.com/python/cpython/blob/3.11/Objects/exceptions.c#L568-L584
@@ -352,8 +352,8 @@ def raise_observed_exception(
     exc_type: type[Exception],
     tx: InstructionTranslatorBase,
     *,
-    args: Optional[list[Any]] = None,
-    kwargs: Optional[dict[str, Any]] = None,
+    args: list[Any] | None = None,
+    kwargs: dict[str, Any] | None = None,
 ) -> NoReturn:
     from .variables import BuiltinVariable
 
@@ -429,7 +429,7 @@ _NOTHING = object()
 
 
 def unimplemented(
-    msg: str, *, from_exc: Any = _NOTHING, case_name: Optional[str] = None
+    msg: str, *, from_exc: Any = _NOTHING, case_name: str | None = None
 ) -> NoReturn:
     assert msg != os.environ.get("BREAK", False)
     if from_exc is not _NOTHING:
@@ -582,7 +582,7 @@ def augment_exc_message(exc: Exception, msg: str = "\n", export: bool = False) -
 
 def get_exc_message(
     e: Exception, compile_id: CompileId
-) -> tuple[Optional[str], Optional[int]]:
+) -> tuple[str | None, int | None]:
     filename = None
     lineno = None
     if e.innermost_user_frame_summary is not None:  # type: ignore[attr-defined]
@@ -593,8 +593,8 @@ def get_exc_message(
 
 
 def get_real_stack(
-    exc: Exception, frame: Optional[DynamoFrameType] = None
-) -> Optional[StackSummary]:
+    exc: Exception, frame: DynamoFrameType | None = None
+) -> StackSummary | None:
     real_stack = getattr(exc, "real_stack", None)
     if real_stack is None:
         return None
@@ -644,8 +644,8 @@ def filter_stack(stack: StackSummary) -> StackSummary:
 def format_error_msg_verbose(
     exc: Exception,
     code: types.CodeType,
-    record_filename: Optional[str] = None,
-    frame: Optional[DynamoFrameType] = None,
+    record_filename: str | None = None,
+    frame: DynamoFrameType | None = None,
 ) -> str:
     msg = (
         f"WON'T CONVERT {code.co_name} {code.co_filename} line {code.co_firstlineno}\n"
@@ -671,8 +671,8 @@ def format_error_msg_verbose(
 def format_error_msg(
     exc: Exception,
     code: types.CodeType,
-    record_filename: Optional[str] = None,
-    frame: Optional[DynamoFrameType] = None,
+    record_filename: str | None = None,
+    frame: DynamoFrameType | None = None,
 ) -> str:
     if config.verbose:
         return format_error_msg_verbose(exc, code, record_filename, frame)

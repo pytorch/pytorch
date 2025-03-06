@@ -38,7 +38,7 @@ import weakref
 from contextlib import contextmanager
 from copy import deepcopy
 from inspect import currentframe
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, TYPE_CHECKING
 from weakref import ReferenceType
 
 import torch
@@ -153,7 +153,7 @@ from .utils import (
 )
 
 
-guard_manager_testing_hook_fn: Optional[Callable[[Any, Any], Any]] = None
+guard_manager_testing_hook_fn: Callable[[Any, Any], Any] | None = None
 
 try:
     import numpy as np
@@ -422,7 +422,7 @@ def uninteresting_files():
     return {inspect.getfile(m) for m in mods}
 
 
-_CLOSURE_VARS: Optional[dict[str, object]] = None
+_CLOSURE_VARS: dict[str, object] | None = None
 
 
 def _get_closure_vars():
@@ -473,16 +473,14 @@ def get_verbose_code_part(code_part: str, guard: Guard) -> str:
     return f"{code_part:<60}{extra}"
 
 
-def get_verbose_code_parts(
-    code_parts: Union[str | list[str]], guard: Guard
-) -> list[str]:
+def get_verbose_code_parts(code_parts: str | list[str], guard: Guard) -> list[str]:
     if not isinstance(code_parts, list):
         code_parts = [code_parts]
     return [get_verbose_code_part(code_part, guard) for code_part in code_parts]
 
 
 def convert_to_concrete_values(size_or_stride):
-    converted: list[Optional[int]] = []
+    converted: list[int | None] = []
     for dim in size_or_stride:
         if not is_symbolic(dim):
             converted.append(dim)
@@ -528,10 +526,10 @@ class NNModuleAttrAccessorInfo:
     present_in_generic_dict: bool = False
 
     # Either the actual name or _parameters/_buffers/_modules
-    l1_key: Optional[str] = None
+    l1_key: str | None = None
 
     # Actual paramter/buffer/submodule name
-    l2_key: Optional[str] = None
+    l2_key: str | None = None
 
 
 def getitem_on_dict_manager(
@@ -1312,7 +1310,7 @@ class GuardBuilder(GuardBuilderBase):
     # to this frame!)  Instead, you should be reading out some property
     # (like its type) which is what you permanently install into the
     # guard code.
-    def get(self, name: str, closure_vars: Optional[dict[str, Any]] = None) -> Any:
+    def get(self, name: str, closure_vars: dict[str, Any] | None = None) -> Any:
         if closure_vars is None:
             closure_vars = _get_closure_vars()
         return eval(name, self.scope, closure_vars)
@@ -1322,7 +1320,7 @@ class GuardBuilder(GuardBuilderBase):
     # to call this before generating some code that makes use of 'guard',
     # because without this call, we won't actually bind the variable
     # you reference in the actual guard closure (oops!)
-    def arg_ref(self, guard: Union[str, Guard]) -> str:
+    def arg_ref(self, guard: str | Guard) -> str:
         name: str
         if isinstance(guard, str):
             name = guard
@@ -1907,7 +1905,7 @@ class GuardBuilder(GuardBuilderBase):
             names: dict[str, tuple[int, int]] = {}
             source_pairs: list[tuple[Source, Source]] = []
             derived_equalities: list[  # type: ignore[type-arg]
-                tuple[Source, Union[Source, Symbol], Callable]
+                tuple[Source, Source | Symbol, Callable]
             ] = []
             phantom_symbols: dict[str, Symbol] = {}
             relaxed_sources: set[Source] = set()
@@ -2353,7 +2351,7 @@ class PyExprCSEPass:
     def __init__(self) -> None:
         self._counter = 0
         self._config = self.Config(
-            expr_count=collections.defaultdict(lambda: 0), expr_to_name={}
+            expr_count=collections.defaultdict(int), expr_to_name={}
         )
 
     def _new_var(self, prefix: str = "_var") -> str:
@@ -2410,7 +2408,7 @@ class CheckFunctionManager:
         f_code,
         output_graph=None,
         cache_entry=None,
-        guard_fail_fn: Optional[Callable[[GuardFail], None]] = None,
+        guard_fail_fn: Callable[[GuardFail], None] | None = None,
     ):
         guards = output_graph.guards if output_graph else None
         self._weakrefs: dict[int, ReferenceType[object]] = {}

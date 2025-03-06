@@ -51,17 +51,7 @@ from contextlib import contextmanager
 from dataclasses import is_dataclass
 from functools import lru_cache
 from types import MethodWrapperType
-from typing import (
-    Any,
-    Callable,
-    cast,
-    ClassVar,
-    Generic,
-    Optional,
-    overload,
-    TypeVar,
-    Union,
-)
+from typing import Any, Callable, cast, ClassVar, Generic, overload, TypeVar
 from typing_extensions import Literal, TypeIs
 
 import torch
@@ -210,8 +200,8 @@ class ReinplaceCounters:
 
 
 def tabulate(
-    rows: Union[list[tuple[str, object]], list[list[object]]],
-    headers: Union[tuple[str, ...], list[str]],
+    rows: list[tuple[str, object]] | list[list[object]],
+    headers: tuple[str, ...] | list[str],
 ) -> str:
     try:
         import tabulate
@@ -352,7 +342,7 @@ class CompileEventLogger:
     def log_instant_event(
         event_name: str,
         metadata: dict[str, Any],
-        time_ns: Optional[int] = None,
+        time_ns: int | None = None,
         log_level: CompileEventLogLevel = CompileEventLogLevel.CHROMIUM,
     ):
         if time_ns is None:
@@ -565,9 +555,7 @@ class CompileEventLogger:
         )
 
     @staticmethod
-    def instant(
-        event_name: str, metadata: dict[str, Any], time_ns: Optional[int] = None
-    ):
+    def instant(event_name: str, metadata: dict[str, Any], time_ns: int | None = None):
         """
         Log an instant event to chromium logs with name <event_name> at time <time_ns>. The `args` field in
         Perfetto will point to metadata. <time_ns> should be a value obtained from time.time_ns().
@@ -590,15 +578,15 @@ class CompileEventLogger:
 def dynamo_timed(
     key: str,
     # TODO(masneral): Deprecate this param.
-    phase_name: Optional[str] = None,
+    phase_name: str | None = None,
     log_pt2_compile_event: bool = False,
-    metadata: Optional[dict[str, object]] = None,
-    dynamo_compile_column_us: Optional[str] = None,
-    dynamo_compile_runtime_column_us: Optional[str] = None,
-    compile_id: Optional[CompileId] = None,
-    is_forward: Optional[bool] = None,
+    metadata: dict[str, object] | None = None,
+    dynamo_compile_column_us: str | None = None,
+    dynamo_compile_runtime_column_us: str | None = None,
+    compile_id: CompileId | None = None,
+    is_forward: bool | None = None,
     log_waitcounter: bool = False,
-) -> Generator[Any, None, None]:
+) -> Generator[Any]:
     """
     dynamo_timed is a context manager
     By wrapping a function in dynamo_timed, we can get a few things:
@@ -787,7 +775,7 @@ class DuplicateWarningChecker:
     def reset(self):
         self.set = OrderedDict()
 
-    def add(self, key: Union[str, tuple[object, object]]) -> bool:
+    def add(self, key: str | tuple[object, object]) -> bool:
         if key in self.set:
             self.set.move_to_end(key, last=True)
             if not config.verbose:
@@ -1123,13 +1111,13 @@ def proxy_args_kwargs(args, kwargs):
         )
 
 
-def to_int_ms(v: Optional[float]) -> Optional[int]:
+def to_int_ms(v: float | None) -> int | None:
     return None if v is None else int(v * 1000)
 
 
 # float64 timestamp has a quarter microsecond precision in 2024, so while
 # this is suboptimal we shouldn't meaningfully lose precision
-def to_int_us(v: Optional[float]) -> Optional[int]:
+def to_int_us(v: float | None) -> int | None:
     return None if v is None else int(v * 1_000_000)
 
 
@@ -1140,86 +1128,86 @@ LOG_FORMAT_VERSION = 3
 
 @dataclasses.dataclass
 class CompilationMetrics:
-    compile_id: Optional[str] = None
-    frame_key: Optional[str] = None
-    co_name: Optional[str] = None
-    co_filename: Optional[str] = None
-    co_firstlineno: Optional[int] = None
-    cache_size: Optional[int] = None
-    accumulated_cache_size: Optional[int] = None
-    guard_count: Optional[int] = None
-    shape_env_guard_count: Optional[int] = None
-    graph_op_count: Optional[int] = None
-    graph_node_count: Optional[int] = None
-    graph_input_count: Optional[int] = None
-    start_time: Optional[float] = None
-    entire_frame_compile_time_s: Optional[float] = None
-    backend_compile_time_s: Optional[float] = None
-    inductor_compile_time_s: Optional[float] = None
-    code_gen_time_s: Optional[float] = None
-    fail_type: Optional[str] = None
-    fail_reason: Optional[str] = None
-    fail_user_frame_filename: Optional[str] = None
-    fail_user_frame_lineno: Optional[int] = None
-    non_compliant_ops: Optional[set[str]] = None
-    compliant_custom_ops: Optional[set[str]] = None
-    restart_reasons: Optional[set[str]] = None
-    dynamo_time_before_restart_s: Optional[float] = None
+    compile_id: str | None = None
+    frame_key: str | None = None
+    co_name: str | None = None
+    co_filename: str | None = None
+    co_firstlineno: int | None = None
+    cache_size: int | None = None
+    accumulated_cache_size: int | None = None
+    guard_count: int | None = None
+    shape_env_guard_count: int | None = None
+    graph_op_count: int | None = None
+    graph_node_count: int | None = None
+    graph_input_count: int | None = None
+    start_time: float | None = None
+    entire_frame_compile_time_s: float | None = None
+    backend_compile_time_s: float | None = None
+    inductor_compile_time_s: float | None = None
+    code_gen_time_s: float | None = None
+    fail_type: str | None = None
+    fail_reason: str | None = None
+    fail_user_frame_filename: str | None = None
+    fail_user_frame_lineno: int | None = None
+    non_compliant_ops: set[str] | None = None
+    compliant_custom_ops: set[str] | None = None
+    restart_reasons: set[str] | None = None
+    dynamo_time_before_restart_s: float | None = None
     # Sometimes, we will finish analyzing a frame but conclude we don't want
     # to install any guarded code.  True means we actually decided to install
     # a compiled frame
-    has_guarded_code: Optional[bool] = None
-    remote_cache_time_saved_s: Optional[float] = None
-    structured_logging_overhead_s: Optional[float] = None
-    config_suppress_errors: Optional[bool] = None
-    config_inline_inbuilt_nn_modules: Optional[bool] = None
-    specialize_float: Optional[bool] = None
-    dynamo_config: Optional[str] = None
-    is_forward: Optional[bool] = None
-    num_triton_bundles: Optional[int] = None
-    remote_fx_graph_cache_get_time_ms: Optional[int] = None
-    remote_fx_graph_cache_put_time_ms: Optional[int] = None
-    start_time_us: Optional[int] = None
-    duration_us: Optional[int] = None
-    dynamo_cumulative_compile_time_us: Optional[int] = None
-    aot_autograd_cumulative_compile_time_us: Optional[int] = None
-    inductor_cumulative_compile_time_us: Optional[int] = None
-    inductor_code_gen_cumulative_compile_time_us: Optional[int] = None
-    triton_compile_time_us: Optional[int] = None
-    runtime_cudagraphify_time_us: Optional[int] = None  # TODO: instrument
-    runtime_triton_autotune_time_us: Optional[int] = None
-    dynamo_compile_time_before_restart_us: Optional[int] = None
-    cuda_synchronize_time_us: Optional[int] = None  # TODO: instrument
-    distributed_ephemeral_timeout_us: Optional[int] = None
-    structured_logging_overhead_us: Optional[int] = None
-    remote_fx_graph_cache_get_time_us: Optional[int] = None
-    remote_fx_graph_cache_put_time_us: Optional[int] = None
-    backward_cumulative_compile_time_us: Optional[int] = None
-    end_time_us: Optional[int] = None
-    pre_grad_pass_time_us: Optional[int] = None
-    post_grad_pass_time_us: Optional[int] = None
-    joint_graph_pass_time_us: Optional[int] = None
+    has_guarded_code: bool | None = None
+    remote_cache_time_saved_s: float | None = None
+    structured_logging_overhead_s: float | None = None
+    config_suppress_errors: bool | None = None
+    config_inline_inbuilt_nn_modules: bool | None = None
+    specialize_float: bool | None = None
+    dynamo_config: str | None = None
+    is_forward: bool | None = None
+    num_triton_bundles: int | None = None
+    remote_fx_graph_cache_get_time_ms: int | None = None
+    remote_fx_graph_cache_put_time_ms: int | None = None
+    start_time_us: int | None = None
+    duration_us: int | None = None
+    dynamo_cumulative_compile_time_us: int | None = None
+    aot_autograd_cumulative_compile_time_us: int | None = None
+    inductor_cumulative_compile_time_us: int | None = None
+    inductor_code_gen_cumulative_compile_time_us: int | None = None
+    triton_compile_time_us: int | None = None
+    runtime_cudagraphify_time_us: int | None = None  # TODO: instrument
+    runtime_triton_autotune_time_us: int | None = None
+    dynamo_compile_time_before_restart_us: int | None = None
+    cuda_synchronize_time_us: int | None = None  # TODO: instrument
+    distributed_ephemeral_timeout_us: int | None = None
+    structured_logging_overhead_us: int | None = None
+    remote_fx_graph_cache_get_time_us: int | None = None
+    remote_fx_graph_cache_put_time_us: int | None = None
+    backward_cumulative_compile_time_us: int | None = None
+    end_time_us: int | None = None
+    pre_grad_pass_time_us: int | None = None
+    post_grad_pass_time_us: int | None = None
+    joint_graph_pass_time_us: int | None = None
     log_format_version: int = LOG_FORMAT_VERSION
-    inductor_config: Optional[str] = None
-    remote_cache_version: Optional[int] = None
-    inductor_fx_remote_cache_hit_count: Optional[int] = None
-    inductor_fx_remote_cache_miss_count: Optional[int] = None
-    inductor_fx_remote_cache_backend_type: Optional[str] = None
-    inductor_fx_remote_cache_hit_keys: Optional[str] = None
-    inductor_fx_remote_cache_miss_keys: Optional[str] = None
-    cuda_version: Optional[str] = None
-    triton_version: Optional[str] = None
-    feature_usage: Optional[dict[str, bool]] = None
-    compile_time_autotune_time_us: Optional[int] = None
-    is_runtime: Optional[bool] = False
-    gc_time_us: Optional[int] = None
-    tensorify_float_attempt: Optional[bool] = None
-    tensorify_float_success: Optional[bool] = None
-    tensorify_float_failure: Optional[set[str]] = None
-    guard_latency_us: Optional[float] = None
-    recompile_reason: Optional[str] = None
-    num_graph_breaks: Optional[int] = None
-    triton_kernel_compile_times_us: Optional[str] = None
+    inductor_config: str | None = None
+    remote_cache_version: int | None = None
+    inductor_fx_remote_cache_hit_count: int | None = None
+    inductor_fx_remote_cache_miss_count: int | None = None
+    inductor_fx_remote_cache_backend_type: str | None = None
+    inductor_fx_remote_cache_hit_keys: str | None = None
+    inductor_fx_remote_cache_miss_keys: str | None = None
+    cuda_version: str | None = None
+    triton_version: str | None = None
+    feature_usage: dict[str, bool] | None = None
+    compile_time_autotune_time_us: int | None = None
+    is_runtime: bool | None = False
+    gc_time_us: int | None = None
+    tensorify_float_attempt: bool | None = None
+    tensorify_float_success: bool | None = None
+    tensorify_float_failure: set[str] | None = None
+    guard_latency_us: float | None = None
+    recompile_reason: str | None = None
+    num_graph_breaks: int | None = None
+    triton_kernel_compile_times_us: str | None = None
 
     @classmethod
     def create(cls, metrics: dict[str, Any]):
@@ -1229,13 +1217,13 @@ class CompilationMetrics:
         we transform some fields to comma-separated strings for scuba logging.
         """
 
-        def us_to_s(metric: Optional[int]) -> Optional[float]:
+        def us_to_s(metric: int | None) -> float | None:
             return metric / 1e6 if metric is not None else None
 
-        def us_to_ms(metric: Optional[int]) -> Optional[int]:
+        def us_to_ms(metric: int | None) -> int | None:
             return metric // 1000 if metric is not None else None
 
-        def collection_to_str(metric: Optional[Any]) -> Optional[str]:
+        def collection_to_str(metric: Any | None) -> str | None:
             def safe_str(item: Any) -> str:
                 try:
                     return str(item)
@@ -1250,7 +1238,7 @@ class CompilationMetrics:
 
             return ",".join(safe_str(item) for item in sorted(metric))
 
-        def collection_to_json_str(metric: Optional[Any]) -> Optional[str]:
+        def collection_to_json_str(metric: Any | None) -> str | None:
             if metric is None:
                 return None
             try:
@@ -1362,7 +1350,7 @@ def add_compilation_metrics_to_chromium(c: CompilationMetrics) -> None:
     )
 
 
-def _get_dynamo_config_for_logging() -> Optional[str]:
+def _get_dynamo_config_for_logging() -> str | None:
     def clean_for_json(d: dict[str, Any]) -> dict[str, Any]:
         blocklist = {
             "TYPE_CHECKING",
@@ -1396,7 +1384,7 @@ def _get_dynamo_config_for_logging() -> Optional[str]:
     return json.dumps(config_dict, sort_keys=True)
 
 
-def _scrubbed_inductor_config_for_logging() -> Optional[str]:
+def _scrubbed_inductor_config_for_logging() -> str | None:
     """
     Method to parse and scrub uninteresting configs from inductor config
     """
@@ -1443,8 +1431,8 @@ def record_compilation_metrics(
     start_time_ns: int,
     end_time_ns: int,
     metrics: dict[str, Any],
-    exc_type: Optional[type[BaseException]],
-    exc_value: Optional[BaseException],
+    exc_type: type[BaseException] | None,
+    exc_value: BaseException | None,
 ):
     if torch._inductor.utils.should_use_remote_fx_graph_cache():
         try:
@@ -1557,7 +1545,7 @@ class ChromiumEventLogger:
             self.tls.stack = []
             return self.tls.stack
 
-    def get_outermost_event(self) -> Optional[str]:
+    def get_outermost_event(self) -> str | None:
         """
         Get the outermost event name (i.e. the longest running event)
         or None if the stack is empty.
@@ -1664,7 +1652,7 @@ class ChromiumEventLogger:
         time_ns: int,
         metadata: dict[str, Any],
         log_pt2_compile_event: bool = False,
-        compile_id: Optional[CompileId] = None,
+        compile_id: CompileId | None = None,
     ) -> None:
         """
         Logs the start of a single event.
@@ -1705,7 +1693,7 @@ class ChromiumEventLogger:
         metadata: dict[str, Any],
         start_time_ns: int,
         log_pt2_compile_event: bool,
-        compile_id: Optional[CompileId] = None,
+        compile_id: CompileId | None = None,
     ) -> None:
         """
         Logs the end of a single event. This function should only be
@@ -1776,7 +1764,7 @@ class ChromiumEventLogger:
         event_name: str,
         time_ns: int,
         phase: str,
-        metadata: Optional[dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """
         Logs a timed event in chromium format. See log_event_start, log_event_end, etc.
@@ -1804,7 +1792,7 @@ class ChromiumEventLogger:
         self,
         event_name: str,
         time_ns: int,
-        metadata: Optional[dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
         # By default, an instant event isn't logged internally, only to structured logging.
         log_pt2_compile_event: bool = False,
     ) -> None:
@@ -1843,7 +1831,7 @@ class ChromiumEventLogger:
             )
 
 
-CHROMIUM_EVENT_LOG: Optional[ChromiumEventLogger] = None
+CHROMIUM_EVENT_LOG: ChromiumEventLogger | None = None
 
 
 def get_chromium_event_logger() -> ChromiumEventLogger:
@@ -1858,7 +1846,7 @@ def chromium_event_timed(
     event_name: str,
     reset_event_log_on_exit: bool = False,
     log_pt2_compile_event: bool = False,
-) -> Generator[Any, None, None]:
+) -> Generator[Any]:
     """
     Context manager that creates a chromium start and end event. Chromium event
     logging is integrated with dynamo_timed, so you probably want to use that
@@ -2003,7 +1991,7 @@ def clone_input(x, *, dtype=None):
 
 
 def clone_inputs(example_inputs):
-    res: Union[dict[Any, Any], list[Any]]
+    res: dict[Any, Any] | list[Any]
     if type(example_inputs) is dict:
         res = dict(example_inputs)
         for key, value in res.items():
@@ -2519,7 +2507,7 @@ def iter_contains(items, search, tx, check_tensor_identity=False):
         # Match of Tensor means match of FakeTensor
         search = _get_fake_tensor(search)
 
-    found: Optional[VariableTracker] = None
+    found: VariableTracker | None = None
     for x in items:
         if must_check_tensor_id:
             if isinstance(x, TensorVariable):
@@ -3444,10 +3432,10 @@ def tensor_static_reason_to_message(reason: TensorStaticReason):
 
 
 def tensor_always_has_static_shape(
-    tensor: Union[torch.Tensor, Any],
+    tensor: torch.Tensor | Any,
     is_tensor: bool,
     tensor_source: Source,
-) -> tuple[bool, Optional[TensorStaticReason]]:
+) -> tuple[bool, TensorStaticReason | None]:
     """
     Given a tensor, source, and is_tensor flag, determine if a shape should be static.
 
@@ -3772,7 +3760,7 @@ class _Anchors:
     right_start_offset: int
 
 
-def _extract_anchors_from_expr(segment: str) -> Optional[_Anchors]:
+def _extract_anchors_from_expr(segment: str) -> _Anchors | None:
     """
     Given source code `segment` corresponding to a bytecode
     instruction, determine:
@@ -3976,7 +3964,7 @@ def get_instruction_source_311(code: types.CodeType, inst: dis.Instruction) -> s
         num_spaces = len(last_line) - len(last_line.lstrip())
         markers.append(" " * num_spaces + "~" * (end_offset - num_spaces))
 
-    anchors: Optional[_Anchors] = None
+    anchors: _Anchors | None = None
     try:
         anchors = _extract_anchors_from_expr(segment)
     except AssertionError:

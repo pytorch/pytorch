@@ -14,16 +14,7 @@ import weakref
 from abc import abstractmethod
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import (
-    Any,
-    Callable,
-    Generic,
-    NamedTuple,
-    Optional,
-    TYPE_CHECKING,
-    TypeVar,
-    Union,
-)
+from typing import Any, Callable, Generic, NamedTuple, TYPE_CHECKING, TypeVar
 
 import torch
 from torch.utils import _pytree as pytree
@@ -67,15 +58,15 @@ CA_COMPILE_ID_PATTERN = re.compile(
 # TODO: mark as kw_only=True once we drop support for <Python 3.10
 @dataclass(frozen=True)
 class CompileId:
-    frame_id: Optional[int]
+    frame_id: int | None
     # This id is per-frame, and counts how many times we've compiled this
     # frame.  This could have been a global id but having this be per-frame
     # gives you a better intuitive sense for how many recompiles have occurred
     # so far.
-    frame_compile_id: Optional[int]
+    frame_compile_id: int | None
 
     # torch.compiling a compiled autograd graph
-    compiled_autograd_id: Optional[int] = None
+    compiled_autograd_id: int | None = None
 
     # TODO: consider also tracking the recompilation count
     # See Note: Updating CompileId
@@ -94,7 +85,7 @@ class CompileId:
             return f"{self.frame_id}/{self.frame_compile_id}"
 
     @classmethod
-    def from_string(cls, compile_id: Optional[str]):
+    def from_string(cls, compile_id: str | None):
         """
         Factory method that creates a CompileId from its string representation.
         Keep this in sync with the __str__ method.
@@ -212,8 +203,8 @@ class GuardBuilderBase:
 
 @dataclasses.dataclass(frozen=True)
 class SLoc:
-    framework_loc: Optional[Union[traceback.FrameSummary, str]]
-    maybe_user_loc: Optional[str]
+    framework_loc: traceback.FrameSummary | str | None
+    maybe_user_loc: str | None
 
     def __str__(self):
         floc = (
@@ -256,14 +247,14 @@ class Guard:
     create_fn: Callable[[GuardBuilderBase, Guard], None]
 
     # Export only. These values are written to at time of guard check_fn creation.
-    guard_types: Optional[list[str]] = None
-    code_list: Optional[list[str]] = None
-    obj_weakref: Optional[object] = None
-    guarded_class_weakref: Optional[type] = None
+    guard_types: list[str] | None = None
+    code_list: list[str] | None = None
+    obj_weakref: object | None = None
+    guarded_class_weakref: type | None = None
 
-    stack: Optional[CapturedTraceback] = None
-    user_stack: Optional[traceback.StackSummary] = None
-    _hash: Optional[int] = None
+    stack: CapturedTraceback | None = None
+    user_stack: traceback.StackSummary | None = None
+    _hash: int | None = None
 
     def __hash__(self):
         if self._hash is None:
@@ -653,7 +644,7 @@ class HopSubgraphCache:
     def add_dynamo_identifier(self, cache_key: str, identifier: str): ...
 
     @abstractmethod
-    def get_dynamo_identifier(self, cache_key: str) -> Optional[str]: ...
+    def get_dynamo_identifier(self, cache_key: str) -> str | None: ...
 
     @abstractmethod
     def add_autograd_key_entry(self, identifier: str, key: Callable): ...
@@ -677,7 +668,7 @@ class InvokeSubgraphCache(HopSubgraphCache):
     def add_dynamo_identifier(self, cache_key: str, identifier: str):
         self.dynamo_identifiers[cache_key] = identifier
 
-    def get_dynamo_identifier(self, cache_key: str) -> Optional[str]:
+    def get_dynamo_identifier(self, cache_key: str) -> str | None:
         return self.dynamo_identifiers.get(cache_key, None)
 
     def add_autograd_key_entry(self, identifier: str, key: Callable):
@@ -700,9 +691,7 @@ class HopDispatchSetCache:
 
         self.hop_cache_map = {invoke_subgraph: InvokeSubgraphCache()}
 
-    def get_cache(
-        self, op: torch._ops.HigherOrderOperator
-    ) -> Optional[HopSubgraphCache]:
+    def get_cache(self, op: torch._ops.HigherOrderOperator) -> HopSubgraphCache | None:
         if op not in self.hop_cache_map:
             return None
         return self.hop_cache_map[op]  # type: ignore[index]
@@ -736,12 +725,12 @@ class CompileContext:
         return _TLS.compile_context
 
     @staticmethod
-    def try_get() -> Optional[CompileContext]:
+    def try_get() -> CompileContext | None:
         return getattr(_TLS, "compile_context", None)
 
     def __init__(self, compile_id):
         assert compile_id is None or isinstance(compile_id, CompileId)
-        self.compile_id: Optional[CompileId] = compile_id
+        self.compile_id: CompileId | None = compile_id
         self.attempt = 0
         # Verbose ShapeEnv guards produced.
         self.shape_env_guards: list[str] = []
@@ -772,7 +761,7 @@ class TracingContext:
     """
 
     @staticmethod
-    def try_get() -> Optional[TracingContext]:
+    def try_get() -> TracingContext | None:
         return getattr(_TLS, "tracing_context", None)
 
     @staticmethod
@@ -812,7 +801,7 @@ class TracingContext:
         # careful not to accidentally induce guards on the SymInt if
         # you ever do change this in aot_autograd.py; you should check
         # on permutations preferentially.)
-        self.output_strides: Optional[list[Optional[tuple[int, ...]]]] = None
+        self.output_strides: list[tuple[int, ...] | None] | None = None
         # When this is True, whenever we encounter an int in Dynamo tracing,
         # we will (1) force unspec it and (2) force it as a size-like unbacked
         # integer.  This is currently used when processing certain lists of
@@ -937,7 +926,7 @@ class TracingContext:
 
 
 @contextmanager
-def compile_context(context: Optional[CompileContext]):
+def compile_context(context: CompileContext | None):
     old_context = getattr(_TLS, "compile_context", None)
     _TLS.compile_context = context
     try:
@@ -947,7 +936,7 @@ def compile_context(context: Optional[CompileContext]):
 
 
 @contextmanager
-def tracing(context: Optional[TracingContext]):
+def tracing(context: TracingContext | None):
     """
     This function installs the passed in tracing context as a dynamic scoped
     global variable.
