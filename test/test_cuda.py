@@ -4838,6 +4838,7 @@ class TestMemPool(TestCase):
         # the pointer to the mempool is thread local
         self.assertEqual(len(set(active_pool_ids)), 4)
 
+    @skipIfRocm(msg="expandable_segments mode is not supported on ROCm")
     def test_mempool_expandable(self):
         torch.cuda.memory._set_allocator_settings("expandable_segments:True")
         pool = torch.cuda.MemPool()
