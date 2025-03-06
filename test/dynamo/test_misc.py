@@ -92,10 +92,17 @@ from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing._internal.logging_utils import logs_to_string
 
 
+pytree_modules = {
+    "python": python_pytree,
+}
 if python_pytree._cxx_pytree_dynamo_traceable:
     import torch.utils._cxx_pytree as cxx_pytree
+
+    pytree_modules["cxx"] = cxx_pytree
 else:
     cxx_pytree = None
+pytree_modules["generic"] = pytree
+
 
 MyTuple = collections.namedtuple("MyTuple", ["a", "b", "ab"])
 T = typing.TypeVar("T")
@@ -8621,12 +8628,8 @@ def ___make_guard_fn():
         opt = torch.compile(fn, backend="eager")
         opt()
 
-    def test_tracing_py_tree(self):
-        implemtations = [("generic", pytree), ("python", python_pytree)]
-        if cxx_pytree is not None:
-            implemtations.append(("cxx", cxx_pytree))
-
-        for name, module in implemtations:
+    def test_tracing_pytree(self):
+        for name, module in pytree_modules.items():
             with self.subTest(f"pytree implement: {name}"):
 
                 def fn(xs):
@@ -8641,12 +8644,8 @@ def ___make_guard_fn():
                 self.assertEqual(counter.frame_count, 1)
                 self.assertEqual(counter.op_count, 3)
 
-    def test_tracing_nested_py_tree(self):
-        implemtations = [("generic", pytree), ("python", python_pytree)]
-        if cxx_pytree is not None:
-            implemtations.append(("cxx", cxx_pytree))
-
-        for name, module in implemtations:
+    def test_tracing_nested_pytree(self):
+        for name, module in pytree_modules.items():
             with self.subTest(f"pytree implement: {name}"):
 
                 def fn(xs):
@@ -8664,12 +8663,8 @@ def ___make_guard_fn():
                 self.assertEqual(counter.frame_count, 1)
                 self.assertEqual(counter.op_count, 12)
 
-    def test_tracing_nested_py_tree_tuples(self):
-        implemtations = [("generic", pytree), ("python", python_pytree)]
-        if cxx_pytree is not None:
-            implemtations.append(("cxx", cxx_pytree))
-
-        for name, module in implemtations:
+    def test_tracing_nested_pytree_tuples(self):
+        for name, module in pytree_modules.items():
             with self.subTest(f"pytree implement: {name}"):
 
                 def fn(xs):
@@ -8687,12 +8682,8 @@ def ___make_guard_fn():
                 self.assertEqual(counter.frame_count, 1)
                 self.assertEqual(counter.op_count, 12)
 
-    def test_tracing_nested_py_tree_dicts(self):
-        implemtations = [("generic", pytree), ("python", python_pytree)]
-        if cxx_pytree is not None:
-            implemtations.append(("cxx", cxx_pytree))
-
-        for name, module in implemtations:
+    def test_tracing_nested_pytree_dicts(self):
+        for name, module in pytree_modules.items():
             with self.subTest(f"pytree implement: {name}"):
 
                 def fn(xs):
@@ -8730,12 +8721,8 @@ def ___make_guard_fn():
         self.assertEqual(counter.frame_count, 2)
         self.assertEqual(counter.op_count, 2)
 
-    def test_tracing_nested_py_tree_mixed_all(self):
-        implemtations = [("generic", pytree), ("python", python_pytree)]
-        if cxx_pytree is not None:
-            implemtations.append(("cxx", cxx_pytree))
-
-        for name, module in implemtations:
+    def test_tracing_nested_pytree_mixed_all(self):
+        for name, module in pytree_modules.items():
             with self.subTest(f"pytree implement: {name}"):
 
                 def fn(xs):
@@ -8789,11 +8776,7 @@ def ___make_guard_fn():
         from torch.testing._internal.two_tensor import TwoTensor
         from torch.utils.checkpoint import checkpoint
 
-        implemtations = [("generic", pytree), ("python", python_pytree)]
-        if cxx_pytree is not None:
-            implemtations.append(("cxx", cxx_pytree))
-
-        for name, module in implemtations:
+        for name, module in pytree_modules.items():
             with self.subTest(f"pytree implement: {name}"):
 
                 def fn(xs):
@@ -8813,11 +8796,7 @@ def ___make_guard_fn():
                 self.assertEqual(counter.op_count, 2)
 
     def test_tracing_tree_map_only(self):
-        implemtations = [("generic", pytree), ("python", python_pytree)]
-        if cxx_pytree is not None:
-            implemtations.append(("cxx", cxx_pytree))
-
-        for name, module in implemtations:
+        for name, module in pytree_modules.items():
             with self.subTest(f"pytree implement: {name}"):
 
                 def fn(xs):
@@ -10186,11 +10165,7 @@ def ___make_guard_fn():
         self.assertEqual(actual, expected)
 
     def test_pytree_tree_leaves(self):
-        implemtations = [("generic", pytree), ("python", python_pytree)]
-        if cxx_pytree is not None:
-            implemtations.append(("cxx", cxx_pytree))
-
-        for name, module in implemtations:
+        for name, module in pytree_modules.items():
             with self.subTest(f"pytree implement: {name}"):
 
                 def fn(x):
@@ -10220,11 +10195,7 @@ def ___make_guard_fn():
                 self.assertEqual(actual, expected)
 
     def test_pytree_tree_flatten_unflatten(self):
-        implemtations = [("generic", pytree), ("python", python_pytree)]
-        if cxx_pytree is not None:
-            implemtations.append(("cxx", cxx_pytree))
-
-        for name, module in implemtations:
+        for name, module in pytree_modules.items():
             with self.subTest(f"pytree implement: {name}"):
 
                 def fn(x, y):
@@ -10271,11 +10242,7 @@ def ___make_guard_fn():
             self.assertEqual(actual, expected)
 
     def test_pytree_tree_map(self):
-        implemtations = [("generic", pytree), ("python", python_pytree)]
-        if cxx_pytree is not None:
-            implemtations.append(("cxx", cxx_pytree))
-
-        for name, module in implemtations:
+        for name, module in pytree_modules.items():
             with self.subTest(f"pytree implement: {name}"):
 
                 def fn(x, y):
