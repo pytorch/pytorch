@@ -93,8 +93,16 @@ Tensor& do_metal_bmm(const Tensor& batch1, const Tensor& batch2, Tensor& output)
                                         output.stride(2),
                                         output.stride(1),
                                         output.stride(0)};
+      constexpr uint32_t TILE_DIM = 16;
+      uint32_t gridSizeX = (output.size(2) + TILE_DIM - 1) / TILE_DIM;
+      uint32_t gridSizeY = (batch1.size(1) + TILE_DIM - 1) / TILE_DIM;
+      uint32_t gridSizeZ = output.size(0);
+
+      MTLSize threadsPerThreadgroup = MTLSizeMake(TILE_DIM, TILE_DIM, 1);
+      MTLSize threadgroupsPerGrid = MTLSizeMake(gridSizeX, gridSizeY, gridSizeZ);
+
       mtl_setArgs(computeEncoder, batch1, batch2, output, strides, sizes);
-      mtl_dispatch1DJob(computeEncoder, matmulPSO, output.numel());
+      [computeEncoder dispatchThreadgroups:threadgroupsPerGrid threadsPerThreadgroup:threadsPerThreadgroup];
       getMPSProfiler().endProfileKernel(matmulPSO);
     }
   });

@@ -11,6 +11,7 @@
 #else // ROCM_ON_WINDOWS
 #include <c10/util/Exception.h>
 #endif // ROCM_ON_WINDOWS
+#include <c10/cuda/CUDAException.h>
 #include <cuda_runtime.h>
 #include <torch/csrc/utils/pybind.h>
 
@@ -30,7 +31,8 @@ static void device_callback_range_end(void* userData) {
 }
 
 static void device_nvtxRangeEnd(void* handle, std::intptr_t stream) {
-  cudaLaunchHostFunc((cudaStream_t)stream, device_callback_range_end, handle);
+  C10_CUDA_CHECK(cudaLaunchHostFunc(
+      (cudaStream_t)stream, device_callback_range_end, handle));
 }
 
 static void device_callback_range_start(void* userData) {
@@ -42,8 +44,10 @@ static void* device_nvtxRangeStart(const char* msg, std::intptr_t stream) {
   RangeHandle* handle = (RangeHandle*)calloc(sizeof(RangeHandle), 1);
   handle->msg = strdup(msg);
   handle->id = 0;
-  cudaLaunchHostFunc(
-      (cudaStream_t)stream, device_callback_range_start, (void*)handle);
+  TORCH_CHECK(
+      cudaLaunchHostFunc(
+          (cudaStream_t)stream, device_callback_range_start, (void*)handle) ==
+      cudaSuccess);
   return handle;
 }
 
