@@ -134,7 +134,11 @@ def maybe_realize(args: list[Optional[IRNode]]):
 
 
 def get_float32_precision():
-    if torch.get_float32_matmul_precision() == "highest" or torch.version.hip:
+    if (
+        torch.get_float32_matmul_precision() == "highest"
+        or torch.version.hip
+        or torch.mtia.is_available()
+    ):
         return "'ieee'"
     else:
         return "'tf32'"
@@ -1099,9 +1103,9 @@ def lower_cpu(
         raise NotImplementedError(
             "Unsupported for now if query, key, value are the same buffer."
         )
-    if query.get_dtype() not in [torch.float, torch.bfloat16]:
+    if query.get_dtype() not in [torch.float, torch.bfloat16, torch.float16]:
         raise NotImplementedError(
-            "`torch.float` and `torch.bfloat16` are supported in FlexAttention for CPU device. "
+            "`torch.float` , `torch.float16` and `torch.bfloat16` are supported in FlexAttention for CPU device. "
             f"Found input tensors are `{query.get_dtype()}`."
         )
     score_mod_other_buffers = maybe_realize(score_mod_other_buffers)
