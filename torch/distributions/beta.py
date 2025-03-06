@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+from typing import Optional, Union
+
 import torch
 from torch import Tensor
 from torch.distributions import constraints
@@ -36,7 +38,12 @@ class Beta(ExponentialFamily):
     support = constraints.unit_interval
     has_rsample = True
 
-    def __init__(self, concentration1, concentration0, validate_args=None):
+    def __init__(
+        self,
+        concentration1: Union[Tensor, float],
+        concentration0: Union[Tensor, float],
+        validate_args: Optional[bool] = None,
+    ) -> None:
         if isinstance(concentration1, _Number) and isinstance(concentration0, _Number):
             concentration1_concentration0 = torch.tensor(
                 [float(concentration1), float(concentration0)]
