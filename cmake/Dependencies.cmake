@@ -1632,6 +1632,7 @@ if(USE_KINETO)
     endif()
 
     find_library(CUPTI_LIBRARY_PATH ${CUPTI_LIB_NAME} PATHS
+        ${CUDAToolkit_TARGET_DIR}/lib
         ${CUDA_SOURCE_DIR}
         ${CUDA_SOURCE_DIR}/extras/CUPTI/lib64
         ${CUDA_SOURCE_DIR}/lib
@@ -1639,6 +1640,7 @@ if(USE_KINETO)
         NO_DEFAULT_PATH)
 
     find_path(CUPTI_INCLUDE_DIR cupti.h PATHS
+        ${CUDAToolkit_TARGET_DIR}/include
         ${CUDA_SOURCE_DIR}/extras/CUPTI/include
         ${CUDA_INCLUDE_DIRS}
         ${CUDA_SOURCE_DIR}
