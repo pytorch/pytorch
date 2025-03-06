@@ -1753,13 +1753,13 @@ class Module:
     # torchrec tests the code consistency with the following code
     # fmt: off
     def _call_impl(self, *args, **kwargs):
-        forward_call = (self._slow_forward if torch._C._get_tracing_state() else self.forward)
+        _call_impl_forward_call = (self._slow_forward if torch._C._get_tracing_state() else self.forward)
         # If we don't have any hooks, we want to skip the rest of the logic in
         # this function, and just call forward.
         if not (self._backward_hooks or self._backward_pre_hooks or self._forward_hooks or self._forward_pre_hooks
                 or _global_backward_pre_hooks or _global_backward_hooks
                 or _global_forward_hooks or _global_forward_pre_hooks):
-            return forward_call(*args, **kwargs)
+            return _call_impl_forward_call(*args, **kwargs)
 
         result = None
         called_always_called_hooks = set()
@@ -1806,7 +1806,9 @@ class Module:
                 bw_hook = BackwardHook(self, full_backward_hooks, backward_pre_hooks)
                 args = bw_hook.setup_input_hook(args)
 
-            result = forward_call(*args, **kwargs)
+            # TODO(yf225): this rename is a hack to more easily avoid issuing ID_MATCH for the forward call.
+            # Proper fix is to figure out why ID of forward_call is changed per iteration.
+            result = _call_impl_forward_call(*args, **kwargs)
             if _global_forward_hooks or self._forward_hooks:
                 for hook_id, hook in (
                     *_global_forward_hooks.items(),

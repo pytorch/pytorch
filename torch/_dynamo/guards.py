@@ -1466,6 +1466,10 @@ class GuardBuilder(GuardBuilderBase):
             )
 
         ref = self.arg_ref(guard)
+        # TODO(yf225): this is a hack to avoid recompilation due to `_call_impl_forward_call` ID change.
+        # Proper fix is to figure out why there is an ID change.
+        if "_call_impl_forward_call" in str(ref):
+            return
         val = self.get(guard.name)
         id_val = self.id_ref(val, guard.name)
         code = f"___check_obj_id({ref}, {id_val})"
