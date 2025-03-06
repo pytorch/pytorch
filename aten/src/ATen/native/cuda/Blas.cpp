@@ -1482,7 +1482,7 @@ bool use_fast_accum) {
     TORCH_CHECK(offs->dim() == 1, "offs has to be 1D");
     TORCH_CHECK(offs->dtype() == at::kInt, "Offsets have to be int32");
   }
-  
+
   // Both Per-Tensor and Row-wise scaling expect fp32 tensors
   TORCH_CHECK(
       scale_a.scalar_type() == kFloat && scale_b.scalar_type() == kFloat,
