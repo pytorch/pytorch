@@ -1964,6 +1964,7 @@ def _load(
         if torch._guards.detect_fake_mode(None) is not None:
             nbytes = numel * torch._utils._element_size(dtype)
             storage = torch.UntypedStorage(nbytes, device="meta")
+            storage._checkpoint_offset = zip_file.get_record_offset(name)
         elif overall_storage is not None:
             if can_calculate_storage_offsets and calculate_storage_offsets:
                 storage_offset = _get_offset(key, name, numel)
