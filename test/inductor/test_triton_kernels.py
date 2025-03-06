@@ -3454,8 +3454,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             def impl2(x):
                 return x.clone(memory_format=torch.channels_last)
 
-            lib.impl("force_channels_last", impl2, "CUDA")
-            lib.impl("force_channels_last", impl2, "Meta")
+            lib.impl("force_channels_last", impl2, "CompositeExplicitAutograd")
 
             lib.define(
                 "add_op(Tensor x, Tensor y) -> Tensor",
@@ -3468,7 +3467,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             def meta(x, y):
                 return torch.empty_like(y, memory_format=torch.contiguous_format)
 
-            lib.impl("add_op", impl, "CUDA")
+            lib.impl("add_op", impl, "CompositeExplicitAutograd")
             lib.impl("add_op", meta, "Meta")
 
             def f(x, other):
