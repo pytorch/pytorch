@@ -519,8 +519,12 @@ def log_graph_break(code_options, reason="", exc_info=False, user_stack=None):
     if config.verbose:
         user_stack_trace += (
             f"{stack_above_dynamo_formatted}\n"
-            "========== `torch.compile` tracing started here ==========\n\n"
-            f"{user_stack_formatted}"
+            "========== most recent `torch.compile` tracing attempt started here ==========\n\n"
+            f"{user_stack_formatted}\n"
+            "NOTE: the most recent `torch.compile` tracing attempt might not be where you applied `torch.compile`! "
+            "This is due to how graph breaks are implemented - the optimized code object returned by Dynamo will call another "
+            "Dynamo-generated resume function and tracing is re-enabled by calling the resume function as a normal Python "
+            "function, which Dynamo intercepts as a top-level frame.\n"
         )
     else:
         user_stack_trace += str(user_stack_formatted)
@@ -3149,7 +3153,6 @@ class InstructionTranslator(InstructionTranslatorBase):
         one_graph,
         export,
         export_constraints,
-        dynamism,
         frame_state,
         speculation_log: SpeculationLog,
         distributed_state: Optional[DistributedState],
@@ -3204,6 +3207,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             # Populate `symbolic_locals` with non-cell variables.
             cell_and_freevars: set[str] = set(self.cell_and_freevars())
 
+            dynamism = code_context.get_context(f_code).get("dynamism", None)
             for name, value in f_locals.items():
                 if name not in cell_and_freevars:
                     local_dynamism = None

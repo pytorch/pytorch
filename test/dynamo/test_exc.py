@@ -185,9 +185,6 @@ Graph Break Reason: Call to `torch._dynamo.graph_break()`
 User code traceback:
   File "test_exc.py", line N, in test_graph_break_log
     torch.compile(fn001, backend="eager")(torch.randn(1))
-
-========== `torch.compile` tracing started here ==========
-
   File "test_exc.py", line N, in fn001
     return fn002(x)
   File "test_exc.py", line N, in fn002

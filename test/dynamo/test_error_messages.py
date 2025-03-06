@@ -1010,6 +1010,28 @@ User code traceback:
         self.assertIn("Foo().attr = x  # 0", records[-1].getMessage())
         self.assertIn("Foo().attr = x  # 1", records[-1].getMessage())
 
+        self.assertExpectedInline(
+            munge_exc(records[-1].getMessage(), skip=0),
+            """\
+Graph break in user code at test_error_messages.py:N
+Graph Break Reason: STORE_ATTR-caused graph break
+User code traceback:
+  File "test_error_messages.py", line N, in test_graph_break_traceback_above_dynamo_shows_user_code
+    f3(torch.randn(3))
+  File "test_error_messages.py", line N, in f3
+    Foo().attr = x  # 0
+  File "test_error_messages.py", line N, in torch_dynamo_resume_in_f3_at_999
+    Foo().attr = x  # 1
+
+========== most recent `torch.compile` tracing attempt started here ==========
+
+  File "test_error_messages.py", line N, in torch_dynamo_resume_in_f3_at_1000
+    Foo().attr = x
+
+NOTE: the most recent `torch.compile` tracing attempt might not be where you applied `torch.compile`! This is due to how graph breaks are implemented - the optimized code object returned by Dynamo will call another Dynamo-generated resume function and tracing is re-enabled by calling the resume function as a normal Python function, which Dynamo intercepts as a top-level frame.
+""",
+        )
+
     @make_logging_test(graph_breaks=True)
     def test_graph_break_traceback_collapsed_resume_frames(self, records):
         @torch.compile(backend="eager")
