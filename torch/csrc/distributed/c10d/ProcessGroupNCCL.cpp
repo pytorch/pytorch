@@ -3866,11 +3866,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
 
   if (!coalescing_state_ && capture_status == c10::cuda::CaptureStatus::None) {
     workEnqueue(work);
-    return work;
   } else {
     at::cuda::CUDAGraph::dec_pending_event_queries();
-    return nullptr;
   }
+  return work;
 }
 
 template <typename Fn, typename PreProcess, typename PostProcess>

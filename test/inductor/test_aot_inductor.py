@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from unittest import skip
+from unittest.mock import patch
 
 import torch
 import torch._export
@@ -1161,6 +1162,19 @@ class AOTInductorTestsTemplate:
         path = torch._inductor.aot_compile(ep.module(), inputs)
         aot_model = torch._export.aot_load(path, device=self.device)
         torch.testing.assert_close(m(*inputs), aot_model(*inputs))
+
+    def test_aoti_constant_tensor(self):
+        class Foo(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.a = torch.ones(4, 4, device=device)
+                self.b = torch.ones(4, 4, device=device)
+
+            def forward(self, x):
+                return torch.ops.aten.linear.default(x, self.a, self.b)
+
+        example_inputs = (torch.ones(4, 4, device=self.device),)
+        self.check_model(Foo(self.device), example_inputs)
 
     def test_large_grid(self):
         if self.device != GPU_TYPE:
@@ -3349,6 +3363,7 @@ class AOTInductorTestsTemplate:
             )
             self.check_model(Model(), example_inputs)
 
+    @patch.dict(os.environ, {"AOTI_RUNTIME_CHECK_INPUTS": "1"})
     def test_runtime_checks(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -3400,11 +3415,7 @@ class AOTInductorTestsTemplate:
 
         m = Model()
         inputs = tuple(inputs)
-        with torch.no_grad(), config.patch(
-            {
-                "aot_inductor.debug_compile": True,
-            }
-        ):
+        with torch.no_grad():
             so_path = AOTIRunnerUtil.compile(m, inputs, dynamic_shapes=dynamic_shapes)
         with open(os.path.splitext(so_path)[0] + ".cpp") as cpp:
             src_code = cpp.read()
@@ -3444,6 +3455,7 @@ class AOTInductorTestsTemplate:
         not PLATFORM_SUPPORTS_FP8,
         "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
     )
+    @patch.dict(os.environ, {"AOTI_RUNTIME_CHECK_INPUTS": "1"})
     def test_runtime_checks_fp8(self):
         # cuda only
         if self.device != "cuda":
@@ -3472,11 +3484,7 @@ class AOTInductorTestsTemplate:
             "x0": {0: dim0},
             "x1": {0: dim0},
         }
-        with torch.no_grad(), config.patch(
-            {
-                "aot_inductor.debug_compile": True,
-            }
-        ):
+        with torch.no_grad():
             self.check_model(
                 Model(),
                 tuple(inputs),
@@ -3508,11 +3516,7 @@ class AOTInductorTestsTemplate:
             "x1": {},
             "x2": {},
         }
-        with torch.no_grad(), config.patch(
-            {
-                "aot_inductor.debug_compile": True,
-            }
-        ):
+        with torch.no_grad():
             self.check_model(
                 Model(),
                 tuple(inputs),
@@ -3520,6 +3524,7 @@ class AOTInductorTestsTemplate:
             )
 
     @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
+    @patch.dict(os.environ, {"AOTI_RUNTIME_CHECK_INPUTS": "1"})
     def test_runtime_checks_dtype_failed(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -3531,11 +3536,7 @@ class AOTInductorTestsTemplate:
 
         x = torch.randn(1, 4, dtype=torch.float16, device=self.device)
         model = Model()
-        with torch.no_grad(), config.patch(
-            {
-                "aot_inductor.debug_compile": True,
-            }
-        ):
+        with torch.no_grad():
             so_path: str = AOTIRunnerUtil.compile(
                 model,
                 (x,),
@@ -3596,6 +3597,7 @@ class AOTInductorTestsTemplate:
         # cubed shouldn't be an alias.
         self.assertTrue(result[0].data_ptr() != result[3].data_ptr())
 
+    @patch.dict(os.environ, {"AOTI_RUNTIME_CHECK_INPUTS": "1"})
     def test_runtime_checks_shape_failed(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -3618,11 +3620,7 @@ class AOTInductorTestsTemplate:
             "x": {0: dim0},
         }
         model = Model()
-        with torch.no_grad(), config.patch(
-            {
-                "aot_inductor.debug_compile": True,
-            }
-        ):
+        with torch.no_grad():
             so_path: str = AOTIRunnerUtil.compile(
                 model, (x,), dynamic_shapes=dynamic_shapes
             )
