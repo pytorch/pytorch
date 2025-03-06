@@ -40,7 +40,6 @@ from torch.utils._pytree import (
     is_structseq as is_structseq,
     is_structseq_class as is_structseq_class,
     is_structseq_instance as is_structseq_instance,
-    KeyEntry as KeyEntry,
     KeyPath as KeyPath,
     PyTree as PyTree,
     ToDumpableContextFunc as ToDumpableContextFunc,
