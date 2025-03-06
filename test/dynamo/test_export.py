@@ -2064,7 +2064,7 @@ def forward(self, l_x_):
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.Unsupported,
-            "Dynamic slicing on data-dependent value is not supported",
+            "Dynamic slicing with Tensor arguments",
         ):
             torch._dynamo.export(
                 g,
@@ -3015,8 +3015,8 @@ def forward(self, x):
             return x.sin()
 
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UserError,
-            "Dynamic control flow is not supported at the moment",
+            torch._dynamo.exc.Unsupported,
+            "Data-dependent branching",
         ):
             torch._dynamo.export(f, aten_graph=True)(torch.randn(5, 6))
 

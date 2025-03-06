@@ -1628,15 +1628,15 @@ class GuardBuilder(GuardBuilderBase):
                 DeviceMesh,
             )
 
+        def check_type(obj):
+            import torch.utils._pytree as pytree
+
+            return istype(obj, ok_types) or pytree.is_constant_class(type(obj))
+
         if istype(val, dict):
-            assert all(
-                istype(x, ok_types) for x in itertools.chain(val.keys(), val.values())
-            )
+            assert all(check_type(x) for x in itertools.chain(val.keys(), val.values()))
         else:
-            assert istype(
-                val,
-                ok_types,
-            ), f"Unexpected type {type(val)}, not in {ok_types}"
+            assert check_type(val), f"Unexpected type {type(val)}"
 
         # Special case for nan because float("nan") == float("nan") evaluates to False
         if istype(val, float) and math.isnan(val):
@@ -2242,9 +2242,9 @@ class GuardBuilder(GuardBuilderBase):
         func_name = caller.f_code.co_name
         del caller
         # We use func_name for export, so might as well get a nice defensive check out of it
-        assert (
-            func_name in self.__class__.__dict__
-        ), f"_produce_guard_code must be called from inside GuardedCode. Called from {func_name}"
+        assert func_name in self.__class__.__dict__, (
+            f"_produce_guard_code must be called from inside GuardedCode. Called from {func_name}"
+        )
 
         # Not all guards have names, some can be installed globally (see asserts on HAS_GRAD)
         if provided_guarded_object is None:

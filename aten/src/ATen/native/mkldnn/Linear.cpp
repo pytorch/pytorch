@@ -482,8 +482,6 @@ mkldnn_scaled_mm(const Tensor& mat1, const Tensor& mat2,
   TORCH_CHECK(!out_dtype || *out_dtype == out.scalar_type(), "out_dtype must match output matrix type");
   TORCH_CHECK(isFloat8Type(mat1.scalar_type()), "Expected mat1 to be Float8 matrix got ", mat1.scalar_type());
   TORCH_CHECK(isFloat8Type(mat2.scalar_type()), "Expected mat2 to be Float8 matrix got ", mat2.scalar_type());
-  // TODO: This check of mat1 and mat2 must have the same data type will be removed after oneDNN v3.6.
-  TORCH_CHECK(mat1.scalar_type() == mat2.scalar_type(), "Expected mat1 and mat2 must have the same data type");
 
   // Validation checks have passed lets resize the output to actual size
   auto mat1_c = mat1.contiguous();
@@ -548,13 +546,14 @@ mkldnn_scaled_mm(const Tensor& mat1, const Tensor& mat2,
             engine, src_desc, weights_desc, bias_desc, dst_desc, op_attr)
       : dnnl::matmul::primitive_desc(
             engine, src_desc, weights_desc, dst_desc, op_attr);
+  auto expected_weight = weight_t.reorder_if_differ_in(primitive_desc.weights_desc());
   auto primitive = dnnl::matmul(primitive_desc);
 
   // Prepare args and execute primitive
   ideep::tensor scratchpad(primitive_desc.scratchpad_desc());
   ideep::exec_args args;
   args.insert({DNNL_ARG_SRC, src});
-  args.insert({DNNL_ARG_WEIGHTS, weight_t});
+  args.insert({DNNL_ARG_WEIGHTS, expected_weight});
   args.insert({DNNL_ARG_DST, dst});
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad});
   if (with_bias) {
