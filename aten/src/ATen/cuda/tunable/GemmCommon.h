@@ -576,7 +576,7 @@ struct ScaledGemmParams : OpParams {
   std::string BLASSignature() const override {
     // Excluding use_fast_accum and use_rowise booleans for now
     return fmt::sprintf("- { function: matmul, M: %ld, N: %ld, K: %ld, lda: %ld, ldb: %ld, ldc: %ld, ldd: %ld, stride_a: 0, stride_b: 0, stride_c: 0, stride_d: 0, "
-      "transA: %c, transB: %c, batch_count: 1, scaleA: s, scaleB: s, a_type: %s, b_type: %s, c_type: %s, d_type: %s, bias_type: %s, scale_type: %s, compute_type: %s }",
+      "transA: %c, transB: %c, batch_count: 1, scaleA: f32_r, scaleB: f32_r, a_type: %s, b_type: %s, c_type: %s, d_type: %s, bias_type: %s, scale_type: %s, compute_type: %s }",
       m, n, k, lda, ldb, ldc, ldc, transa, transb,
       ScalarTypeToBLASType(a_dtype), ScalarTypeToBLASType(b_dtype), ScalarTypeToBLASType(c_dtype), ScalarTypeToBLASType(c_dtype), ScalarTypeToBLASType(bias_dtype),
       ComputeTypeFor<T>(), ComputeTypeFor<T>());
