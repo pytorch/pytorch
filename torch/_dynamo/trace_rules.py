@@ -3751,7 +3751,7 @@ def lookup_inner(
 ):
     # (NOTE: this is not meant to be committed as-is, but rather a starting point for discussion)
     # We want `def inner()` in nn/modules/module.py to be traced through instead of being skipped.
-    # TOOD: Is there a better way to do this?
+    # TODO: Is there a better way to do this?
     if name == "_nn_module_call_impl_inner":
         if reasons is not None:
             reasons.add("func name is _nn_module_call_impl_inner")
