@@ -592,7 +592,9 @@ class ShardedTensor(ShardedTensorBase):
             assert (
                 isinstance(device, torch.device)
                 and device.index == torch.cuda.current_device()
-            ), """Only device without device id (e.g. "cpu" or "cuda") is expected for ShardedTensor!"""
+            ), (
+                """Only device without device id (e.g. "cpu" or "cuda") is expected for ShardedTensor!"""
+            )
 
         current_device = torch.device(torch.cuda.current_device())
         # returns a copy of ShardedTensor on CUDA current device
@@ -831,7 +833,9 @@ class ShardedTensor(ShardedTensorBase):
                         "rank:1/cuda:1",
                     ],
                 )
-            >>> st = ShardedTensor._init_from_local_tensor(local_tensor, sharding_spec, [2, 4])
+            >>> st = ShardedTensor._init_from_local_tensor(
+            ...     local_tensor, sharding_spec, [2, 4]
+            ... )
             >>> st
             ShardedTensor(
                 ShardedTensorMetadata(
