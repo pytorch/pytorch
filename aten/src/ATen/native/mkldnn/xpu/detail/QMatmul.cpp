@@ -307,7 +307,7 @@ void quantized_matmul(
   args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC, m1_sc_m});
   if (m1_need_zp) {
     m1_zp_m = dnnl_memory_from_host_scalar(
-      static_cast<int32_t>(input_zero_point), m1_zp_tensor, engine);
+        static_cast<int32_t>(input_zero_point), m1_zp_tensor, engine);
     args.insert({DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_SRC, m1_zp_m});
   }
 
@@ -318,7 +318,7 @@ void quantized_matmul(
   args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_DST, dst_sc_m});
   if (dst_need_zp) {
     dst_zp_m = dnnl_memory_from_host_scalar(
-      static_cast<int32_t>(output_zero_point), dst_zp_tensor, engine);
+        static_cast<int32_t>(output_zero_point), dst_zp_tensor, engine);
     args.insert({DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_DST, dst_zp_m});
   }
 
