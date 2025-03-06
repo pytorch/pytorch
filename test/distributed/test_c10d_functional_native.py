@@ -693,6 +693,7 @@ class PyWorkTest(TestCase):
 
 class CompileTest(TestCase):
     def setUp(self):
+        super().setUp()
         # Allow testing aoti after torch.compile
         torch._inductor.config.triton.store_cubin = True
         torch._inductor.config.debug = True

@@ -226,9 +226,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         else:
             self.is_constant = False
 
-        assert isinstance(
-            fn, (types.FunctionType, torch.jit.ScriptFunction)
-        ), f"expected FunctionType found {typestr(fn)} {fn}"
+        assert isinstance(fn, (types.FunctionType, torch.jit.ScriptFunction)), (
+            f"expected FunctionType found {typestr(fn)} {fn}"
+        )
         # TODO(anijain2305) - Replace directly calling UserFunctionVariable with
         # VariableBuilder, which handles the wrapping of _torchdynamo_inline.
         # unpack @torch._dynamo.optimize()(fn) wrapped function
@@ -363,6 +363,27 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        # Handle a `nonstrict_trace(fn)` call
+        if self.fn is torch._dynamo.nonstrict_trace:
+            bound = inspect.signature(self.fn).bind(*args, **kwargs)
+            fn_var = bound.args[0]
+            if not isinstance(fn_var, BaseUserFunctionVariable):
+                typ = fn_var.python_type()
+                unimplemented(
+                    f"`nonstrict_trace` expects a callable, but got value of type <{typ.__name__}>"
+                )
+
+            if not isinstance(fn_var, UserFunctionVariable):
+                fn_name = fn_var.get_name()
+                unimplemented(
+                    f"""
+Applying `nonstrict_trace` to function <{fn_name}>; however, `nonstrict_trace` currently requires the function to be defined outside `torch.compile` region.
+"""  # NOQA: B950
+                )
+
+            fn = fn_var.fn
+            return variables.TorchInGraphFunctionVariable(fn, nonstrict_traceable=True)
+
         if self.is_constant:
             return invoke_and_store_as_constant(
                 tx, self.fn, self.get_name(), args, kwargs
@@ -506,7 +527,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # test/dynamo/test_misc.py::test_iterator_limit
             raise
         except Unsupported as e:
-            torch._C._dynamo.eval_frame.skip_code(self.get_code())
+            torch._dynamo.eval_frame.skip_code(self.get_code())
             raise SkipFrame from e
         finally:
             counters["unimplemented"] |= counters["inline_call"]
@@ -858,6 +879,23 @@ class UserMethodVariable(UserFunctionVariable):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        # NOTE this is to handle methods annotated by `nonstrict_trace`. Usually
+        # a `nonstrict_trace`-ed function will be wrapped by
+        # `VariableTracker.build` and route to `TorchInGraphFunctionVariable`,
+        # but in the case of method, we manually wrap it with `UserMethodVariable`
+        # inside `UserDefinedObjectVariable.var_getattr`.
+        #
+        # We might be able to simplify this away by canonicalizing the
+        # function/method wrapping code paths.
+        from ..trace_rules import is_nonstrict_trace_callable
+
+        if is_nonstrict_trace_callable(self.fn):
+            call_args = [*self.self_args(), *args]
+            var = variables.TorchInGraphFunctionVariable(
+                self.fn, nonstrict_traceable=True
+            )
+            return var.call_function(tx, call_args, kwargs)
+
         # For nn.Module methods, redirecting to NNModuleVariable.call_method for optimized solution
         # rather than simple inlining. E.g, putting `call_method` op in FX graph for `forward` method
         # since we ensure `forward` of allowed modules can be traced by AOT safely.
@@ -1002,6 +1040,9 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 
     def get_code(self):
         return self.code.as_python_constant()
+
+    def python_type(self):
+        return types.FunctionType
 
     def get_function(self):
         if self.closure:
@@ -1166,21 +1207,22 @@ class SkipFunctionVariable(VariableTracker):
             torch._dynamo.utils.warn_once(msg)
             unimplemented(msg)
         else:
+            qualname = getattr(self.value, "__qualname__", "<unknown qualname>")
             try:
                 path = inspect.getfile(self.value)
                 explanation = (
-                    f"Dynamo developers have intentionally marked that the function `{self.value.__qualname__}` "
+                    f"Dynamo developers have intentionally marked that the function `{qualname}` "
                     f"in file `{path}` should not be traced."
                 )
                 hints = [
-                    f"Avoid calling the function `{self.value.__qualname__}`.",
+                    f"Avoid calling the function `{qualname}`.",
                 ]
                 # TODO improve trace_rules reasoning to provide better hints.
                 # How do we tell that a function/file should NOT be removed from skip files?
                 # Do a very basic check for now.
                 if "_dynamo" not in path:
                     hints += [
-                        f"Remove the function `{self.value.__qualname__}` or the file `{path}` "
+                        f"Remove the function `{qualname}` or the file `{path}` "
                         "from torch/_dynamo/trace_rules.py. More graph breaks may occur as a result of "
                         "attempting to trace into the function.",
                         "Please file an issue to PyTorch.",
@@ -1191,7 +1233,7 @@ class SkipFunctionVariable(VariableTracker):
                 if self.value.__module__ in known_python_builtin_modules:
                     explanation = (
                         f"Dynamo does not know how to trace the Python builtin "
-                        f"`{self.value.__module__}.{self.value.__qualname__}`."
+                        f"`{self.value.__module__}.{qualname}`."
                     )
                     hints = [
                         "If you are attempting to call a logging function (e.g. `_warnings.warn`), "
@@ -1203,7 +1245,7 @@ class SkipFunctionVariable(VariableTracker):
                     self.value.__module__ is not None
                     and self.value.__module__.startswith("optree")
                 ):
-                    explanation = f"Dynamo cannot trace optree C/C++ function {self.value.__module__}.{self.value.__qualname__}."
+                    explanation = f"Dynamo cannot trace optree C/C++ function {self.value.__module__}.{qualname}."
                     hints = [
                         " Consider using torch.utils._pytree - "
                         "https://github.com/pytorch/pytorch/blob/main/torch/utils/_pytree.py"
@@ -1212,7 +1254,7 @@ class SkipFunctionVariable(VariableTracker):
                     torch._dynamo.utils.warn_once(explanation + "\n" + "\n".join(hints))
                 else:
                     explanation = (
-                        f"Dynamo does not know how to trace the builtin `{self.value.__module__}.{self.value.__qualname__}.` "
+                        f"Dynamo does not know how to trace the builtin `{self.value.__module__}.{qualname}.` "
                         f"This function is either a Python builtin (e.g. _warnings.warn) "
                         f"or a third-party C/C++ Python extension (perhaps created with pybind)."
                     )
@@ -1227,7 +1269,7 @@ class SkipFunctionVariable(VariableTracker):
                     ]
                     # also warn on it because most users won't see the graph break message
                     torch._dynamo.utils.warn_once(explanation + "\n" + "\n".join(hints))
-            if self.value.__qualname__ == "allow_in_graph":
+            if qualname == "allow_in_graph":
                 explanation = (
                     "Found an allow_in_graph decorator to a function which "
                     "is created inside the parent function that is getting "
@@ -1237,7 +1279,7 @@ class SkipFunctionVariable(VariableTracker):
             reason = self.reason if self.reason else "<missing reason>"
             unimplemented_v2(
                 gb_type="Attempted to call function marked as skipped",
-                context=f"module: {self.value.__module__}, qualname: {self.value.__qualname__}, skip reason: {reason}",
+                context=f"module: {self.value.__module__}, qualname: {qualname}, skip reason: {reason}",
                 explanation=explanation,
                 hints=hints,
             )
@@ -1636,8 +1678,7 @@ class PolyfilledFunctionVariable(VariableTracker):
 
 class TracebackVariable(VariableTracker):
     # We don't track traceback. A call to any function in this module is a no-op
-    def call_function(self, tx, args, kwargs):
-        ...
+    def call_function(self, tx, args, kwargs): ...
 
 
 class SysFunctionVariable(VariableTracker):

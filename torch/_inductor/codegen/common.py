@@ -288,6 +288,10 @@ class DeviceOpOverrides:
     def tma_descriptor_helpers(self) -> str:
         raise NotImplementedError
 
+    def cpp_global_scratch(self, idx: int) -> Optional[tuple[str, str]]:
+        # optionally return (scratch definition, arg name)
+        raise NotImplementedError
+
 
 device_op_overrides_dict: dict[str, DeviceOpOverrides] = {}
 
@@ -338,7 +342,7 @@ class BackendFeature(Enum):
 
 
 def get_backend_features(
-    device: Union[torch.device, str, None]
+    device: Union[torch.device, str, None],
 ) -> OrderedSet[BackendFeature]:
     if device is None:
         return OrderedSet()
@@ -1008,9 +1012,9 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
                 if cls._is_unimplemented(funcname):
                     setattr(cls, funcname, cls._unimplemented(funcname))
             else:
-                assert (
-                    funcname not in cls.__dict__
-                ), f"multiple definitions of {funcname} on {cls.__name__}"
+                assert funcname not in cls.__dict__, (
+                    f"multiple definitions of {funcname} on {cls.__name__}"
+                )
                 impl.__name__ = funcname
                 setattr(cls, funcname, staticmethod(impl))
 
@@ -1258,6 +1262,18 @@ pointwise_overrides_data: dict[str, OverridesData] = dict(
 )
 
 
+def is_buffer_removed(name: str) -> bool:
+    return any(
+        name in x
+        for x in (
+            V.graph.removed_buffers,
+            V.kernel.removed_buffers,
+            V.graph.inplaced_to_remove,
+            V.kernel.inplaced_to_remove,
+        )
+    )
+
+
 class DeferredLine(DeferredLineBase):
     """A line that can be 'unwritten' by adding name to V.graph.removed_buffers"""
 
@@ -1267,15 +1283,7 @@ class DeferredLine(DeferredLineBase):
         assert not isinstance(line, DeferredLineBase)
 
     def __call__(self) -> Optional[str]:
-        if all(
-            self.name not in x
-            for x in (
-                V.graph.removed_buffers,
-                V.kernel.removed_buffers,
-                V.graph.inplaced_to_remove,
-                V.kernel.inplaced_to_remove,
-            )
-        ):
+        if not is_buffer_removed(self.name):
             return self.line
         return None
 
@@ -2251,7 +2259,7 @@ class KernelTemplate:
 
     @staticmethod
     def _fake_get_dtype(
-        fake_outs: Union[list[Buffer], Buffer]
+        fake_outs: Union[list[Buffer], Buffer],
     ) -> Callable[[str], torch.dtype]:
         _get_dtype_real = V.graph.get_dtype
         if isinstance(fake_outs, (list, tuple)):

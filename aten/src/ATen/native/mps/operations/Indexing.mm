@@ -1,5 +1,7 @@
 //  Copyright © 2022 Apple Inc.
+#include <limits>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/Dispatch_v2.h>
 #include <ATen/native/mps/OperationUtils.h>
 
 #include <ATen/AccumulateType.h>
@@ -20,6 +22,7 @@
 #include <c10/core/QScheme.h>
 #include <c10/util/SmallVector.h>
 #include <c10/util/irange.h>
+#include <fmt/format.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -688,10 +691,28 @@ Tensor& index_select_out_mps(const Tensor& self, int64_t dim, const Tensor& inde
   return output;
 }
 
+// Checks if one tensor is broadcastable into another
+static bool is_dense_broadcastable(const Tensor& from, const Tensor& into) {
+  if (!from.is_contiguous() || !into.is_contiguous()) {
+    return false;
+  }
+  bool checking_squeezable_dims = false;
+  for (const auto dim : c10::irange(from.ndimension())) {
+    if (checking_squeezable_dims) {
+      if (from.size(-dim - 1) == 1) {
+        continue;
+      }
+      return false;
+    }
+    checking_squeezable_dims = from.size(-dim - 1) != into.size(-dim - 1);
+  }
+  return true;
+}
+
 Tensor& masked_fill__mps(Tensor& self, const Tensor& mask, const Scalar& value) {
   using namespace mps;
 
-  if (self.numel() == 0) {
+  if (self.numel() == 0 || mask.numel() == 0) {
     return self;
   }
   TORCH_CHECK(self.device() == mask.device(),
@@ -700,78 +721,38 @@ Tensor& masked_fill__mps(Tensor& self, const Tensor& mask, const Scalar& value) 
               " and self on ",
               self.device());
   TORCH_CHECK(mask.scalar_type() == kBool, "expected mask dtype to be Bool but got ", mask.scalar_type());
+  TORCH_CHECK(self.numel() <= std::numeric_limits<uint32_t>::max(),
+              "masked_fill not supported for tensors of more than 2**32 elements");
   auto maybe_outnames = namedinference::broadcast_to_outnames(self, mask, "masked_fill_");
-
   c10::MaybeOwned<Tensor> b_mask = expand_inplace(self, mask, "masked_fill_");
-
-  bool needs_output_copy = false;
-
-  Tensor output;
-  if (needsGather(self)) {
-    output = at::empty(self.sizes(), self.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
-    needs_output_copy = true;
-  }
-
-  struct CachedGraph : public MPSCachedGraph {
-    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor* inputTensor_ = nil;
-    MPSGraphTensor* maskTensor_ = nil;
-    MPSGraphTensor* valueTensor_ = nil;
-    MPSGraphTensor* outputTensor_ = nil;
-  };
-
-  MPSDataType inputDataType = getMPSScalarType(self.scalar_type());
-  MPSDataType maskDataType = getMPSScalarType(b_mask->scalar_type());
-
-  MPSStream* stream = getCurrentMPSStream();
-  MPSScalar valueScalar = getMPSScalar(value, value.type());
-  @autoreleasepool {
-    string key = "masked_fill" + getTensorsStringKey({self, *b_mask}) + ":" + getMPSTypeString(value.type());
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, inputDataType, getMPSShape(self));
-      MPSGraphTensor* maskTensor = mpsGraphRankedPlaceHolder(mpsGraph, maskDataType, getMPSShape(*b_mask));
-      MPSGraphTensor* valueTensor = mpsGraphScalarPlaceHolder(mpsGraph, value);
-
-      MPSDataType valueType = getMPSScalarType(value.type());
-      MPSGraphTensor* castValueTensor = valueTensor;
-      if (valueType != inputDataType) {
-        castValueTensor = [mpsGraph castTensor:valueTensor toType:inputDataType name:@"castValueTensor"];
+  auto stream = getCurrentMPSStream();
+  const bool is_dense = self.is_contiguous() && b_mask->is_contiguous();
+  const bool is_dense_broadcast = is_dense_broadcastable(mask, self);
+  const auto flavor = is_dense ? "dense" : is_dense_broadcast ? "broadcast" : "strided";
+  auto fillPSO = lib.getPipelineStateForFunc(
+      fmt::format("masked_fill_scalar_{}_{}", flavor, getBitSizeString(self.scalar_type())));
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto computeEncoder = stream->commandEncoder();
+      auto mpsScalar = getMPSScalar(value, self.scalar_type());
+      [computeEncoder setComputePipelineState:fillPSO];
+      if (is_dense) {
+        mtl_setArgs(computeEncoder, self, *b_mask, mpsScalar);
+      } else if (is_dense_broadcast) {
+        mtl_setArgs(computeEncoder, self, mask, mpsScalar, mask.numel());
+      } else {
+        mtl_setArgs(computeEncoder,
+                    self,
+                    *b_mask,
+                    mpsScalar,
+                    self.sizes(),
+                    self.strides(),
+                    b_mask->strides(),
+                    self.ndimension());
       }
-
-      MPSGraphTensor* outputTensor = [mpsGraph selectWithPredicateTensor:maskTensor
-                                                     truePredicateTensor:castValueTensor
-                                                    falsePredicateTensor:inputTensor
-                                                                    name:nil];
-
-      newCachedGraph->inputTensor_ = inputTensor;
-      newCachedGraph->maskTensor_ = maskTensor;
-      newCachedGraph->valueTensor_ = valueTensor;
-      newCachedGraph->outputTensor_ = outputTensor;
-    });
-
-    Placeholder selfPlaceholder =
-        Placeholder(cachedGraph->inputTensor_, self, /*mpsShape*/ nil, /*gatherTensorData=*/true, inputDataType);
-    Placeholder maskPlaceholder =
-        Placeholder(cachedGraph->maskTensor_, *b_mask, /*mpsShape*/ nil, /*gatherTensorData=*/true, maskDataType);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_,
-                                                needs_output_copy ? output : self,
-                                                /*mpsShape*/ nil,
-                                                /*gatherTensorData=*/false,
-                                                inputDataType);
-
-    // Create dictionary of inputs and outputs
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData(),
-      maskPlaceholder.getMPSGraphTensor() : maskPlaceholder.getMPSGraphTensorData(),
-      cachedGraph->valueTensor_ : getMPSGraphTensorFromScalar(stream, valueScalar)
-    };
-
-    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
-  }
-
-  if (needs_output_copy) {
-    self.copy_(output);
-  }
+      mtl_dispatch1DJob(computeEncoder, fillPSO, self.numel());
+    }
+  });
 
   namedinference::propagate_names_if_nonempty(self, maybe_outnames);
   return self;

@@ -304,7 +304,7 @@ bool initialize_block(
   if (block.size()<=0) return false;
   Element scope_max(static_cast<Element>(max)), scope_min(static_cast<Element>(min));
   cutlass::reference::device::BlockFillRandomUniform(
-    (Element*)block.get(), block.size(), seed, scope_max, scope_min, 0);
+    (Element*)block.get(), block.size(), seed, scope_max, scope_min);
 
   return true;
 }
@@ -333,6 +333,7 @@ extern "C" int run_standalone(uint64_t seed, int repetitions) {
     int ldb = {{kernel.get_layout_args()[4]}};
     int ldc = {{kernel.get_layout_args()[5]}};
     int ldd = {{kernel.get_layout_args()[6]}};
+    uint8_t swizzle = {{kernel.runtime_arg_values[0]}};
 
     using ElementA = {{kernel.cutlass_dtype(X)}};
     using ElementB = {{kernel.cutlass_dtype(W)}};
@@ -899,7 +900,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                     ):
                         res[filter_res.configuration_name()] = filter_res
         log.info("Got cutlass configs: total number of ops: %d, ", len(res))
-        return list(res.items())[: inductor_cuda_config.cutlass_max_profiling_configs]
+        sorted_res = sorted(res.items())
+        return sorted_res[: inductor_cuda_config.cutlass_max_profiling_configs]
 
     def gemm_mode(self) -> str:
         """
@@ -948,9 +950,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         import cutlass_library.gemm_operation as cutlass_gemm_op
         import cutlass_library.library as cutlass_lib
 
-        assert isinstance(
-            op, cutlass_gemm_op.GemmOperation
-        ), "op argument is required and has to be an instance of GemmOperation"
+        assert isinstance(op, cutlass_gemm_op.GemmOperation), (
+            "op argument is required and has to be an instance of GemmOperation"
+        )
 
         assert len(self.input_nodes) >= 2 and self.output_node is not None
         X, W = self.input_nodes[0], self.input_nodes[1]
@@ -976,7 +978,10 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         else:
             input_reorder = None
         kernel_call_signature = kernel.def_kernel(
-            inputs=inputs, outputs=[Y], names_str=names_str, input_reorder=input_reorder  # type: ignore[arg-type]
+            inputs=inputs,  # type: ignore[arg-type]
+            outputs=[Y],
+            names_str=names_str,
+            input_reorder=input_reorder,
         )
         test_call_statement = self.test_call_statement(kernel, inputs, names_str)
         # The layouts might have changed between autotuning and this call if they were FlexibleLayout
@@ -1057,7 +1062,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             f"(({arg_type}){arg_name}_data.get())"
             for arg_type, arg_name in zip(arg_types, arg_names)
         ]
-        return f"{kernel.kernel_name}({', '.join(arguments)}, M, N, K, lda, ldb, ldc, ldd, workspace_size_ptr, (uint8_t*)workspace_data.get(), 0);"  # noqa: B950
+        return f"{kernel.kernel_name}({', '.join(arguments)}, M, N, K, lda, ldb, ldc, ldd, swizzle, workspace_size_ptr, (uint8_t*)workspace_data.get(), 0);"  # noqa: B950
 
 
 class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
@@ -1195,8 +1200,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         self,
         op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
     ) -> bool:
-        X, W = self.input_nodes[0], self.input_nodes[1]
-        return X.get_size()[1] == W.get_size()[0]
+        return True
 
     def _alignment_match(
         self,
@@ -1306,6 +1310,12 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
     ) -> list[str]:
         if input_nodes[2] is None:
             del arg_names[2]
+        else:
+            # Reorder them as Bias, A, B
+            if self.input_reorder is not None:
+                arg_names[0 : len(self.input_reorder)] = [
+                    arg_names[i] for i in self.input_reorder
+                ]
         return arg_names
 
     def render_gemm_arguments(
