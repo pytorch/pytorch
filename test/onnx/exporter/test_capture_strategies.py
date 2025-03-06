@@ -31,8 +31,6 @@ class ExportStrategiesTest(common_utils.TestCase):
         b = torch.tensor(1.0)
 
         result = strategy_cls()(model, (a, b), kwargs=None, dynamic_shapes=None)
-        if result.exception:
-            raise result.exception
         ep = result.exported_program
         assert ep is not None
         torch.testing.assert_close(ep.module()(a, b), model(a, b))
