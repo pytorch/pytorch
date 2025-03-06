@@ -80,7 +80,7 @@ def current_accelerator(check_available: bool = False) -> Optional[torch.device]
         >>> # xdoctest:
         >>> # If an accelerator is available, sent the model to it
         >>> model = torch.nn.Linear(2, 2)
-        >>> if current_device := current_accelerator(check_available=True) is not None:
+        >>> if (current_device := current_accelerator(check_available=True)) is not None:
         >>>     model.to(current_device)
     """
     if (acc := torch._C._accelerator_getAccelerator()) is not None:
