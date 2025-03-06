@@ -283,6 +283,24 @@ class MiscTests(torch._inductor.test_case.TestCase):
             g(x)  # dynamo falls back on the outermost frame
             self.assertEqual(len(counters["graph_break"]), 0)
 
+    def test_inside_torch_dispatch(self):
+        from torch.utils._python_dispatch import TorchDispatchMode
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+
+        class YoloMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                out = torch.compile(func, backend=backend, fullgraph=True)(
+                    *args, **kwargs
+                )
+                return out
+
+        x = torch.randn(5)
+        with YoloMode():
+            out = torch.add(x, x)
+
+        self.assertEqual(len(backend.graphs), 1)
+
     def test_invalid_args_builtin(self):
         @torch.compile(backend="eager")
         def fn(x):

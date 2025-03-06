@@ -33,6 +33,17 @@ def is_in_torch_dispatch_mode(include_infra_modes=True) -> bool:
     return _is_in_torch_dispatch_mode if include_infra_modes else _is_in_non_infra_torch_dispatch_mode
 
 
+def any_torch_dispatch_mode_on_stack(*, include_infra_modes=True) -> bool:
+    stack_len = torch._C._len_torch_dispatch_stack()
+    for idx in range(stack_len):
+        mode = _get_dispatch_stack_at(idx)
+        if mode.is_infra_mode:
+            if not include_infra_modes:
+                continue
+        return True
+    return False
+
+
 class TorchDispatchMode:
     """
     A ``TorchDispatchMode`` allows you to override the meaning of all
