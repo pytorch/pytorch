@@ -98,28 +98,6 @@ class BaseWithMeta(BaseTSC):
     TSC_INNER_TENSORS = ["a"]
     TSC_META = ["m"]
 
-#    @staticmethod
-#    def __new__(
-#        cls,
-#        a: torch.Tensor,
-#        m: str,
-#        outer_size=None,
-#        outer_stride=None,
-#    ):
-#        return torch.Tensor._make_wrapper_subclass(
-#            cls, outer_size or a.size(), **tensor_kwargs_from(a, outer_stride)
-#        )
-#
-#    def __init__(
-#        self,
-#        a: torch.Tensor,
-#        m: str,
-#        outer_size=None,
-#        outer_stride=None,
-#    ):
-#        self.a = a
-#        self.m = m
-
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs):
         ms = []
@@ -143,25 +121,6 @@ class BaseWithMeta(BaseTSC):
 class BaseWithOverride(BaseTSC):
     TSC_INNER_TENSORS = ["a"]
 
-    @staticmethod
-    def __new__(
-        cls,
-        a: torch.Tensor,
-        outer_size=None,
-        outer_stride=None,
-    ):
-        return torch.Tensor._make_wrapper_subclass(
-            cls, outer_size or a.size(), **tensor_kwargs_from(a, outer_stride)
-        )
-
-    def __init__(
-        self,
-        a: torch.Tensor,
-        outer_size=None,
-        outer_stride=None,
-    ):
-        self.a = a
-
     @torch_function_override(ops={torch.add})
     def torch_fn_add(cls, func, types, args=(), kwargs=None):  # noqa: B902
         print(f"{cls}.torch_fn_add {func} {types}")
@@ -182,3 +141,6 @@ class BaseWithOverride(BaseTSC):
         # Calling func(args, kwargs) without unwrapping subclasses results in recursive cycle
         print(f"{cls}.torch_disp_add {func} {types}")
         return BaseTSC.default_torch_dispatch(cls, func, types, args, kwargs)
+
+
+import torch.testing._internal.subclasses_impl

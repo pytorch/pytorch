@@ -1,6 +1,7 @@
 # mypy: ignore-errors
 
 import importlib
+import itertools
 from typing import Callable, Optional
 
 import torch
@@ -37,14 +38,16 @@ def gen_tensor_flatten_fn(
 
     return __tensor_flatten__
 
+
 def get_cls(module_name: str, class_name: str):
-    if "<locals>" in qualname:
+    if "<locals>" in class_name:
         raise RuntimeError(
             "Local subclasses of BaseTensorSubclass are not supported yet"
         )
     module = importlib.import_module(module_name)
     clz = getattr(module, class_name)
     return clz
+
 
 def gen_tensor_unflatten_fn(
     module_name: str,
@@ -86,16 +89,33 @@ def gen_tensor_unflatten_fn(
 
     return __tensor_unflatten__
 
+
 def gen_init(inner_tensors, meta_attrs):
+    meta_attrs = meta_attrs or []
+
     def fn(self, *args, **kwargs):
         for a in itertools.chain(inner_tensors, meta_attrs):
-            setattr(self, a, kwargs[a])
+            if a in kwargs:
+                setattr(self, a, kwargs[a])
+            else:
+                assert args
+                setattr(self, a, args[0])
+                args = args[1:]
+
+    return fn
+
 
 def gen_new(module_name, qualname, inner_tensors, meta_attrs):
     def fn(cls, *args, **kwargs):
-        main_inner_tensor = inner_tensors[0]
-        outer_size = kwargs[main_inner_tensor].size()
-        outer_stride = kwargs[main_inner_tensor].stride()
+        main_inner_tensor_attr = inner_tensors[0]
+        if main_inner_tensor_attr in kwargs:
+            main_inner_tensor = kwargs[main_inner_tensor_attr]
+        else:
+            assert args
+            main_inner_tensor = args[0]
+
+        outer_size = main_inner_tensor.size()
+        outer_stride = main_inner_tensor.stride()
 
         if "outer_size" in kwargs:
             outer_size = kwargs["outer_size"]
@@ -106,15 +126,17 @@ def gen_new(module_name, qualname, inner_tensors, meta_attrs):
         out = torch.Tensor._make_wrapper_subclass(cls, outer_size, **_kwargs)
         return out
 
+    return fn
 
-def gen_torch_function(
-    pro_fn: Optional[Callable], epi_fn: Optional[Callable], override_fn_table
-):
+
+def gen_torch_function(pro_fn: Optional[Callable], epi_fn: Optional[Callable]):
     # TODO: Shortcuts to gen minimal control flow if smth undef
 
     def fn(cls, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
+
+        override_fn_table = cls.TCS_TORCH_FUNCTION_OVERRIDE_TABLE
 
         if override_fn_table and func in override_fn_table:
             with torch._C.DisableTorchFunctionSubclass():
@@ -134,13 +156,14 @@ def gen_torch_function(
     return fn
 
 
-def gen_torch_dispatch(override_fn_table):
+def gen_torch_dispatch():
     # TODO: Shortcuts to gen minimal control flow if smth undef
 
     def fn(cls, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
 
+        override_fn_table = cls.TCS_TORCH_DISPATCH_OVERRIDE_TABLE
         if override_fn_table and func in override_fn_table:
             return override_fn_table[func](cls, func, types, args, kwargs)
 
@@ -169,8 +192,21 @@ def _parse_override_table(attrs, fn_attr):
     return table or None
 
 
+def _update_or_set_attrs_dict(attrs, a, d):
+    attrs_d = attrs.get(a, None)
+    if attrs_d:
+        attrs_d.update(d)
+    else:
+        attrs[a] = d
+
+
 class BaseTensorSubclassMeta(torch._C._TensorMeta):
     def __new__(meta, name, bases, attrs):  # noqa: B902
+        if "TCS_TORCH_DISPATCH_OVERRIDE_TABLE" not in attrs:
+            attrs["TCS_TORCH_DISPATCH_OVERRIDE_TABLE"] = {}
+        if "TCS_TORCH_FUNCTION_OVERRIDE_TABLE" not in attrs:
+            attrs["TCS_TORCH_FUNCTION_OVERRIDE_TABLE"] = {}
+
         if "TSC_INNER_TENSORS" in attrs:
             inner_tensors = attrs["TSC_INNER_TENSORS"]
             assert len(inner_tensors) > 0, "At least one inner tensor is required"
@@ -195,7 +231,7 @@ class BaseTensorSubclassMeta(torch._C._TensorMeta):
 
             if "__slots__" not in attrs:
                 # TODO: Add meta attributes to slots too
-                attrs["__slots__"] = inner_tensors
+                attrs["__slots__"] = inner_tensors + (meta_attrs or [])
 
             if "__repr__" not in attrs:
                 attrs["__repr__"] = gen_repr(attrs["__qualname__"], inner_tensors)
@@ -210,25 +246,30 @@ class BaseTensorSubclassMeta(torch._C._TensorMeta):
                     gen_new(module_name, qualname, inner_tensors, meta_attrs)
                 )
 
-        if attrs["__qualname__"] == "BaseWithOverride":
-            print(f"XXX attrs:{attrs}")
         if "__torch_function__" not in attrs:
             torch_fn_pro = attrs.get("torch_function_prologue", None)
             torch_fn_epi = attrs.get("torch_function_epilogue", None)
             torch_fn_override_table = _parse_override_table(
                 attrs, TORCH_FN_OVERRIDE_OPS_ATTR
             )
+            _update_or_set_attrs_dict(
+                attrs, "TCS_TORCH_FUNCTION_OVERRIDE_TABLE", torch_fn_override_table
+            )
+
             attrs["__torch_function__"] = classmethod(
-                gen_torch_function(torch_fn_pro, torch_fn_epi, torch_fn_override_table)
+                gen_torch_function(torch_fn_pro, torch_fn_epi)
             )
 
         if "__torch_dispatch__" not in attrs:
             torch_dispatch_override_table = _parse_override_table(
                 attrs, TORCH_DISPATCH_OVERRIDE_OPS_ATTR
             )
-            attrs["__torch_dispatch__"] = classmethod(
-                gen_torch_dispatch(torch_dispatch_override_table)
+            _update_or_set_attrs_dict(
+                attrs,
+                "TCS_TORCH_DISPATCH_OVERRIDE_TABLE",
+                torch_dispatch_override_table,
             )
+            attrs["__torch_dispatch__"] = classmethod(gen_torch_dispatch())
 
         return super().__new__(meta, name, bases, attrs)
 
@@ -358,6 +399,24 @@ class BaseTensorSubclass(torch.Tensor, metaclass=BaseTensorSubclassMeta):
                 plain_tensor_out,
             ),
         )
+
+    @classmethod
+    def torch_dispatch_override(cls, ops):
+        def wrapped_func(fn):
+            for op in ops:
+                cls.TCS_TORCH_DISPATCH_OVERRIDE_TABLE[op] = fn
+            return fn
+
+        return wrapped_func
+
+    @classmethod
+    def torch_function_override(cls, ops):
+        def wrapped_func(fn):
+            for op in ops:
+                cls.TCS_TORCH_FUNCTION_OVERRIDE_TABLE[op] = fn
+            return fn
+
+        return wrapped_func
 
 
 def torch_function_override(ops):
