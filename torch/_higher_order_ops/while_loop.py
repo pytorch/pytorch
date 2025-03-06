@@ -245,6 +245,7 @@ def _create_unbacked_symint(
     with ctx:
         return fake_mode.shape_env.create_unbacked_symint()
 
+
 @while_loop_op.py_impl(torch._subclasses.fake_utils.CrossRefFakeMode)
 def _(mode, cond_fn, body_fn, carried_inputs, additional_inputs):
     return while_loop_op(cond_fn, body_fn, carried_inputs, additional_inputs)
