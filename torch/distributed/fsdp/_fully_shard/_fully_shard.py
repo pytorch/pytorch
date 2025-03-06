@@ -60,8 +60,7 @@ def fully_shard(
     mp_policy: MixedPrecisionPolicy = ...,
     offload_policy: OffloadPolicy = ...,
     ignored_params: Optional[set[nn.Parameter]] = ...,
-) -> FSDPModule:
-    ...
+) -> FSDPModule: ...
 
 
 @overload
@@ -74,8 +73,7 @@ def fully_shard(
     mp_policy: MixedPrecisionPolicy = ...,
     offload_policy: OffloadPolicy = ...,
     ignored_params: Optional[set[nn.Parameter]] = ...,
-) -> list[FSDPModule]:
-    ...
+) -> list[FSDPModule]: ...
 
 
 # The decorator adds a state object to `module` that can be accessed via
