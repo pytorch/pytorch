@@ -1160,7 +1160,7 @@ if "optree" in sys.modules:
                 self.norm = norm
 
         try:
-            py_pytree.register_constant(Config)
+            python_pytree.register_constant(Config)
             self.assertFalse(True)  # must raise error before this
         except TypeError as e:
             msg = "register_constant(cls) expects `cls` to have a non-default `__eq__` implementation."
@@ -1175,7 +1175,7 @@ if "optree" in sys.modules:
                 return self.norm == other.norm
 
         try:
-            py_pytree.register_constant(Config)
+            python_pytree.register_constant(Config)
             self.assertFalse(True)  # must raise error before this
         except TypeError as e:
             msg = "register_constant(cls) expects `cls` to have a non-default `__hash__` implementation."
