@@ -1322,7 +1322,9 @@ def use_deterministic_algorithms(
         * :class:`torch.nn.ConvTranspose1d` when called on CUDA tensor
         * :class:`torch.nn.ConvTranspose2d` when called on CUDA tensor
         * :class:`torch.nn.ConvTranspose3d` when called on CUDA tensor
+        * :class:`torch.nn.ReplicationPad1d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReplicationPad2d` when attempting to differentiate a CUDA tensor
+        * :class:`torch.nn.ReplicationPad3d` when attempting to differentiate a CUDA tensor
         * :func:`torch.bmm` when called on sparse-dense CUDA tensors
         * :func:`torch.Tensor.__getitem__` when attempting to differentiate a CPU tensor
           and the index is a list of tensors
@@ -1365,6 +1367,7 @@ def use_deterministic_algorithms(
         * :class:`torch.nn.ReflectionPad2d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReflectionPad3d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReplicationPad1d` when attempting to differentiate a CUDA tensor
+        * :class:`torch.nn.ReplicationPad2d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReplicationPad3d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.NLLLoss` when called on a CUDA tensor
         * :class:`torch.nn.CTCLoss` when attempting to differentiate a CUDA tensor
