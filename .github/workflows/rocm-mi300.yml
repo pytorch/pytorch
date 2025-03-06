@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - main
+    tags:
+      - ciflow/rocm-mi300/*
   workflow_dispatch:
   schedule:
     - cron: 29 8 * * *  # about 1:29am PDT

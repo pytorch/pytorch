@@ -965,8 +965,8 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
                                            std::optional<int64_t> extra) {
   auto inputTensor = iter.input(0);
   auto outputTensor = iter.output(0);
-  bool same_strides =
-      inputTensor.strides().equals(outputTensor.strides()) && inputTensor.sizes().equals(outputTensor.sizes());
+  bool is_dense_strided = is_dense_in_storage(inputTensor) && inputTensor.strides().equals(outputTensor.strides());
+  bool needs_output_copy = false;
   uint32_t length = outputTensor.numel();
   if (length == 0) {
     return;
@@ -977,9 +977,12 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
     cplState = getPipelineStateForFunc(fmt::format(
         "{}_dense_{}_{}", name, scalarToMetalTypeString(outputTensor), scalarToMetalTypeString(inputTensor)));
 
-    if (!same_strides) {
+    if (!is_dense_strided) {
       inputTensor = inputTensor.contiguous();
-      outputTensor = outputTensor.contiguous();
+      if (!outputTensor.is_contiguous()) {
+        outputTensor = outputTensor.contiguous();
+        needs_output_copy = true;
+      }
     }
 
     MPSStream* mpsStream = getCurrentMPSStream();
@@ -998,7 +1001,7 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
       getMPSProfiler().endProfileKernel(cplState);
     });
   }
-  if (!same_strides) {
+  if (needs_output_copy) {
     iter.output(0).copy_(outputTensor);
   }
 }
