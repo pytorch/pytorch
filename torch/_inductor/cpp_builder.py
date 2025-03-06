@@ -561,14 +561,19 @@ def _get_ffast_math_flags() -> list[str]:
     return flags
 
 
-def _get_optimization_cflags(cpp_compiler: str) -> list[str]:
+def _get_optimization_cflags(
+    cpp_compiler: str, min_optimize: bool = False
+) -> list[str]:
     if _IS_WINDOWS:
-        return ["O2"]
+        return ["O1" if min_optimize else "O2"]
     else:
-        cflags = ["O0", "g"] if config.aot_inductor.debug_compile else ["O3", "DNDEBUG"]
+        cflags = (
+            ["O0", "g"]
+            if config.aot_inductor.debug_compile
+            else ["O1" if min_optimize else "O3", "DNDEBUG"]
+        )
         cflags += _get_ffast_math_flags()
         cflags.append("fno-finite-math-only")
-
         if not config.cpp.enable_unsafe_math_opt_flag:
             cflags.append("fno-unsafe-math-optimizations")
         cflags.append(f"ffp-contract={config.cpp.enable_floating_point_contract_flag}")
@@ -612,6 +617,7 @@ def get_cpp_options(
     compile_only: bool,
     warning_all: bool = True,
     extra_flags: Sequence[str] = (),
+    min_optimize: bool = False,
 ) -> tuple[list[str], list[str], list[str], list[str], list[str], list[str], list[str]]:
     definitions: list[str] = []
     include_dirs: list[str] = []
@@ -623,7 +629,7 @@ def get_cpp_options(
 
     cflags = (
         _get_shared_cflag(compile_only)
-        + _get_optimization_cflags(cpp_compiler)
+        + _get_optimization_cflags(cpp_compiler, min_optimize)
         + _get_warning_all_cflag(warning_all)
         + _get_cpp_std_cflag()
         + _get_os_related_cpp_cflags(cpp_compiler)
@@ -660,6 +666,7 @@ class CppOptions(BuildOptionsBase):
         extra_flags: Sequence[str] = (),
         use_relative_path: bool = False,
         compiler: str = "",
+        min_optimize: bool = False,
         precompiling: bool = False,
         preprocessing: bool = False,
     ) -> None:
@@ -684,6 +691,7 @@ class CppOptions(BuildOptionsBase):
             compile_only=compile_only,
             extra_flags=extra_flags,
             warning_all=warning_all,
+            min_optimize=min_optimize,
         )
 
         _append_list(self._definitions, definitions)
@@ -753,10 +761,7 @@ def _setup_standard_sys_libs(
         include_dirs.append(build_paths.linux_kernel_include)
         include_dirs.append("include")
 
-        if aot_mode and not use_relative_path:
-            linker_script = _LINKER_SCRIPT
-        else:
-            linker_script = os.path.basename(_LINKER_SCRIPT)
+        linker_script = os.path.basename(_LINKER_SCRIPT)
 
         if _is_clang(cpp_compiler):
             passthrough_args.append(" --rtlib=compiler-rt")
@@ -1138,6 +1143,7 @@ class CppTorchOptions(CppOptions):
         shared: bool = True,
         extra_flags: Sequence[str] = (),
         compiler: str = "",
+        min_optimize: bool = False,
         precompiling: bool = False,
         preprocessing: bool = False,
     ) -> None:
@@ -1147,6 +1153,7 @@ class CppTorchOptions(CppOptions):
             extra_flags=extra_flags,
             use_relative_path=use_relative_path,
             compiler=compiler,
+            min_optimize=min_optimize,
             precompiling=precompiling,
             preprocessing=preprocessing,
         )
@@ -1312,6 +1319,7 @@ class CppTorchDeviceOptions(CppTorchOptions):
         use_mmap_weights: bool = False,
         shared: bool = True,
         extra_flags: Sequence[str] = (),
+        min_optimize: bool = False,
         precompiling: bool = False,
         preprocessing: bool = False,
     ) -> None:
@@ -1323,6 +1331,7 @@ class CppTorchDeviceOptions(CppTorchOptions):
             use_relative_path=use_relative_path,
             use_mmap_weights=use_mmap_weights,
             extra_flags=extra_flags,
+            min_optimize=min_optimize,
             precompiling=precompiling,
             preprocessing=preprocessing,
         )
@@ -1599,7 +1608,6 @@ class CppBuilder:
                 )
                 if self._do_link:
                     cmd += f" {ldflags_args} {libraries_args} {libraries_dirs_args}"
-                cmd = re.sub(r"[ \n]+", " ", cmd).strip()
             return cmd
 
         command_line = format_build_command(

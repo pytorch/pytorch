@@ -658,7 +658,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_9-xpu
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.0.2 | intel-cmplr-lib-ur==2025.0.2 | intel-cmplr-lic-rt==2025.0.2 | intel-sycl-rt==2025.0.2 | tcmlib==1.2.0 | umf==0.9.1 | intel-pti==0.10.0
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.0.4; platform_system == 'Linux' | intel-cmplr-lib-ur==2025.0.4; platform_system == 'Linux' | intel-cmplr-lic-rt==2025.0.4; platform_system == 'Linux' | intel-sycl-rt==2025.0.4; platform_system == 'Linux' | intel-cmplr-lib-rt==2025.0.5; platform_system == 'Windows' | intel-cmplr-lib-ur==2025.0.5; platform_system == 'Windows' | intel-cmplr-lic-rt==2025.0.5; platform_system == 'Windows' | intel-sycl-rt==2025.0.5; platform_system == 'Windows' | tcmlib==1.2.0 | umf==0.9.1 | intel-pti==0.10.1
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-xpu-test:  # Testing
@@ -1356,7 +1356,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_10-xpu
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.0.2 | intel-cmplr-lib-ur==2025.0.2 | intel-cmplr-lic-rt==2025.0.2 | intel-sycl-rt==2025.0.2 | tcmlib==1.2.0 | umf==0.9.1 | intel-pti==0.10.0
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.0.4; platform_system == 'Linux' | intel-cmplr-lib-ur==2025.0.4; platform_system == 'Linux' | intel-cmplr-lic-rt==2025.0.4; platform_system == 'Linux' | intel-sycl-rt==2025.0.4; platform_system == 'Linux' | intel-cmplr-lib-rt==2025.0.5; platform_system == 'Windows' | intel-cmplr-lib-ur==2025.0.5; platform_system == 'Windows' | intel-cmplr-lic-rt==2025.0.5; platform_system == 'Windows' | intel-sycl-rt==2025.0.5; platform_system == 'Windows' | tcmlib==1.2.0 | umf==0.9.1 | intel-pti==0.10.1
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-xpu-test:  # Testing
@@ -2119,7 +2119,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_11-xpu
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.0.2 | intel-cmplr-lib-ur==2025.0.2 | intel-cmplr-lic-rt==2025.0.2 | intel-sycl-rt==2025.0.2 | tcmlib==1.2.0 | umf==0.9.1 | intel-pti==0.10.0
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.0.4; platform_system == 'Linux' | intel-cmplr-lib-ur==2025.0.4; platform_system == 'Linux' | intel-cmplr-lic-rt==2025.0.4; platform_system == 'Linux' | intel-sycl-rt==2025.0.4; platform_system == 'Linux' | intel-cmplr-lib-rt==2025.0.5; platform_system == 'Windows' | intel-cmplr-lib-ur==2025.0.5; platform_system == 'Windows' | intel-cmplr-lic-rt==2025.0.5; platform_system == 'Windows' | intel-sycl-rt==2025.0.5; platform_system == 'Windows' | tcmlib==1.2.0 | umf==0.9.1 | intel-pti==0.10.1
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-xpu-test:  # Testing
@@ -2817,7 +2817,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_12-xpu
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.0.2 | intel-cmplr-lib-ur==2025.0.2 | intel-cmplr-lic-rt==2025.0.2 | intel-sycl-rt==2025.0.2 | tcmlib==1.2.0 | umf==0.9.1 | intel-pti==0.10.0
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.0.4; platform_system == 'Linux' | intel-cmplr-lib-ur==2025.0.4; platform_system == 'Linux' | intel-cmplr-lic-rt==2025.0.4; platform_system == 'Linux' | intel-sycl-rt==2025.0.4; platform_system == 'Linux' | intel-cmplr-lib-rt==2025.0.5; platform_system == 'Windows' | intel-cmplr-lib-ur==2025.0.5; platform_system == 'Windows' | intel-cmplr-lic-rt==2025.0.5; platform_system == 'Windows' | intel-sycl-rt==2025.0.5; platform_system == 'Windows' | tcmlib==1.2.0 | umf==0.9.1 | intel-pti==0.10.1
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-xpu-test:  # Testing
@@ -3515,7 +3515,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_13-xpu
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.0.2 | intel-cmplr-lib-ur==2025.0.2 | intel-cmplr-lic-rt==2025.0.2 | intel-sycl-rt==2025.0.2 | tcmlib==1.2.0 | umf==0.9.1 | intel-pti==0.10.0
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.0.4; platform_system == 'Linux' | intel-cmplr-lib-ur==2025.0.4; platform_system == 'Linux' | intel-cmplr-lic-rt==2025.0.4; platform_system == 'Linux' | intel-sycl-rt==2025.0.4; platform_system == 'Linux' | intel-cmplr-lib-rt==2025.0.5; platform_system == 'Windows' | intel-cmplr-lib-ur==2025.0.5; platform_system == 'Windows' | intel-cmplr-lic-rt==2025.0.5; platform_system == 'Windows' | intel-sycl-rt==2025.0.5; platform_system == 'Windows' | tcmlib==1.2.0 | umf==0.9.1 | intel-pti==0.10.1
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_13-xpu-test:  # Testing
@@ -4213,7 +4213,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_13t-xpu
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.0.2 | intel-cmplr-lib-ur==2025.0.2 | intel-cmplr-lic-rt==2025.0.2 | intel-sycl-rt==2025.0.2 | tcmlib==1.2.0 | umf==0.9.1 | intel-pti==0.10.0
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.0.4; platform_system == 'Linux' | intel-cmplr-lib-ur==2025.0.4; platform_system == 'Linux' | intel-cmplr-lic-rt==2025.0.4; platform_system == 'Linux' | intel-sycl-rt==2025.0.4; platform_system == 'Linux' | intel-cmplr-lib-rt==2025.0.5; platform_system == 'Windows' | intel-cmplr-lib-ur==2025.0.5; platform_system == 'Windows' | intel-cmplr-lic-rt==2025.0.5; platform_system == 'Windows' | intel-sycl-rt==2025.0.5; platform_system == 'Windows' | tcmlib==1.2.0 | umf==0.9.1 | intel-pti==0.10.1
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_13t-xpu-test:  # Testing
