@@ -400,7 +400,13 @@ Tensor& set_storage_meta__symint(
     c10::SymInt storage_offset,
     c10::SymIntArrayRef size,
     c10::SymIntArrayRef stride) {
-  checkSetStorage(result, storage, storage_offset, size, stride);
+  checkSetStorage(
+      result,
+      storage,
+      storage_offset,
+      size,
+      stride,
+      /*check_offset_in_bounds=*/false);
 
   c10::SymDimVector contiguous_strides;
   if (stride.data() == nullptr) {
@@ -3053,7 +3059,8 @@ Tensor slice(
   }
   auto storage_offset = self.storage_offset() + start_val * strides[dim];
   auto len = end_val - start_val;
-  sizes[dim] = (len + step - 1) / step; // round-up
+  sizes[dim] =
+      (len == 0) ? 0 : (1 + (len - 1) / step); // round-up, avoiding overflow
   strides[dim] *= step;
 
   Tensor result;
