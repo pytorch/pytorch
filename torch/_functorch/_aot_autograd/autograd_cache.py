@@ -568,7 +568,7 @@ class AOTAutogradCacheEntry:
                 compiled_bw_func, bw_fx_config
             )
         else:
-            fw_fx_config: _CompileFxKwargs = {
+            inference_fx_config: _CompileFxKwargs = {
                 **fx_config,
                 "is_backward": False,
             }
@@ -578,7 +578,7 @@ class AOTAutogradCacheEntry:
                 "backend_compile", dispatch_mode="inference"
             )
             compiled_fw_func = self.compiled_fw.post_compile(
-                compiled_fw_func, fw_fx_config
+                compiled_fw_func, inference_fx_config
             )
 
         # Wrap the forward function in post compile wrappers
