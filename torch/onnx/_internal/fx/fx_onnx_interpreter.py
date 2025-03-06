@@ -15,7 +15,6 @@ from onnxscript.function_libs.torch_lib import (
 import torch
 import torch.fx
 from torch.onnx import _type_utils as jit_type_utils
-from torch.onnx._internal._lazy_import import onnxscript_apis
 from torch.onnx._internal.fx import (
     _pass,
     diagnostics,
@@ -101,6 +100,7 @@ def _retrieve_or_adapt_input_to_graph_set(
     When creating TorchScript graph from FX graph, we need a mapping from FX variable
     to TorchScript variable. This function maps FX variable, fx_node_arg, to torch.jit.Value.
     """
+    from onnxscript import opset18 as op
 
     onnx_tensor = fx_node_arg
     if isinstance(onnx_tensor, torch.fx.Node):
@@ -149,7 +149,7 @@ def _retrieve_or_adapt_input_to_graph_set(
                     # Since tensors with rank=0 (i.e., scalar) cannot be concated, all
                     # scalars are promoted to tensors with shape (1,).
                     with onnxscript.evaluator.default_as(tracer):
-                        element_value = onnxscript_apis.torchlib_opset().Reshape(
+                        element_value = op.Reshape(
                             element_value,  # type: ignore[arg-type, type-var]
                             [1],  # type: ignore[arg-type, type-var]
                         )
@@ -173,9 +173,7 @@ def _retrieve_or_adapt_input_to_graph_set(
         # onnx-script auto wraps python number with op.Constants,
         # so we don't need to specifically process them.
         with onnxscript.evaluator.default_as(tracer):
-            output = onnxscript_apis.torchlib_opset().Concat(
-                *sequence_mixed_elements, axis=0
-            )  # type: ignore[type-var]
+            output = op.Concat(*sequence_mixed_elements, axis=0)  # type: ignore[type-var]
         output.dtype = torch.int64  # type: ignore[union-attr]
         output.shape = [len(sequence_mixed_elements)]  # type: ignore[union-attr]
         return output
