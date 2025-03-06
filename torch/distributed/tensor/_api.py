@@ -286,7 +286,7 @@ class DTensor(torch.Tensor):
     @torch._disable_dynamo
     @mark_subclass_constructor_exportable_experimental
     def __init__(self, *args, **kwargs):
-        pass
+        super().__init__()
 
     # pyre-fixme[14]: `__repr__` overrides method defined in `DTensor` inconsistently.
     # pyre-fixme[3]: Return type must be annotated.
