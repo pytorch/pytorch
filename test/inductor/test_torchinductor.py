@@ -4273,13 +4273,14 @@ class CommonTemplate:
         prims = torch.ops.prims
 
         def fn(x):
-            kernel_size = [3, 3]
-            stride = [2, 2]
-            padding = [1, 1]
-            dilation = [1, 1]
+            dim = 2
+            kernel_size = [3] * dim
+            stride = [2] * dim
+            padding = [1] * dim
+            dilation = [1] * dim
             ceil_mode = False
 
-            vals, offsets = prims._low_memory_max_pool2d_with_offsets(
+            vals, offsets = prims._low_memory_max_pool_with_offsets(
                 x,
                 kernel_size,
                 stride,
@@ -4287,12 +4288,13 @@ class CommonTemplate:
                 dilation,
                 ceil_mode,
             )
-            indices = prims._low_memory_max_pool2d_offsets_to_indices(
+            indices = prims._low_memory_max_pool_offsets_to_indices(
                 offsets,
-                kernel_size[1],
-                x.size(-1),
+                kernel_size,
+                x.shape[-dim:],
                 stride,
                 padding,
+                dilation=dilation,
             )
             return vals, indices, offsets
 
@@ -5031,16 +5033,14 @@ class CommonTemplate:
 
     @skip_if_gpu_halide  # slow
     def test_max_pool2d6(self):
-        # Too big kernel size, use fallback
+        # Big kernel size
         def fn(x):
             return aten.max_pool2d_with_indices(x, [13, 13], [])
 
-        torch._inductor.metrics.generated_kernel_count = 0
         self.common(
             fn,
             (torch.randn([16, 64, 55, 55]),),
         )
-        assertGeneratedKernelCountEqual(self, 0)
 
     # From https://github.com/pytorch/pytorch/issues/94775
     def test_max_pool2d7(self):
@@ -5061,12 +5061,10 @@ class CommonTemplate:
         def fn(x):
             return aten.max_pool2d_with_indices(x, [3, 2], [2, 1], [1, 1], [1, 2])
 
-        torch._inductor.metrics.generated_kernel_count = 0
         self.common(
             fn,
             (torch.randn([2, 2, 3, 6]),),
         )
-        assertGeneratedKernelCountEqual(self, 0)
 
     def test_avg_pool2d1(self):
         def fn(x):
