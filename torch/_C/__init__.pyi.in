@@ -2526,139 +2526,150 @@ class _NodeIter(Iterator):
 
 # Defined in torch/csrc/inductor/static_cuda_launcher.cpp
 class _StaticCudaLauncher:
+    @staticmethod
     def _load_kernel(
         cubin_file: str,
         func_name: str,
-        shared_mem_bytes: int,
-    ) -> tuple[int, int, int]:
+        shared_mem_bytes: _int,
+    ) -> Tuple[_int, _int, _int]:
         ...
 
+    @staticmethod
     def _launch_cuda_kernel_1(
         cubin_path: str,
         kernel_name: str,
-        grid_x: int,
-        grid_y: int,
-        grid_z: int,
-        num_warps: int,
-        shared_mem_bytes: int,
+        grid_x: _int,
+        grid_y: _int,
+        grid_z: _int,
+        num_warps: _int,
+        shared_mem_bytes: _int,
         arg_types: str,
         args: Tuple[Any],
-        stream: int,
+        stream: _int,
     ) ->  None: ...
 
+    @staticmethod
     def _launch_cuda_kernel_2(
         cubin_path: str,
         kernel_name: str,
-        grid_x: int,
-        grid_y: int,
-        grid_z: int,
-        num_warps: int,
-        shared_mem_bytes: int,
+        grid_x: _int,
+        grid_y: _int,
+        grid_z: _int,
+        num_warps: _int,
+        shared_mem_bytes: _int,
         arg_types: str,
         args: Tuple[Any, Any],
-        stream: int,
+        stream: _int,
     ) ->  None: ...
 
+    @staticmethod
     def _launch_cuda_kernel_3(
         cubin_path: str,
         kernel_name: str,
-        grid_x: int,
-        grid_y: int,
-        grid_z: int,
-        num_warps: int,
-        shared_mem_bytes: int,
+        grid_x: _int,
+        grid_y: _int,
+        grid_z: _int,
+        num_warps: _int,
+        shared_mem_bytes: _int,
         arg_types: str,
         args: Tuple[Any, Any, Any],
-        stream: int,
+        stream: _int,
     ) ->  None: ...
 
+    @staticmethod
     def _launch_cuda_kernel_4(
             cubin_path: str,
             kernel_name: str,
-            grid_x: int,
-            grid_y: int,
-            grid_z: int,
-            num_warps: int,
-            shared_mem_bytes: int,
+            grid_x: _int,
+            grid_y: _int,
+            grid_z: _int,
+            num_warps: _int,
+            shared_mem_bytes: _int,
             arg_types: str,
             args: Tuple[Any, Any, Any],
-            stream: int,
+            stream: _int,
         ) ->  None: ...
 
+    @staticmethod
     def _launch_cuda_kernel_5(
             cubin_path: str,
             kernel_name: str,
-            grid_x: int,
-            grid_y: int,
-            grid_z: int,
-            num_warps: int,
-            shared_mem_bytes: int,
+            grid_x: _int,
+            grid_y: _int,
+            grid_z: _int,
+            num_warps: _int,
+            shared_mem_bytes: _int,
             arg_types: str,
             args: Tuple[Any, Any, Any],
-            stream: int,
+            stream: _int,
         ) ->  None: ...
 
+    @staticmethod
     def _launch_cuda_kernel_6(
         cubin_path: str,
         kernel_name: str,
-        grid_x: int,
-        grid_y: int,
-        grid_z: int,
-        num_warps: int,
-        shared_mem_bytes: int,
+        grid_x: _int,
+        grid_y: _int,
+        grid_z: _int,
+        num_warps: _int,
+        shared_mem_bytes: _int,
         arg_types: str,
         args: Tuple[Any, Any, Any],
-        stream: int,
+        stream: _int,
     ) ->  None: ...
 
+    @staticmethod
     def _launch_cuda_kernel_7(
             cubin_path: str,
             kernel_name: str,
-            grid_x: int,
-            grid_y: int,
-            grid_z: int,
-            num_warps: int,
-            shared_mem_bytes: int,
+            grid_x: _int,
+            grid_y: _int,
+            grid_z: _int,
+            num_warps: _int,
+            shared_mem_bytes: _int,
             arg_types: str,
             args: Tuple[Any, Any, Any],
-            stream: int,
+            stream: _int,
         ) ->  None: ...
 
+    @staticmethod
     def _launch_cuda_kernel_8(
             cubin_path: str,
             kernel_name: str,
-            grid_x: int,
-            grid_y: int,
-            grid_z: int,
-            num_warps: int,
-            shared_mem_bytes: int,
+            grid_x: _int,
+            grid_y: _int,
+            grid_z: _int,
+            num_warps: _int,
+            shared_mem_bytes: _int,
             arg_types: str,
             args: Tuple[Any, Any, Any],
-            stream: int,
+            stream: _int,
         ) ->  None: ...
 
+    @staticmethod
     def _launch_cuda_kernel_9(
             cubin_path: str,
             kernel_name: str,
-            grid_x: int,
-            grid_y: int,
-            grid_z: int,
-            num_warps: int,
-            shared_mem_bytes: int,
+            grid_x: _int,
+            grid_y: _int,
+            grid_z: _int,
+            num_warps: _int,
+            shared_mem_bytes: _int,
             arg_types: str,
             args: Tuple[Any, Any, Any],
-            stream: int,
+            stream: _int,
         ) ->  None: ...
 
+    @staticmethod
     def _launch_cuda_kernel_10(
             cubin_path: str,
             kernel_name: str,
-            grid_x: int,
-            grid_y: int,
-            grid_z: int,
-            num_warps: int,
-            shared_mem_bytes: int,
+            grid_x: _int,
+            grid_y: _int,
+            grid_z: _int,
+            num_warps: _int,
+            shared_mem_bytes: _int,
             arg_types: str,
             args: Tuple[Any, Any, Any],
-            stream: int,
+            stream: _int,
         ) ->  None: ...

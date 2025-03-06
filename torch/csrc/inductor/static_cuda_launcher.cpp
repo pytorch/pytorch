@@ -1,3 +1,4 @@
+
 #ifdef USE_CUDA
 // TODO what are the right imports to get access to CUDA drivers?
 #include <torch/csrc/utils/pythoncapi_compat.h>
@@ -248,8 +249,9 @@ void parseKernelArgs(
   }
 }
 
-/* Load the CUDA kernel into memory (called during torch.compile)
-  Called in python as
+/* Load the CUDA kernel into memory (called during torch.compile), and
+  return a pointer to it (along with nregs and nspills).
+  Called in python as:
   (function, n_regs, n_spills) = load_kernel(cubin_path, func_name,
   sharedMemBytes)
 */
@@ -283,6 +285,7 @@ static PyObject* load_kernel(PyObject* self, PyObject* args) {
 /**
  *  Main entrypoint function called at runtime; called like this in python land:
     launcher(
+      function, # CUfunction returned by load_kernel()
       grid_x,
       grid_y,
       grid_z,

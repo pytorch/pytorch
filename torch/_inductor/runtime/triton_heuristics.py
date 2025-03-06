@@ -2352,7 +2352,9 @@ class StaticallyLaunchedCudaKernel:
         self.num_warps = kernel.metadata.num_warps
         self.shared = kernel.metadata.shared
         self.arg_tys = self.arg_ty_from_signature(kernel.src)
-        self.function = None  # Loaded by load_kernel(on the parent process)
+        self.function: Optional[int] = (
+            None  # Loaded by load_kernel(on the parent process)
+        )
         num_args = len(self.arg_tys)
         if launcher := getattr(
             _StaticCudaLauncher, f"_launch_cuda_kernel_{num_args}", None
