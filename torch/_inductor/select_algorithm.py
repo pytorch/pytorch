@@ -1649,7 +1649,6 @@ class AlgorithmSelectorCache(PersistentCache):
 
     def cache_clear(self) -> None:
         self.precompile_cache.clear()
-        self.feedback_saver_fns.clear()
 
     def __call__(
         self,
