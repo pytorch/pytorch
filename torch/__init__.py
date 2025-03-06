@@ -1179,7 +1179,7 @@ def get_default_device() -> "torch.device":
         None,
     )
     if device_mode:
-        device = device_modes.device
+        device = device_mode.device
         return _get_device_with_index(device)
 
     if hasattr(_GLOBAL_DEVICE_CONTEXT, "device_context"):
