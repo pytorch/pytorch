@@ -44,6 +44,7 @@ from ..utils import (
     cmp_name_to_op_mapping,
     identity,
     is_tensor_base_attr_getter,
+    istype,
     list_methods,
     proxy_args_kwargs,
     set_example_value,
@@ -292,13 +293,23 @@ class ExceptionVariable(VariableTracker):
         self.__context__ = context
 
     def reconstruct(self, codegen):
-        if type(self.__context__) is not ConstantVariable:
-            unimplemented("ExceptionVariable with __context__")
         codegen.add_push_null(
             lambda: codegen.load_import_from("builtins", self.exc_type.__name__)
         )
         codegen.foreach(self.args)
         codegen.call_function(len(self.args), False)
+
+        def codegen_attr(name: str) -> None:
+            attr = getattr(self, name)
+            if not istype(attr, ConstantVariable):
+                codegen.dup_top()
+                codegen(attr)
+                codegen.extend_output(codegen.rot_n(2))
+                codegen.store_attr(name)
+
+        codegen_attr("__context__")
+        codegen_attr("__cause__")
+        codegen_attr("__suppress_context__")
 
     def python_type(self):
         return self.exc_type
@@ -368,7 +379,7 @@ class ExceptionVariable(VariableTracker):
 
     def __str__(self):
         ctx = self.__context__
-        if type(ctx) is variables.ConstantVariable:
+        if istype(ctx, ConstantVariable):
             ctx = None
         else:
             ctx = ctx.exc_type.__name__
