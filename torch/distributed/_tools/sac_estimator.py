@@ -50,7 +50,7 @@ def _get_untyped_storages(t: torch.Tensor) -> set[torch.UntypedStorage]:
        t (torch.Tensor): Input `torch.Tensor` or traceable wrapper-subclass of `torch.Tensor`.
 
     Returns:
-        Set[torch.UntypedStorage]: Set of untyped storages.
+        set[torch.UntypedStorage]: Set of untyped storages.
 
     Warns:
         UserWarning: If the flattened input is not a tensor or traceable wrapper-subclass.
@@ -159,7 +159,7 @@ class MSPS(NamedTuple):
     Represents Memory and Runtime Statistics for an operator/operator group.
 
     Attributes:
-        func_names (Set[str]): Set of operator/operator group names.
+        func_names (set[str]): Set of operator/operator group names.
         op_idx (int): Operator index (group head index incase of operator groups).
         memory (int): Memory usage in bytes.
         runtime (float): Runtime in milliseconds.
@@ -203,11 +203,11 @@ class SACGreedyOrderMeta:
     Stores metadata for Greedy-order SAC.
 
     Attributes:
-        recomputed_ops (Set[int]): Set of operator indices to be recomputed.
-        stored_ops (Set[int]): Set of operator indices to be stored.
-        inplace_op_groups (Dict[int, Set[int]]): Dictionary of inplace operator groups from group-head to operators.
-        random_ops_group (Dict[int, Set[int]]): Dictionary of random op group head to random ops.
-        msps_meta (List[MSPS]): List of Memory and Runtime Statistics for operators.
+        recomputed_ops (set[int]): Set of operator indices to be recomputed.
+        stored_ops (set[int]): Set of operator indices to be stored.
+        inplace_op_groups (dict[int, set[int]]): Dictionary of inplace operator groups from group-head to operators.
+        random_ops_group (dict[int, set[int]]): Dictionary of random op group head to random ops.
+        msps_meta (list[MSPS]): List of Memory and Runtime Statistics for operators.
     """
 
     recomputed_ops: set[int]

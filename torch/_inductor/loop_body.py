@@ -194,11 +194,12 @@ class LoopBody:
         # There is indeed an issue due to symbol name conflicting.
         # y0 maybe reused for the y dimension later.
         (
-            iter_vars,
-            reduce_vars,
-        ), var_ranges = dependencies.index_vars_no_squeeze(
-            iter_sizes, reduce_sizes, prefix="t"
-        )
+            (
+                iter_vars,
+                reduce_vars,
+            ),
+            var_ranges,
+        ) = dependencies.index_vars_no_squeeze(iter_sizes, reduce_sizes, prefix="t")
         new_body = LoopBody(
             old_body,
             [iter_reindex(iter_vars), reduce_reindex(reduce_vars)],
@@ -234,7 +235,8 @@ class LoopBody:
         new_sizes = (new_iter_size, reduce_size)
 
         (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
-            *new_sizes, prefix="t"  # type: ignore[arg-type]
+            *new_sizes,
+            prefix="t",  # type: ignore[arg-type]
         )
 
         inverse_order = {b: a for a, b in enumerate(new_order)}
@@ -254,7 +256,8 @@ class LoopBody:
 
         # use the original symbol prefix so we can do multiple round of reordering
         (iter_vars2, reduce_vars2), var_ranges2 = dependencies.index_vars_no_squeeze(
-            *new_sizes, prefix="p"  # type: ignore[arg-type]
+            *new_sizes,
+            prefix="p",  # type: ignore[arg-type]
         )
         new_body = LoopBody(
             loop_body, (iter_vars2, reduce_vars2), var_ranges2, iter_vars2, reduce_vars2
@@ -385,9 +388,9 @@ class LoopBody:
     def indexing_from_args(self, indices):
         index = [*itertools.chain.from_iterable(indices)]
         assert len(index) == len(self.var_ranges), (index, self.var_ranges)
-        assert all(
-            v not in self.var_ranges for v in index
-        ), f"{self.var_ranges=}, {indices=}"
+        assert all(v not in self.var_ranges for v in index), (
+            f"{self.var_ranges=}, {indices=}"
+        )
         replacements = dict(zip(self.var_ranges.keys(), index))
         return {
             name: sympy_subs(expr, replacements)
