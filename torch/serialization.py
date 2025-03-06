@@ -2000,8 +2000,15 @@ def _load(
 
         # TODO: Once we decide to break serialization FC, we can
         # stop wrapping with TypedStorage
+
+        if torch._guards.detect_fake_mode(None) is None:
+            wrap_storage = restore_location(storage, location)
+        else:
+            storage._fake_device = location
+            wrap_storage = storage
+
         typed_storage = torch.storage.TypedStorage(
-            wrap_storage=restore_location(storage, location),
+            wrap_storage=wrap_storage,
             dtype=dtype,
             _internal=True,
         )
