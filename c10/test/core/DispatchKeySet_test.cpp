@@ -432,9 +432,13 @@ TEST(DispatchKeySet, TestFunctionalityDispatchKeyToString) {
         k == DispatchKey::StartOfAutogradFunctionalityBackends)
       continue;
     auto res = std::string(toString(k));
-    ASSERT_TRUE(res.find("Unknown") == std::string::npos)
-        << i << " (before is " << toString(static_cast<DispatchKey>(i - 1))
-        << ")";
+    if (i > 0) {
+      ASSERT_TRUE(res.find("Unknown") == std::string::npos)
+          << i << " (before is " << toString(static_cast<DispatchKey>(i - 1))
+          << ")";
+    } else {
+      ASSERT_TRUE(res.find("Unknown") == std::string::npos) << i;
+    }
     ASSERT_TRUE(seen_strings.count(res) == 0);
     seen_strings.insert(res);
   }
