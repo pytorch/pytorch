@@ -72,6 +72,7 @@ from torch.testing._internal.custom_op_db import custom_op_db
 
 from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.testing._internal.jit_utils import RUN_CUDA
+from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -1609,24 +1610,41 @@ class FakeTensorPropTest(TestCase):
 
         self.assertEqual(fake_r.T.is_contiguous(), r.T.is_contiguous())
 
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_torch_load_with_fake_mode(self):
-        class TheModelClass(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.fc1 = torch.nn.Linear(5, 10)
+        model = torch.nn.Linear(5, 10)
+        sd = model.state_dict()
+        sd['tt'] = TwoTensor(torch.randn(2), torch.randn(2))
 
-            def forward(self, x):
-                return self.fc1(x)
 
-        with TemporaryFileName() as state_dict_file:
+        with TemporaryFileName() as state_dict_file, torch.serialization.safe_globals([TwoTensor]):
             # Create state_dict to be loaded later
-            model = TheModelClass()
-            torch.save(model.state_dict(), state_dict_file)
+            torch.save(sd, state_dict_file)
 
             fake_mode = FakeTensorMode()
             with fake_mode:
-                torch.load(state_dict_file)  # scenario 1
-                torch.load(state_dict_file, map_location="cpu")  # scenario 2
+                sd_loaded = torch.load(state_dict_file)
+                self.assertEqual(sd_loaded["weight"].device.type, "cpu")
+                self.assertEqual(sd_loaded["tt"].device.type, "cpu")
+                sd_loaded = torch.load(state_dict_file, map_location="cuda")
+                self.assertEqual(sd_loaded["weight"].device.type, "cuda")
+                self.assertEqual(sd_loaded["tt"].device.type, "cuda")
+
+
+        for k in sd.keys():
+            sd[k] = sd[k].to('cuda')
+
+        with TemporaryFileName() as state_dict_file, torch.serialization.safe_globals([TwoTensor]):
+            torch.save(sd, state_dict_file)
+
+            fake_mode = FakeTensorMode()
+            with fake_mode:
+                sd_loaded = torch.load(state_dict_file)
+                self.assertEqual(sd_loaded["weight"].device.type, "cuda")
+                self.assertEqual(sd_loaded["tt"].device.type, "cuda")
+                sd_loaded = torch.load(state_dict_file, map_location="cpu")
+                self.assertEqual(sd_loaded["weight"].device.type, "cpu")
+                self.assertEqual(sd_loaded["tt"].device.type, "cpu")
 
 
 make_propagate_real_tensors_cls(FakeTensorPropTest)
