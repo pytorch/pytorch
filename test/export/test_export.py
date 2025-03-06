@@ -2618,10 +2618,7 @@ def forward(self, p_linear_weight, p_linear_bias, x):
         ep.module()(torch.randn(9), torch.randn(4, 4))
         ep.module()(torch.randn(1), torch.randn(1, 1))
 
-    def test_colin(self):
-        # This test checks the unbacked symint runtime assertions, for the following cases:
-        # (A) an unbacked symint equals an unbacked symint (mark_unbacked=True)
-        # (B) an unbacked symint equals a backed symint    (mark_unbacked=False)
+    def test_colin_unbacked_backed_vr_sub(self):
         class Model(torch.nn.Module):
             def forward(self, a, b, c):
                 nz = torch.nonzero(a)
