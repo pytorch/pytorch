@@ -34,6 +34,10 @@
 
   This launcher is paired with StaticallyLaunchedCudaKernel in
   triton_heuristics.py.
+
+  TODO: 
+  - Handle CutensorMap, NvtmDesc
+  - Handle launch_enter and launch_exit hooks (in python maybe?)
  */
 
 static const at::cuda::NVRTC& nvrtc() {
