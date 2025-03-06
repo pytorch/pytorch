@@ -128,11 +128,11 @@ def _mark_strict_experimental(cls):
     return cls
 
 
-def _register_and_get_spec_proxy_in_tracer(tracer, name, spec):
+def _register_subclass_spec_proxy_in_tracer(tracer, name, spec):
     """
     This is a wrapper utility method on top of tracer to cache the
-    already registered attribute. This is useful for cases when we
-    know for sure the attribute is the same. By default, fx will
+    already registered subclass spec attribute. This is useful because
+    Subclass.__init__ will be same for each subclass. By default, fx will
     create multiple attributes/proxies for given attribute.
     """
     fx_name = name + "0"
@@ -235,7 +235,7 @@ def mark_subclass_constructor_exportable_experimental(constructor_subclass):
         # for each subclass type. This is different from proxy-ing the init arguments which
         # can't be reused because for example, DTensor can receive different DeviceMesh etc
         # as it's arguments
-        func_spec_proxy = _register_and_get_spec_proxy_in_tracer(
+        func_spec_proxy = _register_subclass_spec_proxy_in_tracer(
             tracer, fxable_constructor_call_spec_name, func_spec
         )
 
