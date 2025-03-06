@@ -1,12 +1,16 @@
-#include <cuda.h>
+#ifdef USE_CUDA
+// TODO what are the right imports to get access to CUDA drivers?
+#include <torch/csrc/utils/pythoncapi_compat.h>
+
+#include <ATen/Context.h>
+#include <ATen/cuda/Exceptions.h>
+#include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 #include <torch/csrc/inductor/static_cuda_launcher.h>
-#include <torch/csrc/utils/pythoncapi_compat.h>
 #include <cstdint>
 #include <stdexcept>
 
-#include <torch/csrc/inductor/cpp_wrapper/device_internal/cuda.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <filesystem>
 #include <optional>
@@ -32,23 +36,11 @@
   triton_heuristics.py.
  */
 
-#define CUDA_DRIVER_CHECK(EXPR)                                   \
-  do {                                                            \
-    CUresult code = EXPR;                                         \
-    const char* msg;                                              \
-    CUresult code_get_error = cuGetErrorString(code, &msg);       \
-    if (code_get_error != CUDA_SUCCESS) {                         \
-      throw std::runtime_error(                                   \
-          std::string("CUDA driver error: ") +                    \
-          std::string("invalid error code!"));                    \
-    }                                                             \
-    if (code != CUDA_SUCCESS) {                                   \
-      throw std::runtime_error(                                   \
-          std::string("CUDA driver error: ") + std::string(msg)); \
-    }                                                             \
-  } while (0);
+static const at::cuda::NVRTC& nvrtc() {
+  return at::globalContext().getNVRTC();
+}
 
-static inline CUdeviceptr getPointer(PyObject* obj, int idx) {
+static CUdeviceptr getPointer(PyObject* obj) {
   CUdeviceptr data_ptr = 0;
   if (THPUtils_checkLong(obj)) {
     data_ptr = THPUtils_unpackUInt64(obj);
@@ -61,7 +53,7 @@ static inline CUdeviceptr getPointer(PyObject* obj, int idx) {
   PyObject* ptr = PyObject_GetAttrString(obj, "data_ptr");
   if (ptr) {
     PyObject* empty_tuple = PyTuple_New(0);
-    PyObject* ret = PyObject_Call(ptr, empty_tuple, NULL);
+    PyObject* ret = PyObject_Call(ptr, empty_tuple, nullptr);
     Py_DECREF(empty_tuple);
     Py_DECREF(ptr);
     if (!THPUtils_checkLong(ret)) {
@@ -72,8 +64,8 @@ static inline CUdeviceptr getPointer(PyObject* obj, int idx) {
     if (!data_ptr)
       return data_ptr;
 
-    CUdeviceptr dev_ptr;
-    CUDA_DRIVER_CHECK(cuPointerGetAttribute(
+    CUdeviceptr dev_ptr = 0;
+    AT_CUDA_DRIVER_CHECK(nvrtc().cuPointerGetAttribute(
         &dev_ptr, CU_POINTER_ATTRIBUTE_DEVICE_POINTER, data_ptr));
     Py_DECREF(ret);
     return dev_ptr;
@@ -93,17 +85,19 @@ static inline CUfunction loadKernel(
     filePath = (p1 / p2.filename()).string();
   }
 
-  CUmodule mod;
-  CUfunction func;
-  CUDA_DRIVER_CHECK(cuModuleLoad(&mod, filePath.c_str()));
-  CUDA_DRIVER_CHECK(cuModuleGetFunction(&func, mod, funcName.c_str()));
+  CUmodule mod = nullptr;
+  CUfunction func = nullptr;
+  AT_CUDA_DRIVER_CHECK(nvrtc().cuModuleLoad(&mod, filePath.c_str()));
+  AT_CUDA_DRIVER_CHECK(
+      nvrtc().cuModuleGetFunction(&func, mod, funcName.c_str()));
   if (sharedMemBytes > 0) {
-    CUDA_DRIVER_CHECK(cuFuncSetAttribute(
-        func, CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, sharedMemBytes))
+    AT_CUDA_DRIVER_CHECK(nvrtc().cuFuncSetAttribute(
+        func, CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, sharedMemBytes));
   }
   return func;
 }
 
+template <size_t NUM_ARGS>
 static inline void launchKernel(
     CUfunction func,
     uint32_t gridX,
@@ -111,9 +105,9 @@ static inline void launchKernel(
     uint32_t gridZ,
     uint32_t numWarps,
     uint32_t sharedMemBytes,
-    void* args[],
+    std::array<void*, NUM_ARGS>& args,
     cudaStream_t stream) {
-  CUDA_DRIVER_CHECK(cuLaunchKernel(
+  AT_CUDA_DRIVER_CHECK(nvrtc().cuLaunchKernel(
       func,
       gridX,
       gridY,
@@ -123,7 +117,7 @@ static inline void launchKernel(
       1,
       sharedMemBytes,
       stream,
-      args,
+      args.data(),
       nullptr));
 }
 
@@ -138,9 +132,9 @@ template <size_t NUM_ARGS>
 void parseKernelArgs(
     PyObject* varArgs,
     const char* argTypes,
-    uint64_t argStorage[NUM_ARGS],
-    void* kernelArgs[NUM_ARGS]) {
-  size_t numKernelArgs = std::strlen(argTypes);
+    std::array<uint64_t, NUM_ARGS>& argStorage,
+    std::array<void*, NUM_ARGS>& kernelArgs) {
+  int numKernelArgs = static_cast<int>(std::strlen(argTypes));
   if (!PyTuple_Check(varArgs)) {
     throw std::runtime_error("Kernel arguments must be provided as a tuple");
   }
@@ -148,7 +142,7 @@ void parseKernelArgs(
     throw std::runtime_error(
         "Mismatch between number of argument types and provided arguments");
   }
-  for (size_t i = 0; i < numKernelArgs; ++i) {
+  for (int i = 0; i < numKernelArgs; ++i) {
     // Get pointer to the ith 8-byte slot.
     void* slot = static_cast<void*>(&argStorage[i]);
     PyObject* item = PyTuple_GetItem(varArgs, i);
@@ -227,7 +221,7 @@ void parseKernelArgs(
         *reinterpret_cast<float*>(slot) = static_cast<float>(temp);
         break;
       }
-      case 'd': { // double (fp64)
+      case 'd': { // double (64-bit float; fp64)
         double temp = THPUtils_unpackDouble(item);
         if (PyErr_Occurred()) {
           throw std::runtime_error("Failed to convert argument to double");
@@ -235,8 +229,9 @@ void parseKernelArgs(
         *reinterpret_cast<double*>(slot) = temp;
         break;
       }
-      case 'O': { // pointer; grab .data_ptr() if the ptr is to a tensor 
-        CUdeviceptr ptr = getPointer(item, i);
+      case 'O': { // pointer; using helper getPointer() (which may call
+                  // data_ptr() if needed)
+        CUdeviceptr ptr = getPointer(item);
         *reinterpret_cast<CUdeviceptr*>(slot) = ptr;
         break;
       }
@@ -249,11 +244,41 @@ void parseKernelArgs(
   }
 }
 
+/* Load the CUDA kernel into memory (called during torch.compile)
+  Called in python as
+  (function, n_regs, n_spills) = load_kernel(cubin_path, func_name,
+  sharedMemBytes)
+*/
+static PyObject* load_kernel(PyObject* self, PyObject* args) {
+  const char* filePath = nullptr;
+  const char* funcName = nullptr;
+  int sharedMemBytes = 0;
+  int n_regs = 0;
+  int n_spills = 0;
+  if (!PyArg_ParseTuple(args, "ssi", &filePath, &funcName, &sharedMemBytes)) {
+    return nullptr;
+  }
+  CUfunction func = nullptr;
+  try {
+    func = loadKernel(filePath, funcName, sharedMemBytes);
+    // Taken from triton/nvidia/backend/driver.c
+    AT_CUDA_DRIVER_CHECK(
+        nvrtc().cuFuncGetAttribute(&n_regs, CU_FUNC_ATTRIBUTE_NUM_REGS, func));
+    AT_CUDA_DRIVER_CHECK(nvrtc().cuFuncGetAttribute(
+        &n_spills, CU_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES, func));
+    n_spills /= 4;
+  } catch (const std::runtime_error& e) {
+    PyErr_SetString(PyExc_RuntimeError, e.what());
+    return nullptr;
+  }
+  // Return a tuple of CUFunction, n_regs, n_spills
+  return Py_BuildValue(
+      "(Kii)", reinterpret_cast<uint64_t>(func), n_regs, n_spills);
+}
+
 /**
- *  Main entrypoint function; called like this in python land:
+ *  Main entrypoint function called at runtime; called like this in python land:
     launcher(
-      cubin_path, # File path of cubin file
-      name, # Name of triton kernel
       grid_x,
       grid_y,
       grid_z,
@@ -267,20 +292,19 @@ void parseKernelArgs(
  */
 template <size_t NUM_ARGS>
 static PyObject* launch_kernel(PyObject* self, PyObject* args) {
-  const char* filePath;
-  const char* funcName;
-  int gridX, gridY, gridZ, numWarps, sharedMemBytes;
+  // Pointer to CUfunction generated by load_kernel()
+  uint64_t func_ptr = 0;
+  int gridX = 0, gridY = 0, gridZ = 0, numWarps = 0, sharedMemBytes = 0;
   // stream here should be the raw stream gotten from
   // device_interface.get_raw_stream()
-  uint64_t stream;
-  const char* argTypes;
-  PyObject* varArgs;
+  uint64_t stream = 0;
+  const char* argTypes = nullptr;
+  PyObject* varArgs = nullptr;
   // Parse the fixed arguments and the format string
   if (!PyArg_ParseTuple(
           args,
-          "ssiiiiisOl",
-          &filePath,
-          &funcName,
+          "KiiiiisOl",
+          &func_ptr,
           &gridX,
           &gridY,
           &gridZ,
@@ -291,13 +315,7 @@ static PyObject* launch_kernel(PyObject* self, PyObject* args) {
           &stream)) {
     return nullptr;
   }
-  CUfunction func;
-  try {
-    func = loadKernel(filePath, funcName, sharedMemBytes);
-  } catch (const std::runtime_error& e) {
-    PyErr_SetString(PyExc_RuntimeError, e.what());
-    return nullptr;
-  }
+  CUfunction func = reinterpret_cast<CUfunction>(func_ptr);
   cudaStream_t cudaStream = reinterpret_cast<cudaStream_t>(stream);
   try {
     // Launch the kernel
@@ -305,10 +323,9 @@ static PyObject* launch_kernel(PyObject* self, PyObject* args) {
     // We allocate 8 bytes per argument on the stack. We then allocate 8 more
     // bytes to point to each 8 byte slot in argStorage, and pass that array of
     // pointers to launchKernel.
-    std::array<uint64_t, NUM_ARGS> argStorage;
-    std::array<void*, NUM_ARGS> kernelArgs;
-    parseKernelArgs<NUM_ARGS>(
-        varArgs, argTypes, argStorage.data(), kernelArgs.data());
+    std::array<uint64_t, NUM_ARGS> argStorage = {};
+    std::array<void*, NUM_ARGS> kernelArgs = {};
+    parseKernelArgs(varArgs, argTypes, argStorage, kernelArgs);
 
     launchKernel(
         func,
@@ -317,7 +334,7 @@ static PyObject* launch_kernel(PyObject* self, PyObject* args) {
         gridZ,
         numWarps,
         sharedMemBytes,
-        kernelArgs.data(),
+        kernelArgs,
         cudaStream);
   } catch (const std::runtime_error& e) {
     PyErr_SetString(PyExc_RuntimeError, e.what());
@@ -326,92 +343,106 @@ static PyObject* launch_kernel(PyObject* self, PyObject* args) {
   Py_RETURN_NONE;
 }
 
-static PyMethodDef StaticCudaLauncherMethods[] = {
-    {"_launch_cuda_kernel_1",
-     (PyCFunction)launch_kernel<1>,
-     METH_VARARGS,
-     "Cuda Launcher with 1 arg"},
-    {"_launch_cuda_kernel_2",
-     (PyCFunction)launch_kernel<2>,
-     METH_VARARGS,
-     "Cuda Launcher with 2 args"},
-    {"_launch_cuda_kernel_3",
-     (PyCFunction)launch_kernel<3>,
-     METH_VARARGS,
-     "Cuda Launcher with 3 args"},
-    {"_launch_cuda_kernel_4",
-     (PyCFunction)launch_kernel<4>,
-     METH_VARARGS,
-     "Cuda Launcher with 4 args"},
-    {"_launch_cuda_kernel_5",
-     (PyCFunction)launch_kernel<5>,
-     METH_VARARGS,
-     "Cuda Launcher with 5 args"},
-    {"_launch_cuda_kernel_6",
-     (PyCFunction)launch_kernel<6>,
-     METH_VARARGS,
-     "Cuda Launcher with 6 args"},
-    {"_launch_cuda_kernel_7",
-     (PyCFunction)launch_kernel<7>,
-     METH_VARARGS,
-     "Cuda Launcher with 7 args"},
-    {"_launch_cuda_kernel_8",
-     (PyCFunction)launch_kernel<8>,
-     METH_VARARGS,
-     "Cuda Launcher with 8 args"},
-    {"_launch_cuda_kernel_9",
-     (PyCFunction)launch_kernel<9>,
-     METH_VARARGS,
-     "Cuda Launcher with 9 args"},
-    {"_launch_cuda_kernel_10",
-     (PyCFunction)launch_kernel<10>,
-     METH_VARARGS,
-     "Cuda Launcher with 10 args"},
-    {nullptr, nullptr, 0, nullptr} // Sentinel
-};
+#define MAX_ARGS 11
+static std::array<PyMethodDef, MAX_ARGS> StaticCudaLauncherMethods = {
+    PyMethodDef{
+        "_launch_cuda_kernel_1",
+        (PyCFunction)launch_kernel<1>,
+        METH_VARARGS,
+        "Cuda Launcher with 1 arg"},
+    PyMethodDef{
+        "_launch_cuda_kernel_2",
+        (PyCFunction)launch_kernel<2>,
+        METH_VARARGS,
+        "Cuda Launcher with 2 args"},
+    PyMethodDef{
+        "_launch_cuda_kernel_3",
+        (PyCFunction)launch_kernel<3>,
+        METH_VARARGS,
+        "Cuda Launcher with 3 args"},
+    PyMethodDef{
+        "_launch_cuda_kernel_4",
+        (PyCFunction)launch_kernel<4>,
+        METH_VARARGS,
+        "Cuda Launcher with 4 args"},
+    PyMethodDef{
+        "_launch_cuda_kernel_5",
+        (PyCFunction)launch_kernel<5>,
+        METH_VARARGS,
+        "Cuda Launcher with 5 args"},
+    PyMethodDef{
+        "_launch_cuda_kernel_6",
+        (PyCFunction)launch_kernel<6>,
+        METH_VARARGS,
+        "Cuda Launcher with 6 args"},
+    PyMethodDef{
+        "_launch_cuda_kernel_7",
+        (PyCFunction)launch_kernel<7>,
+        METH_VARARGS,
+        "Cuda Launcher with 7 args"},
+    PyMethodDef{
+        "_launch_cuda_kernel_8",
+        (PyCFunction)launch_kernel<8>,
+        METH_VARARGS,
+        "Cuda Launcher with 8 args"},
+    PyMethodDef{
+        "_launch_cuda_kernel_9",
+        (PyCFunction)launch_kernel<9>,
+        METH_VARARGS,
+        "Cuda Launcher with 9 args"},
+    PyMethodDef{
+        "_launch_cuda_kernel_10",
+        (PyCFunction)launch_kernel<10>,
+        METH_VARARGS,
+        "Cuda Launcher with 10 args"},
+    PyMethodDef{
+        "_load_kernel",
+        (PyCFunction)load_kernel,
+        METH_VARARGS,
+        "Load CUDA kernel from cubin file"}};
 
 // Define a minimal type for StaticCudaLauncher.
 // We don't implement __new__ or __init__ because we're using it only as a
 // container for static methods.
 static PyTypeObject StaticCudaLauncherType = {
-    PyVarObject_HEAD_INIT(NULL, 0)
+    PyVarObject_HEAD_INIT(nullptr, 0)
     "torch._C._StaticCudaLauncher", // tp_name
     sizeof(PyObject), // tp_basicsize
     0, // tp_itemsize
-    0, // tp_dealloc
+    nullptr, // tp_dealloc
     0, // tp_print (deprecated)
-    0, // tp_getattr
-    0, // tp_setattr
-    0, // tp_reserved
-    0, // tp_repr
-    0, // tp_as_number
-    0, // tp_as_sequence
-    0, // tp_as_mapping
-    0, // tp_hash
-    0, // tp_call
-    0, // tp_str
-    0, // tp_getattro
-    0, // tp_setattro
-    0, // tp_as_buffer
+    nullptr, // tp_getattr
+    nullptr, // tp_setattr
+    nullptr, // tp_reserved
+    nullptr, // tp_repr
+    nullptr, // tp_as_number
+    nullptr, // tp_as_sequence
+    nullptr, // tp_as_mapping
+    nullptr, // tp_hash
+    nullptr, // tp_call
+    nullptr, // tp_str
+    nullptr, // tp_getattro
+    nullptr, // tp_setattro
+    nullptr, // tp_as_buffer
     Py_TPFLAGS_DEFAULT | Py_TPFLAGS_DISALLOW_INSTANTIATION,
     "Statically defined launchers for triton compiled CUDA kernels", // tp_doc
-    0, // tp_traverse
-    0, // tp_clear
-    0, // tp_richcompare
+    nullptr, // tp_traverse
+    nullptr, // tp_clear
+    nullptr, // tp_richcompare
     0, // tp_weaklistoffset
-    0, // tp_iter
-    0, // tp_iternext
+    nullptr, // tp_iter
+    nullptr, // tp_iternext
     nullptr, // tp_methods
-    0, // tp_members
-    0, // tp_getset
-    0, // tp_base
-    0, // tp_dict (automatically allocated)
-    0, // tp_descr_get
-    0, // tp_descr_set
+    nullptr, // tp_members
+    nullptr, // tp_getset
+    nullptr, // tp_base
+    nullptr, // tp_dict (automatically allocated)
+    nullptr, // tp_descr_get
+    nullptr, // tp_descr_set
     0, // tp_dictoffset
-    0, // tp_init
-    0, // tp_alloc
-    0, // tp_new
+    nullptr, // tp_init
+    nullptr, // tp_alloc
+    nullptr, // tp_new
 };
 
 // Module initialization: add StaticCudaLauncher to the module with our static
@@ -422,9 +453,11 @@ bool StaticCudaLauncher_init(PyObject* module) {
   }
   // Add our static methods to the type's dictionary.
   PyObject* dict = StaticCudaLauncherType.tp_dict;
-  for (PyMethodDef* def = StaticCudaLauncherMethods; def->ml_name != nullptr;
+
+  for (auto def = StaticCudaLauncherMethods.begin();
+       def != StaticCudaLauncherMethods.end();
        def++) {
-    PyObject* func = PyCFunction_New(def, nullptr);
+    PyObject* func = PyCFunction_New(def, nullptr); // &*
     if (!func) {
       return false;
     }
@@ -436,6 +469,7 @@ bool StaticCudaLauncher_init(PyObject* module) {
     }
     Py_DECREF(static_method);
   }
+
   Py_INCREF(&StaticCudaLauncherType);
   if (PyModule_AddObject(
           module, "_StaticCudaLauncher", (PyObject*)&StaticCudaLauncherType) <
@@ -445,3 +479,4 @@ bool StaticCudaLauncher_init(PyObject* module) {
   }
   return true;
 }
+#endif

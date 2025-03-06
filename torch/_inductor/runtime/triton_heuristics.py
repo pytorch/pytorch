@@ -2348,13 +2348,9 @@ class StaticallyLaunchedCudaKernel:
         self.metadata = kernel.metadata
         self.num_warps = kernel.metadata.num_warps
         self.shared = kernel.metadata.shared
-        src = kernel.src
-
-        def index_key(i):
-            return src.fn.arg_names.index(i) if isinstance(i, str) else i
-
-        self.signature = {index_key(key): value for key, value in src.signature.items()}
-        num_args = len(self.signature)
+        self.arg_tys = self.arg_ty_from_signature(kernel.src)
+        self.function = None  # Loaded by load_kernel(on the parent process)
+        num_args = len(self.arg_tys)
         if launcher := getattr(
             _StaticCudaLauncher, f"_launch_cuda_kernel_{num_args}", None
         ):
@@ -2363,6 +2359,14 @@ class StaticallyLaunchedCudaKernel:
             raise NotImplementedError(
                 "No static cuda launcher available for %d arguments", num_args
             )
+
+    def load_kernel(self):
+        assert hasattr(self, "cubin_path")
+        if self.function is not None:
+            return
+        (self.function, self.n_regs, self.n_spills) = _StaticCudaLauncher._load_kernel(
+            self.cubin_path, self.name, self.shared
+        )
 
     def write_cubin_to_file(self, filepath):
         with open(filepath, "wb") as f:
@@ -2392,28 +2396,32 @@ class StaticallyLaunchedCudaKernel:
             # TODO handle nvTmaDesc/CUtensormap
         }[ty]
 
-    def arg_ty_from_signature(self):
-        tys = [self.signature[i] for i in range(len(self.signature))]
+    def arg_ty_from_signature(self, src: ASTSource):
+        def index_key(i) -> int:
+            return src.fn.arg_names.index(i) if isinstance(i, str) else i
+
+        signature = {index_key(key): value for key, value in src.signature.items()}
+        # Sorts signature by index_key
+        tys = [signature[i] for i in range(len(signature))]
         return "".join(self.extract_type(ty) for ty in tys)
 
-    def loadAndRun(self, grid, stream, args):
+    def run(self, grid, stream, args):
+        assert self.function is not None
         # TODO: can handle grid functions here or in the C++ code later
-        arg_tys = self.arg_ty_from_signature()
-        assert len(args) == len(arg_tys)
+        assert len(args) == len(self.arg_tys)
         assert hasattr(self, "cubin_path")
         assert callable(self.launcher)
         grid_x = grid[0]
         grid_y = grid[1] if len(grid) > 1 else 1
         grid_z = grid[2] if len(grid) > 2 else 1
         self.launcher(
-            self.cubin_path,
-            self.name,
+            self.function,
             grid_x,
             grid_y,
             grid_z,
             self.num_warps,
             self.shared,
-            arg_tys,
+            self.arg_tys,
             args,
             stream,
         )

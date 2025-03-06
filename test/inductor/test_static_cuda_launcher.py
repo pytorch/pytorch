@@ -39,6 +39,7 @@ class TestStaticCudaLauncher(TestCase):
         compiled_kernel = fn[grid](*args)
         result = StaticallyLaunchedCudaKernel(compiled_kernel)
         result.write_cubin_to_file(self.tmp_file.name)
+        result.load_kernel()
         return result
 
     def test_basic(self):
@@ -53,12 +54,12 @@ class TestStaticCudaLauncher(TestCase):
 
         launcher = self._make_launcher(simple_kernel, args, (1,))
         self.assertEqual(arg0, torch.tensor([5], dtype=torch.int32, device="cuda"))
-        self.assertEqual(launcher.arg_ty_from_signature(), "Oi")
+        self.assertEqual(launcher.arg_tys, "Oi")
         new_arg0 = torch.zeros(1, dtype=torch.int32, device="cuda")
         device_interface = get_interface_for_device("cuda")
         stream = device_interface.get_raw_stream(device_interface.current_device())
 
-        launcher.loadAndRun((1,), stream, (new_arg0, arg1))
+        launcher.run((1,), stream, (new_arg0, arg1))
         self.assertEqual(new_arg0, arg0)
 
     def test_basic_1arg(self):
@@ -69,12 +70,12 @@ class TestStaticCudaLauncher(TestCase):
         arg0 = torch.zeros(1, dtype=torch.int32, device="cuda")
         launcher = self._make_launcher(simple_kernel_1_arg, (arg0,), (1,))
         self.assertEqual(arg0, torch.tensor([1], dtype=torch.int32, device="cuda"))
-        self.assertEqual(launcher.arg_ty_from_signature(), "O")
+        self.assertEqual(launcher.arg_tys, "O")
         new_arg0 = torch.zeros(1, dtype=torch.int32, device="cuda")
         device_interface = get_interface_for_device("cuda")
         stream = device_interface.get_raw_stream(device_interface.current_device())
 
-        launcher.loadAndRun((1,), stream, (new_arg0,))
+        launcher.run((1,), stream, (new_arg0,))
         self.assertEqual(new_arg0, arg0)
 
     def test_too_many_args(self):
