@@ -148,8 +148,6 @@ __global__ void prepare_gemm_data(
       cutlass::make_cute_packed_stride(StrideOutput{}, {M, ldoutput, 1});
 }
 
-constexpr int kNumSMsForH100 = 132;
-
 using DtypeScale = float;
 using DtypeAccum = float;
 using DtypeEpilogue = float;
@@ -490,7 +488,13 @@ void f8f8bf16_grouped_gemm_impl_sm90(
        stride_output,
        output_ptrs,
        stride_output}};
-  // kernel_hw_info};
+
+  int sm_count = at::cuda::getDeviceProperties(out.device().index())->multiProcessorCount;
+  if (at::globalContext()._SMCarveout_EXPERIMENTAL().has_value()) {
+    sm_count -= at::globalContext()._SMCarveout_EXPERIMENTAL().value();
+  }
+  arguments.hw_info.sm_count = sm_count;
+
   size_t workspace_size = Gemm::get_workspace_size(arguments);
   auto workspace = allocator.allocate(workspace_size);
   Gemm gemm;
