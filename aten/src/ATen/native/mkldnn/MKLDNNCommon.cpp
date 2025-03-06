@@ -54,7 +54,6 @@ ideep::tensor::data_type get_mkldnn_dtype(ScalarType type) {
     case ScalarType::Byte:
       return ideep::tensor::data_type::u8;
     case ScalarType::BFloat16:
-#if !(IDEEP_VERSION_MAJOR <= 2 || (IDEEP_VERSION_MAJOR == 3 && IDEEP_VERSION_MINOR < 5))
       return ideep::tensor::data_type::bf16;
     case ScalarType::Half:
       return ideep::tensor::data_type::f16;
@@ -62,7 +61,6 @@ ideep::tensor::data_type get_mkldnn_dtype(ScalarType type) {
       return ideep::tensor::data_type::f8_e4m3;
     case ScalarType::Float8_e5m2:
       return ideep::tensor::data_type::f8_e5m2;
-#endif
     default:
       TORCH_CHECK(false, "get_mkldnn_dtype: unsupported data type");
   }
@@ -167,7 +165,6 @@ ideep::tensor itensor_view_from_dense(const Tensor& tensor, bool from_const_data
               const_cast<void*>(tensor.const_data_ptr()) :
               tensor.data_ptr()};
   }
-#if !(IDEEP_VERSION_MAJOR <= 2 || (IDEEP_VERSION_MAJOR == 3 && IDEEP_VERSION_MINOR < 5))
   else if (tensor.scalar_type() == ScalarType::Float8_e4m3fn) {
     return {{tensor.sizes().vec(),
             ideep::tensor::data_type::f8_e4m3,
@@ -184,7 +181,6 @@ ideep::tensor itensor_view_from_dense(const Tensor& tensor, bool from_const_data
               const_cast<void*>(tensor.const_data_ptr()) :
               tensor.data_ptr()};
   }
-#endif
   else {
     TORCH_CHECK(false, "itensor_view_from_dense expects float/bfloat16/half/int8/fp8 tensor input");
   }
