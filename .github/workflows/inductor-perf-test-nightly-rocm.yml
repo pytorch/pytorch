@@ -111,7 +111,7 @@ jobs:
     needs: linux-focal-rocm6_3-py3_10-inductor-benchmark-build
     with:
       build-environment: linux-focal-rocm6_3-py3_10
-      dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-cppwrapper-true-aotinductor-true-freezing_cudagraphs-true-cudagraphs_low_precision-true
+      dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-cppwrapper-true-aotinductor-true-maxautotune-true-freezing_cudagraphs-true-cudagraphs_low_precision-true
       docker-image: ${{ needs.linux-focal-rocm6_3-py3_10-inductor-benchmark-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-rocm6_3-py3_10-inductor-benchmark-build.outputs.test-matrix }}
       timeout-minutes: 720
