@@ -2603,6 +2603,7 @@ def forward(self, p_linear_weight, p_linear_bias, x):
             def __init__(self):
                 super().__init__()
                 self.register_buffer("buf", torch.zeros(10))
+
             def forward(self, x, y):
                 self.buf[0 : x.shape[0]] = x
                 return x + 2, y[:, ::1]
@@ -2610,7 +2611,7 @@ def forward(self, p_linear_weight, p_linear_bias, x):
         inps = (torch.randn(10), torch.randn(32, 36))
         dynamic_shapes = {
             "x": {0: Dim("dx", min=1, max=10)},
-            "y": {0: Dim("dy0"), 1: Dim("dy1")}
+            "y": {0: Dim("dy0"), 1: Dim("dy1")},
         }
         with torch.fx.experimental._config.patch(backed_size_oblivious=True):
             ep = export(Foo(), inps, dynamic_shapes=dynamic_shapes)
@@ -2635,11 +2636,7 @@ def forward(self, p_linear_weight, p_linear_bias, x):
             torch.randn(32),
             torch.randn(64, 32),
         )
-        dynamic_shapes = {
-            "a": None,
-            "b": None,
-            "c": (Dim.DYNAMIC, Dim.STATIC)
-        }
+        dynamic_shapes = {"a": None, "b": None, "c": (Dim.DYNAMIC, Dim.STATIC)}
         with torch.fx.experimental._config.patch(backed_size_oblivious=True):
             ep = export(model, example_inputs, dynamic_shapes=dynamic_shapes)
 

@@ -3370,9 +3370,6 @@ class ShapeEnv:
         # Each time divisible is changed this should be set to True, this is set in _update_version_counter.
         self._resimplify_floor_div_axioms = True
 
-        # apply size-oblivious reasoning to backed symbols
-        self.backed_size_oblivious = config.backed_size_oblivious
-
         # Cache for FX nodes.
         # Maps an already built node a tuple of:
         #   1. node's target
@@ -3888,11 +3885,11 @@ class ShapeEnv:
                 TensorPropertySource(source, TensorProperty.SIZE, i),
                 dynamic_dims[i],
                 constraint_dims[i],
-                do_not_specialize_zero_one=self.backed_size_oblivious,
+                do_not_specialize_zero_one=config.backed_size_oblivious,
                 symbolic_context=symbolic_context,
             )
             if (
-                self.backed_size_oblivious
+                config.backed_size_oblivious
                 and isinstance(sym, sympy.Symbol)  # could be static
                 and symbol_is_type(sym, SymT.SIZE)
             ):
@@ -4543,7 +4540,9 @@ class ShapeEnv:
                     self._add_assertion(sympy_expr > 1)
 
                     # Apply default range, which assumes not zero-one
-                    self.var_to_range[sympy_expr] = self._default_value_range(do_not_specialize_zero_one)
+                    self.var_to_range[sympy_expr] = self._default_value_range(
+                        do_not_specialize_zero_one
+                    )
                     self.var_to_range_sloc[sympy_expr] = ValueRangesSLoc(
                         self._get_sloc(
                             "user code shown is first use of this value--the guard itself is not "
@@ -5293,7 +5292,12 @@ class ShapeEnv:
         # This removes all the checks that follow from bounds
         # We could simply emit those and also the bounds 2 <= size when necessary
         for guard in guards if guards is not None else self.guards:
-            if self._maybe_evaluate_static(guard.expr, axioms=(), size_oblivious=guard.size_oblivious) is not None:
+            if (
+                self._maybe_evaluate_static(
+                    guard.expr, axioms=(), size_oblivious=guard.size_oblivious
+                )
+                is not None
+            ):
                 continue
             issue_guard(guard)
 
@@ -5596,7 +5600,9 @@ class ShapeEnv:
         return [
             self.simplify(guard.expr)
             for guard in self.guards
-            if self._maybe_evaluate_static(guard.expr, axioms=(), size_oblivious=guard.size_oblivious) is None
+            if self._maybe_evaluate_static(
+                guard.expr, axioms=(), size_oblivious=guard.size_oblivious
+            ) is None
         ]
 
     def format_guards(self, verbose: bool = False) -> str:
@@ -6413,7 +6419,7 @@ class ShapeEnv:
         return
 
     # See: Note - On 0/1 specialization
-    def _default_value_range(self, do_not_specialize_zero_one=False) -> ValueRanges:
+    def _default_value_range(self, do_not_specialize_zero_one: bool = False) -> ValueRanges:
         lower = 0 if (do_not_specialize_zero_one or not self.specialize_zero_one) else 2
         return ValueRanges(lower, int_oo)
 
@@ -6784,7 +6790,7 @@ class ShapeEnv:
                 )
                 if (
                     not size_oblivious
-                    and self.backed_size_oblivious
+                    and config.backed_size_oblivious
                     and hint is not None
                 ):
                     # TODO: maybe reconcile this with use of counterfactual hints
@@ -6934,7 +6940,9 @@ class ShapeEnv:
                     # at this point, we've evaluated the concrete expr value, and have
                     # flipped/negated the guard if necessary. Now we know what to guard
                     # or defer to runtime assert on.
-                    guard = ShapeGuard(g, self._get_sloc(), size_oblivious=size_oblivious)
+                    guard = ShapeGuard(
+                        g, self._get_sloc(), size_oblivious=size_oblivious
+                    )
                     self.guards.append(guard)
                     self.axioms.update(dict(self.get_implications(self.simplify(g))))
                 else:
