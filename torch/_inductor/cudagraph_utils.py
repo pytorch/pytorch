@@ -386,7 +386,7 @@ def get_partition_cudagraph_metadata(
 
     partition_stack_traces = []
     for graph_output_idx in partition_map.output_index_mapping:
-        if graph_output_idx:
+        if graph_output_idx is not None:
             partition_stack_traces.append(metadata.stack_traces[graph_output_idx])
         else:
             partition_stack_traces.append(None)

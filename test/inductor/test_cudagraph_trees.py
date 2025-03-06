@@ -492,8 +492,12 @@ if HAS_CUDA:
                 mut_inp = tmp.clone()
                 mut(mut_inp)  # should not warn since mut has warned
 
+            msg = "skipping cudagraphs due to mutated inputs (1 instances)" + (
+                ". Found from" if not config.graph_partition else ""
+            )
+
             FileCheck().check_count(
-                "skipping cudagraphs due to mutated inputs (1 instances). Found from",
+                msg,
                 1,
                 exactly=True,
             ).run(captured_output[0])
@@ -870,7 +874,7 @@ if HAS_CUDA:
 
             # out1 gets manually freed
             out2 = self.run_twc(foo_opt, torch.zeros([6], device="cuda"))
-
+            breakpoint()
             self.assertEqual(all_live_block_count(), 1)
 
             out3 = self.run_twc(foo_opt, torch.ones([5], device="cuda"))
@@ -2641,6 +2645,31 @@ if HAS_CUDA:
             self.assertEqual(new_id, 1)
 
             self.assertFalse(self.get_manager().running_forwards_with_pending_backwards)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_forward_backward_not_called(self):
+            # tests saved tensor is handled correctly
+            def foo(x, y):
+                x_out = x * x * x
+                torch._dynamo.graph_break()
+                y_out = y * y * y
+                return x_out, y_out
+
+            foo = torch.compile(foo, mode="reduce-overhead")
+
+            for _ in range(3):
+                inps = [
+                    torch.rand([20, 20], requires_grad=True, device="cuda")
+                    for _ in range(2)
+                ]
+                x_out, y_out = foo(inps[0], inps[1])
+                x_out.sum().backward()
+
+            self.assertFalse(self.get_manager().running_forwards_with_pending_backwards)
+
+            # we should not have cudagraph'd the y backward
+            new_id = self.get_manager().new_graph_id().id
+            self.assertEqual(new_id, 3)
 
     class TestSAC(TestCase):
         def _make_observer_mode(self):
