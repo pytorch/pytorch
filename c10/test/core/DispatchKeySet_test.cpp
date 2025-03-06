@@ -313,7 +313,9 @@ TEST(DispatchKeySet, IteratorBasicOps) {
   ASSERT_TRUE(full_set.begin() != full_set.end());
 
   // Increment Ops
+  // NOLINTNEXTLINE(bugprone-inc-dec-in-conditions)
   ASSERT_TRUE(full_set.begin() == full_set.begin()++);
+  // NOLINTNEXTLINE(bugprone-inc-dec-in-conditions)
   ASSERT_TRUE(full_set.begin() != ++full_set.begin());
 }
 
