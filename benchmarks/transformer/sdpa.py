@@ -247,7 +247,7 @@ def generate_experiment_configs() -> list[ExperimentConfig]:
     num_heads = [16]
     q_kv_seq_lens = [(128, 128), (256, 256), (512, 512), (1024, 1024), (8192, 8192)]
     embed_dims = [2048]
-    backends = [SDPBackend.CUDNN_ATTENTION]  # If set to None, all backends are enabled
+    backends = [None]  # If set to None, all backends are enabled
     dtypes = [
         torch.bfloat16,
     ]
