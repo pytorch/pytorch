@@ -135,7 +135,7 @@ There are basically two steps:
 .. code-block:: python
    import torch.cuda.tunable as tunable
    import os
-   
+
    os.putenv('PYTORCH_TUNABLEOP_ENABLED', '1')
    os.putenv('PYTORCH_TUNABLEOP_TUNING', '1')
    os.putenv('PYTORCH_TUNABLEOP_RECORD_UNTUNED', '0')
