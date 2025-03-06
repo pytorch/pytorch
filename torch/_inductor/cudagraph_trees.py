@@ -1015,7 +1015,6 @@ class CUDAGraphNode:
         self.static_output_tensors: OutputList[Optional[Tensor]] = []
 
         # Cleared after recording
-
         with dynamo_timed_cudagraph(
             "CUDAGraphNode.record", compile_id, mode, dynamo_compile=True
         ):
