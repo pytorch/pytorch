@@ -59,6 +59,7 @@ from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
     TEST_CUDA,
     TEST_HPU,
+    TEST_XPU,
 )
 from torch.utils._triton import has_triton
 
@@ -72,6 +73,10 @@ if TEST_CUDA:
 elif TEST_HPU:
     DEVICE_TYPE = "hpu:0"
     DISTRIBUTED_BACKEND = "hccl"
+elif TEST_XPU:
+    DEVICE_TYPE = "xpu"
+    DISTRIBUTED_BACKEND = "xccl"
+    DEVICE_COUNT = torch.xpu.device_count()
 else:
     DEVICE_TYPE = "cpu"
     DISTRIBUTED_BACKEND = "gloo"
@@ -647,7 +652,7 @@ class ModuleWithDelay(FSDPTestModel):
     def get_loss(self, input, output):
         loss = self.module.get_loss(input, output)  # type: ignore[operator]
         if self.delay_after_loss_ms > 0:
-            if TEST_HPU:
+            if TEST_HPU or TEST_XPU:
                 time.sleep(self.delay_after_loss_ms / 1000)
             elif TEST_CUDA:
                 torch.cuda._sleep(int(self.delay_after_loss_ms * get_cycles_per_ms()))
@@ -663,7 +668,7 @@ class ModuleWithDelay(FSDPTestModel):
                     torch.cuda._sleep(
                         int(self.delay_before_reduction_ms * get_cycles_per_ms())
                     )
-                elif TEST_HPU:
+                elif TEST_HPU or TEST_XPU:
                     time.sleep(self.delay_before_reduction_ms / 1000)
             return orig_reduce_scatter(*args, **kwargs)
 
@@ -796,7 +801,7 @@ class MixtureOfExperts(NestedWrappedModule):
                         torch.cuda._sleep(
                             int(self.delay_before_free_ms * get_cycles_per_ms())
                         )
-                    elif TEST_HPU:
+                    elif TEST_HPU or TEST_XPU:
                         time.sleep(self.delay_before_free_ms / 1000)
 
                     return orig_reshard(*args, **kwargs)
@@ -1209,8 +1214,8 @@ class FSDPTest(MultiProcessTestCase):
 
         device_ids = None
         device_id = self.rank % DEVICE_COUNT
-        if TEST_CUDA:
-            torch.cuda.set_device(device_id)
+        if TEST_CUDA or TEST_XPU:
+            torch.accelerator.set_device_index(device_id)
         device_ids = [device_id]
 
         # Execute barrier prior to running test to ensure that every process
@@ -1435,7 +1440,7 @@ class FSDPTest(MultiProcessTestCase):
             self.assertRaisesRegex(
                 RuntimeError,
                 "An FSDP-managed module with parameter CPU offloading enabled "
-                "has parameters on cuda",
+                f"has parameters on {DEVICE_TYPE}",
             )
             if expects_device_error
             else nullcontext()
