@@ -125,6 +125,7 @@ There are basically two steps:
 1) Set the environment variables to collect the untuned GEMM and this will generate ``tunableop_untuned0.csv``
 
 .. code-block:: python
+
    PYTORCH_TUNABLEOP_ENABLED=1
    PYTORCH_TUNABLEOP_TUNING=0
    PYTORCH_TUNABLEOP_RECORD_UNTUNED=1
@@ -133,6 +134,7 @@ There are basically two steps:
 2) Run a Python script that reads the `tunableop_untuned0.csv` and generates the `tunableop_results0.csv`, like
 
 .. code-block:: python
+
    import torch.cuda.tunable as tunable
    import os
 
@@ -151,6 +153,7 @@ duplicated N times, once for each GPU as convenience to the user will run the wo
 configuration on N GPUs.
 
 .. code-block:: python
+
    if __name__ == "__main__":
        num_gpus = 8 # number of GPUs that will be used during the tuning process
        tunable.mgpu_tune_gemm_in_file("tunableop_untuned?.csv", num_gpus)
