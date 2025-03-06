@@ -97,7 +97,7 @@ Tensor& linspace_cuda_out(const Scalar& start, const Scalar& end, int64_t steps,
 
         return scalar_end - step * (steps - ind - 1);
       });
-    }), AT_EXPAND(AT_INTEGRAL_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
+    }), AT_EXPAND(AT_INTEGRAL_TYPES_V2));
   } else {
     AT_DISPATCH_V2(r.scalar_type(), "linspace_cuda", AT_WRAP([&] {
       scalar_t scalar_start = start.to<scalar_t>();

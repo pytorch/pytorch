@@ -102,6 +102,9 @@ TO_TYPE(uint8_t, int8_t)
 TO_TYPE(uint16_t, int16_t)
 TO_TYPE(uint32_t, int32_t)
 TO_TYPE(uint64_t, int64_t)
+TO_TYPE(int8_t, int8_t)
+TO_TYPE(int16_t, int16_t)
+TO_TYPE(int32_t, int32_t)
 TO_TYPE(int64_t, int64_t)
 
 #ifdef USE_FBGEMM
@@ -239,7 +242,7 @@ static void sort_kernel(
         }
       }
     );
-  }), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kByte, kLong);
+  }), AT_EXPAND(AT_INTEGRAL_TYPES_V2));
 }
 
 static void topk_kernel(
