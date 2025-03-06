@@ -25,17 +25,13 @@ from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inducto
     check_model,
     CommonTemplate,
     copy_tests,
-    TestFailure,
 )
 
 
 importlib.import_module("filelock")
 
 # xfail by default, set is_skip=True to skip
-test_failures = {
-    # TypeError: cannot pickle 'generator' object
-    "test_layer_norm_graph_pickler": TestFailure(("cpu"), is_skip=True),
-}
+test_failures = {}
 
 
 def make_test_cls(cls, xfail_prop="_expected_failure_graph_pickler"):
