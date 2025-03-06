@@ -40,21 +40,26 @@ jobs:
   build-wheel:
     name: "Build Triton Wheel"
     needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
+    runs-on: ${{ matrix.runs_on }}
     strategy:
       fail-fast: false
       matrix:
         py_vers: [ "3.9", "3.10", "3.11", "3.12", "3.13", "3.13t" ]
-        device: ["cuda", "rocm", "xpu"]
+        device: ["cuda", "rocm", "xpu", "aarch64"]
         docker-image: ["pytorch/manylinux2_28-builder:cpu"]
         include:
           - device: "rocm"
             rocm_version: "6.3"
+            runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
           - device: "cuda"
             rocm_version: ""
+            runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
+          - device: "aarch64"
+            rocm_version: ""
+            runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.2xlarge"
     timeout-minutes: 40
     env:
-      DOCKER_IMAGE: ${{ matrix.device == 'rocm' && format('pytorch/manylinux2_28-builder:rocm{0}', matrix.rocm_version) || matrix.docker-image }}
+      DOCKER_IMAGE: ${{ matrix.device == 'rocm' && format('pytorch/manylinux2_28-builder:rocm{0}', matrix.rocm_version) || matrix.device == 'arm' && 'pytorch/manylinuxaarch64-builder:cpu' || matrix.docker-image }}
       PY_VERS: ${{ matrix.py_vers }}
       BUILD_DEVICE: ${{ matrix.device }}
       PLATFORM: 'manylinux_2_28_x86_64'
