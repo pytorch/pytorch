@@ -568,12 +568,17 @@ class AOTAutogradCacheEntry:
                 compiled_bw_func, bw_fx_config
             )
         else:
+            fw_fx_config: _CompileFxKwargs = {
+                **fx_config,
+                "is_backward": False,
+            }
+
             needs_autograd = False
             CompileEventLogger.try_add_pt2_compile(
                 "backend_compile", dispatch_mode="inference"
             )
             compiled_fw_func = self.compiled_fw.post_compile(
-                compiled_fw_func, fx_config
+                compiled_fw_func, fw_fx_config
             )
 
         # Wrap the forward function in post compile wrappers
