@@ -51,9 +51,7 @@ C10_DIAGNOSTIC_POP()
 
 namespace {
 
-struct Strides {
-  int64_t strides[3];
-};
+using Strides = std::array<int64_t, 3>;
 
 template <
     typename DtypeA,
@@ -100,20 +98,20 @@ __global__ void prepare_gemm_data(
   if (M < 0) {
     // A and output is 2d
     M = delta;
-    lda = tensor_StrideA.strides[0];
-    ldb = tensor_StrideB.strides[2]; // B is transposed
-    ldoutput = tensor_StrideOutput.strides[0];
+    lda = tensor_StrideA[0];
+    ldb = tensor_StrideB[2]; // B is transposed
+    ldoutput = tensor_StrideOutput[0];
     A_ptrs[tid] = tid == 0 ? A : A + offs[tid - 1] * lda;
     inputA_scale_ptrs[tid] = tid == 0 ? scale_A : scale_A + offs[tid - 1];
     output_ptrs[tid] = tid == 0 ? output : output + offs[tid - 1] * ldoutput;
-    B_ptrs[tid] = B + tid * tensor_StrideB.strides[0];
+    B_ptrs[tid] = B + tid * tensor_StrideB[0];
     inputB_scale_ptrs[tid] = scale_B + tid * b_scale_stride;
   } else if (N < 0) {
     N = delta;
-    lda = tensor_StrideA.strides[1];
-    ldb = tensor_StrideB.strides[1]; // B is transposed
-    ldoutput = tensor_StrideOutput.strides[0];
-    A_ptrs[tid] = A + tid * tensor_StrideA.strides[0];
+    lda = tensor_StrideA[1];
+    ldb = tensor_StrideB[1]; // B is transposed
+    ldoutput = tensor_StrideOutput[0];
+    A_ptrs[tid] = A + tid * tensor_StrideA[0];
     inputA_scale_ptrs[tid] = scale_A + tid * a_scale_stride;
     output_ptrs[tid] = tid == 0 ? output : output + offs[tid - 1];
     B_ptrs[tid] = tid == 0 ? B : B + offs[tid - 1] * ldb;
@@ -121,24 +119,24 @@ __global__ void prepare_gemm_data(
   } else if (K < 0) {
     // A, B is 2d, output is 3d
     K = delta;
-    lda = tensor_StrideA.strides[0];
-    ldb = tensor_StrideB.strides[1]; // B is transposed
-    ldoutput = tensor_StrideOutput.strides[1];
+    lda = tensor_StrideA[0];
+    ldb = tensor_StrideB[1]; // B is transposed
+    ldoutput = tensor_StrideOutput[1];
     A_ptrs[tid] = tid == 0 ? A : A + offs[tid - 1];
     B_ptrs[tid] = tid == 0 ? B : B + offs[tid - 1];
     inputA_scale_ptrs[tid] = scale_A + tid * M;
     inputB_scale_ptrs[tid] = scale_B + tid * N;
-    output_ptrs[tid] = output + tid * tensor_StrideOutput.strides[0];
+    output_ptrs[tid] = output + tid * tensor_StrideOutput[0];
   } else {
     // A, B, output are 3D
-    lda = tensor_StrideA.strides[1];
-    ldb = tensor_StrideB.strides[2];
-    ldoutput = tensor_StrideOutput.strides[1];
-    A_ptrs[tid] = A + tid * tensor_StrideA.strides[0];
-    B_ptrs[tid] = B + tid * tensor_StrideB.strides[0];
+    lda = tensor_StrideA[1];
+    ldb = tensor_StrideB[2];
+    ldoutput = tensor_StrideOutput[1];
+    A_ptrs[tid] = A + tid * tensor_StrideA[0];
+    B_ptrs[tid] = B + tid * tensor_StrideB[0];
     inputA_scale_ptrs[tid] = scale_A + tid * a_scale_stride;
     inputB_scale_ptrs[tid] = scale_B + tid * b_scale_stride;
-    output_ptrs[tid] = output + tid * tensor_StrideOutput.strides[0];
+    output_ptrs[tid] = output + tid * tensor_StrideOutput[0];
   }
   problem_sizes[tid] = ProblemShape(M, N, K);
 
@@ -300,8 +298,6 @@ void f8f8bf16_grouped_gemm_impl_sm90(
           AlignmentOutput,
           EpilogueSchedule,
           EpilogueEVT>::CollectiveOp;
-  //   cutlass::epilogue::fusion::
-  //       LinearCombination<DtypeOutput, DtypeAccum>>::CollectiveOp;
 
   using CollectiveMainloop =
       typename cutlass::gemm::collective::CollectiveBuilder<
@@ -391,9 +387,7 @@ void f8f8bf16_grouped_gemm_impl_sm90(
 
   auto make_strides = [](at::IntArrayRef strides) -> Strides {
     Strides out;
-    for (const auto i : c10::irange(strides.size())) {
-      out.strides[i] = strides[i];
-    }
+    std::copy(strides.begin(), strides.end(), out.begin());
     return out;
   };
 
