@@ -12,6 +12,7 @@ from numbers import Number
 import torch
 from torch.testing import make_tensor
 from torch.testing._comparison import default_tolerances
+from torch.testing._internal.common_cuda import _get_torch_cuda_version, TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
@@ -41,10 +42,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TestCase,
 )
-from torch.testing._internal.common_cuda import (
-    _get_torch_cuda_version,
-    TEST_MULTIGPU,
-)
+
 
 _BOOL_SUB_ERR_MSG = "Subtraction, the `-` operator"
 
@@ -357,7 +355,8 @@ class TestForeach(TestCase):
 
     @ops(foreach_pointwise_op_db)
     @parametrize("is_fastpath", (True, False))
-    @unittest.skipIf(_get_torch_cuda_version() >= (12, 6), "This test is failing on CUDA 12.6")
+    # TODO: Remove skip CUDA 12.6 once resolved: https://github.com/pytorch/pytorch/issues/148681
+    @unittest.skipIf(_get_torch_cuda_version() >= (12, 6), "Failure on CUDA 12.6")
     def test_pointwise_op_with_tensor_of_scalarlist_overload(
         self, device, dtype, op, is_fastpath
     ):
