@@ -501,7 +501,7 @@ class RNN(RNNBase):
                         + h_t_minus_1[layer] @ weight_hh[layer].T
                         + bias_hh[layer]
                     )
-                output.append(h_t[-1])
+                output.append(h_t[-1].clone())
                 h_t_minus_1 = h_t
             output = torch.stack(output)
             if batch_first:
