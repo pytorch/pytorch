@@ -302,12 +302,13 @@ class MiscTests(torch._inductor.test_case.TestCase):
 
         self.assertEqual(fn(d, t), torch.sin(d["x"] - d["y"] + t))
 
-        actual_graph = torch._dynamo.testing.normalize_gm(
-            cnt.graphs[0].print_readable(print_output=False)
-        )
-        self.assertExpectedInline(
-            actual_graph,
-            """\
+        if torch._dynamo.config.assume_static_by_default:
+            actual_graph = torch._dynamo.testing.normalize_gm(
+                cnt.graphs[0].print_readable(print_output=False)
+            )
+            self.assertExpectedInline(
+                actual_graph,
+                """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_t_: "f32[2, 3]", L_d_y_: "f32[2, 3]", L_d_x_: "f32[2, 3]"):
         l_t_ = L_t_
@@ -318,7 +319,7 @@ class GraphModule(torch.nn.Module):
         flat_apply: "f32[2, 3]" = torch.ops.higher_order.flat_apply(torch.ops.mylib.foo.default, mylib_foo_input_spec, l_d_x_, l_d_y_, l_t_);  mylib_foo_input_spec = l_d_x_ = l_d_y_ = l_t_ = None
         return (flat_apply,)
 """,
-        )
+            )
 
     def test_invalid_args_builtin(self):
         @torch.compile(backend="eager")
