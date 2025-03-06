@@ -474,6 +474,8 @@ class CompiledFxGraph(OutputCode):
         """
         set_tracing_context_output_strides(example_inputs, self)
         assert graph_kwargs["cudagraphs"] is not None
+        assert graph_kwargs["is_backward"] is not None
+        is_backward = graph_kwargs["is_backward"]
         cudagraphs: BoxedBool = graph_kwargs["cudagraphs"]
         if cudagraphs:
             # It's possible that cudagraphs is enabled, but was disabled
@@ -488,12 +490,23 @@ class CompiledFxGraph(OutputCode):
                     counters["inductor"]["cudagraph_skips"] += 1
                 BoxedBool.disable(cudagraphs)
             else:
+                if is_backward:
+                    assert "boxed_forward_device_index" in graph_kwargs
+                    boxed_forward_device_index = graph_kwargs[
+                        "boxed_forward_device_index"
+                    ]
+                else:
+                    # On the forward we don't know whether or not
+                    # boxed_foward_device_index is set yet
+                    boxed_forward_device_index = graph_kwargs.get(
+                        "boxed_forward_device_index", None
+                    )
                 cudagraph_post_compile(
                     example_inputs,
                     self,
                     cudagraphs,
                     constants.unwrap(self),
-                    graph_kwargs.get("boxed_forward_device_index", None),
+                    boxed_forward_device_index,
                 )
         inputs_to_check = self.inputs_to_check
         # cudagraphs could have been disabled from the earlier conditions

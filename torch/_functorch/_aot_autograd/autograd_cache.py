@@ -553,11 +553,19 @@ class AOTAutogradCacheEntry:
             # Now that we've loaded forward and backward, call post compile on both
             # This avoids setting things like BoxedBools in fx_config until
             # after both forward and backward cache hit
+            fw_fx_config: _CompileFxKwargs = {
+                **fx_config,
+                "is_backward": False,
+            }
+            bw_fx_config: _CompileFxKwargs = {
+                **fx_config,
+                "is_backward": True,
+            }
             compiled_fw_func = self.compiled_fw.post_compile(
-                compiled_fw_func, fx_config
+                compiled_fw_func, fw_fx_config
             )
             compiled_bw_func = self.compiled_bw.post_compile(
-                compiled_bw_func, fx_config
+                compiled_bw_func, bw_fx_config
             )
         else:
             needs_autograd = False
