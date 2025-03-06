@@ -181,11 +181,11 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
 
     def exit(self, tx: "InstructionTranslator", *args):
         source = None if self.source is None else AttrSource(self.source, "__exit__")
-            x = variables.UserMethodVariable(
-                self.cm_obj.__exit__.__func__,
-                self,
-                source=source,
-            ).call_function(tx, args, {})
+        x = variables.UserMethodVariable(
+            self.cm_obj.__exit__.__func__,
+            self,
+            source=source,
+        ).call_function(tx, args, {})
         tx.active_generic_context_managers.pop()
         return x
 
