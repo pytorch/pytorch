@@ -30,6 +30,11 @@
 #endif
 #endif
 
+// Avoid potential compiler -Wall -Werror complains undefined macro
+#ifndef AOTRITON_VERSION_MINOR
+#define AOTRITON_VERSION_MINOR 0
+#endif
+
 /**
 * Note [SDPA Runtime Dispatch]
 * SDPA relies on a runtime dispatch mechanism to select the appropriate
