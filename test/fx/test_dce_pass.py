@@ -239,7 +239,7 @@ class TestDCE(TestCase):
 
         class TestModule(torch.nn.Module):
             def forward(self, a: torch.Tensor) -> torch.Tensor:
-                x = torch.rand([10])
+                x = torch.rand([10])  # noqa: F841
                 return a * 2
 
         # %torch.rand should not be removed because it has side effects.

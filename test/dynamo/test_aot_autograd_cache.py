@@ -801,7 +801,9 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             inputs = [torch.ones(3)]
         _, fx_g, example_inputs = self._get_dynamo_output(f, *inputs)
         shape_env = ShapeEnv()
-        ctx = TracingContext(FakeTensorMode(shape_env=shape_env))
+        ctx = TracingContext(
+            FakeTensorMode(shape_env=shape_env), compiler_name="inductor"
+        )
         # Needs a shape env for FxGraphCache.check_can_cache to pass.
         # Not needed for actual key calculation.
         with torch._guards.tracing(ctx):
@@ -1008,7 +1010,9 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
 
         _, fx_g, example_inputs = self._get_dynamo_output(fn, torch.ones(3))
 
-        ctx = TracingContext(FakeTensorMode(shape_env=ShapeEnv()))
+        ctx = TracingContext(
+            FakeTensorMode(shape_env=ShapeEnv()), compiler_name="inductor"
+        )
         with torch._guards.tracing(ctx):
             fx_g.meta = {"foo": "bar"}
             fx_g.compile_subgraph_reason = "Blah"

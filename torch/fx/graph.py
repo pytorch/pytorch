@@ -1855,7 +1855,8 @@ class Graph:
         self.lint()
 
         impure_random = True
-        if torch._guards.TracingContext.try_get():
+        context = torch._guards.TracingContext.try_get()
+        if context and context.compiler_name == "inductor":
             impure_random = torch._inductor.config.fallback_random
 
         def has_side_effect(node):
