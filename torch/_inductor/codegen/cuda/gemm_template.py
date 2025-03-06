@@ -1170,7 +1170,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
                 return False
         if len(layouts) == 3:
             C_layout = layouts[2]
-            C_size = [int(i) for i in C_layout.size]
+            C_size = [V.graph.sizevars.size_hint(i) for i in C_layout.size]
             while len(C_size) < len(A_size):
                 C_size.insert(0, 1)
             # check batch dims

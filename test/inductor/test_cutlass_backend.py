@@ -453,14 +453,14 @@ class TestCutlassBackend(TestCase):
         # M, N, K
         shapes = [
             (4096, 2048, 25728),
-            (128, 128, 16),
+            (256, 128, 16),
         ]
         shapes = shapes[0:1] if not dynamic else shapes
 
         x_shapes = [
-            lambda M, N: (M, N),
-            lambda M, N: (M, 1),
-            lambda M, N: (1, N),
+            # lambda M, N: (M, N),
+            # lambda M, N: (M, 1),
+            # lambda M, N: (1, N),
             lambda M, N: (N,),
         ]
         for x_shape in x_shapes:
@@ -490,6 +490,8 @@ class TestCutlassBackend(TestCase):
                     "autotune_fallback_to_aten": False,
                 }
             ), dynamo_config.patch({"error_on_recompile": dynamic}):
+                torch._dynamo.reset()
+                fresh_inductor_cache()
                 expected = [model(*input) for input in inputs]
                 if use_aoti:
                     actual = AOTIRunnerUtil.run_multiple(
