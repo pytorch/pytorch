@@ -50,6 +50,7 @@ register_log(
         "torch._export.converter",
         "torch._export.non_strict_utils",
         "torch._export.serde.serialize",
+        "torch.fx.experimental.proxy_tensor",
     ],
 )
 
