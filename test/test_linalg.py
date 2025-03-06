@@ -2519,7 +2519,7 @@ class TestLinalg(TestCase):
                 a = a_input.to_dense()
 
             q = min(*size)
-            u, s, v = svd_lowrank(a_input, q=q, **options)
+            u, s, v = svd_lowrank(a_input, q=q, niter=3, **options)
 
             # check if u, s, v is a SVD
             u, s, v = u[..., :q], s[..., :q], v[..., :q]
