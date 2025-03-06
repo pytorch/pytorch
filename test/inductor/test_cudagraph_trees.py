@@ -874,7 +874,7 @@ if HAS_CUDA:
 
             # out1 gets manually freed
             out2 = self.run_twc(foo_opt, torch.zeros([6], device="cuda"))
-            breakpoint()
+
             self.assertEqual(all_live_block_count(), 1)
 
             out3 = self.run_twc(foo_opt, torch.ones([5], device="cuda"))
