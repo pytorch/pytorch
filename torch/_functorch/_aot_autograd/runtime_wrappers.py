@@ -1761,6 +1761,7 @@ class AOTDispatchAutograd:
             return x, [x]
 
         if isinstance(x, FakeTensor):
+            assert meta.memory_format is not None
             if not x.is_contiguous(memory_format=meta.memory_format):
                 x = x.contiguous(memory_format=meta.memory_format)
             return x, [x]
