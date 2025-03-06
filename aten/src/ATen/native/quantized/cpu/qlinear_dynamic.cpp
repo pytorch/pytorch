@@ -722,7 +722,7 @@ at::Tensor PackedLinearWeightsACL::apply_dynamic_impl(
   auto input_dims = input_reshaped.sizes().vec();
 
   int64_t m = input_dims[0];
-  at::native::acl_utils::QuantMatmulCacheKey key = std::make_tuple(
+  auto key = std::make_tuple(
       m, /* M */
       ReluFused, /* FUSE_RELU */
       static_cast<int64_t>(at::get_num_threads()), /* NUM_THREADS */
@@ -789,8 +789,8 @@ at::Tensor PackedLinearWeightsACL::apply_dynamic_impl(
     // s8 src, s8 wei -> f32 dst
     acl_gemm->gemm.run();
 
-    if (ReluFused) {
-      acl_gemm->relu.run();
+    if (acl_gemm->relu.has_value()) {
+      acl_gemm->relu.value().run();
     }
 
     // this will not free memory, it will just tell ACL that we're no longer

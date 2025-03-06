@@ -1171,7 +1171,6 @@ at::Tensor PackedLinearWeightsACL::apply_impl(
       return output;
     return output.reshape(out_sizes);
   }
-
   // fallback to oneDNN in the unlikely scinario that ACL's validation fails
   if (ReluFused) {
     return PackedLinearWeightsOnednn::apply_relu(
