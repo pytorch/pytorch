@@ -2356,14 +2356,11 @@ class StaticallyLaunchedCudaKernel:
             None  # Loaded by load_kernel(on the parent process)
         )
         num_args = len(self.arg_tys)
-        if launcher := getattr(
-            _StaticCudaLauncher, f"_launch_cuda_kernel_{num_args}", None
-        ):
-            self.launcher = launcher
-        else:
+        if num_args > 10 or num_args == 0:
             raise NotImplementedError(
                 "No static cuda launcher available for %d arguments", num_args
             )
+        self.launcher = _StaticCudaLauncher._launch_kernel
 
     def load_kernel(self):
         from torch._C import _StaticCudaLauncher
