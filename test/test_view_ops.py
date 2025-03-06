@@ -13,6 +13,7 @@ from torch.testing._internal.common_device_type import (
     dtypesIfMPS,
     instantiate_device_type_tests,
     onlyCPU,
+    onlyNativeDeviceTypes,
     onlyNativeDeviceTypesAnd,
     skipLazy,
     skipMeta,
@@ -154,8 +155,8 @@ class TestViewOps(TestCase):
         self.assertTrue(s is t)
 
     @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
+    @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool))
-    @skipXLA
     def test_view_dtype_new(self, device, dtype):
         dtypes = {value: key for (key, value) in numpy_to_torch_dtype_dict.items()}
         del dtypes[torch.bool]
@@ -268,7 +269,7 @@ class TestViewOps(TestCase):
 
     # Test the extra error checks that happen when the view dtype
     # has a greater element size than the original dtype
-    @skipXLA
+    @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
     def test_view_dtype_upsize_errors(self, device, dtype):
         dtype_size = torch._utils._element_size(dtype)
@@ -304,6 +305,7 @@ class TestViewOps(TestCase):
             ):
                 a.view(view_dtype)
 
+    @onlyNativeDeviceTypes
     def test_view_as_complex(self, device):
         def fn(contiguous_input=True, dim0=0, dim1=1):
             t = torch.randn(3, 2, 2, device=device)
@@ -368,6 +370,7 @@ class TestViewOps(TestCase):
         self.assertTrue(self.is_view_of(x, res))
         self.assertEqual(res.shape, torch.Size([0]))
 
+    @onlyNativeDeviceTypes
     @dtypes(*complex_types(), torch.complex32)
     def test_view_as_real(self, device, dtype):
         def fn(contiguous_input=True):
@@ -393,6 +396,7 @@ class TestViewOps(TestCase):
         self.assertTrue(self.is_view_of(x, res))
         self.assertEqual(res.shape, torch.Size([2]))
 
+    @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
     @dtypesIfMPS(
         *integral_types_and(torch.half, torch.bfloat16, torch.bool, torch.float32)
@@ -406,6 +410,7 @@ class TestViewOps(TestCase):
         for a_split_dim1_tensor in a_split_dim1:
             self.assertTrue(self.is_view_of(a, a_split_dim1_tensor))
 
+    @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
     def test_view_tensor_hsplit(self, device, dtype):
         t = make_tensor((4, 4, 4), dtype=dtype, device=device, low=-9, high=9)
@@ -415,6 +420,7 @@ class TestViewOps(TestCase):
         t[2, 2, 2] = 7
         self.assertEqual(t_hsplit[1][2, 0, 2], t[2, 2, 2])
 
+    @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
     def test_view_tensor_vsplit(self, device, dtype):
         t = make_tensor((4, 4, 4), dtype=dtype, device=device, low=-9, high=9)
@@ -424,6 +430,7 @@ class TestViewOps(TestCase):
         t[2, 2, 2] = 7
         self.assertEqual(t_vsplit[1][0, 2, 2], t[2, 2, 2])
 
+    @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
     def test_view_tensor_dsplit(self, device, dtype):
         t = make_tensor((4, 4, 4), dtype=dtype, device=device, low=-9, high=9)
@@ -442,6 +449,7 @@ class TestViewOps(TestCase):
         with self.assertRaises(RuntimeError):
             torch.imag(t)
 
+    @onlyNativeDeviceTypes
     @dtypes(*complex_types())
     def test_real_imag_view(self, device, dtype):
         def compare_with_numpy(contiguous_input=True):
@@ -472,7 +480,7 @@ class TestViewOps(TestCase):
         self.assertEqual(a[5:].real, a.real[5:])
         self.assertEqual(a[5:].imag, a.imag[5:])
 
-    @skipLazy
+    @onlyNativeDeviceTypes
     @dtypes(*complex_types())
     def test_conj_imag_view(self, device, dtype) -> None:
         t = _make_tensor((4, 5), dtype, device)
@@ -487,6 +495,7 @@ class TestViewOps(TestCase):
             self.assertEqual(v_imag, t_numpy_conj.imag)
             self.assertTrue(v_imag.is_neg())
 
+    @onlyNativeDeviceTypes
     def test_conj_view_with_shared_memory(self, device) -> None:
         a = _make_tensor((4, 5), torch.cfloat, device)
         b = a.conj()
@@ -496,6 +505,7 @@ class TestViewOps(TestCase):
         self.assertEqual(torch.add(b, c), torch.add(b, c, out=a))
         self.assertEqual(torch.add(b, c), b.add_(c))
 
+    @onlyNativeDeviceTypes
     @dtypes(
         *product(
             complex_types(),
@@ -872,7 +882,7 @@ class TestViewOps(TestCase):
         test_writes_propagate(t, v3)
         self.assertTrue(self.is_view_of_same_base(t, v3))
 
-    @skipLazy
+    @onlyNativeDeviceTypes
     def test_flatten_nonview(self, device):
         def assert_is_nonview(t, nv):
             idx_t = (0,) * t.ndim
@@ -1151,7 +1161,7 @@ class TestOldViewOps(TestCase):
         self.assertEqual((1, 0, 6, 1, 1), x.view(1, 0, 6, 1, 1).shape)
 
     # TODO: this should be refactored into the view ops test suite
-
+    @onlyNativeDeviceTypes
     def test_reshape(self, device):
         x = torch.randn(3, 3, device=device)
         self.assertEqual(x.data_ptr(), x.reshape(-1).data_ptr())
@@ -1472,6 +1482,7 @@ class TestOldViewOps(TestCase):
             (3, 10, 3, 32, 32), 3 * 10 * 3 * 32 * 32, torch.channels_last_3d, device
         )
 
+    @onlyNativeDeviceTypes
     @dtypes(torch.int64, torch.float, torch.complex128)
     def test_transpose_invalid(self, device, dtype):
         for fn in (torch.swapdims, torch.swapaxes, torch.transpose):
@@ -1812,6 +1823,7 @@ class TestOldViewOps(TestCase):
         x.set_(x.storage(), 0, x.size(), stride)
         self.assertTrue(x.is_contiguous())
 
+    @onlyNativeDeviceTypes
     # Skip BFloat16 since numpy does not support it
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool))
     def test_tensor_split_sections(self, device, dtype):
@@ -1844,6 +1856,7 @@ class TestOldViewOps(TestCase):
                         self.assertEqual(result_n, result1, msg=msg)
                         self.assertEqual(result_n, result2, msg=msg)
 
+    @onlyNativeDeviceTypes
     # Skip BFloat16 since numpy does not support it
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool))
     def test_tensor_split_indices(self, device, dtype):
@@ -1890,6 +1903,7 @@ class TestOldViewOps(TestCase):
                         self.assertEqual(result_n, result_1, msg=msg)
                         self.assertEqual(result_n, result_2, msg=msg)
 
+    @onlyNativeDeviceTypes
     def test_tensor_split_errors(self, device):
         S = 10
         test_cases = [
@@ -1969,6 +1983,7 @@ class TestOldViewOps(TestCase):
             x.resize_as_(y)
             self.assertEqual(y.shape, x.shape)
 
+    @onlyNativeDeviceTypes
     def test_resize_overflow(self, device):
         x = torch.empty((), dtype=torch.float64)
         with self.assertRaisesRegex(
