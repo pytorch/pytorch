@@ -1707,6 +1707,29 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
             output = compiled(torch.rand(2, 2))
             self.assertNotEqual(id(output), id(input))
 
+    def test_inference_mode_view(self):
+        @torch.library.custom_op(
+            "test_inference_mode_view::foo", mutates_args={"workspace"}
+        )
+        def foo(x: torch.Tensor, workspace: torch.Tensor) -> torch.Tensor:
+            return x.clone()
+
+        @foo.register_fake
+        def _(x, workspace):
+            return x.clone()
+
+        @torch.compile(fullgraph=True, backend="aot_eager")
+        def f(x, w):
+            y = foo(x, w)
+            z = y.view(-1)
+            return z.sin()
+
+        x = torch.randn(2)
+        w = torch.randn(2)
+        with torch.inference_mode():
+            y = f(x, w)
+        self.assertEqual(y, x.sin())
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

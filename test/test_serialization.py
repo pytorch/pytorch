@@ -443,6 +443,40 @@ class SerializationMixin:
                         "size is inconsistent with indices"):
                     y = torch.load(f, weights_only=weights_only)
 
+    def test_serialization_sparse_invalid_legacy_ctor(self):
+        # This is set in test class setup but would not be check when running user code
+        prev_invariant_check_enabled = torch.sparse.check_sparse_tensor_invariants.is_enabled()
+        try:
+            torch.sparse.check_sparse_tensor_invariants.disable()
+            x = torch.zeros(3, 3)
+            x[1][1] = 1
+            x = x.to_sparse()
+            x_legacy_ctor = torch.sparse.FloatTensor(x.indices(), x.values())
+
+            # technically legacy ctor will still always be rebuilt with _rebuild_sparse_tensor
+            # this is to test that legacy ctor in data.pkl will be validated by weights_only unpickler
+            class LegacyCtorSerializationSpoofer:
+                def __init__(self, tensor):
+                    self.tensor = tensor
+
+                def __reduce_ex__(self, proto):
+                    indices = self.tensor._indices()
+                    indices[0][0] = 3
+                    return (torch.sparse.FloatTensor, (indices, self.tensor._values(), self.tensor.size()))
+
+            with tempfile.NamedTemporaryFile() as f:
+                sd = {"spoofed_legacy_ctor": LegacyCtorSerializationSpoofer(x_legacy_ctor)}
+                torch.save(sd, f)
+                for weights_only in (True,):
+                    f.seek(0)
+                    with self.assertRaisesRegex(
+                            RuntimeError,
+                            "size is inconsistent with indices"):
+                        y = torch.load(f, weights_only=weights_only)
+        finally:
+            if prev_invariant_check_enabled:
+                torch.sparse.check_sparse_tensor_invariants.enable()
+
     def _test_serialization_sparse_compressed_invalid(self,
                                                       conversion,
                                                       get_compressed_indices,
