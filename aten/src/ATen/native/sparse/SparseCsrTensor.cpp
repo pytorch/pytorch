@@ -429,7 +429,7 @@ Tensor sparse_compressed_tensor_with_dims(
     compressed_indices_size.push_back(compressed_size / blocksize[d0] + 1);
     values_size.append(DimVector(blocksize));
   } else {
-    TORCH_CHECK(blocksize.size() == 0, "sparse_compressed_tensor_with_dims: blocksize cannot be specified for non-block layout ", layout_);
+    TORCH_CHECK(blocksize.empty(), "sparse_compressed_tensor_with_dims: blocksize cannot be specified for non-block layout ", layout_);
     compressed_indices_size.push_back(size[compressedDimension(layout_, size, dense_dim)] + 1);
   }
 
