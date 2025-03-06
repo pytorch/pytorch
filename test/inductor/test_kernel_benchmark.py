@@ -15,7 +15,6 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_inductor_cache
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import xfailIfSM89
-from torch.testing._internal.common_device_type import expectedFailureXPU
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -134,7 +133,11 @@ class TestKernelBenchmark(TestCase):
         out = f(inp)
         self.verify_compiled_kernels()
 
-    @config.patch(max_autotune=True, max_autotune_gemm_backends="TRITON")
+    # TODO: Currently the Triton mm template +  relu fusion causes slowdown on XPU,
+    # Need to refine the template and config for XPU.
+    @config.patch(
+        max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
+    )
     @fresh_inductor_cache()
     def test_matmul_triton_kernel_benchmark(self):
         M = 12544
@@ -150,16 +153,17 @@ class TestKernelBenchmark(TestCase):
         f(a, b)
         self.verify_compiled_kernels()
 
-    @expectedFailureXPU
-    @config.patch(max_autotune=True, max_autotune_gemm_backends="TRITON")
+    @config.patch(
+        max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
+    )
     @fresh_inductor_cache()
     def test_mm_triton_kernel_benchmark(self):
         M = 2048
         N = 2432
         K = 1949
         K_2 = 3581
-        a = rand_strided((M, K_2), (K_2, 1), device="cuda", dtype=torch.float16)
-        b = rand_strided((K, N), (1, K), device="cuda", dtype=torch.float16)
+        a = rand_strided((M, K_2), (K_2, 1), device=GPU_TYPE, dtype=torch.float16)
+        b = rand_strided((K, N), (1, K), device=GPU_TYPE, dtype=torch.float16)
 
         @torch.compile
         def f(a, b):
@@ -168,7 +172,12 @@ class TestKernelBenchmark(TestCase):
             return c
 
         f(a, b)
-        self.verify_compiled_kernels(GB_count=3)
+
+        GB_count = 3
+        # pad_mm is not enabled on XPU, so there is only one kernel.
+        if GPU_TYPE == "xpu":
+            GB_count = 1
+        self.verify_compiled_kernels(GB_count=GB_count)
 
         # make sure we correctly generate the grid info
         compiled_module = self.get_compiled_module()
@@ -351,12 +360,6 @@ class TestKernelBenchmark(TestCase):
         # num_gb = (1000 * 1000 + 2 * 1000 * 1000 + 1000 * 1000) * 2/ 1e9
         #        = 0.008
         num_gb = "0.008"
-        if GPU_TYPE == "xpu":
-            # In XPU backend, mm + add + add will be fused as admm + add
-            # And CUDA prefer not fuse add + mm, please check in function
-            # `should_prefer_unfused_addmm` in torch/_inductor/fx_passes/post_grad.py
-            num_gb = "0.006"
-
         self.check_bandwidth(compiled_module, num_gb)
 
     def test_mm_slice_add_bandwidth_computation_2(self):
@@ -385,9 +388,10 @@ class TestKernelBenchmark(TestCase):
         # have the same index.
         self.check_bandwidth(compiled_module, "0.006")
 
-    @expectedFailureXPU
     @xfailIfSM89
-    @config.patch(max_autotune=True, max_autotune_gemm_backends="TRITON")
+    @config.patch(
+        max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
+    )
     def test_slice_mm_bandwidth_computation(self):
         M, N, K = 1000, 2000, 3000
 

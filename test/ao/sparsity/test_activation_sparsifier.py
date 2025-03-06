@@ -2,7 +2,6 @@
 
 import copy
 import logging
-from typing import List
 
 import torch
 import torch.nn as nn
@@ -247,7 +246,7 @@ class TestActivationSparsifier(TestCase):
                 assert mask2 is None
             else:
                 assert type(mask1) == type(mask2)
-                if isinstance(mask1, List):
+                if isinstance(mask1, list):
                     assert len(mask1) == len(mask2)
                     for idx in range(len(mask1)):
                         assert torch.all(mask1[idx] == mask2[idx])
@@ -258,7 +257,7 @@ class TestActivationSparsifier(TestCase):
         for state in state_dict["state"].values():
             mask = state["mask"]
             if mask is not None:
-                if isinstance(mask, List):
+                if isinstance(mask, list):
                     for idx in range(len(mask)):
                         assert mask[idx].is_sparse
                 else:

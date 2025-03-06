@@ -11,4 +11,3 @@ The MTIA backend is implemented out of the tree, only interfaces are be defined 
     :nosignatures:
 
     memory_stats
-    max_memory_allocated

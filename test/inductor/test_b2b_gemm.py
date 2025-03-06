@@ -14,7 +14,7 @@ from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 class B2BGEMMTest(TestCase):
     device = GPU_TYPE
 
-    @torch._dynamo.config.patch(cache_size_limit=32)
+    @torch._dynamo.config.patch(recompile_limit=32)
     @torch._inductor.config.patch(b2b_gemm_pass=True)
     def test_b2b_gemm_left_assoc_good_shape(self):
         """
@@ -48,7 +48,7 @@ class B2BGEMMTest(TestCase):
         self.assertTrue(torch.allclose(f_32(A, B, C), res, atol=0.1, rtol=0.01))
         self.assertTrue("B2B_GEMM_LEFT_TRITON_ENTRANCE" in code)
 
-    @torch._dynamo.config.patch(cache_size_limit=32)
+    @torch._dynamo.config.patch(recompile_limit=32)
     @torch._inductor.config.patch(b2b_gemm_pass=True)
     def test_b2b_gemm_right_assoc_good_shape(self):
         """
@@ -74,7 +74,7 @@ class B2BGEMMTest(TestCase):
         self.assertTrue(torch.allclose(f_32(A, B, C), res, atol=0.1, rtol=0.01))
         self.assertTrue("B2B_GEMM_RIGHT_TRITON_ENTRANCE" in code)
 
-    @torch._dynamo.config.patch(cache_size_limit=32)
+    @torch._dynamo.config.patch(recompile_limit=32)
     @torch._inductor.config.patch(b2b_gemm_pass=True)
     def test_b2b_gemm_trivial_left_assoc_good_shape(self):
         """
@@ -99,7 +99,7 @@ class B2BGEMMTest(TestCase):
         self.assertTrue(torch.allclose(f_32(A, B, C), res, atol=0.1, rtol=0.01))
         self.assertTrue("B2B_GEMM_LEFT_TRITON_ENTRANCE" in code)
 
-    @torch._dynamo.config.patch(cache_size_limit=32)
+    @torch._dynamo.config.patch(recompile_limit=32)
     @torch._inductor.config.patch(b2b_gemm_pass=True)
     def test_b2b_gemm_trivial_right_assoc_good_shape(self):
         """
@@ -124,7 +124,7 @@ class B2BGEMMTest(TestCase):
         self.assertTrue(torch.allclose(f_32(A, B, C), res, atol=0.1, rtol=0.01))
         self.assertTrue("B2B_GEMM_RIGHT_TRITON_ENTRANCE" in code)
 
-    @torch._dynamo.config.patch(cache_size_limit=32)
+    @torch._dynamo.config.patch(recompile_limit=32)
     @torch._inductor.config.patch(b2b_gemm_pass=True)
     def test_b2b_gemm_bad_pattern_good_shape(self):
         """
@@ -145,7 +145,7 @@ class B2BGEMMTest(TestCase):
         self.assertTrue("B2B_GEMM_LEFT_TRITON_ENTRANCE" not in code)
         self.assertTrue("B2B_GEMM_RIGHT_TRITON_ENTRANCE" not in code)
 
-    @torch._dynamo.config.patch(cache_size_limit=32)
+    @torch._dynamo.config.patch(recompile_limit=32)
     @torch._inductor.config.patch(b2b_gemm_pass=True)
     def test_b2b_gemm_good_pattern_bad_shape(self):
         """
@@ -167,7 +167,7 @@ class B2BGEMMTest(TestCase):
     @unittest.skipIf(
         not (os.environ.get("DO_PERF_TEST") == "1"), "Perf test not enabled"
     )
-    @torch._dynamo.config.patch(cache_size_limit=32)
+    @torch._dynamo.config.patch(recompile_limit=32)
     def test_plain_b2b_gemm_performance(self):
         """compare torch.compile(f, b2b_gemm = off) with torch.compile(f, b2b_gemm = on)"""
 
@@ -222,7 +222,7 @@ class B2BGEMMTest(TestCase):
     @unittest.skipIf(
         not (os.environ.get("DO_PERF_TEST") == "1"), "Perf test not enabled"
     )
-    @torch._dynamo.config.patch(cache_size_limit=32)
+    @torch._dynamo.config.patch(recompile_limit=32)
     def test_gelu_b2b_gemm_performance(self):
         """compare torch.compile(f, b2b_gemm = off) with torch.compile(f, b2b_gemm = on)"""
 
@@ -279,7 +279,7 @@ class B2BGEMMTest(TestCase):
     @unittest.skipIf(
         not (os.environ.get("DO_PERF_TEST") == "1"), "Perf test not enabled"
     )
-    @torch._dynamo.config.patch(cache_size_limit=32)
+    @torch._dynamo.config.patch(recompile_limit=32)
     def test_gelu_mlp_b2b_gemm_performance(self):
         """compare torch.compile(f, b2b_gemm = off) with torch.compile(f, b2b_gemm = on)"""
 

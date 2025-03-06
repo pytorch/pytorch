@@ -6,7 +6,7 @@ from pathlib import Path
 import yaml
 
 
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 EXPECTED_GROUP_PREFIX = (
     "${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}"

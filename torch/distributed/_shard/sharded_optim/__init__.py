@@ -1,4 +1,5 @@
-from typing import Iterator, Tuple, Union
+from collections.abc import Iterator
+from typing import Union
 
 import torch.nn as nn
 from torch.distributed._shard.sharded_tensor import ShardedTensor
@@ -10,7 +11,7 @@ def named_params_with_sharded_tensor(
     module: nn.Module,
     prefix: str = "",
     recurse: bool = True,
-) -> Iterator[Tuple[str, Union[nn.Parameter, ShardedTensor]]]:
+) -> Iterator[tuple[str, Union[nn.Parameter, ShardedTensor]]]:
     r"""Returns an iterator over module parameters (together with the
     ShardedTensor parameters), yielding both the name of the parameter
     as well as the parameter itself. This is typically passed to a

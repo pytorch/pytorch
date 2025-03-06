@@ -618,8 +618,8 @@ For more information on dynamic shapes, see `The dynamic shapes manual <https://
 Changing the cache size limit
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-There is a limit to how many times a function can be recompiled, determined by ``torch._dynamo.config.cache_size_limit``
-and ``torch._dynamo.config.accumulated_cache_size_limit``.
+There is a limit to how many times a function can be recompiled, determined by ``torch._dynamo.config.recompile_limit``
+and ``torch._dynamo.config.accumulated_recompile_limit``.
 If either limit is exceeded, then we will not attempt to compile the function again and instead will run the function eagerly.
 ``torch.compile`` will also issue a warning containing the affected function and which limit was hit.
 In the example below, each function call results in a recompile attempt.
@@ -639,7 +639,7 @@ When we hit the cache size limit (8), we stop attempting to recompile.
 ::
 
     $ python playground.py
-    torch._dynamo hit config.cache_size_limit (8)
+    torch._dynamo hit config.recompile_limit (8)
         function: 'fn' (/data/users/williamwen/pytorch/playground.py:5)
         last reason: 0/0: tensor 'L['x']' size mismatch at index 0. expected 1, actual 9
 
@@ -676,7 +676,7 @@ In the below example, we have a recompilation for each function call.
         - 0/2: L['c'] == 3.5
         - 0/1: L['c'] == 2.5
         - 0/0: L['c'] == 1.5
-    torch._dynamo hit config.cache_size_limit (8)
+    torch._dynamo hit config.recompile_limit (8)
         function: 'fn' (/data/users/williamwen/pytorch/playground.py:3)
         last reason: 0/0: L['c'] == 1.5
 
@@ -714,7 +714,7 @@ In particular, for LR schedulers, initializing with a constant can lead to recom
         - 3/2: L['self'].param_groups[0]['lr'] == 0.008100000000000001
         - 3/1: L['self'].param_groups[0]['lr'] == 0.009000000000000001
         - 3/0: L['self'].param_groups[0]['lr'] == 0.01
-    torch._dynamo hit config.cache_size_limit (8)
+    torch._dynamo hit config.recompile_limit (8)
         function: 'step' (/data/users/williamwen/pytorch/torch/optim/adam.py:189)
         last reason: 3/0: L['self'].param_groups[0]['lr'] == 0.01
 

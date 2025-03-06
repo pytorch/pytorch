@@ -1,10 +1,11 @@
 import contextlib
 import threading
-from typing import Any, Callable, Generator, Iterable, Optional, Union
+from collections.abc import Generator, Iterable
+from typing import Any, Callable, Optional, Union
 
 from torch.utils._exposed_in import exposed_in
 
-from .custom_ops import custom_op
+from .custom_ops import custom_op, CustomOpDef
 from .infer_schema import infer_schema
 
 
@@ -39,7 +40,7 @@ def triton_op(
 
     Note that ``fn`` must only consist of calls to PyTorch-understood
     operators and triton kernels. Any triton kernels called inside ``fn``
-    must be wrapped in a call to :func:`torch._library.wrap_triton``.
+    must be wrapped in a call to :func:`torch.library.wrap_triton`.
 
     Args:
         name (str): A name for the custom op that looks like "{namespace}::{name}",
@@ -60,7 +61,7 @@ def triton_op(
 
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
         >>> import torch
-        >>> from torch._library import triton_op, wrap_triton
+        >>> from torch.library import triton_op, wrap_triton
         >>>
         >>> import triton
         >>> from triton import language as tl
@@ -106,7 +107,7 @@ def triton_op(
 
     """
 
-    def dec(fn: Callable) -> Any:
+    def dec(fn: Callable[..., object]) -> CustomOpDef:
         def backend_fn(*args, **kwargs):  # type: ignore[no-untyped-def]
             # Optimization: we're passing regular Tensors into the triton kernel, so
             # no need to go through HOP dispatch
@@ -148,11 +149,10 @@ def triton_op(
             # In the short term, we expect users to have a seperate aot_compile stage that compiles the exported program
             # into a Cubin file on the same machine that users call export, which does autotuning and removes triton
             # dependency and serve the model with Cubin. This guarantees that triton changes won't break BC.
-            # In the long term, we may export multiple cubins for the triton op directly.
+            # In the long term, we may export multiple cubins for the triton op directly
+            from torch.export._trace import custom_triton_ops_decomposition_disabled
 
-            from torch.compiler import is_exporting
-
-            if is_exporting():
+            if custom_triton_ops_decomposition_disabled():
                 return mode.__torch_dispatch__(op, types, args, kwargs)
             else:
                 with mode:

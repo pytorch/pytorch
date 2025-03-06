@@ -1573,10 +1573,10 @@ torch.cuda.synchronize()
                 return torch.stack([col, col + 2], 1).view(2, 2, 2, 2)
 
         if adaptive:
-            cls_name = "AdaptiveMaxPool{}d".format(num_dim)  # noqa: UP032
+            cls_name = f"AdaptiveMaxPool{num_dim}d"
         else:
             # FIXME(#105716): Test fails when using f-string
-            cls_name = "MaxPool{}d".format(num_dim)  # noqa: UP032
+            cls_name = f"MaxPool{num_dim}d"
         module_cls = getattr(nn, cls_name)
         module = module_cls(2, return_indices=True).to(device, dtype=dtype)
         numel = 4 ** (num_dim + 1)
@@ -1782,6 +1782,19 @@ torch.cuda.synchronize()
                     F.fractional_max_pool2d(
                         x, (2, 2), output_size=output_size, _random_samples=samples
                     )
+
+    @onlyNativeDeviceTypes
+    def test_fractional_max_pool2d_backward_fails(self, device):
+        grad_output = torch.randn(1, 1, 2, 3, 3, device=device)
+        input = torch.randn(1, 2, 7, 7, device=device)
+        kernel_size = (2, 2)
+        output_size = (3, 3)
+        indices = torch.ones(1, 2, 3, 3, dtype=torch.long, device=device)
+
+        with self.assertRaisesRegex(RuntimeError, "gradOutput sizes unexpected"):
+            torch.ops.aten.fractional_max_pool2d_backward(
+                grad_output, input, kernel_size, output_size, indices
+            )
 
     @expectedFailureMeta  # RuntimeError: Unrecognized tensor type ID: Meta
     @onlyNativeDeviceTypes

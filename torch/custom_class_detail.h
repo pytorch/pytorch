@@ -227,6 +227,7 @@ TORCH_API at::ClassTypePtr getCustomClass(const std::string& name);
 
 // Given an IValue, return true if the object contained in that IValue
 // is a custom C++ class, otherwise return false.
+// NOLINTNEXTLINE(readability-redundant-declaration)
 TORCH_API bool isCustomClass(const c10::IValue& v);
 
 // This API is for testing purposes ONLY. It should not be used in

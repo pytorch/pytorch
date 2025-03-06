@@ -22,18 +22,18 @@ jobs:
     runs-on: windows-2019
     strategy:
       matrix:
-        cuda_version: ["126", "124", "118"]
+        cuda_version: ["128", "126", "124", "118"]
         config: ["Release", "Debug"]
     env:
       CUDA_VERSION: ${{ matrix.cuda_version }}
       CONFIG: ${{ matrix.config }}
     steps:
-      - name: Checkout pytorch/builder
+      - name: Checkout pytorch/pytorch
         uses: actions/checkout@v4
       - name: Enable MSVC dev commands to enable cl.exe  # FYI incompatible with shell: bash
         uses: ilammy/msvc-dev-cmd@dd5e2fa0a7de1e7929605d9ecc020e749d9856a3
       - name: Install CUDA Toolkit
-        run: .github/scripts/windows/cuda_install.bat
+        run: .ci/pytorch/windows/internal/cuda_install.bat
       - name: Build MAGMA and push to S3
         run: .github/scripts/windows/build_magma.bat
       - name: Save as artifact
