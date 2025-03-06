@@ -1534,7 +1534,7 @@ class TestFxGraphCacheHashing(TestCase):
         """
         Test the get_hash_for_files helper.
         """
-        with tempfile.NamedTemporaryFile(delete=True) as temp:
+        with tempfile.NamedTemporaryFile(delete=False) as temp:
             temp.write(b"contents")
             temp.flush()
 
@@ -1549,6 +1549,10 @@ class TestFxGraphCacheHashing(TestCase):
 
             self.assertEqual(hash1, hash2)
             self.assertNotEqual(hash1, hash3)
+        # We need to use this workaround for Windows.
+        # See https://docs.python.org/3.12/library/tempfile.html#tempfile.NamedTemporaryFile
+        # for detail.
+        os.unlink(temp.name)
 
 
 class TestCudaCompileCommand(TestCase):
