@@ -10,7 +10,7 @@ import sys
 import warnings
 from abc import abstractmethod
 from dataclasses import dataclass
-from typing import Any, Optional, TYPE_CHECKING, Union, Generator
+from typing import Any, Optional, TYPE_CHECKING, Union
 from typing_extensions import override, Self, TypeGuard
 
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
@@ -23,8 +23,8 @@ from torch._inductor.output_code import (
     CompiledFxGraphConstantsWithGm,
     OutputCode,
 )
-from torch.utils._ordered_set import OrderedSet
 from torch._subclasses import FakeTensorMode
+from torch.utils._ordered_set import OrderedSet
 
 from . import config
 from .compile_fx import _CompileFxKwargs, _InProcessFxCompile, FxCompile, log
@@ -36,7 +36,7 @@ from .virtualized import V
 
 if TYPE_CHECKING:
     import types
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Generator, Mapping, Sequence
 
     from torch._inductor.utils import InputType
     from torch.fx import GraphModule
@@ -449,7 +449,7 @@ class _SerializedFxCompile(FxCompile):
                 deterministic_guard_for_testing,
                 logger_state,
                 lowering,
-                fake_tensor_mode
+                fake_tensor_mode,
             ).serialize()
         except (AttributeError, BypassFxGraphCache):
             # For example: AttributeError: Can't pickle local object
