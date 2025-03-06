@@ -25,7 +25,6 @@ std::optional<c10::DeviceType> getAccelerator(bool checked) {
   }
 
   DETECT_RUNTIME_ACCELERATOR(MTIA)
-  DETECT_RUNTIME_ACCELERATOR(HPU)
 
 #undef DETECT_RUNTIME_ACCELERATOR
 
@@ -45,6 +44,7 @@ std::optional<c10::DeviceType> getAccelerator(bool checked) {
   DETECT_AND_ASSIGN_ACCELERATOR_COMP(XPU)
   DETECT_AND_ASSIGN_ACCELERATOR_COMP(HIP)
   DETECT_AND_ASSIGN_ACCELERATOR_COMP(MPS)
+  DETECT_AND_ASSIGN_ACCELERATOR_COMP(HPU)
   if (checked) {
     TORCH_CHECK(
         device_type, "Cannot access accelerator device when none is available.")
