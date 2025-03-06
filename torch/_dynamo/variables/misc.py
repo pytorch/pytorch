@@ -712,9 +712,9 @@ class AutogradEngineVariable(UserDefinedObjectVariable):
     ) -> "VariableTracker":
         if name == "queue_callback":
             if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
-                assert (
-                    tx.one_graph
-                ), "queue_callback() is only supported when Compiled Autograd is enabled with fullgraph=True"
+                assert tx.one_graph, (
+                    "queue_callback() is only supported when Compiled Autograd is enabled with fullgraph=True"
+                )
                 return variables.UserFunctionVariable(
                     torch._dynamo.external_utils.FakeCompiledAutogradEngine.queue_callback,
                     source=self.source,
@@ -1611,3 +1611,8 @@ class WeakRefVariable(VariableTracker):
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         return self.referent_vt
+
+    def reconstruct(self, codegen):
+        codegen.add_push_null(lambda: codegen.load_import_from("weakref", "ref"))
+        codegen(self.referent_vt)
+        codegen.extend_output(create_call_function(1, False))

@@ -132,7 +132,7 @@ void quantized_matmul(
   at::Tensor m1 = is_onednn_matmul_strides(mat1) ? mat1 : mat1.contiguous();
   at::Tensor m2 = is_onednn_matmul_strides(mat2) ? mat2 : mat2.contiguous();
   at::Tensor dst =
-      is_onednn_matmul_strides(result, true) ? result : result.contiguous();
+      is_onednn_matmul_strides(result) ? result : result.contiguous();
 
   int64_t m = dst.size(-2);
   int64_t n = dst.size(-1);

@@ -13,6 +13,11 @@ def is_graphable(val) -> bool:
     return isinstance(val, torch.fx.node.base_types)
 
 
+def is_graphable_type(typ) -> bool:
+    """Return whether the given type is graphable"""
+    return issubclass(typ, torch.fx.node.base_types)
+
+
 def to_graphable(stuff):
     """Flattens stuff into a flat list of graphable types."""
     # We can consider preserving things like List[int] to improve
@@ -34,15 +39,23 @@ def from_graphable(flat_args, spec):
     return stuff
 
 
-@dataclass
-class ConstantFunction:
+def func_to_graphable(func):
+    """
+    Pack and flatten a function type into graphable types.
+    This is useful for legalizing the function argument of `flat_apply`.
+    """
+    return pytree.tree_flatten(_ConstantFunction(func))
+
+
+@dataclass(frozen=True)
+class _ConstantFunction:
     func: Callable
 
     def __call__(self, *args, **kwargs):
         return self.func(*args, **kwargs)
 
 
-pytree.register_constant(ConstantFunction)
+pytree.register_constant(_ConstantFunction)
 
 _op_types = (
     torch._ops.OpOverload,
@@ -84,27 +97,28 @@ class FlatApply(HigherOrderOperator):
 
 def impl(func, in_spec, *flat_args):
     if not isinstance(func, _op_types):
-        # assume ConstantFunction
+        # assume _ConstantFunction
         func = pytree._retrieve_constant(func)
-        assert isinstance(func, ConstantFunction)
+        assert isinstance(func, _ConstantFunction)
 
     args, kwargs = from_graphable(flat_args, in_spec)
     out = func(*args, **kwargs)
-    # Right now, all outputs must either be Tensor or lists/tuples of Tensors.
-    # This matches the output type restriction on custom operators.
+
+    # Right now, all outputs must either be graphable or lists/tuples of graphables.
     #
-    # TODO: The following can be updated to support non-Tensor outputs and pytrees.
-    # For non-Tensor constant outputs: the assumption would be that they are constant
+    # TODO: The following can be updated to support non-graphable outputs and pytrees.
+    # For non-graphable constant outputs: the assumption would be that they are constant
     # (everytime the function runs those MUST be the same)
     # For pytree outputs:
     # I'm not sure if we need to return (flat_output, spec) or just (flat_output,):
     # in the latter case the tracers need to carry out the output specs
     # (they need to know how to reconstruct the object from just the flat_output).
-    assert (
-        isinstance(out, torch.Tensor)
-        or isinstance(out, (tuple, list))
-        and all(isinstance(x, torch.Tensor) for x in out)
-    )
+    def is_valid_output(x):
+        if isinstance(x, (tuple, list)):
+            return all(map(is_valid_output, x))
+        return is_graphable(x)
+
+    assert is_valid_output(out)
     return out
 
 
