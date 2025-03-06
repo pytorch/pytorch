@@ -6,7 +6,6 @@ from typing import NamedTuple
 import torch
 from torch._inductor import config
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch.testing._internal.inductor_utils import has_cpp_wrapper_for_device
 from torch.testing._internal.common_device_type import (
     get_desired_device_type_test_bases,
 )
@@ -17,7 +16,7 @@ from torch.testing._internal.common_utils import (
     TEST_MKL,
     TEST_WITH_ROCM,
 )
-from torch.testing._internal.inductor_utils import HAS_CPU
+from torch.testing._internal.inductor_utils import has_cpp_wrapper_for_device, HAS_CPU
 
 
 try:
