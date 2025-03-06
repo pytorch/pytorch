@@ -31,6 +31,31 @@ class ExportStrategiesTest(common_utils.TestCase):
         b = torch.tensor(1.0)
 
         result = strategy_cls()(model, (a, b), kwargs=None, dynamic_shapes=None)
+        if result.exception:
+            raise result.exception
+        ep = result.exported_program
+        assert ep is not None
+        torch.testing.assert_close(ep.module()(a, b), model(a, b))
+
+
+    def test_jit_module_with_dynamic_shapes(self):
+        class Model(torch.nn.Module):
+            def forward(self, a, b):
+                c = torch.relu(a)
+                return c + b
+
+        model = Model()
+        a = torch.tensor([[0.0]])
+        b = torch.tensor([[1.0]])
+
+        strategy = _capture_strategies.JitTraceConvertStrategy()
+        dynamic_shapes = {
+            "a": {0: "dynamic"},
+            "b": {0: "dynamic"},
+        }
+        result = strategy(model, (a, b), kwargs=None, dynamic_shapes=dynamic_shapes)
+        if result.exception:
+            raise result.exception
         ep = result.exported_program
         assert ep is not None
         torch.testing.assert_close(ep.module()(a, b), model(a, b))
