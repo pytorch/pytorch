@@ -122,22 +122,24 @@ the GEMMs for the workload once and then tune repeatedly with different tuning p
 Workflow
 --------
 There are basically two steps:
-1) Set the environment variables to collect the untuned GEMM and this will generate ``tunableop_untuned0.csv``::
+1) Set the environment variables to collect the untuned GEMM and this will generate ``tunableop_untuned0.csv``
 
-  PYTORCH_TUNABLEOP_ENABLED=1
-  PYTORCH_TUNABLEOP_TUNING=0
-  PYTORCH_TUNABLEOP_RECORD_UNTUNED=1
-  ...
+.. code-block:: python
+   PYTORCH_TUNABLEOP_ENABLED=1
+   PYTORCH_TUNABLEOP_TUNING=0
+   PYTORCH_TUNABLEOP_RECORD_UNTUNED=1
+   ...
 
-2) Run a Python script that reads the `tunableop_untuned0.csv` and generates the `tunableop_results0.csv`, like::
+2) Run a Python script that reads the `tunableop_untuned0.csv` and generates the `tunableop_results0.csv`, like
 
-  import torch.cuda.tunable as tunable
-  import os
-
-  os.putenv('PYTORCH_TUNABLEOP_ENABLED', '1')
-  os.putenv('PYTORCH_TUNABLEOP_TUNING', '1')
-  os.putenv('PYTORCH_TUNABLEOP_RECORD_UNTUNED', '0')
-  tunable.tune_gemm_in_file("tunableop_untuned0.csv")
+.. code-block:: python
+   import torch.cuda.tunable as tunable
+   import os
+   
+   os.putenv('PYTORCH_TUNABLEOP_ENABLED', '1')
+   os.putenv('PYTORCH_TUNABLEOP_TUNING', '1')
+   os.putenv('PYTORCH_TUNABLEOP_RECORD_UNTUNED', '0')
+   tunable.tune_gemm_in_file("tunableop_untuned0.csv")
 
 
 It is also possible to take multiple untuned files and distribute the GEMMs for tuning to multiple GPUs
@@ -146,11 +148,12 @@ Next, the GEMMs are distributed to different GPUs for tuning. After all GEMMs ar
 all the GPUs are then gathered into a single file whose base filename has ``_full0`` appended to it
 (for example ``tunableop_results_full0.csv``). Finally, this new file, containing the gathered results, will be
 duplicated N times, once for each GPU as convenience to the user will run the workload with the tuned
-configuration on N GPUs.::
+configuration on N GPUs.
 
-  if __name__ == "__main__":
-      num_gpus = 8 # number of GPUs that will be used during the tuning process
-      tunable.mgpu_tune_gemm_in_file("tunableop_untuned?.csv", num_gpus)
+.. code-block:: python
+   if __name__ == "__main__":
+       num_gpus = 8 # number of GPUs that will be used during the tuning process
+       tunable.mgpu_tune_gemm_in_file("tunableop_untuned?.csv", num_gpus)
 
 Note that the usage of the ``mgpu_tune_gemm_in_file`` API is different from its single GPU counterpart
 (``tune_gemm_in_file``). The body of the Python script that calls the API must be wrapped in ``main()`` as shown
