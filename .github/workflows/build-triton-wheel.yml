@@ -198,21 +198,6 @@ jobs:
           # the directory on Windows and prevent GHA from checking out as reported
           # in https://github.com/actions/checkout/issues/1018
           git config --global core.fsmonitor false
-      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
-      - name: Enable long paths on Windows
-        shell: powershell
-        run: |
-          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
-      # Since it's just a defensive command, the workflow should continue even the command fails. This step can be
-      # removed once Windows Defender is removed from the AMI
-      - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
-        continue-on-error: true
-        shell: powershell
-        run: |
-          Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
-          # Let's both exclude the path and disable Windows Defender completely just to be sure
-          # that it doesn't interfere
-          Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -225,43 +210,14 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Install VS 17.13.2 with Win11SDK
+      - name: Enable long paths on Windows and install VS2022 17.13.2
         env:
           VC_YEAR: 2022
           VC_VERSION: 17.13.2
-        shell: powershell
+        shell: bash
+        working-directory: pytorch
         run: |
-          #Requires -RunAsAdministrator
-          $VC_VERSION_major = [int] ${env:VC_VERSION}.split(".")[0]
-          $VC_DOWNLOAD_LINK = "https://aka.ms/vs/$VC_VERSION_major/release/vs_BuildTools.exe"
-          $VC_INSTALL_ARGS = @("--nocache","--quiet","--norestart","--wait", "--add Microsoft.VisualStudio.Workload.VCTools",
-                                                              "--add Microsoft.Component.MSBuild",
-                                                              "--add Microsoft.VisualStudio.Component.Roslyn.Compiler",
-                                                              "--add Microsoft.VisualStudio.Component.TextTemplating",
-                                                              "--add Microsoft.VisualStudio.Component.VC.CoreBuildTools",
-                                                              "--add Microsoft.VisualStudio.Component.VC.CoreIde",
-                                                              "--add Microsoft.VisualStudio.Component.VC.Redist.14.Latest",
-                                                              "--add Microsoft.VisualStudio.ComponentGroup.NativeDesktop.Core",
-                                                              "--add Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
-                                                              "--add Microsoft.VisualStudio.Component.Windows11SDK.22621")
-
-
-          echo "Downloading Visual Studio installer from $VC_DOWNLOAD_LINK."
-          curl.exe --retry 3 -kL $VC_DOWNLOAD_LINK --output vs_installer.exe
-          if ($LASTEXITCODE -ne 0) {
-              echo "Download of the VS ${env:VC_YEAR} Version ${env:VC_VERSION} installer failed"
-              exit 1
-          }
-          $InstallationPath = ${env:VC_INSTALL_PATH}
-          $VC_INSTALL_ARGS = "--installPath `"$InstallationPath`"" + " " + $VC_INSTALL_ARGS
-          echo "Installing Visual Studio version ${env:VC_VERSION} in $InstallationPath."
-          $process = Start-Process "${PWD}\vs_installer.exe" -ArgumentList $VC_INSTALL_ARGS -NoNewWindow -Wait -PassThru
-          Remove-Item -Path vs_installer.exe -Force
-          $exitCode = $process.ExitCode
-          if (($exitCode -ne 0) -and ($exitCode -ne 3010)) {
-              echo "VS ${env:VC_YEAR} installer exited with code $exitCode, which should be one of [0, 3010]."
-              exit 1
-          }
+          powershell .github/scripts/windows/install_vs2022.ps1
       - name: Build Triton wheel
         env:
           IS_RELEASE_TAG: ${{ startsWith(github.event.ref, 'refs/tags/v') }}
