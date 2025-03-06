@@ -301,7 +301,6 @@ S390X_TESTLIST = [
     "inductor/test_autoheuristic",
     "inductor/test_b2b_gemm",
     "inductor/test_benchmarking",
-    "inductor/test_best_config",
     "inductor/test_ck_backend",
     "inductor/test_codecache",
     "inductor/test_codegen_triton",
