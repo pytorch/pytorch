@@ -8,6 +8,7 @@
 #include <arm_compute/core/TensorInfo.h>
 #include <arm_compute/function_info/ActivationLayerInfo.h>
 #include <arm_compute/runtime/NEON/functions/NEActivationLayer.h>
+#include <arm_compute/runtime/NEON/functions/NEArithmeticAddition.h>
 #include <arm_compute/runtime/NEON/functions/NEGEMMLowpMatrixMultiplyCore.h>
 #include <arm_compute/runtime/NEON/functions/NEQuantizationLayer.h>
 #include <arm_compute/runtime/Tensor.h>
@@ -119,6 +120,21 @@ struct StaticQuantMatmul : public QuantMatmul {
  private:
   std::optional<arm_compute::Tensor> bia_q_tensor_;
   std::optional<at::Tensor> bia_q_tensor_orig_;
+};
+
+struct ACLInt8Add {
+  arm_compute::Tensor qa_acl_tensor;
+  arm_compute::Tensor qb_acl_tensor;
+  arm_compute::Tensor qdst_acl_tensor;
+  arm_compute::NEArithmeticAddition acl_add;
+
+  ~ACLInt8Add() {
+    // This will free memory allocated for the quantized src tensor since the
+    // allocation happened through ACL: src_s8_tensor.allocator()->allocate()
+    qa_acl_tensor.allocator()->free();
+    qb_acl_tensor.allocator()->free();
+    qdst_acl_tensor.allocator()->free();
+  }
 };
 
 } // namespace at::native::acl_utils
