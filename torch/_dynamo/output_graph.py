@@ -1039,9 +1039,9 @@ class OutputGraph:
                     )
                 else:
                     prefix_insts.append(copy.copy(inst))
-        assert not (
-            self.pregraph_bytecode and self.export
-        ), "export does not support pregraph_bytecode"
+        assert not (self.pregraph_bytecode and self.export), (
+            "export does not support pregraph_bytecode"
+        )
         prefix_insts.extend(self.pregraph_bytecode)
         alias_insts, overridden_sources = self.handle_aliases_for_stolen_lists(tx)
         prefix_insts.extend(alias_insts)
@@ -2239,9 +2239,9 @@ class SubgraphTracer(fx.Tracer):
             for arg in flat_args:
                 if not isinstance(arg, torch.fx.Node):
                     continue
-                assert (
-                    arg.graph == self.graph
-                ), "create_node using arg not from this SubgraphTracer"
+                assert arg.graph == self.graph, (
+                    "create_node using arg not from this SubgraphTracer"
+                )
 
         node = super().create_node(op, target, args, kwargs, name, type_expr)
         node.meta["creation_timestamp"] = self.output_graph.timestamp
@@ -2283,9 +2283,9 @@ class SubgraphTracer(fx.Tracer):
             before,
         )
         if source is None:
-            assert (
-                self.parent is not None
-            ), f"you are required to provide a source for inputs {name} example_val {example_value} on the root tracer"
+            assert self.parent is not None, (
+                f"you are required to provide a source for inputs {name} example_val {example_value} on the root tracer"
+            )
 
         # Note [Export inputs must be explicitly passed in]
         # In eager, we are generally OK with adding graph inputs whenever we
@@ -2365,9 +2365,9 @@ class SubgraphTracer(fx.Tracer):
     def lift_tracked_freevar_to_input(self, proxy):
         # You're doing something wrong if we are the root SubgraphTracer because
         # Dynamo adds tensors to graph inputs before creating a proxy for them.
-        assert (
-            self.parent is not None
-        ), "lift_tracked_freevar_to_input should not be called on root SubgraphTracer"
+        assert self.parent is not None, (
+            "lift_tracked_freevar_to_input should not be called on root SubgraphTracer"
+        )
 
         example_value = proxy.node.meta["example_value"]
 
@@ -2677,9 +2677,9 @@ class SubgraphTracer(fx.Tracer):
             if isinstance(proxy, LazyProxy):
                 proxy = proxy()
                 self.bound_symbols[s0] = proxy
-            assert (
-                isinstance(proxy, torch.fx.Proxy) and proxy.tracer is self
-            ), f"The proxy of symbol {s0} doesn't belong to current tracer."
+            assert isinstance(proxy, torch.fx.Proxy) and proxy.tracer is self, (
+                f"The proxy of symbol {s0} doesn't belong to current tracer."
+            )
         # Sort the symbols so that we can have a deterministic lifting order
         return sorted(to_be_bound, key=lambda s: s.name)
 
