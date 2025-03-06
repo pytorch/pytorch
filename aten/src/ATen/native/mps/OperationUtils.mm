@@ -973,13 +973,8 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
   using namespace mps;
   @autoreleasepool {
     id<MTLComputePipelineState> cplState = nil;
-    if (c10::isComplexType(inputTensor.scalar_type())) {
-      auto scalarStr = inputTensor.scalar_type() == kComplexFloat ? "float" : "half";
-      cplState = getPipelineStateForFunc(fmt::format("{}_complex_{}_{}", name, scalarStr, scalarStr));
-    } else {
-      cplState = getPipelineStateForFunc(
-          fmt::format("{}_{}_{}", name, scalarToMetalTypeString(outputTensor), scalarToMetalTypeString(inputTensor)));
-    }
+    cplState = getPipelineStateForFunc(fmt::format(
+        "{}_dense_{}_{}", name, scalarToMetalTypeString(outputTensor), scalarToMetalTypeString(inputTensor)));
 
     if (!outputTensor.is_contiguous()) {
       outputTensor = outputTensor.contiguous();
