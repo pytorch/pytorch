@@ -133,7 +133,7 @@ PYTHON_TO_CPP = {
 }
 
 CONTAINER_PYTHON_TO_CPP = {
-    "List": "std::vector",
+    "List": "c10::ArrayRef",
     "Optional": "std::optional",
 }
 
