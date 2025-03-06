@@ -1279,6 +1279,8 @@ class FakeTensorMode(TorchDispatchMode):
             torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE) is None
         ), func
         try:
+            from torch.utils._traceback import CapturedTraceback
+            # print(''.join(CapturedTraceback.extract(cpp=True).format()))
             return self.dispatch(func, types, args, kwargs)
         except TypeError:
             log.exception("fake tensor raised TypeError")

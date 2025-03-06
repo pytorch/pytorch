@@ -30,6 +30,7 @@
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 #include <optional>
+#include <iostream>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -1992,16 +1993,24 @@ Tensor reshape_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
   if (self.is_sparse()) {
     TORCH_CHECK(false, "reshape is not implemented for sparse tensors");
   }
+  using namespace std;
+  cout<<"laith look here"<<endl;
+  // auto dd = self.is_contiguous();
+  // auto numel = dd.numel();
 
+  cout<<"self.is_contiguous()"<<self.is_contiguous()<<endl;
   if (self.is_contiguous() && !self.is_mkldnn()) {
     return self.view_symint(proposed_shape);
   }
+  cout<<"laith look here2"<<endl;
 
   c10::SymDimVector shape = infer_size_dv(proposed_shape, self.sym_numel());
+  cout<<"laith look here3"<<endl;
 
   if (self.is_mkldnn()) {
     return at::_mkldnn_reshape(self, C10_AS_INTARRAYREF_SLOW(shape));
   }
+  cout<<"laith look here4"<<endl;
 
   // `computeStride` returns the proper strides to use if this
   // `reshape` can be just a view.
@@ -2017,6 +2026,8 @@ Tensor reshape_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
   //     we've already done, and instead call our internal/private operator
   //     `_reshape_alias` that essentially does the same thing as `view` and
   //     `as_strided` without any of the extra overhead.
+  cout<<"laith look here5"<<endl;
+
   if (stride.has_value()) {
     // Temporary check to revert to the old behavior/view in cases where the
     // device is not supported (e.g. for XLA the operation is not supported

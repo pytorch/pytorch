@@ -3696,7 +3696,7 @@ def repeat(a: Tensor, *repeat_shape) -> Tensor:
 
 
 def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorLikeType:
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious, sym_eq
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious, sym_eq,guard_or_false,guard_or_true
 
     # Creates a valid shape
     shape = utils.extract_shape_from_varargs(shape, validate=False)
@@ -3784,6 +3784,13 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
         end = idx
         while guard_size_oblivious(accum % length != 0):
             end = end + 1
+            if end == len(a_.shape):
+                if allow_copy:
+                    return prims.reshape(a, shape)
+                else:
+                    msg = f"Cannot view a tensor with shape {a.shape} and strides {a.stride()} as a tensor with shape {shape}!"
+                    raise ValueError(msg)
+
             accum = accum * a_.shape[end]
         if end != idx:
             # NOTE: in this case multiple dimensions must be flatten to create the desired dimension

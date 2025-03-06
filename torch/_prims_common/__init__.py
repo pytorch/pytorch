@@ -920,6 +920,8 @@ def infer_size_shapes(a: ShapeType, b: ShapeType) -> tuple[int, ...]:
 
 
 def infer_size(shape: ShapeType, numel: int) -> tuple[int, ...]:
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious, guard_or_false, guard_or_true
+
     """
     Infers the size of a dim with size -1, if it exists.
     Also checks that new shape is compatible with the number of elements.
@@ -1810,7 +1812,7 @@ def compute_required_storage_length(
     40
 
     """
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious, guard_or_false, guard_or_true
 
     # Short-circuits if the shape has no elements
     if guard_size_oblivious(reduce(operator.mul, shape, 1) == 0):

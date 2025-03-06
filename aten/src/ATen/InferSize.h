@@ -36,26 +36,29 @@ inline void infer_size_impl(
       TORCH_CHECK(false, "invalid shape dimension ", shape[dim]);
     }
   }
+  // Do this early to avoid hitting data dependent erros when not needed.
+  if (!infer_dim) {
+    return;
+  }
 
   if (TORCH_GUARD_SIZE_OBLIVIOUS(sym_eq(numel, newsize)) ||
       (infer_dim && newsize > 0 && numel % newsize == 0)) {
-    if (infer_dim) {
-      // We have a degree of freedom here to select the dimension size; follow
-      // NumPy semantics and just bail.  However, a nice error message is needed
-      // because users often use `view` as a way to flatten & unflatten
-      // dimensions and will otherwise be confused why
-      //   empty_tensor.view( 0, 0)
-      // works yet
-      //   empty_tensor.view(-1, 0)
-      // doesn't.
-      TORCH_CHECK(
-          newsize != 0,
-          "cannot reshape tensor of 0 elements into shape ",
-          shape,
-          " because the unspecified dimension size -1 can be any "
-          "value and is ambiguous");
-      res[*infer_dim] = numel / newsize;
-    }
+    // We have a degree of freedom here to select the dimension size; follow
+    // NumPy semantics and just bail.  However, a nice error message is needed
+    // because users often use `view` as a way to flatten & unflatten
+    // dimensions and will otherwise be confused why
+    //   empty_tensor.view( 0, 0)
+    // works yet
+    //   empty_tensor.view(-1, 0)
+    // doesn't.
+    TORCH_CHECK(
+        newsize != 0,
+        "cannot reshape tensor of 0 elements into shape ",
+        shape,
+        " because the unspecified dimension size -1 can be any "
+        "value and is ambiguous");
+    res[*infer_dim] = numel / newsize;
+  
     return;
   }
 

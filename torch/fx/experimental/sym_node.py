@@ -572,6 +572,7 @@ class SymNode:
         """
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
+        # breakpoint()
         r = self.shape_env.evaluate_expr(
             self.expr,
             self.hint,

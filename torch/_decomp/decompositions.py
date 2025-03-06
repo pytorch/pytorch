@@ -15,6 +15,7 @@ import torch
 import torch._meta_registrations
 import torch._prims as prims
 import torch._prims_common as utils
+from torch.fx.experimental.symbolic_shapes import statically_known_true
 import torch.nn.functional as F
 from torch import sym_float, sym_int, Tensor
 from torch._decomp import register_decomposition
@@ -1673,6 +1674,8 @@ def native_layer_norm_backward(
     M = prod(outer_dims)  # type: ignore[arg-type]
     from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
 
+    # This used to be  if guard_size_oblivious(M <= 0) or guard_size_oblivious(N <= 0)
+    # statically_known_true(M>=0) or statically_known_true(N>=0)
     if guard_size_oblivious(M <= 0) or guard_size_oblivious(N <= 0):
         return (
             input.new_zeros(input_shape) if output_mask[0] else None,
