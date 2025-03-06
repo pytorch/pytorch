@@ -66,7 +66,9 @@ def aoti_compile_and_package(
     .. code-block:: python
 
         ep = torch.export.export(M(), ...)
-        aoti_file = torch._inductor.aoti_compile_and_package(ep, package_path="my_package.pt2")
+        aoti_file = torch._inductor.aoti_compile_and_package(
+            ep, package_path="my_package.pt2"
+        )
         compiled_model = torch._inductor.aoti_load_package("my_package.pt2")
 
     To compile and save multiple models into a single ``.pt2`` artifact, you can do
@@ -75,11 +77,16 @@ def aoti_compile_and_package(
     .. code-block:: python
 
         ep1 = torch.export.export(M1(), ...)
-        aoti_file1 = torch._inductor.aot_compile(ep1, ..., options={"aot_inductor.package": True})
+        aoti_file1 = torch._inductor.aot_compile(
+            ep1, ..., options={"aot_inductor.package": True}
+        )
         ep2 = torch.export.export(M2(), ...)
-        aoti_file2 = torch._inductor.aot_compile(ep2, ..., options={"aot_inductor.package": True})
+        aoti_file2 = torch._inductor.aot_compile(
+            ep2, ..., options={"aot_inductor.package": True}
+        )
 
         from torch._inductor.package import package_aoti, load_package
+
         package_aoti("my_package.pt2", {"model1": aoti_file1, "model2": aoti_file2})
 
         compiled_model1 = load_package("my_package.pt2", "model1")
@@ -123,7 +130,9 @@ def aoti_compile_and_package(
             isinstance(package_path, (str, os.PathLike))
             and os.fspath(package_path).endswith(".pt2")
         )
-    ), f"Expect package path to be a file ending in .pt2, is None, or is a buffer. Instead got {package_path}"
+    ), (
+        f"Expect package path to be a file ending in .pt2, is None, or is a buffer. Instead got {package_path}"
+    )
 
     inductor_configs = inductor_configs or {}
     inductor_configs["aot_inductor.package"] = True
@@ -168,9 +177,9 @@ def _aoti_compile_and_package_inner(
     """
 
     if check_accuracy:
-        assert (
-            kwargs is None or len(kwargs) == 0
-        ), "when checking for accuracy, the inputs must have been flattened and kwargs is None"
+        assert kwargs is None or len(kwargs) == 0, (
+            "when checking for accuracy, the inputs must have been flattened and kwargs is None"
+        )
 
     from .package import package_aoti
 
