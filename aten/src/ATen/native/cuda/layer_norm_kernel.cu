@@ -1151,8 +1151,12 @@ void
   if (partial_reduction || (blockDim.y == 1 && gridDim.y == 1)) {
     if (aligned_grid || thread_x < N) {
       int64_t thread_y = blockIdx.y * blockDim.y + threadIdx.y;
-      dg[thread_y * N + thread_x] = dg_sum;
-      db[thread_y * N + thread_x] = db_sum;
+      if (dg) {
+        dg[thread_y * N + thread_x] = dg_sum;
+      }
+      if (db) {
+        db[thread_y * N + thread_x] = db_sum;
+      }
     }
   } else {
     // The caller requested a full reduction so we must reduce across
