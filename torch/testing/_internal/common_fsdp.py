@@ -74,9 +74,10 @@ elif TEST_XPU:
     DEVICE_TYPE = "xpu"
 else:
     DEVICE_TYPE = "cpu"
-
 DISTRIBUTED_BACKEND = dist.get_default_backend_for_device(DEVICE_TYPE)
 DEVICE_COUNT = torch.get_device_module(DEVICE_TYPE).device_count()
+
+
 class FSDPInitMode(Enum):
     # No FSDP wrapping
     NO_FSDP = auto()
