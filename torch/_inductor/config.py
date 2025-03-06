@@ -1251,7 +1251,7 @@ class cuda:
     version: Optional[str] = None
 
     # Optimization level for the host compiler.
-    compile_opt_level: Literal["-O0", "-O1", "-O2", "-O3", "-OS"] = "-O1"
+    compile_opt_level: Literal["-O0", "-O1", "-O2", "-O3", "-OS"] = "-O3"
 
     # Whether to enable device LTO (link-time-optimization).
     enable_cuda_lto = False
