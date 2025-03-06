@@ -3,7 +3,7 @@ from torch import Tensor
 
 
 lib = torch.library.Library("libtorch_agnostic", "FRAGMENT")
-lib.define("sgd_out_of_place(Tensor param, Tensor grad, float weight_decay, float lr, bool maximize) -> Tensor")
+# lib.define("sgd_out_of_place(Tensor param, Tensor grad, float weight_decay, float lr, bool maximize) -> Tensor")
 
 
 def sgd_out_of_place(param, grad, weight_decay, lr, maximize) -> Tensor:
@@ -24,4 +24,6 @@ def sgd_out_of_place(param, grad, weight_decay, lr, maximize) -> Tensor:
         a 1D float Tensor the same shape as param
 
     """
-    return torch.ops.libtorch_agnostic.sgd_out_of_place.default(param, grad, weight_decay, lr, maximize)
+    return torch.ops.libtorch_agnostic.sgd_out_of_place.default(
+        param, grad, weight_decay, lr, maximize
+    )

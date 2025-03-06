@@ -503,7 +503,6 @@ endif()
 list(APPEND TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/autograd/FunctionsManual.cpp
   ${TORCH_SRC_DIR}/csrc/utils/out_types.cpp
-  ${TORCH_SRC_DIR}/library_stable_impl.cpp
 )
 
 if(NOT INTERN_DISABLE_AUTOGRAD AND NOT BUILD_LITE_INTERPRETER)

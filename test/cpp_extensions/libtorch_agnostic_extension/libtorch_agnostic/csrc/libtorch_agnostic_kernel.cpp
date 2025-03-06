@@ -2,10 +2,6 @@
 #include <torch/csrc/inductor/aoti_runtime/utils.h>
 #include <torch/library_stable.h>
 
-
-// NEED TO DELETE, IS NOT STABLE!!!
-#include <c10/util/Exception.h>
-
 using RAIIATH = torch::aot_inductor::RAIIAtenTensorHandle;
 
 void inline sgd_math(
@@ -35,7 +31,7 @@ RAIIATH sgd_out_of_place(
     const float weight_decay,
     const double lr,
     const bool maximize) {
-  
+
   int64_t param_dim;
   aoti_torch_get_dim(param.get(), &param_dim);
 
@@ -46,7 +42,7 @@ RAIIATH sgd_out_of_place(
 
   int32_t param_dtype;
   aoti_torch_get_dtype(param.get(), &param_dtype);
-  
+
   int32_t param_device_type;
   int32_t param_device_index;
   aoti_torch_get_device_type(param.get(), &param_device_type);
@@ -68,7 +64,7 @@ RAIIATH sgd_out_of_place(
 
   int64_t param_numel;
   aoti_torch_get_numel(param.get(), &param_numel);
-  
+
   sgd_math(
     param_fp_ptr,
     grad_fp_ptr,
@@ -82,18 +78,8 @@ RAIIATH sgd_out_of_place(
   return RAIIATH(out);
 }
 
-template <typename T>
-uint64_t from(T val) {
-  static_assert(sizeof(T) <= sizeof(uint64_t), "StableLibrary stack does not support parameter types larger than 64 bits.");
-  return *reinterpret_cast<uint64_t*>(&val);
-}
 
-template <typename T>
-T to(uint64_t val) {
-  return *reinterpret_cast<T*>(&val);
-}
-
-void voidyvoid_boxed_ATH_sgd_out_of_place(uint64_t* stack, int64_t num_args, int64_t num_outputs) {
+void voidyvoid_boxed_ATH_sgd_out_of_place(StableIValue* stack, int64_t num_args, int64_t num_outputs) {
   RAIIATH param(to<AtenTensorHandle>(stack[0]));
   RAIIATH grad(to<AtenTensorHandle>(stack[1]));
   auto weight_decay = to<double>(stack[2]);
@@ -106,10 +92,14 @@ void voidyvoid_boxed_ATH_sgd_out_of_place(uint64_t* stack, int64_t num_args, int
     float(weight_decay),
     lr,
     maximize);
-  
+
   stack[num_args] = from(raiiath_res.release());
 }
 
+STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
+  m.def("sgd_out_of_place(Tensor param, Tensor grad, float weight_decay, float lr, bool maximize) -> Tensor");
+}
+
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CPU, m) {
-    m.impl("libtorch_agnostic::sgd_out_of_place", &voidyvoid_boxed_ATH_sgd_out_of_place);
+  m.impl("libtorch_agnostic::sgd_out_of_place", &voidyvoid_boxed_ATH_sgd_out_of_place);
 }
