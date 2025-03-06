@@ -232,6 +232,16 @@ def check_model_with_multiple_inputs(
         )
 
     if not same(list_actual, list_expected):
+        def f():
+            list_expected = [ref_model(*inputs) for inputs in ref_inputs]
+            list_actual = AOTIRunnerUtil.run_multiple(
+                self.device, model, list_example_inputs, options, dynamic_shapes
+            )
+            return same(list_actual, list_expected)
+
+        from torch._inductor.compiler_bisector import CompilerBisector
+        print(CompilerBisector.do_bisect(f))
+
         for i, example_inputs in enumerate(list_example_inputs):
             print("list_actual", list_actual[i])
             print("list_expected", list_expected[i])
