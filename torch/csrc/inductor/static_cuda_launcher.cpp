@@ -318,19 +318,17 @@ static PyObject* launch_kernel_inner(
   }
   Py_RETURN_NONE;
 }
-
-#define LAUNCH_KERNEL(N)    \
-launch_kernel_inner<N>(     \
-  func,                     \
-  gridX,                    \
-  gridY,                    \
-  gridZ,                    \
-  numWarps,                 \
-  sharedMemBytes,           \
-  argTypes,                 \
-  varArgs,                  \
-  cudaStream                \
-)                           \
+#define LAUNCH_KERNEL(N)  \
+  launch_kernel_inner<N>( \
+      func,               \
+      gridX,              \
+      gridY,              \
+      gridZ,              \
+      numWarps,           \
+      sharedMemBytes,     \
+      argTypes,           \
+      varArgs,            \
+      cudaStream)
 
 /**
  *  Main entrypoint function called at runtime; called like this in python land:
