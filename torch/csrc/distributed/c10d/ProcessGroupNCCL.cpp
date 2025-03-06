@@ -3586,8 +3586,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
   /* Note [cuda graph capture and workEnqueue]
 
   Normal behavior of the C10D watchdog is to query cuda events on work objects.
-  We disable this event query behavior as they are disallowed during capture
-  under the strictest capture mode setting.
+  We disable this event query behavior during graph capture as it is disallowed
+  during capture under the strictest capture mode setting.
   Note that previously recorded events (e.g., before the capture) can be queried
   as the watchdog capture mode has been changed to thread-local, but user-side
   event queries (from the main thread) via .is_completed() are still disallowed.
