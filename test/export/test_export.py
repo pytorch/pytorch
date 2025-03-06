@@ -9754,7 +9754,7 @@ graph():
     @testing.expectedFailureSerDerNonStrict  # register_constant needs to handle serialization
     @testing.expectedFailureSerDer  # register_constant needs to handle serialization
     def test_register_constant(self):
-        @dataclass
+        @dataclass(frozen=True)
         class MyInput:
             int_1: int
             int_2: int
@@ -11222,6 +11222,72 @@ graph():
         FileCheck().check_count("torch.ops.aten.sym_size.int", 2, exactly=True).run(
             ep.graph_module.code
         )
+
+    def test_shared_submodule_nn_module_stack(self):
+        class Shared(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                layernorm = torch.nn.LayerNorm(10)
+                self.sub_net = torch.nn.Sequential(
+                    layernorm,
+                    torch.nn.ReLU(),
+                    layernorm,
+                    torch.nn.ReLU(),
+                )
+
+            def forward(self, x):
+                return self.sub_net(x)
+
+        eager_module = Shared()
+        inps = (torch.rand(10),)
+        export_module = export(eager_module, inps, {})
+
+        nn_module_stacks = [
+            node.meta.get("nn_module_stack")
+            for node in export_module.graph.nodes
+            if node.op == "call_function" and "norm" in str(node.target)
+        ]
+        self.assertEqual(len(nn_module_stacks), 2)
+        filtered_nn_module_stack = [
+            list(nn_module_stack.values())[-1][0]
+            for nn_module_stack in nn_module_stacks
+        ]
+        self.assertEqual(filtered_nn_module_stack[0], "sub_net.0")
+        self.assertEqual(filtered_nn_module_stack[1], "sub_net.2")
+
+    def test_slice_nn_module_stack(self):
+        class N(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.n = N()
+                self.mod_list_1 = torch.nn.Sequential(*tuple(self.n for _ in range(5)))
+                self.mod_list_2 = torch.nn.ModuleList(self.n for _ in range(5))
+
+            def forward(self, x, y):
+                for m in self.mod_list_1[2:3]:
+                    x = m(x, y)
+                for m in self.mod_list_2[4:5]:
+                    x = m(x, y)
+                return x
+
+        export_module = export(M(), (torch.randn(8), torch.randn(8)))
+
+        nn_module_stacks = [
+            node.meta.get("nn_module_stack")
+            for node in export_module.graph.nodes
+            if node.op == "call_function" and "add" in str(node.target)
+        ]
+        self.assertEqual(len(nn_module_stacks), 2)
+        filtered_nn_module_stack = [
+            list(nn_module_stack.values())[-1][0]
+            for nn_module_stack in nn_module_stacks
+        ]
+        self.assertEqual(filtered_nn_module_stack[0], "mod_list_1.slice(2, 3, None).2")
+        self.assertEqual(filtered_nn_module_stack[1], "mod_list_2.slice(4, 5, None).0")
 
     def test_split_const_gm_with_lifted_constants(self):
         class Model(torch.nn.Module):

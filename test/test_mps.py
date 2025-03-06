@@ -4865,6 +4865,9 @@ class TestMPS(TestCaseMPS):
         # verify if changes in shape would cause cached graph lookup problems
         helper([7, 5, 2, 4, 6], 'sum')
         helper([8, 4, 5, 7, 6], 'mean')
+        helper((3, 3, 0), 'sum')
+        helper((3, 3, 0), 'mean')
+        helper((3, 3, 0), 'none')
 
     def test_mse_loss_strided_output(self):
         # https://github.com/pytorch/pytorch/issues/124621
@@ -8513,6 +8516,19 @@ class TestMPS(TestCaseMPS):
                 op(cpu_x, out=cpu_y)
                 op(mps_x, out=mps_y)
                 self.assertEqual(mps_y, cpu_y)
+
+                # test for non contiguous but dense input/output with similar strides
+                cpu_x = torch.randn(shape, device='cpu', dtype=dtype).mT
+                mps_x = cpu_x.to('mps')
+                cpu_y = torch.empty_like(cpu_x)
+                mps_y = cpu_y.to('mps')
+                op(cpu_x, out=cpu_y)
+                op(mps_x, out=mps_y)
+                self.assertEqual(mps_y, cpu_y)
+                # test for sliced inputs and outputs with similar strides
+                mps_x, mps_y = torch.randn((2, shape[0] * 2, shape[1] * 2), device='mps', dtype=dtype).unbind(0)
+                op(mps_x[::2, ::2], out=mps_y[::2, ::2])
+                self.assertEqual(mps_y[::2, ::2], op(mps_x[::2, ::2].contiguous()))
 
 
         helper((5, 5), torch.exp, False)
