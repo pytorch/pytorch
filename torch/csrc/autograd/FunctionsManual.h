@@ -641,7 +641,8 @@ Tensor linalg_lstsq_residuals_jvp(
     const Tensor& B_,
     const Tensor& dA,
     const Tensor& dB_,
-    const Tensor& X_);
+    const Tensor& X_,
+    const Tensor& L);
 std::tuple<Tensor, Tensor> triangular_solve_backward(
     const Tensor& grad_x,
     const Tensor& grad_m,
