@@ -144,34 +144,6 @@ def _set_compilation_env():
         torch._dynamo.config.allow_empty_graphs = _old_allow_empty_graphs
 
 
-def _detect_input_mutation(gm: torch.fx.GraphModule) -> bool:
-    example_inputs = [
-        ph.meta.get("val", None) for ph in gm.graph.find_nodes(op="placeholder")
-    ]
-    inp_mutation, _, _, _ = check_input_alias_and_mutation(gm, example_inputs)
-    if len(inp_mutation) > 0:
-        return True
-
-    for _, module in gm.named_children():
-        if isinstance(module, torch.fx.GraphModule):
-            if _detect_input_mutation(module):
-                return True
-
-    return False
-
-
-def _detect_input_alias(gm: torch.fx.GraphModule) -> bool:
-    example_inputs = [
-        ph.meta.get("val", None) for ph in gm.graph.find_nodes(op="placeholder")
-    ]
-    _, inp_inp_alias_map, inp_out_alias_map, _ = check_input_alias_and_mutation(
-        gm, example_inputs
-    )
-    if len(inp_out_alias_map) > 0 or len(inp_inp_alias_map) > 0:
-        return True
-    return False
-
-
 # The invariant here is that we always trace the branch with fake tensor
 def _maybe_fake_tracing(fn, inputs: list[Any], pre_dispatch):
     fake_mode = detect_fake_mode(inputs)
@@ -191,7 +163,7 @@ def _maybe_fake_tracing(fn, inputs: list[Any], pre_dispatch):
         )(*inputs)
 
 
-def has_potential_input_alias_or_mutation(gm, inputs, pre_dispatch=False):
+def potential_input_alias_or_mutation(gm, inputs, pre_dispatch=False):
     try:
         gm = _maybe_fake_tracing(gm, inputs, pre_dispatch)
     except UnsupportedAliasMutationException:
@@ -201,43 +173,34 @@ def has_potential_input_alias_or_mutation(gm, inputs, pre_dispatch=False):
     except Exception as e:
         raise e
 
-    return _detect_input_mutation(gm) or _detect_input_alias(gm)
+    example_inputs = [
+        ph.meta.get("val", None) for ph in gm.graph.find_nodes(op="placeholder")
+    ]
+    (
+        inp_inp_alias_map,
+        inp_out_alias_map,
+        out_out_alias_map,
+        inp_mutation,
+    ) = check_input_alias_and_mutation(gm, example_inputs)
+    return (inp_inp_alias_map, inp_out_alias_map, out_out_alias_map), inp_mutation
 
 
-def _has_potential_branch_input_mutation(branch, inputs, pre_dispatch=False):
-    """
-    Dispatch-trace the branch with inputs and check if
-    producing graph has mutable op on the input. This is
-    bit restrictive as the branch must be traceable.
-    """
-    try:
-        gm = _maybe_fake_tracing(branch, inputs, pre_dispatch)
-    except UnsupportedAliasMutationException:
-        # this can happen when nested cond_op is
-        # functionalized
-        return True
-    except Exception as e:
-        raise e
-
-    return _detect_input_mutation(gm)
-
-
-def _has_potential_branch_input_alias(branch, inputs, pre_dispatch=False):
-    """
-    Dispatch-trace the branch with inputs and check if
-    producing graph has output aliasing the branch input. This is
-    bit restrictive as the branch must be traceable.
-    """
-    try:
-        gm = _maybe_fake_tracing(branch, inputs, pre_dispatch)
-    except UnsupportedAliasMutationException:
-        # this can happen when nested cond_op is
-        # functionalized
-        return True
-    except Exception as e:
-        raise e
-
-    return _detect_input_alias(gm)
+def has_potential_input_alias_or_mutation(gm, inputs, pre_dispatch=False):
+    (
+        inp_inp_alias_map,
+        inp_out_alias_map,
+        out_out_alias_map,
+    ), inp_mutation = potential_input_alias_or_mutation(gm, inputs, pre_dispatch)
+    return (
+        any(
+            (
+                len(inp_inp_alias_map) > 0,
+                len(inp_out_alias_map) > 0,
+                len(out_out_alias_map) > 0,
+            )
+        ),
+        len(inp_mutation) > 0,
+    )
 
 
 def unique_graph_id(proxy_mode, prefix):
@@ -563,6 +526,8 @@ def validate_subgraph_args_types(lifted_args: Union[tuple[Any, ...], list[Any]])
     ), f"{lifted_args} can only be of {allowed_types} but got {tuple(type(arg) for arg in lifted_args)}"
 
 
+# TODO: Return a more detailed information as to which node
+# causes a mutation or an alias. This may requires a per operator tensor version checking
 def check_input_alias_and_mutation(
     gm: torch.fx.GraphModule,
     fake_args: list[FakeTensor],
@@ -629,4 +594,4 @@ def check_input_alias_and_mutation(
             for i, inp in enumerate(cloned)
             if isinstance(inp, torch.Tensor) and _tensor_storage(inp) in out_storage_map
         }
-        return mutated_inputs, inp_inp_alias_map, inp_out_alias_map, out_out_alias_map
+        return inp_inp_alias_map, inp_out_alias_map, out_out_alias_map, mutated_inputs
