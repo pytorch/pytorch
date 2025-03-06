@@ -1586,7 +1586,7 @@ class AOTInductorTestsTemplate:
 
     @common_utils.parametrize("dynamic", [False, True])
     def test_while_loop_with_conv(self, dynamic):
-        inputs = (torch.randn(2, 4, 4, 4, device=self.device),)
+        inputs = (torch.randn(2, 4, 4, 4, device=self.device, dtype=torch.float64),)
         dim0_ab = Dim("s0", min=2, max=1024)
         dynamic_shapes = None
         if dynamic:
