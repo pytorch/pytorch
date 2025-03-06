@@ -19,6 +19,11 @@ from torch.utils.backend_registration import (
 from torch.utils.cpp_backtrace import get_cpp_backtrace
 from torch.utils.throughput_benchmark import ThroughputBenchmark
 
+def __getattr__(name):
+    if name == 'checkpoint':
+        import torch.utils.checkpoint as checkpoint
+        return checkpoint
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
 def set_module(obj, mod):
     """
