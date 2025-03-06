@@ -1241,7 +1241,7 @@ jobs:
       GPU_ARCH_TYPE: xpu
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.0.2 | intel-cmplr-lib-ur==2025.0.2 | intel-cmplr-lic-rt==2025.0.2 | intel-sycl-rt==2025.0.2 | tcmlib==1.2.0 | umf==0.9.1 | intel-pti==0.10.0
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.0.4; platform_system == 'Linux' | intel-cmplr-lib-ur==2025.0.4; platform_system == 'Linux' | intel-cmplr-lic-rt==2025.0.4; platform_system == 'Linux' | intel-sycl-rt==2025.0.4; platform_system == 'Linux' | intel-cmplr-lib-rt==2025.0.5; platform_system == 'Windows' | intel-cmplr-lib-ur==2025.0.5; platform_system == 'Windows' | intel-cmplr-lic-rt==2025.0.5; platform_system == 'Windows' | intel-sycl-rt==2025.0.5; platform_system == 'Windows' | tcmlib==1.2.0 | umf==0.9.1 | intel-pti==0.10.1
     steps:
       - name: Display EC2 information
         shell: bash
@@ -2663,7 +2663,7 @@ jobs:
       GPU_ARCH_TYPE: xpu
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.0.2 | intel-cmplr-lib-ur==2025.0.2 | intel-cmplr-lic-rt==2025.0.2 | intel-sycl-rt==2025.0.2 | tcmlib==1.2.0 | umf==0.9.1 | intel-pti==0.10.0
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.0.4; platform_system == 'Linux' | intel-cmplr-lib-ur==2025.0.4; platform_system == 'Linux' | intel-cmplr-lic-rt==2025.0.4; platform_system == 'Linux' | intel-sycl-rt==2025.0.4; platform_system == 'Linux' | intel-cmplr-lib-rt==2025.0.5; platform_system == 'Windows' | intel-cmplr-lib-ur==2025.0.5; platform_system == 'Windows' | intel-cmplr-lic-rt==2025.0.5; platform_system == 'Windows' | intel-sycl-rt==2025.0.5; platform_system == 'Windows' | tcmlib==1.2.0 | umf==0.9.1 | intel-pti==0.10.1
     steps:
       - name: Display EC2 information
         shell: bash
@@ -4085,7 +4085,7 @@ jobs:
       GPU_ARCH_TYPE: xpu
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.11"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.0.2 | intel-cmplr-lib-ur==2025.0.2 | intel-cmplr-lic-rt==2025.0.2 | intel-sycl-rt==2025.0.2 | tcmlib==1.2.0 | umf==0.9.1 | intel-pti==0.10.0
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.0.4; platform_system == 'Linux' | intel-cmplr-lib-ur==2025.0.4; platform_system == 'Linux' | intel-cmplr-lic-rt==2025.0.4; platform_system == 'Linux' | intel-sycl-rt==2025.0.4; platform_system == 'Linux' | intel-cmplr-lib-rt==2025.0.5; platform_system == 'Windows' | intel-cmplr-lib-ur==2025.0.5; platform_system == 'Windows' | intel-cmplr-lic-rt==2025.0.5; platform_system == 'Windows' | intel-sycl-rt==2025.0.5; platform_system == 'Windows' | tcmlib==1.2.0 | umf==0.9.1 | intel-pti==0.10.1
     steps:
       - name: Display EC2 information
         shell: bash
@@ -5507,7 +5507,7 @@ jobs:
       GPU_ARCH_TYPE: xpu
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.12"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.0.2 | intel-cmplr-lib-ur==2025.0.2 | intel-cmplr-lic-rt==2025.0.2 | intel-sycl-rt==2025.0.2 | tcmlib==1.2.0 | umf==0.9.1 | intel-pti==0.10.0
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.0.4; platform_system == 'Linux' | intel-cmplr-lib-ur==2025.0.4; platform_system == 'Linux' | intel-cmplr-lic-rt==2025.0.4; platform_system == 'Linux' | intel-sycl-rt==2025.0.4; platform_system == 'Linux' | intel-cmplr-lib-rt==2025.0.5; platform_system == 'Windows' | intel-cmplr-lib-ur==2025.0.5; platform_system == 'Windows' | intel-cmplr-lic-rt==2025.0.5; platform_system == 'Windows' | intel-sycl-rt==2025.0.5; platform_system == 'Windows' | tcmlib==1.2.0 | umf==0.9.1 | intel-pti==0.10.1
     steps:
       - name: Display EC2 information
         shell: bash
@@ -6929,7 +6929,7 @@ jobs:
       GPU_ARCH_TYPE: xpu
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.13"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.0.2 | intel-cmplr-lib-ur==2025.0.2 | intel-cmplr-lic-rt==2025.0.2 | intel-sycl-rt==2025.0.2 | tcmlib==1.2.0 | umf==0.9.1 | intel-pti==0.10.0
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.0.4; platform_system == 'Linux' | intel-cmplr-lib-ur==2025.0.4; platform_system == 'Linux' | intel-cmplr-lic-rt==2025.0.4; platform_system == 'Linux' | intel-sycl-rt==2025.0.4; platform_system == 'Linux' | intel-cmplr-lib-rt==2025.0.5; platform_system == 'Windows' | intel-cmplr-lib-ur==2025.0.5; platform_system == 'Windows' | intel-cmplr-lic-rt==2025.0.5; platform_system == 'Windows' | intel-sycl-rt==2025.0.5; platform_system == 'Windows' | tcmlib==1.2.0 | umf==0.9.1 | intel-pti==0.10.1
     steps:
       - name: Display EC2 information
         shell: bash
@@ -8351,7 +8351,7 @@ jobs:
       GPU_ARCH_TYPE: xpu
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.13t"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.0.2 | intel-cmplr-lib-ur==2025.0.2 | intel-cmplr-lic-rt==2025.0.2 | intel-sycl-rt==2025.0.2 | tcmlib==1.2.0 | umf==0.9.1 | intel-pti==0.10.0
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.0.4; platform_system == 'Linux' | intel-cmplr-lib-ur==2025.0.4; platform_system == 'Linux' | intel-cmplr-lic-rt==2025.0.4; platform_system == 'Linux' | intel-sycl-rt==2025.0.4; platform_system == 'Linux' | intel-cmplr-lib-rt==2025.0.5; platform_system == 'Windows' | intel-cmplr-lib-ur==2025.0.5; platform_system == 'Windows' | intel-cmplr-lic-rt==2025.0.5; platform_system == 'Windows' | intel-sycl-rt==2025.0.5; platform_system == 'Windows' | tcmlib==1.2.0 | umf==0.9.1 | intel-pti==0.10.1
     steps:
       - name: Display EC2 information
         shell: bash
