@@ -1368,13 +1368,11 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
         # Collect the results from the comnbine_fn
-        # results = combine_result.unpack_var_sequence(tx)
         results, _combine_treespec = _make_inlined(tx, pytree.tree_flatten)(
             combine_result
         ).unpack_var_sequence(tx)
 
         # Check whether the combine_fn returns one child tree for the output.
-        # if len(results.items) < 1:
         if _combine_treespec.as_python_constant().num_leaves < 1:
             unimplemented(
                 f"combine_fn needs to produce one pytree for the output "
