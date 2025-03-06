@@ -19,7 +19,6 @@ from collections import namedtuple
 from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import torch
-from torch._C import _StaticCudaLauncher
 from torch._prims_common import compute_required_storage_length
 from torch.utils._ordered_set import OrderedSet
 
@@ -2342,6 +2341,10 @@ class StaticallyLaunchedCudaKernel:
     """
 
     def __init__(self, kernel: CompiledKernel):
+        # TODO: Can only import this if we know torch was compiled with CUDA
+        # Maybe we make a class that just errors otherwise?
+        from torch._C import _StaticCudaLauncher
+
         self.cubin = kernel.asm["cubin"]
         # TODO: is this right?
         self.name = kernel.src.fn.__name__
@@ -2361,6 +2364,8 @@ class StaticallyLaunchedCudaKernel:
             )
 
     def load_kernel(self):
+        from torch._C import _StaticCudaLauncher
+
         assert hasattr(self, "cubin_path")
         if self.function is not None:
             return

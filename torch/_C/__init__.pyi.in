@@ -2526,6 +2526,13 @@ class _NodeIter(Iterator):
 
 # Defined in torch/csrc/inductor/static_cuda_launcher.cpp
 class _StaticCudaLauncher:
+    def _load_kernel(
+        cubin_file: str,
+        func_name: str,
+        shared_mem_bytes: int,
+    ) -> tuple[int, int, int]:
+        ...
+
     def _launch_cuda_kernel_1(
         cubin_path: str,
         kernel_name: str,
@@ -2533,9 +2540,9 @@ class _StaticCudaLauncher:
         grid_y: int,
         grid_z: int,
         num_warps: int,
-        sharedMemBytes: int,
+        shared_mem_bytes: int,
         arg_types: str,
-        args: Tuple[Any]
+        args: Tuple[Any],
         stream: int,
     ) ->  None: ...
 
@@ -2546,7 +2553,7 @@ class _StaticCudaLauncher:
         grid_y: int,
         grid_z: int,
         num_warps: int,
-        sharedMemBytes: int,
+        shared_mem_bytes: int,
         arg_types: str,
         args: Tuple[Any, Any],
         stream: int,
@@ -2559,7 +2566,7 @@ class _StaticCudaLauncher:
         grid_y: int,
         grid_z: int,
         num_warps: int,
-        sharedMemBytes: int,
+        shared_mem_bytes: int,
         arg_types: str,
         args: Tuple[Any, Any, Any],
         stream: int,
@@ -2572,7 +2579,7 @@ class _StaticCudaLauncher:
             grid_y: int,
             grid_z: int,
             num_warps: int,
-            sharedMemBytes: int,
+            shared_mem_bytes: int,
             arg_types: str,
             args: Tuple[Any, Any, Any],
             stream: int,
@@ -2585,7 +2592,7 @@ class _StaticCudaLauncher:
             grid_y: int,
             grid_z: int,
             num_warps: int,
-            sharedMemBytes: int,
+            shared_mem_bytes: int,
             arg_types: str,
             args: Tuple[Any, Any, Any],
             stream: int,
@@ -2598,7 +2605,7 @@ class _StaticCudaLauncher:
         grid_y: int,
         grid_z: int,
         num_warps: int,
-        sharedMemBytes: int,
+        shared_mem_bytes: int,
         arg_types: str,
         args: Tuple[Any, Any, Any],
         stream: int,
@@ -2611,7 +2618,7 @@ class _StaticCudaLauncher:
             grid_y: int,
             grid_z: int,
             num_warps: int,
-            sharedMemBytes: int,
+            shared_mem_bytes: int,
             arg_types: str,
             args: Tuple[Any, Any, Any],
             stream: int,
@@ -2624,7 +2631,7 @@ class _StaticCudaLauncher:
             grid_y: int,
             grid_z: int,
             num_warps: int,
-            sharedMemBytes: int,
+            shared_mem_bytes: int,
             arg_types: str,
             args: Tuple[Any, Any, Any],
             stream: int,
@@ -2637,7 +2644,7 @@ class _StaticCudaLauncher:
             grid_y: int,
             grid_z: int,
             num_warps: int,
-            sharedMemBytes: int,
+            shared_mem_bytes: int,
             arg_types: str,
             args: Tuple[Any, Any, Any],
             stream: int,
@@ -2650,7 +2657,7 @@ class _StaticCudaLauncher:
             grid_y: int,
             grid_z: int,
             num_warps: int,
-            sharedMemBytes: int,
+            shared_mem_bytes: int,
             arg_types: str,
             args: Tuple[Any, Any, Any],
             stream: int,

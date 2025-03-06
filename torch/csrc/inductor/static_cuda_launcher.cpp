@@ -35,7 +35,7 @@
   This launcher is paired with StaticallyLaunchedCudaKernel in
   triton_heuristics.py.
 
-  TODO: 
+  TODO:
   - Handle CutensorMap, NvtmDesc
   - Handle launch_enter and launch_exit hooks (in python maybe?)
  */
@@ -319,8 +319,8 @@ static PyObject* launch_kernel(PyObject* self, PyObject* args) {
           &stream)) {
     return nullptr;
   }
-  CUfunction func = reinterpret_cast<CUfunction>(func_ptr);
-  cudaStream_t cudaStream = reinterpret_cast<cudaStream_t>(stream);
+  CUfunction func = reinterpret_cast<CUfunction>(func_ptr); // NOLINT
+  cudaStream_t cudaStream = reinterpret_cast<cudaStream_t>(stream); // NOLINT
   try {
     // Launch the kernel
     // Prepare the arguments for the kernel
