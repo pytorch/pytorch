@@ -232,7 +232,14 @@ def check_model_with_multiple_inputs(
         )
 
     if not same(list_actual, list_expected):
+
         def f():
+            list_expected = [ref_model(*inputs) for inputs in ref_inputs]
+            list_actual = [torch.compile(ref_model)(*inputs) for inputs in ref_inputs]
+            return same(list_actual, list_expected)
+
+        # This bisector is saying eager is wrong
+        def aot_f():
             list_expected = [ref_model(*inputs) for inputs in ref_inputs]
             list_actual = AOTIRunnerUtil.run_multiple(
                 self.device, model, list_example_inputs, options, dynamic_shapes
@@ -240,6 +247,7 @@ def check_model_with_multiple_inputs(
             return same(list_actual, list_expected)
 
         from torch._inductor.compiler_bisector import CompilerBisector
+
         print(CompilerBisector.do_bisect(f))
 
         for i, example_inputs in enumerate(list_example_inputs):
