@@ -1072,8 +1072,7 @@ def _is_valid_woq_optimization_pattern():
     def fn(match):
         assert all(k in match.kwargs for k in ("x", "weight", "scales"))
         if not all(
-            hasattr(match.kwargs[key], "meta") 
-            for key in ["x", "weight", "scales"]
+            hasattr(match.kwargs[key], "meta") for key in ["x", "weight", "scales"]
         ):
             return False
         x = match.kwargs["x"].meta["val"]
