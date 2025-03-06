@@ -83,7 +83,7 @@ bool can_accumulate_inplace(const Variable& v) {
       v.storage().use_count() == 1);
 }
 
-inline void sync_streams(
+void sync_streams(
     std::optional<c10::Stream>& stream_be_synced,
     std::optional<c10::Stream>& sync_stream,
     Variable& var,
@@ -143,7 +143,7 @@ static void accumulate(
   }
 }
 
-void execute_accumulation(
+static void execute_accumulation(
     std::vector<Variable>& buffer,
     size_t pos,
     Variable&& var,
