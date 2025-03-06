@@ -57,10 +57,10 @@ def get_all(store, rank: int, prefix: str, world_size: int):
 
     ::
 
-     values = get_all(store, 'torchelastic/data', 3)
-     value1 = values[0] # retrieves the data for key torchelastic/data0
-     value2 = values[1] # retrieves the data for key torchelastic/data1
-     value3 = values[2] # retrieves the data for key torchelastic/data2
+     values = get_all(store, "torchelastic/data", 3)
+     value1 = values[0]  # retrieves the data for key torchelastic/data0
+     value2 = values[1]  # retrieves the data for key torchelastic/data1
+     value3 = values[2]  # retrieves the data for key torchelastic/data2
 
     """
     data_arr = store.multi_get([f"{prefix}{idx}" for idx in range(world_size)])

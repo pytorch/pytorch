@@ -179,7 +179,7 @@ class _WeakRefInfo:
             t (torch.Tensor): The tensor to extract storages from.
 
         Returns:
-            Set[torch.UntypedStorage]: A set of untyped storages.
+            set[torch.UntypedStorage]: A set of untyped storages.
         """
         unflattened_tensors = [t]
         flattened_tensor_storages = set()
@@ -379,7 +379,7 @@ class MemTracker(TorchDispatchMode):
                 optimizer.step()
                 optimizer.zero_grad()
             mt.display_snapshot("peak")
-            mt.display_modulewise_snapshots(depth = 3, units = "MiB")
+            mt.display_modulewise_snapshots(depth=3, units="MiB")
 
     Known Limitations:
         - The ``MemTracker`` does not track memory for tensors that bypass the ``TorchDispatchMode`` ex. under ``no_dispatch``.
