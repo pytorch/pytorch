@@ -146,6 +146,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         return self._skip["freezing"]["cuda"]
 
     @property
+    def disable_cudagraph_models(self):
+        return self._config["disable_cudagraph"]
+
+    @property
     def skip_models_for_freezing_cpu(self):
         return self._skip["freezing"]["cpu"]
 

@@ -41,10 +41,11 @@ TORCH_SDT_DEFINE_SEMAPHORE(free)
 
 namespace c10 {
 
-C10_DEFINE_REGISTRY(FreeCudaMemoryCallbacksRegistry, FreeMemoryCallback);
+C10_DEFINE_REGISTRY(FreeCudaMemoryCallbacksRegistry, FreeMemoryCallback)
 
 namespace cuda::CUDACachingAllocator {
 
+using namespace c10::CachingAllocator;
 using namespace c10::CachingDeviceAllocator;
 
 // Included here as this is externally used in CUDAAllocatorConfig
@@ -855,7 +856,7 @@ BlockState::BlockState(Block* block)
   TORCH_CHECK(
       block->event_count == 0,
       "Events should have synchronized when checkpointing block");
-};
+}
 
 SegmentState::SegmentState(Block* head) {
   TORCH_INTERNAL_ASSERT(head->prev == nullptr && head->pool != nullptr);
