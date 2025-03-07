@@ -223,7 +223,15 @@ class AOTInductorModelContainer {
 
   bool _should_skip_update(const size_t idx) const {
     auto constant_type = models_[0]->constant_type(static_cast<int64_t>(idx));
+    // We should skip constants
     return constant_type == ConstantType::TensorConstant;
+  }
+
+  bool _could_skip_update(const size_t idx) const {
+    auto constant_type = models_[0]->constant_type(static_cast<int64_t>(idx));
+    // Buffer can be optionally skipped, so if it not provided by upstream
+    // services, it is OK to relax the check.
+    return constant_type == ConstantType::Buffer;
   }
 
   void assert_all_constants(
@@ -238,10 +246,11 @@ class AOTInductorModelContainer {
           std::string(models_[0]->constant_name(static_cast<int64_t>(idx)));
       auto it = constants_map.find(constant_name);
       if (it == constants_map.end()) {
-        if (_should_skip_update(idx)) {
+        if (_should_skip_update(idx) || _could_skip_update(idx)) {
           // tracing sometimes creates tensors that are non-existent in
           // original graph. We could skip those and do a direct copy.
-          std::cerr << "[WARNING] Found constant " << constant_name
+          std::cerr << "[WARNING] Found constant or module state buffer "
+                    << constant_name
                     << " in model, but not provided by user!\n";
           continue;
         }
@@ -272,13 +281,12 @@ class AOTInductorModelContainer {
       auto constant_name =
           std::string(models_[0]->constant_name(static_cast<int64_t>(idx)));
       auto it = constants_map.find(constant_name);
-      if (it == constants_map.end() &&
-          !(_should_skip_update(idx) && use_inactive)) {
+      if (it == constants_map.end() && !use_inactive) {
         continue;
       }
 
       AtenTensorHandle tensor;
-      if (_should_skip_update(idx) && use_inactive) {
+      if (it == constants_map.end() && use_inactive) {
         aoti_torch_clone(
             original_constants_map->find(constant_name)->second.get(), &tensor);
       } else {
@@ -313,13 +321,12 @@ class AOTInductorModelContainer {
       auto constant_name =
           std::string(models_[0]->constant_name(static_cast<int64_t>(idx)));
       auto it = constants_map.find(constant_name);
-      if (it == constants_map.end() &&
-          !(_should_skip_update(idx) && use_inactive)) {
+      if (it == constants_map.end() && !use_inactive) {
         continue;
       }
 
       AtenTensorHandle tensor;
-      if (_should_skip_update(idx) && use_inactive) {
+      if (it == constants_map.end() && use_inactive) {
         tensor = original_constants_map->find(constant_name)->second.get();
       } else {
         tensor = it->second;
