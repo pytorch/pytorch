@@ -7579,15 +7579,13 @@ class CommonTemplate:
             ),
         )
 
+    @requires_gpu()
     def test_indirect_broadcast_embedding(self):
         B, T, D, V = (8, 2048, 4096, 2048)
         op = nn.Embedding(V, D).to(self.device).to(torch.float32)
-        shared_weight = op.weight.data
-        tmp_op = nn.Embedding(V, D).to(self.device).to(torch.float32)
-        tmp_op.weight.data.copy_(shared_weight)
         _input = torch.randint(0, V, (B, T), device=self.device)
-        self.common(op, (_input,))
-        compiled_op = torch.compile(tmp_op)
+        self.common(op, (_input,), check_lowp=False)
+        compiled_op = torch.compile(op)
         code = run_and_get_triton_code(
             compiled_op,
             _input,

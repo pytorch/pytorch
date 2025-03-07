@@ -2051,10 +2051,10 @@ class SIMDScheduling(BaseScheduling):
 
         if len(ranked_tilings) > 1:
             perf_hint_log.info("possibly bad tiling: %s", ranked_tilings)
-        # save iter vars in indirect broadcast memory reads
-        indirect_broadcast_pairs: list[tuple[sympy.Symbol, sympy.Symbol]] = []
-        if len(node_schedule) == 1:
-            for read in node_schedule[0].read_writes.reads:
+        for node in node_schedule:
+            # save iter vars in indirect broadcast memory reads
+            indirect_broadcast_pairs: list[tuple[sympy.Symbol, sympy.Symbol]] = []
+            for read in node.read_writes.reads:
                 if (
                     isinstance(read, MemoryDep)
                     and hasattr(read, "indirect_broadcast")
@@ -2065,20 +2065,21 @@ class SIMDScheduling(BaseScheduling):
             if indirect_broadcast_pairs:
                 tail: list[int] = []
                 for pair in indirect_broadcast_pairs:
-                    idx_first = node_schedule[0]._body.iter_vars.index(pair[0])
-                    idx_second = node_schedule[0]._body.iter_vars.index(pair[1])
+                    # indirect load dimension
+                    idx_first = node._body.iter_vars.index(pair[0])
+                    # broadcast dimension
+                    idx_second = node._body.iter_vars.index(pair[1])
+                    # move the indirect load dimension to the end of the list, where it will be the innermost dimension. if we have multiple pairs sharing the indirect load dimension, e.g. [(p1, p0), (p1, p0)], we will move the shared dimension p0 to the end of the list, which is the innermost dimension.
                     for idx in [idx_second, idx_first]:
                         if idx in tail:
                             tail.remove(idx)
                         tail.append(idx)
                 remaining = [
-                    i
-                    for i in range(len(node_schedule[0]._body.iter_vars))
-                    if i not in tail
+                    i for i in range(len(node._body.iter_vars)) if i not in tail
                 ]
                 new_order = remaining + tail
-                if new_order != list(range(len(node_schedule[0]._body.sizes[0]))):
-                    node_schedule[0].apply_new_loop_order(new_order)
+                if new_order != list(range(len(node._body.sizes[0]))):
+                    node.apply_new_loop_order(new_order)
 
         # Optionally, prefer tiling into as many dimensions as possible.
         if config.triton.prefer_nd_tiling or indirect_broadcast_pairs:
