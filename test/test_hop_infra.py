@@ -62,6 +62,7 @@ class TestHOPInfra(TestCase):
         FIXME_ALLOWLIST = {
             "autograd_function_apply",
             "run_with_rng_state",
+            "graphsafe_run_with_rng_state",
             "map_impl",
             "_export_tracepoint",
             "run_and_save_rng_state",

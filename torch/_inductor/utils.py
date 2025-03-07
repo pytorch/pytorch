@@ -283,9 +283,9 @@ def ceildiv(
     # TODO: There is a bug in a call to this function, to repro:
     # python benchmarks/dynamo/huggingface.py --inductor -d cuda --accuracy
     # --amp --only YituTechConvBert --dynamic-shapes
-    assert isinstance(numer, int) and isinstance(
-        denom, int
-    ), f"{numer}: {type(numer)}, {denom}: {type(denom)}"
+    assert isinstance(numer, int) and isinstance(denom, int), (
+        f"{numer}: {type(numer)}, {denom}: {type(denom)}"
+    )
     return runtime_ceildiv(numer, denom)
 
 
@@ -325,7 +325,7 @@ def _type_of(key: Optional[torch.dtype]) -> str:
 
 
 def convert_shape_to_inductor(
-    lst: Iterable[Union[int, torch.SymInt]]
+    lst: Iterable[Union[int, torch.SymInt]],
 ) -> list[sympy.Expr]:
     """
     Gets the shape and stride of a tensor. For non-symbolic tensors, this is
@@ -502,11 +502,9 @@ RV = TypeVar("RV", covariant=True)
 
 class CachedMethod(Protocol, Generic[P, RV]):
     @staticmethod
-    def clear_cache(cache: Any) -> None:
-        ...
+    def clear_cache(cache: Any) -> None: ...
 
-    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> RV:
-        ...
+    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> RV: ...
 
 
 # See https://github.com/python/mypy/issues/13222#issuecomment-1193073470 to understand the type signature
@@ -980,6 +978,12 @@ class LineContext(NamedTuple):
     context: Any
 
 
+@dataclasses.dataclass
+class ValueWithLineMap:
+    value: str
+    line_map: list[tuple[int, LineContext]]
+
+
 class IndentedBuffer:
     tabwidth = 4
 
@@ -987,10 +991,10 @@ class IndentedBuffer:
         self._lines: list[Union[DeferredLineBase, LineContext, str]] = []
         self._indent = initial_indent
 
-    def getvaluewithlinemap(self) -> tuple[str, list[tuple[int, LineContext]]]:
+    def getvaluewithlinemap(self) -> ValueWithLineMap:
         buf = StringIO()
         p = 1
-        linemap = []
+        linemap: list[tuple[int, LineContext]] = []
         for li in self._lines:
             if isinstance(li, DeferredLineBase):
                 line = li()
@@ -1005,11 +1009,10 @@ class IndentedBuffer:
             buf.write(line)
             buf.write("\n")
             p += 1 + line.count("\n")
-        return buf.getvalue(), linemap
+        return ValueWithLineMap(buf.getvalue(), linemap)
 
     def getvalue(self) -> str:
-        v, _ = self.getvaluewithlinemap()
-        return v
+        return self.getvaluewithlinemap().value
 
     def getrawvalue(self) -> str:
         buf = StringIO()
@@ -1359,9 +1362,9 @@ def _rocm_native_device_arch_name(device: str) -> str:
 
 
 @functools.lru_cache(None)
-def try_import_ck_lib() -> (
-    tuple[Optional[str], Callable[[], list[Any]], Callable[[], list[Any]], type[Any]]
-):
+def try_import_ck_lib() -> tuple[
+    Optional[str], Callable[[], list[Any]], Callable[[], list[Any]], type[Any]
+]:
     try:
         import ck4inductor  # type: ignore[import]
         from ck4inductor.universal_gemm.gen_instances import (  # type: ignore[import]
@@ -1471,6 +1474,8 @@ def use_cpp_gemm_template(
     mat2: IRNode,
     mat2_transposed: bool = False,
     require_constant_mat2: bool = True,
+    is_woq_int4: bool = False,
+    q_group_size: Optional[int] = None,
 ) -> bool:
     from . import ir
     from .codegen.cpp_micro_gemm import create_micro_gemm
@@ -1490,6 +1495,7 @@ def use_cpp_gemm_template(
         mat2,
         out_dtype=layout.dtype if int8_gemm else None,
         mat2_transposed=mat2_transposed,
+        use_4x2_dim=is_woq_int4,
     )
 
     # TODO(jgong5): support dynamic shapes for n or k
@@ -1508,6 +1514,8 @@ def use_cpp_gemm_template(
         input2_dtype=mat2.get_dtype(),
         output_dtype=output_dtype,
         num_threads=parallel_num_threads(),
+        use_ref=not is_woq_int4,
+        q_group_size=q_group_size,
     )
 
     def is_last_dim_stride1(x: IRNode) -> bool:
@@ -1601,18 +1609,23 @@ def get_code(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> list[str]:
                 # Don't do anything when called
                 pass
 
-        code, _ = (
+        wrapper_code, kernel_code = (
             self.codegen_with_cpp_wrapper() if self.cpp_wrapper else self.codegen()
         )
         # Skip all the actual compiling.
         nonlocal save_output_code
-        save_output_code(code)
+        save_output_code(wrapper_code.value)
+        if kernel_code:
+            save_output_code(kernel_code.value)
 
         return DummyModule()
 
-    with mock.patch.object(
-        GraphLowering, "compile_to_module", patched_compile_to_module
-    ), mock.patch.object(GraphLowering, "save_output_code", save_output_code):
+    with (
+        mock.patch.object(
+            GraphLowering, "compile_to_module", patched_compile_to_module
+        ),
+        mock.patch.object(GraphLowering, "save_output_code", save_output_code),
+    ):
         torch._dynamo.reset()
         # Note the return here is None
         _ = fn(*args, **kwargs)
@@ -1623,18 +1636,18 @@ def get_code(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> list[str]:
 def get_triton_code(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> str:
     source_codes = get_code(fn, *args, **kwargs)
     # Can have two outputs if backwards was eagerly compiled
-    assert (
-        1 <= len(source_codes) <= 2
-    ), f"expected one or two code outputs got {len(source_codes)}"
+    assert 1 <= len(source_codes) <= 2, (
+        f"expected one or two code outputs got {len(source_codes)}"
+    )
     return source_codes[0]
 
 
 def run_and_get_triton_code(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> str:
     _, source_codes = run_and_get_code(fn, *args, **kwargs)
     # Can have two outputs if backwards was eagerly compiled
-    assert (
-        1 <= len(source_codes) <= 2
-    ), f"expected one or two code outputs got {len(source_codes)}"
+    assert 1 <= len(source_codes) <= 2, (
+        f"expected one or two code outputs got {len(source_codes)}"
+    )
     return source_codes[0]
 
 
@@ -1760,9 +1773,9 @@ def is_cpu_device(inputs: Sequence[torch.Tensor]) -> bool:
 
 
 def get_sympy_Expr_dtype(val: sympy.Expr) -> torch.dtype:
-    assert isinstance(
-        val, sympy.Expr
-    ), "only support sympy.Expr as input to get_sympy_Expr_dtype"
+    assert isinstance(val, sympy.Expr), (
+        "only support sympy.Expr as input to get_sympy_Expr_dtype"
+    )
     if val.is_integer:  # type: ignore[attr-defined]
         return torch.int64
     else:
@@ -1839,7 +1852,12 @@ def is_welford_reduction(reduction_type: str) -> bool:
 
 
 def reduction_num_outputs(reduction_type: str) -> int:
-    return 3 if is_welford_reduction(reduction_type) else 1
+    if is_welford_reduction(reduction_type):
+        return 3
+    elif reduction_type == "online_softmax_reduce":
+        return 2
+    else:
+        return 1
 
 
 def is_linux() -> bool:
@@ -1932,7 +1950,7 @@ def is_multi_outputs_template(input_buf: Optional[Union[Buffer, Operation]]) -> 
 
 
 def is_output_of_multi_outputs_template(
-    input_buf: Optional[Union[Buffer, Operation]]
+    input_buf: Optional[Union[Buffer, Operation]],
 ) -> bool:
     """
     Check if input buffer is a output of multi-outputs template buffer
@@ -2085,12 +2103,6 @@ def num_fw_fixed_arguments(dynamo_gm_num_inputs: int, aot_fw_gm_num_inputs: int)
     # AOT won't lift any parameters if we're inlining NN Modules
     # however desugaring subclasses will still add arguments
     # resulted in extra fixed inputs https://github.com/pytorch/pytorch/issues/130502
-    if (
-        torch._dynamo.config.inline_inbuilt_nn_modules
-        and not torch._dynamo.utils.is_parameter_freezing()
-    ):
-        return 0
-
     return aot_fw_gm_num_inputs - dynamo_gm_num_inputs - num_rng_seed_offset_inputs
 
 
@@ -2104,6 +2116,7 @@ def count_tangents(fx_g: torch.fx.GraphModule) -> int:
             "tangents" not in x.name
             and "bwd_seed" not in x.name
             and "bwd_base_offset" not in x.name
+            and "bwd_rng_state" not in x.name
         )
 
     arg_count = 0
@@ -2145,9 +2158,12 @@ def collect_defined_kernels(kernel_list: list[str]) -> Iterator[None]:
         kernel_code: str,
         metadata: Optional[str] = None,
         gpu: bool = True,
+        cpp_definition: Optional[str] = None,
     ) -> Any:
         kernel_list.append(kernel_code)
-        return orig_define_kernel(self, kernel_name, kernel_code, metadata, gpu)
+        return orig_define_kernel(
+            self, kernel_name, kernel_code, metadata, gpu, cpp_definition
+        )
 
     with mock.patch.object(PythonWrapperCodegen, "define_kernel", define_kernel):
         yield
@@ -2638,7 +2654,8 @@ def set_kernel_post_grad_provenance_tracing(
         if node not in (EnableReduction, DisableReduction):
             if node.node is not None:
                 V.debug._inductor_triton_kernel_to_post_grad_node_info[kernel_name] = [
-                    origin.name for origin in node.node.origins  # type: ignore[attr-defined]
+                    origin.name
+                    for origin in node.node.origins  # type: ignore[attr-defined]
                 ]
 
 
