@@ -933,6 +933,88 @@ static PyObject* is_fwd_grad_enabled(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
+static void visit_tensors(
+    PyObject* args,
+    PyObject* kwargs,
+    std::function<bool(at::Tensor&)> visit_fn) {
+  std::stack<PyObject*> s;
+  if (args) {
+    for (const auto i : c10::irange(PyTuple_GET_SIZE(args))) {
+      s.push(PyTuple_GET_ITEM(args, i));
+    }
+  }
+  if (kwargs) {
+    s.push(PyDict_Values(kwargs));
+  }
+  while (!s.empty()) {
+    PyObject* o = s.top();
+    s.pop();
+    if (THPVariable_Check(o)) {
+      at::Tensor t = THPVariable_Unpack(o);
+      if (visit_fn(t)) {
+        return;
+      }
+    } else if (PyList_Check(o)) {
+      for (const auto i : c10::irange(PyList_GET_SIZE(o))) {
+        s.push(PyList_GET_ITEM(o, i));
+      }
+    }
+  }
+}
+
+// Returns true if any of the args, kwargs tensor leaves have requires_grad
+// Only List container is supported.
+// Introduced for perf of custom ops.
+static PyObject* any_requires_grad(
+    PyObject* _unused,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  bool has_requires_grad = false;
+  visit_tensors(args, kwargs, [&has_requires_grad](at::Tensor& t) {
+    if (t.requires_grad()) {
+      has_requires_grad = true;
+      return true;
+    }
+    return false;
+  });
+  if (has_requires_grad) {
+    Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
+  END_HANDLE_TH_ERRORS
+}
+
+// Returns true if any of outputs tensors is alias to any input tensor or
+// another output tensor. Expected python args: inputs_args, inputs_kwargs,
+// outputs
+static PyObject* check_aliasing_constraint(PyObject* _unused, PyObject* args) {
+  HANDLE_TH_ERRORS
+  PyObject* inps = PyTuple_GET_ITEM(args, 0);
+  PyObject* inps_kwargs = PyTuple_GET_ITEM(args, 1);
+  PyObject* outs = PyTuple_GET_ITEM(args, 2);
+  std::unordered_set<void*> s;
+  visit_tensors(inps, inps_kwargs, [&s](at::Tensor& t) {
+    s.insert(t.data_ptr().get_context());
+    return false;
+  });
+  bool ret = false;
+  visit_tensors(outs, nullptr, [&s, &ret](at::Tensor& t) {
+    void* cp = t.data_ptr().get_context();
+    if (s.find(cp) != s.end()) {
+      ret = true;
+      return true;
+    }
+    s.insert(cp);
+    return false;
+  });
+  if (ret) {
+    Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* set_multithreading_enabled(
     PyObject* self,
     PyObject* args,
@@ -1304,6 +1386,14 @@ static PyMethodDef methods[] = {
      nullptr},
     {"is_grad_enabled", is_grad_enabled, METH_NOARGS, nullptr},
     {"_set_fwd_grad_enabled", set_fwd_grad_enabled, METH_O, nullptr},
+    {"_any_requires_grad",
+     castPyCFunctionWithKeywords(any_requires_grad),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
+    {"_check_aliasing_constraint",
+     check_aliasing_constraint,
+     METH_VARARGS,
+     nullptr},
     {"_is_fwd_grad_enabled", is_fwd_grad_enabled, METH_NOARGS, nullptr},
     {"is_inference_mode_enabled",
      is_inference_mode_enabled,

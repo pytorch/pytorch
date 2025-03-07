@@ -105,15 +105,10 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
     # The dispatcher passes any keyword-only-args as kwargs and the
     # rest of the args (even if specified as kwargs) as args.
     def autograd_impl(keyset, *args, **keyword_only_args):
-        # XXX Call to any takes 40us of 160us ~ 25% of the call (linear to args count)
-        # pytree prologue 7.4 us
-        # 2.5us per arg
-        #if _C.is_grad_enabled() and _pytree.tree_any_only(
-        #    Tensor, lambda x: x.requires_grad, args, not_list_of_tensor
-        #):
-        #    result = Generated.apply(*args, Metadata(keyset, keyword_only_args))  # type: ignore[attr-defined]
-        #else:
-        result = forward_no_grad(*args, Metadata(keyset, keyword_only_args))
+        if _C.is_grad_enabled() and _C._any_requires_grad(args):
+            result = Generated.apply(*args, Metadata(keyset, keyword_only_args))  # type: ignore[attr-defined]
+        else:
+            result = forward_no_grad(*args, Metadata(keyset, keyword_only_args))
         return result
 
     return autograd_impl
