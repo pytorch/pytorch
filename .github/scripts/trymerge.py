@@ -485,7 +485,7 @@ def get_check_run_name_prefix(workflow_run: Any) -> str:
     if workflow_run is None:
         return ""
     else:
-        return f'{workflow_run["workflow"]["name"]} / '
+        return f"{workflow_run['workflow']['name']} / "
 
 
 def is_passing_status(status: Optional[str]) -> bool:
@@ -545,7 +545,7 @@ def add_workflow_conclusions(
                     if not isinstance(checkrun_node, dict):
                         warn(f"Expected dictionary, but got {type(checkrun_node)}")
                         continue
-                    checkrun_name = f'{get_check_run_name_prefix(workflow_run)}{checkrun_node["name"]}'
+                    checkrun_name = f"{get_check_run_name_prefix(workflow_run)}{checkrun_node['name']}"
                     existing_checkrun = workflow_obj.jobs.get(checkrun_name)
                     if existing_checkrun is None or not is_passing_status(
                         existing_checkrun.status
@@ -1224,9 +1224,17 @@ class GitHubPR:
         if not self.is_ghstack_pr():
             msg = self.gen_commit_message()
             pr_branch_name = f"__pull-request-{self.pr_num}__init__"
-            repo.fetch(f"pull/{self.pr_num}/head", pr_branch_name)
+            repo.fetch(self.last_commit()["oid"], pr_branch_name)
             repo._run_git("merge", "--squash", pr_branch_name)
             repo._run_git("commit", f'--author="{self.get_author()}"', "-m", msg)
+
+            # Did the PR change since we started the merge?
+            pulled_sha = repo.show_ref(pr_branch_name)
+            latest_pr_status = GitHubPR(self.org, self.project, self.pr_num)
+            if pulled_sha != latest_pr_status.last_commit()["oid"]:
+                raise RuntimeError(
+                    "PR has been updated since CI checks last passed. Please rerun the merge command."
+                )
             return []
         else:
             return self.merge_ghstack_into(
@@ -1505,6 +1513,36 @@ def checks_to_markdown_bullets(
     return [
         f"- [{c[0]}]({c[1]})" if c[1] is not None else f"- {c[0]}" for c in checks[:5]
     ]
+
+
+def post_starting_merge_comment(
+    repo: GitRepo,
+    pr: GitHubPR,
+    explainer: TryMergeExplainer,
+    dry_run: bool,
+    ignore_current_checks_info: Optional[
+        list[tuple[str, Optional[str], Optional[int]]]
+    ] = None,
+) -> None:
+    """Post the initial merge starting message on the PR. Also post a short
+    message on all PRs in the stack."""
+    gh_post_pr_comment(
+        pr.org,
+        pr.project,
+        pr.pr_num,
+        explainer.get_merge_message(ignore_current_checks_info),
+        dry_run=dry_run,
+    )
+    if pr.is_ghstack_pr():
+        for additional_prs, _ in get_ghstack_prs(repo, pr):
+            if additional_prs.pr_num != pr.pr_num:
+                gh_post_pr_comment(
+                    additional_prs.org,
+                    additional_prs.project,
+                    additional_prs.pr_num,
+                    f"Starting merge as part of PR stack under #{pr.pr_num}",
+                    dry_run=dry_run,
+                )
 
 
 def manually_close_merged_pr(
@@ -2130,13 +2168,7 @@ def merge(
     check_for_sev(pr.org, pr.project, skip_mandatory_checks)
 
     if skip_mandatory_checks:
-        gh_post_pr_comment(
-            pr.org,
-            pr.project,
-            pr.pr_num,
-            explainer.get_merge_message(),
-            dry_run=dry_run,
-        )
+        post_starting_merge_comment(repo, pr, explainer, dry_run)
         return pr.merge_into(
             repo,
             dry_run=dry_run,
@@ -2159,12 +2191,12 @@ def merge(
         )
         ignore_current_checks_info = failing
 
-    gh_post_pr_comment(
-        pr.org,
-        pr.project,
-        pr.pr_num,
-        explainer.get_merge_message(ignore_current_checks_info),
-        dry_run=dry_run,
+    post_starting_merge_comment(
+        repo,
+        pr,
+        explainer,
+        dry_run,
+        ignore_current_checks_info=ignore_current_checks_info,
     )
 
     start_time = time.time()

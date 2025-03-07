@@ -1640,6 +1640,27 @@ class NOT_NONE : public LeafGuard {
   }
 };
 
+class MAPPING_KEYS_MATCH : public LeafGuard {
+ public:
+  MAPPING_KEYS_MATCH(py::object value, py::object verbose_code_parts)
+      : LeafGuard(std::move(verbose_code_parts)) {
+    // This is ok to stash in the state because we only support
+    // MappingProxyType objects with constant keys. So, the mem overhead is
+    // negligible.
+    _keys = py::list(value.attr("keys")());
+  }
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    PyObject* keys = PyMapping_Keys(value); // new ref
+    int result = PyObject_RichCompareBool(keys, _keys.ptr(), Py_EQ);
+    Py_DECREF(keys);
+    return result;
+  }
+
+ private:
+  py::object _keys;
+};
+
 class DEFAULT_DEVICE : public LeafGuard {
  public:
   DEFAULT_DEVICE(py::object verbose_code_parts)
@@ -1847,19 +1868,24 @@ class NO_TENSOR_ALIASING : public RelationalGuard {
   }
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
-    // Typically we don't have to increment the ref count here because the
-    // tensors are held in f_locals. But there is a special case for
-    // `from_numpy` source. `from_numpy` converts integers and such into tensors
-    // and these tensors are ephemeral. If we don't incref, those tensors can be
-    // garbage collected, and the next time from_numpy can reuse the memory
-    // address. Therefore, we incref here. They are decref'd in reset_state.
-    Py_INCREF(value);
     auto insertion = _unique_tensors.insert({value, nullptr});
     if (!insertion.second) {
       // No need to clear _unique_tensors, reset_state will do
       // it.
       return false;
     }
+
+    // Typically we don't have to increment the ref count here because the
+    // tensors are held in f_locals. But there is a special case for
+    // `from_numpy` source. `from_numpy` converts integers and such into tensors
+    // and these tensors are ephemeral. If we don't incref, those tensors can be
+    // garbage collected, and the next time from_numpy can reuse the memory
+    // address. Therefore, we incref here. They are decref'd in reset_state.
+    //
+    // IMPORTANT NOTE - Do not move this Py_INCREF before the insertion into
+    // _unique_tensors. If there is a tensor aliasing, you will end up
+    // incrementing the refcount twice, while the reset decrements only once.
+    Py_INCREF(value);
     return true;
   }
 
@@ -2512,6 +2538,10 @@ class GuardManager {
     }
 
     return GuardDebugInfo(true, num_guards_executed);
+  }
+
+  bool has_no_accessors() {
+    return _accessors.empty();
   }
 
   int64_t fail_count() const {
@@ -3759,8 +3789,12 @@ class DictGetItemGuardAccessor : public GuardAccessor {
   // NB: Intentional duplication between check_nopybind and
   // check_verbose_nopybind.
   bool check_nopybind(PyObject* obj, bool matches_dict_tag = false) override {
-    if (matches_dict_tag && _is_immutable_object) {
+    if (matches_dict_tag && _is_immutable_object &&
+        _guard_manager->has_no_accessors()) {
       // immutable object and dict tag matches, we can skip the guard subtree.
+      // NB: We only skip the subtree if there are no accessors in the subtree.
+      // This is specificallly for tensors which are used in symbolic shape C++
+      // guards, and therefore have accessors on the tensor GuardManager itself.
       return true;
     }
 
@@ -5227,6 +5261,12 @@ PyObject* torch_c_dynamo_guards_init() {
       .def(py::init<py::list>())
       .def("__call__", &NOT_NONE::check);
   py::class_<
+      MAPPING_KEYS_MATCH,
+      LeafGuard,
+      std::shared_ptr<MAPPING_KEYS_MATCH>>(py_m, "MAPPING_KEYS_MATCH")
+      .def(py::init<py::object, py::list>())
+      .def("__call__", &MAPPING_KEYS_MATCH::check);
+  py::class_<
       TUPLE_ITERATOR_LEN,
       LeafGuard,
       std::shared_ptr<TUPLE_ITERATOR_LEN>>(py_m, "TUPLE_ITERATOR_LEN")
@@ -5513,6 +5553,15 @@ PyObject* torch_c_dynamo_guards_init() {
             SKIP_IF_GUARD_ALREADY_PRESENT("NOT_NONE");
             self.add_leaf_guard(
                 std::make_shared<NOT_NONE>(std::move(verbose_code_parts)));
+          })
+      .def(
+          "add_mapping_keys_guard",
+          [](GuardManager& self,
+             py::object value,
+             py::object verbose_code_parts) -> void {
+            SKIP_IF_GUARD_ALREADY_PRESENT("MAPPING_KEYS_MATCH");
+            self.add_leaf_guard(std::make_shared<MAPPING_KEYS_MATCH>(
+                std::move(value), std::move(verbose_code_parts)));
           })
       .def(
           "add_dispatch_key_set_guard",
