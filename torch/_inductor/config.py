@@ -1153,6 +1153,7 @@ class triton:
     # During autotuning, if one of the kernels/configs fails for some reason,
     # Inductor will usually skip it (and assign its latency to inf).
     # For testing it's helpful to be able to assert that none of the configs fail.
+    # Note: it may also need to be used with config.compile_threads = 1
     disallow_failing_autotune_kernels_TESTING_ONLY = False
 
 

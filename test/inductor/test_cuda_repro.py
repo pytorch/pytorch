@@ -1064,12 +1064,22 @@ class CudaReproTests(TestCase):
         {
             "max_autotune_gemm_backends": "TRITON",
             "triton.disallow_failing_autotune_kernels_TESTING_ONLY": True,
+            "compile_threads": 1,
         }
     )
     def test_bucketize_epilogue(self):
         """
         See https://github.com/pytorch/pytorch/issues/148764.
         Make sure that when torch.bucketize appears as an epilogue, the codegen is valid.
+
+        Note: during autotuning, there's also the option to _not_ do the fusion.
+        So if you run the test with standard configs, the fused kernel would fail during
+        autotuning, and another non-fused kernel would be selected (and Inductor would
+        throw some errors, but the test would pass)
+
+        So we set disallow_failing_autotune_kernels_TESTING_ONLY=True to prevent the
+        autotuner from catching failures. And set compile_threads=1 so that compile
+        failures aren't caught by the asyn runner infra.
         """
 
         def fn(x: torch.Tensor, y: torch.Tensor, buckets: torch.Tensor) -> torch.Tensor:
