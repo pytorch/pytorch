@@ -2338,6 +2338,19 @@ class StaticallyLaunchedCudaKernel:
     statically compiled library to launch the kernel. To avoid mallocing for the arguments,
     we have a launcher for different numbers of arguments up to a max. StaticCudaLauncher
     only supports # of arguments up until 10 for now.
+
+    Workflow:
+    Compile time:
+    1. Compile a kernel with triton and get a CompiledKernel
+    2. Instantiate kernel = StaticallyLaunchedCudaKernel(triton_kernel)
+    3. Write to a cubin file: kernel.write_cubin_to_file(filepath)
+    4. Call kernel.load_kernel() (CUDA should be initialized by this point) to load the cubin
+    Runtime:
+    5. Call kernel.run(grid, stream, args) to launch the kernel
+
+    Note that after step 3, StaticallyLaunchedCudaKernel is fully pickleable/serializable.
+    This allows it to be cached by FXGraphCache/TritonBundler, as well as sent from the worker
+    to the parent process in inductor.
     """
 
     def __init__(self, kernel: CompiledKernel):
@@ -2373,12 +2386,20 @@ class StaticallyLaunchedCudaKernel:
         )
 
     def write_cubin_to_file(self, filepath):
+        # Just used by tests for now.
+        # TODO: derive cubin_path from wherever triton stores the cubin file on disk.
         with open(filepath, "wb") as f:
             f.write(self.cubin)
             del self.cubin
         self.cubin_path = filepath
 
-    def extract_type(self, ty):
+    def extract_type(self, ty: str) -> str:
+        """
+        Takes a triton type from CompiledKernel.signature and
+        converts it into a single char encoding. _StaticCudaLauncher
+        will switch on this char to figure out what type the underlying
+        value should be passed to the triton kernel as.
+        """
         if ty[0] == "*":
             return "O"
         return {
@@ -2409,12 +2430,19 @@ class StaticallyLaunchedCudaKernel:
         tys = [signature[i] for i in range(len(signature))]
         return "".join(self.extract_type(ty) for ty in tys)
 
-    def run(self, grid, stream, args):
+    def run(self, grid: tuple[int, ...], stream: int, args: tuple[Any, ...]):
+        """Actually run the kernel at runtime. This function is the hot codepath."""
+
+        # Assert load_kernel() has been called and args match
         assert self.function is not None
-        # TODO: can handle grid functions here or in the C++ code later
+
+        # TODO: actually, if the args *don't* match, we probably should
+        # throw an exception. But if inductor is the only one calling this
+        # thing, it should always match.
         assert len(args) == len(self.arg_tys)
-        assert hasattr(self, "cubin_path")
-        assert callable(self.launcher)
+
+        # TODO: can handle grid functions here or in C++, so
+        # that we don't need the grid handler above.
         grid_x = grid[0]
         grid_y = grid[1] if len(grid) > 1 else 1
         grid_z = grid[2] if len(grid) > 2 else 1
