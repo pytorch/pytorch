@@ -103,22 +103,14 @@ static inline std::string getMetalType(const Tensor& t) {
   return getMetalType(t.scalar_type());
 }
 
-static inline std::string getMetalType(const c10::Scalar& s) {
-  return getMetalType(s.type());
-}
-
-template <typename ScalarOrTensor>
 static id<MTLComputePipelineState> getCPLState(const Tensor& t1,
                                                const Tensor& t2,
-                                               const ScalarOrTensor& t3,
+                                               const Tensor& t3,
                                                const std::string& fname) {
   return lib.getPipelineStateForFunc(fname, {getMetalType(t1), getMetalType(t2), getMetalType(t3)});
 }
 
-static void handle_tensor_tensor_binary_op(const Tensor& self,
-                                           const Tensor& other,
-                                           Tensor& output,
-                                           const std::string& kernel_name) {
+static void handle_binary_op(const Tensor& self, const Tensor& other, Tensor& output, const std::string& kernel_name) {
   using namespace at::mps;
   MPSStream* stream = getCurrentMPSStream();
   auto cplState = getCPLState(output, self, other, kernel_name);
@@ -136,33 +128,6 @@ static void handle_tensor_tensor_binary_op(const Tensor& self,
     [commandEncoder pushDebugGroup:[NSString stringWithFormat:@"Dispatch %s kernel", kernel_name.c_str()]];
     [commandEncoder setComputePipelineState:cplState];
     mtl_setArgs(commandEncoder, output, self, other);
-    mtl_dispatch1DJob(commandEncoder, cplState, length);
-
-    getMPSProfiler().endProfileKernel(cplState);
-  });
-}
-
-static void handle_tensor_scalar_binary_op(const Tensor& self,
-                                           const Scalar& other,
-                                           Tensor& output,
-                                           const std::string& kernel_name) {
-  using namespace at::mps;
-  MPSStream* stream = getCurrentMPSStream();
-  auto cplState = getCPLState(output, self, other, kernel_name);
-  uint64_t sval = other.to<int64_t>();
-  uint32_t length = output.numel();
-  if (length == 0) {
-    return;
-  }
-
-  dispatch_sync(stream->queue(), ^() {
-    getMPSProfiler().beginProfileKernel(cplState, kernel_name, {self});
-
-    id<MTLComputeCommandEncoder> commandEncoder = stream->commandEncoder();
-
-    [commandEncoder pushDebugGroup:[NSString stringWithFormat:@"Dispatch %s kernel", kernel_name.c_str()]];
-    [commandEncoder setComputePipelineState:cplState];
-    mtl_setArgs(commandEncoder, output, self, sval);
     mtl_dispatch1DJob(commandEncoder, cplState, length);
 
     getMPSProfiler().endProfileKernel(cplState);
@@ -201,14 +166,14 @@ static void _bitwise_op_out_mps(const Tensor& self,
       TORCH_CHECK(false, "Unknown operation to be performed over scalars ", op_name);
     }
   } else if (is_other_scalar) {
-    handle_tensor_scalar_binary_op(self.contiguous(), other.item(), output, fmt::format("bitwise_{}_scalar", op_name));
+    handle_binary_op(self.contiguous(), other, output, fmt::format("bitwise_{}_scalar", op_name));
   } else if (is_self_scalar) {
-    handle_tensor_scalar_binary_op(other.contiguous(), self.item(), output, fmt::format("bitwise_{}_scalar", op_name));
+    handle_binary_op(other.contiguous(), self, output, fmt::format("bitwise_{}_scalar", op_name));
   } else {
-    handle_tensor_tensor_binary_op(self.expand(output_size).contiguous(),
-                                   other.expand(output_size).contiguous(),
-                                   output,
-                                   fmt::format("bitwise_{}_tensor", op_name));
+    handle_binary_op(self.expand(output_size).contiguous(),
+                     other.expand(output_size).contiguous(),
+                     output,
+                     fmt::format("bitwise_{}_tensor", op_name));
   }
   if (needs_output_copy) {
     output_.copy_(output);

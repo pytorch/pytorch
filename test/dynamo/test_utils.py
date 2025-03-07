@@ -2,6 +2,7 @@
 import dataclasses
 import pprint
 from unittest import mock
+import sys
 
 import torch
 import torch._dynamo.config as dynamo_config
@@ -451,6 +452,15 @@ class TestDynamoTimed(TestCase):
         }
     )
     def test_ir_count(self):
+        # Different python versions have different potential IR counts.
+        version = (sys.version_info[0], sys.version_info[1])
+        self.assertIn(version, ((3,10), (3,11), (3,12), (3,13)))
+        first, second = {
+                (3,10): (10,16),
+                (3,11): (10,16),
+                (3,12): (10,16),
+                (3,13): (11,18),
+                }[version]
         def test1(x):
             y = x + x
             z = y * y
@@ -460,7 +470,7 @@ class TestDynamoTimed(TestCase):
         with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
             torch.compile(test1)(torch.randn(10, 10))
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
-        self.assertEqual(compilation_events[0].ir_count, 10)
+        self.assertEqual(compilation_events[0].ir_count, first)
 
         def test2(x):
             y = x + x
@@ -470,7 +480,7 @@ class TestDynamoTimed(TestCase):
         with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
             torch.compile(test2)(torch.randn(10, 10))
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
-        self.assertEqual(compilation_events[0].ir_count, 16)
+        self.assertEqual(compilation_events[0].ir_count, second)
 
 
 class TestInductorConfigParsingForLogging(TestCase):
