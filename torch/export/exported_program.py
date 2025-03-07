@@ -1530,7 +1530,13 @@ class ExportedProgram:
 
     # TODO(zhxchen17) Formalize this.
     def _update(
-        self, graph_module, graph_signature, *, state_dict=None, verifiers=None
+        self,
+        graph_module,
+        graph_signature,
+        *,
+        state_dict=None,
+        constants=None,
+        verifiers=None,
     ) -> "ExportedProgram":
         return ExportedProgram(
             root=graph_module,
@@ -1540,7 +1546,7 @@ class ExportedProgram:
             range_constraints=copy.deepcopy(self.range_constraints),
             module_call_graph=copy.deepcopy(self._module_call_graph),
             example_inputs=self.example_inputs,
-            constants=self.constants,
+            constants=constants if constants is not None else self.constants,
             verifiers=verifiers if verifiers is not None else self.verifiers,
         )
 

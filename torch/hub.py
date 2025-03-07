@@ -262,7 +262,7 @@ def _get_cache_or_reload(
 
         try:
             url = _git_archive_link(repo_owner, repo_name, ref)
-            sys.stderr.write(f'Downloading: "{url}" to {cached_file}\n')
+            sys.stdout.write(f'Downloading: "{url}" to {cached_file}\n')
             download_url_to_file(url, cached_file, progress=False)
         except HTTPError as err:
             if err.code == 300:
@@ -666,7 +666,11 @@ def _load_local(hubconf_dir, model, *args, **kwargs):
     Example:
         >>> # xdoctest: +SKIP("stub local path")
         >>> path = "/some/local/path/pytorch/vision"
-        >>> model = _load_local(path, "resnet50", weights="ResNet50_Weights.IMAGENET1K_V1")
+        >>> model = _load_local(
+        ...     path,
+        ...     "resnet50",
+        ...     weights="ResNet50_Weights.IMAGENET1K_V1",
+        ... )
     """
     with _add_to_sys_path(hubconf_dir):
         hubconf_path = os.path.join(hubconf_dir, MODULE_HUBCONF)
@@ -859,7 +863,7 @@ def load_state_dict_from_url(
         filename = file_name
     cached_file = os.path.join(model_dir, filename)
     if not os.path.exists(cached_file):
-        sys.stderr.write(f'Downloading: "{url}" to {cached_file}\n')
+        sys.stdout.write(f'Downloading: "{url}" to {cached_file}\n')
         hash_prefix = None
         if check_hash:
             r = HASH_REGEX.search(filename)  # r is Optional[Match[str]]
