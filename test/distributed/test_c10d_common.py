@@ -3,8 +3,8 @@
 import copy
 import os
 import pickle
-import sys
 import subprocess
+import sys
 import tempfile
 import threading
 import time
