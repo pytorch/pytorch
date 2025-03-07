@@ -598,13 +598,12 @@ def _str_intern(inp, *, tensor_contents=None):
         from torch._subclasses.fake_tensor import FakeTensor
 
         if self.is_meta or isinstance(self, FakeTensor):
-            suffixes.append("size=" + str(tuple(self.shape)))
             if self.dtype != torch.get_default_dtype():
                 suffixes.append("dtype=" + str(self.dtype))
-            # TODO: This implies that ellipses is valid syntax for allocating
-            # a meta tensor or FakeTensor, which it could be, but it isn't right now
+            # Redirect construction to `torch.empty` and use size as the positional argument.
             if not custom_contents_provided:
-                tensor_str = "..."
+                prefix = "torch.empty("
+                tensor_str = str(tuple(self.shape))
         else:
             if self.numel() == 0 and not self.is_sparse:
                 # Explicitly print the shape if it is not (0,), to match NumPy behavior
