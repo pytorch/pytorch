@@ -301,7 +301,9 @@ class ExceptionVariable(VariableTracker):
 
         def codegen_attr(name: str) -> None:
             attr = getattr(self, name)
-            if not istype(attr, ConstantVariable):
+            if istype(attr, ConstantVariable):
+                assert attr.value in (True, False, None), attr
+            else:
                 codegen.dup_top()
                 codegen(attr)
                 codegen.extend_output(codegen.rot_n(2))
