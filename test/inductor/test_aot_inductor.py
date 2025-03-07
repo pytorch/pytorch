@@ -4584,9 +4584,12 @@ class AOTInductorTestsTemplate:
                 def wrapped(**kwargs):
                     for key in kwargs:
                         in_tensors[key].copy_(kwargs[key])
-                    # [a.copy_(b) for a, b in zip(in_tensors, args)]
                     g.replay()
-                    return [o.clone() for o in out_tensors]
+                    if isinstance(out_tensors, torch.Tensor):
+                        return out_tensors.clone()
+                    elif isinstance(out_tensors, (list, tuple)):
+                        return type(out_tensors)(o.clone() for o in out_tensors)
+                    raise ValueError("unsupported output type encountered")
 
                 _graphs[key] = (wrapped, g, in_tensors, out_tensors)
                 return wrapped(**kwargs)
@@ -4618,6 +4621,9 @@ class AOTInductorTestsTemplate:
         # warmup -> run with CUDAGraphs
         for _ in range(3):
             optimized(**model_kwargs)
+
+        # compare against eager
+        self.assertEqual(optimized(**model_kwargs), model(**model_kwargs))
 
 
 class AOTInductorLoggingTest(LoggingTestCase):
