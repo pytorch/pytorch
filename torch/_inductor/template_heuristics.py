@@ -14,8 +14,10 @@ from .virtualized import V
 
 
 if TYPE_CHECKING:
-    from triton import Config as TritonConfig
     from collections.abc import Generator, Sequence
+    
+    from triton import Config as TritonConfig
+
 
 class BaseConfigSingleton(type):
     """
