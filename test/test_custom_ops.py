@@ -3910,6 +3910,37 @@ Please use `add.register_fake` to add an fake impl.""",
         self.assertTrue(called)
         self.assertEqual(result, x + y)
 
+    def test_any_requires_grad(self):
+        test_fn = torch._C._any_requires_grad
+
+        self.assertTrue(
+            test_fn(
+                torch.zeros(1, requires_grad=True), torch.ones(1, requires_grad=True)
+            )
+        )
+        self.assertFalse(test_fn(torch.ones(1), torch.zeros(1)))
+        self.assertTrue(
+            test_fn(
+                [torch.zeros(1, requires_grad=True), torch.ones(1, requires_grad=True)]
+            )
+        )
+        self.assertFalse(test_fn([torch.zeros(1), torch.ones(1)]))
+        self.assertTrue(test_fn(torch.zeros(1), a=torch.ones(1, requires_grad=True)))
+        self.assertFalse(test_fn(torch.zeros(1), a=torch.ones(1)))
+
+    def test_any_is_aliased_tensor(self):
+        test_fn = torch._C._any_is_aliased_tensor
+
+        x = torch.randn(2, 2)
+        y = torch.randn(2, 2)
+        self.assertTrue(test_fn(y, x.t()))
+        x = torch.randn(2, 2)
+        self.assertFalse(test_fn(2 * x))
+        self.assertTrue(test_fn(x, a=x.view(-1)))
+        self.assertTrue(test_fn(y, x[1:]))
+        x = torch.randn(2, 2)
+        self.assertFalse(test_fn(a=x))
+
 
 class MiniOpTestOther(CustomOpTestCaseBase):
     test_ns = "mini_op_test"

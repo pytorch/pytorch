@@ -933,6 +933,77 @@ static PyObject* is_fwd_grad_enabled(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
+static void visit_tensors(
+    PyObject* args,
+    PyObject* kwargs,
+    std::function<bool(at::Tensor&)> tensor_visit_fn) {
+  static std::function<void(PyObject*)> visit_fn =
+      [&tensor_visit_fn](PyObject* o) {
+        if (THPVariable_Check(o)) {
+          at::Tensor t = THPVariable_Unpack(o);
+          if (tensor_visit_fn(t)) {
+            return;
+          }
+        } else if (PyList_Check(o)) {
+          for (const auto i : c10::irange(PyList_GET_SIZE(o))) {
+            visit_fn(PyList_GET_ITEM(o, i));
+          }
+        }
+      };
+  if (args) {
+    for (const auto i : c10::irange(PyTuple_GET_SIZE(args))) {
+      visit_fn(PyTuple_GET_ITEM(args, i));
+    }
+  }
+  if (kwargs) {
+    visit_fn(PyDict_Values(kwargs));
+  }
+}
+
+// Returns true if any of the args, kwargs tensor leaves have requires_grad
+// Only List container is supported.
+// Introduced for perf of custom ops.
+static PyObject* any_requires_grad(
+    PyObject* _unused,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  bool has_requires_grad = false;
+  visit_tensors(args, kwargs, [&has_requires_grad](at::Tensor& t) {
+    if (t.requires_grad()) {
+      has_requires_grad = true;
+      return true;
+    }
+    return false;
+  });
+  if (has_requires_grad) {
+    Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
+  END_HANDLE_TH_ERRORS
+}
+
+// Returns true if any leaf tensor is aliased
+static PyObject* any_is_aliased_tensor(
+    PyObject* _unused,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  bool has_aliased_tensor = false;
+  visit_tensors(args, kwargs, [&has_aliased_tensor](at::Tensor& t) {
+    if (t.storage().use_count() > 1) {
+      has_aliased_tensor = true;
+      return true;
+    }
+    return false;
+  });
+  if (has_aliased_tensor) {
+    Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* set_multithreading_enabled(
     PyObject* self,
     PyObject* args,
@@ -1304,6 +1375,14 @@ static PyMethodDef methods[] = {
      nullptr},
     {"is_grad_enabled", is_grad_enabled, METH_NOARGS, nullptr},
     {"_set_fwd_grad_enabled", set_fwd_grad_enabled, METH_O, nullptr},
+    {"_any_requires_grad",
+     castPyCFunctionWithKeywords(any_requires_grad),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
+    {"_any_is_aliased_tensor",
+     castPyCFunctionWithKeywords(any_is_aliased_tensor),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
     {"_is_fwd_grad_enabled", is_fwd_grad_enabled, METH_NOARGS, nullptr},
     {"is_inference_mode_enabled",
      is_inference_mode_enabled,
