@@ -15,6 +15,7 @@ from torch._inductor.codegen.rocm.ck_template import CKTemplate
 from torch._inductor.codegen.rocm.compile_command import rocm_compile_command
 from torch._inductor.codegen.rocm.rocm_kernel import ROCmTemplateKernel
 from torch._inductor.ir import Buffer, Layout
+from torch._inductor.runtime.runtime_utils import next_power_of_2
 
 from ...utils import IndentedBuffer, try_import_ck_lib
 
@@ -602,7 +603,12 @@ class CKGemmTemplate(CKTemplate):
             operation_name=operation_name
         )
 
-    def render(self, kernel: ROCmTemplateKernel, op: "CKGemmOperation", **kwargs) -> str:  # type: ignore[override]
+    def render(  # type: ignore[override]
+        self,
+        kernel: ROCmTemplateKernel,
+        op: "CKGemmOperation",
+        **kwargs,
+    ) -> str:
         """
         The primary entry point for the code rendering process used in this template.
         """
@@ -706,7 +712,7 @@ class CKGemmTemplate(CKTemplate):
 * Template instance {op}
 *
 * {torch.__version__=}
-* torch.version.git_version={getattr(torch.version, 'git_version', 'None')}
+* torch.version.git_version={getattr(torch.version, "git_version", "None")}
 */
 """
         epilogue = None
@@ -871,6 +877,30 @@ class CKGemmTemplate(CKTemplate):
             and Y_layout == "Row"
         )
 
+    # helper to calculate a potentially optimal kBatch(es) for a problem
+    def _get_kBatch(self, op):
+        # we only set a higher kBatch if K > 16 * the larger of M and N
+        # this is a hand-tuned heuristic to start
+        metas = [T.get_layout() for T in [*self.input_nodes]]
+        X_meta = metas[0]
+        W_meta = metas[1]
+        M = X_meta.size[-2]
+        K = X_meta.size[-1]
+        N = W_meta.size[-1]
+        if K // max(M, N) < config.rocm.split_k_threshold:
+            return [1]
+        # if the user is telling us which kBatches to sweep, just use those
+        if config.rocm.kBatch_sweep is not None:
+            return config.rocm.kBatch_sweep
+        # Calculate the number of blocks needed for each dimension
+        total_k_blocks = math.ceil(K / op.k_per_block)
+        # we want to calculate how many blocks we need to fit per CU
+        cus = torch.cuda.get_device_properties(X_meta.device).multi_processor_count
+        # again, manual heuristics as much larger kBatch are significantly worse in
+        # initial testing
+        kBatch = min(max(next_power_of_2(total_k_blocks // cus), 1), 128)
+        return [kBatch]
+
     def gen_ops(self) -> list[InductorROCmOp]:
         """
         Creates a list of `CKGemmOperation` instances that match the GEMM operation this template represents.
@@ -900,14 +930,12 @@ class CKGemmTemplate(CKTemplate):
 
         assert generator is not None
 
-        # NOTE(coconutruben): for now, we only support kBatch 1
-        # TODO(coconturuben): infer a better kBatch depending on the input shape
-        # TODO(coconutruben): allow users to provide a list of kBatches to sweep over
-        kBatches = [1]
         rops = generator()
-        ops = [
-            InductorROCmOp(op=op, kBatch=kBatch) for op in rops for kBatch in kBatches
-        ]
+        ops = []
+        for o in rops:
+            kBatches = self._get_kBatch(o)
+            for kBatch in kBatches:
+                ops.append(InductorROCmOp(op=o, kBatch=kBatch))
 
         filtered_instances = list(filter(lambda op: self.filter_op(op), ops))
 

@@ -1,6 +1,6 @@
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/inductor/aoti_runtime/utils.h>
-#include <torch/library_stable.h>
+#include <torch/stable/library.h>
 
 using RAIIATH = torch::aot_inductor::RAIIAtenTensorHandle;
 

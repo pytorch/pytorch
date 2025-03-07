@@ -16,7 +16,7 @@
 #include <torch/csrc/inductor/inductor_ops.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 #include <torch/library.h>
-#include <torch/library_stable.h>
+#include <torch/stable/library.h>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -376,6 +376,15 @@ AOTITorchError aoti_torch_get_storage_offset(
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
     *ret_storage_offset = t->storage_offset();
+  });
+}
+
+AOTITorchError aoti_torch_new_tensor_handle(
+    AtenTensorHandle orig_handle,
+    AtenTensorHandle* new_handle) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t = tensor_handle_to_tensor_pointer(orig_handle);
+    *new_handle = new_tensor_handle(at::Tensor(*t));
   });
 }
 
@@ -1300,7 +1309,8 @@ AOTITorchError aoti_torch_cpu__weight_int4pack_mm_cpu_tensor(
 
 class StableIValueConverter : public c10::OperatorKernel {
  public:
-  StableIValueConverter(void (*fn)(StableIValue*, int64_t, int64_t)) : fn_(fn) {}
+  StableIValueConverter(void (*fn)(StableIValue*, int64_t, int64_t)) 
+    : fn_(fn) {}
 
   void operator()(
       const c10::OperatorHandle& op,
@@ -1311,8 +1321,8 @@ class StableIValueConverter : public c10::OperatorKernel {
     const auto num_arguments = schema.arguments().size();
     // to make this faster, you can make this a C array on the stack --> though
     // this may cause a stackoverflow
-    StableIValue* ministack =
-        (StableIValue*)malloc((num_arguments + num_returns) * sizeof(StableIValue));
+    StableIValue* ministack = (StableIValue*)malloc(
+      (num_arguments + num_returns) * sizeof(StableIValue));
     // std::unique_ptr<void *[]> ministack =
     // std::make_unique<void*[]>(num_arguments + num_returns);
 
@@ -1341,8 +1351,8 @@ class StableIValueConverter : public c10::OperatorKernel {
       }
     }
 
-    // second function is going to take a stack of StableIValues, cast them to our
-    // schema values, and run the function and modify the StableIValue stack
+    // second function is going to take a stack of StableIValues, cast them to
+    // our schema values, and run the function and modify the StableIValue stack
     fn_(ministack, num_arguments, num_returns);
 
     // now pop all inputs on stack. if we pop earlier, Tensors would go out of
@@ -1350,7 +1360,7 @@ class StableIValueConverter : public c10::OperatorKernel {
     torch::jit::drop(stack, num_arguments);
 
     // read the output from the end of the stack and wrap that back into
-    // IValue from void*?
+    // IValue from StableIValue?
     for (size_t idx = 0; idx < num_returns; idx++) {
       const c10::TypePtr& ret_type = schema.returns()[idx].type();
       if (*ret_type == *c10::getTypePtr<at::Tensor>()) {
@@ -1371,7 +1381,7 @@ class StableIValueConverter : public c10::OperatorKernel {
   void (*fn_)(StableIValue*, int64_t, int64_t);
 };
 
-AOTITorchError aoti_init_torch_library_impl(
+AOTITorchError aoti_torch_library_init_impl(
     const char* ns,
     const char* k,
     const char* file,
@@ -1388,7 +1398,7 @@ AOTITorchError aoti_init_torch_library_impl(
   });
 }
 
-AOTITorchError aoti_init_torch_library_def(
+AOTITorchError aoti_torch_library_init_def(
     const char* ns,
     const char* file,
     uint32_t line,
@@ -1404,7 +1414,7 @@ AOTITorchError aoti_init_torch_library_def(
   });
 }
 
-AOTITorchError aoti_init_torch_library_fragment(
+AOTITorchError aoti_torch_library_init_fragment(
     const char* ns,
     const char* file,
     uint32_t line,
@@ -1436,4 +1446,11 @@ AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_library_def(TorchLibraryHandle self, const char* name) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
       { reinterpret_cast<torch::Library*>(self)->def(name); });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_delete_library_object(TorchLibraryHandle tlh) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    delete reinterpret_cast<torch::Library*>(tlh);
+  });
 }

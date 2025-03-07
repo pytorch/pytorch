@@ -269,6 +269,10 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_storage_offset(
     AtenTensorHandle tensor,
     int64_t* ret_storage_offset);
 
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_new_tensor_handle(
+    AtenTensorHandle orig_handle,
+    AtenTensorHandle* new_handle);
+
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch__alloc_from_pool(
     AtenTensorHandle self,
     int64_t offset_bytes,
@@ -622,20 +626,20 @@ AOTI_TORCH_EXPORT void aoti_torch_save_tensor_handle(
 class TorchLibraryOpaque;
 using TorchLibraryHandle = TorchLibraryOpaque*;
 
-AOTI_TORCH_EXPORT AOTITorchError aoti_init_torch_library_impl(
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_library_init_impl(
     const char* ns,
     const char* k,
     const char* file,
     uint32_t line,
     TorchLibraryHandle* ret_new_torch_lib);
 
-AOTI_TORCH_EXPORT AOTITorchError aoti_init_torch_library_def(
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_library_init_def(
     const char* ns,
     const char* file,
     uint32_t line,
     TorchLibraryHandle* ret_new_torch_lib);
 
-AOTI_TORCH_EXPORT AOTITorchError aoti_init_torch_library_fragment(
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_library_init_fragment(
     const char* ns,
     const char* file,
     uint32_t line,
@@ -648,6 +652,10 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_library_impl(
 
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_library_def(TorchLibraryHandle self, const char* name);
+
+// Free the torch::Library object
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_delete_library_object(TorchLibraryHandle tlh);
 
 #ifdef USE_CUDA
 

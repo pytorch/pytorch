@@ -45,11 +45,11 @@ class TORCH_API StableLibrary final {
         const char* file,
         uint32_t line) {
       if (kind == IMPL) {
-        aoti_init_torch_library_impl(ns, k, file, line, &lib_);
+        aoti_torch_library_init_impl(ns, k, file, line, &lib_);
       } else if (kind == DEF) {
-        aoti_init_torch_library_def(ns, file, line, &lib_);
+        aoti_torch_library_init_def(ns, file, line, &lib_);
       } else { // kind == FRAGMENT
-        aoti_init_torch_library_fragment(ns, file, line, &lib_);
+        aoti_torch_library_init_fragment(ns, file, line, &lib_);
       }
     }
 

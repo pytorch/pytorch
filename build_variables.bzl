@@ -51,6 +51,7 @@ jit_core_headers = [
     "torch/custom_class.h",
     "torch/custom_class_detail.h",
     "torch/library.h",
+    "torch/stable/library.h",
 ]
 
 jit_core_sources = [

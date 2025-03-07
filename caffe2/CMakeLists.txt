@@ -1259,7 +1259,7 @@ install(FILES
   "${TORCH_SRC_DIR}/extension.h"
   "${TORCH_SRC_DIR}/custom_class.h"
   "${TORCH_SRC_DIR}/library.h"
-  "${TORCH_SRC_DIR}/library_stable.h"
+  "${TORCH_SRC_DIR}/stable/library.h"
   "${TORCH_SRC_DIR}/custom_class_detail.h"
   DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch)
 if(BUILD_TEST)
