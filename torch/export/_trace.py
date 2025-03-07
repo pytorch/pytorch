@@ -1,13 +1,11 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-import builtins
 import dataclasses
 import functools
 import inspect
 import logging
 import re
 import time
-import types
 import warnings
 from contextlib import contextmanager, nullcontext
 from typing import Any, Callable, Optional, Union
@@ -67,6 +65,7 @@ from torch._functorch.aot_autograd import (
 )
 from torch._guards import detect_fake_mode
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._logging import dtrace_structured
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._utils_internal import log_export_usage
 from torch.export._unlift import _check_input_constraints_pre_hook
@@ -189,7 +188,7 @@ def _fixup_key(x):
 def _strip_root(x):
     if isinstance(x, str) and x.startswith("_export_root"):
         stripped = x[len("_export_root") :]
-        return stripped[1:] if stripped.startswith(".") else stripped
+        return stripped.removeprefix(".")
     return x
 
 
@@ -435,6 +434,46 @@ def _remap_constants(
                 constants[target] = constant
 
 
+def _replace_unbacked_bindings(gm: torch.fx.GraphModule) -> None:
+    """
+    When we run an interpreter-based pass over a GraphModule, execution of data-dependent operators
+    will produce example values with new unbacked symbols. To track that the new/old symbols are equivalent,
+    we used to rely on the unbacked_renamings mapping. This led to problematic metadata where the unbacked_bindings
+    keys mapped new symbols (u2) to paths containing old symbols (u0) in the example values, or worse, backed symbols
+    or constants (e.g. if the original unbacked was replaced/specialized). Additionally this created problems with
+    de/serialized programs, since we didn't comprehensively serialize ShapeEnv/unbacked renamings/node bindings.
+
+    This pass attempts a simpler way of handling these for export, by throwing away the previously computed bindings, and re-running
+    the pattern match used in compute_unbacked_bindings. This ensures we keep the original symbols contained in the example values,
+    or delete bindings if they've been replaced/specialized.
+    """
+    from torch._export.utils import _get_shape_env_from_gm
+    from torch.fx.experimental.symbolic_shapes import _free_unbacked_symbols_with_path
+    from torch.utils._sympy.symbol import symbol_is_type, SymT
+
+    if (shape_env := _get_shape_env_from_gm(gm)) is None:
+        return
+
+    base_unbacked_symbols = {
+        symbol
+        for symbol in shape_env.var_to_range
+        if symbol_is_type(symbol, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT))
+        and symbol not in shape_env.unbacked_renamings
+    }
+    for node in gm.graph.nodes:
+        node.meta.pop("unbacked_bindings", None)
+        if (val := node.meta.get("val")) is not None and (
+            unbacked_bindings := _free_unbacked_symbols_with_path(
+                val,
+                (),
+                shape_env=shape_env,
+                pending=base_unbacked_symbols,
+                simplify=True,
+            )
+        ):
+            node.meta["unbacked_bindings"] = unbacked_bindings
+
+
 def _produce_aten_artifact(
     *,
     gm: torch.fx.GraphModule,
@@ -463,6 +502,11 @@ def _produce_aten_artifact(
     # Overwrite output specs afterwards.
     flat_fake_args = pytree.tree_leaves((fake_args, fake_kwargs))
     gm, graph_signature = apply_runtime_assertion_pass(gm, graph_signature)
+
+    # Simplify unbacked_bindings by recomputing them.
+    # Useful for any pass that's interpreter-based and might call rebind_unbacked(),
+    # e.g. AOTAutograd in this case.
+    _replace_unbacked_bindings(gm)
 
     total_non_user_inputs = (
         len(graph_signature.parameters)
@@ -1498,8 +1542,7 @@ def _export_to_aten_ir_make_fx(
                 out = original_getattr(self, attr)
                 if attr in attrs_to_proxy:
                     if torch._C._is_torch_function_mode_enabled():
-                        # If it is a static function or method, we should always inline
-                        if not isinstance(out, (types.FunctionType, types.MethodType)):
+                        if isinstance(out, torch.Tensor):
                             # When we get here there is no guarantee that we will hit the
                             # PreDispatchTorchFunctionMode, so we manually peak into the torch
                             # function mode list and tweak the PreDispatchTorchFunctionMode.
@@ -1516,7 +1559,7 @@ def _export_to_aten_ir_make_fx(
                                     proxy = get_proxy_slot(self, tracer).proxy
                                     inner_proxy = tracer.create_proxy(
                                         "call_function",
-                                        builtins.getattr,
+                                        torch.ops.export.access_subclass_inner_tensor.default,
                                         (proxy, attr),
                                         {},
                                     )
@@ -1611,7 +1654,7 @@ def _export_to_aten_ir_make_fx(
                     # from subclass tensors if we carefully rewrite track_tensor_tree
                     # in a way that it doesn't do any tensor methods.
                     torch.ops.aten.detach.default,
-                    builtins.getattr,
+                    torch.ops.export.access_subclass_inner_tensor.default,
                 ):
                     return False
                 return True
@@ -2056,6 +2099,8 @@ def _export(
 
     log_export_usage(event="export.enter", flags=_EXPORT_FLAGS)
 
+    dtrace_structured("export", payload_fn=lambda: "start!")
+
     # NOTE Export training IR rollout
     # Old export calls export._trace(pre_dispatch=True)
     # and there are still lot of internal/OSS callsites that
@@ -2064,7 +2109,7 @@ def _export(
     # export_training_ir_rollout_check returns True in OSS
     # while internally it returns False UNLESS otherwise specified.
     if pre_dispatch and export_training_ir_rollout_check():
-        return _export_for_training(
+        ep = _export_for_training(
             mod,
             args,
             kwargs,
@@ -2072,6 +2117,8 @@ def _export(
             strict=strict,
             preserve_module_call_signature=preserve_module_call_signature,
         )
+        dtrace_structured("exported_program", payload_fn=lambda: str(ep))
+        return ep
 
     (
         args,
@@ -2142,5 +2189,7 @@ def _export(
         constants=export_artifact.aten.constants,
         verifiers=[Verifier],
     )
+
+    dtrace_structured("exported_program", payload_fn=lambda: str(exported_program))
 
     return exported_program

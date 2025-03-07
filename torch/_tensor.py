@@ -6,7 +6,7 @@ import warnings
 from collections import OrderedDict
 from copy import deepcopy
 from numbers import Number
-from typing import Any, Optional, Union
+from typing import Any, Callable, cast, Optional, Union
 
 import torch
 import torch._C as _C
@@ -1104,8 +1104,14 @@ class Tensor(torch._C.TensorBase):
     __rtruediv__ = __rdiv__
     __itruediv__ = _C.TensorBase.__idiv__
 
-    __pow__ = _handle_torch_function_and_wrap_type_error_to_not_implemented(
-        _C.TensorBase.pow
+    __pow__ = cast(
+        Callable[
+            ["torch._C.TensorBase", Union["Tensor", int, float, bool, complex]],
+            "Tensor",
+        ],
+        _handle_torch_function_and_wrap_type_error_to_not_implemented(
+            _C.TensorBase.pow
+        ),
     )
     __ipow__ = _handle_torch_function_and_wrap_type_error_to_not_implemented(
         _C.TensorBase.pow_
@@ -1517,6 +1523,8 @@ class Tensor(torch._C.TensorBase):
         Args:
             ambiguity_check (bool or List[torch.memory_format]): The check method for ambiguity of dim order.
 
+        Examples::
+
             >>> torch.empty((2, 3, 5, 7)).dim_order()
             (0, 1, 2, 3)
             >>> torch.empty((2, 3, 5, 7)).transpose(1, 2).dim_order()
@@ -1539,6 +1547,7 @@ class Tensor(torch._C.TensorBase):
             ... except TypeError as e:
             ...     print(e)
             The ambiguity_check argument must be a bool or a list of memory formats.
+
         .. warning::
             The dim_order tensor API is experimental and subject to change.
         """
