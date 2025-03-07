@@ -5,7 +5,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-from typing import Any, List, Tuple
+from typing import Any
 
 import torch
 from torch.distributed.checkpoint.metadata import (
@@ -34,12 +34,12 @@ class LocalShardsWrapper(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new
     """
 
     __slots__ = ["_local_shards", "_storage_meta"]
-    _local_shards: List[torch.Tensor]
+    _local_shards: list[torch.Tensor]
     _storage_meta: TensorStorageMetadata
 
     @staticmethod
     def __new__(
-        cls, local_shards: List[torch.Tensor], local_offsets: List[Tuple[int, ...]]
+        cls, local_shards: list[torch.Tensor], local_offsets: list[tuple[int, ...]]
     ) -> "LocalShardsWrapper":
         assert len(local_shards) > 0
         assert len(local_shards) == len(local_offsets)
@@ -206,7 +206,7 @@ class LocalShardsWrapper(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new
         [shard.requires_grad_(requires_grad) for shard in self._local_shards]
         return self
 
-    def local_shards(self) -> List[torch.Tensor]:
+    def local_shards(self) -> list[torch.Tensor]:
         """
         Returns a list of :class:`torch.Tensor' corresponding to the
         local shards for this rank. Returns an empty list if the current rank
@@ -214,7 +214,7 @@ class LocalShardsWrapper(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new
         """
         return self._local_shards
 
-    def local_sizes(self) -> List[torch.Size]:
+    def local_sizes(self) -> list[torch.Size]:
         """
         Returns a list of :class:`torch.Size' corresponding to the
         local sizes for the shards on this rank. Returns an empty list if the current rank
@@ -222,7 +222,7 @@ class LocalShardsWrapper(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new
         """
         return [chunk.sizes for chunk in self._storage_meta.chunks]
 
-    def local_offsets(self) -> List[torch.Size]:
+    def local_offsets(self) -> list[torch.Size]:
         """
         Returns a list of :class:`torch.Size' corresponding to the
         local offsets for the shards on this rank. Returns an empty list if the current rank
@@ -231,7 +231,7 @@ class LocalShardsWrapper(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new
         return [chunk.offsets for chunk in self._storage_meta.chunks]
 
     @property
-    def local_chunks(self) -> List[ChunkStorageMetadata]:
+    def local_chunks(self) -> list[ChunkStorageMetadata]:
         """
         Returns a :class:`List[ChunkStorageMetadata]` object corresponding to the
         metadata for each tensor shard
@@ -247,7 +247,7 @@ class LocalShardsWrapper(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new
 
     def __create_write_items__(
         self, fqn: str, object: Any
-    ) -> List[WriteItem]:  # pyre-ignore[2]
+    ) -> list[WriteItem]:  # pyre-ignore[2]
         """
         For compatibility with DCP, we support creation of WriteItems
         such that they can be saved properly.
@@ -268,7 +268,7 @@ class LocalShardsWrapper(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new
             for tensor, chunks in zip(self.local_shards(), self.local_chunks)
         ]
 
-    def __create_chunk_list__(self) -> List[ChunkStorageMetadata]:
+    def __create_chunk_list__(self) -> list[ChunkStorageMetadata]:
         """
         For compatibility with DCP, we support creation of chunk lists
         such that they can be saved properly.

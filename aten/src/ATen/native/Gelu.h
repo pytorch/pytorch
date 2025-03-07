@@ -1,7 +1,7 @@
 #pragma once
 
 #include <c10/util/Exception.h>
-#include <c10/util/string_view.h>
+#include <string_view>
 
 namespace at::native {
 // These constants control the approximation behavior of gelu function.

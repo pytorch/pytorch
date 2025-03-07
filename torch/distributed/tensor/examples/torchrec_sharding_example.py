@@ -3,10 +3,11 @@
 The following example demonstrates how to represent torchrec's embedding
 sharding with the DTensor API.
 """
+
 import argparse
 import os
 from functools import cached_property
-from typing import List, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torch
 from torch.distributed.checkpoint.metadata import (
@@ -43,12 +44,12 @@ supported_ops = [aten.view.default, aten._to_copy.default]
 # this torch.Tensor subclass is a wrapper around all local shards associated
 # with a single sharded embedding table.
 class LocalShardsWrapper(torch.Tensor):
-    local_shards: List[torch.Tensor]
+    local_shards: list[torch.Tensor]
     storage_meta: TensorStorageMetadata
 
     @staticmethod
     def __new__(
-        cls, local_shards: List[torch.Tensor], offsets: List[torch.Size]
+        cls, local_shards: list[torch.Tensor], offsets: list[torch.Size]
     ) -> "LocalShardsWrapper":
         assert len(local_shards) > 0
         assert len(local_shards) == len(offsets)
@@ -98,19 +99,19 @@ class LocalShardsWrapper(torch.Tensor):
             )
 
     @property
-    def shards(self) -> List[torch.Tensor]:
+    def shards(self) -> list[torch.Tensor]:
         return self.local_shards
 
     @shards.setter
-    def shards(self, local_shards: List[torch.Tensor]):
+    def shards(self, local_shards: list[torch.Tensor]):
         self.local_shards = local_shards
 
     @cached_property
-    def shard_sizes(self) -> List[torch.Size]:
+    def shard_sizes(self) -> list[torch.Size]:
         return [chunk.sizes for chunk in self.storage_meta.chunks]
 
     @cached_property
-    def shard_offsets(self) -> List[torch.Size]:
+    def shard_offsets(self) -> list[torch.Size]:
         return [chunk.offsets for chunk in self.storage_meta.chunks]
 
 
@@ -158,7 +159,7 @@ def run_torchrec_row_wise_even_sharding_example(rank, world_size):
     # this is the sharding placement we use in DTensor to represent row-wise sharding
     # row_wise_sharding_placements means that the global tensor is sharded by first dim
     # over the 1-d mesh.
-    row_wise_sharding_placements: List[Placement] = [Shard(0)]
+    row_wise_sharding_placements: list[Placement] = [Shard(0)]
 
     # create a DTensor from the local shard
     dtensor = DTensor.from_local(
@@ -226,7 +227,7 @@ def run_torchrec_row_wise_uneven_sharding_example(rank, world_size):
     ###########################################################################
     # example 1: transform local_shards into DTensor
     # create the DTensorMetadata which torchrec should provide
-    row_wise_sharding_placements: List[Placement] = [Shard(0)]
+    row_wise_sharding_placements: list[Placement] = [Shard(0)]
 
     # note: for uneven sharding, we need to specify the shape and stride because
     # DTensor would assume even sharding and compute shape/stride based on the

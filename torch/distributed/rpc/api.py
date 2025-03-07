@@ -7,7 +7,7 @@ import functools
 import inspect
 import logging
 import threading
-from typing import Any, Dict, Generic, Set, TYPE_CHECKING, TypeVar
+from typing import Any, Generic, TYPE_CHECKING, TypeVar
 
 import torch
 from torch._C._distributed_rpc import (
@@ -115,9 +115,9 @@ class AllGatherStates:
 
 # States used by `def _all_gather()`.
 # `_ALL_WORKER_NAMES` is initialized on initializing RPC layer.
-_ALL_WORKER_NAMES: Set[Any] = set()
+_ALL_WORKER_NAMES: set[Any] = set()
 _all_gather_dict_lock = threading.RLock()
-_all_gather_sequence_id: Dict[str, int] = {}
+_all_gather_sequence_id: dict[str, int] = {}
 _all_gather_sequence_id_to_states: collections.defaultdict = collections.defaultdict(
     AllGatherStates
 )
@@ -137,13 +137,13 @@ def _gather_to_leader(sequence_id, worker_name, obj, worker_names=None):
     with _all_gather_dict_lock:
         if not worker_names:
             worker_names = _ALL_WORKER_NAMES
-            assert (
-                worker_name in worker_names
-            ), f"{worker_name} is not expected by leader."
+            assert worker_name in worker_names, (
+                f"{worker_name} is not expected by leader."
+            )
         states = _all_gather_sequence_id_to_states[sequence_id]
-        assert (
-            worker_name not in states.gathered_objects
-        ), f"{worker_name} reported intent sequence id {sequence_id} twice. "
+        assert worker_name not in states.gathered_objects, (
+            f"{worker_name} reported intent sequence id {sequence_id} twice. "
+        )
         states.gathered_objects[worker_name] = obj
         if worker_names == set(states.gathered_objects.keys()):
             states.proceed_signal.set()
@@ -153,9 +153,9 @@ def _broadcast_to_followers(sequence_id, objects_map):
     with _all_gather_dict_lock:
         states = _all_gather_sequence_id_to_states[sequence_id]
 
-    assert (
-        not states.proceed_signal.is_set()
-    ), f"Termination signal sequence id {sequence_id} got set twice."
+    assert not states.proceed_signal.is_set(), (
+        f"Termination signal sequence id {sequence_id} got set twice."
+    )
     states.gathered_objects = objects_map
     states.proceed_signal.set()
 
@@ -202,9 +202,9 @@ def _all_gather(obj, worker_names=None, timeout: float = UNSET_RPC_TIMEOUT):
     function blocks until all workers have received the gathered results.
     """
     if not worker_names:
-        assert (
-            _ALL_WORKER_NAMES is not None
-        ), "`_ALL_WORKER_NAMES` is not initialized for `def _all_gather`."
+        assert _ALL_WORKER_NAMES is not None, (
+            "`_ALL_WORKER_NAMES` is not initialized for `def _all_gather`."
+        )
         worker_names = _ALL_WORKER_NAMES
     leader_name = min(worker_names)
 
@@ -930,8 +930,7 @@ def _get_should_profile():
     ActiveProfilerType = torch._C._profiler.ActiveProfilerType
     return (
         torch.autograd._profiler_enabled()
-        and torch._C._autograd._profiler_type()
-        == ActiveProfilerType.LEGACY  # type: ignore[attr-defined]
+        and torch._C._autograd._profiler_type() == ActiveProfilerType.LEGACY  # type: ignore[attr-defined]
     )
 
 

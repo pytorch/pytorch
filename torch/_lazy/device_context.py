@@ -1,11 +1,11 @@
 import threading
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 import torch._C._lazy
 
 
 class DeviceContext:
-    _CONTEXTS: Dict[str, Any] = {}
+    _CONTEXTS: dict[str, Any] = {}
     _CONTEXTS_LOCK = threading.Lock()
 
     def __init__(self, device: str) -> None:

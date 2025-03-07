@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 import itertools as it
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 
@@ -26,7 +26,7 @@ class FuzzedParameter:
         name: str,
         minval: Optional[Union[int, float]] = None,
         maxval: Optional[Union[int, float]] = None,
-        distribution: Optional[Union[str, Dict[Any, float]]] = None,
+        distribution: Optional[Union[str, dict[Any, float]]] = None,
         strict: bool = False,
     ):
         """
@@ -182,8 +182,8 @@ class FuzzedTensor:
     def __init__(
         self,
         name: str,
-        size: Tuple[Union[str, int], ...],
-        steps: Optional[Tuple[Union[str, int], ...]] = None,
+        size: tuple[Union[str, int], ...],
+        steps: Optional[tuple[Union[str, int], ...]] = None,
         probability_contiguous: float = 0.5,
         min_elements: Optional[int] = None,
         max_elements: Optional[int] = None,
@@ -346,9 +346,9 @@ class FuzzedTensor:
 class Fuzzer:
     def __init__(
         self,
-        parameters: List[Union[FuzzedParameter, List[FuzzedParameter]]],
-        tensors: List[Union[FuzzedTensor, List[FuzzedTensor]]],
-        constraints: Optional[List[Callable]] = None,
+        parameters: list[Union[FuzzedParameter, list[FuzzedParameter]]],
+        tensors: list[Union[FuzzedTensor, list[FuzzedTensor]]],
+        constraints: Optional[list[Callable]] = None,
         seed: Optional[int] = None
     ):
         """
@@ -390,8 +390,8 @@ class Fuzzer:
 
     @staticmethod
     def _unpack(values, cls):
-        return tuple(it.chain(
-            *[[i] if isinstance(i, cls) else i for i in values]
+        return tuple(it.chain.from_iterable(
+            [[i] if isinstance(i, cls) else i for i in values]
         ))
 
     def take(self, n):
@@ -415,9 +415,9 @@ class Fuzzer:
         return self._rejections / self._total_generated
 
     def _generate(self, state):
-        strict_params: Dict[str, Union[float, int, ParameterAlias]] = {}
+        strict_params: dict[str, Union[float, int, ParameterAlias]] = {}
         for _ in range(1000):
-            candidate_params: Dict[str, Union[float, int, ParameterAlias]] = {}
+            candidate_params: dict[str, Union[float, int, ParameterAlias]] = {}
             for p in self._parameters:
                 if p.strict:
                     if p.name in strict_params:
