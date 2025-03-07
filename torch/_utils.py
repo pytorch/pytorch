@@ -203,6 +203,16 @@ def set_tensor_metadata(tensor, metadata):
     torch._C._set_tensor_metadata(tensor, metadata)  # type: ignore[attr-defined]
 
 
+def _restore_device_fake_mode(tensor):
+    if torch._guards.detect_fake_mode(None) is not None:
+        if tensor.untyped_storage()._fake_device is not None:
+            device = _get_restore_location(tensor.untyped_storage()._fake_device)
+            if not isinstance(device, torch.device):
+                device = torch.device(device)
+            tensor.fake_device = torch.device(device)
+    return tensor
+
+
 def _rebuild_tensor_v2(
     storage,
     storage_offset,
@@ -221,6 +231,8 @@ def _rebuild_tensor_v2(
     # general expectation is that backward_hooks is an empty
     # OrderedDict.  See Note [Don't serialize hooks]
     tensor._backward_hooks = backward_hooks
+
+    tensor = _restore_device_fake_mode(tensor)
     return tensor
 
 
@@ -244,6 +256,7 @@ def _rebuild_tensor_v3(
     if metadata:
         set_tensor_metadata(t, metadata)
     t._backward_hooks = backward_hooks
+    t = _restore_device_fake_mode(t)
     return t
 
 
