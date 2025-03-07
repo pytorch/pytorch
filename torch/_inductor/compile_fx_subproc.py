@@ -4,7 +4,7 @@ import atexit
 import functools
 import os
 from typing import Optional, TYPE_CHECKING
-from typing_extensions import override
+from typing_extensions import final, override
 
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 import torch.fx
@@ -25,13 +25,15 @@ from .output_code import complex_memory_overlap as complex_memory_overlap  # noq
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+    from concurrent.futures import Future
 
 
+@final
 class _SubprocessFxCompile(_OutOfProcessFxCompile):
     @override
-    def _send_to_child(
+    def _send_to_child_async(
         self, input: _WireProtocolPickledInput
-    ) -> _WireProtocolPickledOutput:
+    ) -> Future[_WireProtocolPickledOutput]:
         # TODO: Do we need to copy across some kind of logging IDs? (ChromiumEventLogger)
 
         pool = self.process_pool()
@@ -41,20 +43,9 @@ class _SubprocessFxCompile(_OutOfProcessFxCompile):
         env_vars = ["TORCHINDUCTOR_CACHE_DIR", "TRITON_CACHE_DIR"]
         extra_env = {v: os.environ[v] for v in env_vars if v in os.environ}
 
-        f = pool.submit(_SubprocessFxCompile._run_in_child_subprocess, input, extra_env)
-
-        # For debugging: If we want to print status updates...
-        # last = time.time()
-        # while not f.done():
-        #     print("tick...")
-        #     time.sleep(0.125)
-        #     now = time.time()
-        #     if now - last > 1:
-        #         last = now
-
-        output = f.result()
-
-        return output
+        return pool.submit(
+            _SubprocessFxCompile._run_in_child_subprocess, input, extra_env
+        )
 
     @staticmethod
     @functools.cache
