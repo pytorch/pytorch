@@ -17,6 +17,7 @@ from contextlib import AbstractContextManager
 from inspect import currentframe
 from itertools import count
 from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
+from typing_extensions import Never, override, ParamSpec, Protocol, TypedDict, Unpack
 from unittest import mock
 
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
@@ -87,7 +88,6 @@ from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymExpr
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch.monitor import _WaitCounter
 from torch.utils._ordered_set import OrderedSet
-from typing_extensions import Never, override, ParamSpec, Protocol, TypedDict, Unpack
 
 from .._dynamo.backends.common import aot_autograd
 from .._dynamo.exc import ShortenTraceback, SkipFrame
@@ -658,9 +658,9 @@ def _compile_fx_inner(
     static_inputs_log.debug("static input idxs compile_fx_inner: %s", static_input_idxs)
     inputs_to_check = get_input_idxs_to_check(example_inputs, static_input_idxs)
 
-    assert isinstance(
-        next(iter(reversed(gm.graph.nodes))).args[0], (tuple, list)
-    ), f"inductor can only compile FX graphs which return a tuple/list, but got {gm.graph}"
+    assert isinstance(next(iter(reversed(gm.graph.nodes))).args[0], (tuple, list)), (
+        f"inductor can only compile FX graphs which return a tuple/list, but got {gm.graph}"
+    )
 
     if (cudagraphs := graph_kwargs.get("cudagraphs")) is None:
         graph_kwargs["cudagraphs"] = cudagraphs = BoxedBool(config.triton.cudagraphs)
@@ -1153,9 +1153,9 @@ class _InProcessFxCompile(FxCompile):
                         if graph.aot_mode:
                             from .codecache import AotCodeCompiler
 
-                            assert (
-                                graph.cpp_wrapper
-                            ), "AOT mode only supports C++ wrapper"
+                            assert graph.cpp_wrapper, (
+                                "AOT mode only supports C++ wrapper"
+                            )
                             wrapper_code, kernel_code = graph.codegen_with_cpp_wrapper()
                             output_code_log.debug(
                                 "Output wrapper code: \n%s", wrapper_code.value
@@ -1421,7 +1421,9 @@ def cudagraphify_impl(
         (
             x
             if not isinstance(x, torch.Tensor)
-            else static_input(x) if idx not in static_input_idxs else x.detach()
+            else static_input(x)
+            if idx not in static_input_idxs
+            else x.detach()
         )
         for idx, x in enumerate(inputs)
     ]
