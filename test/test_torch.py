@@ -5334,6 +5334,68 @@ else:
         run(10, 2, False, True)
         run(10, 2, True, True)
 
+    @onlyCUDA
+    def test_lazy_clone_to_device(self, device):
+        device_pairs = [
+            ('cpu', 'cuda'),
+            ('cpu', 'cuda:0'),
+            ('cpu', 'cuda:1'),
+            ('cuda:1', 'cuda:0'),
+            ('cuda:0', 'cuda:1'),
+            # ('cuda', 'cpu'),
+            # NOTE: CUDA -> CPU doesn't work at the moment. Traceback shows that
+            # apparently the CPU Allocator's `clone` method doesn't know how to
+            # deal with a CUDA data pointer. May not need to solve this problem
+            # at the moment, because the whole point is MPS-CPU, not CUDA-CPU.
+            #
+            #   Thread 1 "python" received signal SIGSEGV, Segmentation fault.
+            #   __memcpy_avx_unaligned () at ../sysdeps/x86_64/multiarch/memmove-vec-unaligned-erms.S:220
+            #   warning: 220    ../sysdeps/x86_64/multiarch/memmove-vec-unaligned-erms.S: No such file or directory
+            #   (gdb) bt
+            #   #0  __memcpy_avx_unaligned () at ../sysdeps/x86_64/multiarch/memmove-vec-unaligned-erms.S:220
+            #   #1  0x00007ffff3d22e40 in c10::Allocator::clone (this=0x7ffff3df8010 <c10::g_cpu_alloc>,
+            #       data=0x7ffc89000200, n=40)
+            #       at /home/kurtamohler/develop/pytorch-0/c10/util/UniqueVoidPtr.h:61
+            #   #2  0x00007ffff3d751cf in c10::impl::cow::materialize_cow_storage (storage=...)
+            #       at /home/kurtamohler/develop/pytorch-0/c10/util/UniqueVoidPtr.h:61
+            #
+        ]
+        for from_device, to_device in device_pairs:
+            from_device_check = torch.empty(0, device=from_device).device
+            to_device_check = torch.empty(0, device=to_device).device
+
+            a = torch.randn(10, device=from_device)
+            orig_data_ptr = a.data_ptr()
+            b = a._lazy_clone(device=to_device)
+
+            self.assertEqual(a.device, from_device_check)
+            self.assertEqual(b.device, to_device_check)
+            self.assertTrue(torch._C._is_cow_tensor(a))
+            self.assertEqual(torch._C._data_address(a), orig_data_ptr)
+            self.assertTrue(torch._C._is_cow_tensor(b))
+            self.assertEqual(torch._C._data_address(b), orig_data_ptr)
+
+            a[0] = 1
+
+            self.assertEqual(a.device, from_device_check)
+            self.assertEqual(b.device, to_device_check)
+            self.assertFalse(torch._C._is_cow_tensor(a))
+            self.assertNotEqual(torch._C._data_address(a), orig_data_ptr)
+            self.assertTrue(torch._C._is_cow_tensor(b))
+            self.assertEqual(torch._C._data_address(b), orig_data_ptr)
+
+            b[0] = 2
+
+            self.assertEqual(a.device, from_device_check)
+            self.assertEqual(b.device, to_device_check)
+            self.assertFalse(torch._C._is_cow_tensor(a))
+            self.assertNotEqual(torch._C._data_address(a), orig_data_ptr)
+            self.assertFalse(torch._C._is_cow_tensor(b))
+            self.assertNotEqual(torch._C._data_address(b), orig_data_ptr)
+
+            self.assertEqual(a[0], 1)
+            self.assertEqual(b[0], 2)
+
     # FIXME: move to test distributions
     @skipIfMPS
     @dtypesIfCUDA(torch.float, torch.double, torch.half)
