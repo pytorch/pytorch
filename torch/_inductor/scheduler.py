@@ -4121,7 +4121,7 @@ class Scheduler:
             self._codegen(partition)
             partition_code, _ = V.graph.wrapper_code.generate(V.graph.is_inference)
 
-        V.graph.wrapper_code.define_subgraph_launcher_fn(partition_code)
+        V.graph.wrapper_code.define_subgraph_launcher_fn(partition_code.value)
 
         V.graph.wrapper_code.codegen_partition_call(graph_partition_id, signature)
         V.graph.wrapper_code.allocated.update(
