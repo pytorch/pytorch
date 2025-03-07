@@ -1274,6 +1274,59 @@ TEST(ManagedTensorRanges, OverlappingLifetimesOutputs) {
   EXPECT_TRUE(ranges.lifetimesOverlap(b, output));
 }
 
+TEST(ManagedTensorRanges, LifetimeIncludeSubBlockInputs) {
+  const std::string src_plain = R"IR(
+    graph(%cond : bool, %a : Tensor):
+        %b : Tensor = aten::mul(%a, %a)
+        %output : bool = prim::If(%cond)
+          block0():
+            -> (%a)
+          block1():
+            %c : Tensor = aten::mul(%b, %a)
+            -> (%c)
+        return (%output)
+  )IR";
+  const std::string src_recursive = R"IR(
+    graph(%cond : bool, %a : Tensor):
+        %b : Tensor = aten::mul(%a, %a)
+        %output : bool = prim::If(%cond)
+          block0():
+            -> (%a)
+          block1():
+            %outputblock1 : bool = prim::If(%cond)
+              block0():
+                -> (%a)
+              block1():
+                %c : Tensor = aten::mul(%b, %a)
+                -> (%c)
+            -> (%outputblock1)
+        return (%output)
+  )IR";
+
+  for (const auto& src : {src_plain, src_recursive}) {
+    auto graph = std::make_shared<Graph>();
+    std::unordered_map<std::string, Value*> vmap;
+    parseIR(src, graph.get(), vmap);
+
+    auto* b = vmap["b"];
+
+    FastSet<const Value*> managed_tensors = {b};
+    AliasDb alias_db(graph);
+    auto ranges = ManagedTensorRanges(*graph->block(), alias_db, managed_tensors);
+
+    std::vector<Node*> nodes(
+        graph->block()->nodes().begin(), graph->block()->nodes().end());
+    ASSERT_EQ(nodes.size(), 2);
+
+    EXPECT_FALSE(ranges.nodeFreesManagedTensors(nodes[0]));
+
+    EXPECT_TRUE(ranges.nodeFreesManagedTensors(nodes[1]));
+    EXPECT_EQ(
+        ranges.availableTensorValuesAfterNode(nodes[1]),
+        std::vector<const Value*>{b});
+  }
+}
+
 namespace {
 
 // For checking the correctness of assignStorageToManageTensors, the following

@@ -12,7 +12,7 @@ from torch.utils._sympy.printers import ExprPrinter as ExprPrinter_
 from torch.utils._sympy.value_ranges import ValueRanges
 
 from ..utils import get_bounds_index_expr, get_kernel_metadata
-from ..virtualized import ops, V
+from ..virtualized import ops, OpsWrapper, V
 from .common import (
     CSEVariable,
     DeferredLine,
@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 
     import sympy
 
-    from ..ops_handler import OpsHandler, ReductionType, StoreMode
+    from ..ops_handler import ReductionType, StoreMode
     from ..scheduler import Scheduler, SchedulerNode
     from .common import OpVarT
 
@@ -363,14 +363,20 @@ class MetalOverrides(OpOverrides):
     def zeta(a: CSEVariable, b: CSEVariable) -> str:
         return f"c10::metal::zeta({a}, {b})"
 
+    @staticmethod
+    def spherical_bessel_j0(x: CSEVariable) -> str:
+        return f"c10::metal::spherical_bessel_j0({x})"
+
+    @staticmethod
+    def xlog1py(x: CSEVariable) -> str:
+        return f"c10::metal::xlog1py({x})"
+
+    @staticmethod
+    def entr(x: CSEVariable) -> str:
+        return f"c10::metal::entr({x})"
+
 
 MetalOverrides._initialize_pointwise_overrides("mps")
-
-
-if TYPE_CHECKING:
-
-    class _typecheck_MetalOverrides(MetalOverrides, OpsHandler[Any]):
-        pass  # mypy will error if we got any of the signatures wrong
 
 
 class MetalKernel(SIMDKernel):
@@ -463,6 +469,16 @@ class MetalKernel(SIMDKernel):
                 f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {reduction_dim.numel})",
                 dtype=dtype,
             )
+        if reduction_type == "welford_reduce":
+            acc_buf = self._new_accvar(src_dtype, reduction_dim.numel)
+            self.body.splice(f"{acc_buf}[{reduction_dim.name}] = {value};")
+            wf_res = self.cse.generate(
+                self.body,
+                f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {reduction_dim.numel})",
+            )
+            return OpsWrapper._unwrap(
+                (f"{wf_res}.x", f"{wf_res}.y", self.features.reduction_numel)
+            )
         raise NotImplementedError(reduction_type)
 
     def codegen_iteration_ranges_entry(self, entry: IterationRangesEntry) -> None:
@@ -544,7 +560,10 @@ class MetalKernel(SIMDKernel):
             threads = [self.pexpr(v.numel) for v in self.active_range_trees()]  # type: ignore[misc]
             args += [f"threads=[{', '.join(threads)}]"]
         if self.inside_reduction:
-            threads = [self.pexpr(v.numel) if v.is_reduction else "1" for v in self.active_range_trees()]  # type: ignore[misc]
+            threads = [
+                self.pexpr(v.numel) if v.is_reduction else "1"  # type: ignore[misc]
+                for v in self.active_range_trees()
+            ]
             args += [f"group_size=[{', '.join(threads)}]"]
 
         wrapper.generate_kernel_call(

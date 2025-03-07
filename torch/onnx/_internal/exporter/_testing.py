@@ -22,8 +22,10 @@ def assert_onnx_program(
     atol: float | None = None,
     args: tuple[Any, ...] | None = None,
     kwargs: dict[str, Any] | None = None,
+    strategy: str | None = "TorchExportNonStrictStrategy",
 ) -> None:
     """Assert that the ONNX model produces the same output as the PyTorch ExportedProgram.
+
     Args:
         program: The ``ONNXProgram`` to verify.
         rtol: Relative tolerance.
@@ -32,7 +34,16 @@ def assert_onnx_program(
             If None, the default example inputs in the ExportedProgram will be used.
         kwargs: The keyword arguments to pass to the program.
             If None, the default example inputs in the ExportedProgram will be used.
+        strategy: Assert the capture strategy used to export the program. Values can be
+            class names like "TorchExportStrategy" or "TorchExportNonStrictStrategy" etc.
+            If None, the strategy is not asserted.
     """
+    if strategy is not None:
+        if program._capture_strategy != strategy:
+            raise ValueError(
+                f"Expected strategy '{strategy}' is used to capture the exported program, "
+                f"but got '{program._capture_strategy}'."
+            )
     exported_program = program.exported_program
     if exported_program is None:
         raise ValueError(

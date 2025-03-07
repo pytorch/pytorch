@@ -2,7 +2,7 @@ name: Upload torch dynamo performance stats
 
 on:
   workflow_run:
-    workflows: [inductor-A100-perf-nightly, inductor-perf-nightly-A10g, inductor-perf-nightly-aarch64, inductor-perf-nightly-x86, perf-nightly-macos, inductor-perf-nightly-rocm]
+    workflows: [inductor-A100-perf-nightly, inductor-perf-nightly-A10g, inductor-perf-nightly-aarch64, inductor-perf-nightly-x86, perf-nightly-macos, inductor-perf-nightly-rocm, inductor-perf-nightly-h100]
     types:
       - completed
 
@@ -13,7 +13,8 @@ jobs:
       conclusion: ${{ fromJson(steps.get-conclusion.outputs.data).conclusion }}
     steps:
       - name: Get workflow run conclusion
-        uses: octokit/request-action@v2.1.0
+        # TODO (huydhn): Pin this once https://github.com/octokit/request-action/issues/315 is resolved
+        uses: octokit/request-action@main
         id: get-conclusion
         with:
           route: GET /repos/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}/attempts/${{ github.event.workflow_run.run_attempt }}
