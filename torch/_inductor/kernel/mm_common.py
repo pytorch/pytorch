@@ -109,7 +109,6 @@ def filtered_configs(
                     or block_n % matrix_instr_nonkdim != 0
                 ):
                     #  block_m and block_n must be a multiple of matrix_instr_nonkdim
-                    kpack = 1
                     continue
 
                 if (
