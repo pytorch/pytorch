@@ -36,11 +36,9 @@ _M = TypeVar("_M", nn.Module, list[nn.Module])
 
 
 class _ContractFn(Protocol, Generic[_P, _T, _TState]):
-    def __call__(self, *args: _P.args, **kwargs: _P.kwargs) -> _T:
-        ...
+    def __call__(self, *args: _P.args, **kwargs: _P.kwargs) -> _T: ...
 
-    def state(self, module: nn.Module) -> _TState:
-        ...
+    def state(self, module: nn.Module) -> _TState: ...
 
 
 def contract(
@@ -92,7 +90,7 @@ def contract(
     # wraps will make functions decorated with contract() pickleable - needed for integration with torch.package
     @wraps(state_cls)  # type: ignore[arg-type]
     def inner(
-        func: Callable[Concatenate[_M, _P], _M]
+        func: Callable[Concatenate[_M, _P], _M],
     ) -> _ContractFn[Concatenate[_M, _P], _M, _TState]:
         @wraps(func)
         def wrapper(
@@ -232,9 +230,7 @@ def contract(
             return module.__dict__.setdefault(  # type: ignore[call-overload]
                 STATE_KEY,
                 {},  # TODO(@yhcharles): this is a temporary fix, need a better way
-            ).get(
-                func
-            )  # type: ignore[call-overload]
+            ).get(func)  # type: ignore[call-overload]
 
         wrapper.state = get_state  # type: ignore[attr-defined]
 

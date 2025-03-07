@@ -118,6 +118,10 @@ def relu_nan_to_num(graph):
     return None
 
 
+def fuse_split_getitem_squeeze_cat(graph):
+    return None
+
+
 @init_once_fakemode
 def lazy_init():
     from . import efficient_conv_bn_eval, split_cat  # noqa: F401
@@ -166,7 +170,9 @@ def _run_pre_dispatch_passes(
         fuse_chunk_reshape_unsqueeze_concat_pass,
     ]
 
-    full_pass_list = default_pass_list + []
+    full_pass_list = default_pass_list + [
+        fuse_split_getitem_squeeze_cat,
+    ]
 
     log.info(
         f"pre_grad_passes: add_passes: {add_passes}, remove_pass: {remove_passes}"  # noqa: G004
@@ -271,9 +277,9 @@ def pre_grad_passes(
                 for _ in range(counter):
                     pattern_matcher_pass.apply(gm.graph)  # type: ignore[arg-type]
                 if not is_same_dict(counters["inductor"], inductor_before_change):
-                    optimus_scuba_log[
-                        f"{pattern_matcher_pass.pass_name}_pre_grad"
-                    ] = upload_graph(gm.graph)
+                    optimus_scuba_log[f"{pattern_matcher_pass.pass_name}_pre_grad"] = (
+                        upload_graph(gm.graph)
+                    )
             # TODO: move efficient_conv_bn_eval_pass to the fusions dict too.
             efficient_conv_bn_eval_pass.apply(gm.graph)  # type: ignore[arg-type]
 

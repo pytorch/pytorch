@@ -48,7 +48,8 @@ IF(NOT MKLDNN_FOUND)
       set(DNNL_CXX_FLAGS "")
     endif()
     ExternalProject_Add(xpu_mkldnn_proj
-      SOURCE_DIR ${MKLDNN_ROOT}
+      GIT_REPOSITORY https://github.com/oneapi-src/oneDNN
+      GIT_TAG v3.7.1
       PREFIX ${XPU_MKLDNN_DIR_PREFIX}
       BUILD_IN_SOURCE 0
       CMAKE_ARGS  -DCMAKE_C_COMPILER=icx
