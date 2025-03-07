@@ -37,7 +37,7 @@ def any_torch_dispatch_mode_on_stack(*, include_infra_modes=True) -> bool:
     stack_len = torch._C._len_torch_dispatch_stack()
     for idx in range(stack_len):
         mode = _get_dispatch_stack_at(idx)
-        if mode.is_infra_mode:
+        if mode.is_infra_mode():
             if not include_infra_modes:
                 continue
         return True
