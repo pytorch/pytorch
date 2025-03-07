@@ -596,7 +596,7 @@ def dynamo_timed(
     dynamo_compile_column_us: Optional[str] = None,
     dynamo_compile_runtime_column_us: Optional[str] = None,
     compile_id: Optional[CompileId] = None,
-    is_forward: Optional[bool] = None,
+    is_backward: Optional[bool] = None,
     log_waitcounter: bool = False,
 ) -> Generator[Any, None, None]:
     """
@@ -638,7 +638,8 @@ def dynamo_timed(
     - compile_id: In the typical case, this parameter should not be needed. Use to
       supply the compile_id for those cases where we want to log a compile_id where
       it's not naturally available, e.g., for runtime autotuning.
-    - is_forward: Optionally set an is_forward field for those logging destinations
+    - is_backward: Specify forward/backward directly when not available in a
+      CompileContext, e.g., during runtime autotuning.
       that support it.
     - log_waitcounter: If set, we'll log a waitcounter of the form "pytorch.dynamo_timed.{key}"
     """
@@ -664,8 +665,8 @@ def dynamo_timed(
         event_metadata.update(metadata)
     if fn_name:
         event_metadata.update({"fn_name": fn_name})
-    if is_forward is not None:
-        event_metadata.update({"is_backward": not is_forward})
+    if is_backward is not None:
+        event_metadata.update({"is_backward": is_backward})
 
     chromium_log: ChromiumEventLogger = get_chromium_event_logger()
     start_ns = time.time_ns()
@@ -707,7 +708,7 @@ def dynamo_timed(
                 extra={
                     "compile_id": compile_id,
                     "is_runtime": True,
-                    "is_forward": is_forward,
+                    "is_forward": not is_backward,
                 },
             )
             cumulative_time_spent_ns[event_name] += time_spent_ns
