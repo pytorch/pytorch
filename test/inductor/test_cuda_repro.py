@@ -551,9 +551,15 @@ class CudaReproTests(TestCase):
         from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
         from torch._inductor.runtime.hints import AttrsDescriptorWrapper, HeuristicType
         from torch._inductor.runtime.triton_heuristics import CachingAutotuner, grid
+        from torch._inductor.utils import triton_version_uses_attrs_dict
 
         def autotune(configs, meta):
             def decorator(fn):
+                if triton_version_uses_attrs_dict():
+                    # Newer versions of Triton puts constexpr in signature
+                    # Ref: https://github.com/pytorch/pytorch/pull/145051
+                    meta["signature"]["XBLOCK"] = "constexpr"
+
                 return CachingAutotuner(
                     # force autotune by setting save_cache_hook to False
                     fn,
