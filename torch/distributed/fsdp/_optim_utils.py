@@ -6,6 +6,7 @@ import warnings
 from collections.abc import Iterable, Iterator, Sequence
 from contextlib import ExitStack
 from dataclasses import dataclass, field
+from itertools import chain
 from typing import Any, cast, NamedTuple, no_type_check, Optional, TYPE_CHECKING, Union
 
 import torch
@@ -1220,9 +1221,7 @@ def _map_param_key_to_optim_keys(
             [] for _ in range(dist.get_world_size(group))
         ]
         dist.all_gather_object(all_keys, all_optim_state_keys, group=group)
-        merge_all_optim_state_keys = [
-            key for local_keys in all_keys for key in local_keys
-        ]
+        merge_all_optim_state_keys = [*chain.from_iterable(all_keys)]
         all_optim_state_keys = sorted(set(merge_all_optim_state_keys))
     else:
         key_obj_list: list[Optional[list[_OptimStateKey]]] = (
@@ -1257,9 +1256,7 @@ def _unflatten_param_groups(
             param_to_fqns[param] for param in param_group_params
         ]
         unflat_param_group["params"] = [
-            unflat_param_name
-            for unflat_param_names in nested_unflat_param_names
-            for unflat_param_name in unflat_param_names
+            *chain.from_iterable(nested_unflat_param_names)
         ]  # flatten the list of lists
         param_groups.append(unflat_param_group)
     return param_groups
