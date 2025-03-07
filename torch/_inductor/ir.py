@@ -2196,8 +2196,7 @@ class Scan(Loops):
         scan_type = Scan
         if num_splits > 1:
             supports_split = (
-                torch.version.hip is None
-                or (has_triton and triton_version >= "3.3.0")
+                torch.version.hip is None or (has_triton and triton_version >= "3.3.0")
             ) and (len(dtypes) == 1)
             if not supports_split:
                 if can_fallback_to_aten:
