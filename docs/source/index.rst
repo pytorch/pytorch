@@ -115,6 +115,7 @@ Features described in this documentation are classified by release status:
    size
    sparse
    storage
+   torch.pytree <pytree>
    torch.testing <testing>
    torch.utils <utils>
    torch.utils.benchmark <benchmark_utils>
