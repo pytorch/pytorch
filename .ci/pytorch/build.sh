@@ -15,6 +15,8 @@ if [[ "$BUILD_ENVIRONMENT" == *-mobile-*build* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile.sh" "$@"
 fi
 
+pip install ninja
+
 echo "Python version:"
 python --version
 
@@ -26,6 +28,9 @@ cmake --version
 
 echo "Environment variables:"
 env
+
+# mkdir -p /var/lib/jenkins/.config/sccache
+# echo "" > /var/lib/jenkins/.config/sccache/config
 
 if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   # Use jemalloc during compilation to mitigate https://github.com/pytorch/pytorch/issues/116289
