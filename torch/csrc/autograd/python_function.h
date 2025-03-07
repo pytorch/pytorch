@@ -36,9 +36,9 @@ struct PyNode : public Node {
       const std::vector<bool>& is_variable_input);
 
   variable_list apply(variable_list&& inputs) override;
-  variable_list apply_with_saved_impl(
+  variable_list defer_to_dynamo(
       const variable_list& inputs,
-      const SwapSavedVariables& saved);
+      const std::optional<PyObject*>& compiler);
 
   void release_variables() override;
   std::string name() const override;
@@ -46,13 +46,20 @@ struct PyNode : public Node {
 
   bool is_aot_backward() const override;
 
-  void compiled_args(CompiledNodeArgs& args) const override;
+  void compiled_args(CompiledNodeArgs& args) override;
   variable_list apply_with_saved(
       const variable_list& inputs,
       SwapSavedVariables& saved) override;
 
   // THPFunction this Function is wrapping.  Owning!
   PyObject* obj;
+
+  // The AutogradCompilerCall::hooks idx corresponding to this node's backward
+  std::optional<int> _backward_idx;
+
+  // The AutogradCompilerCall::hooks idx corresponding to this node's
+  // backward_state
+  std::optional<int> _backward_state_idx;
 
   // NOLINTNEXTLINE(bugprone-exception-escape)
   ~PyNode() override {
