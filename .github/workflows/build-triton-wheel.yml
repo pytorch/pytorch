@@ -135,7 +135,7 @@ jobs:
           docker exec -t "${container_name}" yum install -y zlib-devel zip
           docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}"  -m pip install -U setuptools==67.4.0 pybind11==2.13.1 auditwheel wheel
 
-          if [[ "${{ matrix.device }}" == "aaech64" ]]; then
+          if [[ "${{ matrix.device }}" == "aarch64" ]]; then
             docker exec -t "${container_name}" bash -c  "yum install -y ninja-build"
           fi
 
