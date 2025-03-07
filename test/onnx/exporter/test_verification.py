@@ -59,7 +59,7 @@ class VerificationInterpreterTest(common_utils.TestCase):
         args = (torch.tensor([1.0]), torch.tensor([2.0]))
         onnx_program = torch.onnx.export(model, args, dynamo=True, verbose=False)
         assert onnx_program is not None
-        interpreter = _verification.VerificationInterpreter(onnx_program)
+        interpreter = _verification._VerificationInterpreter(onnx_program)
         results = interpreter.run(args)
         torch.testing.assert_close(results, model(*args))
         verification_infos = interpreter.verification_infos
@@ -67,6 +67,38 @@ class VerificationInterpreterTest(common_utils.TestCase):
         for info in verification_infos:
             self.assertEqual(info.max_abs_diff, 0)
             self.assertEqual(info.max_rel_diff, 0)
+
+
+class VerificationFunctionsTest(common_utils.TestCase):
+    def test_verify_onnx_program(self):
+        class Model(torch.nn.Module):
+            def forward(self, a, b):
+                c = a + b
+                return c - 1, c
+
+        model = Model()
+        args = (torch.tensor([1.0]), torch.tensor([2.0]))
+        onnx_program = torch.onnx.export(model, args, dynamo=True, verbose=False)
+        assert onnx_program is not None
+        verification_infos = _verification.verify_onnx_program(
+            onnx_program, args, compare_intermediates=False
+        )
+        self.assertEqual(len(verification_infos), 2)
+
+    def test_verify_onnx_program_with_compare_intermediates_true(self):
+        class Model(torch.nn.Module):
+            def forward(self, a, b):
+                c = a + b
+                return c - 1, c
+
+        model = Model()
+        args = (torch.tensor([1.0]), torch.tensor([2.0]))
+        onnx_program = torch.onnx.export(model, args, dynamo=True, verbose=False)
+        assert onnx_program is not None
+        verification_infos = _verification.verify_onnx_program(
+            onnx_program, args, compare_intermediates=True
+        )
+        self.assertEqual(len(verification_infos), 3)
 
 
 if __name__ == "__main__":
