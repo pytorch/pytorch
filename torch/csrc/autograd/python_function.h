@@ -24,6 +24,7 @@ namespace torch::autograd {
 
 // A Function which is implemented by a Python object (i.e., a THPFunction).
 // Calls to 'apply' are forwarded to the Python method implementation.
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 struct PyNode : public Node {
   PyNode(THPObjectPtr obj) : obj(obj.release()) {}
 
