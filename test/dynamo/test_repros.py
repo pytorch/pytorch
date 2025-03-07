@@ -5826,7 +5826,6 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         out_ref = f(x, param)
         out_test = torch.compile(f, backend="aot_eager_decomp_partition")(x, param)
         self.assertEqual(out_ref, out_test)
-        out = f(x, param)
 
     @requires_cuda
     # This test will fail as flip in combination with particular input lenghts
