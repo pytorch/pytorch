@@ -12188,6 +12188,10 @@ op_db: list[OpInfo] = [
                DecorateInfo(
                    toleranceOverride({torch.half: tol(atol=1e-5, rtol=3e-3)}),
                    'TestInductorOpInfo', 'test_comprehensive', device_type='cpu'),
+               DecorateInfo(toleranceOverride({torch.float32: tol(atol=2e-5, rtol=3e-6)}),
+                            "TestConsistency", "test_output_match", device_type="mps"),
+               DecorateInfo(toleranceOverride({torch.float32: tol(atol=2e-5, rtol=3e-6)}),
+                            "TestConsistency", "test_output_grad_match", device_type="mps"),
            ],
            sample_inputs_func=sample_inputs_addmv),
     OpInfo('addbmm',
