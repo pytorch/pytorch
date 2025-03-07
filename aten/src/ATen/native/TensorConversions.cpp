@@ -423,7 +423,7 @@ bool to_will_alias(
        self.suggest_memory_format() == memory_format);
 }
 
-bool _only_device_differs(
+static bool _only_device_differs(
     const Tensor& self,
     std::optional<ScalarType> dtype,
     std::optional<Layout> layout,
