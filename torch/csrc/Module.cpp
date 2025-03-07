@@ -128,6 +128,8 @@
 #endif
 #endif
 
+#include <torch/csrc/runtime/ModelRunnerPybind.h>
+
 #if defined(USE_VALGRIND)
 #include <callgrind.h>
 #endif
@@ -2575,6 +2577,10 @@ Call this whenever a new thread is created in order to propagate values from
 #ifdef USE_KINETO
   torch::global_kineto_init();
 #endif
+  {
+    auto py_module_runtime = py_module.def_submodule("runtime");
+    torch::runtime::initModelRunnerPybind(py_module_runtime);
+  }
   return module;
   END_HANDLE_TH_ERRORS
 }
