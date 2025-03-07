@@ -956,6 +956,7 @@ class InstructionTranslatorBase(
     exn_vt_stack: list[VariableTracker]
     exec_recorder: Optional[ExecutionRecorder]
     strict_checks_fn: Optional[Callable[[VariableTracker], bool]]
+    start_point: Optional[int]
 
     def mark_inconsistent_side_effects(self):
         """
@@ -1103,7 +1104,6 @@ class InstructionTranslatorBase(
             return False
         self.current_instruction = inst = self.instructions[ip]
         self.instruction_pointer = ip + 1
-        get_metrics_context().increment("ir_count", 1)
 
         if inst.starts_line:
             self.starts_line(inst.starts_line)
@@ -1215,6 +1215,7 @@ class InstructionTranslatorBase(
         with self.run_ctx_mgr():
             try:
                 self.output.push_tx(self)
+                self.start_point = self.instruction_pointer
                 while self.step():
                     pass
             except TensorifyScalarRestartAnalysis:
@@ -1538,7 +1539,13 @@ class InstructionTranslatorBase(
         self.load_builtin_from_argval(inst.argval)
 
     def jump(self, inst):
+        assert self.instruction_pointer is not None
+        assert self.start_point is not None
+        get_metrics_context().increment(
+            "ir_count", self.instruction_pointer - self.start_point
+        )
         self.instruction_pointer = self.indexof[inst.target]
+        self.start_point = self.instruction_pointer
 
     JUMP_FORWARD = jump
     JUMP_ABSOLUTE = jump
@@ -3045,6 +3052,7 @@ class InstructionTranslatorBase(
         self.symbolic_torch_function_state = symbolic_torch_function_state
         self.stack = []
         self.instruction_pointer = 0
+        self.start_point = None
         self.current_instruction = create_instruction("NOP")
         self.block_stack = []
         # states before SETUP_WITH for checkpointing and fallback
@@ -3478,6 +3486,11 @@ class InstructionTranslator(InstructionTranslatorBase):
 
     def _return(self, inst):
         self.replace_tos_if_return_is_generator()
+        assert self.instruction_pointer is not None
+        assert self.start_point is not None
+        get_metrics_context().increment(
+            "ir_count", self.instruction_pointer - self.start_point
+        )
 
         if (
             not config.allow_empty_graphs
