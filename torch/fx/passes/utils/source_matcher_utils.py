@@ -99,13 +99,14 @@ def get_source_partitions(
                 partition.append(node)
 
     def make_partition(nodes: list[Node], module_type: type) -> SourcePartition:
-        input_nodes = set()
+        input_nodes = set()  # Initialize as a set
         output_nodes = set()
         params = set()
+
         for node in nodes:
             for arg in node.args:
                 if isinstance(arg, Node) and arg not in nodes and arg.op != "get_attr":
-                    input_nodes.add(arg)
+                    input_nodes.add(arg)  # Populate input_nodes
 
             if node.op == "get_attr":
                 params.add(node)
@@ -116,10 +117,13 @@ def get_source_partitions(
                 if user not in nodes:
                     output_nodes.add(node)
 
+        # Sort input_nodes deterministically after populating it
+        sorted_input_nodes = sorted(input_nodes, key=lambda node: str(node))
+
         return SourcePartition(
             nodes,
             module_type,
-            list(input_nodes),
+            sorted_input_nodes,  # Use sorted list here
             list(output_nodes),
             list(params),  # type: ignore[arg-type]
         )
@@ -127,8 +131,8 @@ def get_source_partitions(
     ret: dict[type[Any], list[SourcePartition]] = {}
 
     if filter_fn:
-        # for each partition, we apply filter_fn to filter out all partitions that doesn't satisfy the
-        # filter condition
+        # For each partition, apply filter_fn to filter out all partitions that don't satisfy the condition
+        # filter_fn should return True if the node should be kept, False otherwise
         filtered_modules = {}
         for tp, name_to_partition in modules.items():
             filtered_name_to_partition = {
@@ -143,6 +147,7 @@ def get_source_partitions(
         ret[k] = [make_partition(partition, k) for partition in v.values()]
 
     return ret
+
 
 
 @compatibility(is_backward_compatible=False)  # type: ignore[misc]
