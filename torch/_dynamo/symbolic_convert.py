@@ -1736,11 +1736,14 @@ class InstructionTranslatorBase(
         # Handle https://peps.python.org/pep-0479/
         # CPython 3.12+ has a specific bytecode instruction (CALL_INTRINSIC_1 3) for this
         if (
-            is_generator(self.f_code)
-            and isinstance(val, variables.ExceptionVariable)
+            isinstance(val, variables.ExceptionVariable)
             and val.exc_type is StopIteration
         ):
-            val = variables.BuiltinVariable(RuntimeError).call_function(self, [], {})  # type: ignore[arg-type]
+            msg = ConstantVariable("generator raised StopIteration")
+            other = val
+            val = variables.BuiltinVariable(RuntimeError).call_function(self, [msg], {})  # type: ignore[arg-type]
+            val.call_setattr(self, ConstantVariable("__context__"), other)
+            val.call_setattr(self, ConstantVariable("__cause__"), other)
 
         # Save the exception in a global data structure
         self.exn_vt_stack.set_current_exception(val)
