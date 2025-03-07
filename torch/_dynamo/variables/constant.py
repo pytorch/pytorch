@@ -1,13 +1,21 @@
 # mypy: ignore-errors
 
+"""
+Constant and enum variable tracking in Dynamo.
+
+This module is fundamental to Dynamo's ability to track and propagate constant
+values during compilation, ensuring proper handling of Python literals and
+maintaining type safety through the compilation process.
+"""
+
 import operator
 from typing import TYPE_CHECKING
 
 import torch
 from torch._dynamo.source import AttrSource, GetItemSource
 
-from .. import variables
-from ..exc import raise_observed_exception, unimplemented
+from .. import graph_break_hints, variables
+from ..exc import raise_observed_exception, unimplemented_v2
 from ..utils import cmp_name_to_op_mapping, common_constant_types, istype, np
 from .base import VariableTracker
 
@@ -17,6 +25,14 @@ if TYPE_CHECKING:
 
 
 class ConstantVariable(VariableTracker):
+    """
+    Variable tracker for Python literals and basic immutable types, with automatic
+    routing support for collection types (lists, tuples, sets, etc.).
+
+    The create() method intelligently constructs appropriate variable types for
+    nested collections.
+    """
+
     @staticmethod
     def create(value, **kwargs) -> VariableTracker:
         """
@@ -52,9 +68,7 @@ class ConstantVariable(VariableTracker):
 
     def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
-        assert ConstantVariable.is_base_literal(
-            value
-        ), f"""
+        assert ConstantVariable.is_base_literal(value), f"""
 Cannot construct `ConstantVariable` for value of type {type(value)}.
 
 This failure likely due to PyTorch-internal use of `ConstantVariable` on
@@ -185,7 +199,7 @@ its type to `common_constant_types`.
             return ConstantVariable.create(len(self.value))
         elif name == "__round__" and len(args) == 1 and args[0].is_python_constant():
             return ConstantVariable.create(
-                round(self.value, args[0].is_python_constant())
+                round(self.value, args[0].as_python_constant())
             )
         elif name == "__contains__" and len(args) == 1 and args[0].is_python_constant():
             assert not kwargs
@@ -202,6 +216,12 @@ its type to `common_constant_types`.
 
 
 class EnumVariable(VariableTracker):
+    """VariableTracker for enum.Enum and enum.IntEnum instances
+
+    Provides specialized handling for Python enum types, supporting
+    both standard Enum and IntEnum with proper value tracking and comparison.
+    """
+
     def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
         self.value = value
@@ -212,7 +232,14 @@ class EnumVariable(VariableTracker):
             for member in list(cls_type):
                 if member.value == value_vt.as_python_constant():
                     return cls(member, **options)
-        unimplemented("Enum variable is constructed with non constant values")
+        unimplemented_v2(
+            gb_type="Failed to construct Enum variable",
+            context=f"value: {value_vt}, allowed enum values: {list(cls_type)}",
+            explanation="Attempted to construct an Enum value that is non-constant (e.g. int, string) "
+            "or is not an acceptable value for the Enum. "
+            f"Acceptable values for Enum `{cls_type}`: {list(cls_type)}.",
+            hints=[*graph_break_hints.USER_ERROR, *graph_break_hints.SUPPORTABLE],
+        )
 
     def as_proxy(self):
         if isinstance(self.value, int):

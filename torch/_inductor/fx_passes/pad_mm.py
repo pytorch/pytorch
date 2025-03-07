@@ -2,7 +2,8 @@ import functools
 import itertools
 import operator
 import typing
-from typing import Any, Callable, List, Optional, Sequence, Tuple, Union
+from collections.abc import Sequence
+from typing import Any, Callable, Optional, Union
 
 import torch
 import torch._inductor.runtime.runtime_utils
@@ -275,7 +276,7 @@ def should_pad_bench_key(
     input: Optional[Tensor] = None,
     is_base_time_key: bool = False,
 ) -> str:
-    def tensor_key(t: Tensor) -> Tuple[torch.Size, Tuple[int, ...], torch.dtype]:
+    def tensor_key(t: Tensor) -> tuple[torch.Size, tuple[int, ...], torch.dtype]:
         return (t.shape, t.stride(), t.dtype)
 
     tf32_key = (
@@ -436,8 +437,8 @@ def _should_pad_bench(
             return False
 
         def realize_symbols(
-            ds: Union[torch.Size, Tuple[torch.SymInt, ...]]
-        ) -> List[int]:
+            ds: Union[torch.Size, tuple[torch.SymInt, ...]],
+        ) -> list[int]:
             return [d if isinstance(d, int) else d.node.hint for d in ds]
 
         if any(

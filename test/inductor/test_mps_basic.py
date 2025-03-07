@@ -114,6 +114,21 @@ class MPSBasicTests(TestCase):
             check_lowp=False,
         )
 
+    def test_pointwise_spherical_bessel_j0(self):
+        self.common(
+            torch.special.spherical_bessel_j0, (torch.rand(128, 128),), check_lowp=False
+        )
+
+    def test_pointwise_xlog1py(self):
+        self.common(
+            torch.special.xlog1py,
+            (torch.rand(128, 128), torch.rand(128, 128)),
+            check_lowp=False,
+        )
+
+    def test_pointwise_entr(self):
+        self.common(torch.special.entr, (torch.rand(128, 128),), check_lowp=False)
+
     def test_broadcast(self):
         self.common(torch.add, (torch.rand(32, 1024), torch.rand(1024)))
 
@@ -164,6 +179,7 @@ for test_name in [
     "test_inf",
     "test_isinf",
     "test_isinf2",
+    "test_layer_norm",
     "test_lgamma",
     "test_linear_float64",
     "test_log_fp64",
@@ -187,6 +203,7 @@ for test_name in [
     "test_slice_scatter4",
     "test_softmax",
     "test_sort",
+    "test_split_cumsum",
     "test_sum_int",
     "test_sum_keepdims",
     "test_tanh",
