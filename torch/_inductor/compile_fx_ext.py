@@ -23,6 +23,7 @@ from torch._inductor.output_code import (
     CompiledFxGraphConstantsWithGm,
     OutputCode,
 )
+from torch._subclasses import FakeTensorMode
 from torch.utils._ordered_set import OrderedSet
 
 from . import config
@@ -35,7 +36,7 @@ from .virtualized import V
 
 if TYPE_CHECKING:
     import types
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Generator, Mapping, Sequence
 
     from torch._inductor.utils import InputType
     from torch.fx import GraphModule
@@ -160,6 +161,23 @@ class _LoweringSerializerContextManager(contextlib.ExitStack):
 
 
 @dataclass
+class _FakeTensorModeSerializer:
+    allow_non_fake_inputs: bool
+
+    def __init__(self, fake_mode: FakeTensorMode) -> None:
+        self.allow_non_fake_inputs = fake_mode.allow_non_fake_inputs
+
+    @contextlib.contextmanager
+    def patch(self, fake_mode: FakeTensorMode) -> Generator[None, None, None]:
+        saved_allow_non_fake_inputs = fake_mode.allow_non_fake_inputs
+        fake_mode.allow_non_fake_inputs = self.allow_non_fake_inputs
+
+        yield
+
+        fake_mode.allow_non_fake_inputs = saved_allow_non_fake_inputs
+
+
+@dataclass
 class _WireProtocolInput:
     """
     For _SerializedFxCompile - encapsulates all the data being transferred
@@ -178,6 +196,7 @@ class _WireProtocolInput:
     ]
     logger_state: _LoggerState
     lowering: _LoweringSerializer
+    fake_tensor_mode: _FakeTensorModeSerializer
 
     def serialize(self) -> _WireProtocolPickledInput:
         """
@@ -189,7 +208,7 @@ class _WireProtocolInput:
         return _WireProtocolPickledInput(GraphPickler.dumps(self))
 
 
-def _current_fake_mode() -> torch._subclasses.FakeTensorMode:
+def _current_fake_mode() -> FakeTensorMode:
     fake_mode = None
     if context := torch._guards.TracingContext.try_get():
         fake_mode = context.fake_mode
@@ -197,7 +216,7 @@ def _current_fake_mode() -> torch._subclasses.FakeTensorMode:
         return fake_mode
 
     shape_env = torch.fx.experimental.symbolic_shapes.ShapeEnv()
-    return torch._subclasses.FakeTensorMode(shape_env=shape_env)
+    return FakeTensorMode(shape_env=shape_env)
 
 
 @dataclass
@@ -415,6 +434,9 @@ class _SerializedFxCompile(FxCompile):
         except AttributeError:
             pass
 
+        fake_mode = _current_fake_mode()
+        fake_tensor_mode = _FakeTensorModeSerializer(fake_mode)
+
         try:
             input = _WireProtocolInput(
                 gm,
@@ -427,6 +449,7 @@ class _SerializedFxCompile(FxCompile):
                 deterministic_guard_for_testing,
                 logger_state,
                 lowering,
+                fake_tensor_mode,
             ).serialize()
         except (AttributeError, BypassFxGraphCache):
             # For example: AttributeError: Can't pickle local object
@@ -489,6 +512,9 @@ class _SerializedFxCompile(FxCompile):
                 stack.enter_context(input.deterministic_guard_for_testing)
             stack.enter_context(torch._guards.tracing(input.tracing_context))
             stack.enter_context(DebugContext())
+
+            fake_mode = _current_fake_mode()
+            stack.enter_context(input.fake_tensor_mode.patch(fake_mode))
 
             output_graph = _InProcessFxCompile().codegen_and_compile(
                 input.gm,
