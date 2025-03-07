@@ -93,6 +93,7 @@ __global__ void prepare_gemm_data(
   if (offs != nullptr) {
     int32_t start = tid == 0 ? 0 : offs[tid - 1];
     delta = offs[tid] - start;
+    CUDA_KERNEL_ASSERT(delta % 16 == 0 && "expected dynamic dimension to be multiple of 16\n");
   }
   int64_t lda, ldb, ldoutput;
   if (M < 0) {

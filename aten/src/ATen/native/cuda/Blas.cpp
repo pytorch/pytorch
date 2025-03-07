@@ -1475,6 +1475,19 @@ bool use_fast_accum) {
   TORCH_CHECK(mat_b.dim() == 2 || mat_b.dim() == 3, "mat_b has to be 2 or 3d");
   const bool a_is_2d = mat_a.dim() == 2;
   const bool b_is_2d = mat_b.dim() == 2;
+  TORCH_CHECK(
+    mat_a.size(-1) % 16 == 0,
+    "Expected trailing dimension of mat_a to be divisible by 16 ",
+    "but got mat1 shape: (",
+    mat_a.sizes(),
+    ").");
+  TORCH_CHECK(mat_b.size(-2) % 16 == 0 && mat_b.size(-1) % 16 == 0,
+    "Expected mat_b shape to be divisible by 16 ",
+    "but got mat_b shape: (",
+    mat_b.sizes(),
+    ").");
+
+
 
   TORCH_CHECK(offs.has_value() ==  (a_is_2d || b_is_2d), "Have to provide offsets if there is a 2d matrix");
 
