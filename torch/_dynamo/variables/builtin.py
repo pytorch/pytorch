@@ -10,6 +10,7 @@ import operator
 import sys
 import types
 import typing
+import unittest
 from collections import defaultdict, OrderedDict
 from collections.abc import KeysView, Sequence
 from typing import Callable, TYPE_CHECKING, Union
@@ -1266,6 +1267,12 @@ class BuiltinVariable(VariableTracker):
 
                 # Inline the user function
                 return tx.inline_user_function_return(user_func_variable, [arg], {})
+        elif isinstance(arg, (variables.ExceptionVariable,)):
+            if len(arg.args) == 0:
+                value = f"{arg.exc_type}"
+            else:
+                value = ", ".join(a.as_python_constant() for a in arg.args)
+            return variables.ConstantVariable.create(value=value)
 
     def _call_min_max(self, tx: "InstructionTranslator", *args):
         if len(args) == 1 and args[0].has_force_unpack_var_sequence(tx):
@@ -1863,6 +1870,21 @@ class BuiltinVariable(VariableTracker):
                 variables.UserDefinedObjectVariable,
             ),
         ):
+            if (
+                name == "assertRaisesRegex"
+                and isinstance(obj, variables.UserDefinedObjectVariable)
+                and isinstance(obj.value, unittest.TestCase)
+            ):
+                unimplemented_v2(
+                    gb_type="Failed to trace builtin operator",
+                    context="ctx manager unittest.TestCase.assertRaisesRegex",
+                    explanation="Dynamo does not know how to trace builtin operator `assertRaisesRegex` ",
+                    hints=[
+                        "Avoid calling builtin `assertRaisesRegex` "
+                        "Please report an issue to PyTorch.",
+                    ],
+                )
+
             try:
                 return obj.var_getattr(tx, name)
             except NotImplementedError:
@@ -1911,6 +1933,8 @@ class BuiltinVariable(VariableTracker):
                 variables.PlacementVariable,
                 variables.NamedTupleVariable,
                 variables.UserDefinedObjectVariable,
+                variables.NestedUserFunctionVariable,
+                variables.ExceptionVariable,
             ),
         ):
             return obj.call_method(tx, "__setattr__", [name_var, val], {})

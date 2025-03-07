@@ -256,6 +256,7 @@ class SideEffects:
             int.__getattribute__,
             str.__getattribute__,
             list.__getattribute__,
+            BaseException.__getattribute__,
         )
 
     def is_attribute_mutation(self, item):
@@ -377,6 +378,8 @@ class SideEffects:
             variable_cls = variables.MutableMappingVariable
         elif is_frozen_dataclass(user_cls):
             variable_cls = FrozenDataClassVariable
+        elif issubclass(user_cls, BaseException):
+            variable_cls = variables.UserDefinedExceptionObjectVariable
         assert issubclass(variable_cls, variables.UserDefinedObjectVariable)
         return variable_cls
 
