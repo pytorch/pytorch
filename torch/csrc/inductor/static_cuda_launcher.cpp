@@ -1,6 +1,7 @@
-
 #if defined(USE_CUDA) && !defined(USE_ROCM)
-// TODO what are the right imports to get access to CUDA drivers?
+// We disable this file from being hipified because there are CUDA drivers hip
+// has not implemented yet. Also, we're passing in a cubin file directly, so it
+// would take more work to support ROCM anyway.
 #include <torch/csrc/utils/pythoncapi_compat.h>
 
 #include <ATen/Context.h>
@@ -41,6 +42,10 @@
   - Handle launch_enter and launch_exit hooks (in python maybe?)
  */
 
+// Use ATen/NVRTC.h to gain access to the CUDA driver API.
+// This function is only called when CUDA is enabled, and only called to load
+// and launch triton compiled CUDA kernels, so CUDA should always be
+// initialized.
 static const at::cuda::NVRTC& nvrtc() {
   return at::globalContext().getNVRTC();
 }
@@ -132,6 +137,8 @@ static inline void launchKernel(
    pointer to the argument in kernelArgs[i]. We then can pass `kernelArgs`
    directly to launchKernel. Note that some args can be less than 8 bytes, but
    we'll still allocate 8 bytes on the stack for them.
+
+   * TODO: Need to handle NvtmDesc here.
  */
 template <size_t NUM_ARGS>
 void parseKernelArgs(
