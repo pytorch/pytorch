@@ -41,7 +41,7 @@ TORCH_SDT_DEFINE_SEMAPHORE(free)
 
 namespace c10 {
 
-C10_DEFINE_REGISTRY(FreeCudaMemoryCallbacksRegistry, FreeMemoryCallback);
+C10_DEFINE_REGISTRY(FreeCudaMemoryCallbacksRegistry, FreeMemoryCallback)
 
 namespace cuda::CUDACachingAllocator {
 
@@ -856,7 +856,7 @@ BlockState::BlockState(Block* block)
   TORCH_CHECK(
       block->event_count == 0,
       "Events should have synchronized when checkpointing block");
-};
+}
 
 SegmentState::SegmentState(Block* head) {
   TORCH_INTERNAL_ASSERT(head->prev == nullptr && head->pool != nullptr);
@@ -2711,6 +2711,7 @@ class DeviceCachingAllocator {
     bool in_fbcode = false;
 #endif
 
+    auto active_pool = MemPoolContext::getActiveMemPool();
     if (set_fraction &&
         total_allocated_memory + size > allowed_memory_maximum) {
       p.err = cudaErrorMemoryAllocation;
@@ -2719,6 +2720,9 @@ class DeviceCachingAllocator {
     } else if (
         CUDAAllocatorConfig::expandable_segments() &&
         !(in_fbcode && p.pool->owner_PrivatePool)) {
+      TORCH_CHECK(
+          !active_pool,
+          "torch.cuda.MemPool doesn't currently support expandable_segments.");
       p.block = try_allocate_expandable_block(
           p.device(), p.stream(), p.pool, p.size(), ctx);
       if (p.block) {
@@ -2732,7 +2736,6 @@ class DeviceCachingAllocator {
       }
       return bool(p.block);
     } else {
-      auto active_pool = MemPoolContext::getActiveMemPool();
       if (active_pool && active_pool->allocator() &&
           p.pool->owner_PrivatePool) {
         // Ensure that active_pool and p.pool are the same
