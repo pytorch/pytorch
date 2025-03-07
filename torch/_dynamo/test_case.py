@@ -30,7 +30,7 @@ from . import config, reset, utils
 log = logging.getLogger(__name__)
 
 
-def check_skip_windows_inductor_UTs_switch():
+def check_skip_windows_inductor_UTs_switch() -> bool:
     if not IS_WINDOWS:
         return False
 
