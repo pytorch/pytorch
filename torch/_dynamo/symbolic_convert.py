@@ -958,6 +958,10 @@ class ExceptionStack:
     _exc_stack: list[VariableTracker] = dataclasses.field(default_factory=list)
     _current_exception: Optional[VariableTracker] = dataclasses.field(default=None)
 
+    def clear_current_exception(self):
+        assert self._current_exception is not None
+        self._current_exception = None
+
     def set_current_exception(self, val):
         self._set_context_and_break_context_reference_cycle(val)
         self._current_exception = val
