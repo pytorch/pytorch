@@ -62,42 +62,42 @@ kernel void bitwise_lshift_tensor_tensor(device {0}  *out [[buffer(0)]],
                          constant {1}  *a [[buffer(1)]],
                          constant {2}  *b [[buffer(2)]],
                          uint offset [[thread_position_in_grid]]) {{
-  out[offset] = a[offset] << b [offset];
+  out[offset] = static_cast<{0}>(a[offset]) << b [offset];
 }}
 
 kernel void bitwise_lshift_tensor_scalar(device {0}  *out [[buffer(0)]],
                          constant {1}  *a [[buffer(1)]],
                          constant {2}  &b [[buffer(2)]],
                          uint offset [[thread_position_in_grid]]) {{
-  out[offset] = a[offset] << b;
+  out[offset] = static_cast<{0}>(a[offset]) << b;
 }}
 
 kernel void bitwise_lshift_scalar_tensor(device {0}  *out [[buffer(0)]],
                          constant {1}  &a [[buffer(1)]],
                          constant {2}  *b [[buffer(2)]],
                          uint offset [[thread_position_in_grid]]) {{
-  out[offset] = a << b[offset];
+  out[offset] = static_cast<{0}>(a) << b[offset];
 }}
 
 kernel void bitwise_rshift_tensor_tensor(device {0}  *out [[buffer(0)]],
                          constant {1}  *a [[buffer(1)]],
                          constant {2}  *b [[buffer(2)]],
                          uint offset [[thread_position_in_grid]]) {{
-  out[offset] = a[offset] >> b [offset];
+  out[offset] = static_cast<{0}>(a[offset]) >> b [offset];
 }}
 
 kernel void bitwise_rshift_tensor_scalar(device {0}  *out [[buffer(0)]],
                          constant {1}  *a [[buffer(1)]],
                          constant {2}  &b [[buffer(2)]],
                          uint offset [[thread_position_in_grid]]) {{
-  out[offset] = a[offset] >> b;
+  out[offset] = static_cast<{0}>(a[offset]) >> b;
 }}
 
 kernel void bitwise_rshift_scalar_tensor(device {0}  *out [[buffer(0)]],
                          constant {1}  &a [[buffer(1)]],
                          constant {2}  *b [[buffer(2)]],
                          uint offset [[thread_position_in_grid]]) {{
-  out[offset] = a >> b[offset];
+  out[offset] = static_cast<{0}>(a) >> b[offset];
 }}
 
 kernel void bitwise_not(device {0}  *out [[buffer(0)]],

@@ -8785,9 +8785,8 @@ class TestLogical(TestCaseMPS):
     @parametrize("dtype", [torch.int32, torch.int64, torch.int16, torch.int8, torch.uint8, torch.bool])
     def test_shifts(self, dtype):
         x = make_tensor(256, device="mps", dtype=dtype)
-        max_val = torch.iinfo(dtype).max if dtype != torch.bool else 1
         if dtype is not torch.bool:
-            x[3] = max_val
+            x[3] = torch.iinfo(dtype).max
             x[5] = torch.iinfo(dtype).min
         x_cpu = x.cpu()
         self.assertEqual((x >> 3).cpu(), x_cpu >> 3)
@@ -8795,8 +8794,8 @@ class TestLogical(TestCaseMPS):
         # Regression test for https://github.com/pytorch/pytorch/issues/147889
         x = x.clamp(0, 8)
         x_cpu = x.cpu()
-        self.assertEqual((max_val >> x).cpu(), max_val >> x_cpu)
-        self.assertEqual((1 << x).cpu(), 1 << x_cpu)
+        self.assertEqual((4095 >> x).cpu(), 4095 >> x_cpu)
+        self.assertEqual((257 << x).cpu(), 257 << x_cpu)
 
 
 class TestSmoothL1Loss(TestCaseMPS):
