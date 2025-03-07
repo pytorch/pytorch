@@ -1,5 +1,5 @@
 
-#ifdef USE_CUDA
+#if defined(USE_CUDA) && !defined(USE_ROCM)
 // TODO what are the right imports to get access to CUDA drivers?
 #include <torch/csrc/utils/pythoncapi_compat.h>
 
