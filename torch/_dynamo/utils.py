@@ -1034,6 +1034,16 @@ cmp_name_to_op_mapping = {
 }
 
 
+cmp_name_to_op_str_mapping = {
+    "__eq__": "==",
+    "__ne__": "!=",
+    "__lt__": "<",
+    "__le__": "<=",
+    "__gt__": ">",
+    "__ge__": ">=",
+}
+
+
 def is_wrapper_or_member_descriptor(value):
     return isinstance(
         value,
