@@ -936,29 +936,27 @@ static PyObject* is_fwd_grad_enabled(PyObject* _unused, PyObject* arg) {
 static void visit_tensors(
     PyObject* args,
     PyObject* kwargs,
-    std::function<bool(at::Tensor&)> visit_fn) {
-  std::stack<PyObject*> s;
+    std::function<bool(at::Tensor&)> tensor_visit_fn) {
+  static std::function<void(PyObject*)> visit_fn =
+      [&tensor_visit_fn](PyObject* o) {
+        if (THPVariable_Check(o)) {
+          at::Tensor t = THPVariable_Unpack(o);
+          if (tensor_visit_fn(t)) {
+            return;
+          }
+        } else if (PyList_Check(o)) {
+          for (const auto i : c10::irange(PyList_GET_SIZE(o))) {
+            visit_fn(PyList_GET_ITEM(o, i));
+          }
+        }
+      };
   if (args) {
     for (const auto i : c10::irange(PyTuple_GET_SIZE(args))) {
-      s.push(PyTuple_GET_ITEM(args, i));
+      visit_fn(PyTuple_GET_ITEM(args, i));
     }
   }
   if (kwargs) {
-    s.push(PyDict_Values(kwargs));
-  }
-  while (!s.empty()) {
-    PyObject* o = s.top();
-    s.pop();
-    if (THPVariable_Check(o)) {
-      at::Tensor t = THPVariable_Unpack(o);
-      if (visit_fn(t)) {
-        return;
-      }
-    } else if (PyList_Check(o)) {
-      for (const auto i : c10::irange(PyList_GET_SIZE(o))) {
-        s.push(PyList_GET_ITEM(o, i));
-      }
-    }
+    visit_fn(PyDict_Values(kwargs));
   }
 }
 
