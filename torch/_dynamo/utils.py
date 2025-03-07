@@ -1492,7 +1492,6 @@ def record_compilation_metrics(
         "triton_version": triton.__version__ if has_triton() else "",
         "remote_cache_version": remote_cache_version,
         "inductor_fx_remote_cache_backend_type": inductor_fx_remote_cache_backend_type,
-        "ir_count": counters["dynamo_step_count"]["total"],
     }
 
     compilation_metrics = CompilationMetrics.create({**common_metrics, **metrics})

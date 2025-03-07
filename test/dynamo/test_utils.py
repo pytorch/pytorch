@@ -456,10 +456,10 @@ class TestDynamoTimed(TestCase):
         version = (sys.version_info[0], sys.version_info[1])
         self.assertIn(version, ((3,10), (3,11), (3,12), (3,13)))
         first, second = {
-                (3,10): (10,16),
-                (3,11): (10,16),
-                (3,12): (10,16),
-                (3,13): (11,18),
+                (3,10): (10,6),
+                (3,11): (10,6),
+                (3,12): (10,6),
+                (3,13): (11,7),
                 }[version]
         def test1(x):
             y = x + x

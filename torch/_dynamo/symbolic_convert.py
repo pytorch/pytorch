@@ -104,9 +104,9 @@ from .source import (
 )
 from .trace_rules import is_builtin_constant, is_forbidden
 from .utils import (
-    counters,
     get_fake_value,
     get_instruction_source_311,
+    get_metrics_context,
     graph_break_dup_warning_checker,
     istype,
     LazyString,
@@ -1102,7 +1102,7 @@ class InstructionTranslatorBase(
             return False
         self.current_instruction = inst = self.instructions[ip]
         self.instruction_pointer = ip + 1
-        counters["dynamo_step_count"]["total"] += 1
+        get_metrics_context().increment("ir_count", 1)
 
         if inst.starts_line:
             self.starts_line(inst.starts_line)
