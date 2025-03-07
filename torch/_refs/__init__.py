@@ -3733,7 +3733,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
     if a.is_contiguous():
         if len(shape) >= 1 and a.ndim >= 1:
             strides = [1]
-            for x in shape[:-1]:
+            for x in reversed(shape[1:]):
                 strides.append(strides[-1] * x)
             strides.reverse()
             return torch.as_strided(a, shape, strides)
