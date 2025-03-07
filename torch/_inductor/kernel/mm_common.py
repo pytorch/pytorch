@@ -89,7 +89,7 @@ def filtered_configs(
         ),
         min_block_size_k,
     )
-    used = OrderedSet[tuple[int, int, int, int, int, int]]()
+    used = OrderedSet[tuple[int, ...]]()
     for block_m, block_n, block_k, num_stages, num_warps in configs:
         # shrink configs for small sizes
         block_m = max(min(int(block_m * scale), m), min_block_size)
@@ -119,6 +119,7 @@ def filtered_configs(
                     num_stages,
                     num_warps,
                     matrix_instr_nonkdim,
+                    kpack,
                 ) not in used and (
                     max_mm_configs is None or len(used) < max_mm_configs
                 ):
