@@ -104,6 +104,7 @@ from .source import (
 )
 from .trace_rules import is_builtin_constant, is_forbidden
 from .utils import (
+    counters,
     get_fake_value,
     get_instruction_source_311,
     get_metrics_context,
