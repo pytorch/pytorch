@@ -21,6 +21,7 @@ from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.fx.experimental.symbolic_shapes import (
     find_symbol_binding_fx_nodes,
     free_symbols,
+    free_unbacked_symbols,
     hint_int,
     is_symbol_binding_fx_node,
 )
@@ -1449,14 +1450,28 @@ def estimate_runtime(node):
             shape = list(x.meta["val"].shape)
 
             def realize_symbol(d):
-                return hint_int(d, fallback=4096)
+                if isinstance(d, torch.SymInt) and d.node.hint is None:
+                    unbacked_symbols = free_unbacked_symbols(d.node.expr)
+                    replacements = {
+                        s: 4096
+                        if s in unbacked_symbols
+                        else d.node.shape_env.var_to_val[s]
+                        for s in d.node.expr.free_symbols
+                    }
+                    return d.node.expr.xreplace(replacements)
+                return hint_int(d)
 
             shape = [realize_symbol(s) for s in shape]
             return x.meta["val"].new_empty_strided(
                 shape, stride=x.meta["tensor_meta"].stride
             )
         elif isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.SymInt):
-            return hint_int(x.meta["val"], fallback=4096)
+            d = x.meta["val"]
+            if d.node.hint is None:
+                return d.node.expr.xreplace(
+                    dict.fromkeys(d.node.expr.free_symbols, 4096)
+                )
+            return hint_int(d)
         elif isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.SymFloat):
             return 1.0
         elif isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.SymBool):
