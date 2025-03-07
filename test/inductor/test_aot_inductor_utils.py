@@ -231,36 +231,6 @@ def check_model_with_multiple_inputs(
             self.device, model, list_example_inputs, options, dynamic_shapes
         )
 
-    if not same(list_actual, list_expected):
-
-        def f():
-            list_expected = [ref_model(*inputs) for inputs in ref_inputs]
-            list_actual = [torch.compile(ref_model)(*inputs) for inputs in ref_inputs]
-            return same(list_actual, list_expected)
-
-        # This bisector is saying eager is wrong
-        def aot_f():
-            list_expected = [ref_model(*inputs) for inputs in ref_inputs]
-            list_actual = AOTIRunnerUtil.run_multiple(
-                self.device, model, list_example_inputs, options, dynamic_shapes
-            )
-            return same(list_actual, list_expected)
-
-        from torch._inductor.compiler_bisector import CompilerBisector
-
-        print(CompilerBisector.do_bisect(f))
-
-        for i, example_inputs in enumerate(list_example_inputs):
-            print("list_actual", list_actual[i])
-            print("list_expected", list_expected[i])
-            print(
-                f" inp {i}\n"
-                f" haha tensor_hash {str([hash(inp) for inp in example_inputs])}\n"  # noqa: G004
-                f" rand_seed {torch.initial_seed()}\n"  # noqa: G004
-                f" cuda initial_seed {torch.cuda.initial_seed() if torch.cuda.is_initialized() else None}.\n"  # noqa: G004
-                f" tensor value: {example_inputs}\n"  # noqa: G004
-            )
-
     self.assertTrue(same(list_actual, list_expected))
 
 
