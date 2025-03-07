@@ -293,13 +293,12 @@ class JitTraceConvertStrategy(CaptureStrategy):
                 )
         ep = _torchscript_converter.TS2EPConverter(jit_model, flattened_args).convert()
         if dynamic_shapes is not None:
-            if isinstance(dynamic_shapes, dict):
-                raise RuntimeError(
-                    "JitTraceConvertStrategy does not support dynamic_shapes as dict. You may pass it in as a tuple"
-                )
             # Retrace with torch.export to get dynamic shapes
             ep = torch.export.export(
-                ep.module(), flattened_args, dynamic_shapes=dynamic_shapes, strict=False
+                ep.module(),
+                flattened_args,
+                dynamic_shapes=dynamic_shapes,
+                strict=False,
             )
         return ep
 

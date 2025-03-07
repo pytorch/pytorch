@@ -35,7 +35,7 @@ class ExportStrategiesTest(common_utils.TestCase):
         assert ep is not None
         torch.testing.assert_close(ep.module()(a, b), model(a, b))
 
-    def test_jit_trace_supports_dynamic_shapes_when_it_is_tuple(self):
+    def test_jit_trace_supports_dynamic_shapes_as_tuple(self):
         class Model(torch.nn.Module):
             def forward(self, a, b):
                 c = torch.relu(a)
@@ -58,7 +58,7 @@ class ExportStrategiesTest(common_utils.TestCase):
         batch_dim_val = a_size[0]
         self.assertIsInstance(batch_dim_val, torch.SymInt)
 
-    def test_jit_trace_fails_dynamic_shapes_when_it_is_dict(self):
+    def test_jit_trace_supports_dynamic_shapes_as_dict(self):
         # Since we wrap the model into one that takes flat inputs for JIT tracing,
         # there is no way to expose the original forward function signature for
         # torch.export, which is required for dynamic shapes when provided as a dict.
@@ -75,8 +75,14 @@ class ExportStrategiesTest(common_utils.TestCase):
         batch_dim = torch.export.Dim("batch_dim")
         dynamic_shapes = {"a": {0: batch_dim}, "b": {0: batch_dim}}
         result = strategy(model, (a, b), kwargs=None, dynamic_shapes=dynamic_shapes)
-        self.assertIsInstance(result.exception, RuntimeError)
-        self.assertIn("does not support dynamic_shapes as dict", str(result.exception))
+        if result.exception:
+            raise result.exception
+        ep = result.exported_program
+        assert ep is not None
+        torch.testing.assert_close(ep.module()(a, b), model(a, b))
+        a_size = next(iter(ep.graph.nodes)).meta["val"].size()
+        batch_dim_val = a_size[0]
+        self.assertIsInstance(batch_dim_val, torch.SymInt)
 
 
 if __name__ == "__main__":
