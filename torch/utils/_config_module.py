@@ -584,7 +584,9 @@ class ConfigModule(ModuleType):
         if self._is_dirty or self._hash_digest is None:
             dict_to_hash = self._get_dict(ignored_keys=list(self._compile_ignored_keys))
             string_to_hash = repr(sorted(dict_to_hash.items()))
-            self._hash_digest = hashlib.md5(string_to_hash.encode("utf-8")).digest()
+            self._hash_digest = hashlib.md5(
+                string_to_hash.encode("utf-8"), usedforsecurity=False
+            ).digest()
             self._is_dirty = False
         return self._hash_digest
 
