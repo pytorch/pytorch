@@ -1060,7 +1060,12 @@ class CudaReproTests(TestCase):
 
         self.assertEqual(expect, actual)
 
-    @config.patch({"max_autotune_gemm_backends": "TRITON"})
+    @config.patch(
+        {
+            "max_autotune_gemm_backends": "TRITON",
+            "triton.disallow_failing_autotune_kernels_TESTING_ONLY": True,
+        }
+    )
     def test_bucketize_epilogue(self):
         """
         See https://github.com/pytorch/pytorch/issues/148764.

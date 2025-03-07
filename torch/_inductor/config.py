@@ -1150,6 +1150,11 @@ class triton:
     # Skip L1 cache for buffers that are used only once.  Disabled by default
     skip_l1_cache = os.environ.get("TORCHINDUCTOR_SKIP_L1", "0") == "1"
 
+    # During autotuning, if one of the kernels/configs fails for some reason,
+    # Inductor will usually skip it (and assign its latency to inf).
+    # For testing it's helpful to be able to assert that none of the configs fail.
+    disallow_failing_autotune_kernels_TESTING_ONLY = False
+
 
 class aot_inductor:
     # AOTInductor output path

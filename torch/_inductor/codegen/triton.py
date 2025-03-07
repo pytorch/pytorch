@@ -4180,6 +4180,8 @@ class TritonScheduling(SIMDScheduling):
             try:
                 call(wrapped_jit_function.clone_args(*args)[0])
             except Exception as e:
+                if config.triton.disallow_failing_autotune_kernels_TESTING_ONLY:
+                    raise
                 log.debug(
                     "Exception (%s) in compiling fused nodes %s",
                     e,
