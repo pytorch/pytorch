@@ -332,6 +332,7 @@ class TestDynamoTimed(TestCase):
  'log_format_version': 3,
  'non_compliant_ops': set(),
  'num_graph_breaks': 0,
+ 'num_params': 0,
  'num_triton_bundles': None,
  'post_grad_pass_time_us': 0,
  'pre_grad_pass_time_us': 0,
@@ -416,6 +417,7 @@ class TestDynamoTimed(TestCase):
  'log_format_version': 3,
  'non_compliant_ops': None,
  'num_graph_breaks': 0,
+ 'num_params': 0,
  'num_triton_bundles': None,
  'post_grad_pass_time_us': 0,
  'pre_grad_pass_time_us': None,
@@ -442,6 +444,48 @@ class TestDynamoTimed(TestCase):
  'triton_kernel_compile_times_us': None,
  'triton_version': None}""",  # noqa: B950
         )
+
+    @dynamo_config.patch(
+        {
+            "log_compilation_metrics": True,
+        }
+    )
+    def test_num_params(self):
+        import torch.nn as nn
+        import torch.nn.functional as F
+
+        class ModelSimple(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.conv1 = nn.Conv2d(1, 20, 5)
+
+            def forward(self, x):
+                return F.relu(self.conv1(x))
+
+        self.assertEqual([x.numel() for x in ModelSimple().parameters()], [500, 20])
+
+        compilation_events = []
+        with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
+            m = ModelSimple()
+            torch.compile(m)(torch.randn(1, 10, 10))
+            compilation_events = [arg[0][0] for arg in log_event.call_args_list]
+        self.assertEqual(compilation_events[0].num_params, 520)
+
+        class ModelWrapped(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.m1 = ModelSimple()
+                self.m2 = ModelSimple()
+
+            def forward(self, x):
+                return self.m1(x) + self.m2(x)
+
+        compilation_events = []
+        with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
+            m = ModelWrapped()
+            torch.compile(m)(torch.randn(1, 10, 10))
+            compilation_events = [arg[0][0] for arg in log_event.call_args_list]
+        self.assertEqual(compilation_events[0].num_params, 1560)
 
 
 class TestInductorConfigParsingForLogging(TestCase):

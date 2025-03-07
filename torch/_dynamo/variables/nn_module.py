@@ -53,7 +53,6 @@ from ..source import (
     UnspecializedNNModuleSource,
 )
 from ..utils import (
-    counters,
     get_custom_getattr,
     get_fake_value,
     is_lazy_module,
@@ -171,8 +170,6 @@ class NNModuleVariable(VariableTracker):
         self.value = value
         assert self.source
         self.nn_module_stack_source = self.source
-        for p in value.parameters():
-            counters["paramaters"]["total"] += p.numel()
 
     def get_nn_module_stack_source(self):
         return self.nn_module_stack_source or self.source
