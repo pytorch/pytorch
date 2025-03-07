@@ -974,26 +974,6 @@ class WhileLoopModels:
                 (c, x),
             )
 
-    class ConvLoop1(torch.nn.Module):
-        def __init__(self, device):
-            super().__init__()
-            self.conv2d = torch.nn.Conv2d(
-                4, 4, (3, 3), stride=(1, 1), padding=(1, 1), device=device
-            )
-
-        def forward(self, c, x):
-            def cond_fn(loop_idx, x):
-                return loop_idx < 1
-
-            def body_fn(loop_idx, x):
-                return loop_idx + 1, self.conv2d(x) + 1
-
-            return torch._higher_order_ops.while_loop(
-                cond_fn,
-                body_fn,
-                (c, x),
-            )
-
 
 class WhileLoopTests(TestCase):
     def _run_test(

@@ -246,11 +246,6 @@ def _create_unbacked_symint(
         return fake_mode.shape_env.create_unbacked_symint()
 
 
-@while_loop_op.py_impl(torch._subclasses.fake_utils.CrossRefFakeMode)
-def _(mode, cond_fn, body_fn, carried_inputs, additional_inputs):
-    return while_loop_op(cond_fn, body_fn, carried_inputs, additional_inputs)
-
-
 @while_loop_op.py_impl(ProxyTorchDispatchMode)
 def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs):
     def _trace_while_loop(
