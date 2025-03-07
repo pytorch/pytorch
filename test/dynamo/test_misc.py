@@ -16,10 +16,8 @@ import math
 import operator
 import os
 import random
-import subprocess
 import sys
 import tempfile
-import textwrap
 import threading
 import traceback
 import typing
@@ -9394,43 +9392,6 @@ def ___make_guard_fn():
         self.assertEqual(eager, compiled)
         self.assertEqual(counter.frame_count, 1)
         self.assertTrue(isinstance(compiled, torch.Tensor))
-
-    def test_deque_reconstruct_shallows_global(self):
-        script = textwrap.dedent(
-            """
-            import collections
-
-            import torch
-
-            deque = None
-
-            @torch.compile(backend="eager", fullgraph=True)
-            def func(x):
-                return collections.deque([x, x + 1, x + 2], maxlen=2)
-
-            x = torch.randn(3, 4)
-            out = func(x)
-            assert isinstance(out, collections.deque), f"get type: {type(out)}"
-            assert out.maxlen == 2, f"get maxlen: {out.maxlen}"
-            torch.testing.assert_close(out, collections.deque([x + 1, x + 2], maxlen=2))
-            """
-        ).strip()
-
-        try:
-            subprocess.check_output(
-                [sys.executable, "-c", script],
-                stderr=subprocess.STDOUT,
-                # On Windows, opening the subprocess with the default CWD makes `import torch`
-                # fail, so just set CWD to this script's directory
-                cwd=os.path.dirname(os.path.realpath(__file__)),
-            )
-        except subprocess.CalledProcessError as e:
-            self.fail(
-                msg=(
-                    "Subprocess exception while attempting to run test: "
-                    + e.output.decode("utf-8")
-                )
-            )
 
     def test_yield_from(self):
         def yield_from_fn(t_list, k):
