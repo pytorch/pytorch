@@ -11,6 +11,7 @@ It includes:
 import contextlib
 import importlib
 import logging
+import os
 from typing import Union
 
 import torch
@@ -29,13 +30,24 @@ from . import config, reset, utils
 log = logging.getLogger(__name__)
 
 
+def check_skip_windows_inductor_UTs_switch():
+    if not IS_WINDOWS:
+        return False
+
+    var = os.environ.get("RUN_ALL_WIN_INDUCTOR_UTS", "OFF")
+    if var in ["ON", "YES", "1", "Y"]:
+        return False
+
+    return True
+
+
 def run_tests(needs: Union[str, tuple[str, ...]] = ()) -> None:
     from torch.testing._internal.common_utils import run_tests
 
     if TEST_WITH_TORCHDYNAMO or TEST_WITH_CROSSREF:
         return  # skip testing
 
-    if not torch.xpu.is_available() and IS_WINDOWS:
+    if not torch.xpu.is_available() and check_skip_windows_inductor_UTs_switch():
         return
 
     if isinstance(needs, str):
