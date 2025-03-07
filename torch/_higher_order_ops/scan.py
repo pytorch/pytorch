@@ -47,6 +47,10 @@ def wrap_combine_fn_flat(
     return combine_fn(carry, xs)
 
 
+def call_operator(operator, *args):
+    return pytree.tree_leaves(operator(*args))
+    
+
 def _extract_carry_and_out(flat_out: list[Any], num_carry: int):
     return flat_out[:num_carry], flat_out[num_carry:]
 
@@ -104,7 +108,8 @@ def create_fw_bw_graph_combinefn(combine_fn, init, xs, additional_inputs):
             ]
 
             carry, outs = _extract_carry_and_out(
-                combine_fn(
+                call_operator(
+                    combine_fn,
                     *fw_init,
                     *fw_xs,
                     *fw_additional_inputs,
@@ -118,7 +123,7 @@ def create_fw_bw_graph_combinefn(combine_fn, init, xs, additional_inputs):
 
             # 1.) Create the forward and the joint graph of the combine_fn
             fw_graph, joint_graph = create_fw_bw_graph(
-                combine_fn,
+                lambda *args: call_operator(combine_fn, *args),
                 False,
                 (
                     *fw_init,
@@ -316,6 +321,14 @@ def scan(
         for x in lxs:
             if not isinstance(x, torch.Tensor):
                 raise RuntimeError(f"All xs leaves must be a Tensor but got {x}")
+        if any(x.ndim <= d for x in lxs):
+            raise RuntimeError(
+                "All xs leaves must at least have 'dim' number of dimensions and scan dimension > 0"
+            )
+        if any(x.shape[d] == 0 for x in lxs):
+            raise RuntimeError(
+                "All xs leaves must at least have 'dim' number of dimensions and scan dimension > 0"
+            )
 
     ndim = leaves_xs_orig[0].ndim
     dim = utils.canonicalize_dim(ndim, dim)
@@ -382,8 +395,6 @@ scan_op = ScanOp()
 
 
 def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
-    def call_operator(*args):
-        return pytree.tree_leaves(operator(*args))
 
     def _scan(init, xs):
         """Perform scan on `elems` using `elems_init."""
@@ -398,6 +409,7 @@ def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
         num_init_leaves = len(init)
         dummy_carry, dummy_out = _extract_carry_and_out(
             call_operator(
+                operator,
                 *carry,
                 *[first_slice_copy(elem, dim) for elem in xs],
                 *additional_inputs,
@@ -436,6 +448,7 @@ def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
             ind = i
             carry, out = _extract_carry_and_out(
                 call_operator(
+                    operator,
                     *carry,
                     *[elem.select(dim, ind) for elem in xs],
                     *additional_inputs,
@@ -799,7 +812,7 @@ def scan_autograd(combine_fn, init, xs, additional_inputs):
         xs_mask,
         additional_inputs_mask,
         additional_inputs_tensor_mask,
-        *(init + xs + additional_inputs),
+        *(tuple(init) + tuple(xs) + additional_inputs),
     )
     return *flat_out[:num_leaves_init], *flat_out[num_leaves_init:]
 

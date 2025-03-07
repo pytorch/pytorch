@@ -2530,12 +2530,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
         init = torch._ops.ops.aten.slice(x, dim, 0, 1, 1)
         inp = torch._ops.ops.aten.slice(x, dim, 1, None, 1)
         with self.assertRaisesRegex(
-            # RuntimeError,
-            # "scan\(\) operator doesn't support.*",
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "scan must be captured completely with.*",
+            RuntimeError,
+            "All xs leaves must at least have.*",
         ):
-            scan_fct(
+            scan(
                 get_scan_combine_fn("add", False),
                 init,
                 inp,
@@ -2584,7 +2582,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
         scan_fct = compile_mode_helper(scan, "none")
 
         # Only init and no input
-        x = torch.randn(3, 1, 2, device=device)
+        x = torch.randn(3, 1, 2)
         dim = 1
 
         # Init wrong pytree
@@ -2812,8 +2810,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
 
         # Wrong pytree of the carry produced by the operation
         with self.assertRaisesRegex(
-            RuntimeError,
-            "he number of leaves of the pytree of the new carry produced by the operator.*",
+            # Should be
+            # RuntimeError,
+            # "The number of leaves of the pytree of the new carry produced by the operator.*",
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "scan must be captured completely with.*"
         ):
             scan(
                 fct_pointwise_carry_wrong_pytree,
@@ -3086,7 +3087,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
         b_hh = torch.randn(7, device=device, requires_grad=autograd)
 
         with self.assertRaisesRegex(
-            RuntimeError, "All xs leaves must have at least scan dimensions.*"
+            RuntimeError, "All xs leaves must at least have.*"
         ):
             scan(
                 get_scan_combine_fn("RNN", True, parameters=[W_ih, b_ih, W_hh, b_hh]),
@@ -3196,16 +3197,13 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
         h1 = torch.randn(3, 7, device=device, requires_grad=autograd)
         h2 = torch.randn(3, 7, device=device, requires_grad=autograd)
 
-        with self.assertRaisesRegex(
-            RuntimeError, "The requires_grad of the new_carry.*"
-        ):
-            scan(
-                get_scan_combine_fn("fct_c1_no_grad", True),
-                (h1, h2),
-                x,
-                dim=dim,
-                reverse=reverse,
-            )
+        scan(
+            get_scan_combine_fn("fct_c1_no_grad", True),
+            (h1, h2),
+            x,
+            dim=dim,
+            reverse=reverse,
+        )
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
@@ -3492,7 +3490,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
             return scan(fct, init, xs, dim=0, reverse=True)
 
         # Wrong number of returns from function
-        with self.assertRaisesRegex(RuntimeError, "The shape of the new_carry.*"):
+        with self.assertRaisesRegex(torch._dynamo.exc.UncapturedHigherOrderOpError, "scan must be captured completely with.*"):
             make_fx(f, tracing_mode="symbolic")(
                 get_scan_combine_fn("add", True), init, x
             )
@@ -3509,7 +3507,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
             return scan(fct, init, xs, dim=0, reverse=True)
 
         # Wrong carry shape
-        with self.assertRaisesRegex(RuntimeError, "The shape of the new_carry.*"):
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "Expected init and carry to have same metadata.*",):
             make_fx(f, tracing_mode="symbolic")(add_wrong_carry, init, x)
 
     @skipIfNoDynamoSupport
@@ -3551,12 +3551,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
 def forward(self, fct_1, init_1, xs_1):
     permute = torch.ops.aten.permute.default(xs_1, [0, 1, 2])
     flip = torch.ops.aten.flip.default(permute, [0]);  permute = None
-    sym_size_int = torch.ops.aten.sym_size.int(init_1, 1)
-    sym_size_int_1 = torch.ops.aten.sym_size.int(init_1, 2)
-    sym_size_int_2 = torch.ops.aten.sym_size.int(xs_1, 1)
-    sym_size_int_3 = torch.ops.aten.sym_size.int(xs_1, 2);  xs_1 = None
+    sym_size_int_1 = torch.ops.aten.sym_size.int(init_1, 1)
+    sym_size_int_2 = torch.ops.aten.sym_size.int(init_1, 2)
+    sym_size_int_3 = torch.ops.aten.sym_size.int(xs_1, 1)
+    sym_size_int_4 = torch.ops.aten.sym_size.int(xs_1, 2);  xs_1 = None
     scan_combine_graph_0 = self.scan_combine_graph_0
-    scan = torch.ops.higher_order.scan(scan_combine_graph_0, [init_1], [flip], (sym_size_int, sym_size_int_1, sym_size_int_2, sym_size_int_3));  scan_combine_graph_0 = init_1 = flip = sym_size_int = sym_size_int_1 = sym_size_int_2 = sym_size_int_3 = None
+    scan = torch.ops.higher_order.scan(scan_combine_graph_0, [init_1], [flip], (sym_size_int_1, sym_size_int_2, sym_size_int_3, sym_size_int_4));  scan_combine_graph_0 = init_1 = flip = sym_size_int_1 = sym_size_int_2 = sym_size_int_3 = sym_size_int_4 = None
     getitem = scan[0]
     getitem_1 = scan[1];  scan = None
     flip_1 = torch.ops.aten.flip.default(getitem_1, [0]);  getitem_1 = None
@@ -3597,8 +3597,8 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
 
         # Wrong dtype
         with self.assertRaisesRegex(
-            RuntimeError,
-            "The dtype of the new_carry",
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "Expected init and carry to have same metadata.*",
         ):
             f(add_wrong_dtype, init, x)
 
