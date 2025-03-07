@@ -185,15 +185,7 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
             self.cm_obj.__exit__.__func__,
             self,
             source=source,
-        ).call_function(
-            tx,
-            [
-                variables.ConstantVariable.create(None),
-                variables.ConstantVariable.create(None),
-                variables.ConstantVariable.create(None),
-            ],
-            {},
-        )
+        ).call_function(tx, args, {})
         tx.active_generic_context_managers.pop()
         return x
 
