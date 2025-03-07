@@ -723,7 +723,7 @@ def emit_structseq_call(
         tn_key = gen_structseq_typename_key(overload.function)
         typename = typenames.get(tn_key)
         if typename is None:
-            typename = f'NamedTuple{"" if not typedefs else len(typedefs)}'
+            typename = f"NamedTuple{'' if not typedefs else len(typedefs)}"
             typenames[tn_key] = typename
             typedefs.append(
                 f"""\
@@ -759,7 +759,7 @@ def generate_return_type_definition_and_registrations(
         typename = typenames.get(tn_key)
 
         if typename is None:
-            typename = f'{name}NamedTuple{"" if not definitions else len(definitions)}'
+            typename = f"{name}NamedTuple{'' if not definitions else len(definitions)}"
             typenames[tn_key] = typename
             definitions.append(
                 f"""\
@@ -807,7 +807,7 @@ def generate_return_type_declarations(
 
         if typename is None:
             typename = (
-                f'{name}NamedTuple{"" if not declarations else len(declarations)}'
+                f"{name}NamedTuple{'' if not declarations else len(declarations)}"
             )
             typenames[tn_key] = typename
             declarations.append(f"PyTypeObject* get_{name}_structseq();")
@@ -1351,7 +1351,7 @@ def emit_single_dispatch(
             or (ps.method and ("requires_grad" in parser_outputs))
         )
         set_requires_grad = (
-            f'.set_requires_grad({parser_outputs["requires_grad"].expr})'
+            f".set_requires_grad({parser_outputs['requires_grad'].expr})"
             if need_set_requires_grad
             else ""
         )

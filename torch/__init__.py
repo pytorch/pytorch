@@ -1482,7 +1482,7 @@ def set_deterministic_debug_mode(debug_mode: _Union[builtins.int, str]) -> None:
         _C._set_deterministic_algorithms(True)
     else:
         raise RuntimeError(
-            "invalid value of debug_mode, expected 0, 1, or 2, " f"but got {debug_mode}"
+            f"invalid value of debug_mode, expected 0, 1, or 2, but got {debug_mode}"
         )
 
 

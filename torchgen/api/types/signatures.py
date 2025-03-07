@@ -366,9 +366,9 @@ class FunctionalizationLambda:
             e.expr for e in translate.translate(full_ctx, call_bindings, method=False)
         ]
         if not self.is_reverse and maybe_index is not None:
-            return f'{inner_call_name}({", ".join(call_exprs)})[{maybe_index.name}];'
+            return f"{inner_call_name}({', '.join(call_exprs)})[{maybe_index.name}];"
         else:
-            return f'{inner_call_name}({", ".join(call_exprs)});'
+            return f"{inner_call_name}({', '.join(call_exprs)});"
 
     @staticmethod
     def from_func(

@@ -644,6 +644,37 @@ void atomic_add_vec(T *addr, at::vec::VectorizedN<int64_t, NI> index, at::vec::V
     atomic_add(addr + tmpidx[i], tmpbuf[i]);
   }
 }
+
+template <typename T, bool atomic_add>
+struct transpose_mxn_helper;
+
+template <typename T>
+struct transpose_mxn_helper<T, true> {
+    static void call(const T* src, int64_t ld_src, T* dst, int64_t ld_dst, int M, int N) {
+        for (int i = 0; i < M; i++) {
+          for (int j = 0; j < N; j++) {
+            atomic_add(&dst[j*ld_dst + i], src[i*ld_src + j]);
+          }
+        }
+    }
+};
+
+template <typename T>
+struct transpose_mxn_helper<T, false> {
+    static void call(const T* src, int64_t ld_src, T* dst, int64_t ld_dst, int M, int N) {
+        at::vec::transpose_mxn<T>(src, ld_src, dst, ld_dst, M, N);
+    }
+};
+
+template <typename T, bool atomic_add>
+inline void transpose_mxn(const T* src, int64_t ld_src, T* dst, int64_t ld_dst, int M, int N) {
+  transpose_mxn_helper<T, atomic_add>::call(src, ld_src, dst, ld_dst, M, N);
+}
+
+template <typename T, int M, int N, bool atomic_add>
+inline void transpose_mxn(const T* src, int64_t ld_src, T* dst, int64_t ld_dst) {
+  transpose_mxn<T, atomic_add>(src, ld_src, dst, ld_dst, M, N);
+}
 #endif
 
 inline std::tuple<std::shared_ptr<int64_t[]>, int> _get_factors(int64_t number) {
