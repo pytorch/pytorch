@@ -6,14 +6,12 @@ from typing import (
     Callable,
     ContextManager,
     Iterator,
-    List,
     Literal,
     NamedTuple,
     NoReturn,
     Optional,
     overload,
     Sequence,
-    Tuple,
     Type,
     TypeVar,
     Union,
@@ -34,4 +32,4 @@ from torch.types import (
 
 ${structseq_defs}
 
-all_return_types: List[Type] = []
+all_return_types: list[Type] = []
