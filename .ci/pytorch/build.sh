@@ -235,7 +235,7 @@ if [[ "$BUILD_ENVIRONMENT" == *-debug* ]]; then
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *sm89* ]]; then
-  export USE_DISTRBUTED=0
+  export USE_DISTRIBUTED=0
   export USE_NCCl=0
 fi
 
