@@ -53,6 +53,7 @@ from ..source import (
     UnspecializedNNModuleSource,
 )
 from ..utils import (
+    counters,
     get_custom_getattr,
     get_fake_value,
     is_lazy_module,
@@ -60,7 +61,6 @@ from ..utils import (
     is_safe_constant,
     istensor,
     istype,
-    counters,
     nnmodule_has_hooks,
     object_has_getattribute,
     proxy_args_kwargs,
