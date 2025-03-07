@@ -3731,14 +3731,12 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
             return _a
 
     if a.is_contiguous():
-        # Special-cases for nd_to_1d
-        if len(shape) == 1 and a.ndim > 1:
-            return torch.as_strided(a, [a.numel()], [1])
-        # Special-cases for 1d_to_2d
-        if len(shape) == 2 and a.ndim == 1:
-            dim0 = shape[0]
-            dim1 = shape[1]
-            return torch.as_strided(a, [dim0, dim1], [dim1, 1])
+        if len(shape) >= 1 and a.ndim >= 1:
+            strides = [1]
+            for x in shape[:-1]:
+                strides.append(strides[-1] * x)
+            strides.reverse()
+            return torch.as_strided(a, shape, strides)
 
     # Handles general case: a 1+D tensor reshaped into a distinct 1+D shape
 
