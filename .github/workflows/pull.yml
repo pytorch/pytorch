@@ -476,7 +476,7 @@ jobs:
       - linux-focal-cuda12_6-py3_10-gcc11-sm89-build
       - target-determination
     with:
-      build-environment: linux-focal-cuda12.6-py3.10-gcc1-sm89
+      build-environment: linux-focal-cuda12.6-py3.10-gcc11-sm89
       docker-image: ${{ needs.linux-focal-cuda12_6-py3_10-gcc11-sm89-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_6-py3_10-gcc11-sm89-build.outputs.test-matrix }}
     secrets: inherit
