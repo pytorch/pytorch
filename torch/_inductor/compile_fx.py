@@ -841,6 +841,14 @@ def _compile_fx_inner(
 
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
 
+    # This message is for printing overview information of inductor mm counts, shapes,etc after lowering
+    log.info(
+        "Overview info of inductor aten mms: %s",
+        ", ".join(
+            f"({key}: {value})" for key, value in counters["aten_mm_info"].items()
+        ),
+    )
+
     # Clear Compiled Triton Kernels per inductor compile, as the future objects
     # may not be valid for use after they are run/autotuned
     torch._inductor.async_compile.CompiledTritonKernels.cache_clear()
