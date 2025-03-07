@@ -4948,7 +4948,7 @@ class CppScheduling(BaseScheduling):
                 )
                 kernel_group.finalize_kernel(
                     outer_fusion_cpp_kernel_proxy,
-                    [_node for _nodes in nodes_list for _node in _nodes],
+                    [*itertools.chain.from_iterable(nodes_list)],
                 )
 
             return True
