@@ -79,9 +79,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # min version (3.5 for xenial and 3.10 for bionic), so we only do it in those
   # following builds that we know should use conda. Specifically, Ubuntu bionic
   # and focal cannot find conda mkl with stock cmake, so we need a cmake from conda
-  if [ -n "${CONDA_CMAKE}" ]; then
-    conda_install cmake
-  fi
+
 
   # Magma package names are concatenation of CUDA major and minor ignoring revision
   # I.e. magma-cuda102 package corresponds to CUDA_VERSION=10.2 and CUDA_VERSION=10.2.89
