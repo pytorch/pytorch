@@ -25,6 +25,9 @@ def is_rng_supported_mesh(device_mesh: DeviceMesh) -> bool:
     """Checks if the current device of ``device_mesh`` supports DTensor's random APIs.
     Currently DTensor Random APIs only supports cuda/cuda-like devices. We suggest
     users call this API to test the availability before using our random APIs.
+    The device needs to have an attribute ``rng_supported_mesh`` to indicate support
+    for DTensor Random APIs. If ``rng_supported_mesh`` isn't present in device, then
+    presence of ``set_rng_state`` attribute will be checked to ensure backward compatibility.
 
     Args:
         device_mesh (:class:`DeviceMesh`): The device mesh on which we check if the
@@ -37,7 +40,9 @@ def is_rng_supported_mesh(device_mesh: DeviceMesh) -> bool:
         Currently we only support correct RNG on cuda/cuda-like devices.
     """
     device_handle = _get_device_handle(device_mesh.device_type)
-    if device_handle and hasattr(device_handle, "set_rng_state"):
+    if device_handle and hasattr(device_handle, "rng_supported_mesh"):
+        return device_handle.rng_supported_mesh
+    elif device_handle and hasattr(device_handle, "set_rng_state"):
         return True
     else:
         # TODO: Logs way too much
