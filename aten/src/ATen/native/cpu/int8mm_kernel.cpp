@@ -5,10 +5,11 @@
 #include <ATen/Parallel.h>
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
+#include <ATen/native/CPUBlas.h>
 #include <ATen/native/cpu/int_mm_kernel.h>
 #include <ATen/native/cpu/utils.h>
-#include <c10/util/irange.h>
 #include <c10/util/Unroll.h>
+#include <c10/util/irange.h>
 
 #if (defined(_WIN32) || defined(_WIN64))
 #define RESTRICT __restrict
@@ -16,11 +17,193 @@
 #define RESTRICT __restrict__
 #endif
 
+#if AT_MKLDNN_ENABLED()
+#include <ideep.hpp>
+// Add uKernel API versioning to be compatible with different oneDNN versions
+// oneDNN 3.6.x updates the ukernel APIs of brgemm and brgemm_pack_B
+// brgemm_pack_B is changed to transform and the setting of brgemm beta is
+// changed to set_add_C
+#if (IDEEP_VERSION_MAJOR == 3 && IDEEP_VERSION_MINOR == 5)
+#define ONEDNN_UKERNEL_1
+#elif (IDEEP_VERSION_MAJOR >= 3 && IDEEP_VERSION_MINOR >= 6)
+#define ONEDNN_UKERNEL_2
+#endif
+#if (                                                           \
+    (defined(ONEDNN_UKERNEL_1) || defined(ONEDNN_UKERNEL_2)) && \
+    (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC))))
+#define ONEDNN_UKERNEL_ENABLED
+#endif
+#endif // AT_MKLDNN_ENABLED()
+#if defined(ONEDNN_UKERNEL_ENABLED)
+#include <oneapi/dnnl/dnnl.hpp>
+#include <oneapi/dnnl/dnnl_ukernel.hpp>
+#endif // oneDNN BRGEMM
+
 namespace at::native {
 
 namespace {
 
+template <typename T>
+void int8pack_mm_kernel_(
+    const Tensor& C,
+    const Tensor& A,
+    const Tensor& B,
+    const Tensor& scales);
+
 #if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
+
+static inline void transpose_16x16_fp32(__m512 a[16]) {
+  __m512 t[16];
+  c10::ForcedUnroll<16>{}([&](auto i) { t[i] = a[i]; });
+  c10::ForcedUnroll<8>{}([&](auto i) {
+    a[i] = (__m512)_mm512_unpacklo_pd((__m512d)t[i * 2], (__m512d)t[i * 2 + 1]);
+    a[i + 8] =
+        (__m512)_mm512_unpackhi_pd((__m512d)t[i * 2], (__m512d)t[i * 2 + 1]);
+  });
+  c10::ForcedUnroll<8>{}([&](auto i) {
+    t[2 * i] = _mm512_shuffle_f32x4(a[2 * i], a[2 * i + 1], 0x44);
+    t[2 * i + 1] = _mm512_shuffle_f32x4(a[2 * i], a[2 * i + 1], 0xee);
+  });
+  c10::ForcedUnroll<4>{}([&](auto i) {
+    a[i + 0] = _mm512_shuffle_f32x4(t[4 * i + 0], t[4 * i + 2], 0x88);
+    a[i + 4] = _mm512_shuffle_f32x4(t[4 * i + 0], t[4 * i + 2], 0xdd);
+    a[i + 8] = _mm512_shuffle_f32x4(t[4 * i + 1], t[4 * i + 3], 0x88);
+    a[i + 12] = _mm512_shuffle_f32x4(t[4 * i + 1], t[4 * i + 3], 0xdd);
+  });
+}
+
+template <int N>
+void unpack_and_dequant(
+    const int8_t* B,
+    BFloat16* B_unpack,
+    const BFloat16* scales,
+    const int K,
+    const int ldb_unpack);
+
+template <>
+void unpack_and_dequant<1>(
+    const int8_t* B,
+    BFloat16* B_unpack,
+    const BFloat16* scales,
+    const int K,
+    const int ldb_unpack) {
+  for (int k = 0; k < K; k++) {
+    int8_t b8 = B[k];
+    B_unpack[k * ldb_unpack] = static_cast<BFloat16>(b8) * scales[0];
+  }
+}
+
+template <>
+void unpack_and_dequant<16>(
+    const int8_t* B,
+    BFloat16* B_unpack,
+    const BFloat16* scales,
+    const int K,
+    const int ldb_unpack) {
+  const int ldb = K;
+  __m512 scale[16];
+  c10::ForcedUnroll<16>{}([&](auto i) {
+    float ss = static_cast<float>(scales[i]);
+    scale[i] = _mm512_set1_ps(ss);
+  });
+  for (int k = 0; k < K; k += 16) {
+    int kk = std::min(k, K - 16);
+    __m512 vb[16];
+    c10::ForcedUnroll<16>{}([&](auto i) {
+      __m128i b8 = _mm_load_si128((__m128i*)(B + kk + i * ldb));
+      __m512i b32 = _mm512_cvtepi8_epi32(b8);
+      vb[i] = _mm512_cvtepi32_ps(b32);
+      vb[i] = _mm512_mul_ps(vb[i], scale[i]);
+    });
+    transpose_16x16_fp32(vb);
+    c10::ForcedUnroll<16>{}([&](auto i) {
+      _mm256_storeu_epi16(
+          (void*)(B_unpack + (kk + i) * 16), vec::cvtfp32_bf16(vb[i]));
+    });
+  }
+}
+
+template <>
+void int8pack_mm_kernel_<BFloat16>(
+    const Tensor& C,
+    const Tensor& A,
+    const Tensor& B,
+    const Tensor& scales) {
+  const BFloat16* A_data = A.const_data_ptr<BFloat16>();
+  const int8_t* B_data = B.const_data_ptr<int8_t>();
+  BFloat16* C_data = C.data_ptr<BFloat16>();
+  const BFloat16* S_data = scales.const_data_ptr<BFloat16>();
+
+  int M = A.size(0);
+  int N = B.size(0);
+  int K = A.size(1);
+  int lda = K;
+  int ldb = K;
+  int ldc = N;
+  int thread_num = get_num_threads();
+  static dnnl::ukernel::brgemm brg[3];
+  static bool init = false;
+  static size_t max_scratchpad_size = -1;
+  if (!init) {
+    for (int i = 0; i < 1; i++) {
+      int n = 16 * (i + 1);
+      brg[i] = dnnl::ukernel::brgemm(
+          M,
+          n,
+          K,
+          1,
+          lda,
+          n,
+          n,
+          dnnl::memory::data_type::bf16,
+          dnnl::memory::data_type::bf16,
+          dnnl::memory::data_type::f32);
+      brg[i].set_post_ops(N, dnnl::memory::data_type::bf16);
+      brg[i].set_add_C(false);
+      brg[i].finalize();
+      brg[i].generate();
+      max_scratchpad_size =
+          std::max(max_scratchpad_size, brg[i].get_scratchpad_size());
+    }
+    init = true;
+  }
+  BFloat16* B_unpack = (BFloat16*)malloc(N * K * sizeof(BFloat16));
+  float* tmp_data = (float*)malloc(M * N * sizeof(float));
+  uint8_t* scratchpad = (uint8_t*)malloc(thread_num * max_scratchpad_size);
+
+  int thread_size_pad16 = 16;
+  brg[0].set_hw_context();
+  at::parallel_for(0, N / thread_size_pad16, 0, [&](int begin, int end) {
+    int local_begin = begin * thread_size_pad16;
+    const int8_t* B_local = B_data + local_begin * ldb;
+    BFloat16* B_unpack_local = B_unpack + local_begin * K;
+    const BFloat16* scales_local = S_data + local_begin;
+    float* tmp_local = tmp_data + local_begin * M;
+    BFloat16* C_local = C_data + local_begin;
+    uint8_t* scratchpad_local = scratchpad + begin * max_scratchpad_size;
+
+    int local_n = (end - begin) * 16;
+    if (end == N / thread_size_pad16 && N % 16 != 0) {
+      local_n = N - local_begin;
+    }
+    for (int i = 0; i < local_n; i += 16) {
+      int ii = std::min(i, local_n - 16);
+      unpack_and_dequant<16>(
+          B_local + ii * ldb, B_unpack_local + ii * K, scales_local + ii, K, N);
+      brg[0].execute(
+          A_data,
+          B_unpack_local + ii * K,
+          {{0, 0}},
+          tmp_local + ii * M,
+          C_local + ii,
+          scratchpad_local);
+    }
+  });
+  dnnl::ukernel::brgemm::release_hw_context();
+  free(tmp_data);
+  free(B_unpack);
+  free(scratchpad);
+}
 
 // A block : {BLOCK_M, BLOCK_K}, lda = K
 // B block : {BLOCK_K, BLOCK_N}, ldb = K
@@ -38,7 +221,6 @@ inline void tinygemm_kernel(
     int ldb,
     int ldc,
     int K) {
-
   constexpr int ROWS = BLOCK_M;
   constexpr int COLS = BLOCK_N;
 
@@ -55,9 +237,7 @@ inline void tinygemm_kernel(
   };
   c10::ForcedUnroll<COLS>{}(load_scale);
 
-  auto loadc = [&](auto i) {
-    vc[i] = _mm512_setzero_ps();
-  };
+  auto loadc = [&](auto i) { vc[i] = _mm512_setzero_ps(); };
   c10::ForcedUnroll<ROWS * COLS>{}(loadc);
 
   auto compute = [&](auto i, int k) {
@@ -87,7 +267,7 @@ inline void tinygemm_kernel(
   };
 
   for (int k = 0; k < K; k += 16) {
-      c10::ForcedUnroll<ROWS * COLS>{}(compute, k);
+    c10::ForcedUnroll<ROWS * COLS>{}(compute, k);
   }
 
   auto storec = [&](auto i) {
