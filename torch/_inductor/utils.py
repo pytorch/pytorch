@@ -305,6 +305,7 @@ def _type_of(key: Optional[torch.dtype]) -> str:
         "float8e4b15x4": "fp8e4b15x4",
         "float8_e4m3fn": "fp8e4nv",
         "float8_e5m2": "fp8e5",
+        "float8_e8m0fnu": "u8",
         "float16": "fp16",
         "bfloat16": "bf16",
         "float32": "fp32",
@@ -2458,6 +2459,7 @@ _triton_type_mapping = {
     "tl.float8_e5m2": "tl.float8e5",
     "tl.float8_e4m3fnuz": "tl.float8e4b8",
     "tl.float8_e5m2fnuz": "tl.float8e5b16",
+    "tl.float8_e8m0fnu": "tl.uint8",
 }
 _torch_triton_mapping = {v: k for k, v in _triton_type_mapping.items()}
 
