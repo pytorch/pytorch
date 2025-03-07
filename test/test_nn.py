@@ -11151,20 +11151,22 @@ class TestNNDeviceType(NNTestCase):
         inputs.requires_grad = True
         self.assertTrue(gradcheck(F.hardswish, (inputs,)))
 
-    @onlyCPU
-    @dtypes(torch.half, torch.bfloat16, torch.float)
-    def test_hardswish_grad_corner(self, device, dtype):
+    def _test_hardswish_grad_corner(self, device, dtype, scalar, ref_fn):
         m = nn.Hardswish()
         shape = (1, 9, 9, 1)
-        cpu_input = torch.ones(shape, device=device, dtype=dtype)
-        cpu_input = cpu_input * 3
-        cpu_input.requires_grad = True
-        fwd_result = m(cpu_input)
-        grad = torch.ones_like(fwd_result)
-        fwd_result.backward(grad)
-        ref = torch.ones(shape, device=device, dtype=dtype)
-        ref.fill_(1.5)
-        self.assertEqual(cpu_input.grad, ref)
+        inputs = torch.ones(shape, device=device, dtype=dtype)
+        inputs = inputs * scalar
+        inputs.requires_grad = True
+        fwd_result = m(inputs)
+        fwd_result.backward(torch.ones_like(fwd_result))
+        ref = ref_fn(shape, device=device, dtype=dtype)
+        self.assertEqual(inputs.grad, ref)
+
+    @onlyNativeDeviceTypes
+    @dtypes(torch.half, torch.bfloat16, torch.float)
+    def test_hardswish_grad_corner(self, device, dtype):
+        self._test_hardswish_grad_corner(device, dtype, 3, torch.ones)
+        self._test_hardswish_grad_corner(device, dtype, -3, torch.zeros)
 
     def _test_batchnorm_eval(self, ndim, device, dtype, module_dtype=None):
         module_dtype = module_dtype or dtype

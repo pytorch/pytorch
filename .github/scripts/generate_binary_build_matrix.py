@@ -106,13 +106,17 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cufile-cu12==1.13.0.11; platform_system == 'Linux' and platform_machine == 'x86_64'"
     ),
     "xpu": (
-        "intel-cmplr-lib-rt==2025.0.2 | "
-        "intel-cmplr-lib-ur==2025.0.2 | "
-        "intel-cmplr-lic-rt==2025.0.2 | "
-        "intel-sycl-rt==2025.0.2 | "
+        "intel-cmplr-lib-rt==2025.0.4; platform_system == 'Linux' | "
+        "intel-cmplr-lib-ur==2025.0.4; platform_system == 'Linux' | "
+        "intel-cmplr-lic-rt==2025.0.4; platform_system == 'Linux' | "
+        "intel-sycl-rt==2025.0.4; platform_system == 'Linux' | "
+        "intel-cmplr-lib-rt==2025.0.5; platform_system == 'Windows' | "
+        "intel-cmplr-lib-ur==2025.0.5; platform_system == 'Windows' | "
+        "intel-cmplr-lic-rt==2025.0.5; platform_system == 'Windows' | "
+        "intel-sycl-rt==2025.0.5; platform_system == 'Windows' | "
         "tcmlib==1.2.0 | "
         "umf==0.9.1 | "
-        "intel-pti==0.10.0"
+        "intel-pti==0.10.1"
     ),
 }
 
