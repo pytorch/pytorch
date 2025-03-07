@@ -1,5 +1,6 @@
 import warnings
-from typing import List, Optional
+from itertools import chain
+from typing import Optional
 
 import torch
 from torch._utils import _get_device_index
@@ -25,7 +26,7 @@ class Broadcast(Function):
             if not input_requires_grad:
                 non_differentiables.extend(output[idx] for output in outputs)
         ctx.mark_non_differentiable(*non_differentiables)
-        return tuple([t for tensors in outputs for t in tensors])
+        return tuple(chain.from_iterable(outputs))
 
     @staticmethod
     def backward(ctx, *grad_outputs):
@@ -116,7 +117,7 @@ class Scatter(Function):
 
 
 # background streams used for copying
-_streams: Optional[List[Optional[torch.Stream]]] = None
+_streams: Optional[list[Optional[torch.Stream]]] = None
 
 
 def _get_stream(device: torch.device):

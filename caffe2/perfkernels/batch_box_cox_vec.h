@@ -21,7 +21,6 @@ void TileIndicesInPlace(std::vector<int>& v, const std::size_t D, const std::siz
     }
   }
 }
-}  // namespace
 
 // MKL VML function templates.
 template <typename T>
@@ -307,5 +306,6 @@ void compute_batch_box_cox_vec_fma(
     }
   }
 }
+}  // namespace
 
 }   // namespace caffe2::details

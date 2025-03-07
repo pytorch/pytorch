@@ -157,6 +157,13 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return backendType_;
   }
 
+  inline bool backendSupportsSequenceNumbers(BackendType backendType) {
+    if (backendType == BackendType::GLOO || backendType == BackendType::NCCL ||
+        backendType == BackendType::XCCL || backendType == BackendType::UCC)
+      return true;
+    return false;
+  }
+
   virtual void startCoalescing(c10::DeviceType deviceType) {
     // only nccl has implemented startCoalescing so only execute for nccl
     // backends
@@ -639,9 +646,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   virtual void setSequenceNumberForGroup() {
     auto backendType = getBackendType();
     // TODO: HACK for backend name to get sequence number for that backend.
-    if (backendType == ProcessGroup::BackendType::GLOO ||
-        backendType == ProcessGroup::BackendType::NCCL ||
-        backendType == ProcessGroup::BackendType::UCC) {
+    if (backendSupportsSequenceNumbers(backendType)) {
       getDefaultBackend()->setSequenceNumberForGroup();
     } else {
       TORCH_CHECK(
@@ -660,9 +665,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     auto backendType = getBackendType();
 
     // TODO: HACK for backend name to get sequence number for that backend.
-    if (backendType == ProcessGroup::BackendType::GLOO ||
-        backendType == ProcessGroup::BackendType::NCCL ||
-        backendType == ProcessGroup::BackendType::UCC) {
+    if (backendSupportsSequenceNumbers(backendType)) {
       return getDefaultBackend()->getSequenceNumberForGroup();
     } else {
       TORCH_CHECK(
@@ -757,6 +760,11 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       tensor = at::empty(
           {1},
           at::TensorOptions().device(at::DeviceType::CUDA).dtype(at::kByte));
+    } else if (backendType_ == c10d::ProcessGroup::BackendType::XCCL) {
+      // set xpu tensor for override cpu dispatch
+      tensor = at::empty(
+          {1},
+          at::TensorOptions().device(at::DeviceType::XPU).dtype(at::kByte));
     } else {
       // Default to using cpu implementation
       tensor = at::empty(
@@ -816,7 +824,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     TORCH_CHECK(
         backendTypeToBackend_.find(backendType_) != backendTypeToBackend_.end(),
         "Could not find the default backend type ",
-        backendType_,
+        uint16_t(backendType_),
         " for Process Group with name ",
         getBackendName(),
         ".");
@@ -837,7 +845,9 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     TORCH_CHECK(
         backendTypeToBackend_.find(backendType) != backendTypeToBackend_.end(),
         "Could not find backend type ",
-        backendType,
+        uint16_t(backendType),
+        " for Process Group with name ",
+        backendTypeToString(backendType),
         ".");
     return backendTypeToBackend_.at(backendType);
   }
@@ -865,7 +875,17 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   }
 
   bool hasHooks() const {
-    return getDefaultBackend()->hasHooks();
+    // `getDefaultBackend` will throw today if the backend is set to `undefined`
+    // (in case of `init_process_group(nothing)`)
+    try {
+      return getDefaultBackend()->hasHooks();
+    } catch (const std::exception& e) {
+      TORCH_WARN(
+          "Failed to check if ProcessGroup has hooks: ",
+          e.what(),
+          ". Assuming no hooks are registered.");
+      return false;
+    }
   }
 
   virtual const std::string& getGroupName() const;

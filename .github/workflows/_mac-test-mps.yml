@@ -152,6 +152,7 @@ jobs:
           set -e
 
           ${CONDA_RUN} python3 test/run_test.py --mps --verbose
+          MTL_CAPTURE_ENABLED=1 ${CONDA_RUN} python3 test/test_mps.py --verbose -k test_metal_capture
 
       - name: Print remaining test logs
         shell: bash

@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
-from numbers import Number
-
 import torch
+from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import (
@@ -11,6 +10,7 @@ from torch.distributions.utils import (
     probs_to_logits,
 )
 from torch.nn.functional import binary_cross_entropy_with_logits
+from torch.types import _Number
 
 
 __all__ = ["Geometric"]
@@ -41,6 +41,7 @@ class Geometric(Distribution):
         probs (Number, Tensor): the probability of sampling `1`. Must be in range (0, 1]
         logits (Number, Tensor): the log-odds of sampling `1`.
     """
+
     arg_constraints = {"probs": constraints.unit_interval, "logits": constraints.real}
     support = constraints.nonnegative_integer
 
@@ -54,7 +55,7 @@ class Geometric(Distribution):
         else:
             (self.logits,) = broadcast_all(logits)
         probs_or_logits = probs if probs is not None else logits
-        if isinstance(probs_or_logits, Number):
+        if isinstance(probs_or_logits, _Number):
             batch_shape = torch.Size()
         else:
             batch_shape = probs_or_logits.size()
@@ -84,23 +85,23 @@ class Geometric(Distribution):
         return new
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         return 1.0 / self.probs - 1.0
 
     @property
-    def mode(self):
+    def mode(self) -> Tensor:
         return torch.zeros_like(self.probs)
 
     @property
-    def variance(self):
+    def variance(self) -> Tensor:
         return (1.0 / self.probs - 1.0) / self.probs
 
     @lazy_property
-    def logits(self):
+    def logits(self) -> Tensor:
         return probs_to_logits(self.probs, is_binary=True)
 
     @lazy_property
-    def probs(self):
+    def probs(self) -> Tensor:
         return logits_to_probs(self.logits, is_binary=True)
 
     def sample(self, sample_shape=torch.Size()):

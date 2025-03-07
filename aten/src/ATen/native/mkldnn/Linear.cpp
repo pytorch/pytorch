@@ -22,8 +22,8 @@
 
 #if !AT_MKLDNN_ENABLED()
 
-namespace at {
-namespace native {
+
+namespace at::native {
 
 Tensor mkldnn_linear(
     const Tensor& self,
@@ -46,8 +46,8 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_linear_backward(
   TORCH_CHECK(false, "mkldnn_linear_backward: ATen not compiled with MKLDNN support");
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
+
 
 #else // AT_MKLDNN_ENABLED
 

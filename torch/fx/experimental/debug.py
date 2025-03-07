@@ -1,4 +1,4 @@
-from typing import List, Sequence
+from collections.abc import Sequence
 
 import torch.fx as fx
 
@@ -19,7 +19,7 @@ def set_trace(gm: fx.GraphModule) -> fx.GraphModule:
         the `gm` with breakpoint inserted.
     """
 
-    def insert_pdb(body: Sequence[str]) -> List[str]:
+    def insert_pdb(body: Sequence[str]) -> list[str]:
         return ["import pdb; pdb.set_trace()\n", *body]
 
     with gm.graph.on_generate_code(

@@ -1,31 +1,17 @@
 # mypy: allow-untyped-defs
 import functools
-from typing import (
-    Callable,
-    Optional,
-    Protocol,
-    Sequence,
-    Tuple,
-    TYPE_CHECKING,
-    TypeVar,
-    Union,
-)
+from collections.abc import Sequence
+from typing import Any, Callable, Optional, Protocol, TYPE_CHECKING, TypeVar, Union
 
 import sympy
 
+import torch
+from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND, type_to_dtype
 from torch.utils._ordered_set import OrderedSet
 
-
-if TYPE_CHECKING:
-    from torch._inductor.loop_body import LoopBodyBlock
-
-import torch
-from torch._inductor.virtualized import V
-from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND, type_to_dtype
-
-from . import config
+from .ops_handler import OP_NAMES, OpsHandler
 from .utils import upcast_compute_type
-from .virtualized import OpsValue
+from .virtualized import OpsValue, V
 
 
 T = TypeVar("T")
@@ -33,8 +19,7 @@ T = TypeVar("T")
 
 class DTypeVar(Protocol):
     @property
-    def dtype(self) -> torch.dtype:
-        ...
+    def dtype(self) -> torch.dtype: ...
 
 
 DTypeArg = Union[DTypeVar, torch.types.Number, str, OpsValue]
@@ -46,7 +31,7 @@ DTypeArg = Union[DTypeVar, torch.types.Number, str, OpsValue]
 
 @functools.lru_cache(None)
 def get_promoted_dtype(
-    *args: Sequence[Tuple[torch.dtype, bool]],
+    *args: Sequence[tuple[torch.dtype, bool]],
     type_promotion_kind: Optional[ELEMENTWISE_TYPE_PROMOTION_KIND] = None,
 ):
     def construct_input(inp):
@@ -74,15 +59,7 @@ def promote_types(
     dtype_prop_candidates = []
 
     for arg in args:
-        if isinstance(arg, str):
-            # TODO: fix the flex attention instances, enable internally
-            if not config.is_fbcode():
-                assert isinstance(
-                    V.get_ops_handler(),
-                    torch._inductor.select_algorithm.ModificationWrapper,
-                )
-            continue
-
+        assert not isinstance(arg, str)
         if isinstance(arg, OpsValue):
             arg = arg.value
             assert isinstance(arg, torch._prims_common.Number) or hasattr(arg, "dtype")
@@ -145,10 +122,7 @@ class DtypePropagationOpsHandler:
                     self, op, functools.partial(self.return_dtype, dtype=torch.bool)
                 )
 
-        from torch._inductor.ops_handler import OpsHandler
-
-        ops_set = OrderedSet(s for s in dir(OpsHandler) if s[0] != "_")
-        unimplemented_ops = ops_set - OrderedSet(dir(self))
+        unimplemented_ops = OP_NAMES - OrderedSet(dir(self))
         torch._check(
             len(unimplemented_ops) == 0,
             lambda: f"Unimplemented dtype rule for ops: {unimplemented_ops}",
@@ -181,7 +155,12 @@ class DtypePropagationOpsHandler:
         return torch.int64
 
     @staticmethod
-    def masked(mask: DTypeArg, body: "LoopBodyBlock", other: DTypeArg) -> torch.dtype:
+    def masked(
+        mask: DTypeArg, body: Callable[[], DTypeArg], other: DTypeArg
+    ) -> torch.dtype:
+        from .loop_body import LoopBodyBlock
+
+        assert isinstance(body, LoopBodyBlock), "body must be a LoopBodyBlock"
         # TODO - we avoid calling this in codegen, needs work for non codegen use cases
         loads = body.graph.find_nodes(op="call_method", target="load")
         if len(loads) <= 1:
@@ -225,10 +204,6 @@ class DtypePropagationOpsHandler:
 
     @staticmethod
     def mul(a: DTypeArg, b: DTypeArg) -> torch.dtype:
-        return promote_types([a, b])
-
-    @staticmethod
-    def div(a: DTypeArg, b: DTypeArg) -> torch.dtype:
         return promote_types([a, b])
 
     @staticmethod
@@ -293,10 +268,10 @@ class DtypePropagationOpsHandler:
 
     @staticmethod
     def scan(
-        dtypes: Tuple[torch.dtype, ...],
-        combine_fn: Callable[[Tuple[T, ...], Tuple[T, ...]], Tuple[T, ...]],
-        values: Tuple[T, ...],
-    ) -> Tuple[torch.dtype, ...]:
+        dtypes: tuple[torch.dtype, ...],
+        combine_fn: Callable[[tuple[T, ...], tuple[T, ...]], tuple[T, ...]],
+        values: tuple[T, ...],
+    ) -> tuple[torch.dtype, ...]:
         return dtypes
 
     @staticmethod
@@ -312,17 +287,17 @@ class DtypePropagationOpsHandler:
         return promote_types([x])
 
     @staticmethod
-    def frexp(x: DTypeArg) -> Tuple[torch.dtype, torch.dtype]:
+    def frexp(x: DTypeArg) -> tuple[torch.dtype, torch.dtype]:
         # TODO - need to handle multiple outputs
         return (promote_types([x]), torch.int32)
 
     @staticmethod
     def sort(
-        dtypes: Tuple[torch.dtype, ...],
-        values: Tuple[T, ...],
+        dtypes: tuple[torch.dtype, ...],
+        values: tuple[T, ...],
         stable: bool,
         descending: bool,
-    ) -> Tuple[torch.dtype, ...]:
+    ) -> tuple[torch.dtype, ...]:
         return dtypes
 
     @staticmethod
@@ -332,10 +307,12 @@ class DtypePropagationOpsHandler:
     @staticmethod
     def bucketize(
         values: DTypeArg,
-        boundaries: Tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
+        boundaries: tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
         boundary_indices: DTypeArg,
         indexing_dtype: torch.dtype,
         right: bool,
+        sorter: Optional[tuple[str, sympy.Expr]] = None,
+        sorter_indices: Optional[T] = None,
     ) -> torch.dtype:
         return indexing_dtype
 
@@ -348,10 +325,6 @@ class DtypePropagationOpsHandler:
         return promote_types(
             [x], type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
         )
-
-    @staticmethod
-    def getitem(x: DTypeArg, y: DTypeArg) -> torch.dtype:
-        raise RuntimeError("Unexpected op: getitem")
 
     @staticmethod
     def trunc_to_int(x: DTypeArg, dtype: torch.dtype) -> torch.dtype:
@@ -368,11 +341,6 @@ class DtypePropagationOpsHandler:
     @staticmethod
     def floordiv(x: DTypeArg, y: DTypeArg) -> torch.dtype:
         return promote_types([x, y])
-
-    @staticmethod
-    def round_decimal(x: DTypeArg, y: DTypeArg) -> torch.dtype:
-        # TODO - dont see it anywhere..
-        return promote_types([x])
 
     @staticmethod
     def halide_clamp(value, size, check):
@@ -394,9 +362,23 @@ class DtypePropagationOpsHandler:
         return promote_types([x])
 
     @staticmethod
-    def invert(x: DTypeArg) -> torch.dtype:
-        raise RuntimeError("Unexpected op: invert")
+    def check_bounds(
+        expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
+    ) -> None:
+        return None
 
-    @staticmethod
-    def matmul(x: DTypeArg, y: DTypeArg) -> torch.dtype:
-        raise RuntimeError("Unexpected op: matmul")
+    def output(self, *args: DTypeArg) -> None:
+        raise AssertionError(
+            f"{type(self).__name__}: ops.output should not appear here"
+        )
+
+    def placeholder(self, index: int) -> torch.dtype:
+        raise AssertionError(
+            f"{type(self).__name__}: ops.placeholder should not appear here"
+        )
+
+
+if TYPE_CHECKING:
+
+    class _typecheck_DtypePropagation(DtypePropagationOpsHandler, OpsHandler[Any]):
+        pass  # mypy will error if we got any of the signatures wrong

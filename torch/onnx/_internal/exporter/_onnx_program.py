@@ -5,6 +5,7 @@ from __future__ import annotations
 
 __all__ = ["ONNXProgram"]
 
+import contextlib
 import copy
 import gc
 import logging
@@ -12,10 +13,11 @@ import os
 import tempfile
 import textwrap
 import warnings
-from typing import Callable, Sequence, TYPE_CHECKING
+from typing import Any, Callable, TYPE_CHECKING
 
 import torch
 from torch.onnx._internal._lazy_import import onnx, onnxscript_apis, onnxscript_ir as ir
+from torch.onnx._internal.exporter import _dynamic_shapes, _ir_passes
 from torch.utils import _pytree
 
 
@@ -23,6 +25,8 @@ from torch.utils import _pytree
 # because ONNXProgram is exposed to the public API
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     import onnxruntime as ort
 
 _LARGE_MODEL_THRESHOLD = 1536 * 1024 * 1024  # 1536MB
@@ -58,6 +62,53 @@ def _count_initializer_size(graph: ir.Graph) -> int:
     )
 
 
+@contextlib.contextmanager
+def _set_graph_outputs(
+    graph: ir.Graph,
+    outputs: list[ir.Value],
+):
+    """Temporarily set the outputs of the graph.
+
+    Args:
+        graph: The graph to set the outputs for.
+        outputs: The outputs to set.
+    """
+    original_outputs = graph.outputs.copy()
+    graph.outputs.clear()
+    graph.outputs.extend(outputs)
+    try:
+        yield
+    finally:
+        graph.outputs.clear()
+        graph.outputs.extend(original_outputs)
+
+
+def _create_value_mapping(graph: ir.Graph) -> dict[str, ir.Value]:
+    """Return a dictionary mapping names to values in the graph.
+
+    The mapping does not include values from subgraphs.
+
+    Args:
+        graph: The graph to extract the mapping from.
+
+    Returns:
+        A dictionary mapping names to values.
+    """
+    values = {}
+    values.update(graph.initializers)
+    # The names of the values can be None or "", which we need to exclude
+    for input in graph.inputs:
+        if not input.name:
+            continue
+        values[input.name] = input
+    for node in graph:
+        for value in node.outputs:
+            if not value.name:
+                continue
+            values[value.name] = value
+    return values
+
+
 class ONNXProgram:
     """A class to represent an ONNX program that is callable with torch tensors."""
 
@@ -73,15 +124,17 @@ class ONNXProgram:
         self.exported_program = exported_program
         self._inference_session: ort.InferenceSession | None = None
         self._tempdir: tempfile.TemporaryDirectory | None = None
+        # Strategy used to capture the exported program
+        self._capture_strategy: str | None = None
 
     def __repr__(self) -> str:
         return f"""\
 ONNXProgram(
     model=
-{textwrap.indent(str(self.model), ' ' * 8)}
+{textwrap.indent(str(self.model), " " * 8)}
     ,
     exported_program=
-{textwrap.indent(str(self.exported_program), ' ' * 8)}
+{textwrap.indent(str(self.exported_program), " " * 8)}
 )
 """
 
@@ -108,6 +161,38 @@ ONNXProgram(
         logger.debug("Inference session run completed.")
         # TODO(justinchuby): Maybe output complex tensors as needed
         return tuple(torch.from_numpy(output) for output in outputs)
+
+    def compute_values(
+        self, value_names: Sequence[str], args=(), kwargs=None
+    ) -> Sequence[torch.Tensor]:
+        """Compute the values of the specified names in the ONNX model.
+
+        This method is used to compute the values of the specified names in the ONNX model.
+        The values are returned as a dictionary mapping names to tensors.
+
+        Args:
+            value_names: The names of the values to compute.
+
+        Returns:
+            A dictionary mapping names to tensors.
+        """
+        if kwargs is None:
+            kwargs = {}
+        self.release()
+        values = _create_value_mapping(self.model.graph)
+        for name in value_names:
+            if name not in values:
+                raise ValueError(
+                    f"Value '{name}' not found in the model. "
+                    "Please provide a valid value name."
+                )
+        temporary_outputs = [values[name] for name in value_names]
+        with _set_graph_outputs(self.model.graph, temporary_outputs):
+            try:
+                result = self(*args, **kwargs)
+            finally:
+                self.release()
+        return result
 
     @property
     def model_proto(self) -> onnx.ModelProto:
@@ -251,6 +336,16 @@ ONNXProgram(
         if self._tempdir is not None:
             self._tempdir.cleanup()
             self._tempdir = None
+
+    def _rename_dynamic_axes(
+        self,
+        dynamic_shapes: dict[str, Any] | tuple[Any, ...] | list[Any],
+    ) -> None:
+        """Rename dynamic axes in a model according to the specified dynamic_axes names."""
+        rename_mapping = _dynamic_shapes.create_rename_mapping(
+            self.model.graph.inputs, dynamic_shapes
+        )
+        _ir_passes.rename_axis(self.model, rename_mapping)
 
 
 def _process_args(args, kwargs) -> tuple[torch.Tensor, ...]:

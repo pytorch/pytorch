@@ -1,5 +1,5 @@
 from collections import deque
-from typing import Callable, Dict, List, Set, Tuple
+from typing import Callable
 
 import networkx as nx
 import numpy as np
@@ -25,10 +25,10 @@ class KnapsackEvaluator:
     def _get_backward_memory_from_topologically_sorted_graph(
         self,
         node_graph: nx.DiGraph,
-        node_memories: Dict[str, float],
-        saved_nodes_set: Set[str],
+        node_memories: dict[str, float],
+        saved_nodes_set: set[str],
         peak_memory_after_forward_pass: float,
-    ) -> List[Tuple[float, str]]:
+    ) -> list[tuple[float, str]]:
         """
         Simulates the backward pass and keeps track of the peak memory usage.
 
@@ -108,7 +108,7 @@ class KnapsackEvaluator:
         return current_memory
 
     def _validate_all_indexes_accounted_for_in_provided_output(
-        self, saved_nodes_idxs: List[int], recomputable_node_idxs: List[int]
+        self, saved_nodes_idxs: list[int], recomputable_node_idxs: list[int]
     ) -> None:
         """
         Validate that all indexes are accounted for in the provided output.
@@ -132,10 +132,10 @@ class KnapsackEvaluator:
 
     def evaluate_knapsack_output(
         self,
-        saved_nodes_idxs: List[int],
-        recomputable_node_idxs: List[int],
+        saved_nodes_idxs: list[int],
+        recomputable_node_idxs: list[int],
         account_for_backward_pass: bool = False,
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """
         Evaluate the theoretical runtime and peak memory usage of a given checkpointing strategy.
         Args:
@@ -188,10 +188,10 @@ class KnapsackEvaluator:
     def evaluate_distribution_of_results_for_knapsack_algo(
         self,
         knapsack_algo: Callable[
-            [List[float], List[float], float], Tuple[float, List[int], List[int]]
+            [list[float], list[float], float], tuple[float, list[int], list[int]]
         ],
-        memory_budget_values: List[float],
-    ) -> List[Dict[str, float]]:
+        memory_budget_values: list[float],
+    ) -> list[dict[str, float]]:
         """
         Evaluates the distribution of results for a given knapsack algorithm.
         Args:
@@ -216,7 +216,7 @@ class KnapsackEvaluator:
     def get_knee_point_memory_budget(
         self,
         knapsack_algo: Callable[
-            [List[float], List[float], float], Tuple[float, List[int], List[int]]
+            [list[float], list[float], float], tuple[float, list[int], list[int]]
         ],
         max_mem_budget: float = 0.1,
         min_mem_budget: float = 0.001,
@@ -239,7 +239,7 @@ class KnapsackEvaluator:
         """
         results = self.evaluate_distribution_of_results_for_knapsack_algo(
             knapsack_algo=knapsack_algo,
-            memory_budget_values=np.linspace(
+            memory_budget_values=np.linspace(  # type: ignore[arg-type]
                 min_mem_budget, max_mem_budget, iterations
             ).tolist(),
         )

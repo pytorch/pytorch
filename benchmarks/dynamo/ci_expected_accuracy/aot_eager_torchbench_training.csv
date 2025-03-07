@@ -114,6 +114,10 @@ hf_Reformer,pass,23
 
 
 
+hf_Roberta_base,fail_accuracy,6
+
+
+
 hf_T5_base,eager_2nd_run_OOM,0
 
 
@@ -142,6 +146,10 @@ maml_omniglot,pass,7
 
 
 
+microbench_unbacked_tolist_sum,pass,8
+
+
+
 mnasnet1_0,pass,7
 
 
@@ -158,7 +166,7 @@ mobilenet_v3_large,pass,7
 
 
 
-moco,pass,11
+moco,pass,13
 
 
 
@@ -246,11 +254,11 @@ timm_efficientnet,pass,7
 
 
 
-timm_regnet,pass,6
+timm_regnet,pass,7
 
 
 
-timm_resnest,pass,7
+timm_resnest,pass,6
 
 
 

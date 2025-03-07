@@ -51,9 +51,9 @@ class ModelArgs:
         # take longer name (as it have more symbols matched)
         if len(config) > 1:
             config.sort(key=len, reverse=True)
-            assert len(config[0]) != len(
-                config[1]
-            ), name  # make sure only one 'best' match
+            assert len(config[0]) != len(config[1]), (
+                name
+            )  # make sure only one 'best' match
 
         return cls(**transformer_configs[config[0]])
 
