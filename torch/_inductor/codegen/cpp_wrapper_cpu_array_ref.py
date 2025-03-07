@@ -56,9 +56,9 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         self.cached_output_id = count()
         self.scalar_to_tensor_id = count()
         self.custom_op_wrapper_loaded = False
-        self.allow_stack_allocation: Optional[
-            bool
-        ] = config.aot_inductor.allow_stack_allocation
+        self.allow_stack_allocation: Optional[bool] = (
+            config.aot_inductor.allow_stack_allocation
+        )
         self.stack_allocated_buffers: dict[BufferName, BufferLike] = {}
 
     @staticmethod
@@ -66,6 +66,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         is_subgraph: bool,
         subgraph_name: Optional[str],
         parent_wrapper: Optional[PythonWrapperCodegen],
+        partition_signatures: Optional[ir.GraphPartitionSignature] = None,
     ):
         # TODO - support subgraph codegen by lifting functions. Check the
         # comment at CppWrapperCpu `codegen_subgraph` function.
@@ -83,8 +84,9 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             return DTYPE_TO_CPP[dtype]
         return f"ArrayRefTensor<{DTYPE_TO_CPP[input.get_dtype()]}>"
 
-    def get_device_include(self):
-        assert self.device == "cpu", "ArrayRef only supported on CPU!"
+    @staticmethod
+    def get_device_include_path(device: str) -> str:
+        assert device == "cpu", "ArrayRef only supported on CPU!"
         if V.graph.aot_mode:
             return "#include <torch/csrc/inductor/aoti_include/array_ref.h>"
         return "#include <torch/csrc/inductor/cpp_wrapper/array_ref.h>"
@@ -124,12 +126,12 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 Otherwise it uses the CUDA language for codegen.
                 Only valid when cuda == True.
         """
-        assert (
-            not gpu
-        ), "CppWrapperCpuArrayRef.generate_kernel_call does not support GPU"
-        assert arg_types is not None and len(call_args) == len(
-            arg_types
-        ), "Mismatch call_args and arg_types in generate_kernel_call"
+        assert not gpu, (
+            "CppWrapperCpuArrayRef.generate_kernel_call does not support GPU"
+        )
+        assert arg_types is not None and len(call_args) == len(arg_types), (
+            "Mismatch call_args and arg_types in generate_kernel_call"
+        )
         new_args = []
         for idx, arg in enumerate(call_args):
             if "*" in arg_types[idx]:
@@ -176,7 +178,12 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
 
             if V.graph.const_module:
                 self.header.splice(V.graph.const_module.wrapper_code.header)
-                self.prefix.splice(V.graph.const_code)
+
+                assert V.graph.const_wrapper_code is not None
+                self.prefix.splice(V.graph.const_wrapper_code)
+
+                assert V.graph.const_kernel_code is not None
+                self.kernel_declarations.splice(V.graph.const_kernel_code)
 
             if V.graph.is_const_graph:
                 self.prefix.splice(
@@ -227,11 +234,10 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                     ) {
                     """
 
-                if config.aot_inductor.debug_compile:
-                    self.generate_input_output_runtime_checks()
-                    run_impl_proto += """
-                        __check_inputs_outputs(input_handles, output_handles);
-                    """
+                self.generate_input_output_runtime_checks()
+                run_impl_proto += """
+                    __check_inputs_outputs(input_handles, output_handles);
+                """
 
                 if config.aot_inductor.use_minimal_arrayref_interface:
                     self.prefix.splice(
@@ -325,9 +331,9 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                         dtype = may_get_constant_buffer_dtype(
                             V.graph.graph_inputs[input_key]  # type: ignore[arg-type]
                         )
-                        assert (
-                            dtype is not None
-                        ), "Fails to get the dtype of the sympy.Expr"
+                        assert dtype is not None, (
+                            "Fails to get the dtype of the sympy.Expr"
+                        )
                         self.codegen_tensor_item(
                             dtype, f"inputs[{idx}]", input_key, self.prefix
                         )
@@ -661,15 +667,15 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
     def is_safe_to_use_borrow_arrayref_tensor_as_tensor(self):
         return not self.allow_stack_allocation and not self.stack_allocated_buffers
 
-    def generate_c_shim_extern_kernel_call(self, kernel, args):
+    def generate_c_shim_extern_kernel_call(
+        self, kernel: str, args: list[str], device: str, **_
+    ) -> None:
         # In the abi_compatible mode, we call fallback aten ops through a C shim layer
         # Setting self.allow_stack_allocation to False because the exchange between
         # ArrayRefTensor and at::Tensor is still fragile.
         self.allow_stack_allocation = False
 
         wrapped_args = []
-        debug_printer_manager = V.graph.wrapper_code.debug_printer
-
         for x in args:
             pieces = x.split(", ")
             for piece in pieces:
@@ -686,12 +692,9 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                     piece = f"borrow_arrayref_tensor_as_tensor({piece})"
                 wrapped_args.append(piece)
 
-        debug_printer_manager.set_printer_args(args, kernel, None, None, "extern")
-        with debug_printer_manager:
-            shim_fn = self.get_c_shim_func_name(kernel)
-            self.writeline(
-                f"AOTI_TORCH_ERROR_CODE_CHECK({shim_fn}({', '.join(wrapped_args)}));"
-            )
+        super().generate_c_shim_extern_kernel_call(
+            kernel, wrapped_args, device, debug_args=args
+        )
 
     def generate_scatter_fallback(
         self,
@@ -707,7 +710,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         self.allow_stack_allocation = False
 
         # call the ABI shim function instead of the ATen one
-        cpp_kernel_name = self.get_c_shim_func_name(cpp_kernel_name)
+        cpp_kernel_name = self.get_c_shim_func_name(cpp_kernel_name, self.device)
         # TODO: consider remove "_out" and add missing inplace variants to fallback_ops.py
         cpp_kernel_name = cpp_kernel_name.replace("__", "_") + "_out"
         self._assert_safe_to_use_borrow_arrayref_tensor_as_tensor()
@@ -724,9 +727,9 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 if reduce:
                     line += f", {V.graph.wrapper_code.val_to_arg_str(reduce)}"
             else:
-                assert (
-                    reduce is None
-                ), "Expect reduce to be None for aten.scatter_ with scalar src"
+                assert reduce is None, (
+                    "Expect reduce to be None for aten.scatter_ with scalar src"
+                )
         line += ");"
         self.writeline(line)
 

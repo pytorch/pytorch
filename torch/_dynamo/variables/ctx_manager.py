@@ -1,4 +1,25 @@
 # mypy: ignore-errors
+
+"""
+This file contains a collection of context manager classes used by Dynamo for tracking
+and managing various PyTorch runtime states during graph compilation. These context
+managers handle different aspects of PyTorch's execution environment, including:
+
+- Autograd states (grad mode, inference mode)
+- CUDA streams and events
+- Profiling contexts
+- Deterministic algorithms
+- Forward/backward AD modes
+- SDPA (Scaled Dot Product Attention) kernels
+- FSDP (Fully Sharded Data Parallel) states
+- AMP (Automatic Mixed Precision) autocast states
+
+The context managers ensure proper state transitions during graph compilation by
+tracking enter/exit points and managing cleanup operations. They help maintain
+consistency between eager execution and compiled graph behavior by capturing and
+restoring state changes.
+"""
+
 import dataclasses
 import inspect
 import sys
@@ -34,7 +55,7 @@ if TYPE_CHECKING:
 
 
 @dataclasses.dataclass
-class ContextMangerState:
+class ContextManagerState:
     """
     Mutating `self` in VariableTracker is not allowed because we copy
     them.  This is a mutable container pointed to by context managers
@@ -69,7 +90,7 @@ class ContextWrappingVariable(VariableTracker):
         super().__init__(**kwargs)
         self.target_values = target_values
         self.initial_values = initial_values
-        self.state = ContextMangerState() if state is None else state
+        self.state = ContextManagerState() if state is None else state
 
     def enter(self, tx):
         self._call_func(tx, self.target_values)
@@ -186,7 +207,7 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
                 from_exc=e,
             )
 
-        tx.generic_context_manager_depth -= 1
+        tx.active_generic_context_managers.pop()
         return x
 
     def supports_graph_breaks(self):
@@ -729,9 +750,11 @@ class DeterministicAlgorithmsVariable(ContextWrappingVariable):
     def _call_func(self, tx: "InstructionTranslator", values):
         assert len(values) == 1
         value = values[0]
-        tx.output.create_node(
-            "call_function", torch._C._set_deterministic_algorithms, (value,), {}
-        ),
+        (
+            tx.output.create_node(
+                "call_function", torch._C._set_deterministic_algorithms, (value,), {}
+            ),
+        )
         torch._C._set_deterministic_algorithms(value)
 
     def module_name(self):
@@ -1163,9 +1186,9 @@ class StreamVariable(VariableTracker):
     def __init__(self, proxy, value, device, **kwargs) -> None:
         if proxy is not None and "example_value" in proxy.node.meta:
             assert proxy.node.meta["example_value"] == value
-        assert (
-            value.device.type == device.type
-        ), "stream value is not equal to the passed device"
+        assert value.device.type == device.type, (
+            "stream value is not equal to the passed device"
+        )
         super().__init__(**kwargs)
         self.proxy = proxy
         self.value = value
