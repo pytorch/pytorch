@@ -2085,9 +2085,9 @@ class GraphLowering(torch.fx.Interpreter):
     def _compile_to_module(self) -> ModuleType:
         from .codecache import PyCodeCache
 
-        # Currently, if we're here, we don't have to worry about the kernel code, which
-        # is only available in AOTInductor mode.
-        wrapper_code, _ = (
+        # If we're here, we don't have to worry about the kernel code, which is only
+        # returned separately in AOTInductor mode.
+        src_code, _ = (
             self.codegen_with_cpp_wrapper() if self.cpp_wrapper else self.codegen()
         )
         if config.triton.autotune_at_compile_time:
@@ -2098,33 +2098,33 @@ class GraphLowering(torch.fx.Interpreter):
                 + self.wrapper_code.kernel_autotune_calls.getvalue()
                 + '"""\n'
             )
-            wrapper_code.value = tuning_code + wrapper_code.value
+            src_code.value = tuning_code + src_code.value
         if GraphLowering.save_output_code is not None:
-            GraphLowering.save_output_code(wrapper_code.value)
-        output_code_log.debug("Output code: \n%s", wrapper_code.value)
+            GraphLowering.save_output_code(src_code.value)
+        output_code_log.debug("Output code: \n%s", src_code.value)
 
         inductor_meta = autotune_cache.inductor_meta_from_config()
-        AutotuneCacheBundler.begin_compile(inductor_meta, code=wrapper_code.value)
+        AutotuneCacheBundler.begin_compile(inductor_meta, code=src_code.value)
 
         try:
             linemap = [
                 (line_no, node.stack_trace)  # type: ignore[attr-defined]
-                for line_no, node in wrapper_code.line_map
+                for line_no, node in src_code.line_map
             ]
-            key, path = PyCodeCache.write(wrapper_code.value)
+            key, path = PyCodeCache.write(src_code.value)
             output_code_log.debug("Output code written to: %s", path)
         except Exception:
             trace_structured(
                 "inductor_output_code",
                 # Just omit the filename, I still want the code though!
-                payload_fn=lambda: wrapper_code.value,
+                payload_fn=lambda: src_code.value,
             )
             raise
         else:
             trace_structured(
                 "inductor_output_code",
                 lambda: {"filename": path},
-                payload_fn=lambda: wrapper_code.value,
+                payload_fn=lambda: src_code.value,
             )
         with dynamo_timed("PyCodeCache.load_by_key_path", log_pt2_compile_event=True):
             mod = PyCodeCache.load_by_key_path(
