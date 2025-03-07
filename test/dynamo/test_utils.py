@@ -332,7 +332,7 @@ class TestDynamoTimed(TestCase):
  'log_format_version': 3,
  'non_compliant_ops': set(),
  'num_graph_breaks': 0,
- 'num_params': 0,
+ 'num_params': 4,
  'num_triton_bundles': None,
  'post_grad_pass_time_us': 0,
  'pre_grad_pass_time_us': 0,
@@ -417,7 +417,7 @@ class TestDynamoTimed(TestCase):
  'log_format_version': 3,
  'non_compliant_ops': None,
  'num_graph_breaks': 0,
- 'num_params': 0,
+ 'num_params': None,
  'num_triton_bundles': None,
  'post_grad_pass_time_us': 0,
  'pre_grad_pass_time_us': None,
@@ -485,7 +485,7 @@ class TestDynamoTimed(TestCase):
             m = ModelWrapped()
             torch.compile(m)(torch.randn(1, 10, 10))
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
-        self.assertEqual(compilation_events[0].num_params, 1560)
+        self.assertEqual(compilation_events[0].num_params, 1040)
 
 
 class TestInductorConfigParsingForLogging(TestCase):

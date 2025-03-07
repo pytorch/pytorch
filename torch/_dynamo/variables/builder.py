@@ -46,7 +46,6 @@ import sympy
 import torch
 from torch import SymInt
 from torch._dynamo.utils import (
-    counters,
     get_metrics_context,
     is_int_specialization_case,
     is_torch_sym,
@@ -1513,7 +1512,7 @@ class VariableBuilder:
         from ..eval_frame import OptimizedModule
 
         for p in value.parameters(recurse=False):
-            counters["paramaters"]["total"] += p.numel()
+            get_metrics_context().increment("num_params", p.numel())
 
         if len(value.__dict__) == 0:
             unimplemented_v2(
