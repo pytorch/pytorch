@@ -266,7 +266,7 @@ class TestCppExtensionAOT(common.TestCase):
         init_mem = torch.cuda.memory_allocated(device)
 
         for _ in range(3):
-            _run_identity(init_mem)
+            _run_identity(init_mem, device)
             curr_mem = torch.cuda.memory_allocated(device)
             self.assertEqual(curr_mem, init_mem)
 
@@ -282,15 +282,15 @@ class TestCppExtensionAOT(common.TestCase):
         with self.assertRaises(RuntimeError):
             libtorch_agnostic.ops.identity(t)
 
-        # # finally, clean up the folder
-        # cmd = [sys.executable, "setup.py", "clean"]
-        # return_code = shell(
-        #     cmd,
-        #     cwd=os.path.join("cpp_extensions", "libtorch_agnostic_extension"),
-        #     env=os.environ.copy(),
-        # )
-        # if return_code != 0:
-        #     return return_code
+        # finally, clean up the folder
+        cmd = [sys.executable, "setup.py", "clean"]
+        return_code = shell(
+            cmd,
+            cwd=os.path.join("cpp_extensions", "libtorch_agnostic_extension"),
+            env=os.environ.copy(),
+        )
+        if return_code != 0:
+            return return_code
 
 
 @torch.testing._internal.common_utils.markDynamoStrictTest

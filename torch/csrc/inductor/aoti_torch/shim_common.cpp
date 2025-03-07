@@ -1318,8 +1318,7 @@ class StableIValueConverter : public c10::OperatorKernel {
     const auto& schema = op.schema();
     const auto num_returns = schema.returns().size();
     const auto num_arguments = schema.arguments().size();
-    // to make this faster, you can make this a C array on the stack --> though
-    // this may cause a stackoverflow
+
     StableIValue* ministack = (StableIValue*)malloc(
         (num_arguments + num_returns) * sizeof(StableIValue));
 
@@ -1348,7 +1347,7 @@ class StableIValueConverter : public c10::OperatorKernel {
     fn_(ministack, num_arguments, num_returns);
 
     // read the output from the end of the stack and wrap that back into
-    // IValue from StableIValue?
+    // IValue from StableIValue
     for (size_t idx = 0; idx < num_returns; idx++) {
       const c10::TypePtr& ret_type = schema.returns()[idx].type();
       if (*ret_type == *c10::getTypePtr<at::Tensor>()) {
