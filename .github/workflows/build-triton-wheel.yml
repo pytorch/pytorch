@@ -104,21 +104,27 @@ jobs:
           case $PY_VERS in
           3.9)
             PYTHON_EXECUTABLE=/opt/python/cp39-cp39/bin/python
+            PYTHON_PATH=/opt/python/cp39-cp39/bin
             ;;
           3.10)
             PYTHON_EXECUTABLE=/opt/python/cp310-cp310/bin/python
+            PYTHON_PATH=/opt/python/cp310-cp310/bin
             ;;
           3.11)
             PYTHON_EXECUTABLE=/opt/python/cp311-cp311/bin/python
+            PYTHON_PATH=/opt/python/cp311-cp311/bin
             ;;
           3.12)
             PYTHON_EXECUTABLE=/opt/python/cp312-cp312/bin/python
+            PYTHON_PATH=/opt/python/cp312-cp312/bin
             ;;
           3.13)
             PYTHON_EXECUTABLE=/opt/python/cp313-cp313/bin/python
+            PYTHON_PATH=/opt/python/cp313-cp313/bin
             ;;
           3.13t)
             PYTHON_EXECUTABLE=/opt/python/cp313-cp313t/bin/python
+            PYTHON_PATH=/opt/python/cp313t-cp313t/bin
             ;;
           *)
             echo "Unsupported python version ${PY_VERS}"
@@ -135,6 +141,7 @@ jobs:
           docker exec -t "${container_name}" yum install -y zlib-devel zip
           docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}"  -m pip install -U setuptools==67.4.0 pybind11==2.13.1 auditwheel
           if [[ "${{ matrix.device }}" == "aarch64" ]]; then
+            export PATH=${PYTHON_PATH}:${PATH}
             docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}" -m pip install ninja
           fi
           if [[ ("${{ matrix.device }}" == "cuda" || "${{ matrix.device }}" == "rocm") ]]; then
@@ -142,12 +149,14 @@ jobs:
             docker exec -t "${container_name}" dnf install clang lld -y
             WITH_CLANG_LDD="--with-clang-ldd"
           fi
+
           if [[ "${BUILD_DEVICE}" == xpu ]]; then
             docker exec -t "${container_name}" bash -c "dnf install -y gcc-toolset-13-gcc-c++"
             docker exec -t "${container_name}" bash -c "source /opt/rh/gcc-toolset-13/enable && ${PYTHON_EXECUTABLE} /pytorch/.github/scripts/build_triton_wheel.py --device=$BUILD_DEVICE $RELEASE"
           else
             docker exec -t "${container_name}" bash -c "${PYTHON_EXECUTABLE} /pytorch/.github/scripts/build_triton_wheel.py --device=$BUILD_DEVICE $RELEASE $WITH_CLANG_LDD"
           fi
+
           if [[ ("${{ matrix.device }}" == "cuda" || "${{ matrix.device }}" == "xpu") ]]; then
             docker exec -t "${container_name}"  bash -c "auditwheel repair --plat ${PLATFORM} //artifacts/*.whl"
           else
