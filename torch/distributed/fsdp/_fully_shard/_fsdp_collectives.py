@@ -1,3 +1,4 @@
+from itertools import chain
 from typing import Callable, cast, NamedTuple, Optional, Union
 
 import torch
@@ -152,7 +153,7 @@ def foreach_all_gather(
                 t.view(torch.uint8) for ts in param_all_gather_inputs for t in ts
             ]
         else:
-            all_gather_inputs = [t for ts in param_all_gather_inputs for t in ts]
+            all_gather_inputs = [*chain.from_iterable(param_all_gather_inputs)]
         inp_split_sizes = [t.numel() for t in all_gather_inputs]
         all_gather_input_numel = sum(inp_split_sizes)
         all_gather_input, all_gather_output = torch.ops.fsdp.all_gather_copy_in(

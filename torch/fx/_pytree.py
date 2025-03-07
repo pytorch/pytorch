@@ -92,20 +92,28 @@ def _namedtuple_flatten_spec_exact_match(d: NamedTuple, spec: TreeSpec) -> bool:
     return len(d) == spec.num_children
 
 
-register_pytree_flatten_spec(dict, _dict_flatten_spec, _dict_flatten_spec_exact_match)
-register_pytree_flatten_spec(list, _list_flatten_spec, _list_flatten_spec_exact_match)
 register_pytree_flatten_spec(
     tuple,
     _tuple_flatten_spec,
     _tuple_flatten_spec_exact_match,
 )
 register_pytree_flatten_spec(
-    structseq,
-    _tuple_flatten_spec,
-    _tuple_flatten_spec_exact_match,
+    list,
+    _list_flatten_spec,
+    _list_flatten_spec_exact_match,
+)
+register_pytree_flatten_spec(
+    dict,
+    _dict_flatten_spec,
+    _dict_flatten_spec_exact_match,
 )
 register_pytree_flatten_spec(
     namedtuple,  # type: ignore[arg-type]
     _namedtuple_flatten_spec,
     _namedtuple_flatten_spec_exact_match,
+)
+register_pytree_flatten_spec(
+    structseq,
+    _tuple_flatten_spec,
+    _tuple_flatten_spec_exact_match,
 )
