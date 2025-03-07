@@ -1428,6 +1428,17 @@ class TestFlexAttention(InductorTestCase):
         self.run_test_with_paged_attention(bias_mod, dtype)
 
     @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes_fast)
+    def test_causal_small_non_zero_heads(self, dtype):
+        block_mask = create_block_mask(_causal_mask, 1, 32, 8, 8, device="cuda")
+        self.run_test(
+            _identity, dtype, 1, 32, 8, 128, 1, 32, 8, 128, block_mask=block_mask
+        )
+        self.run_test_with_paged_attention(
+            _identity, dtype, 1, 32, 8, 128, 1, 32, 8, 128, block_mask=block_mask
+        )
+
+    @supported_platform
     def test_load_from_view_buffer(self):
         dtype = torch.float16
         device = "cuda"
