@@ -1306,11 +1306,10 @@ AOTITorchError aoti_torch_cpu__weight_int4pack_mm_cpu_tensor(
   });
 }
 
-
 class StableIValueConverter : public c10::OperatorKernel {
  public:
-  StableIValueConverter(void (*fn)(StableIValue*, int64_t, int64_t)) 
-    : fn_(fn) {}
+  StableIValueConverter(void (*fn)(StableIValue*, int64_t, int64_t))
+      : fn_(fn) {}
 
   void operator()(
       const c10::OperatorHandle& op,
@@ -1322,25 +1321,20 @@ class StableIValueConverter : public c10::OperatorKernel {
     // to make this faster, you can make this a C array on the stack --> though
     // this may cause a stackoverflow
     StableIValue* ministack = (StableIValue*)malloc(
-      (num_arguments + num_returns) * sizeof(StableIValue));
+        (num_arguments + num_returns) * sizeof(StableIValue));
 
     for (const auto idx : c10::irange(num_arguments)) {
       const c10::IValue& arg = torch::jit::pop(stack);
       const auto ministack_idx = num_arguments - idx - 1;
       if (arg.isInt()) {
-        TORCH_WARN("dealt with an Int");
         ministack[ministack_idx] = from(arg.toInt());
       } else if (arg.isDouble()) {
-        TORCH_WARN("dealt with a double");
         ministack[ministack_idx] = from(arg.toDouble());
       } else if (arg.isBool()) {
-        TORCH_WARN("dealt with a bool");
         ministack[ministack_idx] = from(arg.toBool());
       } else if (arg.isNone()) {
-        TORCH_WARN("dealt with a None");
         ministack[ministack_idx] = from(nullptr);
       } else if (arg.isTensor()) {
-        TORCH_WARN("dealt with a Tensor");
         AtenTensorHandle ath = torch::aot_inductor::new_tensor_handle(
             std::move(const_cast<at::Tensor&>(arg.toTensor())));
         ministack[ministack_idx] = from(ath);
@@ -1349,7 +1343,7 @@ class StableIValueConverter : public c10::OperatorKernel {
       }
     }
 
-    // second function is going to take a stack of StableIValues, cast them to
+    // boxed function is going to take a stack of StableIValues, cast them to
     // our schema values, and run the function and modify the StableIValue stack
     fn_(ministack, num_arguments, num_returns);
 
@@ -1444,7 +1438,6 @@ aoti_torch_library_def(TorchLibraryHandle self, const char* name) {
 
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_delete_library_object(TorchLibraryHandle tlh) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    delete reinterpret_cast<torch::Library*>(tlh);
-  });
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { delete reinterpret_cast<torch::Library*>(tlh); });
 }

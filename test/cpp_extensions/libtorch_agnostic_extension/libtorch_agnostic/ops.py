@@ -2,10 +2,6 @@ import torch
 from torch import Tensor
 
 
-lib = torch.library.Library("libtorch_agnostic", "FRAGMENT")
-# lib.define("sgd_out_of_place(Tensor param, Tensor grad, float weight_decay, float lr, bool maximize) -> Tensor")
-
-
 def sgd_out_of_place(param, grad, weight_decay, lr, maximize) -> Tensor:
     """
     Computes a single step of SGD on a single parameter Tensor with grad.
@@ -27,3 +23,16 @@ def sgd_out_of_place(param, grad, weight_decay, lr, maximize) -> Tensor:
     return torch.ops.libtorch_agnostic.sgd_out_of_place.default(
         param, grad, weight_decay, lr, maximize
     )
+
+
+def identity(t) -> Tensor:
+    """
+    Returns the input tensor
+
+    Args:
+        t: any Tensor
+
+    Returns:
+        a Tensor, the same as input.
+    """
+    return torch.ops.libtorch_agnostic.identity.default(t)

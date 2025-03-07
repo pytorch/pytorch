@@ -60,7 +60,7 @@ class TORCH_API StableLibrary final {
     // do not permit move
     StableLibrary(StableLibrary&& other) = delete;
     StableLibrary& operator=(StableLibrary&& other) = delete;
-  
+
     ~StableLibrary() {
       aoti_torch_delete_library_object(lib_);
     }

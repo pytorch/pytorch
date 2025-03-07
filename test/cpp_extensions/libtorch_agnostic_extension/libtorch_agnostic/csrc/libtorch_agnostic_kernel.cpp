@@ -79,7 +79,7 @@ RAIIATH sgd_out_of_place(
 }
 
 
-void voidyvoid_boxed_ATH_sgd_out_of_place(StableIValue* stack, int64_t num_args, int64_t num_outputs) {
+void boxed_sgd_out_of_place(StableIValue* stack, int64_t num_args, int64_t num_outputs) {
   RAIIATH param(to<AtenTensorHandle>(stack[0]));
   RAIIATH grad(to<AtenTensorHandle>(stack[1]));
   auto weight_decay = to<double>(stack[2]);
@@ -100,10 +100,28 @@ STABLE_TORCH_LIBRARY(libtorch_agnostic, m) {
   m.def("sgd_out_of_place(Tensor param, Tensor grad, float weight_decay, float lr, bool maximize) -> Tensor");
 }
 
-// STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
-//   m.def("sgd_out_of_place(Tensor param, Tensor grad, float weight_decay, float lr, bool maximize) -> Tensor");
-// }
+STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CPU, m) {
+  m.impl("libtorch_agnostic::sgd_out_of_place", &boxed_sgd_out_of_place);
+}
+
+RAIIATH identity(RAIIATH t) {
+  return std::move(t);
+}
+
+void boxed_identity(StableIValue* stack, int64_t num_args, int64_t num_outputs) {
+  RAIIATH t(to<AtenTensorHandle>(stack[0]));
+  RAIIATH raiiath_res = identity(std::move(t));
+  stack[num_args] = from(raiiath_res.release());
+}
+
+STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
+  m.def("identity(Tensor t) -> Tensor");
+}
+
+STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CUDA, m) {
+  m.impl("libtorch_agnostic::identity", &boxed_identity);
+}
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CPU, m) {
-  m.impl("libtorch_agnostic::sgd_out_of_place", &voidyvoid_boxed_ATH_sgd_out_of_place);
+  m.impl("libtorch_agnostic::identity", &boxed_identity);
 }
