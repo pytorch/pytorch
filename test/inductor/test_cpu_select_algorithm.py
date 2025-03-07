@@ -1435,8 +1435,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @parametrize("reshape_a", [True, False])
     @parametrize("expand_a_scale", [True, False])
     @parametrize("dynamic", [True, False])
+    @parametrize("M", [1, 32])
     def test_da8w8_sym_act_sym_wgt_with_int_mm(
-        self, has_bias, dtype, per_channel_quant, reshape_a, expand_a_scale, dynamic
+        self, has_bias, dtype, per_channel_quant, reshape_a, expand_a_scale, dynamic, M
     ):
         r"""
         This testcase check if we can match the int8_dynamic_activation_int8_weight int8 linear pattern from torchao,
@@ -1451,7 +1452,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         """
         if dtype == torch.bfloat16 and not torch.ops.mkldnn._is_mkldnn_bf16_supported():
             return
-        M = 32
         in_feature = 48
         out_feature = 64
         q_min, q_max = -32, 31
@@ -1505,7 +1505,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
 
         vec_amx = VecAMX()
         self._check_amx_counter(vec_amx)
-        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
+        if torch._C._cpu._is_amx_tile_supported():
+            # Only AMX ISA based micro-kernel is currently supported for da8w8
+            self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
 
     @inductor_config.patch({"freezing": True})
     @patches
@@ -2481,6 +2483,32 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             )
             self.assertEqual(actual, expected, atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 2)
+
+    @patches
+    @inductor_config.patch(freezing=True)
+    @unittest.skipIf(not torch._C._has_mkldnn, "MKLDNN is not enabled")
+    def test_bmm_flexible_layout(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, u, v):
+                view_3 = torch.ops.aten.reshape.default(u, [-1, 512, 64])
+                clone_1 = torch.ops.aten.clone.default(
+                    v, memory_format=torch.contiguous_format
+                )
+                view_7 = torch.ops.aten.reshape.default(clone_1, [-1, 512, 64])
+                permute_6 = torch.ops.aten.permute.default(view_7, [0, 2, 1])
+                div = torch.ops.aten.div.Tensor(permute_6, 8.0)
+                # view_3 is a ReinterpretView and div is a FlexibleLayout which will become FixedLayout
+                bmm = torch.ops.aten.bmm.default(view_3, div)
+                return bmm
+
+        mod = M().eval()
+        u = torch.randn(2, 24, 512, 64)
+        v = torch.randn(48, 512, 64)
+        with verify(u.dtype) as (atol, rtol):
+            self.common(mod, (u, v))
 
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
