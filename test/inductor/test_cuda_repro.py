@@ -1060,6 +1060,29 @@ class CudaReproTests(TestCase):
 
         self.assertEqual(expect, actual)
 
+    @config.patch({"max_autotune_gemm_backends": "TRITON"})
+    def test_bucketize_epilogue(self):
+        """
+        See https://github.com/pytorch/pytorch/issues/148764.
+        Make sure that when torch.bucketize appears as an epilogue, the codegen is valid.
+        TODO: need to make sure we force fusion - otherwise we just get a very loud warning, but the test passes
+        """
+
+        def fn(x: torch.Tensor, y: torch.Tensor, buckets: torch.Tensor) -> torch.Tensor:
+            z = torch.mm(x, y)
+            return torch.bucketize(z, buckets)
+
+        buckets = torch.arange(-100, 100, 10, device="cuda")
+        x = torch.randn(64, 64, device="cuda").clamp(-99, 99)
+        y = torch.randn(64, 64, device="cuda").clamp(-99, 99)
+
+        opt_fn = torch.compile(fn, mode="max-autotune")
+
+        expected = fn(x, y, buckets)
+        actual = opt_fn(x, y, buckets)
+
+        self.assertEqual(expected, actual)
+
     def test_float64_constants(self):
         def fn():
             # NOTE: tensors of all the same value are constant folded, so we

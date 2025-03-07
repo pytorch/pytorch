@@ -2323,7 +2323,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         boundary_stride = self.index_to_str(boundaries[3])
         sorter_ptr = self.args.input(sorter[0]) if sorter else "None"
         sorter_stride = self.index_to_str(sorter[1]) if sorter else "None"
-        block_size = self.dense_size_str()
 
         if indexing_dtype == torch.int32:
             triton_dtype = "tl.int32"
@@ -2343,7 +2342,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             f"{right}, "
             f"{sorter_ptr}, {sorter_stride}, "
             f"{sorter_indices}, "
-            f"{block_size}, "
             ")",
             dtype=indexing_dtype,  # type: ignore[attr-defined]
         )
