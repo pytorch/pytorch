@@ -96,9 +96,13 @@ void voidyvoid_boxed_ATH_sgd_out_of_place(StableIValue* stack, int64_t num_args,
   stack[num_args] = from(raiiath_res.release());
 }
 
-STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
+STABLE_TORCH_LIBRARY(libtorch_agnostic, m) {
   m.def("sgd_out_of_place(Tensor param, Tensor grad, float weight_decay, float lr, bool maximize) -> Tensor");
 }
+
+// STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
+//   m.def("sgd_out_of_place(Tensor param, Tensor grad, float weight_decay, float lr, bool maximize) -> Tensor");
+// }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CPU, m) {
   m.impl("libtorch_agnostic::sgd_out_of_place", &voidyvoid_boxed_ATH_sgd_out_of_place);

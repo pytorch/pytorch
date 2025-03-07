@@ -1273,6 +1273,7 @@ def main():
         "include/c10/xpu/*.h",
         "include/c10/xpu/impl/*.h",
         "include/torch/*.h",
+        "include/torch/stable/*.h",
         "include/torch/csrc/*.h",
         "include/torch/csrc/api/include/torch/*.h",
         "include/torch/csrc/api/include/torch/data/*.h",

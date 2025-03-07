@@ -223,6 +223,7 @@ include_patterns = [
     'c10/**/*.cpp',
     'c10/**/*.h',
     'torch/*.h',
+    'torch/stable/*.h',
     'torch/csrc/*.h',
     'torch/csrc/*.cpp',
     'torch/csrc/**/*.h',

@@ -1323,29 +1323,27 @@ class StableIValueConverter : public c10::OperatorKernel {
     // this may cause a stackoverflow
     StableIValue* ministack = (StableIValue*)malloc(
       (num_arguments + num_returns) * sizeof(StableIValue));
-    // std::unique_ptr<void *[]> ministack =
-    // std::make_unique<void*[]>(num_arguments + num_returns);
 
-    for (size_t idx = 0; idx < num_arguments;
-         idx++) { // rbarnes will prefer a c10::irange instead of this loop!
-      const c10::IValue& arg = torch::jit::peek(stack, idx, num_arguments);
+    for (const auto idx : c10::irange(num_arguments)) {
+      const c10::IValue& arg = torch::jit::pop(stack);
+      const auto ministack_idx = num_arguments - idx - 1;
       if (arg.isInt()) {
         TORCH_WARN("dealt with an Int");
-        ministack[idx] = from(arg.toInt());
+        ministack[ministack_idx] = from(arg.toInt());
       } else if (arg.isDouble()) {
         TORCH_WARN("dealt with a double");
-        ministack[idx] = from(arg.toDouble());
+        ministack[ministack_idx] = from(arg.toDouble());
       } else if (arg.isBool()) {
         TORCH_WARN("dealt with a bool");
-        ministack[idx] = from(arg.toBool());
+        ministack[ministack_idx] = from(arg.toBool());
       } else if (arg.isNone()) {
         TORCH_WARN("dealt with a None");
-        ministack[idx] = from(nullptr);
+        ministack[ministack_idx] = from(nullptr);
       } else if (arg.isTensor()) {
         TORCH_WARN("dealt with a Tensor");
         AtenTensorHandle ath = torch::aot_inductor::new_tensor_handle(
             std::move(const_cast<at::Tensor&>(arg.toTensor())));
-        ministack[idx] = from(ath);
+        ministack[ministack_idx] = from(ath);
       } else {
         TORCH_CHECK(false, "Other types of IValues not yet handled!");
       }
@@ -1354,10 +1352,6 @@ class StableIValueConverter : public c10::OperatorKernel {
     // second function is going to take a stack of StableIValues, cast them to
     // our schema values, and run the function and modify the StableIValue stack
     fn_(ministack, num_arguments, num_returns);
-
-    // now pop all inputs on stack. if we pop earlier, Tensors would go out of
-    // scope before calling the function
-    torch::jit::drop(stack, num_arguments);
 
     // read the output from the end of the stack and wrap that back into
     // IValue from StableIValue?
