@@ -15,7 +15,7 @@ from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     make_fx,
 )
-from torch.fx.passes.shape_prop import TensorMetadata, _extract_tensor_metadata
+from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.multiprocessing.reductions import StorageWeakRef
 
 
@@ -141,6 +141,7 @@ def _maybe_reenter_make_fx(fn):
 
         return _maybe_make_fx_with_fake_mode(fn)
 
+
 def check_meta_consistency(
     lhs_list: list[Union[torch.Tensor, torch.SymInt, int]],
     rhs_list: list[Union[torch.Tensor, torch.SymInt, int]],
@@ -221,6 +222,7 @@ def check_meta_consistency(
         raise torch._dynamo.exc.UncapturedHigherOrderOpError(
             f"Expected {lhs_name} and {rhs_name} to have same metadata but found:\n{diff_str}"
         )
+
 
 @contextmanager
 def _set_compilation_env():
