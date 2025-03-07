@@ -139,6 +139,8 @@ triton_kernel_default_layout_constraint: Literal[
 # incompatible with disable_cpp_codegen
 cpp_wrapper: bool = os.environ.get("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1"
 
+online_softmax = os.environ.get("TORCHINDUCTOR_ONLINE_SOFTMAX", "1") == "1"
+
 # dead code elimination
 dce = False
 
@@ -1378,6 +1380,13 @@ class rocm:
     # Flag to use a short list of CK instances which perform well across a variety of shapes.
     # Currently RCR and F16 only
     use_preselected_instances: bool = False
+
+    # List to determine kBatch parameters to sweep over. By default, we calculate one in splitK
+    # scenarios, and run on kBatch=1 in non-splitK scenarios
+    kBatch_sweep: Optional[list[int]] = None
+
+    # The threshold at which we trigger a splitK config - K // max(M,N) has to be greater than this
+    split_k_threshold: int = 16
 
 
 # Backend to use for CPU codegen either "cpp" or "triton" (experimental) or "halide" (experimental)
