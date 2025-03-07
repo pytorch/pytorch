@@ -431,12 +431,13 @@ inline bool should_use_onednn_quant(
   // Also, the heuristics for dispatching are based on perf data on Linux.
   // So, for x86 qengine, we always use fbgemm kernels if OS is not Linux.
   // TODO Support more OSs.
+  bool vnni_available = false;
 #if !defined(__linux__)
   return false;
 #elif defined(__powerpc__)
-  bool vnni_available = true;
+  vnni_available = true;
 #else
-  bool vnni_available = cpuinfo_has_x86_avx512vnni();
+  vnni_available = cpuinfo_has_x86_avx512vnni();
 #endif
   bool w_sym_quant =
       is_weight_symmetric_quant(weight, is_transposed_conv);
