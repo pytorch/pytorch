@@ -303,7 +303,7 @@ class AsyncCompile:
         set_feature_use("parallel_compile_post_warmup", is_parallel)
 
         compile_id = torch._guards.CompileContext.current_compile_id()
-        is_backward = V.graph.is_backward
+        is_backward = getattr(V.graph, "is_backward", False)
 
         if is_parallel:
             # We want to support changing these env vars after (and while) the
