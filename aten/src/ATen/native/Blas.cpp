@@ -283,9 +283,22 @@ _scaled_mm_out_cpu(const Tensor& mat1, const Tensor& mat2,
           bool use_fast_accum,
           Tensor& out) {
 #if AT_MKLDNN_ENABLED()
-  if (at::globalContext().userEnabledMkldnn() && cpuinfo_has_x86_amx_int8()) {
-    return mkldnn_scaled_mm(mat1, mat2, scale_a, scale_b, bias, scale_result, out_dtype, use_fast_accum, out);
-  } else
+  if (at::globalContext().userEnabledMkldnn()) {
+    bool mixed_dtype = mat1.scalar_type() != mat2.scalar_type();
+    if ((!mixed_dtype && cpuinfo_has_x86_amx_int8()) ||
+        (mixed_dtype && cpuinfo_has_x86_amx_fp16())) {
+      return mkldnn_scaled_mm(
+          mat1,
+          mat2,
+          scale_a,
+          scale_b,
+          bias,
+          scale_result,
+          out_dtype,
+          use_fast_accum,
+          out);
+    }
+  }
 #endif
   {
   return _scaled_mm_out_cpu_emulated(mat1, mat2, scale_a, scale_b, bias, scale_result, out_dtype, use_fast_accum, out);
