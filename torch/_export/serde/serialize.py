@@ -14,7 +14,7 @@ import operator
 import traceback
 import typing
 
-from collections import OrderedDict
+from collections import OrderedDict, namedtuple
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
@@ -73,6 +73,7 @@ from .schema import (  # type: ignore[attr-defined]
     ModuleCallEntry,
     ModuleCallSignature,
     NamedArgument,
+    NamedTupleDef,
     Node,
     OptionalTensorArgument,
     OutputSpec,
@@ -182,6 +183,7 @@ _SYM_OPS = {
     operator.gt,
     operator.neg,
     operator.pos,
+    math.trunc,
     torch.sym_not,
     operator.mul,
     operator.add,
@@ -397,6 +399,10 @@ def _int_to_sympy_int(val: Optional[int], default) -> sympy.Expr:
     return sympy.Integer(val)
 
 
+def _symbol_index(sym: sympy.Symbol, sym_type: SymT):
+    return int(str(sym)[len(prefix_str[sym_type]):])
+
+
 def serialize_range_constraints(
     range_constraints: dict[sympy.Symbol, ValueRanges]
 ) -> dict[str, RangeConstraint]:
@@ -454,6 +460,7 @@ class GraphModuleSerializer(metaclass=Final):
         self.module_call_graph = module_call_graph
         self.custom_objs: dict[str, torch._C.ScriptObject] = {}
         self.duplicate_getitem_nodes: dict[str, str] = {}
+        self.treespec_namedtuple_fields: dict[str, NamedTupleDef] = {}
 
     @contextmanager
     def save_graph_state(self):
@@ -630,22 +637,6 @@ class GraphModuleSerializer(metaclass=Final):
 
     def serialize_metadata(self, node: torch.fx.Node) -> dict[str, str]:
         ret = {}
-        if unbacked_bindings := node.meta.get("unbacked_bindings"):
-            # serialize the symbol names of unbacked bindings;
-            # reconstruct the key paths to those symbols when deserializing
-            val = node.meta["val"]
-            new_unbacked_bindings = {}
-            for key in unbacked_bindings.values():
-                expr = pytree.key_get(val, key).node.expr
-                if expr.is_symbol and (
-                    expr.name.startswith(prefix_str[SymT.UNBACKED_FLOAT])
-                    or expr.name.startswith(prefix_str[SymT.UNBACKED_INT])
-                ):
-                    new_unbacked_bindings[expr] = key
-            if new_unbacked_bindings:
-                ret["unbacked_bindings"] = ",".join(
-                    u.name for u in new_unbacked_bindings.keys()
-                )
 
         if stack_trace := node.meta.get("stack_trace"):
             ret["stack_trace"] = stack_trace
@@ -772,6 +763,13 @@ class GraphModuleSerializer(metaclass=Final):
             ]
         )
         return inputs
+
+    def is_inductor_sym_int_arg(self, arg) -> bool:
+        # This is a special branch for handling SymInt args in inductor's
+        # ExternalFallbackNode.
+        # For regular FX graph, SymInt arg should be a fx.Node and should be
+        # verified with is_sym_int_arg()
+        return type(arg) is int or isinstance(arg, torch.SymInt)
 
     def is_sym_int_arg(self, arg) -> bool:
         return type(arg) is int or (
@@ -915,14 +913,17 @@ class GraphModuleSerializer(metaclass=Final):
                 return Argument.create(as_floats=list(arg))
             elif all(type(a) is str for a in arg):
                 return Argument.create(as_strings=list(arg))
-            elif all(isinstance(a, torch.SymInt) for a in arg):
+            elif all(self.is_inductor_sym_int_arg(a) for a in arg):
                 # This is a special branch for handling SymInt args in inductor's
                 # ExternalFallbackNode.
-                # For regular FX graph, SymInt arg should be a fx.Node with
-                # self.is_sym_int_arg(arg) being true
-                return Argument.create(
-                    as_sym_ints=[SymIntArgument.create(as_name=str(a)) for a in arg]
-                )
+                # For regular FX graph, SymInt arg should be a fx.Node
+                values = []
+                for a in arg:
+                    if isinstance(a, torch.SymInt):
+                        values.append(SymIntArgument.create(as_name=str(a)))
+                    elif type(a) is int:
+                        values.append(SymIntArgument.create(as_int=a))
+                return Argument.create(as_sym_ints=values)
             elif all(isinstance(a, torch.SymFloat) for a in arg):
                 return Argument.create(
                     as_sym_floats=[SymFloatArgument.create(as_name=str(a)) for a in arg]
@@ -1216,6 +1217,32 @@ class GraphModuleSerializer(metaclass=Final):
         else:
             raise AssertionError("TODO")
 
+    def serialize_treespec(self, treespec):
+        # We want to additionally save all the field names of the namedtuples in
+        # case users want to check that the treespec types are equivalent
+        def store_namedtuple_fields(ts):
+            if ts.type is None:
+                return
+            if ts.type is namedtuple or pytree.is_namedtuple_class(ts.type):
+                serialized_type_name = pytree.SUPPORTED_SERIALIZED_TYPES[ts.context].serialized_type_name
+                if serialized_type_name in self.treespec_namedtuple_fields:
+                    field_names = self.treespec_namedtuple_fields[serialized_type_name].field_names
+                    if field_names != ts.context._fields:
+                        raise SerializeError(
+                            f"The given TreeSpec's namedtuple type {ts.context} "
+                            f"was found to have field names {ts.context._fields} "
+                            f"but somehow previously was found to have field names {field_names}."
+                        )
+                else:
+                    self.treespec_namedtuple_fields[serialized_type_name] = NamedTupleDef(field_names=ts.context._fields)
+
+            for child in ts.children_specs:
+                store_namedtuple_fields(child)
+
+        serialized_treespec = treespec_dumps(treespec, TREESPEC_VERSION)
+        store_namedtuple_fields(treespec)
+        return serialized_treespec
+
     def serialize_module_call_signature(
         self, module_call_signature: ep.ModuleCallSignature
     ) -> ModuleCallSignature:
@@ -1227,8 +1254,8 @@ class GraphModuleSerializer(metaclass=Final):
             outputs=[
                 self.serialize_argument_spec(x) for x in module_call_signature.outputs
             ],
-            in_spec=treespec_dumps(module_call_signature.in_spec, TREESPEC_VERSION),
-            out_spec=treespec_dumps(module_call_signature.out_spec, TREESPEC_VERSION),
+            in_spec=self.serialize_treespec(module_call_signature.in_spec),
+            out_spec=self.serialize_treespec(module_call_signature.out_spec),
             forward_arg_names=names if (names := module_call_signature.forward_arg_names) else None
         )
 
@@ -1483,7 +1510,8 @@ class GraphModuleSerializer(metaclass=Final):
             graph=graph,
             signature=self.serialize_signature(self.graph_signature),
             module_call_graph=self.serialize_module_call_graph(self.module_call_graph),
-            metadata=self.serialize_graph_module_metadata(graph_module.meta)
+            metadata=self.serialize_graph_module_metadata(graph_module.meta),
+            treespec_namedtuple_fields=self.treespec_namedtuple_fields
         )
 
 
@@ -1637,6 +1665,11 @@ class GraphModuleDeserializer(metaclass=Final):
                     sym = self.symbol_name_to_symbol[expr_str]
                 else:
                     self.symbol_name_to_symbol[expr_str] = sym
+                    if (
+                        isinstance(sym, sympy.Symbol)
+                        and symbolic_shapes.symbol_is_type(sym, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT))
+                    ):
+                        self.unbacked_symbols.add(sym)
                 # hints
                 if (
                     hint is not None
@@ -1716,6 +1749,7 @@ class GraphModuleDeserializer(metaclass=Final):
                     tuple(self.deserialize_sym_int(val) for val in tensor_meta.strides),  # type: ignore[misc]
                     device=deserialize_device(tensor_meta.device),
                     dtype=_SERIALIZE_TO_TORCH_DTYPE[tensor_meta.dtype],
+                    requires_grad=tensor_meta.requires_grad,
                 ),
             )
 
@@ -1848,6 +1882,19 @@ class GraphModuleDeserializer(metaclass=Final):
                 for arg in output_node.args[0]
             )
 
+        # recompute unbacked bindings
+        for node in self.graph.nodes:
+            if (
+                (val := node.meta.get("val")) is not None
+                and (
+                    unbacked_bindings := symbolic_shapes._free_unbacked_symbols_with_path(
+                        val, (), shape_env=self.shape_env, pending=self.unbacked_symbols, simplify=True
+                    )
+                )
+            ):
+                node.meta["unbacked_bindings"] = unbacked_bindings
+
+        assert len(self.unbacked_symbols) == 0
         return self.graph
 
     def deserialize_node(self, serialized_node: Node, target: Callable) -> None:
@@ -1926,16 +1973,6 @@ class GraphModuleDeserializer(metaclass=Final):
             fx_node.kwargs,
             fx_node.meta.get("val"),
         )
-        if "unbacked_bindings" in serialized_node.metadata:
-            for u_name in serialized_node.metadata["unbacked_bindings"].split(","):
-                u = self.symbol_name_to_symbol[u_name]
-                # these are pending fresh unbacked symbols, so update shape env
-                self.shape_env.pending_fresh_unbacked_symbols.append(u)
-            # consume pending fresh unbacked symbols and reconstruct key paths to them
-            unbacked_bindings = symbolic_shapes.compute_unbacked_bindings(
-                self.shape_env, fx_node.meta["val"]
-            )
-            fx_node.meta["unbacked_bindings"] = unbacked_bindings
         if fx_node.op not in ["placeholder", "output"] and "nn_module_stack" not in fx_node.meta:
             fx_node.meta["nn_module_stack"] = {}  # serialization throws away empty dicts
 
@@ -2102,6 +2139,7 @@ class GraphModuleDeserializer(metaclass=Final):
             self.symbol_name_to_range = {}
             # we also need to bump unbacked sym[float,int] counters in the
             # shape env to accommodate unbacked symbols in the exported program
+            self.unbacked_symbols: set[sympy.Symbol] = set()
             count_unbacked_symfloat, count_unbacked_symint = -1, -1
             unbacked_symfloat_prefix, unbacked_symint_prefix = (
                 prefix_str[t] for t in [SymT.UNBACKED_FLOAT, SymT.UNBACKED_INT]
@@ -2119,6 +2157,8 @@ class GraphModuleDeserializer(metaclass=Final):
                         i = int(k[len(unbacked_symint_prefix):])
                         count_unbacked_symint = max(count_unbacked_symint, i)
 
+            # TODO(pianpwk): if we can clean up unused symbols in range_constraints,
+            # then this logic can just be handled with self.unbacked_symbols alone
             for _ in range(count_unbacked_symfloat + 1):
                 next(self.shape_env.unbacked_symfloat_counter)
             for _ in range(count_unbacked_symint + 1):
@@ -2140,6 +2180,10 @@ class GraphModuleDeserializer(metaclass=Final):
             meta = {}
             if custom := serialized_graph_module.metadata.get("custom"):
                 meta["custom"] = json.loads(custom)
+            if hasattr(serialized_graph_module, "treespec_namedtuple_fields"):
+                meta["treespec_namedtuple_fields"] = {}
+                for type_, fields in serialized_graph_module.treespec_namedtuple_fields.items():
+                    meta["treespec_namedtuple_fields"][type_] = fields.field_names
             graph_module.meta = meta
             return GraphModuleDeserializer.Result(
                 graph_module=graph_module,
@@ -2685,8 +2729,21 @@ def _dataclass_to_dict(obj):
         return tuple(_dataclass_to_dict(x) for x in obj)
     elif isinstance(obj, dict):
         return {k: _dataclass_to_dict(v) for k, v in obj.items()}
+    elif isinstance(obj, float):
+        if obj == math.inf:
+            return "Infinity"
+        elif obj == -math.inf:
+            return "-Infinity"
+        elif obj == math.nan:
+            return "NaN"
+        else:
+            return obj
     else:
         return obj
+
+
+def _to_json_bytes(obj: Any) -> bytes:
+    return json.dumps(_dataclass_to_dict(obj), cls=EnumEncoder, allow_nan=False).encode("utf-8")
 
 
 def serialize(
@@ -2700,10 +2757,7 @@ def serialize(
         )
     assert isinstance(serialized_program.exported_program, ExportedProgram)
 
-    json_program = json.dumps(
-        _dataclass_to_dict(serialized_program.exported_program), cls=EnumEncoder
-    )
-    json_bytes = json_program.encode("utf-8")
+    json_bytes = _to_json_bytes(serialized_program.exported_program)
     artifact = SerializedArtifact(
         json_bytes,
         serialized_program.state_dict,
@@ -2747,6 +2801,8 @@ def _dict_to_dataclass(cls, data):
     elif isinstance(data, dict):
         v_type = typing.get_args(cls)[1]
         return {k: _dict_to_dataclass(v_type, v) for k, v in data.items()}
+    elif cls == float:
+        return float(data)
     return data
 
 

@@ -953,9 +953,10 @@ This class does not support ``__members__`` property.)");
       "_register_work",
       [](const at::Tensor& tensor,
          const c10::intrusive_ptr<::c10d::Work>& work) {
-        dynamic_cast<::c10d::PyProcessGroup::PyWork*>(work.get())
-            ->ref_py_object();
-        ::c10d::register_work(tensor, work);
+        py::object obj = py::cast(work);
+        auto holder = c10::make_intrusive<::c10d::PyProcessGroup::PyWorkHolder>(
+            work, obj);
+        ::c10d::register_work(tensor, holder);
       },
       py::arg("tensor"),
       py::arg("work"));
@@ -2481,6 +2482,10 @@ Arguments:
               "supports_splitting",
               &::c10d::Backend::supportsSplitting,
               "(test whether the backend supports splitting)")
+          .def_property_readonly(
+              "supports_coalescing",
+              &::c10d::Backend::supportsCoalescing,
+              "(test whether the backend supports coalescing)")
           .def(
               "broadcast",
               &::c10d::Backend::broadcast,

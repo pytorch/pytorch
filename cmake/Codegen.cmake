@@ -92,6 +92,9 @@ if(INTERN_BUILD_ATEN_OPS)
       if(EXISTING_ARCH_FLAGS MATCHES ".*compute_90.*")
         list(APPEND ROWWISE_SCALED_MM_FILE_COMPILE_FLAGS "-gencode;arch=compute_90a,code=sm_90a")
       endif()
+      if(EXISTING_ARCH_FLAGS MATCHES ".*compute_100a.*")
+        list(APPEND ROWWISE_SCALED_MM_FILE_COMPILE_FLAGS "-gencode;arch=compute_100a,code=sm_100a")
+      endif()
     endif()
     list(JOIN ROWWISE_SCALED_MM_FILE_COMPILE_FLAGS " " ROWWISE_SCALED_MM_FILE_COMPILE_FLAGS)
     set_source_files_properties(${ROWWISE_SCALED_MM_FILE} PROPERTIES COMPILE_FLAGS "${ROWWISE_SCALED_MM_FILE_COMPILE_FLAGS}")
@@ -389,6 +392,12 @@ if(INTERN_BUILD_ATEN_OPS)
       else(MSVC)
         set(EXTRA_FLAGS "-DCPU_CAPABILITY=${CPU_CAPABILITY} -DCPU_CAPABILITY_${CPU_CAPABILITY}")
       endif(MSVC)
+
+      # Only parallelize the SortingKernel for now to avoid side effects
+      if(${NAME} STREQUAL "native/cpu/SortingKernel.cpp" AND NOT MSVC AND USE_OMP)
+        string(APPEND EXTRA_FLAGS " -D_GLIBCXX_PARALLEL")
+      endif()
+
       # Disable certain warnings for GCC-9.X
       if(CMAKE_COMPILER_IS_GNUCXX)
         if(("${NAME}" STREQUAL "native/cpu/GridSamplerKernel.cpp") AND ("${CPU_CAPABILITY}" STREQUAL "DEFAULT"))

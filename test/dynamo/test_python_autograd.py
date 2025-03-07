@@ -1,5 +1,5 @@
 # Owner(s): ["module: dynamo"]
-from typing import Callable, List, NamedTuple, Optional
+from typing import Callable, NamedTuple, Optional
 
 import torch
 import torch._dynamo
@@ -81,7 +81,7 @@ def grad(L, desired_results: list[Variable]) -> list[Variable]:
 
     # look up dL_dentries. If a variable is never used to compute the loss,
     # we consider its gradient None, see the note below about zeros for more information.
-    def gather_grad(entries: List[str]):
+    def gather_grad(entries: list[str]):
         return [dL_d[entry] if entry in dL_d else None for entry in entries]
 
     # propagate the gradient information backward
@@ -127,7 +127,7 @@ def operator_mul(self: Variable, rhs: Variable) -> Variable:
     outputs = [r.name]
 
     # define backprop
-    def propagate(dL_doutputs: List[Variable]):
+    def propagate(dL_doutputs: list[Variable]):
         (dL_dr,) = dL_doutputs
 
         dr_dself = rhs  # partial derivative of r = self*rhs
@@ -150,7 +150,7 @@ def operator_add(self: Variable, rhs: Variable) -> Variable:
     r = Variable(self.value + rhs.value)
     # print(f'{r.name} = {self.name} + {rhs.name}')
 
-    def propagate(dL_doutputs: List[Variable]):
+    def propagate(dL_doutputs: list[Variable]):
         (dL_dr,) = dL_doutputs
         dr_dself = 1.0
         dr_drhs = 1.0
@@ -168,7 +168,7 @@ def operator_sum(self: Variable, name: Optional[str]) -> "Variable":
     r = Variable(torch.sum(self.value), name=name)
     # print(f'{r.name} = {self.name}.sum()')
 
-    def propagate(dL_doutputs: List[Variable]):
+    def propagate(dL_doutputs: list[Variable]):
         (dL_dr,) = dL_doutputs
         size = self.value.size()
         return [dL_dr.expand(*size)]
@@ -179,12 +179,12 @@ def operator_sum(self: Variable, name: Optional[str]) -> "Variable":
     return r
 
 
-def operator_expand(self: Variable, sizes: List[int]) -> "Variable":
+def operator_expand(self: Variable, sizes: list[int]) -> "Variable":
     assert self.value.dim() == 0  # only works for scalars
     r = Variable(self.value.expand(sizes))
     # print(f'{r.name} = {self.name}.expand({sizes})')
 
-    def propagate(dL_doutputs: List[Variable]):
+    def propagate(dL_doutputs: list[Variable]):
         (dL_dr,) = dL_doutputs
         return [dL_dr.sum()]
 

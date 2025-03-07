@@ -1036,6 +1036,7 @@ cc_test(
             "test/cpp/lazy/test_ir.cpp",
             "test/cpp/lazy/test_lazy_ops.cpp",
             "test/cpp/lazy/test_lazy_ops_util.cpp",
+            "test/cpp/lazy/test_lazy_graph_executor.cpp",
         ],
     ),
     linkstatic = True,

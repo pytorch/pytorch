@@ -11635,20 +11635,6 @@ def error_inputs_mean(op_info, device, is_ref=False, **kwargs):
         error_regex=err_msg2
     )
 
-    if is_ref:
-        err_msg3 = "Expected out tensor to have dtype torch.float64, but got torch.float32 instead"
-    else:
-        err_msg3 = "Expected out tensor to have dtype double, but got float instead"
-    yield ErrorInput(
-        SampleInput(
-            make_tensor((3, 4, 5), dtype=torch.int64, device=device),
-            [],
-            dtype=torch.float64,
-            out=make_tensor([], dtype=torch.float32, device=device),
-        ),
-        error_regex=err_msg3
-    )
-
 # numpy implementation of torch.flatten
 # unfortunately there's no np.flatten. we figure out the desired shape and call np.reshape
 def reference_flatten(input, start_dim=0, end_dim=-1):
@@ -15259,6 +15245,10 @@ op_db: list[OpInfo] = [
                    toleranceOverride({torch.chalf: tol(atol=6e-2, rtol=5e-2)}),
                    'TestCommon', 'test_complex_half_reference_testing',
                ),
+               DecorateInfo(
+                   toleranceOverride({torch.float16: tol(atol=5e-3, rtol=1e-3)}),
+                   'TestInductorOpInfo', 'test_comprehensive',
+               ),
            ),
            skips=(
                # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
@@ -15304,6 +15294,10 @@ op_db: list[OpInfo] = [
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-6)}),
                    'TestOperators', 'test_vjpvmap',
+               ),
+               DecorateInfo(
+                   toleranceOverride({torch.float16: tol(atol=5e-3, rtol=1e-3)}),
+                   'TestInductorOpInfo', 'test_comprehensive',
                ),
            ),
            skips=(
@@ -18523,7 +18517,7 @@ op_db: list[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            skips=(
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values',
-                            dtypes=[torch.bool], device_type='cuda'),
+                            dtypes=[torch.bool], device_type='cuda', active_if=not TEST_WITH_ROCM),
            )),
     OpInfo('unique',
            dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16, torch.uint16, torch.uint32, torch.uint64),
@@ -19574,12 +19568,7 @@ op_db: list[OpInfo] = [
            check_batched_gradgrad=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs_msort,
-           skips=(
-               # https://github.com/pytorch/pytorch/issues/139972
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values',
-                            dtypes=[torch.bool], device_type='cuda', active_if=TEST_WITH_ROCM),
-           )),
+           sample_inputs_func=sample_inputs_msort),
     OpInfo('movedim',
            aliases=('moveaxis',),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
@@ -21405,6 +21394,7 @@ op_db: list[OpInfo] = [
                 "test_non_standard_bool_values",
                 dtypes=[torch.bool],
                 device_type='cuda',
+                active_if=not TEST_WITH_ROCM
             ),
         ),
     ),
@@ -22030,6 +22020,13 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
                          dtypes=(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64),
                          device_type="cuda"),
+            # TODO torch.ops.aten.copy is not in _refs
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                         dtypes=(torch.float32, torch.float64, torch.float16, torch.complex64, torch.complex128, torch.bfloat16),
+                         device_type="cuda"),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                         dtypes=(torch.float32, torch.float64, torch.float16, torch.complex64, torch.complex128, torch.bfloat16),
+                         device_type="cpu"),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
                          dtypes=(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64),
                          device_type="cuda"),
@@ -22075,6 +22072,23 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
                          dtypes=(torch.int16, torch.int32, torch.int64),
                          device_type="cuda"),
+            # TODO copy doesn't have prim refs
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                dtypes=(
+                    torch.float32, torch.float64, torch.float16, torch.complex64,
+                    torch.complex128, torch.bfloat16, torch.int8, torch.uint8
+                ),
+                device_type="cuda"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                dtypes=(
+                    torch.float32, torch.float64, torch.float16,
+                    torch.complex64, torch.complex128, torch.bfloat16,
+                    torch.int16, torch.int32, torch.int64, torch.int8, torch.uint8
+                ),
+                device_type="cpu"),
         ),
     ),
     PythonRefInfo(
@@ -22999,15 +23013,7 @@ python_ref_db = [
     ),
     PythonRefInfo(
         "_refs.nn.functional.hinge_embedding_loss",
-        torch_opinfo_name="nn.functional.hinge_embedding_loss",
-        skips=(
-            # Reference result was farther (0.29562714856322714) from the precise
-            # computation than the torch result was (0.20437285143677286)!
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                dtypes=(torch.bfloat16,), device_type="cpu"
-            ),
-        ),
+        torch_opinfo_name="nn.functional.hinge_embedding_loss"
     ),
     PythonRefInfo(
         "_refs.nn.functional.nll_loss",
@@ -24696,12 +24702,10 @@ reference_filtered_ops = [op for op in reduction_ops if op.ref is not None]
 reference_masked_ops = [op for op in reference_filtered_ops if op.name.startswith('masked.')]
 sparse_masked_reduction_ops = [op for op in sparse_reduction_ops if op.name.startswith('masked.')]
 
-# TODO: review porting these to make_tensor
 def index_variable(shape, max_indices, device=torch.device('cpu')):
     if not isinstance(shape, tuple):
         shape = (shape,)
-    index = torch.rand(*shape, dtype=torch.double, device=device).mul_(max_indices).floor_().long()
-    return index
+    return torch.testing.make_tensor(*shape, dtype=torch.long, device=device, low=0, high=max_indices)
 
 def gather_variable(shape, index_dim, max_indices, duplicate=False, device=torch.device('cpu')):
     assert len(shape) == 2

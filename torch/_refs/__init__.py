@@ -10,7 +10,7 @@ import warnings
 from collections.abc import Iterable, Sequence
 from enum import Enum
 from functools import partial, reduce, singledispatch, wraps
-from typing import Any, Callable, cast, Dict, List, Optional, overload, Tuple, Union
+from typing import Any, Callable, cast, Optional, overload, Union
 
 import torch
 import torch._prims as prims
@@ -2504,11 +2504,6 @@ def mean(
     orig_dtype = dtype
     if dtype is None:
         dtype = a.dtype
-    # can't use out wrapper because of this argument
-    torch._check(
-        out is None or out.dtype == dtype,
-        lambda: f"Expected out tensor to have dtype {dtype}, but got {out.dtype} instead",
-    )
     result = _reduction(
         a,
         prims.sum,
@@ -3362,6 +3357,7 @@ def stft(
     normalized: bool = False,
     onesided: Optional[bool] = None,
     return_complex: Optional[bool] = None,
+    align_to_window: Optional[bool] = None,
 ) -> Tensor:
     torch._check(
         window is None or window.device == input.device,
@@ -3369,6 +3365,10 @@ def stft(
             f"stft input and window must be on the same device but got self on {input.device}"
             + f" and window on {window.device}"  # type: ignore[union-attr]
         ),
+    )
+    torch._check(
+        not center or align_to_window is None,
+        "stft only supports align_to_window for center = False.",
     )
 
     hop_length_ = hop_length if hop_length is not None else n_fft // 4
@@ -3433,6 +3433,9 @@ def stft(
         window = aten.constant_pad_nd(window, [left, n_fft - win_length_ - left])
 
     input = input.unfold(dimension=-1, size=n_fft, step=hop_length_)
+    if not center and align_to_window:
+        input_pad_amount = (n_fft - win_length_) // 2
+        input = aten.pad(input, [input_pad_amount, input_pad_amount], pad_mode)
     if window is not None:
         input = input * window
 
@@ -5196,7 +5199,8 @@ def linspace(
         return torch.full((0,), 0, dtype=dtype, **factory_kwargs)  # type: ignore[arg-type]
     if steps == 1:
         if isinstance(start, TensorLikeType):
-            return torch.empty((steps,), dtype=dtype, **factory_kwargs).copy_(start)  # type: ignore[arg-type]
+            empty_tensor = torch.empty((steps,), dtype=dtype, **factory_kwargs)  # type: ignore[arg-type]
+            return torch.ops.aten.copy.default(empty_tensor, start)
         else:
             return torch.full((steps,), start, dtype=dtype, **factory_kwargs)  # type: ignore[arg-type]
 
