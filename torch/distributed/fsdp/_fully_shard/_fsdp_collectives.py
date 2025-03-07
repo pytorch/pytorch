@@ -351,7 +351,7 @@ def foreach_reduce(
     torch.Event,
     torch.Event,
     Optional[torch.Tensor],
-    Optional[torch.Event],
+    Optional[dist.Work],
     Optional[torch.Tensor],
 ]:
     """
@@ -394,7 +394,7 @@ def foreach_reduce(
     unsharded_grads.clear()
     reduce_scatter_stream.wait_stream(current_stream)
     all_reduce_input = None
-    all_reduce_event = None
+    all_reduce_work = None
     with device_handle.stream(reduce_scatter_stream):
         reduce_output = reduce_scatter_input.new_empty((reduce_scatter_output_numel,))
         _div_if_needed(reduce_scatter_input, predivide_factor)
@@ -423,7 +423,7 @@ def foreach_reduce(
                     reduce_scatter_event,
                     post_reduce_stream.record_event(),
                     all_reduce_input,
-                    all_reduce_event,
+                    all_reduce_work,
                     partial_reduce_output,
                 )
             if partial_reduce_output is not None:
@@ -431,13 +431,13 @@ def foreach_reduce(
             post_reduce_stream = all_reduce_stream
             all_reduce_stream.wait_stream(reduce_scatter_stream)
             with device_handle.stream(all_reduce_stream):
-                dist.all_reduce(
+                all_reduce_work = dist.all_reduce(
                     reduce_output,
                     group=all_reduce_group,
                     op=ReduceOp.AVG if predivide_factor is None else ReduceOp.SUM,
+                    async_op=True,
                 )
                 all_reduce_input = reduce_output
-                all_reduce_event = all_reduce_stream.record_event()
     # -- END: ops in reduce_scatter stream
 
     if all_reduce_hook is not None:
@@ -508,7 +508,7 @@ def foreach_reduce(
         reduce_scatter_event,
         post_reduce_event,
         all_reduce_input,
-        all_reduce_event,
+        all_reduce_work,
         None,
     )
 

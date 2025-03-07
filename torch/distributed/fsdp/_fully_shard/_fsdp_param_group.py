@@ -105,7 +105,7 @@ class ReduceScatterState(NamedTuple):
 
 class AllReduceState(NamedTuple):
     all_reduce_input: torch.Tensor
-    event: torch.Event  # all-reduce event
+    work: dist.Work  # all-reduce event
 
 
 class FSDPParamGroup:
@@ -437,7 +437,7 @@ class FSDPParamGroup:
                 reduce_scatter_event,
                 self._post_reduce_event,
                 all_reduce_input,
-                all_reduce_event,
+                all_reduce_work,
                 self._partial_reduce_output,
             ) = foreach_reduce(
                 fsdp_params_with_grad,
@@ -458,9 +458,9 @@ class FSDPParamGroup:
                 reduce_scatter_input, reduce_scatter_event
             )
             if all_reduce_input is not None:
-                assert all_reduce_event is not None
+                assert all_reduce_work is not None
                 self._all_reduce_state = AllReduceState(
-                    all_reduce_input, all_reduce_event
+                    all_reduce_input, all_reduce_work
                 )
 
     def finalize_backward(self):
@@ -485,7 +485,7 @@ class FSDPParamGroup:
             self.device_handle.current_stream().wait_event(self._post_reduce_event)
             self._post_reduce_event = None
         if self._all_reduce_state is not None:
-            self.device_handle.current_stream().wait_event(self._all_reduce_state.event)
+            self._all_reduce_state.work.wait()
             self._all_reduce_state = None
 
     def _backward_prefetch(self) -> None:
