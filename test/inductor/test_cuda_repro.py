@@ -1070,7 +1070,6 @@ class CudaReproTests(TestCase):
         """
         See https://github.com/pytorch/pytorch/issues/148764.
         Make sure that when torch.bucketize appears as an epilogue, the codegen is valid.
-        TODO: need to make sure we force fusion - otherwise we just get a very loud warning, but the test passes
         """
 
         def fn(x: torch.Tensor, y: torch.Tensor, buckets: torch.Tensor) -> torch.Tensor:
