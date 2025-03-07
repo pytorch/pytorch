@@ -1,8 +1,6 @@
 @echo off
 setlocal
 
-set "ORIG_PATH=%PATH%"
-
 if "%PACKAGE_TYPE%" == "wheel" goto wheel
 if "%PACKAGE_TYPE%" == "libtorch" goto libtorch
 
@@ -10,21 +8,7 @@ echo "unknown package type"
 exit /b 1
 
 :wheel
-echo "install wheel package"
-
-echo Running pip install...
-pip install -q --pre numpy protobuf
-echo Error level after pip install: %ERRORLEVEL%
-if errorlevel 1 exit /b 1
-
-for /F "delims=" %%i in ('where /R "%PYTORCH_FINAL_PACKAGE_DIR:/=\%" *.whl') do pip install "%%i"
-if errorlevel 1 exit /b 1
-
-goto smoke_test
-
-:smoke_test
-python -c "import torch"
-if ERRORLEVEL 1 exit /b 1
+call %PYTORCH_ROOT%\.ci\pytorch\windows\arm64\bootstrap_tests.bat
 
 echo Running python rnn_smoke.py...
 python %PYTORCH_ROOT%\.ci\pytorch\test_example_code\rnn_smoke_win_arm64.py
@@ -39,10 +23,12 @@ goto end
 :libtorch
 echo "install and test libtorch"
 
-for /F "delims=" %%i in ('where /R "%PYTORCH_FINAL_PACKAGE_DIR:/=\%" *-latest.zip') do tar -xf "%%i" -C tmp
+if not exist tmp mkdir tmp
+
+for /F "delims=" %%i in ('where /R "%PYTORCH_FINAL_PACKAGE_DIR:/=\%" *-latest.zip') do C:\Windows\System32\tar.exe -xf "%%i" -C tmp
 if ERRORLEVEL 1 exit /b 1
 
-pushd tmp\libtorch
+pushd tmp
 
 set VC_VERSION_LOWER=14
 set VC_VERSION_UPPER=36
@@ -61,5 +47,3 @@ if ERRORLEVEL 1 exit /b 1
 if ERRORLEVEL 1 exit /b 1
 
 :end
-set "PATH=%ORIG_PATH%"
-popd
