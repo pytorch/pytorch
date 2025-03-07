@@ -3736,7 +3736,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
 
     if a.is_contiguous():
         if len(shape) >= 1 and a.ndim >= 1:
-            if statically_known_true(sym_eq(shape, a.shape)):
+            if len(shape) == len(a.shape) and statically_known_true(sym_eq(shape, a.shape)):
                 return prims.view_of(a)
 
             strides = [1]
@@ -3778,6 +3778,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
             continue
 
         # Skips dimensions that are already the correct length
+        # can use guard_or_false for sure.
         if guard_size_oblivious(length == a_.shape[idx]):
             idx = idx + 1
             continue

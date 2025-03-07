@@ -10889,16 +10889,8 @@ def forward(self, x, y):
             dynamic_shapes=dynamic_shapes,
             allow_complex_guards_as_runtime_asserts=True,
         )
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"Runtime assertion failed for expression Ne\(s0, 20\)",
-        ):
-            ep.module()(torch.randn(20, 20, 16))
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"Runtime assertion failed for expression Ne\(Mod\(s0, 20\), 0\)",
-        ):
-            ep.module()(torch.randn(400, 20, 16))
+        ep.module()(torch.randn(20, 20, 16))
+        ep.module()(torch.randn(400, 20, 16))
         ep.module()(torch.randn(42, 20, 16))
 
     def test_full_on_scalar_tensor(self):

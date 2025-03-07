@@ -2827,6 +2827,7 @@ class TestGuardsExpressions(TestCase):
         self.assertTrue(shape_env.evaluate_guards_expression(guards, [hint_int(s0)]))
         self.assertFalse(shape_env.evaluate_guards_expression(guards, [hint_int(s1)]))
 
+    @skipIfTorchDynamo("not allowed to trace mark_unbacked")
     def test_unbacked_reshape(self):
         # reshape u0 -> (u1, u2, u2)
         @torch.compile(fullgraph=True)
