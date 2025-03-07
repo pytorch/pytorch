@@ -1028,6 +1028,21 @@ class CPUReproTests(TestCase):
         a = torch.randn(1, 3)
         self.common(fn, (a,))
 
+    def test_tanh_atan2(self):
+        # https://github.com/pytorch/pytorch/issues/148241
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.shrink = nn.Tanhshrink()
+
+            def forward(self, x):
+                x = self.shrink(x)
+                x = torch.atan2(x, x)
+                return x
+
+        x = torch.randn(1, 3, 64, 64)
+        self.common(Model(), (x,))
+
     def test_index_propagation_issue_102065(self):
         def fn(x):
             x = torch.arange(x.numel())
@@ -3587,8 +3602,10 @@ class CPUReproTests(TestCase):
         opt_fn = torch.compile(fn, backend="inductor")
         _, code = run_and_get_cpp_code(opt_fn, x)
         self.assertTrue(same(fn(x), opt_fn(x)))
-        # def and use
-        FileCheck().check_count("cpp_fused", 2, exactly=True).run(code)
+        # declare, def, and use (declare and def are the same in non-cpp_wrapper mode)
+        FileCheck().check_count(
+            "cpp_fused", 3 if config.cpp_wrapper else 2, exactly=True
+        ).run(code)
 
     def test_invalid_index_of_empty_tensor(self):
         def fn(a):
@@ -4132,14 +4149,16 @@ class CPUReproTests(TestCase):
                 expected = mod(x)
                 compiled_m = torch.compile(mod)
                 actual = compiled_m(x)
-                self.assertEqual(expected, actual, atol=1e-4, rtol=1e-5)
-                # 3 generated kernels (first one for var_mean, last two for result)
-                check_metrics_vec_kernel_count(3)
+                self.assertEqual(expected, actual)
+                # 2 generated kernels (one for var_mean, the other for result)
+                check_metrics_vec_kernel_count(2)
                 # check that there is no outer loop fusion.
                 self.assertEqual(
                     len(metrics.cpp_outer_loop_fused_inner_counts),
                     0,
                 )
+                # check for parallel reduction.
+                self.assertEqual(metrics.parallel_reduction_count, 1)
 
     def test_int_div_vec(self):
         def fn(x, y, mode):
