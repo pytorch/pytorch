@@ -15,6 +15,8 @@ if [[ "$BUILD_ENVIRONMENT" == *-mobile-*build* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile.sh" "$@"
 fi
 
+pip install ninja
+
 echo "Python version:"
 python --version
 
@@ -26,6 +28,9 @@ cmake --version
 
 echo "Environment variables:"
 env
+
+mkdir -p /var/lib/jenkins/.config/sccache
+echo "" > /var/lib/jenkins/.config/sccache/config
 
 if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   # Use jemalloc during compilation to mitigate https://github.com/pytorch/pytorch/issues/116289
@@ -194,9 +199,10 @@ fi
 # memory to build and will OOM
 if [[ "$BUILD_ENVIRONMENT" == *cuda* ]] && [[ 1 -eq $(echo "${TORCH_CUDA_ARCH_LIST} >= 8.0" | bc) ]] && [ -z "$MAX_JOBS_OVERRIDE" ]; then
   echo "WARNING: FlashAttention files require large amounts of memory to build and will OOM"
-  echo "Setting MAX_JOBS=(nproc-2)/3 to reduce memory usage"
-  export MAX_JOBS="$(( $(nproc --ignore=2) / 3 ))"
+  echo "Setting MAX_JOBS=nproc to reduce memory usage"
+  export MAX_JOBS=$(nproc)
 fi
+export MAX_JOBS=$(nproc)
 
 if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
   export CC=clang
