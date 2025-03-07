@@ -60,7 +60,12 @@ from torch._inductor.codecache import (
     FxGraphCache,
     output_code_log,
 )
-from torch._inductor.cudagraph_utils import BoxedDeviceIndex, PlaceholderInfo
+from torch._inductor.cudagraph_utils import (
+    BoxedDeviceIndex,
+    format_default_skip_message,
+    log_cudagraph_skip_and_bump_counter,
+    PlaceholderInfo,
+)
 from torch._inductor.debug import save_args_for_compile_fx_inner
 from torch._inductor.output_code import (
     CompiledAOTI,
@@ -835,6 +840,14 @@ def _compile_fx_inner(
         compiled_graph.post_compile(example_inputs, cudagraphs, constants)
 
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
+
+    # This message is for printing overview information of inductor mm counts, shapes,etc after lowering
+    log.info(
+        "Overview info of inductor aten mms: %s",
+        ", ".join(
+            f"({key}: {value})" for key, value in counters["aten_mm_info"].items()
+        ),
+    )
 
     # Clear Compiled Triton Kernels per inductor compile, as the future objects
     # may not be valid for use after they are run/autotuned
@@ -1820,6 +1833,11 @@ def fw_compiler_freezing(
 
 
 def get_cpp_wrapper_config() -> dict[str, object]:
+    if config.triton.cudagraphs:
+        log_cudagraph_skip_and_bump_counter(
+            format_default_skip_message("cpp wrapper enabled")
+        )
+
     return {
         # Set autotune_at_compile_time to True as default if the option is not explicitly set
         "triton.autotune_at_compile_time": (
