@@ -230,6 +230,15 @@ inline const ConstantHandle& unwrap_raii_handle_if_needed(
 inline AtenTensorHandle wrap_with_raii_handle_if_needed(
     const ConstantHandle& handle) = delete;
 
+// DANGEROUS.  Do not call unless you explicitly intend to get a reference to a
+// temporary value, which will expire at the end of the current expression.
+// This should only be called in cases where the C-shim API expects an optional
+// input argument (passed by pointer), and a temporary needs to be passed to it.
+template <class T>
+T& temporary_reference(T&& t) {
+  return t;
+}
+
 #define CACHE_TORCH_DTYPE(typename) \
   static auto cached_torch_dtype_##typename = aoti_torch_dtype_##typename()
 

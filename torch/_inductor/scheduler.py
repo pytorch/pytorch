@@ -805,8 +805,8 @@ class BaseSchedulerNode:
                     from .ir import ir_node_to_tensor
 
                     fake_inputs = [
-                        ir_node_to_tensor(cast(IRNode, input), guard_shape=False)
-                        for input in self.node.inputs
+                        ir_node_to_tensor(input, guard_shape=False)
+                        for input in self.node.inputs_as_nodes
                     ]
                     cls = self.node.__class__
                     cls.process_kernel(op, *fake_inputs, **self.node.kwargs)
@@ -994,12 +994,10 @@ class SchedulerNode(BaseSchedulerNode):
         recompute_sizes_body_func: Optional[Callable[..., Any]] = None,
     ) -> None:
         assert isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer))
-        self._sizes, body = self.node.simplify_and_reorder(
+        self._sizes, self._body = self.node.simplify_and_reorder(  # type: ignore[assignment]
             extra_indexing_constraints=extra_indexing_constraints,
             recompute_sizes_body_func=recompute_sizes_body_func,
         )
-        assert body is not None
-        self._body = body
 
         device = self.node.get_device_or_error()
         group_fn = self.scheduler.get_backend(device).group_fn
