@@ -57,6 +57,7 @@ from torch.utils._functools import cache_method
 from . import (
     config,
     exc,
+    external_utils,
     graph_break_hints,
     logging as torchdynamo_logging,
     trace_rules,
@@ -3567,6 +3568,11 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             )
 
         result = trace_rules.check_verbose(func, is_inlined_call=True)
+        if result.skipped and external_utils._ignore_skip_function_variable:
+            return trace_rules.SkipResult(
+                False,
+                "Attempted to skip but skipped functions are being force inlined.",
+            )
         if result.skipped:
             from torch._dynamo.variables.misc import produce_trampoline_autograd_apply
 
@@ -3585,11 +3591,12 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             ]
             if "_dynamo" not in func.get_filename():
                 hints += [
-                    f"Remove the function `{fn_qualname}` or the file `{func.get_filename()}` "
-                    "from torch/_dynamo/trace_rules.py. More graph breaks may occur as a result of "
-                    "attempting to trace into the function.",
+                    f"Apply `@torch.compiler.ignore_intentional_skips` to the function `{fn_qualname}` "
+                    "to force tracing into the function. "
+                    "More graph breaks may occur as a result of attempting to trace into the function.",
+                    f"Remove the file`{func.get_filename()}` from torch/_dynamo/trace_rules.py. "
+                    "More graph breaks may occur as a result of attempting to trace into the function.",
                     "Please file an issue to PyTorch.",
-                    # TODO suggest mark_force_inline when implemented
                 ]
             unimplemented_v2(
                 gb_type="Attempted to inline function marked as skipped",

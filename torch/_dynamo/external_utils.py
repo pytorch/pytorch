@@ -187,3 +187,23 @@ def call_module_hooks_from_backward_state(
         if new_result is not None:
             result = new_result
     return result
+
+
+# used by ignore_intentional_skips decorator to ignore trace rules recursively
+_ignore_skip_function_variable = False
+
+
+def _set_ignore_skip_function_variable(value: bool) -> None:
+    global _ignore_skip_function_variable
+    _ignore_skip_function_variable = value
+
+
+def ignore_trace_rules_recursively_wrapper(fn: Callable[_P, _R]) -> Callable[_P, _R]:
+    def wrap(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+        _set_ignore_skip_function_variable(True)
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            _set_ignore_skip_function_variable(False)
+
+    return wrap
