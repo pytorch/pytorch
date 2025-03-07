@@ -1511,6 +1511,14 @@ class VariableBuilder:
     def wrap_module(self, value: torch.nn.Module):
         from ..eval_frame import OptimizedModule
 
+        try:
+            params = list(value.parameters(recurse=False))
+        except AttributeError:
+            params = []
+        for p in params:
+            if not isinstance(p, torch.nn.parameter.UninitializedParameter):
+                get_metrics_context().increment("num_params", p.numel())
+
         if len(value.__dict__) == 0:
             unimplemented_v2(
                 gb_type="Uninitialized nn.Module",
