@@ -111,12 +111,14 @@ class TestContentStore(TestCase):
                     self.assertIsInstance(x4, FakeTensor)
                     same_meta_as_x(x4)
 
-                # Check fp64 works
-                x5 = torch.ops.debugprims.load_tensor.default(
-                    "x", (4,), (1,), dtype=torch.float64, device=device
-                )
-                self.assertEqual(x5.float(), x)
-                self.assertEqual(x5.dtype, torch.float64)
+                # Check fp64 works on non-MPS platforms, since MPS doesn't currently
+                # support fp64.
+                if not device.startswith("mps"):
+                    x5 = torch.ops.debugprims.load_tensor.default(
+                        "x", (4,), (1,), dtype=torch.float64, device=device
+                    )
+                    self.assertEqual(x5.float(), x)
+                    self.assertEqual(x5.dtype, torch.float64)
 
         x6 = torch.ops.debugprims.load_tensor.default(
             "x", (4,), (1,), dtype=torch.float32, device=device
@@ -124,7 +126,9 @@ class TestContentStore(TestCase):
         same_meta_as_x(x6)
 
 
-instantiate_device_type_tests(TestContentStore, globals())
+instantiate_device_type_tests(
+    TestContentStore, globals(), allow_mps=True, allow_xpu=True
+)
 
 
 if __name__ == "__main__":
