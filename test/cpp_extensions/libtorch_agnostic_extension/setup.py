@@ -2,7 +2,7 @@ import distutils.command.clean
 import shutil
 from pathlib import Path
 
-from setuptools import setup
+from setuptools import find_packages, setup
 
 from torch.utils.cpp_extension import BuildExtension, CppExtension
 
@@ -53,6 +53,11 @@ setup(
     version="0.0",
     author="PyTorch Core Team",
     description="Example of libtorch agnostic extension",
+    packages=find_packages(exclude=("test",)),
+    package_data={"libtorch_agnostic": ["*.dll", "*.dylib", "*.so"]},
+    install_requires=[
+        "torch",
+    ],
     ext_modules=get_extension(),
     cmdclass={
         "build_ext": BuildExtension.with_options(no_python_abi_suffix=True),

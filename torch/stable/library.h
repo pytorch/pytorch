@@ -5,9 +5,6 @@
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 
 
-// helpers for converting between StableIValue and actual IValues
-using StableIValue = uint64_t;
-
 template <typename T>
 StableIValue from(T val) {
   static_assert(

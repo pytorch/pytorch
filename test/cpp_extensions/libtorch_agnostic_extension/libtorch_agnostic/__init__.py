@@ -15,3 +15,8 @@ with torch._ops.dl_open_guard():
     loaded_lib = ctypes.CDLL(so_files[0])
 
 from . import ops
+
+__all__ = [
+    "loaded_lib",
+    "ops",
+]

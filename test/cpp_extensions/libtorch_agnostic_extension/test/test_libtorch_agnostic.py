@@ -52,6 +52,7 @@ class TestLibtorchAgnostic(TestCase):
             curr_mem = torch.cuda.memory_allocated(device)
             self.assertEqual(curr_mem, init_mem)
 
+
     @onlyCUDA
     def test_z_delete_torch_lib(self, device):
         # Why the z + CUDA? THIS TEST MUST BE RUN LAST

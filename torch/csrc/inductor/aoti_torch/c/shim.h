@@ -623,9 +623,14 @@ AOTI_TORCH_EXPORT void aoti_torch_save_tensor_handle(
     const char* launch_prefix,
     const char* kernel_name);
 
+// helpers for converting between StableIValue and actual IValues
+using StableIValue = uint64_t;
+
 class TorchLibraryOpaque;
 using TorchLibraryHandle = TorchLibraryOpaque*;
 
+// stable corollary to torch::Library constructor with Kind::IMPL
+// will create a new torch::Library object on the heap
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_library_init_impl(
     const char* ns,
     const char* k,
@@ -633,27 +638,37 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_library_init_impl(
     uint32_t line,
     TorchLibraryHandle* ret_new_torch_lib);
 
+// stable corollary to torch::Library constructor with Kind::DEF
+// will create a new torch::Library object on the heap
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_library_init_def(
     const char* ns,
     const char* file,
     uint32_t line,
     TorchLibraryHandle* ret_new_torch_lib);
 
+// stable corollary to torch::Library constructor with Kind::FRAGMENT
+// will create a new torch::Library object on the heap
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_library_init_fragment(
     const char* ns,
     const char* file,
     uint32_t line,
     TorchLibraryHandle* ret_new_torch_lib);
 
+// stable corollary to torch::Library method m.impl()
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_library_impl(
     TorchLibraryHandle self,
     const char* name,
-    void (*fn)(uint64_t*, int64_t, int64_t));
+    void (*fn)(StableIValue*, int64_t, int64_t));
 
+// stable corollary to torch::Library method m.def()
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_library_def(TorchLibraryHandle self, const char* name);
 
-// Free the torch::Library object
+// the above stable constructors for torch::Library add Library objects
+// to the heap. if you are calling those functions directly, please use
+// this function to free the Library's memory. The more user friendly
+// alternative is to use StableLibrary, which will free its handle upon
+// destruction
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_delete_library_object(TorchLibraryHandle tlh);
 
