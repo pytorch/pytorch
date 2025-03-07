@@ -381,18 +381,22 @@ class TestMAIATensor(common.TestCase):
         self.assertEqual(maia_extension.get_test_int(), 3)
         self.assertEqual(grad[0].shape, input.shape)
 
-    def test_matmul_autocast(self):
+    def test_matmul_autocast_default(self):
         # Use default lower precision dtype.
+        x = torch.empty((2, 4), dtype=torch.float, device="maia")
+        w = torch.empty((4, 2), dtype=torch.float, device="maia")
         with torch.autocast(device_type="maia"):
-            x = torch.empty((2, 4), dtype=torch.float, device="maia")
-            w = torch.empty((4, 2), dtype=torch.float, device="maia")
+            self.assertTrue(torch.is_autocast_enabled("maia"))
             y = torch.ops.aten.matmul(x, w)
             self.assertEqual(y.dtype, torch.bfloat16)
             self.assertEqual(y.shape, (2, 2))
+
+    def test_matmul_autocast_float16(self):
         # Ensure we can change low precision dtype.
+        x = torch.empty((2, 4), dtype=torch.float, device="maia")
+        w = torch.empty((4, 2), dtype=torch.float, device="maia")
         with torch.autocast(device_type="maia", dtype=torch.float16):
-            x = torch.empty((2, 4), dtype=torch.float, device="maia")
-            w = torch.empty((4, 2), dtype=torch.float, device="maia")
+            self.assertTrue(torch.is_autocast_enabled("maia"))
             y = torch.ops.aten.matmul(x, w)
             self.assertEqual(y.dtype, torch.float16)
             self.assertEqual(y.shape, (2, 2))
