@@ -64,7 +64,7 @@ thread_local std::array<at::ScalarType, at::COMPILE_TIME_MAX_DEVICE_TYPES>
         at::ScalarType::Undefined, // IDEEP.
         at::kHalf, // AMD HIP
         at::ScalarType::Undefined, // FPGA
-        at::ScalarType::Undefined, // ONNX Runtime / Microsoft
+        at::kBFloat16, // ONNX Runtime / Microsoft
         at::kBFloat16, // XLA / TPU
         at::ScalarType::Undefined, // Vulkan
         at::ScalarType::Undefined, // Metal
