@@ -3733,7 +3733,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
             return prims.view_of(a)
         else:
             return _a
-    x = None
+
     if a.is_contiguous():
         if len(shape) >= 1 and a.ndim >= 1:
             if statically_known_true(sym_eq(shape, a.shape)):
