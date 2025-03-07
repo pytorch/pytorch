@@ -4974,7 +4974,7 @@ def _fractional_pooling_offsets(samples, in_sz, out_sz, kernel_sz, dim, ndims):
     out_sz = out_sz[dim]
     in_sz = in_sz[dim]
     kernel_sz = kernel_sz[dim]
-    alpha = IntTrueDiv(in_sz - kernel_sz, out_sz - 1)
+    alpha = IntTrueDiv(in_sz - kernel_sz, out_sz - 1) if out_sz != 1 else 0
     samples_loader = samples.make_loader()
 
     def load(prefix, i):
