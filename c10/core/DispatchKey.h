@@ -679,7 +679,7 @@ constexpr DispatchKey toFunctionalityKey(DispatchKey k) {
   }
 }
 
-BackendComponent toBackendComponent(DeviceType device_type);
+C10_API BackendComponent toBackendComponent(DeviceType device_type);
 
 // Given (DispatchKey::Dense, BackendComponent::CUDABit), returns
 // DispatchKey::CUDA.

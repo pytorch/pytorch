@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/core/Device.h>
 #include <c10/macros/Export.h>
 #include <c10/util/UniqueVoidPtr.h>
 
@@ -21,7 +22,9 @@ class C10_API COWDeleterContext {
   // Note that the deleter will only be called in our destructor if
   // the last reference to this goes away without getting
   // materialized.
-  explicit COWDeleterContext(std::unique_ptr<void, DeleterFnPtr> data);
+  explicit COWDeleterContext(
+      std::unique_ptr<void, DeleterFnPtr> data,
+      c10::Device original_device);
 
   // Increments the current refcount.
   void increment_refcount();
@@ -45,6 +48,10 @@ class C10_API COWDeleterContext {
   // do with it.
   std::variant<NotLastReference, LastReference> decrement_refcount();
 
+  c10::Device original_device();
+
+  std::int64_t refcount();
+
  private:
   // The destructor is hidden, this should only ever be used within
   // UniqueVoidPtr using cow::delete_context as the deleter.
@@ -53,6 +60,7 @@ class C10_API COWDeleterContext {
   std::shared_mutex mutex_;
   std::unique_ptr<void, DeleterFnPtr> data_;
   std::atomic<std::int64_t> refcount_ = 1;
+  c10::Device original_device_;
 };
 
 // `cow_deleter` is used as the `ctx_deleter` for DataPtr to implement a COW

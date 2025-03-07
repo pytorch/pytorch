@@ -9,8 +9,9 @@ void cow::cow_deleter(void* ctx) {
 }
 
 cow::COWDeleterContext::COWDeleterContext(
-    std::unique_ptr<void, DeleterFnPtr> data)
-    : data_(std::move(data)) {
+    std::unique_ptr<void, DeleterFnPtr> data,
+    c10::Device original_device)
+    : data_(std::move(data)), original_device_(original_device) {
   // We never wrap a COWDeleterContext.
   TORCH_INTERNAL_ASSERT(data_.get_deleter() != cow::cow_deleter);
 }
@@ -37,6 +38,14 @@ auto cow::COWDeleterContext::decrement_refcount()
 
 cow::COWDeleterContext::~COWDeleterContext() {
   TORCH_INTERNAL_ASSERT(refcount_ == 0);
+}
+
+c10::Device cow::COWDeleterContext::original_device() {
+  return original_device_;
+}
+
+std::int64_t cow::COWDeleterContext::refcount() {
+  return refcount_.load();
 }
 
 } // namespace c10::impl
