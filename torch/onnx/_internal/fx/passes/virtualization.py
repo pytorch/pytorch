@@ -48,9 +48,9 @@ class ReplaceGetAttrWithPlaceholder(_pass.Transform):
     @property
     def replaced_attrs(self) -> tuple[torch.Tensor, ...]:
         """The list of replaced weight tensors."""
-        assert (
-            self._replaced_attrs is not None
-        ), "Must run ReplaceGetAttrWithPlaceholder first"
+        assert self._replaced_attrs is not None, (
+            "Must run ReplaceGetAttrWithPlaceholder first"
+        )
         return self._replaced_attrs
 
     def _run(self, *args, **kwargs) -> torch.fx.GraphModule:

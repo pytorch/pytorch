@@ -69,6 +69,10 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     return false;
   }
 
+  virtual bool supportsCoalescing() const {
+    return false;
+  }
+
   virtual void startCoalescing() {
     TORCH_CHECK(
         false,
@@ -427,7 +431,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   }
 
   // Returns true if backend supports tensor allocation
-  virtual bool supportsTensorAlloc() {
+  virtual bool supportsTensorAlloc(c10::DeviceIndex deviceIdx) {
     // Change to true in concrete backend if supported
     return false;
   }
