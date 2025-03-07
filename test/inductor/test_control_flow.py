@@ -976,26 +976,6 @@ class WhileLoopModels:
                 (c, x),
             )
 
-    class ConvLoop1(torch.nn.Module):
-        def __init__(self, device):
-            super().__init__()
-            self.conv2d = torch.nn.Conv2d(
-                4, 4, (3, 3), stride=(1, 1), padding=(1, 1), device=device
-            )
-
-        def forward(self, c, x):
-            def cond_fn(loop_idx, x):
-                return loop_idx < 1
-
-            def body_fn(loop_idx, x):
-                return loop_idx + 1, self.conv2d(x) + 1
-
-            return torch._higher_order_ops.while_loop(
-                cond_fn,
-                body_fn,
-                (c, x),
-            )
-
 
 class WhileLoopTests(TestCase):
     def _run_test(
@@ -1470,7 +1450,9 @@ class ScanModels:
             super().__init__()
             self.reverse = reverse
             self.dim = dim
-            self.conv2d = torch.nn.Conv2d(4, 4, (3, 3), stride=(1, 1), padding=(1, 1))
+            self.conv2d = torch.nn.Conv2d(
+                4, 4, (3, 3), stride=(1, 1), padding=(1, 1), dtype=torch.float64
+            )
 
         # init = torch.randn(2, 4, 4, 4)
         # xs = torch.randn(scan_dim, 2, 4, 4, 4)
@@ -1773,8 +1755,8 @@ class ScanTests(TestCase):
     @parametrize("scan_length", [1, 5])
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_scan_conv(self, device, dynamic, reverse, dim, scan_length):
-        init = torch.randn(2, 4, 4, 4)
-        xs = torch.randn(scan_length, 2, 4, 4, 4)
+        init = torch.randn(2, 4, 4, 4, dtype=torch.float64)
+        xs = torch.randn(scan_length, 2, 4, 4, 4, dtype=torch.float64)
         xs = xs.movedim(0, dim)
         self._run_test(
             model=ScanModels.ScanConv(reverse=reverse, dim=dim),
