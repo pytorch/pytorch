@@ -145,10 +145,11 @@ struct CUDACachingHostAllocatorImpl
       std::optional<std::vector<EventPool::Event>>& events,
       CUDAStream stream) override {
     auto event = create_event_internal(stream.device_index());
+    event->record(stream);
+    events->push_back(std::move(event));
   }
 
   bool query_event(EventPool::Event& event) override {
-    at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
     cudaError_t err = cudaEventQuery(*event);
     if (err == cudaErrorNotReady) {
       (void)cudaGetLastError(); // clear CUDA error
