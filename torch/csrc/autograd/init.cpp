@@ -985,30 +985,21 @@ static PyObject* any_requires_grad(
   END_HANDLE_TH_ERRORS
 }
 
-// Returns true if any of outputs tensors is alias to any input tensor or
-// another output tensor. Expected python args: inputs_args, inputs_kwargs,
-// outputs
-static PyObject* check_aliasing_constraint(PyObject* _unused, PyObject* args) {
+// Returns true if any leaf tensor is aliased
+static PyObject* any_is_aliased_tensor(
+    PyObject* _unused,
+    PyObject* args,
+    PyObject* kwargs) {
   HANDLE_TH_ERRORS
-  PyObject* inps = PyTuple_GET_ITEM(args, 0);
-  PyObject* inps_kwargs = PyTuple_GET_ITEM(args, 1);
-  PyObject* outs = PyTuple_GET_ITEM(args, 2);
-  std::unordered_set<void*> s;
-  visit_tensors(inps, inps_kwargs, [&s](at::Tensor& t) {
-    s.insert(t.data_ptr().get_context());
-    return false;
-  });
-  bool ret = false;
-  visit_tensors(outs, nullptr, [&s, &ret](at::Tensor& t) {
-    void* cp = t.data_ptr().get_context();
-    if (s.find(cp) != s.end()) {
-      ret = true;
+  bool has_aliased_tensor = false;
+  visit_tensors(args, kwargs, [&has_aliased_tensor](at::Tensor& t) {
+    if (t.storage().use_count() > 1) {
+      has_aliased_tensor = true;
       return true;
     }
-    s.insert(cp);
     return false;
   });
-  if (ret) {
+  if (has_aliased_tensor) {
     Py_RETURN_TRUE;
   }
   Py_RETURN_FALSE;
@@ -1390,9 +1381,9 @@ static PyMethodDef methods[] = {
      castPyCFunctionWithKeywords(any_requires_grad),
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
-    {"_check_aliasing_constraint",
-     check_aliasing_constraint,
-     METH_VARARGS,
+    {"_any_is_aliased_tensor",
+     castPyCFunctionWithKeywords(any_is_aliased_tensor),
+     METH_VARARGS | METH_KEYWORDS,
      nullptr},
     {"_is_fwd_grad_enabled", is_fwd_grad_enabled, METH_NOARGS, nullptr},
     {"is_inference_mode_enabled",

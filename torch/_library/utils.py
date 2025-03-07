@@ -375,12 +375,12 @@ def check_aliasing_constraint(name, prev, result, get_module=lambda: "???"):
 
 def _c_check_aliasing_constraint(name, args, kwargs, result, get_module=lambda: "???"):
     """
-    custom operators' outputs must not alias any inputs or other outputs.
+    custom operators' outputs must not have any aliases
     """
     tuple_result = result
     if not isinstance(result, tuple):
         tuple_result = (result,)
-    if _C._check_aliasing_constraint(args, kwargs, tuple_result):
+    if _C._any_is_aliased_tensor(tuple_result):
         raise RuntimeError(
             f"{name} (with implementation in {get_module()}): "
             f"The output of this custom operator (1) must not "

@@ -3928,15 +3928,18 @@ Please use `add.register_fake` to add an fake impl.""",
         self.assertTrue(test_fn(torch.zeros(1), a=torch.ones(1, requires_grad=True)))
         self.assertFalse(test_fn(torch.zeros(1), a=torch.ones(1)))
 
-    def test_check_aliasing_constraint(self):
-        test_fn = torch._C._check_aliasing_constraint
+    def test_any_is_aliased_tensor(self):
+        test_fn = torch._C._any_is_aliased_tensor
 
         x = torch.randn(2, 2)
         y = torch.randn(2, 2)
-        self.assertTrue(test_fn((x,), {}, (y, x.t())))
-        self.assertFalse(test_fn((x,), {}, (2*x,)))
-        self.assertTrue(test_fn((x,), {"y": y}, (2*x,y.t())))
-        self.assertTrue(test_fn((x,), {}, (y, x[1:])))
+        self.assertTrue(test_fn(y, x.t()))
+        x = torch.randn(2, 2)
+        self.assertFalse(test_fn(2 * x))
+        self.assertTrue(test_fn(x, a=x.view(-1)))
+        self.assertTrue(test_fn(y, x[1:]))
+        x = torch.randn(2, 2)
+        self.assertFalse(test_fn(a=x))
 
 
 class MiniOpTestOther(CustomOpTestCaseBase):
