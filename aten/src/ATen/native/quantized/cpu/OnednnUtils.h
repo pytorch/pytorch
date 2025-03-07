@@ -444,7 +444,7 @@ inline bool should_use_onednn_quant(
   bool opad_all_zero =
       std::all_of(output_padding.begin(), output_padding.end(), [](int i) { return i==0; });
   return vnni_available && (groups <= 100) && w_sym_quant && opad_all_zero;
-#endif  
+#endif
 }
 
 } // onednn_utils
