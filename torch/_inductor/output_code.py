@@ -327,23 +327,6 @@ def maybe_realign_inputs(
             compiled_graph.current_callable = new_callable
 
 
-def get_cudagraph_info(
-    gm: torch.fx.GraphModule, cudagraph_fail_reasons: Optional[list[str]] = None
-) -> CudagraphCachedInfo:
-    cudagraph_fail_reasons = cudagraph_fail_reasons or []
-
-    output = output_node(gm)
-    # output args are tuple of first argument
-    assert len(output.args) == 1
-    stack_traces = [
-        (arg.stack_trace if isinstance(arg, torch.fx.node.Node) else None)
-        for arg in output.args[0]  # type: ignore[union-attr]
-    ]
-    placeholders = tuple(get_placeholder_info(gm.graph))
-
-    return CudagraphCachedInfo(placeholders, stack_traces, cudagraph_fail_reasons)
-
-
 class CompiledFxGraphConstants:
     """Wrapper class that unwraps constants from a compiled fx graph. This
     version of the class only supports directly grabbing the saved constants off of
@@ -489,8 +472,7 @@ class CompiledFxGraph(OutputCode):
         self.boxed_forward_device_index = None
 
         cudagraph_info = None
-
-        def _init_and_get_cudagraph() -> Optional[CudagraphCachedInfo]:
+        if cudagraphs:
             # check cudagraph disabling reasons from inductor lowering
             if self.disabled_cudagraphs_reason:
                 if "cuda" in self.device_types:
@@ -500,7 +482,6 @@ class CompiledFxGraph(OutputCode):
                 else:
                     counters["inductor"]["cudagraph_skips"] += 1
                 BoxedBool.disable(cudagraphs)
-                return None
             else:
                 complex_memory_overlap_inputs = any(
                     complex_memory_overlap(t)
@@ -541,11 +522,18 @@ class CompiledFxGraph(OutputCode):
                         "non-Tensor inputs",
                     ),
                 ]
+                output = output_node(gm)
+                # output args are tuple of first argument
+                assert len(output.args) == 1
+                stack_traces = [
+                    (arg.stack_trace if isinstance(arg, torch.fx.node.Node) else None)
+                    for arg in output.args[0]  # type: ignore[union-attr]
+                ]
                 cudagraph_fail_reasons = [s for b, s in cudagraph_tests if not b]
-                return get_cudagraph_info(gm, cudagraph_fail_reasons)
-
-        if cudagraphs:
-            cudagraph_info = _init_and_get_cudagraph()
+                placeholders = tuple(get_placeholder_info(gm.graph))
+                cudagraph_info = CudagraphCachedInfo(
+                    placeholders, stack_traces, cudagraph_fail_reasons
+                )
 
         self.cudagraph_info = cudagraph_info
         self.inputs_to_check = inputs_to_check
@@ -582,11 +570,10 @@ class CompiledFxGraph(OutputCode):
         set_tracing_context_output_strides(example_inputs, self)
 
         if cudagraphs:
+            # It's possible that cudagraphs is enabled, but was disabled
+            # during a previous compilation we're loading from the cache.
+            # If so, we need to disable it on this new process too.
             if self.disabled_cudagraphs_reason:
-                # It's possible that cudagraphs is enabled, but was disabled
-                # during a previous compilation we're loading from the cache.
-                # If so, we need to disable it on this new process too.
-
                 if "cuda" in self.device_types:
                     log_cudagraph_skip_and_bump_counter(
                         f"skipping cudagraphs due to {self.disabled_cudagraphs_reason}"
