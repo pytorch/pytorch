@@ -27,7 +27,6 @@ import enum
 import functools
 import importlib
 import inspect
-import itertools
 import logging
 import math
 import sys
@@ -1628,15 +1627,11 @@ class GuardBuilder(GuardBuilderBase):
                 DeviceMesh,
             )
 
-        if istype(val, dict):
-            assert all(
-                istype(x, ok_types) for x in itertools.chain(val.keys(), val.values())
-            )
-        else:
-            assert istype(
-                val,
-                ok_types,
-            ), f"Unexpected type {type(val)}, not in {ok_types}"
+        import torch.utils._pytree as pytree
+
+        assert istype(val, ok_types) or pytree.is_constant_class(type(val)), (
+            f"Unexpected type {type(val)}"
+        )
 
         # Special case for nan because float("nan") == float("nan") evaluates to False
         if istype(val, float) and math.isnan(val):
@@ -1668,7 +1663,7 @@ class GuardBuilder(GuardBuilderBase):
         code = [f"{ref} == {val!r}"]
         if istype(val, ok_mutable_types):
             # C++ guards perform a pointer equality check to speedup guards, but the assumption is that the object
-            # is mutable. For a few corner cases like sets and lists, we make a deepcopy to purposefully fail the
+            # is immutable. For a few corner cases like sets and lists, we make a deepcopy to purposefully fail the
             # pointer equality check.
             val = deepcopy(val)
         self.get_guard_manager(guard).add_equals_match_guard(
@@ -1691,7 +1686,15 @@ class GuardBuilder(GuardBuilderBase):
             assert istype(val.training, bool)
             self._guard_on_attribute(guard, "training", GuardBuilder.CONSTANT_MATCH)
         else:
-            exc.unimplemented(f"Guard setup for uninitialized class {type(val)}")
+            exc.unimplemented_v2(
+                gb_type="Attempted to guard on uninitialized nn.Module",
+                context="",
+                explanation="Attempted to setup an NN_MODULE guard on uninitialized "
+                f"nn.Module subclass `{type(val)}`.",
+                hints=[
+                    "Ensure the `nn.Module` subclass instance has called `super().__init__()`.",
+                ],
+            )
 
     def FUNCTION_MATCH(self, guard: Guard):
         """things like torch.add and user defined functions"""
@@ -2234,9 +2237,9 @@ class GuardBuilder(GuardBuilderBase):
         func_name = caller.f_code.co_name
         del caller
         # We use func_name for export, so might as well get a nice defensive check out of it
-        assert (
-            func_name in self.__class__.__dict__
-        ), f"_produce_guard_code must be called from inside GuardedCode. Called from {func_name}"
+        assert func_name in self.__class__.__dict__, (
+            f"_produce_guard_code must be called from inside GuardedCode. Called from {func_name}"
+        )
 
         # Not all guards have names, some can be installed globally (see asserts on HAS_GRAD)
         if provided_guarded_object is None:

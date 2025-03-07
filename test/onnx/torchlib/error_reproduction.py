@@ -9,7 +9,7 @@ import platform
 import sys
 import time
 import traceback
-from typing import Any, Mapping
+from typing import Any, TYPE_CHECKING
 
 import numpy as np
 
@@ -18,6 +18,10 @@ import onnxruntime as ort
 import onnxscript
 
 import torch
+
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 
 _REPRODUCTION_TEMPLATE = '''\
