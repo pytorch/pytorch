@@ -1894,7 +1894,7 @@ dist.init_process_group(rank=0, world_size=1, store=dist.HashStore())
                 msg="Example code timed out! See the code sample in the test for details."
             )
         except subprocess.CalledProcessError as e:
-            self.fail(f"Subprocess failed with {e.output.decode("utf-8")}")
+            self.fail(f"""Subprocess failed with {e.output.decode("utf-8")}""")
 
     def _call_collective_with_varying_tensors(self, backend, collective, *args):
         # call collective with varying tensors to ensure that the tensors are
