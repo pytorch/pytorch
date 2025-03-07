@@ -497,6 +497,8 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(
   }
   futureWorkResult_ =
       c10::make_intrusive<at::ivalue::Future>(c10::AnyEnumType::get());
+  // other functions expect an initialized ptr
+  stashed_for_allocator_safety_ = std::make_shared<std::vector<at::Tensor>>();
 }
 
 ProcessGroupNCCL::WorkNCCL::WorkNCCL(const WorkNCCL& w)
@@ -2736,6 +2738,20 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
     rank = p2pRank;
   }
 
+  RECORD_PARAM_COMMS(
+      std::make_tuple(0, false), // seq
+      std::make_tuple(pg_uid_, pg_desc_), // PG name tuple
+      rank, // rank
+      "init", // collective name
+      0, // inNelems
+      0, // outNelems
+      at::kByte, // dType
+      std::vector<int64_t>(), // inSplitSizes
+      std::vector<int64_t>(), // outSplitSizes
+      globalRankStart, // globalRankStart
+      globalRankStride, // globalRankStride
+      size_); // worldSize
+
 #ifdef NCCL_HAS_COMM_NONBLOCKING
   bool useNb = useNonblocking();
   options_->config.blocking = useNb ? 0 : 1;
@@ -2857,20 +2873,6 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
 
   FlightRecorder::get()->record_pg_ranks(
       std::make_tuple(pg_uid_, pg_desc_), groupRanks());
-
-  RECORD_PARAM_COMMS(
-      std::make_tuple(0, false), // seq
-      std::make_tuple(pg_uid_, pg_desc_), // PG name tuple
-      rank, // rank
-      "init", // collective name
-      0, // inNelems
-      0, // outNelems
-      at::kByte, // dType
-      std::vector<int64_t>(), // inSplitSizes
-      std::vector<int64_t>(), // outSplitSizes
-      globalRankStart, // globalRankStart
-      globalRankStride, // globalRankStride
-      size_); // worldSize
 
   VLOG(2) << logPrefix() << "ProcessGroupNCCL created ncclComm_ "
           << ncclComm->repr()
@@ -3052,10 +3054,6 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
       enableTiming_.load(),
       cudaEventCacheEnabled_.load(),
       dist_debug_level_);
-
-  // other functions expect an initialized ptr
-  r->stashed_for_allocator_safety_ =
-      std::make_shared<std::vector<at::Tensor>>();
 
   if (record) {
     bool isP2P = isP2POp(opType);
@@ -3861,11 +3859,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
 
   if (!coalescing_state_ && capture_status == c10::cuda::CaptureStatus::None) {
     workEnqueue(work);
-    return work;
   } else {
     at::cuda::CUDAGraph::dec_pending_event_queries();
-    return nullptr;
   }
+  return work;
 }
 
 template <typename Fn, typename PreProcess, typename PostProcess>
