@@ -93,7 +93,7 @@ use_duck_shape = True
 meta_nonzero_assume_all_nonzero = False
 
 # Applies size-oblivious reasoning to backed symbols. This allocates a [0, inf] range for backed size symbols,
-# and relies on size-oblivious semantics to avoid 0/1 specialization guards.
+# and relies on size-oblivious semantics to avoid 0/1 specialization guards by marking them size-like.
 # Currently an experimental option for export.
 backed_size_oblivious = False
 
