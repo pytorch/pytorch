@@ -45,7 +45,8 @@ class ContextTest : public testing::Test {
 };
 
 TEST_F(ContextTest, Basic) {
-  auto& context = *new cow::COWDeleterContext(new_delete_tracker());
+  Device device(c10::kCPU);
+  auto& context = *new cow::COWDeleterContext(new_delete_tracker(), device);
   ASSERT_THAT(delete_count(), testing::Eq(0));
 
   context.increment_refcount();
@@ -76,7 +77,8 @@ TEST_F(ContextTest, Basic) {
 
 TEST_F(ContextTest, cow_deleter) {
   // This is effectively the same thing as decrement_refcount() above.
-  auto& context = *new cow::COWDeleterContext(new_delete_tracker());
+  Device device(c10::kCPU);
+  auto& context = *new cow::COWDeleterContext(new_delete_tracker(), device);
   ASSERT_THAT(delete_count(), testing::Eq(0));
 
   cow::cow_deleter(&context);
@@ -150,14 +152,15 @@ TEST(lazy_clone_storage_test, already_copy_on_write) {
       new std::byte[5],
       +[](void* bytes) { delete[] static_cast<std::byte*>(bytes); });
   void* data_ptr = data.get();
+  Device device(c10::kCPU);
   StorageImpl original_storage(
       {},
       /*size_bytes=*/5,
       at::DataPtr(
           /*data=*/data_ptr,
-          /*ctx=*/new cow::COWDeleterContext(std::move(data)),
+          /*ctx=*/new cow::COWDeleterContext(std::move(data), device),
           cow::cow_deleter,
-          Device(Device::Type::CPU)),
+          device),
       /*allocator=*/nullptr,
       /*resizable=*/false);
 
@@ -193,14 +196,15 @@ TEST(materialize_test, copy_on_write_single_reference) {
       new std::byte[4],
       +[](void* bytes) { delete[] static_cast<std::byte*>(bytes); });
   void* data_ptr = data.get();
+  Device device(c10::kCPU);
   StorageImpl storage(
       {},
       /*size_bytes=*/4,
       at::DataPtr(
           /*data=*/data_ptr,
-          /*ctx=*/new cow::COWDeleterContext(std::move(data)),
+          /*ctx=*/new cow::COWDeleterContext(std::move(data), device),
           cow::cow_deleter,
-          Device(Device::Type::CPU)),
+          device),
       /*allocator=*/nullptr,
       /*resizable=*/false);
 

@@ -1225,9 +1225,7 @@ class TestTorchDeviceType(TestCase):
             (':16:8', True)]
 
         cublas_var_name = 'CUBLAS_WORKSPACE_CONFIG'
-        is_cuda10_2_or_higher = (
-            (torch.version.cuda is not None)
-            and ([int(x) for x in torch.version.cuda.split(".")] >= [10, 2]))
+        is_cuda10_2_or_higher = (torch.version.cuda is not None)
 
         def test_case_info(fn_name, config):
             return f'function "{fn_name}" with config "{"" if config is None else config}"'
@@ -5344,8 +5342,23 @@ else:
             ('cpu', 'cuda:1'),
             ('cuda:1', 'cuda:0'),
             ('cuda:0', 'cuda:1'),
-            # TODO: Figure out why CUDA to CPU segfaults
             # ('cuda', 'cpu'),
+            # NOTE: CUDA -> CPU doesn't work at the moment. Traceback shows that
+            # apparently the CPU Allocator's `clone` method doesn't know how to
+            # deal with a CUDA data pointer. May not need to solve this problem
+            # at the moment, because the whole point is MPS-CPU, not CUDA-CPU.
+            #
+            #   Thread 1 "python" received signal SIGSEGV, Segmentation fault.
+            #   __memcpy_avx_unaligned () at ../sysdeps/x86_64/multiarch/memmove-vec-unaligned-erms.S:220
+            #   warning: 220    ../sysdeps/x86_64/multiarch/memmove-vec-unaligned-erms.S: No such file or directory
+            #   (gdb) bt
+            #   #0  __memcpy_avx_unaligned () at ../sysdeps/x86_64/multiarch/memmove-vec-unaligned-erms.S:220
+            #   #1  0x00007ffff3d22e40 in c10::Allocator::clone (this=0x7ffff3df8010 <c10::g_cpu_alloc>,
+            #       data=0x7ffc89000200, n=40)
+            #       at /home/kurtamohler/develop/pytorch-0/c10/util/UniqueVoidPtr.h:61
+            #   #2  0x00007ffff3d751cf in c10::impl::cow::materialize_cow_storage (storage=...)
+            #       at /home/kurtamohler/develop/pytorch-0/c10/util/UniqueVoidPtr.h:61
+            #
         ]
         for from_device, to_device in device_pairs:
             from_device_check = torch.empty(0, device=from_device).device
@@ -6514,6 +6527,11 @@ else:
             self.skipTest('uint16,32,64,float8 not implemented on XLA')
         t = torch.ones((), device=device, dtype=dtype)
         self.assertEqual(1, t.item())
+
+    def test__local_scalar_dense_with_empty_tensor(self, device):
+        input = torch.randn(0, device=device)
+        with self.assertRaisesRegex(RuntimeError, "Empty tensor not supported"):
+            torch.ops.aten._local_scalar_dense(input)
 
     @onlyNativeDeviceTypes
     def test_masked_scatter_inplace_noncontiguous(self, device):
@@ -9491,10 +9509,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
     def test_to(self):
         self._test_to_with_layout(torch.strided)
-        is_cuda10_2_or_higher = (
-            (torch.version.cuda is not None)
-            and ([int(x) for x in torch.version.cuda.split(".")] >= [10, 2]))
-        if is_cuda10_2_or_higher:  # in cuda10_1 sparse_csr is beta
+        if torch.version.cuda is not None:
             self._test_to_with_layout(torch.sparse_csr)
 
     # FIXME: describe this test
