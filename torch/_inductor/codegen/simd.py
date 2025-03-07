@@ -2052,7 +2052,7 @@ class SIMDScheduling(BaseScheduling):
         if len(ranked_tilings) > 1:
             perf_hint_log.info("possibly bad tiling: %s", ranked_tilings)
         have_indirect_broadcast = False
-        for node in node_schedule:
+        for node in EnableReduction.filter(node_schedule):
             # save iter vars in indirect broadcast memory reads
             indirect_broadcast_pairs: list[tuple[sympy.Symbol, sympy.Symbol]] = []
             for read in node.read_writes.reads:

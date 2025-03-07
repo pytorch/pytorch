@@ -7579,6 +7579,7 @@ class CommonTemplate:
             ),
         )
 
+    @skip_if_triton_cpu
     @requires_gpu()
     def test_indirect_broadcast_embedding(self):
         B, T, D, V = (8, 2048, 4096, 2048)
