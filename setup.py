@@ -1256,35 +1256,18 @@ def main():
         torch_package_data.extend(
             [
                 "include/tensorpipe/*.h",
-                "include/tensorpipe/channel/*.h",
-                "include/tensorpipe/channel/basic/*.h",
-                "include/tensorpipe/channel/cma/*.h",
-                "include/tensorpipe/channel/mpt/*.h",
-                "include/tensorpipe/channel/xth/*.h",
-                "include/tensorpipe/common/*.h",
-                "include/tensorpipe/core/*.h",
-                "include/tensorpipe/transport/*.h",
-                "include/tensorpipe/transport/ibv/*.h",
-                "include/tensorpipe/transport/shm/*.h",
-                "include/tensorpipe/transport/uv/*.h",
+                "include/tensorpipe/**/*.h",
             ]
         )
     if get_cmake_cache_vars()["USE_KINETO"]:
         torch_package_data.extend(
             [
                 "include/kineto/*.h",
+                "include/kineto/**/*.h",
             ]
         )
     torchgen_package_data = [
-        # Recursive glob doesn't work in setup.py,
-        # https://github.com/pypa/setuptools/issues/1806
-        # To make this robust we should replace it with some code that
-        # returns a list of everything under packaged/
-        "packaged/ATen/*",
-        "packaged/ATen/native/*",
-        "packaged/ATen/templates/*",
-        "packaged/autograd/*",
-        "packaged/autograd/templates/*",
+        "packaged/*",
         "packaged/**/*",
     ]
     package_data = {
