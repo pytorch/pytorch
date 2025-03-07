@@ -467,6 +467,7 @@ S390X_TESTLIST = [
     "test_tensorexpr_pybind",
     "test_torch",
     "test_transformers",
+    "test_transformers_privateuse1",
     "test_type_hints",
     "test_type_info",
     "test_type_promotion",
@@ -759,7 +760,7 @@ def run_test(
         stepcurrent_key = f"{test_file}_{test_module.shard}_{os.urandom(8).hex()}"
 
     if options.verbose:
-        unittest_args.append(f'-{"v" * options.verbose}')  # in case of pytest
+        unittest_args.append(f"-{'v' * options.verbose}")  # in case of pytest
 
     if test_file in RUN_PARALLEL_BLOCKLIST:
         unittest_args = [
@@ -1483,7 +1484,7 @@ CUSTOM_HANDLERS = {
     "test_autoload_enable": test_autoload_enable,
     "test_autoload_disable": test_autoload_disable,
     "test_cpp_extensions_open_device_registration": run_test_with_openreg,
-    "test_transformers": run_test_with_openreg,
+    "test_transformers_privateuse1": run_test_with_openreg,
 }
 
 
@@ -1895,8 +1896,7 @@ def get_selected_tests(options) -> list[str]:
         selected_tests = exclude_tests(
             TESTS_NOT_USING_GRADCHECK,
             selected_tests,
-            "Running in slow gradcheck mode, skipping tests "
-            "that don't use gradcheck.",
+            "Running in slow gradcheck mode, skipping tests that don't use gradcheck.",
             exact_match=True,
         )
 

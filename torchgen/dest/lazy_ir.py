@@ -543,7 +543,7 @@ std::vector<torch::lazy::Shape> shapes{torch::lazy::Shape(out_meta.scalar_type()
                 aten_name += "_symint"
             shape_str = f"""\
         {meta_conversion_str}
-        auto out_meta = at::{dispatch_ns}::{aten_name}({', '.join(meta_call_args)});
+        auto out_meta = at::{dispatch_ns}::{aten_name}({", ".join(meta_call_args)});
         {meta_out}"""
         else:
             shape_sig = ComputeShapeSignature(
@@ -559,7 +559,7 @@ std::vector<torch::lazy::Shape> shapes{torch::lazy::Shape(out_meta.scalar_type()
         func_schema_str = "aten::" + str(func.func)
         shape_str += f"""
             if(torch::lazy::symbolicShapeEnabled()){{
-                std::vector<torch::jit::IValue> inputs = {{ {', '.join(str(a.name) for a in all_args)} }};
+                std::vector<torch::jit::IValue> inputs = {{ {", ".join(str(a.name) for a in all_args)} }};
                 const char* schema_str = "{func_schema_str}";
                 applySymbolicShapesOnLT(schema_str, inputs, shapes);
             }}

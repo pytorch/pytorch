@@ -201,6 +201,7 @@ class IsInputHandler:
 
 class AliasOfIntermediateHandler:
     def __init__(self, info, runtime_metadata, trace_joint):
+        self._unwrap_aliased_base_tensor = _identity
         if info.output_type in (
             OutputType.alias_of_intermediate,
             OutputType.alias_of_intermediate_save_as_output,
@@ -209,6 +210,8 @@ class AliasOfIntermediateHandler:
             self.base_idx = info.base_idx + num_user_outputs
         else:
             self.base_idx = info.base_idx
+            if self.base_idx in runtime_metadata.aliased_out_indices:
+                self._unwrap_aliased_base_tensor = _unwrap_tensoralias
 
         self.unwrap_out = _unwrap_tensoralias if trace_joint else _identity
         self.requires_grad = info.requires_grad
@@ -218,7 +221,7 @@ class AliasOfIntermediateHandler:
     def __call__(self, orig_inputs, fw_outs, out):
         aliased_base_tensor = fw_outs[self.base_idx]
         return gen_alias_from_base(
-            aliased_base_tensor,
+            self._unwrap_aliased_base_tensor(aliased_base_tensor),
             self.unwrap_out(out),
             self.requires_grad,
             self.functional_tensor,
