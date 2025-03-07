@@ -78,8 +78,6 @@ jobs:
     if: github.repository_owner == 'pytorch'
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 240
-    outputs:
-      test-matrix: ${{ steps.filter.outputs.test-matrix }}
     defaults:
       run:
         shell: bash
@@ -94,8 +92,6 @@ jobs:
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
-          repository: "iremyux/pytorch"
-          ref: "nightly-for-win-arm64"
           path: pytorch
       - name: Bootstrap Git
         shell: cmd
@@ -108,8 +104,6 @@ jobs:
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
-          repository:  "iremyux/pytorch"
-          ref: "nightly-for-win-arm64"
           path: pytorch
           submodules: recursive
       - name: Bootstrap Python
