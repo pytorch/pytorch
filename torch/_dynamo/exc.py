@@ -390,8 +390,7 @@ def handle_observed_exception(tx: Any) -> None:
     #
 
     # Fortunately this translates to a simple pop from the exn_vt_stack
-    # tx.exn_vt_stack.pop()
-    ...
+    tx.exn_vt_stack.clear_current_exception()
 
 
 # These exceptions are ok to fallback to eager/graph_break.
