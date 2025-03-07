@@ -65,9 +65,9 @@ class ComputeNativeFunctionStub:
                 {comma.join([r.name for r in f.func.arguments.out])}
             )"""
         else:
-            assert all(
-                a.type == BaseType(BaseTy.Tensor) for a in f.func.returns
-            ), f"Only support tensor returns but got {f.func.returns}"
+            assert all(a.type == BaseType(BaseTy.Tensor) for a in f.func.returns), (
+                f"Only support tensor returns but got {f.func.returns}"
+            )
             # Returns a tuple of empty tensors
             tensor_type = "at::Tensor"
             comma = ", "

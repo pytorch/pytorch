@@ -611,6 +611,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     return true;
   }
 
+  bool supportsCoalescing() const override {
+    return true;
+  }
+
   void startCoalescing() override;
 
   c10::intrusive_ptr<Work> endCoalescing() override;
@@ -773,6 +777,12 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   ErrorType getError() override;
 
   std::shared_ptr<c10::Allocator> getMemAllocator() override;
+
+  // Allocate tensor from communication-optimized memory pool
+  at::Tensor allocateTensor(long size, at::TensorOptions options = {}) override;
+
+  // Whether tensor allocation from NCCL memory pool is supported
+  bool supportsTensorAlloc(c10::DeviceIndex deviceIdx) override;
 
   // Performs NCCL user buffer registration for all buffers in
   // the given MemPool
@@ -1029,6 +1039,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::string getNCCLWatchdogTimeoutExitMsg(const std::string& exitReason);
 
   void checkAndSetRemoteError();
+
+  // A helper function to guess the device id of the current rank, based on
+  // bounded device or used device. Do not use this function if you already know
+  // the device id to operate on.
+  c10::DeviceIndex guessDeviceId() const;
 
   static const int64_t kWatchdogThreadSleepMillis;
 
@@ -1294,6 +1309,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Internal cached value: use NCCL non-blocking API mode or not.
   // Use `useNonblocking()` method instead of accessing this variable directly.
   std::optional<bool> useNonblocking_{std::nullopt};
+
+  // Communication-optimized memory pool associated with this PG
+  std::unique_ptr<c10::cuda::MemPool> memPool_ = nullptr;
 };
 
 // Dumps the NCCL comm traces and additional information about the Process
