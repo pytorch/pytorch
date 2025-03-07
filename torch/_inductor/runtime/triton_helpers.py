@@ -11,7 +11,6 @@ _T = TypeVar("_T")
 _LOG_2_E: tl.constexpr = tl.constexpr(pymath.log2(pymath.e))
 
 
-
 def set_driver_to_cpu():
     driver = triton.runtime.driver
     if backend := triton.backends.backends.get("cpu", None):
