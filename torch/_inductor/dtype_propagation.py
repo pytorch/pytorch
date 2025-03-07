@@ -19,8 +19,7 @@ T = TypeVar("T")
 
 class DTypeVar(Protocol):
     @property
-    def dtype(self) -> torch.dtype:
-        ...
+    def dtype(self) -> torch.dtype: ...
 
 
 DTypeArg = Union[DTypeVar, torch.types.Number, str, OpsValue]

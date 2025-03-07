@@ -24,13 +24,14 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch import sub
+from torch._dynamo.exc import Unsupported
 from torch._dynamo.testing import (
     CompileCounterWithBackend,
     EagerAndRecordGraphs,
     normalize_gm,
 )
 from torch._dynamo.utils import ifdynstaticdefault, same
-from torch._dynamo.variables import ConstantVariable
+from torch._dynamo.variables import ConstantVariable, SkipFunctionVariable
 from torch._dynamo.variables.lists import RangeVariable
 from torch.nn import functional as F
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
@@ -927,18 +928,37 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             [(1, -1, 3), (1, 2, 3), 13.33],
         ]:
             if a != b:
-                x += 1 * c
+                x = x + 1 * c
             if a == b:
-                x += 2 * c
+                x = x + 2 * c
             if a < b:
-                x += 4 * c
+                x = x + 4 * c
             if a > b:
-                x += 8 * c
+                x = x + 8 * c
             if a <= b:
-                x += 16 * c
+                x = x + 16 * c
             if a >= b:
-                x += 32 * c
+                x = x + 32 * c
         return x
+
+    @make_test
+    def test_list_compare_polyfill_non_lists(x):
+        conds = []
+
+        # Non-list instances only work for eq and ne
+        for a, b, c in [
+            [(1, 2, 3), "(1, 2, 3)", 7.77],
+            [143, (143,), 3.33],
+        ]:
+            conds.append(a != b)
+            if conds[-1]:
+                x = x + 1 * c
+
+            conds.append(a == b)
+            if conds[-1]:
+                x = x + 2 * c
+
+        return x, conds
 
     @make_test
     def test_promote_types(x):
@@ -2070,6 +2090,16 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         mytuple.z = b
         mytuple.z = a
         return hasattr(mytuple, "x"), mytuple.x + mytuple.y, mytuple.z
+
+    @make_test
+    def test_sourceless_build_method_type(a, b):
+        cls = collections.namedtuple("Foo", ["x", "y"])  # sourceless variable
+
+        # The type of `cls._make` is method type
+        if callable(getattr(cls, "_make", None)):
+            return a + b
+        else:
+            return a - b
 
     @make_test
     def test_torch_size_hasattr(x):
@@ -4728,6 +4758,31 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.randn(4)
         self.assertEqual(fn(x), opt_fn(x))
+
+    def test_functional_compile(self):
+        def get_torch_functional_functions():
+            s = set()
+            for name in torch.functional.__all__:
+                method = getattr(torch.functional, name)
+                s.add(method)
+            return s
+
+        functions = get_torch_functional_functions()
+        self.assertTrue(len(functions) > 0)
+        for func in functions:
+            compiled_func = torch.compile(func)
+            self.assertTrue(callable(compiled_func))
+
+    def test_skip_function_call_very_weird_value(self):
+        class weird:  # noqa: UP004
+            def __getattribute__(self, name):
+                if name == "__qualname__":
+                    raise AttributeError("test")
+
+        w = weird()
+        a = SkipFunctionVariable(value=w)
+        with self.assertRaises(Unsupported):
+            a.call_function(None, [], {})
 
 
 instantiate_parametrized_tests(FunctionTests)

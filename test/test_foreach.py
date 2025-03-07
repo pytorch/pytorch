@@ -12,7 +12,7 @@ from numbers import Number
 import torch
 from torch.testing import make_tensor
 from torch.testing._comparison import default_tolerances
-from torch.testing._internal.common_cuda import TEST_MULTIGPU
+from torch.testing._internal.common_cuda import _get_torch_cuda_version, TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
@@ -87,9 +87,9 @@ class ForeachFuncWrapper:
                 actual = self.func(*inputs, **kwargs)
             keys = tuple([e.key for e in p.key_averages()])
             mta_called = any("multi_tensor_apply_kernel" in k for k in keys)
-            assert (
-                mta_called == (expect_fastpath and (not zero_size))
-            ), f"{mta_called=}, {expect_fastpath=}, {zero_size=}, {self.func.__name__=}, {keys=}"
+            assert mta_called == (expect_fastpath and (not zero_size)), (
+                f"{mta_called=}, {expect_fastpath=}, {zero_size=}, {self.func.__name__=}, {keys=}"
+            )
         else:
             actual = self.func(*inputs, **kwargs)
         if self.is_inplace:
@@ -355,6 +355,8 @@ class TestForeach(TestCase):
 
     @ops(foreach_pointwise_op_db)
     @parametrize("is_fastpath", (True, False))
+    # TODO: Remove skip CUDA 12.6 once resolved: https://github.com/pytorch/pytorch/issues/148681
+    @unittest.skipIf(_get_torch_cuda_version() >= (12, 6), "Failure on CUDA 12.6")
     def test_pointwise_op_with_tensor_of_scalarlist_overload(
         self, device, dtype, op, is_fastpath
     ):
