@@ -116,8 +116,8 @@ void quantized_matmul(
   construct_attr_by_post_op(
       binary_post_op,
       binary_alpha,
-      input_scale,
-      input_zero_point,
+      other_scale,
+      other_zero_point,
       other,
       unary_post_op,
       unary_post_op_args,
