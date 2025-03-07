@@ -11,14 +11,19 @@
 
 namespace at::native::onednn {
 
-static std::tuple<dnnl::memory::desc, dnnl::memory::desc, dnnl::memory::desc>
+static std::tuple<
+    dnnl::memory::desc,
+    dnnl::memory::desc,
+    dnnl::memory::desc,
+    dnnl::memory::desc>
 qconv_get_md(
     const at::Tensor& src,
     const at::Tensor& wgh,
+    std::optional<at::Tensor> bias,
     const at::Tensor& dst,
     int64_t groups) {
   // create dnnl::memory desc from the src/wgh/dst tensors
-  dnnl::memory::desc src_usr_md, wgh_usr_md, dst_usr_md;
+  dnnl::memory::desc src_usr_md, wgh_usr_md, dst_usr_md, bias_usr_md;
   auto ndim = src.ndimension();
   bool src_is_cl =
       (src.suggest_memory_format() == at::MemoryFormat::ChannelsLast) ||
@@ -44,7 +49,14 @@ qconv_get_md(
   auto fmt_wgh = conv_weight_fmt(ndim, groups != 1, wgh_is_cl);
   wgh_usr_md = dnnl::memory::desc(wgh_tz, wei_data_t, fmt_wgh);
 
-  return {src_usr_md, wgh_usr_md, dst_usr_md};
+  if (bias.has_value()) {
+    bias_usr_md = dnnl::memory::desc(
+        bias.value().sizes().vec(),
+        dnnl::memory::data_type::f32,
+        dnnl::memory::format_tag::x);
+  }
+
+  return {src_usr_md, wgh_usr_md, bias_usr_md, dst_usr_md};
 }
 
 at::Tensor quantized_convolution(
@@ -76,14 +88,12 @@ at::Tensor quantized_convolution(
       Attr(/*q_scale=*/1.0 / inv_output_scale, /*zp=*/output_zero_point);
 
   auto ndim = act.ndimension();
-  if (bias.has_value()) {
-    attr = attr.append_bias(bias.value(), ndim - 2);
-  }
   construct_attr_by_post_op(
       binary_attr.has_value() ? binary_attr.value() : "none",
       binary_alpha.has_value() ? binary_alpha.value().to<double>() : 1.0,
       accum_scale,
       accum_zero_point,
+      accum,
       unary_attr.has_value() ? unary_attr.value() : "none",
       unary_scalars,
       unary_algorithm.has_value() ? unary_algorithm.value() : "",
@@ -110,10 +120,7 @@ at::Tensor quantized_convolution(
   dnnl::memory::dims _dilation = compatible_dilation(dilation);
   dnnl::post_ops po;
   // extract post ops
-  po = attr.extract_post_ops(
-      output,
-      /*is_quantized*/ true,
-      output.scalar_type() == at::kByte || output.scalar_type() == at::kChar);
+  po = attr.extract_post_ops(output);
   int mask_ac = 0, mask_weight;
   // [Note: Per-channel quantization mask setting]
   // Per-channel quantization is on weight output channel mostly, mask_weight=
@@ -127,10 +134,11 @@ at::Tensor quantized_convolution(
   dnnl::primitive_attr pattr;
 
   bool src_need_zp = (act_scale != 0);
+  bool dst_need_zp = (output_zero_point != 0);
 
   // create usr_md for tensors, and md for conv primitive
-  auto [src_md, weight_md, output_md] =
-      qconv_get_md(act, weight, output, groups);
+  auto [src_md, weight_md, bias_md, output_md] =
+      qconv_get_md(act, weight, bias, output, groups);
 
   // get tensor md
   auto ic = act.size(1);
@@ -139,11 +147,14 @@ at::Tensor quantized_convolution(
       compatible_weight_dims(ndim, groups, oc, ic, weight.sizes());
 
   pattr.set_scales_mask(DNNL_ARG_SRC, mask_ac);
+  pattr.set_scales_mask(DNNL_ARG_DST, mask_ac);
   pattr.set_scales_mask(DNNL_ARG_WEIGHTS, mask_weight);
   pattr.set_post_ops(po);
 
   if (src_need_zp)
     pattr.set_zero_points_mask(DNNL_ARG_SRC, mask_ac);
+  if (dst_need_zp)
+    pattr.set_zero_points_mask(DNNL_ARG_DST, mask_ac);
   pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
 
   // create primitive
@@ -153,7 +164,7 @@ at::Tensor quantized_convolution(
       dnnl::algorithm::convolution_direct,
       src_md,
       weight_md,
-      dnnl::memory::desc(),
+      bias.has_value() ? bias_md : dnnl::memory::desc(),
       output_md,
       _stride,
       _dilation,
@@ -164,11 +175,14 @@ at::Tensor quantized_convolution(
   dnnl::convolution_forward conv_forward =
       dnnl::convolution_forward(conv_fwd_pd);
 
-  dnnl::memory src_m, weight_m, output_m;
+  dnnl::memory src_m, weight_m, output_m, bias_m;
 
   src_m = make_onednn_memory(src_md, engine, act.data_ptr());
   output_m = make_onednn_memory(output_md, engine, output.data_ptr());
   weight_m = make_onednn_memory(weight_md, engine, weight.data_ptr());
+  if (bias.has_value()) {
+    bias_m = make_onednn_memory(bias_md, engine, bias.value().data_ptr());
+  }
 
   std::unordered_map<int, dnnl::memory> args;
   if (attr.with_binary())
@@ -176,6 +190,9 @@ at::Tensor quantized_convolution(
   args.insert({DNNL_ARG_SRC, src_m});
   args.insert({DNNL_ARG_WEIGHTS, weight_m});
   args.insert({DNNL_ARG_DST, output_m});
+  if (bias.has_value()) {
+    args.insert({DNNL_ARG_BIAS, bias_m});
+  }
 
   dnnl::memory src_sc_m, src_zp_m;
   Tensor src_sc_tensor, src_zp_tensor;
@@ -188,7 +205,17 @@ at::Tensor quantized_convolution(
     args.insert({DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_SRC, src_zp_m});
   }
 
-  // dst scale is no need for setting, since it is fused in postop via linear
+  dnnl::memory dst_sc_m, dst_zp_m;
+  Tensor dst_sc_tensor, dst_zp_tensor;
+  dst_sc_m = dnnl_memory_from_host_scalar(
+      static_cast<float>(inv_output_scale), dst_sc_tensor, engine);
+  dst_zp_m = dnnl_memory_from_host_scalar(
+      static_cast<int32_t>(output_zero_point), dst_zp_tensor, engine);
+  args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_DST, dst_sc_m});
+  if (dst_need_zp) {
+    args.insert({DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_DST, dst_zp_m});
+  }
+
   size_t scratchpad_size = conv_fwd_pd.scratchpad_desc().get_size();
   Tensor scratchpad_tensor = at::empty(
       {static_cast<int64_t>(scratchpad_size)},
