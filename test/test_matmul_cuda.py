@@ -1165,6 +1165,69 @@ class TestFP8MatmulCuda(TestCase):
                 out_dtype=torch.bfloat16,
             )
 
+    def test_blockwise_nvfp4_numerics(self):
+
+        test_case_name = "smoke_test"
+        mkn = 128, 128, 128
+        fast_accum = False
+
+        device = "cuda"
+        M, K, N = mkn
+        BLOCK_SIZE = 16
+        require_exact_match = True
+
+        def ceil_div(a, b):
+            return (a + b - 1) // b
+
+        if test_case_name == "smoke_test":
+            # if not ((M == K) and (M == N)):
+            #     return unittest.skip("this test is only defined for M == K == N, skipping")
+            A_ref = torch.ones(M, K, device=device, dtype=torch.bfloat16)
+            B_ref = torch.ones(N, K, device=device, dtype=torch.bfloat16)
+
+            # A_ref[1][1] = 1
+
+            # A = A_ref.to(torch.uint8).view(torch.float4_e2m1fn_x2)
+            # B = B_ref.to(torch.uint8).view(torch.float4_e2m1fn_x2)
+
+            # for now, hand craft A and B
+            # 34 is the fp4x2 encoding for [1.0, 1.0] packed into a byte
+            A = torch.full((M, K // 2), 34, device=device, dtype=torch.uint8)
+            B = torch.full((N, K // 2), 34, device=device, dtype=torch.uint8)
+            B = B.t()
+            # A[0][0] = 0b00100010
+            # A[0][0] = 34
+            # B[0][0] = 0b00100001
+            # B[0][1] = 0b00000001
+            print(A)
+            print(B)
+            A = A.view(torch.float4_e2m1fn_x2)
+            B = B.view(torch.float4_e2m1fn_x2)
+
+            A_scale = torch.full((M, ceil_div(K // 2, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e4m3fn)
+            B_scale = torch.full((N, ceil_div(K // 2, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e4m3fn)
+            # convert to swizzled format
+            # A_scale = to_blocked(A_scale)
+            # B_scale = to_blocked(B_scale)
+
+        C_ref = A_ref @ B_ref.t()
+
+        C = torch._scaled_mm(
+            A,
+            B,
+            A_scale,
+            B_scale,
+            # out_dtype=torch.bfloat16,
+            out_dtype=torch.bfloat16,
+            use_fast_accum=fast_accum,
+        )
+        print(C_ref)
+        print(C)
+
+        torch.testing.assert_close(C, C_ref, atol=0, rtol=0)
+        
+        print('done')
+
 
 @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
 @unittest.skipIf(IS_WINDOWS, "Windows doesn't support CUTLASS extensions")
