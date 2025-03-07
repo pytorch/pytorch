@@ -3653,7 +3653,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 return t + res
 
             with self.assertRaisesRegex(
-                torch._dynamo.exc.UserError, "Dynamic control flow is not supported"
+                torch._dynamo.exc.Unsupported,
+                "Data-dependent branching",
             ):
                 torch.compile(f, backend="eager", fullgraph=True)(torch.zeros(1))
 
@@ -4891,6 +4892,19 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         res = opt_fn(x_weak, weight, y)
         self.assertEqual(ref, res)
         self.assertEqual(cnt.frame_count, 2)
+
+    def test_return_weakref(self):
+        def f(t):
+            t = t * 2
+            wr = weakref.ref(t)
+            return wr, t
+
+        ref_t = torch.randn(2, 2, requires_grad=True)
+        ref_y = f(ref_t)
+
+        t = ref_t.detach().clone().requires_grad_()
+        y = torch.compile(f, backend="eager", fullgraph=True)(t)
+        self.assertEqual(ref_y[0](), y[0]())
 
     def test_weakref_del(self):
         def fn(x_weak, y):
