@@ -2827,6 +2827,46 @@ class TestGuardsExpressions(TestCase):
         self.assertTrue(shape_env.evaluate_guards_expression(guards, [hint_int(s0)]))
         self.assertFalse(shape_env.evaluate_guards_expression(guards, [hint_int(s1)]))
 
+    def test_unbacked_reshape(self):
+        # reshape u0 -> (u1, u2, u2)
+        @torch.compile(fullgraph=True)
+        def func(x, y, z):
+            t = torch.reshape(x, (y.size()[0], z.size()[0], z.size()[0]))
+            return t
+
+        x = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8])
+        y = torch.rand(2)
+        z = torch.rand(2)
+
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+        torch._dynamo.decorators.mark_unbacked(y, 0)
+        torch._dynamo.decorators.mark_unbacked(z, 0)
+
+        self.assertEqual(
+            func(x, y, z), torch.tensor([[[1, 2], [3, 4]], [[5, 6], [7, 8]]])
+        )
+        self.assertEqual(
+            func(torch.ones(50), torch.ones(2), torch.ones(5)), torch.ones(2, 5, 5)
+        )
+
+        # reshape (u0, u1) -> (u3, u3+u4)
+        @torch.compile(fullgraph=True)
+        def func2(x, y, z):
+            t = torch.reshape(x, (y.size()[0], z.size()[0] + y.size()[0]))
+            return t
+
+        x = torch.ones(4, 4)
+        y = torch.rand(2)
+        z = torch.rand(6)
+
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+        torch._dynamo.decorators.mark_unbacked(x, 1)
+
+        torch._dynamo.decorators.mark_unbacked(y, 0)
+        torch._dynamo.decorators.mark_unbacked(z, 0)
+
+        self.assertEqual(func2(x, y, z), torch.ones(2, 8))
+
     def test_remove_symbols_without_guarding(self):
         from torch._functorch.partitioners import _remove_symbols_without_guarding
 
