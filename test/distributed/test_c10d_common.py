@@ -4,6 +4,7 @@ import copy
 import os
 import pickle
 import sys
+import subprocess
 import tempfile
 import threading
 import time
@@ -1888,7 +1889,7 @@ dist.init_process_group(rank=0, world_size=1, store=dist.HashStore())
                 # It is ok to have an extra long timeout here as a timeout means the test failed
                 timeout=20,
             )
-        except subprocess.TimeoutExpired as e:
+        except subprocess.TimeoutExpired:
             self.fail(
                 msg="Example code timed out! See the code sample in the test for details."
             )

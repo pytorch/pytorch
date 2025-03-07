@@ -2358,16 +2358,14 @@ Call this whenever a new thread is created in order to propagate values from
         auto acc = at::getAccelerator(check.value_or(false));
         if (acc.has_value()) {
           bool is_available = at::globalContext()
-              .getAcceleratorHooksInterface(acc.value())
-              .isAvailable();
+                                  .getAcceleratorHooksInterface(acc.value())
+                                  .isAvailable();
 
           if (!is_available) {
             acc = std::nullopt;
           }
         }
-        return c10::Device(
-                acc.value_or(c10::DeviceType::CPU),
-            -1);
+        return c10::Device(acc.value_or(c10::DeviceType::CPU), -1);
       },
       py::arg("check") = nullptr);
 
