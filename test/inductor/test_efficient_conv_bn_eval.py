@@ -16,7 +16,6 @@ sys.path.append(pytorch_test_dir)
 from torch._dynamo.utils import counters
 from torch._inductor import config as inductor_config
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_utils import TEST_WITH_ASAN
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 
 
@@ -207,7 +206,7 @@ if HAS_CPU and not torch.backends.mps.is_available():
 
     copy_tests(EfficientConvBNEvalTemplate, EfficientConvBNEvalCpuTests, "cpu")
 
-if HAS_GPU and not TEST_WITH_ASAN:
+if HAS_GPU:
 
     class EfficientConvBNEvalGpuTests(TestCase):
         device = GPU_TYPE
