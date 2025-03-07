@@ -708,7 +708,6 @@ class TestFP8MatmulCuda(TestCase):
         )
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
-    @skipIfRocm()
     def test_float8_error_messages(self, device) -> None:
         M, K, N = (1024, 512, 2048)
         fill_value = 0.5
@@ -847,7 +846,7 @@ class TestFP8MatmulCuda(TestCase):
         self.assertEqual(out_dtype, out_fp8.dtype)
         self.assertEqual(out_fp32, out_fp8.to(torch.float))
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support row-wise scaling")
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support sm carveout")
     @unittest.skipIf(IS_WINDOWS, "Windows doesn't support row-wise scaling")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @unittest.skipIf(not SM90OrLater, "sm89 kernel isn't opted into carveout yet")
@@ -1092,7 +1091,6 @@ class TestFP8MatmulCuda(TestCase):
             assert sqnr.item() > 22.0
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
-    @skipIfRocm()
     def test_blockwise_mxfloat8_error_messages(self, device) -> None:
         M, K, N = (1024, 512, 2048)
         BLOCK_SIZE_K = 32

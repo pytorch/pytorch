@@ -36,7 +36,6 @@ exposing internal implementation details of TorchDynamo to maintain compatibilit
 across versions.
 """
 
-
 import builtins
 import dis
 import time
@@ -46,7 +45,7 @@ from typing import Optional, Union
 import torch
 from torch.fx.experimental.symbolic_shapes import free_symbols
 
-from .exc import unimplemented
+from .exc import unimplemented_v2
 from .variables import CellVariable
 from .variables.constant import ConstantVariable
 from .variables.tensor import SymNodeVariable
@@ -192,7 +191,12 @@ class ComptimeContext:
         """
         Manually trigger a graph break
         """
-        unimplemented(msg)
+        unimplemented_v2(
+            gb_type="ComptimeContext graph break",
+            context=msg,
+            explanation=f"Manually triggered ComptimeContext graph break with message {msg}.",
+            hints=[],
+        )
 
     def graph(self):
         """
@@ -205,9 +209,9 @@ class ComptimeContext:
         """
         Asserts that the int is static (and not dynamic, per dynamic shapes)
         """
-        assert (
-            not val.is_dynamic()
-        ), "expected static but got dynamic (run with TORCH_LOGS=dynamic for more info)"
+        assert not val.is_dynamic(), (
+            "expected static but got dynamic (run with TORCH_LOGS=dynamic for more info)"
+        )
 
     def print_graph(self, *, verbose=True, file=None):
         """
@@ -400,6 +404,7 @@ class _Comptime:
         this in your model code::
 
             from torch._dynamo.comptime import comptime
+
             comptime.breakpoint()
 
         And then, inside pdb, you can access 'ctx' to query things
