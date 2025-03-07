@@ -1144,7 +1144,7 @@ def cat_default(func, *args, **kwargs):
     )
 
 
-@register_jagged_func(torch.ops.aten.matmul.default, "self: jt_all, other: any")
+@register_jagged_func(torch.ops.aten.matmul.default, "self: any, other: any")
 def matmul_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(  # type: ignore[misc]
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
@@ -1159,8 +1159,10 @@ def matmul_default(func, *args, **kwargs):
         ]
 
     def _padded_impl(a, b):
-        assert a.is_nested and not b.is_nested
-        nt = a
+        if a.is_nested:
+            nt = a
+        else:
+            nt = b
 
         from .nested_tensor import nested_from_padded
 
@@ -1178,8 +1180,12 @@ def matmul_default(func, *args, **kwargs):
             *nt.shape[nt._ragged_idx + 1 :],
         )
         padded_nt = nt.to_padded_tensor(0.0, output_size=padded_shape)
+        if a.is_nested:
+            padded_t = func(padded_nt, b)
+        else:
+            padded_t = func(a, padded_nt)
         return nested_from_padded(
-            func(padded_nt, b),
+            padded_t,
             offsets=nt._offsets,
             ragged_idx=nt._ragged_idx,
             sum_S=total_L,
@@ -1191,17 +1197,40 @@ def matmul_default(func, *args, **kwargs):
     # NJT x dense
     if inp.is_nested and not other.is_nested:
         # (B, j1, D) x (B, D, E) => (B, j1, E)
-        if inp.dim() >= 3 and inp.dim() == other.dim():
+        if (
+            inp.dim() >= 3
+            and inp.dim() == other.dim()
+            and inp._ragged_idx < inp.dim() - 1
+        ):
             # convert to padded for this
             return _padded_impl(inp, other)
         # Support broadcasting the dense:
         # (B, j1, D) x (D, E) => (B, j1, E)
         # (B, j1, D, E) x (E, F) => (B, j1, D, F)
         # etc.
-        elif other.dim() == 2 and inp.dim() > other.dim():
+        elif (
+            other.dim() == 2
+            and inp.dim() > other.dim()
+            and inp._ragged_idx < inp.dim() - 1
+        ):
             return NestedTensor(
                 func(inp._values, other, **new_kwargs), **extract_kwargs(inp)
             )
+    # Dense x NJT
+    elif not inp.is_nested and other.is_nested:
+        # (B, D, E) x (B, E, j1) => (B, E, j1)
+        if other.dim() >= 3 and other.dim() == inp.dim() and other._ragged_idx >= 2:
+            # convert to padded for this
+            return _padded_impl(inp, other)
+        # Support broadcasting the dense:
+        # (D, E) x (B, E, j1) => (B, D, j1)
+        # (D, E) x (B, E, j1, F) => (B, D, j1, F)
+        # etc.
+        elif inp.dim() == 2 and other.dim() > inp.dim() and other._ragged_idx >= 2:
+            return NestedTensor(
+                func(inp, other._values, **new_kwargs), **extract_kwargs(other)
+            )
+
     # NJT x NJT
     elif inp.is_nested and other.is_nested:
         # Support ragged batch dim:
@@ -2547,7 +2576,7 @@ def frexp_Tensor(func, *args, **kwargs):
 
 @register_jagged_func(
     torch.ops.aten.matmul_backward.default,
-    "grad: jt_all, self: jt_all, other: any, mask: any",
+    "grad: any, self: any, other: any, mask: any",
 )
 def matmul_backward_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(  # type: ignore[misc]
@@ -2558,6 +2587,9 @@ def matmul_backward_default(func, *args, **kwargs):
     inp = new_kwargs.pop("input")
     other = new_kwargs.pop("other")
     grad_input_mask = new_kwargs.pop("mask")
+
+    if grad is None:
+        return (None, None)
 
     grad_self = None
     if grad_input_mask[0]:

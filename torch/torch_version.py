@@ -26,6 +26,8 @@ class TorchVersion(str):
             TorchVersion('1.10.0a') > '1.2.1'
     """
 
+    __slots__ = ()
+
     # fully qualified type names here to appease mypy
     def _convert_to_version(self, inp: Any) -> Any:
         if isinstance(inp, Version):

@@ -135,8 +135,7 @@ class _NodeReporterReruns(_NodeReporter):
         else:
             assert isinstance(report.longrepr, tuple)
             filename, lineno, skipreason = report.longrepr
-            if skipreason.startswith("Skipped: "):
-                skipreason = skipreason[9:]
+            skipreason = skipreason.removeprefix("Skipped: ")
             details = f"{filename}:{lineno}: {skipreason}"
 
             skipped = ET.Element(

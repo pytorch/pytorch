@@ -57,9 +57,9 @@ class TritonSplitScanKernel(TritonKernel):
 
     def initialize_range_tree(self, pid_cache):
         prefixes = ["y", "x", "r0_"]
-        assert len(self.numels) <= len(
-            prefixes
-        ), "z dimension not supported for split scan"
+        assert len(self.numels) <= len(prefixes), (
+            "z dimension not supported for split scan"
+        )
         active_prefixes = prefixes[len(prefixes) - len(self.numels) :]
 
         grid_dims = {"r0_": 0, "x": 1, "y": 2}
@@ -202,9 +202,6 @@ class TritonSplitScanKernel(TritonKernel):
 
     def _get_heuristic(self):
         return "split_scan"
-
-    def _get_grid_fn_str(self):
-        return "split_scan_grid"
 
     def _get_grid_fn(self):
         return split_scan_grid
