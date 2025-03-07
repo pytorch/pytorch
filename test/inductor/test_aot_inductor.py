@@ -4129,7 +4129,7 @@ class AOTInductorTestsTemplate:
         so_path, code = run_and_get_cpp_code(
             AOTIRunnerUtil.compile, model, example_inputs
         )
-        lowerbound_check = "u1 >= 1" if mark_unbacked else "u0 >= 2"
+        lowerbound_check = "u1 >= 1" if mark_unbacked else "u0 >= 1"
         FileCheck().check_count(lowerbound_check, 1).run(code)
 
         compiled = AOTIRunnerUtil.load(self.device, so_path)

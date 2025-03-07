@@ -11967,7 +11967,7 @@ def forward(self, x):
             node.target == torch.ops.aten._assert_scalar.default
             for node in ep.graph.nodes
         ].count(True)
-        self.assertEqual(num_asserts, 1)
+        self.assertEqual(num_asserts, 3)
         with self.assertRaises(RuntimeError):
             ep.module()(torch.randn(4, 2))
 
