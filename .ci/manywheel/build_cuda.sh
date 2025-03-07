@@ -14,6 +14,7 @@ export USE_CUDA_STATIC_LINK=1
 export INSTALL_TEST=0 # dont install test binaries into site-packages
 export USE_CUPTI_SO=0
 export USE_CUSPARSELT=${USE_CUSPARSELT:-1} # Enable if not disabled by libtorch build
+export USE_CUFILE=${USE_CUFILE:-1}
 
 # Keep an array of cmake variables to add to
 if [[ -z "$CMAKE_ARGS" ]]; then
@@ -53,11 +54,11 @@ cuda_version_nodot=$(echo $CUDA_VERSION | tr -d '.')
 TORCH_CUDA_ARCH_LIST="5.0;6.0;7.0;7.5;8.0;8.6"
 case ${CUDA_VERSION} in
     12.8)
-        TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST};9.0;10.0;12.0+PTX" #Ripping out 5.0 and 6.0 due to ld error
+        TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;9.0;10.0;12.0+PTX" #removing sm_50-sm_70 as these architectures are deprecated in CUDA 12.8 and will be removed in future releases
         EXTRA_CAFFE2_CMAKE_FLAGS+=("-DATEN_NO_TEST=ON")
         ;;
     12.6)
-        TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST};9.0+PTX"
+        TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST};9.0"
         EXTRA_CAFFE2_CMAKE_FLAGS+=("-DATEN_NO_TEST=ON")
         ;;
     12.4)
@@ -118,6 +119,14 @@ if [[ $USE_CUSPARSELT == "1" && $CUDA_VERSION == "11.8" ]]; then
         )
 fi
 
+
+# Turn USE_CUFILE off for CUDA 11.8, 12.4 since nvidia-cufile-cu11 and 1.9.0.20 are
+# not available in PYPI
+if [[ $CUDA_VERSION == "11.8" || $CUDA_VERSION == "12.4" ]]; then
+    export USE_CUFILE=0
+fi
+
+
 # CUDA_VERSION 12.4, 12.6, 12.8
 if [[ $CUDA_VERSION == 12* ]]; then
     export USE_STATIC_CUDNN=0
@@ -160,6 +169,16 @@ if [[ $CUDA_VERSION == 12* ]]; then
             "libnvrtc.so.12"
             "libnvrtc-builtins.so"
         )
+        if [[ $USE_CUFILE == 1 ]]; then
+            DEPS_LIST+=(
+                "/usr/local/cuda/lib64/libcufile.so.0"
+                "/usr/local/cuda/lib64/libcufile_rdma.so.1"
+            )
+            DEPS_SONAME+=(
+                "libcufile.so.0"
+                "libcufile_rdma.so.1"
+            )
+        fi
     else
         echo "Using nvidia libs from pypi."
         CUDA_RPATHS=(
@@ -176,6 +195,11 @@ if [[ $CUDA_VERSION == 12* ]]; then
             '$ORIGIN/../../nvidia/nccl/lib'
             '$ORIGIN/../../nvidia/nvtx/lib'
         )
+        if [[ $USE_CUFILE == 1 ]]; then
+            CUDA_RPATHS+=(
+                '$ORIGIN/../../nvidia/cufile/lib'
+            )
+        fi
         CUDA_RPATHS=$(IFS=: ; echo "${CUDA_RPATHS[*]}")
         export C_SO_RPATH=$CUDA_RPATHS':$ORIGIN:$ORIGIN/lib'
         export LIB_SO_RPATH=$CUDA_RPATHS':$ORIGIN'
