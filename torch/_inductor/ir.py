@@ -6671,7 +6671,10 @@ class FallbackKernel(ExternKernelAlloc):
             else:
                 raise RuntimeError(f"Unsupported return type {type(return_type)}")
 
-        returns = target._schema.returns  # type: ignore[union-attr]
+        if isinstance(target, torch._higher_order_ops.torchbind.CallTorchBind):
+            returns = target.schema(args[0], args[1]).returns
+        else:
+            returns = target._schema.returns  # type: ignore[union-attr]
         if len(returns) == 1:
             # NOTE: [special handling of all_reduce_coalesced_'s return value]
             # all_reduce_coalesced_ return a list of tensors via self.mutation_outputs

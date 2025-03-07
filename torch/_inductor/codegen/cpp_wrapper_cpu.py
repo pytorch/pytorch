@@ -320,6 +320,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 codegen_symbol(size, name, sizeof, dim)
             for dim, stride in enumerate(value.get_stride()):
                 codegen_symbol(stride, name, strideof, dim)
+        elif isinstance(value, ir.TorchBindObject):
+            # torchbind objects are loaded in proxy executor
+            pass
         else:
             raise AssertionError(f"Unknown value type: {type(value)}")
 
@@ -1824,8 +1827,15 @@ class CppWrapperCpu(PythonWrapperCodegen):
         output_args: Optional[list[str]] = None,
         raw_outputs: Optional[list[ir.Buffer]] = None,
     ):
-        arg_types = [x.real_type for x in op_overload._schema.arguments]
-        return_types = [x.type for x in op_overload._schema.returns]
+        schema = None
+        if isinstance(op_overload, torch._higher_order_ops.torchbind.CallTorchBind):
+            obj = raw_args[0]
+            method = raw_args[1]
+            schema = op_overload.schema(obj, method)
+        else:
+            schema = op_overload._schema
+        arg_types = [x.real_type for x in schema.arguments]
+        return_types = [x.type for x in schema.returns]
 
         new_tensor_args = []
         new_int_args = []
@@ -1859,6 +1869,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 # Only treat int Scalar as dynamic
                 if isinstance(arg, int):
                     new_int_args.append(str(arg))
+            elif isinstance(arg, ir.TorchBindObject):
+                # torchbind objects are loaded in proxy executor
+                pass
             elif isinstance(arg_type, torch.ListType):
                 assert isinstance(arg, (list, tuple))
 
@@ -1990,7 +2003,15 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 raise AssertionError(f"Unexpected output: {type(out)}")
 
         # output_args has the same pytree structure as outputs
-        if op_overload and not op_overload._schema.returns:
+
+        return_schema = None
+        if isinstance(op_overload, torch._higher_order_ops.torchbind.CallTorchBind):
+            obj = raw_args[0]
+            method = raw_args[1]
+            return_schema = op_overload.schema(obj, method).returns
+        else:
+            return_schema = op_overload._schema.returns
+        if op_overload and not return_schema:
             # kernel does not return a value
             output_args = []
         elif outputs is None:
