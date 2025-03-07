@@ -3696,7 +3696,11 @@ def repeat(a: Tensor, *repeat_shape) -> Tensor:
 
 
 def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorLikeType:
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious, sym_eq
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_size_oblivious,
+        statically_known_true,
+        sym_eq,
+    )
 
     # Creates a valid shape
     shape = utils.extract_shape_from_varargs(shape, validate=False)
@@ -3729,9 +3733,12 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
             return prims.view_of(a)
         else:
             return _a
-
+    x = None
     if a.is_contiguous():
         if len(shape) >= 1 and a.ndim >= 1:
+            if statically_known_true(sym_eq(shape, a.shape)):
+                return prims.view_of(a)
+
             strides = [1]
             for x in reversed(shape[1:]):
                 strides.append(strides[-1] * x)
