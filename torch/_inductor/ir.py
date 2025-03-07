@@ -174,6 +174,18 @@ _NodeOrNodes: TypeAlias = Union[
 ]
 
 
+@dataclasses.dataclass(frozen=True)
+class GraphPartitionSignature:
+    # mapping from partition input name to IRNode or Expr. Need the name str since
+    # we cannot get name from Expr.
+    input_nodes: dict[str, Union[IRNode, sympy.Expr, TorchBindObject]]
+    output_nodes: list[IRNode]
+    # mapping from partition input name to a boolean for whether deallocating it
+    # in the partition function
+    input_deallocation: dict[str, bool]
+    skip_cudagraph: bool
+
+
 def validate_ir(node_or_nodes: Optional[_NodeOrNodes]) -> None:
     def _check_tensorbox(nodes: Optional[_NodeOrNodes]) -> None:
         # Could expand this to check deeper properties
@@ -5787,6 +5799,14 @@ class UserDefinedTritonKernel(ExternKernel):
             self.get_kwargs_value(k) for k in self.ordered_kwargs_for_cpp_kernel
         ]
 
+        # NOTE: raw_args doesn't include autotuned args.
+        # But, kernel.constexprs includes indices of autotuned args.
+        # So, let's recalculate constexpr indices wrt to raw_args.
+        constexpr_indices = []
+        for idx, kwarg in enumerate(self.ordered_kwargs_for_cpp_kernel):
+            if kernel.arg_names.index(kwarg) in kernel.constexprs:
+                constexpr_indices.append(idx)
+
         if not triton_version_uses_attrs_dict():
             """
             Filter out None args.
@@ -5797,13 +5817,6 @@ class UserDefinedTritonKernel(ExternKernel):
             1. The arg is already tl.constexpr, so leave it in
             2. The arg is not tl.constexpr so we have to remove it
             """
-            # NOTE: raw_args doesn't include autotuned args.
-            # But, kernel.constexprs includes indices of autotuned args.
-            # So, let's recalculate constexpr indices wrt to raw_args.
-            constexpr_indices = []
-            for idx, kwarg in enumerate(self.ordered_kwargs_for_cpp_kernel):
-                if kernel.arg_names.index(kwarg) in kernel.constexprs:
-                    constexpr_indices.append(idx)
 
             constexpr_indices_set = OrderedSet(constexpr_indices)
             REMOVED = object()
@@ -5843,11 +5856,6 @@ class UserDefinedTritonKernel(ExternKernel):
                         equal_to_1.append(idx - index_shift)
 
                 triton_meta["configs"][0].equal_to_1 = equal_to_1
-        else:
-            constexpr_indices = []
-            for idx, kwarg in enumerate(self.ordered_kwargs_for_cpp_kernel):
-                if triton_meta["signature"][kwarg] == "constexpr":
-                    constexpr_indices.append(idx)
 
         # Call to kernel
         self.codegen_comment(wrapper)
@@ -6483,7 +6491,16 @@ class FallbackKernel(ExternKernelAlloc):
                     # individual output arguments are bound by
                     # generate_c_shim_fallback_kernel
                     if len(self.outputs) == 1:
-                        return go(self.outputs[0].get_name(), keypath)
+                        out = self.outputs[0]
+                        # When fallback kernel returns a list consisting of a single tensor,
+                        # the output is represented as a MultiOutput with non empty indices.
+                        # In this case, we strip the first key path away.
+                        return go(
+                            self.outputs[0].get_name(),
+                            keypath[1:]
+                            if isinstance(out, MultiOutput) and len(out.indices) != 0
+                            else keypath,
+                        )
                     else:
                         assert isinstance(keypath[0], pytree.SequenceKey)
                         return go(self.outputs[keypath[0].idx].get_name(), keypath[1:])

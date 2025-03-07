@@ -29,6 +29,7 @@ from torch.testing._internal.common_utils import (
     IS_ARM64,
     IS_FBCODE,
     parametrize,
+    serialTest,
     TEST_CUDA_MEM_LEAK_CHECK,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
@@ -57,9 +58,12 @@ test_failures = {
     "test_AllenaiLongformerBase_repro_dynamic_shapes": TestFailure(
         ("cpu", "cuda", "xpu")
     ),
-    "test_conv_inference_heuristics_dynamic_shapes": TestFailure(("cuda", "xpu")),
     "test_randint_distribution_dynamic_shapes": TestFailure(("cuda", "xpu")),
 }
+if not torch._inductor.config.cpp_wrapper:
+    test_failures["test_conv_inference_heuristics_dynamic_shapes"] = TestFailure(
+        ("cuda", "xpu")
+    )
 
 if TEST_WITH_ROCM:
     # Tensor-likes are not close
@@ -474,7 +478,9 @@ class TestInductorDynamic(TestCase):
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_unbacked_reduction(self, device):
-        expect_fail = device == "cpu" and not IS_ARM64
+        expect_fail = (
+            device == "cpu" and not IS_ARM64 and not torch._inductor.config.cpp_wrapper
+        )
         try:
 
             def f(x):
@@ -602,10 +608,7 @@ class TestInductorDynamic(TestCase):
 
         f(torch.tensor([3], device=device))
 
-    @torch._inductor.config.patch(disable_cpp_codegen=True)
     def test_floor(self):
-        # `int(n * 0.2)` will be generated as `floor(0.2*s0)` of torch.SymInt type.
-        # If cpp codegen is disabled, we should generate `math.floor` using PythonPrinter.
         def fn(x):
             n = x.size(-1)
             y = x + int(n * 0.2) + 1
@@ -851,6 +854,7 @@ class TestInductorDynamic(TestCase):
         output = cfunc(x, op, a)
         self.assertEqual(output, expected)
 
+    @serialTest()
     def test_wrapper_codegen_statically_known_int_or_none(self):
         torch._dynamo.reset()
 
