@@ -392,7 +392,23 @@ class TestFloat8Dtype(TestCase):
             torch.testing.assert_close(x1, x1_save_load, atol=0, rtol=0)
 
 
+class TestFloat4Dtype(TestCase):
+    def test_float4_e2m1fn_x2(self, device):
+        # can create a tensor of dtype float4
+        x1 = torch.empty(4, 4, device=device, dtype=torch.float4_e2m1fn_x2)
+
+        # can create a string (so printing will work)
+        str(x1)
+
+        # can view float4_e2m1fn_x2 as uint8
+        x2 = x1.view(torch.uint8)
+
+        # can view uint8 as float4_e2m1fn_x2
+        x2.view(torch.float4_e2m1fn_x2)
+
+
 instantiate_device_type_tests(TestFloat8Dtype, globals())
+instantiate_device_type_tests(TestFloat4Dtype, globals())
 
 
 class TestFloat8DtypeCPUOnly(TestCase):
