@@ -26,7 +26,15 @@ from optree import (  # noqa: F401  # direct import for type annotations
 )
 
 import torch.utils._pytree as python_pytree
-from torch.utils._pytree import KeyEntry as KeyEntry
+from torch.utils._pytree import (
+    is_namedtuple as is_namedtuple,
+    is_namedtuple_class as is_namedtuple_class,
+    is_namedtuple_instance as is_namedtuple_instance,
+    is_structseq as is_structseq,
+    is_structseq_class as is_structseq_class,
+    is_structseq_instance as is_structseq_instance,
+    KeyEntry as KeyEntry,
+)
 
 
 __all__ = [
@@ -42,6 +50,7 @@ __all__ = [
     "keystr",
     "key_get",
     "register_pytree_node",
+    "tree_is_leaf",
     "tree_flatten",
     "tree_flatten_with_path",
     "tree_unflatten",
@@ -61,6 +70,12 @@ __all__ = [
     "treespec_dumps",
     "treespec_loads",
     "treespec_pprint",
+    "is_namedtuple",
+    "is_namedtuple_class",
+    "is_namedtuple_instance",
+    "is_structseq",
+    "is_structseq_class",
+    "is_structseq_instance",
 ]
 
 
@@ -226,15 +241,12 @@ def _private_register_pytree_node(
     for the C++ pytree only. End-users should use :func:`register_pytree_node`
     instead.
     """
-    # TODO(XuehaiPan): remove this condition when we make Python pytree out-of-box support
-    # PyStructSequence types
-    if not optree.is_structseq_class(cls):
-        optree.register_pytree_node(
-            cls,
-            flatten_fn,
-            _reverse_args(unflatten_fn),
-            namespace="torch",
-        )
+    optree.register_pytree_node(
+        cls,
+        flatten_fn,
+        _reverse_args(unflatten_fn),
+        namespace="torch",
+    )
 
 
 def _is_pytreespec_instance(obj: Any, /) -> TypeIs[TreeSpec]:
