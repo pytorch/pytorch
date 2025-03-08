@@ -1260,7 +1260,7 @@ def get_max_num_sms() -> int:
 def get_num_sms() -> int:
     """Handle experimental carveout if set otherwise return hardware SM count"""
     carveout = torch._C._get_sm_carveout_experimental()
-    return carveout if carveout is not None else get_max_num_sms()
+    return get_max_num_sms() - (carveout if carveout is not None else 0)
 
 
 def get_tma_workspace_arg(
