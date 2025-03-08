@@ -30,7 +30,9 @@ def module_to_nested_dict(module: torch.nn.Module) -> dict[str, Any]:
 
     for attr_name in dir(module):
         try:
-            if not attr_name.startswith("_") and not callable(getattr(module, attr_name)):
+            if not attr_name.startswith("_") and not callable(
+                getattr(module, attr_name)
+            ):
                 attr_value = getattr(module, attr_name)
                 if (
                     not isinstance(attr_value, torch.nn.Module)
@@ -38,7 +40,7 @@ def module_to_nested_dict(module: torch.nn.Module) -> dict[str, Any]:
                     and type(attr_value) is not bool
                 ):
                     self_dict[attr_name] = attr_value
-        except Exception:
+        except NotImplementedError:
             # Skip attributes that cause exceptions when accessed
             continue
 
