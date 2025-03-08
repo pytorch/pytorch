@@ -963,9 +963,8 @@ class BundledShaderLibary : public MetalShaderLibrary {
 void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
                                            const std::string& name,
                                            std::optional<int64_t> extra) {
-  auto inputTensor = iter.input(0);
+  auto inputTensor = iter.input(0).contiguous();
   auto outputTensor = iter.output(0);
-  bool is_dense_strided = is_dense_in_storage(inputTensor) && inputTensor.strides().equals(outputTensor.strides());
   bool needs_output_copy = false;
   uint32_t length = outputTensor.numel();
   if (length == 0) {
@@ -977,12 +976,9 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
     cplState = getPipelineStateForFunc(fmt::format(
         "{}_dense_{}_{}", name, scalarToMetalTypeString(outputTensor), scalarToMetalTypeString(inputTensor)));
 
-    if (!is_dense_strided) {
-      inputTensor = inputTensor.contiguous();
-      if (!outputTensor.is_contiguous()) {
-        outputTensor = outputTensor.contiguous();
-        needs_output_copy = true;
-      }
+    if (!outputTensor.is_contiguous()) {
+      outputTensor = outputTensor.contiguous();
+      needs_output_copy = true;
     }
 
     MPSStream* mpsStream = getCurrentMPSStream();

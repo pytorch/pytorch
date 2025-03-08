@@ -18,12 +18,7 @@ from torch.utils._sympy.symbol import SymT
 from . import config, dependencies
 from .codegen.common import index_prevent_reordering
 from .ops_handler import DefaultHandler, OpsHandler, WrapperHandler
-from .utils import (
-    cache_on_self,
-    reduction_num_outputs,
-    sympy_index_symbol_with_prefix,
-    sympy_subs,
-)
+from .utils import cache_on_self, sympy_index_symbol_with_prefix, sympy_subs
 from .virtualized import ops, V
 
 
@@ -248,7 +243,7 @@ class LoopBody:
         inverse_order = [inverse_order[i] for i in range(len(new_order))]
 
         def new_body(*indices: Sequence[sympy.Expr]) -> Any:
-            index = [*itertools.chain.from_iterable(indices)]
+            index = list(itertools.chain(*indices))
             assert len(index) == len(iter_size) + len(reduce_size)
             iter_idx = index[: len(iter_size)]
             reduce_idx = index[len(iter_size) :]
@@ -448,7 +443,6 @@ class LoopBodyBlock:
 
     def __init__(self, body: LoopBody, fn: Callable[..., Any], args: list[Any]):
         self.body = body
-
         tracer = LightTracer()
         proxy_ops = tracer.create_proxy("placeholder", "ops", (), {})
 
@@ -559,9 +553,8 @@ class CaptureIndexing(WrapperHandler):
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
         result = self._inner.reduction(dtype, src_dtype, reduction_type, value)
-        num_outputs = reduction_num_outputs(reduction_type)
-        if num_outputs > 1:
-            return tuple(result[i] for i in range(num_outputs))
+        if "welford" in reduction_type:
+            return tuple(result[i] for i in range(3))
         return result
 
     def index_expr(self, index, dtype):

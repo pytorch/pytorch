@@ -869,34 +869,6 @@ def clear_inductor_caches() -> None:
         obj.cache_clear()
 
 
-import gc
-
-
-def unload_xpu_triton_pyds() -> None:
-    # unload __triton_launcher.pyd
-    for module_name in list(sys.modules.keys()):
-        if not module_name.startswith("torch._inductor.runtime.compile_tasks."):
-            continue
-        m = sys.modules[module_name]
-        for attr_name in m.__dict__.keys():
-            if attr_name.startswith("triton_"):
-                kernel = getattr(m, attr_name)
-                if isinstance(
-                    kernel, torch._inductor.runtime.triton_heuristics.CachingAutotuner
-                ):
-                    for result in kernel.compile_results:
-                        result.kernel.run.mod.__del__()
-        del sys.modules[module_name]
-
-    # unload spirv_utils.pyd
-    if "triton.runtime.driver" in sys.modules:
-        mod = sys.modules["triton.runtime.driver"]
-        del type(mod.driver.active.utils).instance
-        del mod.driver.active.utils
-
-    gc.collect()
-
-
 @contextlib.contextmanager
 def fresh_inductor_cache(
     cache_entries: Optional[dict[str, Any]] = None,
@@ -932,9 +904,6 @@ def fresh_inductor_cache(
                             }
                         )
         if delete:
-            if is_windows() and torch.xpu.is_available():
-                unload_xpu_triton_pyds()
-
             shutil.rmtree(
                 inductor_cache_dir,
                 # Let's not fail if we can't clean up the temp dir. Also note that for
@@ -1009,12 +978,6 @@ class LineContext(NamedTuple):
     context: Any
 
 
-@dataclasses.dataclass
-class ValueWithLineMap:
-    value: str
-    line_map: list[tuple[int, LineContext]]
-
-
 class IndentedBuffer:
     tabwidth = 4
 
@@ -1022,10 +985,10 @@ class IndentedBuffer:
         self._lines: list[Union[DeferredLineBase, LineContext, str]] = []
         self._indent = initial_indent
 
-    def getvaluewithlinemap(self) -> ValueWithLineMap:
+    def getvaluewithlinemap(self) -> tuple[str, list[tuple[int, LineContext]]]:
         buf = StringIO()
         p = 1
-        linemap: list[tuple[int, LineContext]] = []
+        linemap = []
         for li in self._lines:
             if isinstance(li, DeferredLineBase):
                 line = li()
@@ -1040,10 +1003,11 @@ class IndentedBuffer:
             buf.write(line)
             buf.write("\n")
             p += 1 + line.count("\n")
-        return ValueWithLineMap(buf.getvalue(), linemap)
+        return buf.getvalue(), linemap
 
     def getvalue(self) -> str:
-        return self.getvaluewithlinemap().value
+        v, _ = self.getvaluewithlinemap()
+        return v
 
     def getrawvalue(self) -> str:
         buf = StringIO()
@@ -1640,14 +1604,12 @@ def get_code(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> list[str]:
                 # Don't do anything when called
                 pass
 
-        wrapper_code, kernel_code = (
+        code, _ = (
             self.codegen_with_cpp_wrapper() if self.cpp_wrapper else self.codegen()
         )
         # Skip all the actual compiling.
         nonlocal save_output_code
-        save_output_code(wrapper_code.value)
-        if kernel_code:
-            save_output_code(kernel_code.value)
+        save_output_code(code)
 
         return DummyModule()
 
@@ -1883,12 +1845,7 @@ def is_welford_reduction(reduction_type: str) -> bool:
 
 
 def reduction_num_outputs(reduction_type: str) -> int:
-    if is_welford_reduction(reduction_type):
-        return 3
-    elif reduction_type == "online_softmax_reduce":
-        return 2
-    else:
-        return 1
+    return 3 if is_welford_reduction(reduction_type) else 1
 
 
 def is_linux() -> bool:
@@ -2189,12 +2146,9 @@ def collect_defined_kernels(kernel_list: list[str]) -> Iterator[None]:
         kernel_code: str,
         metadata: Optional[str] = None,
         gpu: bool = True,
-        cpp_definition: Optional[str] = None,
     ) -> Any:
         kernel_list.append(kernel_code)
-        return orig_define_kernel(
-            self, kernel_name, kernel_code, metadata, gpu, cpp_definition
-        )
+        return orig_define_kernel(self, kernel_name, kernel_code, metadata, gpu)
 
     with mock.patch.object(PythonWrapperCodegen, "define_kernel", define_kernel):
         yield

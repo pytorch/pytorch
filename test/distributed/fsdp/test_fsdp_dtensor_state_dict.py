@@ -285,9 +285,9 @@ class TestFSDPWithDeviceMeshAndDTensor(DTensorTestBase):
                 FSDP.optim_state_dict(model, optim)
 
 
-devices = ("cuda", "hpu", "xpu")
+devices = ("cuda", "hpu")
 instantiate_device_type_tests(
-    TestFSDPWithDeviceMeshAndDTensor, globals(), only_for=devices, allow_xpu=True
+    TestFSDPWithDeviceMeshAndDTensor, globals(), only_for=devices
 )
 if __name__ == "__main__":
     run_tests()

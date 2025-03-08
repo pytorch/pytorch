@@ -10,7 +10,6 @@ import weakref
 from collections.abc import Generator, Iterable
 from enum import auto, Enum
 from functools import partial
-from itertools import chain
 from typing import Any, Callable, cast, no_type_check, Optional, TYPE_CHECKING
 
 import torch
@@ -372,7 +371,9 @@ def _get_handle_fqns_from_root(
         return None
     param_to_fqn = state._exec_order_data.param_to_fqn
     handle_params = handle.flat_param._params  # only populated for use_orig_params
-    param_fqns = [*chain.from_iterable(param_to_fqn[p] for p in handle_params)]
+    param_fqns = [
+        fqn for fqn_list in [param_to_fqn[p] for p in handle_params] for fqn in fqn_list
+    ]
     return param_fqns
 
 

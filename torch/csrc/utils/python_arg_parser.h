@@ -209,7 +209,7 @@ struct FunctionSignature {
 
 // PythonArgs contains bound Python arguments for an actual invocation
 // along with references to the matched signature.
-struct TORCH_PYTHON_API PythonArgs {
+struct PythonArgs {
   PythonArgs(
       bool traceable,
       const FunctionSignature& signature,
@@ -303,8 +303,6 @@ struct TORCH_PYTHON_API PythonArgs {
   inline std::optional<c10::DispatchKeySet> toDispatchKeySetOptional(int i);
 
  private:
-  // Non-inline functions' symbols are exposed to torch_python DLL
-  // via TORCH_PYTHON_API tag at struct level.
   at::Tensor tensor_slow(int i);
   at::Scalar scalar_slow(int i);
   at::Scalar scalar_slow(PyObject* arg);
@@ -322,7 +320,7 @@ struct FunctionParameter {
       int64_t* failed_idx = nullptr);
 
   void set_default_str(const std::string& str);
-  TORCH_PYTHON_API std::string type_name() const;
+  std::string type_name() const;
 
   ParameterType type_;
   bool optional;

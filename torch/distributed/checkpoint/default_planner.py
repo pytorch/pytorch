@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
-import copy
 import dataclasses
 import io
 import logging
@@ -157,10 +156,7 @@ class DefaultSavePlanner(SavePlanner):
         global_plan_delta: list[SavePlan] = []
 
         if self._cached_plans_key not in SavePlanner._cached_all_plans:
-            # Make a deepcopy of all_plans to avoid caching the modified plans post de-dupe
-            SavePlanner._cached_all_plans[self._cached_plans_key] = copy.deepcopy(
-                all_plans
-            )
+            SavePlanner._cached_all_plans[self._cached_plans_key] = all_plans
             global_plan, metadata = self._create_global_plan(all_plans)
             SavePlanner._cached_global_plan[self._cached_plans_key] = global_plan
             # If plans are not cached, global_plan delta will be the same as global plan.
@@ -171,11 +167,6 @@ class DefaultSavePlanner(SavePlanner):
         merged_plans = _merge_delta_local_plans(
             SavePlanner._cached_all_plans[self._cached_plans_key], all_plans
         )
-        # Make a deepcopy of merged_plans to avoid caching the modified plans post de-dupe
-        SavePlanner._cached_all_plans[self._cached_plans_key] = copy.deepcopy(
-            merged_plans
-        )
-
         global_plan, metadata = self._create_global_plan(merged_plans)
 
         if self._cached_plans_key in self._cached_global_plan:

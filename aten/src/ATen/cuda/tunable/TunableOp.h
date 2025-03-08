@@ -21,7 +21,6 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include <deque>
 
 namespace at::cuda::tunable {
 
@@ -85,25 +84,6 @@ class Stats {
     double _max;
 };
 
-class FixedSizeStack {
-  private:
-      std::deque<std::string> stack;
-      const size_t max_size;
-
-  public:
-      FixedSizeStack(size_t size) : max_size(size) {}
-
-      void push(const std::string& value) {
-          if (stack.size() >= max_size) {
-              stack.pop_front(); // Remove the oldest entry
-          }
-          stack.push_back(value); // Add new entry
-      }
-
-      auto rbegin() { return stack.rbegin(); }
-      auto rend() { return stack.rend(); }
-};
-
 } // anonymous namespace
 
 template <typename ParamsT>
@@ -118,7 +98,6 @@ class TunableOp {
         auto& mgr = ctx->GetTuningResultsManager();
         auto op_sig = Signature();
         auto params_sig = params->Signature();
-        auto blas_sig = params->BLASSignature();
         result = mgr.Lookup(op_sig, params_sig);
         // If there is not previous tuning result been found, we do the tuning iff tuning is enabled
         if (result == ResultEntry::Null()) {
@@ -128,7 +107,7 @@ class TunableOp {
           }
           else if (ctx->IsRecordUntunedEnabled()) {
             // or record the gemm into file
-            mgr.RecordUntuned(ctx->GetUntunedFile(), op_sig, params_sig, blas_sig);
+            mgr.RecordUntuned(ctx->GetUntunedFile(), op_sig, params_sig);
           }
         }
       }
@@ -225,12 +204,10 @@ class TunableOp {
       TuningContext* ctx = getTuningContext();
       auto op_sig = Signature();
       auto params_sig = params->Signature();
-      auto blas_sig = params->BLASSignature();
       TUNABLE_LOG2("finding fastest for ", op_sig, '(', params_sig, ')', " out of ", op_names_.size(), " candidates");
       auto min_duration_ms = std::numeric_limits<double>::infinity();
       std::string id_name = "Default";
       ParamsT* reference_params = nullptr;
-      auto top_solns = FixedSizeStack(5);
 
       // numeric check option is controlled by non-static env var, so check it once per tuned operator
       bool do_numerics_check = ctx->IsNumericsCheckEnabled();
@@ -372,8 +349,6 @@ class TunableOp {
                 " std ", s_stddev);
           min_duration_ms = s._mean;
           id_name = op_names_[i];
-          std::string current_soln = std::to_string(s._mean) + " " + op_names_[i];
-          top_solns.push(current_soln);
         }
         else {
           TUNABLE_LOG3("├──found slower instance id=", i, ". " , s._mean, "ms. ", op_names_[i],
@@ -392,10 +367,6 @@ class TunableOp {
       }
 
       TUNABLE_LOG2("└──found fastest for ", op_sig, '(', params_sig, ") ", id_name);
-      TUNABLE_LOG2("└──top five solutions for ", op_sig, '(', params_sig, ") ");
-      for (auto it = top_solns.rbegin(); it != top_solns.rend(); ++it) {
-        TUNABLE_LOG2("   ", *it);
-      }
       return ResultEntry(id_name, min_duration_ms);
     }
 
@@ -424,7 +395,6 @@ class TunableOp {
 struct OpParams {
   virtual ~OpParams() = default;
   virtual std::string Signature() const = 0;
-  virtual std::string BLASSignature() const = 0;
 };
 
 } // namespace at::cuda::tunable

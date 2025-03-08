@@ -1,6 +1,5 @@
 // Implementation of specal math functions for Metal
 #pragma once
-#include <c10/metal/utils.h>
 #include <metal_stdlib>
 
 namespace c10 {
@@ -453,18 +452,18 @@ inline float digamma(T0 x) {
 }
 
 template <typename T>
-inline ::metal::enable_if_t<is_scalar_floating_point_v<T>, T> sinc(T a) {
+inline T sinc(T a) {
   if (a == static_cast<T>(0)) {
     return static_cast<T>(1);
   }
-  auto product = M_PI_F * static_cast<float>(a);
-  return static_cast<T>(::metal::precise::sin(product) / product);
+  constexpr T pi = static_cast<T>(M_PI_F);
+  T product = pi * a;
+  return static_cast<T>(::metal::sin(product) / product);
 }
 
 // Complex sinc2 implementation
-template <typename T>
-inline ::metal::enable_if_t<is_complex_v<T>, T> sinc(T inp) {
-  auto a = static_cast<float2>(inp) * M_PI_F;
+inline float2 sinc(float2 inp) {
+  float2 a = inp * M_PI_F;
   const float a2 = a.x * a.x + a.y * a.y;
   if (a2 == 0) {
     return 0;
@@ -475,7 +474,7 @@ inline ::metal::enable_if_t<is_complex_v<T>, T> sinc(T inp) {
   float coshy = ::metal::cosh(a.y);
   auto re = sinx * coshy * a.x + cosx * sinhy * a.y;
   auto im = cosx * sinhy * a.x - sinx * coshy * a.y;
-  return T(re, im) / a2;
+  return float2(re, im) / a2;
 }
 
 template <typename T>

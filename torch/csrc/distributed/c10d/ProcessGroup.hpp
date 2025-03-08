@@ -875,17 +875,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   }
 
   bool hasHooks() const {
-    // `getDefaultBackend` will throw today if the backend is set to `undefined`
-    // (in case of `init_process_group(nothing)`)
-    try {
-      return getDefaultBackend()->hasHooks();
-    } catch (const std::exception& e) {
-      TORCH_WARN(
-          "Failed to check if ProcessGroup has hooks: ",
-          e.what(),
-          ". Assuming no hooks are registered.");
-      return false;
-    }
+    return getDefaultBackend()->hasHooks();
   }
 
   virtual const std::string& getGroupName() const;

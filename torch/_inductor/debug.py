@@ -526,15 +526,14 @@ class DebugFormatter:
             fd.write(gm.print_readable(print_output=False))
 
     def ir_pre_fusion(self, nodes: SchedulerNodeList) -> None:
-        with self.fopen("ir_pre_fusion.txt") as fd:
-            fd.write(self._write_ir(nodes))
+        if ir_pre_fusion_log.isEnabledFor(logging.INFO):
+            ir_pre_fusion_log.info("BEFORE FUSION\n%s", self._write_ir(nodes))
 
     def ir_post_fusion(self, nodes: SchedulerNodeList) -> None:
-        with self.fopen("ir_post_fusion.txt") as fd:
-            fd.write(self._write_ir(nodes))
+        if ir_post_fusion_log.isEnabledFor(logging.INFO):
+            ir_post_fusion_log.info("AFTER FUSION\n%s", self._write_ir(nodes))
 
-    @staticmethod
-    def _write_ir(nodes: SchedulerNodeList) -> str:
+    def _write_ir(self, nodes: SchedulerNodeList) -> str:
         buf = io.StringIO()
         for node in nodes:
             buf.write(node.debug_str())
@@ -668,20 +667,6 @@ class DebugFormatter:
                 info_dict["benchmark_result"] = time
                 json.dump(info_dict, fd)
                 fd.write("\n")
-
-
-def log_ir_pre_fusion(nodes: SchedulerNodeList) -> None:
-    if ir_pre_fusion_log.isEnabledFor(logging.INFO):
-        ir_pre_fusion_log.info("BEFORE FUSION\n%s", DebugFormatter._write_ir(nodes))
-
-    V.debug.ir_pre_fusion(nodes)
-
-
-def log_ir_post_fusion(nodes: SchedulerNodeList) -> None:
-    if ir_post_fusion_log.isEnabledFor(logging.INFO):
-        ir_post_fusion_log.info("AFTER FUSION\n%s", DebugFormatter._write_ir(nodes))
-
-    V.debug.ir_post_fusion(nodes)
 
 
 @dataclasses.dataclass
