@@ -459,7 +459,9 @@ class AOTInductorTestsTemplate:
         compile_inputs = (torch.randn(2048, 1, device=self.device),)
         dim0_x = Dim("dim0_x", min=2, max=2048)
         dynamic_shapes = {"x": {0: dim0_x}}
-        ep = torch.export.export(model, compile_inputs, dynamic_shapes=dynamic_shapes)
+        ep = torch.export.export(
+            model, compile_inputs, dynamic_shapes=dynamic_shapes, strict=True
+        )
         optimized = torch._inductor.aoti_load_package(
             torch._inductor.aoti_compile_and_package(
                 ep,
