@@ -27,7 +27,6 @@ import enum
 import functools
 import importlib
 import inspect
-import itertools
 import logging
 import math
 import sys
@@ -1628,15 +1627,11 @@ class GuardBuilder(GuardBuilderBase):
                 DeviceMesh,
             )
 
-        if istype(val, dict):
-            assert all(
-                istype(x, ok_types) for x in itertools.chain(val.keys(), val.values())
-            )
-        else:
-            assert istype(
-                val,
-                ok_types,
-            ), f"Unexpected type {type(val)}, not in {ok_types}"
+        import torch.utils._pytree as pytree
+
+        assert istype(val, ok_types) or pytree.is_constant_class(type(val)), (
+            f"Unexpected type {type(val)}"
+        )
 
         # Special case for nan because float("nan") == float("nan") evaluates to False
         if istype(val, float) and math.isnan(val):
@@ -1668,7 +1663,7 @@ class GuardBuilder(GuardBuilderBase):
         code = [f"{ref} == {val!r}"]
         if istype(val, ok_mutable_types):
             # C++ guards perform a pointer equality check to speedup guards, but the assumption is that the object
-            # is mutable. For a few corner cases like sets and lists, we make a deepcopy to purposefully fail the
+            # is immutable. For a few corner cases like sets and lists, we make a deepcopy to purposefully fail the
             # pointer equality check.
             val = deepcopy(val)
         self.get_guard_manager(guard).add_equals_match_guard(

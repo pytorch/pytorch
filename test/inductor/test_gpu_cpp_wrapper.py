@@ -11,7 +11,7 @@ from torch._inductor.utils import is_gpu
 from torch.testing._internal.common_device_type import (
     get_desired_device_type_test_bases,
 )
-from torch.testing._internal.common_utils import slowTest, TEST_WITH_ASAN
+from torch.testing._internal.common_utils import slowTest
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -40,10 +40,8 @@ except unittest.SkipTest:
 
 
 _desired_test_bases = get_desired_device_type_test_bases(allow_xpu=True)
-RUN_GPU = (
-    HAS_GPU
-    and any(is_gpu(getattr(x, "device_type", "")) for x in _desired_test_bases)
-    and not TEST_WITH_ASAN
+RUN_GPU = HAS_GPU and any(
+    is_gpu(getattr(x, "device_type", "")) for x in _desired_test_bases
 )
 
 

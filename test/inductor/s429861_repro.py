@@ -668,8 +668,7 @@ def forward(
         getitem_155,
         getitem_156,
         getitem_157,
-        *__,
-    ) = (None,) * 1024
+    ) = (None,) * 79
     getitem_158: "f32[50][1]cuda:0" = _foreach_mul_1[0]
     getitem_159: "f32[23][1]cuda:0" = _foreach_mul_1[1]
     getitem_160: "f32[38][1]cuda:0" = _foreach_mul_1[2]
@@ -916,8 +915,7 @@ def forward(
         getitem_234,
         getitem_235,
         getitem_236,
-        *__,
-    ) = (None,) * 1024
+    ) = (None,) * 79
     getitem_237: "f32[50][1]cuda:0" = _foreach_add[0]
     getitem_238: "f32[23][1]cuda:0" = _foreach_add[1]
     getitem_239: "f32[38][1]cuda:0" = _foreach_add[2]
@@ -1323,8 +1321,7 @@ def forward(
         getitem_313,
         getitem_314,
         getitem_315,
-        *__,
-    ) = (None,) * 1024
+    ) = (None,) * 158
     getitem_316: "f32[50][1]cuda:0" = _foreach_div[0]
     getitem_317: "f32[23][1]cuda:0" = _foreach_div[1]
     getitem_318: "f32[38][1]cuda:0" = _foreach_div[2]
@@ -1571,8 +1568,7 @@ def forward(
         getitem_392,
         getitem_393,
         getitem_394,
-        *__,
-    ) = (None,) * 1024
+    ) = (None,) * 79
     getitem_395: "f32[][]cuda:0" = _foreach_norm[0]
     getitem_396: "f32[][]cuda:0" = _foreach_norm[1]
     getitem_397: "f32[][]cuda:0" = _foreach_norm[2]
@@ -1819,8 +1815,7 @@ def forward(
         getitem_471,
         getitem_472,
         getitem_473,
-        *__,
-    ) = (None,) * 1024
+    ) = (None,) * 79
     getitem_474: "f32[][]cuda:0" = _foreach_maximum[0]
     getitem_475: "f32[][]cuda:0" = _foreach_maximum[1]
     getitem_476: "f32[][]cuda:0" = _foreach_maximum[2]
@@ -2313,8 +2308,7 @@ def forward(
         getitem_550,
         getitem_551,
         getitem_552,
-        *__,
-    ) = (None,) * 1024
+    ) = (None,) * 158
     getitem_632: "f32[1][1]cuda:0" = _foreach_div_1[0]
     getitem_633: "f32[1][1]cuda:0" = _foreach_div_1[1]
     getitem_634: "f32[1][1]cuda:0" = _foreach_div_1[2]
@@ -3196,8 +3190,7 @@ def forward(
         arg156_1,
         arg157_1,
         arg158_1,
-        *__,
-    ) = (None,) * 1024
+    ) = (None,) * 79
     getitem_6952: "f32[50][1]cuda:0" = _foreach_add_1[0]
     getitem_6953: "f32[23][1]cuda:0" = _foreach_add_1[1]
     getitem_6954: "f32[38][1]cuda:0" = _foreach_add_1[2]
@@ -3603,8 +3596,7 @@ def forward(
         getitem_6791,
         getitem_6871,
         getitem_6951,
-        *__,
-    ) = (None,) * 1024
+    ) = (None,) * 158
     getitem_7031: "f32[50][1]cuda:0" = _foreach_mul_2[0]
     getitem_7032: "f32[23][1]cuda:0" = _foreach_mul_2[1]
     getitem_7033: "f32[38][1]cuda:0" = _foreach_mul_2[2]
