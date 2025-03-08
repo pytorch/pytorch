@@ -136,7 +136,7 @@ jobs:
           docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}"  -m pip install -U setuptools==67.4.0 pybind11==2.13.1 auditwheel wheel
 
           if [[ "${{ matrix.device }}" == "aarch64" ]]; then
-            docker exec -t "${container_name}" bash -c  "yum install -y ninja-build"
+            docker exec -t "${container_name}" bash -c "cd ~/ && wget https://github.com/ninja-build/ninja/releases/download/v1.12.1/ninja-linux-aarch64.zip && unzip ninja-linux-aarch64.zip && mv -f ./ninja /usr/bin/ninja && rm ninja-linux-aarch64.zip"
           fi
 
           if [[ ("${{ matrix.device }}" == "cuda" || "${{ matrix.device }}" == "rocm" || "${{ matrix.device }}" == "aarch64" ) ]]; then
