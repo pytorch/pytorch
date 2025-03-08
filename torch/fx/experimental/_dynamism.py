@@ -41,7 +41,8 @@ def module_to_nested_dict(module: torch.nn.Module) -> dict[str, Any]:
                 ):
                     self_dict[attr_name] = attr_value
         except NotImplementedError:
-            # Skip attributes that cause exceptions when accessed
+            # Skip attributes that raise NotImplementedError since they won't
+            # contain any dynamism anyways.
             continue
 
     for name, param in module.named_parameters(recurse=False):
