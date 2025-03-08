@@ -39,7 +39,7 @@ struct TORCH_API PyCompilerInterface {
       // NOLINTNEXTLINE(performance-unnecessary-value-param)
       std::vector<at::TypePtr> packed_args_schema,
       bool is_custom_function = false,
-      bool is_traceable = true) {
+      bool is_traceable = true) const {
     TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
   }
 
@@ -51,14 +51,14 @@ struct TORCH_API PyCompilerInterface {
       const std::string& fn_name,
       const variable_list& inputs,
       const ivalue_list& packed_args,
-      const c10::IValue& output_metadata) {
+      const c10::IValue& output_metadata) const {
     TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
   }
   virtual variable_list call_copy_slices_prologue(
       PyObject* py_compiler,
       const variable_list& inputs,
       const at::TensorGeometry& base,
-      const at::TensorGeometry& view) {
+      const at::TensorGeometry& view) const {
     TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
   }
   virtual variable_list call_copy_slices_epilogue(
@@ -66,13 +66,13 @@ struct TORCH_API PyCompilerInterface {
       const std::vector<bool>& needs_input_grad,
       const at::Tensor& result,
       const variable_list& res,
-      const at::Tensor& grad_slice) {
+      const at::Tensor& grad_slice) const {
     TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
   }
   virtual at::Tensor call_unpack(
       PyObject* py_compiler,
       std::optional<size_t> hook_id,
-      size_t hook_input_id) {
+      size_t hook_input_id) const {
     TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
   }
 };
