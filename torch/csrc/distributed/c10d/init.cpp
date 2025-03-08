@@ -1961,6 +1961,16 @@ communication mechanism.
           .def("rank", &::c10d::ProcessGroup::getRank, R"(Get the rank of this process group.)")
           .def("size", &::c10d::ProcessGroup::getSize, R"(Get the size of this process group.)")
           .def("name", &::c10d::ProcessGroup::getBackendName, R"(Get the name of this process group.)")
+          .def(
+              "abort",
+              &::c10d::ProcessGroup::abort,
+              py::call_guard<py::gil_scoped_release>(),
+              "abort all operations and connections if supported by the backend")
+          .def(
+              "shutdown",
+              &::c10d::ProcessGroup::shutdown,
+              py::call_guard<py::gil_scoped_release>(),
+              "shutdown the process group")
           .def("_id", &::c10d::ProcessGroup::getID)
           .def(
               "_backend_id",
@@ -2478,6 +2488,16 @@ Arguments:
           .def("rank", &::c10d::Backend::getRank)
           .def("size", &::c10d::Backend::getSize)
           .def("name", &::c10d::Backend::getBackendName)
+          .def(
+              "abort",
+              &::c10d::Backend::abort,
+              py::call_guard<py::gil_scoped_release>(),
+              "abort all operations and connections if supported by the backend")
+          .def(
+              "shutdown",
+              &::c10d::Backend::shutdown,
+              py::call_guard<py::gil_scoped_release>(),
+              "shutdown the backend")
           .def_property_readonly(
               "supports_splitting",
               &::c10d::Backend::supportsSplitting,
@@ -2972,12 +2992,6 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               py::arg("size"),
               py::arg("timeout") = ::c10d::kProcessGroupNCCLDefaultTimeout,
               R"(Create a new ProcessGroupNCCL instance.)")
-          .def(
-              "_shutdown",
-              [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self) {
-                return self->shutdown();
-              },
-              py::call_guard<py::gil_scoped_release>())
           .def("_group_start", &::c10d::ProcessGroupNCCL::groupStart)
           .def("_group_end", &::c10d::ProcessGroupNCCL::groupEnd)
           .def(
@@ -3025,11 +3039,6 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           .def(
               "deregister_mem_pool",
               &::c10d::ProcessGroupNCCL::deregisterMemPool)
-          .def(
-              "abort",
-              &::c10d::ProcessGroupNCCL::abort,
-              py::call_guard<py::gil_scoped_release>(),
-              R"(Abort the process group.)")
           .def(
               "_is_initialized",
               &::c10d::ProcessGroupNCCL::isInitialized,
