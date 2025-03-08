@@ -115,10 +115,13 @@ def vector_norm(
     if isinstance(dim, Dim):
         dim = [dim]  # type: ignore[assignment]
 
-    # The effect of guard_or_false here is avoid having the additional checks when we do
-    # not know if x.numel() == 0. Alternatively, we could append to all those checks 
-    x.numel()!= 0 or 
-    # and keep them.
+    # The effect of guard_or_false(x.numel() == 0) here is avoid having the additional 
+    # checks that we do when x.numel() == 0.
+
+    # Alternatively, we could append to all those checks sym_or(x.numel()!= 0, the check) 
+    # by doing so we would convert those to runtime checks they would always be running 
+    # without any deviation from backed semantics except that triggered at runtime 
+    # instead of compile time for backed.
     if (ord < 0.0 or ord == float("inf")) and guard_or_false(x.numel() == 0):
         torch._check(
             dim is not None and len(dim) != 0,
