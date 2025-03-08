@@ -118,7 +118,7 @@ def get_source_partitions(
                     output_nodes.add(node)
 
         # Sort input_nodes deterministically after populating it
-        sorted_input_nodes = sorted(input_nodes, key=lambda node: str(node))
+        sorted_input_nodes = sorted(input_nodes, key=str)
 
         return SourcePartition(
             nodes,
