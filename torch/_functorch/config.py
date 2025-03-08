@@ -223,6 +223,30 @@ graphsafe_rng_functionalization = True
 # Used for tests
 strict_autograd_cache = False
 
+# Note [Recomputing collectives in the partitioner]
+# The purpose of this config is as follows:
+# - We have many passes in the compiler (min-cut partitioning, DCE, etc)
+#   which can reorder or ,delete duplicate nodes in the graph
+# - If any of these passes reorder/delete/duplicate a collective
+#   in a setting where the compiler is being run independently on multiple
+#   ranks, we run the risk that the compiler will make a different decison on
+#   different ranks, resulting in a NCCL hang when using torch.compile
+# To handle this, we will (by default) ensure that collectives are not modified
+# by the compiler.
+#
+# A few examples:
+# - don't dead-code-eliminate collectives
+#   (in case they are dead on rank i but not rank j)
+# - don't recompute collectives in partitioning
+#   (in case we recompute on rank i but not rank j)
+#
+# Today this flag **must** be set to false, but eventually
+# we want the option to set it to true.
+# In order to potentially optimize collectives, we'll need the compiler
+# to broadcast information across ranks at compile time to ensure
+# that any decisions on collectives are made consistently.
+unsafe_allow_optimization_of_collectives = False
+
 # See Note [AOTAutograd Tangent Subclassness for mutated inputs]
 # TODO(ivankobzarev): Remove this config, being able to deduce it compile time.
 disable_guess_zero_tangent_for_mutated_input_subclass = False
