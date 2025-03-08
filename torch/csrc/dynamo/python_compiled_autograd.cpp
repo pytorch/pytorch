@@ -163,7 +163,7 @@ struct PyCompilerInterfaceImpl : PyCompilerInterface {
       functional_apply_t fn,
       std::vector<at::TypePtr> packed_args_schema,
       bool is_custom_function = false,
-      bool is_traceable = true) override {
+      bool is_traceable = true) const override {
     return torch::dynamo::autograd::bind_function(
         py_compiler,
         fn_name,
@@ -178,7 +178,7 @@ struct PyCompilerInterfaceImpl : PyCompilerInterface {
       const std::string& fn_name,
       const variable_list& inputs,
       const ivalue_list& packed_args,
-      const c10::IValue& output_metadata) override {
+      const c10::IValue& output_metadata) const override {
     return torch::dynamo::autograd::call_function(
         py_compiler,
         method_name,
@@ -191,10 +191,16 @@ struct PyCompilerInterfaceImpl : PyCompilerInterface {
       PyObject* py_compiler,
       const variable_list& inputs,
       const at::TensorGeometry& base,
-      const at::TensorGeometry& view) override {
+      const at::TensorGeometry& view) const override {
     py::handle handle(py_compiler);
-    py::object stuff =
-        handle.attr("call_copy_slices_prologue")(inputs, base, view);
+    py::object stuff = handle.attr("call_copy_slices_prologue")(
+        inputs,
+        base.sym_sizes(),
+        base.sym_strides(),
+        base.sym_storage_offset(),
+        view.sym_sizes(),
+        view.sym_strides(),
+        view.sym_storage_offset());
     return py::cast<std::vector<at::Tensor>>(stuff);
   }
   variable_list call_copy_slices_epilogue(
@@ -202,7 +208,7 @@ struct PyCompilerInterfaceImpl : PyCompilerInterface {
       const std::vector<bool>& needs_input_grad,
       const at::Tensor& result,
       const variable_list& res,
-      const at::Tensor& grad_slice) override {
+      const at::Tensor& grad_slice) const override {
     py::handle handle(py_compiler);
     py::object stuff = handle.attr("call_copy_slices_epilogue")(
         needs_input_grad, result, res, grad_slice);
@@ -212,7 +218,7 @@ struct PyCompilerInterfaceImpl : PyCompilerInterface {
   at::Tensor call_unpack(
       PyObject* py_compiler,
       std::optional<size_t> hook_id,
-      size_t hook_input_id) override {
+      size_t hook_input_id) const override {
     py::handle handle(py_compiler);
     py::object proxy = handle.attr("unpack_hook")(hook_id, hook_input_id);
     auto tmp = py::cast<std::optional<at::Tensor>>(proxy);
