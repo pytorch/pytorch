@@ -353,8 +353,11 @@ struct TORCH_API RecordFunction {
 
   RecordFunction(const RecordFunction&) = delete;
   RecordFunction& operator=(const RecordFunction&) = delete;
+  RecordFunction(RecordFunction&&) = delete;
+  RecordFunction& operator=(RecordFunction&&) = delete;
 
   const char* name() const;
+  const char* overload_name() const;
 
   int64_t seqNr() const {
     return sequence_nr_;
@@ -764,6 +767,10 @@ class TORCH_API RecordFunctionGuard {
     enableRecordFunction(is_enabled);
   }
 
+  RecordFunctionGuard(RecordFunctionGuard&& other) = delete;
+  RecordFunctionGuard(const RecordFunctionGuard&) = delete;
+  RecordFunctionGuard& operator=(const RecordFunctionGuard&) = delete;
+  RecordFunctionGuard& operator=(RecordFunctionGuard&&) = delete;
   virtual ~RecordFunctionGuard() {
     enableRecordFunction(prev_value_);
   }

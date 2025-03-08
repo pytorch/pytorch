@@ -38,35 +38,36 @@
 #include <mutex>
 #include <optional>
 
+// clang-format off
 C10_DEFINE_bool(
     torch_jit_enable_new_executor,
     true,
-    "If this flag is set to false TorchScript will be using the legacy/original executor");
+    "If this flag is set to false TorchScript will be using the legacy/original executor")
 
 C10_DEFINE_bool(
     torch_jit_disable_warning_prints,
     false,
-    "Disables warning.warn prints in TorchScript graph");
+    "Disables warning.warn prints in TorchScript graph")
 
 C10_DEFINE_bool(
     torch_jit_static_then_dynamic,
     false,
-    "fuse on two static compilations then 10 dynamic");
+    "fuse on two static compilations then 10 dynamic")
 
 C10_DEFINE_bool(
     torch_jit_always_dynamic,
     false,
-    "fuse on 12 dynamic compilations");
+    "fuse on 12 dynamic compilations")
 
 C10_DEFINE_bool(
     torch_jit_release_profiling_graph_after_optimization,
     false,
-    "After getOptimizedPlanFor release the optimization record for reduction of memory in inference. This is aggressive memory saving, and please be cautious!");
+    "After getOptimizedPlanFor release the optimization record for reduction of memory in inference. This is aggressive memory saving, and please be cautious!")
 
 C10_DEFINE_int32(
     torch_jit_release_profiling_graph_delay_in_seconds,
     60,
-    "How long to wait before releasing the profiling graph after optimizaiton is done. Only used if torch_jit_release_profiling_graph_after_optimization is set to true.");
+    "How long to wait before releasing the profiling graph after optimizaiton is done. Only used if torch_jit_release_profiling_graph_after_optimization is set to true.")
 
 constexpr size_t kDefaultNumProfiledRuns = 1;
 constexpr size_t kDefaultBailoutDepth = 20;
@@ -74,11 +75,11 @@ constexpr size_t kDefaultBailoutDepth = 20;
 C10_DEFINE_int64(
     torch_jit_num_profiled_runs,
     kDefaultNumProfiledRuns,
-    "Number of profiling runs");
+    "Number of profiling runs")
 C10_DEFINE_int64(
     torch_jit_bailout_depth,
     kDefaultBailoutDepth,
-    "Number of re-specializations");
+    "Number of re-specializations")
 
 namespace torch::jit {
 

@@ -2,11 +2,11 @@
 import logging
 import math
 from collections import defaultdict
-from typing import Dict
 
 import torch
 import torch.distributed as dist
 from torch.distributed import distributed_c10d
+from torch.utils._typing_utils import not_none
 
 from . import default_hooks as default
 
@@ -251,9 +251,9 @@ class PowerSGDState:
         self.rng = np.random.RandomState(random_seed)
         # Since there is only a single state instance for all the input buckets,
         # need to maintain a dictionary that maps each bucket index to the local error.
-        self.error_dict: Dict[int, torch.Tensor] = {}
-        self.p_memory_dict: Dict[int, torch.Tensor] = {}
-        self.q_memory_dict: Dict[int, torch.Tensor] = {}
+        self.error_dict: dict[int, torch.Tensor] = {}
+        self.p_memory_dict: dict[int, torch.Tensor] = {}
+        self.q_memory_dict: dict[int, torch.Tensor] = {}
         # Iteration/step in the training loop.
         self.iter = 0
         # Compression stats accumulators
@@ -398,7 +398,9 @@ def powerSGD_hook(
         >>> ddp_model.register_comm_hook(state, powerSGD_hook)
     """  # noqa: B950
     process_group = state.process_group
-    group_to_use = process_group if process_group is not None else dist.group.WORLD
+    group_to_use = (
+        process_group if process_group is not None else not_none(dist.group.WORLD)
+    )
     world_size = group_to_use.size()
 
     # The input tensor is a flattened 1D tensor.
@@ -707,7 +709,9 @@ def batched_powerSGD_hook(
         >>> ddp_model.register_comm_hook(state, batched_powerSGD_hook)
     """  # noqa: B950
     process_group = state.process_group
-    group_to_use = process_group if process_group is not None else dist.group.WORLD
+    group_to_use = (
+        process_group if process_group is not None else not_none(dist.group.WORLD)
+    )
     world_size = group_to_use.size()
 
     # The input tensor is a flattened 1D tensor.

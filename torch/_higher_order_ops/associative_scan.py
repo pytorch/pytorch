@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 import itertools
-from typing import Any, Callable, List
+from typing import Any, Callable
 
 import torch
 import torch._prims_common as utils
@@ -15,8 +15,8 @@ from torch._higher_order_ops.utils import (
     first_slice_copy,
     reenter_make_fx,
     unique_graph_id,
+    validate_subgraph_args_types,
 )
-from torch._inductor.utils import is_pointwise_use
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._subclasses.functional_tensor import disable_functional_mode
@@ -118,8 +118,16 @@ class AssociativeScanOp(HigherOrderOperator):
     def __init__(self):
         super().__init__("associative_scan")
 
-    def __call__(self, combine_fn, xs):
-        return super().__call__(combine_fn, xs)
+    def __call__(self, combine_fn, xs, additional_inputs):
+        # There is currently an issue that the ScanOp is sometimes called with
+        # the additional_inputs being a list. See https://github.com/pytorch/pytorch/issues/145785
+        # Once this issue is resolved, the assertion should only allow tuples
+        # and the tuple cast should be removed
+        assert isinstance(
+            additional_inputs, (tuple, list)
+        ), "additional_inputs must be a tuple."
+        validate_subgraph_args_types(additional_inputs)
+        return super().__call__(combine_fn, xs, additional_inputs)
 
 
 associative_scan_op = AssociativeScanOp()
@@ -177,9 +185,9 @@ def associative_scan(
             "Combine_mode must either 'pointwise' or 'generic', but got {combine_mode}"
         )
 
-    if not torch._dynamo.is_compiling():
+    if not torch.compiler.is_compiling():
         with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
-            return torch.compile(associative_scan, fullgraph=True)(
+            return torch.compile(associative_scan, fullgraph=True, backend="eager")(
                 combine_fn, xs, dim, reverse=reverse, combine_mode=combine_mode
             )
 
@@ -196,7 +204,7 @@ def associative_scan(
         raise ValueError("xs leaves must be a Tensor")
     if any(x.is_sparse for x in leaves):
         raise ValueError("xs leaves must dense Tensors, consider using `to_dense()`")
-    if any(x.ndim < dim for x in leaves):
+    if any(x.ndim <= dim for x in leaves):
         raise ValueError(
             "All xs leaves must at least have 'dim' number of dimensions and scan dimension > 0"
         )
@@ -211,15 +219,10 @@ def associative_scan(
     ndim = leaves[0].ndim
     orig_scan_dim = utils.canonicalize_dim(ndim, dim)
     leaves = [torch.movedim(elem, dim, 0) for elem in leaves]
-    shape = leaves[0].shape
-
-    for x in leaves[1:]:
-        assert x.shape == shape, "All xs tensors must have the same shape"
 
     # Call the combine_fn with only a slice along the scan dim
     # and check whether the output leaves have the same slice dimensions
-    sliced_leaves = [first_slice_copy(leaf, dim) for leaf in leaves]
-    sliced_shape = sliced_leaves[0].shape
+    sliced_leaves = [first_slice_copy(leaf) for leaf in leaves]
 
     out = combine_fn(
         pytree.tree_unflatten(sliced_leaves, spec),
@@ -231,7 +234,7 @@ def associative_scan(
             "The number of leaves of the pytree of the output of the operator needs to match the length of the pytree of the input"
         )
     if any(
-        x.shape != sliced_shape
+        x.shape != x_sliced.shape
         or x.dtype != x_sliced.dtype
         or x.device != x_sliced.device
         or x.stride() != x_sliced.stride()
@@ -258,7 +261,6 @@ def associative_scan(
         #            [torch.tensor([[1.0, 3.0],
         #                           [1.0, 3.0]])])
         # The arguments are of shape 2 x 2, but can be evaluated in parallel along the scan dimension.
-        # TODO: In case of the additional inputs, we the in_dims should be set to None
         combine_fn = functools.partial(
             wrap_combine_fn_flat,
             combine_fn=torch.vmap(
@@ -272,7 +274,7 @@ def associative_scan(
             spec=spec,
             num_leaves=len(leaves),
         )
-        result_flat = generic_associative_scan(combine_fn, leaves)
+        result_flat = generic_associative_scan(combine_fn, leaves, additional_inputs=())
     else:
         combine_fn = functools.partial(
             wrap_combine_fn_flat,
@@ -280,7 +282,7 @@ def associative_scan(
             spec=spec,
             num_leaves=len(leaves),
         )
-        result_flat = associative_scan_op(combine_fn, leaves)
+        result_flat = associative_scan_op(combine_fn, leaves, additional_inputs=())
 
     if reverse:
         result_flat = [torch.flip(elem, [0]) for elem in result_flat]
@@ -290,7 +292,7 @@ def associative_scan(
     return pytree.tree_unflatten(result_flat, spec)
 
 
-def generic_associative_scan(operator, leaves, dim=0):
+def generic_associative_scan(operator, leaves, dim=0, additional_inputs=()):
     r"""
     This function performs the associative_scan operation.
     The algorithm works by recursively collecting neighbours of ``leaves`` and subsequently
@@ -305,7 +307,8 @@ def generic_associative_scan(operator, leaves, dim=0):
             ``xs`` provided to ``associative_scan``.
             All inputs are expected to have the same shape.
         dim (int): the dimension to scan over
-
+        additional_inputs (Tuple of tensors): A tuple of lifted parameters from the global scope.
+            This parameter will be populated internally.
 
     Example::
 
@@ -348,6 +351,7 @@ def generic_associative_scan(operator, leaves, dim=0):
         reduced_elems = operator(
             *[aten.slice(elem, dim, 0, -1, 2) for elem in elems],
             *[aten.slice(elem, dim, 1, None, 2) for elem in elems],
+            *additional_inputs,
         )
 
         # Recursively compute scan for partially reduced tensors.
@@ -357,11 +361,13 @@ def generic_associative_scan(operator, leaves, dim=0):
             even_elems = operator(
                 *[aten.slice(e, dim, 0, -1) for e in odd_elems],
                 *[aten.slice(e, dim, 2, None, 2) for e in elems],
+                *additional_inputs,
             )
         else:
             even_elems = operator(
                 *odd_elems,
                 *[aten.slice(e, dim, 2, None, 2) for e in elems],
+                *additional_inputs,
             )
 
         # The first element of a scan is the same as the first element
@@ -387,11 +393,15 @@ def generic_associative_scan(operator, leaves, dim=0):
 
 
 def trace_associative_scan(
-    proxy_mode, func_overload, combine_fn: Callable, xs: List[torch.Tensor]
+    proxy_mode,
+    func_overload,
+    combine_fn: Callable,
+    xs: list[torch.Tensor],
+    additional_inputs: tuple[torch.Tensor],
 ):
     with disable_proxy_modes_tracing():
         sample_xs = [first_slice_copy(x) for x in itertools.chain(xs, xs)]
-        combine_graph = reenter_make_fx(combine_fn)(*sample_xs)
+        combine_graph = reenter_make_fx(combine_fn)(*sample_xs, *additional_inputs)
 
     outputs = None
     for node in combine_graph.graph.nodes:
@@ -399,11 +409,6 @@ def trace_associative_scan(
             assert outputs is None
             assert len(node.args) == 1
             outputs = node.args[0]
-
-        if not all(is_pointwise_use(use) or use.op == "output" for use in node.users):
-            raise ValueError(
-                "For combine_mode='pointwise', the combine_fn needs to be pointwise"
-            )
 
     assert outputs is not None
     assert len(outputs) == len(
@@ -421,21 +426,21 @@ def trace_associative_scan(
 
     proxy_mode.tracer.root.register_module(combine_graph_name, combine_graph)
 
-    args = (combine_graph, xs)
+    args = (combine_graph, xs, additional_inputs)
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, args)
     out_proxy = proxy_mode.tracer.create_proxy(
         "call_function", func_overload, proxy_args, {}, name="associative_scan"
     )
 
     with disable_proxy_modes_tracing():
-        out = [aten.clone(x) for x in xs]
+        out = tuple(aten.clone(x) for x in xs)
 
     return track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
 
 
 @associative_scan_op.py_impl(DispatchKey.CompositeExplicitAutograd)
-def associative_scan_op_dense(combine_fn, xs):
-    return generic_associative_scan(combine_fn, xs)
+def associative_scan_op_dense(combine_fn, xs, additional_inputs):
+    return generic_associative_scan(combine_fn, xs, additional_inputs=additional_inputs)
 
 
 class AssociativeScanAutogradOp(torch.autograd.Function):
@@ -457,231 +462,6 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
         with torch._C._AutoDispatchBelowAutograd():
             outs = associative_scan_op(fw_graph, xs)
             ctx.save_for_backward(*(*xs, *outs))
-            
-        # # BWD in FWD
-        # dim = 0
-        # ndim = outs[0].ndim
-        # scan_length = ctx._scan_length
-        # num_xs = ctx._num_xs
-            
-        # def segprod(x: torch.Tensor, offset: int = 0) -> torch.Tensor:            
-        #     ones_mask = torch.tril(
-        #         torch.ones(scan_length, scan_length, device=x.device, dtype=bool),
-        #         diagonal=offset - 1,
-        #     )
-            
-        #     ones_mask = ones_mask[..., *(None for _ in range(ndim-1))]
-        #     ones_mask = ones_mask.expand(-1, -1, *x.shape[1:])
-
-        #     x_segprod = x.unsqueeze(dim).repeat_interleave(scan_length, dim)
-        #     x_segprod.masked_fill_(ones_mask, 1.0)
-        #     x_segprod = x_segprod.cumprod(dim=dim + 1)
-
-        #     # Similar broadcast with the zeros mask.
-        #     zeros_mask = torch.tril(
-        #         torch.ones(scan_length, scan_length, device=x.device, dtype=bool),
-        #         diagonal=-1,
-        #     )
-            
-        #     zeros_mask = zeros_mask[..., *(None for _ in range(ndim-1))]
-        #     zeros_mask = zeros_mask.expand(-1, -1, *x.shape[1:])
-
-        #     x_segprod.masked_fill_(zeros_mask, 0.0)
-            
-        #     return x_segprod
-                
-        # mapped_joint_graph = ctx._mapped_joint_graph    
-
-        # flat_grads = [torch.ones_like(x).unsqueeze(dim) for x in xs]
-
-        # # For the assoc. op A(x, y), get the derivatives dA(x_i, y_{i-1})/dy_{i-1} and
-        # # dA(x_i,y_{i-1})/dx_i for all i, with invalid index values giving derivatives equal to 1.
-        # grads = mapped_joint_graph(*(torch.ones_like(x) for x in xs), *xs, *(o.roll(1, dim) for o in outs))
-        # op_bwd_x, op_bwd_y = grads[:num_xs], grads[num_xs:]
-        # # Set the i=0 component of dA(x_i,y_{i-1})/dx_i to 1.0
-        # [torch.select(bwd_x, dim, 0).fill_(1.0) for bwd_x in op_bwd_x]
-        # D_segprod = [segprod(bwd_y, offset=1) for bwd_y in op_bwd_y]
-        
-        # # TODO: @goon - write this as a batched matmul
-        # grads = tuple((Ds * fg).sum(dim + 1) * bwd_x for Ds, fg, bwd_x in zip(D_segprod, flat_grads, op_bwd_x))
-
-        # print('Grad 1 : ')
-        # print(grads)
-        
-        # dim = 0
-        # scan_length = ctx._scan_length
-        # num_xs = ctx._num_xs
-        
-        # flat_grads = [torch.ones_like(x) for x in xs]
-
-        # # Helper variables for grads_h and grads_x computation
-        # ones = torch.unsqueeze(torch.ones_like(first_slice_copy(xs[0])), 0)
-
-        # # vmap joint graph over scan dimension
-        # mapped_joint_graph = ctx._mapped_joint_graph
-
-        # with torch._C._AutoDispatchBelowAutograd():
-        #     """Step 1"""
-        #     shifted_outs = [
-        #         torch.concat([ones, aten.slice(o, 0, 0, -1, 1)], 0) for o in outs
-        #     ]
-
-        #     # Function to compute the gradients with respect
-        #     # *) to the inputs (xs) -> grads_xs
-        #     # *) to the previosus outputs -> grads_hs
-        #     def compute_grad_hs_xs():
-        #         # Compute the partial grads_x and grads_h by only setting part of the gradients for the joint_graph to 1
-        #         # This is requried in some cases, especially where tuples are used as inputs to the combine_fn
-        #         def compute_part_grads(flat_grad_ind):
-        #             flat_grads_init = [
-        #                 torch.ones_like(x)
-        #                 if flat_grad_ind == ind
-        #                 else torch.zeros_like(x)
-        #                 for ind, x in enumerate(xs)
-        #             ]
-        #             grads = mapped_joint_graph(*flat_grads_init, *shifted_outs, *xs)
-        #             return (*grads,)
-
-        #         # Compute all the partial gradients
-        #         grad_parts = [torch.unsqueeze(g, 0) for g in compute_part_grads(0)]
-        #         for part_ind in range(1, num_xs):
-        #             grad_parts = [
-        #                 torch.concat([gp, torch.unsqueeze(g, 0)], 0)
-        #                 for gp, g in zip(grad_parts, compute_part_grads(part_ind))
-        #             ]
-
-        #         return grad_parts
-
-        #     # Compute the grads_xs and grads_hs by collecting all the partial gradients
-        #     grads_intermediate = compute_grad_hs_xs()
-        #     grads_h_parts, grads_x_parts = (
-        #         grads_intermediate[:num_xs],
-        #         grads_intermediate[num_xs:],
-        #     )
-
-        #     # Helper variables to generate the gradient matrix
-        #     zeros_p = torch.zeros_like(aten.slice(grads_x_parts[0], dim + 1, 0, 1, 1))
-        #     ones_d = torch.ones((scan_length, scan_length), device=outs[0].device)
-        #     len_shape = len(grads_x_parts[0].shape) - 1
-
-        #     def expand_to_equal_dims(el, target_ndim):
-        #         while len(el.shape) < target_ndim:
-        #             el = torch.unsqueeze(el, -1)
-        #         return el
-
-        #     triu = torch.triu(ones_d, diagonal=1)
-        #     triu = torch.unsqueeze(triu, 0)
-        #     triu = expand_to_equal_dims(triu, len_shape + 2)
-        #     tril = torch.tril(ones_d, diagonal=0)
-        #     tril = torch.unsqueeze(tril, 0)
-        #     tril = expand_to_equal_dims(tril, len_shape + 2)
-        #     tril2 = torch.tril(ones_d, diagonal=-1)
-        #     tril2 = torch.unsqueeze(tril2, 0)
-        #     tril2 = expand_to_equal_dims(tril2, len_shape + 2)
-        #     eye = torch.eye(scan_length, device=outs[0].device)
-        #     eye = expand_to_equal_dims(eye, len_shape + 1)
-        #     a_eye = triu + tril2
-
-        #     def compute_gradient_for_leaf(grads_h_parts, grads_x_parts, flat_grads):
-        #         # The first output of the associative_scan operation is always the first element of xs.
-        #         # Therefore, the first grads_h is always zero and the first grads_x is always 1
-        #         grads_h_parts = torch.concat(
-        #             [
-        #                 torch.zeros_like(aten.slice(grads_h_parts, dim + 1, 0, 1, 1)),
-        #                 aten.slice(grads_h_parts, dim + 1, 1, None, 1),
-        #             ],
-        #             dim + 1,
-        #         )
-        #         grads_x_parts = torch.concat(
-        #             [
-        #                 torch.stack(
-        #                     [
-        #                         torch.ones_like(gp)
-        #                         if ind == 0
-        #                         else torch.zeros_like(gp)
-        #                         for ind, gp in enumerate(
-        #                             aten.slice(grads_x_parts, dim + 1, 0, 1, 1)
-        #                         )
-        #                     ],
-        #                     0,
-        #                 ),
-        #                 aten.slice(grads_x_parts, dim + 1, 1, None, 1),
-        #             ],
-        #             dim + 1,
-        #         )
-
-        #         # Prepare the components for the gradient computation
-        #         grads_h_parts = aten.slice(
-        #             torch.concat(
-        #                 [zeros_p, torch.flip(grads_h_parts, [dim + 1])], dim + 1
-        #             ),
-        #             dim + 1,
-        #             0,
-        #             -1,
-        #             1,
-        #         )
-        #         grads_x = torch.flip(torch.sum(grads_x_parts, 0), [dim])
-        #         flat_grads = torch.unsqueeze(
-        #             aten.slice(
-        #                 torch.concat([torch.flip(flat_grads, [dim]), ones], dim),
-        #                 dim,
-        #                 0,
-        #                 -1,
-        #                 1,
-        #             ),
-        #             dim + 1,
-        #         )
-
-        #         def create_grads_h_matrix_part(gh_p):
-        #             # Create the gradient matrix from the grads_h by duplicating grads_h and masking the appropriate regions
-        #             # Dim 1 is the dimention of the individual parts
-        #             # Dim 2 will be the newly expanded dim that is of scan_length
-        #             # Dim 3 is the scan dim with scan_length
-        #             h_mat = torch.tile(
-        #                 torch.unsqueeze(gh_p, 1), [1, scan_length] + [1] * len_shape
-        #             )
-        #             h_mat = h_mat * triu + tril
-        #             return h_mat
-
-        #         def compute_gradient_factors_part(h_mat):
-        #             # Comput the gradient by applying the cumprod on the scan dim and masking the irrelevant values
-        #             return torch.cumprod(h_mat, dim + 2) - tril2
-
-        #         def stack_and_reduce_parts(mat_fact):
-        #             # Summing the different parts (dim 0) without the diagonal and adding the diagonal back
-        #             return torch.sum(mat_fact * a_eye, 0) + eye
-
-        #         """Step 2 + 3"""
-        #         grads_h_prod_mat = (
-        #             stack_and_reduce_parts(
-        #                 compute_gradient_factors_part(
-        #                     create_grads_h_matrix_part(grads_h_parts)
-        #                 )
-        #             )
-        #             * flat_grads
-        #         )
-
-        #         """Step 4 + 5"""
-        #         grad = torch.flip(torch.sum(grads_h_prod_mat * grads_x, 0), [dim])
-        #         return grad
-
-        #     compute_gradient_for_leaf_mapped = torch.vmap(
-        #         compute_gradient_for_leaf, 0, 0
-        #     )
-
-        #     # Compute the gradients for all the leaves in parallel
-        #     grads = torch.split(
-        #         compute_gradient_for_leaf_mapped(
-        #             torch.stack(grads_h_parts),
-        #             torch.stack(grads_x_parts),
-        #             torch.stack(flat_grads),
-        #         ),
-        #         1,
-        #         0,
-        #     )
-        
-        # print('Grads2:')
-        # print(grads)
         
         return (*outs,)
 
@@ -892,30 +672,37 @@ def associative_scan_autograd(combine_fn, xs):
 
 
 @associative_scan_op.py_impl(ProxyTorchDispatchMode)
-def associative_scan_proxy_mode(mode, combine_fn, xs):
-    return trace_associative_scan(mode, associative_scan_op, combine_fn, xs)
+def associative_scan_proxy_mode(mode, combine_fn, xs, additional_inputs):
+    return trace_associative_scan(
+        mode, associative_scan_op, combine_fn, xs, additional_inputs
+    )
 
 
 @associative_scan_op.py_impl(FakeTensorMode)
-def assoiciative_scan_fake_tensor_mode(mode, combine_fn, xs):
+def assoiciative_scan_fake_tensor_mode(mode, combine_fn, xs, additional_inputs):
     with mode:
-        return [x.clone() for x in xs]
+        return tuple(x.clone() for x in xs)
 
 
 @associative_scan_op.py_functionalize_impl
-def associative_scan_functionalize(ctx, combine_fn, xs):
+def associative_scan_functionalize(ctx, combine_fn, xs, additional_inputs):
     unwrapped_xs = ctx.unwrap_tensors(xs)
-    with ctx.redispatch_to_next() as m:
+    unwrapped_additional_inputs = ctx.unwrap_tensors(additional_inputs)
+    with ctx.redispatch_to_next():
         functional_combine_fn = ctx.functionalize(
             _maybe_run_with_interpreter(combine_fn)
         )
-        ret = associative_scan_op(functional_combine_fn, unwrapped_xs)
+        ret = associative_scan_op(
+            functional_combine_fn,
+            unwrapped_xs,
+            unwrapped_additional_inputs,
+        )
     return ctx.wrap_tensors(ret)
 
 
 def _fake_associative_scan(combine_fn, xs, dim, reverse=False):
     inp_leaves, spec = pytree.tree_flatten(xs)
-    result_flat: List[Any] = []
+    result_flat: list[Any] = []
     num_leaves = len(inp_leaves)
     op = reversed if reverse else lambda x: x
 

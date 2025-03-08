@@ -12,6 +12,7 @@
 #include <ATen/core/TensorBase.h>
 #include <c10/core/Scalar.h>
 #include <c10/cuda/CUDAMathCompat.h>
+#include <ATen/NumericUtils.h>
 #include <ATen/cuda/ApplyGridUtils.cuh>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/native/cuda/Loops.cuh>
@@ -28,7 +29,7 @@ void softshrink_kernel(TensorIteratorBase& iter, const Scalar& value) {
       [&]() {
         auto lambd = value.to<scalar_t>();
         gpu_kernel(iter, [lambd] GPU_LAMBDA(scalar_t a) -> scalar_t {
-          return a > lambd ? a - lambd : (a < -lambd ? a + lambd : scalar_t(0));
+          return at::_isnan(a) ? a : (a > lambd ? a - lambd : (a < -lambd ? a + lambd : scalar_t(0)));
         });
       });
 }

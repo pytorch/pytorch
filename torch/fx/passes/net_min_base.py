@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import logging
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Optional
 
 import torch
 import torch.fx
@@ -66,12 +66,16 @@ class _MinimizerSettingBase:
 
     `return_intermediate`: If true, when using `run_nodes()` function to run the
     model, intermediate results of all the ops will be returned as output.
+
+    `all_outputs`: If true, when using `_run_and_compare()` function,
+    all the output nodes in the subgraph will be used for comparison.
     """
 
     accumulate_error: bool = False
     traverse_method: str = "sequential"
     find_all: bool = False
     return_intermediate: bool = False
+    all_outputs: bool = False
 
     def __str__(self):
         settings_str = "FX Minimizer Settings:\n"
@@ -102,7 +106,7 @@ class _MinimizerBase:
         module: torch.fx.GraphModule,
         sample_input: Tensors,
         compare_fn: Callable[
-            [TensorOrTensors, TensorOrTensors, Names], Tuple[float, bool]
+            [TensorOrTensors, TensorOrTensors, Names], tuple[float, bool]
         ],
         settings: _MinimizerSettingBase,
         module_exporter: Optional[
@@ -120,16 +124,16 @@ class _MinimizerBase:
         self.exclusion_fn = exclusion_fn
 
         # Stores outputs of run_a function
-        self.a_outputs: Dict[str, Any] = {}
+        self.a_outputs: dict[str, Any] = {}
 
         # Stores outputs of run_b function
-        self.b_outputs: Dict[str, Any] = {}
+        self.b_outputs: dict[str, Any] = {}
 
         # Stores the results of compare_fn
-        self.results: Dict[Any, Any] = {}
+        self.results: dict[Any, Any] = {}
 
         # Stores the report for the runs
-        self.reports: List[List[str]] = []
+        self.reports: list[list[str]] = []
 
         # Current iteration
         self.iteration: int = 0
@@ -201,7 +205,7 @@ class _MinimizerBase:
 
     def _get_submod_inputs(
         self, main_module: torch.fx.GraphModule, submod_path: str
-    ) -> Tuple[Tensors, Tensors]:
+    ) -> tuple[Tensors, Tensors]:
         """
         Try get submodule inputs from stored outputs. If not found then use
         torch_glow.get_submod_inputs to get the inputs.
@@ -276,7 +280,7 @@ class _MinimizerBase:
             else:
                 node.tag = "main_0"
 
-    def _build_submodule(self, nodes: NodeSet) -> Tuple[torch.fx.GraphModule, str]:
+    def _build_submodule(self, nodes: NodeSet) -> tuple[torch.fx.GraphModule, str]:
         """
         Split self.module so that one submodule consists of `nodes` and only `nodes`.
 
@@ -341,7 +345,7 @@ class _MinimizerBase:
         report = self.reports[report_idx if report_idx >= 0 else self.iteration - 1]
         report.append("Run and compare ...")
 
-        if output_names:
+        if output_names and not self.settings.all_outputs:
             output_nodes: NodeList = []
             for node in submodule.graph.nodes:
                 if node.op == "output":
@@ -381,19 +385,23 @@ class _MinimizerBase:
         self.results[result_key] = numeric_result  # type: ignore[possibly-undefined]
         report.append(f"Numerical accuracy = {numeric_result}")
         if not bool_result:
-            report.append(f"Result mismatch for {result_key}")
+            report.append(f"Result mismatch for {result_key}")  # type: ignore[possibly-undefined]
             if self.module_exporter:
+                if isinstance(result_key, tuple):  # type: ignore[possibly-undefined]
+                    result_key = result_key[-1]
+                # pyre-ignore[29]: not a function
                 self.module_exporter(
                     a_input,
                     submodule,
                     str(result_key[0]) + "_cpu",  # type: ignore[index]
                 )
+                # pyre-ignore[29]: not a function
                 self.module_exporter(
                     b_input,
                     submodule,
                     str(result_key[0]) + "_acc",  # type: ignore[index]
                 )
-            raise FxNetMinimizerResultMismatchError(f"Result mismatch for {result_key}")
+            raise FxNetMinimizerResultMismatchError(f"Result mismatch for {result_key}")  # type: ignore[possibly-undefined]
 
     def _binary_search_impl(
         self, all_nodes: NodeList, start_idx: int, end_idx: int
@@ -404,7 +412,7 @@ class _MinimizerBase:
         culprits: NodeSet = set()
         nodes: NodeList = all_nodes[start_idx:end_idx]
 
-        report: List[str] = []
+        report: list[str] = []
         if self.exclusion_fn is not None:
             self.exclusion_fn(nodes, start_idx, end_idx)
             if len(nodes) == 0:
@@ -476,7 +484,7 @@ class _MinimizerBase:
         culprits: NodeSet = set()
 
         for node in nodes:
-            report: List[str] = []
+            report: list[str] = []
             self.reports.append(report)
             self.iteration += 1
             report.append(f"Sequential traverse iteration {self.iteration}.")
@@ -526,7 +534,7 @@ class _MinimizerBase:
         find_last_node: If True, search for the last node which result in numerics difference
         if False: find first node in sorted node list
         """
-        report: List[str] = []
+        report: list[str] = []
 
         mid = (start_idx + end_idx) // 2
         cur_nodes_list: NodeList = nodes[: mid + 1] if find_last_node else nodes[mid:]
@@ -718,7 +726,7 @@ class _MinimizerBase:
             return culprits
 
         for node in nodes:
-            report: List[str] = []
+            report: list[str] = []
             self.reports.append(report)
             self.iteration += 1
             report.append(f"Accumulate traverse iteration {self.iteration}.")
@@ -762,7 +770,7 @@ class _MinimizerBase:
             for node in nodes:
                 if node in self.fusions:
                     cur_nodes.update(self.fusions[node])
-        report: List[str] = []
+        report: list[str] = []
         self.reports.append(report)
         self.iteration += 1
         report.append(f" Nodes block {self.iteration}.")
@@ -789,7 +797,7 @@ class _MinimizerBase:
             self.print_report(report)
             return set()
 
-    def _skip_traverse(self, all_nodes: NodeList, skip_nodes: List) -> NodeSet:
+    def _skip_traverse(self, all_nodes: NodeList, skip_nodes: list) -> NodeSet:
         """
         Skip certain nodes in graph based on settings
         """
@@ -866,7 +874,7 @@ class _MinimizerBase:
         ) as e:
             print(e)
 
-    def print_report(self, report: List[str]):
+    def print_report(self, report: list[str]):
         for i in range(len(report)):
             if i > 0:
                 print(" . " + report[i])
@@ -881,7 +889,7 @@ class _MinimizerBase:
         self,
         start: Optional[str] = None,
         end: Optional[str] = None,
-        skip_nodes: Optional[List] = None,
+        skip_nodes: Optional[list] = None,
         find_last_node: Optional[bool] = None,
     ) -> NodeSet:
         """

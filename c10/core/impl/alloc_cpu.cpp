@@ -4,8 +4,10 @@
 #include <c10/util/Flags.h>
 #include <c10/util/Logging.h>
 #include <c10/util/env.h>
+#include <c10/util/error.h>
 #include <c10/util/irange.h>
 #include <c10/util/numa.h>
+#include <cstring>
 
 #ifdef USE_MIMALLOC
 #include <mimalloc.h>
@@ -20,12 +22,12 @@
 C10_DEFINE_bool(
     caffe2_cpu_allocator_do_zero_fill,
     false,
-    "If set, do memory zerofilling when allocating on CPU");
+    "If set, do memory zerofilling when allocating on CPU")
 
 C10_DEFINE_bool(
     caffe2_cpu_allocator_do_junk_fill,
     false,
-    "If set, fill memory with deterministic junk when allocating on CPU");
+    "If set, fill memory with deterministic junk when allocating on CPU")
 
 namespace c10 {
 
@@ -121,7 +123,7 @@ void* alloc_cpu(size_t nbytes) {
       " bytes. Error code ",
       err,
       " (",
-      strerror(err),
+      c10::utils::str_error(err),
       ")");
   if (is_thp_alloc(nbytes)) {
 #ifdef __linux__
@@ -129,7 +131,9 @@ void* alloc_cpu(size_t nbytes) {
     // general posix compliant systems can check POSIX_MADV_SEQUENTIAL advise.
     int ret = madvise(data, nbytes, MADV_HUGEPAGE);
     if (ret != 0) {
-      TORCH_WARN_ONCE("thp madvise for HUGEPAGE failed with ", strerror(errno));
+      TORCH_WARN_ONCE(
+          "thp madvise for HUGEPAGE failed with ",
+          c10::utils::str_error(errno));
     }
 #endif
   }

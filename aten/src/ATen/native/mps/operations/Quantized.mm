@@ -57,9 +57,7 @@ Tensor _convert_weight_to_int4pack_mps(const Tensor& in, int64_t innerKTiles) {
       id<MTLComputePipelineState> quantizedPSO = lib.getPipelineStateForFunc(kernel);
       const auto maxThreadsPerGroup = [quantizedPSO maxTotalThreadsPerThreadgroup];
       [computeEncoder setComputePipelineState:quantizedPSO];
-      mtl_setBuffer(computeEncoder, weight, 0);
-      mtl_setBuffer(computeEncoder, weight_packed, 1);
-      mtl_setBytes(computeEncoder, sizes, 2);
+      mtl_setArgs(computeEncoder, weight, weight_packed, sizes);
       [computeEncoder dispatchThreads:MTLSizeMake(N, Kdiv2 / 4, 1) threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
 #if _CAPTURE_KERNEL
       if (getMPSProfiler().isCapturing()) {
@@ -114,11 +112,7 @@ Tensor _weight_int4pack_mm_mps(const Tensor& A, const Tensor& B, int64_t qGroupS
       id<MTLComputePipelineState> quantizedPSO = lib.getPipelineStateForFunc(kernel);
       const auto maxThreadsPerGroup = static_cast<decltype(M)>([quantizedPSO maxTotalThreadsPerThreadgroup]);
       [computeEncoder setComputePipelineState:quantizedPSO];
-      mtl_setBuffer(computeEncoder, A, 0);
-      mtl_setBuffer(computeEncoder, B, 1);
-      mtl_setBuffer(computeEncoder, qScaleAndZeros, 2);
-      mtl_setBuffer(computeEncoder, C, 3);
-      mtl_setBytes(computeEncoder, sizes, 4);
+      mtl_setArgs(computeEncoder, A, B, qScaleAndZeros, C, sizes);
       [computeEncoder dispatchThreads:MTLSizeMake(N / 4 * 32, 1, M) threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
 #if _CAPTURE_KERNEL
       if (getMPSProfiler().isCapturing()) {
@@ -169,11 +163,7 @@ Tensor _weight_int8pack_mm_mps(const Tensor& A, const Tensor& B, const Tensor& s
       }
       id<MTLComputePipelineState> quantizedPSO = lib.getPipelineStateForFunc(kernel);
       [computeEncoder setComputePipelineState:quantizedPSO];
-      mtl_setBuffer(computeEncoder, A, 0);
-      mtl_setBuffer(computeEncoder, B, 1);
-      mtl_setBuffer(computeEncoder, scales, 2);
-      mtl_setBuffer(computeEncoder, C, 3);
-      mtl_setBytes(computeEncoder, sizes, 4);
+      mtl_setArgs(computeEncoder, A, B, scales, C, sizes);
       if (M < 12) {
         [computeEncoder setThreadgroupMemoryLength:32 atIndex:0];
         [computeEncoder dispatchThreadgroups:MTLSizeMake((N + 7) / 8, M, 1)

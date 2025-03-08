@@ -105,7 +105,7 @@ def post_localSGD_hook(
     # Run allreduce using `global_group_to_use` in the first `start_localSGD_iter` iterations.
     if state.iter < state.start_localSGD_iter:
         state.maybe_increase_iter(bucket)
-        return default._allreduce_fut(global_group_to_use, input_tensor)
+        return default._allreduce_fut(global_group_to_use, input_tensor)  # type: ignore[arg-type]
 
     # If `post_local_gradient_allreduce` is not set,
     # then no gradient synchronization after the first `start_localSGD_iter` iterations.

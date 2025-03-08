@@ -5,12 +5,12 @@ import copy
 import functools
 import itertools
 import unittest
-from typing import Any, List, Optional, Type, Union
+from typing import Any, Optional, Union
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from torch.distributed._composable.fsdp import fully_shard
+from torch.distributed.fsdp import fully_shard
 from torch.nn.parallel.scatter_gather import _is_namedtuple
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -117,7 +117,7 @@ class TestFullyShardAutograd(FSDPTest):
             local_inp = global_inp[
                 self.rank * local_batch_size : (self.rank + 1) * local_batch_size
             ].detach()
-            losses: List[torch.Tensor] = []
+            losses: list[torch.Tensor] = []
             for _model, inp in ((ref_model, global_inp), (model, local_inp)):
                 losses.append(_model(inp).sum())
                 losses[-1].backward()
@@ -141,7 +141,7 @@ class TestFullyShardAutograd(FSDPTest):
             self._test_nontensor_activations,
         )
 
-    def _test_nontensor_activations(self, container_type: Type):
+    def _test_nontensor_activations(self, container_type: type):
         class Module(nn.Module):
             def __init__(self, dim: int):
                 super().__init__()
@@ -170,7 +170,7 @@ class TestFullyShardAutograd(FSDPTest):
                 return self.relu(self.lin2(self.relu(self.lin1(x))))
 
         class ToContainerType(nn.Module):
-            def __init__(self, container_type: Type):
+            def __init__(self, container_type: type):
                 super().__init__()
                 self.container_type = container_type
 
@@ -190,7 +190,7 @@ class TestFullyShardAutograd(FSDPTest):
                     )
 
         class FromContainerType(nn.Module):
-            def __init__(self, container_type: Type):
+            def __init__(self, container_type: type):
                 super().__init__()
                 self.container_type = container_type
 
@@ -227,7 +227,7 @@ class TestFullyShardAutograd(FSDPTest):
             local_inp = global_inp[
                 self.rank * local_batch_size : (self.rank + 1) * local_batch_size
             ].detach()
-            losses: List[torch.Tensor] = []
+            losses: list[torch.Tensor] = []
             for _model, inp in ((ref_model, global_inp), (model, local_inp)):
                 losses.append(_model(inp).sum())
                 losses[-1].backward()

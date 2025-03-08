@@ -11,7 +11,7 @@
 #include <c10/util/irange.h>
 
 namespace torch::jit {
-std::ostream& operator<<(std::ostream& out, Instruction inst);
+
 namespace mobile {
 
 void CompilationUnit::register_function(std::unique_ptr<Function> fn) {
@@ -88,7 +88,7 @@ void Module::unsafeCopyMethod(
 std::optional<Method> Module::find_method(const std::string& basename) const {
   for (const auto& fn : cu_->methods()) {
     if (fn->name() == basename) {
-      return std::make_optional<Method>(Method(this, fn.get()));
+      return Method(this, fn.get());
     }
   }
   return std::nullopt;
@@ -138,7 +138,7 @@ void slot_named_params_recurse(
   auto slots = obj->slots();
   size_t nslots = slots.size();
   for (const auto i : c10::irange(nslots)) {
-    auto slot = slots[i];
+    const auto& slot = slots[i];
     std::string name = parent_name.empty() ? parent_name : parent_name + ".";
     name += obj->type()->getAttributeName(i);
     // TODO: Fix this filter. Requires_grad is not the appropriate
@@ -178,7 +178,7 @@ const std::vector<at::Tensor> Module::parameters() const {
 // loading of a mobile module. TODO
 const std::map<std::string, at::Tensor> Module::named_parameters() const {
   std::map<std::string, at::Tensor> params;
-  const std::string name = "";
+  const std::string name;
   slot_named_params_recurse(object_, &params, name);
   return params;
 }

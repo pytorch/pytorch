@@ -71,8 +71,6 @@ class TORCH_API SymmetricMemory : public c10::intrusive_ptr_target {
 
   virtual int get_rank() = 0;
   virtual int get_world_size() = 0;
-
-  virtual void stream_write_value32(uintptr_t addr, uint32_t val) = 0;
 };
 
 class SymmetricMemoryAllocator : public c10::intrusive_ptr_target {
@@ -82,12 +80,13 @@ class SymmetricMemoryAllocator : public c10::intrusive_ptr_target {
   virtual void* alloc(
       size_t size,
       int device_idx,
-      const std::string& group_name) = 0;
+      const std::optional<std::string>& group_name) = 0;
 
   virtual void free(void* ptr) = 0;
   virtual size_t get_alloc_size(void* ptr) = 0;
-  virtual c10::intrusive_ptr<SymmetricMemory> rendezvous(void* ptr) = 0;
-  virtual bool is_rendezvous_completed(void* ptr) = 0;
+  virtual c10::intrusive_ptr<SymmetricMemory> rendezvous(
+      void* ptr,
+      const std::optional<std::string>& group_name) = 0;
   virtual bool has_multicast_support(int device_idx) = 0;
 };
 
@@ -96,6 +95,8 @@ C10_EXPORT bool is_finalizing();
 C10_EXPORT void register_allocator(
     c10::DeviceType device_type,
     c10::intrusive_ptr<SymmetricMemoryAllocator> allocator);
+
+C10_EXPORT bool has_allocator(c10::DeviceType device_type);
 
 C10_EXPORT c10::intrusive_ptr<SymmetricMemoryAllocator> get_allocator(
     c10::DeviceType device_type);
@@ -140,7 +141,7 @@ TORCH_API at::Tensor empty_strided_p2p(
     c10::IntArrayRef stride,
     c10::ScalarType dtype,
     c10::Device device,
-    const std::string& group_name,
+    const std::optional<std::string>& group_name,
     std::optional<uint64_t> alloc_id);
 
 // Establishes symmetric memory access on tensors allocated via
@@ -154,12 +155,8 @@ TORCH_API at::Tensor empty_strided_p2p(
 // The function has a collective semantic and must be invoked simultaneously
 // from all rendezvous participants.
 TORCH_API c10::intrusive_ptr<SymmetricMemory> rendezvous(
-    const at::Tensor& tensor);
-
-// Returns the SymmetricMemory object associated with the tensor. It can only
-// be invoked after rendezvous() but does not need to be invoked collectively.
-TORCH_API c10::intrusive_ptr<SymmetricMemory> get_symmetric_memory(
-    const at::Tensor& tensor);
+    const at::Tensor& tensor,
+    const std::optional<std::string>& group_name = std::nullopt);
 
 TORCH_API bool has_multicast_support(
     c10::DeviceType device_type,

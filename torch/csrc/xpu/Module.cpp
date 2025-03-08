@@ -1,7 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/xpu/XPUContext.h>
 #include <ATen/xpu/XPUGeneratorImpl.h>
-#include <c10/util/CallOnce.h>
 #include <c10/xpu/XPUCachingAllocator.h>
 #include <c10/xpu/XPUFunctions.h>
 #include <torch/csrc/Module.h>
@@ -32,8 +31,8 @@ static void forked_child() {
 // has some working functions (e.g. device_count) but cannot fully initialize.
 static void poison_fork() {
 #ifndef WIN32
-  static c10::once_flag flag;
-  c10::call_once(flag, [] { pthread_atfork(nullptr, nullptr, forked_child); });
+  static auto result [[maybe_unused]] =
+      pthread_atfork(nullptr, nullptr, forked_child);
 #endif
 }
 
@@ -213,10 +212,10 @@ PyObject* THXPModule_memoryStats(PyObject* self, PyObject* arg) {
   TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to memory_stats");
   const auto device_index = THPUtils_unpackDeviceIndex(arg);
 
+  using c10::CachingAllocator::Stat;
+  using c10::CachingAllocator::StatArray;
+  using c10::CachingAllocator::StatType;
   using c10::CachingDeviceAllocator::DeviceStats;
-  using c10::CachingDeviceAllocator::Stat;
-  using c10::CachingDeviceAllocator::StatArray;
-  using c10::CachingDeviceAllocator::StatType;
 
   const auto statToDict = [](const Stat& stat) {
     py::dict dict;
@@ -306,6 +305,11 @@ static void registerXpuDeviceProperties(PyObject* module) {
   auto gpu_subslice_count = [](const DeviceProp& prop) {
     return (prop.gpu_eu_count / prop.gpu_eu_count_per_subslice);
   };
+#if SYCL_COMPILER_VERSION >= 20250000
+  auto get_device_architecture = [](const DeviceProp& prop) {
+    return static_cast<int64_t>(prop.architecture);
+  };
+#endif
   auto m = py::handle(module).cast<py::module>();
 
 #define DEFINE_READONLY_MEMBER(member) \
@@ -334,6 +338,9 @@ static void registerXpuDeviceProperties(PyObject* module) {
   THXP_FORALL_DEVICE_PROPERTIES(DEFINE_READONLY_MEMBER)
       .def_readonly("total_memory", &DeviceProp::global_mem_size)
       .def_property_readonly("gpu_subslice_count", gpu_subslice_count)
+#if SYCL_COMPILER_VERSION >= 20250000
+      .def_property_readonly("architecture", get_device_architecture)
+#endif
       .def_property_readonly("type", get_device_type)
       .def(
           "__repr__",
@@ -343,8 +350,8 @@ static void registerXpuDeviceProperties(PyObject* module) {
                    << "', platform_name='" << prop.platform_name << "', type='"
                    << get_device_type(prop) << "', driver_version='"
                    << prop.driver_version << "', total_memory="
-                   << prop.global_mem_size / (1024ull * 1024)
-                   << "MB, max_compute_units=" << prop.max_compute_units
+                   << prop.global_mem_size / (1024ull * 1024) << "MB"
+                   << ", max_compute_units=" << prop.max_compute_units
                    << ", gpu_eu_count=" << prop.gpu_eu_count
                    << ", gpu_subslice_count=" << gpu_subslice_count(prop)
                    << ", max_work_group_size=" << prop.max_work_group_size
@@ -366,6 +373,40 @@ static void bindGetDeviceProperties(PyObject* module) {
         return at::xpu::getDeviceProperties(device);
       },
       py::return_value_policy::reference);
+}
+
+static void initXpuMethodBindings(PyObject* module) {
+  auto m = py::handle(module).cast<py::module>();
+  m.def("_xpu_getMemoryInfo", [](c10::DeviceIndex device_index) {
+#if SYCL_COMPILER_VERSION >= 20250000
+    auto total = at::xpu::getDeviceProperties(device_index)->global_mem_size;
+    auto& device = c10::xpu::get_raw_device(device_index);
+    TORCH_CHECK(
+        device.has(sycl::aspect::ext_intel_free_memory),
+        "The device (",
+        at::xpu::getDeviceProperties(device_index)->name,
+        ") doesn't support querying the available free memory. ",
+        "You can file an issue at https://github.com/pytorch/pytorch/issues ",
+        "to help us prioritize its implementation.");
+    auto free = device.get_info<sycl::ext::intel::info::device::free_memory>();
+    return std::make_tuple(free, total);
+#else
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      false,
+      "torch.xpu.mem_get_info requires PyTorch to be built with SYCL compiler version 2025.0.0 or newer.");
+#endif
+  });
+  m.def(
+      "_xpu_getStreamFromExternal",
+      [](uintptr_t data_ptr, c10::DeviceIndex device_index) {
+        sycl::queue* ext_queue =
+            // NOLINTNEXTLINE(performance-no-int-to-ptr)
+            reinterpret_cast<sycl::queue*>(reinterpret_cast<void*>(data_ptr));
+        at::xpu::XPUStream stream =
+            c10::xpu::getStreamFromExternal(ext_queue, device_index);
+        return std::make_tuple(
+            stream.id(), stream.device_index(), stream.device_type());
+      });
 }
 
 // Callback for python part. Used for additional initialization of python
@@ -450,6 +491,7 @@ namespace torch::xpu {
 
 void initModule(PyObject* module) {
   registerXpuDeviceProperties(module);
+  initXpuMethodBindings(module);
 }
 
 } // namespace torch::xpu

@@ -119,6 +119,7 @@ struct TorchOpBasicFields {
   uint64_t record_function_id_{0};
   int64_t debug_handle_{0};
   std::string name_;
+  std::string overload_name_;
 
   // Set in the exit callback.
   uint64_t end_tid_{0};
@@ -394,6 +395,7 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
   }
 
   std::string name() const;
+  std::string overload_name() const;
   libkineto::ActivityType kinetoType() const;
   uint64_t correlationID() const;
   int64_t endTimeNS() const;
@@ -449,6 +451,7 @@ struct KinetoObserverContext : public at::ObserverContext {
 
     bool allow_tf32_cublas_;
     std::unique_ptr<perf_counters_t> counters_;
+    extra_meta_t* extra_nccl_meta_{};
   };
 
   explicit KinetoObserverContext(Event* event) : event_{event} {}
@@ -675,5 +678,11 @@ TORCH_API void set_fwd_bwd_enabled_val(bool);
 TORCH_API bool get_cuda_sync_enabled();
 TORCH_API void set_cuda_sync_enabled_fn(std::function<bool()>);
 TORCH_API void set_cuda_sync_enabled_val(bool);
+
+// Comms related RecordFunctions will record information about tensor storage
+// locations.
+TORCH_API bool get_record_tensor_addrs_enabled();
+TORCH_API void set_record_tensor_addrs_enabled_fn(std::function<bool()>);
+TORCH_API void set_record_tensor_addrs_enabled_val(bool);
 
 } // namespace torch::profiler::impl

@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
-from typing import Any, List, Optional
+from collections.abc import Sequence
+from typing import Any, Optional
 
 import sympy
 
@@ -11,8 +12,8 @@ from .ir import (
     ExternKernelAlloc,
     FixedLayout,
     FlexibleLayout,
+    get_device_type,
     ir_node_to_tensor,
-    IRNode,
     is_contiguous_storage_and_layout,
     Layout,
     may_convert_to_optional,
@@ -31,21 +32,21 @@ def _prepare_convolution_fusion_create(
     x: "TensorBox",
     weight: "TensorBox",
     bias: "TensorBox",
-    padding: List[int],
-    stride: List[int],
-    dilation: List[int],
+    padding: Sequence[int],
+    stride: Sequence[int],
+    dilation: Sequence[int],
     groups: int,
     transposed: bool = False,
-    output_padding: Optional[List[int]] = None,
-    quantize_args: Optional[List["TensorBox"]] = None,
+    output_padding: Optional[Sequence[int]] = None,
+    quantize_args: Optional[list["TensorBox"]] = None,
     other: Optional["TensorBox"] = None,
 ):
     """
     This function is a helper function to prepare inputs, layout and constant args
     for convolution post-op fusion's create function, including deciding the output
     layout (channels first or channels last), realizing inputs and make them etc. The
-    function only supports the CPU device since conv post-op fusion kernel is only
-    supported on CPU right now.
+    function only supports the CPU/XPU device since conv post-op fusion kernel is only
+    supported on CPU/XPU right now.
     """
 
     # Port from aten/src/ATen/native/ConvUtils.h: _conv_input_size
@@ -87,8 +88,7 @@ def _prepare_convolution_fusion_create(
             weight_size = []
             weight_size.append(prepacked_weight_size[1] * groups)
             weight_size.append(prepacked_weight_size[0] / groups)
-            for d in range(2, dim):
-                weight_size.append(prepacked_weight_size[d])
+            weight_size.extend(prepacked_weight_size[d] for d in range(2, dim))
         else:
             weight_size = prepacked_weight.transpose(0, 1).size()
         return weight_size
@@ -164,7 +164,8 @@ def _prepare_convolution_fusion_create(
     else:
         output_stride = make_channels_last_strides_for(output_size)
 
-    assert x.get_device().type == "cpu" and weight.get_device().type == "cpu"
+    assert get_device_type(x) == get_device_type(weight)
+    assert get_device_type(x) in ["cpu", "xpu"]
     inputs = [x]
 
     if quantize_args is not None:
@@ -183,7 +184,7 @@ def _prepare_convolution_fusion_create(
         inputs += [other]
 
     kernel_layout = FixedLayout(
-        x.get_device(),
+        x.get_device_or_error(),
         x.get_dtype(),
         convert_shape_to_inductor(output_size),
         convert_shape_to_inductor(output_stride),
@@ -204,7 +205,7 @@ def _prepare_linear_fusion_create(
     x: "TensorBox",
     weight: "TensorBox",
     bias: "TensorBox",
-    quantize_args: Optional[List["TensorBox"]] = None,
+    quantize_args: Optional[list["TensorBox"]] = None,
     other: Optional["TensorBox"] = None,
     binary_sum: bool = False,
 ):
@@ -227,7 +228,8 @@ def _prepare_linear_fusion_create(
     req_stride_order = list(reversed(range(len(x.get_size()))))
 
     x = cls.require_stride_order(x, req_stride_order)
-    assert x.get_device().type == "cpu" and weight.get_device().type == "cpu"
+    assert get_device_type(x) == get_device_type(weight)
+    assert get_device_type(x) in ["cpu", "xpu"]
     inputs = [x]
 
     if quantize_args is not None:
@@ -252,7 +254,7 @@ def _prepare_linear_fusion_create(
         output_size,
         output_stride,
     )
-    constant_args: List[Any] = []
+    constant_args: list[Any] = []
 
     if bias is not None:
         inputs.append(bias)
@@ -287,18 +289,6 @@ class ConvolutionUnary(ExternKernelAlloc):
             op_overload=torch.ops.mkldnn._convolution_pointwise.default,
             cpp_kernel_name="aoti_torch_cpu_mkldnn__convolution_pointwise",
         )
-        self.cpp_op_schema = """
-            at::Tensor(
-                const at::Tensor& input_t,
-                const at::Tensor& weight_t,
-                const std::optional<at::Tensor>& bias_opt,
-                at::IntArrayRef padding,
-                at::IntArrayRef stride,
-                at::IntArrayRef dilation,
-                int64_t groups,
-                c10::string_view attr,
-                torch::List<std::optional<at::Scalar>> scalars,
-                std::optional<c10::string_view> algorithm)"""
 
     def codegen(self, wrapper):
         wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h")
@@ -310,12 +300,12 @@ class ConvolutionUnary(ExternKernelAlloc):
         x: "TensorBox",
         weight: "TensorBox",
         bias: "TensorBox",
-        padding_: List[int],
-        stride_: List[int],
-        dilation_: List[int],
+        padding_: list[int],
+        stride_: list[int],
+        dilation_: list[int],
         groups: int,
         attr,
-        scalars: Optional[List[Any]],
+        scalars: Optional[list[Any]],
         algorithm,
     ):
         (
@@ -356,21 +346,6 @@ class ConvolutionBinary(ExternKernelAlloc):
             op_overload=torch.ops.mkldnn._convolution_pointwise.binary,
             cpp_kernel_name="aoti_torch_cpu_mkldnn__convolution_pointwise_binary",
         )
-        self.cpp_op_schema = """
-            at::Tensor(
-                const at::Tensor& input_t,
-                const at::Tensor& other_t,
-                const at::Tensor& weight_t,
-                const std::optional<at::Tensor>& bias_opt,
-                at::IntArrayRef padding,
-                at::IntArrayRef stride,
-                at::IntArrayRef dilation,
-                int64_t groups,
-                c10::string_view binary_attr,
-                std::optional<at::Scalar> alpha,
-                std::optional<c10::string_view> unary_attr,
-                torch::List<std::optional<at::Scalar>> unary_scalars,
-                std::optional<c10::string_view> unary_algorithm)"""
         self.cpp_constant_args = cpp_constant_args
 
     def codegen(self, wrapper):
@@ -384,14 +359,14 @@ class ConvolutionBinary(ExternKernelAlloc):
         other: "TensorBox",
         weight: "TensorBox",
         bias: "TensorBox",
-        padding_: List[int],
-        stride_: List[int],
-        dilation_: List[int],
+        padding_: list[int],
+        stride_: list[int],
+        dilation_: list[int],
         groups: int,
         binary_attr: str,
         binary_alpha: Optional[float],
         unary_attr: Optional[str],
-        unary_scalars: Optional[List[Any]],
+        unary_scalars: Optional[list[Any]],
         unary_algorithm: Optional[str],
     ):
         (
@@ -438,22 +413,6 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
             op_overload=torch.ops.mkldnn._convolution_pointwise_.binary,
             cpp_kernel_name="aoti_torch_cpu_mkldnn__convolution_pointwise_binary_",
         )
-        # TODO: op.call: input[0] should be at::Tensor&
-        self.cpp_op_schema = """
-            at::Tensor&(
-                at::Tensor& other_t,
-                const at::Tensor& input_t,
-                const at::Tensor& weight_t,
-                const std::optional<at::Tensor>& bias_opt,
-                at::IntArrayRef padding,
-                at::IntArrayRef stride,
-                at::IntArrayRef dilation,
-                int64_t groups,
-                c10::string_view binary_attr,
-                std::optional<at::Scalar> alpha,
-                std::optional<c10::string_view> unary_attr,
-                torch::List<std::optional<at::Scalar>> unary_scalars,
-                std::optional<c10::string_view> unary_algorithm)"""
 
         self.mutation_outputs = [
             MutationOutput(NoneLayout(device=inputs[0].get_device()), inputs[0], self),
@@ -474,14 +433,14 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
         other: "TensorBox",
         weight: "TensorBox",
         bias: "TensorBox",
-        padding_: List[int],
-        stride_: List[int],
-        dilation_: List[int],
+        padding_: list[int],
+        stride_: list[int],
+        dilation_: list[int],
         groups: int,
         binary_attr: str,
         binary_alpha: Optional[float],
         unary_attr: Optional[str],
-        unary_scalars: Optional[List[Any]],
+        unary_scalars: Optional[list[Any]],
         unary_algorithm: Optional[str],
     ):
         (
@@ -528,19 +487,6 @@ class ConvolutionTransposeUnary(ExternKernelAlloc):
             op_overload=torch.ops.mkldnn._convolution_transpose_pointwise.default,
             cpp_kernel_name="aoti_torch_cpu_mkldnn__convolution_transpose_pointwise",
         )
-        self.cpp_op_schema = """
-            at::Tensor(
-                const at::Tensor& input_t,
-                const at::Tensor& weight_t,
-                const std::optional<at::Tensor>& bias_opt,
-                at::IntArrayRef padding,
-                at::IntArrayRef output_padding,
-                at::IntArrayRef stride,
-                at::IntArrayRef dilation,
-                int64_t groups,
-                c10::string_view attr,
-                torch::List<std::optional<at::Scalar>> scalars,
-                std::optional<c10::string_view> algorithm)"""
 
     def codegen(self, wrapper):
         wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h")
@@ -552,13 +498,13 @@ class ConvolutionTransposeUnary(ExternKernelAlloc):
         x: "TensorBox",
         weight: "TensorBox",
         bias: "TensorBox",
-        padding_: List[int],
-        output_padding_: List[int],
-        stride_: List[int],
-        dilation_: List[int],
+        padding_: list[int],
+        output_padding_: list[int],
+        stride_: list[int],
+        dilation_: list[int],
         groups_: int,
         attr,
-        scalars: Optional[List[Any]],
+        scalars: Optional[list[Any]],
         algorithm,
     ):
         transposed = True
@@ -619,25 +565,6 @@ class QConvPointWisePT2E(ExternKernelAlloc):
             op_overload=torch.ops.onednn.qconv2d_pointwise.default,
             cpp_kernel_name="aoti_torch_cpu__qconv2d_pointwise_tensor",
         )
-        self.cpp_op_schema = """
-            at::Tensor(
-                at::Tensor act,
-                double act_scale,
-                int64_t act_zero_point,
-                at::Tensor weight,
-                at::Tensor weight_scales,
-                at::Tensor weight_zero_points,
-                std::optional<at::Tensor> bias,
-                torch::List<int64_t> stride,
-                torch::List<int64_t> padding,
-                torch::List<int64_t> dilation,
-                int64_t groups,
-                double output_scale,
-                int64_t output_zero_point,
-                std::optional<c10::ScalarType> output_dtype,
-                c10::string_view attr,
-                torch::List<std::optional<at::Scalar>> scalars,
-                std::optional<c10::string_view> algorithm)"""
 
     def codegen(self, wrapper):
         wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h")
@@ -655,9 +582,9 @@ class QConvPointWisePT2E(ExternKernelAlloc):
         w_scale: "TensorBox",
         w_zero_point: "TensorBox",
         bias: "TensorBox",
-        stride: List[int],
-        padding: List[int],
-        dilation: List[int],
+        stride: list[int],
+        padding: list[int],
+        dilation: list[int],
         groups: int,
         output_scale: float,
         output_zero_point: int,
@@ -743,30 +670,6 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             op_overload=torch.ops.onednn.qconv2d_pointwise.binary,
             cpp_kernel_name=("aoti_torch_cpu__qconv2d_pointwise_binary_tensor"),
         )
-        self.cpp_op_schema = """
-            at::Tensor(
-                at::Tensor act,
-                double act_scale,
-                int64_t act_zero_point,
-                at::Tensor accum,
-                double accum_scale,
-                int64_t accum_zero_point,
-                at::Tensor weight,
-                at::Tensor weight_scales,
-                at::Tensor weight_zero_points,
-                std::optional<at::Tensor> bias,
-                torch::List<int64_t> stride,
-                torch::List<int64_t> padding,
-                torch::List<int64_t> dilation,
-                int64_t groups,
-                double output_scale,
-                int64_t output_zero_point,
-                std::optional<c10::ScalarType> output_dtype,
-                c10::string_view binary_attr,
-                std::optional<at::Scalar> alpha,
-                std::optional<c10::string_view> attr,
-                torch::List<std::optional<at::Scalar>> scalars,
-                std::optional<c10::string_view> algorithm)"""
 
     def codegen(self, wrapper):
         wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h")
@@ -791,9 +694,9 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
         w_zero_point,
         qaccum: "TensorBox",
         bias: "TensorBox",
-        stride: List[int],
-        padding: List[int],
-        dilation: List[int],
+        stride: list[int],
+        padding: list[int],
+        dilation: list[int],
         groups: int,
         output_scale: "TensorBox",
         output_zero_point: "TensorBox",
@@ -811,7 +714,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
         (
             inputs,
             constant_args,
-            kernel_layout,
+            _kernel_layout,
             req_stride_order,
             qaccum,
         ) = _prepare_convolution_fusion_create(
@@ -848,9 +751,9 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             unary_algorithm,
         ]
 
-        assert (
-            binary_attr == "sum"
-        ), "For now, only post op sum is supported in QConvPointWiseBinaryPT2E."
+        assert binary_attr == "sum", (
+            "For now, only post op sum is supported in QConvPointWiseBinaryPT2E."
+        )
 
         V.graph.mark_buffer_mutated(qaccum.get_name())
         packed = QConvPointWiseBinaryPT2E(
@@ -877,13 +780,6 @@ class MKLPackedLinear(ExternKernelAlloc):
             None,
             op_overload=torch.ops.mkl._mkl_linear.default,
         )
-        self.cpp_op_schema = """
-            at::Tensor(
-                const at::Tensor& self,
-                const at::Tensor& mkl_weight_t,
-                const at::Tensor& origin_weight_t,
-                const std::optional<at::Tensor>& bias_opt,
-                const int64_t prepack_batch_size)"""
 
     def codegen(self, wrapper):
         wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h")
@@ -928,15 +824,6 @@ class LinearUnary(ExternKernelAlloc):
             op_overload=torch.ops.mkldnn._linear_pointwise.default,
             cpp_kernel_name="aoti_torch_cpu__linear_pointwise",
         )
-        self.cpp_kernel_key = "linear_pointwise"
-        self.cpp_op_schema = """
-            at::Tensor(
-                const at::Tensor& input_t,
-                const at::Tensor& weight_t,
-                const std::optional<at::Tensor>& bias_opt,
-                c10::string_view attr,
-                torch::List<std::optional<at::Scalar>> scalars,
-                std::optional<c10::string_view> algorithm)"""
 
     def codegen(self, wrapper):
         wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h")
@@ -947,10 +834,9 @@ class LinearUnary(ExternKernelAlloc):
         x = cls.require_contiguous(cls.realize_input(x))
         w = cls.require_contiguous(cls.realize_input(w))
 
-        *m, ic = x.get_size()
-        oc, ic = w.get_size()
+        *m, _ic = x.get_size()
+        oc, _ic = w.get_size()
         output_size = list(m) + [oc]
-        output_stride = FlexibleLayout.contiguous_strides(output_size)
         inputs = [x, w]
         constant_args = [attr, scalars if scalars else [-1], algorithm]
         if B is not None:
@@ -991,14 +877,6 @@ class LinearBinary(ExternKernelAlloc):
             op_overload=torch.ops.mkldnn._linear_pointwise.binary,
             cpp_kernel_name="aoti_torch_cpu__linear_pointwise_binary",
         )
-        self.cpp_op_schema = """
-            at::Tensor(
-                const at::Tensor& input_t,
-                const at::Tensor& other_t,
-                const at::Tensor& weight_t,
-                const std::optional<at::Tensor>& bias_opt,
-                c10::string_view attr)
-        """
 
     def codegen(self, wrapper):
         wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h")
@@ -1010,10 +888,9 @@ class LinearBinary(ExternKernelAlloc):
         y = cls.require_contiguous(cls.realize_input(y))
         w = cls.require_contiguous(cls.realize_input(w))
 
-        *m, ic = x.get_size()
-        oc, ic = w.get_size()
+        *m, _ic = x.get_size()
+        oc, _ic = w.get_size()
         output_size = list(m) + [oc]
-        output_stride = FlexibleLayout.contiguous_strides(output_size)
         inputs = [x, y, w]
         constant_args = [attr]
         if B is not None:
@@ -1064,22 +941,6 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
             op_overload=(torch.ops.onednn.qlinear_pointwise.tensor),
             cpp_kernel_name=("aoti_torch_cpu__qlinear_pointwise_tensor"),
         )
-        x_scale_type_str, x_zp_type_str = ("at::Tensor", "at::Tensor")
-        self.cpp_op_schema = f"""
-            at::Tensor(
-                at::Tensor act,
-                {x_scale_type_str} act_scale,
-                {x_zp_type_str} act_zero_point,
-                at::Tensor weight,
-                at::Tensor weight_scales,
-                at::Tensor weight_zero_points,
-                std::optional<at::Tensor> bias,
-                double output_scale,
-                int64_t output_zero_point,
-                std::optional<c10::ScalarType> output_dtype,
-                c10::string_view post_op_name,
-                torch::List<std::optional<at::Scalar>> post_op_args,
-                c10::string_view post_op_algorithm)"""
 
     def codegen(self, wrapper):
         wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h")
@@ -1164,27 +1025,6 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
             op_overload=(torch.ops.onednn.qlinear_pointwise.binary_tensor),
             cpp_kernel_name="aoti_torch_cpu__qlinear_pointwise_binary_tensor",
         )
-        x_scale_type_str, x_zp_type_str = ("at::Tensor", "at::Tensor")
-        self.cpp_op_schema = f"""
-            at::Tensor(
-                at::Tensor act,
-                {x_scale_type_str} act_scale,
-                {x_zp_type_str} act_zero_point,
-                at::Tensor weight,
-                at::Tensor weight_scales,
-                at::Tensor weight_zero_points,
-                std::optional<at::Tensor> other,
-                std::optional<at::Tensor> bias,
-                double inv_output_scale,
-                int64_t output_zero_point,
-                std::optional<c10::ScalarType> output_dtype,
-                double other_scale,
-                int64_t other_zero_point,
-                c10::string_view binary_post_op,
-                double binary_alpha,
-                c10::string_view unary_post_op,
-                torch::List<std::optional<at::Scalar>> unary_post_op_args,
-                c10::string_view unary_post_op_algorithm)"""
 
     def codegen(self, wrapper):
         wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h")
@@ -1301,7 +1141,7 @@ class MkldnnRnnLayer(ExternKernelAlloc):
         hx: "TensorBox",
         cx: "TensorBox",
         reverse: bool,
-        batch_sizes: List[int],
+        batch_sizes: list[int],
         mode: int,
         hidden_size: int,
         num_layers: int,
@@ -1332,8 +1172,6 @@ class MkldnnRnnLayer(ExternKernelAlloc):
 
         hy_shape = hx.get_size()
         cy_shape = cx.get_size()
-
-        res: List[IRNode] = []
 
         inputs = [x, w0, w1, w2, w3, hx, cx]
         constant_args = [

@@ -75,7 +75,7 @@ import sys
 import urllib.parse
 import zipfile
 from pathlib import Path
-from typing import Dict
+import warnings
 
 import torch.utils.show_pickle
 
@@ -237,7 +237,7 @@ def get_model_info(
         # so re-used strings are stored efficiently.
         # However, JSON has no way of representing this,
         # so we have to do it manually.
-        interned_strings : Dict[str, int] = {}
+        interned_strings : dict[str, int] = {}
 
         def ist(s):
             if s not in interned_strings:
@@ -389,6 +389,7 @@ def get_info_and_burn_skeleton(path_or_bytesio, **kwargs):
 
 
 def main(argv, *, stdout=None):
+    warnings.warn("torch.utils.model_dump is deprecated and will be removed in a future PyTorch release.")
     parser = argparse.ArgumentParser()
     parser.add_argument("--style", choices=["json", "html"])
     parser.add_argument("--title")

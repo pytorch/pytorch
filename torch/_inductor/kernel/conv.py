@@ -1,11 +1,11 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
 import logging
-from typing import cast, List, Optional, Sequence, Tuple, TYPE_CHECKING, TypedDict
+from typing import cast, Optional, TYPE_CHECKING, TypedDict
 
 import torch
+from torch._inductor.codegen.rocm.ck_conv_template import CKGroupedConvFwdTemplate
 
 from .. import config, ir
 from ..lowering import (
@@ -25,13 +25,16 @@ from ..utils import (
     is_zeros,
     pad_listlike,
     sympy_product,
+    use_ck_conv_template,
     use_triton_template,
 )
 from ..virtualized import V
-from .mm_common import filtered_configs
+from .mm_common import build_rocm_gemm_configs, filtered_configs
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from ..ir import TensorBox
 
 log = logging.getLogger(__name__)
@@ -71,16 +74,14 @@ kernel_configs = [
 
 # Create filtered list of configs based on conv
 platform_configs = tuple(
-    cast(Tuple[int, int, int, int, int], config["config"])
+    cast(tuple[int, int, int, int, int], config["config"])
     for config in kernel_configs
     if config["cond"]
 )
 
 # On ROCm convert num_stages to 1 as pipelining provides no benefit
-if torch.version.hip:
-    platform_configs = tuple(
-        (config[0], config[1], config[2], 1, config[4]) for config in platform_configs
-    )
+if torch.version.hip and torch.cuda.is_available():
+    platform_configs = build_rocm_gemm_configs(platform_configs)
 
 
 def _is_large_block_for_cpu(m, n, k):
@@ -420,7 +421,7 @@ def conv_layout(
         stride = ir.convert_shape_to_inductor(output.stride())  # type: ignore[assignment]
 
     return ir.FixedLayout(
-        x.get_device(),
+        x.get_device_or_error(),
         x.get_dtype(),
         sizes,
         stride,
@@ -460,12 +461,12 @@ def convert_1x1_conv_to_mm(x, weight, bias):
 def convolution(
     x: TensorBox,
     weight: TensorBox,
-    bias: TensorBox,
-    stride: List[int],
-    padding: List[int],
-    dilation: List[int],
+    bias: Optional[TensorBox],
+    stride: Sequence[int],
+    padding: Sequence[int],
+    dilation: Sequence[int],
     transposed: bool,
-    output_padding: List[int],
+    output_padding: Sequence[int],
     groups: int,
 ):
     stride = tuple(stride)
@@ -504,6 +505,32 @@ def convolution(
     out_chan, in_chan, *kernel_shape = V.graph.sizevars.evaluate_static_shapes(
         weight.get_size()
     )
+
+    # Always convert conv1D to 2D for Intel GPU.
+    # Only conv2D can be converted to channel last layout,
+    # which have much better performance.
+    if (
+        len(x.get_size()) == 3
+        and len(kernel_shape) == 1
+        and ir.get_device_type(x) == "xpu"
+    ):
+        kwargs.update(
+            {
+                "stride": (1,) + stride,
+                "padding": (0,) + padding,
+                "dilation": (1,) + dilation,
+                "output_padding": (0,) + output_padding,
+            }
+        )
+        # (N, C, L) -> (N, C, 1, L)
+        x = L[aten.unsqueeze](x, dim=2)
+        weight = L[aten.unsqueeze](weight, dim=2)
+
+        return L[aten.squeeze](
+            convolution(x, weight, bias, **kwargs),
+            dim=2,
+        )
+
     ndim = len(kernel_shape)
     stride = pad_listlike(stride, ndim)
     padding = pad_listlike(padding, ndim)
@@ -659,7 +686,17 @@ def convolution(
                     num_warps=cfg.num_warps,
                     **cfg.kwargs,
                 )
-
+    if use_ck_conv_template(layout):
+        CKGroupedConvFwdTemplate.add_ck_conv_choices(
+            choices,
+            layout,
+            input_nodes=(x, weight) + ((bias,) if bias is not None else tuple()),
+            stride=stride,
+            padding=padding,
+            dilation=dilation,
+            groups=groups,
+            n_spatial_dimensions=ndim,
+        )
     return autotune_select_algorithm("convolution", choices, args, layout)
 
 

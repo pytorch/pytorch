@@ -51,8 +51,7 @@ namespace detail {
 template <typename Derived>
 RNNImplBase<Derived>::RNNImplBase(const RNNOptionsBase& options_)
     : options_base(options_) {
-  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
-  reset();
+  RNNImplBase<Derived>::reset();
 }
 
 template <typename Derived>
@@ -507,10 +506,7 @@ std::tuple<Tensor, Tensor> RNNImpl::forward_helper(
           torch::enumtype::get_enum_name(options_base.mode()));
     }
   }
-  auto output = std::get<0>(result);
-  auto hidden = std::get<1>(result);
-
-  return std::make_tuple(output, hidden);
+  return result;
 }
 
 std::tuple<Tensor, Tensor> RNNImpl::forward(const Tensor& input, Tensor hx) {
@@ -755,10 +751,7 @@ std::tuple<Tensor, Tensor> GRUImpl::forward_helper(
         this->is_training(),
         options.bidirectional());
   }
-  auto output = std::get<0>(result);
-  auto hidden = std::get<1>(result);
-
-  return std::make_tuple(output, hidden);
+  return result;
 }
 
 std::tuple<Tensor, Tensor> GRUImpl::forward(const Tensor& input, Tensor hx) {
@@ -799,8 +792,7 @@ namespace detail {
 template <typename Derived>
 RNNCellImplBase<Derived>::RNNCellImplBase(const RNNCellOptionsBase& options_)
     : options_base(options_) {
-  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
-  reset();
+  RNNCellImplBase<Derived>::reset();
 }
 
 template <typename Derived>

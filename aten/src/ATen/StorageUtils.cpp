@@ -11,7 +11,7 @@ C10_EXPORT c10::intrusive_ptr<c10::StorageImpl> new_shm_fd_storage(
       ALLOCATOR_MAPPED_KEEPFD | ALLOCATOR_MAPPED_UNLINK;
   std::string handle = NewProcessWideShmHandle();
   auto sptr = MapAllocator::makeDataPtr(
-      handle.c_str(), flags, size * sizeof(uint8_t), nullptr);
+      handle, flags, size * sizeof(uint8_t), nullptr);
   return c10::make_intrusive<StorageImpl>(
       c10::StorageImpl::use_byte_size_t(),
       size,

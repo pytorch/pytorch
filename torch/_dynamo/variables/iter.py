@@ -1,9 +1,24 @@
 # mypy: ignore-errors
 
+"""
+This module provides iterator-related variable tracking functionality for Dynamo.
+It implements variable classes for handling Python iterators and itertools functions
+during symbolic execution and tracing.
+
+The module includes:
+- Base iterator variable classes for tracking iterator state
+- Implementations of built-in iterators (zip, map, filter)
+- Support for itertools functions (product, accumulate, combinations, etc.)
+- Mutation tracking and reconstruction capabilities for iterator operations
+
+These classes integrate with Dynamo's variable tracking system to enable proper
+handling of iterator operations during code transformation and optimization.
+"""
+
 import itertools
 import operator
 import sys
-from typing import Dict, List, Optional, TYPE_CHECKING, Union
+from typing import Optional, TYPE_CHECKING, Union
 
 from .. import polyfills, variables
 from ..bytecode_transformation import create_call_function, create_instruction
@@ -39,18 +54,20 @@ class ItertoolsVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        # See also: module `torch._dynamo.polyfills.itertools`
+
         if (
             self.value is itertools.product
             and not kwargs
             and all(arg.has_unpack_var_sequence(tx) for arg in args)
         ):
             seqs = [arg.unpack_var_sequence(tx) for arg in args]
-            items = []
-            for item in itertools.product(*seqs):
-                items.append(variables.TupleVariable(list(item)))
+            items = [
+                variables.TupleVariable(list(item)) for item in itertools.product(*seqs)
+            ]
             return variables.ListIteratorVariable(
                 items, mutation_type=ValueMutationNew()
             )
@@ -136,19 +153,20 @@ class ItertoolsVariable(VariableTracker):
 
             if len(args) == 1 and args[0].has_unpack_var_sequence(tx):
                 seq = args[0].unpack_var_sequence(tx)
-                keyfunc = (
-                    (
-                        lambda x: (
-                            retrieve_const_key(
-                                kwargs.get("key").call_function(tx, [x], {})
-                            )
-                        )
-                    )
-                    if "key" in kwargs
-                    else None
-                )
             else:
                 unimplemented("Unsupported arguments for itertools.groupby")
+
+            if "key" in kwargs:
+
+                def keyfunc(x):
+                    return retrieve_const_key(
+                        kwargs.get("key").call_function(tx, [x], {})
+                    )
+
+            else:
+
+                def keyfunc(x):
+                    return retrieve_const_key(x)
 
             result = []
             try:
@@ -191,14 +209,6 @@ class ItertoolsVariable(VariableTracker):
             return variables.CycleIteratorVariable(
                 *args, mutation_type=ValueMutationNew()
             )
-        elif self.value is itertools.dropwhile:
-            return variables.UserFunctionVariable(polyfills.dropwhile).call_function(
-                tx, args, kwargs
-            )
-        elif self.value is itertools.zip_longest:
-            return variables.UserFunctionVariable(polyfills.zip_longest).call_function(
-                tx, args, kwargs
-            )
         else:
             return super().call_function(tx, args, kwargs)
 
@@ -214,7 +224,7 @@ class IteratorVariable(VariableTracker):
     # Normally, iterators are accessed lazily.
     # Example of safe eager unpacking: list(map(f, seq))
     # Example of unsafe eager unpacking: list(islice(map(f, seq), 5))
-    def force_unpack_var_sequence(self, tx) -> List[VariableTracker]:
+    def force_unpack_var_sequence(self, tx) -> list[VariableTracker]:
         result = []
         while True:
             try:
@@ -287,7 +297,7 @@ class CycleIteratorVariable(IteratorVariable):
     def __init__(
         self,
         iterator: IteratorVariable,
-        saved: Optional[List[VariableTracker]] = None,
+        saved: Optional[list[VariableTracker]] = None,
         saved_index: int = 0,
         item: Optional[VariableTracker] = None,
         **kwargs,
@@ -341,7 +351,7 @@ class ZipVariable(IteratorVariable):
 
     def __init__(
         self,
-        iterables: List[Union[List[VariableTracker], VariableTracker]],
+        iterables: list[Union[list[VariableTracker], VariableTracker]],
         strict: bool = False,
         **kwargs,
     ) -> None:
@@ -361,7 +371,7 @@ class ZipVariable(IteratorVariable):
             for it in self.iterables
         )
 
-    def unpack_var_sequence(self, tx) -> List["VariableTracker"]:
+    def unpack_var_sequence(self, tx) -> list["VariableTracker"]:
         assert self.has_unpack_var_sequence(tx)
         iterables = []
         for it in self.iterables:
@@ -455,7 +465,7 @@ class MapVariable(ZipVariable):
     def __init__(
         self,
         fn: VariableTracker,
-        iterables: List[Union[List[VariableTracker], VariableTracker]],
+        iterables: list[Union[list[VariableTracker], VariableTracker]],
         **kwargs,
     ) -> None:
         super().__init__(iterables, **kwargs)
@@ -483,3 +493,80 @@ class MapVariable(ZipVariable):
                 create_instruction("CALL_FUNCTION_EX", arg=0),
             ]
         )
+
+
+class FilterVariable(IteratorVariable):
+    """
+    Represents filter(fn, iterable)
+    """
+
+    _nonvar_fields = {
+        "index",
+        *IteratorVariable._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        fn: VariableTracker,
+        iterable: Union[list[VariableTracker], VariableTracker],
+        **kwargs,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.fn = fn
+        self.iterable = iterable
+        self.index = 0
+
+    def python_type(self):
+        return filter
+
+    def has_unpack_var_sequence(self, tx) -> bool:
+        return isinstance(self.iterable, list) or self.iterable.has_unpack_var_sequence(
+            tx
+        )
+
+    def unpack_var_sequence(self, tx) -> list["VariableTracker"]:
+        assert self.has_unpack_var_sequence(tx)
+        it = None
+        if isinstance(self.iterable, list):
+            it = self.iterable[self.index :]
+        else:
+            it = self.iterable.unpack_var_sequence(tx)
+        filtered = self.fn.call_function(tx, it, {})
+        return [variables.TupleVariable([filtered])]
+
+    def next_variable(self, tx):
+        def _next():
+            old_index = self.index
+            if isinstance(self.iterable, list):
+                if old_index >= len(self.iterable):
+                    raise_observed_exception(StopIteration, tx)
+                return self.iterable[old_index]
+            else:
+                return self.iterable.next_variable(tx)
+
+        # A do-while loop to find elements that make fn return true
+        while True:
+            item = _next()
+            self.index += 1
+            res = self.fn.call_function(tx, [item], {})
+            pred_res = variables.UserFunctionVariable(
+                polyfills.predicate
+            ).call_function(tx, [res], {})
+            if pred_res.as_python_constant():
+                return item
+
+    def reconstruct_items(self, codegen):
+        if isinstance(self.iterable, list):
+            remaining_items = self.iterable[self.index :]
+            codegen.foreach(remaining_items)
+            codegen.append_output(
+                create_instruction("BUILD_TUPLE", arg=len(remaining_items))
+            )
+        else:
+            codegen(self.iterable)
+
+    def reconstruct(self, codegen):
+        codegen.add_push_null(lambda: codegen.load_import_from("builtins", "filter"))
+        codegen(self.fn)
+        self.reconstruct_items(codegen)
+        codegen.extend_output(create_call_function(2, False))

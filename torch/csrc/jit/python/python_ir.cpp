@@ -756,8 +756,7 @@ void initPythonIRBindings(PyObject* module_) {
           [](Node& n, const char* name, const at::Tensor& v) {
             return n.t_(
                 Symbol::attr(name),
-                autograd::Variable(v.view(std::vector<int64_t>{}))
-                    .set_requires_grad(false));
+                v.view(std::vector<int64_t>{}).set_requires_grad(false));
           })
       .def(
           "z",
@@ -782,8 +781,7 @@ void initPythonIRBindings(PyObject* module_) {
           "zs_",
           [](Node& n, const char* name, TensorsAttr::ValueType v) {
             for (auto& i : v) {
-              i = autograd::Variable(i.view(std::vector<int64_t>{}))
-                      .set_requires_grad(false);
+              i = i.view(std::vector<int64_t>{}).set_requires_grad(false);
             }
             return n.ts_(Symbol::attr(name), std::move(v));
           })
@@ -1071,8 +1069,15 @@ void initPythonIRBindings(PyObject* module_) {
         return get_python_cu()->get_class(c10::QualifiedName(qualified_name));
       }))
       .def("name", [](ClassType& self) { return self.name()->name(); })
-      .def("qualified_name", [](ClassType& self) {
-        return self.name()->qualifiedName();
+      .def(
+          "qualified_name",
+          [](ClassType& self) { return self.name()->qualifiedName(); })
+      .def("method_names", [](ClassType& self) {
+        std::vector<std::string> method_names;
+        for (const auto* method : self.methods()) {
+          method_names.push_back(method->name());
+        }
+        return method_names;
       });
   py::class_<EnumType, Type, EnumTypePtr>(m, "EnumType")
       .def(py::init([](const std::string& qualified_name,

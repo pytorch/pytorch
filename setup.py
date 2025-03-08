@@ -22,6 +22,11 @@
 #     also applies to C++ files (unless CXXFLAGS is set), in contrast to the
 #     default behavior of autogoo and cmake build systems.)
 #
+#     A specific flag that can be used is
+#     -DHAS_TORCH_SHOW_DISPATCH_TRACE
+#       build with dispatch trace that can be enabled with
+#       TORCH_SHOW_DISPATCH_TRACE=1 at runtime.
+#
 #   CC
 #     the C/C++ compiler to use
 #
@@ -256,7 +261,7 @@ import setuptools.command.install
 import setuptools.command.sdist
 from setuptools import Extension, find_packages, setup
 from setuptools.dist import Distribution
-from tools.build_pytorch_libs import build_caffe2
+from tools.build_pytorch_libs import build_pytorch
 from tools.generate_torch_version import get_torch_version
 from tools.setup_helpers.cmake import CMake
 from tools.setup_helpers.env import build_type, IS_DARWIN, IS_LINUX, IS_WINDOWS
@@ -339,7 +344,6 @@ else:
 cwd = os.path.dirname(os.path.abspath(__file__))
 lib_path = os.path.join(cwd, "torch", "lib")
 third_party_path = os.path.join(cwd, "third_party")
-caffe2_build_dir = os.path.join(cwd, "build")
 
 # CMAKE: full path to python library
 if IS_WINDOWS:
@@ -415,16 +419,16 @@ def check_submodules():
     # If none of the submodule folders exists, try to initialize them
     if all(not_exists_or_empty(folder) for folder in folders):
         try:
-            print(" --- Trying to initialize submodules")
+            report(" --- Trying to initialize submodules")
             start = time.time()
             subprocess.check_call(
                 ["git", "submodule", "update", "--init", "--recursive"], cwd=cwd
             )
             end = time.time()
-            print(f" --- Submodule initialization took {end - start:.2f} sec")
+            report(f" --- Submodule initialization took {end - start:.2f} sec")
         except Exception:
-            print(" --- Submodule initalization failed")
-            print("Please run:\n\tgit submodule update --init --recursive")
+            report(" --- Submodule initalization failed")
+            report("Please run:\n\tgit submodule update --init --recursive")
             sys.exit(1)
     for folder in folders:
         check_for_files(
@@ -480,11 +484,10 @@ def mirror_files_into_torchgen():
 # all the work we need to do _before_ setup runs
 def build_deps():
     report("-- Building version " + version)
-
     check_submodules()
     check_pydep("yaml", "pyyaml")
     build_python = not BUILD_LIBTORCH_WHL
-    build_caffe2(
+    build_pytorch(
         version=version,
         cmake_python_library=cmake_python_library,
         build_python=build_python,
@@ -568,35 +571,52 @@ class build_ext(setuptools.command.build_ext.build_ext):
                 assert rpath.startswith("path ")
                 rpaths.append(rpath.split(" ", 1)[1].rsplit("(", 1)[0][:-1])
 
-        omp_lib_name = (
-            "libomp.dylib" if os.uname().machine == "arm64" else "libiomp5.dylib"
-        )
-        omp_rpath_lib_path = os.path.join("@rpath", omp_lib_name)
-        if omp_rpath_lib_path not in libs:
+        omplib_path = get_cmake_cache_vars()["OpenMP_libomp_LIBRARY"]
+        omplib_name = get_cmake_cache_vars()["OpenMP_C_LIB_NAMES"] + ".dylib"
+        omplib_rpath_path = os.path.join("@rpath", omplib_name)
+
+        # This logic is fragile and checks only two cases:
+        # - libtorch_cpu depends on `@rpath/libomp.dylib`e (happens when built inside miniconda environment)
+        # - libtorch_cpu depends on `/abs/path/to/libomp.dylib` (happens when built with libomp from homebrew)
+        if not any(c in libs for c in [omplib_path, omplib_rpath_path]):
             return
 
         # Copy libomp/libiomp5 from rpath locations
+        target_lib = os.path.join(self.build_lib, "torch", "lib", omplib_name)
+        libomp_relocated = False
         for rpath in rpaths:
-            source_lib = os.path.join(rpath, omp_lib_name)
+            source_lib = os.path.join(rpath, omplib_name)
             if not os.path.exists(source_lib):
                 continue
-            target_lib = os.path.join(self.build_lib, "torch", "lib", omp_lib_name)
             self.copy_file(source_lib, target_lib)
             # Delete old rpath and add @loader_lib to the rpath
             # This should prevent delocate from attempting to package another instance
             # of OpenMP library in torch wheel as well as loading two libomp.dylib into
             # the address space, as libraries are cached by their unresolved names
-            subprocess.check_call(
-                [
-                    "install_name_tool",
-                    "-rpath",
-                    rpath,
-                    "@loader_path",
-                    libtorch_cpu_path,
-                ]
-            )
+            install_name_tool_args = [
+                "-rpath",
+                rpath,
+                "@loader_path",
+            ]
+            libomp_relocated = True
             break
-
+        if not libomp_relocated and os.path.exists(omplib_path):
+            self.copy_file(omplib_path, target_lib)
+            install_name_tool_args = [
+                "-change",
+                omplib_path,
+                omplib_rpath_path,
+            ]
+            if "@loader_path" not in rpaths:
+                install_name_tool_args += [
+                    "-add_rpath",
+                    "@loader_path",
+                ]
+            libomp_relocated = True
+        if libomp_relocated:
+            install_name_tool_args.insert(0, "install_name_tool")
+            install_name_tool_args.append(libtorch_cpu_path)
+            subprocess.check_call(install_name_tool_args)
         # Copy omp.h from OpenMP_C_FLAGS and copy it into include folder
         omp_cflags = get_cmake_cache_vars()["OpenMP_C_FLAGS"]
         if not omp_cflags:
@@ -700,7 +720,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
         # It's an old-style class in Python 2.7...
         setuptools.command.build_ext.build_ext.run(self)
 
-        if IS_DARWIN and package_type != "conda":
+        if IS_DARWIN:
             self._embed_libomp()
 
         # Copy the essential export library to compile C++ extensions.
@@ -730,47 +750,6 @@ class build_ext(setuptools.command.build_ext.build_ext):
 
     def build_extensions(self):
         self.create_compile_commands()
-        # The caffe2 extensions are created in
-        # tmp_install/lib/pythonM.m/site-packages/caffe2/python/
-        # and need to be copied to build/lib.linux.... , which will be a
-        # platform dependent build folder created by the "build" command of
-        # setuptools. Only the contents of this folder are installed in the
-        # "install" command by default.
-        # We only make this copy for Caffe2's pybind extensions
-        caffe2_pybind_exts = [
-            "caffe2.python.caffe2_pybind11_state",
-            "caffe2.python.caffe2_pybind11_state_gpu",
-            "caffe2.python.caffe2_pybind11_state_hip",
-        ]
-        if BUILD_LIBTORCH_WHL:
-            caffe2_pybind_exts = []
-        i = 0
-        while i < len(self.extensions):
-            ext = self.extensions[i]
-            if ext.name not in caffe2_pybind_exts:
-                i += 1
-                continue
-            fullname = self.get_ext_fullname(ext.name)
-            filename = self.get_ext_filename(fullname)
-            report(f"\nCopying extension {ext.name}")
-
-            relative_site_packages = (
-                sysconfig.get_path("purelib")
-                .replace(sysconfig.get_path("data"), "")
-                .lstrip(os.path.sep)
-            )
-            src = os.path.join("torch", relative_site_packages, filename)
-            if not os.path.exists(src):
-                report(f"{src} does not exist")
-                del self.extensions[i]
-            else:
-                dst = os.path.join(os.path.realpath(self.build_lib), filename)
-                report(f"Copying {ext.name} from {src} to {dst}")
-                dst_dir = os.path.dirname(dst)
-                if not os.path.exists(dst_dir):
-                    os.makedirs(dst_dir)
-                self.copy_file(src, dst)
-                i += 1
 
         # Copy functorch extension
         for i, ext in enumerate(self.extensions):
@@ -1060,9 +1039,7 @@ def configure_extension_build():
     ################################################################################
 
     extensions = []
-    excludes = ["tools", "tools.*"]
-    if not cmake_cache_vars["BUILD_CAFFE2"]:
-        excludes.extend(["caffe2", "caffe2.*"])
+    excludes = ["tools", "tools.*", "caffe2", "caffe2.*"]
     if not cmake_cache_vars["BUILD_FUNCTORCH"]:
         excludes.extend(["functorch", "functorch.*"])
     packages = find_packages(exclude=excludes)
@@ -1082,18 +1059,6 @@ def configure_extension_build():
 
     # These extensions are built by cmake and copied manually in build_extensions()
     # inside the build_ext implementation
-    if cmake_cache_vars["BUILD_CAFFE2"]:
-        extensions.append(
-            Extension(name="caffe2.python.caffe2_pybind11_state", sources=[]),
-        )
-        if cmake_cache_vars["USE_CUDA"]:
-            extensions.append(
-                Extension(name="caffe2.python.caffe2_pybind11_state_gpu", sources=[]),
-            )
-        if cmake_cache_vars["USE_ROCM"]:
-            extensions.append(
-                Extension(name="caffe2.python.caffe2_pybind11_state_hip", sources=[]),
-            )
     if cmake_cache_vars["BUILD_FUNCTORCH"]:
         extensions.append(
             Extension(name="functorch._C", sources=[]),
@@ -1109,8 +1074,6 @@ def configure_extension_build():
 
     entry_points = {
         "console_scripts": [
-            "convert-caffe2-to-onnx = caffe2.python.onnx.bin.conversion:caffe2_to_onnx",
-            "convert-onnx-to-caffe2 = caffe2.python.onnx.bin.conversion:onnx_to_caffe2",
             "torchrun = torch.distributed.run:main",
         ],
         "torchrun.logs_specs": [
@@ -1157,7 +1120,7 @@ def main():
         "filelock",
         "typing-extensions>=4.10.0",
         'setuptools ; python_version >= "3.12"',
-        'sympy==1.13.1 ; python_version >= "3.9"',
+        "sympy>=1.13.3",
         "networkx",
         "jinja2",
         "fsspec",
@@ -1224,7 +1187,7 @@ def main():
     with open(os.path.join(cwd, "README.md"), encoding="utf-8") as f:
         long_description = f.read()
 
-    version_range_max = max(sys.version_info[1], 12) + 1
+    version_range_max = max(sys.version_info[1], 13) + 1
     torch_package_data = [
         "py.typed",
         "bin/*",
@@ -1279,6 +1242,7 @@ def main():
         "include/ATen/native/cuda/*.cuh",
         "include/ATen/native/hip/*.h",
         "include/ATen/native/hip/*.cuh",
+        "include/ATen/native/kleidiai/*.h",
         "include/ATen/native/mps/*.h",
         "include/ATen/native/mkldnn/xpu/*.h",
         "include/ATen/native/mkldnn/xpu/detail/*.h",
@@ -1305,6 +1269,7 @@ def main():
         "include/c10/cuda/impl/*.h",
         "include/c10/hip/*.h",
         "include/c10/hip/impl/*.h",
+        "include/c10/metal/*.h",
         "include/c10/xpu/*.h",
         "include/c10/xpu/impl/*.h",
         "include/torch/*.h",
@@ -1341,12 +1306,16 @@ def main():
         "include/torch/csrc/distributed/autograd/rpc_messages/*.h",
         "include/torch/csrc/dynamo/*.h",
         "include/torch/csrc/inductor/*.h",
+        "include/torch/csrc/inductor/aoti_include/*.h",
         "include/torch/csrc/inductor/aoti_package/*.h",
         "include/torch/csrc/inductor/aoti_runner/*.h",
         "include/torch/csrc/inductor/aoti_runtime/*.h",
         "include/torch/csrc/inductor/aoti_torch/*.h",
         "include/torch/csrc/inductor/aoti_torch/c/*.h",
         "include/torch/csrc/inductor/aoti_torch/generated/*.h",
+        "include/torch/csrc/inductor/aoti_torch/generated/extend/*.h",
+        "include/torch/csrc/inductor/cpp_wrapper/*.h",
+        "include/torch/csrc/inductor/cpp_wrapper/device_internal/*.h",
         "include/torch/csrc/jit/*.h",
         "include/torch/csrc/jit/backends/*.h",
         "include/torch/csrc/jit/generated/*.h",
@@ -1394,7 +1363,9 @@ def main():
         "include/sleef.h",
         "_inductor/codegen/*.h",
         "_inductor/codegen/aoti_runtime/*.cpp",
+        "_inductor/script.ld",
         "_export/serde/*.yaml",
+        "_export/serde/*.thrift",
         "share/cmake/ATen/*.cmake",
         "share/cmake/Caffe2/*.cmake",
         "share/cmake/Caffe2/public/*.cmake",
@@ -1429,14 +1400,13 @@ def main():
                 "lib/*.lib",
             ]
         )
-    if get_cmake_cache_vars()["BUILD_CAFFE2"]:
-        torch_package_data.extend(
-            [
-                "include/caffe2/**/*.h",
-                "include/caffe2/utils/*.h",
-                "include/caffe2/utils/**/*.h",
-            ]
-        )
+        aotriton_image_path = os.path.join(lib_path, "aotriton.images")
+        aks2_files = []
+        for root, dirs, files in os.walk(aotriton_image_path):
+            subpath = os.path.relpath(root, start=aotriton_image_path)
+            for fn in files:
+                aks2_files.append(os.path.join("lib/aotriton.images", subpath, fn))
+        torch_package_data += aks2_files
     if get_cmake_cache_vars()["USE_TENSORPIPE"]:
         torch_package_data.extend(
             [
@@ -1477,9 +1447,6 @@ def main():
 
     if not BUILD_LIBTORCH_WHL:
         package_data["torchgen"] = torchgen_package_data
-        package_data["caffe2"] = [
-            "python/serialized_test/data/operator_test/*.zip",
-        ]
     else:
         # no extensions in BUILD_LIBTORCH_WHL mode
         extensions = []
@@ -1488,8 +1455,7 @@ def main():
         name=package_name,
         version=version,
         description=(
-            "Tensors and Dynamic neural networks in "
-            "Python with strong GPU acceleration"
+            "Tensors and Dynamic neural networks in Python with strong GPU acceleration"
         ),
         long_description=long_description,
         long_description_content_type="text/markdown",

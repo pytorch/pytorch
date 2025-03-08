@@ -11,6 +11,7 @@
 
 namespace c10::cuda::CUDACachingAllocator::CudaMallocAsync {
 
+using namespace c10::CachingAllocator;
 using namespace c10::CachingDeviceAllocator;
 
 #if CUDA_VERSION >= 11040
@@ -449,6 +450,19 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
   static inline void assertValidDevice(c10::DeviceIndex device) {
     TORCH_CHECK(
         0 <= device && device < device_count, "Invalid device argument.");
+  }
+
+  double getMemoryFraction(c10::DeviceIndex device) override {
+    std::lock_guard<std::mutex> lk(general_mutex);
+    assertValidDevice(device);
+    CUDAGuard g(device);
+    lazy_init_device(device);
+
+    size_t device_free = 0;
+    size_t device_total = 0;
+    C10_CUDA_CHECK(cudaMemGetInfo(&device_free, &device_total));
+    return static_cast<double>(pytorch_memory_limits[device]) /
+        static_cast<double>(device_total);
   }
 
   void setMemoryFraction(double fraction, c10::DeviceIndex device) override {

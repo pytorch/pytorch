@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import math
-from typing import Sequence
+from typing import TYPE_CHECKING
 
 import torchgen.api.cpp as cpp
 from torchgen.context import native_function_manager
@@ -21,6 +21,10 @@ from torchgen.model import (
     Type,
 )
 from torchgen.static_runtime import config
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 logger: logging.Logger = logging.getLogger()
@@ -530,7 +534,7 @@ def generate_non_out_variant_call(
     kernel_name = get_kernel_name(g, backend_index)
     arg_names = (arg.name for arg in schema.schema_order_arguments())
     namespace_name = "cpu" if g.structured else "native"
-    return f'at::{namespace_name}::{kernel_name}({",".join(arg_names)})'
+    return f"at::{namespace_name}::{kernel_name}({','.join(arg_names)})"
 
 
 def generate_call_to_view_ops(
@@ -543,7 +547,7 @@ def generate_call_to_view_ops(
         kernel_name = kernel.kernel
     arg_names = (arg.name for arg in schema.schema_order_arguments())
     namespace_name = "native"
-    return f'at::{namespace_name}::{kernel_name}({",".join(arg_names)})'
+    return f"at::{namespace_name}::{kernel_name}({','.join(arg_names)})"
 
 
 def generate_out_variant_call(

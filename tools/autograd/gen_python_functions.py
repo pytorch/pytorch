@@ -36,7 +36,7 @@ from __future__ import annotations
 import itertools
 import re
 from collections import defaultdict
-from typing import Callable, Iterable, Sequence
+from typing import Callable, TYPE_CHECKING
 
 import yaml
 
@@ -74,6 +74,10 @@ from torchgen.yaml_utils import YamlLoader
 
 from .gen_inplace_or_view_type import is_tensor_list_type
 from .gen_trace_type import should_trace
+
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Sequence
 
 
 #
@@ -612,9 +616,9 @@ def load_deprecated_signatures(
         }
         schema_args_by_name = {a.name: a for a in schema.arguments.flat_all}
         for name in call_args:
-            assert (
-                name in schema_args_by_name or name in known_constants
-            ), f"deprecation definiton: Unrecognized value {name}"
+            assert name in schema_args_by_name or name in known_constants, (
+                f"deprecation definiton: Unrecognized value {name}"
+            )
 
         # Map deprecated signature arguments to their aten signature and test
         # if the types and alias annotation match.
@@ -679,7 +683,9 @@ def load_deprecated_signatures(
                     function=pair.function,
                 )
             )
-        assert any_schema_found, f"No native function with name {aten_name} matched signature:\n  {str(schema)}"
+        assert any_schema_found, (
+            f"No native function with name {aten_name} matched signature:\n  {str(schema)}"
+        )
 
     return results
 
@@ -719,7 +725,7 @@ def emit_structseq_call(
         tn_key = gen_structseq_typename_key(overload.function)
         typename = typenames.get(tn_key)
         if typename is None:
-            typename = f'NamedTuple{"" if not typedefs else len(typedefs)}'
+            typename = f"NamedTuple{'' if not typedefs else len(typedefs)}"
             typenames[tn_key] = typename
             typedefs.append(
                 f"""\
@@ -755,7 +761,7 @@ def generate_return_type_definition_and_registrations(
         typename = typenames.get(tn_key)
 
         if typename is None:
-            typename = f'{name}NamedTuple{"" if not definitions else len(definitions)}'
+            typename = f"{name}NamedTuple{'' if not definitions else len(definitions)}"
             typenames[tn_key] = typename
             definitions.append(
                 f"""\
@@ -803,7 +809,7 @@ def generate_return_type_declarations(
 
         if typename is None:
             typename = (
-                f'{name}NamedTuple{"" if not declarations else len(declarations)}'
+                f"{name}NamedTuple{'' if not declarations else len(declarations)}"
             )
             typenames[tn_key] = typename
             declarations.append(f"PyTypeObject* get_{name}_structseq();")
@@ -1319,8 +1325,6 @@ def emit_single_dispatch(
         else:
             schema_comment = f"// aten::{f.func}"
 
-        deprecated = "[deprecated] " if ps.deprecated else ""
-
         # dispatch lambda signature
         name = cpp.name(f.func)
         lambda_formals = ", ".join(
@@ -1349,7 +1353,7 @@ def emit_single_dispatch(
             or (ps.method and ("requires_grad" in parser_outputs))
         )
         set_requires_grad = (
-            f'.set_requires_grad({parser_outputs["requires_grad"].expr})'
+            f".set_requires_grad({parser_outputs['requires_grad'].expr})"
             if need_set_requires_grad
             else ""
         )

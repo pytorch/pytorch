@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from copy import copy
 from functools import total_ordering
-from typing import Any, Iterable
+from typing import Any, TYPE_CHECKING
+
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 
 class TestRun:
@@ -22,6 +26,10 @@ class TestRun:
         str
     ]  # If non-empy, only these tests should be run in this test run
 
+    # NB: Also the class is called TestRun, it's not a test class, so having this field set
+    # will allow pytest to ignore this accordingly
+    __test__ = False
+
     def __init__(
         self,
         name: str,
@@ -35,9 +43,9 @@ class TestRun:
         exs = set(excluded or [])
 
         if "::" in name:
-            assert (
-                not included and not excluded
-            ), "Can't specify included or excluded tests when specifying a test class in the file name"
+            assert not included and not excluded, (
+                "Can't specify included or excluded tests when specifying a test class in the file name"
+            )
             self.test_file, test_class = name.split("::")
             ins.add(test_class)
         else:
@@ -140,9 +148,9 @@ class TestRun:
             return copy(self)
 
         # If not, ensure we have the same file
-        assert (
-            self.test_file == other.test_file
-        ), f"Can't exclude {other} from {self} because they're not the same test file"
+        assert self.test_file == other.test_file, (
+            f"Can't exclude {other} from {self} because they're not the same test file"
+        )
 
         # 4 possible cases:
 

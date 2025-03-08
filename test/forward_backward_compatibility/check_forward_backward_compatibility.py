@@ -41,7 +41,9 @@ logging.basicConfig(level=logging.INFO, format=FORMAT)
 # [
 #   0: function name regex
 #   1: date until which the allowlist entry is valid
-#   2: (optional) function argument regex
+#   2: (optional, default: None) function argument regex
+#   3: (optional, default: False) If True, tells us that you are NOT a core ATen op
+#                                 See Note [Op removal core ATen detection]
 # ]
 #
 # NB: function name DOES NOT include overload name!
@@ -124,26 +126,14 @@ ALLOW_LIST = [
     ("aten::reduce_scatter_tensor", datetime.date(9999, 1, 30)),
     ("aten::all_gather_into_tensor", datetime.date(9999, 1, 30)),
     ("aten::all_reduce", datetime.date(9999, 1, 30)),
-    ("onednn::qconv1d_pointwise", datetime.date(2024, 12, 31)),
-    ("onednn::qconv2d_pointwise", datetime.date(2024, 12, 31)),
-    ("onednn::qconv3d_pointwise", datetime.date(2024, 12, 31)),
-    ("onednn::qconv2d_pointwise.binary", datetime.date(2024, 12, 31)),
-    ("onednn::qlinear_pointwise.binary", datetime.date(2024, 12, 31)),
-    ("onednn::qlinear_pointwise.binary_tensor", datetime.date(2024, 12, 31)),
-    ("aten::_scaled_mm.out", datetime.date(2024, 12, 31)),
-    ("aten::_scaled_mm", datetime.date(2024, 12, 31)),
-    ("aten::wrapped_quantized_linear_prepacked", datetime.date(2024, 12, 31)),
-    ("aten::wrapped_linear_prepack", datetime.date(2024, 12, 31)),
-    ("_quantized::wrapped_linear_prepack", datetime.date(2024, 12, 31)),
-    ("_quantized::wrapped_linear_prepacked", datetime.date(2024, 12, 31)),
-    ("_quantized::wrapped_quantized_linear_prepacked", datetime.date(2024, 12, 31)),
 ]
 
 ALLOW_LIST_COMPILED = [
     (
         re.compile(item[0]),
         item[1],
-        re.compile(item[2]) if len(item) > 2 else None,
+        re.compile(item[2]) if (len(item) > 2 and item[2] is not None) else None,
+        item[3] if len(item) > 3 else False,
     )
     for item in ALLOW_LIST
     if item[1] >= datetime.date.today()
@@ -155,9 +145,9 @@ def allow_listed(schema):
         if item[0].search(str(schema)):
             if len(item) > 2 and item[2] is not None:
                 # if arguments regex is present, use it
-                return bool(item[2].search(str(schema)))
-            return True
-    return False
+                return bool(item[2].search(str(schema))), item[3]
+            return True, item[3]
+    return False, None
 
 
 # The nightly will fail to parse newly added syntax to schema declarations
@@ -238,7 +228,22 @@ def is_core_aten_op(schema) -> bool:
     # Check if the schema is a core ATen op
     if "::" not in schema.name:
         return False
-    _, _, tags = torch._C._get_operation_overload(schema.name, schema.overload_name)
+    res = torch._C._get_operation_overload(schema.name, schema.overload_name)
+    if res is None:
+        # Note [Op removal core ATen detection]
+        #
+        # If the core ATen op has been removed, we cannot be sure whether it
+        # was previously a core ATen op or not via checking tags this way.
+        # Conservatively assume that you are ARE a core ATen op in this case.
+        # This means that deleting a core ATen op will still be caught.
+        # But if you're deleting an operator that is not a core ATen op
+        # and add it to the allow_list, you would need to additionally specify
+        # a flag in the ALLOW_LIST to tell us you are not a core ATen op.
+        # See the comment block above ALLOW_LIST for more info.
+        #
+        # See https://github.com/pytorch/pytorch/issues/146049
+        return True
+    _, _, tags = res
     return Tag.core in tags
 
 
@@ -248,13 +253,18 @@ def check_bc(existing_schemas):
     is_bc = True
     broken_ops = []
     for existing_schema in existing_schemas:
-        if allow_listed(existing_schema):
-            if not is_core_aten_op(existing_schema):
+        is_allow_list, trust_not_core_aten = allow_listed(existing_schema)
+        if is_allow_list:
+            if trust_not_core_aten or not is_core_aten_op(existing_schema):
                 logging.info("schema: %s found on allowlist, skipping", existing_schema)
                 continue
             else:
                 logging.info(
-                    "schema: %s found on allowlist, but is a core ATen op, checking BC",
+                    "schema: %s found on allowlist, but is a core ATen op, checking BC. "
+                    "NOTE: If you have removed an operator we will conservatively assume that "
+                    "it is a core ATen op. If the operator you removed is not a core ATen op, "
+                    "please specify that in the ALLOW_LIST entry (see comment block on top "
+                    "of ALLOW_LIST more info)",
                     existing_schema,
                 )
         if has_valid_upgraders(existing_schema, version_map):
@@ -300,7 +310,8 @@ def check_fc(existing_schemas):
     is_fc = True
     broken_ops = []
     for existing_schema in existing_schemas:
-        if allow_listed(existing_schema):
+        is_allow_list, _ = allow_listed(existing_schema)
+        if is_allow_list:
             logging.info("schema: %s found on allowlist, skipping", existing_schema)
             continue
         logging.info("processing existing schema: %s", existing_schema)

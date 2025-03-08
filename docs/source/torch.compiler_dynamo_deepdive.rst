@@ -341,7 +341,7 @@ All the inputs and intermediary elements of the FX graph are
 ``fx.Node``\ s. In Dynamo, ``fx.Node``\ s are wrapped in
 ``fx.Proxy``\ s. ``fx.Proxy``\ s are used to build the FX graph.
 In particular, they record every PyTorch operation performed on them
-into the graph. You can can create a new operation to be added to
+into the graph. You can create a new operation to be added to
 the graph by calling `create_proxy <https://github.com/pytorch/pytorch/blob/fb80f05ee2e1cba17892980701bfd5dbce58349f/torch/_dynamo/output_graph.py#L430-L431>`__.
 Then, we can add it to the graph through the function
 `wrap_fx_proxy <https://github.com/pytorch/pytorch/blob/fb80f05ee2e1cba17892980701bfd5dbce58349f/torch/_dynamo/variables/builder.py#L1311>`__.

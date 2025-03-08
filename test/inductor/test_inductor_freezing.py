@@ -15,7 +15,7 @@ from torch._inductor import config
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import override_lowering, run_and_get_code
 from torch.testing import FileCheck
-from torch.testing._internal.common_cuda import SM80OrLater
+from torch.testing._internal.common_cuda import SM80OrLater, tf32_on_and_off
 from torch.testing._internal.common_utils import IS_FBCODE, skipIfRocm, skipIfXpu
 
 
@@ -28,7 +28,7 @@ from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inducto
     check_model_gpu,
     copy_tests,
 )
-from torch.testing._internal.common_utils import TEST_WITH_ASAN, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import TEST_WITH_ROCM
 
 
 importlib.import_module("functorch")
@@ -261,12 +261,8 @@ class OptimizeForInferenceTemplate(TestCase):
                 FileCheck().check_not("@triton.jit").run(code[0])
                 self.assertEqual(out_eager, out_compiled)
 
+    @torch._inductor.config.patch("cpp.enable_concat_linear", True)
     def test_mm_concat(self):
-        # CPU path will replace mm with mkl._linear,
-        # skip this case for now.
-        if self.device == "cpu":
-            raise unittest.SkipTest("NYI CPU")
-
         class MM(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -319,12 +315,24 @@ class OptimizeForInferenceTemplate(TestCase):
                 return mod(inp)
 
             kernel_invoke = "kernel_cpp_0" if self.device == "cpu" else "triton.jit"
+            mm_invoke = "mm("
+            # https://github.com/pytorch/pytorch/blob/e754611d190b323e53c5d17db0dc39a96687513c/torch/_inductor/fx_passes/mkldnn_fusion.py#L1263
+            mkldnn_weight_pack_init = (
+                torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available()
+            )
+            if self.device == "cpu" and mkldnn_weight_pack_init:
+                if torch.ops.mkldnn._is_mkldnn_acl_supported():
+                    # for aarch64 with acl supported, use mkldnn weight prepack
+                    # https://github.com/pytorch/pytorch/blob/e754611d190b323e53c5d17db0dc39a96687513c/torch/_inductor/fx_passes/mkldnn_fusion.py#L1176-L1184
+                    mm_invoke = "mkldnn._linear_pointwise.default("
+                elif torch._C.has_mkl:
+                    mm_invoke = "mkl_linear.default("
 
             with torch.no_grad():
                 out_eager = mod(inp)
                 out, code = run_and_get_code(foo, mod, inp)
                 FileCheck().check_not(kernel_invoke).check_count(
-                    "mm(", count=1, exactly=True
+                    mm_invoke, count=1, exactly=True
                 ).run(code[0])
                 self.assertEqual(out_eager, out)
 
@@ -343,7 +351,7 @@ class OptimizeForInferenceTemplate(TestCase):
                 out_eager = mod2(inp)
                 out, code = run_and_get_code(foo, mod2, inp)
                 FileCheck().check_not(kernel_invoke).check_count(
-                    "mm(", count=count, exactly=True
+                    mm_invoke, count=count, exactly=True
                 ).run(code[0])
                 self.assertEqual(out_eager, out)
 
@@ -381,7 +389,7 @@ class OptimizeForInferenceTemplate(TestCase):
         def fn(a):
             return a.cos(), torch.zeros(a.shape[0], a.shape[1])
 
-        fn_opt = torch._dynamo.optimize("inductor", dynamic=True)(fn)
+        fn_opt = torch.compile(fn, backend="inductor", dynamic=True)
         inp = torch.randn(2, 4, 6).to(self.device)
         torch._dynamo.mark_dynamic(inp, 0)
         torch._dynamo.mark_dynamic(inp, 1)
@@ -704,7 +712,6 @@ class OptimizeForInferenceTemplate(TestCase):
         self.assertEqual(eager, compiled)
         self.assertTrue(weight_ref() is None)
 
-    @skipIfRocm
     def test_conv_with_as_strided(self):
         class Model(nn.Module):
             def __init__(self, groups):
@@ -763,6 +770,7 @@ class OptimizeForInferenceTemplate(TestCase):
             self.assertEqual(foo(mod, x), out_eager)
             self.assertEqual(foo(mod, x), out_eager)
 
+    @tf32_on_and_off(0.001)
     def test_conv_layout_convert_with_view(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -880,6 +888,7 @@ class OptimizeForInferenceTemplate(TestCase):
             self.assertEqual(out_eager, out_compiled)
 
     @skipIfRocm
+    @tf32_on_and_off(0.001)
     def test_redundant_clone_for_layout_convert(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -925,10 +934,7 @@ class OptimizeForInferenceTemplate(TestCase):
         for i, actual, expected in zip(
             itertools.count(), actual_outputs, expected_outputs
         ):
-            self.assertTrue(
-                torch.allclose(expected, actual, atol=1e-4, rtol=1e-4),
-                f"{i}th output: expected {expected}, actual {actual}",
-            )
+            self.assertEqual(expected, actual)
 
         if self.device == "cpu":
             # CPU use different convolution implementation, skip the checks below
@@ -962,7 +968,7 @@ if HAS_CPU and not torch.backends.mps.is_available():
 
     copy_tests(OptimizeForInferenceTemplate, FreezingCpuTests, "cpu")
 
-if HAS_GPU and not TEST_WITH_ASAN:
+if HAS_GPU:
 
     class FreezingGpuTests(TestCase):
         common = check_model_gpu

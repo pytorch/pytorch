@@ -5,7 +5,7 @@
 
 namespace torch {
 namespace jit {
-constexpr c10::string_view testSource = R"JIT(
+constexpr std::string_view testSource = R"JIT(
   class FooTest:
     def __init__(self, x):
       self.x = x

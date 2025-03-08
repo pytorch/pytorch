@@ -1,7 +1,6 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <mutex>
-#include <unordered_map>
 #include <utility>
 
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
@@ -29,8 +28,7 @@ int device_count = 0;
 
 void custom_raw_deleter(void* ptr);
 
-_AllocationMetadata::_AllocationMetadata()
-    : size(0), device_idx(-1), stream{} {}
+_AllocationMetadata::_AllocationMetadata() : size(0), device_idx(-1) {}
 
 _AllocationMetadata::_AllocationMetadata(
     size_t size,
@@ -169,6 +167,13 @@ void CUDAPluggableAllocator::init(int device_count) {
 
 bool CUDAPluggableAllocator::initialized() {
   return initialized_;
+}
+
+double CUDAPluggableAllocator::getMemoryFraction(c10::DeviceIndex device) {
+  TORCH_CHECK(
+      false,
+      "CUDAPluggableAllocator does not yet support getMemoryFraction. "
+      "If you need it, please file an issue describing your use case.");
 }
 
 void CUDAPluggableAllocator::setMemoryFraction(

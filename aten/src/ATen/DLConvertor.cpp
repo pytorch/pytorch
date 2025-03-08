@@ -63,10 +63,12 @@ DLDataType getDLDataType(const Tensor& t) {
     case ScalarType::BFloat16:
       dtype.code = DLDataTypeCode::kDLBfloat;
       break;
+    // TODO(#146647): use macro here instead of spelling out each shell dtype
     case ScalarType::Float8_e5m2:
     case ScalarType::Float8_e5m2fnuz:
     case ScalarType::Float8_e4m3fn:
     case ScalarType::Float8_e4m3fnuz:
+    case ScalarType::Float8_e8m0fnu:
       TORCH_CHECK(false, "float8 types are not supported by dlpack");
       break;
     case ScalarType::QInt8:
@@ -121,6 +123,9 @@ static DLDevice getDLDevice(const Tensor& tensor, c10::DeviceIndex device_id) {
     case DeviceType::MAIA:
       ctx.device_type = DLDeviceType::kDLMAIA;
       break;
+    case DeviceType::PrivateUse1:
+      ctx.device_type = DLDeviceType::kDLExtDev;
+      break;
     default:
       TORCH_CHECK(false, "Cannot pack tensors on " + tensor.device().str());
   }
@@ -149,6 +154,8 @@ static Device getATenDevice(const DLDevice& ctx, void* data) {
       return at::detail::getXPUHooks().getDeviceFromPtr(data);
     case DLDeviceType::kDLMAIA:
       return at::Device(DeviceType::MAIA, static_cast<c10::DeviceIndex>(ctx.device_id));
+    case DLDeviceType::kDLExtDev:
+      return at::Device(DeviceType::PrivateUse1, static_cast<c10::DeviceIndex>(ctx.device_id));
     default:
       TORCH_CHECK(
           false, "Unsupported device_type: ", std::to_string(ctx.device_type));
@@ -255,7 +262,6 @@ ScalarType toScalarType(const DLDataType& dtype) {
   return stype;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 namespace {
 struct ATenDLMTensor {
   Tensor handle;
@@ -287,7 +293,7 @@ DLManagedTensor* toDLPack(const Tensor& src) {
   atDLMTensor->tensor.deleter = &deleter;
   atDLMTensor->tensor.dl_tensor.data = view.data_ptr();
   c10::DeviceIndex device_id = 0;
-  if (src.is_cuda()) {
+  if (src.is_cuda() || src.is_privateuseone()) {
     device_id = src.get_device();
   }
   atDLMTensor->tensor.dl_tensor.device = getDLDevice(src, device_id);

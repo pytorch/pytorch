@@ -1,8 +1,8 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from typing import List, Sequence, Tuple
+from collections.abc import Sequence
+from typing import cast
 
 import torch
-from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor._op_schema import (
     _is_inplace_op,
@@ -295,7 +295,10 @@ pointwise_ops = [
     aten.logit.out,
     aten.logit_.default,
     aten.masked_fill.Scalar,
+    aten.maximum.default,
     aten.maximum.out,
+    aten.minimum.default,
+    aten.minimum.out,
     aten.mul.Scalar,
     aten.mul.Tensor,
     aten.mul.out,
@@ -416,9 +419,7 @@ pointwise_ops = [
 ]
 
 
-def pointwise_strategy(
-    mesh: DeviceMesh, op_schema: OpSchema, linearity: bool = False
-) -> OpStrategy:
+def pointwise_strategy(op_schema: OpSchema, linearity: bool = False) -> OpStrategy:
     max_shards_strategy_index = -1
     max_shards = -1
 
@@ -442,16 +443,15 @@ def pointwise_strategy(
 
         followed_strategy = op_schema.args_schema[max_shards_strategy_index]
 
-    assert isinstance(
-        followed_strategy, OpStrategy
-    ), f"no strategy to follow for {op_schema}!"
+    assert isinstance(followed_strategy, OpStrategy), (
+        f"no strategy to follow for {op_schema}!"
+    )
     return common_pointwise_strategy(
-        mesh, op_schema.args_schema, followed_strategy, linearity
+        op_schema.args_schema, followed_strategy, linearity
     )
 
 
 def common_pointwise_strategy(
-    mesh: DeviceMesh,
     args_schema: Sequence[object],
     followed_strategy: OpStrategy,
     linearity: bool,
@@ -464,7 +464,7 @@ def common_pointwise_strategy(
 
     for placement_strategy in followed_strategy.strategies:
         spec_to_follow = placement_strategy.output_spec
-        out_placements: List[Placement] = []
+        out_placements: list[Placement] = []
         for placement in spec_to_follow.placements:
             if isinstance(placement, Shard):
                 shard_dim = normalize_dim(placement.dim, len(spec_to_follow.shape))
@@ -479,10 +479,18 @@ def common_pointwise_strategy(
             else:
                 out_placements.append(placement)
 
-        input_specs: List[DTensorSpec] = []
-        redistribute_costs: List[List[float]] = []
-        for input_arg in args_schema:
+        input_specs: list[DTensorSpec] = []
+        redistribute_costs: list[list[float]] = []
+        for arg_idx, input_arg in enumerate(args_schema):
             if isinstance(input_arg, OpStrategy):
+                # sanity check that all args that follow the same strategy
+                # are on the same DeviceMesh
+                if input_arg.mesh != followed_strategy.mesh:
+                    raise ValueError(
+                        f"Could not run pointwise computation across different mesh: "
+                        f"Found {input_arg.mesh} and {followed_strategy.mesh}!"
+                    )
+
                 # every arg follow the out_placements, but need to handle broadcasting
                 input_arg_spec = input_arg.strategies[0].output_spec
                 input_arg_dims_map = infer_broadcast_dims_map(
@@ -494,7 +502,7 @@ def common_pointwise_strategy(
                     input_arg_dims_map,
                 )
                 input_arg_target_spec = DTensorSpec(
-                    mesh=mesh,
+                    mesh=followed_strategy.mesh,
                     placements=input_target_placements,
                     tensor_meta=input_arg_spec.tensor_meta,
                 )
@@ -506,7 +514,7 @@ def common_pointwise_strategy(
         pointwise_strategy.strategies.append(
             PlacementStrategy(
                 output_specs=DTensorSpec(
-                    mesh=mesh,
+                    mesh=followed_strategy.mesh,
                     placements=tuple(out_placements),
                 ),
                 input_specs=input_specs,
@@ -516,13 +524,13 @@ def common_pointwise_strategy(
     return pointwise_strategy
 
 
-def linear_pointwise_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
+def linear_pointwise_strategy(op_schema: OpSchema) -> StrategyType:
     """
     Linear pointwise operators can propagate pending reductions.
     For example, c = add(a, b); if a is pending sum, then c will be
     pending sum as well without any communication overhead.
     """
-    return pointwise_strategy(mesh, op_schema, linearity=True)
+    return pointwise_strategy(op_schema, linearity=True)
 
 
 for op in linear_pointwise_ops:
@@ -598,7 +606,7 @@ for_each_linearity_ops = [
 
 
 def list_pointwise_strategy(
-    mesh: DeviceMesh, op_schema: OpSchema, linearity: bool = False
+    op_schema: OpSchema, linearity: bool = False
 ) -> StrategyType:
     """
     Apply the pointwise strategy to the zipped arguments. For example, if we
@@ -616,11 +624,11 @@ def list_pointwise_strategy(
         OpStrategy: generated strategy
     """
 
-    def args_tuple_strategies(args_schema: Tuple[object, ...]) -> List[TupleStrategy]:
+    def args_tuple_strategies(args_schema: tuple[object, ...]) -> list[TupleStrategy]:
         first_arg = args_schema[0]
         assert isinstance(first_arg, TupleStrategy)
         strategy_len = len(first_arg.childs)
-        tuple_strategies: List[TupleStrategy] = []
+        tuple_strategies: list[TupleStrategy] = []
         for arg_idx, arg in enumerate(args_schema):
             if isinstance(arg, TupleStrategy):
                 # every tuple strategy should have the same length
@@ -639,26 +647,25 @@ def list_pointwise_strategy(
 
     args_strategies = args_tuple_strategies(op_schema.args_schema)
     follow_strategy: TupleStrategy = args_strategies[0]
-    list_strategy: List[OpStrategy] = []
+    list_strategy: list[OpStrategy] = []
     for child_idx, child_strtgy in enumerate(follow_strategy.childs):
         assert isinstance(child_strtgy, OpStrategy)
-        args_schema: List[StrategyType] = [
-            arg_strategy.childs[child_idx] for arg_strategy in args_strategies
+        args_schema: list[OpStrategy] = [
+            cast(OpStrategy, arg_strategy.childs[child_idx])
+            for arg_strategy in args_strategies
         ]
         pointwise_strategy: OpStrategy = common_pointwise_strategy(
-            mesh, args_schema, child_strtgy, linearity
+            args_schema, child_strtgy, linearity
         )
         list_strategy.append(pointwise_strategy)
     return TupleStrategy(list_strategy)
 
 
-def list_linear_pointwise_strategy(
-    mesh: DeviceMesh, op_schema: OpSchema
-) -> StrategyType:
+def list_linear_pointwise_strategy(op_schema: OpSchema) -> StrategyType:
     """
     for each list op stratgy that supports linearity
     """
-    return list_pointwise_strategy(mesh, op_schema, linearity=True)
+    return list_pointwise_strategy(op_schema, linearity=True)
 
 
 for op in for_each_ops:

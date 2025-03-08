@@ -25,7 +25,7 @@
 
 #if !AT_ROCM_ENABLED()
 
-namespace at { namespace native {
+namespace at::native {
 
     std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
             const Tensor& input_r, TensorList weight, int64_t weight_stride0,
@@ -46,7 +46,7 @@ namespace at { namespace native {
         TORCH_CHECK(false, "miopen_rnn_backward: ATen not compiled with MIOpen support.");
     }
 
-}} //namespace at::native
+} //namespace at::native
 
 #else // AT_ROCM_ENABLED()
 
@@ -889,9 +889,9 @@ void lstm_miopen(Tensor& output, Tensor& hy, Tensor& cy,
       int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
     auto result = _miopen_impl(input, std::make_tuple(hx[0], hx[1]), params, has_biases,
         miopenLSTM, num_layers, dropout_p, train, bidirectional, batch_first);
-    output = result.first;
-    hy = std::get<0>(result.second);
-    cy = std::get<1>(result.second);
+    output = std::move(result.first);
+    hy = std::move(std::get<0>(result.second));
+    cy = std::move(std::get<1>(result.second));
 }
 
 void lstm_packed_miopen(Tensor& output, Tensor& hy, Tensor& cy,
@@ -900,9 +900,9 @@ void lstm_packed_miopen(Tensor& output, Tensor& hy, Tensor& cy,
       int64_t num_layers, double dropout_p, bool train, bool bidirectional) {
     auto result = _miopen_impl(data, batch_sizes, std::make_tuple(hx[0], hx[1]),
         params, has_biases, miopenLSTM, num_layers, dropout_p, train, bidirectional);
-    output = result.first;
-    hy = std::get<0>(result.second);
-    cy = std::get<1>(result.second);
+    output = std::move(result.first);
+    hy = std::move(std::get<0>(result.second));
+    cy = std::move(std::get<1>(result.second));
 }
 
 REGISTER_CUDA_DISPATCH(lstm_miopen_stub, &lstm_miopen)

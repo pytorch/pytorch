@@ -385,7 +385,7 @@ Tensor _segment_reduce_cpu_offsets_backward_kernel(
 
 Tensor segment_reduce_kernel(
     const Tensor& data,
-    c10::string_view reduce,
+    std::string_view reduce,
     const std::optional<Tensor>& lengths,
     const std::optional<Tensor>& indices,
     const std::optional<Tensor>& offsets,
@@ -485,7 +485,7 @@ Tensor _segment_reduce_backward_kernel(
     const Tensor& grad,
     const Tensor& output,
     const Tensor& data,
-    c10::string_view reduce,
+    std::string_view reduce,
     const std::optional<Tensor>& lengths,
     const std::optional<Tensor>& offsets,
     int64_t axis,

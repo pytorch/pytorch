@@ -1,5 +1,7 @@
 import distutils.command.clean
+import os
 import shutil
+import sys
 from pathlib import Path
 
 from setuptools import find_packages, setup
@@ -32,6 +34,15 @@ class clean(distutils.command.clean.clean):
 
 
 if __name__ == "__main__":
+    if sys.platform == "win32":
+        vc_version = os.getenv("VCToolsVersion", "")
+        if vc_version.startswith("14.16."):
+            CXX_FLAGS = ["/sdl"]
+        else:
+            CXX_FLAGS = ["/sdl", "/permissive-"]
+    else:
+        CXX_FLAGS = {"cxx": ["-g", "-Wall", "-Werror"]}
+
     sources = list(CSRS_DIR.glob("*.cpp"))
 
     # Note that we always compile with debug info
@@ -40,7 +51,7 @@ if __name__ == "__main__":
             name="pytorch_openreg._C",
             sources=sorted(str(s) for s in sources),
             include_dirs=[CSRS_DIR],
-            extra_compile_args={"cxx": ["-g", "-Wall", "-Werror"]},
+            extra_compile_args=CXX_FLAGS,
         )
     ]
 
@@ -48,7 +59,7 @@ if __name__ == "__main__":
         name=PACKAGE_NAME,
         version=version,
         author="PyTorch Core Team",
-        description="Example for PyTorch out of tree regitration",
+        description="Example for PyTorch out of tree registration",
         packages=find_packages(exclude=("test",)),
         package_data={PACKAGE_NAME: ["*.dll", "*.dylib", "*.so"]},
         install_requires=[

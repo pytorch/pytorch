@@ -1,4 +1,4 @@
-from typing import Any, Optional, Tuple, Union
+from typing import Any, Optional, Union
 
 from torchgen.model import (
     Annotation,
@@ -80,8 +80,8 @@ class FunctionSchemaGen:
     @staticmethod
     def from_example(
         op_name: str,
-        example_inputs: Tuple[Tuple[str, Any], ...],
-        example_outputs: Tuple[Any, ...],
+        example_inputs: tuple[tuple[str, Any], ...],
+        example_outputs: tuple[Any, ...],
     ) -> FunctionSchema:
         args = []
         for name, inp in example_inputs:

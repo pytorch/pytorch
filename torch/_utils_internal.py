@@ -4,7 +4,7 @@ import logging
 import os
 import sys
 import tempfile
-from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar
+from typing import Any, Callable, Optional, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -91,6 +91,8 @@ def compile_time_strobelight_meta(
             if "skip" in kwargs and isinstance(skip := kwargs["skip"], int):
                 kwargs["skip"] = skip + 1
 
+            # This is not needed but we have it here to avoid having profile_compile_time
+            # in stack traces when profiling is not enabled.
             if not StrobelightCompileTimeProfiler.enabled:
                 return function(*args, **kwargs)
 
@@ -116,7 +118,7 @@ def compile_time_strobelight_meta(
 #
 # Killswitch is at
 # https://www.internalfb.com/intern/justknobs/?name=pytorch%2Fsignpost#event
-def signpost_event(category: str, name: str, parameters: Dict[str, Any]):
+def signpost_event(category: str, name: str, parameters: dict[str, Any]):
     log.info("%s %s: %r", category, name, parameters)
 
 
@@ -154,7 +156,7 @@ def check_if_torch_exportable():
 
 
 def export_training_ir_rollout_check() -> bool:
-    return False
+    return True
 
 
 def log_torch_jit_trace_exportability(
@@ -165,119 +167,6 @@ def log_torch_jit_trace_exportability(
 ):
     _, _, _, _ = api, type_of_export, export_outcome, result
     return
-
-
-def capture_pre_autograd_graph_using_training_ir() -> bool:
-    return False
-
-
-class JustKnobsConfig:
-    """Represents a lazily loaded config
-
-    This is designed to be used to specify a value in a config.
-
-    i.e. foo.bar = JustknobsConfig(name="//foo:bar", env_name="FORCE_FOO_BAR")
-
-    Call .get() in order to access the value
-    i.e. if foo.bar.get():
-
-    Note that the value is fetched once, and then not allowed to change. This
-    means less suprises, at the downside that you may have to restart a job
-    to pick up an update.
-
-    It can also be set explicitly via set - i.e.
-    foo.bar = JustknobsConfig(name="//foo:bar")
-    foo.bar.set(True)
-
-    Note that this does allow for no JK name (so that you can use this to replace old configurations).
-    """
-
-    def __init__(
-        self, *, name: Optional[str] = None, env_name=None, default: bool = True
-    ):
-        self.name = name
-        self.env_name = env_name
-        self.default = default
-        self.value: Optional[bool] = None
-        self.executed_value = None
-
-    def set(self, value: bool):
-        self.value = value
-
-    def get(self):
-        if self.executed_value is None:
-            self.executed_value = justknobs_feature(
-                self.name,
-                config_value=self.value,
-                env_name=self.env_name,
-                default=self.default,
-            )
-        return self.executed_value
-
-    def __str__(self):
-        v = bool(self)
-        return f"JustknobsConfig(name={self.name}, env_name={self.env_name}, default={self.default} - evals_to={v})"
-
-    def __bool__(self):
-        return self.get()
-
-
-def justknobs_feature(
-    name: Optional[str], config_value=None, env_name=None, default: bool = True
-):
-    """Returns whether or not a specific justknob feature is enabled.
-
-    This is a slightly higher level API then justknobs_check, designed to make it "easy" to do the right thing.
-    The primary thing it does, is allow configuration to override JK by default, while retaining some features to force this
-    the other way during sevs.
-
-    The preference order (i.e. who wins first) in OSS (and FB) is
-    - Config if specified
-    - Environment Variable if specified
-    - JK (FB), or default (OSS)
-
-
-    Quickstart
-    Have a config variable
-    Make a JK which is set to your "enabled" value (generally true).
-    Use this feature to check it (if you set the JK to be false, change the default).
-    If you have an env variable, also use the function to check it.
-
-    Arguments:
-        name - This should correspond 1:1 to a JK name internally to FB.
-        env_name - If this is set, we'll try and read the value from environment variables
-        config_value - If this is set to anything other than None, we'll use this value by
-            default. Note that within FB, there is some functionality to force override these
-            configs
-        default - This is the value to return in OSS. This avoids having to write weird double
-            negatives within justknobs and the config code, if you just want to have the
-            killswitch work by having feature return True to turn off features
-
-    Requirements:
-        WARNING - Don't use this at import time - Simply pass in the existing config.
-        If you want to use this at config time, use JustKnobsConfig
-    """
-    if config_value is not None:
-        return config_value
-    if env_name is not None and ((env := os.getenv(env_name)) is not None):
-        env = env.upper()
-        if env in ("1", "TRUE"):
-            return True
-        if env in ("0", "FALSE"):
-            return False
-        log.error(
-            "Difficulty parsing env variable %s=%s for feature %s - Assuming env variable means true and returning True",
-            env_name,
-            env,
-            name,
-        )
-        # We could return default here, but that was confusing to log.
-        return True
-    if name is None:
-        return True
-    if not default:
-        return not justknobs_check(name)
-    return justknobs_check(name)
 
 
 def justknobs_check(name: str, default: bool = True) -> bool:
@@ -334,17 +223,21 @@ def max_clock_rate():
             return 1700
         elif "gfx908" in gcn_arch:
             return 1502
+        elif "gfx12" in gcn_arch:
+            return 1700
         elif "gfx11" in gcn_arch:
             return 1700
         elif "gfx103" in gcn_arch:
             return 1967
         elif "gfx101" in gcn_arch:
             return 1144
+        elif "gfx95" in gcn_arch:
+            return 1700  # TODO: placeholder, get actual value
         else:
             return 1100
 
 
-def get_mast_job_name_version() -> Optional[Tuple[str, int]]:
+def get_mast_job_name_version() -> Optional[tuple[str, int]]:
     return None
 
 
@@ -369,9 +262,15 @@ def maybe_upload_prof_stats_to_manifold(profile_path: str) -> Optional[str]:
 
 
 def log_chromium_event_internal(
-    event: Dict[str, Any],
-    stack: List[str],
+    event: dict[str, Any],
+    stack: list[str],
     logger_uuid: str,
     start_time_ns: int,
+):
+    return None
+
+
+def record_chromium_event_internal(
+    event: dict[str, Any],
 ):
     return None

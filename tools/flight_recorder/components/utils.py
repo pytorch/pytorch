@@ -5,56 +5,21 @@
 # LICENSE file in the root directory of this source tree.
 
 import argparse
-import logging
 import math
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any
 
-from .types import Group, MatchState, Membership, Op, P2P
-
-
-class FlightRecorderLogger:
-    _instance: Optional[Any] = None
-    logger: logging.Logger
-
-    def __init__(self) -> None:
-        self.logger: logging.Logger = logging.getLogger("Flight Recorder")
-
-    def __new__(cls) -> Any:
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance.logger = logging.getLogger("Flight Recorder")
-            cls._instance.logger.setLevel(logging.INFO)
-            formatter = logging.Formatter("%(message)s")
-            ch = logging.StreamHandler()
-            ch.setFormatter(formatter)
-            cls._instance.logger.addHandler(ch)
-        return cls._instance
-
-    def set_log_level(self, level: int) -> None:
-        self.logger.setLevel(level)
-
-    @property
-    def debug(self) -> Callable[..., None]:
-        return self.logger.debug
-
-    @property
-    def info(self) -> Callable[..., None]:
-        return self.logger.info
-
-    @property
-    def warning(self) -> Callable[..., None]:
-        return self.logger.warning
-
-    @property
-    def error(self) -> Callable[..., None]:
-        return self.logger.error
-
-    @property
-    def critical(self) -> Callable[..., None]:
-        return self.logger.critical
+from tools.flight_recorder.components.fr_logger import FlightRecorderLogger
+from tools.flight_recorder.components.types import (
+    Group,
+    MatchInfo,
+    MatchState,
+    Membership,
+    Op,
+    P2P,
+)
 
 
-logger = FlightRecorderLogger()
+logger: FlightRecorderLogger = FlightRecorderLogger()
 
 
 try:
@@ -63,14 +28,14 @@ except ModuleNotFoundError:
     logger.debug("tabulate is not installed. Proceeding without it.")
 
 
-def format_frame(frame: Dict[str, str]) -> str:
+def format_frame(frame: dict[str, str]) -> str:
     name = frame["name"]
     filename = frame["filename"]
     line = frame["line"]
     return f"{name} at {filename}:{line}"
 
 
-def format_frames(frames: List[Dict[str, str]]) -> str:
+def format_frames(frames: list[dict[str, str]]) -> str:
     formatted_frames = []
     for frame in frames:
         formatted_frames.append(format_frame(frame))
@@ -78,22 +43,22 @@ def format_frames(frames: List[Dict[str, str]]) -> str:
 
 
 def match_one_event(
-    event_a: Dict[Any, Any],
-    event_b: Dict[Any, Any],
-    memberships: Dict[str, Set[Any]],
+    event_a: dict[Any, Any],
+    event_b: dict[Any, Any],
+    memberships: dict[str, set[Any]],
     pg_name: str,
-) -> MatchState:
+) -> MatchInfo:
     op_a = Op(event_a, memberships, pg_name)
     op_b = Op(event_b, memberships, pg_name)
     return op_a.match(op_b)
 
 
 def match_coalesced_groups(
-    all_rank_events: Dict[Any, Any],
+    all_rank_events: dict[Any, Any],
     group_size: int,
-    groups: Dict[str, Group],
-    memberships: Dict[str, Set[Any]],
-    _pg_guids: Dict[Tuple[str, int], str],
+    groups: dict[str, Group],
+    memberships: dict[str, set[Any]],
+    _pg_guids: dict[tuple[str, int], str],
 ) -> bool:
     """
     all_rank_events: {
@@ -128,7 +93,7 @@ def match_coalesced_groups(
 
     def visualize_ops(
         match: bool,
-        _pg_guids: Dict[Tuple[str, int], str],
+        _pg_guids: dict[tuple[str, int], str],
     ) -> None:
         all_ops = {
             rank: [
@@ -188,7 +153,7 @@ def match_coalesced_groups(
             dst_global_rank = sorted(memberships[op.pg_name])[op.dst]
             peer_ops = all_ops[dst_global_rank]
             for i, other in enumerate(peer_ops):
-                if op.match(other) == MatchState.FULLY_MATCHED:
+                if op.match(other).state == MatchState.FULLY_MATCHED:
                     match_idx = i
                     break
                 elif op.dst == other.src:
@@ -210,7 +175,7 @@ def match_coalesced_groups(
     return True
 
 
-def check_size_alltoall(alltoall_cases: List[Dict[str, Any]]) -> Tuple[bool, int, int]:
+def check_size_alltoall(alltoall_cases: list[dict[str, Any]]) -> tuple[bool, int, int]:
     input_numel = 0
     output_numel = 0
     for e in alltoall_cases:
@@ -221,10 +186,10 @@ def check_size_alltoall(alltoall_cases: List[Dict[str, Any]]) -> Tuple[bool, int
 
 def find_coalesced_group(
     pg_name: str,
-    entries: List[Dict[str, Any]],
-    _pg_guids: Dict[Tuple[str, int], str],
+    entries: list[dict[str, Any]],
+    _pg_guids: dict[tuple[str, int], str],
     rank: int,
-) -> List[Tuple[int, Dict[str, Any]]]:
+) -> list[tuple[int, dict[str, Any]]]:
     """Given a list of entries, if the collective_seq_id of the first entry matches that of subsequent ones,
     build an return a list of entries terminating in a 'coalesced' op entry all sharing a collective_seq_id
     """
@@ -252,10 +217,10 @@ def find_coalesced_group(
 
 
 def just_print_entries(
-    all_entries: Dict[int, List[Dict[str, Any]]],
-    _groups: Dict[str, Group],
-    _memberships: Dict[str, Set[Any]],
-    _pg_guids: Dict[Tuple[str, int], str],
+    all_entries: dict[int, list[dict[str, Any]]],
+    _groups: dict[str, Group],
+    _memberships: dict[str, set[Any]],
+    _pg_guids: dict[tuple[str, int], str],
     args: argparse.Namespace,
 ) -> None:
     rows = []
@@ -293,25 +258,25 @@ def just_print_entries(
 
 
 def check_no_missing_dump_files(
-    entries: Dict[int, Any], memberships: List[Membership]
+    entries: dict[int, Any], memberships: list[Membership]
 ) -> None:
     all_ranks = set()
     for membership in memberships:
         all_ranks.add(int(membership.global_rank))
     dumps_ranks = {int(key) for key in entries.keys()}
-    assert (
-        dumps_ranks == all_ranks
-    ), f"Missing dump files from ranks {all_ranks - dumps_ranks}"
+    assert dumps_ranks == all_ranks, (
+        f"Missing dump files from ranks {all_ranks - dumps_ranks}"
+    )
 
 
-def check_version(version_by_ranks: Dict[str, str], version: str) -> None:
+def check_version(version_by_ranks: dict[str, str], version: str) -> None:
     for rank, v in version_by_ranks.items():
-        assert (
-            v == version
-        ), f"Rank {rank} has different version {v} from the given version {version}"
+        assert v == version, (
+            f"Rank {rank} has different version {v} from the given version {version}"
+        )
 
 
-def get_version_detail(version: str) -> Tuple[int, int]:
+def get_version_detail(version: str) -> tuple[int, int]:
     version = version.split(".")
     assert len(version) == 2, f"Invalid version {version}"
     major, minor = map(int, version)
@@ -319,8 +284,8 @@ def get_version_detail(version: str) -> Tuple[int, int]:
 
 
 def align_trace_from_beginning(
-    entries: Dict[int, List[Dict[str, Any]]],
-) -> Dict[int, List[Dict[str, Any]]]:
+    entries: dict[int, list[dict[str, Any]]],
+) -> dict[int, list[dict[str, Any]]]:
     """
     Align the trace entries by record ID for entries.
     This function takes a dictionary of rank names to lists of trace entries as input.

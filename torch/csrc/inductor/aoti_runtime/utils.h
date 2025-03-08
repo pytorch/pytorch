@@ -112,6 +112,25 @@ class RAIIAtenTensorHandle {
     return storage_offset;
   }
 
+  void* data_ptr() const {
+    void* result = nullptr;
+    AOTI_TORCH_ERROR_CODE_CHECK(
+        aoti_torch_get_data_ptr(handle_.get(), &result));
+    return result;
+  }
+
+  int64_t* sizes() const {
+    int64_t* result = nullptr;
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_sizes(handle_.get(), &result));
+    return result;
+  }
+
+  int64_t* strides() const {
+    int64_t* result = nullptr;
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_strides(handle_.get(), &result));
+    return result;
+  }
+
  private:
   std::unique_ptr<AtenTensorOpaque, DeleterFnPtr> handle_;
 };
@@ -127,6 +146,34 @@ inline std::vector<RAIIAtenTensorHandle> steal_from_raw_handles_to_raii_handles(
     handles[i] = nullptr;
   }
   return result;
+}
+
+inline AtenTensorHandle reinterpret_tensor_wrapper(
+    AtenTensorHandle self,
+    int64_t ndim,
+    const int64_t* sizes_ptr,
+    const int64_t* strides_ptr,
+    int64_t storage_offset) {
+  AtenTensorHandle result = nullptr;
+  AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch__reinterpret_tensor(
+      self, ndim, sizes_ptr, strides_ptr, storage_offset, &result));
+  return result;
+}
+
+inline void* get_data_ptr_wrapper(AtenTensorHandle tensor) {
+  void* result = nullptr;
+  AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_data_ptr(tensor, &result));
+  return result;
+}
+
+inline AtenTensorHandle unwrap_raii_handle_if_needed(
+    const RAIIAtenTensorHandle& handle) {
+  return handle.get();
+}
+
+inline RAIIAtenTensorHandle wrap_with_raii_handle_if_needed(
+    AtenTensorHandle handle) {
+  return RAIIAtenTensorHandle(handle);
 }
 
 class ConstantHandle {
@@ -153,6 +200,18 @@ class ConstantHandle {
     return data_;
   }
 
+  int64_t* sizes() const {
+    int64_t* result = nullptr;
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_sizes(handle_, &result));
+    return result;
+  }
+
+  int64_t* strides() const {
+    int64_t* result = nullptr;
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_strides(handle_, &result));
+    return result;
+  }
+
  private:
   AtenTensorHandle handle_{};
   void* data_ = nullptr;
@@ -171,6 +230,15 @@ inline const ConstantHandle& unwrap_raii_handle_if_needed(
 inline AtenTensorHandle wrap_with_raii_handle_if_needed(
     const ConstantHandle& handle) = delete;
 
+// DANGEROUS.  Do not call unless you explicitly intend to get a reference to a
+// temporary value, which will expire at the end of the current expression.
+// This should only be called in cases where the C-shim API expects an optional
+// input argument (passed by pointer), and a temporary needs to be passed to it.
+template <class T>
+T& temporary_reference(T&& t) {
+  return t;
+}
+
 #define CACHE_TORCH_DTYPE(typename) \
   static auto cached_torch_dtype_##typename = aoti_torch_dtype_##typename()
 
@@ -180,5 +248,9 @@ inline AtenTensorHandle wrap_with_raii_handle_if_needed(
 
 #define CACHE_TORCH_LAYOUT(layout) \
   static auto cached_torch_layout_##layout = aoti_torch_layout_##layout()
+
+#define CACHE_TORCH_MEMORY_FORMAT(format)           \
+  static auto cached_torch_memory_format_##format = \
+      aoti_torch_memory_format_##format()
 
 } // namespace torch::aot_inductor

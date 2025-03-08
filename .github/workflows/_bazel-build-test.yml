@@ -143,9 +143,6 @@ jobs:
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
           CUDA_VERSION: ${{ inputs.cuda-version }}
         run: |
-          python3 -m pip install boto3==1.19.12
-          # Fetch aws credential from IMDs
-          eval "$(python3 .github/scripts/get_aws_session_tokens.py)"
           export SHARD_NUMBER=0
           # detached container should get cleaned up by teardown_ec2_linux
           # TODO: Stop building test binaries as part of the build phase
@@ -154,6 +151,7 @@ jobs:
           # shellcheck disable=SC2086
           container_name=$(docker run \
             ${GPU_FLAG:-} \
+            -e AWS_DEFAULT_REGION \
             -e BUILD_ENVIRONMENT \
             -e GITHUB_ACTIONS \
             -e GITHUB_REPOSITORY \

@@ -139,6 +139,10 @@ if(USE_CUDA)
         list(APPEND TORCH_PYTHON_LINK_LIBRARIES torch::cusparselt)
         list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_CUSPARSELT)
     endif()
+    if(USE_CUFILE)
+        list(APPEND TORCH_PYTHON_LINK_LIBRARIES torch::cufile)
+        list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_CUFILE)
+    endif()
 
     if(TARGET torch::nvtx3)
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES torch::nvtx3)
@@ -157,7 +161,9 @@ if(USE_ROCM)
       USE_ROCM
       __HIP_PLATFORM_AMD__
       )
-    list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${ROCM_ROCTX_LIB})
+    if(NOT WIN32)
+      list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${ROCM_ROCTX_LIB})
+    endif()
 endif()
 
 if(USE_XPU)
@@ -309,6 +315,11 @@ endif()
 
 
 add_library(torch_python SHARED ${TORCH_PYTHON_SRCS})
+torch_compile_options(torch_python)  # see cmake/public/utils.cmake
+if(APPLE)
+  target_compile_options(torch_python PRIVATE
+      $<$<COMPILE_LANGUAGE:CXX>: -fvisibility=default>)
+endif()
 
 if(CAFFE2_USE_MKL AND BUILD_LIBTORCHLESS)
 
@@ -468,6 +479,7 @@ add_custom_target(
     --is-debug=${TORCH_VERSION_DEBUG}
     --cuda-version=${CUDA_VERSION}
     --hip-version=${HIP_VERSION}
+    --xpu-version=${SYCL_COMPILER_VERSION}
   BYPRODUCTS ${TORCH_SRC_DIR}/version.py
   COMMENT "Regenerating version file..."
   WORKING_DIRECTORY ${TORCH_ROOT}

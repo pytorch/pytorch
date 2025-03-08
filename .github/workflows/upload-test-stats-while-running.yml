@@ -1,0 +1,40 @@
+name: Upload test stats while running
+
+on:
+  schedule:
+    # Every hour
+    - cron: '0 * * * *'
+
+concurrency:
+  group: upload-test-stats-while-running
+  cancel-in-progress: true
+
+jobs:
+  upload_test_stats_while_running:
+    if: github.repository_owner == 'pytorch'
+    name: Upload test stats while running
+    runs-on: linux.2xlarge
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          fetch-depth: 1
+          submodules: false
+
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+
+      - name: Setup miniconda
+        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
+        with:
+          python-version: "3.10"
+
+      - name: Install requirements
+        run: |
+          ${CONDA_RUN} pip install requests==2.32.2 boto3==1.35.42
+
+      - name: Upload test stats
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ${CONDA_RUN} python -m tools.stats.upload_test_stats_running_jobs

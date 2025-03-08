@@ -32,7 +32,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     TestCase,
     xfailIfTorchDynamo,
-    xpassIfTorchDynamo,
+    xpassIfTorchDynamo_np,
 )
 
 
@@ -157,7 +157,7 @@ def _aligned_zeros(shape, dtype=float, order="C", align=None):
     return data
 
 
-@xpassIfTorchDynamo  # (reason="TODO: flags")
+@xpassIfTorchDynamo_np  # (reason="TODO: flags")
 @instantiate_parametrized_tests
 class TestFlag(TestCase):
     def setUp(self):
@@ -307,7 +307,7 @@ class TestFlag(TestCase):
         assert_(a.flags.aligned)
 
 
-@xpassIfTorchDynamo  # (reason="TODO: hash")
+@xpassIfTorchDynamo_np  # (reason="TODO: hash")
 class TestHash(TestCase):
     # see #3793
     def test_int(self):
@@ -319,33 +319,33 @@ class TestHash(TestCase):
         ]:
             for i in range(1, s):
                 assert_equal(
-                    hash(st(-(2**i))), hash(-(2**i)), err_msg="%r: -2**%d" % (st, i)
+                    hash(st(-(2**i))), hash(-(2**i)), err_msg=f"{st!r}: -2**{i:d}"
                 )
                 assert_equal(
                     hash(st(2 ** (i - 1))),
                     hash(2 ** (i - 1)),
-                    err_msg="%r: 2**%d" % (st, i - 1),
+                    err_msg=f"{st!r}: 2**{i - 1:d}",
                 )
                 assert_equal(
                     hash(st(2**i - 1)),
                     hash(2**i - 1),
-                    err_msg="%r: 2**%d - 1" % (st, i),
+                    err_msg=f"{st!r}: 2**{i:d} - 1",
                 )
 
                 i = max(i - 1, 1)
                 assert_equal(
                     hash(ut(2 ** (i - 1))),
                     hash(2 ** (i - 1)),
-                    err_msg="%r: 2**%d" % (ut, i - 1),
+                    err_msg=f"{ut!r}: 2**{i - 1:d}",
                 )
                 assert_equal(
                     hash(ut(2**i - 1)),
                     hash(2**i - 1),
-                    err_msg="%r: 2**%d - 1" % (ut, i),
+                    err_msg=f"{ut!r}: 2**{i:d} - 1",
                 )
 
 
-@xpassIfTorchDynamo  # (reason="TODO: hash")
+@xpassIfTorchDynamo_np  # (reason="TODO: hash")
 class TestAttributes(TestCase):
     def setUp(self):
         self.one = np.arange(10)
@@ -536,7 +536,7 @@ class TestArrayConstruction(TestCase):
         d[1] = 3
         assert_array_equal(e, [1, 3, 3])
 
-    @xpassIfTorchDynamo  # (reason="order='F'")
+    @xpassIfTorchDynamo_np  # (reason="order='F'")
     def test_array_copy_false_2(self):
         d = np.array([1, 2, 3])
         e = np.array(d, copy=False, order="F")
@@ -1243,7 +1243,7 @@ class TestCreation(TestCase):
     def _ragged_creation(self, seq):
         # without dtype=object, the ragged object raises
         with pytest.raises(ValueError, match=".*detected shape was"):
-            a = np.array(seq)
+            np.array(seq)
 
         return np.array(seq, dtype=object)
 
@@ -1293,9 +1293,9 @@ class TestCreation(TestCase):
 
     def test_deep_nonragged_object(self):
         # None of these should raise, even though they are missing dtype=object
-        a = np.array([[[Decimal(1)]]])
-        a = np.array([1, Decimal(1)])
-        a = np.array([[1], [Decimal(1)]])
+        np.array([[[Decimal(1)]]])
+        np.array([1, Decimal(1)])
+        np.array([[1], [Decimal(1)]])
 
     @parametrize("dtype", [object, "O,O", "O,(3)O", "(2,3)O"])
     @parametrize(
@@ -1335,7 +1335,7 @@ class TestBool(TestCase):
         assert_equal(d[::2].sum(), d[::2].size)
         # assert_equal(d[::-2].sum(), d[::-2].size)
 
-    @xpassIfTorchDynamo  # (reason="frombuffer")
+    @xpassIfTorchDynamo_np  # (reason="frombuffer")
     def test_sum_2(self):
         d = np.frombuffer(b"\xff\xff" * 100, dtype=bool)
         assert_equal(d.sum(), d.size)
@@ -1415,7 +1415,7 @@ class TestBool(TestCase):
 class TestMethods(TestCase):
     sort_kinds = ["quicksort", "heapsort", "stable"]
 
-    @xpassIfTorchDynamo  # (reason="all(..., where=...)")
+    @xpassIfTorchDynamo_np  # (reason="all(..., where=...)")
     def test_all_where(self):
         a = np.array([[True, False, True], [False, False, False], [True, True, True]])
         wh_full = np.array(
@@ -1435,7 +1435,7 @@ class TestMethods(TestCase):
         assert_equal(a.all(where=False), True)
         assert_equal(np.all(a, where=False), True)
 
-    @xpassIfTorchDynamo  # (reason="any(..., where=...)")
+    @xpassIfTorchDynamo_np  # (reason="any(..., where=...)")
     def test_any_where(self):
         a = np.array([[True, False, True], [False, False, False], [True, True, True]])
         wh_full = np.array(
@@ -1456,7 +1456,7 @@ class TestMethods(TestCase):
         assert_equal(a.any(where=False), False)
         assert_equal(np.any(a, where=False), False)
 
-    @xpassIfTorchDynamo  # (reason="TODO: compress")
+    @xpassIfTorchDynamo_np  # (reason="TODO: compress")
     def test_compress(self):
         tgt = [[5, 6, 7, 8, 9]]
         arr = np.arange(10).reshape(2, 5)
@@ -1497,7 +1497,7 @@ class TestMethods(TestCase):
         assert out is ret
         assert_equal(out[()], 20)
 
-    @xpassIfTorchDynamo  # (reason="choose(..., mode=...) not implemented")
+    @xpassIfTorchDynamo_np  # (reason="choose(..., mode=...) not implemented")
     def test_choose_2(self):
         # gh-6272 check overlap on out
         x = np.arange(5)
@@ -1548,7 +1548,7 @@ class TestMethods(TestCase):
         A = m_rect.repeat(2, axis=1)
         assert_equal(A, [[1, 1, 2, 2, 3, 3], [4, 4, 5, 5, 6, 6]])
 
-    @xpassIfTorchDynamo  # (reason="reshape(..., order='F')")
+    @xpassIfTorchDynamo_np  # (reason="reshape(..., order='F')")
     def test_reshape(self):
         arr = np.array([[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12]])
 
@@ -1607,7 +1607,7 @@ class TestMethods(TestCase):
         b = np.sort(a)
         assert_equal(b, np.flip(a), msg)
 
-    @xpassIfTorchDynamo  # (reason="sort complex")
+    @xpassIfTorchDynamo_np  # (reason="sort complex")
     def test_sort_complex_nans(self):
         # check complex
         msg = "Test complex sort order with nans"
@@ -1652,7 +1652,7 @@ class TestMethods(TestCase):
             c.sort(kind=kind)
             assert_equal(c, a, msg)
 
-    @xpassIfTorchDynamo  # (reason="sort complex")
+    @xpassIfTorchDynamo_np  # (reason="sort complex")
     @parametrize("dtype", [np.float32, np.float64])
     @parametrize("part", ["real", "imag"])
     def test_sort_complex(self, part, dtype):
@@ -1801,7 +1801,7 @@ class TestMethods(TestCase):
                 msg = f"byte-swapped complex argsort, dtype={dt}"
                 assert_equal(arr.argsort(), np.arange(len(arr), dtype=np.intp), msg)
 
-    @xpassIfTorchDynamo  # (reason="argsort axis TODO")
+    @xpassIfTorchDynamo_np  # (reason="argsort axis TODO")
     def test_argsort_axis(self):
         # check axis handling. This should be the same for all type
         # specific argsorts, so we only check it for one type and one kind
@@ -1838,7 +1838,7 @@ class TestMethods(TestCase):
         a = np.array(["aaaaaaaaa" for i in range(100)], dtype=np.str_)
         assert_equal(a.argsort(kind="m"), r)
 
-    @xpassIfTorchDynamo  # (reason="TODO: searchsorted with nans differs in pytorch")
+    @xpassIfTorchDynamo_np  # (reason="TODO: searchsorted with nans differs in pytorch")
     @parametrize(
         "a",
         [
@@ -1910,7 +1910,7 @@ class TestMethods(TestCase):
         b = a.searchsorted([0, 1, 2], "right")
         assert_equal(b, [0, 2, 2])
 
-    @xpassIfTorchDynamo  # (
+    @xpassIfTorchDynamo_np  # (
     #    reason="RuntimeError: self.storage_offset() must be divisible by 8"
     # )
     def test_searchsorted_unaligned_array(self):
@@ -1953,17 +1953,15 @@ class TestMethods(TestCase):
             b = a.searchsorted(a, "right")
             assert_equal(b, out + 1)
 
-    @xpassIfTorchDynamo  # (reason="ndarray ctor")
+    @xpassIfTorchDynamo_np  # (reason="ndarray ctor")
     def test_searchsorted_type_specific_2(self):
         # Test all type specific binary search functions
         types = "".join((np.typecodes["AllInteger"], np.typecodes["AllFloat"], "?"))
         for dt in types:
             if dt == "?":
                 a = np.arange(2, dtype=dt)
-                out = np.arange(2)
             else:
                 a = np.arange(0, 5, dtype=dt)
-                out = np.arange(5)
 
             # Test empty array, use a fresh array to get warnings in
             # valgrind if access happens.
@@ -1975,7 +1973,6 @@ class TestMethods(TestCase):
 
     def test_searchsorted_with_invalid_sorter(self):
         a = np.array([5, 2, 1, 3, 4])
-        s = np.argsort(a)
         assert_raises((TypeError, RuntimeError), np.searchsorted, a, 0, sorter=[1.1])
         assert_raises(
             (ValueError, RuntimeError), np.searchsorted, a, 0, sorter=[1, 2, 3, 4]
@@ -1989,7 +1986,7 @@ class TestMethods(TestCase):
         # assert_raises(ValueError, np.searchsorted, a, 0, sorter=[-1, 0, 1, 2, 3])
         # assert_raises(ValueError, np.searchsorted, a, 0, sorter=[4, 0, -1, 2, 3])
 
-    @xpassIfTorchDynamo  # (reason="self.storage_offset() must be divisible by 8")
+    @xpassIfTorchDynamo_np  # (reason="self.storage_offset() must be divisible by 8")
     def test_searchsorted_with_sorter(self):
         a = np.random.rand(300)
         s = a.argsort()
@@ -2064,7 +2061,7 @@ class TestMethods(TestCase):
         b = a.searchsorted(a, "right", s)
         assert_equal(b, out + 1)
 
-    @xpassIfTorchDynamo  # (reason="TODO argpartition")
+    @xpassIfTorchDynamo_np  # (reason="TODO argpartition")
     @parametrize("dtype", "efdFDBbhil?")
     def test_argpartition_out_of_range(self, dtype):
         # Test out of range values in kth raise an error, gh-5469
@@ -2072,7 +2069,7 @@ class TestMethods(TestCase):
         assert_raises(ValueError, d.argpartition, 10)
         assert_raises(ValueError, d.argpartition, -11)
 
-    @xpassIfTorchDynamo  # (reason="TODO partition")
+    @xpassIfTorchDynamo_np  # (reason="TODO partition")
     @parametrize("dtype", "efdFDBbhil?")
     def test_partition_out_of_range(self, dtype):
         # Test out of range values in kth raise an error, gh-5469
@@ -2080,7 +2077,7 @@ class TestMethods(TestCase):
         assert_raises(ValueError, d.partition, 10)
         assert_raises(ValueError, d.partition, -11)
 
-    @xpassIfTorchDynamo  # (reason="TODO argpartition")
+    @xpassIfTorchDynamo_np  # (reason="TODO argpartition")
     def test_argpartition_integer(self):
         # Test non-integer values in kth raise an error/
         d = np.arange(10)
@@ -2090,7 +2087,7 @@ class TestMethods(TestCase):
         d_obj = np.arange(10, dtype=object)
         assert_raises(TypeError, d_obj.argpartition, 9.0)
 
-    @xpassIfTorchDynamo  # (reason="TODO partition")
+    @xpassIfTorchDynamo_np  # (reason="TODO partition")
     def test_partition_integer(self):
         # Test out of range values in kth raise an error, gh-5469
         d = np.arange(10)
@@ -2100,7 +2097,7 @@ class TestMethods(TestCase):
         d_obj = np.arange(10, dtype=object)
         assert_raises(TypeError, d_obj.partition, 9.0)
 
-    @xpassIfTorchDynamo  # (reason="TODO partition")
+    @xpassIfTorchDynamo_np  # (reason="TODO partition")
     @parametrize("kth_dtype", "Bbhil")
     def test_partition_empty_array(self, kth_dtype):
         # check axis handling for multidimensional empty arrays
@@ -2113,7 +2110,7 @@ class TestMethods(TestCase):
         msg = "test empty array partition with axis=None"
         assert_equal(np.partition(a, kth, axis=None), a.ravel(), msg)
 
-    @xpassIfTorchDynamo  # (reason="TODO argpartition")
+    @xpassIfTorchDynamo_np  # (reason="TODO argpartition")
     @parametrize("kth_dtype", "Bbhil")
     def test_argpartition_empty_array(self, kth_dtype):
         # check axis handling for multidimensional empty arrays
@@ -2132,7 +2129,7 @@ class TestMethods(TestCase):
             msg,
         )
 
-    @xpassIfTorchDynamo  # (reason="TODO partition")
+    @xpassIfTorchDynamo_np  # (reason="TODO partition")
     def test_partition(self):
         d = np.arange(10)
         assert_raises(TypeError, np.partition, d, 2, kind=1)
@@ -2339,11 +2336,11 @@ class TestMethods(TestCase):
                     # array_less does not seem to work right
                     at(
                         (p[:, :i].T <= p[:, i]).all(),
-                        msg="%d: %r <= %r" % (i, p[:, i], p[:, :i].T),
+                        msg=f"{i:d}: {p[:, i]!r} <= {p[:, :i].T!r}",
                     )
                     at(
                         (p[:, i + 1 :].T > p[:, i]).all(),
-                        msg="%d: %r < %r" % (i, p[:, i], p[:, i + 1 :].T),
+                        msg=f"{i:d}: {p[:, i]!r} < {p[:, i + 1 :].T!r}",
                     )
                     aae(
                         p,
@@ -2358,11 +2355,11 @@ class TestMethods(TestCase):
                     # array_less does not seem to work right
                     at(
                         (p[:i, :] <= p[i, :]).all(),
-                        msg="%d: %r <= %r" % (i, p[i, :], p[:i, :]),
+                        msg=f"{i:d}: {p[i, :]!r} <= {p[:i, :]!r}",
                     )
                     at(
                         (p[i + 1 :, :] > p[i, :]).all(),
-                        msg="%d: %r < %r" % (i, p[i, :], p[:, i + 1 :]),
+                        msg=f"{i:d}: {p[i, :]!r} < {p[:, i + 1 :]!r}",
                     )
                     aae(
                         p,
@@ -2386,14 +2383,14 @@ class TestMethods(TestCase):
     def assert_partitioned(self, d, kth):
         prev = 0
         for k in np.sort(kth):
-            assert_array_less(d[prev:k], d[k], err_msg="kth %d" % k)
+            assert_array_less(d[prev:k], d[k], err_msg=f"kth {k:d}")
             assert_(
                 (d[k:] >= d[k]).all(),
-                msg="kth %d, %r not greater equal %d" % (k, d[k:], d[k]),
+                msg=f"kth {k:d}, {d[k:]!r} not greater equal {d[k]:d}",
             )
             prev = k + 1
 
-    @xpassIfTorchDynamo  # (reason="TODO partition")
+    @xpassIfTorchDynamo_np  # (reason="TODO partition")
     def test_partition_iterative(self):
         d = np.arange(17)
         kth = (0, 1, 2, 429, 231)
@@ -2460,7 +2457,7 @@ class TestMethods(TestCase):
         for i in range(d0.shape[1]):
             self.assert_partitioned(p[:, i], kth)
 
-    @xpassIfTorchDynamo  # (reason="TODO partition")
+    @xpassIfTorchDynamo_np  # (reason="TODO partition")
     def test_partition_fuzz(self):
         # a few rounds of random data testing
         for j in range(10, 30):
@@ -2477,7 +2474,7 @@ class TestMethods(TestCase):
                     err_msg=f"data: {d!r}\n kth: {kth!r}",
                 )
 
-    @xpassIfTorchDynamo  # (reason="TODO partition")
+    @xpassIfTorchDynamo_np  # (reason="TODO partition")
     @parametrize("kth_dtype", "Bbhil")
     def test_argpartition_gh5524(self, kth_dtype):
         #  A test for functionality of argpartition on lists.
@@ -2486,7 +2483,7 @@ class TestMethods(TestCase):
         p = np.argpartition(d, kth)
         self.assert_partitioned(np.array(d)[p], [1])
 
-    @xpassIfTorchDynamo  # (reason="TODO order='F'")
+    @xpassIfTorchDynamo_np  # (reason="TODO order='F'")
     def test_flatten(self):
         x0 = np.array([[1, 2, 3], [4, 5, 6]], np.int32)
         x1 = np.array([[[1, 2], [3, 4]], [[5, 6], [7, 8]]], np.int32)
@@ -2505,7 +2502,6 @@ class TestMethods(TestCase):
     def test_arr_mult(self, func):
         a = np.array([[1, 0], [0, 1]])
         b = np.array([[0, 1], [1, 0]])
-        c = np.array([[9, 1], [1, -9]])
         d = np.arange(24).reshape(4, 6)
         ddt = np.array(
             [
@@ -2629,7 +2625,7 @@ class TestMethods(TestCase):
         a.dot(b=b, out=c)
         assert_equal(c, np.dot(a, b))
 
-    @xpassIfTorchDynamo  # (reason="_aligned_zeros")
+    @xpassIfTorchDynamo_np  # (reason="_aligned_zeros")
     def test_dot_out_mem_overlap(self):
         np.random.seed(1)
 
@@ -2651,7 +2647,7 @@ class TestMethods(TestCase):
             assert_raises(ValueError, np.dot, a, b, out=b[::2])
             assert_raises(ValueError, np.dot, a, b, out=b.T)
 
-    @xpassIfTorchDynamo  # (reason="TODO: overlapping memor in matmul")
+    @xpassIfTorchDynamo_np  # (reason="TODO: overlapping memor in matmul")
     def test_matmul_out(self):
         # overlapping memory
         a = np.arange(18).reshape(2, 3, 3)
@@ -2778,7 +2774,7 @@ class TestMethods(TestCase):
         bad_array = [1, 2, 3]
         assert_raises(TypeError, np.put, bad_array, [0, 2], 5)
 
-    @xpassIfTorchDynamo  # (reason="TODO: implement order='F'")
+    @xpassIfTorchDynamo_np  # (reason="TODO: implement order='F'")
     def test_ravel(self):
         a = np.array([[0, 1], [2, 3]])
         assert_equal(a.ravel(), [0, 1, 2, 3])
@@ -3189,7 +3185,7 @@ class TestArgmaxArgminCommon(TestCase):
             with pytest.raises(ValueError):
                 method(arr.T, axis=axis, out=wrong_outarray, keepdims=True)
 
-    @xpassIfTorchDynamo  # (reason="TODO: implement choose")
+    @xpassIfTorchDynamo_np  # (reason="TODO: implement choose")
     @parametrize("method", ["max", "min"])
     def test_all(self, method):
         a = np.random.normal(0, 1, (4, 5, 6, 7, 8))
@@ -3472,7 +3468,7 @@ class TestArgmin(TestCase):
 
 
 class TestMinMax(TestCase):
-    @xpassIfTorchDynamo
+    @xpassIfTorchDynamo_np
     def test_scalar(self):
         assert_raises(np.AxisError, np.amax, 1, 1)
         assert_raises(np.AxisError, np.amin, 1, 1)
@@ -3578,7 +3574,7 @@ class TestClip(TestCase):
         assert_array_equal(result, expected)
 
 
-@xpassIfTorchDynamo  # (reason="TODO")
+@xpassIfTorchDynamo_np  # (reason="TODO")
 class TestCompress(TestCase):
     def test_axis(self):
         tgt = [[5, 6, 7, 8, 9]]
@@ -3602,7 +3598,7 @@ class TestCompress(TestCase):
         assert_equal(out, 1)
 
 
-@xpassIfTorchDynamo  # (reason="TODO")
+@xpassIfTorchDynamo_np  # (reason="TODO")
 @instantiate_parametrized_tests
 class TestPutmask(TestCase):
     def tst_basic(self, x, T, mask, val):
@@ -3706,14 +3702,14 @@ class TestTake(TestCase):
         assert_raises(IndexError, np.take, x, [-3], axis=0)
         assert_array_equal(np.take(x, [-1], axis=0)[0], x[1])
 
-    @xpassIfTorchDynamo  # (reason="XXX: take(..., mode='clip')")
+    @xpassIfTorchDynamo_np  # (reason="XXX: take(..., mode='clip')")
     def test_clip(self):
         x = np.random.random(24) * 100
         x = np.reshape(x, (2, 3, 4))
         assert_array_equal(np.take(x, [-1], axis=0, mode="clip")[0], x[0])
         assert_array_equal(np.take(x, [2], axis=0, mode="clip")[0], x[1])
 
-    @xpassIfTorchDynamo  # (reason="XXX: take(..., mode='wrap')")
+    @xpassIfTorchDynamo_np  # (reason="XXX: take(..., mode='wrap')")
     def test_wrap(self):
         x = np.random.random(24) * 100
         x = np.reshape(x, (2, 3, 4))
@@ -3721,7 +3717,7 @@ class TestTake(TestCase):
         assert_array_equal(np.take(x, [2], axis=0, mode="wrap")[0], x[0])
         assert_array_equal(np.take(x, [3], axis=0, mode="wrap")[0], x[1])
 
-    @xpassIfTorchDynamo  # (reason="XXX: take(mode='wrap')")
+    @xpassIfTorchDynamo_np  # (reason="XXX: take(mode='wrap')")
     def test_out_overlap(self):
         # gh-6272 check overlap on out
         x = np.arange(5)
@@ -3738,7 +3734,7 @@ class TestTake(TestCase):
         assert ret is out
 
 
-@xpassIfTorchDynamo  # (reason="TODO")
+@xpassIfTorchDynamo_np  # (reason="TODO")
 @instantiate_parametrized_tests
 class TestLexsort(TestCase):
     @parametrize(
@@ -3856,13 +3852,13 @@ class TestIO(TestCase):
         assert d.shape == (0,)
 
     def test_empty_files_text(self, tmp_filename):
-        with open(tmp_filename, "w") as f:
+        with open(tmp_filename, "w"):
             pass
         y = np.fromfile(tmp_filename)
         assert_(y.size == 0, "Array not empty")
 
     def test_empty_files_binary(self, tmp_filename):
-        with open(tmp_filename, "wb") as f:
+        with open(tmp_filename, "wb"):
             pass
         y = np.fromfile(tmp_filename, sep=" ")
         assert_(y.size == 0, "Array not empty")
@@ -3970,7 +3966,7 @@ class TestIO(TestCase):
                 f.write(b"\0")
 
             for mode in ["rb", "r+b"]:
-                err_msg = "%d %s" % (size, mode)
+                err_msg = f"{size:d} {mode}"
 
                 with open(tmp_filename, mode) as f:
                     f.read(2)
@@ -3987,7 +3983,7 @@ class TestIO(TestCase):
         ]
 
         for size in sizes:
-            err_msg = "%d" % (size,)
+            err_msg = f"{size:d}"
 
             with open(tmp_filename, "wb") as f:
                 f.seek(size - 1)
@@ -4274,7 +4270,7 @@ class TestIO(TestCase):
         # We currently do not support parsing subarray dtypes
         data = "12,42,13," * 50
         with pytest.raises(ValueError):
-            expected = np.fromstring(data, dtype="(3,)i", sep=",")
+            np.fromstring(data, dtype="(3,)i", sep=",")
 
         with open(tmp_filename, "w") as f:
             f.write(data)
@@ -4298,7 +4294,7 @@ class TestIO(TestCase):
         assert_array_equal(res, expected)
 
 
-@xpassIfTorchDynamo  # (reason="TODO")
+@xpassIfTorchDynamo_np  # (reason="TODO")
 @instantiate_parametrized_tests
 class TestFromBuffer(TestCase):
     @parametrize(
@@ -4311,7 +4307,7 @@ class TestFromBuffer(TestCase):
         buf = x.tobytes()
         assert_array_equal(np.frombuffer(buf, dtype=dt), x.flat)
 
-    #    @xpassIfTorchDynamo
+    #    @xpassIfTorchDynamo_np
     @parametrize(
         "obj", [np.arange(10), subtest("12345678", decorators=[xfailIfTorchDynamo])]
     )
@@ -4688,7 +4684,7 @@ class TestStats(TestCase):
         with assert_raises(np.AxisError):
             np.arange(10).mean(axis=2)
 
-    @xpassIfTorchDynamo  # (reason="implement mean(..., where=...)")
+    @xpassIfTorchDynamo_np  # (reason="implement mean(..., where=...)")
     def test_mean_where(self):
         a = np.arange(16).reshape((4, 4))
         wh_full = np.array(
@@ -4716,13 +4712,13 @@ class TestStats(TestCase):
         assert_allclose(a3d.mean(axis=2, where=_wh_partial), np.array(_res))
         assert_allclose(np.mean(a3d, axis=2, where=_wh_partial), np.array(_res))
 
-        with pytest.warns(RuntimeWarning) as w:
+        with pytest.warns(RuntimeWarning):
             assert_allclose(
                 a.mean(axis=1, where=wh_partial), np.array([np.nan, 5.5, 9.5, np.nan])
             )
-        with pytest.warns(RuntimeWarning) as w:
+        with pytest.warns(RuntimeWarning):
             assert_equal(a.mean(where=False), np.nan)
-        with pytest.warns(RuntimeWarning) as w:
+        with pytest.warns(RuntimeWarning):
             assert_equal(np.mean(a, where=False), np.nan)
 
     def test_var_values(self):
@@ -4776,7 +4772,7 @@ class TestStats(TestCase):
         with assert_raises(np.AxisError):
             np.arange(10).var(axis=2)
 
-    @xpassIfTorchDynamo  # (reason="implement var(..., where=...)")
+    @xpassIfTorchDynamo_np  # (reason="implement var(..., where=...)")
     def test_var_where(self):
         a = np.arange(25).reshape((5, 5))
         wh_full = np.array(
@@ -4809,9 +4805,9 @@ class TestStats(TestCase):
         assert_allclose(
             np.var(a, axis=0, where=wh_partial), np.var(a[wh_partial[:, 0]], axis=0)
         )
-        with pytest.warns(RuntimeWarning) as w:
+        with pytest.warns(RuntimeWarning):
             assert_equal(a.var(where=False), np.nan)
-        with pytest.warns(RuntimeWarning) as w:
+        with pytest.warns(RuntimeWarning):
             assert_equal(np.var(a, where=False), np.nan)
 
     def test_std_values(self):
@@ -4821,7 +4817,7 @@ class TestStats(TestCase):
                 res = _std(mat, axis=axis)
                 assert_almost_equal(res, tgt)
 
-    @xpassIfTorchDynamo  # (reason="implement std(..., where=...)")
+    @xpassIfTorchDynamo_np  # (reason="implement std(..., where=...)")
     def test_std_where(self):
         a = np.arange(25).reshape((5, 5))[::-1]
         whf = np.array(
@@ -4858,9 +4854,9 @@ class TestStats(TestCase):
         )
         assert_allclose(a.std(axis=0, where=whp), np.std(a[whp[:, 0]], axis=0))
         assert_allclose(np.std(a, axis=0, where=whp), (a[whp[:, 0]]).std(axis=0))
-        with pytest.warns(RuntimeWarning) as w:
+        with pytest.warns(RuntimeWarning):
             assert_equal(a.std(where=False), np.nan)
-        with pytest.warns(RuntimeWarning) as w:
+        with pytest.warns(RuntimeWarning):
             assert_equal(np.std(a, where=False), np.nan)
 
 
@@ -4891,7 +4887,7 @@ class TestVdot(TestCase):
         assert_(np.isscalar(res))
         assert_equal(np.vdot(b, b), True)
 
-    @xpassIfTorchDynamo  # (reason="implement order='F'")
+    @xpassIfTorchDynamo_np  # (reason="implement order='F'")
     def test_vdot_array_order(self):
         a = np.array([[1, 2], [3, 4]], order="C")
         b = np.array([[1, 2], [3, 4]], order="F")
@@ -4917,7 +4913,7 @@ class TestVdot(TestCase):
             assert_equal(np.vdot(a, b.copy()), np.vdot(a.flatten(), b.flatten()))
             assert_equal(np.vdot(a.copy(), b), np.vdot(a.flatten(), b.flatten()))
 
-    @xpassIfTorchDynamo  # (reason="implement order='F'")
+    @xpassIfTorchDynamo_np  # (reason="implement order='F'")
     def test_vdot_uncontiguous_2(self):
         # test order='F' separately
         for size in [2, 1000]:
@@ -5129,7 +5125,7 @@ class TestDot(TestCase):
         r = np.empty((1024, 32), dtype=int)
         assert_raises(ValueError, dot, f, v, r)
 
-    @xpassIfTorchDynamo  # (reason="TODO order='F'")
+    @xpassIfTorchDynamo_np  # (reason="TODO order='F'")
     def test_dot_array_order(self):
         a = np.array([[1, 2], [3, 4]], order="C")
         b = np.array([[1, 2], [3, 4]], order="F")
@@ -5276,7 +5272,7 @@ class MatmulCommon:
                 res = self.matmul(*arg)
                 assert_(res.dtype == dt)
 
-    @xpassIfTorchDynamo  # (reason="no scalars")
+    @xpassIfTorchDynamo_np  # (reason="no scalars")
     def test_result_types_2(self):
         # in numpy, vector vector returns scalars
         # we return a 0D array instead
@@ -5593,7 +5589,7 @@ class TestMatmul(MatmulCommon, TestCase):
 
         a = np.full((3, 3), add_not_multiply())
         with assert_raises(TypeError):
-            b = np.matmul(a, a)
+            np.matmul(a, a)
 
     @skip(reason="object arrays")
     def test_matmul_exception_add(self):
@@ -5604,7 +5600,7 @@ class TestMatmul(MatmulCommon, TestCase):
 
         a = np.full((3, 3), multiply_not_add())
         with assert_raises(TypeError):
-            b = np.matmul(a, a)
+            np.matmul(a, a)
 
     def test_matmul_bool(self):
         # gh-14439
@@ -5654,7 +5650,7 @@ class TestMatmulOperator(MatmulCommon, TestCase):
             (RuntimeError, TypeError, ValueError), self.matmul, np.int8(5), np.int8(5)
         )
 
-    @xpassIfTorchDynamo  # (reason="torch supports inplace matmul, and so do we")
+    @xpassIfTorchDynamo_np  # (reason="torch supports inplace matmul, and so do we")
     @skipif(numpy.__version__ >= "1.26", reason="This is fixed in numpy 1.26")
     def test_matmul_inplace(self):
         # It would be nice to support in-place matmul eventually, but for now
@@ -5672,7 +5668,7 @@ class TestMatmulOperator(MatmulCommon, TestCase):
         assert_raises(TypeError, operator.imatmul, a, b)
         assert_raises(TypeError, exec, "a @= b", globals(), locals())
 
-    @xpassIfTorchDynamo  # (reason="matmul_axes")
+    @xpassIfTorchDynamo_np  # (reason="matmul_axes")
     def test_matmul_axes(self):
         a = np.arange(3 * 4 * 5).reshape(3, 4, 5)
         c = np.matmul(a, a, axes=[(-2, -1), (-1, -2), (1, 2)])
@@ -5849,7 +5845,7 @@ class TestRepeat(TestCase):
 NEIGH_MODE = {"zero": 0, "one": 1, "constant": 2, "circular": 3, "mirror": 4}
 
 
-@xpassIfTorchDynamo  # (reason="TODO")
+@xpassIfTorchDynamo_np  # (reason="TODO")
 class TestWarnings(TestCase):
     def test_complex_warning(self):
         x = np.array([1, 2])
@@ -5904,7 +5900,7 @@ class TestPEP3118Dtype(TestCase):
             if j == 0:
                 s = "bi"
             else:
-                s = "b%dxi" % j
+                s = f"b{j:d}xi"
             self._check(
                 "@" + s, {"f0": ("i1", 0), "f1": ("i", align * (1 + j // align))}
             )
@@ -6005,13 +6001,13 @@ class TestPEP3118Dtype(TestCase):
         self._check("i:f0:", [("f0", "i")])
 
 
-# NOTE: xpassIfTorchDynamo below
+# NOTE: xpassIfTorchDynamo_np below
 # 1. TODO: torch._numpy does not handle/model _CopyMode
 # 2. order= keyword not supported (probably won't be)
 # 3. Under TEST_WITH_TORCHDYNAMO many of these make it through due
 #    to a graph break leaving the _CopyMode to only be handled by numpy.
 @skipif(numpy.__version__ < "1.23", reason="CopyMode is new in NumPy 1.22")
-@xpassIfTorchDynamo
+@xpassIfTorchDynamo_np
 @instantiate_parametrized_tests
 class TestArrayCreationCopyArgument(TestCase):
     class RaiseOnBool:
@@ -6323,7 +6319,7 @@ class TestArrayInterface(TestCase):
 
 
 class TestDelMisc(TestCase):
-    @xpassIfTorchDynamo  # (reason="TODO")
+    @xpassIfTorchDynamo_np  # (reason="TODO")
     def test_flat_element_deletion(self):
         it = np.ones(3).flat
         try:
@@ -6703,7 +6699,7 @@ class TestHashing(TestCase):
 
 
 class TestFormat(TestCase):
-    @xpassIfTorchDynamo  # (reason="TODO")
+    @xpassIfTorchDynamo_np  # (reason="TODO")
     def test_0d(self):
         a = np.array(np.pi)
         assert_equal(f"{a:0.3g}", "3.14")
@@ -6736,7 +6732,7 @@ class TestWritebackIfCopy(TestCase):
         res = np.argmin(mat, 0, out=out)
         assert_equal(res, range(5))
 
-    @xpassIfTorchDynamo  # (reason="XXX: place()")
+    @xpassIfTorchDynamo_np  # (reason="XXX: place()")
     def test_insert_noncontiguous(self):
         a = np.arange(6).reshape(2, 3).T  # force non-c-contiguous
         # uses arr_insert
@@ -6751,7 +6747,7 @@ class TestWritebackIfCopy(TestCase):
         np.put(a, [0, 2], [44, 55])
         assert_equal(a, np.array([[44, 3], [55, 4], [2, 5]]))
 
-    @xpassIfTorchDynamo  # (reason="XXX: putmask()")
+    @xpassIfTorchDynamo_np  # (reason="XXX: putmask()")
     def test_putmask_noncontiguous(self):
         a = np.arange(6).reshape(2, 3).T  # force non-c-contiguous
         # uses arr_putmask
@@ -6771,7 +6767,7 @@ class TestWritebackIfCopy(TestCase):
         np.choose(a, choices, out=out, mode="raise")
         assert_equal(out, np.array([[10, -10, 10], [-10, 10, -10], [10, -10, 10]]))
 
-    @xpassIfTorchDynamo  # (reason="XXX: ndarray.flat")
+    @xpassIfTorchDynamo_np  # (reason="XXX: ndarray.flat")
     def test_flatiter__array__(self):
         a = np.arange(9).reshape(3, 3)
         b = a.T.flat
@@ -6815,7 +6811,7 @@ class TestArange(TestCase):
         assert_raises(TypeError, np.arange, step=3)
         assert_raises(TypeError, np.arange, dtype="int64")
 
-    @xpassIfTorchDynamo  # (reason="weird arange signature (optionals before required args)")
+    @xpassIfTorchDynamo_np  # (reason="weird arange signature (optionals before required args)")
     def test_require_range_2(self):
         assert_raises(TypeError, np.arange, start=4)
 

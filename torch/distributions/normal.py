@@ -1,12 +1,12 @@
 # mypy: allow-untyped-defs
 import math
-from numbers import Number, Real
 
 import torch
+from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import _standard_normal, broadcast_all
-from torch.types import _size
+from torch.types import _Number, _size
 
 
 __all__ = ["Normal"]
@@ -29,30 +29,31 @@ class Normal(ExponentialFamily):
         scale (float or Tensor): standard deviation of the distribution
             (often referred to as sigma)
     """
+
     arg_constraints = {"loc": constraints.real, "scale": constraints.positive}
     support = constraints.real
     has_rsample = True
     _mean_carrier_measure = 0
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         return self.loc
 
     @property
-    def mode(self):
+    def mode(self) -> Tensor:
         return self.loc
 
     @property
-    def stddev(self):
+    def stddev(self) -> Tensor:
         return self.scale
 
     @property
-    def variance(self):
+    def variance(self) -> Tensor:
         return self.stddev.pow(2)
 
     def __init__(self, loc, scale, validate_args=None):
         self.loc, self.scale = broadcast_all(loc, scale)
-        if isinstance(loc, Number) and isinstance(scale, Number):
+        if isinstance(loc, _Number) and isinstance(scale, _Number):
             batch_shape = torch.Size()
         else:
             batch_shape = self.loc.size()
@@ -72,7 +73,7 @@ class Normal(ExponentialFamily):
         with torch.no_grad():
             return torch.normal(self.loc.expand(shape), self.scale.expand(shape))
 
-    def rsample(self, sample_shape: _size = torch.Size()) -> torch.Tensor:
+    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
         shape = self._extended_shape(sample_shape)
         eps = _standard_normal(shape, dtype=self.loc.dtype, device=self.loc.device)
         return self.loc + eps * self.scale
@@ -83,7 +84,9 @@ class Normal(ExponentialFamily):
         # compute the variance
         var = self.scale**2
         log_scale = (
-            math.log(self.scale) if isinstance(self.scale, Real) else self.scale.log()
+            math.log(self.scale)
+            if isinstance(self.scale, _Number)
+            else self.scale.log()
         )
         return (
             -((value - self.loc) ** 2) / (2 * var)
@@ -105,7 +108,7 @@ class Normal(ExponentialFamily):
         return 0.5 + 0.5 * math.log(2 * math.pi) + torch.log(self.scale)
 
     @property
-    def _natural_params(self):
+    def _natural_params(self) -> tuple[Tensor, Tensor]:
         return (self.loc / self.scale.pow(2), -0.5 * self.scale.pow(2).reciprocal())
 
     def _log_normalizer(self, x, y):

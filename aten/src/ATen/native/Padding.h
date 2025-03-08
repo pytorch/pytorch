@@ -35,9 +35,10 @@ inline void check_valid_input(const Tensor& input, IntArrayRef padding) {
   int input_dim = input.dim();
 
   bool is_batch_mode = input_dim == (dim + 2);
+  bool is_non_batch_mode = input_dim == (dim + 1);
 
   bool valid_batch_mode = is_batch_mode;
-  bool valid_non_batch_mode = !is_batch_mode;
+  bool valid_non_batch_mode = is_non_batch_mode;
 
   if (is_batch_mode) {
     // allow batch size of 0-dim.

@@ -17,7 +17,9 @@ static std::vector<std::string> ENABLE_INTRA_NODE_COMM = {
 // for testing purposes.
 static std::vector<std::string> TEST_INTRA_NODE_COMM = {"TEST_INTRA_NODE_COMM"};
 
+#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 static int intraNodeCommIdx = 0;
+#endif
 
 /**
  * Query the nvlink connection among devices.
@@ -59,7 +61,7 @@ static Topology detectTopology(const NvlMesh nvlMesh, size_t worldSize) {
   }
   LOG(INFO) << "IntraNodeComm: Topology::UNKNOWN";
   return Topology::UNKNOWN;
-};
+}
 
 IntraNodeComm::IntraNodeComm(
     c10::intrusive_ptr<c10d::Store> store,
@@ -163,6 +165,18 @@ bool IntraNodeComm::rendezvous() {
     rankToDeviceIdx.emplace_back(info.deviceIdx);
   }
 
+  {
+    std::unordered_set uniqueDeviceIdxs(
+        rankToDeviceIdx.begin(), rankToDeviceIdx.end());
+    if (uniqueDeviceIdxs.size() != worldSize_) {
+      LOG(WARNING)
+          << "Skipping IntraNodeComm::rendezvous() because participants have "
+             "overlapping devices. To resolve this, call torch.cuda.set_device() "
+             "before init_process_group().";
+      return false;
+    }
+  }
+
   // Query nvlink connection
   auto nvlMesh = getNvlMesh(rankToDeviceIdx);
 
@@ -177,7 +191,7 @@ bool IntraNodeComm::rendezvous() {
       groupName, static_cast<int>(rank_), static_cast<int>(worldSize_), store_);
   auto allocator = get_allocator(c10::DeviceType::CUDA);
   symmetricMemoryPtr_ = allocator->alloc(bufferSize_, deviceIdx_, groupName);
-  symmetricMemory_ = allocator->rendezvous(symmetricMemoryPtr_);
+  symmetricMemory_ = allocator->rendezvous(symmetricMemoryPtr_, std::nullopt);
   isInitialized_ = true;
   return true;
 #endif

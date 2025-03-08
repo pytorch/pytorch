@@ -1,3 +1,5 @@
+from . import _extension
+from ._hf_storage import _HuggingFaceStorageReader, _HuggingFaceStorageWriter
 from .api import CheckpointException
 from .default_planner import DefaultLoadPlanner, DefaultSavePlanner
 from .filesystem import FileSystemReader, FileSystemWriter

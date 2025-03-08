@@ -166,16 +166,14 @@ class Agent:
         r"""
         Run one episode. The agent will tell each observer to run n_steps.
         """
-        futs = []
-        for ob_rref in self.ob_rrefs:
-            # make async RPC to kick off an episode on all observers
-            futs.append(
-                rpc_async(
-                    ob_rref.owner(),
-                    _call_method,
-                    args=(Observer.run_episode, ob_rref, self.agent_rref, n_steps)
-                )
-            )
+        # make async RPC to kick off an episode on all observers
+        futs = [
+            rpc_async(
+                ob_rref.owner(),
+                _call_method,
+                args=(Observer.run_episode, ob_rref, self.agent_rref, n_steps)
+            ) for ob_rref in self.ob_rrefs
+        ]
 
         # wait until all observers have finished this episode
         for fut in futs:
