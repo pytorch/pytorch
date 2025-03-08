@@ -86,7 +86,7 @@ robocopy /E ".additional_ci_files" "%PYTORCH_FINAL_PACKAGE_DIR%\.additional_ci_f
 :: Also save build/.ninja_log as an artifact
 copy /Y "build\.ninja_log" "%PYTORCH_FINAL_PACKAGE_DIR%\"
 
-sccache --show-stats --stats-format json | jq .stats > sccache-stats-%BUILD_ENVIRONMENT%-%OUR_GITHUB_JOB_ID%.json
+sccache --show-stats
 sccache --stop-server
 
 exit /b 0
