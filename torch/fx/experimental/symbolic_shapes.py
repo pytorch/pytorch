@@ -121,6 +121,8 @@ class PendingUnbackedSymbolNotFound(RuntimeError):
 aten = torch._ops.ops.aten  # type: ignore[has-type]
 
 __all__ = [
+    "guard_or_false",
+    "guard_or_true",
     "has_symbolic_sizes_strides",
     "create_contiguous",
     "ShapeEnv",
@@ -1178,6 +1180,31 @@ def compute_unbacked_bindings(
                     shape_env._eliminate_unbacked(new_s, sympy.sympify(old_sym))
 
     return symbol_to_path
+
+
+# This is used for size oblivious reasoning to avoid 0/1 specializations.
+def guard_or_false(a: BoolLikeType) -> bool:
+    """
+    try to gaurd a, if data dependent error encountered just return false.
+    """
+    if isinstance(a, SymBool):
+        try:
+            guard_bool(a)
+        except GuardOnDataDependentSymNode:
+            return False
+    return bool(a)
+
+
+def guard_or_true(a: BoolLikeType) -> bool:
+    """
+    try to gaurd a, if data dependent error encountered just return true.
+    """
+    if isinstance(a, SymBool):
+        try:
+            guard_bool(a)
+        except GuardOnDataDependentSymNode:
+            return True
+    return bool(a)
 
 
 def definitely_true(a: BoolLikeType) -> bool:
