@@ -1291,19 +1291,40 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         def arg_extractor(combine_fn, xs, additional_inputs):
             return combine_fn, xs, additional_inputs
 
-        if len(args) != 2:
-            unimplemented(
-                f"Expected 2 positional arguments but got {len(args)}.\n"
-                f"Usage: associative_scan(combine_fn, xs)",
-            )
-
         combine_fn, xs, additional_inputs = arg_extractor(*args, **kwargs)
 
-        # combine_fn input check
-        # We need to get the pure combine_fn from the functools.partial
-        _check_supported_callable_arg(
-            tx, combine_fn.keywords["combine_fn"], "combine_fn"
-        )
+        if True or args[0].python_type() is functools.partial:
+            # This is the standard case when the user calls the frontend
+            # and the frontend invokes dynamo
+            if len(args) != 2:
+                unimplemented(
+                    f"Expected 2 positional arguments but got {len(args)}.\n"
+                    f"Usage: associative_scan(combine_fn, xs)",
+                )
+
+            xs_treespec = args[0].keywords["spec"]
+
+            # combine_fn input check
+            # We need to get the pure combine_fn from the functools.partial
+            _check_supported_callable_arg(
+                tx, combine_fn.keywords["combine_fn"], "combine_fn"
+            )
+            out_treespec = xs_treespec
+        else:
+            # This case is hit during re-tracing, for example in export tests
+            # In this case, the combine_fn is a callable and not a functools.partial
+            # Moreover, the xs are a tuple of the original inputs, i.e. (xs,)
+            # Therefore, the outputs are also expected to be of the same form
+            # and thus we must return the original input treestructure and not
+            # directly the treestructure of the combine_fn.
+            # For the treestructure checks between the combine_fn and the inputs,
+            # we need though the unpacked treestructure
+            xs_treespec = _make_inlined(tx, pytree.tree_structure)(
+                *xs.unpack_var_sequence(tx)
+            )
+
+            _check_supported_callable_arg(tx, combine_fn, "combine_fn")
+            out_treespec = _make_inlined(tx, pytree.tree_structure)(xs)
 
         # xs input check
         if not isinstance(xs, (ListVariable, TupleVariable)):
@@ -1314,14 +1335,6 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
         xs_vars = xs.unpack_var_sequence(tx)
         _check_all_tensorvariable(xs_vars)
-
-        if args[0].python_type() is not functools.partial:
-            unimplemented(
-                f"Expected args[0], aka, inits to be a FunctoolsPartialVariable but got "
-                f"{args[0].python_type()}. It seems to be an "
-                f"internal error, please report an issue to PyTorch."
-            )
-        xs_treespec = args[0].keywords["spec"]
 
         # additional_inputs input check
         if not isinstance(additional_inputs, (ListVariable, TupleVariable)):
@@ -1390,7 +1403,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         ).as_python_constant():
             unimplemented(
                 f"The tree structure of the xs and the outs of the combine_fn are are expected to be identical, but got "
-                f"xs: {xs_treespec.as_python_constant()} vs carry: {_combine_treespec.as_python_constant()}."
+                f"xs: {xs_treespec.as_python_constant()} vs output: {_combine_treespec.as_python_constant()}."
             )
 
         check_meta_consistency_vt(
@@ -1474,7 +1487,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             p_args,
             {},
             out_meta,
-            _combine_treespec,
+            out_treespec,
         )
 
 
