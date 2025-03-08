@@ -8791,6 +8791,11 @@ class TestLogical(TestCaseMPS):
         x_cpu = x.cpu()
         self.assertEqual((x >> 3).cpu(), x_cpu >> 3)
         self.assertEqual((x << 1).cpu(), x_cpu << 1)
+        # Regression test for https://github.com/pytorch/pytorch/issues/147889
+        x = x.clamp(0, 8)
+        x_cpu = x.cpu()
+        self.assertEqual((4095 >> x).cpu(), 4095 >> x_cpu)
+        self.assertEqual((257 << x).cpu(), 257 << x_cpu)
 
 
 class TestSmoothL1Loss(TestCaseMPS):

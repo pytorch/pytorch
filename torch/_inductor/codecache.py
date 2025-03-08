@@ -1171,6 +1171,24 @@ class FxGraphCache:
             counters["inductor"]["fxgraph_cache_write_error"] += 1
 
     @staticmethod
+    def _check_for_hop(gm: torch.fx.GraphModule) -> None:
+        for module in gm.modules():
+            if not isinstance(module, torch.fx.GraphModule):
+                continue
+            for node in module.graph.nodes:
+                if (
+                    isinstance(node.target, torch._ops.HigherOrderOperator)
+                    and not node.target.cacheable()
+                ):
+                    raise BypassFxGraphCache(
+                        f"Can't cache HigherOrderOperator: {node.target.name()}"
+                    )
+                if node.op == "getattr" and isinstance(
+                    getattr(gm, node.target), torch._C.ScriptObject
+                ):
+                    raise BypassFxGraphCache("Can't cache torchbind objects")
+
+    @staticmethod
     def _check_can_cache(gm: torch.fx.GraphModule) -> None:
         """
         Check some conditions that would preclude caching and raise BypassFxGraphCache
@@ -1206,22 +1224,8 @@ class FxGraphCache:
             log.debug("fx graph cache no shape env")
             raise BypassFxGraphCache("No shape env")
 
-        # We skip caching if there are any torchbind objects.
-        for module in gm.modules():
-            if not isinstance(module, torch.fx.GraphModule):
-                continue
-            for node in module.graph.nodes:
-                if (
-                    isinstance(node.target, torch._ops.HigherOrderOperator)
-                    and not node.target.cacheable()
-                ):
-                    raise BypassFxGraphCache(
-                        f"Can't cache HigherOrderOperator: {node.target.name()}"
-                    )
-                if node.op == "getattr" and isinstance(
-                    getattr(gm, node.target), torch._C.ScriptObject
-                ):
-                    raise BypassFxGraphCache("Can't cache torchbind objects")
+        # We skip caching if there are any HOPs or torchbind objects.
+        FxGraphCache._check_for_hop(gm)
 
     @staticmethod
     def prepare_key(
@@ -1425,6 +1429,11 @@ class AotCodeCompiler:
         # guarantee the source code hash contains ISA difference.
         cpp_command = repr(vec_isa_cmd_gen.get_command_line())
 
+        # Meta internal AOTInductor CPU
+        use_relative_path = (
+            config.is_fbcode() and device_type == "cpu" and graph.aot_mode
+        )
+
         (
             specified_output_path,
             specified_artifact_name,
@@ -1535,7 +1544,7 @@ class AotCodeCompiler:
                 device_type=device_type if device_type != "xpu" else "cpu",
                 aot_mode=graph.aot_mode,
                 compile_only=True,
-                use_relative_path=config.is_fbcode(),
+                use_relative_path=use_relative_path,
             )
             object_builder = CppBuilder(
                 name=str(consts_s.stem),
@@ -1746,7 +1755,7 @@ class AotCodeCompiler:
                 vec_isa=picked_vec_isa,
                 device_type=device_type,
                 aot_mode=graph.aot_mode,
-                use_relative_path=config.is_fbcode(),
+                use_relative_path=use_relative_path,
             )
 
             so_builder = CppBuilder(
@@ -1986,7 +1995,8 @@ class CppCodeCache:
             lib = None
 
             cpp_build_option = CppTorchDeviceOptions(
-                **compile_command, use_relative_path=config.is_fbcode()
+                **compile_command,
+                use_relative_path=(config.is_fbcode() and device_type == "cpu"),
             )
             cpp_builder = CppBuilder(
                 name=output_name,
