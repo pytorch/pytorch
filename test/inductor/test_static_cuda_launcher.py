@@ -62,6 +62,76 @@ class TestStaticCudaLauncher(TestCase):
         launcher.run((1,), stream, (new_arg0, arg1))
         self.assertEqual(new_arg0, arg0)
 
+    # I wish I could macro all int types this into a single unit test on a loop, but
+    # 1. variables aren't allowed as type annotations in python
+    # 2. triton relies on inspect.get_source to get the type annotations
+    # so I can't even use exec() to generate the test cases.
+    # So we'll just make a few kernels by hand
+    def test_unsigned_integers(self):
+        def unsigned_integers(
+            arg0, arg1: tl.uint8, arg2: tl.uint16, arg3: tl.uint32, arg4: tl.uint64
+        ):
+            x = tl.load(arg0)
+            y = arg1 + arg2 + arg3 + arg4
+            tl.store(arg0, x + y)
+
+        arg0 = torch.zeros(1, dtype=torch.uint64, device="cuda")
+        args = (arg0, 1, 1, 1, 1)
+
+        launcher = self._make_launcher(unsigned_integers, args, (1,))
+        self.assertEqual(arg0, torch.tensor([4], dtype=torch.uint64, device="cuda"))
+        self.assertEqual(launcher.arg_tys, "OBHIK")
+        new_arg0 = torch.zeros(1, dtype=torch.uint64, device="cuda")
+        device_interface = get_interface_for_device("cuda")
+        stream = device_interface.get_raw_stream(device_interface.current_device())
+        launcher.run((1,), stream, (new_arg0, 1, 1, 1, 1))
+        self.assertEqual(new_arg0, arg0)
+
+    def test_signed_integers(self):
+        def signed_integers(
+            arg0, arg1: tl.int8, arg2: tl.int16, arg3: tl.int32, arg4: tl.int64
+        ):
+            x = tl.load(arg0)
+            y = arg1 + arg2 + arg3 + arg4
+            tl.store(arg0, x + y)
+
+        arg0 = torch.zeros(1, dtype=torch.int64, device="cuda")
+        args = (arg0, 1, 1, 1, 1)
+
+        launcher = self._make_launcher(signed_integers, args, (1,))
+        self.assertEqual(arg0, torch.tensor([4], dtype=torch.int64, device="cuda"))
+        self.assertEqual(launcher.arg_tys, "Obhil")
+        new_arg0 = torch.zeros(1, dtype=torch.int64, device="cuda")
+        device_interface = get_interface_for_device("cuda")
+        stream = device_interface.get_raw_stream(device_interface.current_device())
+        launcher.run((1,), stream, (new_arg0, 1, 1, 1, 1))
+        self.assertEqual(new_arg0, arg0)
+
+    # TODO: floats don't work properly, triton seems to think they're all tl.float32
+    # despite type annotations.
+    # There's also not really a good way for me to make a float16 in python...
+    def test_floats(self):
+        def unsigned_integers(
+            arg0, arg1: tl.float16, arg2: tl.float32, arg3: tl.float64
+        ):
+            x = tl.load(arg0)
+            y = arg1 + arg2 + arg3
+            tl.store(arg0, x + y)
+
+        arg0 = torch.zeros(1, dtype=torch.float64, device="cuda")
+
+        args = (arg0, 1.0, 1.0, 1.0)
+
+        launcher = self._make_launcher(unsigned_integers, args, (1,))
+        self.assertEqual(arg0, torch.tensor([3.0], dtype=torch.float64, device="cuda"))
+        # TODO:
+        self.assertEqual(launcher.arg_tys, "Offf")
+        new_arg0 = torch.zeros(1, dtype=torch.float64, device="cuda")
+        device_interface = get_interface_for_device("cuda")
+        stream = device_interface.get_raw_stream(device_interface.current_device())
+        launcher.run((1,), stream, (new_arg0, 1.0, 1.0, 1.0))
+        self.assertEqual(new_arg0, arg0)
+
     def test_basic_1arg(self):
         def simple_kernel_1_arg(arg0):
             x = tl.load(arg0)

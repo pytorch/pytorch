@@ -2402,6 +2402,14 @@ class StaticallyLaunchedCudaKernel:
         """
         if ty[0] == "*":
             return "O"
+        elif ty == "nvTmaDesc":
+            # nvTmaDescs use "O" in the triton arg map,
+            # since they need to be treated as a pointer PyObject*
+            # type. However, StaticCudaLauncher doesn't use Py_ParseTuple,
+            # nor can it codegen "CUTensormap*" as the proper type of a
+            # nvTmaDesc typed argument. So instead, we pass N as a special indicator
+            # so that StaticCudaLauncher knows to treat it as a CUTensorMap.
+            return "N"
         return {
             "i1": "i",
             "i8": "b",

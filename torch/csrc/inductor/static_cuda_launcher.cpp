@@ -60,12 +60,10 @@ static CUdeviceptr getPointer(PyObject* obj) {
     // valid nullptr
     return data_ptr;
   }
-  PyObject* ptr = PyObject_GetAttrString(obj, "data_ptr");
+  auto ptr = THPObjectPtr{PyObject_GetAttrString(obj, "data_ptr")};
   if (ptr) {
-    PyObject* empty_tuple = PyTuple_New(0);
-    PyObject* ret = PyObject_Call(ptr, empty_tuple, nullptr);
-    Py_DECREF(empty_tuple);
-    Py_DECREF(ptr);
+    auto empty_tuple = THPObjectPtr{PyTuple_New(0)};
+    auto ret = THPObjectPtr{PyObject_Call(ptr, empty_tuple, nullptr)};
     if (!THPUtils_checkLong(ret)) {
       throw std::runtime_error(
           "data_ptr method of Pointer object must return 64-bit int");
@@ -77,7 +75,6 @@ static CUdeviceptr getPointer(PyObject* obj) {
     CUdeviceptr dev_ptr = 0;
     AT_CUDA_DRIVER_CHECK(nvrtc().cuPointerGetAttribute(
         &dev_ptr, CU_POINTER_ATTRIBUTE_DEVICE_POINTER, data_ptr));
-    Py_DECREF(ret);
     return dev_ptr;
   }
   throw std::runtime_error(
@@ -131,6 +128,53 @@ static inline void launchKernel(
       nullptr));
 }
 
+static CUtensorMap* getTmaDesc(PyObject* obj) {
+  if (sizeof(CUtensorMap*) != 8) {
+    throw std::runtime_error("getTmaDesc() requires 64-bit compilation");
+  }
+
+  auto method_handle =
+      THPObjectPtr{PyObject_GetAttrString(obj, "tma_desc_cpu_ptr")};
+  if (!method_handle) {
+    throw std::runtime_error("tma_desc_cpu_ptr() method does not exist");
+  }
+
+  auto empty_tuple = THPObjectPtr{PyTuple_New(0)};
+  if (!empty_tuple) {
+    throw std::runtime_error("Internal python error!");
+  }
+  auto method_ret =
+      THPObjectPtr{PyObject_Call(method_handle, empty_tuple, nullptr)};
+  if (!method_ret) {
+    throw std::runtime_error("Internal Python error!");
+  }
+
+  if (!PyLong_Check(method_ret)) {
+    throw std::runtime_error("tma_desc_cpu_ptr() must return 64-bit int");
+  }
+
+  uint64_t ptr_as_uint = THPUtils_unpackUInt64(method_ret);
+  if (!ptr_as_uint) {
+    throw std::runtime_error("received NULL ptr from tma_desc_cpu_ptr()");
+  }
+  if (ptr_as_uint % 64 != 0) {
+    throw std::runtime_error("tma_desc_cpu_ptr() must be 64-byte aligned");
+  }
+
+  return (CUtensorMap*)(ptr_as_uint); // NOLINT
+}
+
+template <typename FINAL, typename F>
+void convertType(F converter, const char* name, void* slot, PyObject* item) {
+  auto temp = converter(item);
+  if (PyErr_Occurred()) {
+    std::string msg = "Failed to convert argument to ";
+    msg += name;
+    throw std::runtime_error(msg);
+  }
+  *reinterpret_cast<FINAL*>(slot) = static_cast<FINAL>(temp);
+}
+
 /**
    Given a list of args and their types (in a string), along with two stack
    allocated arrays, puts each argument arg_{i} into argStorage[i], and a
@@ -154,91 +198,47 @@ void parseKernelArgs(
     throw std::runtime_error(
         "Mismatch between number of argument types and provided arguments");
   }
+
   for (int i = 0; i < numKernelArgs; ++i) {
     // Get pointer to the ith 8-byte slot.
     void* slot = static_cast<void*>(&argStorage[i]);
     PyObject* item = PyTuple_GetItem(varArgs, i);
     char typeChar = argTypes[i];
-
     switch (typeChar) {
-      case 'b': { // (int8_t)
-        long temp = THPUtils_unpackInt(item);
-        if (PyErr_Occurred()) {
-          throw std::runtime_error("Failed to convert argument to int8");
-        }
-        *reinterpret_cast<int8_t*>(slot) = static_cast<int8_t>(temp);
+      case 'b':
+        convertType<int8_t>(THPUtils_unpackInt, "int8", slot, item);
         break;
-      }
-      case 'h': { // (int16_t)
-        long temp = THPUtils_unpackInt(item);
-        if (PyErr_Occurred()) {
-          throw std::runtime_error("Failed to convert argument to int16");
-        }
-        *reinterpret_cast<int16_t*>(slot) = static_cast<int16_t>(temp);
+      case 'h':
+        convertType<int16_t>(THPUtils_unpackInt, "int16", slot, item);
         break;
-      }
-      case 'i': { // (int32_t)
-        long temp = THPUtils_unpackLong(item);
-        if (PyErr_Occurred()) {
-          throw std::runtime_error("Failed to convert argument to int32");
-        }
-        *reinterpret_cast<int32_t*>(slot) = static_cast<int32_t>(temp);
+      case 'i':
+        convertType<int32_t>(THPUtils_unpackLong, "int32", slot, item);
         break;
-      }
-      case 'l': { // (int64_t)
-        long long temp = THPUtils_unpackLong(item);
-        if (PyErr_Occurred()) {
-          throw std::runtime_error("Failed to convert argument to int64");
-        }
-        *reinterpret_cast<int64_t*>(slot) = static_cast<int64_t>(temp);
+      case 'l':
+        convertType<int64_t>(THPUtils_unpackLong, "int64", slot, item);
         break;
-      }
-      case 'B': { // (uint8_t)
-        unsigned long temp = THPUtils_unpackUInt32(item);
-        if (PyErr_Occurred()) {
-          throw std::runtime_error("Failed to convert argument to uint8");
-        }
-        *reinterpret_cast<uint8_t*>(slot) = static_cast<uint8_t>(temp);
+      case 'B':
+        convertType<uint8_t>(THPUtils_unpackUInt32, "uint8", slot, item);
         break;
-      }
-      case 'H': { // (uint16_t)
-        unsigned long temp = THPUtils_unpackUInt32(item);
-        if (PyErr_Occurred()) {
-          throw std::runtime_error("Failed to convert argument to uint16");
-        }
-        *reinterpret_cast<uint16_t*>(slot) = static_cast<uint16_t>(temp);
+      case 'H':
+        convertType<uint16_t>(THPUtils_unpackUInt32, "uint16", slot, item);
         break;
-      }
-      case 'I': { // (uint32_t)
-        unsigned long temp = THPUtils_unpackUInt32(item);
-        if (PyErr_Occurred()) {
-          throw std::runtime_error("Failed to convert argument to uint32");
-        }
-        *reinterpret_cast<uint32_t*>(slot) = static_cast<uint32_t>(temp);
+      case 'I':
+        convertType<uint32_t>(THPUtils_unpackUInt32, "uint32", slot, item);
         break;
-      }
-      case 'K': { // (uint64_t)
-        unsigned long long temp = THPUtils_unpackUInt64(item);
-        if (PyErr_Occurred()) {
-          throw std::runtime_error("Failed to convert argument to uint64");
-        }
-        *reinterpret_cast<uint64_t*>(slot) = static_cast<uint64_t>(temp);
+      case 'K':
+        convertType<uint64_t>(THPUtils_unpackUInt64, "uint64", slot, item);
         break;
-      }
-      case 'f': { // float (fp16, bf16, fp32, f32)
-        double temp = THPUtils_unpackDouble(item);
-        if (PyErr_Occurred()) {
-          throw std::runtime_error("Failed to convert argument to float");
-        }
-        *reinterpret_cast<float*>(slot) = static_cast<float>(temp);
+      case 'f':
+        convertType<float>(THPUtils_unpackDouble, "float", slot, item);
         break;
-      }
-      case 'd': { // double (64-bit float; fp64)
-        double temp = THPUtils_unpackDouble(item);
-        if (PyErr_Occurred()) {
-          throw std::runtime_error("Failed to convert argument to double");
-        }
-        *reinterpret_cast<double*>(slot) = temp;
+      case 'd':
+        convertType<double>(THPUtils_unpackDouble, "double", slot, item);
+        break;
+      case 'N': // NvtmDesc (N is not a regular format character)
+      {
+        CUtensorMap* tma_ptr = getTmaDesc(item);
+        *reinterpret_cast<CUtensorMap*>(slot) = *tma_ptr;
         break;
       }
       case 'O': { // pointer; using helper getPointer() (which may call
