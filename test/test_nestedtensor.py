@@ -6814,6 +6814,7 @@ torch.cuda.synchronize()
             rtol=output_ref_rtol,
         )
 
+    @skipIfTorchDynamo("fails with 'SymNode' object has no attribute 'nested_int_coeff'")
     @dtypes(torch.float32, torch.double, torch.half)
     def test_sdpa_with_constant_sequence_length(self, device, dtype):
         # shape (B, P*, S, D)
