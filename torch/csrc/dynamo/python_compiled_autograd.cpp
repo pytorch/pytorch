@@ -152,7 +152,7 @@ static variable_list call_function(
       jit::toPyObject(output_metadata));
 
   // Convert the output from PyObject* to vector<Tensor>
-  auto tmp = py::cast<std::vector<std::optional<at::Tensor>>>(stuff);
+  auto tmp = py::cast<std::vector<std::optional<at::Tensor>>>(std::move(stuff));
   return toTensorList(tmp);
 }
 
