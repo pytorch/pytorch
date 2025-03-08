@@ -177,6 +177,24 @@ static Tensor handle_r_to_c(const Tensor& self, Tensor gradient_result) {
   return gradient_result;
 }
 
+Tensor nextafter_backward(const Tensor& grad, const Tensor& self, const Tensor& other) {
+  // The gradient of nextafter(x, y) with respect to x is:
+  // - 1.0 where x != y (changes in x cause changes in output)
+  // - 0.0 where x == y (no change in output when x equals y)
+  
+  auto mask = self.ne(other);
+  return grad * mask.to(grad.dtype());
+}
+
+// Forward mode implementation for nextafter
+Tensor nextafter_jvp(const Tensor& self_p, const Tensor& self_t, 
+                      const Tensor& other_p, const Tensor& other_t) {
+  // For forward-mode autodiff, we need a similar approach
+  // Only propagate tangents where self_p != other_p
+  auto mask = self_p.ne(other_p);
+  return self_t * mask.to(self_t.dtype());
+}
+
 Tensor restore_reduced_dims(
     const Tensor& output,
     IntArrayRef dims,
