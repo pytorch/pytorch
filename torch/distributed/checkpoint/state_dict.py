@@ -729,6 +729,21 @@ def _unflatten_optim_state_dict(
         pg_state.append({_PARAMS: []})
         for param in param_group[_PARAMS]:
             for fqn in info.fqn_param_mapping[param]:
+                if fqn in info.shared_params_mapping:
+                    in_params = False
+                    for k in param_group.keys():
+                        if k == _PARAMS:
+                            continue
+                        flatten_key = f"{_PG}.{fqn}.{k}"
+                        if flatten_key in state_dict:
+                            in_params = True
+                        break
+                else:
+                    in_params = True
+
+                if not in_params:
+                    continue
+
                 params = pg_state[-1][_PARAMS]
                 assert isinstance(params, list)  # typing
                 params.append(fqn)
