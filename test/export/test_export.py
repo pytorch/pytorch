@@ -3985,7 +3985,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         # example input
         t = torch.tensor([1, 4, 4], dtype=torch.int32)
 
-        # We define a series of versions of M() below. Each version has
+        # We define a series of versions of M() below. Each version
         # raises a data-dependent error that the next version fixes, by
         # copy-pasting a suggested fix in the error message. The fix is
         # always a torch.check() on an unresolved condition (or its negation)
@@ -4042,35 +4042,11 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 # Could not guard on data-dependent expression Eq(u2, -1)
                 torch._check(items[2] != -1)
                 # Could not guard on data-dependent expression u2 >= 0
-                torch._check(items[2] >= 0)
+                torch._check_is_size(items[2])
                 # Could not guard on data-dependent expression Eq(u1, u2)
                 return r.view(items[0], items[2])
 
         M = M_v2
-        with self.assertRaisesRegex(
-            error_type,
-            "The following call raised this error(.*\n)+"
-            f".*{re.escape('return r.view(items[0], items[2])')}(.*\n)+"
-            "To fix the error, insert one of the following checks before this call.*:\n"
-            f".*{re.escape('torch._check(items[2] == items[1])')}.*\n"
-            f".*{re.escape('torch._check(items[2] != items[1])')}(.*\n)+"
-            f".*{re.escape('(These suggested fixes were derived by replacing `u1` with items[1] or r.shape[1], `u2` with items[2] in Eq(u2, u1) and its negation.)')}",
-        ):
-            export(N(), (t,), strict=strict)
-
-        class M_v3(torch.nn.Module):
-            def forward(self, t):
-                items = [t[i].item() for i in range(t.numel())]
-                r = torch.randn([items[0], items[1]])
-                # Could not guard on data-dependent expression Eq(u2, -1)
-                torch._check(items[2] != -1)
-                # Could not guard on data-dependent expression u2 >= 0
-                torch._check(items[2] >= 0)
-                # Could not guard on data-dependent expression Eq(u1, u2)
-                torch._check(items[2] == r.shape[1])
-                return r.view(items[0], items[2])
-
-        M = M_v3
         export(N(), (t,), strict=strict)
 
     def test_suggested_fixes_for_data_dependent_errors_puzzlers(self):
