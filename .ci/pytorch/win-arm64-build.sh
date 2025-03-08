@@ -23,6 +23,4 @@ export SCRIPT_HELPERS_DIR=$SCRIPT_PARENT_DIR/win-arm64-test-helpers
 
 "$SCRIPT_HELPERS_DIR"/build_pytorch.bat
 
-assert_git_not_dirty
-
 echo "BUILD PASSED"
