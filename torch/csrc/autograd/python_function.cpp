@@ -360,17 +360,14 @@ variable_list PyNode::apply_with_saved(
     const variable_list& inputs,
     SwapSavedVariables& saved) {
   auto f = (THPFunction*)obj;
-  TORCH_INTERNAL_ASSERT(!f->compiled_autograd_tracing);
   saved.before(f->compiled_autograd_symints);
   saved.before(f->saved_variables);
   saved.before(f->needs_input_grad);
   saved.before(f->materialize_non_diff_grads);
   saved.before(f->output_info);
   saved.before(f->input_info);
-  f->compiled_autograd_tracing = true;
   variable_list result =
       defer_to_dynamo(variable_list(inputs), saved.get_py_compiler());
-  f->compiled_autograd_tracing = false;
   saved.after(f->compiled_autograd_symints);
   saved.after(f->saved_variables);
   saved.after(f->needs_input_grad);
@@ -527,7 +524,6 @@ static PyObject* THPFunction_new(
   new (&self->is_variable_input) std::vector<bool>();
   self->materialize_grads = true;
   self->materialize_non_diff_grads = true;
-  self->compiled_autograd_tracing = false;
   return obj;
 }
 
@@ -1500,18 +1496,6 @@ PyObject* THPFunction_saved_variables(THPFunction* self, void* _unused) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPFunction_is_compiled_autograd_tracing(
-    PyObject* self,
-    PyObject* _unused) {
-  HANDLE_TH_ERRORS
-  if (((THPFunction*)self)->compiled_autograd_tracing) {
-    Py_RETURN_TRUE;
-  } else {
-    Py_RETURN_FALSE;
-  }
-  END_HANDLE_TH_ERRORS
-}
-
 PyObject* THPFunction_get_compiled_autograd_symints(
     PyObject* _self,
     PyObject* _unused) {
@@ -1768,10 +1752,6 @@ static struct PyMethodDef THPFunction_methods[] = {
      nullptr},
     {(char*)"register_hook", THPFunction_register_hook, METH_O, nullptr},
     {(char*)"register_prehook", THPFunction_register_prehook, METH_O, nullptr},
-    {(char*)"_is_compiled_autograd_tracing",
-     THPFunction_is_compiled_autograd_tracing,
-     METH_NOARGS,
-     nullptr},
     {(char*)"_get_compiled_autograd_symints",
      THPFunction_get_compiled_autograd_symints,
      METH_NOARGS,
