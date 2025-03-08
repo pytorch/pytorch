@@ -1186,6 +1186,8 @@ class TestFP8MatmulCuda(TestCase):
             B_ref = torch.ones(N, K, device=device, dtype=torch.bfloat16)
 
             # A_ref[1][1] = 1
+            A_ref[0][0] = 0
+            A_ref[0][1] = 0
 
             # A = A_ref.to(torch.uint8).view(torch.float4_e2m1fn_x2)
             # B = B_ref.to(torch.uint8).view(torch.float4_e2m1fn_x2)
@@ -1195,7 +1197,7 @@ class TestFP8MatmulCuda(TestCase):
             A = torch.full((M, K // 2), 0b00100010, device=device, dtype=torch.uint8)
             B = torch.full((N, K // 2), 0b00100010, device=device, dtype=torch.uint8)
             B = B.t()
-            A[1][0] = 0b00110111
+            A[0][0] = 0b00000000
             # A[0][0] = 34
             # B[0][0] = 0b00100001
             # B[0][1] = 0b00000001
@@ -1204,8 +1206,9 @@ class TestFP8MatmulCuda(TestCase):
             A = A.view(torch.float4_e2m1fn_x2)
             B = B.view(torch.float4_e2m1fn_x2)
 
-            A_scale = torch.full((M, ceil_div(K // 2, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e4m3fn)
-            B_scale = torch.full((N, ceil_div(K // 2, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e4m3fn)
+            A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e4m3fn)
+            B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e4m3fn)
+            print(A_scale.numel(), B_scale.numel(), A_scale, B_scale)
             # convert to swizzled format
             # A_scale = to_blocked(A_scale)
             # B_scale = to_blocked(B_scale)

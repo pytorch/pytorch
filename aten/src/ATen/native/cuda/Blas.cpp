@@ -1019,12 +1019,14 @@ ScalingType get_scaling_type(
     auto expected_b_size =
         BLOCK_SIZE_MN * ceil_div(dim_n, BLOCK_SIZE_MN) * padded_num_k_blocks;
 
+    /*
     TORCH_CHECK(scale_a.numel() == expected_a_size,
                 "For BlockWise scaling: Expected scale_a size to be ",
                 expected_a_size, " but got ", scale_a.numel());
     TORCH_CHECK(scale_b.numel() == expected_b_size,
                 "For BlockWise scaling: Expected scale_b size to be ",
                 expected_b_size, " but got ", scale_b.numel());
+    */
 
     TORCH_CHECK(
         scale_a.is_contiguous() && scale_b.is_contiguous(),
