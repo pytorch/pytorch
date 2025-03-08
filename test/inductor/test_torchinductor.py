@@ -98,7 +98,6 @@ from torch.testing._internal.common_utils import (
     skipIfWindows,
     skipIfXpu,
     subtest,
-    TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     xfailIfS390X,
 )
@@ -11877,9 +11876,6 @@ class CommonTemplate:
         list(itertools.product(test_dtypes, test_dtypes)),
     )
     def test_dtypeview(self, dtype_x, dtype_y):
-        if TEST_WITH_ASAN:
-            return
-
         if is_triton_cpu_backend(self.device):
             raise unittest.SkipTest("Compile time crash in Triton CPU CI")
 

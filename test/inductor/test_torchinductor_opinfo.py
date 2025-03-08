@@ -38,7 +38,6 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     suppress_warnings,
     TEST_MKL,
-    TEST_WITH_ASAN,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import (
@@ -135,7 +134,7 @@ def print_seen():
                 if idx >= 0:
                     x = f"{x[:idx]}..."
                 if len(x) > length:
-                    return f"{x[:length - 3]}..."
+                    return f"{x[: length - 3]}..."
                 return x
 
             reasons = sorted(set(map(maybe_truncate, failed_reasons[key])))
@@ -904,7 +903,6 @@ class TestInductorOpInfo(TestCase):
     @skipCUDAIf(not HAS_CUDA, "Skipped! Triton not found")
     @skipXPUIf(not HAS_XPU, "Skipped! Supported XPU compiler not found")
     @skipCPUIf(not HAS_CPU, "Skipped! Supported CPU compiler not found")
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfTorchDynamo("Test uses dynamo already")
     @skipIfCrossRef
     @_ops(op_db[START:END])
