@@ -502,15 +502,24 @@ class AutogradCompilerInstance:
             self.bind_objects_to_proxies(grad_ins, proxies)
         return tuple(grad_ins)
 
-    def call_copy_slices_prologue(self, inputs, base, view):
+    def call_copy_slices_prologue(
+        self,
+        inputs,
+        base_sizes,
+        base_strides,
+        base_storage_offset,
+        view_sizes,
+        view_strides,
+        view_storage_offset,
+    ):
         args = (
             inputs,
-            base.sizes(),
-            base.strides(),
-            base.storage_offset(),
-            view.sizes(),
-            view.strides(),
-            view.storage_offset(),
+            self.to_proxy(base_sizes),
+            self.to_proxy(base_strides),
+            self.to_proxy(base_storage_offset),
+            self.to_proxy(view_sizes),
+            self.to_proxy(view_strides),
+            self.to_proxy(view_storage_offset),
         )
         return self.proxy_call(copy_slices_prologue, args, [None] * 3)
 
