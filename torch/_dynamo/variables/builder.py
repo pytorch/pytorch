@@ -1577,12 +1577,8 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.TYPE_MATCH)
             if torch._dynamo.config.inline_inbuilt_nn_modules:
                 freezing = is_parameter_freezing()
-                try:
                     for p in value.parameters():
                         self.mark_static_input(p, guard=freezing)
-                except AttributeError:
-                    pass
-
                 for b in value.buffers():
                     self.mark_static_input(b, guard=freezing)
 
