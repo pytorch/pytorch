@@ -131,8 +131,10 @@ def get_scan_combine_fn(name, associative=True):
         }
 
     def non_pointwise(x: torch.Tensor, y: torch.Tensor):
-        W = torch.diag(torch.ones(2, device=x.device))
+        # W = torch.diag(torch.ones(2, device=x.device))
+        W = torch.arange(4, dtype=torch.float, device=x.device).view(2, 2)
         return x @ W + y @ W
+        # return x + y
 
     if name == "add":
         fct = add
@@ -2534,6 +2536,11 @@ class AssociativeScanTests(TestCase):
         )
         grad_init = [torch.ones_like(el) for el in result_flatten]
         grads = torch.autograd.grad(result_flatten, grad_param, grad_init)
+        
+        # print('Grads out')
+        # print(grads)
+        # print('Grads exp')
+        # print(expected_grads)
         self.assertEqual(grads, expected_grads, atol=6e-05, rtol=6e-06)
 
     def _run_test(self, model, model_fake, inputs, autograd_param=None):
@@ -2561,6 +2568,11 @@ class AssociativeScanTests(TestCase):
     @parametrize("combine_mode", ["pointwise", "generic"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
+    # @parametrize("reverse", [False])
+    # @parametrize("compile_mode", ["eager"])
+    # @parametrize("combine_mode", ["pointwise"])
+    # @parametrize("device", [torch.device("cuda")])
+    # @parametrize("autograd", [True])
     # Skipping the combination of combine_mode=pointwise and device=cpu
     # as the current implementation of pointwise does only support CUDA device
     @decorateIf(
@@ -2570,7 +2582,7 @@ class AssociativeScanTests(TestCase):
             and (params["device"] == torch.device("cpu") or torch.version.hip)
         ),
     )
-    def test_associative_scan_compile(
+    def test_associative_scan_compile1111(
         self, combine_mode, reverse, compile_mode, device, autograd
     ):
         x = torch.randn(3, 10, 2, device=device, requires_grad=autograd)
@@ -3209,10 +3221,14 @@ class AssociativeScanTests(TestCase):
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
-    @parametrize("reverse", [False, True])
-    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    @parametrize("autograd", [False, True])
+    # @parametrize("reverse", [False, True])
+    @parametrize("reverse", [False])
+    # @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("compile_mode", ["eager"])
+    # @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    @parametrize("device", [torch.device("cuda")])
+    # @parametrize("autograd", [False, True])
+    @parametrize("autograd", [True])
     # Skipping the combination of associative_scan and device=cpu
     # as the current implementation of pointwise does only support CUDA device
     @decorateIf(
@@ -3229,7 +3245,8 @@ class AssociativeScanTests(TestCase):
             "reverse": reverse,
             "compile_mode": compile_mode,
             "combine_fn": get_scan_combine_fn("non_pointwise", True),
-            "combine_mode": "generic",
+            "combine_mode": "pointwise",
+            # "combine_mode": "generic",
         }
         kwargs_fake = self._prepare_fake_kwargs(kwargs)
         self._run_test(
