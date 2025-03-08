@@ -1569,14 +1569,15 @@ void scaled_gemm(
 #endif  // USE_ROCM
 #ifndef USE_ROCM
   const int8_t fastAccuMode = use_fast_accum ? 1 : 0;
-  computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_FAST_ACCUM, fastAccuMode);
+  // computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_FAST_ACCUM, fastAccuMode);
 #endif  // USE_ROCM
   // CuBlasLtMatrixLayout Adesc(ScalarTypeToCudaDataType(mat1_dtype), m, k, mat1_ld, transa == 't');
   // CuBlasLtMatrixLayout Bdesc(ScalarTypeToCudaDataType(mat2_dtype), k, n, mat2_ld, transb == 't');
   // just for debugging
   // TODO(this PR): uncomment above
-  CuBlasLtMatrixLayout Adesc(CUDA_R_4F_E2M1, m, k, mat1_ld, transa == 't');
-  CuBlasLtMatrixLayout Bdesc(CUDA_R_4F_E2M1, k, n, mat2_ld, transb == 't');
+  // TODO(this PR): move the k and ld gymnastics somewhere and make them nice
+  CuBlasLtMatrixLayout Adesc(CUDA_R_4F_E2M1, m, k * 2, mat1_ld * 2, transa == 't');
+  CuBlasLtMatrixLayout Bdesc(CUDA_R_4F_E2M1, k * 2, n, mat2_ld * 2, transb == 't');
 #ifdef USE_ROCM
   // Cdesc is unused, beta is 0. But hipblaslt needs this set to something reasonable.
   CuBlasLtMatrixLayout Cdesc(ScalarTypeToCudaDataType(result_dtype), m, n, result_ld);

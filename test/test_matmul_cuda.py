@@ -1192,10 +1192,10 @@ class TestFP8MatmulCuda(TestCase):
 
             # for now, hand craft A and B
             # 34 is the fp4x2 encoding for [1.0, 1.0] packed into a byte
-            A = torch.full((M, K // 2), 34, device=device, dtype=torch.uint8)
-            B = torch.full((N, K // 2), 34, device=device, dtype=torch.uint8)
+            A = torch.full((M, K // 2), 0b00100010, device=device, dtype=torch.uint8)
+            B = torch.full((N, K // 2), 0b00100010, device=device, dtype=torch.uint8)
             B = B.t()
-            # A[0][0] = 0b00100010
+            A[1][0] = 0b00110111
             # A[0][0] = 34
             # B[0][0] = 0b00100001
             # B[0][1] = 0b00000001
