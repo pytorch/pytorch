@@ -107,7 +107,7 @@ def vector_norm(
     *,
     dtype: Optional[torch.dtype] = None,
 ) -> Tensor:
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
 
     # Checks
     check_fp_or_complex(x.dtype, "linalg.vector_norm")
@@ -115,7 +115,11 @@ def vector_norm(
     if isinstance(dim, Dim):
         dim = [dim]  # type: ignore[assignment]
 
-    if guard_size_oblivious(x.numel() == 0) and (ord < 0.0 or ord == float("inf")):
+    # The effect of guard_or_false here is avoid having the additional checks when we do
+    # not know if x.numel() == 0. Alternatively, we could append to all those checks 
+    x.numel()!= 0 or 
+    # and keep them.
+    if (ord < 0.0 or ord == float("inf")) and guard_or_false(x.numel() == 0):
         torch._check(
             dim is not None and len(dim) != 0,
             lambda: f"linalg.vector_norm cannot compute the {ord} norm on an empty tensor "
