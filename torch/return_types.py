@@ -24,6 +24,18 @@ def pytree_register_structseq(cls):
     raise TypeError(f"Class {cls!r} is not a PyStructSequence class.")
 
 
+_name, _attr = "", None
+for _name in dir(return_types):
+    if _name.startswith("__"):
+        continue
+
+    _attr = getattr(return_types, _name)
+    globals()[_name] = _attr
+
+    if not _name.startswith("_"):
+        __all__.append(_name)
+        all_return_types.append(_attr)
+
 with warnings.catch_warnings():
     warnings.filterwarnings(
         "ignore",
@@ -31,27 +43,11 @@ with warnings.catch_warnings():
         module=__name__,
         append=False,
     )
-
-    _name, _attr = "", None
-    for _name in dir(return_types):
-        if _name.startswith("__"):
-            continue
-
-        _attr = getattr(return_types, _name)
-        globals()[_name] = _attr
-
-        if not _name.startswith("_"):
-            __all__.append(_name)
-            all_return_types.append(_attr)
-
-        # Today everything in torch.return_types is a structseq, aka a "namedtuple"-like
-        # thing defined by the Python C-API. We're going to need to modify this when that
-        # is no longer the case.
-        # NB: I don't know how to check that something is a "structseq" so we do a fuzzy
-        # check for tuple
+    # Today everything in torch.return_types is a structseq, aka a "namedtuple"-like
+    # thing defined by the Python C-API. We're going to need to modify this when that
+    # is no longer the case.
+    for _attr in all_return_types:
         if isinstance(_attr, type) and issubclass(_attr, tuple):
             pytree_register_structseq(_attr)
 
-    del _name, _attr
-
-del warnings, deprecated
+del _name, _attr, warnings, deprecated
