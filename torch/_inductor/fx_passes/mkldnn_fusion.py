@@ -2,7 +2,7 @@
 import functools
 import operator
 from functools import reduce
-from typing import Any, Tuple
+from typing import Any
 
 import torch
 from torch._dynamo.utils import counters
@@ -37,6 +37,74 @@ if torch._C._has_mkldnn:
     _conv_args = [Arg() for _ in range(10)]
     _linear_args = [Arg() for _ in range(6)]
     _conv_transpose_args = [Arg() for _ in range(11)]
+
+    def _is_valid_grouped_gemm_fusion(computation_nodes):
+        """
+        Here we check:
+        1. More than 1 GEMM nodes has been found.
+        2. All the GEMM nodes share the same activation.
+        3. All the GEMM nodes have same weight size but different wgt node.
+        """
+        computation_op = mkldnn._linear_pointwise.default
+        act = computation_nodes[0].args[0]
+        wgt = computation_nodes[0].args[1]
+        wgt_size = wgt.meta.get("val").size()  # type: ignore[union-attr]
+        return len(computation_nodes) >= 2 and all(
+            (
+                node.target == computation_op
+                and node.args[0] == act
+                and (node.args[1].meta.get("val").size() == wgt_size)
+                and (node.args[1] != wgt or gemm_idx == 0)
+            )
+            for gemm_idx, node in enumerate(computation_nodes)
+        )
+
+    def grouped_gemm_pass(graph: torch.fx.Graph):
+        """
+        Group GEMM has multi output nodes which is compilicated to define a Pattern.
+        Use below way to connect the pattern to the lowering.
+        TODO: Use MultiOutputPattern, current limitation is the pattern requires
+        fixed number of output nodes. Extend to support Group GEMM for pattern matcher.
+        """
+        computation_op = mkldnn._linear_pointwise.default
+        from ..mkldnn_lowerings import grouped_gemm_lowering
+
+        for node in graph.find_nodes(op="call_function", target=computation_op):
+            if (
+                not node._erased
+                and isinstance(node.meta.get("val"), torch.Tensor)
+                and node.meta["val"].device.type == "cpu"
+            ):
+                act = node.args[0]
+                users = list(act.users)
+                if _is_valid_grouped_gemm_fusion(users):
+                    with graph.inserting_before(node):
+                        grouped_gemm_node = graph.create_node(
+                            "call_function",
+                            grouped_gemm_lowering,
+                            (
+                                act,
+                                [user.args[1] for user in users],
+                                [user.args[2] for user in users],
+                            ),
+                        )
+                        grouped_gemm_node.meta["val"] = [
+                            user.meta["val"] for user in users
+                        ]
+                        with graph.inserting_after(grouped_gemm_node):
+                            for gemm_idx, user in enumerate(users):
+                                assert user.target == computation_op
+                                get_item = graph.create_node(
+                                    "call_function",
+                                    operator.getitem,
+                                    (
+                                        grouped_gemm_node,
+                                        gemm_idx,
+                                    ),
+                                )
+                                user.replace_all_uses_with(get_item)
+                                graph.erase_node(user)
+        return
 
     def _conv_call(users=1):
         return CallFunction(
@@ -490,9 +558,9 @@ if torch._C._has_mkldnn:
             binary_nodes = filter_nodes(match.nodes, binary_op)
 
             def _get_compute_node(_binary_node, _other_index):
-                assert (
-                    len(_binary_node.all_input_nodes) == 2
-                ), "Binary node should have 2 input nodes."
+                assert len(_binary_node.all_input_nodes) == 2, (
+                    "Binary node should have 2 input nodes."
+                )
                 _compute_index = 1 if (_other_index == 0) else 0
                 return _binary_node.args[_compute_index]
 
@@ -546,9 +614,9 @@ if torch._C._has_mkldnn:
                 else:
                     computation_args += [1.0, None, [], None]
             counters["inductor"]["mkldnn_conv_binary_unary_fusion_matcher_count"] += 1
-            counters["inductor"][
-                "mkldnn_conv_binary_unary_fusion_matcher_nodes"
-            ] += len(match.nodes)
+            counters["inductor"]["mkldnn_conv_binary_unary_fusion_matcher_nodes"] += (
+                len(match.nodes)
+            )
             return L[fusion_op](*computation_args)
 
         return fn
@@ -591,9 +659,9 @@ if torch._C._has_mkldnn:
                 else:
                     computation_args += [1.0, None, [], None]
             counters["inductor"]["mkldnn_conv_binary_unary_fusion_matcher_count"] += 1
-            counters["inductor"][
-                "mkldnn_conv_binary_unary_fusion_matcher_nodes"
-            ] += len(match.nodes)
+            counters["inductor"]["mkldnn_conv_binary_unary_fusion_matcher_nodes"] += (
+                len(match.nodes)
+            )
             # Make sure the other is not an alias or mutation(fx side doesn't has such info).
             other.realize()
             if not _can_be_inplace(other) or other.data.shape != list(
@@ -1242,9 +1310,9 @@ if torch._C._has_mkldnn:
                 )
                 batch_size = input.meta.get("val").shape[0]
                 if has_free_symbols(batch_size):
-                    assert (
-                        is_lp_weight or mkldnn._is_mkldnn_acl_supported()
-                    ), f"only bf16/fp16 weight prepacking supports dynamic shape inputs but got {weight_dtype}"
+                    assert is_lp_weight or mkldnn._is_mkldnn_acl_supported(), (
+                        f"only bf16/fp16 weight prepacking supports dynamic shape inputs but got {weight_dtype}"
+                    )
                 # For bfloat16 dynamic shape path, using input size hint to pack weight for a better performance.
                 packed_weight_inputs = (
                     transpose_weight_node,
@@ -1262,7 +1330,7 @@ if torch._C._has_mkldnn:
                     if (
                         is_lp_weight
                         or mkldnn._is_mkldnn_acl_supported()
-                        or V.aot_compilation is True
+                        or V.aot_compilation
                     )
                     else torch.ops.mkl._mkl_reorder_linear_weight
                 )
@@ -1270,11 +1338,11 @@ if torch._C._has_mkldnn:
                     "call_function", packed_weight_op, args=packed_weight_inputs
                 )
 
-                packed_linear_inputs: Tuple[Any, ...] = (input, packed_weight_node)
+                packed_linear_inputs: tuple[Any, ...] = (input, packed_weight_node)
                 if (
                     is_lp_weight
                     or mkldnn._is_mkldnn_acl_supported()
-                    or V.aot_compilation is True
+                    or V.aot_compilation
                 ):
                     packed_linear_inputs += (bias, "none", [], "")
                     packed_linear_op = mkldnn._linear_pointwise.default

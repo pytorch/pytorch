@@ -201,17 +201,17 @@ class LBFGS(Optimizer):
 
     Args:
         params (iterable): iterable of parameters to optimize. Parameters must be real.
-        lr (float): learning rate (default: 1)
-        max_iter (int): maximal number of iterations per optimization step
+        lr (float, optional): learning rate (default: 1)
+        max_iter (int, optional): maximal number of iterations per optimization step
             (default: 20)
-        max_eval (int): maximal number of function evaluations per optimization
+        max_eval (int, optional): maximal number of function evaluations per optimization
             step (default: max_iter * 1.25).
-        tolerance_grad (float): termination tolerance on first order optimality
+        tolerance_grad (float, optional): termination tolerance on first order optimality
             (default: 1e-7).
-        tolerance_change (float): termination tolerance on function
+        tolerance_change (float, optional): termination tolerance on function
             value/parameter changes (default: 1e-9).
-        history_size (int): update history size (default: 100).
-        line_search_fn (str): either 'strong_wolfe' or None (default: None).
+        history_size (int, optional): update history size (default: 100).
+        line_search_fn (str, optional): either 'strong_wolfe' or None (default: None).
     """
 
     def __init__(
@@ -244,7 +244,7 @@ class LBFGS(Optimizer):
 
         if len(self.param_groups) != 1:
             raise ValueError(
-                "LBFGS doesn't support per-parameter options " "(parameter groups)"
+                "LBFGS doesn't support per-parameter options (parameter groups)"
             )
 
         self._params = self.param_groups[0]["params"]

@@ -2,7 +2,7 @@ name: Upload test stats
 
 on:
   workflow_run:
-    workflows: [pull, trunk, periodic, inductor, unstable, slow, unstable-periodic, inductor-periodic, rocm, inductor-micro-benchmark, inductor-micro-benchmark-x86, inductor-cu124, inductor-rocm]
+    workflows: [pull, trunk, periodic, inductor, unstable, slow, unstable-periodic, inductor-periodic, rocm, rocm-mi300, inductor-micro-benchmark, inductor-micro-benchmark-x86, inductor-cu124, inductor-rocm, inductor-rocm-mi300, mac-mps]
     types:
       - completed
 
@@ -16,7 +16,8 @@ jobs:
       conclusion: ${{ fromJson(steps.get_conclusion.outputs.data).conclusion }}
     steps:
       - name: Get workflow run conclusion
-        uses: octokit/request-action@v2.1.0
+        # TODO (huydhn): Pin this once https://github.com/octokit/request-action/issues/315 is resolved
+        uses: octokit/request-action@main
         id: get_conclusion
         with:
           route: GET /repos/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}/attempts/${{ github.event.workflow_run.run_attempt }}

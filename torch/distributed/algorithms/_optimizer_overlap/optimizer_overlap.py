@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import inspect
 from abc import ABC, abstractmethod
-from typing import Dict, Type
 
 from torch.distributed.algorithms.ddp_comm_hooks.default_hooks import allreduce_hook
 from torch.distributed.algorithms.ddp_comm_hooks.optimizer_overlap_hooks import (
@@ -15,7 +14,7 @@ from torch.optim import Optimizer
 
 
 # Contains the mappings between the regular and overlapped optimizer types.
-_registered_overlapped_optims: Dict[Type, Type] = {}
+_registered_overlapped_optims: dict[type, type] = {}
 
 
 def register_overlapped(optim_cls):
@@ -33,7 +32,7 @@ def register_overlapped(optim_cls):
 
 
 class OverlappedOptimizer(ABC):
-    def __init__(self, optim_cls: Type) -> None:
+    def __init__(self, optim_cls: type) -> None:
         """
         Initialize the OverlappedOptimizer.
 
@@ -61,7 +60,7 @@ class OverlappedOptimizer(ABC):
 class _OverlappedStandardOptimizer(OverlappedOptimizer):
     """Overlaps a regular ``Optimizer``."""
 
-    def __init__(self, optim_cls: Type, params, *optim_args, **optim_kwargs) -> None:
+    def __init__(self, optim_cls: type, params, *optim_args, **optim_kwargs) -> None:
         super().__init__(optim_cls)
         f_optim = as_functional_optim(self.optim_cls, *optim_args, **optim_kwargs)
         self._opt_hook_state = _OptimizerHookState(f_optim, params)
@@ -82,7 +81,7 @@ class _OverlappedStandardOptimizer(OverlappedOptimizer):
         )
 
 
-def _as_overlapped_optim(optim_cls: Type, params, *args, **kwargs):
+def _as_overlapped_optim(optim_cls: type, params, *args, **kwargs):
     """Return a new ``OverlappedOptimizer`` instance that supports ``optim_cls``."""
     for clz in inspect.getmro(optim_cls):
         try:

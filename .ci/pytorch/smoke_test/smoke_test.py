@@ -6,6 +6,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 
 import torch
 import torch._dynamo
@@ -159,6 +160,36 @@ def test_cuda_runtime_errors_captured() -> None:
             raise e
     if cuda_exception_missed:
         raise RuntimeError("Expected CUDA RuntimeError but have not received!")
+
+
+def test_cuda_gds_errors_captured() -> None:
+    major_version = int(torch.version.cuda.split(".")[0])
+    minor_version = int(torch.version.cuda.split(".")[1])
+
+    if target_os == "windows":
+        print(f"{target_os} is not supported for GDS smoke test")
+        return
+
+    if major_version < 12 or (major_version == 12 and minor_version < 6):
+        print("CUDA version is not supported for GDS smoke test")
+        return
+
+    cuda_exception_missed = True
+    try:
+        print("Testing test_cuda_gds_errors_captured")
+        with NamedTemporaryFile() as f:
+            torch.cuda.gds.GdsFile(f.name, os.O_CREAT | os.O_RDWR)
+    except RuntimeError as e:
+        expected_error = "cuFileHandleRegister failed"
+        if re.search(expected_error, f"{e}"):
+            print(f"Caught CUDA exception with success: {e}")
+            cuda_exception_missed = False
+        else:
+            raise e
+    if cuda_exception_missed:
+        raise RuntimeError(
+            "Expected cuFileHandleRegister failed RuntimeError but have not received!"
+        )
 
 
 def smoke_test_cuda(
@@ -381,6 +412,7 @@ def main() -> None:
     test_numpy()
     if is_cuda_system:
         test_linalg("cuda")
+        test_cuda_gds_errors_captured()
 
     if options.package == "all":
         smoke_test_modules()

@@ -224,7 +224,7 @@ static void div_mode_template(const Tensor& self,
     if (!rounding_mode.has_value() || !isFloatOutput) {
       return divTensor;
     } else if (*rounding_mode == "trunc") {
-      auto truncTensor = trunc_tensor(mpsGraph, divTensor);
+      auto truncTensor = [mpsGraph truncateWithTensor:divTensor name:nil];
       if (op_name == "fmod_mps_out") {
         auto mulTensor = [mpsGraph multiplicationWithPrimaryTensor:truncTensor
                                                    secondaryTensor:secondaryCastTensor
@@ -376,8 +376,8 @@ CREATE_MPS_STRUCTURED_BOOLEAN_OP_FUNC(gt_scalar_out_mps, greaterThan, Scalar);
 CREATE_MPS_STRUCTURED_BOOLEAN_OP_FUNC(gt_tensor_out_mps, greaterThan, Tensor);
 
 // Arithmetic Binary Ops
-CREATE_MPS_STRUCTURED_BINARY_OP_FUNC(minimum_out_mps, minimum, Tensor);
-CREATE_MPS_STRUCTURED_BINARY_OP_FUNC(maximum_out_mps, maximum, Tensor);
+CREATE_MPS_STRUCTURED_BINARY_OP_FUNC(minimum_out_mps, minimumWithNaNPropagationAndIntFallback, Tensor);
+CREATE_MPS_STRUCTURED_BINARY_OP_FUNC(maximum_out_mps, maximumWithNaNPropagationAndIntFallback, Tensor);
 CREATE_MPS_STRUCTURED_BINARY_OP_FUNC(pow_tensor_scalar_out_mps, power, Scalar);
 CREATE_MPS_STRUCTURED_BINARY_OP_FUNC(pow_tensor_tensor_out_mps, power, Tensor);
 CREATE_MPS_BINARY_COMPARISON_OP_FUNC(logical_and_out_mps, logicalAND, Tensor);

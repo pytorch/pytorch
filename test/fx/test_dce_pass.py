@@ -1,7 +1,7 @@
 # Owner(s): ["module: fx"]
 import copy
 import unittest
-from typing import Optional, Set, Type
+from typing import Optional
 
 import torch
 import torch.fx
@@ -38,7 +38,7 @@ class TestDCE(TestCase):
         self,
         m: torch.nn.Module,
         expect_dce_changes: bool,
-        modules_to_be_leafs: Optional[Set[Type]] = None,
+        modules_to_be_leafs: Optional[set[type]] = None,
         custom: bool = False,
     ):
         class TestTracer(torch.fx.Tracer):
@@ -191,6 +191,33 @@ class TestDCE(TestCase):
         # Note: Don't need to specify torch._assert as having side effects
         # because it's known to.
         self._run_dce_and_test(TestModule(), expect_dce_changes=False)
+
+    def test_keep_setitem(self):
+        """
+        Fix issue: https://github.com/pytorch/pytorch/issues/145697
+        Test that DCE doesn't remove operator.setitem since it has side effects.
+        """
+
+        class TestModule(torch.nn.Module):
+            def forward(self, a: torch.Tensor) -> torch.Tensor:
+                a[0, 0, 0, 0] *= 2.0
+                return a * 2
+
+        def dce_backend(gm, inputs, **kwargs):
+            import torch._inductor.constant_folding
+
+            torch._inductor.constant_folding.constant_fold(gm)
+            return gm
+
+        x = torch.randn(1, 3, 224, 224)
+        dce_x = x.detach().clone()
+        model = TestModule().eval()
+        dce_mod = torch.compile(copy.deepcopy(model), backend=dce_backend)
+
+        with torch.inference_mode():
+            eager_out = model(x)
+            out = dce_mod(dce_x)
+        self.assertEqual(eager_out, out, atol=1e-5, rtol=1e-5)
 
     def test_impure_nodes_args(self):
         """

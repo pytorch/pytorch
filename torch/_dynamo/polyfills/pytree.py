@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Callable, Iterable, Literal, TYPE_CHECKING
+from typing import Any, Callable, Literal, TYPE_CHECKING
 from typing_extensions import TypeIs
 
 import torch.utils._pytree as python_pytree
@@ -17,6 +17,7 @@ from ..decorators import substitute_in_graph
 
 if TYPE_CHECKING:
     import builtins
+    from collections.abc import Iterable
     from typing_extensions import Self
 
     from torch.utils._cxx_pytree import PyTree
@@ -55,9 +56,10 @@ if python_pytree._cxx_pytree_dynamo_traceable:
         "structseq_fields",
     ):
         __func = getattr(optree, __name)
-        substitute_in_graph(__func, can_constant_fold_through=True)(
+        globals()[__name] = substitute_in_graph(__func, can_constant_fold_through=True)(
             __func.__python_implementation__
         )
+        __all__ += [__name]  # noqa: PLE0604
         del __func
     del __name
 
@@ -104,6 +106,8 @@ if python_pytree._cxx_pytree_dynamo_traceable:
     __all__ += ["tree_leaves"]
 
     class _Asterisk(str):
+        __slots__ = ()
+
         def __new__(cls) -> Self:
             return super().__new__(cls, "*")
 

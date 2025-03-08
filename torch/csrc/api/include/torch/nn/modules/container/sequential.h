@@ -376,7 +376,7 @@ class Sequential : public torch::nn::ModuleHolder<SequentialImpl> {
  public:
   using torch::nn::ModuleHolder<SequentialImpl>::ModuleHolder;
 
-  Sequential() {}
+  Sequential() = default;
 
   /// Constructs the `Sequential` from a braced-init-list of named `AnyModule`s.
   /// It enables the following use case:

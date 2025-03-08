@@ -4,9 +4,10 @@ import logging
 import operator
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Tuple, Union
+from typing import Any, Callable, Union
 
 import torch
+from torch._C._dynamo.guards import compute_overlapping_tensors
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import ReinplaceCounters, ReInplaceTrigger
 from torch._higher_order_ops.triton_kernel_wrap import (
@@ -19,6 +20,7 @@ from torch._inductor.lowering import (
     inplaceable_foreach_ops as inplaceable_foreach_ops_lowerings,
 )
 from torch._inductor.virtualized import V
+from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode
 from torch.fx.immutable_collections import immutable_dict
 from torch.fx.passes.reinplace import _is_view_op
 from torch.utils import _pytree as pytree
@@ -61,12 +63,12 @@ def graph_call_function(graph: torch.fx.Graph, fn, *args, **kwargs):
 @dataclass
 class ViewOp:
     target: torch._ops.OpOverload
-    args: Tuple[Any, ...]
-    kwargs: Dict[str, Any]
+    args: tuple[Any, ...]
+    kwargs: dict[str, Any]
 
 
 def _inplace_generalized_scatter(
-    inp: torch.Tensor, src: torch.Tensor, view_ops: List[ViewOp]
+    inp: torch.Tensor, src: torch.Tensor, view_ops: list[ViewOp]
 ) -> torch.Tensor:
     tmp = inp
     for view in view_ops:
@@ -85,7 +87,7 @@ def _inplace_generalized_scatter(
 
 
 def _generalized_scatter(
-    inp: torch.Tensor, src: torch.Tensor, view_ops: List[ViewOp]
+    inp: torch.Tensor, src: torch.Tensor, view_ops: list[ViewOp]
 ) -> torch.Tensor:
     out = inp.clone()
     return _inplace_generalized_scatter(out, src, view_ops)
@@ -95,7 +97,7 @@ def _decompose_scatter_functional_helper(
     graph: torch.fx.Graph,
     inp: torch.Tensor,
     src: torch.Tensor,
-    view_ops: List[ViewOp],
+    view_ops: list[ViewOp],
 ) -> torch.fx.Node:
     view_op, view_ops_tail = view_ops[0], view_ops[1:]
 
@@ -246,8 +248,8 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
     easier to reinplace since there is only one use of `self`
     """
 
-    node_to_view_base: Dict[torch.fx.Node, torch.fx.Node] = {}
-    node_to_view_op: Dict[torch.fx.Node, List[ViewOp]] = defaultdict(list)
+    node_to_view_base: dict[torch.fx.Node, torch.fx.Node] = {}
+    node_to_view_op: dict[torch.fx.Node, list[ViewOp]] = defaultdict(list)
 
     def handle_views(node: torch.fx.Node):
         inp = node.args[0]
@@ -355,7 +357,7 @@ except AttributeError:
     # is built with USE_DISTRIBUTED=1.
     pass
 
-inplaceable_foreach_ops: Dict[torch._ops.OpOverload, InplaceableOp] = {}
+inplaceable_foreach_ops: dict[torch._ops.OpOverload, InplaceableOp] = {}
 for outplace_op, inplace_op in inplaceable_foreach_ops_lowerings.items():
     inplaceable_foreach_ops[outplace_op] = InplaceableOp(inplace_op, 0)
 
@@ -398,7 +400,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
     copy_nodes = {}
     mutated_inputs = OrderedSet[Any]()
     storage_to_nodes = defaultdict(list)
-    node_order: Dict[Any, int] = {}
+    node_order: dict[Any, int] = {}
     for i, node in enumerate(reversed(graph.nodes)):
         node_order[node] = len(graph.nodes) - i - 1
         storage_to_nodes[get_node_storage(node)].append(node)
@@ -461,10 +463,19 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
         return False
 
     def can_inplace(node, mutated_arg):
+        # ls should be a list of tensors that all shares the same storage.
+        def _overlap(ls) -> bool:
+            try:
+                return len(compute_overlapping_tensors(ls)) != 0
+            except GuardOnDataDependentSymNode:
+                # If we fail with data dependent error we assume they all overlap.
+                return True
+
         if isinstance(mutated_arg, (list, tuple)):
+            # TODO Using _overlap here causes a several issues.
             unique_storages = OrderedSet(get_node_storage(arg) for arg in mutated_arg)
             if len(unique_storages) != len(mutated_arg):
-                # at least two Tensors in mutated_arg alias each other, so we can't reinplace it.
+                # At least two Tensors in mutated_arg alias each other, so we can't reinplace it.
                 # We can probably do better (that is, reinplace one of them and clone the other)
                 # but that requires more work and mutable List[Tensor] are not that common.
                 return False
@@ -472,7 +483,15 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
 
         if get_node_storage(mutated_arg) is None:
             return False
+
         shared_view_nodes = storage_to_nodes[get_node_storage(mutated_arg)]
+
+        # Only keep tensor that might overlap with mutated_arg.
+        shared_view_nodes = [
+            v
+            for v in shared_view_nodes
+            if _overlap([mutated_arg.meta["val"], v.meta["val"]])
+        ]
 
         if mutated_arg.op in ("placeholder", "get_attr"):
             # Get the first copy_ node that mutates the mutated_arg.
@@ -545,18 +564,19 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
         ReinplaceCounters.add_missed_opportunities(trigger, len(missed_args))
         ReinplaceCounters.add_missed_bytes(trigger, missed_bytes)
 
-    replace_dict: Dict[torch.fx.Node, torch.fx.Node] = {}
+    replace_dict: dict[torch.fx.Node, torch.fx.Node] = {}
 
     def reinplace_and_refine_tensors_to_clone(
         old_tensors_to_clone, kwargs, node_name, trigger
     ):
-        tensors_to_clone: List[str] = []
+        tensors_to_clone: list[str] = []
         storage_of_reinplaced_args = OrderedSet[Union[int, None]]()
 
         # Those used to count possibly_missed_reinplacing_opportunities
         missed_nodes = []
         missed_args = []
 
+        # TODO this logic can be made more precise using _overlap
         def tensor_with_same_storage_already_reinplaced(arg):
             if isinstance(arg, (list, tuple)):
                 return any(
@@ -636,7 +656,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             all_bases = kwargs["_all_bases"]
             bases_to_clone = range(len(all_bases))
             base_tensors_dct = dict(enumerate(all_bases))
-            new_bases_to_clone: List[int] = reinplace_and_refine_tensors_to_clone(
+            new_bases_to_clone: list[int] = reinplace_and_refine_tensors_to_clone(
                 bases_to_clone,
                 base_tensors_dct,
                 node.target,

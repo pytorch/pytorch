@@ -29,7 +29,8 @@ AOTIModelContainerRunner::AOTIModelContainerRunner(
     const std::string& model_so_path,
     size_t num_models,
     const std::string& device_str,
-    const std::string& cubin_dir) {
+    const std::string& cubin_dir,
+    const bool run_single_threaded) {
   model_so_ = std::make_unique<at::DynamicLibrary>(model_so_path.c_str());
   TORCH_CHECK(model_so_, "Failed to load model: ", model_so_path);
   create_func_ = reinterpret_cast<decltype(create_func_)>(
@@ -38,8 +39,9 @@ AOTIModelContainerRunner::AOTIModelContainerRunner(
       model_so_->sym("AOTInductorModelContainerDelete"));
   get_num_outputs_func_ = reinterpret_cast<decltype(get_num_outputs_func_)>(
       model_so_->sym("AOTInductorModelContainerGetNumOutputs"));
-  run_func_ = reinterpret_cast<decltype(run_func_)>(
-      model_so_->sym("AOTInductorModelContainerRun"));
+  run_func_ = reinterpret_cast<decltype(run_func_)>(model_so_->sym(
+      run_single_threaded ? "AOTInductorModelContainerRunSingleThreaded"
+                          : "AOTInductorModelContainerRun"));
   get_num_constants_func_ = reinterpret_cast<decltype(get_num_constants_func_)>(
       model_so_->sym("AOTInductorModelContainerGetNumConstants"));
   get_constant_name_func_ = reinterpret_cast<decltype(get_constant_name_func_)>(
@@ -91,12 +93,9 @@ AOTIModelContainerRunner::~AOTIModelContainerRunner() {
       result == AOTI_RUNTIME_SUCCESS, "AOTInductorModelContainerDelete failed");
 }
 
-std::vector<at::Tensor> AOTIModelContainerRunner::run(
-    const std::vector<at::Tensor>& inputs,
+std::vector<at::Tensor> AOTIModelContainerRunner::run_impl(
+    std::vector<AtenTensorHandle>& input_handles,
     void* stream_handle) {
-  auto input_handles =
-      torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(inputs);
-
   // For outputs, we only allocate a vector to hold returned tensor handles,
   // not allocating the actual output tensor storage here
   size_t num_outputs = 0;
@@ -115,6 +114,23 @@ std::vector<at::Tensor> AOTIModelContainerRunner::run(
 
   return torch::aot_inductor::alloc_tensors_by_stealing_from_handles(
       output_handles.data(), output_handles.size());
+}
+
+std::vector<at::Tensor> AOTIModelContainerRunner::run(
+    const std::vector<at::Tensor>& inputs,
+    void* stream_handle) {
+  std::vector<AtenTensorHandle> input_handles =
+      torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(inputs);
+  return run_impl(input_handles, stream_handle);
+}
+
+std::vector<at::Tensor> AOTIModelContainerRunner::boxed_run(
+    std::vector<at::Tensor>&& inputs,
+    void* stream_handle) {
+  std::vector<AtenTensorHandle> input_handles =
+      torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(inputs);
+  std::move(inputs).clear();
+  return run_impl(input_handles, stream_handle);
 }
 
 std::unordered_map<std::string, std::string> AOTIModelContainerRunner::
