@@ -38,7 +38,7 @@ per-file-ignores =
     torchgen/api/types/__init__.py: F401,F403
     torchgen/executorch/api/types/__init__.py: F401,F403
     test/dynamo/test_higher_order_ops.py: B950
-    test/dynamo/test_graph_break_messages.py: B950
+    test/dynamo/test_error_messages.py: B950
     torch/testing/_internal/dynamo_test_failures.py: B950
     # TOR901 is only for test, we want to ignore it for everything else.
     # It's not easy to configure this without affecting other per-file-ignores,
