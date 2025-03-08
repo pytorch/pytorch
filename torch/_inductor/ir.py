@@ -116,6 +116,16 @@ else:
     CUDATemplate: TypeAlias = object
 
 
+try:
+    import triton
+
+    triton_version = triton.__version__
+    has_triton = True
+except ImportError:
+    triton_version = None
+    has_triton = False
+
+
 _T = TypeVar("_T")
 _U = TypeVar("_U")
 _V = TypeVar("_V")
@@ -2195,7 +2205,9 @@ class Scan(Loops):
         )
         scan_type = Scan
         if num_splits > 1:
-            supports_split = torch.version.hip is None and len(dtypes) == 1
+            supports_split = (
+                torch.version.hip is None or (has_triton and triton_version >= "3.3.0")
+            ) and (len(dtypes) == 1)
             if not supports_split:
                 if can_fallback_to_aten:
                     # Fallback to ATen
@@ -4448,7 +4460,7 @@ class TemplateBuffer(OperationBuffer):
         )
 
         for inp in self.inputs:
-            assert isinstance(inp, Buffer)
+            assert isinstance(inp, (Buffer, ReinterpretView))
             assert isinstance(inp.layout, Layout)
             indexer = inp.layout.make_indexer()
 

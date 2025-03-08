@@ -162,8 +162,8 @@ class CppTemplateKernel(CppKernel):
             assert len(_range) == 2
             start, end = parse_expr_with_index_symbols(_range)
             sliced = L.slice_(sliced, dim, start, end, clamp=False)
-        assert isinstance(slice, ir.TensorBox), slice
-        assert isinstance(sliced.data, ir.ReinterpretView), sliced.data
+        assert isinstance(sliced, ir.TensorBox)
+        assert isinstance(sliced.data, ir.ReinterpretView)
         return sliced.data
 
     def select(self, node, dim: int, idx: int) -> ir.ReinterpretView:
