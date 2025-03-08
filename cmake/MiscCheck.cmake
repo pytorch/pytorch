@@ -2,6 +2,8 @@ include(CheckCXXSourceCompiles)
 include(CheckCXXCompilerFlag)
 include(CMakePushCheckState)
 
+set(CAFFE2_USE_EXCEPTION_PTR 1)
+
 # ---[ Check if we want to turn off deprecated warning due to glog.
 if(USE_GLOG)
   cmake_push_check_state(RESET)

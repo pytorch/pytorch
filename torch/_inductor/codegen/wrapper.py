@@ -659,7 +659,6 @@ class PythonWrapperCodegen(CodeGen):
         self.header = IndentedBuffer()
         self.prefix = IndentedBuffer()
         self.suffix = IndentedBuffer()
-        self.kernel_declarations = IndentedBuffer()
         self.wrapper_call = IndentedBuffer()
         self.kernel_autotune_defs = IndentedBuffer()
         self.kernel_autotune_calls = IndentedBuffer()
@@ -1319,10 +1318,7 @@ class PythonWrapperCodegen(CodeGen):
 
         self.add_benchmark_harness(result)
 
-        return (
-            result.getvaluewithlinemap(),
-            self.kernel_declarations.getvaluewithlinemap(),
-        )
+        return result.getvaluewithlinemap()
 
     def generate_and_run_autotune_block(self):
         """
@@ -1675,8 +1671,7 @@ class PythonWrapperCodegen(CodeGen):
         kernel_name: str,
         kernel_body: str,
         metadata: Optional[str] = None,
-        gpu: bool = True,
-        cpp_definition: Optional[str] = None,
+        gpu=True,
     ):
         if config.triton.autotune_at_compile_time:
             # Skip inserting comments for the autotune block as they may contain cpp style comments
@@ -2382,13 +2377,19 @@ class PythonWrapperCodegen(CodeGen):
         reinterpret_view = self.codegen_reinterpret_view(
             old, new.get_size(), new.get_stride(), 0, self.wrapper_call.writeline
         )
-        return f"{self.declare}{new_name} = {reinterpret_view}{del_line}  {self.comment} reuse"
+        return (
+            f"{self.declare_maybe_reference}{new_name} = "
+            f"{self.move_begin}{reinterpret_view}{self.move_end}{del_line}"
+            f"  {self.comment} reuse"
+        )
 
-    def codegen_deferred_allocation(self, name: str, view: ir.ReinterpretView) -> None:
+    def codegen_deferred_allocation(self, name, layout):
         self.writeline(
             DeferredLine(
                 name,
-                f"{self.declare}{name} = {view.codegen_reference()}{self.ending}  {self.comment} alias",
+                f"{self.declare_maybe_reference}{name} = "
+                f"{self.move_begin}{layout.view.codegen_reference()}{self.move_end}{self.ending}"
+                f"  {self.comment} alias",
             )
         )
 
@@ -2423,7 +2424,7 @@ class PythonWrapperCodegen(CodeGen):
             assert isinstance(layout.view.data, ir.StorageBox), type(layout.view.data)
             assert isinstance(layout.view.data.data, ir.Buffer), type(layout.view.data)
             self.codegen_allocation(layout.view.data.data)
-            self.codegen_deferred_allocation(name, layout.view)
+            self.codegen_deferred_allocation(name, layout)
             return
 
         if isinstance(layout, ir.CommBufferLayout):
@@ -2708,7 +2709,7 @@ class PythonWrapperCodegen(CodeGen):
                     # Call the codegen of subgraph recursively
                     subgraph_code, _ = subgraph.graph.codegen()
             self.already_codegened_subgraphs.add(subgraph.graph.name)
-            self.define_subgraph_launcher_fn(subgraph_code.value)
+            self.define_subgraph_launcher_fn(subgraph_code)
 
         self.codegen_subgraph_call(subgraph, outer_inputs, outer_outputs)
 

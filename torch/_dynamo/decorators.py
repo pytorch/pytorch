@@ -8,7 +8,6 @@ This module provides decorators and utilities for controlling TorchDynamo's beha
 import functools
 import inspect
 import sys
-import weakref
 from dataclasses import dataclass
 from typing import Any, Callable, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
@@ -156,15 +155,8 @@ def allow_in_graph(fn):
         return [allow_in_graph(x) for x in fn]
     assert callable(fn), "allow_in_graph expects a callable"
     if trace_rules.lookup_callable(fn) != variables.TorchInGraphFunctionVariable:
-        fn_id = id(fn)
-        trace_rules._disallowed_callable_ids.remove(fn_id)
-        trace_rules._allowed_callable_ids.add(fn_id)
-
-        # Avoid id reuse which creates subtle bugs.
-        def deregister():
-            trace_rules._allowed_callable_ids.remove(fn_id)
-
-        weakref.finalize(fn, deregister)
+        trace_rules._disallowed_callable_ids.remove(id(fn))
+        trace_rules._allowed_callable_ids.add(id(fn))
     return fn
 
 
@@ -192,20 +184,11 @@ def nonstrict_trace(traceable_fn):
     def wrapped(*args, **kwargs):
         return traceable_fn(*args, **kwargs)
 
-    wrapped_id = id(wrapped)
-
     # This line allows us to reuse much of the `allow_in_graph` impl.
-    trace_rules._allowed_callable_ids.add(wrapped_id)
+    trace_rules._allowed_callable_ids.add(id(wrapped))
 
     # This line allows us to diverge the impl from `allow_in_graph`.
-    trace_rules._nonstrict_trace_callable_ids.add(wrapped_id)
-
-    # Avoid id reuse which creates subtle bugs.
-    def deregister():
-        trace_rules._allowed_callable_ids.remove(wrapped_id)
-        trace_rules._nonstrict_trace_callable_ids.remove(wrapped_id)
-
-    weakref.finalize(wrapped, deregister)
+    trace_rules._nonstrict_trace_callable_ids.add(id(wrapped))
 
     return wrapped
 

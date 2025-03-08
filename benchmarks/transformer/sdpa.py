@@ -80,10 +80,7 @@ class Experiment:
 
 
 def calculate_tflops(
-    config: ExperimentConfig,
-    time_us: float,
-    is_backward: bool = False,
-    sparsity: float = 0.0,
+    config: ExperimentConfig, time_us: float, is_backward: bool = False
 ) -> float:
     """
     Calculate TFLOPS for scaled dot product attention.
@@ -92,7 +89,6 @@ def calculate_tflops(
     - config: The experiment configuration
     - time_us: The execution time in microseconds
     - is_backward: Whether to calculate for backward pass (includes gradient computation)
-    - sparsity: Sparsity factor between 0.0 and 1.0, where 0.0 means no sparsity and 1.0 means fully sparse
 
     Returns:
     - TFLOPS value
@@ -102,9 +98,6 @@ def calculate_tflops(
     M = config.q_seq_len
     N = config.kv_seq_len
     D = config.head_dim
-
-    # Calculate density factor (1.0 - sparsity)
-    density = 1.0 - sparsity
 
     # Forward pass FLOPs
     qk_flops = (
@@ -116,9 +109,6 @@ def calculate_tflops(
     )  # Attention @ V: (M,N) @ (N,D) with 2 FLOPs per multiply-add
 
     total_flops = B * H * (qk_flops + softmax_flops + av_flops)
-
-    # Apply density factor to account for sparsity
-    total_flops *= density
 
     # For backward pass flash uses 2.5x more flops will use this
     if is_backward:
@@ -178,11 +168,8 @@ def run_single_experiment(config: ExperimentConfig) -> ExperimentResults:
         )
 
     # Calculate TFLOPS for forward and backward passes
-    sparsity = 0.5 if is_causal else 0.0
-    forward_tflops = calculate_tflops(config, forward_time, sparsity=sparsity)
-    backward_tflops = calculate_tflops(
-        config, backward_time, is_backward=True, sparsity=sparsity
-    )
+    forward_tflops = calculate_tflops(config, forward_time)
+    backward_tflops = calculate_tflops(config, backward_time, is_backward=True)
 
     return ExperimentResults(
         forward_time=forward_time,

@@ -733,9 +733,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         if len(self._param_to_index_cache) == 0:
             self._param_to_index_cache = {
                 p: i
-                for i, p in enumerate(
-                    chain.from_iterable(g["params"] for g in self.param_groups)
-                )
+                for i, p in enumerate(chain(*(g["params"] for g in self.param_groups)))
             }
         return self._param_to_index_cache
 
@@ -744,7 +742,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         r"""List mapping parameter indices in the global optimizer scheme to the actual params."""
         if len(self._index_to_param_cache) == 0:
             self._index_to_param_cache = list(
-                chain.from_iterable(g["params"] for g in self.param_groups)
+                chain(*(g["params"] for g in self.param_groups))
             )
         return self._index_to_param_cache
 

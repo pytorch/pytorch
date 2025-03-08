@@ -40,7 +40,6 @@ enum TORCH_CUDA_CPP_API TuningStatus {
 class TORCH_CUDA_CPP_API ResultEntry {
   public:
     explicit ResultEntry(std::string  key, double time) : key_(std::move(key)), time_(time) {}
-    explicit ResultEntry(std::string  key, double time, const std::string& blas_sig ) : key_(std::move(key)), time_(time), blas_sig_(blas_sig) {}
     bool operator==(const ResultEntry& other) { return key_ == other.key_; }
     bool operator!=(const ResultEntry& other) { return key_ != other.key_; }
     operator std::string () { return key_; }
@@ -53,7 +52,6 @@ class TORCH_CUDA_CPP_API ResultEntry {
   private:
     std::string key_;
     double time_;
-    std::string blas_sig_;
 };
 
 typedef std::unordered_map<std::string, ResultEntry> KernelMap;
@@ -101,8 +99,7 @@ class TORCH_CUDA_CPP_API TuningResultsManager {
 
     size_t GetSize();
 
-    void RecordUntuned( std::ofstream& untuned_file, const std::string& op_signature,
-      const std::string& params_signature, const std::string& blas_signature);
+    void RecordUntuned( std::ofstream& untuned_file, const std::string& op_signature, const std::string& params_signature);
   private:
     std::mutex lock_;
     ResultsMap results_;
