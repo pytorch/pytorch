@@ -454,8 +454,9 @@ class TestDynamoTimed(TestCase):
     def test_ir_count(self):
         # Different python versions have different potential IR counts.
         version = (sys.version_info[0], sys.version_info[1])
-        self.assertIn(version, ((3, 10), (3, 11), (3, 12), (3, 13)))
+        self.assertIn(version, ((3, 9), (3, 10), (3, 11), (3, 12), (3, 13)))
         first, second = {
+            (3, 9): (10, 6),
             (3, 10): (10, 6),
             (3, 11): (10, 6),
             (3, 12): (10, 6),
