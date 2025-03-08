@@ -290,9 +290,6 @@ class numeric_limits<c10::BFloat16> {
   static constexpr bool has_infinity = true;
   static constexpr bool has_quiet_NaN = true;
   static constexpr bool has_signaling_NaN = true;
-  static constexpr auto has_denorm = numeric_limits<float>::has_denorm;
-  static constexpr auto has_denorm_loss =
-      numeric_limits<float>::has_denorm_loss;
   static constexpr auto round_style = numeric_limits<float>::round_style;
   static constexpr bool is_iec559 = false;
   static constexpr bool is_bounded = true;
