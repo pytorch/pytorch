@@ -10,7 +10,6 @@
 #include <utility>
 
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/CUDAGraph.h>
 #include <c10/core/DeviceType.h>
 #include <c10/cuda/CUDAAllocatorConfig.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
@@ -2339,6 +2338,10 @@ void ProcessGroupNCCL::watchdogHandler() {
         pgStatus_->lastStartedNumelOut = work.numelOut_;
       }
 
+      // allow watchdog to do an event query on a side thread
+      at::cuda::CUDAGuard device_guard(work.ncclEndEvent_->device_index());
+      at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeThreadLocal};
+
       // Clean up completed work
       if (work.isCompleted()) {
         // In case user didn't call `work.wait()` with async collectives,
@@ -2381,7 +2384,6 @@ void ProcessGroupNCCL::watchdogHandler() {
           it = workMetaList_.erase(it);
           lastWorkListUpdateTime_ = std::chrono::steady_clock::now();
         }
-        at::cuda::CUDAGraph::dec_pending_event_queries();
       } else {
         // Increment the iterator if the current WorkNCCL object is not
         // completed.
@@ -3230,13 +3232,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
   // TODO(eqy): is this still necessary if avoidRecordStreams_ is set?
   work->ncclEndEvent_->record(ncclStream);
 
-  // Notify graphs before we check the capture status preemptively
-  at::cuda::CUDAGraph::inc_pending_event_queries();
-
   if (enqueue) {
     workEnqueue(work);
-  } else {
-    at::cuda::CUDAGraph::dec_pending_event_queries();
   }
 
   // Reset coalescing state
@@ -3419,12 +3416,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
     work->numelOut_ += output.numel();
   }
 
-  // Notify graphs before we check the capture status preemptively
-  at::cuda::CUDAGraph::inc_pending_event_queries();
   if (enqueue) {
     workEnqueue(work);
-  } else {
-    at::cuda::CUDAGraph::dec_pending_event_queries();
   }
 
   return asyncOp ? work : nullptr;
@@ -3588,34 +3581,22 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
 
   /* Note [cuda graph capture and workEnqueue]
 
-  Normal behavior of the C10D watchdog is to query cuda events on work objects
-  periodically, but when cuda graph recording is active these event queries
-  would crash or mess up the recording.
-
-  To ensure we do not enqueue a work object to the watchdog when cuda graph
-  capture is active, we use a one-way sync. We increment a flag pre-emptively,
-  indicating our intent to enqueue a work object. Then we check capture_status
-  to see if (a) capturing is already in progress (we cannot enqueue in this
-  case), (b) capturing hasn't started yet, so we can trust that no capture will
-  start (since a pre-condition of starting a capture is to check the event query
-  count is 0).
-
-  If we are not able to enqueue the work due to capture-in-progress, we finally
-  decrement the counter.
-
-  For this reason we cannot easily move the increment inside workEnqueue unless
-  we also change the semantic of workEnqueue to 'maybeWorkEnqueue'.
+  Normal behavior of the C10D watchdog is to query cuda events on work objects.
+  We disable this event query behavior during graph capture as it is disallowed
+  during capture under the strictest capture mode setting.
+  Note that previously recorded events (e.g., before the capture) can be queried
+  as the watchdog capture mode has been changed to thread-local, but user-side
+  event queries (from the main thread) via .is_completed() are still disallowed.
+  TODO(eqy): Is there a path to allowing workEnqueue during graph capture for
+  watchdog-thread usage only?
 
   TODO:
    - Is our design for flight recorder safe in this context?  are we recording
   any FR events during cudagraph capture? if so, they won't be safe to poll for
   completion status.
   */
-  at::cuda::CUDAGraph::inc_pending_event_queries();
   if (capture_status == c10::cuda::CaptureStatus::None) {
     workEnqueue(work);
-  } else {
-    at::cuda::CUDAGraph::dec_pending_event_queries();
   }
   // TODO(whc) if the work isn't enqueued, I don't feel great about returning
   // it, since interactions with it by usercode won't behave normally - they
@@ -3854,13 +3835,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   c10::cuda::CaptureStatus capture_status =
       c10::cuda::currentStreamCaptureStatusMayInitCtx();
 
-  // Notify graphs before we check the capture status preemptively
-  at::cuda::CUDAGraph::inc_pending_event_queries();
-
   if (!coalescing_state_ && capture_status == c10::cuda::CaptureStatus::None) {
     workEnqueue(work);
-  } else {
-    at::cuda::CUDAGraph::dec_pending_event_queries();
   }
   return work;
 }

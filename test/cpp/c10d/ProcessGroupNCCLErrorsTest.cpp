@@ -364,6 +364,7 @@ class TestDebugInfoWriter : public c10d::DebugInfoWriter {
 
 TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNoHeartbeat) {
   // Note (kwen2501) 03/07/2025
+  // TODO: re-enable
   GTEST_SKIP() << "Skipping test as the trace write seems unstable.";
   int heartBeatIntervalInSec = 2;
   std::string timeInterval = std::to_string(heartBeatIntervalInSec);
