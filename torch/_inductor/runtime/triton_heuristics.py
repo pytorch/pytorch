@@ -2369,6 +2369,17 @@ class StaticallyLaunchedCudaKernel:
             None  # Loaded by load_kernel(on the parent process)
         )
         num_args = len(self.arg_tys)
+        num_ctas = 1
+        if hasattr(kernel, "num_ctas"):
+            num_ctas = kernel.num_ctas
+        elif hasattr(kernel, "metadata"):
+            num_ctas = kernel.metadata.num_ctas
+
+        if num_ctas != 1:
+            raise NotImplementedError(
+                "Static cuda launcher only supports num_ctas == 1"
+            )
+
         if num_args > 10 or num_args == 0:
             raise NotImplementedError(
                 "No static cuda launcher available for %d arguments", num_args
@@ -2403,13 +2414,7 @@ class StaticallyLaunchedCudaKernel:
         if ty[0] == "*":
             return "O"
         elif ty == "nvTmaDesc":
-            # nvTmaDescs use "O" in the triton arg map,
-            # since they need to be treated as a pointer PyObject*
-            # type. However, StaticCudaLauncher doesn't use Py_ParseTuple,
-            # nor can it codegen "CUTensormap*" as the proper type of a
-            # nvTmaDesc typed argument. So instead, we pass N as a special indicator
-            # so that StaticCudaLauncher knows to treat it as a CUTensorMap.
-            return "N"
+            raise NotImplementedError("nvTmaDesc kernels are not yet supported")
         return {
             "i1": "i",
             "i8": "b",
@@ -2436,7 +2441,10 @@ class StaticallyLaunchedCudaKernel:
         signature = {index_key(key): value for key, value in src.signature.items()}
         # Sorts signature by index_key
         tys = [signature[i] for i in range(len(signature))]
-        return "".join(self.extract_type(ty) for ty in tys)
+        # Despite requiring them to be passed in, the triton CUDA launcher
+        # completely ignores the constexprs passed into it when generating code.
+        # So we can ignore them here too
+        return "".join(self.extract_type(ty) for ty in tys if ty != "constexpr")
 
     def run(self, grid: tuple[int, ...], stream: int, args: tuple[Any, ...]):
         """Actually run the kernel at runtime. This function is the hot codepath."""

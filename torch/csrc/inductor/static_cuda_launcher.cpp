@@ -114,54 +114,20 @@ static inline void launchKernel(
     uint32_t sharedMemBytes,
     std::array<void*, NUM_ARGS>& args,
     cudaStream_t stream) {
+  // cta_args is always 1 for inductor generated triton kernels,
+  // so we don't need to figure out grid dimension here
   AT_CUDA_DRIVER_CHECK(nvrtc().cuLaunchKernel(
       func,
       gridX,
       gridY,
       gridZ,
-      32 * numWarps,
-      1,
-      1,
+      32 * numWarps, // blockDim.x
+      1, // blockDim.y
+      1, // blockDim.z
       sharedMemBytes,
       stream,
       args.data(),
       nullptr));
-}
-
-static CUtensorMap* getTmaDesc(PyObject* obj) {
-  if (sizeof(CUtensorMap*) != 8) {
-    throw std::runtime_error("getTmaDesc() requires 64-bit compilation");
-  }
-
-  auto method_handle =
-      THPObjectPtr{PyObject_GetAttrString(obj, "tma_desc_cpu_ptr")};
-  if (!method_handle) {
-    throw std::runtime_error("tma_desc_cpu_ptr() method does not exist");
-  }
-
-  auto empty_tuple = THPObjectPtr{PyTuple_New(0)};
-  if (!empty_tuple) {
-    throw std::runtime_error("Internal python error!");
-  }
-  auto method_ret =
-      THPObjectPtr{PyObject_Call(method_handle, empty_tuple, nullptr)};
-  if (!method_ret) {
-    throw std::runtime_error("Internal Python error!");
-  }
-
-  if (!PyLong_Check(method_ret)) {
-    throw std::runtime_error("tma_desc_cpu_ptr() must return 64-bit int");
-  }
-
-  uint64_t ptr_as_uint = THPUtils_unpackUInt64(method_ret);
-  if (!ptr_as_uint) {
-    throw std::runtime_error("received NULL ptr from tma_desc_cpu_ptr()");
-  }
-  if (ptr_as_uint % 64 != 0) {
-    throw std::runtime_error("tma_desc_cpu_ptr() must be 64-byte aligned");
-  }
-
-  return (CUtensorMap*)(ptr_as_uint); // NOLINT
 }
 
 template <typename FINAL, typename F>
@@ -235,12 +201,6 @@ void parseKernelArgs(
       case 'd':
         convertType<double>(THPUtils_unpackDouble, "double", slot, item);
         break;
-      case 'N': // NvtmDesc (N is not a regular format character)
-      {
-        CUtensorMap* tma_ptr = getTmaDesc(item);
-        *reinterpret_cast<CUtensorMap*>(slot) = *tma_ptr;
-        break;
-      }
       case 'O': { // pointer; using helper getPointer() (which may call
                   // data_ptr() if needed)
         CUdeviceptr ptr = getPointer(item);

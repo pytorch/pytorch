@@ -27,7 +27,10 @@ class TestStaticCudaLauncher(TestCase):
             os.remove(self.tmp_file.name)
 
     def _make_launcher(
-        self, kernel: Callable, args: tuple[Any, ...], grid: tuple[Any, ...] = (1,)
+        self,
+        kernel: Callable,
+        args: tuple[Any, ...],
+        grid: tuple[Any, ...] = (1,),
     ) -> StaticallyLaunchedCudaKernel:
         """
         Compiles a Triton kernel with the provided *args,
@@ -35,7 +38,6 @@ class TestStaticCudaLauncher(TestCase):
         """
         fn = triton.jit(kernel)
         # Launch the kernel to trigger compilation.
-        # Forcing a 1-element launch; the returned object contains the compiled info.
         compiled_kernel = fn[grid](*args)
         result = StaticallyLaunchedCudaKernel(compiled_kernel)
         result.write_cubin_to_file(self.tmp_file.name)
@@ -145,6 +147,30 @@ class TestStaticCudaLauncher(TestCase):
         device_interface = get_interface_for_device("cuda")
         stream = device_interface.get_raw_stream(device_interface.current_device())
 
+        launcher.run((1,), stream, (new_arg0,))
+        self.assertEqual(new_arg0, arg0)
+
+    def test_constexpr(self):
+        # Constexprs are compiled directly into the cubin file,
+        # so we never need to pass it to StaticCudaLauncher.
+
+        @triton.jit
+        def kernel_constexpr(arg0, CONSTANT: tl.constexpr):
+            x = tl.load(arg0)
+            tl.store(arg0, x + CONSTANT)
+
+        # Can't use make_launcher because constexpr needs to be constant
+        arg0 = torch.zeros(1, dtype=torch.int32, device="cuda")
+        compiled_kernel = kernel_constexpr[(1,)](arg0, CONSTANT=5)
+        launcher = StaticallyLaunchedCudaKernel(compiled_kernel)
+        launcher.write_cubin_to_file(self.tmp_file.name)
+        launcher.load_kernel()
+
+        self.assertEqual(arg0, torch.tensor([5], dtype=torch.int32, device="cuda"))
+        self.assertEqual(launcher.arg_tys, "O")
+        new_arg0 = torch.zeros(1, dtype=torch.int32, device="cuda")
+        device_interface = get_interface_for_device("cuda")
+        stream = device_interface.get_raw_stream(device_interface.current_device())
         launcher.run((1,), stream, (new_arg0,))
         self.assertEqual(new_arg0, arg0)
 
