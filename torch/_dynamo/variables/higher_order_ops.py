@@ -1293,7 +1293,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         combine_fn, xs, additional_inputs = arg_extractor(*args, **kwargs)
 
-        if True or args[0].python_type() is functools.partial:
+        if args[0].python_type() is functools.partial:
             # This is the standard case when the user calls the frontend
             # and the frontend invokes dynamo
             if len(args) != 2:
