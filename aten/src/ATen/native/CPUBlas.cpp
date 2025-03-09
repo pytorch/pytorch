@@ -3,7 +3,8 @@
 #include <ATen/native/mkl/LinearAlgebra.h>
 #include <ATen/native/mkldnn/Matmul.h>
 #include <ATen/Config.h>
-
+#include <ATen/cpu/vec/vec.h>
+#include <ATen/Parallel.h>
 #include <c10/util/SmallBuffer.h>
 #include <c10/util/irange.h>
 
@@ -337,9 +338,20 @@ void gemm(
               b, &ldb_,
               &beta_,
               float_v.data(), &ldc_);
-      for (auto cv: float_v) {
-        *(c++) = c10::convert<at::BFloat16>(cv);
-      }
+      at::parallel_for(0, c_size, 1, [&](int64_t begin, int64_t end) {
+        int64_t i = begin;
+        //Vectorized Loop
+        for (; i + c_size <= end; i += c_size) {
+            auto a_vec = at::vec::Vectorized<float>::loadu(&float_v[i]); // Load vec_size floats
+            auto bf16_vec = at::vec::convert<at::BFloat16>(a_vec);// VecConvert to BFloat16
+            bf16_vec.store(&c[i]);
+        }
+        //Handle remaining elements (scalar fallback)
+        for (; i < end; i++) {
+            c[i] = at::BFloat16(float_v[i]);
+        }
+    });
+
       return;
    }
 #endif
