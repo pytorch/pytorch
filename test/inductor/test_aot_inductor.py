@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from unittest import skip
+from unittest.mock import patch
 
 import torch
 import torch._export
@@ -62,6 +63,7 @@ if HAS_GPU:
         add_kernel_2d_autotuned,
         add_kernel_autotuned,
         add_kernel_autotuned_weird_param_order,
+        add_kernel_with_none_param_and_equal_to_1_arg,
         add_kernel_with_optional_param,
         add_kernel_with_scaling,
         add_kernel_with_tma_1d,
@@ -457,7 +459,9 @@ class AOTInductorTestsTemplate:
         compile_inputs = (torch.randn(2048, 1, device=self.device),)
         dim0_x = Dim("dim0_x", min=2, max=2048)
         dynamic_shapes = {"x": {0: dim0_x}}
-        ep = torch.export.export(model, compile_inputs, dynamic_shapes=dynamic_shapes)
+        ep = torch.export.export(
+            model, compile_inputs, dynamic_shapes=dynamic_shapes, strict=True
+        )
         optimized = torch._inductor.aoti_load_package(
             torch._inductor.aoti_compile_and_package(
                 ep,
@@ -1161,6 +1165,19 @@ class AOTInductorTestsTemplate:
         aot_model = torch._export.aot_load(path, device=self.device)
         torch.testing.assert_close(m(*inputs), aot_model(*inputs))
 
+    def test_aoti_constant_tensor(self):
+        class Foo(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.a = torch.ones(4, 4, device=device)
+                self.b = torch.ones(4, 4, device=device)
+
+            def forward(self, x):
+                return torch.ops.aten.linear.default(x, self.a, self.b)
+
+        example_inputs = (torch.ones(4, 4, device=self.device),)
+        self.check_model(Foo(self.device), example_inputs)
+
     def test_large_grid(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
@@ -1362,6 +1379,33 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    @common_utils.parametrize("dynamic", [False, True])
+    def test_cond_mismatched_branch_output(self, dynamic):
+        inputs = (
+            torch.randn(10, 20, device=self.device),
+            torch.randn(10, 20, device=self.device),
+            torch.randn(10, 20, device=self.device),
+        )
+        dynamic_shapes = None
+        if dynamic:
+            # Note the minimum has to be 4 because the model
+            # is slicing over the first dim with [2:], if first
+            # dim is 2 or 3, the slicing will be 0/1 specialized,
+            # causing a constraint violation eror.
+            dim0_a = Dim("s0", min=4, max=1024)
+            dim0_b = Dim("s1", min=4, max=1024)
+            dynamic_shapes = {
+                "p": {},
+                "x": {0: dim0_a, 1: None},
+                "y": {0: dim0_b, 1: None},
+                "z": {0: dim0_a, 1: None},
+            }
+        self.check_model_with_multiple_inputs(
+            CondModels.MismatchedOutputSize(),
+            prepend_predicates(inputs),
+            dynamic_shapes=dynamic_shapes,
+        )
+
     def test_cond_symint_input(self):
         class M(torch.nn.Module):
             def forward(self, x, y, z):
@@ -1512,6 +1556,26 @@ class AOTInductorTestsTemplate:
             }
         self.check_model_with_multiple_inputs(
             WhileLoopModels.UnbackedSymIntClosure(),
+            prepend_counters(inputs),
+            dynamic_shapes=dynamic_shapes,
+        )
+
+    @common_utils.parametrize("dynamic", [False, True])
+    def test_while_loop_with_mixed_device(self, dynamic):
+        inputs = (
+            torch.randn(10, 20, device=self.device),
+            torch.randn(10, 20, device=self.device),
+        )
+        dim0_ab = Dim("s0", min=2, max=1024)
+        dynamic_shapes = None
+        if dynamic:
+            dynamic_shapes = {
+                "c": {},
+                "a": {0: dim0_ab, 1: None},
+                "b": {0: dim0_ab, 1: None},
+            }
+        self.check_model_with_multiple_inputs(
+            WhileLoopModels.MixedDevice(),
             prepend_counters(inputs),
             dynamic_shapes=dynamic_shapes,
         )
@@ -2673,6 +2737,46 @@ class AOTInductorTestsTemplate:
 
         self.check_model(Model(), example_inputs)
 
+    def test_triton_kernel_with_none_inputs_and_equal_to_1_arg(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires GPU")
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x):
+                n_elements = x.size()[0]
+                BLOCK_SIZE = 1024
+                out1 = torch.empty_like(x)
+                out2 = torch.empty_like(x)
+                # Run the same kernel multiple times to test the optimization
+                # of removing None arguments and then update the indices of
+                # equal_to_1 arguments. The None arguments need to be before
+                # the equal_to_1 arguments
+                add_kernel_with_none_param_and_equal_to_1_arg[(1,)](
+                    x,
+                    None,
+                    out1,
+                    n_elements,
+                    x.stride(0),  # equal to 1
+                    ARGS_PASSED="one",
+                    BLOCK_SIZE=BLOCK_SIZE,
+                )
+                add_kernel_with_none_param_and_equal_to_1_arg[(1,)](
+                    2.71 * out1,
+                    None,
+                    out2,
+                    n_elements,
+                    x.stride(0),  # equal to 1
+                    ARGS_PASSED="one",
+                    BLOCK_SIZE=BLOCK_SIZE,
+                )
+                return out2
+
+        example_inputs = (torch.randn(1023, device=self.device),)
+        self.check_model(Model(), example_inputs)
+
     @common_utils.parametrize("dynamic", [False, True])
     def test_triton_kernel_equal_to_1_float_arg(self, dynamic):
         if self.device != GPU_TYPE:
@@ -3261,6 +3365,7 @@ class AOTInductorTestsTemplate:
             )
             self.check_model(Model(), example_inputs)
 
+    @patch.dict(os.environ, {"AOTI_RUNTIME_CHECK_INPUTS": "1"})
     def test_runtime_checks(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -3312,11 +3417,7 @@ class AOTInductorTestsTemplate:
 
         m = Model()
         inputs = tuple(inputs)
-        with torch.no_grad(), config.patch(
-            {
-                "aot_inductor.debug_compile": True,
-            }
-        ):
+        with torch.no_grad():
             so_path = AOTIRunnerUtil.compile(m, inputs, dynamic_shapes=dynamic_shapes)
         with open(os.path.splitext(so_path)[0] + ".cpp") as cpp:
             src_code = cpp.read()
@@ -3356,6 +3457,7 @@ class AOTInductorTestsTemplate:
         not PLATFORM_SUPPORTS_FP8,
         "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
     )
+    @patch.dict(os.environ, {"AOTI_RUNTIME_CHECK_INPUTS": "1"})
     def test_runtime_checks_fp8(self):
         # cuda only
         if self.device != "cuda":
@@ -3384,11 +3486,7 @@ class AOTInductorTestsTemplate:
             "x0": {0: dim0},
             "x1": {0: dim0},
         }
-        with torch.no_grad(), config.patch(
-            {
-                "aot_inductor.debug_compile": True,
-            }
-        ):
+        with torch.no_grad():
             self.check_model(
                 Model(),
                 tuple(inputs),
@@ -3420,11 +3518,7 @@ class AOTInductorTestsTemplate:
             "x1": {},
             "x2": {},
         }
-        with torch.no_grad(), config.patch(
-            {
-                "aot_inductor.debug_compile": True,
-            }
-        ):
+        with torch.no_grad():
             self.check_model(
                 Model(),
                 tuple(inputs),
@@ -3432,6 +3526,7 @@ class AOTInductorTestsTemplate:
             )
 
     @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
+    @patch.dict(os.environ, {"AOTI_RUNTIME_CHECK_INPUTS": "1"})
     def test_runtime_checks_dtype_failed(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -3443,11 +3538,7 @@ class AOTInductorTestsTemplate:
 
         x = torch.randn(1, 4, dtype=torch.float16, device=self.device)
         model = Model()
-        with torch.no_grad(), config.patch(
-            {
-                "aot_inductor.debug_compile": True,
-            }
-        ):
+        with torch.no_grad():
             so_path: str = AOTIRunnerUtil.compile(
                 model,
                 (x,),
@@ -3508,6 +3599,7 @@ class AOTInductorTestsTemplate:
         # cubed shouldn't be an alias.
         self.assertTrue(result[0].data_ptr() != result[3].data_ptr())
 
+    @patch.dict(os.environ, {"AOTI_RUNTIME_CHECK_INPUTS": "1"})
     def test_runtime_checks_shape_failed(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -3530,11 +3622,7 @@ class AOTInductorTestsTemplate:
             "x": {0: dim0},
         }
         model = Model()
-        with torch.no_grad(), config.patch(
-            {
-                "aot_inductor.debug_compile": True,
-            }
-        ):
+        with torch.no_grad():
             so_path: str = AOTIRunnerUtil.compile(
                 model, (x,), dynamic_shapes=dynamic_shapes
             )
@@ -4054,6 +4142,12 @@ class AOTInductorTestsTemplate:
             unexpected_inputs = (torch.ones(0, device=self.device), b, c)
             compiled(*unexpected_inputs)
 
+        # Try it again without runtime assertions.
+        with config.patch({"scalar_asserts": False}):
+            AOTIRunnerUtil.run_multiple(
+                self.device, model, [example_inputs, unexpected_inputs]
+            )
+
     def test_none_args_aot_codegen(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
@@ -4473,6 +4567,78 @@ class AOTInductorTestsTemplate:
             "x": {0: dim_even},
         }
         self.check_model(Model(), example_inputs, dynamic_shapes=dynamic_shapes)
+
+    def test_with_cudagraphs(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        # define CUDAGraph handling wrapper (only works with kwargs for simplicity)
+        def cudagraph(f):
+            _graphs = {}
+
+            def f_(**kwargs):
+                key = hash(
+                    tuple(
+                        tuple(kwargs[a].shape)
+                        for a in sorted(kwargs.keys())
+                        if isinstance(kwargs[a], torch.Tensor)
+                    )
+                )
+                if key in _graphs:
+                    wrapped, *_ = _graphs[key]
+                    return wrapped(**kwargs)
+                g = torch.cuda.CUDAGraph()
+                in_tensors = {
+                    k: v.clone() if isinstance(v, torch.Tensor) else v
+                    for k, v in kwargs.items()
+                }
+                f(**in_tensors)  # stream warmup
+                with torch.cuda.graph(g):
+                    out_tensors = f(**in_tensors)
+
+                def wrapped(**kwargs):
+                    for key in kwargs:
+                        in_tensors[key].copy_(kwargs[key])
+                    g.replay()
+                    if isinstance(out_tensors, torch.Tensor):
+                        return out_tensors.clone()
+                    elif isinstance(out_tensors, (list, tuple)):
+                        return type(out_tensors)(o.clone() for o in out_tensors)
+                    raise ValueError("unsupported output type encountered")
+
+                _graphs[key] = (wrapped, g, in_tensors, out_tensors)
+                return wrapped(**kwargs)
+
+            return f_
+
+        # define a simple model
+        model = torch.nn.Linear(10, 20).to(device=self.device)
+
+        # export + AOTI
+        model_kwargs = {
+            "input": torch.randn(3, 10, device=self.device),
+        }
+        ep = torch.export.export(model, args=(), kwargs=model_kwargs)
+
+        optimized = torch._inductor.aoti_load_package(
+            torch._inductor.aoti_compile_and_package(
+                ep,
+                inductor_configs={"max_autotune": True},
+            ),
+            # NB: this flag avoids a CUDAGraph + AOTI runtime multi-threading conflict
+            # "Error: operation not permitted when stream is capturing"
+            run_single_threaded=True,
+        )
+
+        # enable CUDAGraphs
+        optimized = cudagraph(optimized)
+
+        # warmup -> run with CUDAGraphs
+        for _ in range(3):
+            optimized(**model_kwargs)
+
+        # compare against eager
+        self.assertEqual(optimized(**model_kwargs), model(**model_kwargs))
 
 
 class AOTInductorLoggingTest(LoggingTestCase):
