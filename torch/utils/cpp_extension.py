@@ -2523,7 +2523,10 @@ def _get_vc_env(vc_arch: str) -> dict[str, str]:
         return distutils._msvccompiler._get_vc_env(vc_arch)
     except AttributeError:
         from setuptools._distutils import _msvccompiler
-        return _msvccompiler._get_vc_env(vc_arch)
+        try:
+            return _msvccompiler._get_vc_env(vc_arch)
+        except AttributeError:
+            return _msvccompiler.msvc._get_vc_env(vc_arch)
 
 
 def _run_ninja_build(build_directory: str, verbose: bool, error_prefix: str) -> None:
