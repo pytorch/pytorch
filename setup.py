@@ -1274,6 +1274,7 @@ def main():
         "include/c10/xpu/impl/*.h",
         "include/torch/*.h",
         "include/torch/csrc/*.h",
+        "include/torch/csrc/stable/*.h",
         "include/torch/csrc/api/include/torch/*.h",
         "include/torch/csrc/api/include/torch/data/*.h",
         "include/torch/csrc/api/include/torch/data/dataloader/*.h",
