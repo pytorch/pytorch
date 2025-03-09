@@ -374,6 +374,15 @@ AOTITorchError aoti_torch_get_storage_offset(
   });
 }
 
+AOTITorchError aoti_torch_new_tensor_handle(
+    AtenTensorHandle orig_handle,
+    AtenTensorHandle* new_handle) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t = tensor_handle_to_tensor_pointer(orig_handle);
+    *new_handle = new_tensor_handle(at::Tensor(*t));
+  });
+}
+
 AOTITorchError aoti_torch__reinterpret_tensor(
     AtenTensorHandle self,
     int64_t ndim,
