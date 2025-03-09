@@ -363,22 +363,23 @@ def generate_wheels_matrix(
                 and os == "linux"
                 or arch_version in CUDA_AARCH64_ARCHES
             ):
+                desired_cuda = translate_desired_cuda(gpu_arch_type, gpu_arch_version)
                 ret.append(
                     {
                         "python_version": python_version,
                         "gpu_arch_type": gpu_arch_type,
                         "gpu_arch_version": gpu_arch_version,
-                        "desired_cuda": translate_desired_cuda(
-                            gpu_arch_type, gpu_arch_version
-                        ),
+                        "desired_cuda": desired_cuda,
                         "use_split_build": "True" if use_split_build else "False",
                         "devtoolset": "cxx11-abi",
                         "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
                         "package_type": package_type,
                         "pytorch_extra_install_requirements": (
-                            PYTORCH_EXTRA_INSTALL_REQUIREMENTS[arch_version]
-                            if os != "linux-aarch64"
-                            else ""
+                            PYTORCH_EXTRA_INSTALL_REQUIREMENTS[
+                                f"{desired_cuda[2:4]}.{desired_cuda[4:]}"  # for cuda-aarch64: cu126 -> 12.6
+                            ]
+                            if os == "linux-aarch64"
+                            else PYTORCH_EXTRA_INSTALL_REQUIREMENTS[arch_version]
                         ),
                         "build_name": (
                             f"{package_type}-py{python_version}-{gpu_arch_type}"
