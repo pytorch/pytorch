@@ -2,9 +2,17 @@
 # the standard cmake script with version and python generation support
 macro(custom_protobuf_find)
   message(STATUS "Use custom protobuf build.")
-  option(protobuf_BUILD_TESTS "" OFF)
-  option(protobuf_BUILD_EXAMPLES "" OFF)
-  option(protobuf_WITH_ZLIB "" OFF)
+  set(ABSL_BUILD_TESTING OFF)
+  set(ABSL_ENABLE_INSTALL OFF)
+  set(ABSL_PROPAGATE_CXX_STD ON)
+  set(protobuf_BUILD_TESTS OFF)
+  set(protobuf_BUILD_EXAMPLES OFF)
+  set(protobuf_WITH_ZLIB OFF)
+  set(protobuf_ABSL_PROVIDER "module")
+  set(__caffe2_CMAKE_POSITION_INDEPENDENT_CODE ${CMAKE_POSITION_INDEPENDENT_CODE})
+  set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+  set(__caffe2_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
+  set(BUILD_SHARED_LIBS OFF)
   if(${CAFFE2_LINK_LOCAL_PROTOBUF})
     # If we are going to link protobuf locally, we will need to turn off
     # shared libs build for protobuf.
@@ -18,10 +26,7 @@ macro(custom_protobuf_find)
   option(protobuf_MSVC_STATIC_RUNTIME "" ${CAFFE2_USE_MSVC_STATIC_RUNTIME})
 
   if(${CAFFE2_LINK_LOCAL_PROTOBUF})
-    set(__caffe2_CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ${CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS})
     set(__caffe2_CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
-    set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS OFF)
-    set(BUILD_SHARED_LIBS OFF)
     if(${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
       set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fvisibility=hidden")
     endif()
@@ -29,9 +34,6 @@ macro(custom_protobuf_find)
       set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fvisibility-inlines-hidden")
     endif()
   endif()
-
-  set(__caffe2_CMAKE_POSITION_INDEPENDENT_CODE ${CMAKE_POSITION_INDEPENDENT_CODE})
-  set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
   if(MSVC)
     foreach(flag_var
@@ -51,29 +53,23 @@ macro(custom_protobuf_find)
       endforeach(flag_var)
     endif(MSVC_Z7_OVERRIDE)
   endif(MSVC)
+  set(FILENAME "${CMAKE_CURRENT_LIST_DIR}/../third_party/protobuf/third_party/abseil-cpp/absl/container/CMakeLists.txt")
+  file(READ "${FILENAME}" content)
+  string( REPLACE "GTest::gmock" "GTest::gmock TESTONLY" content "${content}")
+  file(WRITE ${FILENAME} "${content}")
 
-  add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/protobuf/cmake)
+  set(FILENAME "${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx/CMakeLists.txt")
+  file(READ "${FILENAME}" content)
+  string(REPLACE "if (NOT Build_Protobuf)" "if (OFF)" content "${content}")
+  file(WRITE ${FILENAME} "${content}")
 
-  set(CMAKE_POSITION_INDEPENDENT_CODE ${__caffe2_CMAKE_POSITION_INDEPENDENT_CODE})
+  add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/protobuf)
 
   if(${CAFFE2_LINK_LOCAL_PROTOBUF})
-    set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ${__caffe2_CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS})
-    set(BUILD_SHARED_LIBS ON)
     set(CMAKE_CXX_FLAGS ${__caffe2_CMAKE_CXX_FLAGS})
   endif()
-
-  # Protobuf "namespaced" target is only added post protobuf 3.5.1. As a
-  # result, for older versions, we will manually add alias.
-  if(NOT TARGET protobuf::libprotobuf)
-    add_library(protobuf::libprotobuf ALIAS libprotobuf)
-    add_library(protobuf::libprotobuf-lite ALIAS libprotobuf-lite)
-    # There is link error when cross compiling protoc on mobile:
-    # https://github.com/protocolbuffers/protobuf/issues/2719
-    # And protoc is very unlikely needed for mobile builds.
-    if(NOT (ANDROID OR IOS))
-      add_executable(protobuf::protoc ALIAS protoc)
-    endif()
-  endif()
+  set(BUILD_SHARED_LIBS ${__caffe2_BUILD_SHARED_LIBS})
+  set(CMAKE_POSITION_INDEPENDENT_CODE ${__caffe2_CMAKE_POSITION_INDEPENDENT_CODE})
 endmacro()
 
 # Main entry for protobuf. If we are building on Android, iOS or we have hard
