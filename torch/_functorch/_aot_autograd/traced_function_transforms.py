@@ -884,19 +884,29 @@ def aot_dispatch_subclass(
 def create_functional_call(mod, params_spec, params_len, store_orig_mod=False):
     # Redundant with dynamo, but worth having in case this gets invoked elsewhere.
     # https://github.com/pytorch/pytorch/issues/103569
+    from torch._export.non_strict_utils import _fakify_script_objects
 
     def functional_call(*args, **kwargs):
         with stateless._reparametrize_module(
             mod, pytree.tree_unflatten(args[:params_len], params_spec)
         ), maybe_disable_thunkify():
             if isinstance(mod, torch.fx.GraphModule):
-                with fx_traceback.preserve_node_meta(), warnings.catch_warnings():
+                fake_mode = detect_fake_mode(args)
+                with fx_traceback.preserve_node_meta(), warnings.catch_warnings(), _fakify_script_objects(
+                    mod, args, kwargs, fake_mode
+                ) as (
+                    patched_mod,
+                    _,
+                    _,
+                    _,
+                    _,
+                ):
                     warnings.filterwarnings(
                         "ignore", "Anomaly Detection has been enabled."
                     )
                     with torch.autograd.detect_anomaly(check_nan=False):
                         detect_fake_mode().epoch += 1
-                        out = PropagateUnbackedSymInts(mod).run(
+                        out = PropagateUnbackedSymInts(patched_mod).run(
                             *args[params_len:], **kwargs
                         )
             else:

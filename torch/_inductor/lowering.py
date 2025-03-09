@@ -6937,10 +6937,7 @@ def with_effects(token, op, *args, **kwargs):
         return (effectful_kernel,)
 
     result = pytree.tree_map_only(ir.MultiOutput, TensorBox.create, result)
-    if not isinstance(result, (list, tuple)):
-        return (effectful_kernel, result)
-    else:
-        return (effectful_kernel, *result)
+    return (effectful_kernel, result)
 
 
 from .comm_lowering import register_comm_lowerings

@@ -469,7 +469,10 @@ Result: TypeAlias = Union[torch.Tensor, tuple[torch.Tensor, ...]]
 
 
 def rebind_unbacked(
-    shape_env: Optional[ShapeEnv], n: torch.fx.Node, result: Result
+    shape_env: Optional[ShapeEnv],
+    n: torch.fx.Node,
+    result: Result,
+    remove_effect_token_in_path: bool=False,
 ) -> None:
     """
     Suppose we are retracing a pre-existing FX graph that previously had
@@ -490,6 +493,8 @@ def rebind_unbacked(
     ):
         assert shape_env is not None
         for raw_u0, path in bindings.items():
+            if remove_effect_token_in_path:
+                path = path[1:]  # remove the extra layer for effect token
             u1 = pytree.key_get(result, path)
             # Sometimes, things were previously unbacked bindings become constants.
             # There are two situations this can happen.

@@ -5098,7 +5098,7 @@ class ExternKernel(InputsKernel):
             ):
                 example_args.append(V.graph.torchbind_constants[x.get_name()])
             elif isinstance(x, TorchBindObject):
-                example_args.append(x.get_real_obj())
+                example_args.append(x.get_value())
             elif isinstance(x, torch._inductor.ir.GeneratorState):
                 device_index = x.device.index
                 assert x.device.type == "cuda" and device_index is not None
@@ -5113,9 +5113,18 @@ class ExternKernel(InputsKernel):
 
         unbacked_bindings: Optional[dict[sympy.Symbol, pytree.KeyPath]] = None
         if shape_env := V.fake_mode.shape_env:
-            rebind_unbacked(shape_env, V.current_node, example_output)
+            remove_effect_token_in_path = False
+            node_meta_val = V.current_node.meta.get("val")
+            if isinstance(
+                V.current_node.target, torch._higher_order_ops.effects.WithEffects
+            ):
+                remove_effect_token_in_path = True
+                node_meta_val = node_meta_val[1]  # remove the first effect token
+            rebind_unbacked(
+                shape_env, V.current_node, example_output, remove_effect_token_in_path
+            )
             unbacked_bindings = compute_unbacked_bindings(
-                shape_env, example_output, V.current_node.meta.get("val")
+                shape_env, example_output, node_meta_val
             )
 
         example_out_li = (
@@ -6683,7 +6692,10 @@ class FallbackKernel(ExternKernelAlloc):
             else:
                 raise RuntimeError(f"Unsupported return type {type(return_type)}")
 
-        returns = target._schema.returns  # type: ignore[union-attr]
+        if isinstance(target, torch._higher_order_ops.torchbind.CallTorchBind):
+            returns = target.schema(args[0], args[1]).returns
+        else:
+            returns = target._schema.returns  # type: ignore[union-attr]
         if len(returns) == 1:
             # NOTE: [special handling of all_reduce_coalesced_'s return value]
             # all_reduce_coalesced_ return a list of tensors via self.mutation_outputs
