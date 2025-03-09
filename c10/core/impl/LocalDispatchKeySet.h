@@ -34,11 +34,11 @@ struct C10_API PODLocalDispatchKeySet {
 
   // See Note [TLS Initialization]
   DispatchKeySet included() const {
-    return DispatchKeySet(DispatchKeySet::RAW, included_) ^
+    return DispatchKeySet(DispatchKeySet::RAWDATA, included_) ^
         c10::default_included_set;
   }
   DispatchKeySet excluded() const {
-    return DispatchKeySet(DispatchKeySet::RAW, excluded_) ^
+    return DispatchKeySet(DispatchKeySet::RAWDATA, excluded_) ^
         c10::default_excluded_set;
   }
 
@@ -62,9 +62,12 @@ struct C10_API LocalDispatchKeySet {
 
 // thread_local variables cannot be C10_API on Windows.
 // Inlining this seems to break AutoDispatchBelowAutograd on Android.
-#if defined(_MSC_VER) || defined(C10_ANDROID) || defined(C10_IPHONE)
+#if defined(_MSC_VER) || defined(C10_ANDROID) || defined(C10_IPHONE) || \
+defined(_AIX)
 C10_API LocalDispatchKeySet tls_local_dispatch_key_set();
-#else // defined(_MSC_VER) || defined(C10_ANDROID) || defined(C10_IPHONE)
+#else
+// defined(_MSC_VER) || defined(C10_ANDROID) || defined(C10_IPHONE) ||
+// defined(_AIX)
 extern C10_API thread_local PODLocalDispatchKeySet raw_local_dispatch_key_set;
 
 inline C10_API LocalDispatchKeySet tls_local_dispatch_key_set() {
