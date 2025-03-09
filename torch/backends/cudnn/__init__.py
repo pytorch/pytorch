@@ -124,6 +124,7 @@ def is_acceptable(tensor):
 
 def set_flags(
     _enabled=None,
+    _force=None,
     _benchmark=None,
     _benchmark_limit=None,
     _deterministic=None,
@@ -131,6 +132,7 @@ def set_flags(
 ):
     orig_flags = (
         torch._C._get_cudnn_enabled(),
+        torch._C._get_force_cudnn(),
         torch._C._get_cudnn_benchmark(),
         None if not is_available() else torch._C._cuda_get_cudnn_benchmark_limit(),
         torch._C._get_cudnn_deterministic(),
@@ -138,6 +140,8 @@ def set_flags(
     )
     if _enabled is not None:
         torch._C._set_cudnn_enabled(_enabled)
+    if _force is not None:
+        torch._C._set_force_cudnn(_force)
     if _benchmark is not None:
         torch._C._set_cudnn_benchmark(_benchmark)
     if _benchmark_limit is not None and is_available():
@@ -152,6 +156,7 @@ def set_flags(
 @contextmanager
 def flags(
     enabled=False,
+    force=False,
     benchmark=False,
     benchmark_limit=10,
     deterministic=False,
@@ -159,7 +164,7 @@ def flags(
 ):
     with __allow_nonbracketed_mutation():
         orig_flags = set_flags(
-            enabled, benchmark, benchmark_limit, deterministic, allow_tf32
+            enabled, force, benchmark, benchmark_limit, deterministic, allow_tf32
         )
     try:
         yield
@@ -179,6 +184,7 @@ class CudnnModule(PropModule):
         super().__init__(m, name)
 
     enabled = ContextProp(torch._C._get_cudnn_enabled, torch._C._set_cudnn_enabled)
+    force = ContextProp(torch._C._get_force_cudnn, torch._C._set_force_cudnn)
     deterministic = ContextProp(
         torch._C._get_cudnn_deterministic, torch._C._set_cudnn_deterministic
     )
@@ -202,6 +208,7 @@ sys.modules[__name__] = CudnnModule(sys.modules[__name__], __name__)
 
 # Add type annotation for the replaced module
 enabled: bool
+force: bool
 deterministic: bool
 benchmark: bool
 allow_tf32: bool
