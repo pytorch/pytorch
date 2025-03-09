@@ -14,6 +14,8 @@
 #include <hipblaslt/hipblaslt.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
 
+#include <ATen/cuda/tunable/GemmMxUtils.h>
+
 #define TORCH_HIPBLASLT_CHECK(EXPR)               \
   do {                                            \
     hipblasStatus_t __err = EXPR;                 \
@@ -509,7 +511,23 @@ class HipblasltGemmOp : public Callable<ParamsT> {
       if (mat1_scale_ptr && mat2_scale_ptr) {
 #ifdef HIPBLASLT_VEC_EXT
         if (GetUseRowwiseFromParams<CT>(params)) {
-          // swapped
+          // For MX-FP8 on gfx950
+#if ROCM_VERSION >= 60500
+          if (IsGfx950Device()) {
+            // Validate matrix dimensions for MX format
+            TORCH_CHECK(ValidateMXFormatRequirements(params->m, params->n, params->k),
+                       "Matrix dimensions must be multiples of 32 for MX format. ",
+                       "Got m=", params->m, ", n=", params->n, ", k=", params->k);
+
+            // Set block sizes for MX format
+            constexpr int32_t block_size = 32;
+            matmul.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_BLOCK_SIZE_ROWS_VEC_EXT, block_size);
+            matmul.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_BLOCK_SIZE_COLS_VEC_EXT, block_size);
+            matmul.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_BLOCK_SIZE_ROWS_VEC_EXT, block_size);
+            matmul.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_BLOCK_SIZE_COLS_VEC_EXT, block_size);
+          }
+#endif
+          // Set scale pointers (swapped as before)
           matmul.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT, mat2_scale_ptr);
           matmul.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT, mat1_scale_ptr);
         }

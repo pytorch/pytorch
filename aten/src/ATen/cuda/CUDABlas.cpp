@@ -1549,6 +1549,24 @@ void scaled_gemm(
     matmulDescA = HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT;
     matmulDescB = HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT;
   }
+  else if(mat1_scale_dtype == kFloat8_e8m0fnu && mat2_scale_dtype == kFloat8_e8m0fnu) {
+    #if ROCM_VERSION >= 60500
+          if (IsGfx950Device()) {
+            // Validate matrix dimensions for MX format
+            TORCH_CHECK(ValidateMXFormatRequirements(params->m, params->n, params->k),
+                       "Matrix dimensions must be multiples of 32 for MX format. ",
+                       "Got m=", params->m, ", n=", params->n, ", k=", params->k);
+
+            // Set block sizes for MX format
+            // TODO: Check if we need to set these explicitly for hipblaslt
+            constexpr int32_t block_size = 32;
+            computeDesc.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_BLOCK_SIZE_ROWS_VEC_EXT, block_size);
+            computeDesc.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_BLOCK_SIZE_COLS_VEC_EXT, block_size);
+            computeDesc.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_BLOCK_SIZE_ROWS_VEC_EXT, block_size);
+            computeDesc.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_BLOCK_SIZE_COLS_VEC_EXT, block_size);
+          }
+#endif
+  }
 #else
   // rowwise isn't supported using cublaslt or older hipblaslt
   TORCH_INTERNAL_ASSERT(use_rowwise == false, "rowwise scaled_gemm not supported with blaslt");
@@ -1585,13 +1603,18 @@ void scaled_gemm(
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_DATA_TYPE, ScalarTypeToCudaDataType(bias_dtype));
   }
 
+ #ifdef USE_ROCM //TODO: Check if this is needed
+  size_t workspaceSize = _getWorkspaceSize();
+  auto workspace = at::empty(static_cast<int64_t>(workspaceSize), at::TensorOptions().dtype(at::kByte).device(at::kCUDA));
+ #endif
+
   if (mat1_scale_dtype == kFloat8_e8m0fnu && mat2_scale_dtype == kFloat8_e8m0fnu) {
-#if CUDA_VERSION >= 12080
+#if (!defined(USE_ROCM) && CUDA_VERSION >= 12080) || (defined(USE_ROCM) && ROCM_VERSION >= 60500)
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_A_SCALE_MODE, CUBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0);
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_B_SCALE_MODE, CUBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0);
 #else
-    TORCH_CHECK(false, "scaled_gemm with `torch.float8_e8m0fnu` scales is only supported for CUDA 12.8 and above");
-#endif // CUDA_VERSION >= 12080
+    TORCH_CHECK(false, "scaled_gemm with `torch.float8_e8m0fnu` scales is only supported for CUDA 12.8 or ROCm 6.5(with gfx950) and above");
+#endif
   }
 
   auto stream = c10::cuda::getCurrentCUDAStream();
