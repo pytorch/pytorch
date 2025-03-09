@@ -795,11 +795,4 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__weight_int4pack_mm_cpu_tensor(
     AtenTensorHandle qScaleAndZeros,
     AtenTensorHandle* ret0);
 
-// calls the op defined in opname given the stack of IValues
-// namespace.op.overload
-// AOTI_TORCH_EXPORT AOTITorchError aoti_torch_call_dispatcher(
-//     const char* opname,
-//     StableIValue* stack
-// );
-
 #endif // AOTI_TORCH_SHIM
