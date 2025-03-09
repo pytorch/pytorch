@@ -1,6 +1,5 @@
 # Owner(s): ["module: pytree"]
 
-import collections
 import enum
 import inspect
 import os
@@ -9,7 +8,7 @@ import subprocess
 import sys
 import time
 import unittest
-from collections import defaultdict, namedtuple, OrderedDict, UserDict
+from collections import defaultdict, deque, namedtuple, OrderedDict, UserDict
 from dataclasses import dataclass
 from enum import auto
 from typing import Any, NamedTuple
@@ -455,7 +454,7 @@ class TestGenericPytree(TestCase):
                 (
                     python_pytree,
                     lambda deq: python_pytree.TreeSpec(
-                        collections.deque, deq.maxlen, [python_leafspec for _ in deq]
+                        deque, deq.maxlen, [python_leafspec for _ in deq]
                     ),
                 ),
                 name="python",
@@ -464,7 +463,7 @@ class TestGenericPytree(TestCase):
                 (
                     cxx_pytree,
                     lambda deq: cxx_pytree.tree_structure(
-                        collections.deque(deq, maxlen=deq.maxlen)
+                        deque(deq, maxlen=deq.maxlen)
                     ),
                 ),
                 name="cxx",
@@ -472,9 +471,7 @@ class TestGenericPytree(TestCase):
             subtest(
                 (
                     pytree,
-                    lambda deq: pytree.tree_structure(
-                        collections.deque(deq, maxlen=deq.maxlen)
-                    ),
+                    lambda deq: pytree.tree_structure(deque(deq, maxlen=deq.maxlen)),
                 ),
                 name="generic",
             ),
@@ -491,11 +488,11 @@ class TestGenericPytree(TestCase):
             unflattened = pytree.tree_unflatten(values, treespec)
             self.assertEqual(unflattened, deq)
             self.assertEqual(unflattened.maxlen, deq.maxlen)
-            self.assertIsInstance(unflattened, collections.deque)
+            self.assertIsInstance(unflattened, deque)
 
-        run_test(collections.deque([]))
-        run_test(collections.deque([1.0, 2]))
-        run_test(collections.deque([torch.tensor([1.0, 2]), 2, 10, 9, 11], maxlen=8))
+        run_test(deque([]))
+        run_test(deque([1.0, 2]))
+        run_test(deque([torch.tensor([1.0, 2]), 2, 10, 9, 11], maxlen=8))
 
     @parametrize_pytree_module
     def test_flatten_unflatten_namedtuple(self, pytree):
@@ -1420,7 +1417,7 @@ if "optree" in sys.modules:
             namedtuple: namedtuple("ANamedTuple", ["x", "y"])(1, 2),
             OrderedDict: OrderedDict([("foo", 1), ("bar", 2)]),
             defaultdict: defaultdict(int, {"foo": 1, "bar": 2}),
-            collections.deque: collections.deque([1, 2, 3]),
+            deque: deque([1, 2, 3]),
             torch.Size: torch.Size([1, 2, 3]),
             immutable_dict: immutable_dict({"foo": 1, "bar": 2}),
             immutable_list: immutable_list([1, 2, 3]),
