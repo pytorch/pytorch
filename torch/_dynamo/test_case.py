@@ -30,17 +30,6 @@ from . import config, reset, utils
 log = logging.getLogger(__name__)
 
 
-def check_skip_windows_inductor_UTs_switch() -> bool:
-    if not IS_WINDOWS:
-        return False
-
-    var = os.environ.get("RUN_ALL_WIN_INDUCTOR_UTS", "OFF")
-    if var in ["ON", "YES", "1", "Y"]:
-        return False
-
-    return True
-
-
 def run_tests(needs: Union[str, tuple[str, ...]] = ()) -> None:
     from torch.testing._internal.common_utils import run_tests
 
