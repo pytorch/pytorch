@@ -1,6 +1,6 @@
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/inductor/aoti_runtime/utils.h>
-#include <torch/stable/library.h>
+#include <torch/csrc/stable/library.h>
 
 using RAIIATH = torch::aot_inductor::RAIIAtenTensorHandle;
 
@@ -101,7 +101,7 @@ STABLE_TORCH_LIBRARY(libtorch_agnostic, m) {
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CPU, m) {
-  m.impl("libtorch_agnostic::sgd_out_of_place", &boxed_sgd_out_of_place);
+  m.impl("sgd_out_of_place", &boxed_sgd_out_of_place);
 }
 
 RAIIATH identity(RAIIATH t) {
@@ -119,9 +119,9 @@ STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CUDA, m) {
-  m.impl("libtorch_agnostic::identity", &boxed_identity);
+  m.impl("identity", &boxed_identity);
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CPU, m) {
-  m.impl("libtorch_agnostic::identity", &boxed_identity);
+  m.impl("identity", &boxed_identity);
 }

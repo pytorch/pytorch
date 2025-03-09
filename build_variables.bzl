@@ -48,10 +48,10 @@ jit_core_headers = [
     "torch/csrc/jit/frontend/schema_type_parser.h",
     "torch/csrc/jit/frontend/error_report.h",
     "torch/csrc/jit/frontend/tree.h",
+    "torch/csrc/stable/library.h",
     "torch/custom_class.h",
     "torch/custom_class_detail.h",
     "torch/library.h",
-    "torch/stable/library.h",
 ]
 
 jit_core_sources = [

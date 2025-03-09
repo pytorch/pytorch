@@ -939,7 +939,6 @@ def define_buck_targets(
                 ("", "torch/csrc/**/*.h"),
                 ("", "torch/script.h"),
                 ("", "torch/library.h"),
-                ("", "torch/stable/library.h"),
                 ("", "torch/custom_class.h"),
                 ("", "torch/custom_class_detail.h"),
                 # Add again due to namespace difference from aten_header.

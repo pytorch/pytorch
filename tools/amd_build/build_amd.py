@@ -107,8 +107,8 @@ includes = [
     # we do want to handle, so explicitly specify them
     "aten/src/THC/CMakeLists.txt",
     "torch/*",
-    "torch/stable/*",
     "tools/autograd/templates/python_variable_methods.cpp",
+    "torch/csrc/stable/*",
 ]
 
 includes = [os.path.join(proj_dir, include) for include in includes]

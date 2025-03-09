@@ -666,7 +666,6 @@ cc_library(
     ) + glob(
         [
             "torch/*.h",
-            "torch/stable/*.h",
             "torch/csrc/**/*.h",
             "torch/csrc/distributed/c10d/**/*.hpp",
             "torch/lib/libshm/*.h",

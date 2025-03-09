@@ -15,13 +15,14 @@
 #include <torch/csrc/inductor/aoti_torch/utils.h>
 #include <torch/csrc/inductor/inductor_ops.h>
 #include <torch/csrc/jit/serialization/pickle.h>
+#include <torch/csrc/stable/library.h>
 #include <torch/library.h>
-#include <torch/stable/library.h>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <vector>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -1306,9 +1307,9 @@ AOTITorchError aoti_torch_cpu__weight_int4pack_mm_cpu_tensor(
   });
 }
 
-class StableIValueConverter : public c10::OperatorKernel {
+class StableIValueBoxedKernel : public c10::OperatorKernel {
  public:
-  StableIValueConverter(void (*fn)(StableIValue*, int64_t, int64_t))
+  StableIValueBoxedKernel(void (*fn)(StableIValue*, int64_t, int64_t))
       : fn_(fn) {}
 
   void operator()(
@@ -1319,8 +1320,7 @@ class StableIValueConverter : public c10::OperatorKernel {
     const auto num_returns = schema.returns().size();
     const auto num_arguments = schema.arguments().size();
 
-    StableIValue* ministack = (StableIValue*)malloc(
-        (num_arguments + num_returns) * sizeof(StableIValue));
+    std::vector<StableIValue> ministack(num_arguments + num_returns);
 
     for (const auto idx : c10::irange(num_arguments)) {
       const c10::IValue& arg = torch::jit::pop(stack);
@@ -1344,7 +1344,7 @@ class StableIValueConverter : public c10::OperatorKernel {
 
     // boxed function is going to take a stack of StableIValues, cast them to
     // our schema values, and run the function and modify the StableIValue stack
-    fn_(ministack, num_arguments, num_returns);
+    fn_(ministack.data(), num_arguments, num_returns);
 
     // read the output from the end of the stack and wrap that back into
     // IValue from StableIValue
@@ -1360,8 +1360,6 @@ class StableIValueConverter : public c10::OperatorKernel {
         TORCH_CHECK(false, "Only Tensor return types are currently supported!");
       }
     }
-
-    free(ministack);
   }
 
  private:
@@ -1425,7 +1423,7 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_library_impl(
     reinterpret_cast<torch::Library*>(self)->impl(
         name,
         torch::CppFunction::makeFromBoxedFunctor(
-            std::make_unique<StableIValueConverter>(fn)));
+            std::make_unique<StableIValueBoxedKernel>(fn)));
   });
 }
 
