@@ -269,6 +269,10 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_storage_offset(
     AtenTensorHandle tensor,
     int64_t* ret_storage_offset);
 
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_new_tensor_handle(
+    AtenTensorHandle orig_handle,
+    AtenTensorHandle* new_handle);
+
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch__alloc_from_pool(
     AtenTensorHandle self,
     int64_t offset_bytes,

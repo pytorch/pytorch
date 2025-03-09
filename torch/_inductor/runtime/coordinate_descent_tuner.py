@@ -20,6 +20,8 @@ def get_field(config, name):
         return config.num_warps
     elif name == "num_stages":
         return config.num_stages
+    elif name == "waves_per_eu":
+        return config.kwargs.get(name, int(8 // config.num_warps))
     else:
         return config.kwargs.get(name, None)
 
@@ -97,6 +99,8 @@ class CoordescTuner:
         ]
         if self.is_mm:
             out.append("num_stages")
+        if self.inductor_meta.get("is_hip") is True:
+            out.append("waves_per_eu")
 
         return out
 
@@ -107,6 +111,8 @@ class CoordescTuner:
             return val > self.get_config_max(prefix)
         if name == "num_warps":
             return val > self.get_warpsmax()
+        if name == "waves_per_eu":
+            return val > 8
 
         return False
 

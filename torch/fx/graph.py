@@ -585,7 +585,7 @@ class CodeGen:
             """
             nonlocal prev_stacktrace
 
-            if node.op not in ("placeholder", "output"):
+            if node.op not in {"placeholder", "output"}:
                 stack_trace = node.stack_trace
                 if stack_trace:
                     if stack_trace != prev_stacktrace:
