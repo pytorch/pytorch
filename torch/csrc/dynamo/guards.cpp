@@ -1874,18 +1874,6 @@ class NO_TENSOR_ALIASING : public RelationalGuard {
       // it.
       return false;
     }
-
-    // Typically we don't have to increment the ref count here because the
-    // tensors are held in f_locals. But there is a special case for
-    // `from_numpy` source. `from_numpy` converts integers and such into tensors
-    // and these tensors are ephemeral. If we don't incref, those tensors can be
-    // garbage collected, and the next time from_numpy can reuse the memory
-    // address. Therefore, we incref here. They are decref'd in reset_state.
-    //
-    // IMPORTANT NOTE - Do not move this Py_INCREF before the insertion into
-    // _unique_tensors. If there is a tensor aliasing, you will end up
-    // incrementing the refcount twice, while the reset decrements only once.
-    Py_INCREF(value);
     return true;
   }
 
@@ -1900,9 +1888,6 @@ class NO_TENSOR_ALIASING : public RelationalGuard {
   }
 
   void reset_state() final {
-    for (auto item : _unique_tensors) {
-      Py_DECREF(item.first);
-    }
     _unique_tensors.clear();
   }
 
