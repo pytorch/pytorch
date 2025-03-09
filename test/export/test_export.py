@@ -6636,27 +6636,27 @@ def forward(self, b_a_buffer, x):
         self.assertEqual(is_non_negative_check("x >= 0"), "x")
         self.assertEqual(is_non_negative_check("variable_name >= 0"), "variable_name")
         self.assertEqual(is_non_negative_check("obj.attr >= 0"), "obj.attr")
-        
+
         self.assertEqual(is_non_negative_check("tensor.shape[0] >= 0"), "tensor.shape[0]")
         self.assertEqual(is_non_negative_check("  x  >=  0  "), "x")
         self.assertIsNone(is_non_negative_check("x > 0"))
         self.assertIsNone(is_non_negative_check("x == 0"))
         self.assertIsNone(is_non_negative_check("0 <= x"))
         self.assertIsNone(is_non_negative_check("x >= 1"))
-    
+
     def test_suggest_torch_checks_with_non_negative_check(self):
         from torch.fx.experimental.symbolic_shapes import _suggest_torch_checks
-        
+
         mock_exception = MagicMock(spec=GuardOnDataDependentSymNode)
         mock_exception.args = ["Test error message"]
-        
+
         mock_cond = MagicMock()
         mock_cond.free_symbols = {sympy.Symbol("u")}
         mock_exception.cond = mock_cond
-        
+
         mock_printer = MagicMock()
         mock_printer.doprint.side_effect = lambda expr: "u >= 0" if expr == mock_cond else "u < 0"
-        
+
         with patch("torch.fx.experimental.symbolic_shapes._PythonMsgPrinter", return_value=mock_printer):
             src_map = defaultdict(list)
             src_map["u"] = ["u"]
@@ -6664,31 +6664,31 @@ def forward(self, b_a_buffer, x):
             error_msg = mock_exception.args[0]
             self.assertIn("torch._check_is_size(u)", error_msg)
             self.assertIn("torch._check(u < 0)", error_msg)
-    
+
     def test_suggest_torch_checks_with_regular_check(self):
         from torch.fx.experimental.symbolic_shapes import _suggest_torch_checks
-        
+
         mock_exception = MagicMock(spec=GuardOnDataDependentSymNode)
         mock_exception.args = ["Test error message"]
-        
+
         mock_cond = MagicMock()
         mock_cond.free_symbols = {sympy.Symbol("u")}
         mock_exception.cond = mock_cond
-        
+
         mock_printer = MagicMock()
         mock_printer.doprint.side_effect = lambda expr: "u > 5" if expr == mock_cond else "u <= 5"
-        
+
         with patch("torch.fx.experimental.symbolic_shapes._PythonMsgPrinter", return_value=mock_printer):
             src_map = defaultdict(list)
             src_map["u"] = ["u"]
-            
+
             _suggest_torch_checks(mock_exception, src_map)
-            
+
             error_msg = mock_exception.args[0]
             self.assertIn("torch._check(u > 5)", error_msg)
             self.assertIn("torch._check(u <= 5)", error_msg)
             self.assertNotIn("torch._check_is_size", error_msg)
-    
+
     def test_train_eval_on_exported_preautograd_module(self):
         class Foo(torch.nn.Module):
             def __init__(self) -> None:
