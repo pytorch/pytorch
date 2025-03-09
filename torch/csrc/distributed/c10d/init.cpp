@@ -999,20 +999,23 @@ This class does not support ``__members__`` property.)");
   py::class_<::c10d::AllreduceOptions>(module, "AllreduceOptions")
       .def(py::init<>())
       .def_readwrite("reduceOp", &::c10d::AllreduceOptions::reduceOp)
-      .def_readwrite("timeout", &::c10d::AllreduceOptions::timeout);
+      .def_readwrite("timeout", &::c10d::AllreduceOptions::timeout)
+      .def_readwrite("asyncOp", &::c10d::AllreduceOptions::asyncOp);
 
   py::class_<::c10d::AllreduceCoalescedOptions>(
       module, "AllreduceCoalescedOptions")
       .def(py::init<>())
       .def_readwrite("reduceOp", &::c10d::AllreduceCoalescedOptions::reduceOp)
-      .def_readwrite("timeout", &::c10d::AllreduceCoalescedOptions::timeout);
+      .def_readwrite("timeout", &::c10d::AllreduceCoalescedOptions::timeout)
+      .def_readwrite("asyncOp", &::c10d::AllreduceCoalescedOptions::asyncOp);
 
   py::class_<::c10d::ReduceOptions>(module, "ReduceOptions")
       .def(py::init<>())
       .def_readwrite("reduceOp", &::c10d::ReduceOptions::reduceOp)
       .def_readwrite("rootRank", &::c10d::ReduceOptions::rootRank)
       .def_readwrite("rootTensor", &::c10d::ReduceOptions::rootTensor)
-      .def_readwrite("timeout", &::c10d::ReduceOptions::timeout);
+      .def_readwrite("timeout", &::c10d::ReduceOptions::timeout)
+      .def_readwrite("asyncOp", &::c10d::ReduceOptions::asyncOp);
 
   py::class_<::c10d::AllgatherOptions>(module, "AllgatherOptions")
       .def(py::init<>())
@@ -1022,7 +1025,8 @@ This class does not support ``__members__`` property.)");
   py::class_<::c10d::GatherOptions>(module, "GatherOptions")
       .def(py::init<>())
       .def_readwrite("rootRank", &::c10d::GatherOptions::rootRank)
-      .def_readwrite("timeout", &::c10d::GatherOptions::timeout);
+      .def_readwrite("timeout", &::c10d::GatherOptions::timeout)
+      .def_readwrite("asyncOp", &::c10d::GatherOptions::asyncOp);
 
   py::class_<::c10d::ScatterOptions>(module, "ScatterOptions")
       .def(py::init<>())
@@ -1040,11 +1044,13 @@ This class does not support ``__members__`` property.)");
       .def(py::init<>())
       .def_readwrite("device_ids", &::c10d::BarrierOptions::device_ids)
       .def_readwrite("timeout", &::c10d::BarrierOptions::timeout)
-      .def_readwrite("device", &::c10d::BarrierOptions::device);
+      .def_readwrite("device", &::c10d::BarrierOptions::device)
+      .def_readwrite("asyncOp", &::c10d::BarrierOptions::asyncOp);
 
   py::class_<::c10d::AllToAllOptions>(module, "AllToAllOptions")
       .def(py::init<>())
-      .def_readwrite("timeout", &::c10d::AllToAllOptions::timeout);
+      .def_readwrite("timeout", &::c10d::AllToAllOptions::timeout)
+      .def_readwrite("asyncOp", &::c10d::AllToAllOptions::asyncOp);
 
   py::class_<::c10d::DistributedBackendOptions>(
       module, "_DistributedBackendOptions")
