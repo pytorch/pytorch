@@ -116,6 +116,7 @@ jobs:
       # checkout because when we run this action we don't *have* a local
       # checkout. In other cases you should prefer a local checkout.
       - name: Checkout PyTorch
+        # uses: pytorch/pytorch/.github/actions/checkout-pytorch@csl/build_test_more_procs
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           no-sudo: true
@@ -279,6 +280,16 @@ jobs:
 
           END_TIME=$(date +%s)
           echo "build_time=$((END_TIME - START_TIME))" >> "$GITHUB_OUTPUT"
+          # zip -r sccache_log.zip sccache_error.log
+
+      # - name: store
+      #   uses: seemethere/upload-artifact-s3@v5
+      #   with:
+      #     name: ${{ inputs.build-environment }}-sccache-log
+      #     retention-days: 14
+      #     if-no-files-found: error
+      #     path: sccache_log.zip
+      #     s3-bucket: ${{ inputs.s3-bucket }}
 
       - name: Archive artifacts into zip
         if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped'
