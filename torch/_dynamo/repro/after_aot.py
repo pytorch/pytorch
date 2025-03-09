@@ -18,6 +18,7 @@ The main components include:
 This is primarily used by PyTorch developers and researchers to debug issues in
 the Dynamo AOT compilation pipeline, particularly for the Inductor backend.
 """
+from __future__ import annotations
 
 import argparse
 import copy
@@ -30,7 +31,6 @@ import subprocess
 import sys
 import textwrap
 import uuid
-from collections.abc import Sequence
 from importlib import import_module
 from tempfile import TemporaryFile
 from typing import Any, Callable, TYPE_CHECKING, Union
@@ -60,7 +60,6 @@ from torch._dynamo.debug_utils import (
 )
 from torch._dynamo.trace_rules import is_fbcode
 from torch._dynamo.utils import clone_inputs, counters, same
-from torch._inductor.output_code import OutputCode
 from torch._library.fake_class_registry import FakeScriptObject
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
@@ -73,7 +72,10 @@ from .. import config
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from torch._inductor.compile_fx import _CompileFxCallable, _CompileFxKwargs
+    from torch._inductor.output_code import OutputCode
     from torch._inductor.utils import InputType
 
 
@@ -89,9 +91,9 @@ use_buck = inductor_config.is_fbcode()
 
 
 def wrap_compiler_debug(
-    unconfigured_compiler_fn: "_CompileFxCallable",
+    unconfigured_compiler_fn: _CompileFxCallable,
     compiler_name: str,
-) -> "_CompileFxCallable":
+) -> _CompileFxCallable:
     """
     Minifier for Fx Graph modules after Aot Autograd has finished. We wrap both
     forward and backward call separately with the backend compiler_fn - like
@@ -103,8 +105,8 @@ def wrap_compiler_debug(
     @functools.wraps(unconfigured_compiler_fn)
     def debug_wrapper(
         gm: torch.fx.GraphModule,
-        example_inputs: Sequence["InputType"],
-        **kwargs: Unpack["_CompileFxKwargs"],
+        example_inputs: Sequence[InputType],
+        **kwargs: Unpack[_CompileFxKwargs],
     ) -> OutputCode:
         from torch._subclasses import FakeTensorMode
 
@@ -144,7 +146,7 @@ def wrap_compiler_debug(
         # We may run regular PyTorch compute that may trigger Dynamo, do NOT
         # recursively attempt to accuracy minify in that case!
         def deferred_for_real_inputs(
-            real_inputs: Sequence["InputType"], **_kwargs: object
+            real_inputs: Sequence[InputType], **_kwargs: object
         ) -> Any:
             # This is a bit obscure: if we recursively try to accuracy minify
             # the SAME function, this would trigger.  But most of the time
