@@ -1494,7 +1494,7 @@ TEST_SKIP_CUDAGRAPH: bool = TestEnvironment.def_flag(
     env_var="PYTORCH_TEST_SKIP_CUDAGRAPH",
 )
 TEST_CUDA_GRAPH = TEST_CUDA and (not TEST_SKIP_CUDAGRAPH) and (
-    (torch.version.cuda and int(torch.version.cuda.split(".")[0]) >= 11) or
+    torch.version.cuda or
     (torch.version.hip and float(".".join(torch.version.hip.split(".")[0:2])) >= 5.3)
 )
 
@@ -2031,20 +2031,24 @@ class DeterministicGuard:
         self.warn_only = warn_only
         self.fill_uninitialized_memory = fill_uninitialized_memory
 
-    def __enter__(self):
-        self.deterministic_restore = torch.are_deterministic_algorithms_enabled()
-        self.warn_only_restore = torch.is_deterministic_algorithms_warn_only_enabled()
-        self.fill_uninitialized_memory_restore = torch.utils.deterministic.fill_uninitialized_memory  # type: ignore[attr-defined]
-        torch.use_deterministic_algorithms(
-            self.deterministic,
-            warn_only=self.warn_only)
+    @classmethod
+    def _current_state(cls):
+        return cls(
+            torch.are_deterministic_algorithms_enabled(),
+            warn_only=torch.is_deterministic_algorithms_warn_only_enabled(),
+            fill_uninitialized_memory=torch.utils.deterministic.fill_uninitialized_memory,  # type: ignore[attr-defined]
+        )
+
+    def _update(self):
+        torch.use_deterministic_algorithms(self.deterministic, warn_only=self.warn_only)
         torch.utils.deterministic.fill_uninitialized_memory = self.fill_uninitialized_memory  # type: ignore[attr-defined]
 
+    def __enter__(self):
+        self._restore = self._current_state()
+        self._update()
+
     def __exit__(self, exception_type, exception_value, traceback):
-        torch.use_deterministic_algorithms(
-            self.deterministic_restore,
-            warn_only=self.warn_only_restore)
-        torch.utils.deterministic.fill_uninitialized_memory = self.fill_uninitialized_memory_restore  # type: ignore[attr-defined]
+        self._restore._update()
 
 class AlwaysWarnTypedStorageRemoval:
     def __init__(self, always_warn):
@@ -2126,21 +2130,16 @@ def wrapDeterministicFlagAPITest(fn):
                 cublas_var_name = 'CUBLAS_WORKSPACE_CONFIG'
 
                 def __enter__(self):
-                    self.is_cuda10_2_or_higher = (
-                        (torch.version.cuda is not None)
-                        and ([int(x) for x in torch.version.cuda.split(".")] >= [10, 2]))
-                    if self.is_cuda10_2_or_higher:
-                        self.cublas_config_restore = os.environ.get(self.cublas_var_name)
-                        os.environ[self.cublas_var_name] = ':4096:8'
+                    self.cublas_config_restore = os.environ.get(self.cublas_var_name)
+                    os.environ[self.cublas_var_name] = ':4096:8'
 
                 def __exit__(self, exception_type, exception_value, traceback):
-                    if self.is_cuda10_2_or_higher:
-                        cur_cublas_config = os.environ.get(self.cublas_var_name)
-                        if self.cublas_config_restore is None:
-                            if cur_cublas_config is not None:
-                                del os.environ[self.cublas_var_name]
-                        else:
-                            os.environ[self.cublas_var_name] = self.cublas_config_restore
+                    cur_cublas_config = os.environ.get(self.cublas_var_name)
+                    if self.cublas_config_restore is None:
+                        if cur_cublas_config is not None:
+                            del os.environ[self.cublas_var_name]
+                    else:
+                        os.environ[self.cublas_var_name] = self.cublas_config_restore
             with CuBLASConfigGuard():
                 fn(*args, **kwargs)
     return wrapper
@@ -2297,7 +2296,7 @@ def to_gpu(obj, type_map=None):
         assert obj.is_leaf
         t = type_map.get(obj.dtype, obj.dtype)
         with torch.no_grad():
-            res = obj.clone().to(dtype=t, device="cuda")
+            res = obj.to(dtype=t, device="cuda", copy=True)
             res.requires_grad = obj.requires_grad
         return res
     elif torch.is_storage(obj):
@@ -3095,16 +3094,16 @@ class TestCase(expecttest.TestCase):
 
     # Munges exceptions that internally contain stack traces, using munge_exc
     def assertExpectedInlineMunged(
-        self, exc_type, callable, expect, *, suppress_suffix=True, post_munge=None,
+        self, exc_type, callable, expect, *, skip=0, suppress_suffix=True, post_munge=None,
     ):
         try:
             callable()
         except exc_type as e:
-            munged = munge_exc(e, suppress_suffix=suppress_suffix, skip=1)
+            munged = munge_exc(e, suppress_suffix=suppress_suffix, skip=skip + 1)
             if post_munge:
                 munged = post_munge(munged)
             self.assertExpectedInline(
-                munged, expect, skip=1
+                munged, expect, skip=skip + 1
             )
             return
         self.fail(msg="Did not raise when expected to")
@@ -5561,6 +5560,7 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
     if suppress_suffix:
         s = re.sub(r"\n*Set TORCH_LOGS.+", "", s, flags=re.DOTALL)
         s = re.sub(r"\n*You can suppress this exception.+", "", s, flags=re.DOTALL)
+        s = re.sub(r"\n*Set TORCHDYNAMO_VERBOSE=1.+", "", s, flags=re.DOTALL)
     if suppress_prefix:
         s = re.sub(r"Cannot export model.+\n\n", "", s)
     s = re.sub(r" +$", "", s, flags=re.MULTILINE)

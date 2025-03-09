@@ -824,7 +824,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     TORCH_CHECK(
         backendTypeToBackend_.find(backendType_) != backendTypeToBackend_.end(),
         "Could not find the default backend type ",
-        backendType_,
+        uint16_t(backendType_),
         " for Process Group with name ",
         getBackendName(),
         ".");
@@ -845,7 +845,9 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     TORCH_CHECK(
         backendTypeToBackend_.find(backendType) != backendTypeToBackend_.end(),
         "Could not find backend type ",
-        backendType,
+        uint16_t(backendType),
+        " for Process Group with name ",
+        backendTypeToString(backendType),
         ".");
     return backendTypeToBackend_.at(backendType);
   }
@@ -872,8 +874,30 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     getDefaultBackend()->waitForPendingWorks();
   }
 
+  virtual void shutdown() {
+    for (auto& backend : backendTypeToBackend_) {
+      backend.second->shutdown();
+    }
+  }
+
+  virtual void abort() {
+    for (auto& backend : backendTypeToBackend_) {
+      backend.second->abort();
+    }
+  }
+
   bool hasHooks() const {
-    return getDefaultBackend()->hasHooks();
+    // `getDefaultBackend` will throw today if the backend is set to `undefined`
+    // (in case of `init_process_group(nothing)`)
+    try {
+      return getDefaultBackend()->hasHooks();
+    } catch (const std::exception& e) {
+      TORCH_WARN(
+          "Failed to check if ProcessGroup has hooks: ",
+          e.what(),
+          ". Assuming no hooks are registered.");
+      return false;
+    }
   }
 
   virtual const std::string& getGroupName() const;
