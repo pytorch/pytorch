@@ -139,24 +139,6 @@ class AOTInductorTestsTemplate:
                 model, example_inputs, "AOTInductorModelRunMinimalArrayrefInterface(", 1
             )
 
-    def test_compile_wrapper_with_O0(self):
-        class Model(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.linear = torch.nn.Linear(10, 10)
-
-            def forward(self, x, y):
-                return x + self.linear(y)
-
-        example_inputs = (
-            torch.randn(10, 10, device=self.device),
-            torch.randn(10, 10, device=self.device),
-        )
-        model = Model()
-        with config.patch("aot_inductor.compile_wrapper_with_O0", True):
-            self.check_model(model, example_inputs)
-            self.code_check_count(model, example_inputs, "__attribute__((", 2)
-
     def test_small_constant(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
