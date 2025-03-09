@@ -83,13 +83,30 @@ void complex_mul_out(const Tensor& input, const Tensor& other, const Tensor& out
     return;
   }
   auto common_dtype = output.scalar_type();
-  auto output_as_real = at::view_as_real(output).select(output.dim(), 0);
-  auto input_as_real = at::view_as_real(input.to(kMPS, common_dtype)).select(input.dim(), 0);
-  auto other_as_real = at::view_as_real(other.to(kMPS, common_dtype)).select(other.dim(), 0);
   auto iter =
-      TensorIteratorConfig().add_output(output_as_real).add_input(input_as_real).add_input(other_as_real).build();
+      TensorIteratorConfig().add_output(output).add_input(input).add_input(other).build();
 
   mps::binary_mps_impl(iter, "complex_mul", false);
+}
+
+// When alpha = 1, binary alpha ops can call into a binary kernel for reduced overhead, see BinaryOps.mm
+bool binary_alpha_kernel(const std::string func_name, const Tensor& input, const Tensor& other, const Scalar& alpha, const Tensor& output) {
+  if (alpha.toFloat() != 1.0) {
+    return false;
+  }
+  auto new_size = at::infer_size(input.sizes(), other.sizes());
+  if (!output.sizes().equals(new_size)) {
+    output.resize_(new_size);
+  }
+  uint32_t length = output.numel();
+  if (length == 0) {
+    return true;
+  }
+  auto iter =
+      TensorIteratorConfig().add_output(output).add_input(input).add_input(other).build();
+
+  mps::binary_mps_impl(iter, func_name);
+  return true;
 }
 
 } // namespace mps
