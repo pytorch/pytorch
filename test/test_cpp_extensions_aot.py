@@ -392,6 +392,11 @@ class TestPybindTypeCasters(common.TestCase):
 
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestMAIATensor(common.TestCase):
+    # For all tests inside this class, check
+    # pytorch/test/cpp_extensions/maia_extension.cpp
+    # when seeing C++ side errors. Ignore
+    # pytorch/aten/src/ATen/test/extension_backend_test.cpp.
+
     def test_unregistered(self):
         torch.arange(0, 10, device="cpu")
         with self.assertRaisesRegex(RuntimeError, "Could not run"):
@@ -440,6 +445,26 @@ class TestMAIATensor(common.TestCase):
         grad = torch.autograd.grad(out, input, out, create_graph=True)
         self.assertEqual(maia_extension.get_test_int(), 3)
         self.assertEqual(grad[0].shape, input.shape)
+
+    def test_matmul_autocast_default(self):
+        # Use default lower precision dtype.
+        x = torch.empty((2, 4), dtype=torch.float, device="maia")
+        w = torch.empty((4, 2), dtype=torch.float, device="maia")
+        with torch.autocast(device_type="maia"):
+            self.assertTrue(torch.is_autocast_enabled("maia"))
+            y = torch.ops.aten.matmul(x, w)
+            self.assertEqual(y.dtype, torch.bfloat16)
+            self.assertEqual(y.shape, (2, 2))
+
+    def test_matmul_autocast_float16(self):
+        # Ensure we can change low precision dtype.
+        x = torch.empty((2, 4), dtype=torch.float, device="maia")
+        w = torch.empty((4, 2), dtype=torch.float, device="maia")
+        with torch.autocast(device_type="maia", dtype=torch.float16):
+            self.assertTrue(torch.is_autocast_enabled("maia"))
+            y = torch.ops.aten.matmul(x, w)
+            self.assertEqual(y.dtype, torch.float16)
+            self.assertEqual(y.shape, (2, 2))
 
 
 @torch.testing._internal.common_utils.markDynamoStrictTest
