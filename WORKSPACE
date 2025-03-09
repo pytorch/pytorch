@@ -315,6 +315,12 @@ local_repository(
     repo_mapping = {"@com_google_googletest": "@com_google_benchmark"},
 )
 
+new_local_repository(
+    name = "openrng",
+    build_file = "@//third_party:openrng.BUILD",
+    path = "third_party/openrng",
+)
+
 ### Unused repos start
 
 # `unused` repos are defined to hide bazel files from submodules of submodules.
