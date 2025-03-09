@@ -38,7 +38,7 @@ struct PyNode : public Node {
   variable_list apply(variable_list&& inputs) override;
   variable_list defer_to_dynamo(
       const variable_list& inputs,
-      const std::optional<PyObject*>& compiler);
+      PyObject* compiler);
 
   void release_variables() override;
   std::string name() const override;
