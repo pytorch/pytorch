@@ -89,8 +89,7 @@ static PyObject* THCPEvent_from_ipc_handle(
   }
   THCPEvent* self = (THCPEvent*)ptr.get();
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  cudaIpcEventHandle_t handle;
+  cudaIpcEventHandle_t handle{};
   std::memcpy(&handle, handle_string.c_str(), handle_string.size());
   new (&self->cuda_event) at::cuda::CUDAEvent(device.index(), &handle);
 
@@ -172,8 +171,7 @@ static PyObject* THCPEvent_synchronize(PyObject* _self, PyObject* noargs) {
 static PyObject* THCPEvent_ipc_handle(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   auto self = (THCPEvent*)_self;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  cudaIpcEventHandle_t handle;
+  cudaIpcEventHandle_t handle{};
   self->cuda_event.ipc_handle(&handle);
   return PyBytes_FromStringAndSize((const char*)&handle, sizeof(handle));
   END_HANDLE_TH_ERRORS
