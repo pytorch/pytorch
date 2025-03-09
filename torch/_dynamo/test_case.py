@@ -47,7 +47,7 @@ def run_tests(needs: Union[str, tuple[str, ...]] = ()) -> None:
     if TEST_WITH_TORCHDYNAMO or TEST_WITH_CROSSREF:
         return  # skip testing
 
-    if not torch.xpu.is_available() and check_skip_windows_inductor_UTs_switch():
+    if not torch.xpu.is_available() and IS_WINDOWS and os.environ.get("TORCHINDUCTOR_WINDOWS_TESTS", "0") == "0":
         return
 
     if isinstance(needs, str):
