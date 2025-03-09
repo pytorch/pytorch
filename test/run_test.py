@@ -1076,10 +1076,10 @@ def _test_cpp_extensions_aot(test_directory, options, use_ninja):
     if sys.platform != "win32":
         exts_to_build = [
             (install_cmd, "no_python_abi_suffix_test"),
-            (install_cmd, "libtorch_agnostic_extension"),
         ]
         if TEST_CUDA:
             exts_to_build.append((wheel_cmd, "python_agnostic_extension"))
+            exts_to_build.append((install_cmd, "libtorch_agnostic_extension"))
         for cmd, extension_dir in exts_to_build:
             return_code = shell(
                 cmd,
