@@ -135,6 +135,9 @@ def convert_arg_type(arg: torch.Argument) -> str:
         else:
             return f"at::{python_type} const&"
 
+    if python_type == "List[Optional[Tensor]]":
+        return "c10::List<std::optional<at::Tensor>> "
+
     if python_type in PYTHON_TO_CPP:
         cpp_type = PYTHON_TO_CPP[python_type]
         return cpp_type
