@@ -1155,7 +1155,9 @@ std::tuple<Tensor, std::optional<int64_t>> index_fill_int_scalar_batch_rule_impl
     return std::make_tuple(self_, 0);
   }
 
-  self_ = self_bdim.has_value() ? self_ : self_.clone();
+  if (!self_bdim.has_value()) {
+    self_ = self_.clone();
+  }
 
   return index_fill_batch_rule_helper(batch_size, self_logical_rank, index_logical_rank, self_, dim, index_, value);
 }
@@ -1209,7 +1211,9 @@ std::tuple<Tensor, std::optional<int64_t>> index_fill_int_tensor_batch_rule_impl
     return std::make_tuple(self_, 0);
   }
 
-  self_ = self_bdim.has_value() ? self_ : self_.clone();
+  if (!self_bdim.has_value()) {
+    self_ = self_.clone();
+  }
 
   // calling .item() on value is safe here because value is guaranteed to not be a batched tensor.
   return index_fill_batch_rule_helper(batch_size, self_logical_rank, index_logical_rank, self_, dim, index_, value.item());
