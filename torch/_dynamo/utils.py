@@ -1230,6 +1230,7 @@ class CompilationMetrics:
     recompile_reason: Optional[str] = None
     num_graph_breaks: Optional[int] = None
     triton_kernel_compile_times_us: Optional[str] = None
+    cudagraph_skip_reason: Optional[str] = None
 
     @classmethod
     def create(cls, metrics: dict[str, Any]):
