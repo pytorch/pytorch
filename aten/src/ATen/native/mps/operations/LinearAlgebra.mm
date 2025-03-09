@@ -2,6 +2,7 @@
 
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/mps/MPSProfiler.h>
+#include <ATen/native/LinearAlgebra.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/Resize.h>
 // For MTLLanguageVersion_3_1
@@ -259,14 +260,14 @@ static void linalg_lu_factor_ex_out_mps_impl(const Tensor& A,
   }
 }
 
-static void linalg_solve_out_mps_impl(const at::Tensor& A,
-                                      const at::Tensor& B,
-                                      bool left,
-                                      bool check_errors,
-                                      const at::Tensor& result,
-                                      const at::Tensor& LU,
-                                      const at::Tensor& pivots,
-                                      const at::Tensor& info) {
+void linalg_solve_out_mps_impl(const at::Tensor& A,
+                               const at::Tensor& B,
+                               bool left,
+                               bool check_errors,
+                               const at::Tensor& result,
+                               const at::Tensor& LU,
+                               const at::Tensor& pivots,
+                               const at::Tensor& info) {
   using namespace mps;
 
   TORCH_CHECK(!c10::isComplexType(A.scalar_type()) && !c10::isComplexType(LU.scalar_type()),
