@@ -666,6 +666,7 @@ struct MaybeOwnedTraits<c10::intrusive_ptr<T>> {
 
   static const owned_type& referenceFromBorrow(
       const borrow_type& borrow) noexcept {
+    // NOLINTNEXTLINE(bugprone-return-const-ref-from-parameter)
     return borrow;
   }
 
