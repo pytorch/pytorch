@@ -86,7 +86,6 @@ ignore = [
     "SIM117",
     "SIM118",
     "UP007", # keep-runtime-typing
-    "C416", # tuple(generator) is a performance regression
 ]
 select = [
     "B",
