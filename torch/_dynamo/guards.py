@@ -1176,14 +1176,6 @@ class GuardBuilder(GuardBuilderBase):
                     example_value=example_value,
                     guard_manager_enum=guard_manager_enum,
                 )
-        elif istype(source, NumpyTensorSource):
-            assert base_guard_manager  # to make mypy happy
-            out = base_guard_manager.lambda_manager(
-                python_lambda=from_numpy,
-                source=source_name,
-                example_value=example_value,
-                guard_manager_enum=guard_manager_enum,
-            )
         elif istype(source, SubclassAttrListSource):
             assert base_guard_manager  # to make mypy happy
             out = base_guard_manager.lambda_manager(
@@ -2068,15 +2060,18 @@ class GuardBuilder(GuardBuilderBase):
     def TENSOR_MATCH(self, guard: Guard, value=None):
         if config._unsafe_skip_fsdp_module_guards and guard.is_fsdp_module():
             return
+
+        if isinstance(guard.originating_source, NumpyTensorSource):
+            # Numpy tensors are ephemeral objects, so there is no point of
+            # guarding on them. One can argue why we even have a source for
+            # them. Here, we need source to reconstruct the grapharg. But there
+            # is no need to guard.
+            return
+
         # For tensors that are part of the Dynamo extracted Fx graph module, an
         # ID_MATCH suffices. Once we turn on inline_inbuilt_nn_modules, these
         # will be lifted as inputs and have a TENSOR_MATCH guard.
-        # For numpy tensors, always use TENSOR_MATCH because __from_numpy leads
-        # to a new tensor everytime and therefore id differs.
-        if (
-            guard.is_specialized_nn_module()
-            and not isinstance(guard.originating_source, NumpyTensorSource)
-        ) or match_on_id_for_tensor(guard):
+        if match_on_id_for_tensor(guard):
             self.ID_MATCH(guard)
         else:
             if isinstance(value, TensorWeakRef):
