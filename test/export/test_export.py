@@ -12,6 +12,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from re import escape
 from typing import Dict, List
+from unittest.mock import MagicMock, patch
 
 import torch
 import torch._dynamo as torchdynamo
@@ -4095,7 +4096,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             "The following call raised this error(.*\n)+"
             f".*{re.escape('return r.view(items[0], items[2])')}(.*\n)+"
             "To fix the error, insert one of the following checks before this call.*:\n"
-            f".*{re.escape('torch._check(items[2] >= 0)')}.*\n"
+            f".*{re.escape('torch._check_is_size(items[2])')}.*\n"
             f".*{re.escape('torch._check(items[2] < 0)')}(.*\n)+"
             f".*{re.escape('(These suggested fixes were derived by replacing `u2` with items[2] in u2 >= 0 and its negation.)')}",
         ):
@@ -6871,6 +6872,87 @@ def forward(self, b_a_buffer, x):
         error_msg = r"Could not guard on data-dependent expression"
         with self.assertRaisesRegex(error, error_msg):
             _ = export(f, (torch.tensor(6),))
+
+    def test_is_non_negative_check_function(self):
+        from torch.fx.experimental.symbolic_shapes import _is_non_negative_check
+
+        self.assertEqual(_is_non_negative_check("x >= 0"), "x")
+        self.assertEqual(_is_non_negative_check("variable_name >= 0"), "variable_name")
+        self.assertEqual(_is_non_negative_check("obj.attr >= 0"), "obj.attr")
+
+        self.assertEqual(
+            _is_non_negative_check("tensor.shape[0] >= 0"), "tensor.shape[0]"
+        )
+        self.assertEqual(_is_non_negative_check("  x  >=  0  "), "x")
+        self.assertIsNone(_is_non_negative_check("x > 0"))
+        self.assertIsNone(_is_non_negative_check("x == 0"))
+        self.assertIsNone(_is_non_negative_check("0 <= x"))
+        self.assertIsNone(_is_non_negative_check("x >= 1"))
+
+    def test_suggest_torch_checks_with_non_negative_check(self):
+        import sympy
+
+        from torch.export.dynamic_shapes import defaultdict
+        from torch.fx.experimental.symbolic_shapes import _suggest_torch_checks
+
+        mock_exception = MagicMock(
+            spec=torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
+        )
+        mock_exception.args = ["Test error message"]
+
+        mock_cond = MagicMock()
+        mock_cond.free_symbols = {sympy.Symbol("u")}
+        mock_exception.cond = mock_cond
+
+        mock_printer = MagicMock()
+        mock_printer.doprint.side_effect = lambda expr: (
+            "u >= 0" if expr == mock_cond else "u < 0"
+        )
+
+        with patch(
+            "torch.fx.experimental.symbolic_shapes._PythonMsgPrinter",
+            return_value=mock_printer,
+        ):
+            src_map = defaultdict(list)
+            src_map["u"] = ["u"]
+            _suggest_torch_checks(mock_exception, src_map)
+            error_msg = mock_exception.args[0]
+            self.assertIn("torch._check_is_size(u)", error_msg)
+            self.assertIn("torch._check(u < 0)", error_msg)
+
+    def test_suggest_torch_checks_with_regular_check(self):
+        import sympy
+
+        from torch.export.dynamic_shapes import defaultdict
+        from torch.fx.experimental.symbolic_shapes import _suggest_torch_checks
+
+        mock_exception = MagicMock(
+            spec=torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
+        )
+        mock_exception.args = ["Test error message"]
+
+        mock_cond = MagicMock()
+        mock_cond.free_symbols = {sympy.Symbol("u")}
+        mock_exception.cond = mock_cond
+
+        mock_printer = MagicMock()
+        mock_printer.doprint.side_effect = lambda expr: (
+            "u > 5" if expr == mock_cond else "u <= 5"
+        )
+
+        with patch(
+            "torch.fx.experimental.symbolic_shapes._PythonMsgPrinter",
+            return_value=mock_printer,
+        ):
+            src_map = defaultdict(list)
+            src_map["u"] = ["u"]
+
+            _suggest_torch_checks(mock_exception, src_map)
+
+            error_msg = mock_exception.args[0]
+            self.assertIn("torch._check(u > 5)", error_msg)
+            self.assertIn("torch._check(u <= 5)", error_msg)
+            self.assertNotIn("torch._check_is_size", error_msg)
 
     def test_train_eval_on_exported_preautograd_module(self):
         class Foo(torch.nn.Module):
