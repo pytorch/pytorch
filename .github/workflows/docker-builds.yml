@@ -75,7 +75,8 @@ jobs:
           pytorch-linux-focal-linter,
           pytorch-linux-jammy-cuda11.8-cudnn9-py3.9-linter,
           pytorch-linux-jammy-py3-clang12-executorch,
-          pytorch-linux-jammy-py3.12-triton-cpu
+          pytorch-linux-jammy-py3.12-triton-cpu,
+          pytorch-linux-noble-riscv64-py3.12-gcc14
         ]
         include:
           - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc11
@@ -103,6 +104,12 @@ jobs:
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
+
+      - name: Setup QEMU for RISC-V
+        if: ${{ matrix.docker-image-name == 'pytorch-linux-noble-riscv64-py3.12-gcc14' }}
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: riscv64
 
       - name: Build docker image
         id: build-docker-image
