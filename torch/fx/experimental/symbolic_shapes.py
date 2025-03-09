@@ -7197,6 +7197,15 @@ class _PythonMsgPrinter(PythonPrinter):
     def _print_Symbol(self, sym: sympy.Symbol) -> str:
         return self.src_map[sym.name][0]
 
+def is_non_negative_check(condition_str):
+    """
+    Check if a condition string is checking for non-negative values (>= 0)
+    Returns the variable name if it's a non-negative check, None otherwise
+    """
+    # Pattern to match expressions like "x >= 0", "x.shape[0] >= 0", etc.
+    pattern = r'([a-zA-Z0-9_\.\[\]]+)\s*>=\s*0'
+    match = re.match(pattern, condition_str.strip())
+    return match.group(1) if match else None
 
 def _suggest_torch_checks(
     e: GuardOnDataDependentSymNode, src_map: defaultdict[str, list[str]]
@@ -7210,12 +7219,19 @@ def _suggest_torch_checks(
     printer = _PythonMsgPrinter(src_map)
     msg = e.args[0]
     msg += "\nTo fix the error, insert one of the following checks before this call:"
-    # suggested fixes to resolve `cond`` are to tell the compiler to assume
-    # either `cond` or its negation (the user will need to select which)
-    suggested_fixes = [
-        f"torch._check({printer.doprint(cond)})",
-        f"torch._check({printer.doprint(sympy.Not(cond))})",
-    ]
+    cond_str = printer.doprint(cond)
+    var_name = is_non_negative_check(cond_str)
+    
+    suggested_fixes = []
+    if var_name and ">= 0" in cond_str:
+        # This is a non-negative check, suggest _check_is_size
+        suggested_fixes.append(f"torch._check_is_size({var_name})")
+        suggested_fixes.append(f"torch._check({printer.doprint(sympy.Not(cond))})")
+    else:
+        # Regular case
+        suggested_fixes.append(f"torch._check({printer.doprint(cond)})")
+        suggested_fixes.append(f"torch._check({printer.doprint(sympy.Not(cond))})")
+    
     for i, fix in enumerate(suggested_fixes):
         msg += f"\n  {i + 1}. {fix}"
     src_mapped = ", ".join(
