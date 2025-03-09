@@ -15,6 +15,7 @@ from .optimizer import (
     _get_value,
     _maximize_doc,
     _params_doc,
+    _to_scalar,
     _use_grad_for_differentiable,
     _view_as_real,
     Optimizer,
@@ -101,7 +102,9 @@ class ASGD(Optimizer):
                     )
                     state["eta"] = (
                         torch.as_tensor(
-                            group["lr"], device=p.device, dtype=_get_scalar_dtype()
+                            _to_scalar(group["lr"]),
+                            device=p.device,
+                            dtype=_get_scalar_dtype(),
                         )
                         .clone()
                         .detach()
@@ -209,6 +212,9 @@ def _single_tensor_asgd(
     capturable: bool,
     has_complex: bool,
 ):
+    if not torch.jit.is_scripting():
+        lr = _to_scalar(lr)
+
     for i, param in enumerate(params):
         grad = grads[i]
         grad = grad if not maximize else -grad
@@ -300,6 +306,8 @@ def _multi_tensor_asgd(
             and p.device.type in capturable_supported_devices
             for p, mu, eta, step in zip(params, mus, etas, state_steps)
         ), f"If capturable=True, params, mus, etas, and state_steps must be on supported devices: {capturable_supported_devices}."
+
+    lr = _to_scalar(lr)
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
         [params, grads, axs, mus, etas, state_steps]  # type: ignore[list-item]

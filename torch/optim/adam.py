@@ -18,6 +18,7 @@ from .optimizer import (
     _maximize_doc,
     _params_doc,
     _stack_if_compiling,
+    _to_scalar,
     _use_grad_for_differentiable,
     _view_as_real,
     DeviceDict,
@@ -372,6 +373,11 @@ def _single_tensor_adam(
         assert isinstance(lr, float)
         assert isinstance(beta1, float)
         assert isinstance(beta2, float)
+    else:
+        lr = _to_scalar(lr)
+        # TODO: Support nonzero-dim Tensor betas using the following code.
+        # beta1 = _to_scalar(beta1)
+        # beta2 = _to_scalar(beta2)
 
     # We only shuffle around the beta when it is a Tensor, otherwise, we prefer
     # treating it as a scalar.
@@ -556,10 +562,13 @@ def _multi_tensor_adam(
     if len(params) == 0:
         return
 
-    if isinstance(lr, Tensor) and not capturable:
-        raise RuntimeError(
-            "lr as a Tensor is not supported for capturable=False and foreach=True"
-        )
+    if isinstance(lr, Tensor):
+        if not capturable:
+            raise RuntimeError(
+                "lr as a Tensor is not supported for capturable=False and foreach=True"
+            )
+        if lr.numel() != 1:
+            raise ValueError("Tensor lr must be 1-element")
 
     if isinstance(beta1, Tensor):
         if not capturable:
@@ -591,6 +600,11 @@ def _multi_tensor_adam(
     assert grad_scale is None and found_inf is None
 
     assert not differentiable, "_foreach ops don't support autograd"
+
+    lr = _to_scalar(lr)
+    # TODO: Support nonzero-dim Tensor betas using the following code.
+    # beta1 = _to_scalar(beta1)
+    # beta2 = _to_scalar(beta2)
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
         [params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps]  # type: ignore[list-item]
