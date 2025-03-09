@@ -203,6 +203,8 @@ class AutotuneCache:
             **config.kwargs,
             "num_warps": config.num_warps,
             "num_stages": config.num_stages,
+            "num_consumer_groups": getattr(config, 'num_consumer_groups', 0),
+            "num_buffers_warp_spec": getattr(config, 'num_buffers_warp_spec', 0),
             "configs_hash": self.configs_hash,
             "found_by_coordesc": found_by_coordesc,
             "time_taken_ms": time_taken_ns // 1000000,  # Convert from NS to MS
@@ -464,7 +466,15 @@ def _load_cached_autotuning(
     ):
         num_warps = best_config.pop("num_warps")
         num_stages = best_config.pop("num_stages")
-        triton_config = Config(best_config, num_warps=num_warps, num_stages=num_stages)
+        num_consumer_groups = best_config.pop("num_consumer_groups", 0)
+        num_buffers_warp_spec = best_config.pop("num_buffers_warp_spec", 0)
+        triton_config = Config(
+            best_config,
+            num_warps=num_warps,
+            num_stages=num_stages,
+            num_consumer_groups=num_consumer_groups,
+            num_buffers_warp_spec=num_buffers_warp_spec,
+        )
         triton_config.found_by_coordesc = True
         return triton_config
 
