@@ -217,6 +217,8 @@ def lift_constants_pass(
                 continue
             elif "LoweredBackendModule" in type(constant_val).__name__:
                 continue
+            elif "AOTInductorRunnerWrapper" in type(constant_val).__name__:
+                continue
             else:
                 raise SpecViolationError(
                     f"getattr node {node} referencing unsupported type {type(constant_val)}"
