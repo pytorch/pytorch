@@ -10877,6 +10877,20 @@ fn
         with self.assertRaisesRegex(RuntimeError, "RelaxedUnspecConstraint"):
             fn(x, y)
 
+    def test_mark_oblivious(self):
+        @torch.compile()
+        def fn(x, y):
+            y = torch.cat([y, y], dim=0)
+            return x * y
+
+        x = torch.randn(12)
+        y = torch.randn(6)
+        torch._dynamo.decorators._mark_oblivious(x, 0)
+        torch._dynamo.decorators._mark_oblivious(y, 0)
+        f(x, y)
+        f(torch.randn(2), torch.randn(1))
+        f(torch.randn(0), torch.randn(0))
+
     def test_sym_max_unbacked_sizelike_simplification(self):
         @torch.compile(fullgraph=True, backend="eager")
         def cf(x):
