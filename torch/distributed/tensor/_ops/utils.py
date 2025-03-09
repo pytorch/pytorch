@@ -260,7 +260,6 @@ def expand_to_full_mesh_op_strategy(
         ]
 
         input_args_strategy = op_schema.args_strategy
-        assert len(input_specs) == len(input_args_strategy)
         self_spec = input_args_strategy[0].strategies[0].output_spec
 
         if inplace_op and self_spec.placements != input_specs[0].placements:
