@@ -139,6 +139,8 @@ triton_kernel_default_layout_constraint: Literal[
 # incompatible with disable_cpp_codegen
 cpp_wrapper: bool = os.environ.get("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1"
 
+online_softmax = os.environ.get("TORCHINDUCTOR_ONLINE_SOFTMAX", "1") == "1"
+
 # dead code elimination
 dce = False
 
@@ -148,6 +150,7 @@ static_weight_shapes = True
 # put correctness assertions in generated code
 size_asserts = os.environ.get("TORCHINDUCTOR_SIZE_ASSERTS", "1") == "1"
 nan_asserts = os.environ.get("TORCHINDUCTOR_NAN_ASSERTS") == "1"
+scalar_asserts = os.environ.get("TORCHINDUCTOR_SCALAR_ASSERTS", "1") == "1"
 
 # enable loop reordering based on input orders
 pick_loop_orders = True
@@ -1147,6 +1150,12 @@ class triton:
     # Skip L1 cache for buffers that are used only once.  Disabled by default
     skip_l1_cache = os.environ.get("TORCHINDUCTOR_SKIP_L1", "0") == "1"
 
+    # During autotuning, if one of the kernels/configs fails for some reason,
+    # Inductor will usually skip it (and assign its latency to inf).
+    # For testing it's helpful to be able to assert that none of the configs fail.
+    # Note: it may also need to be used with config.compile_threads = 1
+    disallow_failing_autotune_kernels_TESTING_ONLY = False
+
 
 class aot_inductor:
     # AOTInductor output path
@@ -1377,6 +1386,13 @@ class rocm:
     # Flag to use a short list of CK instances which perform well across a variety of shapes.
     # Currently RCR and F16 only
     use_preselected_instances: bool = False
+
+    # List to determine kBatch parameters to sweep over. By default, we calculate one in splitK
+    # scenarios, and run on kBatch=1 in non-splitK scenarios
+    kBatch_sweep: Optional[list[int]] = None
+
+    # The threshold at which we trigger a splitK config - K // max(M,N) has to be greater than this
+    split_k_threshold: int = 16
 
 
 # Backend to use for CPU codegen either "cpp" or "triton" (experimental) or "halide" (experimental)

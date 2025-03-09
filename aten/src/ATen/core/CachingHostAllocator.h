@@ -10,7 +10,8 @@
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
 namespace at {
 
-using namespace c10::CachingAllocator;
+using c10::CachingAllocator::Stat;
+using c10::CachingAllocator::DurationStat;
 
 /**
  * HostBlock is typically a fundamental memory block used in pinned memory. It
