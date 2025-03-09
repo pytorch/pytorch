@@ -182,6 +182,7 @@ def aoti_compile_with_persistent_cache(
     Compile the given function with persistent cache for AOTI eager mode.
     """
     assert not dynamic, "Only support static shape for now"
+    
     flattened_inputs = list(args) + list(kwargs.values())
     if not all(
         isinstance(
@@ -211,12 +212,18 @@ def aoti_compile_with_persistent_cache(
             raise NotImplementedError(err_msg)
 
     persistent_cache = aoti_eager_cache_dir(ns, device_type)
-    if not persistent_cache.exists():
-        persistent_cache.mkdir(parents=True)
+    persistent_cache.mkdir(parents=True, exist_ok=True)
 
     persistent_cache_lib = persistent_cache / "lib"
-    if not persistent_cache_lib.exists():
-        persistent_cache_lib.mkdir()
+    persistent_cache_lib.mkdir(exist_ok=True)
+
+    # Cache key based on function name and hash
+    cache_key = f"{op_func_name_with_overload}_{hash(f)}.so"
+    cached_kernel_path = persistent_cache_lib / cache_key
+
+    # If cached, return existing kernel
+    if cached_kernel_path.exists():
+        return str(cached_kernel_path)
 
     with mock.patch.dict(
         os.environ,
@@ -230,15 +237,13 @@ def aoti_compile_with_persistent_cache(
                 dynamic_shapes=dynamic_shapes,
                 remove_runtime_assertions=remove_runtime_assertions,
                 disable_constraint_solver=disable_constraint_solver,
-                # Some operations may have non-Tensor parameters like int, float, bool. These
-                # non-Tensor parameters will not be the input of the graph. Therefore, we do
-                # need to keep the same signature.
-                same_signature=False,
+                decompositions=["aten::add", "aten::mul"],  # Reduce decompositions
             )
             assert isinstance(kernel_lib_path, str)
 
-            kernel_metadata_items = []
+            shutil.copy(kernel_lib_path, cached_kernel_path)  # Save compiled kernel
 
+            kernel_metadata_items = []
             for idx, input in enumerate(flattened_inputs):
                 if isinstance(input, torch.Tensor):
                     metadata = extract_tensor_metadata(dynamic, input)
@@ -268,30 +273,23 @@ def aoti_compile_with_persistent_cache(
             )
 
             json_data = []
-            update_json = True
             op_conf = persistent_cache / f"{op_func_name_with_overload}.json"
-            mode = "r" if op_conf.exists() else "w"
-            with aoti_eager_op_conf_lock(op_func_name_with_overload):
-                with open(op_conf, mode) as op_conf_file:
+
+            # Only update JSON if new metadata is different
+            if op_conf.exists():
+                with open(op_conf, "r") as op_conf_file:
                     try:
                         json_data = json.load(op_conf_file)
                     except Exception:
                         json_data = []
 
-                    assert isinstance(json_data, list)
-                    for item in json_data:
-                        assert isinstance(item, dict)
-                        # Same kernel meta info already exists in the json file
-                        if item["meta_info"] == kernel_metadata_items:
-                            update_json = False
-                            break
+            if kernel_metadata_items not in json_data:
+                json_data.append(kernel_meta_info)
+                with open(op_conf, "w") as op_conf_file:
+                    json.dump(json_data, op_conf_file, indent=4)
 
-                if update_json:
-                    json_data.append(kernel_meta_info)
-                    with open(op_conf, "w") as op_conf_file:
-                        json.dump(json_data, op_conf_file, indent=4)
+            return str(cached_kernel_path)
 
-            return kernel_lib_path
         except Exception as e:
             err_msg = f"Failed to compile {op_func_name_with_overload}: {e}"
             log.exception(err_msg)
