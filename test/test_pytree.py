@@ -1,5 +1,6 @@
 # Owner(s): ["module: pytree"]
 
+import collections
 import enum
 import inspect
 import os
@@ -8,7 +9,7 @@ import subprocess
 import sys
 import time
 import unittest
-from collections import defaultdict, deque, namedtuple, OrderedDict, UserDict
+from collections import defaultdict, namedtuple, OrderedDict, UserDict
 from dataclasses import dataclass
 from enum import auto
 from typing import Any, NamedTuple
@@ -404,7 +405,7 @@ class TestGenericPytree(TestCase):
                 (
                     py_pytree,
                     lambda deq: py_pytree.TreeSpec(
-                        deque,
+                        collections.deque,
                         deq.maxlen,
                         [py_pytree.LeafSpec() for _ in deq],
                     ),
@@ -415,7 +416,7 @@ class TestGenericPytree(TestCase):
                 (
                     cxx_pytree,
                     lambda deq: cxx_pytree.tree_structure(
-                        deque(deq, maxlen=deq.maxlen)
+                        collections.deque(deq, maxlen=deq.maxlen)
                     ),
                 ),
                 name="cxx",
@@ -433,11 +434,11 @@ class TestGenericPytree(TestCase):
             unflattened = pytree_impl.tree_unflatten(values, treespec)
             self.assertEqual(unflattened, deq)
             self.assertEqual(unflattened.maxlen, deq.maxlen)
-            self.assertIsInstance(unflattened, deque)
+            self.assertIsInstance(unflattened, collections.deque)
 
-        run_test(deque([]))
-        run_test(deque([1.0, 2]))
-        run_test(deque([torch.tensor([1.0, 2]), 2, 10, 9, 11], maxlen=8))
+        run_test(collections.deque([]))
+        run_test(collections.deque([1.0, 2]))
+        run_test(collections.deque([torch.tensor([1.0, 2]), 2, 10, 9, 11], maxlen=8))
 
     @parametrize(
         "pytree_impl",
@@ -1469,7 +1470,7 @@ if "optree" in sys.modules:
             namedtuple: namedtuple("ANamedTuple", ["x", "y"])(1, 2),
             OrderedDict: OrderedDict([("foo", 1), ("bar", 2)]),
             defaultdict: defaultdict(int, {"foo": 1, "bar": 2}),
-            deque: deque([1, 2, 3]),
+            collections.deque: collections.deque([1, 2, 3]),
             torch.Size: torch.Size([1, 2, 3]),
             immutable_dict: immutable_dict({"foo": 1, "bar": 2}),
             immutable_list: immutable_list([1, 2, 3]),
