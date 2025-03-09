@@ -4,6 +4,8 @@ namespace torch::nn {
 
 SELUOptions::SELUOptions(bool inplace) : inplace_(inplace) {}
 
+SwiGLUOptions::SwiGLUOptions(int64_t dim) : dim_(dim) {}
+
 GLUOptions::GLUOptions(int64_t dim) : dim_(dim) {}
 
 HardshrinkOptions::HardshrinkOptions(double lambda) : lambda_(lambda) {}
