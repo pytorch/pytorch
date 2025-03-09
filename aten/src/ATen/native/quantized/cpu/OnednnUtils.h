@@ -5,7 +5,9 @@
 #include <ATen/Tensor.h>
 #include <ATen/native/quantized/PackedParams.h>
 #include <ideep.hpp>
+#if !defined(__powerpc__)
 #include <cpuinfo.h>
+#endif
 
 #include <c10/util/CallOnce.h>
 
@@ -432,7 +434,11 @@ inline bool should_use_onednn_quant(
 #if !defined(__linux__)
   return false;
 #else
-  bool vnni_available = cpuinfo_has_x86_avx512vnni();
+#if defined(__powerpc__)
+  constexpr auto vnni_available = true;
+#else
+  const auto vnni_available = cpuinfo_has_x86_avx512vnni();
+#endif
   bool w_sym_quant =
       is_weight_symmetric_quant(weight, is_transposed_conv);
   bool opad_all_zero =
