@@ -17,6 +17,7 @@
 #include <ATen/ops/_trilinear_native.h>
 #include <ATen/ops/add.h>
 #include <ATen/ops/addmm.h>
+#include <ATen/ops/addmv.h>
 #include <ATen/ops/bilinear_native.h>
 #include <ATen/ops/bmm.h>
 #include <ATen/ops/einsum_native.h>
@@ -25,6 +26,7 @@
 #include <ATen/ops/mkldnn_linear.h>
 #include <ATen/ops/mm.h>
 #include <ATen/ops/mul.h>
+#include <ATen/ops/mv.h>
 #include <ATen/ops/tensordot_native.h>
 #include <ATen/ops/zeros.h>
 #endif
@@ -91,9 +93,15 @@ Tensor linear(const Tensor& input, const Tensor& weight, const std::optional<Ten
     return xnnpack::linear(input, weight, *bias);
   }
 #endif
-  if (input_dim == 2 && bias->defined()) {
-    // Fused op is marginally faster.
-    return at::addmm(*bias, input, weight.t());
+  if (input_dim == 2) {
+    if (input.size(0) == 1) {
+      return bias->defined() ? at::addmv(*bias, weight, input)
+                             : at::mv(weight, input);
+    }
+    if (bias->defined()) {
+      // Fused op is marginally faster.
+      return at::addmm(*bias, input, weight.t());
+    }
   }
   if (bias->defined() && !input.is_xla()) {
     // Also hit the fused path for contiguous 3D input, if not using xla
