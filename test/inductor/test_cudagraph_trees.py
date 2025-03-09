@@ -2527,6 +2527,187 @@ if HAS_CUDA:
             eager_result = f(example_input)
             self.assertEqual(compiled_result, eager_result)
 
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition(self):
+            def f(x, y):
+                x1 = x + 1
+                y1 = y + 1
+                y_cpu = y1.cpu() + 1
+                z = x @ y
+                return x1 + y1 + z + y_cpu.cuda()
+
+            x, y = [torch.randn(2, 2, device="cuda") for _ in range(2)]
+            x_cloned, y_cloned = [tmp.clone() for tmp in [x, y]]
+            eager_out = f(x, y)
+
+            f_compiled = torch.compile(f, mode="reduce-overhead")
+
+            for _ in range(5):
+                compiled_out = f_compiled(x_cloned, y_cloned)
+                self.assertEqual(eager_out, compiled_out)
+
+            # 2 graph partitions lead to 2 cudagraph
+            self.assertEqual(self.get_manager().new_graph_id().id, 2)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        @torch._inductor.config.patch("triton.cudagraphs", False)
+        def test_graph_partition_reduce_overhead_mode_effectiveness(self):
+            # test that `mode="reduce-overhead"` still controls whether
+            # cudagraph is applied. i.e., cudagraph is not applied when
+            # mode="default".
+            def f(x, y):
+                x1 = x + 1
+                y1 = y + 1
+                y_cpu = y1.cpu() + 1
+                z = x @ y
+                return x1 + y1 + z + y_cpu.cuda()
+
+            x, y = [torch.randn(2, 2, device="cuda") for _ in range(2)]
+
+            f_compiled = torch.compile(f)
+            for _ in range(5):
+                _out = f_compiled(x, y)
+            self.assertEqual(self.get_manager() is None, True)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_forward_backward(self):
+            class Mod(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.linear = torch.nn.Linear(16, 16)
+
+                def forward(self, x):
+                    x1 = x + 1
+                    y1 = x + 2
+                    y_cpu = y1.cpu() + 1
+                    z = x @ y1
+                    inp = x1 + y1 + z + y_cpu.cuda()
+                    return self.linear(inp)
+
+            model = Mod().cuda()
+
+            input_data = torch.randn(16, 16).cuda()
+
+            criterion = torch.nn.CrossEntropyLoss()
+            optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+
+            compiled_model = torch.compile(model, mode="reduce-overhead")
+
+            for _ in range(5):
+                output = compiled_model(input_data)
+                loss = criterion(output, torch.randint(0, 10, (16,)).cuda())
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+
+            # 2 graph partitions lead to 2 fwd cudagraphs and 2 bwd cudagraphs
+            self.assertEqual(self.get_manager().new_graph_id().id, 4)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_cpu_only(self):
+            class Mod(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.linear = torch.nn.Linear(16, 16)
+
+                def forward(self, x):
+                    x1 = x + 1
+                    y1 = x + 2
+                    y_cpu = y1 + 1
+                    z = x @ y1
+                    inp = x1 + y1 + z + y_cpu
+                    return self.linear(inp)
+
+            model = Mod().cpu()
+
+            input_data = torch.randn(16, 16).cpu()
+
+            criterion = torch.nn.CrossEntropyLoss()
+            optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+
+            compiled_model = torch.compile(model, mode="default")
+
+            for _ in range(5):
+                output = compiled_model(input_data)
+                loss = criterion(output, torch.randint(0, 10, (16,)).cpu())
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+
+            # 0 cudagraph since all ops are on cpu
+            self.assertEqual(self.get_manager() is None, True)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_forward_with_skipped_cudagraphed_backward(self):
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return x * x * x
+
+            for _ in range(3):
+                inp = torch.rand([20, 20], device="cuda", requires_grad=True)
+                out = foo(inp)
+
+                with config.patch(always_complex_memory_overlap_TESTING_ONLY=True):
+                    back_inp = torch.empty_strided([20, 20], [0, 1], device="cuda")
+                    out.backward(back_inp)
+
+            # we should not have cudagraph'd the backwards
+            new_id = self.get_manager().new_graph_id().id
+            self.assertEqual(new_id, 1)
+
+            self.assertFalse(self.get_manager().running_forwards_with_pending_backwards)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_forward_backward_not_called(self):
+            # tests saved tensor is handled correctly
+            def foo(x, y):
+                x_out = x * x * x
+                torch._dynamo.graph_break()
+                y_out = y * y * y
+                return x_out, y_out
+
+            foo = torch.compile(foo, mode="reduce-overhead")
+
+            for _ in range(3):
+                inps = [
+                    torch.rand([20, 20], requires_grad=True, device="cuda")
+                    for _ in range(2)
+                ]
+                x_out, y_out = foo(inps[0], inps[1])
+                x_out.sum().backward()
+
+            self.assertFalse(self.get_manager().running_forwards_with_pending_backwards)
+
+            # we should not have cudagraph'd the y backward
+            new_id = self.get_manager().new_graph_id().id
+            self.assertEqual(new_id, 3)
+
+        @requires_multigpu()
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_multiple_devices_msg(self):
+            def foo(x, y):
+                return (x + 1, y + 2)
+
+            foo = torch.compile(foo, mode="reduce-overhead")
+            for _ in range(3):
+                foo(torch.ones([10], device="cuda"), torch.ones([20]))
+
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
+
+            with capture_stderr() as captured_output:
+                for _ in range(3):
+                    foo(
+                        torch.ones([10], device="cuda:0"),
+                        torch.ones([10], device="cuda:1"),
+                    )
+
+            FileCheck().check("skipping cudagraphs due to multiple devices").run(
+                captured_output[0]
+            )
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+            new_id = self.get_manager().new_graph_id().id
+            self.assertEqual(new_id, 1)
+
     class TestSAC(TestCase):
         def _make_observer_mode(self):
             class ObserverMode(TorchDispatchMode):

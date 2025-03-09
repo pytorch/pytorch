@@ -1142,7 +1142,7 @@ class _InProcessFxCompile(FxCompile):
                     # not going to touch it for now
 
                     compiled_fn: Any
-
+                    recursively_apply_fns = None
                     with dynamo_timed(
                         "GraphLowering.compile_to_fn", log_pt2_compile_event=True
                     ):
@@ -1192,7 +1192,11 @@ class _InProcessFxCompile(FxCompile):
                                     additional_files=additional_files,
                                 )
                         else:
-                            compiled_fn = graph.compile_to_module().call
+                            compiled_module = graph.compile_to_module()
+                            compiled_fn = compiled_module.call
+                            recursively_apply_fns = getattr(
+                                compiled_module, "recursively_apply_fns", None
+                            )
 
                     num_bytes, nodes_num_elem, node_runtimes = graph.count_bytes()
                     metrics.num_bytes_accessed += num_bytes
@@ -1266,6 +1270,7 @@ class _InProcessFxCompile(FxCompile):
                         graph_kwargs,
                         inputs_to_check,
                         boxed_forward_device_index,
+                        recursively_apply_fns,
                     )
 
 
