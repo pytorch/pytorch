@@ -12,6 +12,7 @@ from torch.ao.quantization.quantize_fx import (
     _check_is_graph_module,
     _convert_fx,
     _convert_standalone_module_fx,
+    convert_to_reference_fx,
     _fuse_fx,
     _prepare_fx,
     _prepare_standalone_module_fx,
