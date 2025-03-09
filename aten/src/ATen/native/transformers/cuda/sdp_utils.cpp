@@ -30,6 +30,11 @@
 #endif
 #endif
 
+// Avoid potential compiler -Wall -Werror complains undefined macro
+#ifndef AOTRITON_VERSION_MINOR
+#define AOTRITON_VERSION_MINOR 0
+#endif
+
 /**
 * Note [SDPA Runtime Dispatch]
 * SDPA relies on a runtime dispatch mechanism to select the appropriate
@@ -107,8 +112,13 @@ int64_t minimum_gemm_alignment(sdp_params const& params) {
 // caller_is_meff is added to make the TORCH_WARN message showing the correct result
 template<bool caller_is_meff = false>
 bool check_head_dim_size_flash(sdp_params const& params, bool debug) {
+#if USE_ROCM_ATTENTION && AOTRITON_VERSION_MINOR >= 9
+  // AOTriton 0.9+ supports head_dim up to 512
+  const auto max_size = c10::SymInt(512);
+#else
   // All head_dim sizes must be equal and less than 256
   const auto max_size = c10::SymInt(256);
+#endif
   const auto query_size_last = params.query.sym_size(-1);
   const auto key_size_last = params.key.sym_size(-1);
   const auto value_size_last = params.value.sym_size(-1);
@@ -232,6 +242,16 @@ bool check_flash_attention_hardware_support(sdp_params const& params, bool debug
         }
         return false;
     }
+#if AOTRITON_VERSION_MINOR >= 9
+    if (aotriton::isArchExperimentallySupported(stream)) {
+      static const bool enable_experimental = c10::utils::check_env("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL") == true;
+      if (!enable_experimental) {
+        TORCH_WARN_ONCE("Flash Efficient attention on Current AMD GPU is still experimental."
+            " Enable it with TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1.");
+        return false;
+      }
+    }
+#endif
   }
 #else
   return false;
@@ -268,6 +288,16 @@ bool check_mem_efficient_hardware_support(sdp_params const& params, bool debug) 
       }
       return false;
   }
+#if AOTRITON_VERSION_MINOR >= 9
+  if (aotriton::isArchExperimentallySupported(stream)) {
+    static const bool enable_experimental = c10::utils::check_env("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL") == true;
+    if (!enable_experimental) {
+      TORCH_WARN_ONCE("Mem Efficient attention on Current AMD GPU is still experimental."
+          " Enable it with TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1.");
+      return false;
+    }
+  }
+#endif
 #else
   return false;
 #endif
@@ -505,10 +535,23 @@ bool check_cudnn_hardware_support(sdp_params const& params, bool debug) {
 }
 
 bool check_for_nested_inputs(sdp_params const& params, bool debug) {
-  // Check that the input is nested
-  if (has_for_nested_inputs(params)) {
+  static const bool enable_cudnn_nested = c10::utils::check_env("TORCH_CUDNN_SDPA_NESTED_TENSOR_ENABLED") == true;
+  if (has_for_nested_inputs(params) && !enable_cudnn_nested) {
     if (debug) {
-      TORCH_WARN("CuDNN currently does not support nested inputs.");
+      TORCH_WARN("Experimental cuDNN SDPA nested tensor support is not enabled.");
+    }
+    return false;
+  } else if (params.query.requires_grad() || params.key.requires_grad() || params.value.requires_grad()) {
+    if (debug) {
+      TORCH_WARN("Experimental cuDNN SDPA nested tensor support does not support backward.");
+    }
+  }
+
+  const auto dprop = at::cuda::getCurrentDeviceProperties();
+  // Check that the input is nested
+  if (dprop->major != 9 && has_for_nested_inputs(params)) {
+    if (debug) {
+      TORCH_WARN("CuDNN SDPA supports nested tensors on SM 9.0.");
     }
     return false;
   }
@@ -574,7 +617,6 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
           check_runtime_disabled_cudnn,
           check_for_nested_inputs,
           check_nonzero_sequence_lengths_dense,
-          check_last_dim_stride_equals_1_dense<true /*ignore_singleton_dim>*/>,
           check_all_tensors_on_device,
           check_tensor_shapes,
           check_cudnn_tensor_shapes,
@@ -586,6 +628,18 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
   for (auto& constraint : general_constraints) {
     if (!constraint(params, debug)) {
       return false;
+    }
+  }
+  constexpr auto dense_constraints =
+      c10::array_of<bool (*)(sdp_params const&, bool)>(
+      check_last_dim_stride_equals_1_dense<true /*ignore_singleton_dim=*/>
+  );
+
+  if (has_only_dense_inputs(params)) {
+    for (auto& constraint : dense_constraints) {
+      if (!constraint(params, debug)) {
+        return false;
+      }
     }
   }
   return true;
