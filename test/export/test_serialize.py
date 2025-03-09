@@ -1622,6 +1622,46 @@ class TestSerializeCustomClass(TestCase):
         ep = deserialize(serialized_vals)
         self.assertTrue(isinstance(ep.constants["custom_obj"].get(), FakeTensor))
 
+    def test_custom_class_input_to_function(self):
+        class Foo(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
+
+            def forward(self, x):
+                return x + torch.ops._TorchScriptTesting.takes_foo(self.attr, x)
+
+        with FakeTensorMode():
+            f = Foo()
+
+        inputs = (torch.zeros(2, 3),)
+        with enable_torchbind_tracing():
+            ep = export_for_training(f, inputs, strict=False)
+
+        serialized_vals = serialize(ep)
+        ep = deserialize(serialized_vals)
+        self.assertExpectedInline(
+            str(ep.graph_module.code).strip(),
+            """\
+def forward(self, obj_attr, x):
+    takes_foo = torch.ops._TorchScriptTesting.takes_foo.default(obj_attr, x);  obj_attr = None
+    add = torch.ops.aten.add.Tensor(x, takes_foo);  x = takes_foo = None
+    return (add,)""",
+        )
+        self.assertTrue(isinstance(ep.constants["attr"], torch.ScriptObject))
+        gm = ep.module()
+        self.assertExpectedInline(
+            str(gm.code).strip(),
+            """\
+def forward(self, x):
+    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    attr = self.attr
+    takes_foo = torch.ops._TorchScriptTesting.takes_foo.default(attr, x);  attr = None
+    add = torch.ops.aten.add.Tensor(x, takes_foo);  x = takes_foo = None
+    return pytree.tree_unflatten((add,), self._out_spec)""",
+        )
+        self.assertTrue(isinstance(gm.attr, torch.ScriptObject))
+
     def test_custom_tag_metadata_serialization(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
