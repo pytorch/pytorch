@@ -6151,7 +6151,8 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         import torch
         from torch.distributions import Categorical
 
-        class SubCateg(Categorical): ...
+        class SubCateg(Categorical):
+            pass
 
         @torch.compile(backend="eager", fullgraph=True)
         def make_dist_and_execute(t, d):
