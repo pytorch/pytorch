@@ -10,6 +10,7 @@ import torch.distributed as dist
 from torch.distributed.checkpoint.default_planner import _EmptyStateDictLoadPlanner
 from torch.distributed.checkpoint.logger import _dcp_method_logger
 from torch.distributed.checkpoint.stateful import Stateful
+from torch.distributed.checkpoint.utils import DistributedCheckpointingType, _get_distributed_checkpointing_type
 
 from ._storage_utils import _storage_setup
 from .default_planner import DefaultLoadPlanner
@@ -148,12 +149,6 @@ def load(
         rank has an individual GPU, via ``torch.cuda.set_device()``.
     """
 
-    no_dist = no_dist or (not dist.is_available()) or (not dist.is_initialized())
-    if no_dist:
-        warnings.warn(
-            "torch.distributed is disabled, unavailable or uninitialized, assuming the intent is to load in a single process."
-        )
-
     with _profile():
         storage_reader = cast(
             StorageReader, _storage_setup(storage_reader, checkpoint_id, reader=True)
@@ -181,6 +176,7 @@ def load(
             no_dist=no_dist,
             planner=planner,
         )
+
         for key in keys:
             if key not in state_dict:
                 continue
@@ -204,7 +200,11 @@ def _load_state_dict(
 ) -> None:
     torch._C._log_api_usage_once("torch.distributed.checkpoint.load_state_dict")
 
-    distW = _DistWrapper(process_group, not no_dist, coordinator_rank)
+    distributed_checkpointing_type = _get_distributed_checkpointing_type(no_dist)
+    use_dist = distributed_checkpointing_type == DistributedCheckpointingType.DISTRIBUTED_CHECKPOINTING
+    use_rank_coordination = not (distributed_checkpointing_type == DistributedCheckpointingType.NO_COORDINATION_CHECKPOINTING)
+
+    distW = _DistWrapper(process_group, use_dist, coordinator_rank)
     if planner is None:
         planner = DefaultLoadPlanner()
 
@@ -216,9 +216,9 @@ def _load_state_dict(
     @_dcp_method_logger(**ckpt_kwargs)
     def local_step():
         assert planner is not None
-        metadata = storage_reader.read_metadata()
+        metadata = storage_reader.read_metadata(rank=distW.rank)
         planner.set_up_planner(state_dict, metadata, distW.is_coordinator)
-        storage_reader.set_up_storage_reader(metadata, distW.is_coordinator)
+        storage_reader.set_up_storage_reader(metadata, distW.is_coordinator, rank=distW.rank)
 
         local_plan = planner.create_local_plan()
         local_plan = storage_reader.prepare_local_plan(local_plan)
@@ -231,7 +231,13 @@ def _load_state_dict(
         all_local_plans = storage_reader.prepare_global_plan(all_local_plans)
         return all_local_plans
 
-    central_plan: LoadPlan = distW.reduce_scatter("plan", local_step, global_step)
+    if use_rank_coordination:
+        central_plan: LoadPlan = distW.reduce_scatter("plan", local_step, global_step)
+    else:
+        local_plan: LoadPlan = local_step()
+        global_plan: LoadPlan = global_step([local_plan])
+        central_plan: LoadPlan = global_plan[0]
+        torch.distributed.barrier()
 
     @_dcp_method_logger(**ckpt_kwargs)
     def read_data():
@@ -242,8 +248,11 @@ def _load_state_dict(
         all_reads.wait()
         return None
 
-    _ = distW.all_gather("read", read_data)
-
+    if use_rank_coordination:
+        _ = distW.all_gather("read", read_data)
+    else:
+        read_data()
+        torch.distributed.barrier()
 
 def _load_state_dict_from_keys(
     keys: Optional[Union[set[str], str]] = None,
