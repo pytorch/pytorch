@@ -4310,7 +4310,11 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             "The following call raised this error(.*\n)+"
             f".*{re.escape('return r.view(items[0], items[2])')}(.*\n)+"
             "To fix the error, insert one of the following checks before this call.*:\n"
+<<<<<<< HEAD
             f".*{re.escape('You can add either: torch._check_is_size(u2) or torch._check(u2>=0) Note: torch._check_is_size(u2) will get you data dependent errors that happen in a guard_size_oblivious(..) context by opting into guard_size_oblivious reasoning, but semantics could deviate slightly. See documentation on guard_size_oblivious for more details: https://pytorch.org/docs/stable/generated/torch.fx.experimental.symbolic_shapes.guard_size_oblivious.html')}.*\n"
+=======
+            f".*{re.escape('torch._check_is_size(items[2])')}.*\n"
+>>>>>>> 6b3158c0b6d (automatically convert instances of _check(u>=0) to check_is_size())
             f".*{re.escape('torch._check(items[2] < 0)')}(.*\n)+"
             f".*{re.escape('(These suggested fixes were derived by replacing `u2` with items[2] in u2 >= 0 and its negation.)')}",
         ):
@@ -7356,49 +7360,41 @@ def forward(self, b_a_buffer, x):
             _ = export(f, (torch.tensor(6),))
 
     def test_is_non_negative_check_function(self):
-        import sympy as sp
-
         from torch.fx.experimental.symbolic_shapes import _is_non_negative_check
 
-        x = sp.Symbol("x")
-        variable_name = sp.Symbol("variable_name")
-        obj_attr = sp.Symbol("obj.attr")
-        tensor_shape = sp.Symbol("tensor.shape[0]")
+        self.assertEqual(_is_non_negative_check("x >= 0"), "x")
+        self.assertEqual(_is_non_negative_check("variable_name >= 0"), "variable_name")
+        self.assertEqual(_is_non_negative_check("obj.attr >= 0"), "obj.attr")
 
-        self.assertEqual(_is_non_negative_check(x >= 0), "x")
-        self.assertEqual(_is_non_negative_check(variable_name >= 0), "variable_name")
-        self.assertEqual(_is_non_negative_check(obj_attr >= 0), "obj.attr")
-        self.assertEqual(_is_non_negative_check(tensor_shape >= 0), "tensor.shape[0]")
-
-        # Test case with extra spaces (e.g., "  x  >=  0  ")
-        self.assertEqual(_is_non_negative_check(x >= 0), "x")
-
-        # Test cases where the condition is not checking for x >= 0
-        self.assertIsNone(_is_non_negative_check(x > 0))
-        self.assertIsNone(_is_non_negative_check(x == 0))
-        self.assertIsNotNone(_is_non_negative_check(0 <= x))
-        self.assertIsNone(_is_non_negative_check(x >= 1))
+        self.assertEqual(
+            _is_non_negative_check("tensor.shape[0] >= 0"), "tensor.shape[0]"
+        )
+        self.assertEqual(_is_non_negative_check("  x  >=  0  "), "x")
+        self.assertIsNone(_is_non_negative_check("x > 0"))
+        self.assertIsNone(_is_non_negative_check("x == 0"))
+        self.assertIsNone(_is_non_negative_check("0 <= x"))
+        self.assertIsNone(_is_non_negative_check("x >= 1"))
 
     def test_suggest_torch_checks_with_non_negative_check(self):
-        from unittest.mock import patch
-
         import sympy
 
         from torch.export.dynamic_shapes import defaultdict
         from torch.fx.experimental.symbolic_shapes import _suggest_torch_checks
 
-        u = sympy.Symbol("u")
-        cond = u >= 0
         mock_exception = MagicMock(
             spec=torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
         )
         mock_exception.args = ["Test error message"]
-        mock_exception.cond = cond
+
+        mock_cond = MagicMock()
+        mock_cond.free_symbols = {sympy.Symbol("u")}
+        mock_exception.cond = mock_cond
 
         mock_printer = MagicMock()
         mock_printer.doprint.side_effect = lambda expr: (
-            str(cond) if expr == cond else "u < 0"  # Simulating the condition
+            "u >= 0" if expr == mock_cond else "u < 0"
         )
+
         with patch(
             "torch.fx.experimental.symbolic_shapes._PythonMsgPrinter",
             return_value=mock_printer,
