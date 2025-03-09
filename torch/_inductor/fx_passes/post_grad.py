@@ -72,7 +72,7 @@ pass_patterns = [
 ]
 
 
-def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
+def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool, is_backward: bool):
     """
     Passes that run on after grad.  This is called once on the forwards
     graph and once on the backwards graph.
@@ -132,6 +132,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             if pass_name in POST_GRAD_FUSIONS:
                 continue
             pattern_matcher_pass = POST_GRAD_PATTERNS[pass_name]
+            pattern_matcher_pass.is_backward = is_backward
             inductor_before_change = save_inductor_dict(
                 [pattern_matcher_pass.pass_name]
             )
