@@ -867,12 +867,13 @@ endif()
 
 include(cmake/Dependencies.cmake)
 
+# aotriton requires CUDA, only available on x86_64 and aarch64
 cmake_dependent_option(
   USE_FLASH_ATTENTION
   "Whether to build the flash_attention kernel for scaled dot product attention.\
   Will be disabled if not supported by the platform"
   ON
-  "USE_CUDA OR USE_ROCM;NOT MSVC"
+  "CPU_INTEL OR CPU_AARCH64;USE_CUDA OR USE_ROCM;NOT MSVC"
   OFF)
 
 # CAVEAT: Again, Flash Attention2 will error while building for sm52 while Mem
@@ -881,7 +882,7 @@ cmake_dependent_option(
   USE_MEM_EFF_ATTENTION
   "Enable memory-efficient attention for scaled dot product attention.\
   Will be disabled if not supported by the platform" ON
-  "USE_CUDA OR USE_ROCM" OFF)
+  "CPU_INTEL OR CPU_AARCH64;USE_CUDA OR USE_ROCM" OFF)
 
 #
 # Cannot be put into Dependencies.cmake due circular dependency:
