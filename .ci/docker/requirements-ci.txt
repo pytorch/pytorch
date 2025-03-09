@@ -145,7 +145,7 @@ opt-einsum==3.3
 #Pinned versions: 3.3
 #test that import: test_linalg.py
 
-optree==0.13.0
+git+https://github.com/metaopt/optree.git#egg=optree
 #Description: A library for tree manipulation
 #Pinned versions: 0.13.0
 #test that import: test_vmap.py, test_aotdispatch.py, test_dynamic_shapes.py,
