@@ -8,7 +8,7 @@ from .triton_compat import _log2, libdevice, math, tl, triton  # noqa: F401
 
 
 _T = TypeVar("_T")
-_LOG_2_E: tl.constexpr = pymath.log2(pymath.e)
+_LOG_2_E: tl.constexpr = tl.constexpr(pymath.log2(pymath.e))
 
 
 def set_driver_to_cpu():
