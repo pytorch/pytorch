@@ -656,6 +656,8 @@ aoti_torch_get_current_cuda_stream(int32_t device_index, void** ret_stream);
 
 #endif // USE_CUDA
 
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_libtorch_version(const char* str);
+
 // See `ProxyExecutor Design Note` in ir.py for more details
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_proxy_executor_call_function(
     AOTIProxyExecutorHandle proxy_executor,
