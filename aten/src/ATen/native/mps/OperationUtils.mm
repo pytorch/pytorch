@@ -965,44 +965,48 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
                                            std::optional<int64_t> extra) {
   auto inputTensor = iter.input(0);
   auto outputTensor = iter.output(0);
-  bool is_dense_strided = is_dense_in_storage(inputTensor) && inputTensor.strides().equals(outputTensor.strides());
-  bool needs_output_copy = false;
-  uint32_t length = outputTensor.numel();
+  bool is_storage_dense = is_dense_in_storage(inputTensor) && inputTensor.strides().equals(outputTensor.strides());
+  uint32_t length = iter.numel();
   if (length == 0) {
     return;
   }
   using namespace mps;
   @autoreleasepool {
     id<MTLComputePipelineState> cplState = nil;
-    cplState = getPipelineStateForFunc(fmt::format(
-        "{}_dense_{}_{}", name, scalarToMetalTypeString(outputTensor), scalarToMetalTypeString(inputTensor)));
-
-    if (!is_dense_strided) {
-      inputTensor = inputTensor.contiguous();
-      if (!outputTensor.is_contiguous()) {
-        outputTensor = outputTensor.contiguous();
-        needs_output_copy = true;
-      }
-    }
+    cplState = getPipelineStateForFunc(fmt::format("{}_{}_{}_{}",
+                                                   name,
+                                                   is_storage_dense ? "dense" : "strided",
+                                                   scalarToMetalTypeString(outputTensor),
+                                                   scalarToMetalTypeString(inputTensor)));
 
     MPSStream* mpsStream = getCurrentMPSStream();
     dispatch_sync(mpsStream->queue(), ^() {
-      id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
+      auto computeEncoder = mpsStream->commandEncoder();
 
       getMPSProfiler().beginProfileKernel(cplState, name, {inputTensor});
 
       [computeEncoder setComputePipelineState:cplState];
-      mtl_setArgs(computeEncoder, outputTensor, inputTensor);
-      if (extra) {
-        mtl_setBytes(computeEncoder, *extra, 2);
+      if (is_storage_dense) {
+        mtl_setArgs(computeEncoder, outputTensor, inputTensor);
+        if (extra) {
+          mtl_setBytes(computeEncoder, *extra, 2);
+        }
+      } else {
+        mtl_setArgs(computeEncoder,
+                    outputTensor,
+                    inputTensor,
+                    outputTensor.sizes(),
+                    inputTensor.strides(),
+                    outputTensor.strides(),
+                    inputTensor.ndimension());
+        if (extra) {
+          mtl_setBytes(computeEncoder, *extra, 6);
+        }
       }
       mtl_dispatch1DJob(computeEncoder, cplState, length);
 
       getMPSProfiler().endProfileKernel(cplState);
     });
-  }
-  if (needs_output_copy) {
-    iter.output(0).copy_(outputTensor);
   }
 }
 
