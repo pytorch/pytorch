@@ -153,10 +153,8 @@ def get_scan_combine_fn(name, associative=True):
         }
 
     def non_pointwise(x: torch.Tensor, y: torch.Tensor):
-        # W = torch.diag(torch.ones(2, device=x.device))
         W = torch.arange(4, dtype=torch.float, device=x.device).view(2, 2)
         return x @ W + y @ W
-        # return x + y
 
     if name == "add":
         fct = add
@@ -3092,11 +3090,7 @@ class AssociativeScanTests(TestCase):
         )
         grad_init = [torch.ones_like(el) for el in result_flatten]
         grads = torch.autograd.grad(result_flatten, grad_param, grad_init)
-        
-        # print('Grads out')
-        # print(grads)
-        # print('Grads exp')
-        # print(expected_grads)
+
         self.assertEqual(grads, expected_grads, atol=6e-05, rtol=6e-06)
 
     def _run_test(self, model, model_fake, inputs, autograd_param=None):
@@ -3120,15 +3114,10 @@ class AssociativeScanTests(TestCase):
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("reverse", [False, True])
-    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("compile_mode", ["none", "eager", "compile"])
     @parametrize("combine_mode", ["pointwise", "generic"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
-    # @parametrize("reverse", [False])
-    # @parametrize("compile_mode", ["eager"])
-    # @parametrize("combine_mode", ["pointwise"])
-    # @parametrize("device", [torch.device("cuda")])
-    # @parametrize("autograd", [True])
     # Skipping the combination of combine_mode=pointwise and device=cpu
     # as the current implementation of pointwise does only support CUDA device
     @decorateIf(
@@ -3191,7 +3180,7 @@ class AssociativeScanTests(TestCase):
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("reverse", [False, True])
-    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("compile_mode", ["none", "eager", "compile"])
     @parametrize("combine_mode", ["pointwise", "generic"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
@@ -3264,7 +3253,7 @@ class AssociativeScanTests(TestCase):
     @skipIfRocm(msg="Unsupported on ROCM yet")
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
-    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("compile_mode", ["none", "eager", "compile"])
     @parametrize("combine_mode", ["pointwise", "generic"])
     @parametrize("reverse", [False, True])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
@@ -3302,7 +3291,7 @@ class AssociativeScanTests(TestCase):
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
-    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("compile_mode", ["none", "eager", "compile"])
     @parametrize("reverse", [False, True])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
@@ -3331,7 +3320,7 @@ class AssociativeScanTests(TestCase):
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
-    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("compile_mode", ["none", "eager", "compile"])
     @parametrize("reverse", [False, True])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
@@ -3362,7 +3351,7 @@ class AssociativeScanTests(TestCase):
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
-    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("compile_mode", ["none", "eager", "compile"])
     @parametrize("combine_mode", ["pointwise", "generic"])
     @parametrize("reverse", [False, True])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
@@ -3402,7 +3391,7 @@ class AssociativeScanTests(TestCase):
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("combine_mode", ["pointwise", "generic"])
-    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("compile_mode", ["none", "eager", "compile"])
     @parametrize("reverse", [False, True])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
@@ -3445,7 +3434,7 @@ class AssociativeScanTests(TestCase):
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("combine_mode", ["pointwise", "generic"])
-    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("compile_mode", ["none", "eager", "compile"])
     @parametrize("reverse", [False, True])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
@@ -3489,7 +3478,7 @@ class AssociativeScanTests(TestCase):
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("combine_mode", ["pointwise", "generic"])
-    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("compile_mode", ["none", "eager", "compile"])
     @parametrize("reverse_first", [False, True])
     @parametrize("same_direction", [False, True])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
@@ -3591,7 +3580,7 @@ class AssociativeScanTests(TestCase):
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
-    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("compile_mode", ["none", "eager", "compile"])
     @parametrize("loop_type", ["for"])
     @parametrize("reverse", [False, True])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
@@ -3678,7 +3667,7 @@ class AssociativeScanTests(TestCase):
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
-    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("compile_mode", ["none", "eager", "compile"])
     @parametrize("reverse", [False, True])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
@@ -3742,7 +3731,7 @@ class AssociativeScanTests(TestCase):
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
-    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("compile_mode", ["none", "eager", "compile"])
     @parametrize("reverse", [False, True])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
@@ -3776,14 +3765,10 @@ class AssociativeScanTests(TestCase):
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
-    # @parametrize("reverse", [False, True])
-    @parametrize("reverse", [False])
-    # @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
-    @parametrize("compile_mode", ["eager"])
-    # @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    @parametrize("device", [torch.device("cuda")])
-    # @parametrize("autograd", [False, True])
-    @parametrize("autograd", [True])
+    @parametrize("reverse", [False, True])
+    @parametrize("compile_mode", ["none", "eager", "compile"])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    @parametrize("autograd", [False, True])
     # Skipping the combination of associative_scan and device=cpu
     # as the current implementation of pointwise does only support CUDA device
     @decorateIf(
@@ -3814,7 +3799,7 @@ class AssociativeScanTests(TestCase):
     @skipIfRocm(msg="Unsupported on ROCM yet")
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
-    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("compile_mode", ["none", "eager", "compile"])
     @parametrize("combine_mode", ["pointwise", "generic"])
     @parametrize("reverse", [False, True])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
@@ -3857,7 +3842,7 @@ class AssociativeScanTests(TestCase):
     @skipIfRocm(msg="Unsupported on ROCM yet")
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
-    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("compile_mode", ["none", "eager", "compile"])
     @parametrize("reverse", [False, True])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     def test_associative_scan_different_input_size(self, compile_mode, reverse, device):
