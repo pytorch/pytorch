@@ -1208,6 +1208,13 @@ void aoti_torch_print_tensor_handle(AtenTensorHandle self, const char* msg) {
   std::cout << '\n';
 }
 
+#include <torch/version.h>
+AOTITorchError aoti_torch_get_libtorch_version(const char* str) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    *str = TORCH_VERSION;
+  });
+}
+
 // ProxyExecutor
 AOTITorchError aoti_torch_proxy_executor_call_function(
     AOTIProxyExecutorHandle proxy_executor,
