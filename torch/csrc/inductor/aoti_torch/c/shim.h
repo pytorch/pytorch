@@ -672,6 +672,15 @@ aoti_torch_library_def(TorchLibraryHandle self, const char* name);
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_delete_library_object(TorchLibraryHandle tlh);
 
+// calls the op overload defined by a given opName, overloadName, and a
+// stack of StableIValues. This call will append any return values of the
+// op into the stack in their StableIValue form. The stack will thus have
+// all the input arguments followed by the returns of the op.
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_call_dispatcher(
+    const char* opName,
+    const char* overloadName,
+    StableIValue* stack);
+
 #ifdef USE_CUDA
 
 struct CUDAGuardOpaque;
@@ -794,14 +803,5 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__weight_int4pack_mm_cpu_tensor(
     AtenTensorHandle qGroupSize,
     AtenTensorHandle qScaleAndZeros,
     AtenTensorHandle* ret0);
-
-// calls the op overload defined by a given opName, overloadName, and a
-// stack of StableIValues. This call will append any return values of the
-// op into the stack in their StableIValue form. The stack will thus have
-// all the input arguments followed by the returns of the op.
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch_call_dispatcher(
-    const char* opName,
-    const char* overloadName,
-    StableIValue* stack);
 
 #endif // AOTI_TORCH_SHIM
