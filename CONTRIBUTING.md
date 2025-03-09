@@ -206,7 +206,7 @@ You can also use this tool to pull the nightly commits into the current branch:
 
 ```bash
 ./tools/nightly.py pull -p my-env
-source my-env/bin/activate  # or `& .\my-env\Scripts\Activate.ps1` on Windows
+source my-env/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
 ```
 
 Pulling will recreate a fresh virtual environment and reinstall the development
@@ -1329,18 +1329,3 @@ PR's commit (commit `B`). Please note, this scenario would never affect PRs auth
 
 ## Dev Infra Office Hours
 [Dev Infra Office Hours](https://github.com/pytorch/pytorch/wiki/Dev-Infra-Office-Hours) are hosted every Friday to answer any questions regarding developer experience, Green HUD, and CI.
-
-{{ ... }}
-If you want to add a new operator you will need to write:
-1. Tests (see above)
-2. Implementation (see above)
-3. A gradient implementation for it in torch/autograd
-4. Binding to Python (optional, but you need this if you want your operator to be accessed from Python)
-
-The following explains in detail how to implement an operator in PyTorch:
-
-Similar to TH, you first need to implement a function
-{{ ... }}
-Autograd allows you to define a custom backward function for your operations through the
-Function class. You can find more details and the exact semantics across
-{{ ... }}
