@@ -54,7 +54,12 @@ from torch._functorch.aot_autograd import (
     make_boxed_func,
     SerializableAOTDispatchCompiler,
 )
-from torch._inductor.codecache import code_hash, FxGraphCache, output_code_log
+from torch._inductor.codecache import (
+    code_hash,
+    extract_tensor_metadata_for_cache_key,
+    FxGraphCache,
+    output_code_log,
+)
 from torch._inductor.cudagraph_utils import (
     BoxedDeviceIndex,
     format_default_skip_message,
@@ -122,6 +127,7 @@ from .virtualized import V
 if TYPE_CHECKING:
     from collections.abc import Generator, Sequence
 
+    from torch._dynamo.sticky_cache import _StickyCache
     from torch._inductor.output_code import _StrideExprStr
     from torch._ops import OpOverload
 
@@ -568,6 +574,7 @@ class _CompileFxKwargs(TypedDict, total=False):
     layout_opt: Optional[bool]
     extern_node_serializer: Optional[Callable[[list[ExternKernelNode]], Any]]
     boxed_forward_device_index: Optional[BoxedDeviceIndex]
+    sticky_cache: Optional[_StickyCache]
 
 
 class _CompileFxCallable(Protocol):
@@ -593,6 +600,7 @@ def compile_fx_inner(
     kwargs.setdefault("boxed_forward_device_index", None)
     kwargs.setdefault("layout_opt", None)
     kwargs.setdefault("extern_node_serializer", None)
+    kwargs.setdefault("sticky_cache", None)
 
     # Need with_fresh_cache_if_config for compile_fx_inner even if we already have one for
     # compile_fx. The reason is the compilation for backward graph may happen after
@@ -644,7 +652,7 @@ def _compile_fx_inner(
     If you change the argument list for this function, make sure you
     also update the call to save_args_for_compile_fx_inner below accordingly.
     """
-    aot_mode: bool = V.aot_compilation
+    aot_mode: bool = V.aot_compilation or graph_kwargs.get("sticky_cache") is not None
 
     if dynamo_utils.count_calls(gm.graph) == 0 and not aot_mode:
         # trigger the real recompilation for _LazyGraphModule before returning
@@ -907,8 +915,9 @@ class _InProcessFxCompile(FxCompile):
         static_input_idxs: Sequence[int] = graph_kwargs.get("static_input_idxs", ())
         is_backward: bool = graph_kwargs.get("is_backward", False)
         graph_id: Optional[int] = graph_kwargs.get("graph_id", None)
+        sticky_cache = graph_kwargs.get("sticky_cache")
         cpp_wrapper: bool = graph_kwargs.get("cpp_wrapper", False)
-        aot_mode: bool = V.aot_compilation
+        aot_mode: bool = V.aot_compilation or sticky_cache is not None
         is_inference: bool = graph_kwargs.get("is_inference", False)
         extern_node_serializer: Optional[Callable[[list[ExternKernelNode]], Any]] = (
             graph_kwargs.get("extern_node_serializer", None)
@@ -1105,12 +1114,12 @@ class _InProcessFxCompile(FxCompile):
                     is_inference=is_inference,
                     is_backward=is_backward,
                     const_output_index=const_output_index,
-                    const_wrapper_code=const_wrapper_code.value
-                    if const_wrapper_code
-                    else None,
-                    const_kernel_code=const_kernel_code.value
-                    if const_kernel_code
-                    else None,
+                    const_wrapper_code=(
+                        const_wrapper_code.value if const_wrapper_code else None
+                    ),
+                    const_kernel_code=(
+                        const_kernel_code.value if const_kernel_code else None
+                    ),
                     const_module=const_graph,
                     inputs_to_check=inputs_to_check,
                 )
@@ -1234,9 +1243,48 @@ class _InProcessFxCompile(FxCompile):
                                 disable = f"{disable} Found from {stack_trace}\n"
                             V.graph.disable_cudagraphs_reason = disable
 
-                    if V.aot_compilation:
+                    if aot_mode:
                         assert isinstance(compiled_fn, (str, list))
-                        return CompiledAOTI(compiled_fn)
+                        if sticky_cache:
+                            if is_backward:
+                                sticky_cache.unimplemented("backward graph compilation")
+                            if isinstance(compiled_fn, list):
+                                current_callable = next(
+                                    fn for fn in compiled_fn if fn.endswith(".so")
+                                )
+                            else:
+                                current_callable = compiled_fn
+
+                            if graph.device_type.startswith("cuda"):
+                                current_callable = (
+                                    torch._C._aoti.AOTIModelContainerRunnerCuda(  # type: ignore[call-arg]
+                                        current_callable, 1, graph.device_type
+                                    ).run  # type: ignore[attr-defined]
+                                )  # type: ignore[attr-defined]
+                            elif graph.device_type == "cpu":
+                                current_callable = (
+                                    torch._C._aoti.AOTIModelContainerRunnerCpu(  # type: ignore[call-arg]
+                                        current_callable, 1
+                                    ).run  # type: ignore[attr-defined]
+                                )  # type: ignore[attr-defined]
+                            else:
+                                sticky_cache.unimplemented(
+                                    f"unsupported device type {graph.device_type}"
+                                )
+
+                            aoti = CompiledAOTI(compiled_fn, current_callable)
+                            # TODO we can get rid of inputs metadata after we serialize dynamo guards.
+                            sticky_cache.current_precompile.add_inputs_metadata(
+                                [
+                                    extract_tensor_metadata_for_cache_key(t)
+                                    for t in example_inputs
+                                    if isinstance(t, torch.Tensor)
+                                ]
+                            )
+                            sticky_cache.current_precompile.add_aoti(aoti)
+                            return aoti
+                        else:
+                            return CompiledAOTI(compiled_fn, None)
 
                     # TODO: Hoist this above V.aot_compilation
                     if cudagraphs and not V.graph.disable_cudagraphs_reason:
@@ -1708,6 +1756,7 @@ def compile_fx(
     inner_compile: Callable[..., OutputCode] = compile_fx_inner,
     config_patches: Optional[dict[str, Any]] = None,
     decompositions: Optional[dict[OpOverload, Callable[..., Any]]] = None,
+    sticky_cache: Optional[_StickyCache] = None,
 ) -> Union[Callable[[list[object]], Sequence[torch.Tensor]], str, list[str]]:
     """
     Main entry point for compiling given FX graph.  Despite the fact that this
@@ -1732,6 +1781,7 @@ def compile_fx(
                 # need extra layer of patching as backwards is compiled out of scope
                 inner_compile=config.patch(config_patches)(inner_compile),
                 decompositions=decompositions,
+                sticky_cache=sticky_cache,
             )
 
     # TODO: This probably shouldn't be a recursive call
@@ -1777,12 +1827,14 @@ def compile_fx(
                 inputs_,
                 inner_compile=functools.partial(inner_compile, cpp_wrapper=True),
                 decompositions=decompositions,
+                sticky_cache=sticky_cache,
             )
 
     recursive_compile_fx = functools.partial(
         compile_fx,
         inner_compile=inner_compile,
         decompositions=decompositions,
+        sticky_cache=sticky_cache,
     )
 
     if not graph_returns_tuple(model_):
@@ -1801,6 +1853,9 @@ def compile_fx(
             example_inputs_,
             recursive_compile_fx,
         )
+
+    if sticky_cache is not None:
+        inner_compile = functools.partial(inner_compile, sticky_cache=sticky_cache)
 
     # Do the actual work
 
@@ -2092,6 +2147,7 @@ def compile_fx(
                     partition_fn=partition_fn,
                     keep_inference_input_mutations=True,
                     cudagraphs=cudagraphs,
+                    sticky_cache=sticky_cache,
                 )(model_, example_inputs_)
             except ShortenTraceback as e:
                 # We will also shorten the traceback inside dynamo.
