@@ -12,7 +12,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/arange.h>
+#include <ATen/ops/linspace.h>
 #include <ATen/ops/empty_like.h>
 #include <ATen/ops/empty_strided.h>
 #include <ATen/ops/sort_native.h>
@@ -29,7 +29,7 @@ void fillSliceWithIndex(const Tensor& t, int64_t dim) {
   if (t.numel()) {
     auto sizes = DimVector(t.dim(), 1);
     sizes[dim] = t.sizes()[dim];
-    auto range = at::arange(t.sizes()[dim], t.options());
+    auto range = at::linspace(0, t.sizes()[dim] - 1, t.sizes()[dim], t.options());
     auto rangeview = range.view(sizes);
     t.copy_(rangeview);
   }
@@ -110,7 +110,7 @@ void sort_cuda_kernel(
 
   if (indices.strides() != self_.strides()) {
     indices_tmp = c10::MaybeOwned<Tensor>::owned(
-        at::empty_strided(self_.sizes(), self_.strides(), self_.options().dtype(kLong)));
+        at::empty_strided(self_.sizes(), self_.strides(), self_.options().dtype(indices.scalar_type())));
   } else {
     indices_tmp = c10::MaybeOwned<Tensor>::borrowed(indices);
   }

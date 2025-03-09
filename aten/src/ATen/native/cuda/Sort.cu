@@ -2,6 +2,7 @@
 #include <ATen/native/cuda/Sort.h>
 #include <ATen/core/TensorBase.h>
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/cuda/cub.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/KernelUtils.h>
@@ -278,7 +279,7 @@ struct MediumRadixSort {
   }
 };
 
-template <typename Sorter>
+template <typename idx_scalar_t, typename Sorter>
 void sortCommon(Sorter sorter, const TensorBase &key, const TensorBase &value,
                 int dim, bool descending) {
   TORCH_CHECK(key.sizes() == value.sizes(),
@@ -310,12 +311,13 @@ void sortCommon(Sorter sorter, const TensorBase &key, const TensorBase &value,
   // we are sorting on a per-block basis
   // The constructed key/value tensor info is used to select the slice
   // we are sorting on a per-block basis
+
   AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Half, at::ScalarType::BFloat16, at::ScalarType::Bool, key.scalar_type(), "sortKeyValueInplace", [&]  {
     if (at::cuda::detail::canUse32BitIndexMath(key)) {
       at::cuda::detail::TensorInfo<scalar_t, unsigned int> keyInfo =
         at::cuda::detail::getTensorInfo<scalar_t, unsigned int>(key);
-      at::cuda::detail::TensorInfo<int64_t, unsigned int> valueInfo =
-        at::cuda::detail::getTensorInfo<int64_t, unsigned int>(value);
+      at::cuda::detail::TensorInfo<idx_scalar_t, unsigned int> valueInfo =
+        at::cuda::detail::getTensorInfo<idx_scalar_t, unsigned int>(value);
 
       auto strideKey = keyInfo.strides[dim];
       keyInfo.sizes[dim] = 1;
@@ -342,8 +344,8 @@ void sortCommon(Sorter sorter, const TensorBase &key, const TensorBase &value,
     } else {
       at::cuda::detail::TensorInfo<scalar_t, uint64_t> keyInfo =
         at::cuda::detail::getTensorInfo<scalar_t, uint64_t>(key);
-      at::cuda::detail::TensorInfo<int64_t, uint64_t> valueInfo =
-        at::cuda::detail::getTensorInfo<int64_t, uint64_t>(value);
+      at::cuda::detail::TensorInfo<idx_scalar_t, uint64_t> valueInfo =
+        at::cuda::detail::getTensorInfo<idx_scalar_t, uint64_t>(value);
 
       auto strideKey = keyInfo.strides[dim];
       keyInfo.sizes[dim] = 1;
@@ -368,18 +370,21 @@ void sortKeyValueInplace(
     bool descending,
     bool stable) {
   const auto sort_size = key.size(dim);
-  if (sort_size <= 1) {
-    return; // Already sorted
-  } else if (!stable && sort_size <= 32) {
-    // NOTE: Bitonic sort is unstable
-    sortCommon(SmallBitonicSort{}, key, value, dim, descending);
-#if HAS_WARP_MERGE_SORT()
-  } else if (sort_size <= 128) {
-    sortCommon(WarpMergeSort<128>{}, key, value, dim, descending);
-#endif
-  } else {
-    sortCommon(MediumRadixSort{}, key, value, dim, descending);
-  }
+  AT_DISPATCH_V2(value.scalar_type(), "sortKeyValueInplace", AT_WRAP([&] {
+    if (sort_size <= 1) {
+      return; // Already sorted
+    } else if (!stable && sort_size <= 32) {
+      // NOTE: Bitonic sort is unstable
+      sortCommon<scalar_t>(SmallBitonicSort{}, key, value, dim, descending);
+  #if HAS_WARP_MERGE_SORT()
+    } else if (sort_size <= 128) {
+      sortCommon<scalar_t>(WarpMergeSort<128>{}, key, value, dim, descending);
+  #endif
+    } else {
+      sortCommon<scalar_t>(MediumRadixSort{}, key, value, dim, descending);
+    }
+  }), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kByte, kLong);
+
 }
 
 }  // namespace at::native
