@@ -143,6 +143,13 @@ def lift_constants_pass(
         input_specs.kind == InputKind.CONSTANT_TENSOR for input_specs in inputs
     )
 
+    # In TS converter, tensor constants are traced as BUFFER and later we 
+    # will convert them back to CONSTANT_TENSOR. So need to prevent 
+    # naming conflicts with the tensor constants being lifted here
+    for input_spec in inputs:
+        if input_spec.kind == InputKind.BUFFER and input_spec.target.startswith("lifted_tensor_"):
+            num_tensor_constants = max(num_tensor_constants, int(input_spec.target.split("_")[-1])+1)
+
     fake_mode = detect_fake_mode(
         tuple(node.meta["val"] for node in gm.graph.nodes if node.op == "placeholder")
     )
