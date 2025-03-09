@@ -279,7 +279,7 @@ def _load_state_dict_from_keys(
         Rank 0 is assumed to be the coordinator rank.
 
     Args:
-        keys (Optional[Union[Set[str], str]]):
+        keys (Optional[Union[set[str], str]]):
             Loads any key specified in this set. If no keys are specified, the entire checkpoint
             is loaded.
         checkpoint_id (Union[str, os.PathLike, None]):

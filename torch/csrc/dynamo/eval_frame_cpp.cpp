@@ -290,3 +290,27 @@ PyObject* dynamo__custom_eval_frame(
   }
   return eval_result;
 }
+
+PyObject* set_code_exec_strategy(PyObject* dummy, PyObject* args) {
+  PyObject* code_obj = nullptr;
+  PyObject* strategy_obj = nullptr;
+  if (!PyArg_ParseTuple(args, "OO", &code_obj, &strategy_obj)) {
+    return nullptr;
+  }
+  if (!PyCode_Check(code_obj)) {
+    PyErr_SetString(PyExc_TypeError, "expected a code object");
+    return nullptr;
+  }
+
+  PyCodeObject* code = (PyCodeObject*)code_obj;
+  ExtraState* extra = get_extra_state(code);
+  if (extra == nullptr) {
+    extra = init_and_set_extra_state(code);
+  }
+
+  FrameExecStrategy strategy =
+      py::handle(strategy_obj).cast<FrameExecStrategy>();
+
+  extra_state_set_exec_strategy(extra, strategy);
+  Py_RETURN_NONE;
+}
