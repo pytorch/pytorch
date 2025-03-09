@@ -912,6 +912,15 @@ def check_amx_extra(config, m, n, k, alpha, num_threads, **kwargs):
     return k % vnni_size == 0 and alpha == 1
 
 
+# amx_fp16 need to be checked separately since it is not always supported when amx is supported
+def check_amx_fp16_extra(config, m, n, k, alpha, num_threads, **kwargs):
+    assert config.input_dtype == torch.float16 and config.output_dtype == torch.float
+    vec_isa = kwargs.get("vec_isa", None)
+    assert vec_isa is not None
+    vnni_size = 2
+    return vec_isa.is_amx_fp16_supported() and k % vnni_size == 0 and alpha == 1
+
+
 @register_micro_gemm(
     *generate_gemm_config(
         VecAMX,
@@ -937,6 +946,13 @@ def check_amx_extra(config, m, n, k, alpha, num_threads, **kwargs):
         input_dtype=torch.bfloat16,
         output_dtype=torch.float,
         extra_check=check_amx_extra,
+    ),
+    *generate_gemm_config(
+        VecAMX,
+        [(32, 32, 32), (48, 16, 32), (16, 48, 32)],
+        input_dtype=torch.float16,
+        output_dtype=torch.float,
+        extra_check=check_amx_fp16_extra,
     ),
     *generate_gemm_config(
         VecAMX,
@@ -1135,7 +1151,11 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
         _tile_dpbusd({{tile_idx_c}}, {{tile_idx_a}}, {{tile_idx_b}});
             {%- endif %}
         {%- else %}
+            {%- if input_dtype == torch.float16 %}
+        _tile_dpfp16ps({{tile_idx_c}}, {{tile_idx_a}}, {{tile_idx_b}});
+            {%- else %}
         _tile_dpbf16ps({{tile_idx_c}}, {{tile_idx_a}}, {{tile_idx_b}});
+            {%- endif %}
         {%- endif %}
     {%- endfor %}
 {%- endfor %}
@@ -1624,7 +1644,14 @@ def create_micro_gemm(
                 # subject to change in the future.
             ):
                 if config.extra_check is not None and not config.extra_check(
-                    config, m, n, k, alpha, num_threads, q_group_size=q_group_size
+                    config,
+                    m,
+                    n,
+                    k,
+                    alpha,
+                    num_threads,
+                    q_group_size=q_group_size,
+                    vec_isa=vec_isa,
                 ):
                     continue
                 block_m, block_n, block_k = config.register_blocking
