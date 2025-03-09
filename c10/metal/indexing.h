@@ -59,7 +59,7 @@ kernel void unary_strided(
     constant long* sizes [[buffer(2)]],
     constant long* input_strides [[buffer(3)]],
     constant long* output_strides [[buffer(4)]],
-    constant uint& ndim,
+    constant uint& ndim [[buffer(5)]],
     uint index [[thread_position_in_grid]]) {
   F f;
   int pos[max_ndim];

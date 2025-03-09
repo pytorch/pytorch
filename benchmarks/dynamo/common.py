@@ -1419,7 +1419,7 @@ class AOTInductorModelCache:
                 # see https://github.com/pytorch/pytorch/issues/113029
                 example_outputs = copy.deepcopy(model)(*example_args, **example_kwargs)
 
-            if pytree._is_namedtuple_instance(example_outputs):
+            if pytree.is_namedtuple_instance(example_outputs):
                 typ = type(example_outputs)
                 pytree._register_namedtuple(
                     typ,
@@ -1822,6 +1822,10 @@ class BenchmarkRunner:
 
     @property
     def skip_models_due_to_control_flow(self):
+        return set()
+
+    @property
+    def skip_models_due_to_export_not_supported(self):
         return set()
 
     @property
@@ -3786,6 +3790,7 @@ def run(runner, args, original_dir=None):
 
             # AOTInductor doesn't support control flow yet
             runner.skip_models.update(runner.skip_models_due_to_control_flow)
+            runner.skip_models.update(runner.skip_models_due_to_export_not_supported)
         elif args.backend == "torchao":
             assert "cuda" in args.devices, "Quantization requires CUDA device."
             assert args.bfloat16, "Quantization requires dtype bfloat16."

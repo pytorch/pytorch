@@ -970,9 +970,6 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
   if (length == 0) {
     return;
   }
-  auto inputTensor = iter.input(0);
-  auto outputTensor = iter.output(0);
-  const auto is_dense = inputTensor.is_contiguous() && outputTensor.is_contiguous();
   using namespace mps;
   @autoreleasepool {
     id<MTLComputePipelineState> cplState = nil;
@@ -989,7 +986,7 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
       getMPSProfiler().beginProfileKernel(cplState, name, {inputTensor});
 
       [computeEncoder setComputePipelineState:cplState];
-      if (is_dense) {
+      if (is_storage_dense) {
         mtl_setArgs(computeEncoder, outputTensor, inputTensor);
         if (extra) {
           mtl_setBytes(computeEncoder, *extra, 2);
@@ -1003,7 +1000,7 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
                     outputTensor.strides(),
                     inputTensor.ndimension());
         if (extra) {
-          mtl_setBytes(computeEncoder, *extra, 7);
+          mtl_setBytes(computeEncoder, *extra, 6);
         }
       }
       mtl_dispatch1DJob(computeEncoder, cplState, length);
