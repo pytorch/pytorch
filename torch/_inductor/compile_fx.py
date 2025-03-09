@@ -834,10 +834,16 @@ def _compile_fx_inner(
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
 
     # This message is for printing overview information of inductor mm counts, shapes,etc after lowering
+    from tabulate import tabulate
+
+    mm_table_data = []
+    for key, value in counters["aten_mm_info"].items():
+        name, m, n, k = key.split("_")
+        mm_table_data.append([name, m, n, k, value])
     log.info(
-        "Overview info of inductor aten mms: %s",
-        ", ".join(
-            f"({key}: {value})" for key, value in counters["aten_mm_info"].items()
+        "Overview info of inductor aten mms:\n%s",
+        tabulate(
+            mm_table_data, headers=["Name", "M", "N", "K", "Count"], tablefmt="grid"
         ),
     )
 
