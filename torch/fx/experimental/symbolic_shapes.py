@@ -2811,9 +2811,7 @@ class DimConstraints:
             return (
                 self._is_dim(dim)
                 and ("min" in c or "max" in c)
-                and (
-                    (dim.min < 2 and c.get("min", 2) == 2) or dim.min == c.get("min", 2)  # type: ignore[attr-defined]
-                )  # let pass if analysis min = 2 and specified min = 0/1
+                and dim.min == c.get("min", 0)  # type: ignore[attr-defined]
                 and dim.max == c.get("max", int_oo)  # type: ignore[attr-defined]
             )
 
@@ -2835,7 +2833,7 @@ class DimConstraints:
                     introduced_roots[str(root)] = k
                     # calculate necessary min & max
                     modulus, remainder = sympy.polys.polytools.div(c["eq"], root)
-                    c_min = c.get("min", 2)
+                    c_min = c.get("min", 0)
                     min_ = math.ceil((c_min - remainder) / modulus)
                     c_max = c.get("max", int_oo)
                     max_ = math.floor((c_max - remainder) / modulus)
@@ -3290,9 +3288,9 @@ class ShapeEnv:
         self.size_like: set[sympy.Symbol] = set()
         # Duck-shaping says that if two input tensors have the same size,
         # they get assigned the same symbolic variable
-        self.val_to_var: dict[int, sympy.Symbol] = {}
-        if specialize_zero_one:
-            self.val_to_var = {0: sympy.S.Zero, 1: sympy.S.One}
+        self.val_to_var: dict[int, sympy.Symbol] = {0: sympy.S.Zero, 1: sympy.S.One}
+        # if specialize_zero_one:
+        #     self.val_to_var = {0: sympy.S.Zero, 1: sympy.S.One}
         self.unbacked_symfloat_counter = itertools.count()
         self.unbacked_symint_counter = itertools.count()
         # Similar to guards, but these MUST evaluate to true and can
@@ -4084,6 +4082,7 @@ class ShapeEnv:
                 TensorPropertySource(source, TensorProperty.STORAGE_OFFSET),
                 dynamic_dim=dynamic_offset,
                 constraint_dim=None,
+                specialize_zero_one=True,
                 symbolic_context=symbolic_context,
             ),
             hint=ex_storage_offset,
@@ -4393,7 +4392,7 @@ class ShapeEnv:
             dynamic_dim,
             constraint_dim,
             positive=None,
-            do_not_specialize_zero_one=True,
+            specialize_zero_one=False,
             symbolic_context=symbolic_context,
         )
 
@@ -4405,10 +4404,12 @@ class ShapeEnv:
         dynamic_dim: DimDynamic = DimDynamic.DUCK,
         constraint_dim: DimConstraint = None,  # NB: includes None
         positive: Optional[bool] = True,
-        do_not_specialize_zero_one: bool = False,
+        specialize_zero_one: Optional[bool] = None,
         symbolic_context: Optional[StatelessSymbolicContext] = None,
     ) -> sympy.Expr:
         """Create a new symbol which is tracked by this ShapeEnv"""
+        from torch._dynamo.source import TensorProperty, TensorPropertySource
+
         # check if constraint_dim is actually static integer
         if (
             isinstance(constraint_dim, StrictMinMaxConstraint)
@@ -4421,8 +4422,6 @@ class ShapeEnv:
                     f"for {source.name()}"
                 )
             if symbolic_context:
-                from torch._dynamo.source import TensorPropertySource
-
                 assert isinstance(source, TensorPropertySource)
                 # TODO: storage_offset handling?
                 assert source.idx is not None
@@ -4461,9 +4460,7 @@ class ShapeEnv:
                 self.oblivious_var_to_val[out] = val
             return out
 
-        if do_not_specialize_zero_one:
-            specialize_zero_one = False
-        else:
+        if specialize_zero_one is None:
             specialize_zero_one = self.specialize_zero_one
 
         assert isinstance(source, Source), f"{type(source)} {source}"
@@ -4503,6 +4500,12 @@ class ShapeEnv:
                 sympy_expr = make_symbol(
                     SymT.SIZE, len(self.var_to_val), positive=positive, integer=True
                 )
+                if (
+                    not specialize_zero_one
+                    and isinstance(source, TensorPropertySource)
+                    and source.prop == TensorProperty.SIZE
+                ):
+                    self.size_like.add(sympy_expr)
             else:
                 sympy_expr = make_symbol(
                     SymT.FLOAT, len(self.var_to_val), positive=positive, real=True
@@ -5284,7 +5287,7 @@ class ShapeEnv:
         # This removes all the checks that follow from bounds
         # We could simply emit those and also the bounds 2 <= size when necessary
         for guard in guards if guards is not None else self.guards:
-            if self._maybe_evaluate_static(guard.expr, axioms=()) is not None:
+            if self._maybe_evaluate_static(guard.expr, axioms=(), size_oblivious=guard.size_oblivious) is not None:
                 continue
             issue_guard(guard)
 
@@ -6773,7 +6776,9 @@ class ShapeEnv:
                     else size_oblivious,
                     static_expr,
                 )
-                if hint is not None:
+                if not size_oblivious and hint is not None:
+                    # TODO: maybe reconcile this with use of counterfactual hints
+                    # in unbacked case
                     assert static_expr == hint, f"{static_expr} != {hint}"
                 return static_expr
 
@@ -6919,7 +6924,7 @@ class ShapeEnv:
                     # at this point, we've evaluated the concrete expr value, and have
                     # flipped/negated the guard if necessary. Now we know what to guard
                     # or defer to runtime assert on.
-                    guard = ShapeGuard(g, self._get_sloc())
+                    guard = ShapeGuard(g, self._get_sloc(), size_oblivious=size_oblivious)
                     self.guards.append(guard)
                     self.axioms.update(dict(self.get_implications(self.simplify(g))))
                 else:
