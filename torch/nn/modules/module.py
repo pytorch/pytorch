@@ -40,6 +40,8 @@ T = TypeVar("T", bound="Module")
 class _IncompatibleKeys(
     namedtuple("IncompatibleKeys", ["missing_keys", "unexpected_keys"]),
 ):
+    __slots__ = ()
+
     def __repr__(self):
         if not self.missing_keys and not self.unexpected_keys:
             return "<All keys matched successfully>"
@@ -443,14 +445,14 @@ class Module:
     _is_full_backward_hook: Optional[bool]
     _forward_hooks: dict[int, Callable]
     # Marks whether the corresponding _forward_hooks accept kwargs or not.
-    # As JIT does not support Set[int], this dict is used as a set, where all
+    # As JIT does not support set[int], this dict is used as a set, where all
     # hooks represented in this dict accept kwargs.
     _forward_hooks_with_kwargs: dict[int, bool]
     # forward hooks that should always be called even if an exception is raised
     _forward_hooks_always_called: dict[int, bool]
     _forward_pre_hooks: dict[int, Callable]
     # Marks whether the corresponding _forward_hooks accept kwargs or not.
-    # As JIT does not support Set[int], this dict is used as a set, where all
+    # As JIT does not support set[int], this dict is used as a set, where all
     # hooks represented in this dict accept kwargs.
     _forward_pre_hooks_with_kwargs: dict[int, bool]
     _state_dict_hooks: dict[int, Callable]
@@ -706,13 +708,13 @@ class Module:
         for item in atoms:
             if not hasattr(mod, item):
                 raise AttributeError(
-                    mod._get_name() + " has no " "attribute `" + item + "`"
+                    mod._get_name() + " has no attribute `" + item + "`"
                 )
 
             mod = getattr(mod, item)
 
             if not isinstance(mod, torch.nn.Module):
-                raise AttributeError("`" + item + "` is not " "an nn.Module")
+                raise AttributeError("`" + item + "` is not an nn.Module")
 
         return mod
 
@@ -829,7 +831,7 @@ class Module:
         param: torch.nn.Parameter = getattr(mod, param_name)
 
         if not isinstance(param, torch.nn.Parameter):
-            raise AttributeError("`" + param_name + "` is not an " "nn.Parameter")
+            raise AttributeError("`" + param_name + "` is not an nn.Parameter")
 
         return param
 
@@ -1382,9 +1384,9 @@ class Module:
             hook (Callable): The user-defined hook to be registered.
             prepend (bool): If true, the provided ``hook`` will be fired before
                 all existing ``backward_pre`` hooks on this
-                :class:`torch.nn.modules.Module`. Otherwise, the provided
+                :class:`torch.nn.Module`. Otherwise, the provided
                 ``hook`` will be fired after all existing ``backward_pre`` hooks
-                on this :class:`torch.nn.modules.Module`. Note that global
+                on this :class:`torch.nn.Module`. Note that global
                 ``backward_pre`` hooks registered with
                 :func:`register_module_full_backward_pre_hook` will fire before
                 all hooks registered by this method.
@@ -1462,9 +1464,9 @@ class Module:
             hook (Callable): The user-defined hook to be registered.
             prepend (bool): If true, the provided ``hook`` will be fired before
                 all existing ``backward`` hooks on this
-                :class:`torch.nn.modules.Module`. Otherwise, the provided
+                :class:`torch.nn.Module`. Otherwise, the provided
                 ``hook`` will be fired after all existing ``backward`` hooks on
-                this :class:`torch.nn.modules.Module`. Note that global
+                this :class:`torch.nn.Module`. Note that global
                 ``backward`` hooks registered with
                 :func:`register_module_full_backward_hook` will fire before
                 all hooks registered by this method.
@@ -1626,9 +1628,9 @@ class Module:
             hook (Callable): The user defined hook to be registered.
             prepend (bool): If true, the provided ``hook`` will be fired before
                 all existing ``forward_pre`` hooks on this
-                :class:`torch.nn.modules.Module`. Otherwise, the provided
+                :class:`torch.nn.Module`. Otherwise, the provided
                 ``hook`` will be fired after all existing ``forward_pre`` hooks
-                on this :class:`torch.nn.modules.Module`. Note that global
+                on this :class:`torch.nn.Module`. Note that global
                 ``forward_pre`` hooks registered with
                 :func:`register_module_forward_pre_hook` will fire before all
                 hooks registered by this method.
@@ -1687,9 +1689,9 @@ class Module:
             hook (Callable): The user defined hook to be registered.
             prepend (bool): If ``True``, the provided ``hook`` will be fired
                 before all existing ``forward`` hooks on this
-                :class:`torch.nn.modules.Module`. Otherwise, the provided
+                :class:`torch.nn.Module`. Otherwise, the provided
                 ``hook`` will be fired after all existing ``forward`` hooks on
-                this :class:`torch.nn.modules.Module`. Note that global
+                this :class:`torch.nn.Module`. Note that global
                 ``forward`` hooks registered with
                 :func:`register_module_forward_hook` will fire before all hooks
                 registered by this method.

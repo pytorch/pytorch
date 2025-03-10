@@ -37,6 +37,7 @@ from torch._inductor.utils import should_use_remote_fx_graph_cache
 from torch._logging import LazyString
 from torch._utils_internal import log_cache_bypass
 from torch.compiler._cache import CacheArtifactManager, CacheArtifactType
+from torch.utils._triton import has_triton_package
 from torchgen.utils import dataclass_repr
 
 from .runtime_wrappers import (
@@ -206,10 +207,6 @@ def check_cacheable(gm: torch.fx.GraphModule):
     Checks that the graph module only uses supported operators
     """
     nodes = gm.graph.nodes
-    if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
-        raise BypassAOTAutogradCache(
-            "Cannot cache a graph with compiled autograd enabled"
-        )
     if torch._inductor.config.freezing:
         raise BypassAOTAutogradCache("Cannot cache a graph with freezing enabled")
 
@@ -318,6 +315,19 @@ def autograd_cache_key(
     Generate a unique hash of the FX graph for caching.
     """
     check_cacheable(gm)
+    if has_triton_package():
+        # Due to https://github.com/triton-lang/triton/issues/3729,
+        # if triton is < 3.2.0, AOTAutogradCache may cause us to
+        # attempt to load a cache entry without initializing
+        # the CUDA context on the autograd thread.
+
+        # Without caching, we naturally do this initialization when
+        # tracing through the graph with the autograd engine.
+        import triton
+
+        if triton.__version__ < "3.2.0":
+            raise BypassAOTAutogradCache("AOTAutogradCache requires triton 3.2.0")
+
     details = AOTAutogradCacheDetails(gm, example_inputs, config, fx_config)
     pickler = AOTAutogradCachePickler(gm)
     # The prefix distinguishes among the other kinds of objects we cache

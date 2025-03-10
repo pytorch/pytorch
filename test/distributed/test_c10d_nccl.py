@@ -77,8 +77,7 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 # bfloat16 is only supported by CUDA 11+
 BFLOAT16_AVAILABLE = torch.cuda.is_available() and (
-    (torch.version.cuda is not None and int(torch.version.cuda.split(".")[0]) >= 11)
-    or torch.version.hip is not None
+    torch.version.cuda is not None or torch.version.hip is not None
 )
 
 
@@ -251,6 +250,15 @@ class ProcessGroupNCCLInitTest(MultiProcessTestCase):
         self._init_process_group(device_id=self.device)
         x = torch.empty(1, device=self.device)
         c10d.all_reduce(x)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(1)
+    def test_scalable_init(self):
+        os.environ["TORCH_NCCL_RANKS_PER_ROOT"] = "1"
+        self._init_process_group(device_id=self.device)
+        x = torch.empty(1, device=self.device)
+        c10d.all_reduce(x)
+        os.environ["TORCH_NCCL_RANKS_PER_ROOT"] = "0"
 
 
 class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
@@ -1998,7 +2006,7 @@ class DistributedDataParallelTest(
         replica_devices = [dev0]
         # Tells _test_grad_layout to construct ConvNet with all layers on this process's first assigned device.
         layer_devs = dev0
-        local_batch_size = 8
+        local_batch_size = 16
         self._test_grad_layout(replica_devices, layer_devs, local_batch_size)
 
     @requires_nccl()
@@ -2012,7 +2020,7 @@ class DistributedDataParallelTest(
         replica_devices = None
         # Tells _test_grad_layout to constructs this process's ConvNet on 2 devices, with 2 layers on each device.
         layer_devs = [dev0] * 2 + [dev1] * 2
-        local_batch_size = 8
+        local_batch_size = 16
         self._test_grad_layout(replica_devices, layer_devs, local_batch_size)
 
     @requires_nccl()

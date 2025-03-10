@@ -274,6 +274,7 @@ class FlatArgsAdapter(abc.ABC):
         target_spec: pytree.TreeSpec,
         input_spec: pytree.TreeSpec,
         input_args: list[Any],
+        metadata: Optional[dict[str, Any]] = None,
     ) -> list[Any]:
         """NOTE: This adapter may mutate given ``input_args_with_path``."""
         ...
@@ -297,6 +298,10 @@ class UnflattenedModule(torch.nn.Module):
         self.graph.owning_module = self
         self.module_call_graph = deepcopy(export_module.module_call_graph)
         self.flat_args_adapter = flat_args_adapter
+
+        self.meta = export_module.graph_module.meta
+        self.meta["unflattened_module"] = self
+
         # Flag to indicate whether args have been adapted.
         self.adapted = False
         self._run_with_interpreter = RUN_WITH_INTERPRETER
@@ -527,6 +532,7 @@ class UnflattenedModule(torch.nn.Module):
                 target_spec=signature.in_spec,
                 input_spec=in_spec,
                 input_args=flat_args,
+                metadata=self.meta,
             )
 
             if len(flat_args) != signature.in_spec.num_leaves:
@@ -1222,10 +1228,8 @@ class _ModuleFrame:
         self.seen_nodes[node.name] = node
 
     def run_outer(self):
-        i = 0
-        for node in self.flat_graph.nodes:
+        for i, node in enumerate(self.flat_graph.nodes):
             self.print(i, node.meta.get("nn_module_stack"), node.format_node())
-            i += 1
 
         # Copy all graph inputs
         node_idx: int = 0
@@ -1389,7 +1393,7 @@ def _reorder_submodules(
         if child is None:
             continue
         fqn = prefix + name
-        _reorder_submodules(child, fqn_order, prefix=fqn + ".")
+        _reorder_submodules(child, fqn_order, prefix=fqn.split("@")[0] + ".")
         delattr(parent, name)
         children.append((fqn_order[fqn], name, child))
     children.sort(key=operator.itemgetter(0))

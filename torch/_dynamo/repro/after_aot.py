@@ -1,5 +1,24 @@
 # mypy: allow-untyped-defs
 
+"""
+Utilities for reproducing and debugging issues in PyTorch's Dynamo AOT compilation.
+
+This module provides tools and infrastructure for:
+1. Generating minimal reproducible test cases ("repros") from failing compilations
+2. Analyzing accuracy issues between eager and compiled execution
+3. Minifying large models/inputs to isolate problematic patterns
+4. Debugging compiler errors and accuracy divergences
+
+The main components include:
+- Repro generation: Creates standalone Python files that reproduce compiler issues
+- Minification: Reduces large graphs to minimal failing examples
+- Accuracy analysis: Compares compiled vs eager execution, with fp64 reference
+- Debug tools: Dumps graph state, tracks intermediates, analyzes divergences
+
+This is primarily used by PyTorch developers and researchers to debug issues in
+the Dynamo AOT compilation pipeline, particularly for the Inductor backend.
+"""
+
 import argparse
 import copy
 import functools
@@ -42,6 +61,7 @@ from torch._dynamo.debug_utils import (
 from torch._dynamo.trace_rules import is_fbcode
 from torch._dynamo.utils import clone_inputs, counters, same
 from torch._inductor.output_code import OutputCode
+from torch._library.fake_class_registry import FakeScriptObject
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     fx_placeholder_targets,
@@ -353,7 +373,9 @@ def save_graph_repro(
         accuracy = "_accuracy" in compiler_name
     if tracing_mode is None:
         tracing_mode = "real"
-        if any(has_free_symbols(a) for a in args):
+        if any(
+            has_free_symbols(a) for a in args if not isinstance(a, FakeScriptObject)
+        ):
             tracing_mode = "symbolic"
     fd.write("if __name__ == '__main__':\n")
     fd.write("    from torch._dynamo.repro.after_aot import run_repro\n")
@@ -588,7 +610,8 @@ ACCURACY_FAILS: dict[str, Callable[[nn.Module, Any], bool]] = {
 def repro_minifier_query(options, mod, load_args):
     mod, args = repro_common(options, mod, load_args)
     fail_fn = functools.partial(
-        ACCURACY_FAILS[options.accuracy], check_str=options.check_str  # type: ignore[call-arg]
+        ACCURACY_FAILS[options.accuracy],
+        check_str=options.check_str,  # type: ignore[call-arg]
     )
     if fail_fn(mod, args):
         sys.exit(1)
@@ -663,9 +686,10 @@ def repro_analyze(options, mod, load_args):
     reader = torch.utils._content_store.ContentStoreReader(options.save_dir)
 
     new_args = clone_inputs(args)
-    with intermediate_hook(save_hook), tqdm(
-        desc="Saving inductor intermediates", total=total
-    ) as pbar:
+    with (
+        intermediate_hook(save_hook),
+        tqdm(desc="Saving inductor intermediates", total=total) as pbar,
+    ):
         assert not isinstance(compiled, str)
         compiled(new_args)
         assert not new_args
@@ -689,9 +713,10 @@ def repro_analyze(options, mod, load_args):
 
     if not options.skip_check_deterministic:
         new_args = clone_inputs(args)
-        with intermediate_hook(check_hook), tqdm(
-            desc="Checking inductor determinism", total=total
-        ) as pbar:
+        with (
+            intermediate_hook(check_hook),
+            tqdm(desc="Checking inductor determinism", total=total) as pbar,
+        ):
             compiled(new_args)
             assert not new_args
 

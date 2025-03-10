@@ -7,12 +7,6 @@ function do_install() {
     cuda_version=$1
     cuda_version_nodot=${1/./}
 
-    # Temporary WAR to be updated for CUDA 12.8
-    if [ "$cuda_version_nodot" == "128" ]; then
-        # Set it to 12.6 if it matches
-        cuda_version_nodot="126"
-    fi
-
     MAGMA_VERSION="2.6.1"
     magma_archive="magma-cuda${cuda_version_nodot}-${MAGMA_VERSION}-1.tar.bz2"
 
