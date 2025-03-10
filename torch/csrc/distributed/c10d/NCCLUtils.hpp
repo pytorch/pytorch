@@ -43,7 +43,6 @@ static_assert(
 // The following macros represent features supported prior to NCCL 2.7,
 // therefore we can define them unconditionally, given the static_assert above.
 // TODO: remove these macros from code.
-#define ENABLE_NCCL_ERROR_CHECKING
 #define ENABLE_NCCL_P2P_SUPPORT
 // End of macros for NCCL 2.7 and below.
 
