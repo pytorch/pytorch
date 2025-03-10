@@ -554,14 +554,12 @@ def _broadcast_tensors(
 
     if pg_device != device:
         for key, full_tensor in zip(keys, tensors):
-            local_state_dict[key] = (
-                (local_state, full_tensor.to(device))
-                if (
-                    isinstance(local_state_dict[key], tuple)
-                    and isinstance(local_state := local_state_dict[key][0], DTensor)
+            if (local_state := local_state_dict.get(key)) is not None:
+                local_state_dict[key] = (
+                    (local_state[0], full_tensor.to(device))
+                    if isinstance(local_state, tuple) and isinstance(local_state[0], DTensor)
+                    else full_tensor.to(device)
                 )
-                else full_tensor.to(device)
-            )
 
     _distribute_tensors(local_state_dict, keys, device, pg)
 
