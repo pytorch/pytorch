@@ -5,7 +5,7 @@ import sympy
 
 import torch
 
-from .ir import Pointwise, TensorBox
+from .ir import Pointwise, ShapeAsConstantBuffer, TensorBox
 from .lowering import fallback_handler, is_integer_type, register_lowering
 from .virtualized import ops
 
@@ -27,7 +27,7 @@ def get_inverse_offsets(
     offsets: TensorBox,
     jagged_len: Union[int, sympy.Expr],
     realize: bool = True,
-) -> TensorBox:
+) -> Union[TensorBox, ShapeAsConstantBuffer]:
     """
     Returns "inverse_offsets" - the inverse of the offsets array.
     offsets maps batch index (dense) to jagged index (i.e. offset into jagged tensor).
@@ -116,7 +116,7 @@ def register_jagged_ops():
         jagged_offsets: list[TensorBox],
         max_lengths: list[int],  # list of ints/SymInts
         padding_value: float = 0.0,
-    ) -> TensorBox:
+    ) -> Union[TensorBox, ShapeAsConstantBuffer]:
         device = jagged_values.get_device_or_error()
         dtype = jagged_values.get_dtype()
 
@@ -186,7 +186,7 @@ def register_jagged_ops():
         dense: TensorBox,
         jagged_offsets: list[TensorBox],
         jagged_len: Optional[int] = None,
-    ) -> TensorBox:
+    ) -> Union[TensorBox, ShapeAsConstantBuffer]:
         device = dense.get_device_or_error()
         dtype = dense.get_dtype()
 
@@ -259,7 +259,7 @@ def register_jagged_ops():
         dense: TensorBox,
         jagged_offsets: list[TensorBox],
         jagged_len: Optional[int] = None,
-    ) -> TensorBox:
+    ) -> Union[TensorBox, ShapeAsConstantBuffer]:
         return _dense_to_jagged_forward_impl(
             fallback_op=torch.ops.aten._padded_dense_to_jagged_forward.default,
             dense=dense,
