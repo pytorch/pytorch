@@ -21,6 +21,10 @@
         }
     },
     "clang-tidy": {
+        "Darwin-i386": {
+            "download_url": "https://oss-clang-format.s3.us-east-2.amazonaws.com/macos-i386/19.1.4/clang-tidy",
+            "hash": "7b5da17d3f8b1c18c77d043999f05293f43402affb16de15dfcb276971984a3e"
+        },
         "Darwin-arm": {
             "download_url": "https://oss-clang-format.s3.us-east-2.amazonaws.com/macos-arm/19.1.4/clang-tidy",
             "hash": "04243f4044fe6d95f6d51d15be803331c3cbb61f2d8fcfeba5a5dec1e7ae6dfb"
