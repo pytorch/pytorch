@@ -62,7 +62,7 @@ jobs:
             runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.2xlarge"
     timeout-minutes: 40
     env:
-      DOCKER_IMAGE: ${{ matrix.device == 'rocm' && format('pytorch/manylinux2_28-builder:rocm{0}', matrix.rocm_version) || matrix.device == 'aarch64' && '308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux2_28_aarch64-builder-cpu-aarch64:6504643774bc512a67e2b1fe0ddbb07363434ba9' || matrix.docker-image }}
+      DOCKER_IMAGE: ${{ matrix.device == 'rocm' && format('pytorch/manylinux2_28-builder:rocm{0}', matrix.rocm_version) || matrix.device == 'aarch64' && 'pytorch/manylinux2_28_aarch64-builder:cpu-aarch64' || matrix.docker-image }}
       PY_VERS: ${{ matrix.py_vers }}
       BUILD_DEVICE: ${{ matrix.device }}
       PLATFORM: 'manylinux_2_28_x86_64'
