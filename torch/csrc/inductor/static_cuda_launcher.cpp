@@ -339,7 +339,7 @@ static PyObject* launch_kernel(PyObject* self, PyObject* args) {
   CUfunction func = reinterpret_cast<CUfunction>(func_ptr); // NOLINT
   cudaStream_t cudaStream = reinterpret_cast<cudaStream_t>(stream); // NOLINT
   auto num_args = std::strlen(argTypes);
-  // Support up to 10 args by default
+  // Support up to 25 args by default
   // We use a templated function here to avoid heap allocations for the
   // argument.
   switch (num_args) {
@@ -363,9 +363,39 @@ static PyObject* launch_kernel(PyObject* self, PyObject* args) {
       return LAUNCH_KERNEL(9);
     case 10:
       return LAUNCH_KERNEL(10);
+    case 11:
+      return LAUNCH_KERNEL(11);
+    case 12:
+      return LAUNCH_KERNEL(12);
+    case 13:
+      return LAUNCH_KERNEL(13);
+    case 14:
+      return LAUNCH_KERNEL(14);
+    case 15:
+      return LAUNCH_KERNEL(15);
+    case 16:
+      return LAUNCH_KERNEL(16);
+    case 17:
+      return LAUNCH_KERNEL(17);
+    case 18:
+      return LAUNCH_KERNEL(18);
+    case 19:
+      return LAUNCH_KERNEL(19);
+    case 20:
+      return LAUNCH_KERNEL(20);
+    case 21:
+      return LAUNCH_KERNEL(21);
+    case 22:
+      return LAUNCH_KERNEL(22);
+    case 23:
+      return LAUNCH_KERNEL(23);
+    case 24:
+      return LAUNCH_KERNEL(24);
+    case 25:
+      return LAUNCH_KERNEL(25);
     default:
       throw std::runtime_error(
-          "Unsupported number of arguments; must be between 1 and 10");
+          "Unsupported number of arguments; must be between 1 and 25");
   }
 }
 
@@ -374,7 +404,7 @@ static std::array<PyMethodDef, 2> StaticCudaLauncherMethods = {
         "_launch_kernel",
         (PyCFunction)launch_kernel,
         METH_VARARGS,
-        "Cuda Launcher with up to 10 args"},
+        "Cuda Launcher with up to 25 args"},
     PyMethodDef{
         "_load_kernel",
         (PyCFunction)load_kernel,
