@@ -66,6 +66,28 @@ class StableLibrary final {
     aoti_torch_delete_library_object(lib_);
   }
 
+  // corresponds to a limited, stable version of torch::library::impl()
+  // Inputs:
+  //   name: the name of the function to implement
+  //   fn: a boxed function with schema
+  //       (StableIValue* stack, int64_t num_inputs, int64_t num_outputs) ->
+  //       void
+  // fn should follow the calling convention of our boxed kernels that convert
+  // to IValues. fn will be called with a StableIValue* array of length
+  // max(num_inputs, num_outputs), where the first num_inputs entries are
+  // populated with inputs. fn is responsible for stealing the memory of the
+  // inputs, in effect "popping" them off the stack, and then populating the
+  // stack with StableIValue outputs. Concretely, fn should:
+  //    1. read StableIValue inputs from the given stack
+  //    2. convert the inputs to the proper types
+  //    3. call the function corresponding to name with the inputs
+  //    4. convert the outputs to StableIValues
+  //    5. populate the now empty stack with StableIValue outputs
+  // If the operation corresponding to name takes in 4 inputs and returns 2
+  // outputs, fn should expect stack to contain 4 StableIValues:
+  //    [stable_arg1, stable_arg2, stable_arg3, stable_arg4]
+  // to end, fn should fill the stack with 2 StableIValues representing outputs:
+  //    [stable_ret1, stable_ret2, -, -]
   StableLibrary& impl(
       const char* name,
       void (*fn)(StableIValue*, int64_t, int64_t)) {
@@ -73,8 +95,9 @@ class StableLibrary final {
     return *this;
   }
 
-  StableLibrary& def(const char* name) {
-    aoti_torch_library_def(lib_, name);
+  // corresponds to a limited, stable version of torch::library::def()
+  StableLibrary& def(const char* schema) {
+    aoti_torch_library_def(lib_, schema);
     return *this;
   }
 };
@@ -97,7 +120,7 @@ class StableTorchLibraryInit final {
   }
 };
 
-} // anon namespace
+} // namespace
 
 // macros copied from c10/macros/Macros.h
 #ifdef __COUNTER__

@@ -654,15 +654,17 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_library_init_fragment(
     uint32_t line,
     TorchLibraryHandle* ret_new_torch_lib);
 
-// stable corollary to torch::Library method m.impl()
+// stable corollary to torch::Library method m.impl(), should be
+// called from StableLibrary
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_library_impl(
     TorchLibraryHandle self,
     const char* name,
     void (*fn)(StableIValue*, int64_t, int64_t));
 
-// stable corollary to torch::Library method m.def()
+// stable corollary to torch::Library method m.def(), should be
+// called from StableLibrary
 AOTI_TORCH_EXPORT AOTITorchError
-aoti_torch_library_def(TorchLibraryHandle self, const char* name);
+aoti_torch_library_def(TorchLibraryHandle self, const char* schema);
 
 // the above stable constructors for torch::Library add Library objects
 // to the heap. if you are calling those functions directly, please use
