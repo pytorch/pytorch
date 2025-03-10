@@ -187,3 +187,17 @@ def call_module_hooks_from_backward_state(
         if new_result is not None:
             result = new_result
     return result
+
+
+# used for torch._dynamo.disable(recursive=False)
+def get_nonrecursive_disable_wrapper(
+    fn: Callable[_P, _R], dummy: object
+) -> Callable[_P, _R]:
+    @functools.wraps(fn)
+    def nonrecursive_disable_wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+        # not directly used, but used by convert_frame to detect that
+        # we are in a disable_wrapper frame
+        nonlocal dummy
+        return fn(*args, **kwargs)
+
+    return nonrecursive_disable_wrapper

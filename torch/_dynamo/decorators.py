@@ -30,7 +30,7 @@ from .eval_frame import (
     skip_code,
 )
 from .exc import IncorrectUsage
-from .external_utils import is_compiling
+from .external_utils import get_nonrecursive_disable_wrapper, is_compiling
 from .utils import is_function
 
 
@@ -91,16 +91,13 @@ def disable(fn=None, recursive=True):
         def wrap(fn):
             fn = innermost_fn(fn)
             assert callable(fn)
-            obj = _DisableWrapperObject
+            nonrecursive_disable_wrapper = get_nonrecursive_disable_wrapper(
+                fn, _DisableWrapperObject
+            )
+            nonrecursive_disable_wrapper._torchdynamo_disable = True  # type: ignore[attr-defined]
+            nonrecursive_disable_wrapper._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
 
-            # calling this should cause a graph break due to trace_rules
-            def disable_wrapper(*args, **kwargs):
-                # not directly used, but used by convert_frame to detect that
-                # we are in a disable_wrapper frame
-                nonlocal obj
-                return fn(*args, **kwargs)
-
-            return disable_wrapper
+            return nonrecursive_disable_wrapper
 
         if fn is None:
             return wrap
