@@ -45,27 +45,38 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
 
+  get-is-ephemeral:
+    # Checks if this PR will join the experiment of using ephemeral runners
+    name: get-is-ephemeral
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      check_experiments: ephemeral
+
   linux-jammy-py3_9-gcc11-build:
     name: linux-jammy-py3.9-gcc11
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs: [get-label-type, get-is-ephemeral]
     with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}"
       build-environment: linux-jammy-py3.9-gcc11
       docker-image-name: pytorch-linux-jammy-py3.9-gcc11
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "default", shard: 2, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "default", shard: 3, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "docs_test", shard: 1, num_shards: 1,  runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "jit_legacy", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "backwards_compat", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "distributed", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "distributed", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "numpy_2_x", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.2xlarge" },
+          { config: "default", shard: 2, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.2xlarge" },
+          { config: "default", shard: 3, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.2xlarge" },
+          { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.2xlarge" },
+          { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.2xlarge" },
+          { config: "docs_test", shard: 1, num_shards: 1,  runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.2xlarge" },
+          { config: "jit_legacy", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.2xlarge" },
+          { config: "backwards_compat", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.2xlarge" },
+          { config: "distributed", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.2xlarge" },
+          { config: "distributed", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.2xlarge" },
+          { config: "numpy_2_x", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.2xlarge" },
         ]}
     secrets: inherit
 
@@ -93,9 +104,9 @@ jobs:
   linux-jammy-py3_9-gcc11-no-ops:
     name: linux-jammy-py3.9-gcc11-no-ops
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs: [get-label-type, get-is-ephemeral]
     with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}"
       build-environment: linux-jammy-py3.9-gcc11-no-ops
       docker-image-name: pytorch-linux-jammy-py3.9-gcc11
       test-matrix: |
@@ -107,9 +118,9 @@ jobs:
   linux-jammy-py3_9-gcc11-pch:
     name: linux-jammy-py3.9-gcc11-pch
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs: [get-label-type, get-is-ephemeral]
     with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}"
       build-environment: linux-jammy-py3.9-gcc11-pch
       docker-image-name: pytorch-linux-jammy-py3.9-gcc11
       test-matrix: |
@@ -121,19 +132,19 @@ jobs:
   linux-jammy-py3_10-clang15-asan-build:
     name: linux-jammy-py3.10-clang15-asan
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs: [get-label-type, get-is-ephemeral]
     with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}"
       build-environment: linux-jammy-py3.10-clang15-asan
       docker-image-name: pytorch-linux-jammy-py3-clang15-asan
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 2, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 3, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 4, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 5, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 6, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "default", shard: 1, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.4xlarge" },
+          { config: "default", shard: 2, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.4xlarge" },
+          { config: "default", shard: 3, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.4xlarge" },
+          { config: "default", shard: 4, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.4xlarge" },
+          { config: "default", shard: 5, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.4xlarge" },
+          { config: "default", shard: 6, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.4xlarge" },
         ]}
       sync-tag: asan-build
     secrets: inherit
@@ -155,15 +166,15 @@ jobs:
   linux-focal-py3_9-clang10-onnx-build:
     name: linux-focal-py3.9-clang10-onnx
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs: [get-label-type, get-is-ephemeral]
     with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}"
       build-environment: linux-focal-py3.9-clang10-onnx
       docker-image-name: pytorch-linux-focal-py3-clang10-onnx
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "default", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "default", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.2xlarge" },
+          { config: "default", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.2xlarge" },
         ]}
     secrets: inherit
 
@@ -182,23 +193,23 @@ jobs:
   linux-focal-py3_9-clang10-build:
     name: linux-focal-py3.9-clang10
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs: [get-label-type, get-is-ephemeral]
     with:
-      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
+      runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.2xlarge"
       build-environment: linux-focal-py3.9-clang10
       docker-image-name: pytorch-linux-focal-py3.9-clang10
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 2, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 3, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "crossref", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "crossref", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "dynamo_wrapped", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "dynamo_wrapped", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "dynamo_wrapped", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.4xlarge" },
+          { config: "default", shard: 2, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.4xlarge" },
+          { config: "default", shard: 3, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.4xlarge" },
+          { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.4xlarge" },
+          { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.4xlarge" },
+          { config: "crossref", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.2xlarge" },
+          { config: "crossref", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.2xlarge" },
+          { config: "dynamo_wrapped", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.2xlarge" },
+          { config: "dynamo_wrapped", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.2xlarge" },
+          { config: "dynamo_wrapped", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.2xlarge" },
         ]}
     secrets: inherit
 
@@ -217,23 +228,23 @@ jobs:
   linux-focal-py3_13-clang10-build:
     name: linux-focal-py3.13-clang10
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs: [get-label-type, get-is-ephemeral]
     with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}"
       build-environment: linux-focal-py3.13-clang10
       docker-image-name: pytorch-linux-focal-py3.13-clang10
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 2, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 3, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "crossref", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "crossref", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "dynamo_wrapped", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "dynamo_wrapped", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "dynamo_wrapped", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.4xlarge" },
+          { config: "default", shard: 2, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.4xlarge" },
+          { config: "default", shard: 3, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.4xlarge" },
+          { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.4xlarge" },
+          { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.4xlarge" },
+          { config: "crossref", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.2xlarge" },
+          { config: "crossref", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.2xlarge" },
+          { config: "dynamo_wrapped", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.2xlarge" },
+          { config: "dynamo_wrapped", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.2xlarge" },
+          { config: "dynamo_wrapped", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.2xlarge" },
         ]}
     secrets: inherit
 
@@ -251,17 +262,17 @@ jobs:
   linux-focal-cuda11_8-py3_10-gcc9-build:
     name: linux-focal-cuda11.8-py3.10-gcc9
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs: [get-label-type, get-is-ephemeral]
     with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}"
       build-environment: linux-focal-cuda11.8-py3.10-gcc9
       docker-image-name: pytorch-linux-focal-cuda11.8-cudnn9-py3-gcc9
       cuda-arch-list: '7.5'
       test-matrix: |
         { include: [
-          { config: "distributed", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.12xlarge.nvidia.gpu" },
-          { config: "distributed", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.12xlarge.nvidia.gpu" },
-          { config: "distributed", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.12xlarge.nvidia.gpu" },
+          { config: "distributed", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.g4dn.12xlarge.nvidia.gpu" },
+          { config: "distributed", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.g4dn.12xlarge.nvidia.gpu" },
+          { config: "distributed", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.g4dn.12xlarge.nvidia.gpu" },
         ]}
     secrets: inherit
 
@@ -281,18 +292,18 @@ jobs:
   linux-focal-cuda12_6-py3_10-gcc11-build:
     name: linux-focal-cuda12.6-py3.10-gcc11
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs: [get-label-type, get-is-ephemeral]
     with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}"
       build-environment: linux-focal-cuda12.6-py3.10-gcc11
       docker-image-name: pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc11
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 2, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 3, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 2, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 3, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.4xlarge.nvidia.gpu" },
         ]}
     secrets: inherit
 
@@ -312,9 +323,9 @@ jobs:
   linux-jammy-py3-clang12-mobile-build:
     name: linux-jammy-py3-clang12-mobile-build
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs: [get-label-type, get-is-ephemeral]
     with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}"
       build-environment: linux-jammy-py3-clang12-mobile-build
       docker-image-name: pytorch-linux-jammy-py3-clang15-asan
       build-generates-artifacts: false
@@ -327,9 +338,9 @@ jobs:
   linux-jammy-cuda-11_8-cudnn9-py3_9-clang12-build:
     name: linux-jammy-cuda11.8-cudnn9-py3.9-clang12
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs: [get-label-type, get-is-ephemeral]
     with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}"
       build-environment: linux-jammy-cuda11.8-cudnn9-py3.9-clang12
       docker-image-name: pytorch-linux-jammy-cuda11.8-cudnn9-py3.9-clang12
       test-matrix: |
@@ -341,14 +352,14 @@ jobs:
   linux-focal-py3_9-clang9-xla-build:
     name: linux-focal-py3_9-clang9-xla
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs: [get-label-type, get-is-ephemeral]
     with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}"
       build-environment: linux-focal-py3.9-clang9-xla
       docker-image-name: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/xla_base:v1.3-lite
       test-matrix: |
         { include: [
-          { config: "xla", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge" },
+          { config: "xla", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.12xlarge" },
         ]}
     secrets: inherit
 
@@ -367,41 +378,41 @@ jobs:
     if: github.event_name == 'pull_request'
     name: win-vs2022-cpu-py3
     uses: ./.github/workflows/_win-build.yml
-    needs: get-label-type
+    needs: [get-label-type, get-is-ephemeral]
     with:
       build-environment: win-vs2022-cpu-py3
       cuda-version: cpu
       sync-tag: win-cpu-build
-      runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
+      runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}windows.4xlarge.nonephemeral"
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral" },
-          { config: "default", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral" },
-          { config: "default", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}windows.4xlarge.nonephemeral" },
         ]}
     secrets: inherit
 
   linux-focal-cpu-py3_10-gcc11-bazel-test:
     name: linux-focal-cpu-py3.10-gcc11-bazel-test
     uses: ./.github/workflows/_bazel-build-test.yml
-    needs: get-label-type
+    needs: [get-label-type, get-is-ephemeral]
     with:
-      runner: "${{ needs.get-label-type.outputs.label-type }}linux.large"
+      runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.large"
       build-environment: linux-focal-cuda12.6-py3.10-gcc11-bazel-test
       docker-image-name: pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc11
       cuda-version: cpu
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "default", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.4xlarge" },
         ]}
     secrets: inherit
 
   linux-jammy-py3_9-gcc11-mobile-lightweight-dispatch-build:
     name: linux-jammy-py3.9-gcc11-mobile-lightweight-dispatch-build
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs: [get-label-type, get-is-ephemeral]
     with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}"
       build-environment: linux-jammy-py3.9-gcc11-mobile-lightweight-dispatch-build
       docker-image-name: pytorch-linux-jammy-py3.9-gcc11
       build-generates-artifacts: false
@@ -416,9 +427,9 @@ jobs:
     if: github.event_name == 'pull_request'
     name: linux-focal-rocm6.3-py3.10
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs: [get-label-type, get-is-ephemeral]
     with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}"
       build-environment: linux-focal-rocm6.3-py3.10
       docker-image-name: pytorch-linux-focal-rocm-n-py3
       sync-tag: rocm-build
@@ -433,19 +444,19 @@ jobs:
   linux-focal-cuda12_6-py3_10-gcc11-sm89-build:
     name: linux-focal-cuda12.6-py3.10-gcc11-sm89
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs: [get-label-type, get-is-ephemeral]
     with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}"
       build-environment: linux-focal-cuda12.6-py3.10-gcc11-sm89
       docker-image-name: pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc11
       cuda-arch-list: 8.9
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
-          { config: "default", shard: 2, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
-          { config: "default", shard: 3, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
-          { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
-          { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "default", shard: 2, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "default", shard: 3, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
         ]}
     secrets: inherit
 
@@ -454,9 +465,9 @@ jobs:
     # OOM
     name: unstable-linux-focal-cuda12.6-py3.10-gcc11-sm89-xfail
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs: [get-label-type, get-is-ephemeral]
     with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}"
       build-environment: linux-focal-cuda12.6-py3.10-gcc11-sm89
       docker-image-name: pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc11
       cuda-arch-list: 8.9
@@ -465,7 +476,7 @@ jobs:
       # from being skipped
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
         ]}
     secrets: inherit
 
@@ -484,14 +495,14 @@ jobs:
   linux-jammy-py3-clang12-executorch-build:
     name: linux-jammy-py3-clang12-executorch
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs: [get-label-type, get-is-ephemeral]
     with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}"
       build-environment: linux-jammy-py3-clang12-executorch
       docker-image-name: pytorch-linux-jammy-py3-clang12-executorch
       test-matrix: |
         { include: [
-          { config: "executorch", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "executorch", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}linux.2xlarge" },
         ]}
     secrets: inherit
 
@@ -508,9 +519,9 @@ jobs:
   linux-focal-cuda12_4-py3_10-gcc9-inductor-build:
     name: cuda12.4-py3.10-gcc9-sm75
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs: [get-label-type, get-is-ephemeral]
     with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}"
       build-environment: linux-focal-cuda12.4-py3.10-gcc9-sm75
       docker-image-name: pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9-inductor-benchmarks
       cuda-arch-list: '7.5'
@@ -533,10 +544,10 @@ jobs:
   linux-jammy-xpu-2025_0-py3_9-build:
     name: linux-jammy-xpu-2025.0-py3.9
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs: [get-label-type, get-is-ephemeral]
     with:
       sync-tag: linux-xpu-2025-0-build
-      runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
+      runner_prefix: ${{ needs.get-label-type.outputs.label-type }}${{ needs.get-is-ephemeral.outputs.label-type }}
       build-environment: linux-jammy-xpu-2025.0-py3.9
       docker-image-name: pytorch-linux-jammy-xpu-2025.0-py3
       test-matrix: |
