@@ -5,6 +5,11 @@ description: Set up ROCm host for CI
 runs:
   using: composite
   steps:
+    - name: Print hostname
+      if: always()
+      shell: bash
+      run: |
+        hostname
     - name: Stop all running docker containers
       if: always()
       shell: bash
