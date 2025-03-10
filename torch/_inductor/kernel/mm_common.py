@@ -89,7 +89,7 @@ def filtered_configs(
         ),
         min_block_size_k,
     )
-    used = OrderedSet[tuple[int, int, int, int, int, int]]()
+    used = OrderedSet[tuple[int, ...]]()
     for block_m, block_n, block_k, num_stages, num_warps in configs:
         # shrink configs for small sizes
         block_m = max(min(int(block_m * scale), m), min_block_size)
@@ -102,6 +102,7 @@ def filtered_configs(
         # each warp computes 16x16 tile = 256
         num_warps = min(num_warps, block_m * block_n // 256)
         if torch.version.hip:
+            kpack = 2
             for matrix_instr_nonkdim in [0, 16]:
                 if matrix_instr_nonkdim != 0 and (
                     block_m % matrix_instr_nonkdim != 0
@@ -109,6 +110,7 @@ def filtered_configs(
                 ):
                     #  block_m and block_n must be a multiple of matrix_instr_nonkdim
                     continue
+
                 if (
                     block_m,
                     block_n,
@@ -116,6 +118,7 @@ def filtered_configs(
                     num_stages,
                     num_warps,
                     matrix_instr_nonkdim,
+                    kpack,
                 ) not in used and (
                     max_mm_configs is None or len(used) < max_mm_configs
                 ):
@@ -127,6 +130,7 @@ def filtered_configs(
                             num_stages,
                             num_warps,
                             matrix_instr_nonkdim,
+                            kpack,
                         )
                     )
                     yield triton_config(
@@ -136,6 +140,7 @@ def filtered_configs(
                         num_stages=num_stages,
                         num_warps=num_warps,
                         matrix_instr_nonkdim=matrix_instr_nonkdim,
+                        kpack=kpack,
                     )
         else:
             if (block_m, block_n, block_k, num_stages, num_warps, 0) not in used and (
