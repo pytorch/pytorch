@@ -57,9 +57,8 @@ inline static PyObject* map_aggregate(PyObject* a, F fn) {
   // Case 1: a is a tuple.
   if (PyTuple_Check(a)) {
     Py_ssize_t n = PyTuple_GET_SIZE(a);
-    if (n == 0) {
-      Py_INCREF(a);
-      return a;
+    if (n == 0 && PyTuple_CheckExact(a)) {
+      return Py_NewRef(a);
     }
     THPObjectPtr new_tuple(PyTuple_New(n));
     if (!new_tuple) {
@@ -83,8 +82,7 @@ inline static PyObject* map_aggregate(PyObject* a, F fn) {
   else if (PyList_Check(a)) {
     Py_ssize_t n = PyList_GET_SIZE(a);
     if (n == 0 && exact_type(a, immutable_list_cls())) {
-      Py_INCREF(a);
-      return a;
+      return Py_NewRef(a);
     }
     THPObjectPtr result(PyObject_CallNoArgs(immutable_list_cls()));
     if (!result) {
@@ -102,8 +100,7 @@ inline static PyObject* map_aggregate(PyObject* a, F fn) {
   // Case 3: a is a dict.
   else if (PyDict_Check(a)) {
     if (PyDict_GET_SIZE(a) == 0 && exact_type(a, immutable_dict_cls())) {
-      Py_INCREF(a);
-      return a;
+      return Py_NewRef(a);
     }
     THPObjectPtr result(PyObject_CallNoArgs(immutable_dict_cls()));
     if (!result) {
