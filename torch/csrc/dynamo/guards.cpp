@@ -2159,14 +2159,7 @@ class GuardAccessor {
       py::object accessor_key,
       std::string source,
       py::handle example_value,
-      py::handle guard_manager_enum)
-      : _guard_manager(make_guard_manager(
-            root,
-            source,
-            example_value,
-            guard_manager_enum)),
-        _accessor_key(std::move(accessor_key)),
-        _source(std::move(source)) {}
+      py::handle guard_manager_enum);
 
   // Return by reference as GuardAccessor owns the GuardManager.
   std::unique_ptr<GuardManager>& get_guard_manager() {
@@ -2194,11 +2187,8 @@ class GuardAccessor {
 
   virtual ~GuardAccessor() = default;
 
- public: // Cloning related functions
-  GuardAccessor(GuardManager* guard_manager, GuardAccessor* from)
-      : _guard_manager(std::unique_ptr<GuardManager>(guard_manager)) {
-    from->clone_visitor(this);
-  }
+  // Cloning related functions
+  GuardAccessor(GuardManager* guard_manager, GuardAccessor* from);
 
   virtual GuardAccessor* clone(
       RootGuardManager* cloned_root,
@@ -2635,6 +2625,23 @@ class GuardManager {
   bool _is_dict;
   uint64_t _dict_tag{0};
 };
+
+GuardAccessor::GuardAccessor(
+    RootGuardManager* root,
+    py::object accessor_key,
+    std::string source,
+    py::handle example_value,
+    py::handle guard_manager_enum)
+    : _guard_manager(
+          make_guard_manager(root, source, example_value, guard_manager_enum)),
+      _accessor_key(std::move(accessor_key)),
+      _source(std::move(source)) {}
+
+// Cloning related functions
+GuardAccessor::GuardAccessor(GuardManager* guard_manager, GuardAccessor* from)
+    : _guard_manager(std::unique_ptr<GuardManager>(guard_manager)) {
+  from->clone_visitor(this);
+}
 
 /**
  Note on [Ownership with cloning] - GuardManagers have the facility to clone
