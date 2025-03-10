@@ -42,6 +42,7 @@ RUN yum install -y \
   llvm-devel \
   libzstd-devel \
   python3.12-devel \
+  python3.12-test \
   python3.12-setuptools \
   python3.12-pip \
   python3-virtualenv \
