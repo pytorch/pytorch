@@ -16,6 +16,7 @@ from collections import defaultdict
 from contextlib import AbstractContextManager
 from inspect import currentframe
 from itertools import count
+from tabulate import tabulate
 from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import Never, override, ParamSpec, Protocol, TypedDict, Unpack
 from unittest import mock
@@ -834,10 +835,14 @@ def _compile_fx_inner(
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
 
     # This message is for printing overview information of inductor mm counts, shapes,etc after lowering
+    mm_table_data = []
+    for key, value in counters["aten_mm_info"].items():
+        name, m, n, k = key.split("_")
+        mm_table_data.append([name, m, n, k, value])
     log.info(
-        "Overview info of inductor aten mms: %s",
-        ", ".join(
-            f"({key}: {value})" for key, value in counters["aten_mm_info"].items()
+        "Overview info of inductor aten mms:\n%s",
+        tabulate(
+            mm_table_data, headers=["Name", "M", "N", "K", "Count"], tablefmt="grid"
         ),
     )
 
