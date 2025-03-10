@@ -136,34 +136,69 @@ constexpr auto calc_io_size(){
 template <int vec_size, typename func_t, typename array_t>
 C10_LAUNCH_BOUNDS_1(num_threads())
 __global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data) {
-  using traits = function_traits<func_t>;
-  constexpr auto io_size = calc_io_size<func_t>();
-  int remaining = N - io_block_work_size<io_size>() * blockIdx.x;
+  if constexpr (vec_size == 8) {
+  // To save some build time on CUDA, we are going to utilize vec8 only on SM90+ devices.
+#if defined(USE_ROCM) || ((defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900))
+    using traits = function_traits<func_t>;
+    constexpr auto io_size = calc_io_size<func_t>();
+    int remaining = N - io_block_work_size<io_size>() * blockIdx.x;
 
-  if (remaining < io_block_work_size<io_size>()) { // if this block handles the reminder,
-                                       // just do a naive unrolled loop
-    auto input_calc = TrivialOffsetCalculator<traits::arity>();
-    auto output_calc = TrivialOffsetCalculator<1>();
-    auto loader = memory::LoadWithoutCast();
-    auto storer = memory::StoreWithoutCast();
-    auto policy = memory::policies::unroll<
-        array_t,
-        decltype(input_calc),
-        decltype(output_calc),
-        memory::LoadWithoutCast,
-        memory::StoreWithoutCast,
-        elems_per_thread<io_size>()>(
-        data, remaining, input_calc, output_calc, loader, storer);
-    elementwise_kernel_helper(f, policy);
-  } else { // if this block has a full `block_work_size` data to handle, use
-           // vectorized memory access
+    if (remaining < io_block_work_size<io_size>()) { // if this block handles the reminder,
+                                        // just do a naive unrolled loop
+      auto input_calc = TrivialOffsetCalculator<traits::arity>();
+      auto output_calc = TrivialOffsetCalculator<1>();
+      auto loader = memory::LoadWithoutCast();
+      auto storer = memory::StoreWithoutCast();
+      auto policy = memory::policies::unroll<
+          array_t,
+          decltype(input_calc),
+          decltype(output_calc),
+          memory::LoadWithoutCast,
+          memory::StoreWithoutCast,
+          elems_per_thread<io_size>()>(
+          data, remaining, input_calc, output_calc, loader, storer);
+      elementwise_kernel_helper(f, policy);
+    } else { // if this block has a full `block_work_size` data to handle, use
+            // vectorized memory access
 #ifdef USE_ROCM
-    constexpr auto optimal_vec_size = calc_optimal_vec_size<vec_size, io_size>();
+      constexpr auto optimal_vec_size = calc_optimal_vec_size<vec_size, io_size>();
 #else
-    constexpr auto optimal_vec_size = vec_size;
+      constexpr auto optimal_vec_size = vec_size;
 #endif
-    elementwise_kernel_helper(
-        f, memory::policies::vectorized<optimal_vec_size, array_t, elems_per_thread<io_size>()>(data));
+      elementwise_kernel_helper(
+          f, memory::policies::vectorized<optimal_vec_size, array_t, elems_per_thread<io_size>()>(data));
+    }
+#endif
+  } else {
+    using traits = function_traits<func_t>;
+    constexpr auto io_size = calc_io_size<func_t>();
+    int remaining = N - io_block_work_size<io_size>() * blockIdx.x;
+
+    if (remaining < io_block_work_size<io_size>()) { // if this block handles the reminder,
+                                        // just do a naive unrolled loop
+      auto input_calc = TrivialOffsetCalculator<traits::arity>();
+      auto output_calc = TrivialOffsetCalculator<1>();
+      auto loader = memory::LoadWithoutCast();
+      auto storer = memory::StoreWithoutCast();
+      auto policy = memory::policies::unroll<
+          array_t,
+          decltype(input_calc),
+          decltype(output_calc),
+          memory::LoadWithoutCast,
+          memory::StoreWithoutCast,
+          elems_per_thread<io_size>()>(
+          data, remaining, input_calc, output_calc, loader, storer);
+      elementwise_kernel_helper(f, policy);
+    } else { // if this block has a full `block_work_size` data to handle, use
+            // vectorized memory access
+#ifdef USE_ROCM
+      constexpr auto optimal_vec_size = calc_optimal_vec_size<vec_size, io_size>();
+#else
+      constexpr auto optimal_vec_size = vec_size;
+#endif
+      elementwise_kernel_helper(
+          f, memory::policies::vectorized<optimal_vec_size, array_t, elems_per_thread<io_size>()>(data));
+    }
   }
 }
 
@@ -213,6 +248,11 @@ static inline void launch_vectorized_kernel(
   // that causes some numerical mismatches with uint8 on sm80 and sm90.
   // TODO: Revisit this after CUDA 12.8 update.
   if constexpr (sizeof(cpp_type) < 2) {
+    vec_size = std::min<uint16_t>(vec_size, 4);
+  }
+  // Since we are not compiling vec8 kernel on sm<90, we are not calling it.
+  auto dprop = at::cuda::getCurrentDeviceProperties();
+  if (dprop->major < 9) {
     vec_size = std::min<uint16_t>(vec_size, 4);
   }
 #endif
