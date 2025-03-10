@@ -19,11 +19,11 @@ from typing import Any, Callable, Literal, NamedTuple, Optional, TYPE_CHECKING
 
 import torch
 import torch.utils._pytree as pytree
-from torch._C import _NodeIter
+from torch._C import _fx_map_arg as map_arg, _NodeIter
 
 from . import _pytree as fx_pytree
 from ._compatibility import compatibility
-from .node import _get_qualified_name, _type_repr, Argument, map_arg, Node, Target
+from .node import _get_qualified_name, _type_repr, Argument, Node, Target
 
 
 __all__ = ["PythonCode", "CodeGen", "Graph"]

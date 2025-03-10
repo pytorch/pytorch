@@ -1,7 +1,145 @@
 #include <torch/csrc/fx/node.h>
 
 #include <structmember.h>
+#include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pythoncapi_compat.h>
+
+namespace {
+
+// Thrown to exit out of a C++ function and return an error to Python.
+class PythonError : public std::exception {};
+
+inline static PyObject* import_from(const char* module_name, const char* name) {
+  THPObjectPtr module(PyImport_ImportModule(module_name));
+  if (!module) {
+    throw PythonError();
+  }
+  PyObject* result = PyObject_GetAttrString(module, name);
+  if (!result) {
+    throw PythonError();
+  }
+  return result;
+}
+
+inline static PyObject* immutable_list_cls() {
+  static PyObject* immutable_list_cls = nullptr;
+  if (!immutable_list_cls) {
+    immutable_list_cls =
+        import_from("torch.fx.immutable_collections", "immutable_list");
+  }
+  return immutable_list_cls;
+}
+
+inline static PyObject* immutable_dict_cls() {
+  static PyObject* immutable_dict_cls = nullptr;
+  if (!immutable_dict_cls) {
+    immutable_dict_cls =
+        import_from("torch.fx.immutable_collections", "immutable_dict");
+  }
+  return immutable_dict_cls;
+}
+
+inline static bool is_node(PyObject* obj) {
+  static PyObject* node_cls = nullptr;
+  if (!node_cls) {
+    node_cls = import_from("torch.fx.node", "Node");
+  }
+  return PyObject_TypeCheck(obj, reinterpret_cast<PyTypeObject*>(node_cls));
+}
+
+inline static bool exact_type(PyObject* obj, PyObject* typ) {
+  return Py_TYPE(obj) == reinterpret_cast<PyTypeObject*>(typ);
+}
+
+template <typename F>
+inline static PyObject* map_aggregate(PyObject* a, F fn) {
+  // Invariant: this function will throw an exception and never return nullptr.
+  // Case 1: a is a tuple.
+  if (PyTuple_Check(a)) {
+    Py_ssize_t n = PyTuple_GET_SIZE(a);
+    if (n == 0 && PyTuple_CheckExact(a)) {
+      return Py_NewRef(a);
+    }
+    THPObjectPtr new_tuple(PyTuple_New(n));
+    if (!new_tuple) {
+      throw PythonError();
+    }
+    for (Py_ssize_t i = 0; i < n; i++) {
+      PyObject* elem = PyTuple_GET_ITEM(a, i); // Borrowed reference.
+      // PyTuple_SET_ITEM steals reference to result of map_aggregate
+      PyTuple_SET_ITEM(new_tuple.get(), i, map_aggregate(elem, fn));
+    }
+    // If the tuple has a "_fields" attribute, assume it is a NamedTuple.
+    if (!PyTuple_CheckExact(a) && PyObject_HasAttrString(a, "_fields")) {
+      // Call type_obj with new_tuple as arguments (i.e. type(a)(*new_tuple))
+      return PyObject_CallObject(
+          reinterpret_cast<PyObject*>(Py_TYPE(a)), new_tuple);
+    } else {
+      return new_tuple.release();
+    }
+  }
+  // Case 2: a is a list.
+  else if (PyList_Check(a)) {
+    Py_ssize_t n = PyList_GET_SIZE(a);
+    if (n == 0 && exact_type(a, immutable_list_cls())) {
+      return Py_NewRef(a);
+    }
+    THPObjectPtr result(PyObject_CallNoArgs(immutable_list_cls()));
+    if (!result) {
+      throw PythonError();
+    }
+    for (Py_ssize_t i = 0; i < n; i++) {
+      PyObject* elem = PyList_GET_ITEM(a, i); // borrowed ref
+      THPObjectPtr mapped(map_aggregate(elem, fn));
+      if (PyList_Append(result.get(), mapped.get()) < 0) {
+        throw PythonError();
+      }
+    }
+    return result.release();
+  }
+  // Case 3: a is a dict.
+  else if (PyDict_Check(a)) {
+    if (PyDict_GET_SIZE(a) == 0 && exact_type(a, immutable_dict_cls())) {
+      return Py_NewRef(a);
+    }
+    THPObjectPtr result(PyObject_CallNoArgs(immutable_dict_cls()));
+    if (!result) {
+      throw PythonError();
+    }
+    PyObject *key = nullptr, *value = nullptr; // borrowed
+    Py_ssize_t pos = 0;
+    while (PyDict_Next(a, &pos, &key, &value)) {
+      THPObjectPtr mapped(map_aggregate(value, fn));
+      if (PyDict_SetItem(result.get(), key, mapped.get()) < 0) {
+        throw PythonError();
+      }
+    }
+    return result.release();
+  }
+  // Case 4: a is a slice.
+  else if (PySlice_Check(a)) {
+    // Get start, stop, and step attributes.
+    THPObjectPtr start(PyObject_GetAttrString(a, "start"));
+    THPObjectPtr stop(PyObject_GetAttrString(a, "stop"));
+    THPObjectPtr step(PyObject_GetAttrString(a, "step"));
+    if (!start || !stop || !step) {
+      throw PythonError();
+    }
+    THPObjectPtr mapped_start(map_aggregate(start, fn));
+    THPObjectPtr mapped_stop(map_aggregate(stop, fn));
+    THPObjectPtr mapped_step(map_aggregate(step, fn));
+    return PySlice_New(
+        mapped_start.get(), mapped_stop.get(), mapped_step.get());
+  }
+  // Default case: call fn(a).
+  else {
+    PyObject* result = fn(a);
+    if (!result) {
+      throw PythonError();
+    }
+    return result;
+  }
+}
 
 ////////////////////////////////
 // NodeBase
@@ -59,7 +197,7 @@ static void NodeBase_dealloc(PyObject* self) {
   Py_TYPE(self)->tp_free(self);
 }
 
-static PyTypeObject NodeBaseType = {
+PyTypeObject NodeBaseType = {
     PyVarObject_HEAD_INIT(nullptr, 0)
     "torch._C._NodeBase", /* tp_name */
     sizeof(NodeBase), /* tp_basicsize */
@@ -101,12 +239,7 @@ static PyTypeObject NodeBaseType = {
     NodeBase_new, /* tp_new */
 };
 
-bool NodeBase_init(PyObject* module) {
-  if (PyModule_AddType(module, &NodeBaseType) < 0) {
-    return false;
-  }
-  return true;
-}
+} // namespace
 
 ////////////////////////////////
 // NodeIter
@@ -255,6 +388,74 @@ static PyTypeObject NodeIterType = {
 
 bool NodeIter_init(PyObject* module) {
   if (PyModule_AddType(module, &NodeIterType) < 0) {
+    return false;
+  }
+  return true;
+}
+
+////////////////////////////////
+// Global methods
+////////////////////////////////
+
+static PyObject* py_map_aggregate(
+    PyObject* self,
+    PyObject* const* args,
+    Py_ssize_t nargs) {
+  if (nargs != 2) {
+    PyErr_SetString(
+        PyExc_TypeError, "map_aggregate() takes exactly two arguments");
+    return nullptr;
+  }
+  try {
+    PyObject* fn = args[1];
+    // args[0]: aggregate, args[1]: callable fn
+    return map_aggregate(
+        args[0], [fn](PyObject* a) { return PyObject_CallOneArg(fn, a); });
+  } catch (const PythonError& e) {
+    return nullptr; // error should already be set
+  }
+}
+
+static PyObject* py_map_arg(
+    PyObject* self,
+    PyObject* const* args,
+    Py_ssize_t nargs) {
+  if (nargs != 2) {
+    PyErr_SetString(PyExc_TypeError, "map_arg() takes exactly two arguments");
+    return nullptr;
+  }
+  try {
+    PyObject* fn = args[1];
+    // args[0]: aggregate, args[1]: callable fn
+    return map_aggregate(args[0], [fn](PyObject* a) {
+      if (is_node(a)) {
+        return PyObject_CallOneArg(fn, a);
+      }
+      return Py_NewRef(a);
+    });
+  } catch (const PythonError& e) {
+    return nullptr; // error should already be set
+  }
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+static PyMethodDef extra_methods[] = {
+    {"_fx_map_aggregate",
+     (PyCFunction)(void*)(py_map_aggregate),
+     METH_FASTCALL,
+     "Recursively apply a function to every element in an aggregate object."},
+    {"_fx_map_arg",
+     (PyCFunction)(void*)(py_map_arg),
+     METH_FASTCALL,
+     "Recursively apply a function to every Node in an aggregate object."},
+    {nullptr, nullptr, 0, nullptr} // Sentinel
+};
+
+bool NodeBase_init(PyObject* module) {
+  if (PyModule_AddType(module, &NodeBaseType) < 0) {
+    return false;
+  }
+  if (PyModule_AddFunctions(module, extra_methods) < 0) {
     return false;
   }
   return true;
