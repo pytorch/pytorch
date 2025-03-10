@@ -3200,22 +3200,17 @@ def native_group_norm(
         input_reshaped, dim=reduction_dims, unbiased=False, keepdim=True
     )
     rstd = torch.rsqrt(biased_var + eps)
-    if weight is not None:
+    if input.device.type == "cpu" and weight is not None:
         weight_reshaped = torch.reshape(
             weight, [1, num_groups, num_channels // num_groups, 1]
         )
         w = rstd * weight_reshaped
         b = -mean * w
-    else:
-        w = rstd
-        b = -mean * rstd
-    if bias is not None:
-        bias_reshaped = torch.reshape(
-            bias, [1, num_groups, num_channels // num_groups, 1]
-        )
-        b = b + bias_reshaped
-
-    if input.device.type == "cpu" and weight is not None:
+        if bias is not None:
+            bias_reshaped = torch.reshape(
+                bias, [1, num_groups, num_channels // num_groups, 1]
+            )
+            b = b + bias_reshaped
         w = w.contiguous().as_strided([batch_size, num_channels], [num_channels, 1])
         b = b.contiguous().as_strided([batch_size, num_channels], [num_channels, 1])
         broadcast_dims = list(range(2, input.ndim))
@@ -3223,8 +3218,15 @@ def native_group_norm(
         unsqueeze_b = _unsqueeze_multiple(b, broadcast_dims)
         out = input_acc * unsqueeze_w + unsqueeze_b
     else:
-        out = input_reshaped * w + b
+        out = (input_reshaped - mean) * rstd
         out = out.view(input.shape)
+        broadcast_dims = [0] + list(range(2, input.ndim))
+        if weight is not None:
+            weight = _unsqueeze_multiple(weight, broadcast_dims)
+            out = out * weight
+        if bias is not None:
+            bias = _unsqueeze_multiple(bias, broadcast_dims)
+            out = out + bias
 
     out = _maybe_convert_to_dtype(out, input.dtype)  # type: ignore[assignment]
     mean = _maybe_convert_to_dtype(mean, input.dtype)  # type: ignore[assignment]
