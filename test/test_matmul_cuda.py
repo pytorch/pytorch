@@ -1206,9 +1206,13 @@ class TestFP8MatmulCuda(TestCase):
             A = A.view(torch.float4_e2m1fn_x2)
             B = B.view(torch.float4_e2m1fn_x2)
 
+            # M = 128
+            # K = 128
+            # block_size = 16
+            # M * (K // block_size) = 128 * (128 // 16) = 128 * 8 = 1024
             A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e4m3fn)
             B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e4m3fn)
-            print(A_scale.numel(), B_scale.numel(), A_scale, B_scale)
+            print(A_scale.numel(), B_scale.numel(), A_scale.shape, B_scale.shape, A_scale, B_scale)
             # convert to swizzled format
             # A_scale = to_blocked(A_scale)
             # B_scale = to_blocked(B_scale)

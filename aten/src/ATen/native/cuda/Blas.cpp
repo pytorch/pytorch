@@ -171,6 +171,13 @@ struct cublasCommonArgs {
     result_ld = result->stride(transpose_result ? 0 : 1);
     transa = transpose_a ? mata->is_conj() ? 'c' : 't' : 'n';
     transb = transpose_b ? matb->is_conj() ? 'c' : 't' : 'n';
+
+    // TODO docblock
+    if (mat1.dtype() == at::kFloat4_e2m1fn_x2 && mat2.dtype() == at::kFloat4_e2m1fn_x2) {
+      k = k * 2;
+      lda = lda * 2;
+      ldb = ldb * 2;
+    }
   }
 
   // Matrix members
@@ -978,7 +985,7 @@ enum class ScalingType : std::uint8_t {
  * ---------------------------
  * Conditions and corresponding Scaling Types:
  *
- * - If scale tensors are Float8_e8m0fnu:
+ * - If scale tensors are both `Float8_e8m0fnu` or `Float8_e4m3fn`:
  *   - Returns BlockWise (with additional size checks).
  *
  * - If scale_a.numel() == 1 && scale_b.numel() == 1:
@@ -999,15 +1006,22 @@ ScalingType get_scaling_type(
     int64_t dim_m,
     int64_t dim_k,
     int64_t dim_n) {
-  // Check for BlockWise scaling (FP8_E8M0 types)
-  if (scale_a.scalar_type() == scale_b.scalar_type() &&
-      (scale_a.scalar_type() == at::kFloat8_e8m0fnu) || (scale_a.scalar_type() == at::kFloat8_e4m3fn)) {
-    int64_t BLOCK_SIZE_K = scale_a.scalar_type() == at::kFloat8_e8m0fnu ? 32 : 16;
-    // int64_t BLOCK_SIZE_K = 16;
+  // Check for BlockWise scaling (FP8_E8M0 and FP8_E4M3 types)
+  if ((scale_a.scalar_type() == scale_b.scalar_type()) &&
+      ((scale_a.scalar_type() == at::kFloat8_e8m0fnu) || (scale_a.scalar_type() == at::kFloat8_e4m3fn))) {
+    const bool is_nvfp4 = scale_a.scalar_type() == at::kFloat8_e4m3fn;
+
+    // cuBLAS's mxfp8 gemm: block_size is 1 scale per 32 elements
+    // cuBLAS's nvfp4 gemm: block_size is 1 scale per 16 unpacked elements.
+    const auto BLOCK_SIZE_K = is_nvfp4 ? 16 : 32;
+
     constexpr int64_t BLOCK_SIZE_MN = 128;
 
+    // adjust for fp4x2 packing if necessary
+    const auto dim_k_unpacked = is_nvfp4 ? dim_k * 2 : dim_k;
+
     auto ceil_div = [](auto a, auto b) { return (a + b - 1) / b; };
-    auto num_k_blocks = ceil_div(dim_k, BLOCK_SIZE_K);
+    auto num_k_blocks = ceil_div(dim_k_unpacked, BLOCK_SIZE_K);
     auto padded_num_k_blocks = ceil_div(num_k_blocks, 4) * 4;
 
     // TODO: We might want to enforce some structure on the shapes of the scale
@@ -1019,14 +1033,12 @@ ScalingType get_scaling_type(
     auto expected_b_size =
         BLOCK_SIZE_MN * ceil_div(dim_n, BLOCK_SIZE_MN) * padded_num_k_blocks;
 
-    /*
     TORCH_CHECK(scale_a.numel() == expected_a_size,
                 "For BlockWise scaling: Expected scale_a size to be ",
                 expected_a_size, " but got ", scale_a.numel());
     TORCH_CHECK(scale_b.numel() == expected_b_size,
                 "For BlockWise scaling: Expected scale_b size to be ",
                 expected_b_size, " but got ", scale_b.numel());
-    */
 
     TORCH_CHECK(
         scale_a.is_contiguous() && scale_b.is_contiguous(),
@@ -1035,9 +1047,8 @@ ScalingType get_scaling_type(
     return ScalingType::BlockWise;
   }
   // Both Per-Tensor and Row-wise scaling expect fp32 tensors
-  // TODO(before land): reenable this
   TORCH_CHECK(
-      true || scale_a.scalar_type() == kFloat && scale_b.scalar_type() == kFloat,
+      scale_a.scalar_type() == kFloat && scale_b.scalar_type() == kFloat,
       "Both scale_a and scale_b must be float (fp32) tensors.");
 
   // Check the singluar scale case for per-tensor scaling
