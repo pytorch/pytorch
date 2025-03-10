@@ -74,7 +74,7 @@ detectron2_fasterrcnn_r_50_fpn,fail_accuracy,46
 
 
 
-detectron2_fcos_r_50_fpn,fail_accuracy,24
+detectron2_fcos_r_50_fpn,fail_accuracy,22
 
 
 
@@ -138,7 +138,7 @@ hf_Bert_large,pass,0
 
 
 
-hf_BigBird,pass,19
+hf_BigBird,pass,24
 
 
 
@@ -290,7 +290,7 @@ soft_actor_critic,pass,0
 
 
 
-speech_transformer,fail_to_run,10
+speech_transformer,fail_to_run,5
 
 
 
