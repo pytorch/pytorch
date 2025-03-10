@@ -32,6 +32,7 @@ from torch.distributed.tensor.parallel import (
 from torch.testing._internal.common_utils import (
     TEST_HPU,
     TEST_CUDA,
+    TEST_XPU
 )
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
@@ -42,23 +43,24 @@ from torch.testing._internal.common_distributed import (
 )
 
 from torch.utils._pytree import tree_flatten, tree_unflatten, TreeSpec
-from torch._utils import _get_device_module
 
 if TEST_CUDA:
     DEVICE_TYPE = "cuda"
 elif TEST_HPU:
     DEVICE_TYPE = "hpu"
+elif TEST_XPU:
+    DEVICE_TYPE = "xpu"
 else:
     DEVICE_TYPE = "cpu"
 
-
+DEVICE_MODULE = torch.get_device_module(DEVICE_TYPE)
+DEVICE_COUNT = DEVICE_MODULE.device_count()
+BACKEND = dist.get_default_backend_for_device(DEVICE_TYPE)
 NUM_DEVICES = 4
-device_module = torch.get_device_module(DEVICE)
-device_count = device_module.device_count()
-BACKEND = dist.get_default_backend_for_device(DEVICE)
-# We use this as a proxy for "multiple GPUs exist"
-if TEST_CUDA and DEVICE_COUNT > 1:
-    # when we actually have multiple GPUs, relax the requirement to smaller counts.
+
+# We use this as a proxy for "multiple GPUs/XPUs/HPUs exist"
+if any((TEST_CUDA, TEST_XPU, TEST_HPU)) and DEVICE_COUNT > 1:
+    # when we actually have multiple GPUs/XPUs/HPUs, relax the requirement to smaller counts.
     NUM_DEVICES = min(NUM_DEVICES, DEVICE_COUNT)
 
 T = TypeVar("T")
@@ -329,13 +331,13 @@ class DTensorTestBase(MultiProcessTestCase):
         if "nccl" in self.backend and torch.cuda.device_count() < self.world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
 
-        if self.backend not in ["nccl", "gloo", "mpi", "cpu:gloo,cuda:nccl", "hccl"]:
+        if self.backend not in ["nccl", "gloo", "mpi", "cpu:gloo,cuda:nccl", "hccl", "xccl"]:
             raise RuntimeError(f"Backend {self.backend} not supported!")
 
         device_id = None
-        if "nccl" in self.backend:
+        if any(x in self.backend for x in ("nccl", "xccl", "hccl")):
             # set device for nccl pg for collectives
-            torch.cuda.set_device(self.rank)
+            torch.accelerator.set_device_index(self.rank)
             # we only need to set device_id for nccl backend with eager init
             device_id = torch.device(f"{self.device_type}:{self.rank}") if eager_init else None
         # For nccl backend, bind the device to the process if device_id is not None
@@ -389,7 +391,7 @@ def with_comms(eager_init: Union[TestFunc, bool] = False) -> TestFunc:
             self, *args: tuple[object], **kwargs: dict[str, Any]  # type: ignore[misc]
         ) -> None:
             # if enough GPU we can use GPU, otherwise we fallback to CPU
-            if not TEST_CUDA or torch.cuda.device_count() < self.world_size:
+            if not (TEST_CUDA or TEST_XPU or TEST_HPU) or DEVICE_COUNT < self.world_size:
                 self.device_type = "cpu"
             else:
                 self.device_type = DEVICE_TYPE

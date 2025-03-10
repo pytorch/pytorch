@@ -28,7 +28,6 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 )
 
 
-
 class DistTensorRandomInitTest(DTensorTestBase):
     def _run_init_op(self, init_op, *args, **kwargs):
         device_mesh = self.build_device_mesh()
@@ -92,7 +91,7 @@ class DistTensorRandomInitTest(DTensorTestBase):
         # torch random generator keeps different seeds on ranks. This ensures
         # that Replicate DTensor will have the same initialized results
         # across ranks.
-        torch.cuda.manual_seed(self.rank)
+        torch.manual_seed(self.rank)
         device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
         size = [1024, 2048]
         meta_dtensor = distribute_tensor(
@@ -210,7 +209,9 @@ class DistTensorRandomInitTest(DTensorTestBase):
             self.assertEqual(model.weight.device, torch.device("meta"))
 
         # actual initialization
-        device = torch.device(self.device_type, torch.get_device_module(self.device_type).current_device())
+        device = torch.device(
+            self.device_type, torch.get_device_module(self.device_type).current_device()
+        )
         model.to_empty(device=device)
         model.reset_parameters()
         self.assertTrue(
@@ -251,7 +252,9 @@ class DistTensorRandomOpTest(DTensorTestBase):
         device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
         # seed synchronization happens after the first `distribute_tensor` call
         distribute_tensor(
-            torch.empty([self.world_size], device=self.device_type), device_mesh, [Shard(0)]
+            torch.empty([self.world_size], device=self.device_type),
+            device_mesh,
+            [Shard(0)],
         )
         self.assertEqual(seed_from_rank_0, random._rng_tracker.get_seed("parallel-rng"))
 
@@ -550,7 +553,9 @@ class DistTensorRandomOpsTest3D(DTensorTestBase):
             self.assertEqual(model.weight.device, torch.device("meta"))
 
         # actual initialization
-        device = torch.device(self.device_type, torch.get_device_module(self.device_type).current_device())
+        device = torch.device(
+            self.device_type, torch.get_device_module(self.device_type).current_device()
+        )
         model.to_empty(device=device)
         model.reset_parameters()
         self.assertTrue(
