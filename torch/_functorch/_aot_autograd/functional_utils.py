@@ -9,7 +9,6 @@ This file contains utilities related to functionalization in AOTAutograd:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
 import torch
 from torch import Tensor
@@ -227,7 +226,7 @@ def gen_alias_from_base(
     aliased_base_tensor,
     target_meta_tensor,
     target_requires_grad,
-    target_functional_tensor: Optional[FunctionalTensorMetadataEq] = None,
+    target_functional_tensor: FunctionalTensorMetadataEq | None = None,
     *,
     replay_views,
 ):
@@ -341,8 +340,8 @@ class MetadataKey:
     layout: torch.layout
     is_sparse: bool
     # these are empty when is_sparse
-    stride: Optional[tuple[SymIntEqByExpr, ...]]
-    storage_offset: Optional[SymIntEqByExpr]
+    stride: tuple[SymIntEqByExpr, ...] | None
+    storage_offset: SymIntEqByExpr | None
     is_conj: bool
     is_neg: bool
 
