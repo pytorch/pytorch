@@ -65,6 +65,10 @@ def signature_of(arg: KernelArgType, *, size_dtype: Optional[str]) -> str:
                 # From triton/runtime/jit.py
                 # `None` is nullptr.  Implicitly convert to *i8.
                 return "*i8"
+        elif _arg_equals_1(arg) and triton_version_uses_attrs_dict():
+            # In new versions of Triton, if we have an equal-to-1 arg that's marked as a constant,
+            # it should be marked as "constexpr" in the signature.
+            return "constexpr"
         elif isinstance(arg.expr, (float, sympy.Float)):
             return "fp32"
 
@@ -143,6 +147,27 @@ def is_unaligned_buffer(arg: TensorArg):
         return False
 
 
+def _arg_equals_1(arg: KernelArgType) -> bool:
+    return (
+        isinstance(arg, SizeArg)
+        and isinstance(arg.expr, (int, sympy.Integer))
+        and V.graph.sizevars.statically_known_equals(arg.expr, 1)  # type: ignore[arg-type]
+    )
+
+
+def equal_1_arg_indices(
+    args: list[KernelArgType],
+    *,
+    indices: Optional[list[int]] = None,
+) -> tuple[int, ...]:
+    if indices is None:
+        indices = list(range(len(args)))
+
+    equal_to_1 = tuple(i for i, arg in zip(indices, args) if _arg_equals_1(arg))
+
+    return equal_to_1
+
+
 def config_of(
     args: list[KernelArgType],
     *,
@@ -159,7 +184,8 @@ def config_of(
         if isinstance(x, TensorArg):
             if include_tensor:
                 offset_aligned = V.graph.sizevars.statically_known_multiple_of(
-                    x.offset * x.dtype.itemsize, alignment  # type: ignore[arg-type]
+                    x.offset * x.dtype.itemsize,
+                    alignment,  # type: ignore[arg-type]
                 )
                 return offset_aligned and not is_unaligned_buffer(x)
             else:
@@ -190,12 +216,6 @@ def config_of(
     else:
         divisible_by_16 = ()
 
-    equal_to_1 = tuple(
-        i
-        for i, arg in zip(indices, args)
-        if isinstance(arg, SizeArg)
-        and isinstance(arg.expr, (int, sympy.Integer))
-        and V.graph.sizevars.statically_known_equals(arg.expr, 1)  # type: ignore[arg-type]
-    )
+    equal_to_1 = equal_1_arg_indices(args, indices=indices)
 
     return AttrsDescriptorWrapper(divisible_by_16, equal_to_1)

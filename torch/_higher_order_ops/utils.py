@@ -2,7 +2,7 @@
 import functools
 from contextlib import contextmanager, ExitStack
 from dataclasses import dataclass
-from typing import Any, Callable, List, Optional, Tuple, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 import torch.fx.traceback as fx_traceback
@@ -10,7 +10,11 @@ import torch.utils._pytree as pytree
 from torch._guards import detect_fake_mode
 from torch._ops import OperatorBase
 from torch._subclasses.fake_tensor import FakeTensor
-from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing, make_fx
+from torch.fx.experimental.proxy_tensor import (
+    _temp_remove_metadata_torch_function_mode,
+    disable_proxy_modes_tracing,
+    make_fx,
+)
 from torch.fx.passes.shape_prop import TensorMetadata
 from torch.multiprocessing.reductions import StorageWeakRef
 
@@ -81,6 +85,23 @@ def _maybe_run_with_interpreter(fn):
     return maybe_interpreted_fn
 
 
+def _maybe_compile_and_run_fn(fn, *args):
+    if not torch._dynamo.is_compiling():
+        from torch._dynamo.backends.debugging import (
+            make_eager_backend_with_torch_function_mode,
+        )
+
+        with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
+            with _temp_remove_metadata_torch_function_mode() as metadata_mode:
+                if metadata_mode:
+                    backend = make_eager_backend_with_torch_function_mode(metadata_mode)
+                else:
+                    backend = "eager"
+                return torch.compile(fn, backend=backend, fullgraph=True)(*args)
+    else:
+        return fn(*args)
+
+
 def reenter_make_fx(fn):
     from torch.fx.experimental.proxy_tensor import _CURRENT_MAKE_FX_TRACER
 
@@ -124,13 +145,24 @@ def _maybe_reenter_make_fx(fn):
 @contextmanager
 def _set_compilation_env():
     _old_is_tracing = torch.fx._symbolic_trace._is_fx_tracing_flag
+    _old_allow_empty_graphs = torch._dynamo.config.allow_empty_graphs
+    # The issue is tracked in https://github.com/pytorch/pytorch/issues/144360: when dynamo finds
+    # the top-level frame produces no graph, the default behavior is to fallback to eager.
+    # Then when it encounters an inner function, it will try to trace that function again, which is unnecessary.
+    # For while_loop, during inspecting the inner call, we trace into the python dispathcer
+    # logic, which is not tracable as of today. So the proper fix can be either 1. allow dispatch
+    # logic to be dynamo tracable or 2. fixing https://github.com/pytorch/pytorch/issues/144360.
+    # but it exposes some bugs in existing tests so we have to have a temporary flag to control
+    # the behavior, which allows dynamo to store an empty graph for a frame without falling back to eager
     try:
         # We need to turn off the is_fx_tracing_flag. Remove this flag check from dyanmo
         # once we are confident fx tracing works with dynamo.
         torch.fx._symbolic_trace._is_fx_tracing_flag = False
+        torch._dynamo.config.allow_empty_graphs = True
         yield
     finally:
         torch.fx._symbolic_trace._is_fx_tracing_flag = _old_is_tracing
+        torch._dynamo.config.allow_empty_graphs = _old_allow_empty_graphs
 
 
 def _detect_input_mutation(gm: torch.fx.GraphModule) -> bool:
@@ -162,7 +194,7 @@ def _detect_input_alias(gm: torch.fx.GraphModule) -> bool:
 
 
 # The invariant here is that we always trace the branch with fake tensor
-def _maybe_fake_tracing(fn, inputs: List[Any], pre_dispatch):
+def _maybe_fake_tracing(fn, inputs: list[Any], pre_dispatch):
     fake_mode = detect_fake_mode(inputs)
     tracing_mode = "real"
     if fake_mode is None:
@@ -326,6 +358,17 @@ def unmask_none_gradients(grads, operands):
             )
 
     return unmasked_grads
+
+
+def _maybe_fake_prop_ignore_unbacked(fn, args):
+    with ExitStack() as ctx_stack:
+        if (fake_mode := detect_fake_mode(args)) is not None:
+            ctx_stack.enter_context(fake_mode)
+            if fake_mode.shape_env is not None:
+                ctx_stack.enter_context(
+                    fake_mode.shape_env.ignore_fresh_unbacked_symbols()
+                )
+        return fn(*args)
 
 
 # TODO: The parameter use_output_and_grad_bw is required because some operations
@@ -543,8 +586,8 @@ def validate_subgraph_args_types(lifted_args: Union[tuple[Any, ...], list[Any]])
 
 def check_input_alias_and_mutation(
     gm: torch.fx.GraphModule,
-    fake_args: List[FakeTensor],
-) -> Tuple[List[int], dict[int, int], dict[int, int], dict[int, int]]:
+    fake_args: list[FakeTensor],
+) -> tuple[list[int], dict[int, int], dict[int, int], dict[int, int]]:
     with disable_proxy_modes_tracing():
         """This function returns mutated inputs, inp-inp alias, inp-out alias, out-out alias
         in the graph module gm. It checks whether input tensor versions have
@@ -567,18 +610,12 @@ def check_input_alias_and_mutation(
             # We need to temporarily turn inference_mode off because
             # under inference mode, tensor version counter is not tracked.
             ctx_stack.enter_context(torch.inference_mode(False))
-            if (fake_mode := detect_fake_mode(fake_args)) is not None:
-                ctx_stack.enter_context(fake_mode)
-                if fake_mode.shape_env is not None:
-                    ctx_stack.enter_context(
-                        fake_mode.shape_env.ignore_fresh_unbacked_symbols()
-                    )
             cloned = [
                 clone_preserve_strides(arg) if isinstance(arg, torch.Tensor) else arg
                 for arg in fake_args
             ]
             before = [_tensor_version(arg) for arg in cloned]
-            outputs = gm(*cloned)
+            outputs = _maybe_fake_prop_ignore_unbacked(gm, cloned)
             outputs = [outputs] if not isinstance(outputs, (list, tuple)) else outputs
             after = [_tensor_version(arg) for arg in cloned]
             mutated_inputs = [
