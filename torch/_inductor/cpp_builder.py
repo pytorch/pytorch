@@ -1518,12 +1518,13 @@ class CppBuilder:
 
             if _IS_WINDOWS:
                 # Visual C++ and ICC both require a dummy source file to compile, in
-                # addition to the header.
-                self._precompiling_dummy_file = tempfile.NamedTemporaryFile(
-                    suffix=".cpp", buffering=0
-                )
-                self._precompiling_dummy_file.write(f'#include "{header}"\n'.encode())
-                self._sources_args = f"/Yc{header} {self._precompiling_dummy_file.name}"
+                # addition to the header.  Do this in a temporary directory, rather than
+                # a NamedTemporaryFile, because Windows won't read from files with open
+                # write handles.
+                self._dummy_source_dir = tempfile.TemporaryDirectory()
+                dummy_source = Path(self._dummy_source_dir.name) / "source.cpp"
+                dummy_source.write_text(f'#include "{header}"\n')
+                self._sources_args = f"/Yc{header} {str(dummy_source)}"
             else:
                 self._sources_args = f"-x c++-header {header}"
         else:
