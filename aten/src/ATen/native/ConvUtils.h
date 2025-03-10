@@ -362,10 +362,27 @@ inline bool miopen_conv_use_channels_last(const at::Tensor& input, const at::Ten
     return false;
   }
 
-  bool can_use_miopen_channels_last_2d = false;
-  // TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC once ROCm officially supports NHWC in MIOpen
-  // See #64427
+  // Check user level env var to override any setting below
   static std::optional<bool> PYTORCH_MIOPEN_SUGGEST_NHWC = c10::utils::check_env("PYTORCH_MIOPEN_SUGGEST_NHWC");
+
+  bool can_use_miopen_channels_last_2d = false;
+
+#if defined(USE_ROCM) && (ROCM_VERSION >= 60300)
+  static const std::array<const char*, 4> unsupported_arch = {
+    "gfx1100", "gfx1101", "gfx1200", "gfx1201"
+  }
+
+  for (auto index: c10::irange(at::detail::getNumGPUs())) {
+    if (at::detail::getCUDAHooks().isGPUArch(index, archs)) {
+      return true;
+    }
+  }
+
+  return false;
+
+#else
+  return false;
+#endif
 
   auto input_memory_format = input.suggest_memory_format();
   auto weight_memory_format = weight.suggest_memory_format();

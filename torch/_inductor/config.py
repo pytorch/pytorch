@@ -464,10 +464,7 @@ autoheuristic_log_path = os.environ.get(
 )
 
 # Disabled by default on ROCm, opt-in if model utilises NHWC convolutions
-layout_opt_default = "1" if not torch.version.hip else "0"
-layout_optimization = (
-    os.environ.get("TORCHINDUCTOR_LAYOUT_OPTIMIZATION", layout_opt_default) == "1"
-)
+layout_optimization = os.environ.get("TORCHINDUCTOR_LAYOUT_OPTIMIZATION", 0) == "1"
 
 force_layout_optimization = os.environ.get("TORCHINDUCTOR_FORCE_LAYOUT_OPT", "0") == "1"
 

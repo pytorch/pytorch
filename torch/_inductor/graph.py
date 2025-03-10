@@ -568,6 +568,21 @@ class GraphLowering(torch.fx.Interpreter):
         if nconv == 0:
             return False
 
+        # If RDNA arch on ROCm do not force NHWC convolutions as this
+        # is still experimental
+        if torch.version.hip:
+            gcn_arch = torch.cuda.get_device_properties(0).gcnArchName.split(":", 1)[0]
+        if (
+            float(".".join(torch.version.hip.split(".")[:2])) >= 6.3
+            and ["gfx11", "gfx12"] not in gcn_arch
+            and all(
+                n.args[idx].meta["val"].device == torch.device("cuda")
+                for n in conv_nodes
+                for idx in [0, 1]
+            )
+        ):
+            return False
+
         # For cpu backend and mkldnn enabled, we always use channels_last for better performance.
         if (
             torch.backends.mkldnn.enabled
