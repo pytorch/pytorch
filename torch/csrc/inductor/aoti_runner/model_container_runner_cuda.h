@@ -17,7 +17,8 @@ class TORCH_CUDA_CPP_API AOTIModelContainerRunnerCuda
       const std::string& model_so_path,
       size_t num_models = 1,
       const std::string& device_str = "cuda",
-      const std::string& cubin_dir = "");
+      const std::string& cubin_dir = "",
+      const bool run_single_threaded = false);
 
   ~AOTIModelContainerRunnerCuda() override;
 
