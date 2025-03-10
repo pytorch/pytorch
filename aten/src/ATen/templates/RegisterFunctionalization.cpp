@@ -96,7 +96,7 @@ inline c10::List<::std::optional<Tensor>> to_meta(const c10::List<::std::optiona
 
 static bool disable_meta_reference() {
   static auto env = std::getenv("TORCH_DISABLE_FUNCTIONALIZATION_META_REFERENCE");
-  return env != nullptr && strcmp(env, "1") == 0;
+  return env != nullptr && std::strcmp(env, "1") == 0;
 }
 
 
