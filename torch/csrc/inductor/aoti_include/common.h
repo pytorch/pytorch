@@ -11,6 +11,8 @@
 #include <torch/csrc/inductor/aoti_runtime/scalar_to_tensor.h>
 using half = at::Half;
 using bfloat16 = at::BFloat16;
+using float8_e4m3fn = at::Float8_e4m3fn;
+using float8_e5m2 = at::Float8_e5m2;
 
 // Round up to the nearest multiple of 64
 [[maybe_unused]] inline int64_t align(int64_t nbytes) {
