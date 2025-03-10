@@ -1112,4 +1112,8 @@ mkldnn_rnn_layer_differentiable_backward(
 
 Tensor values_backward(const Tensor& grad, const Tensor& self);
 
+Tensor nextafter_backward(const Tensor& grad, const Tensor& self, const Tensor& other);
+Tensor nextafter_jvp(const Tensor& self_p, const Tensor& self_t, 
+                  const Tensor& other_p, const Tensor& other_t);
+
 } // namespace torch::autograd::generated::details
