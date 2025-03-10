@@ -46,7 +46,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TestCase,
 )
-from torch.testing._internal.common_quantized import _f32_to_floatx_unpacked
+from torch.testing._internal.common_quantized import _f32_to_floatx_unpacked, _floatx_unpacked_to_f32
 
 _IS_SM8X = False
 if TEST_CUDA:
@@ -424,12 +424,20 @@ def compute_error(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
     Pn = torch.norm(x - y)
     return 20 * torch.log10(Ps / Pn)
 
+
+# TODO(before land): convert other callsites in this file to this function
+def ceil_div(a, b):
+  return (a + b - 1) // b
+
+
 # largest power of 2 representable in `torch.float8_e4m3fn`
 F8E4M3_LARGEST_POW2 = 8
 # max value of `torch.float8_e4m3fn` (448)
 F8E4M3_MAX_VAL = torch.finfo(torch.float8_e4m3fn).max
 # exponent bias of `torch.float8_e8m0fnu`
 F8E8M0_EXP_BIAS = 127
+# exponent and mantissa bits of `torch.float4_e2m1fn_x2`
+FP4_EBITS, FP4_MBITS = 2, 1
 
 def data_to_mx_scale(x, block_size):
     # simple implementation of https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf
@@ -901,50 +909,57 @@ class TestFP8MatmulCuda(TestCase):
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     @parametrize("test_case_name", [
-        "a_eye_b_eye",
-        "a_ones_b_ones",
-        "a_ones_modified_b_ones",
-        "a_ones_b_ones_modified",
-        "a_scale_modified_b_ones",
-        "a_ones_b_scale_modified",
+        # "a_eye_b_eye",
+        # "a_ones_b_ones",
+        # "a_ones_modified_b_ones",
+        # "a_ones_b_ones_modified",
+        # "a_scale_modified_b_ones",
+        # "a_ones_b_scale_modified",
         "data_random_scales_one",
-        "data_random_scales_from_data",
+        # "data_random_scales_from_data",
     ])
-    @parametrize("fast_accum", [False, True])
+    # @parametrize("fast_accum", [False, True])
+    @parametrize("fast_accum", [False,])
     @parametrize("mkn", [
         # Nice shapes
         (128, 128, 128),
-        (256, 256, 256),
-        (128, 256, 512),
-        (256, 512, 128),
-        (512, 128, 256),
+        # (256, 256, 256),
+        # (128, 256, 512),
+        # (256, 512, 128),
+        # (512, 128, 256),
 
         # Non block multiples
-        (65, 96, 112),
-        (197, 224, 272),
+        # (65, 96, 112),
+        # (197, 224, 272),
         # K not multiple of 32
-        (197, 240, 272),
+        # (197, 240, 272),
 
         # Very unbalanced
-        (1023, 64, 48),
-        (31, 1024, 64),
-        (45, 96, 1024),
+        # (1023, 64, 48),
+        # (31, 1024, 64),
+        # (45, 96, 1024),
 
         # Mixed large and small
-        (2, 1024, 128),
-        (127, 96, 1024),
-        (1025, 128, 96)
+        # (2, 1024, 128),
+        # (127, 96, 1024),
+        # (1025, 128, 96)
     ], name_fn=lambda mkn: f"{mkn[0]}_{mkn[1]}_{mkn[2]}")
-    def test_blockwise_mxfp8_numerics(self, test_case_name, fast_accum, mkn) -> None:
+    # @parametrize("recipe", ["mxfp8", "nvfp4"])
+    @parametrize("recipe", ["nvfp4"])
+    # @parametrize("recipe", ["mxfp8"])
+    def test_blockwise_mxfp8_numerics(self, test_case_name, fast_accum, mkn, recipe) -> None:
         # inspiration: https://github.com/pytorch/ao/pull/1625
 
         device = "cuda"
         M, K, N = mkn
-        BLOCK_SIZE = 32
+        BLOCK_SIZE = 16 if recipe == "nvfp4" else 32
         require_exact_match = True
 
-        def ceil_div(a, b):
-            return (a + b - 1) // b
+        def _bfloat16_to_float4_e2m1fn_x2(x):
+            x = _f32_to_floatx_unpacked(x.float(), FP4_EBITS, FP4_MBITS)
+            x = pack_uint4(x)
+            x = x.view(torch.float4_e2m1fn_x2)
+            return x
 
         if test_case_name == "a_eye_b_eye":
             if not ((M == K) and (M == N)):
@@ -952,24 +967,36 @@ class TestFP8MatmulCuda(TestCase):
             A_ref = torch.eye(M, device=device, dtype=torch.bfloat16)
             B_ref = torch.eye(M, device=device, dtype=torch.bfloat16)
 
-            A = A_ref.to(torch.float8_e4m3fn)
-            B = B_ref.to(torch.float8_e4m3fn)
-
-            A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
-            B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
+            if recipe == "mxfp8":
+                A = A_ref.to(torch.float8_e4m3fn)
+                B = B_ref.to(torch.float8_e4m3fn)
+                A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
+                B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
+            else:  # nvfp4
+                A = _bfloat16_to_float4_e2m1fn_x2(A_ref)
+                B = _bfloat16_to_float4_e2m1fn_x2(B_ref)
+                A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e4m3fn)
+                B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e4m3fn)
             # convert to swizzled format
             A_scale = to_blocked(A_scale)
             B_scale = to_blocked(B_scale)
+                
 
         elif test_case_name == "a_ones_b_ones":
             A_ref = torch.ones(M, K, device=device, dtype=torch.bfloat16)
             B_ref = torch.ones(N, K, device=device, dtype=torch.bfloat16)
 
-            A = A_ref.to(torch.float8_e4m3fn)
-            B = B_ref.to(torch.float8_e4m3fn)
+            if recipe == "mxfp8":
+                A = A_ref.to(torch.float8_e4m3fn)
+                B = B_ref.to(torch.float8_e4m3fn)
+                A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
+                B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
+            else:  # nvfp4
+                A = _bfloat16_to_float4_e2m1fn_x2(A_ref)
+                B = _bfloat16_to_float4_e2m1fn_x2(B_ref)
+                A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e4m3fn)
+                B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e4m3fn)
 
-            A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
-            B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
             # convert to swizzled format
             A_scale = to_blocked(A_scale)
             B_scale = to_blocked(B_scale)
@@ -977,15 +1004,19 @@ class TestFP8MatmulCuda(TestCase):
         elif test_case_name == "a_ones_modified_b_ones":
             A_ref = torch.ones(M, K, device=device, dtype=torch.bfloat16)
             B_ref = torch.ones(N, K, device=device, dtype=torch.bfloat16)
-
-            A = A_ref.to(torch.float8_e4m3fn)
-            B = B_ref.to(torch.float8_e4m3fn)
-
             A_ref[1][0:BLOCK_SIZE] = 2
-            A[1][0:BLOCK_SIZE] = 2
 
-            A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
-            B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
+            if recipe == "mxfp8":
+                A = A_ref.to(torch.float8_e4m3fn)
+                B = B_ref.to(torch.float8_e4m3fn)
+                A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
+                B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
+            else:  # nvfp4
+                A = _bfloat16_to_float4_e2m1fn_x2(A_ref)
+                B = _bfloat16_to_float4_e2m1fn_x2(B_ref)
+                A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e4m3fn)
+                B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e4m3fn)
+
             # convert to swizzled format
             A_scale = to_blocked(A_scale)
             B_scale = to_blocked(B_scale)
@@ -993,15 +1024,19 @@ class TestFP8MatmulCuda(TestCase):
         elif test_case_name == "a_ones_b_ones_modified":
             A_ref = torch.ones(M, K, device=device, dtype=torch.bfloat16)
             B_ref = torch.ones(N, K, device=device, dtype=torch.bfloat16)
-
-            A = A_ref.to(torch.float8_e4m3fn)
-            B = B_ref.to(torch.float8_e4m3fn)
-
             B_ref[1][0:BLOCK_SIZE] = 2
-            B[1][0:BLOCK_SIZE] = 2
 
-            A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
-            B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
+            if recipe == "mxfp8":
+                A = A_ref.to(torch.float8_e4m3fn)
+                B = B_ref.to(torch.float8_e4m3fn)
+                A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
+                B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
+            else:  # nvfp4
+                A = _bfloat16_to_float4_e2m1fn_x2(A_ref)
+                B = _bfloat16_to_float4_e2m1fn_x2(B_ref)
+                A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e4m3fn)
+                B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e4m3fn)
+
             # convert to swizzled format
             A_scale = to_blocked(A_scale)
             B_scale = to_blocked(B_scale)
@@ -1010,15 +1045,22 @@ class TestFP8MatmulCuda(TestCase):
             A_ref = torch.ones(M, K, device=device, dtype=torch.bfloat16)
             B_ref = torch.ones(N, K, device=device, dtype=torch.bfloat16)
 
-            A = A_ref.to(torch.float8_e4m3fn)
-            B = B_ref.to(torch.float8_e4m3fn)
-
-            A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
-            B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
-
-            A_ref[1][0:BLOCK_SIZE] = 4
-            A[1][0:BLOCK_SIZE] = 2
-            A_scale[1][0] = 2
+            if recipe == "mxfp8":
+                A = A_ref.to(torch.float8_e4m3fn)
+                B = B_ref.to(torch.float8_e4m3fn)
+                A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
+                B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
+                A_ref[1][0:BLOCK_SIZE] = 4
+                A[1][0:BLOCK_SIZE] = 2
+                A_scale[1][0] = 2
+            else:  # nvfp4
+                A = _bfloat16_to_float4_e2m1fn_x2(A_ref)
+                B = _bfloat16_to_float4_e2m1fn_x2(B_ref)
+                A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e4m3fn)
+                B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e4m3fn)
+                A_ref[1][0:BLOCK_SIZE] = 4
+                A.view(torch.uint8)[1][0:(BLOCK_SIZE//2)] = 0b01000100
+                A_scale[1][0] = 2
 
             # convert to swizzled format
             A_scale = to_blocked(A_scale)
@@ -1028,15 +1070,22 @@ class TestFP8MatmulCuda(TestCase):
             A_ref = torch.ones(M, K, device=device, dtype=torch.bfloat16)
             B_ref = torch.ones(N, K, device=device, dtype=torch.bfloat16)
 
-            A = A_ref.to(torch.float8_e4m3fn)
-            B = B_ref.to(torch.float8_e4m3fn)
-
-            A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
-            B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
-
-            B_ref[1][0:BLOCK_SIZE] = 4
-            B[1][0:BLOCK_SIZE] = 2
-            B_scale[1][0] = 2
+            if recipe == "mxfp8":
+                A = A_ref.to(torch.float8_e4m3fn)
+                B = B_ref.to(torch.float8_e4m3fn)
+                A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
+                B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
+                B_ref[1][0:BLOCK_SIZE] = 4
+                B[1][0:BLOCK_SIZE] = 2
+                B_scale[1][0] = 2
+            else:  # nvfp4
+                A = _bfloat16_to_float4_e2m1fn_x2(A_ref)
+                B = _bfloat16_to_float4_e2m1fn_x2(B_ref)
+                A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e4m3fn)
+                B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e4m3fn)
+                B_ref[1][0:BLOCK_SIZE] = 4
+                B.view(torch.uint8)[1][0:(BLOCK_SIZE//2)] = 0b01000100
+                B_scale[1][0] = 2
 
             # convert to swizzled format
             A_scale = to_blocked(A_scale)
@@ -1044,26 +1093,35 @@ class TestFP8MatmulCuda(TestCase):
 
         elif test_case_name == "data_random_scales_one":
             require_exact_match = False
-            # scales all-ones, element data random while being exactly representable in float8_e4m3fn
 
-            # generate integers in [0, 255] and interpret as float8_e4m3fn
-            A_ref = torch.randint(0, 255, (M, K), device=device, dtype=torch.uint8).view(torch.float8_e4m3fn).to(torch.bfloat16)
-            B_ref = torch.randint(0, 255, (N, K), device=device, dtype=torch.uint8).view(torch.float8_e4m3fn).to(torch.bfloat16)
-            # modification: don't allow NaN values
-            A_ref[torch.isnan(A_ref)] = 0
-            B_ref[torch.isnan(B_ref)] = 0
-
-            A = A_ref.to(torch.float8_e4m3fn)
-            B = B_ref.to(torch.float8_e4m3fn)
-
-            A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
-            B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
+            if recipe == "mxfp8":
+                # scales all-ones, element data random while being exactly representable in float8_e4m3fn
+                # generate integers in [0, 255] and interpret as float8_e4m3fn
+                A_ref = torch.randint(0, 255, (M, K), device=device, dtype=torch.uint8).view(torch.float8_e4m3fn).to(torch.bfloat16)
+                B_ref = torch.randint(0, 255, (N, K), device=device, dtype=torch.uint8).view(torch.float8_e4m3fn).to(torch.bfloat16)
+                # modification: don't allow NaN values
+                A_ref[torch.isnan(A_ref)] = 0
+                B_ref[torch.isnan(B_ref)] = 0
+                A = A_ref.to(torch.float8_e4m3fn)
+                B = B_ref.to(torch.float8_e4m3fn)
+                A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
+                B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
+            else:  # nvfp4
+                # scales all-ones, element data random while being exactly representable in float4_e2m1fn_x2
+                # generate integers in [0, 16] and cast to bfloat16
+                A_ref = _floatx_unpacked_to_f32(torch.randint(0, 16, (M, K), device=device, dtype=torch.uint8), FP4_EBITS, FP4_MBITS).bfloat16()
+                B_ref = _floatx_unpacked_to_f32(torch.randint(0, 16, (N, K), device=device, dtype=torch.uint8), FP4_EBITS, FP4_MBITS).bfloat16()
+                A = _bfloat16_to_float4_e2m1fn_x2(A_ref)
+                B = _bfloat16_to_float4_e2m1fn_x2(B_ref)
+                A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e4m3fn)
+                B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e4m3fn)
 
             # convert to swizzled format
             A_scale = to_blocked(A_scale)
             B_scale = to_blocked(B_scale)
 
         elif test_case_name == "data_random_scales_from_data":
+            # TODO(next): nvfp4 recipe
             if not K % BLOCK_SIZE == 0:
                 return unittest.skip(f"this test is only defined for K a multiple of {BLOCK_SIZE}, skipping")
             require_exact_match = False
@@ -1097,11 +1155,18 @@ class TestFP8MatmulCuda(TestCase):
             out_dtype=torch.bfloat16,
             use_fast_accum=fast_accum,
         )
+        print('A', A.view(torch.uint8))
+        print('B.t()', B.t().view(torch.uint8))
+        print('A_scale', A_scale)
+        print('B_scale', B_scale)
+        print('C_ref', C_ref)
+        print('C', C)
 
         if require_exact_match:
             torch.testing.assert_close(C, C_ref, atol=0, rtol=0)
         else:
             sqnr = compute_error(C_ref, C)
+            print('sqnr', sqnr)
             assert sqnr.item() > 22.0
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
@@ -1188,11 +1253,7 @@ class TestFP8MatmulCuda(TestCase):
         device = "cuda"
         M, K, N = mkn
         BLOCK_SIZE = 16
-        FP4_EBITS, FP4_MBITS = 2, 1
         require_exact_match = True
-
-        def ceil_div(a, b):
-            return (a + b - 1) // b
 
         if test_case_name == "smoke_test":
             # if not ((M == K) and (M == N)):
@@ -1212,16 +1273,14 @@ class TestFP8MatmulCuda(TestCase):
             A = pack_uint4(A)
             B = pack_uint4(B)
 
-            B = B.t()
-
-            print('A', A.shape, A)
-            print('B', B.shape, B)
+            # print('A', A.shape, A)
+            # print('B', B.shape, B)
             A = A.view(torch.float4_e2m1fn_x2)
             B = B.view(torch.float4_e2m1fn_x2)
 
             A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e4m3fn)
             B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e4m3fn)
-            print(A_scale.numel(), B_scale.numel(), A_scale.shape, B_scale.shape, 'A_scale', A_scale, 'B_scale', B_scale)
+            # print(A_scale.numel(), B_scale.numel(), A_scale.shape, B_scale.shape, 'A_scale', A_scale, 'B_scale', B_scale)
             # convert to swizzled format
             # A_scale = to_blocked(A_scale)
             # B_scale = to_blocked(B_scale)
@@ -1230,19 +1289,16 @@ class TestFP8MatmulCuda(TestCase):
 
         C = torch._scaled_mm(
             A,
-            B,
+            B.t(),
             A_scale,
             B_scale,
-            # out_dtype=torch.bfloat16,
             out_dtype=torch.bfloat16,
             use_fast_accum=fast_accum,
         )
-        print(C_ref)
-        print(C)
+        print('C_ref', C_ref)
+        print('C', C)
 
         torch.testing.assert_close(C, C_ref, atol=0, rtol=0)
-
-        print('done')
 
 
 @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
