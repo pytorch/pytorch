@@ -38,11 +38,11 @@ RUN yum install -y \
   sudo \
   gcc-toolset-${GCCTOOLSET_VERSION}-toolchain
 
-RUN cd ~/ && \
-  wget https://github.com/ninja-build/ninja/releases/download/v1.12.1/ninja-linux-aarch64.zip && \
-  unzip ninja-linux-aarch64.zip && \
-  mv -f ./ninja /usr/bin/ninja && \
-  rm ninja-linux-aarch64.zip
+# (optional) Install non-default Ninja version
+ARG NINJA_VERSION
+COPY ./common/install_ninja.sh install_ninja.sh
+RUN if [ -n "${NINJA_VERSION}" ]; then bash ./install_ninja.sh; fi
+RUN rm install_ninja.sh
 
 # Ensure the expected devtoolset is used
 ENV PATH=/opt/rh/gcc-toolset-${GCCTOOLSET_VERSION}/root/usr/bin:$PATH
