@@ -177,13 +177,14 @@ static PyObject* THPDevice_reduce(PyObject* _self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPDevice_enter(PyObject* self, PyObject* noargs) {
+static PyObject* THPDevice_enter(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   py::object mode = py::module::import("torch.utils._device")
-                        .attr("DeviceContext")(py::handle(self));
+                        .attr("DeviceContext")(py::handle(_self));
   at::impl::PythonTorchFunctionTLS::push_onto_stack(
       std::make_shared<c10::SafePyObject>(
           mode.release().ptr(), getPyInterpreter()));
+  auto self = (THPDevice*)_self;
   auto device_type = at::accelerator::getAccelerator();
   if (device_type.has_value() && device_type.value() == self->device.type() &&
       self->device.has_index()) {
@@ -204,14 +205,15 @@ static PyObject* THPDevice_enter(PyObject* self, PyObject* noargs) {
     }
   }
   // So that with torch.device('cuda') as dev: works
-  Py_INCREF(self);
-  return self;
+  Py_INCREF(_self);
+  return _self;
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPDevice_exit(PyObject* self, PyObject* unused) {
+static PyObject* THPDevice_exit(PyObject* _self, PyObject* unused) {
   HANDLE_TH_ERRORS
   at::impl::PythonTorchFunctionTLS::pop_stack();
+  auto self = (THPDevice*)_self;
   auto device_type = at::accelerator::getAccelerator();
   if (device_type.has_value() && device_type.value() == self->device.type() &&
       self->device.has_index()) {
