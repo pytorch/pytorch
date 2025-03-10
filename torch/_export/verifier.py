@@ -149,7 +149,7 @@ class Verifier(metaclass=_VerifierMeta):
 
     def allowed_getattr_types_for_subgm(self) -> tuple[type[Any], ...]:
         # subgm in HOP's argument could has have getattr(weight) nodes, thus stateful
-        return (torch.fx.GraphModule, torch.nn.parameter.Parameter)
+        return (torch.fx.GraphModule, torch.nn.parameter.Parameter, torch.Tensor)
 
     def check_valid_op(self, op):
         pass
