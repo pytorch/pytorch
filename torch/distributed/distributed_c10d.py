@@ -759,9 +759,6 @@ def _check_valid_timeout(timeout: Any) -> None:
         )
 
 
-# Default process group state
-_default_pg_init_method: Optional[str] = None
-
 STORE_BASED_BARRIER_PREFIX = "store_based_barrier_key"
 
 
@@ -1545,15 +1542,6 @@ def init_process_group(
 
     This will also initialize the distributed package.
 
-    There are 2 main ways to initialize a process group:
-        1. Specify ``store``, ``rank``, and ``world_size`` explicitly.
-        2. Specify ``init_method`` (a URL string) which indicates where/how
-           to discover peers. Optionally specify ``rank`` and ``world_size``,
-           or encode all required parameters in the URL and omit them.
-
-    If neither is specified, ``init_method`` is assumed to be "env://".
-
-
     Args:
         backend (str or Backend, optional): The backend to use. Depending on
             build-time configurations, valid values include ``mpi``, ``gloo``,
@@ -1573,10 +1561,7 @@ def init_process_group(
             process must have exclusive access to every GPU it uses, as sharing
             GPUs between processes can result in deadlock or NCCL invalid usage.
             ``ucc`` backend is experimental.
-        init_method (str, optional): URL specifying how to initialize the
-                                     process group. Default is "env://" if no
-                                     ``init_method`` or ``store`` is specified.
-                                     Mutually exclusive with ``store``.
+        init_method (str, optional, deprecated): This argument is ignored.
         world_size (int, optional): Number of processes participating in
                                     the job. Required if ``store`` is specified.
         rank (int, optional): Rank of the current process (it should be a
@@ -1584,7 +1569,6 @@ def init_process_group(
                               Required if ``store`` is specified.
         store(Store, optional): Key/value store accessible to all workers, used
                                 to exchange connection/address information.
-                                Mutually exclusive with ``init_method``.
         timeout (timedelta, optional): Timeout for operations executed against
             the process group. Default value is 10 minutes for NCCL and 30 minutes for other backends.
             This is the duration after which collectives will be aborted asynchronously and the process will crash.
@@ -1626,7 +1610,6 @@ def init_process_group(
     global _world
 
     global _backend
-    global _default_pg_init_method
 
     if GroupMember.WORLD is not None:
         raise ValueError("trying to initialize the default process group twice!")
@@ -1644,15 +1627,9 @@ def init_process_group(
     if "torch._dynamo" in sys.modules:
         torch._dynamo.trace_rules.clear_lru_cache()
 
-    assert (store is None) or (init_method is None), (
-        "Cannot specify both init_method and store."
-    )
-
     if store is not None:
         assert world_size > 0, "world_size must be positive if using store"
         assert rank >= 0, "rank must be non-negative if using store"
-    elif init_method is None:
-        init_method = "env://"
 
     # If user did not provide a backend string but provided a device id, e.g.
     # >>> init_process_group(device_id=device)
@@ -1704,8 +1681,9 @@ def init_process_group(
     else:
         # backward compatible API
         if store is None:
+            init_method = "env://"
             rendezvous_iterator = rendezvous(
-                not_none(init_method), rank, world_size, timeout=timeout
+                init_method, rank, world_size, timeout=timeout
             )
             store, rank, world_size = next(rendezvous_iterator)
             store.set_timeout(timeout)
@@ -1733,7 +1711,6 @@ def init_process_group(
         for i in range(GroupMember.WORLD.size())  # type: ignore[attr-defined]
     }
     _backend = _world.pg_map[not_none(GroupMember.WORLD)][0]
-    _default_pg_init_method = init_method
 
     old_hook = sys.excepthook
     excepthook_prefix = f"[rank{get_rank()}]"
