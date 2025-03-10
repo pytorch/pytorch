@@ -17,10 +17,10 @@ from ..lowering import (
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
+    SymbolicGridFn,
     TritonTemplate,
 )
 from ..utils import (
-    ceildiv,
     is_ones,
     is_zeros,
     pad_listlike,
@@ -43,18 +43,20 @@ log = logging.getLogger(__name__)
 aten = torch.ops.aten
 
 
-def conv2d_grid(n, c, h, w, meta):
+@SymbolicGridFn
+def conv2d_grid(n, c, h, w, meta, *, cdiv):
     return (
-        ceildiv(n * h * w, meta["BLOCK_M"]),
-        ceildiv(c, meta["BLOCK_N"]),
+        cdiv(n * h * w, meta["BLOCK_M"]),
+        cdiv(c, meta["BLOCK_N"]),
         meta["GROUPS"],
     )
 
 
-def conv3d_grid(n, c, d, h, w, meta):
+@SymbolicGridFn
+def conv3d_grid(n, c, d, h, w, meta, *, cdiv):
     return (
-        ceildiv(n * d * h * w, meta["BLOCK_M"]),
-        ceildiv(c, meta["BLOCK_N"]),
+        cdiv(n * d * h * w, meta["BLOCK_M"]),
+        cdiv(c, meta["BLOCK_N"]),
         meta["GROUPS"],
     )
 
