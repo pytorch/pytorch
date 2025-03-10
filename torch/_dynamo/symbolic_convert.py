@@ -958,7 +958,6 @@ class ExceptionStack:
     _current_exception: Optional[VariableTracker] = dataclasses.field(default=None)
 
     def clear_current_exception(self):
-        assert self._current_exception is not None
         self._current_exception = None
 
     def set_current_exception(self, val):
