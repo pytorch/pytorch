@@ -72,7 +72,7 @@ from torch.utils._python_dispatch import (
 )
 from torch.utils._traceback import CapturedTraceback, format_traceback_short
 
-from . import config, exc, graph_break_hints, trace_rules
+from . import config, decorators, exc, graph_break_hints, trace_rules
 from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
 from .bytecode_transformation import (
     check_inst_exn_tab_entries_valid,
@@ -87,7 +87,6 @@ from .cache_size import (
     exceeds_recompile_limit,
     is_recompilation,
 )
-from .code_context import code_context
 from .eval_frame import (
     always_optimize_code_objects,
     dynamo_tls,
@@ -554,20 +553,15 @@ class ConvertFrameAssert:
             return ConvertFrameReturn()
 
         # skip tracing disabled functions
-        # normally this codepath is reached thorugh non-recursive disable wrappers
-        if getattr(frame.f_func, "_torchdynamo_disable", False):
-            # if this frame is a non-recursive disable wrapper, then
-            # we expect the next function call to be frame.f_func, which should
-            # also be skipped. We can use code context to achieve this.
-            original_fn = getattr(frame.f_func, "_torchdynamo_orig_callable", None)
-            if original_fn:
-                code_context.get_context(original_fn.__code__)["should_skip_once"] = (
-                    True
-                )
-            return ConvertFrameReturn()
-        if code_context.get_context(code).get("should_skip_once", False):
-            code_context.get_context(code).pop("should_skip_once")
-            return ConvertFrameReturn(apply_to_code=False)
+        # detect if this frame is torch._dynamo.decorators.disable_wrapper
+        # by looking for a torch._dynamo.decorators._DisableWrapperObject freevar
+        if frame.f_code.co_name == "disable_wrapper":
+            for name in frame.f_code.co_freevars:
+                if (
+                    name in frame.f_locals
+                    and frame.f_locals[name] is decorators._DisableWrapperObject
+                ):
+                    return ConvertFrameReturn(skip_next_frame=True)
 
         global initial_global_state
         initial_global_state = GlobalStateGuard()

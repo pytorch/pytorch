@@ -910,6 +910,35 @@ If the above doesn't work, please subtmit an issue to GitHub.
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(res, inp - 1)
 
+    def test_disable_recursive_false_weird(self):
+        from torch._dynamo.types import FrameAction, FrameExecStrategy
+
+        # test the case where the next invocation of the function is
+        # manually skipped
+        def fn(x):
+            if torch.compiler.is_compiling():
+                return x - 1
+            return x + 1
+
+        fn_disabled = torch._dynamo.disable(fn, recursive=False)
+
+        torch._dynamo.eval_frame.set_code_exec_strategy(
+            fn.__code__, FrameExecStrategy(FrameAction.SKIP, FrameAction.DEFAULT)
+        )
+
+        @torch.compile(backend="eager")
+        def outer(fn, x):
+            return fn(x)
+
+        inp = torch.ones(3)
+        self.assertEqual(outer(fn_disabled, inp), inp + 1)
+
+        torch._dynamo.eval_frame.set_code_exec_strategy(
+            fn.__code__, FrameExecStrategy(FrameAction.DEFAULT, FrameAction.DEFAULT)
+        )
+
+        self.assertEqual(torch.compile(fn, backend="eager")(inp), inp - 1)
+
     def test_substitute_in_graph(self):
         counters.clear()
 

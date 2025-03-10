@@ -30,7 +30,7 @@ from .eval_frame import (
     skip_code,
 )
 from .exc import IncorrectUsage
-from .external_utils import is_compiling, wrap_inline
+from .external_utils import is_compiling
 from .utils import is_function
 
 
@@ -65,6 +65,11 @@ def run(fn=None):
     return RunOnlyContext()
 
 
+# Used to identify that disable_wrapper is the current frame called.
+# We do this by giving disable_wrapper a _DisableWrapperObject freevar.
+_DisableWrapperObject = object()
+
+
 def disable(fn=None, recursive=True):
     """
     Decorator to disable TorchDynamo
@@ -86,9 +91,15 @@ def disable(fn=None, recursive=True):
         def wrap(fn):
             fn = innermost_fn(fn)
             assert callable(fn)
-            disable_wrapper = wrap_inline(fn)
-            disable_wrapper._torchdynamo_disable = True  # type: ignore[attr-defined]
-            disable_wrapper._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
+            obj = _DisableWrapperObject
+
+            # calling this should cause a graph break due to trace_rules
+            def disable_wrapper(*args, **kwargs):
+                # not directly used, but used by convert_frame to detect that
+                # we are in a disable_wrapper frame
+                nonlocal obj
+                return fn(*args, **kwargs)
+
             return disable_wrapper
 
         if fn is None:

@@ -61,12 +61,6 @@ DECLARE_PYOBJ_ATTR(f_executable)
 DECLARE_PYOBJ_ATTR(f_code)
 #endif
 
-#if IS_PYTHON_3_12_PLUS
-DECLARE_PYOBJ_ATTR(f_funcobj)
-#else
-DECLARE_PYOBJ_ATTR(f_func)
-#endif
-
 #undef DECLARE_PYOBJ_ATTR
 
 // This is not a true attribute of the class but we do access it in python and
@@ -152,11 +146,6 @@ static struct PyGetSetDef THPPyInterpreterFrame_properties[] = {
     {"f_lasti", (getter)THPPyInterpreterFrame_f_lasti, NULL, NULL, NULL},
     {"f_lineno", (getter)THPPyInterpreterFrame_f_lineno, NULL, NULL, NULL},
     {"f_back", (getter)THPPyInterpreterFrame_f_back, NULL, NULL, NULL},
-#if IS_PYTHON_3_12_PLUS
-    {"f_func", (getter)THPPyInterpreterFrame_f_funcobj, NULL, NULL, NULL},
-#else
-    {"f_func", (getter)THPPyInterpreterFrame_f_func, NULL, NULL, NULL},
-#endif
     {"closure", (getter)THPPyInterpreterFrame_closure, NULL, NULL, NULL},
     {NULL}};
 
@@ -471,6 +460,8 @@ PyObject* dynamo_eval_custom_code(
   return result;
 }
 
+bool skip_next_frame = false;
+
 static PyObject* dynamo__custom_eval_frame_shim(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
@@ -483,6 +474,7 @@ static PyObject* dynamo__custom_eval_frame_shim(
   PyObject* callback = eval_frame_callback_get();
 
   if (callback == Py_None) {
+    skip_next_frame = false;
     return dynamo_eval_frame_default(tstate, frame, throw_flag);
   }
 
