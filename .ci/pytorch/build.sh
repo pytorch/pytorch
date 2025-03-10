@@ -277,9 +277,12 @@ else
     # or building non-XLA tests.
     if [[ "$BUILD_ENVIRONMENT" != *rocm*  &&
           "$BUILD_ENVIRONMENT" != *xla* ]]; then
-      if [[ "$BUILD_ENVIRONMENT" != *py3.8* ]]; then
-        # Install numpy-2.0.2 for builds which are backward compatible with 1.X
+      # Install numpy for builds which are backward compatible with 1.X
+      if [[ "$BUILD_ENVIRONMENT" = *py3.9* ]]; then
+        # 2.0.2 is the most recent version that supports Python 3.9
         python -mpip install numpy==2.0.2
+      else
+        python -mpip install numpy==2.2.3
       fi
 
       WERROR=1 python setup.py clean
