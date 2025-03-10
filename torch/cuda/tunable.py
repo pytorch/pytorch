@@ -544,22 +544,17 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
             scaleB = torch.tensor(0.9, device=deviceid)
 
         assert untuned_gemm_temp[10] == "bias"
-        if untuned_gemm_temp[11] == "None":
-            bias = False
-        else:
-            bias = True
+        if untuned_gemm_temp[11] == "None":  # no bias vector
+            torch._scaled_mm(matA, matB, scale_a=scaleA, scale_b=scaleB, out_dtype=dtypeC)
+        else:  # bias vector present
             fillbias = 0.10
             bias_dtype = dtype_dict.get(untuned_gemm_temp[11])
-            bias_vec = (
+            bias = (
                 torch.full((n,), fillbias, dtype=bias_dtype, device=deviceid)
                 if transA
                 else torch.full((m,), fillbias, dtype=bias_dtype, device=deviceid)
             )
-
-        if bias:
-            torch._scaled_mm(matA, matB, scale_a=scaleA, scale_b=scaleB, out_dtype=dtypeC, bias=bias_vec)
-        else:
-            torch._scaled_mm(matA, matB, scale_a=scaleA, scale_b=scaleB, out_dtype=dtypeC)
+            torch._scaled_mm(matA, matB, scale_a=scaleA, scale_b=scaleB, out_dtype=dtypeC, bias=bias)
 
     elif op_sig == "GemmAndBiasTunableOp":
         # y = x*A^T + b
