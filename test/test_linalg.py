@@ -5291,7 +5291,7 @@ class TestLinalg(TestCase):
     @onlyCUDA
     @dtypes(torch.bfloat16)
     def test_gemm_bias_offline_tunableop(self, device, dtype):
-        # This test is the offline version of test_scaled_gemm_tunableop
+        # This test is the offline version of test_gemm_bias_tunableop
         import os
 
         ordinal = torch.cuda.current_device()
