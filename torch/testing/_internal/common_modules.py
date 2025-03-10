@@ -49,9 +49,9 @@ MODULES_TO_SKIP: set[type] = {
 }
 
 # List of all module classes to test.
-MODULE_CLASSES: list[type] = list(chain(*[
+MODULE_CLASSES: list[type] = [*chain.from_iterable([
     [getattr(namespace, module_name) for module_name in namespace.__all__]  # type: ignore[attr-defined]
-    for namespace in MODULE_NAMESPACES]))
+    for namespace in MODULE_NAMESPACES])]
 MODULE_CLASSES = [cls for cls in MODULE_CLASSES if cls not in MODULES_TO_SKIP]
 
 # Dict of module class -> common name. Useful for making test names more intuitive.
@@ -1945,10 +1945,9 @@ def module_inputs_torch_nn_RMSNorm(module_info, device, dtype, requires_grad, tr
         dims = [ndim - i - 1 for i in range(len(normalized_shape))]
         upcasted_i = i.float()
         result = upcasted_i * torch.rsqrt(upcasted_i.pow(2).mean(dim=dims, keepdim=True) + m.eps)
-        result = result.type_as(i)
         if weight is not None:
             result *= weight
-        return result
+        return result.type_as(i)
 
     return [
         ModuleInput(
