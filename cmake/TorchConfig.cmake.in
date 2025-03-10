@@ -115,6 +115,7 @@ else()
   endif()
 
   if(@USE_MKLDNN@)
+    message("!!!!!!!! Call USE_MKLDNN here.")
     append_torchlib_if_found(dnnl mkldnn)
   endif()
 
