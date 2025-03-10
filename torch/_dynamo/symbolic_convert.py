@@ -949,11 +949,10 @@ class ExceptionStack:
     # and "stack" sometimes refers to a C variable with the same name and the
     # exception stack, respectively.
     #
-    # The lifetime of an exception is:
+    # The lifetime of an exception is (Python 3.11+):
     #  + tx._raise_exception_variable(...) := sets the current_exception variable
     #  + PUSH_EXC_INFO := pushes the current_exception to the *exception stack*
     #  + POP_EXCEPT := pops TOS from the *exception stack*
-    #
 
     _exc_stack: list[VariableTracker] = dataclasses.field(default_factory=list)
     _current_exception: Optional[VariableTracker] = dataclasses.field(default=None)
@@ -969,7 +968,7 @@ class ExceptionStack:
     def move_current_exception_to_stack(self):
         assert self._current_exception is not None
         self.append(self._current_exception)
-        self._current_exception = None
+        self.clear_current_exception()
 
     def get_current_exception(self):
         assert self._current_exception is not None
@@ -2001,12 +2000,12 @@ class InstructionTranslatorBase(
         # "current exception" to the exception stack.
         #
         # As an example, suppose the stack is in the following state:
-        #   + stack = [, ConstantVariable(1), ConstantVariable(2)]
+        #   + stack = [..., ConstantVariable(1), ConstantVariable(2)]
         #   + current_exception = TypeError
         #   + exception_stack = [ValueError]
         #
         # After PUSH_EXC_INFO is executed
-        #   + stack = [, ConstantVariable(1), ValueError, ConstantVariable(2)]
+        #   + stack = [..., ConstantVariable(1), ValueError, ConstantVariable(2)]
         #   + current_exception = None
         #   + exception_stack = [ValueError, TypeError]
 
@@ -3954,7 +3953,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         )
         self.funcvar = funcvar
         self.parent = parent
-        # Propagate any exception on the parent stack
         self.num_calls = parent.num_calls
         self.symbolic_result = None
         self.nn_module_stack = parent.nn_module_stack.copy()
