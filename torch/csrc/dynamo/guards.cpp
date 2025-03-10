@@ -1766,10 +1766,15 @@ class NDARRAY_MATCH : public LeafGuard {
   NDARRAY_MATCH(py::object ndarray, py::object verbose_code_parts)
       : LeafGuard(std::move(verbose_code_parts)) {
     PyObject* value = ndarray.ptr();
-    if (!PyArray_Check(value)) {
+    if (!PyArray_Check(value) && !PyArray_CheckScalar(value)) {
       throw py::value_error("Expecting a ndarray");
     }
-    PyArrayObject* array = (PyArrayObject*)value;
+    PyArrayObject* array;
+    if (PyArray_Check(value)) {
+      array = (PyArrayObject*)value;
+    } else {
+      array = (PyArrayObject*)(PyArray_FromScalar(value, nullptr));
+    }
 
     _expected_ndims = PyArray_NDIM(array);
     _expected_dtype = PyArray_TYPE(array);
@@ -1779,13 +1784,14 @@ class NDARRAY_MATCH : public LeafGuard {
   }
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
-    // First, check if the PyObject is indeed a NumPy array.
-    if (!PyArray_Check(value)) {
+    PyArrayObject* array;
+    if (PyArray_Check(value)) {
+      array = (PyArrayObject*)value;
+    } else if (PyArray_CheckScalar(value)) {
+      array = (PyArrayObject*)(PyArray_FromScalar(value, nullptr));
+    } else {
       return false;
     }
-
-    // Convert the PyObject to a PyArrayObject.
-    PyArrayObject* array = (PyArrayObject*)value;
 
     if (_expected_ndims != PyArray_NDIM(array)) {
       return false;
