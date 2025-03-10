@@ -6,9 +6,14 @@ namespace torch::accelerator {
 void initModule(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
-  m.def("_accelerator_getAccelerator", []() {
-    // If no accelerator is currently available, raise an exception.
-    return c10::Device(at::getAccelerator(true).value());
+  m.def("_accelerator_getAccelerator", []() -> std::optional<c10::Device> {
+    // If no accelerator was available at compile time, return None.
+    auto acc = at::getAccelerator(false);
+    if (acc.has_value()) {
+      return acc.value();
+    } else {
+      return std::nullopt;
+    }
   });
 
   m.def("_accelerator_deviceCount", []() {
