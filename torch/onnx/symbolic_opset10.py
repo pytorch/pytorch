@@ -115,18 +115,8 @@ def _floor_divide(g: jit_utils.GraphContext, self, other):
 
 
 @_onnx_symbolic("aten::sort")
-@symbolic_helper.parse_args(
-    "v", "i", "i", "none", "none", "none"
-)  # TODO: how to add dtype in parse_arags??
-def sort(
-    g: jit_utils.GraphContext,
-    self,
-    dim,
-    decending,
-    indices_dtype,
-    dynamic_indices_dtype,
-    out=None,
-):
+@symbolic_helper.parse_args("v", "i", "i", "none")
+def sort(g: jit_utils.GraphContext, self, dim, decending, out=None):
     return symbolic_helper._sort_helper(g, self, dim, decending=decending, out=out)
 
 
