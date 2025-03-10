@@ -5435,8 +5435,7 @@ class TestLinalg(TestCase):
         # This stores total number of cummulative results
         total_num_results = len(torch.cuda.tunable.get_results())
 
-        # There must be a four new tuning results unless you do
-        # rowwise in which case there is a 5th one
+        # Rowwise case will have an extra solution
         if dtype is torch.torch.float8_e4m3fnuz:  # rowwise
             count = 7
         else:
