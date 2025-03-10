@@ -235,6 +235,13 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__mkl_linear(
 
 #endif // AT_MKL_ENABLED
 
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__weight_int4pack_mm_cpu_tensor(
+    AtenTensorHandle X,
+    AtenTensorHandle w,
+    AtenTensorHandle qGroupSize,
+    AtenTensorHandle qScaleAndZeros,
+    AtenTensorHandle* ret0);
+
 #ifdef __cplusplus
 } // extern "C"
 #endif
