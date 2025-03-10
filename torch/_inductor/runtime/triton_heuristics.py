@@ -154,6 +154,8 @@ def _dump_launch_params(args, kwargs, launcher, kernel_name):
             call_kwargs[k] = v
     call_kwargs["num_warps"] = launcher.config.num_warps
     call_kwargs["num_stages"] = launcher.config.num_stages
+    call_kwargs["num_consumer_groups"] = getattr(launcher.config, 'num_consumer_groups', 0)
+    call_kwargs["num_buffers_warp_spec"] = getattr(launcher.config, 'num_buffers_warp_spec', 0)
     args_str = ""
     args_str += ", ".join(call_args)
     for k, v in call_kwargs.items():
@@ -480,6 +482,8 @@ class CachingAutotuner(KernelInterface):
         compile_meta["constants"].update(cfg_kwargs)
         compile_meta["num_warps"] = cfg.num_warps
         compile_meta["num_stages"] = cfg.num_stages
+        compile_meta["num_consumer_groups"] = getattr(cfg, 'num_consumer_groups', 0)
+        compile_meta["num_buffers_warp_spec"] = getattr(cfg, 'num_buffers_warp_spec', 0)
         compile_meta["debug"] = self.inductor_meta.get(
             "assert_indirect_indexing", True
         ) and not self.inductor_meta.get("is_hip", False)
@@ -514,6 +518,8 @@ class CachingAutotuner(KernelInterface):
         options = {
             "num_warps": compile_meta["num_warps"],
             "num_stages": compile_meta["num_stages"],
+            "num_consumer_groups": compile_meta["num_consumer_groups"],
+            "num_buffers_warp_spec": compile_meta["num_buffers_warp_spec"],
             "debug": compile_meta["debug"],
             "sanitize_overflow": False,  # turn off additional asserts added for overflow checks
         }
@@ -2103,13 +2109,22 @@ def split_scan(
     )
 
 
-def template(num_stages, num_warps, triton_meta, filename=None, inductor_meta=None):
+def template(num_stages, num_warps, 
+    triton_meta, 
+    num_consumer_groups = 0,
+    num_buffers_warp_spec = 0, filename=None, inductor_meta=None):
     """
     Compile a triton template
     """
     return cached_autotune(
         None,
-        [triton.Config({}, num_stages=num_stages, num_warps=num_warps)],
+        [triton.Config(
+                {},
+                num_stages=num_stages,
+                num_warps=num_warps,
+                num_consumer_groups=num_consumer_groups,
+                num_buffers_warp_spec=num_buffers_warp_spec,
+            )],
         triton_meta=triton_meta,
         inductor_meta=inductor_meta,
         heuristic_type=HeuristicType.TEMPLATE,

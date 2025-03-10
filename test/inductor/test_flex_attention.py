@@ -3698,6 +3698,7 @@ class GraphModule(torch.nn.Module):
         attn_output = mod(q, k, v, mask)
         self.assertEqual(attn_output.device, torch.device("cuda:1"))
 
+    
     @supported_platform
     def test_validate_small_embedding_size_error_message(self):
         # eager support for small embedding size
@@ -3722,6 +3723,45 @@ class GraphModule(torch.nn.Module):
         # compiled gpu kernel supports large embedding size
         q, k, v = [torch.randn(2, 2, 128, 16, device="cuda") for _ in range(3)]
         compiled_fa = torch.compile(flex_attention)
+
+    @unittest.skipIf(not has_triton(), reason="Triton is required for this test")
+    def test_triton_template_warp_specialization():
+
+        make_tensor = lambda: torch.rand(4, 16, 4096, 64, device="cuda", dtype=torch.bfloat16)
+        q, k, v = make_tensor(), make_tensor(), make_tensor()
+        flex_compiled = torch.compile(flex_attention, fullgraph=True)
+
+
+        positional_args = (q, k, v)
+        keyword_args = {
+            "kernel_options": {
+                "num_warps": 4,
+                "num_consumer_groups": 0,
+                "num_buffers_warp_spec": 0,
+            }
+        }
+
+        # Check if kernel code contains warp specialization parameters
+        _, kernel_code = run_and_get_code(
+            flex_compiled,
+            *positional_args,
+            **keyword_args,
+        )
+        assert kernel_code is not None, "Failed to retrieve compiled kernel code"
+        assert (
+            "num_consumer_groups" in kernel_code[0]
+        ), "num_consumer_groups missing in kernel definition"
+        assert (
+            "num_buffers_warp_spec" in kernel_code[0]
+        ), "num_buffers_warp_spec missing in kernel definition"
+
+        # Validate correctness
+        C1 = flex_compiled(q, k, v)
+        C2 = flex_attention(q, k, v)
+
+        assert torch.allclose(
+            C1, C2, atol=1e-2, rtol=1e-2
+        ), "Warp specialized kernel result differs from reference"
 
 
 class TestBlockMask(InductorTestCase):
