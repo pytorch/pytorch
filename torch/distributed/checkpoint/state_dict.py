@@ -1285,9 +1285,9 @@ def set_optimizer_state_dict(
     The counterpart of ``get_optimizer_state_dict`` to set the state_dict to the
     optimizers. See ``set_state_dict`` for the detail usage.
 
-    WARN: ``set_optimizer_state_dict`` can only be called before ``backward()`` or
-        ``step()`` is called on the optimizers. Otherwise, the optimizer states
-        won't be initialized correctly.
+    WARN: ``set_optimizer_state_dict`` can only be called before ``backward()`` or after
+        ``step()`` is called on the optimizers. Otherwise, the optimizer states won't be
+        initialized correctly.
 
     Args:
         model (nn.Module): the nn.Module to the model.
@@ -1334,9 +1334,9 @@ def set_state_dict(
     3) optimizer state_dict cannot contain the parameter IDs; the keys should be
     the canonical FQNs.
 
-    WARN: ``set_state_dict`` can only be called before ``backward()`` or ``step()``
-        is called on the optimizers. Otherwise, the optimizer states won't be
-        initialized correctly.
+    WARN: ``set_state_dict`` can only be called before ``backward()`` or after ``step()``
+        is called on the optimizers. Otherwise, the optimizer states won't be initialized
+        correctly.
 
     Args:
         model (nn.Module): the nn.Module to the model.
