@@ -113,6 +113,11 @@ jobs:
           path: pytorch
           submodules: recursive
 
+      - name: Bootstrap Python
+        shell: cmd
+        run: |
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_python.bat"
+
       - name: Parse ref
         id: parse-ref
         shell: bash
@@ -124,11 +129,6 @@ jobs:
         if: always()
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Bootstrap Python
-        shell: cmd
-        run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_python.bat"
 
       - name: Bootstrap Build Tools
         shell: cmd
