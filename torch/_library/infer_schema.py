@@ -124,7 +124,10 @@ def infer_schema(
         annotation_type, _ = unstringify_type(param.annotation)
 
         if annotation_type not in SUPPORTED_PARAM_TYPES:
-            if annotation_type.__origin__ is tuple:
+            if annotation_type in torch.utils._pytree.SUPPORTED_NODES:
+                # TODO: Move to a separate schema type for pytrees.
+                schema_type = "Any"
+            elif annotation_type.__origin__ is tuple:
                 list_type = tuple_to_list(annotation_type)
                 example_type_str = "\n\n"
                 # Only suggest the list type if this type is supported.
@@ -141,25 +144,25 @@ def infer_schema(
                     f"Parameter {name} has unsupported type {param.annotation}. "
                     f"The valid types are: {SUPPORTED_PARAM_TYPES.keys()}."
                 )
-
-        schema_type = SUPPORTED_PARAM_TYPES[annotation_type]
+        else:
+            schema_type = SUPPORTED_PARAM_TYPES[annotation_type]
         if type(mutates_args) == str:
             if mutates_args != UNKNOWN_MUTATES:
                 raise ValueError(
                     "mutates_args must either be a sequence of the names of "
                     "the arguments that are mutated or the string 'unknown'. "
                 )
-            if schema_type.startswith("Tensor"):
-                schema_type = f"Tensor(a{idx}!){schema_type[len('Tensor'):]}"
+            if schema_type.startswith("Tensor"):  # type: ignore[possibly-undefined]
+                schema_type = f"Tensor(a{idx}!){schema_type[len('Tensor'):]}"  # type: ignore[possibly-undefined]
         elif name in mutates_args:
-            if not schema_type.startswith("Tensor"):
+            if not schema_type.startswith("Tensor"):  # type: ignore[possibly-undefined]
                 error_fn(
                     f"Parameter {name} is in mutable_args but only Tensors or collections of Tensors can be mutated"
                 )
-            schema_type = f"Tensor(a{idx}!){schema_type[len('Tensor'):]}"
+            schema_type = f"Tensor(a{idx}!){schema_type[len('Tensor'):]}"  # type: ignore[possibly-undefined]
         seen_args.add(name)
         if param.default is inspect.Parameter.empty:
-            params.append(f"{schema_type} {name}")
+            params.append(f"{schema_type} {name}")  # type: ignore[possibly-undefined]
         else:
             default_repr = None
             if param.default is None or isinstance(param.default, (int, float, bool)):
@@ -176,7 +179,7 @@ def infer_schema(
                     f"Parameter {name} has an unsupported default value type {type(param.default)}. "
                     f"Please file an issue on GitHub so we can prioritize this."
                 )
-            params.append(f"{schema_type} {name}={default_repr}")
+            params.append(f"{schema_type} {name}={default_repr}")  # type: ignore[possibly-undefined]
     if mutates_args != UNKNOWN_MUTATES:
         mutates_args_not_seen = set(mutates_args) - seen_args
         if len(mutates_args_not_seen) > 0:
