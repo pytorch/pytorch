@@ -1105,12 +1105,12 @@ class _InProcessFxCompile(FxCompile):
                     is_inference=is_inference,
                     is_backward=is_backward,
                     const_output_index=const_output_index,
-                    const_wrapper_code=const_wrapper_code.value
-                    if const_wrapper_code
-                    else None,
-                    const_kernel_code=const_kernel_code.value
-                    if const_kernel_code
-                    else None,
+                    const_wrapper_code=(
+                        const_wrapper_code.value if const_wrapper_code else None
+                    ),
+                    const_kernel_code=(
+                        const_kernel_code.value if const_kernel_code else None
+                    ),
                     const_module=const_graph,
                     inputs_to_check=inputs_to_check,
                 )
@@ -2026,7 +2026,7 @@ def compile_fx(
         ) or torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
         tracing_context = (
             torch._guards.TracingContext.try_get()
-            or torch._guards.TracingContext(fake_mode)
+            or torch._guards.TracingContext(fake_mode, compiler_name="inductor")
         )
 
         if V.aot_compilation:

@@ -783,11 +783,12 @@ class TracingContext:
             "TracingContext.get() must be called within an ongoing trace."
         )
 
-    def __init__(self, fake_mode):
+    def __init__(self, fake_mode, compiler_name):
         self.guards_context = GuardsContext()
         self.module_context = ModuleContext()
         self.global_context = GlobalContext()
         self.fake_mode = fake_mode
+        self.compiler_name = compiler_name
         self.frame_summary_stack = []
         # This is morally part of frame_summary_stack, but it is kept separate
         # for clarity.  As we process a frame, this variable gets updated
