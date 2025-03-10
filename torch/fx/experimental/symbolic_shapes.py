@@ -5602,7 +5602,8 @@ class ShapeEnv:
             for guard in self.guards
             if self._maybe_evaluate_static(
                 guard.expr, axioms=(), size_oblivious=guard.size_oblivious
-            ) is None
+            )
+            is None
         ]
 
     def format_guards(self, verbose: bool = False) -> str:
@@ -6419,7 +6420,9 @@ class ShapeEnv:
         return
 
     # See: Note - On 0/1 specialization
-    def _default_value_range(self, do_not_specialize_zero_one: bool = False) -> ValueRanges:
+    def _default_value_range(
+        self, do_not_specialize_zero_one: bool = False
+    ) -> ValueRanges:
         lower = 0 if (do_not_specialize_zero_one or not self.specialize_zero_one) else 2
         return ValueRanges(lower, int_oo)
 
