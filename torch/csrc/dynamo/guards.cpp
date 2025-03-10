@@ -1765,6 +1765,7 @@ class NDARRAY_MATCH : public LeafGuard {
  public:
   NDARRAY_MATCH(py::object ndarray, py::object verbose_code_parts)
       : LeafGuard(std::move(verbose_code_parts)) {
+#ifdef USE_NUMPY
     PyObject* value = ndarray.ptr();
     if (!PyArray_Check(value) && !PyArray_CheckScalar(value)) {
       throw py::value_error("Expecting a ndarray");
@@ -1781,9 +1782,13 @@ class NDARRAY_MATCH : public LeafGuard {
     for (int i = 0; i < _expected_ndims; i++) {
       _expected_shape.push_back(PyArray_DIM(array, i));
     }
+#elif
+    throw py::runtime_error("expecting build with USE_NUMPY")
+#endif
   }
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
+#ifdef USE_NUMPY
     PyArrayObject* array;
     if (PyArray_Check(value)) {
       array = (PyArrayObject*)value;
@@ -1808,6 +1813,9 @@ class NDARRAY_MATCH : public LeafGuard {
     }
 
     return true;
+#elif
+    throw py::runtime_error("expecting build with USE_NUMPY")
+#endif
   }
 
  private:
