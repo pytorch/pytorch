@@ -39,4 +39,19 @@ cow::COWDeleterContext::~COWDeleterContext() {
   TORCH_INTERNAL_ASSERT(refcount_ == 0);
 }
 
+void cow::COWDeleterContext::WrapDataPtr(
+  std::function<
+    std::unique_ptr<void, DeleterFnPtr>(
+        std::unique_ptr<void, DeleterFnPtr>, size_t
+    )
+  > wrapper_func, size_t nbytes
+) {
+  data_ = wrapper_func(std::move(data_), nbytes);
+}
+
+void cow::unified_memory_data_ptr_ctx_deleter(void *ctx) {
+  delete reinterpret_cast<cow::UnifiedMemoryDataPtrContext*>(ctx);
+}
+
+
 } // namespace c10::impl
