@@ -8,7 +8,6 @@ import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncComp
 from torch._inductor.output_code import CompiledFxGraphConstants, OutputCode
 
 from .compile_fx import _CompileFxKwargs, _InProcessFxCompile, FxCompile
-from .compile_fx_ext import _OutOfProcessFxCompile, _WireProtocolPickledOutput
 from .output_code import complex_memory_overlap as complex_memory_overlap  # noqa: F401
 
 
@@ -19,12 +18,16 @@ if TYPE_CHECKING:
     from torch._inductor.utils import BoxedBool, InputType
     from torch.fx import GraphModule
 
+    from .compile_fx_ext import _OutOfProcessFxCompile, _WireProtocolPickledOutput
+
 
 _PostCompileData = namedtuple(
     "_PostCompileData", ("example_inputs", "cudagraphs", "constants")
 )
 
 
+# _AsyncOutputCode handles the actual management of waiting for an
+# out-of-process compile to finish and then switching over to it.
 @final
 class _AsyncOutputCode(OutputCode):
     _eager_forward: Optional[Callable[..., Any]]
@@ -35,8 +38,12 @@ class _AsyncOutputCode(OutputCode):
 
     def __init__(
         self,
+        # eager_forward is run until the future is finished.
         eager_forward: Callable[..., Any],
+        # this responds with the result of the out-of-process compile when it's
+        # ready.
         future: Future[_WireProtocolPickledOutput],
+        # this callback gets called to turn the _WireProtocolPickledOutput into an OutputCode
         callback: Callable[[_WireProtocolPickledOutput], OutputCode],
     ) -> None:
         self._eager_forward = eager_forward
@@ -55,6 +62,8 @@ class _AsyncOutputCode(OutputCode):
 
         if eager_forward := self._eager_forward:
             _AsyncFxCompile._stat_eager_runs += 1
+            # TODO: Is this correct? Should eager_forward() always be called as
+            # a boxed call?
             return eager_forward(inputs)
 
         else:
@@ -96,6 +105,9 @@ class _AsyncOutputCode(OutputCode):
             self._output_code.post_compile(example_inputs, cudagraphs, constants)
 
 
+# Given an FxCompile for an out-of-process compile _AsyncFxCompile will run
+# eager until the compiled artifact is ready then it will automatically switch
+# over to using the compiled version.
 @final
 class _AsyncFxCompile(FxCompile):
     _compile: _OutOfProcessFxCompile
@@ -110,8 +122,7 @@ class _AsyncFxCompile(FxCompile):
     # Number of times we ran our compiled (out-of-process) artifact
     _stat_oop_runs: int = 0
 
-    def __init__(self, compile: FxCompile) -> None:
-        assert isinstance(compile, _OutOfProcessFxCompile)
+    def __init__(self, compile: _OutOfProcessFxCompile) -> None:
         self._compile = compile
 
     @classmethod
