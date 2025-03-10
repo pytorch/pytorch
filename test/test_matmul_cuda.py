@@ -425,7 +425,6 @@ def compute_error(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
     return 20 * torch.log10(Ps / Pn)
 
 
-# TODO(before land): convert other callsites in this file to this function
 def ceil_div(a, b):
   return (a + b - 1) // b
 
