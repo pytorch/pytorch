@@ -23,6 +23,7 @@ from torch._C import _fx_map_arg as map_arg, _NodeIter
 
 from . import _pytree as fx_pytree
 from ._compatibility import compatibility
+from .immutable_collections import immutable_dict
 from .node import _get_qualified_name, _type_repr, Argument, Node, Target
 
 
@@ -67,11 +68,16 @@ class _CustomBuiltin(NamedTuple):
     obj: Any
 
 
+# Combined dict of disallowed variable names so we can check with one lookup
+_illegal_names = {k: object() for k in keyword.kwlist}
+_illegal_names.update(builtins.__dict__)  # can't shadow a builtin name
+
 _custom_builtins: dict[str, _CustomBuiltin] = {}
 
 
 def _register_custom_builtin(name: str, import_str: str, obj: Any):
     _custom_builtins[name] = _CustomBuiltin(import_str, obj)
+    _illegal_names[name] = obj
 
 
 _register_custom_builtin("inf", "from math import inf", math.inf)
@@ -102,16 +108,26 @@ def _snake_case(s: str) -> str:
 # Replace occurrences where a lowercase letter is followed by an uppercase letter
 _snake_case_sub = functools.partial(re.compile(r"(?<=[a-z])([A-Z])").sub, r"_\1")
 
+# Find chars that can't be in a Python identifier
+_illegal_char_regex = re.compile("[^0-9a-zA-Z_]+")
+
+# Combined check for variable names:
+# 1) Checks name is not empty
+# 2) Checks first character is not a digit
+# 3) Checks name has no illegal characters (_illegal_char_regex)
+# 3) Splits off the number suffix (if present)
+_name_regex = re.compile(r"^([a-zA-Z_][0-9a-zA-Z_]*?)(?:_(\d+))?$")
+
+# starts with torch but does not start with torch._dynamo. or torch._inductor.
+_torch_but_not_dynamo = re.compile(
+    r"^torch(?:\.(?!_dynamo\.|_inductor\.)[^.]+)*$"
+).fullmatch
+
 
 def _is_from_torch(obj: Any) -> bool:
     module_name = getattr(obj, "__module__", None)
     if module_name is not None:
-        base_module = module_name.partition(".")[0]
-        return (
-            base_module == "torch"
-            and not module_name.startswith("torch._dynamo.")
-            and not module_name.startswith("torch._inductor.")
-        )
+        return _torch_but_not_dynamo(module_name) is not None
 
     name = getattr(obj, "__name__", None)
     # exclude torch because torch.torch.torch.torch works. idk mang
@@ -134,12 +150,8 @@ class _Namespace:
 
     def __init__(self):
         self._obj_to_name: dict[Any, str] = {}
-        self._unassociated_names = set()
         self._used_names: set[str] = set()
-        self._base_count: dict[str, int] = defaultdict(int)
-
-        self._illegal_char_regex = re.compile("[^0-9a-zA-Z_]+")
-        self._name_suffix_regex = re.compile(r"(.*)_(\d+)$")
+        self._base_count: dict[str, int] = {}
 
     def create_name(self, candidate: str, obj: Optional[Any]) -> str:
         """Create a unique name.
@@ -151,36 +163,38 @@ class _Namespace:
         if obj is not None and obj in self._obj_to_name:
             return self._obj_to_name[obj]
 
-        # delete all characters that are illegal in a Python identifier
-        candidate = self._illegal_char_regex.sub("_", candidate)
-
-        if not candidate:
-            candidate = "_unnamed"
-
-        if candidate[0].isdigit():
-            candidate = f"_{candidate}"
-
-        match = self._name_suffix_regex.match(candidate)
+        # optimistically check if candidate is already a valid name
+        match = _name_regex.match(candidate)
         if match is None:
-            base = candidate
-            num = None
+            # delete all characters that are illegal in a Python identifier
+            candidate = _illegal_char_regex.sub("_", candidate)
+
+            if not candidate:
+                candidate = "_unnamed"
+
+            if candidate[0].isdigit():
+                candidate = f"_{candidate}"
+
+            match = _name_regex.match(candidate)
+            assert match is not None
+
+        base, num = match.group(1, 2)
+        if num is None or candidate in self._used_names:
+            num = self._base_count.get(candidate, 0)
+            if _illegal_names.get(candidate, obj) is not obj:
+                num += 1
+                candidate = f"{base}_{num}"
+                # assume illegal names don't end in _\d so no need to check again
         else:
-            base, num_str = match.group(1, 2)
-            num = int(num_str)
+            num = int(num)
 
-        candidate = base if num is None else f"{base}_{num}"
-        if not num:
-            num = self._base_count[base]
-
-        while candidate in self._used_names or self._is_illegal_name(candidate, obj):
+        while candidate in self._used_names:
             num += 1
             candidate = f"{base}_{num}"
 
         self._used_names.add(candidate)
         self._base_count[base] = num
-        if obj is None:
-            self._unassociated_names.add(candidate)
-        else:
+        if obj is not None:
             self._obj_to_name[obj] = candidate
         return candidate
 
@@ -189,25 +203,8 @@ class _Namespace:
 
         Neither `name` nor `obj` should be associated already.
         """
-        assert obj not in self._obj_to_name
-        assert name in self._unassociated_names
-        self._obj_to_name[obj] = name
-        self._unassociated_names.remove(name)
-
-    def _is_illegal_name(self, name: str, obj: Any) -> bool:
-        # 1. keywords are never allowed as names.
-        if name in keyword.kwlist:
-            return True
-
-        # 2. Can't shadow a builtin name, unless you *are* that builtin.
-        if name in builtins.__dict__:
-            return obj is not builtins.__dict__[name]
-
-        # 3. Can't shadow our custom builtins either
-        if name in _custom_builtins:
-            return obj is not _custom_builtins[name].obj
-
-        return False
+        maybe_existing = self._obj_to_name.setdefault(obj, name)
+        assert maybe_existing is name, "obj is already associated"
 
     def _rename_object(self, obj: Any, name: str):
         assert obj in self._obj_to_name
@@ -1136,11 +1133,15 @@ class Graph:
 
             The newly-created and inserted node.
         """
-        assert op in _legal_ops
-        args = () if args is None else args
-        kwargs = {} if kwargs is None else kwargs
-        assert isinstance(args, tuple), "args must be a tuple"
-        assert isinstance(kwargs, dict), "kwargs must be a dict"
+        # `target in _legal_ops` is checked in Node.__init__
+        if not args:
+            args = ()
+        else:
+            assert isinstance(args, tuple), "args must be a tuple"
+        if not kwargs:
+            kwargs = immutable_dict()
+        else:
+            assert isinstance(kwargs, dict), "kwargs must be a dict"
 
         candidate = name if name is not None else self._target_to_str(target)
         name = self._graph_namespace.create_name(candidate, None)
