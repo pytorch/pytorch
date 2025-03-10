@@ -467,19 +467,51 @@ class TestMaxAutotune(TestCase):
         # given the config flags above, we should have no choices left.
         self.assertIn("NoValidChoicesError", str(context.exception))
 
+    @fresh_inductor_cache()
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support sm carveout")
     @unittest.skipIf(IS_WINDOWS, "Windows doesn't support persistent TMA")
     @unittest.skipIf(
         not has_triton_tma_device(), "Need device-side TMA support in Triton"
     )
-    def test_honor_sm_carveout_with_triton_tma(self):
+    @parametrize("carveout", (None, 0, 27))
+    @parametrize("op", ("mm", "scaled_mm"))
+    def test_honor_sm_carveout_with_triton_tma(self, carveout, op: str):
         def mm_func(a, b):
             return torch.mm(a, b)
+
+        def scaled_mm(
+            a,
+            b,
+            scale_a,
+            scale_b,
+        ):
+            return torch._scaled_mm(a, b, scale_a, scale_b, out_dtype=torch.bfloat16)
 
         # Create large matrices to ensure we use all possible sms
         size = 2560
         a = torch.randn(size, size, device="cuda", dtype=torch.bfloat16)
-        b = torch.randn(size, size, device="cuda", dtype=torch.bfloat16)
+        b = (
+            torch.randn(size, size, device="cuda", dtype=torch.bfloat16)
+            .transpose(0, 1)
+            .contiguous()
+            .transpose(0, 1)
+        )
+        scale_a = torch.tensor(1, dtype=torch.float32, device="cuda")
+        scale_b = torch.tensor(1, dtype=torch.float32, device="cuda")
+
+        args = (
+            (a.to(torch.float8_e4m3fn), b.to(torch.float8_e4m3fn), scale_a, scale_b)
+            if op == "scaled_mm"
+            else (a, b)
+        )
+        func = scaled_mm if op == "scaled_mm" else mm_func
+
+        # Set the specified carveout value
+        torch._C._set_sm_carveout_experimental(carveout)
+        if carveout is None:
+            self.assertIsNone(torch._C._get_sm_carveout_experimental())
+        else:
+            self.assertEqual(torch._C._get_sm_carveout_experimental(), carveout)
 
         with config.patch(
             {
@@ -487,57 +519,60 @@ class TestMaxAutotune(TestCase):
                 "autotune_fallback_to_aten": False,
                 "triton.enable_persistent_tma_matmul": True,
                 "max_autotune_gemm_backends": "TRITON",
-                "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
+                "test_configs.autotune_choice_name_regex": "tma",
             }
         ):
-            compiled_mm = torch.compile(mm_func, mode="max-autotune-no-cudagraphs")
-            compiled_mm(a, b)
+            compiled_mm = torch.compile(func, mode="max-autotune-no-cudagraphs")
+            compiled_mm(*args)  # Warm-up compilation
 
             with tempfile.NamedTemporaryFile() as f:
                 with torch.profiler.profile(
                     activities=[torch.profiler.ProfilerActivity.CUDA]
                 ) as prof:
-                    # Test with default (no carveout)
-                    self.assertIsNone(torch._C._get_sm_carveout_experimental())
-                    compiled_mm(a, b)
-
-                    # Test with carveout 0
-                    torch._C._set_sm_carveout_experimental(0)
-                    self.assertEqual(torch._C._get_sm_carveout_experimental(), 0)
-                    compiled_mm(a, b)
-
-                    # Test with carveout 66
-                    torch._C._set_sm_carveout_experimental(66)
-                    self.assertEqual(torch._C._get_sm_carveout_experimental(), 66)
-                    compiled_mm(a, b)
-
-                    # Reset to default and test again
-                    torch._C._set_sm_carveout_experimental(None)
-                    self.assertIsNone(torch._C._get_sm_carveout_experimental())
-                    compiled_mm(a, b)
+                    # Run with the specified carveout
+                    compiled_mm(*args)
 
                 # Export trace and analyze results
                 prof.export_chrome_trace(f.name)
 
                 # Extract grid sizes from the trace events for TMA kernels
+                kernel_name = "triton_tem_fused"
                 kernel_events = [
-                    math.prod(evt.get("args", {}).get("grid", []))
+                    {
+                        "grid": evt.get("args", {}).get("grid", []),
+                        "grid_size": math.prod(evt.get("args", {}).get("grid", [])),
+                    }
                     for evt in json.load(open(f.name))["traceEvents"]
                     if evt.get("cat", "") == "kernel"
-                    and "triton_tem_fused_mm" in evt.get("name", "").lower()
+                    and kernel_name in evt.get("name", "").lower()
                 ]
 
-                # We should have at least 4 kernel events (one for each configuration)
-                self.assertGreaterEqual(len(kernel_events), 4)
+                # We should have exactly 1 kernel event for this run
+                self.assertEqual(
+                    len(kernel_events),
+                    1,
+                    f"Expected exactly 1 kernel event, but got {len(kernel_events)}",
+                )
 
-                # Get the first occurrence of each carveout configuration
-                no_carveout, carveout_0, carveout_66, no_carveout_again = kernel_events[
-                    :4
-                ]
+                # Store the grid size for this carveout value for comparison
+                # across test runs
+                if not hasattr(self, "_grid_sizes"):
+                    self._grid_sizes = {}
+                self._grid_sizes[carveout] = kernel_events[0]["grid_size"]
 
-                self.assertEqual(no_carveout, no_carveout_again)
-                self.assertNotEqual(no_carveout, carveout_66)
-                self.assertNotEqual(carveout_66, carveout_0)
+                # Check that grid size matches expected values based on carveout
+                expected_grid_size = None
+                max_grid_size = torch.cuda.get_device_properties(
+                    "cuda"
+                ).multi_processor_count
+                careveout = 0 if carveout is None else carveout
+                expected_grid_size = max_grid_size - careveout
+
+                self.assertEqual(
+                    kernel_events[0]["grid_size"],
+                    expected_grid_size,
+                    f"Grid size {kernel_events[0]['grid_size']} doesn't match {expected_grid_size} for carveout={carveout}",
+                )
 
     @parametrize("dynamic", (False, True))
     def test_max_autotune_addmm_zero_size_input(self, dynamic):
