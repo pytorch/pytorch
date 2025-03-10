@@ -245,39 +245,22 @@ mkldnn_gemm(
   if constexpr (std::is_same_v<scalar_t, float>) {
     idtype = ideep::tensor::data_type::f32;
   }
-  #ifdef __aarch64__
-    ideep::tensor a({
-        /*sizes=*/{k, m},
-        idtype,
-        },
-      const_cast<scalar_t*>(a_data));
-    ideep::tensor b({
-        /*sizes=*/{n, k},
-        idtype,
-        },
-      const_cast<scalar_t*>(b_data));
-    ideep::tensor c({
-        /*sizes=*/{n, m},
-        ideep::tensor::data_type::f32,
-        },
+
+  ideep::tensor a({
+      /*sizes=*/{k, m},
+      idtype,
+      /*strides=*/a_strides},
+    const_cast<scalar_t*>(a_data));
+  ideep::tensor b({
+      /*sizes=*/{n, k},
+      idtype,
+      /*strides=*/b_strides},
+    const_cast<scalar_t*>(b_data));
+  ideep::tensor c({
+      /*sizes=*/{n, m},
+      ideep::tensor::data_type::f32,
+      /*strides=*/c_strides},
       c_data);
-  #else
-    ideep::tensor a({
-        /*sizes=*/{k, m},
-        idtype,
-        /*strides=*/a_strides},
-      const_cast<scalar_t*>(a_data));
-    ideep::tensor b({
-        /*sizes=*/{n, k},
-        idtype,
-        /*strides=*/b_strides},
-      const_cast<scalar_t*>(b_data));
-    ideep::tensor c({
-        /*sizes=*/{n, m},
-        ideep::tensor::data_type::f32,
-        /*strides=*/c_strides},
-      c_data);
-  #endif
 
   ideep::matmul_forward::compute(
       b, a, c, alpha, beta,
