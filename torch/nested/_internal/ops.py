@@ -1797,11 +1797,12 @@ def select_int(func, *args, **kwargs):
         index = new_kwargs["index"]
         begin, end = inp._offsets[[index, index+1]]
         if inp._lengths is not None:
-            # if the tensor has a hole, we must include the size of the jagged dim for this element
-            index_len = inp._lengths[index]
-            return inp._values[begin:end, :index_len]
+            length = inp._lengths[index]
+        else:
+            length = end - begin
         # if tensor has no holes, we can just select from the start and end pos
-        return inp._values[begin:end]
+        return inp._values.narrow(inp._ragged_idx - 1, begin, length)
+#        return inp._values[begin:end]
 
     if inp._lengths is not None:
         raise ValueError(
