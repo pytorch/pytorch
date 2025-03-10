@@ -535,7 +535,6 @@ class TestExport(TestCase):
 
         model = M()
         ep = export(model, (torch.randint(0, 8, (5,), dtype=torch.int64),))
-        print(ep)
         inp = torch.randint(0, 8, (5,), dtype=torch.int64)
         self.assertTrue(torch.allclose(ep.module()(inp), M()(inp)))
 
@@ -2278,7 +2277,6 @@ graph():
                     sample_input = _tensor(nz=nz)
                     ep = export(mod, (sample_input,), strict=False)
                     self.assertEqual(ep.module()(sample_input), nz)
-                    print(ep)
 
     @testing.expectedFailureLegacyExportNonStrict  # Trivial error, just need to move the error check earlier, for real users it wont matter
     @testing.expectedFailureLegacyExportStrict  # Trivial error, just need to move the error check earlier, for real users it wont matter
