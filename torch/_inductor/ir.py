@@ -6247,6 +6247,12 @@ class InplaceBernoulliFallback(ExternKernel):
 
 
 def _str_to_bool(s: str) -> bool:
+    try:
+        if (b := int(s)) in (0, 1):
+            return bool(b)
+    except ValueError:
+        pass
+
     assert s in ("False", "True"), s
     return s == "True"
 
