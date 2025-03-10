@@ -8,7 +8,7 @@ from typing import Any, cast
 import sympy
 
 import torch
-from torch._inductor.select_algorithm import realize_inputs
+from torch._inductor.select_algorithm import realize_inputs, SymbolicGridFn
 from torch._inductor.virtualized import V
 from torch.utils._ordered_set import OrderedSet
 
@@ -17,7 +17,6 @@ from ..codegen.wrapper import PythonWrapperCodegen
 from ..ir import ChoiceCaller, Layout
 from ..runtime.runtime_utils import next_power_of_2
 from ..utils import (
-    ceildiv as cdiv,
     get_backend_num_stages,
     get_num_sms,
     TMA_DESCRIPTOR_SIZE,
@@ -455,14 +454,16 @@ def should_fallback_to_aten(choices: list[ChoiceCaller]) -> bool:
     return False
 
 
-def mm_grid(m, n, meta):
+@SymbolicGridFn
+def mm_grid(m, n, meta, *, cdiv):
     """
     The CUDA grid size for matmul triton templates.
     """
     return (cdiv(m, meta["BLOCK_M"]) * cdiv(n, meta["BLOCK_N"]), 1, 1)
 
 
-def persistent_mm_grid(M: int, N: int, meta: dict[str, Any]):
+@SymbolicGridFn
+def persistent_mm_grid(M: int, N: int, meta: dict[str, Any], *, cdiv, min):
     """Defines the grid for persistent kernels."""
     return (
         min(meta["NUM_SMS"], cdiv(M, meta["BLOCK_M"]) * cdiv(N, meta["BLOCK_N"])),
