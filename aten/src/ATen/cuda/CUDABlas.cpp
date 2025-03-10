@@ -1534,6 +1534,8 @@ void scaled_gemm(
     ScalarType result_dtype,
     bool use_fast_accum,
     bool use_rowwise) {
+  // Note: see `cublasCommonArgs` for various non-intuitive manupulations
+  // of input arguments to this function.
 #if CUDA_VERSION >= 11080 || defined(USE_ROCM)
   const auto computeType = CUBLAS_COMPUTE_32F;
   const auto scaleType = CUDA_R_32F;
