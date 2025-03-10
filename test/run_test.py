@@ -931,10 +931,10 @@ def install_cpp_extensions(cpp_extensions_test_dir, env=os.environ):
 
 
 @contextlib.contextmanager
-def extend_python_path(install_directory):
+def extend_python_path(install_directories):
     python_path = os.environ.get("PYTHONPATH", "")
     try:
-        os.environ["PYTHONPATH"] = os.pathsep.join([install_directory, python_path])
+        os.environ["PYTHONPATH"] = os.pathsep.join(install_directories + [python_path])
         yield
     finally:
         os.environ["PYTHONPATH"] = python_path
@@ -1097,17 +1097,24 @@ def _test_cpp_extensions_aot(test_directory, options, use_ninja):
         test_directory + "/test_cpp_extensions_aot.py",
         test_directory + "/" + test_module + ".py",
     )
+
     try:
         cpp_extensions = os.path.join(test_directory, "cpp_extensions")
-        install_directory = ""
+        install_directories = []
         # install directory is the one that is named site-packages
         for root, directories, _ in os.walk(os.path.join(cpp_extensions, "install")):
             for directory in directories:
                 if "-packages" in directory:
-                    install_directory = os.path.join(root, directory)
+                    install_directories.append(os.path.join(root, directory))
 
-        assert install_directory, "install_directory must not be empty"
-        with extend_python_path(install_directory):
+        for root, directories, _ in os.walk(
+            os.path.join(cpp_extensions, "libtorch_agnostic_extension", "install")
+        ):
+            for directory in directories:
+                if "-packages" in directory:
+                    install_directories.append(os.path.join(root, directory))
+
+        with extend_python_path(install_directories):
             return run_test(ShardedTest(test_module, 1, 1), test_directory, options)
     finally:
         if os.path.exists(test_directory + "/" + test_module + ".py"):
@@ -1139,7 +1146,7 @@ def _test_autoload(test_directory, options, enable=True):
 
     try:
         os.environ["TORCH_DEVICE_BACKEND_AUTOLOAD"] = str(int(enable))
-        with extend_python_path(install_directory):
+        with extend_python_path([install_directory]):
             cmd = [sys.executable, "test_autoload.py"]
             return_code = shell(cmd, cwd=test_directory, env=os.environ)
             return return_code
@@ -1155,7 +1162,7 @@ def run_test_with_openreg(test_module, test_directory, options):
     if return_code != 0:
         return return_code
 
-    with extend_python_path(install_dir):
+    with extend_python_path([install_dir]):
         return run_test(test_module, test_directory, options)
 
 

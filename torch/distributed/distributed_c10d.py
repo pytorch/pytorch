@@ -4794,7 +4794,7 @@ def split_group(
     warning:: This is an experimental API and only the ``NCCL`` backend supports this API.
     Other backends will raise an error.
     Users of this API must gurantee that all ranks in the parent group enter this API call,
-    and the split of the sub groups is the same accross all ranks in the parent group.
+    and the split of the sub groups is the same across all ranks in the parent group.
 
     Args:
         parent_pg (ProcessGroup, optional): The parent process group. If None,
