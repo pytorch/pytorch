@@ -219,7 +219,7 @@
 #      Builds libtorch.so and its dependencies as a wheel
 #
 #   BUILD_PYTHON_ONLY
-#      Builds pytorch as a wheel using libtorch.so from a seperate wheel
+#      Builds pytorch as a wheel using libtorch.so from a separate wheel
 
 import os
 import sys
@@ -1120,7 +1120,7 @@ def main():
         "filelock",
         "typing-extensions>=4.10.0",
         'setuptools ; python_version >= "3.12"',
-        "sympy==1.13.3",
+        "sympy>=1.13.3",
         "networkx",
         "jinja2",
         "fsspec",

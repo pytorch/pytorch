@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import copy
 import sys
 
 import torch
@@ -212,6 +213,7 @@ class TestSavePlan(TestCase):
                 return planner.create_local_plan()
 
         all_plans = [create_data(0), create_data(1), create_data(2), create_data(3)]
+        expected_all_plans = copy.deepcopy(all_plans)
         planner = DefaultSavePlanner(enable_plan_caching=True)
         # First iteration, should create a new plan
         first_global_plan, first_metadata = planner.create_global_plan(all_plans)
@@ -220,7 +222,14 @@ class TestSavePlan(TestCase):
         cached_global_plan = SavePlanner._cached_global_plan[planner._cached_plans_key]
         self.assertEqual(cached_global_plan, first_global_plan)
 
+        # Validate that all_plans are cached
+        cached_all_plans = SavePlanner._cached_all_plans[planner._cached_plans_key]
+        self.assertEqual(cached_all_plans, expected_all_plans)
+
         # Second iteration, should return empty plans
+        # Recreate the plans as the previous ones are deduped.
+        all_plans = [create_data(0), create_data(1), create_data(2), create_data(3)]
+        expected_all_plans = copy.deepcopy(all_plans)
         second_global_plan, second_metadata = planner.create_global_plan(all_plans)
         # All the plans should be empty and usable
         for plan in second_global_plan:
@@ -230,6 +239,10 @@ class TestSavePlan(TestCase):
             self.assertIsNone(plan.storage_data)
 
         self.assertEqual(first_metadata, second_metadata)
+
+        # Validate that all_plans are cached and remain unchanged.
+        cached_all_plans = SavePlanner._cached_all_plans[planner._cached_plans_key]
+        self.assertEqual(cached_all_plans, expected_all_plans)
 
         # Third iteration with changed plans
         def create_data_v2(rank):
@@ -248,11 +261,16 @@ class TestSavePlan(TestCase):
             create_data_v2(2),
             create_data_v2(3),
         ]
+        expected_all_plans = copy.deepcopy(all_plans)
         third_global_plan, third_metadata = planner.create_global_plan(all_plans)
         # Only the rank 0 plan should be non-empty. The rest should be empty
         tensor_plan = third_global_plan[0]
         self.assertNotEqual(0, len(tensor_plan.items))
         self.assertTrue(tensor_plan.usable)
+
+        # Validate that all_plans are updated and cached
+        cached_all_plans = SavePlanner._cached_all_plans[planner._cached_plans_key]
+        self.assertEqual(cached_all_plans, expected_all_plans)
 
         for plan in third_global_plan[1:]:
             self.assertFalse(plan.usable)

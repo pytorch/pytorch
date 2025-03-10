@@ -233,6 +233,15 @@ def _assert_tensors_nonaliasing(inputs, outputs):
     )
 
 
+def _check_all_tensorvariable(args):
+    from . import TensorVariable
+
+    if not all(type(a.realize()) is TensorVariable for a in args):
+        unimplemented(
+            f"Expected all leaves to be of torch.Tensor type, but got {[type(a.realize()) for a in args]}."
+        )
+
+
 def _check_supported_callable_arg(
     tx: "InstructionTranslator", func_var: VariableTracker, arg_name
 ):
@@ -1415,61 +1424,91 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        from torch._higher_order_ops.scan import (
-            _extract_carry_and_out,
-            first_slice_copy,
-            stack_y,
-        )
+        import functools
 
-        from . import TensorVariable
-        from .builder import wrap_fx_proxy
+        from torch._higher_order_ops.scan import stack_y
+        from torch._higher_order_ops.utils import first_slice_copy
 
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
 
         def arg_extractor(combine_fn, init, xs, additional_inputs):
             return combine_fn, init, xs, additional_inputs
 
+        if len(args) != 3:
+            unimplemented(
+                f"Expected 3 positional arguments but got {len(args)}.\n"
+                f"Usage: scan(combine_fn, init, xs)",
+            )
+
         combine_fn, init, xs, additional_inputs = arg_extractor(*args, **kwargs)
-        assert isinstance(additional_inputs, variables.TupleVariable)
 
-        # Ensure that all additional_inputs are TensorVariables and no
-        # ints or SymInts as this is not yet supported
-        assert all(isinstance(t, TensorVariable) for t in additional_inputs.items)
+        # combine_fn input check
+        # We need to get the pure combine_fn from the functools.partial
+        _check_supported_callable_arg(
+            tx, combine_fn.keywords["combine_fn"], "combine_fn"
+        )
 
-        if xs.python_type() != list:
+        # init input check
+        if not isinstance(init, (ListVariable, TupleVariable)):
             unimplemented(
-                f"Expected xs to be a list of tensors but got {xs.python_type()}",
+                f"Expected init to be a list/tuple with at least one element but got "
+                f"{init.python_type()}. It seems to be an "
+                f"internal error, please report an issue to PyTorch."
             )
-        assert isinstance(xs, variables.BaseListVariable)
-        if init.python_type() != list:
+        init_len = len(init.items)
+        if init_len == 0:
             unimplemented(
-                f"Expected init to be a list of tensors but got {init.python_type()}",
+                "scan() operator requires init leaves.  It seems to be an "
+                "internal error, please report an issue to PyTorch."
             )
-        assert isinstance(init, variables.BaseListVariable)
+        init_vars = init.unpack_var_sequence(tx)
+        _check_all_tensorvariable(init_vars)
 
-        scan_length = get_fake_value(xs.items[0].as_proxy().node, tx).size()[0]
+        if args[0].python_type() is not functools.partial:
+            unimplemented(
+                f"Expected args[0], aka, inits to be a FunctoolsPartialVariable but got "
+                f"{args[0].python_type()}. It seems to be an "
+                f"internal error, please report an issue to PyTorch."
+            )
+        init_treespec = args[0].keywords["spec_init"]
+
+        # xs input check
+        if not isinstance(xs, (ListVariable, TupleVariable)):
+            unimplemented(
+                f"Expected xs to be a list/tuple but got "
+                f"{xs.python_type()}. It seems to be an "
+                f"internal error, please report an issue to PyTorch."
+            )
+        xs_vars = xs.unpack_var_sequence(tx)
+        _check_all_tensorvariable(xs_vars)
+
+        # additional_inputs input check
+        if not isinstance(additional_inputs, (ListVariable, TupleVariable)):
+            unimplemented(
+                f"Expected additional_inputs to be a list/tuple but got "
+                f"{additional_inputs.python_type()}. It seems to be an "
+                f"internal error, please report an issue to PyTorch."
+            )
+        additional_inputs_vars = additional_inputs.unpack_var_sequence(tx)
+        _check_all_tensorvariable(additional_inputs_vars)
+
+        scan_length = get_fake_value(xs_vars[0].as_proxy().node, tx).size()[0]
         if scan_length == 0:
             unimplemented(
                 "scan() operator doesn't support zero-sized tensors during tracing."
             )
 
-        init_len = len(init.items)
-        if init_len == 0:
-            unimplemented("scan() operator requires init leaves.")
-
         # Trace the subgraph
         with discard_graph_changes(tx):
             sub_args_init = [
-                ini.call_method(tx, "clone", args=(), kwargs={}) for ini in init.items
+                ini.call_method(tx, "clone", args=(), kwargs={}) for ini in init_vars
             ]
             # The sub_args_inp is a slice of original input, e.g. if input.size is (3, 4), and scan dim=0
             # the sub_args_inp shape will be (4, ).
-            sub_args_inp = [
-                _make_inlined(tx, first_slice_copy)(inp) for inp in xs.items
-            ]
+            sub_args_inp = [_make_inlined(tx, first_slice_copy)(inp) for inp in xs_vars]
             sub_args_additional_inputs = [
                 t.call_method(tx, "clone", args=(), kwargs={})
-                for t in additional_inputs.items
+                for t in additional_inputs_vars
             ]
 
         sub_args = sub_args_init + sub_args_inp + sub_args_additional_inputs
@@ -1486,30 +1525,60 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             source_target=self.value,
             set_subgraph_inputs="flatten_manual",
         )
-        combine_freevars_proxy = tuple(combine_lifted_freevars.keys())
+        combine_freevars_proxy = list(combine_lifted_freevars.keys())
 
-        if combine_result.python_type() != list:
+        # Collect the results from the comnbine_fn
+        results = combine_result.unpack_var_sequence(tx)
+        _combine_treespec = _make_inlined(tx, pytree.tree_structure)(combine_result)
+
+        # Check whether the combine_fn returns two child trees.
+        # One for the carries and one for the outputs
+        if len(results) != 2:
             unimplemented(
-                f"Expected combine_fn to return a list if tensor but got {combine_result.python_type()}",
+                f"combine_fn needs to produce two pytrees, one for the carries and one for the outputs "
+                f"but combine_fn produces the pytree {_combine_treespec.as_python_constant()}."
             )
 
-        xs_proxy = xs.as_proxy()
-        init_proxy = init.as_proxy()
-        additional_inputs_proxy = additional_inputs.as_proxy() + combine_freevars_proxy
-        num_init_leaves = len(init_proxy)
-        # combine_result is a flatten list concated by carry + y, len(carry) is len(init) since they have
-        # same pytree structure.
-        carry_vars, y_vars = _extract_carry_and_out(
-            combine_result.items, num_init_leaves
+        carry_tree, out_tree = results
+        carry_vars, carry_treespec = _make_inlined(tx, pytree.tree_flatten)(
+            carry_tree
+        ).unpack_var_sequence(tx)
+        carry_vars = carry_vars.unpack_var_sequence(tx)
+        out_vars = _make_inlined(tx, pytree.tree_leaves)(out_tree).unpack_var_sequence(
+            tx
         )
-        y_proxies = [y_var.as_proxy() for y_var in y_vars]
 
+        # Check whether the carries produced by combine_fn has the same treespec as the init
+        # We need to have this check this way, because in case init is a TreeSpec and carry
+        # but carry is only a LeafSpec, these two cannot be compared correctly.
+        if (
+            isinstance(init_treespec.as_python_constant(), pytree.LeafSpec)
+            != isinstance(carry_treespec.as_python_constant(), pytree.LeafSpec)
+        ) or not _make_inlined(tx, pytree.TreeSpec.__eq__)(
+            init_treespec, carry_treespec
+        ).as_python_constant():
+            unimplemented(
+                f"The tree structure of the inits and the carries produced by the combine_fn "
+                f"are expected to be identical, but got "
+                f"init: {init_treespec.as_python_constant()} vs carry: {carry_treespec.as_python_constant()}."
+            )
+
+        # Check meta data of carries and inits. If we pass this stage, we are sure that the init and carries
+        # have the same tree structure
         check_meta_consistency_vt(
-            init.unpack_var_sequence(tx),
+            init_vars,
             carry_vars,
             "init",
             "carry",
         )
+
+        # Compute the proxies
+        xs_proxy = xs.as_proxy()
+        init_proxy = init.as_proxy()
+        additional_inputs_proxy = list(additional_inputs.as_proxy()) + list(
+            combine_freevars_proxy
+        )
+        y_proxies = [out_var.as_proxy() for out_var in out_vars]
 
         combine_gm = torch.fx.GraphModule(dict(tx.output.nn_modules), combine_graph)
         combine_fn_name = tx.output.install_subgraph("scan_combine_fn", combine_gm)
@@ -1532,12 +1601,8 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             ]
             out_meta = [*example_carry, *example_stacked_out]
 
-        return wrap_fx_proxy(
-            tx=tx,
-            proxy=tx.output.create_proxy(
-                "call_function", torch.ops.higher_order.scan, p_args, {}
-            ),
-            example_value=out_meta,
+        return _call_function_and_unflatten_output(
+            tx, torch.ops.higher_order.scan, p_args, {}, out_meta, _combine_treespec
         )
 
 
