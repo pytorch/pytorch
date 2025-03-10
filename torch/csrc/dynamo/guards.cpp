@@ -525,11 +525,11 @@ static PyTypeObject TensorGuardsType = { PyVarObject_HEAD_INIT(nullptr, 0)
 
 struct AutocastState {
   static constexpr auto& DEVICES = at::autocast::_AUTOCAST_SUPPORTED_DEVICES;
-  std::array<bool, DEVICES.size()> enabled;
-  std::array<at::ScalarType, DEVICES.size()> dtype;
+  std::array<bool, DEVICES.size()> enabled{};
+  std::array<at::ScalarType, DEVICES.size()> dtype{};
   bool cache_enabled;
 
-  AutocastState() : enabled{}, dtype{} {
+  AutocastState() {
     for (size_t i = 0; i < DEVICES.size(); i++) {
       enabled[i] = at::autocast::is_autocast_enabled(DEVICES[i]);
       dtype[i] = at::autocast::get_autocast_dtype(DEVICES[i]);
@@ -1962,8 +1962,7 @@ class SYMBOLIC_SHAPE_GUARD : public RelationalGuard {
       py::object py_addr_keep_alive,
       py::object verbose_code_parts)
       : RelationalGuard(std::move(verbose_code_parts)),
-        _py_addr_keep_alive(std::move(py_addr_keep_alive)),
-        _args_seen{0} {
+        _py_addr_keep_alive(std::move(py_addr_keep_alive)) {
     _nargs_int = PyLong_AsSize_t(nargs_int.ptr());
     _nargs_float = PyLong_AsSize_t(nargs_float.ptr());
     _nargs = _nargs_int + _nargs_float;
@@ -2057,7 +2056,7 @@ class SYMBOLIC_SHAPE_GUARD : public RelationalGuard {
 
  private:
   py::object _py_addr_keep_alive;
-  size_t _args_seen, _nargs_float, _nargs_int, _nargs;
+  size_t _args_seen{0}, _nargs_float, _nargs_int, _nargs;
   std::vector<int64_t> _args_int;
   std::vector<double> _args_float;
   std::function<int8_t(int64_t*, double*)> _guard_check_fn;
@@ -3481,7 +3480,6 @@ class GetAttrGuardAccessor : public GuardAccessor {
   }
 
  public: // cloning functions
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   GetAttrGuardAccessor(GuardManager* guard_manager, GetAttrGuardAccessor* from)
       : GuardAccessor(guard_manager, from) {
     from->clone_visitor(this);
@@ -3500,7 +3498,7 @@ class GetAttrGuardAccessor : public GuardAccessor {
  private:
   // no need of py::object here because the attr_name is already passed on to
   // the base class as accessor_key which is a py::object.
-  PyObject* _attr_name;
+  PyObject* _attr_name{nullptr};
 };
 
 /**
@@ -3556,7 +3554,6 @@ class GetGenericDictGuardAccessor : public GuardAccessor {
   }
 
  public: // cloning functions
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   GetGenericDictGuardAccessor(
       GuardManager* guard_manager,
       GetGenericDictGuardAccessor* from)
@@ -3624,7 +3621,6 @@ class GetItemGuardAccessor : public GuardAccessor {
   }
 
  public: // cloning functions
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   GetItemGuardAccessor(GuardManager* guard_manager, GetItemGuardAccessor* from)
       : GuardAccessor(guard_manager, from) {
     from->clone_visitor(this);
@@ -3643,7 +3639,7 @@ class GetItemGuardAccessor : public GuardAccessor {
  private:
   // no need of py::object here because the attr_name is already passed on to
   // the base class as accessor_key which is a py::object.
-  PyObject* _attr_name;
+  PyObject* _attr_name{nullptr};
 };
 
 /**
@@ -3742,7 +3738,6 @@ class FrameLocalsGuardAccessor : public GuardAccessor {
   }
 
  public: // cloning functions
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   FrameLocalsGuardAccessor(
       GuardManager* guard_manager,
       FrameLocalsGuardAccessor* from)
@@ -3763,12 +3758,12 @@ class FrameLocalsGuardAccessor : public GuardAccessor {
   }
 
  private:
-  PyObject* _key;
-  int _framelocals_idx;
+  PyObject* _key{nullptr};
+  int _framelocals_idx{-1};
 
   // If immutable object and dict tag matches, we can skip the guard subtree and
   // return true.
-  bool _is_immutable_object;
+  bool _is_immutable_object{false};
 };
 
 /**
@@ -3832,7 +3827,6 @@ class DictGetItemGuardAccessor : public GuardAccessor {
   }
 
  public: // cloning functions
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   DictGetItemGuardAccessor(
       GuardManager* guard_manager,
       DictGetItemGuardAccessor* from)
@@ -3852,11 +3846,11 @@ class DictGetItemGuardAccessor : public GuardAccessor {
   }
 
  private:
-  PyObject* _key;
+  PyObject* _key{nullptr};
 
   // If immutable object and dict tag matches, we can skip the guard subtree and
   // return true.
-  bool _is_immutable_object;
+  bool _is_immutable_object{false};
 };
 
 /**
@@ -3909,7 +3903,6 @@ class ListGetItemGuardAccessor : public GuardAccessor {
   }
 
  public: // cloning functions
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   ListGetItemGuardAccessor(
       GuardManager* guard_manager,
       ListGetItemGuardAccessor* from)
@@ -3928,7 +3921,7 @@ class ListGetItemGuardAccessor : public GuardAccessor {
   }
 
  private:
-  Py_ssize_t _index;
+  Py_ssize_t _index{-1};
 };
 
 /**
@@ -3981,7 +3974,6 @@ class TupleGetItemGuardAccessor : public GuardAccessor {
   }
 
  public: // cloning functions
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   TupleGetItemGuardAccessor(
       GuardManager* guard_manager,
       TupleGetItemGuardAccessor* from)
@@ -4001,7 +3993,7 @@ class TupleGetItemGuardAccessor : public GuardAccessor {
   }
 
  private:
-  Py_ssize_t _index;
+  Py_ssize_t _index{-1};
 };
 
 enum class TensorProperty {
@@ -4128,7 +4120,6 @@ class TensorPropertyGuardAccessor : public GuardAccessor {
   }
 
  public: // cloning functions
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   TensorPropertyGuardAccessor(
       GuardManager* guard_manager,
       TensorPropertyGuardAccessor<_prop>* from)
@@ -4148,7 +4139,7 @@ class TensorPropertyGuardAccessor : public GuardAccessor {
   }
 
  private:
-  Py_ssize_t _index;
+  Py_ssize_t _index{-1};
 };
 
 /**
@@ -4195,7 +4186,6 @@ class IndexedGuardAccessor : public GuardAccessor {
   }
 
  public: // cloning functions
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   IndexedGuardAccessor(GuardManager* guard_manager, IndexedGuardAccessor* from)
       : GuardAccessor(guard_manager, from) {
     from->clone_visitor(this);
@@ -4212,7 +4202,7 @@ class IndexedGuardAccessor : public GuardAccessor {
   }
 
  private:
-  py::int_ _index;
+  py::int_ _index{-1};
 };
 
 /**
@@ -4272,7 +4262,6 @@ class GradGuardAccessor : public GuardAccessor {
   }
 
  public: // cloning functions
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   GradGuardAccessor(GuardManager* guard_manager, GradGuardAccessor* from)
       : GuardAccessor(guard_manager, from) {
     from->clone_visitor(this);
@@ -4346,7 +4335,6 @@ class FuncDefaultsGuardAccessor : public GuardAccessor {
   }
 
  public: // cloning functions
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   FuncDefaultsGuardAccessor(
       GuardManager* guard_manager,
       FuncDefaultsGuardAccessor* from)
@@ -4422,7 +4410,6 @@ class FuncKwDefaultsGuardAccessor : public GuardAccessor {
   }
 
  public: // cloning functions
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   FuncKwDefaultsGuardAccessor(
       GuardManager* guard_manager,
       FuncKwDefaultsGuardAccessor* from)
@@ -4479,7 +4466,6 @@ class GlobalsGuardAccessor : public GuardAccessor {
   }
 
  public: // cloning functions
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   GlobalsGuardAccessor(GuardManager* guard_manager, GlobalsGuardAccessor* from)
       : GuardAccessor(guard_manager, from) {
     from->clone_visitor(this);
@@ -4498,7 +4484,7 @@ class GlobalsGuardAccessor : public GuardAccessor {
  private:
   // no need of py::object here because the globals_dict is already passed on to
   // the base class as accessor_key which is a py::object.
-  PyObject* _globals_dict;
+  PyObject* _globals_dict{nullptr};
 };
 
 /**
@@ -4539,7 +4525,6 @@ class TypeGuardAccessor : public GuardAccessor {
   }
 
  public: // cloning functions
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   TypeGuardAccessor(GuardManager* guard_manager, TypeGuardAccessor* from)
       : GuardAccessor(guard_manager, from) {
     from->clone_visitor(this);
@@ -4608,7 +4593,6 @@ class TupleIteratorGetItemAccessor : public GuardAccessor {
   }
 
  public: // cloning functions
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   TupleIteratorGetItemAccessor(
       GuardManager* guard_manager,
       TupleIteratorGetItemAccessor* from)
@@ -4628,7 +4612,7 @@ class TupleIteratorGetItemAccessor : public GuardAccessor {
   }
 
  private:
-  Py_ssize_t _index;
+  Py_ssize_t _index{-1};
 };
 
 /**
@@ -4724,7 +4708,6 @@ class GlobalWeakRefGuardAccessor : public GuardAccessor {
   }
 
  public: // cloning functions
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   GlobalWeakRefGuardAccessor(
       GuardManager* guard_manager,
       GlobalWeakRefGuardAccessor* from)
@@ -4743,7 +4726,7 @@ class GlobalWeakRefGuardAccessor : public GuardAccessor {
   }
 
  private:
-  PyObject* _global_name;
+  PyObject* _global_name{nullptr};
 };
 
 /**
@@ -4815,7 +4798,6 @@ class WeakRefCallGuardAccessor : public GuardAccessor {
   }
 
  public: // cloning functions
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   WeakRefCallGuardAccessor(
       GuardManager* guard_manager,
       WeakRefCallGuardAccessor* from)
@@ -4895,7 +4877,6 @@ class CallFunctionNoArgsGuardAccessor : public GuardAccessor {
   }
 
  public: // cloning functions
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   CallFunctionNoArgsGuardAccessor(
       GuardManager* guard_manager,
       CallFunctionNoArgsGuardAccessor* from)
@@ -4967,7 +4948,6 @@ class PythonLambdaGuardAccessor : public GuardAccessor {
   }
 
  public: // cloning functions
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   PythonLambdaGuardAccessor(
       GuardManager* guard_manager,
       PythonLambdaGuardAccessor* from)
