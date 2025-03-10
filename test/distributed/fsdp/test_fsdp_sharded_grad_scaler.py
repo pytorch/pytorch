@@ -25,6 +25,7 @@ from torch.testing._internal.common_fsdp import (
     DummyProcessGroup,
     FSDPInitMode,
     FSDPTest,
+    get_devtype,
     NestedWrappedModule,
     NonUniformReqGradNWM,
     subtest_name,
@@ -34,10 +35,13 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    TEST_HPU,
     TEST_WITH_DEV_DBG_ASAN,
     TestCase,
 )
 
+
+device_type = torch.device(get_devtype())
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -75,6 +79,7 @@ subtest_name = functools.partial(subtest_name, test_name_mapping)
 
 
 class TestShardGradScaler(TestCase):
+    @unittest.skipIf(TEST_HPU, "NOT SUPPORTED")
     @unittest.skipIf(
         amp_definitely_not_available(), "no supported device (cuda, xla) found"
     )
@@ -92,7 +97,8 @@ class TestShardGradScaler(TestCase):
         self.assertTrue(scaler._scale.device == t1.device)
 
     @unittest.skipIf(
-        amp_definitely_not_available(), "no supported device (cuda, xla) found"
+        (amp_definitely_not_available() and (not TEST_HPU)),
+        "no supported device (cuda, xla, hpu) found",
     )
     def test_scaling_unscaling_sparse(self):
         pg = DummyProcessGroup(0, 1)
@@ -137,7 +143,8 @@ class TestShardGradScaler(TestCase):
         self.assertEqual(found_inf, 1.0)
 
     @unittest.skipIf(
-        amp_definitely_not_available(), "no supported device (cuda, xla) found"
+        (amp_definitely_not_available() and (not TEST_HPU)),
+        "no supported device (cuda, xla, hpu) found",
     )
     def test_inf_gradients_skip_optim_step(self):
         pg = DummyProcessGroup(0, 1)
@@ -248,6 +255,11 @@ class TestShardedGradScalerParityWithDDP(FSDPTest):
             self._test_sharded_grad_scaler_found_inf,
         )
 
+    @unittest.skipIf(
+        (amp_definitely_not_available()), "no supported device (cuda, xla) found"
+    )
+    # This test case is not support for hpu because of torch.cuda.amp.GradScaler internally
+    # enable only for cuda
     def _test_sharded_grad_scaler_found_inf(
         self,
         use_orig_params: bool,
@@ -258,9 +270,8 @@ class TestShardedGradScalerParityWithDDP(FSDPTest):
             use_orig_params=use_orig_params,
         )
         grad_scaler = ShardedGradScaler(init_scale=2.0)
-        ref_grad_scaler = torch.amp.GradScaler(device="cuda", init_scale=2.0)
+        ref_grad_scaler = torch.amp.GradScaler(device=device_type, init_scale=2.0)
         scaled_losses: list[torch.Tensor] = []
-        device = torch.device("cuda")
         torch.manual_seed(42 + self.rank + 1)
 
         for iter in range(10):
@@ -269,7 +280,7 @@ class TestShardedGradScalerParityWithDDP(FSDPTest):
                 (model, optim, grad_scaler),
             ):
                 module = _model.module
-                inp = module.get_input(device)
+                inp = module.get_input(device_type)
                 _optim.zero_grad()
                 output = _model(*inp)
                 loss = module.get_loss(inp, output)
