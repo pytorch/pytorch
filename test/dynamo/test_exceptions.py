@@ -11,6 +11,7 @@ import torch.nn
 import torch.utils.checkpoint
 from torch._dynamo.bytecode_transformation import Instruction
 from torch._dynamo.symbolic_convert import SpeculationLog, SpeculationLogDivergence
+from torch.testing._internal.common_utils import make_dynamo_test
 
 
 class CustomException(Exception):
@@ -21,6 +22,10 @@ class CustomExceptionWithArgs(Exception):
     def __init__(self, a, b=None):
         self.a = a
         self.b = b
+
+
+class MyException(OSError):
+    pass
 
 
 class ExceptionTests(torch._dynamo.test_case.TestCase):
@@ -242,6 +247,23 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         y = fn(t)
         self.assertEqual(y, t.sin())
 
+    def test_raise_custom_exception_with_args(self):
+        class Exc(Exception):
+            ...
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            try:
+                raise Exc(1, 2.0)
+            except Exc as e:
+                return t.sin() + e.args[0] + e.args[1]
+            except Exception:
+                return t.cos()
+
+        t = torch.randn(2)
+        y = fn(t)
+        self.assertEqual(y, t.sin() + 1 + 2.0)
+
     def test_nn_module_getattr(self):
         class A:
             def __init__(self) -> None:
@@ -433,6 +455,41 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref[0], res[0])
         self.assertEqual(ref[1], res[1])
 
+    def test_reconstruct___context__(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            v = ValueError(1, 2, 3)
+            v.__context__ = TypeError()
+            v.__cause__ = RuntimeError()
+            return t.sin(), v
+
+        t = torch.randn(2)
+        y, v = fn(t)
+        self.assertEqual(y, t.sin())
+        self.assertIsInstance(v, ValueError)
+        self.assertIsInstance(v.__context__, TypeError)
+        self.assertIsInstance(v.__cause__, RuntimeError)
+        self.assertTrue(v.__suppress_context__)
+
+    def test_reconstruct_exception_2(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            try:
+                raise ValueError(1, 2, 3)
+            except Exception:
+                try:
+                    raise TypeError(4, 5) from None
+                except Exception as e:
+                    e.__cause__ = RuntimeError(6, 7)
+                    return t.sin(), e
+
+        t = torch.randn(2)
+        y, v = fn(t)
+        self.assertEqual(y, t.sin())
+        self.assertIsInstance(v, TypeError)
+        self.assertIsInstance(v.__context__, ValueError)
+        self.assertIsInstance(v.__cause__, RuntimeError)
+
     def test_raise_GeneratorExit(self):
         # GeneratorExit does not inherit from Exception
         @torch.compile(backend="eager", fullgraph=True)
@@ -495,6 +552,28 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(4)
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_set_cause_with_arg(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t, err):
+            err.__cause__ = ValueError()
+            return t.sin()
+
+        t = torch.randn(2)
+        e = TypeError("abcd")
+        fn(t, e)
+        self.assertIsInstance(e.__cause__, ValueError)
+
+    def test_set_cause_with_arg_error(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t, err):
+            err.__cause__ = 2
+            return t.sin()
+
+        t = torch.randn(2)
+        e = TypeError("abcd")
+        with self.assertRaisesRegex(TypeError, "exception cause must be"):
+            fn(t, e)
+
     def test_user_defined_exception_variable(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
@@ -511,6 +590,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         t = torch.randn(2)
         fn(t)
 
+    @unittest.skipIf(sys.version_info < (3, 11), "Python 3.11+")
     def test_user_defined_exception_with_args(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
@@ -525,6 +605,251 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
 
         t = torch.randn(2)
         fn(t)
+
+    @make_dynamo_test
+    def test_raise_set___context__(self):
+        try:
+            raise TypeError
+        except TypeError as e:
+            exc = e
+
+        assert exc.__context__ is None
+
+        try:
+            raise ValueError
+        except ValueError as e:
+            exc2 = e
+
+        assert exc2.__context__ is None
+
+
+class CPythonExceptionTests(torch._dynamo.test_case.TestCase):
+    # Tests taken from CPython source code in cpython/Lib/test/test_exceptions.py
+    # https://github.com/python/cpython/blob/v3.13.1/Lib/test/test_exceptions.py
+
+    @make_dynamo_test
+    def testChainingAttrs(self):
+        e = Exception()
+        assert e.__context__ is None
+        assert e.__cause__ is None
+
+        e = TypeError()
+        assert e.__context__ is None
+        assert e.__cause__ is None
+
+        e = MyException()
+        assert e.__context__ is None
+        assert e.__cause__ is None
+
+    @make_dynamo_test
+    def testChainingDescriptors(self):
+        try:
+            raise Exception  # noqa: TRY002
+        except Exception as exc:
+            e = exc
+
+        assert e.__context__ is None
+        assert e.__cause__ is None
+        assert e.__suppress_context__ is False
+
+        e.__context__ = NameError()
+        e.__cause__ = None
+        assert isinstance(e.__context__, NameError)
+        assert e.__cause__ is None
+        assert e.__suppress_context__ is True
+        e.__suppress_context__ = False
+        assert e.__suppress_context__ is False
+
+    @make_dynamo_test
+    def test_context_of_exception_in_try_and_finally(self):
+        try:
+            try:
+                te = TypeError(1)
+                raise te
+            finally:
+                ve = ValueError(2)
+                raise ve
+        except Exception as e:
+            exc = e
+
+        assert exc is ve
+        assert exc.__context__ is te
+
+    @make_dynamo_test
+    def test_context_of_exception_in_except_and_finally(self):
+        try:
+            try:
+                te = TypeError(1)
+                raise te
+            except Exception:  # noqa: E722
+                ve = ValueError(2)
+                raise ve  # noqa: B904
+            finally:
+                oe = OSError(3)
+                raise oe
+        except Exception as e:
+            exc = e
+
+        assert exc is oe
+        assert exc.__context__ is ve
+        assert exc.__context__.__context__ is te
+
+    @make_dynamo_test
+    def test_context_of_exception_in_else_and_finally(self):
+        try:
+            try:
+                pass
+            except Exception:  # noqa: E722
+                pass
+            else:
+                ve = ValueError(1)
+                raise ve
+            finally:
+                oe = OSError(2)
+                raise oe
+        except Exception as e:
+            exc = e
+
+        assert exc is oe
+        assert exc.__context__ is ve
+
+    @unittest.expectedFailure
+    @make_dynamo_test
+    def test_raise_does_not_create_context_chain_cycle(self):
+        A = AssertionError
+        B = BytesWarning
+        C = ConnectionError
+
+        # Create a context chain:
+        # C -> B -> A
+        # Then raise A in context of C.
+        try:
+            try:
+                raise A
+            except A as a_:
+                a = a_
+                try:
+                    raise B
+                except B as b_:
+                    b = b_
+                    try:
+                        raise C
+                    except C as c_:
+                        c = c_
+                        self.assertIsInstance(a, A)
+                        self.assertIsInstance(b, B)
+                        self.assertIsInstance(c, C)
+                        self.assertIsNone(a.__context__)
+                        self.assertIs(b.__context__, a)
+                        self.assertIs(c.__context__, b)
+                        raise a  # noqa: B904
+        except A as e:
+            exc = e
+
+        # Expect A -> C -> B, without cycle
+        self.assertIs(exc, a)
+        self.assertIs(a.__context__, c)
+        self.assertIs(c.__context__, b)
+        self.assertIsNone(b.__context__)
+
+    @unittest.expectedFailure
+    @make_dynamo_test
+    def test_no_hang_on_context_chain_cycle1(self):
+        # See issue 25782. Cycle in context chain.
+
+        def cycle():
+            try:
+                raise ValueError(1)
+            except ValueError as ex:
+                ex.__context__ = ex
+                raise TypeError(2)  # noqa: B904
+
+        try:
+            cycle()
+        except Exception as e:
+            exc = e
+
+        self.assertIsInstance(exc, TypeError)
+        self.assertIsInstance(exc.__context__, ValueError)
+        self.assertIs(exc.__context__.__context__, exc.__context__)
+
+    @unittest.expectedFailure
+    @make_dynamo_test
+    def test_no_hang_on_context_chain_cycle2(self):
+        # See issue 25782. Cycle at head of context chain.
+
+        A = AssertionError
+        B = BytesWarning
+        C = ConnectionError
+
+        # Context cycle:
+        # +-----------+
+        # V           |
+        # C --> B --> A
+        with self.assertRaises(C) as cm:
+            try:
+                raise A()  # noqa: RSE102
+            except A as _a:
+                a = _a
+                try:
+                    raise B()  # noqa: RSE102
+                except B as _b:
+                    b = _b
+                    try:
+                        raise C()  # noqa: RSE102
+                    except C as _c:
+                        c = _c
+                        a.__context__ = c
+                        raise c  # noqa: B904
+
+        self.assertIs(cm.exception, c)
+        # Verify the expected context chain cycle
+        self.assertIs(c.__context__, b)
+        self.assertIs(b.__context__, a)
+        self.assertIs(a.__context__, c)
+
+    @unittest.expectedFailure
+    @make_dynamo_test
+    def test_no_hang_on_context_chain_cycle3(self):
+        # See issue 25782. Longer context chain with cycle.
+        A = AssertionError
+        B = BytesWarning
+        C = ConnectionError
+        D = DeprecationWarning
+        E = Exception
+
+        # Context cycle:
+        #             +-----------+
+        #             V           |
+        # E --> D --> C --> B --> A
+        with self.assertRaises(E) as cm:
+            try:
+                raise A
+            except A as _a:
+                a = _a
+                try:
+                    raise B
+                except B as _b:
+                    b = _b
+                    try:
+                        raise C
+                    except C as _c:
+                        c = _c
+                        a.__context__ = c
+                        try:
+                            raise D
+                        except D as _d:
+                            d = _d
+                            e = E()
+                            raise e  # noqa: B904
+
+        self.assertIs(cm.exception, e)
+        # Verify the expected context chain cycle
+        self.assertIs(e.__context__, d)
+        self.assertIs(d.__context__, c)
+        self.assertIs(c.__context__, b)
+        self.assertIs(b.__context__, a)
+        self.assertIs(a.__context__, c)
 
 
 if __name__ == "__main__":
