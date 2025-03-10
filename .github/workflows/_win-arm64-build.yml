@@ -125,7 +125,7 @@ jobs:
       - name: Parse ref
         id: parse-ref
         shell: bash
-        run: python .github/scripts/parse_ref.py
+        run: python pytorch/.github/scripts/parse_ref.py
 
       - name: Get workflow job id
         id: get-job-id
