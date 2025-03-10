@@ -1749,3 +1749,53 @@ class LogSoftmax(Module):
 
     def extra_repr(self):
         return f"dim={self.dim}"
+
+class Periodic(Module):
+    r"""Applies the element-wise Periodic function (sin or cos) to an n-dimensional input Tensor.
+
+    .. math::
+        sin:
+        \text{Periodic}(x) = \sin(omega_0 x)
+        cos:
+        \text{Periodic}(x) = \cos(omega_0 x)
+
+    Shape:
+        - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
+        - Output: :math:`(*)`, same shape as the input.
+
+    Args:
+        mode (str): The mode of the periodic function (``'sin'`` or ``'cos'``). Default: ``'sin'``.
+        omega_0 (float): The frequency of the periodic function. Default: 1.0.
+        inplace (bool): If set to ``True``, will do this operation in-place. Default: ``False``.
+
+    Examples::
+
+        >>> m = nn.Periodic()
+        >>> input = torch.randn(2)
+        >>> output = m(input)
+
+        
+        >>> m = nn.Periodic(mode='cos', omega_0=2.0)
+        >>> input = torch.randn(3, 5)
+        >>> output = m(input)        
+    """
+
+    __constants__ = ["mode", "omega_0", "inplace"]
+    mode: str
+    omega_0: float
+    inplace: bool
+
+    def __init__(self, mode: str = "sin", omega_0: float = 1.0, inplace: bool = False):
+        super().__init__()
+        self.mode = mode
+        self.omega_0 = omega_0
+        self.inplace = inplace
+
+    def forward(self, input: Tensor) -> Tensor:
+        return F.periodic(input, self.omega_0, self.mode, self.inplace)
+
+    def extra_repr(self) -> str:
+        mode_str = f"mode={self.mode}"
+        omega_0_str = f"omega_0={self.omega_0}"
+        inplace_str = "inplace=True" if self.inplace else ""
+        return f"{mode_str}, {omega_0_str}, {inplace_str}"
