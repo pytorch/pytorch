@@ -30,6 +30,11 @@
 #endif
 #endif
 
+// Avoid potential compiler -Wall -Werror complains undefined macro
+#ifndef AOTRITON_VERSION_MINOR
+#define AOTRITON_VERSION_MINOR 0
+#endif
+
 /**
 * Note [SDPA Runtime Dispatch]
 * SDPA relies on a runtime dispatch mechanism to select the appropriate
@@ -237,6 +242,7 @@ bool check_flash_attention_hardware_support(sdp_params const& params, bool debug
         }
         return false;
     }
+#if AOTRITON_VERSION_MINOR >= 9
     if (aotriton::isArchExperimentallySupported(stream)) {
       static const bool enable_experimental = c10::utils::check_env("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL") == true;
       if (!enable_experimental) {
@@ -245,6 +251,7 @@ bool check_flash_attention_hardware_support(sdp_params const& params, bool debug
         return false;
       }
     }
+#endif
   }
 #else
   return false;
@@ -281,6 +288,7 @@ bool check_mem_efficient_hardware_support(sdp_params const& params, bool debug) 
       }
       return false;
   }
+#if AOTRITON_VERSION_MINOR >= 9
   if (aotriton::isArchExperimentallySupported(stream)) {
     static const bool enable_experimental = c10::utils::check_env("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL") == true;
     if (!enable_experimental) {
@@ -289,6 +297,7 @@ bool check_mem_efficient_hardware_support(sdp_params const& params, bool debug) 
       return false;
     }
   }
+#endif
 #else
   return false;
 #endif

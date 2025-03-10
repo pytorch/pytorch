@@ -1283,7 +1283,7 @@ int64_t _cudnn_rnn_flatten_weight_prologue(
 #else
   return get_num_weights(handle, rnn_desc, flat_buf_datatype);
 #endif
-};
+}
 
 } // namespace native
 
