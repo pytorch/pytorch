@@ -68,7 +68,7 @@ def load(
     costs).
 
     Each rank will try to read the least amount of data necessary
-    to fullfill the requested `state_dict`. When loading :class:`ShardedTensor`
+    to fulfill the requested `state_dict`. When loading :class:`ShardedTensor`
     or :class:`DTensor` instances, each rank only reads data for their local shards.
 
     For each ``Stateful`` object (having both a ``state_dict`` and a ``load_state_dict``),
