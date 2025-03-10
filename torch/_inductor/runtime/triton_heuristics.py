@@ -540,7 +540,17 @@ class CachingAutotuner(KernelInterface):
         TritonBundler.put(
             triton_hash_to_path_key(binary.hash), self.triton_meta.get("device", 0)
         )
+        # If the binary has a cubin file to directly launch, save it on the binary
+        cubin_location = os.path.join(
+            triton_cache_dir(self.triton_meta.get("device, 0")),
+            triton_hash_to_path_key(binary.hash),
+            f"{binary.src.fn.__name__}.cubin"
+        )
+        if os.path.exists(cubin_location):
+            binary._cubin_path = cubin_location
         return TritonCompileResult(binary, cfg, compile_meta, self.inductor_meta)
+
+
 
     def _get_args_with_constexprs(self, args, launcher):
         """
@@ -1076,7 +1086,6 @@ class TritonCompileResult:
         compile_meta = self.compile_meta
         binary = self.kernel
         fn = binary.src.fn
-        binary._init_handles()
         """
         https://github.com/pytorch/pytorch/issues/115344
 
@@ -1148,11 +1157,29 @@ class TritonCompileResult:
                     else ()
                 )
             ),
-            "function": get_first_attr(binary, "function", "cu_function"),
-            "runner": get_first_attr(binary, "run", "c_wrapper"),
         }
+        try:
+            static_binary = StaticallyLaunchedCudaKernel(binary)
+            static_binary.load_kernel()
+            binary = static_binary
+            scope["runner"] = binary.run
+        except NotImplementedError as e:
+            log.warning("Bypassing StaticallyLaunchedCudaKernel due to %s", str(e))
+            binary._init_handles()
+            scope.update(
+                {
+                    "function": get_first_attr(binary, "function", "cu_function"),
+                    "runner": get_first_attr(binary, "run", "c_wrapper"),
+                }
+            )
 
-        if not hasattr(binary, "launch_metadata"):
+        if isinstance(binary, StaticallyLaunchedCudaKernel):
+            runner_args = [
+                "(grid_0, grid_1, grid_2,)",
+                "stream",
+                *call_args,
+            ]
+        elif not hasattr(binary, "launch_metadata"):
             # launch args before CompiledKernel.launch_metadata is added.
             # TODO(jansel): delete this branch in mid-2025
             runner_args = [
@@ -1193,7 +1220,6 @@ class TritonCompileResult:
                 "launch_exit_hook",
                 *call_args,
             ]
-
         exec(
             f"""
             def launcher({", ".join(def_args)}, grid, stream):
@@ -2353,12 +2379,15 @@ class StaticallyLaunchedCudaKernel:
     to the parent process in inductor.
     """
 
-    def __init__(self, kernel: CompiledKernel):
+    def __init__(self, kernel: CompiledKernel, cubin_path: Optional[str] = None):
         # TODO: Can only import this if we know torch was compiled with CUDA
         # Maybe we make a class that just errors otherwise?
         from torch._C import _StaticCudaLauncher
+        if hasattr(kernel, "_cubin_path"):
+            self.cubin_path = kernel._cubin_path
+        else:
+            self.cubin = kernel.asm["cubin"]
 
-        self.cubin = kernel.asm["cubin"]
         # TODO: is this right?
         self.name = kernel.src.fn.__name__
         self.metadata = kernel.metadata
@@ -2380,9 +2409,9 @@ class StaticallyLaunchedCudaKernel:
                 "Static cuda launcher only supports num_ctas == 1"
             )
 
-        if num_args > 10 or num_args == 0:
+        if num_args > 25 or num_args == 0:
             raise NotImplementedError(
-                "No static cuda launcher available for %d arguments", num_args
+                "No static cuda launcher available for %d arguments"
             )
         self.launcher = _StaticCudaLauncher._launch_kernel
 
@@ -2397,6 +2426,8 @@ class StaticallyLaunchedCudaKernel:
         )
 
     def write_cubin_to_file(self, filepath):
+        if hasattr(self, "cubin_path"):
+            return
         # Just used by tests for now.
         # TODO: derive cubin_path from wherever triton stores the cubin file on disk.
         with open(filepath, "wb") as f:
@@ -2446,7 +2477,8 @@ class StaticallyLaunchedCudaKernel:
         # So we can ignore them here too
         return "".join(self.extract_type(ty) for ty in tys if ty != "constexpr")
 
-    def run(self, grid: tuple[int, ...], stream: int, args: tuple[Any, ...]):
+
+    def run(self, grid: tuple[int, ...], stream: int, *args):
         """Actually run the kernel at runtime. This function is the hot codepath."""
 
         # Assert load_kernel() has been called and args match
