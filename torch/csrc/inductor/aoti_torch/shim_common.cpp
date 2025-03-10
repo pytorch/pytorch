@@ -13,6 +13,7 @@
 #include <torch/csrc/inductor/aoti_torch/utils.h>
 #include <torch/csrc/inductor/inductor_ops.h>
 #include <torch/csrc/jit/serialization/pickle.h>
+#include <torch/version.h>
 #include <cstdint>
 #include <cstdio>
 #include <fstream>
@@ -230,6 +231,10 @@ AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(
     c10::complex<double>,
     ComplexDouble)
 #undef AOTI_TORCH_SCALAR_TO_TENSOR_IMPL
+
+uint64_t aoti_torch_abi_version() {
+  return TORCH_ABI_VERSION;
+}
 
 bool aoti_torch_grad_mode_is_enabled() {
   return c10::GradMode::is_enabled();
