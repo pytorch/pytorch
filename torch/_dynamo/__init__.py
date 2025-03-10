@@ -10,7 +10,7 @@ seamlessly optimize PyTorch programs, including those using modern Python featur
 
 import torch
 
-from . import convert_frame, eval_frame, resume_execution
+from . import convert_frame, eval_frame, resume_execution, config
 from .backends.registry import list_backends, lookup_backend, register_backend
 from .callback import callback_handler, on_compile_end, on_compile_start
 from .code_context import code_context
@@ -47,8 +47,6 @@ from .mutation_guard import GenerationTracker
 from .pgo import reset_code_state
 from .symbolic_convert import TensorifyState
 from .utils import graph_break_reasons, guard_failures, orig_code_map, reset_frame_count
-
-
 # Register polyfill functions
 from .polyfills import loader as _  # usort: skip # noqa: F401
 
@@ -79,6 +77,7 @@ __all__ = [
     "register_backend",
     "list_backends",
     "lookup_backend",
+    "config"
 ]
 
 # allowlist this for weights_only load of NJTs
