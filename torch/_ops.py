@@ -133,9 +133,9 @@ class OperatorBase:
                 return fn
 
             assert isinstance(k, DispatchKey)
-            assert (
-                k != DispatchKey.Python
-            ), "Please register a mode for the DispatchKey.Python key instead."
+            assert k != DispatchKey.Python, (
+                "Please register a mode for the DispatchKey.Python key instead."
+            )
 
             if k in self.py_kernels:
                 raise RuntimeError(
@@ -377,6 +377,18 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
                     == torch._C._disabled_torch_dispatch_impl
                 ):
                     continue
+
+                # In some case, people are using FakeTensor without a FakeTensorMode.
+                # For example, some sparse arch model has a mix of FakeTensor and real
+                # tensor for weights during lowering, and ppl tends to run eager evaluation
+                # on the model without setting up the FakeTensorMode.
+                # In this case, we pull FakeTensorMode impl.
+                if subclass_type is torch._subclasses.fake_tensor.FakeTensor:
+                    subclass_type = torch._subclasses.fake_tensor.FakeTensorMode  # type: ignore[assignment]
+                    handler = self.python_key_table[subclass_type]
+                    result = handler(arg.fake_mode, *args, **kwargs)  # type: ignore[attr-defined]
+                    return result
+
                 if subclass_type in self.python_key_table:
                     handler = self.python_key_table[subclass_type]
                     # "natural" calling convention: (*args, **kwargs)
@@ -410,12 +422,12 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
                 DispatchKey.Python
             ):
                 curr_mode = _get_current_dispatch_mode_pre_dispatch()
-                assert (
-                    curr_mode is not None
-                ), "Illegal invocation of dispatch on DispatchKey.PreDispatch without a mode."
-                assert (
-                    type(curr_mode) in self.python_key_table
-                ), f"Current active mode {curr_mode} not registered"
+                assert curr_mode is not None, (
+                    "Illegal invocation of dispatch on DispatchKey.PreDispatch without a mode."
+                )
+                assert type(curr_mode) in self.python_key_table, (
+                    f"Current active mode {curr_mode} not registered"
+                )
                 handler = self.python_key_table[type(curr_mode)]
                 with _pop_mode_temporarily(functionality_key) as mode:
                     return handler(mode, *args, **kwargs)
@@ -444,11 +456,6 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
 
     @abc.abstractmethod
     def __call__(self, /, *args, **kwargs):
-        # Dynamo already traces the body of HigherOrderOp beforehand when it
-        # so no need to trace into it.
-        from torch._dynamo import disable
-
-        @disable
         def wrapper():
             flat_args = _to_flat_tuple(args, kwargs)
             if torch.overrides.has_torch_function(flat_args):
@@ -821,13 +828,15 @@ class OpOverload(OperatorBase):
                 # TODO: We also need to handle tensor subclasses here
                 # TODO(voz): We should walk all the nodes here / turn it into a list, topmode is ok for now.
                 curr_mode = type(_get_current_dispatch_mode())
-                assert (
-                    curr_mode is not None
-                ), "Illegal invocation of dispatch on DispatchKey.Python without a mode."
+                assert curr_mode is not None, (
+                    "Illegal invocation of dispatch on DispatchKey.Python without a mode."
+                )
 
                 if curr_mode not in self.python_key_table:
                     if isinstance(self, TorchBindOpOverload):
-                        with torch.utils._python_dispatch._pop_mode_temporarily() as mode:
+                        with (
+                            torch.utils._python_dispatch._pop_mode_temporarily() as mode
+                        ):
                             return torch._library.utils.handle_dispatch_mode(
                                 mode, self, *args, **kwargs
                             )

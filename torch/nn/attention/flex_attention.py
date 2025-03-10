@@ -161,7 +161,7 @@ def _ordered_to_dense(num_blocks_in_row: Tensor, col_indices: Tensor):
         valid_indices = torch.where(index_mask, kv_indices, num_cols)
 
         # set the values in 'a' to 1 where the indices are valid
-        dense_mask[row_indices, valid_indices] = 1
+        dense_mask[row_indices, valid_indices] = dense_mask.new_ones(())
         return dense_mask[:, :num_cols].contiguous()
 
     create_dense_batched = create_dense_one

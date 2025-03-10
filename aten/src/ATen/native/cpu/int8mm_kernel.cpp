@@ -334,7 +334,7 @@ inline void tinygemm_kernel(
 #define LAUNCH_TINYGEMM_KERNEL(MB_SIZE, NB_SIZE)                 \
   tinygemm_kernel<MB_SIZE, NB_SIZE>(                             \
       A_ptr, B_ptr, S_ptr, C_ptr,                                \
-      K, K, N, K);
+      lda, K, N, K);
 
 #define LAUNCH_TINYGEMM_NB_SIZE(MB_SIZE)                         \
   switch (nb_size) {                                             \
@@ -370,7 +370,7 @@ void int8pack_mm_kernel_(
   int M = A.size(0);
   int N = B.size(0);
   int K = A.size(1);
-
+  int lda = A.stride(0);
   constexpr int BLOCK_M = 4;
   constexpr int BLOCK_N = 4;
 
@@ -389,7 +389,7 @@ void int8pack_mm_kernel_(
       int nb_start = nb * BLOCK_N;
       int nb_size = std::min(BLOCK_N, N - nb_start);
 
-      const auto* A_ptr = A_data + mb_start * K;
+      const auto* A_ptr = A_data + mb_start * lda;
       const auto* B_ptr = B_data + nb_start * K;
       const auto* S_ptr = S_data + nb_start;
       auto* C_ptr = C_data + mb_start * N + nb_start;

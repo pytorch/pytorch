@@ -17,6 +17,7 @@ import io
 import itertools
 import os
 import tempfile
+import typing_extensions
 import warnings
 from collections.abc import Collection, Mapping, Sequence
 from typing import Any, Callable, Union
@@ -43,7 +44,12 @@ _OutputsType = Union[Sequence[_NumericType], Sequence]
 
 
 class OnnxBackend(enum.Enum):
-    """Enum class for ONNX backend used for export verification."""
+    """Enum class for ONNX backend used for export verification.
+
+    .. deprecated:: 2.7
+        Consider using ``torch.onnx.export(..., dynamo=True)`` and use the returned
+        ``ONNXProgram`` to test the ONNX model.
+    """
 
     REFERENCE = "ONNXReferenceEvaluator"
     ONNX_RUNTIME_CPU = "CPUExecutionProvider"
@@ -53,6 +59,10 @@ class OnnxBackend(enum.Enum):
 @dataclasses.dataclass
 class VerificationOptions:
     """Options for ONNX export verification.
+
+    .. deprecated:: 2.7
+        Consider using ``torch.onnx.export(..., dynamo=True)`` and use the returned
+        ``ONNXProgram`` to test the ONNX model.
 
     Attributes:
         flatten: If True, unpack nested list/tuple/dict inputs into a flattened list of
@@ -219,9 +229,9 @@ def _compare_onnx_pytorch_outputs_in_np(
     pt_outs: _OutputsType,
     options: VerificationOptions,
 ):
-    assert (
-        len(onnx_outs) == len(pt_outs)
-    ), f"Number of outputs differ ONNX runtime: ({len(onnx_outs)}) PyTorch: ({len(pt_outs)})"
+    assert len(onnx_outs) == len(pt_outs), (
+        f"Number of outputs differ ONNX runtime: ({len(onnx_outs)}) PyTorch: ({len(pt_outs)})"
+    )
     acceptable_error_percentage = options.acceptable_error_percentage
     if acceptable_error_percentage and (
         acceptable_error_percentage > 1.0 or acceptable_error_percentage < 0.0
@@ -771,6 +781,11 @@ def check_export_model_diff(
     )
 
 
+@typing_extensions.deprecated(
+    "torch.onnx.verification.* is deprecated. Consider using torch.onnx.export(..., dynamo=True) "
+    "and use ONNXProgram to test the ONNX model",
+    category=None,
+)
 def verify(
     model: _ModelType,
     input_args: _InputArgsType,
@@ -790,6 +805,10 @@ def verify(
     options: VerificationOptions | None = None,
 ):
     """Verify model export to ONNX against original PyTorch model.
+
+    .. deprecated:: 2.7
+        Consider using ``torch.onnx.export(..., dynamo=True)`` and use the returned
+        ``ONNXProgram`` to test the ONNX model.
 
     Args:
         model (torch.nn.Module or torch.jit.ScriptModule): See :func:`torch.onnx.export`.
@@ -858,6 +877,10 @@ def verify(
         )
 
 
+@typing_extensions.deprecated(
+    "torch.onnx.verification.* is deprecated. Consider using torch.onnx.export(..., dynamo=True) "
+    "and use ONNXProgram to test the ONNX model"
+)
 def verify_aten_graph(
     graph: torch.Graph,
     input_args: tuple[Any, ...],
@@ -865,6 +888,12 @@ def verify_aten_graph(
     params_dict: dict[str, Any] | None = None,
     verification_options: VerificationOptions | None = None,
 ) -> tuple[AssertionError | None, torch.Graph, _OutputsType, _OutputsType]:
+    """Verify aten graph export to ONNX against original PyTorch model.
+
+    .. deprecated:: 2.7
+        Consider using ``torch.onnx.export(..., dynamo=True)`` and use the returned
+        ``ONNXProgram`` to test the ONNX model.
+    """
     if verification_options is None:
         verification_options = VerificationOptions()
     if params_dict is None:
@@ -1148,9 +1177,18 @@ class OnnxTestCaseRepro:
         _compare_onnx_pytorch_outputs_in_np(run_outputs, expected_outs, options)
 
 
+@typing_extensions.deprecated(
+    "torch.onnx.verification.* is deprecated. Consider using torch.onnx.export(..., dynamo=True) "
+    "and use ONNXProgram to test the ONNX model"
+)
 @dataclasses.dataclass
 class GraphInfo:
-    """GraphInfo contains validation information of a TorchScript graph and its converted ONNX graph."""
+    """GraphInfo contains validation information of a TorchScript graph and its converted ONNX graph.
+
+    .. deprecated:: 2.7
+        Consider using ``torch.onnx.export(..., dynamo=True)`` and use the returned
+        ``ONNXProgram`` to test the ONNX model.
+    """
 
     graph: torch.Graph
     input_args: tuple[Any, ...]
@@ -1523,9 +1561,9 @@ class GraphInfo:
         pt_outs = self.pt_outs
         graph_outputs = list(self.graph.outputs())
         assert pt_outs is not None
-        assert len(graph_outputs) == len(
-            pt_outs
-        ), f"{len(graph_outputs)} vs {len(pt_outs)}\nGraph: {self.graph}"
+        assert len(graph_outputs) == len(pt_outs), (
+            f"{len(graph_outputs)} vs {len(pt_outs)}\nGraph: {self.graph}"
+        )
         return {v.debugName(): o for v, o in zip(graph_outputs, pt_outs)}
 
     def _args_and_params_for_partition_graph(
@@ -1539,9 +1577,9 @@ class GraphInfo:
         args = tuple(bridge_kwargs[k] for k in input_names if k in bridge_kwargs)
         args += tuple(full_kwargs[k] for k in input_names if k in full_kwargs)
         params = {k: full_params[k] for k in input_names if k in full_params}
-        assert len(args) + len(params) == len(
-            input_names
-        ), f"{len(args)} + {len(params)} vs {len(input_names)}: {input_names}"
+        assert len(args) + len(params) == len(input_names), (
+            f"{len(args)} + {len(params)} vs {len(input_names)}: {input_names}"
+        )
         return args, params
 
     def verify_export(
@@ -1675,6 +1713,10 @@ def _produced_by(value: torch.Value, nodes: Collection[torch.Node]) -> bool:
     return value.node() in nodes
 
 
+@typing_extensions.deprecated(
+    "torch.onnx.verification.* is deprecated. Consider using torch.onnx.export(..., dynamo=True) "
+    "and use ONNXProgram to test the ONNX model"
+)
 def find_mismatch(
     model: torch.nn.Module | torch.jit.ScriptModule,
     input_args: tuple[Any, ...],
@@ -1686,6 +1728,10 @@ def find_mismatch(
     options: VerificationOptions | None = None,
 ) -> GraphInfo:
     r"""Find all mismatches between the original model and the exported model.
+
+    .. deprecated:: 2.7
+        Consider using ``torch.onnx.export(..., dynamo=True)`` and use the returned
+        ``ONNXProgram`` to test the ONNX model.
 
     Experimental. The API is subject to change.
 

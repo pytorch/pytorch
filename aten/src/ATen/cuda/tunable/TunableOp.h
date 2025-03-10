@@ -10,6 +10,7 @@
 #pragma once
 
 #include <ATen/cuda/tunable/Tunable.h>
+#include <ATen/cuda/tunable/StreamTimer.h>
 #include <ATen/cuda/Sleep.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 
@@ -20,6 +21,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <deque>
 
 namespace at::cuda::tunable {
 
@@ -35,7 +37,76 @@ class Callable {
     }
 };
 
-template <typename ParamsT, typename TimerT>
+namespace {
+
+/** http://en.wikipedia.org/wiki/Algorithms_for_calculating_variance */
+
+class Stats {
+  public:
+    Stats() {
+      _n = 0UL;
+      _mean = 0.0;
+      _M2 = 0.0;
+      _sum = 0.0;
+      _min = 0.0;
+      _max = 0.0;
+    }
+
+    void sample_value(const double x) {
+      double delta = 0;
+      _sum = _sum + x;
+      if (0UL == _n) {
+          _min = x;
+          _max = x;
+      }
+      else {
+          _min = _min < x ? _min : x;
+          _max = _max > x ? _max : x;
+      }
+      _n = _n + 1UL;
+      delta = x - _mean;
+      _mean = _mean + delta/_n;
+      _M2 = _M2 + delta * (x - _mean);
+    }
+
+    double variance() const {
+      return _M2/(_n-1);
+    }
+
+    double stddev() const {
+      return std::sqrt(variance());
+    }
+
+    unsigned long _n;
+    double _mean;
+    double _M2;
+    double _sum;
+    double _min;
+    double _max;
+};
+
+class FixedSizeStack {
+  private:
+      std::deque<std::string> stack;
+      const size_t max_size;
+
+  public:
+      FixedSizeStack(size_t size) : max_size(size) {}
+
+      void push(const std::string& value) {
+          if (stack.size() >= max_size) {
+              stack.pop_front(); // Remove the oldest entry
+          }
+          stack.push_back(value); // Add new entry
+      }
+
+      auto rbegin() { return stack.rbegin(); }
+      auto rend() { return stack.rend(); }
+};
+
+} // anonymous namespace
+
+template <typename ParamsT>
 class TunableOp {
   public:
     virtual ~TunableOp() = default;
@@ -47,6 +118,7 @@ class TunableOp {
         auto& mgr = ctx->GetTuningResultsManager();
         auto op_sig = Signature();
         auto params_sig = params->Signature();
+        auto blas_sig = params->BLASSignature();
         result = mgr.Lookup(op_sig, params_sig);
         // If there is not previous tuning result been found, we do the tuning iff tuning is enabled
         if (result == ResultEntry::Null()) {
@@ -56,7 +128,7 @@ class TunableOp {
           }
           else if (ctx->IsRecordUntunedEnabled()) {
             // or record the gemm into file
-            mgr.RecordUntuned(ctx->GetUntunedFile(), op_sig, params_sig);
+            mgr.RecordUntuned(ctx->GetUntunedFile(), op_sig, params_sig, blas_sig);
           }
         }
       }
@@ -100,10 +172,17 @@ class TunableOp {
       }
     }
 
-    static double Profile(Callable<ParamsT> *op, const std::vector<ParamsT*> &param, size_t num_iter, size_t &offset) {
+    static double ProfileSimple(Callable<ParamsT> *op, const std::vector<ParamsT*> &param, size_t num_iter, size_t &offset) {
       TuningContext* ctx = getTuningContext();
       bool do_flush = ctx->IsICacheFlushEnabled();
-      TimerT timer{};
+      StreamTimerNoSync timer{};
+
+      // Small Mandatory Warmup
+      // Reduces outliers
+      for (size_t i = 0; i < 2; i++) {
+        TORCH_CHECK(op->Call(param[(i+offset++)%param.size()]) == OK);
+      }
+
       timer.Start();
       for (size_t i = 0; i < num_iter; i++) {
         if (do_flush) {
@@ -115,15 +194,43 @@ class TunableOp {
       return timer.Duration() / num_iter;
     }
 
+    static Stats ProfileStats(Callable<ParamsT> *op, const std::vector<ParamsT*> &param, size_t num_iter, size_t &offset) {
+      TuningContext* ctx = getTuningContext();
+      bool do_flush = ctx->IsICacheFlushEnabled();
+      std::vector<StreamTimerNoSync> timer(num_iter);
+
+      // Small Mandatory Warmup
+      // Reduces outliers
+      for (size_t i = 0; i < 2; i++) {
+        TORCH_CHECK(op->Call(param[(i+offset++)%param.size()]) == OK);
+      }
+
+      for (size_t i = 0; i < num_iter; i++) {
+        timer[i].Start();
+        TORCH_CHECK(op->Call(param[(i+offset++)%param.size()]) == OK);
+        timer[i].End();
+        if (do_flush) {
+          at::cuda::flush_icache();
+        }
+      }
+      Stats s;
+      for (size_t i = 0; i < num_iter; i++) {
+        s.sample_value(timer[i].Duration());
+      }
+      return s;
+    }
+
   protected:
     virtual ResultEntry FindFastest(const ParamsT* params) {
       TuningContext* ctx = getTuningContext();
       auto op_sig = Signature();
       auto params_sig = params->Signature();
+      auto blas_sig = params->BLASSignature();
       TUNABLE_LOG2("finding fastest for ", op_sig, '(', params_sig, ')', " out of ", op_names_.size(), " candidates");
       auto min_duration_ms = std::numeric_limits<double>::infinity();
       std::string id_name = "Default";
       ParamsT* reference_params = nullptr;
+      auto top_solns = FixedSizeStack(5);
 
       // numeric check option is controlled by non-static env var, so check it once per tuned operator
       bool do_numerics_check = ctx->IsNumericsCheckEnabled();
@@ -184,29 +291,43 @@ class TunableOp {
         }
 
         // collect a small profile
-        constexpr const int approx_num_iter = 3;
-        auto approx_duration = Profile(candidate, reusable_params, approx_num_iter, offset);
+        int approx_num_iter = 3;
+        auto s = ProfileStats(candidate, reusable_params, approx_num_iter, offset);
+        double approx_duration = s._mean;
         // bail if too slow
-        if (approx_duration > 2 * min_duration_ms) {
+        if (approx_duration > 1.5 * min_duration_ms) {
           TUNABLE_LOG3("├──skip slow instance id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
           continue;
         }
 
+        // 2nd phase skip, more aggressive
+        approx_num_iter = 10;
+        s = ProfileStats(candidate, reusable_params, approx_num_iter, offset);
+        approx_duration = s._mean;
+        // bail if too slow
+        if (approx_duration > 1.15 * min_duration_ms) {
+          TUNABLE_LOG3("├──2nd skip slow instance id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
+          continue;
+        }
+
         // for warmup does user set max duration, max iters, or both?
-        // warmup is allowed to be skipped by setting either iterations or duration to 0
+        // warmup is skipped by default, i.e. warmup_iter = 0
+        // warmup will be set to the non-zero value of max_warmup_duration
+        // or max_warmup_iter
+        // if both are non-zero, we take the smaller of the two.
         double max_warmup_duration = ctx->GetMaxWarmupDurationMs();
         int max_warmup_iter = ctx->GetMaxWarmupIterations();
-        int warmup_iter = 1; // default
-        if (max_warmup_duration >= 0) {
+        int warmup_iter = 0; // default
+        if (max_warmup_duration > 0) {
           int duration_iters = max_warmup_duration / approx_duration;
-          if (max_warmup_iter >= 0) {
+          if (max_warmup_iter > 0) {
             warmup_iter = std::min(max_warmup_iter, duration_iters);
           }
           else {
             warmup_iter = duration_iters;
           }
         }
-        else if (max_warmup_iter >= 0) {
+        else if (max_warmup_iter > 0) {
           warmup_iter = max_warmup_iter;
         }
 
@@ -238,11 +359,28 @@ class TunableOp {
             "instance id=", i, ", ", op_sig, "(", params_sig, ") ", op_names_[i]);
         TUNABLE_LOG3("├──offset at ", offset);
         WarmUp(candidate, reusable_params, warmup_iter, offset);
-        auto duration_ms = Profile(candidate, reusable_params, tuning_iter, offset);
-        if (duration_ms < min_duration_ms) {
-          TUNABLE_LOG3("├──found better instance id=", i, ". " , duration_ms, "ms. ", op_names_[i]);
-          min_duration_ms = duration_ms;
+        s = ProfileStats(candidate, reusable_params, tuning_iter, offset);
+        auto s_stddev = s.stddev();
+        // Assume normal distribution.
+        // Solution with smallest mean + 2*sigma will be a better solution?
+        // if ((s._mean + 2*s_stddev) < (min_duration_ms + 2*min_stddev_ms)) {
+        if (s._mean < min_duration_ms) {
+          TUNABLE_LOG3("├──found better instance id=", i, ". " , s._mean, "ms. ", op_names_[i],
+                " min ", s._min,
+                " max ", s._max,
+                " mean ", s._mean,
+                " std ", s_stddev);
+          min_duration_ms = s._mean;
           id_name = op_names_[i];
+          std::string current_soln = std::to_string(s._mean) + " " + op_names_[i];
+          top_solns.push(current_soln);
+        }
+        else {
+          TUNABLE_LOG3("├──found slower instance id=", i, ". " , s._mean, "ms. ", op_names_[i],
+                " min ", s._min,
+                " max ", s._max,
+                " mean ", s._mean,
+                " std ", s_stddev);
         }
       }
 
@@ -254,6 +392,10 @@ class TunableOp {
       }
 
       TUNABLE_LOG2("└──found fastest for ", op_sig, '(', params_sig, ") ", id_name);
+      TUNABLE_LOG2("└──top five solutions for ", op_sig, '(', params_sig, ") ");
+      for (auto it = top_solns.rbegin(); it != top_solns.rend(); ++it) {
+        TUNABLE_LOG2("   ", *it);
+      }
       return ResultEntry(id_name, min_duration_ms);
     }
 
@@ -282,6 +424,7 @@ class TunableOp {
 struct OpParams {
   virtual ~OpParams() = default;
   virtual std::string Signature() const = 0;
+  virtual std::string BLASSignature() const = 0;
 };
 
 } // namespace at::cuda::tunable

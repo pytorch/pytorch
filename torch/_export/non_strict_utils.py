@@ -94,7 +94,13 @@ def fakify(
         return t
 
     if not isinstance(t, torch.Tensor):
-        raise ValueError(f"Unsupported input type {type(t)}")
+        raise ValueError(
+            f"Unsupported input type {type(t)}. "
+            "Export only supports pytree containers of basic types (Tensor, int, float, ...) as input. "
+            "To register a custom dataclass, use torch.export.register_dataclass. "
+            "To register a custom container type, use torch.utils._pytree.register_pytree_node. "
+            "To register a constant input, use torch.utils._pytree.register_constant"
+        )
     n_dims = len(t.shape)
     dynamic_sizes = []
     constraint_sizes = [None] * n_dims
@@ -567,7 +573,7 @@ def _fakify_script_objects(
 
     try:
         for obj, fqns in constant_attrs.items():
-            if isinstance(obj, torch.ScriptObject):
+            if torch._library.fake_class_registry._is_script_object(obj):
                 fake_script_obj = _maybe_fakify_obj(obj)
                 for fqn in fqns:
                     cur_mod, attr = _leaf_mod_and_attr(mod, fqn)
@@ -608,8 +614,9 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
     2. Overrides torch functions that are known to cause problems in non-strict.
 
     Certain Python features, such as indexing/slicing, cannot be intercepted
-    in non-strict. When these features need special handling in the compiler,
-    tracing can fail in non-strict (yet surprisingly succeed in strict).
+    in non-strict. Likewise, certain legacy ops, such as distributed collectives,
+    may need to be mapped to other ops. When there is special handling in Dynamo
+    for such things, tracing can fail in non-strict (while succeeding in strict).
     Fortunately, redirecting to other torch functions can often fix such issues.
 
     3. Handles line-of-code logging for each torch function call in non-strict.
@@ -618,6 +625,28 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
     """
 
     def _override(self, func, args, kwargs):
+        if torch.distributed.is_available():
+            from torch.distributed._functional_collectives import (
+                REDUCE_OP_TO_STR,
+                traceable_collective_remaps,
+            )
+
+            if func in traceable_collective_remaps:
+                # Redirect to a corresponding functional collective, following Dynamo.
+                # See torch/distributed/_functional_collectives.py for details.
+                # The following is an adaptation of CollectiveFunctionRewriteVariable.
+                mapped_func = traceable_collective_remaps[func]
+                signature = inspect.signature(func)
+                kwargs = dict(signature.bind(*args, **kwargs).arguments)
+                args = ()
+                if func in (
+                    torch.distributed.all_reduce,
+                    torch.distributed.reduce_scatter_tensor,
+                    torch.distributed._reduce_scatter_base,
+                ):
+                    if "op" in kwargs:
+                        kwargs["op"] = REDUCE_OP_TO_STR[kwargs["op"]]
+                return mapped_func, args, kwargs
         if func is torch.tensor:
             # Redirect to Python implementation of torch.tensor for data with symints.
             # NOTE(avik): We don't unconditionally redirect to this implementation
