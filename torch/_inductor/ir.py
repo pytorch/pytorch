@@ -21,8 +21,6 @@ from typing import (
     Literal,
     Optional,
     overload,
-    Protocol,
-    runtime_checkable,
     TYPE_CHECKING,
     TypeVar,
     Union,
@@ -5239,7 +5237,7 @@ class ExternKernel(InputsKernel):
                 example_args.append(ir_node_to_tensor(x, guard_shape=True))
 
         new_args, new_kwargs = unflatten_args(example_args, non_tensor_args)
-        example_output = kernel(*new_args, **new_kwargs)  # Hype: ignore[operator]
+        example_output = kernel(*new_args, **new_kwargs)
 
         unbacked_bindings: Optional[dict[sympy.Symbol, pytree.KeyPath]] = None
         if shape_env := V.fake_mode.shape_env:
@@ -6002,13 +6000,6 @@ class TMADescriptor(ExternKernel):
         wrapper.generate_tma_descriptor(self)
 
 
-@runtime_checkable
-class _ArgKernel(Protocol):
-    # TODO(rec): replace this with the actual class that has these members
-    constexprs: Sequence[Any]
-    arg_names: Sequence[Any]
-
-
 class UserDefinedTritonKernel(ExternKernel):
     def get_kernel_and_metadata(self) -> tuple[Kernel, Any, list[str], list[str]]:
         from triton.runtime.autotuner import Autotuner
@@ -6063,11 +6054,10 @@ class UserDefinedTritonKernel(ExternKernel):
         # But, kernel.constexprs includes indices of autotuned args.
         # So, let's recalculate constexpr indices wrt to raw_args.
         constexpr_indices: list[int] = []
-        assert isinstance(Kernel, _ArgKernel)
+
+        assert hasattr(kernel, "arg_names") and hasattr(kernel, "constexprs")
         for idx, kwarg in enumerate(self.ordered_kwargs_for_cpp_kernel):
-            if (
-                kernel.arg_names.index(kwarg) in kernel.constexprs
-            ):  # Hype: ignore[attr-defined]
+            if kernel.arg_names.index(kwarg) in kernel.constexprs:
                 constexpr_indices.append(idx)
 
         # Create a copy of triton_meta to avoid modifying the original version.
@@ -6114,10 +6104,11 @@ class UserDefinedTritonKernel(ExternKernel):
                     if idx in removed_none_args:
                         index_shift += 1
                         continue
-                    arg_index = kernel.arg_names.index(
-                        kwarg
-                    )  # Hype: ignore[attr-defined]
-                    if arg_index in kernel.constexprs:  # Hype: ignore[attr-defined]
+                    assert hasattr(kernel, "arg_names") and hasattr(
+                        kernel, "constexprs"
+                    )
+                    arg_index = kernel.arg_names.index(kwarg)
+                    if arg_index in kernel.constexprs:
                         constexpr_indices.append(idx - index_shift)
                     if arg_index in eq1_indices_set:
                         equal_to_1.append(idx - index_shift)
@@ -6183,11 +6174,9 @@ class UserDefinedTritonKernel(ExternKernel):
         kernel, configs, _, _ = self.get_kernel_and_metadata()
 
         # If we are autotuning, not all arguments will be passed
-        assert isinstance(Kernel, _ArgKernel)
+        assert hasattr(kernel, "arg_names")
         self.ordered_kwargs_for_cpp_kernel = [
-            arg
-            for arg in kernel.arg_names
-            if arg in kernel_args  # Hype: ignore[attr-defined]
+            arg for arg in kernel.arg_names if arg in kernel_args
         ]
 
         from torch._higher_order_ops.triton_kernel_wrap import identify_mutated_tensors
@@ -6258,7 +6247,7 @@ class InplaceBernoulliFallback(ExternKernel):
 
 
 def _str_to_bool(s: str) -> bool:
-    assert s in ("False", "True")
+    assert s in ("False", "True"), s
     return s == "True"
 
 
@@ -6801,8 +6790,8 @@ class FallbackKernel(ExternKernelAlloc):
 
         if tensor_args:
             for arg in tensor_args:
-                if d := arg.get_device():
-                    assert isinstance(d, torch.device)  # TODO(rec): Why is this needed?
+                if d := arg.get_device():  # TODO(rec): mypy thinks d is an int!
+                    assert isinstance(d, torch.device)
                     return d
         if isinstance(example_output, torch.Tensor):
             return example_output.device
@@ -7470,18 +7459,14 @@ class InvokeSubgraph(ExternKernel):
 
         assert isinstance(fx_operands, Sequence)
         assert all(isinstance(n, Node) for n in fx_operands)
-        fake_operands = [
-            cast(Node, x).meta["val"] for x in fx_operands
-        ]  # Hype: ignore[union-attr]
+        fake_operands = [cast(Node, x).meta["val"] for x in fx_operands]
 
         # Realize the inputs. Also intermediates can have different strides than
         # the inputs of the subgraph. So, force the intermediates to have same
         # strides as that of subgraph inputs.
         operands: list[IRNode] = [cls.realize_input(x) for x in operands]
 
-        def handle_sym_expr(
-            stride: Sequence[Expr],
-        ) -> list[Expr]:  # Hype: ignore[no-untyped-def]
+        def handle_sym_expr(stride: Sequence[Expr]) -> list[Expr]:
             return [s.node.expr if isinstance(s, torch.SymInt) else s for s in stride]
 
         new_operands: list[IRNode] = []
@@ -7531,7 +7516,7 @@ class InvokeSubgraph(ExternKernel):
                 FixedLayout(
                     device=device,
                     dtype=output.get_dtype(),
-                    size=output.get_size(),  # Hype: ignore[arg-type]
+                    size=output.get_size(),
                     stride=output.get_stride(),
                     offset=output.get_layout().offset,
                 ),
@@ -7543,9 +7528,7 @@ class InvokeSubgraph(ExternKernel):
         invoke_subgraph.outputs = outs
         return outs
 
-    def codegen(
-        self, wrapper: PythonWrapperCodegen
-    ) -> None:  # Hype: ignore[no-untyped-def]
+    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         wrapper.codegen_invoke_subgraph(self)
 
 
@@ -7586,7 +7569,7 @@ class Conditional(ExternKernel):
         V.graph.register_operation(self)
 
     @classmethod
-    def create(  # Hype: ignore[no-untyped-def]
+    def create(
         cls,
         predicate: TensorBox,
         true_fn: Subgraph,
@@ -7599,9 +7582,7 @@ class Conditional(ExternKernel):
 
         assert isinstance(fx_operands, Sequence)
         assert all(isinstance(n, Node) for n in fx_operands)
-        fake_operands = [
-            cast(Node, x).meta["val"] for x in fx_operands
-        ]  # Hype: ignore[union-attr]
+        fake_operands = [cast(Node, x).meta["val"] for x in fx_operands]
 
         for subgraph in (true_fn, false_fn):
             if subgraph.graph is None:
@@ -7616,8 +7597,8 @@ class Conditional(ExternKernel):
 
         assert true_fn.graph is not None
         assert false_fn.graph is not None
-        true_outputs = true_fn.graph.graph_outputs  # Hype: ignore[union-attr]
-        false_outputs = false_fn.graph.graph_outputs  # Hype: ignore[union-attr]
+        true_outputs = true_fn.graph.graph_outputs
+        false_outputs = false_fn.graph.graph_outputs
 
         for name, outputs in (("true_fn", true_outputs), ("false_fn", false_outputs)):
             if _has_aliased_buffers(true_outputs):
@@ -7679,9 +7660,7 @@ class Conditional(ExternKernel):
         conditional.outputs = outputs  # type: ignore[assignment]
         return outputs
 
-    def codegen(
-        self, wrapper: PythonWrapperCodegen
-    ) -> None:  # Hype: ignore[no-untyped-def]
+    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         wrapper.codegen_conditional(self)
         wrapper.codegen_unbacked_symbol_defs_for_outputs(
             self.get_name(), self.outputs, getattr(self, "unbacked_bindings", {})
@@ -7747,7 +7726,7 @@ class WhileLoop(ExternKernel):
         V.graph.register_operation(self)
 
     @classmethod
-    def create(  # Hype: ignore[no-untyped-def]
+    def create(
         cls,
         cond_fn: Subgraph,
         body_fn: Subgraph,
@@ -7763,25 +7742,23 @@ class WhileLoop(ExternKernel):
         fx_all_inputs: list[Node] = [
             *V.graph.current_node.args[-2],
             *V.graph.current_node.args[-1],
-        ]  # Hype: ignore[operator]
-        fake_all_inputs = [
-            x.meta["val"] for x in fx_all_inputs
-        ]  # Hype: ignore[union-attr]
+        ]
+        fake_all_inputs = [x.meta["val"] for x in fx_all_inputs]
 
         for subgraph in (cond_fn, body_fn):
             if subgraph.graph is None:
                 # create and lower subgraphs
                 subgraph.graph = V.graph.make_subgraph(
                     gm=subgraph.graph_module,
-                    example_inputs=fx_all_inputs,  # Hype: ignore[arg-type]
+                    example_inputs=fx_all_inputs,
                     subgraph_name=subgraph.name,
                 )
                 with V.set_graph_handler(subgraph.graph):
                     subgraph.graph.run(*fake_all_inputs)
 
         assert cond_fn.graph and body_fn.graph
-        cond_outputs = cond_fn.graph.graph_outputs  # Hype: ignore[union-attr]
-        body_outputs = body_fn.graph.graph_outputs  # Hype: ignore[union-attr]
+        cond_outputs = cond_fn.graph.graph_outputs
+        body_outputs = body_fn.graph.graph_outputs
 
         if _has_aliased_buffers(body_outputs):
             raise AssertionError(
@@ -7861,14 +7838,12 @@ class WhileLoop(ExternKernel):
         while_loop.outputs = outputs
         return outputs
 
-    def codegen(
-        self, wrapper: PythonWrapperCodegen
-    ) -> None:  # Hype: ignore[no-untyped-def]
+    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         wrapper.codegen_while_loop(self)
 
 
 class EffectfulKernel(FallbackKernel):
-    def __init__(  # Hype: ignore[no-untyped-def]
+    def __init__(
         self,
         layout: OutputSpec,
         kernel: _OpOverloads,
@@ -7958,7 +7933,7 @@ class GeneratorState(NonTensorObj):
     name: str
     device: torch.device
 
-    def get_name(self) -> str:  # Hype: ignore[no-untyped-def]
+    def get_name(self) -> str:
         return self.name
 
     def codegen_reference(self, writer: Optional[IndentedBuffer] = None) -> str:
@@ -7992,7 +7967,7 @@ class _CollectiveKernel(FallbackKernel):
     # the constraints, we model collective -> wait_tensor as as two-step
     # mutation of the input buffers.
     @classmethod
-    def create_inplace(  # Hype: ignore[no-untyped-def]
+    def create_inplace(
         cls,
         kernel: _OpOverloads,
         inputs: Union[IRNode, list[IRNode]],
@@ -8057,7 +8032,7 @@ class _CollectiveKernel(FallbackKernel):
     # TODO(yifu): add a pre-grad pass to validate the correctness of collective
     # usage in the user program.
     @classmethod
-    def create_out_of_place(  # Hype: ignore[no-untyped-def]
+    def create_out_of_place(
         cls,
         kernel: _OpOverloads,
         inputs: Union[TensorBox, list[TensorBox]],
@@ -8108,7 +8083,7 @@ class _CollectiveKernel(FallbackKernel):
 
 
 class _WaitKernel(_CollectiveKernel):
-    def get_volatile_reads(self) -> Sequence[IRNode]:  # Hype: ignore[no-untyped-def]
+    def get_volatile_reads(self) -> Sequence[IRNode]:
         inp = self.inputs_as_nodes[0]
         if isinstance(inp, _CollectiveKernel):
             # Out-of-place single-output
