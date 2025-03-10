@@ -125,3 +125,19 @@ STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CUDA, m) {
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CPU, m) {
   m.impl("identity", &boxed_identity);
 }
+
+RAIIATH my_empty_like(RAIIATH t) {
+  auto num_args = 6;
+  auto num_rets = 1;
+  StableIValue stack[6];
+  stack[0] = from(t.release());
+  // stack[1] = 0; // Dtype
+  // stack[2] = nullptr; // Layout
+  // stack[3] = from(nullptr); // device
+  // stack[4] = from(false); // pin_memory
+  // stack[5] = from(nullptr); // memory_format
+
+  // aoti_torch_call_dispatcher("at::empty_like", "", stack);
+
+  return RAIIATH(to<AtenTensorHandle>(stack[0]));
+}

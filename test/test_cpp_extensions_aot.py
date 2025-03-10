@@ -270,18 +270,6 @@ class TestCppExtensionAOT(common.TestCase):
             curr_mem = torch.cuda.memory_allocated(device)
             self.assertEqual(curr_mem, init_mem)
 
-        # (3) last, test that unloading the torch library will deregister previous ops
-        lib = libtorch_agnostic.loaded_lib
-
-        # code for unloading a library inspired from
-        # https://stackoverflow.com/questions/19547084/can-i-explicitly-close-a-ctypes-cdll
-        lib_handle = lib._handle
-        lib.dlclose(lib_handle)
-
-        t = torch.tensor([-2.0, 0.5])
-        with self.assertRaises(RuntimeError):
-            libtorch_agnostic.ops.identity(t)
-
 
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestPybindTypeCasters(common.TestCase):

@@ -237,6 +237,13 @@ AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(
     ComplexDouble)
 #undef AOTI_TORCH_SCALAR_TO_TENSOR_IMPL
 
+#ifndef C10_MOBILE
+#include <torch/version.h>
+uint64_t aoti_torch_abi_version() {
+  return TORCH_ABI_VERSION;
+}
+#endif // C10_MOBILE
+
 bool aoti_torch_grad_mode_is_enabled() {
   return c10::GradMode::is_enabled();
 }
@@ -1439,6 +1446,53 @@ aoti_torch_delete_library_object(TorchLibraryHandle tlh) {
       { delete reinterpret_cast<torch::Library*>(tlh); });
 }
 
+c10::IValue to_ivalue(c10::TypePtr arg_type, StableIValue stable_ivalue) {
+  switch (arg_type->kind()) {
+    case c10::TypeKind::TensorType: {
+      // stable_ivalue must be an ATH
+      auto ret_raiiath = torch::aot_inductor::RAIIAtenTensorHandle(
+          to<AtenTensorHandle>(stable_ivalue));
+      at::Tensor arg = *torch::aot_inductor::tensor_handle_to_tensor_pointer(
+          ret_raiiath.get());
+      return (c10::IValue(arg));
+    }
+    case c10::TypeKind::IntType: {
+      return c10::IValue(to<int64_t>(stable_ivalue));
+    }
+    case c10::TypeKind::FloatType: {
+      return c10::IValue(to<double>(stable_ivalue));
+    }
+    case c10::TypeKind::BoolType: {
+      return c10::IValue(to<bool>(stable_ivalue));
+    }
+    case c10::TypeKind::ScalarTypeType: {
+      return c10::IValue(to<c10::ScalarType>(stable_ivalue));
+    }
+    case c10::TypeKind::LayoutType: {
+      return c10::IValue(to<c10::Layout>(stable_ivalue));
+    }
+    case c10::TypeKind::DeviceObjType: {
+      return c10::IValue(to<c10::Device>(stable_ivalue));
+    }
+    case c10::TypeKind::MemoryFormatType: {
+      return c10::IValue(to<c10::MemoryFormat>(stable_ivalue));
+    }
+    case c10::TypeKind::OptionalType: {
+      auto inner_type = arg_type->castRaw<at::OptionalType>()->getElementType();
+
+      // our contract is that IValue None = StableIValue nullptr
+      if (to<std::nullptr_t>(stable_ivalue) == nullptr) {
+        return c10::IValue();
+      }
+      // TODO: yes, I should deduplicate the next set of switch statements
+      return to_ivalue(inner_type, stable_ivalue);
+    }
+    default: {
+      TORCH_CHECK(false, "Not yet supported argument type: ", arg_type->str());
+    }
+  }
+}
+
 AOTITorchError aoti_torch_call_dispatcher(
     const char* opName,
     const char* overloadName,
@@ -1453,93 +1507,22 @@ AOTITorchError aoti_torch_call_dispatcher(
 
     torch::jit::Stack ivalue_stack;
     // we will only need max(num_args, num_returns)
-    ivalue_stack.reserve(num_arguments + num_returns);
+    ivalue_stack.reserve(std::max(num_arguments, num_returns));
 
     // convert StableIValue stack to c10::IValue stack
     for (const auto idx : c10::irange(num_arguments)) {
       auto stable_ivalue = stack[idx];
       auto arg_type = schema.arguments()[idx].type();
-      switch (arg_type->kind()) {
-        case c10::TypeKind::TensorType: {
-          // stable_ivalue must be an ATH
-          at::Tensor arg =
-              *torch::aot_inductor::tensor_handle_to_tensor_pointer(
-                  to<AtenTensorHandle>(stable_ivalue));
-          torch::jit::push(ivalue_stack, c10::IValue(arg));
-          break;
-        }
-        case c10::TypeKind::IntType: {
-          torch::jit::push(
-              ivalue_stack, c10::IValue(to<int64_t>(stable_ivalue)));
-          break;
-        }
-        case c10::TypeKind::FloatType: {
-          torch::jit::push(
-              ivalue_stack, c10::IValue(to<double>(stable_ivalue)));
-          break;
-        }
-        case c10::TypeKind::BoolType: {
-          torch::jit::push(ivalue_stack, c10::IValue(to<bool>(stable_ivalue)));
-          break;
-        }
-        case c10::TypeKind::OptionalType: {
-          auto inner_type =
-              arg_type->castRaw<at::OptionalType>()->getElementType();
-
-          // our contract is that IValue None = StableIValue nullptr
-          if (to<nullptr_t>(stable_ivalue) == nullptr) {
-            torch::jit::push(ivalue_stack, c10::IValue());
-          } else {
-            // TODO: yes, I should deduplicate the next set of switch statements
-            switch (inner_type->kind()) {
-              case c10::TypeKind::TensorType: {
-                // stable_ivalue must be an ATH
-                at::Tensor arg =
-                    *torch::aot_inductor::tensor_handle_to_tensor_pointer(
-                        to<AtenTensorHandle>(stable_ivalue));
-                torch::jit::push(ivalue_stack, c10::IValue(arg));
-                break;
-              }
-              case c10::TypeKind::IntType: {
-                torch::jit::push(
-                    ivalue_stack, c10::IValue(to<int64_t>(stable_ivalue)));
-                break;
-              }
-              case c10::TypeKind::FloatType: {
-                torch::jit::push(
-                    ivalue_stack, c10::IValue(to<double>(stable_ivalue)));
-                break;
-              }
-              case c10::TypeKind::BoolType: {
-                torch::jit::push(
-                    ivalue_stack, c10::IValue(to<bool>(stable_ivalue)));
-                break;
-              }
-              default: {
-                TORCH_CHECK(
-                    false,
-                    "Not yet supported optional ",
-                    inner_type->str(),
-                    " type");
-              }
-            }
-          }
-          break;
-        }
-        default: {
-          TORCH_CHECK(
-              false, "Not yet supported argument type: ", arg_type->str());
-        }
-      }
+      torch::jit::push(ivalue_stack, to_ivalue(arg_type, stable_ivalue));
     }
 
     op.callBoxed(ivalue_stack);
 
     // there should then be num_returns IValues on the stack, which
-    // we will convert to StableIValue and add to user input stack
+    // we will convert to StableIValue and repopulate user input stack
     for (const auto idx : c10::irange(num_returns)) {
       const c10::IValue& ret = torch::jit::pop(ivalue_stack);
-      const auto stack_idx = num_arguments + num_returns - idx - 1;
+      const auto stack_idx = num_returns - idx - 1;
       if (ret.isInt()) {
         stack[stack_idx] = from(ret.toInt());
       } else if (ret.isDouble()) {
