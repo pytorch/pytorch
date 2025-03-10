@@ -72,13 +72,6 @@ inline std::vector<int64_t> infer_size(IntArrayRef shape, int64_t numel) {
   infer_size_impl(shape, numel, res);
   return res;
 }
-}
-
-inline std::vector<int64_t> infer_size(IntArrayRef shape, int64_t numel) {
-  auto res = shape.vec();
-  infer_size_impl(shape, numel, res);
-  return res;
-}
 
 inline at::DimVector infer_size_dv(IntArrayRef shape, int64_t numel) {
   auto res = at::DimVector(shape);
