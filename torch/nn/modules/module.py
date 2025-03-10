@@ -1191,8 +1191,8 @@ class Module:
         return self._apply(lambda t: t.bfloat16() if t.is_floating_point() else t)
 
     def to_empty(
-        self: T, *, device: Optional[DeviceLikeType], recurse: bool = True
-    ) -> T:
+        self, *, device: Optional[DeviceLikeType], recurse: bool = True
+    ) -> Self:
         r"""Move the parameters and buffers to the specified device without copying storage.
 
         Args:
@@ -1204,8 +1204,10 @@ class Module:
         Returns:
             Module: self
         """
+        device = torch.empty((), device=device).device
         return self._apply(
-            lambda t: torch.empty_like(t, device=device), recurse=recurse
+            lambda t: torch.empty_like(t, device=device) if t.device != device else t,
+            recurse=recurse,
         )
 
     @overload
