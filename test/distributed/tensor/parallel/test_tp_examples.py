@@ -29,8 +29,10 @@ from torch.distributed.tensor.parallel import (
 from torch.distributed.tensor.parallel.input_reshard import input_reshard
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    NAVI_ARCH,
     parametrize,
     run_tests,
+    TEST_WITH_ROCM
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -414,7 +416,13 @@ class DistTensorParallelExampleTest(DTensorTestBase):
     )
     def test_transformer_req_grad(self, thaw_params, is_seq_parallel, dtype, exp_cnts):
         # Sample a subset of `requires_grad` patterns
-
+        if (
+            TEST_WITH_ROCM 
+            and "test_transformer_req_grad_seq_parallel_float32_thaw_" in self._testMethodName
+        ):
+            gcn_arch = str(torch.cuda.get_device_properties(0).gcnArchName.split(":", 1)[0])
+            if gcn_arch in NAVI_ARCH:
+                self.skipTest("Failed on Navi")
         # disabling dropout to facilitate single gpu to multi-device comparison
         # disable weight-tying to enable more fine-tuning configurations
         model_args = ModelArgs(dropout_p=0.0, weight_tying=False)

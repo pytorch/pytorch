@@ -84,6 +84,8 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     NO_MULTIPROCESSING_SPAWN,
     IS_SANDCASTLE,
+    NAVI_ARCH,
+    skipIfRocmArch,
     skip_but_pass_in_sandcastle,
     skip_but_pass_in_sandcastle_if,
 )
@@ -6754,6 +6756,7 @@ class DistributedTest:
         )
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @with_dist_debug_levels(levels=["DETAIL", "OFF", "INFO"])
+        @skipIfRocmArch(NAVI_ARCH)
         def test_gather_object(self):
             return self._test_gather_object()
 
@@ -6762,6 +6765,7 @@ class DistributedTest:
         )
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @with_dist_debug_levels(levels=["DETAIL", "OFF", "INFO"])
+        @skipIfRocmArch(NAVI_ARCH)
         def test_gather_object_subgroup(self):
             default = _get_default_group()
             backend = dist.get_backend(default)

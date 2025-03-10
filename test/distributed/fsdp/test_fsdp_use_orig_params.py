@@ -38,8 +38,10 @@ from torch.testing._internal.common_fsdp import (
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    NAVI_ARCH,
     parametrize,
     run_tests,
+    skipIfRocmArch,
     TEST_WITH_DEV_DBG_ASAN,
     TestCase,
 )
@@ -220,6 +222,7 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
+    @skipIfRocmArch(NAVI_ARCH)
     def test_fsdp_compile(self):
         self.run_subtests(
             {

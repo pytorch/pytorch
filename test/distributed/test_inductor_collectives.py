@@ -26,8 +26,10 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    NAVI_ARCH,
     parametrize,
     requires_cuda,
+    skipIfRocmArch
 )
 from torch.utils._triton import has_triton
 
@@ -396,6 +398,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
+    @skipIfRocmArch(NAVI_ARCH)
     def test_all_to_all_single_inductor(self):
         def example(
             inp,

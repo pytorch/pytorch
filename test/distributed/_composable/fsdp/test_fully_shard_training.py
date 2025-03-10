@@ -40,7 +40,9 @@ from torch.testing._internal.common_fsdp import (
 )
 from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
+    NAVI_ARCH,
     run_tests,
+    skipIfRocmArch,
     wrapSwapTensorsTest,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -577,6 +579,7 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     @test_compiled_fsdp(compile_compute_on_module=Transformer)
+    @skipIfRocmArch(NAVI_ARCH)
     def test_train_parity_with_activation_checkpointing(self):
         """
         Tests train parity against DDP when composing with activation

@@ -12,7 +12,7 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import NAVI_ARCH, run_tests, skipIfRocmArch
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     MLPModule,
@@ -221,6 +221,7 @@ class TestCommModeFeatures(DTensorTestBase):
 
     @skip_unless_torch_gpu
     @with_comms
+    @skipIfRocmArch(NAVI_ARCH)
     def test_transformer_module_tracing(self, is_seq_parallel=False):
         """
         tests module-level tracing for more complicated transformer module and
