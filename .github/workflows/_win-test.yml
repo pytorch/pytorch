@@ -157,6 +157,9 @@ jobs:
         run: |
           echo "timeout=$((JOB_TIMEOUT-30))" >> "${GITHUB_OUTPUT}"
 
+      - name: Install CMake
+        run: choco install cmake -f -y
+
       - name: Test
         id: test
         shell: bash
@@ -197,9 +200,12 @@ jobs:
           PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.mem_leak_check && '1' || '0' }}
           PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
         run: |
+          set -eux
           pushd "${PYTORCH_FINAL_PACKAGE_DIR}"
+          CMAKE_COMMAND='C:\Program Files\CMake\bin\cmake.exe' \
+            python3 -mpip install -v git+https://github.com/metaopt/optree.git#egg=optree
           # shellcheck disable=SC2046,SC2102
-          python3 -mpip install $(echo *.whl)[opt-einsum,optree] optree==0.13.0
+          python3 -mpip install $(echo *.whl)[opt-einsum,optree]
           popd
 
           .ci/pytorch/win-test.sh
