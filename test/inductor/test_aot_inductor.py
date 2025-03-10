@@ -1600,6 +1600,22 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    @common_utils.parametrize("dynamic", [False, True])
+    def test_while_loop_with_conv(self, dynamic):
+        inputs = (torch.randn(2, 4, 4, 4, device=self.device, dtype=torch.float64),)
+        dim0_ab = Dim("s0", min=2, max=1024)
+        dynamic_shapes = None
+        if dynamic:
+            dynamic_shapes = {
+                "c": {},
+                "x": {0: dim0_ab, 1: None},
+            }
+        self.check_model_with_multiple_inputs(
+            WhileLoopModels.Conv(self.device),
+            prepend_counters(inputs),
+            dynamic_shapes=dynamic_shapes,
+        )
+
     @config.patch({"is_predispatch": True})
     def test_constant(self):
         class M(torch.nn.Module):
