@@ -71,7 +71,9 @@ class verbose:
         return False
 
 
-def set_flags(_enabled=None, _deterministic=None, _allow_tf32=None, _fp32_precision="none"):
+def set_flags(
+    _enabled=None, _deterministic=None, _allow_tf32=None, _fp32_precision="none"
+):
     orig_flags = (
         torch._C._get_mkldnn_enabled(),
         torch._C._get_mkldnn_deterministic(),
