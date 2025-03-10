@@ -4,6 +4,11 @@
 
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 
+// use anonymous namespace to avoid collisions between differing
+// versions of this file that may be included by different sources
+namespace {
+
+// helpers for converting between StableIValue and actual IValues
 template <typename T>
 StableIValue from(T val) {
   static_assert(
@@ -18,7 +23,7 @@ T to(StableIValue val) {
 }
 // end to helpers for converting between StableIValue and actual IValues
 
-class TORCH_API StableLibrary final {
+class StableLibrary final {
  private:
   TorchLibraryHandle lib_;
 
@@ -74,7 +79,7 @@ class TORCH_API StableLibrary final {
   }
 };
 
-class TORCH_API StableTorchLibraryInit final {
+class StableTorchLibraryInit final {
  private:
   using InitFn = void(StableLibrary&);
   StableLibrary lib_;
@@ -91,6 +96,8 @@ class TORCH_API StableTorchLibraryInit final {
     fn(lib_);
   }
 };
+
+} // anon namespace
 
 // macros copied from c10/macros/Macros.h
 #ifdef __COUNTER__
