@@ -44,6 +44,7 @@ def _tolist_with_constrain_as_size(tensor):
 
 
 @requires_nccl()
+@instantiate_parametrized_tests
 class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     """
     Run correctness checks in multi-proc runner, mark with minimum # GPUs to run under
@@ -562,7 +563,8 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     @skip_if_lt_x_gpu(2)
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     @patch.object(torch._functorch.config, "activation_memory_budget", 0.01)
-    def test_all_to_all_recompute_is_always_banned(self):
+    @parametrize("override_with_ac", [False, True])
+    def test_all_to_all_recompute_is_always_banned(self, override_with_ac):
         @torch.library.custom_op("custom_ns::foo", mutates_args=())
         def foo(x: torch.Tensor) -> torch.Tensor:
             return x + 1
@@ -705,17 +707,37 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             trs = self.get_world_trs()
 
             compiled_fn = torch.compile(example, fullgraph=True, dynamic=True)
-            out = compiled_fn(*inputs, **trs)
+
+            if override_with_ac:
+
+                def compiled_fn_wrapper(*args):
+                    return example(*inputs, **trs)
+
+                out = torch.utils.checkpoint.checkpoint(
+                    compiled_fn_wrapper, *inputs, use_reentrant=False
+                )
+            else:
+                out = compiled_fn(*inputs, **trs)
 
             # track how many all_to_alls we saw in the backward
             with TrackingMode() as m:
                 out.sum().backward()
-            # there is 1 all2all in the fw, and 1 all2all in the backward.
-            # notably: even though activation_memory_budget == 0 ("recompute_everything"),
-            # we are still choosing *not* to recompute the all2all from the fw
-            self.assertEqual(
-                m.ops_counter[torch.ops._c10d_functional.all_to_all_single.default], 1
-            )
+            if override_with_ac:
+                # We wrapped our test in AC, which overrides the partitioner decision
+                # of never recomputing collectives.
+                # So we should properly see the all2all be recomputed in the backward
+                self.assertEqual(
+                    m.ops_counter[torch.ops._c10d_functional.all_to_all_single.default],
+                    2,
+                )
+            else:
+                # there is 1 all2all in the fw, and 1 all2all in the backward.
+                # notably: even though activation_memory_budget == 0 ("recompute_everything"),
+                # we are still choosing *not* to recompute the all2all from the fw
+                self.assertEqual(
+                    m.ops_counter[torch.ops._c10d_functional.all_to_all_single.default],
+                    1,
+                )
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
