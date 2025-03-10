@@ -46,6 +46,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TestCase,
 )
+from torch.testing._internal.common_quantized import _f32_to_floatx_unpacked
 
 _IS_SM8X = False
 if TEST_CUDA:
@@ -443,6 +444,19 @@ def data_to_mx_scale(x, block_size):
     scale_e8m0_biased = scale_e8m0_biased.to(torch.uint8)
     scale_e8m0_biased = scale_e8m0_biased.view(torch.float8_e8m0fnu)
     return scale_e8m0_biased.reshape(orig_shape[0], -1)
+
+
+def down_size(size):
+    assert size[-1] % 2 == 0, f"{size} last dim not divisible by two"
+    return (*size[:-1], size[-1] // 2)
+
+
+def pack_uint4(uint8_data) -> torch.Tensor:
+    # converting to uint8 for operations
+    shape = uint8_data.shape
+    assert shape[-1] % 2 == 0
+    uint8_data = uint8_data.contiguous().view(-1)
+    return (uint8_data[::2] << 4 | uint8_data[1::2]).view(down_size(shape))
 
 
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA not found")
@@ -1174,6 +1188,7 @@ class TestFP8MatmulCuda(TestCase):
         device = "cuda"
         M, K, N = mkn
         BLOCK_SIZE = 16
+        FP4_EBITS, FP4_MBITS = 2, 1
         require_exact_match = True
 
         def ceil_div(a, b):
@@ -1186,33 +1201,27 @@ class TestFP8MatmulCuda(TestCase):
             B_ref = torch.ones(N, K, device=device, dtype=torch.bfloat16)
 
             # A_ref[1][1] = 1
-            A_ref[0][0] = 0
-            A_ref[0][1] = 0
+            B_ref[0][0] = 0
+            B_ref[0][1] = 4
 
-            # A = A_ref.to(torch.uint8).view(torch.float4_e2m1fn_x2)
-            # B = B_ref.to(torch.uint8).view(torch.float4_e2m1fn_x2)
+            # cast to uint8
+            A = _f32_to_floatx_unpacked(A_ref.float(), FP4_EBITS, FP4_MBITS)
+            B = _f32_to_floatx_unpacked(B_ref.float(), FP4_EBITS, FP4_MBITS)
 
-            # for now, hand craft A and B
-            # 34 is the fp4x2 encoding for [1.0, 1.0] packed into a byte
-            A = torch.full((M, K // 2), 0b00100010, device=device, dtype=torch.uint8)
-            B = torch.full((N, K // 2), 0b00100010, device=device, dtype=torch.uint8)
+            # pack to uint4x2
+            A = pack_uint4(A)
+            B = pack_uint4(B)
+
             B = B.t()
-            A[0][0] = 0b00000000
-            # A[0][0] = 34
-            # B[0][0] = 0b00100001
-            # B[0][1] = 0b00000001
-            print(A)
-            print(B)
+
+            print('A', A.shape, A)
+            print('B', B.shape, B)
             A = A.view(torch.float4_e2m1fn_x2)
             B = B.view(torch.float4_e2m1fn_x2)
 
-            # M = 128
-            # K = 128
-            # block_size = 16
-            # M * (K // block_size) = 128 * (128 // 16) = 128 * 8 = 1024
             A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e4m3fn)
             B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e4m3fn)
-            print(A_scale.numel(), B_scale.numel(), A_scale.shape, B_scale.shape, A_scale, B_scale)
+            print(A_scale.numel(), B_scale.numel(), A_scale.shape, B_scale.shape, 'A_scale', A_scale, 'B_scale', B_scale)
             # convert to swizzled format
             # A_scale = to_blocked(A_scale)
             # B_scale = to_blocked(B_scale)
