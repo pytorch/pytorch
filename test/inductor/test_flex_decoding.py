@@ -1383,7 +1383,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         loss.backward()
         self.assertEqual(query.grad[:, :, M:, :].sum(), 0)
 
-    @skipIfRocm
     @supported_platform
     def test_windowed_no_mask_vs_sdpa(self):
         score_mod = _generate_windowed(1000)
