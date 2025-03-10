@@ -1438,3 +1438,123 @@ aoti_torch_delete_library_object(TorchLibraryHandle tlh) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
       { delete reinterpret_cast<torch::Library*>(tlh); });
 }
+
+AOTITorchError aoti_torch_call_dispatcher(
+    const char* opName,
+    const char* overloadName,
+    StableIValue* stack) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    static auto op =
+        c10::Dispatcher::singleton().findSchemaOrThrow(opName, overloadName);
+
+    const auto& schema = op.schema();
+    const auto num_returns = schema.returns().size();
+    const auto num_arguments = schema.arguments().size();
+
+    torch::jit::Stack ivalue_stack;
+    // we will only need max(num_args, num_returns)
+    ivalue_stack.reserve(num_arguments + num_returns);
+
+    // convert StableIValue stack to c10::IValue stack
+    for (const auto idx : c10::irange(num_arguments)) {
+      auto stable_ivalue = stack[idx];
+      auto arg_type = schema.arguments()[idx].type();
+      switch (arg_type->kind()) {
+        case c10::TypeKind::TensorType: {
+          // stable_ivalue must be an ATH
+          at::Tensor arg =
+              *torch::aot_inductor::tensor_handle_to_tensor_pointer(
+                  to<AtenTensorHandle>(stable_ivalue));
+          torch::jit::push(ivalue_stack, c10::IValue(arg));
+          break;
+        }
+        case c10::TypeKind::IntType: {
+          torch::jit::push(
+              ivalue_stack, c10::IValue(to<int64_t>(stable_ivalue)));
+          break;
+        }
+        case c10::TypeKind::FloatType: {
+          torch::jit::push(
+              ivalue_stack, c10::IValue(to<double>(stable_ivalue)));
+          break;
+        }
+        case c10::TypeKind::BoolType: {
+          torch::jit::push(ivalue_stack, c10::IValue(to<bool>(stable_ivalue)));
+          break;
+        }
+        case c10::TypeKind::OptionalType: {
+          auto inner_type =
+              arg_type->castRaw<at::OptionalType>()->getElementType();
+
+          // our contract is that IValue None = StableIValue nullptr
+          if (to<nullptr_t>(stable_ivalue) == nullptr) {
+            torch::jit::push(ivalue_stack, c10::IValue());
+          } else {
+            // TODO: yes, I should deduplicate the next set of switch statements
+            switch (inner_type->kind()) {
+              case c10::TypeKind::TensorType: {
+                // stable_ivalue must be an ATH
+                at::Tensor arg =
+                    *torch::aot_inductor::tensor_handle_to_tensor_pointer(
+                        to<AtenTensorHandle>(stable_ivalue));
+                torch::jit::push(ivalue_stack, c10::IValue(arg));
+                break;
+              }
+              case c10::TypeKind::IntType: {
+                torch::jit::push(
+                    ivalue_stack, c10::IValue(to<int64_t>(stable_ivalue)));
+                break;
+              }
+              case c10::TypeKind::FloatType: {
+                torch::jit::push(
+                    ivalue_stack, c10::IValue(to<double>(stable_ivalue)));
+                break;
+              }
+              case c10::TypeKind::BoolType: {
+                torch::jit::push(
+                    ivalue_stack, c10::IValue(to<bool>(stable_ivalue)));
+                break;
+              }
+              default: {
+                TORCH_CHECK(
+                    false,
+                    "Not yet supported optional ",
+                    inner_type->str(),
+                    " type");
+              }
+            }
+          }
+          break;
+        }
+        default: {
+          TORCH_CHECK(
+              false, "Not yet supported argument type: ", arg_type->str());
+        }
+      }
+    }
+
+    op.callBoxed(ivalue_stack);
+
+    // there should then be num_returns IValues on the stack, which
+    // we will convert to StableIValue and add to user input stack
+    for (const auto idx : c10::irange(num_returns)) {
+      const c10::IValue& ret = torch::jit::pop(ivalue_stack);
+      const auto stack_idx = num_arguments + num_returns - idx - 1;
+      if (ret.isInt()) {
+        stack[stack_idx] = from(ret.toInt());
+      } else if (ret.isDouble()) {
+        stack[stack_idx] = from(ret.toDouble());
+      } else if (ret.isBool()) {
+        stack[stack_idx] = from(ret.toBool());
+      } else if (ret.isNone()) {
+        stack[stack_idx] = from(nullptr);
+      } else if (ret.isTensor()) {
+        AtenTensorHandle ath = torch::aot_inductor::new_tensor_handle(
+            std::move(const_cast<at::Tensor&>(ret.toTensor())));
+        stack[stack_idx] = from(ath);
+      } else {
+        TORCH_CHECK(false, "Other types of IValue returns not yet handled!");
+      }
+    }
+  });
+}
