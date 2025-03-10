@@ -3502,13 +3502,6 @@ class CommonTemplate:
     @skip_if_halide  # only 32-bit indexing
     @largeTensorTest("4GB", inductor=True)
     def test_large_pointwise(self):
-        # If this is running with cpp_wrapper, the auto-tuning step will generate an
-        # additional array of the same size as the input.  Numbers derived
-        # experimentally.
-        required_memory = 2**32 + 2**31 + 2**15 if config.cpp_wrapper else 2**31 + 2**15
-        if not _has_sufficient_memory(self.device, required_memory):
-            raise unittest.SkipTest("insufficient memory")
-
         def fn(a):
             return a + 1
 
@@ -5098,11 +5091,9 @@ class CommonTemplate:
 
         eager_version_counters_after = [
             # TODO: remove the + 1 after https://github.com/pytorch/pytorch/issues/120622 is fixed
-            (
-                buffer._version + 1
-                if k in ["m.running_mean", "m.running_var"]
-                else buffer._version
-            )
+            buffer._version + 1
+            if k in ["m.running_mean", "m.running_var"]
+            else buffer._version
             for k, buffer in model_for_eager.named_buffers()
         ]
 
@@ -12420,12 +12411,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         Currently inductor will skip such bad configs and pick the best one
         from the remaining configs.
         """
-        # If this is running with cpp_wrapper, the auto-tuning step will generate an
-        # additional array of the same size as the input.  Numbers derived
-        # experimentally.
-        required_memory = 2**34 + 2**32 + 2**31 if config.cpp_wrapper else 2**33 + 2**32 + 2**31
-        if not _has_sufficient_memory(self.device, required_memory):
-            raise unittest.SkipTest("insufficient memory")
 
         @torch.compile
         def fn(x, y):
@@ -14466,11 +14451,9 @@ if RUN_GPU:
                 ),
                 (
                     fn3,
-                    (
-                        "triton_poi_fused_layer_norm_relu"
-                        if torch._dynamo.config.inline_inbuilt_nn_modules
-                        else "triton_poi_fused_LayerNorm_ReLU"
-                    ),
+                    "triton_poi_fused_layer_norm_relu"
+                    if torch._dynamo.config.inline_inbuilt_nn_modules
+                    else "triton_poi_fused_LayerNorm_ReLU",
                     (torch.randn(4, 4, device=GPU_TYPE),),
                 ),
             ]

@@ -970,22 +970,9 @@ inductor_one_sample["xpu"] = {
 
 
 def get_sort_argsort_assert_equal_fn(is_argsort, args, kwargs):
-    # The normal assert_equal_fn suffices for a stable sort
-    def normal_assert_fn(
-        test_case_inst, x, y, *, atol=None, rtol=None, equal_nan=True, exact_dtype=True
-    ):
-        test_case_inst.assertEqual(
-            x[0],
-            y[0],
-            atol=atol,
-            rtol=rtol,
-            equal_nan=equal_nan,
-            exact_dtype=exact_dtype,
-        )
-
-    if "stable" in kwargs.keys():
-        if kwargs["stable"]:
-            return normal_assert_fn
+    # Use the normal assert_equal_fn suffices for a stable sort
+    if "stable" in kwargs:
+        return True
 
     # In other cases, we need only check that the sort/argsort outputs are
     # compatible.
@@ -1000,7 +987,6 @@ def get_sort_argsort_assert_equal_fn(is_argsort, args, kwargs):
     def argsort_sort_assert_equal(
         test_case_inst, x, y, *, atol=None, rtol=None, equal_nan=True, exact_dtype=True
     ):
-
         if is_argsort:
             assert isinstance(x, torch.Tensor)
             assert isinstance(y, torch.Tensor)
@@ -1263,7 +1249,7 @@ class TestInductorOpInfo(TestCase):
                 )
 
             ctx = functools.partial(maybe_skip_size_asserts, op)
-            if op_name in CUSTOM_ASSERT_EQUALS_FNS.keys():
+            if op_name in CUSTOM_ASSERT_EQUALS_FNS:
                 assert_equal_fn = CUSTOM_ASSERT_EQUALS_FNS[op_name](args, kwargs)
                 return (
                     (
