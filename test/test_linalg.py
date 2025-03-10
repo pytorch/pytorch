@@ -5404,12 +5404,25 @@ class TestLinalg(TestCase):
         matA = torch.full((k, m), fillA, dtype=dtypeA, device=device)
         matB = torch.full((n, k), fillB, dtype=dtypeB, device=device).t()
 
+        # Summary of bias types that are supported:
+        # - bias vector not supported when out_dtype = fp32
+        # - bias_dtype allowed in PyTorch are Half or BFloat16
+        # - bias_dtype in hipBLASLt restrictions can be found here:
+        #   https://rocm.docs.amd.com/projects/hipBLASLt/en/develop/api-reference.html
+        fillbias = 0.10
+        biasf16 = torch.full((n,), fillbias, dtype=torch.half, device=device)
+        biasbf16 = torch.full((n,), fillbias, dtype=torch.bfloat16, device=device)
+
         # out_dtype = dtype
         torch._scaled_mm(matA, matB, scale_a=scaleA, scale_b=scaleB, out_dtype=dtype)
+        # out_dtype = dtype with bias vector
+        torch._scaled_mm(matA, matB, scale_a=scaleA, scale_b=scaleB, out_dtype=dtype, bias=biasf16)
         # out_dtype = float32
         torch._scaled_mm(matA, matB, scale_a=scaleA, scale_b=scaleB, out_dtype=torch.float32)
         # out_dtype = bfloat16
         torch._scaled_mm(matA, matB, scale_a=scaleA, scale_b=scaleB, out_dtype=torch.bfloat16)
+        # out_dtype = bfloat16 with bias vector
+        torch._scaled_mm(matA, matB, scale_a=scaleA, scale_b=scaleB, out_dtype=torch.bfloat16, bias=biasbf16)
         # out_dtype = float16
         torch._scaled_mm(matA, matB, scale_a=scaleA, scale_b=scaleB, out_dtype=torch.half)
 
@@ -5425,9 +5438,9 @@ class TestLinalg(TestCase):
         # There must be a four new tuning results unless you do
         # rowwise in which case there is a 5th one
         if dtype is torch.torch.float8_e4m3fnuz:  # rowwise
-            count = 5
+            count = 7
         else:
-            count = 4
+            count = 6
         self.assertEqual((total_num_results - ref_num_results), count)
 
         # disable TunableOp
