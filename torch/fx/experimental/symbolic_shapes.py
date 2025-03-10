@@ -16,6 +16,7 @@ import dis
 import functools
 import inspect
 import itertools
+import json
 import logging
 import math
 import operator
@@ -3456,6 +3457,17 @@ class ShapeEnv:
     @property
     def allow_complex_guards_as_runtime_asserts(self) -> bool:
         return self.settings.allow_complex_guards_as_runtime_asserts
+
+    def _jsonify_metadata(self) -> str:
+        return json.dumps(
+            {
+                "var_to_val": {str(k): str(v) for k, v in self.var_to_val.items()},
+                "var_to_range": {str(k): str(v) for k, v in self.var_to_range.items()},
+                "var_to_sources": {
+                    str(k): str(v) for k, v in self.var_to_sources.items()
+                },
+            }
+        )
 
     def check_equal(self, other: ShapeEnv) -> None:
         """Compare another ShapeEnv for equivalence"""
