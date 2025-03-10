@@ -155,5 +155,4 @@ inductor_fallback_ops = {
     "aten.view_as_real.default",
     "aten.view.dtype",
     "aten._weight_int8pack_mm.default",
-    "aten._weight_int4pack_mm.default",
 }
