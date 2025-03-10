@@ -261,7 +261,7 @@ if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
     # Build torch, the Python module, and tests for CPU-only
     tools/bazel build --config=no-tty "${BAZEL_MEM_LIMIT}" "${BAZEL_CPU_LIMIT}" --config=cpu-only :torch :torch/_C.so :all_tests
   else
-    tools/bazel build --config=no-tty "${BAZEL_MEM_LIMIT}" "${BAZEL_CPU_LIMIT}" //...
+    tools/bazel build --config=no-tty "${BAZEL_MEM_LIMIT}" "${BAZEL_CPU_LIMIT}" --sandbox_debug --subcommands //...
   fi
 else
   # check that setup.py would fail with bad arguments
@@ -277,10 +277,7 @@ else
     # or building non-XLA tests.
     if [[ "$BUILD_ENVIRONMENT" != *rocm*  &&
           "$BUILD_ENVIRONMENT" != *xla* ]]; then
-      if [[ "$BUILD_ENVIRONMENT" != *py3.8* ]]; then
-        # Install numpy-2.0.2 for builds which are backward compatible with 1.X
-        python -mpip install numpy==2.0.2
-      fi
+      python -mpip install numpy==2.0.2
 
       WERROR=1 python setup.py clean
 
