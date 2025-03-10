@@ -253,11 +253,11 @@ jobs:
         with:
           submodules: false
           fetch-depth: 1
-      - name: Setup Python 3.6
+      - name: Setup Python 3.8
         if: matrix.test_type == 'older_python_version'
         uses: actions/setup-python@v4
         with:
-          python-version: '3.6'
+          python-version: '3.8'
           architecture: x64
           check-latest: false
           cache: pip
