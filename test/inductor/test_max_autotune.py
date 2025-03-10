@@ -554,12 +554,6 @@ class TestMaxAutotune(TestCase):
                     f"Expected exactly 1 kernel event, but got {len(kernel_events)}",
                 )
 
-                # Store the grid size for this carveout value for comparison
-                # across test runs
-                if not hasattr(self, "_grid_sizes"):
-                    self._grid_sizes = {}
-                self._grid_sizes[carveout] = kernel_events[0]["grid_size"]
-
                 # Check that grid size matches expected values based on carveout
                 expected_grid_size = None
                 max_grid_size = torch.cuda.get_device_properties(
