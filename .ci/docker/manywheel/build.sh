@@ -50,7 +50,6 @@ case ${GPU_ARCH_TYPE} in
         GPU_IMAGE=arm64v8/almalinux:8
         DOCKER_GPU_BUILD_ARG=" --build-arg DEVTOOLSET_VERSION=11  --build-arg NINJA_VERSION=1.12.1"
         MANY_LINUX_VERSION="2_28_aarch64"
-        NINJA_VERSION="1.12.1"
         ;;
     cpu-cxx11-abi)
         TARGET=final
