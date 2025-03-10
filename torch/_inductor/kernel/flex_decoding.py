@@ -114,9 +114,7 @@ flex_decoding_template = TritonTemplate(
     SPARSE_HQ = {{size("KV_NUM_BLKS", 1)}}
 
     sparse_idx_z = off_z % SPARSE_Z
-    # TODO: support masks not broadcasted along the head dimension.
-    tl.device_assert(SPARSE_HQ == 1)
-    sparse_idx_h = 0
+    sparse_idx_h = off_hkv % SPARSE_HQ
 
     SPARSE_KV_MULTIPLE: tl.constexpr = (SPARSE_KV_BLOCK_SIZE // BLOCK_N)
     SPARSE_KV_BLOCK_CNT = tl.cdiv(KV_LEN, SPARSE_KV_BLOCK_SIZE)
