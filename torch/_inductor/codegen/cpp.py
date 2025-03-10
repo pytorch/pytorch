@@ -3188,7 +3188,8 @@ class CppVecKernel(CppKernel):
             else welford_helper_vec_range
         )
         vec_num_range_thread_expr = cexpr_index(vec_num_range_thread)
-        num_chunks = CeilDiv(vec_num_range_thread, 4096)
+        chunk_size = 4096
+        num_chunks = CeilDiv(vec_num_range_thread, chunk_size)
         if isinstance(num_chunks, sympy.Integer) and num_chunks <= 1:
             return (
                 f"static WelfordHelper<{self._get_vec_type(dtype)}> {welford_helper_val}"
