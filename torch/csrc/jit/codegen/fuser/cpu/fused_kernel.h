@@ -1,17 +1,13 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <ATen/DynamicLibrary.h>
 #include <torch/csrc/Export.h>
 #include <torch/csrc/jit/codegen/fuser/fused_kernel.h>
 
 #include <cstdint>
 #include <memory>
 #include <string>
-
-// Forward declare DynamicLibrary
-namespace at {
-struct DynamicLibrary;
-}
 
 namespace torch::jit::fuser::cpu {
 
