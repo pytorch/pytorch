@@ -343,9 +343,32 @@ if(USE_CUDA)
 endif()
 
 if(USE_ROCM)
+  # NOTE: The PyTorch build does not actually add_subdirectory
+  # third_party/composable_kernel or use it as a CMake library. What is used
+  # is header only, so this should be ok, except that the CMake build generates
+  # a ck/config.h. We just do that part here. Without this, the ck.h from the
+  # ROCM SDK may get accidentally used instead.
+  function(_pytorch_rocm_generate_ck_conf)
+    set(CK_ENABLE_INT8 "ON")
+    set(CK_ENABLE_FP16 "ON")
+    set(CK_ENABLE_FP32 "ON")
+    set(CK_ENABLE_FP64 "ON")
+    set(CK_ENABLE_BF16 "ON")
+    set(CK_ENABLE_FP8 "ON")
+    set(CK_ENABLE_BF8 "ON")
+    set(CK_USE_XDL "ON")
+    set(CK_USE_WMMA "ON")
+    configure_file(
+      "${Torch_SOURCE_DIR}/third_party/composable_kernel/include/ck/config.h.in"
+      "${CMAKE_CURRENT_BINARY_DIR}/composable_kernel/ck/config.h"
+      )
+  endfunction()
   list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/hip)
   list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/composable_kernel/include)
   list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/composable_kernel/library/include)
+  list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_BINARY_DIR}/composable_kernel)
+  _pytorch_rocm_generate_ck_conf()
+
   # Next two lines are needed because TunableOp uses third-party/fmt
   list(APPEND ATen_HIP_INCLUDE $<TARGET_PROPERTY:fmt::fmt-header-only,INTERFACE_INCLUDE_DIRECTORIES>)
   list(APPEND ATen_HIP_DEPENDENCY_LIBS fmt::fmt-header-only)
