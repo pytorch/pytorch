@@ -370,11 +370,12 @@ inline std::optional<ResultVec> computeStride_impl(
   for (int64_t tensor_d = oldshape.size() - 1; tensor_d >= 0; tensor_d--) {
     tensor_numel *= oldshape[tensor_d];
     // if end of tensor size chunk, check view
-    if ((tensor_d == 0) ||
-        (TORCH_GUARD_SIZE_OBLIVIOUS(sym_ne(oldshape[tensor_d - 1], 1)) &&
-         TORCH_GUARD_SIZE_OBLIVIOUS(sym_ne(oldstride[tensor_d - 1], tensor_numel * chunk_base_stride)))) {
+    if ( tensor_d == 0 ||
+        TORCH_GUARD_SIZE_OBLIVIOUS( 
+          sym_ne(oldshape[tensor_d - 1], 1) &&
+          sym_ne(oldstride[tensor_d - 1], tensor_numel * chunk_base_stride))) {
       while (view_d >= 0 &&
-            (TORCH_GUARD_SIZE_OBLIVIOUS(sym_lt(view_numel, tensor_numel)) || TORCH_GUARD_SIZE_OBLIVIOUS(sym_eq(newshape[view_d], 1)))) {
+            TORCH_GUARD_SIZE_OBLIVIOUS(sym_lt(view_numel, tensor_numel)|| sym_eq(newshape[view_d], 1) )) {
         newstride[view_d] = view_numel * chunk_base_stride;
         view_numel *= newshape[view_d];
         view_d--;
