@@ -59,11 +59,13 @@ Tensor& random_mps_impl(Tensor& self,
   if (self.numel() == 0) {
     return self;
   }
+  // MPS random is broken for 5D+ tensors, see https://github.com/pytorch/pytorch/issues/147624
+  const auto need_reshape = self.ndimension() > 4;
   auto mps_gen = get_generator_or_default<MPSGeneratorImpl>(gen, at::mps::detail::getDefaultMPSGenerator());
-  MPSStream* stream = getCurrentMPSStream();
+  auto stream = getCurrentMPSStream();
 
   @autoreleasepool {
-    string key = op_name + getTensorsStringKey({self, mean_opt.value_or(Tensor()), std_opt.value_or(Tensor())}) + ":" +
+    auto key = op_name + getTensorsStringKey({self, mean_opt.value_or(Tensor()), std_opt.value_or(Tensor())}) + ":" +
         std::to_string(val1) + ":" + std::to_string(val2);
     auto cachedGraph = LookUpOrCreateCachedGraph<RandomCachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       newCachedGraph->stateTensor =
@@ -111,11 +113,17 @@ Tensor& random_mps_impl(Tensor& self,
       // we don't use the output state tensor from the MPSGraph API as it requires reading back from GPU to CPU.
       // Instead, we keep the Philox state in the MPSGenerator and use the PyTorch's philox_engine to maintain
       // the counters, and feed them to the graph manually
-      NSArray<MPSGraphTensor*>* resultTensors = [mpsGraph randomTensorWithShape:getMPSShape(self)
-                                                                     descriptor:desc
-                                                                    stateTensor:newCachedGraph->stateTensor
-                                                                           name:nil];
-      newCachedGraph->resultTensor = randomBlock ? randomBlock(newCachedGraph, resultTensors[0]) : resultTensors[0];
+      auto self_shape = getMPSShape(self);
+      NSArray<MPSGraphTensor*>* resultTensors =
+          [mpsGraph randomTensorWithShape:need_reshape ? @[ @(self.numel()) ] : self_shape
+                               descriptor:desc
+                              stateTensor:newCachedGraph->stateTensor
+                                     name:nil];
+      newCachedGraph->resultTensor =
+          need_reshape ? [mpsGraph reshapeTensor:resultTensors[0] withShape:self_shape name:nil] : resultTensors[0];
+      if (randomBlock) {
+        newCachedGraph->resultTensor = randomBlock(newCachedGraph, newCachedGraph->resultTensor);
+      }
       // results will be cast if self's scalar type isn't directly supported by MPS backend.
       if (getMPSDataType(self) != outputDataType)
         newCachedGraph->resultTensor = castMPSTensor(mpsGraph, newCachedGraph->resultTensor, self.scalar_type());
@@ -620,8 +628,7 @@ Tensor& multinomial_out_mps(const Tensor& self,
     // Sanity checks on `self`.
     auto is_valid = ((self.max() < INFINITY) & (self.min() >= 0)).item();
     TORCH_CHECK(is_valid.to<bool>(), "probability tensor contains either `inf`, `nan` or element < 0");
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    bool zero_prob_condition;
+    bool zero_prob_condition = false;
     if (self.dim() == 1) {
       zero_prob_condition = (self.sum() == 0).item().to<bool>();
     } else {

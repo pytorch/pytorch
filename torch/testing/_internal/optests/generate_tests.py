@@ -50,6 +50,8 @@ def safe_schema_check(
     kwargs: dict[str, Any],
     *,
     copy_inputs: bool = True,
+    rtol: Optional[float] = None,
+    atol: Optional[float] = None,
 ) -> Any:
     if copy_inputs:
         args, kwargs = deepcopy_tensors((args, kwargs))
@@ -66,6 +68,8 @@ def safe_autograd_registration_check(
     kwargs: dict[str, Any],
     *,
     copy_inputs: bool = True,
+    rtol: Optional[float] = None,
+    atol: Optional[float] = None,
 ) -> None:
     if pytree.tree_any_only(torch.Tensor, is_abstract, (args, kwargs)):
         return
@@ -85,6 +89,8 @@ def safe_fake_check(
     kwargs: dict[str, Any],
     *,
     copy_inputs: bool = True,
+    rtol: Optional[float] = None,
+    atol: Optional[float] = None,
 ) -> None:
     if pytree.tree_any_only(torch.Tensor, is_abstract, (args, kwargs)):
         return None
@@ -100,6 +106,8 @@ def safe_aot_autograd_check(
     dynamic: bool,
     *,
     copy_inputs: bool = True,
+    rtol: Optional[float] = None,
+    atol: Optional[float] = None,
 ) -> Any:
     # NB: copy_inputs does nothing for aot_autograd_check: it always needs to copy
     # inputs.
@@ -112,7 +120,20 @@ def safe_aot_autograd_check(
 
     # aot_autograd_check runs func(*args, **kwargs) multiple times
     # and assumes `func` does not modify its inputs.
-    return aot_autograd_check(func, args, kwargs, dynamic, check_gradients="auto")
+    if rtol and atol:
+        assert_equals_fn = functools.partial(
+            torch.testing.assert_close, rtol=rtol, atol=atol
+        )
+    else:
+        assert_equals_fn = torch.testing.assert_close
+    return aot_autograd_check(
+        func,
+        args,
+        kwargs,
+        dynamic,
+        check_gradients="auto",
+        assert_equals_fn=assert_equals_fn,
+    )
 
 
 def deepcopy_tensors(inputs: Any) -> Any:
@@ -624,8 +645,15 @@ def opcheck(
     *,
     test_utils: Union[str, Sequence[str]] = DEFAULT_TEST_UTILS,
     raise_exception: bool = True,
+    rtol: Optional[float] = None,
+    atol: Optional[float] = None,
 ) -> dict[str, str]:
     """See torch.library.opcheck for docstring"""
+
+    if (rtol is None) ^ (atol is None):
+        raise ValueError(
+            "opcheck(op, ...): if you specify one of rtol/atol, you must specify both"
+        )
 
     if kwargs is None:
         kwargs = {}
@@ -654,7 +682,7 @@ def opcheck(
     for test_util in test_utils:
         tester = ALL_TEST_UTILS[test_util]
         try:
-            tester(op, args, kwargs)
+            tester(op, args, kwargs, rtol=rtol, atol=atol)
             results_dict[test_util] = "SUCCESS"
         except Exception as ex:
             if raise_exception:

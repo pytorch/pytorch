@@ -10,7 +10,7 @@ import operator
 import re
 from collections.abc import Iterable
 from contextlib import contextmanager
-from inspect import Parameter
+from inspect import ismethod, Parameter
 from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import torch
@@ -87,6 +87,52 @@ def _collect_and_set_constant_attrs(
         setattr(_mod, attr, value)
         constant_attrs.add(value, name)
     return constant_attrs
+
+
+def _register_constants_as_buffers(
+    mod: torch.fx.GraphModule, state_dict, non_persistent_buffers
+):
+    # TODO some annoying circular dependency issue
+    from torch.export.unflatten import _assign_attr, _AttrKind
+
+    temp_registered_constants = set()
+
+    for node in mod.graph.nodes:
+        if node.op == "get_attr":
+            target = torch.fx.graph_module._get_attr(mod, node.target)
+            if isinstance(target, torch.Tensor):
+                # Make sure we also check if the original buffer is
+                # non persistent as well.
+                if (node.target not in state_dict) and (
+                    node.target not in non_persistent_buffers
+                ):
+                    torch.fx.graph_module._del_attr(mod, node.target)
+                    _assign_attr(target, mod, node.target, _AttrKind.BUFFER, False)
+                    temp_registered_constants.add(node.target)
+
+    mod.recompile()
+
+    return temp_registered_constants
+
+
+def _override_graph_signature_for_temp_registered_constants(
+    sig: "ExportGraphSignature", temp_registered_constants
+):
+    for spec in sig.input_specs:
+        if spec.target in temp_registered_constants:
+            spec.kind = InputKind.CONSTANT_TENSOR
+            spec.persistent = None
+
+    for spec in sig.output_specs:
+        if (
+            spec.kind == OutputKind.BUFFER_MUTATION
+            and spec.target in temp_registered_constants
+        ):
+            raise RuntimeError(
+                f"Constant {spec.target} is mutated in the forward method. Pls register it as buffer"
+            )
+
+    return sig
 
 
 def _overwrite_signature_for_non_persistent_buffers(
@@ -1211,7 +1257,7 @@ def register_module_as_pytree_input_node(cls: type[torch.nn.Module]) -> None:
 
     class PrototypeModule(weakref.ref):
         def __init__(self, m, *args, **kwargs):
-            super().__init__(m, *args, **kwargs)
+            super().__init__(m, *args, **kwargs)  # type: ignore[call-arg]
             assert isinstance(m, torch.nn.Module)
             assert not hasattr(self, "_proto_cls")
             self._proto_cls = cls
@@ -1304,3 +1350,52 @@ def register_module_as_pytree_input_node(cls: type[torch.nn.Module]) -> None:
 def deregister_module_as_pytree_input_node(cls: type[torch.nn.Module]) -> None:
     _deregister_pytree_node(cls)
     _deregister_pytree_flatten_spec(cls)
+
+
+def _sync_state(src, dst):
+    assert isinstance(
+        src,
+        torch.nn.Module,
+    ), f"Expected {src} to be a nn.Module"
+    assert isinstance(
+        dst,
+        torch.nn.Module,
+    ), f"Expected {dst} to be a nn.Module"
+    # Share state (params, buffers) between modules.
+    # This ensures that state mutations are visible across them.
+    # Since tensor constants are not mutable, copying (without sharing) is OK.
+    # Also, primitive constants are specialized, so copying (without sharing) is OK.
+    dst._parameters = src._parameters
+    dst._buffers = src._buffers
+
+
+def sync_state(*wrapped_method_modules):
+    """
+    Sync state between exported modules corresponding to wrapped methods.
+    This might be necessary after serializing/deserializing due to copying.
+    """
+    if wrapped_method_modules:
+        m, *other_ms = wrapped_method_modules
+        for other_m in other_ms:
+            _sync_state(m, other_m)
+
+
+class _WrappedMethod(torch.nn.Module):
+    def __init__(self, method):
+        super().__init__()
+        # share state of method's self module
+        _sync_state(method.__self__, self)
+        # redirect forward to method
+        self.forward = method
+
+
+def wrap_method(method):
+    """
+    Wrap a method as a module so that it can be exported.
+    The wrapped module's forward points to the method, and
+    the method's original module state is shared.
+    """
+    assert ismethod(
+        method,
+    ), f"Expected {method} to be a method"
+    return _WrappedMethod(method)
