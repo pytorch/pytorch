@@ -13,6 +13,7 @@
 #include <torch/csrc/inductor/aoti_torch/utils.h>
 #include <torch/csrc/inductor/inductor_ops.h>
 #include <torch/csrc/jit/serialization/pickle.h>
+#include <torch/version.h>
 #include <cstdint>
 #include <cstdio>
 #include <fstream>
@@ -230,6 +231,10 @@ AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(
     c10::complex<double>,
     ComplexDouble)
 #undef AOTI_TORCH_SCALAR_TO_TENSOR_IMPL
+
+uint64_t aoti_torch_abi_version() {
+  return TORCH_ABI_VERSION;
+}
 
 bool aoti_torch_grad_mode_is_enabled() {
   return c10::GradMode::is_enabled();
@@ -1206,13 +1211,6 @@ void aoti_torch_print_tensor_handle(AtenTensorHandle self, const char* msg) {
   std::cout << "Requires grad: " << t->requires_grad() << '\n';
 
   std::cout << '\n';
-}
-
-#include <torch/version.h>
-AOTITorchError aoti_torch_get_libtorch_version(const char* str) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    *str = TORCH_VERSION;
-  });
 }
 
 // ProxyExecutor

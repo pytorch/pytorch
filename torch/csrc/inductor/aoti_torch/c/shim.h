@@ -143,6 +143,9 @@ AOTI_TORCH_EXPORT int32_t aoti_torch_memory_format_channels_last();
 AOTI_TORCH_EXPORT int32_t aoti_torch_memory_format_channels_last_3d();
 AOTI_TORCH_EXPORT int32_t aoti_torch_memory_format_preserve_format();
 
+// Get TORCH_ABI_VERSION of the built libtorch.so
+AOTI_TORCH_EXPORT uint64_t aoti_torch_abi_version();
+
 // Functions for converting a single-element tensor to a scalar value
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_item_float16(AtenTensorHandle tensor, c10::Half* ret_value);
@@ -655,8 +658,6 @@ AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_get_current_cuda_stream(int32_t device_index, void** ret_stream);
 
 #endif // USE_CUDA
-
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_libtorch_version(const char* str);
 
 // See `ProxyExecutor Design Note` in ir.py for more details
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_proxy_executor_call_function(
