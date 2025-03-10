@@ -1952,11 +1952,15 @@ def _precompile_header(
 ) -> str:
     # Get the preprocessed output from the header file to be precompiled.  This allows
     # us to properly invalidate the file cache when any header dependency changes.
-    with tempfile.NamedTemporaryFile(buffering=0, suffix=".h") as preprocessing_header:
-        preprocessing_header.write(f"#include <{header}>\n".encode())
+    #
+    # N.B. we can't use NamedTemporaryFile here because Windows errors out on attempts
+    # to read from a file with an open write handle.
+    with tempfile.TemporaryDirectory() as preprocessing_dir:
+        preprocessing_header = Path(preprocessing_dir) / "header.h"
+        preprocessing_header.write_text(f"#include <{header}>\n")
         preprocessor = CppBuilder(
-            name=preprocessing_header.name,
-            sources=preprocessing_header.name,
+            name=str(preprocessing_header),
+            sources=str(preprocessing_header),
             BuildOption=CppTorchDeviceOptions(**compile_command, preprocessing=True),
         )
         preprocessor.build()
@@ -1973,14 +1977,11 @@ def _precompile_header(
                 return cmd_output.stdout.splitlines()[1]
 
             cmd_output = subprocess.run(
-                ["sha512sum", filename], capture_output=True, text=True
+                ("openssl", "sha512", filename), capture_output=True, text=True
             )
-            return cmd_output.stdout.split()[0]
+            return cmd_output.stdout.split()[-1]
 
-        # hash, then cleanup, the preprocessor output file
-        preprocessor_file_name = preprocessor.get_target_file_path()
-        preprocessor_hash = _get_file_checksum(preprocessor_file_name)
-        os.unlink(preprocessor_file_name)
+        preprocessor_hash = _get_file_checksum(preprocessor.get_target_file_path())
 
     header_build_option = CppTorchDeviceOptions(**compile_command, precompiling=True)
     header_hash, header_full_path = write(
