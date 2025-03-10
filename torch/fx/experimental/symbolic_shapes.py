@@ -229,7 +229,7 @@ class SymIntEqByExpr:
 
 
 def _nested_int_aware_sort(
-    tup: tuple[Union[SymInt, int], int]
+    tup: tuple[Union[SymInt, int], int],
 ) -> tuple[int, Union[SymInt, int], int]:
     return (
         # Order nested ints by their coefficients.
@@ -1265,7 +1265,7 @@ def sym_eq(x: _T, y: _T) -> Union[bool, SymBool]:
 
 
 def guard_scalar(
-    a: Union[SymBool, SymInt, SymFloat, int, bool, float]
+    a: Union[SymBool, SymInt, SymFloat, int, bool, float],
 ) -> Union[bool, int, float]:
     if isinstance(a, (SymBool, bool)):
         return guard_bool(a)
@@ -1895,7 +1895,7 @@ class SubclassSymbolicContext(StatefulSymbolicContext):
 
 
 def is_symbolic(
-    val: Union[int, SymInt, float, SymFloat, bool, SymBool]
+    val: Union[int, SymInt, float, SymFloat, bool, SymBool],
 ) -> TypeGuard[Union[SymInt, SymFloat, SymBool]]:
     if isinstance(val, (int, float, bool)):
         return False
@@ -2131,7 +2131,7 @@ def _sympy_cast_symbool_to_symint_guardless(x: SympyBoolean) -> sympy.Expr:
 
 
 def cast_symbool_to_symint_guardless(
-    symbool: Union[bool, torch.SymBool]
+    symbool: Union[bool, torch.SymBool],
 ) -> Union[int, torch.SymInt]:
     if isinstance(symbool, bool):
         return 1 if symbool else 0
@@ -7198,6 +7198,17 @@ class _PythonMsgPrinter(PythonPrinter):
         return self.src_map[sym.name][0]
 
 
+def is_non_negative_check(condition_str: str) -> Optional[str]:
+    """
+    Check if a condition string is checking for non-negative values (>= 0).
+    Returns the variable name if it's a non-negative check, None otherwise.
+    """
+    # Pattern to match expressions like "x >= 0", "x.shape[0] >= 0", etc.
+    pattern = r"([a-zA-Z0-9_\.\[\]]+)\s*>=\s*0"
+    match = re.match(pattern, condition_str.strip())
+    return match.group(1) if match else None
+
+
 def _suggest_torch_checks(
     e: GuardOnDataDependentSymNode, src_map: defaultdict[str, list[str]]
 ) -> None:
@@ -7213,9 +7224,15 @@ def _suggest_torch_checks(
     # suggested fixes to resolve `cond`` are to tell the compiler to assume
     # either `cond` or its negation (the user will need to select which)
     suggested_fixes = [
-        f"torch._check({printer.doprint(cond)})",
         f"torch._check({printer.doprint(sympy.Not(cond))})",
     ]
+    cond_str = printer.doprint(cond)
+    var_name = is_non_negative_check(cond_str)
+    # This is a non-negative check, suggest _check_is_size
+    if var_name and ">= 0" in cond_str:
+        suggested_fixes.append(f"torch._check_is_size({var_name})")
+    else:
+        suggested_fixes.append(f"torch._check({printer.doprint(cond)})")
     for i, fix in enumerate(suggested_fixes):
         msg += f"\n  {i + 1}. {fix}"
     src_mapped = ", ".join(
