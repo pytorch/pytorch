@@ -62,7 +62,7 @@ inline static PyObject* map_aggregate(PyObject* a, F fn) {
   // Case 1: a is a tuple.
   if (PyTuple_Check(a)) {
     Py_ssize_t n = PyTuple_GET_SIZE(a);
-    if (n == 0) {
+    if (n == 0 && PyTuple_CheckExact(a)) {
       return Py_NewRef(a);
     }
     THPObjectPtr new_tuple(PyTuple_New(n));
