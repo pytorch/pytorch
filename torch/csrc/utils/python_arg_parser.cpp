@@ -1415,7 +1415,7 @@ void FunctionParameter::set_default_str(const std::string& str) {
   } else if (type_ == ParameterType::SCALARTYPE) {
     if (str == "None") {
       default_scalartype = at::ScalarType::Undefined;
-    } else if (str == "torch.int64" || str == "at::kLong") {
+    } else if (str == "torch.int64") {
       default_scalartype = at::ScalarType::Long;
     } else {
       TORCH_CHECK(false, "invalid default value for ScalarType: " + str);
