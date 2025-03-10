@@ -1782,7 +1782,7 @@ class NDARRAY_MATCH : public LeafGuard {
     for (int i = 0; i < _expected_ndims; i++) {
       _expected_shape.push_back(PyArray_DIM(array, i));
     }
-#elif
+#else
     throw py::runtime_error("expecting build with USE_NUMPY")
 #endif
   }
@@ -1813,7 +1813,7 @@ class NDARRAY_MATCH : public LeafGuard {
     }
 
     return true;
-#elif
+#else
     throw py::runtime_error("expecting build with USE_NUMPY")
 #endif
   }
