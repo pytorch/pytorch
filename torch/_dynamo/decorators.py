@@ -30,7 +30,7 @@ from .eval_frame import (
     skip_code,
 )
 from .exc import IncorrectUsage
-from .external_utils import is_compiling
+from .external_utils import is_compiling, wrap_inline
 from .utils import is_function
 
 
@@ -82,7 +82,18 @@ def disable(fn=None, recursive=True):
             return DisableContext()(fn)
         return DisableContext()
     else:
-        return skip(fn)
+
+        def wrap(fn):
+            fn = innermost_fn(fn)
+            assert callable(fn)
+            disable_wrapper = wrap_inline(fn)
+            disable_wrapper._torchdynamo_disable = True  # type: ignore[attr-defined]
+            disable_wrapper._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
+            return disable_wrapper
+
+        if fn is None:
+            return wrap
+        return wrap(fn)
 
 
 def skip(fn=None):

@@ -87,6 +87,7 @@ from .cache_size import (
     exceeds_recompile_limit,
     is_recompilation,
 )
+from .code_context import code_context
 from .eval_frame import (
     always_optimize_code_objects,
     dynamo_tls,
@@ -551,6 +552,22 @@ class ConvertFrameAssert:
 
         if not has_tensor_in_frame(frame):
             return ConvertFrameReturn()
+
+        # skip tracing disabled functions
+        # normally this codepath is reached thorugh non-recursive disable wrappers
+        if getattr(frame.f_func, "_torchdynamo_disable", False):
+            # if this frame is a non-recursive disable wrapper, then
+            # we expect the next function call to be frame.f_func, which should
+            # also be skipped. We can use code context to achieve this.
+            original_fn = getattr(frame.f_func, "_torchdynamo_orig_callable", None)
+            if original_fn:
+                code_context.get_context(original_fn.__code__)["should_skip_once"] = (
+                    True
+                )
+            return ConvertFrameReturn()
+        if code_context.get_context(code).get("should_skip_once", False):
+            code_context.get_context(code).pop("should_skip_once")
+            return ConvertFrameReturn(apply_to_code=False)
 
         global initial_global_state
         initial_global_state = GlobalStateGuard()

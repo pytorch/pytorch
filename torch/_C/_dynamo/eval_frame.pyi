@@ -49,6 +49,7 @@ class _PyInterpreterFrame:
     f_lasti: int
     f_lineo: int
     f_back: types.FrameType
+    f_func: types.FunctionType
     # A tuple containing cell objects captured by this frame.
     closure: tuple[types.CellType]
 

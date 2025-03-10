@@ -847,12 +847,14 @@ If the above doesn't work, please subtmit an issue to GitHub.
         self.assertEqual(cnts.frame_count, 3)
         self.assertEqual(cnts.op_count, 6)
 
-    def test_skip(self):
+    def test_disable_recursive_false(self):
         def fn2(x):
-            return x.sin()
+            return x + 1
 
         @torch._dynamo.disable(recursive=False)
         def fn1(x):
+            if torch.compiler.is_compiling():
+                raise RuntimeError("bad")
             x = x.sigmoid()
             return fn2(x.cos())
 
@@ -863,6 +865,50 @@ If the above doesn't work, please subtmit an issue to GitHub.
         opt_fn = torch.compile(fn, backend=cnts)
         opt_fn(torch.randn(4))
         self.assertEqual(cnts.frame_count, 2)
+
+        # test that applying disable nonrecursive doesn't modify the original function
+        def fn3(x):
+            if torch.compiler.is_compiling():
+                return x - 1
+            return fn2(x) + 2
+
+        @torch.compile(backend=cnts)
+        def outer(f, x):
+            return f(x)
+
+        inp = torch.ones(3)
+        fn3_disabled = torch._dynamo.disable(fn3, recursive=False)
+
+        torch._dynamo.reset()
+
+        cnts.clear()
+        res = outer(fn3, inp)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(res, inp - 1)
+
+        cnts.clear()
+        res = outer(fn3_disabled, inp)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(res, inp + 3)
+
+        torch._dynamo.reset()
+
+        cnts.clear()
+        res = outer(fn3_disabled, inp)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(res, inp + 3)
+
+        cnts.clear()
+        res = outer(fn3, inp)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(res, inp - 1)
+
+        # directly compiling a disabled function should result in a compile
+        torch._dynamo.reset()
+        cnts.clear()
+        res = torch.compile(fn3_disabled, backend=cnts)(inp)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(res, inp - 1)
 
     def test_substitute_in_graph(self):
         counters.clear()
