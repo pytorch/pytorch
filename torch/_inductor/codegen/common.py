@@ -1084,8 +1084,6 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
         values: tuple[OpVarT, ...],
         stable: bool,
         descending: bool,
-        indices_dtype: torch.dtype = torch.long,
-        dynamic_indices_dtype: bool = False,
     ) -> tuple[OpVarT, ...]:
         raise NotImplementedError(
             f"{type(self).__name__}: sort should be handled by CSEProxy"
@@ -2215,8 +2213,6 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         values: tuple[CSEVariable, ...],
         stable: bool,
         descending: bool,
-        indices_dtype: torch.dtype = torch.long,
-        dynamic_indices_dtype: bool = False,
     ) -> tuple[CSEVariable, ...]:
         raise NotImplementedError
 
@@ -2838,12 +2834,8 @@ class CSEProxy(DefaultHandler):
         values: tuple[CSEVariable, ...],
         stable: bool,
         descending: bool,
-        indices_dtype: torch.dtype = torch.long,
-        dynamic_indices_dtype: bool = False,
     ) -> tuple[CSEVariable, ...]:
-        return self.kernel.sort(
-            dtypes, values, stable, descending, indices_dtype, dynamic_indices_dtype
-        )
+        return self.kernel.sort(dtypes, values, stable, descending)
 
     def bucketize(
         self,

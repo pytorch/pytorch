@@ -49,11 +49,9 @@ std::tuple<Tensor, Tensor> sort_quantized_cpu_stable(
     const Tensor& self,
     std::optional<bool> stable,
     int64_t dim,
-    bool descending,
-    ScalarType indices_dtype,
-    bool dynamic_indices_dtype) {
+    bool descending) {
   auto [sort_int, sort_indicies] =
-      at::sort(self.int_repr(), stable, dim, descending, indices_dtype, dynamic_indices_dtype);
+      at::sort(self.int_repr(), stable, dim, descending);
   return std::forward_as_tuple(
       at::_make_per_tensor_quantized_tensor(
           sort_int, self.q_scale(), self.q_zero_point()),

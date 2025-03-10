@@ -850,13 +850,7 @@ class FreeSymbolsOpsHandler(DefaultHandler):
         return (None,) * len(values)
 
     def sort(
-        self,
-        dtypes: Any,
-        values: Sequence[Any],
-        stable: Any,
-        descending: Any,
-        indices_dtype: Any,
-        dynamic_indices_dtype: Any,
+        self, dtypes: Any, values: Sequence[Any], stable: Any, descending: Any
     ) -> tuple[None, ...]:
         return (None,) * len(values)
 
