@@ -1232,7 +1232,7 @@ class TestFP8MatmulCuda(TestCase):
         print(C)
 
         torch.testing.assert_close(C, C_ref, atol=0, rtol=0)
-        
+
         print('done')
 
 
