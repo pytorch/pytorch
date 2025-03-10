@@ -241,6 +241,43 @@ def create_fw_bw_graph_branches(true_fn, false_fn, *operands):
         return fw_true_graph, fw_false_graph, joint_true_graph, joint_false_graph
 
 
+def create_bw_fn(
+    fn: Callable,
+    num_primals: int,
+    include_set: torch._C.DispatchKeySet,
+    exclude_set: torch._C.DispatchKeySet,
+):
+    from torch._functorch.aot_autograd import AOTConfig, create_joint
+    from torch._higher_order_ops.utils import prepare_fw_with_masks
+
+    dummy_aot_config = AOTConfig(
+        fw_compiler=None,  # type: ignore[arg-type]
+        bw_compiler=None,  # type: ignore[arg-type]
+        partition_fn=None,  # type: ignore[arg-type]
+        decompositions={},
+        num_params_buffers=0,
+        aot_id=0,
+        keep_inference_input_mutations=False,
+    )
+
+    def bw_fn(*grads_and_primals):
+        grads = grads_and_primals[:-num_primals]
+        primals = grads_and_primals[-num_primals:]
+        bw_f = create_joint(prepare_fw_with_masks(fn), aot_config=dummy_aot_config)
+        # TODO: somehow we still need to call torch.enable_grad() here, otherwise the grads
+        # info are gone.
+        with torch._C._ForceDispatchKeyGuard(
+            include_set, exclude_set
+        ), torch.enable_grad():
+            inp_tangents = bw_f(primals, grads)[1]
+        return [
+            inp_tangent if inp_tangent is not None else torch.zeros_like(inp)
+            for inp, inp_tangent in zip(primals, inp_tangents)
+        ]
+
+    return bw_fn
+
+
 def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     assert isinstance(
         operands, (list, tuple)
@@ -346,18 +383,24 @@ def cond_autograd(pred, true_fn, false_fn, operands):
         with torch._C._AutoDispatchBelowAutograd():
             return cond_op(pred, true_fn, false_fn, operands)
 
-    (
-        fw_true_graph,
-        fw_false_graph,
-        joint_true_graph,
-        joint_false_graph,
-    ) = create_fw_bw_graph_branches(true_fn, false_fn, *operands)
+    true_bw_fn = create_bw_fn(
+        true_fn,
+        len(operands),
+        torch._C._dispatch_tls_local_include_set(),
+        torch._C._dispatch_tls_local_exclude_set(),
+    )
+    false_bw_fn = create_bw_fn(
+        false_fn,
+        len(operands),
+        torch._C._dispatch_tls_local_include_set(),
+        torch._C._dispatch_tls_local_exclude_set(),
+    )
     flat_out = CondAutogradOp.apply(
         pred,
-        fw_true_graph,
-        fw_false_graph,
-        joint_true_graph,
-        joint_false_graph,
+        true_fn,
+        false_fn,
+        true_bw_fn,
+        false_bw_fn,
         *operands,
     )
     return flat_out
