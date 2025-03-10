@@ -134,7 +134,11 @@ def maybe_realize(args: list[Optional[IRNode]]):
 
 
 def get_float32_precision():
-    if torch.get_float32_matmul_precision() == "highest" or torch.version.hip:
+    if (
+        torch.get_float32_matmul_precision() == "highest"
+        or torch.version.hip
+        or torch.mtia.is_available()
+    ):
         return "'ieee'"
     else:
         return "'tf32'"
@@ -796,7 +800,7 @@ def _get_nv_config(query, mode: Mode) -> tuple[int, int, int, int]:
     dtype = query.get_dtype()
     head_dim = V.graph.sizevars.evaluate_static_shape(query.get_size()[-1])
     fwd_config = None
-
+    bwd_config = None
     capability = torch.cuda.get_device_capability()
 
     if mode == Mode.fwd:
@@ -819,25 +823,26 @@ def _get_nv_config(query, mode: Mode) -> tuple[int, int, int, int]:
     else:  # bwd
         assert mode == Mode.bwd
         if dtype == torch.float32:
-            return (16, 16, 4, 1)
+            bwd_config = (16, 16, 4, 1)
         elif head_dim <= 256 and capability >= (9, 0):  # H100
             if head_dim == 64:
-                return (64, 64, 4, 3)
+                bwd_config = (64, 64, 4, 3)
             elif head_dim == 128:
-                return (64, 128, 8, 3)
+                bwd_config = (64, 128, 8, 3)
             else:
-                return (64, 64, 4, 2)
+                bwd_config = (64, 64, 4, 2)
         elif capability >= (8, 0):
             if head_dim >= 64:
-                return (32, 128, 4, 3)
+                bwd_config = (32, 128, 4, 3)
             elif head_dim == 128:
                 # SM86/89 have smaller shared memory sizes
                 num_stages = 3 if capability[-1] == 0 else 2
-                return (64, 64, 4, num_stages)
+                bwd_config = (64, 64, 4, num_stages)
             else:
-                return (64, 64, 4, 2)
+                bwd_config = (64, 64, 4, 2)
         else:  # modest hardware or extremely large head_dim
-            return (16, 16, 4, 1)
+            bwd_config = (16, 16, 4, 1)
+        return bwd_config
 
 
 def _get_default_config_fwd(query) -> tuple[int, int, int, int]:
@@ -1444,6 +1449,10 @@ def flex_attention(
     # Mark SPARSE_KV_BLOCK_SIZE & SPARSE_Q_BLOCK_SIZE as static shapes and add guards.
     SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_KV_BLOCK_SIZE)
     SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_Q_BLOCK_SIZE)
+
+    # ROCm specific considerations
+    if torch.version.hip:
+        kernel_options["kpack"] = 2
 
     # Note, we don't need to pass in the captured buffers explicitly
     # because they're implicitly added by the score_mod function
