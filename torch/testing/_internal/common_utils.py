@@ -108,6 +108,7 @@ except ImportError:
 
 
 MI300_ARCH = ("gfx940", "gfx941", "gfx942")
+NAVI_ARCH = ("gfx1030", "gfx1100", "gfx1101", "gfx1200", "gfx1201")
 
 
 def freeze_rng_state(*args, **kwargs):
