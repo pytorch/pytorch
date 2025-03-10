@@ -250,7 +250,7 @@ stable_diffusion_unet,pass_due_to_skip,0
 
 
 
-timm_efficientnet,pass,7
+timm_efficientnet,fail_accuracy,7
 
 
 
