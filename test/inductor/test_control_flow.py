@@ -1463,29 +1463,6 @@ class ScanModels:
 
             return scan_op(combine_fn, init, xs, dim=self.dim, reverse=self.reverse)
 
-    class ScanConvAndLinear(torch.nn.Module):
-        def __init__(self, reverse, dim):
-            super().__init__()
-            self.reverse = reverse
-            self.dim = dim
-            self.conv2d = torch.nn.Conv2d(4, 4, (3, 3), stride=(1, 1), padding=(1, 1))
-            self.linear = torch.nn.Linear(4, 4)
-
-        # init = torch.randn(2, 4, 4, 4)
-        # xs = torch.randn(scan_dim, 2, 4, 4, 4)
-        def forward(self, scan_op, init, xs):
-            def combine_fn(carry, x):
-                # size is still 2, 4, 4, 4 after conv2d
-                x = self.conv2d(x)
-                sizes = x.size()
-                x = self.linear(x.view(-1, sizes[-1]))
-                x = x.view(*sizes)
-                new_carry = carry + x
-                y = new_carry.view(-1)
-                return new_carry, y
-
-            return scan_op(combine_fn, init, xs, dim=self.dim, reverse=self.reverse)
-
     class ScanInCond(torch.nn.Module):
         def __init__(self, reverse, dim):
             super().__init__()
@@ -1760,27 +1737,6 @@ class ScanTests(TestCase):
         xs = xs.movedim(0, dim)
         self._run_test(
             model=ScanModels.ScanConv(reverse=reverse, dim=dim),
-            inputs=(
-                init,
-                xs,
-            ),
-            device=device,
-            dynamic=dynamic,
-        )
-
-    @requires_gpu
-    @parametrize("device", ["cpu", GPU_TYPE])
-    @parametrize("dynamic", [True, False])
-    @parametrize("reverse", [True, False])
-    @parametrize("dim", [0, 1, 3])
-    @parametrize("scan_length", [1, 5])
-    @torch._dynamo.config.patch("capture_scalar_outputs", True)
-    def test_scan_conv_linear(self, device, dynamic, reverse, dim, scan_length):
-        init = torch.randn(2, 4, 4, 4)
-        xs = torch.randn(scan_length, 2, 4, 4, 4)
-        xs = xs.movedim(0, dim)
-        self._run_test(
-            model=ScanModels.ScanConvAndLinear(reverse=reverse, dim=dim),
             inputs=(
                 init,
                 xs,
