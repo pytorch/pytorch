@@ -2,7 +2,6 @@ import builtins
 import copy
 import dataclasses
 import inspect
-import io
 import os
 import sys
 import typing
@@ -10,23 +9,14 @@ import warnings
 import zipfile
 from collections.abc import Iterator
 from enum import auto, Enum
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Optional,
-    Tuple,
-    Type,
-    TYPE_CHECKING,
-    Union,
-)
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch.utils._pytree as pytree
 from torch.fx._compatibility import compatibility
 from torch.fx.passes.infra.pass_base import PassResult
 from torch.fx.passes.infra.pass_manager import PassManager
+from torch.types import FileLike
 from torch.utils._pytree import (
     FlattenFunc,
     FromDumpableContextFn,
@@ -64,6 +54,8 @@ __all__ = [
     "UnflattenedModule",
 ]
 
+# To make sure export specific custom ops are loaded
+import torch.export.custom_ops
 
 from .decomp_utils import CustomDecompTable
 from .dynamic_shapes import Constraint, Dim, dims, ShapesCollection
@@ -381,7 +373,7 @@ DEFAULT_PICKLE_PROTOCOL = 2
 
 def save(
     ep: ExportedProgram,
-    f: Union[str, os.PathLike, io.BytesIO],
+    f: FileLike,
     *,
     extra_files: Optional[dict[str, Any]] = None,
     opset_version: Optional[dict[str, int]] = None,
@@ -399,7 +391,7 @@ def save(
     Args:
         ep (ExportedProgram): The exported program to save.
 
-        f (Union[str, os.PathLike, io.BytesIO): A file-like object (has to
+        f (str | os.PathLike[str] | IO[bytes]) A file-like object (has to
          implement write and flush) or a string containing a file name.
 
         extra_files (Optional[Dict[str, Any]]): Map from filename to contents
@@ -464,7 +456,7 @@ def save(
 
 
 def load(
-    f: Union[str, os.PathLike, io.BytesIO],
+    f: FileLike,
     *,
     extra_files: Optional[dict[str, Any]] = None,
     expected_opset_version: Optional[dict[str, int]] = None,
@@ -479,7 +471,7 @@ def load(
     :func:`torch.export.save <torch.export.save>`.
 
     Args:
-        f (Union[str, os.PathLike, io.BytesIO): A file-like object (has to
+        f (str | os.PathLike[str] | IO[bytes]): A file-like object (has to
          implement write and flush) or a string containing a file name.
 
         extra_files (Optional[Dict[str, Any]]): The extra filenames given in

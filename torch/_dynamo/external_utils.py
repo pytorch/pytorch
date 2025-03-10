@@ -1,5 +1,27 @@
 # This module contains functions that *will be allowed* by dynamo
 
+"""
+This module contains utility functions that are explicitly allowed to be called during
+TorchDynamo compilation. These functions are carefully vetted to ensure they work
+correctly within the TorchDynamo tracing and compilation process.
+
+Key functionality groups:
+
+- Compilation State:
+  Functions for checking compilation state (is_compiling)
+
+- Function Wrapping:
+  Utilities for wrapping functions (wrap_inline, wrap_numpy) to work with
+  TorchDynamo compilation
+
+- Autograd Hooks:
+  Functions and classes for handling autograd hooks and backward passes
+  (call_hook, FakeBackwardCFunction, etc.)
+
+- Tensor Operations:
+  Utility functions for tensor operations and transformations
+"""
+
 import functools
 import warnings
 from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
@@ -114,6 +136,14 @@ def call_backward(
         grads = (grads,)
 
     return grads
+
+
+def normalize_as_list(x: Any) -> list[Any]:
+    if isinstance(x, tuple):
+        return list(x)
+    elif isinstance(x, list):
+        return x
+    return [x]
 
 
 def untyped_storage_size(x: torch.Tensor) -> int:

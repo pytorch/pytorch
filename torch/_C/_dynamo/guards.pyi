@@ -104,6 +104,7 @@ class GuardManager:
     def add_torch_function_mode_stack_guard(
         self, initial_stack, verbose_code_parts: list[str]
     ) -> None: ...
+    def add_mapping_keys_guard(sef, value, verbose_code_parts: list[str]) -> None: ...
 
 class RootGuardManager(GuardManager):
     def get_epilogue_lambda_guards(self) -> list[LeafGuard]: ...
@@ -158,6 +159,7 @@ def install_symbolic_shape_guard(
 def profile_guard_manager(
     guard_manager: GuardManager,
     f_locals: dict[str, Any],
+    n_iters: int,
 ) -> float: ...
 
 class TensorGuards:

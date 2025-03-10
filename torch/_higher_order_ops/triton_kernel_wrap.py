@@ -156,6 +156,11 @@ class Op:
     fn_call_name: Optional[str]
     args: list[Union[Param, Intermediate]]
     ret: Intermediate = dataclasses.field(repr=False)
+    # used for scf.yield: see [Note: scf.yield fix-up]
+    sub_idx: Optional[int] = None
+    # used for tt.elementwise_inline_asm
+    # `is_pure = True` assumes the asm block has no side-effects
+    is_pure: bool = False
 
     def __post_init__(self) -> None:
         if self.name == "tt.call":
@@ -172,9 +177,18 @@ def generate_ttir(
     """
     import sympy
     import triton
+    import triton.runtime.jit
     from triton.compiler.compiler import ASTSource
     from triton.runtime.autotuner import Autotuner
     from triton.runtime.jit import JITFunction
+
+    from torch._inductor.utils import (
+        get_triton_attrs_descriptor_version,
+        triton_version_uses_attrs_dict,
+        TritonAttrsDescriptorVersion,
+    )
+
+    triton_version = get_triton_attrs_descriptor_version()
 
     import torch._inductor.ir
     from torch._subclasses.fake_tensor import FakeTensor
@@ -225,26 +239,83 @@ def generate_ttir(
     ]
 
     def _get_specialization(args):  # type: ignore[no-untyped-def]
-        try:
+        # Support multiple triton versions.
+        # This code basically copies JITFunction.run() logic to get the attrs to construct an ASTSource.
+        if triton_version == TritonAttrsDescriptorVersion.V1_COMPILER:
+            return kernel._get_config(*args)
+        elif triton_version in {
+            TritonAttrsDescriptorVersion.V2_BACKENDS,
+            TritonAttrsDescriptorVersion.V3_BACKENDS_TUPLE,
+        }:
             from triton.backends.compiler import AttrsDescriptor  # noqa: F401
 
             target = triton.runtime.driver.active.get_current_target()
-            backend = triton.compiler.compiler.make_backend(target)
-            return backend.get_attrs_descriptor(args, kernel.params)
-        except ImportError:
-            return kernel._get_config(*args)
+            backend_ = triton.compiler.compiler.make_backend(target)
+            return backend_.get_attrs_descriptor(args, kernel.params)
+        else:
+            assert (
+                get_triton_attrs_descriptor_version()
+                == TritonAttrsDescriptorVersion.V4_DICT
+            )
+            # specialize_impl switched to create_specialize_impl in https://github.com/triton-lang/triton/pull/6099
+            if hasattr(triton.runtime.jit, "create_specialize_impl"):
+                specialize_impl = triton.runtime.jit.create_specialize_impl()
+            else:
+                from triton.runtime.jit import specialize_impl  # type: ignore[no-redef]
+
+            from triton._utils import find_paths_if, get_iterable_path
+
+            # logic is copied from: binder = create_function_from_signature(self.signature, self.params, backend)
+            attrvals = []
+            for arg, kp in zip(args, kernel.params):
+                if kp.is_constexpr:
+                    attrvals.append(arg)
+                else:
+                    spec = specialize_impl(
+                        arg,
+                        specialize_extra=backend.get_arg_specialization,
+                        is_const=kp.is_const,
+                        specialize_value=not kp.do_not_specialize,
+                        align=not kp.do_not_specialize_on_alignment,
+                    )
+                    attrvals.append(spec[1])
+
+            attrs = find_paths_if(attrvals, lambda _, x: isinstance(x, str))
+            attrs = {
+                k: backend.parse_attr(get_iterable_path(attrvals, k)) for k in attrs
+            }
+            return attrs
 
     specialization = _get_specialization(ordered_args.values())
     constants = {
         name: arg for name, arg in ordered_args.items() if not isinstance(arg, Tensor)
     }
 
-    # Build kernel signature -- doesn't include constexpr arguments.
-    signature = {
-        name: kernel._type_of(kernel._key_of(arg))
-        for i, (name, arg) in enumerate(ordered_args.items())
-        if i not in kernel.constexprs
-    }
+    if (mangle_type := getattr(triton.runtime.jit, "mangle_type", None)) is not None:
+
+        def get_signature_value(idx: int, arg: Any) -> str:
+            if kernel.params[idx].is_constexpr:
+                return "constexpr"
+            return mangle_type(arg)
+
+    else:
+
+        def get_signature_value(idx: int, arg: Any) -> str:
+            return kernel._type_of(kernel.key_of(arg))
+
+    if triton_version_uses_attrs_dict():
+        # In newer versions of Triton, the signature includes constexpr args
+        signature = {
+            name: get_signature_value(i, arg)
+            for i, (name, arg) in enumerate(ordered_args.items())
+        }
+    else:
+        # In older versions of Triton, the signature does not include constexpr args
+        signature = {
+            name: get_signature_value(i, arg)
+            for i, (name, arg) in enumerate(ordered_args.items())
+            if i not in kernel.constexprs
+        }
 
     triton._C.libtriton.ir.load_dialects(context)
     backend.load_dialects(context)
@@ -254,13 +325,17 @@ def generate_ttir(
     # Triton changes ASTSource.make_ir to take 3/4 arguments. Handle
     # backward compatibility here.
     make_ir_sig_params = len(inspect.signature(src.make_ir).parameters)
+    get_codegen_implementation_sig_params = len(
+        inspect.signature(backend.get_codegen_implementation).parameters
+    )
     if make_ir_sig_params == 2:
         ttir_module = src.make_ir(options, context)
     elif make_ir_sig_params == 3:
         codegen_fns = backend.get_codegen_implementation()
         ttir_module = src.make_ir(options, codegen_fns, context)
     else:
-        codegen_fns = backend.get_codegen_implementation()
+        codegen_args = [options] if get_codegen_implementation_sig_params == 1 else []
+        codegen_fns = backend.get_codegen_implementation(*codegen_args)
         module_map = backend.get_module_map()
         ttir_module = src.make_ir(options, codegen_fns, module_map, context)
     if not ttir_module.verify():
@@ -440,9 +515,59 @@ def ttir_to_functions(
                             op_stack[parent_block_id][op_result].extend(child_ops)
 
                 scf_results = [Intermediate(idx) for idx in result_ids]
-                for scf_result in scf_results:
+
+                if return_ops and all(
+                    (op.name == "scf.yield" and len(result_ids) == len(op.args))
+                    for op in return_ops
+                ):
+                    # [Note: scf.yield fix-up]
+                    #
+                    # TL;DR: if our scf.yield takes N args, then we'll create N scf.yield ops to handle each of the
+                    # args.
+                    #
+                    #      **Context**:
+                    # During mutation analysis, the analysis pass will identify mutating ops (e.g. tt.store)
+                    # and then DFS upwards towards the parameters of the function. Specifically, the analysis pass
+                    # looks at the mutated arg in tt.store; then looks for its source ops; and then recurses on the
+                    # arguments to each of the source ops.
+                    #
+                    # In the case of scf.if/scf.for, we may have multiple return ops, each passed as an arg
+                    # to scf.yield:
+                    #
+                    # %18:2 = scf.if %... -> (!tt.ptr<f32>, !tt.ptr<f32>) {
+                    #   ...
+                    #   scf.yield %1, %2
+                    # } else {
+                    #   scf.yield %3, %4
+                    # }
+                    #
+                    # And for each of the returns of the scf.if, we'd naively assign the source op of each of the
+                    # return values to be the scf.yields. But the scf.yields take _all_ the returns as arguments.
+                    # Therefore, if _any_ of the return values of the scf.if are mutated, then the analysis pass
+                    # would mark _all_ of the yield args as mutated.
+                    #
+                    #      **Solution**:
+                    # For the purposes of this analysis pass, we create N yield ops - one for each
+                    # return-val/yield-arg. In the example above, we'll have two scf.yield's for each branch of the
+                    # scf.if.
+
                     for return_op in return_ops:
-                        op_stack[parent_block_id][scf_result].append(return_op)
+                        for i, (scf_result, yield_arg) in enumerate(
+                            zip(scf_results, return_op.args)
+                        ):
+                            sub_yield_op = Op(
+                                return_op.name,
+                                return_op.fn_call_name,
+                                [yield_arg],
+                                return_op.ret,
+                                sub_idx=i,
+                            )
+                            op_stack[parent_block_id][scf_result].append(sub_yield_op)
+
+                else:
+                    for scf_result in scf_results:
+                        for return_op in return_ops:
+                            op_stack[parent_block_id][scf_result].append(return_op)
             else:
                 raise RuntimeError(
                     f"Unknown blocked function: {name}. Can't capture the TTIR."
@@ -455,14 +580,22 @@ def ttir_to_functions(
                 Intermediate(operand) for operand in operand_ids
             ]
             block_ops = op_stack[parent_block_id]
+
+            is_pure = False
+            # Handle the case for tt.elementwise_inline_asm to set `is_pure` for mutation analysis
+            if name == "tt.elementwise_inline_asm":
+                is_pure = op.get_bool_attr("pure")
+
             if result_ids:
                 for result_id in result_ids:
                     res = Intermediate(result_id)
-                    block_ops[res].append(Op(name, callee, args, res))
+                    block_ops[res].append(Op(name, callee, args, res, is_pure=is_pure))
             else:
                 next_fake_intermediate -= 1
                 fake_res = Intermediate(next_fake_intermediate)
-                block_ops[fake_res].append(Op(name, callee, args, fake_res))
+                block_ops[fake_res].append(
+                    Op(name, callee, args, fake_res, is_pure=is_pure)
+                )
 
     ttir_module.walk(mlir_to_functions)
 
@@ -523,7 +656,14 @@ def analyze_kernel_mutations(
     ops = functions[fn_name]
     for op_list in ops.values():
         for op in op_list:
+            # If we encounter an operation with effects that cannot be reliably analyzed
+            # (e.g. `tt.elementwise_inline_asm`), we assume it does not mutate any input parameters.
             if op.name in UNKNOWN_OPS:
+                if op.name == "tt.elementwise_inline_asm" and op.is_pure:
+                    log.warning(
+                        "TTIR mutation analysis: Skipping pure tt.elementwise_inline_asm op (is_pure=True)"
+                    )
+                    continue
                 raise RuntimeError(
                     f"ttir analysis hit an op we do not know how to analyze: {op.name}"
                 )
@@ -1135,25 +1275,23 @@ class TritonHOPifier:
             defaults = inspect.signature(Autotuner.__init__).parameters
             # Newer version of triton change attribute name from warmup to num_warmup and rep to num_rep.
             # The call to get_first_attr is to maintain backward-compatibility.
+
+            def defaults_ok(
+                attr: str, alternates: tuple[str, ...], values: tuple[Any, ...]
+            ) -> bool:
+                if attr not in defaults:
+                    return True
+                value = torch._dynamo.utils.get_first_attr(kernel, attr, *alternates)
+                if value == defaults[attr].default:
+                    return True
+                return value in values
+
             if (
                 not torch._inductor.config.unsafe_ignore_unsupported_triton_autotune_args
                 and (
-                    (
-                        "warmup" in defaults
-                        and defaults["warmup"].default
-                        != torch._dynamo.utils.get_first_attr(
-                            kernel, "num_warmups", "warmup"
-                        )
-                    )
-                    or (
-                        "rep" in defaults
-                        and defaults["rep"].default
-                        != torch._dynamo.utils.get_first_attr(kernel, "num_reps", "rep")
-                    )
-                    or (
-                        "use_cuda_graph" in defaults
-                        and defaults["use_cuda_graph"].default != kernel.use_cuda_graph
-                    )
+                    not defaults_ok("num_warmups", ("warmup",), (25, None))
+                    or not defaults_ok("num_reps", ("rep",), (100, None))
+                    or not defaults_ok("use_cuda_graph", (), (False,))
                 )
             ):
                 self.raise_unsupported(

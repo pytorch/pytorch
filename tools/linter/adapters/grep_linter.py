@@ -61,13 +61,18 @@ def run_command(
 
 
 def lint_file(
-    filename: str,
+    matching_line: str,
     allowlist_pattern: str,
     replace_pattern: str,
     linter_name: str,
     error_name: str,
     error_description: str,
 ) -> LintMessage | None:
+    # matching_line looks like:
+    #   tools/linter/clangtidy_linter.py:13:import foo.bar.baz
+    split = matching_line.split(":")
+    filename = split[0]
+
     if allowlist_pattern:
         try:
             proc = run_command(["grep", "-nEHI", allowlist_pattern, filename])
@@ -139,8 +144,8 @@ def lint_file(
             )
 
     return LintMessage(
-        path=filename,
-        line=None,
+        path=split[0],
+        line=int(split[1]) if len(split) > 1 else None,
         char=None,
         code=linter_name,
         severity=LintSeverity.ERROR,
@@ -218,10 +223,24 @@ def main() -> None:
     if args.match_first_only:
         files_with_matches = ["--files-with-matches"]
 
+    lines = []
     try:
-        proc = run_command(
-            ["grep", "-nEHI", *files_with_matches, args.pattern, *args.filenames]
-        )
+        # Split the grep command into multiple batches to avoid hitting the
+        # command line length limit of ~1M on my machine
+        arg_length = sum(len(x) for x in args.filenames)
+        batches = arg_length // 750000 + 1
+        batch_size = len(args.filenames) // batches
+        for i in range(0, len(args.filenames), batch_size):
+            proc = run_command(
+                [
+                    "grep",
+                    "-nEHI",
+                    *files_with_matches,
+                    args.pattern,
+                    *args.filenames[i : i + batch_size],
+                ]
+            )
+            lines.extend(proc.stdout.decode().splitlines())
     except Exception as err:
         err_msg = LintMessage(
             path=None,
@@ -251,13 +270,9 @@ def main() -> None:
         print(json.dumps(err_msg._asdict()), flush=True)
         sys.exit(0)
 
-    lines = proc.stdout.decode().splitlines()
-    # matching_line looks like:
-    #   tools/linter/clangtidy_linter.py:13:import foo.bar.baz
-    files = {line.split(":")[0] for line in lines}
-    for file in files:
+    for line in lines:
         lint_message = lint_file(
-            file,
+            line,
             args.allowlist_pattern,
             args.replace_pattern,
             args.linter_name,

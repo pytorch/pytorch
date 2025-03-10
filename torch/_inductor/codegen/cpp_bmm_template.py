@@ -9,6 +9,7 @@ import sympy
 from .. import ir
 from ..select_algorithm import PartialRender
 from ..virtualized import V
+from .common import ArgName
 from .cpp_gemm_template import CppGemmTemplate, GEMM_TEMPLATE
 from .cpp_micro_gemm import LayoutType
 from .cpp_template_kernel import CppTemplateKernel
@@ -21,7 +22,7 @@ GEMM_SINGLE_THREAD_MM_STUB = r"""
     inputs={"X": X, "W": W},
     outputs={"Y": Y_2d},
     aliases=aliases,
-    function_name="single_thread_mm",
+    function_name=kernel_name+"_single_thread_mm",
     extra_sizevars=BY_sizevars + [b_index],
     placeholder="<SINGLE_THREAD_MM_DEF_FOR_BMM>")}}"""
 
@@ -30,7 +31,7 @@ GEMM_THREADED_MM_STUB = r"""
     inputs={"X": X, "W": W},
     outputs={"Y": Y_2d},
     aliases=aliases,
-    function_name="threaded_mm",
+    function_name=kernel_name+"_threaded_mm",
     extra_sizevars=BY_sizevars + [b_index],
     placeholder="<THREADED_MM_DEF_FOR_BMM>")}}"""
 
@@ -54,7 +55,7 @@ extern "C"
     for (int64_t b_start = 0; b_start < B_single_thread_block; ++b_start) {
         {{template.get_gemm_function_call(
             kernel,
-            "single_thread_mm",
+            kernel_name+"_single_thread_mm",
             "<SINGLE_THREAD_CALL_FOR_BMM>",
             b_index="b_start",
         )}}
@@ -62,7 +63,7 @@ extern "C"
     for (int64_t b_start = B_single_thread_block; b_start < B; ++b_start) {
         {{template.get_gemm_function_call(
             kernel,
-            "threaded_mm",
+            kernel_name+"_threaded_mm",
             "<THREADED_MM_CALL_FOR_BMM>",
             b_index="b_start",
         )}}
@@ -125,18 +126,24 @@ class CppBmmTemplate(CppGemmTemplate):
 
     @staticmethod
     def check_if_block_weight(W, micro_gemm):
-        return micro_gemm.get_b_layout() != LayoutType.NORMAL or (
-            (not W.get_layout().is_contiguous() or W.get_name() in V.graph.constants)  # type: ignore[union-attr]
-            if isinstance(W, ir.IRNode)
-            else not W.is_contiguous()
+        assert isinstance(W, ir.IRNode)
+        _, n = W.get_size()[-2:]
+        result = (
+            not W.get_layout().is_contiguous()
+            or W.get_name() in V.graph.constants
+            or (
+                n % micro_gemm.register_blocking.block_n != 0
+                and micro_gemm.get_b_layout != LayoutType.NORMAL
+            )
         )
+        return result
 
     def get_gemm_function_call(
         self,
         kernel: CppTemplateKernel,
         function_name: str,
         placeholder: str,
-        b_index: int,
+        b_index: str,
     ) -> str:
         """
         Similar to 'def_kernel' in cpp_template_kernel, but instead of generating a function definition,
@@ -150,8 +157,8 @@ class CppBmmTemplate(CppGemmTemplate):
             arg_defs, call_args, _, _ = kernel.args.python_argdefs()
             for i, buf in enumerate(call_args):
                 if buf == self.b_index:
-                    arg_defs[i] = b_index
-            call = f"{function_name}({', '.join(arg_defs)});"
+                    arg_defs[i] = ArgName(b_index)
+            call = f"{function_name}({', '.join(x.full_name() for x in arg_defs)});"
             return call
 
         assert placeholder not in kernel.render_hooks
@@ -195,6 +202,7 @@ class CppBmmTemplate(CppGemmTemplate):
             if isinstance(sym, sympy.Expr)
             for s in sym.free_symbols
         ]
+        options["kernel_name"] = kernel.kernel_name
 
         return options
 

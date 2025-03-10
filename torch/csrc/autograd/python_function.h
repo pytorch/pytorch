@@ -24,6 +24,7 @@ namespace torch::autograd {
 
 // A Function which is implemented by a Python object (i.e., a THPFunction).
 // Calls to 'apply' are forwarded to the Python method implementation.
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 struct PyNode : public Node {
   PyNode(THPObjectPtr obj) : obj(obj.release()) {}
 
@@ -43,12 +44,12 @@ struct PyNode : public Node {
   std::string name() const override;
   bool is_traceable() override;
 
+  bool is_aot_backward() const override;
+
   void compiled_args(CompiledNodeArgs& args) override;
   variable_list apply_with_saved(
       const variable_list& inputs,
       SwapSavedVariables& saved) override;
-
-  bool compiled_autograd_should_lift() const;
 
   // THPFunction this Function is wrapping.  Owning!
   PyObject* obj;
@@ -122,9 +123,6 @@ struct THPFunction {
   // https://github.com/pytorch/pytorch/pull/98659#pullrequestreview-1376822560
   bool materialize_non_diff_grads;
 
-  // This is enabled by compiled autograd as a way to signal to AotAutograd it
-  // should call the original FX graph rather than compiling.
-  bool compiled_autograd_tracing;
   PyObject* compiled_autograd_backward_state;
   std::vector<c10::SymInt> compiled_autograd_symints;
 

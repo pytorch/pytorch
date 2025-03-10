@@ -17,7 +17,7 @@ import threading
 import time
 import unittest
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 from unittest.mock import patch
 
 import expecttest
@@ -70,6 +70,10 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TestCase,
 )
+
+
+if TYPE_CHECKING:
+    from torch.autograd.profiler_util import FunctionEvent
 
 
 # if tqdm is not shutdown properly, it will leave the monitor thread alive.
@@ -289,8 +293,7 @@ class TestProfiler(TestCase):
                     )
                 )
 
-        # TODO: https://github.com/pytorch/kineto/issues/617
-        if kineto_available() and not IS_WINDOWS:
+        if kineto_available():
             with TemporaryFileName(mode="w+") as fname:
                 p.export_chrome_trace(fname)
                 with open(fname) as f:
@@ -845,7 +848,7 @@ class TestProfiler(TestCase):
                 super().__init__(*args, **kwargs)
 
         def train():
-            for _, data in enumerate(dataloader):
+            for data in dataloader:
                 x, y = data[0], data[1]
                 y_pred = model(x)
                 loss = criterion(y_pred, y)
@@ -1286,8 +1289,9 @@ class TestProfiler(TestCase):
 
     def test_profiler_fwd_bwd_link(self):
         with _profile(use_kineto=True) as prof:
-            t1, t2 = torch.ones(1, requires_grad=True), torch.ones(
-                1, requires_grad=True
+            t1, t2 = (
+                torch.ones(1, requires_grad=True),
+                torch.ones(1, requires_grad=True),
             )
             z = torch.add(t1, t2)
             y = torch.ones(1)
@@ -1341,8 +1345,9 @@ class TestProfiler(TestCase):
             torch._C._profiler._set_fwd_bwd_enabled_val(False)
 
             with _profile(use_kineto=True) as prof:
-                t1, t2 = torch.ones(1, requires_grad=True), torch.ones(
-                    1, requires_grad=True
+                t1, t2 = (
+                    torch.ones(1, requires_grad=True),
+                    torch.ones(1, requires_grad=True),
                 )
                 z = torch.add(t1, t2)
                 y = torch.ones(1)
@@ -1360,11 +1365,7 @@ class TestProfiler(TestCase):
         finally:
             torch._C._profiler._set_fwd_bwd_enabled_val(True)
 
-    # This test is broken on Windows, the likely reason is that kineto/CUPTI
-    # is not supported that particular environment. Once the CI stabilizes
-    # we can narrow the condition so Windows is checked as well (TODO)
     @unittest.skipIf(not kineto_available(), "Kineto is required")
-    @unittest.skipIf(IS_WINDOWS, "Test does not work on Windows")
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     def test_profiler_cuda_sync_events(self):
         device = torch.device("cuda:0")
@@ -2466,8 +2467,9 @@ class TestExperimentalUtils(TestCase):
 
     def test_utils_compute_self_time(self):
         with profile() as prof:
-            t1, t2 = torch.ones(1, requires_grad=True), torch.ones(
-                1, requires_grad=True
+            t1, t2 = (
+                torch.ones(1, requires_grad=True),
+                torch.ones(1, requires_grad=True),
             )
             z = torch.add(t1, t2)
             y = torch.ones(1)
@@ -2925,6 +2927,60 @@ aten::mm""",
         addr2line = torch._C._profiler.symbolize_addresses(addrs, "addr2line")
         self.assertEqual(len(fast), len(addrs))
         self.assertEqual(len(addr2line), len(fast))
+
+    def test_profiler_overload_names(self):
+        from torch.library import _scoped_library, fallthrough_kernel
+
+        with _scoped_library("aten", "IMPL") as my_lib:
+            my_lib.impl("add.Tensor", fallthrough_kernel, "CPU")
+            experimental_config = torch._C._profiler._ExperimentalConfig(
+                capture_overload_names=True
+            )
+            with profile(
+                experimental_config=experimental_config,
+                activities=[ProfilerActivity.CPU],
+            ) as prof:
+                torch.add(1, 5)
+
+            # The following execution trace is expected
+            #
+            # Dispatch trace:
+            # [call] op=[aten::add.Tensor], key=[AutogradCPU]
+            #   [redispatch] op=[aten::add.Tensor], key=[Undefined]
+            #     [call] op=[aten::empty.memory_format], key=[BackendSelect]
+            #       [redispatch] op=[aten::empty.memory_format], key=[CPU]
+            #     [call] op=[aten::add.out], key=[CPU]
+            #
+            # prof.table()
+            # ---------------  ---------------  ------------  ------------  ------------  ------------  ------------  ------------
+            #            Name    Overload Name    Self CPU %      Self CPU   CPU total %     CPU total  CPU time avg    # of Calls
+            # ---------------  ---------------  ------------  ------------  ------------  ------------  ------------  ------------
+            #       aten::add           Tensor        71.97%     130.887us       100.00%     181.873us     181.873us             1
+            #     aten::empty    memory_format         8.52%      15.489us         8.52%      15.489us      15.489us             1
+            #       aten::add              out        19.52%      35.497us        19.52%      35.497us      35.497us             1
+            # ---------------  ---------------  ------------  ------------  ------------  ------------  ------------  ------------
+
+            # aten::add.out and aten::empty.memory_format are children of aten::add.Tensor
+            aten_add_parent: list[FunctionEvent] = [
+                event for event in prof.events() if len(event.cpu_children) == 2
+            ]
+            assert len(aten_add_parent) == 1
+            aten_add_parent = aten_add_parent[0]
+            assert aten_add_parent.overload_name == "Tensor"
+
+            aten_add_out_event = [
+                c for c in aten_add_parent.cpu_children if c.overload_name == "out"
+            ]
+            assert len(aten_add_out_event) == 1
+
+            # Without group_by_overload_name, the overload name is ignored in the key averages
+            key_averages = prof.key_averages()
+            assert len(key_averages) == 2
+            assert "Overload Name" not in key_averages.table()
+
+            key_averages = prof.key_averages(group_by_overload_name=True)
+            assert len(key_averages) == 3
+            assert "Overload Name" in key_averages.table()
 
 
 if __name__ == "__main__":
