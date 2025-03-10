@@ -185,9 +185,9 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
   return to_variable_list(r.get(), is_variable_input);
 }
 
-auto PyNode::defer_to_dynamo(
+variable_list PyNode::defer_to_dynamo(
     const variable_list& inputs,
-    const std::optional<PyObject*>& compiler) -> variable_list {
+    PyObject* compiler) {
   pybind11::gil_scoped_acquire gil;
   at::OptionalDeviceGuard _device_guard;
   THPFunction* py_fn = (THPFunction*)obj;
@@ -245,8 +245,7 @@ auto PyNode::defer_to_dynamo(
     Py_CLEAR(py_fn->compiled_autograd_backward_state);
   }
   THPObjectPtr r(PyObject_CallMethod(
-      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-      compiler.value(),
+      compiler,
       "proxy_call_backward",
       "OOOiOO",
       pyInputs.get(),
