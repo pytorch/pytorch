@@ -479,38 +479,24 @@ class CodeGen:
             # Common case: this is a regular module name like 'foo.bar.baz'
             return add_global(typename, o)
 
-        codes = {
-            "yellow": "\033[33m",
-            "cyan": "\033[36m",
-            "green": "\033[32m",
-            "blue": "\033[34m",
-            "red": "\033[31m",
-            "dim": "\033[2m",
-            "dim_blue": "\033[2m\033[34m",
-            "dim_green": "\033[2m\033[32m",
-            "reset": "\033[0m",
-        }
-
-        def make_wrapper_func(name):
-            def f(s):
-                if colored:
-                    return f"{codes[name]}{s}{codes['reset']}"
-                return s
-
-            return f
-
-        yellow = make_wrapper_func("yellow")  # noqa: F841
-        cyan = make_wrapper_func("cyan")  # noqa: F841
-        red = make_wrapper_func("red")
-        green = make_wrapper_func("green")  # noqa: F841
-        dim_green = make_wrapper_func("dim_green")
-        dim = make_wrapper_func("dim")
-        dim_blue = make_wrapper_func("dim_blue")
-        blue = make_wrapper_func("blue")
+        if colored:
+            red = _color_fns["red"]
+            dim_green = _color_fns["dim_green"]
+            dim = _color_fns["dim"]
+            dim_blue = _color_fns["dim_blue"]
+            blue = _color_fns["blue"]
+        else:
+            red = _identity
+            dim_green = _identity
+            dim = _identity
+            dim_blue = _identity
+            blue = _identity
 
         def _get_repr(arg: Any) -> str:
-            # Handle NamedTuples (if it has `_fields`) via add_global.
-            if isinstance(arg, tuple) and hasattr(arg, "_fields"):
+            if isinstance(arg, Node):  # first because common
+                return repr(arg)
+            elif isinstance(arg, tuple) and hasattr(arg, "_fields"):
+                # Handle NamedTuples (if it has `_fields`) via add_global.
                 qualified_name = _get_qualified_name(type(arg))
                 global_name = add_global(qualified_name, type(arg))
                 return f"{global_name}{repr(tuple(arg))}"
@@ -524,8 +510,6 @@ class CodeGen:
                 cls = arg.__class__
                 clsname = add_global(cls.__name__, cls)
                 return f"{clsname}.{arg.name}"
-            elif isinstance(arg, Node):
-                return repr(arg)
             elif isinstance(arg, torch.Tensor):
                 size = list(arg.size())
                 dtype = str(arg.dtype).split(".")[-1]
@@ -545,11 +529,9 @@ class CodeGen:
         def _format_args(
             args: tuple[Argument, ...], kwargs: dict[str, Argument]
         ) -> str:
-            args_s = ", ".join(_get_repr(a) for a in args)
-            kwargs_s = ", ".join(f"{k} = {_get_repr(v)}" for k, v in kwargs.items())
-            if args_s and kwargs_s:
-                return f"{args_s}, {kwargs_s}"
-            return args_s or kwargs_s
+            res = [_get_repr(a) for a in args]
+            res.extend([f"{k} = {_get_repr(v)}" for k, v in kwargs.items()])
+            return ", ".join(res)
 
         # Run through reverse nodes and record the first instance of a use
         # of a given node. This represents the *last* use of the node in the
@@ -564,8 +546,8 @@ class CodeGen:
                 user_to_last_uses.setdefault(user, []).append(n)
 
         for node in reversed(nodes):
-            map_arg(node.args, lambda n: register_last_uses(n, node))
-            map_arg(node.kwargs, lambda n: register_last_uses(n, node))
+            for input_node in node._input_nodes:
+                register_last_uses(input_node, node)
 
         def delete_unused_values(user: Node):
             """
@@ -604,22 +586,22 @@ class CodeGen:
             nonlocal prev_stacktrace
 
             if node.op not in {"placeholder", "output"}:
-                if node.stack_trace:
-                    if node.stack_trace != prev_stacktrace:
-                        prev_stacktrace = node.stack_trace
-                        summary_str = ""
-
-                        if parsed_stack_trace := _parse_stack_trace(node.stack_trace):
+                stack_trace = node.stack_trace
+                if stack_trace:
+                    if stack_trace != prev_stacktrace:
+                        prev_stacktrace = stack_trace
+                        if parsed_stack_trace := _parse_stack_trace(stack_trace):
                             summary_str = parsed_stack_trace.get_summary_str()
-
-                        body.append(f'\n {dim("# " + summary_str)}\n')
+                        else:
+                            summary_str = ""
+                        body.append(f'\n {dim(f"# {summary_str}")}\n')
                 elif prev_stacktrace != "":
                     prev_stacktrace = ""
                     no_stacktrace_msg = "# No stacktrace found for following nodes"
                     body.append(f"\n{dim(no_stacktrace_msg)}\n")
 
         def stringify_shape(shape: Iterable) -> str:
-            return f"[{', '.join(str(x) for x in shape)}]"
+            return f"[{', '.join([str(x) for x in shape])}]"
 
         def emit_node(node: Node):
             maybe_type_annotation = (
@@ -777,8 +759,8 @@ class CodeGen:
         new_lines: list[str] = []
         cur_idx = None
         for line in "".join(body).split("\n"):
-            counter = re.search(r"# COUNTER: (\d+)", line)
-            if counter and counter.group(1) is not None:
+            counter = _counter_regexp.search(line)
+            if counter is not None:
                 cur_idx = int(counter.group(1))
             else:
                 lineno_map[len(new_lines) + prologue_len] = cur_idx
@@ -1207,12 +1189,10 @@ class Graph:
 
         # Null out this Node's argument nodes so that the Nodes referred to
         # can update their ``users`` accordingly
-        new_args = map_arg(to_erase.args, lambda n: None)
-        assert isinstance(new_args, tuple)
-        to_erase.args = new_args
-        new_kwargs = map_arg(to_erase.kwargs, lambda n: None)
-        assert isinstance(new_kwargs, dict)
-        to_erase.kwargs = new_kwargs
+        to_erase._update_args_kwargs(
+            map_arg(to_erase._args, lambda n: None),
+            map_arg(to_erase._kwargs, lambda n: None),
+        )
 
     @compatibility(is_backward_compatible=True)
     def inserting_before(self, n: Optional[Node] = None):
@@ -1726,21 +1706,14 @@ class Graph:
         seen_names: set[str] = set()
         seen_values: set[Node] = set()
         for node in self.nodes:
-            if node.op not in [
-                "placeholder",
-                "call_method",
-                "call_module",
-                "call_function",
-                "get_attr",
-                "output",
-            ]:
+            if node.op not in _legal_ops:
                 raise RuntimeError(f"Node {node} had unknown opcode {node.op}!")
             if node.graph is not self:
                 raise RuntimeError(f"Node '{node}' does not belong to this Graph!")
             if node not in self._find_nodes_lookup_table:
                 raise RuntimeError(f"Node '{node}' is not added to the side table")
-            map_arg(node.args, lambda arg: check_arg(arg, node))
-            map_arg(node.kwargs, lambda arg: check_arg(arg, node))
+            for arg in node._input_nodes:
+                check_arg(arg, node)
             seen_values.add(node)
 
             if node.name in seen_names:
@@ -1957,6 +1930,32 @@ class Graph:
                 self._codegen._body_transformer = on_gen_code_old
 
         return on_generate_code_context_manager()
+
+
+def _identity(x):
+    return x
+
+
+def _make_color_fn(code):
+    def f(s):
+        reset = "\033[0m"
+        return f"{code}{s}{reset}"
+
+    return f
+
+
+_color_codes = {
+    "yellow": "\033[33m",
+    "cyan": "\033[36m",
+    "green": "\033[32m",
+    "blue": "\033[34m",
+    "red": "\033[31m",
+    "dim": "\033[2m",
+    "dim_blue": "\033[2m\033[34m",
+    "dim_green": "\033[2m\033[32m",
+}
+_color_fns = {k: _make_color_fn(v) for k, v in _color_codes.items()}
+_counter_regexp = re.compile(r"# COUNTER: (\d+)")
 
 
 reflectable_magic_methods = {
