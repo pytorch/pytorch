@@ -19,7 +19,7 @@ aten = torch.ops.aten
 # The mechanism is in VariableType,
 #   IF any inputs have forward grad
 #      AND there is no forward AD formula implemented
-#      AND the functions is actually differentiable
+#      AND the functions are actually differentiable
 #   run the decomposition
 #      See run_jit_decomposition_with_args_for_jvp
 #      We currently use python decompositions that we torchscript.
@@ -34,7 +34,7 @@ aten = torch.ops.aten
 # (and possibly produce an unintelligible error) vs erroring out earlier and
 # printing that the forward AD formula is not implemented.
 #
-# The solution to this may be to have a explicitly white list control when
+# The solution to this may be to have an explicitly white list control when
 # to enable the decomposition.
 
 
@@ -234,9 +234,9 @@ def native_batch_norm_backward(
     mean = save_mean
     invstd = save_invstd
     if train:
-        assert (
-            save_mean is not None and save_invstd is not None
-        ), "when train=True, save_mean and save_invstd are required"
+        assert save_mean is not None and save_invstd is not None, (
+            "when train=True, save_mean and save_invstd are required"
+        )
 
         reduciton_dims = [0] + list(range(2, input.dim()))
         assert invstd is not None  # for typing

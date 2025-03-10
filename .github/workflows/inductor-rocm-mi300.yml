@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - main
+    tags:
+      - ciflow/inductor-rocm/*
   workflow_dispatch:
 
 concurrency:
@@ -15,6 +17,14 @@ permissions:
   contents: read
 
 jobs:
+  target-determination:
+    if: github.repository_owner == 'pytorch'
+    name: before-test
+    uses: ./.github/workflows/target_determination.yml
+    permissions:
+      id-token: write
+      contents: read
+
   get-label-type:
     name: get-label-type
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main

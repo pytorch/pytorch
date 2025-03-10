@@ -104,6 +104,7 @@ using AOTITorchError = int32_t;
 // desired for perf reasons.)
 AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_cpu();
 AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_cuda();
+AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_meta();
 AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_xpu();
 AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_privateuse1();
 
@@ -267,6 +268,10 @@ aoti_torch_get_device_index(AtenTensorHandle tensor, int32_t* ret_device_index);
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_storage_offset(
     AtenTensorHandle tensor,
     int64_t* ret_storage_offset);
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_new_tensor_handle(
+    AtenTensorHandle orig_handle,
+    AtenTensorHandle* new_handle);
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch__alloc_from_pool(
     AtenTensorHandle self,
@@ -702,6 +707,13 @@ AOTI_TORCH_EXPORT void aoti_torch_warn(
   aoti_torch_warn(           \
       __func__, __FILE__, static_cast<uint32_t>(__LINE__), #__VA_ARGS__);
 #endif
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__weight_int4pack_mm_cpu_tensor(
+    AtenTensorHandle X,
+    AtenTensorHandle w,
+    AtenTensorHandle qGroupSize,
+    AtenTensorHandle qScaleAndZeros,
+    AtenTensorHandle* ret0);
 
 #ifdef __cplusplus
 } // extern "C"

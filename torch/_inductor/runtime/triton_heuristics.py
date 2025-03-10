@@ -66,6 +66,10 @@ from .triton_compat import (
 )
 
 
+class NoTritonConfigsError(RuntimeError):
+    pass
+
+
 if TYPE_CHECKING:
     from collections.abc import Container, Hashable
 
@@ -145,8 +149,9 @@ def _dump_launch_params(args, kwargs, launcher, kernel_name):
             call_kwargs[k] = v
         else:
             call_kwargs[k] = v
-    for k, v in launcher.config.kwargs.items():
-        call_kwargs[k] = v
+    if not triton_version_uses_attrs_dict():
+        for k, v in launcher.config.kwargs.items():
+            call_kwargs[k] = v
     call_kwargs["num_warps"] = launcher.config.num_warps
     call_kwargs["num_stages"] = launcher.config.num_stages
     args_str = ""
@@ -256,22 +261,33 @@ class CachingAutotuner(KernelInterface):
     def precompile(
         self,
         warm_cache_only=False,
-        reload_in_parent: Optional[Callable[[], CachingAutotuner]] = None,
+        reload_kernel: Optional[Callable[[], CachingAutotuner]] = None,
     ):
         if warm_cache_only:
             self._precompile_worker()
             return
         with self.lock:
+            # Helper function for reloading a kernel generated in a worker
+            # in the parent class. Normally we don't need to reload the kernel
+            # in the parent process, but in certain cases (coordesc tuning, dynamic_scale_rblock),
+            # we need to actually run compilation on the parent process
+            if reload_kernel is not None:
+                self._reload_kernel = reload_kernel
             self._precompile_worker()
             self._make_launchers()
-            self._dynamic_scale_rblock(reload_in_parent)
+            self._dynamic_scale_rblock()
 
     def _precompile_worker(self):
         if self.compile_results:
+            for result in self.compile_results:
+                TritonBundler.put(
+                    triton_hash_to_path_key(result.kernel.hash),
+                    self.triton_meta.get("device", 0),
+                )
             return
         assert not self.launchers
         if not self.configs:
-            raise RuntimeError("No triton configs are available")
+            raise NoTritonConfigsError("No triton configs are available")
 
         compile_results = []
         exc = None
@@ -281,13 +297,13 @@ class CachingAutotuner(KernelInterface):
             except (OutOfResources, PTXASError) as e:
                 exc = e
         if len(compile_results) == 0:
-            raise RuntimeError(f"No valid triton configs. {type(exc).__name__}: {exc}")
+            raise NoTritonConfigsError(
+                f"No valid triton configs. {type(exc).__name__}: {exc}"
+            )
         self.compile_results = compile_results
         self.configs = None
 
-    def _dynamic_scale_rblock(
-        self, reload_in_parent: Optional[Callable[[], CachingAutotuner]] = None
-    ):
+    def _dynamic_scale_rblock(self):
         # TODO(jansel): we should find a way to move this extra compile into the worker process
         # Currently it relies on _make_launchers(), which requires a cuda context, to populate nreg.
         device_prop = self.device_props
@@ -392,8 +408,9 @@ class CachingAutotuner(KernelInterface):
                     and the fn was dropped in prepare_for_pickle().  We haven't loaded the module
                     containing the real fn yet.
                     """
-                    assert reload_in_parent
-                    self.fn = reload_in_parent().fn
+                    assert hasattr(self, "_reload_kernel")
+                    assert callable(self._reload_kernel)
+                    self.fn = self._reload_kernel().fn
                 self.compile_results.append(self._precompile_config(new_config))
 
             self._make_launchers()
@@ -415,6 +432,7 @@ class CachingAutotuner(KernelInterface):
             for result in self.compile_results:
                 try:
                     launchers.append(result.make_launcher())
+
                 except (OutOfResources, PTXASError) as e:
                     exc = e
         if len(launchers) == 0:
@@ -432,9 +450,9 @@ class CachingAutotuner(KernelInterface):
         self.launchers = []
 
     def __getstate__(self) -> dict[str, Any]:
-        assert (
-            not self.launchers
-        ), "pickle should not be called with after make_launchers()"
+        assert not self.launchers, (
+            "pickle should not be called with after make_launchers()"
+        )
         return {
             **self.__dict__,
             "lock": None,
@@ -519,7 +537,6 @@ class CachingAutotuner(KernelInterface):
                 compile_meta,
             )
             raise
-
         TritonBundler.put(
             triton_hash_to_path_key(binary.hash), self.triton_meta.get("device", 0)
         )
@@ -661,7 +678,9 @@ class CachingAutotuner(KernelInterface):
                 assert isinstance(
                     arg,
                     torch.Tensor,
-                ), "self.reset_to_zero_arg_names should only contain valid argument names"
+                ), (
+                    "self.reset_to_zero_arg_names should only contain valid argument names"
+                )
                 arg.zero_()
 
         for name, arg in kwargs.items():
@@ -669,7 +688,9 @@ class CachingAutotuner(KernelInterface):
                 assert isinstance(
                     arg,
                     torch.Tensor,
-                ), "self.reset_to_zero_arg_names should only contain valid argument names"
+                ), (
+                    "self.reset_to_zero_arg_names should only contain valid argument names"
+                )
                 arg.zero_()
 
     def maybe_clone_args(
@@ -740,8 +761,21 @@ class CachingAutotuner(KernelInterface):
         self.autotune_time_taken_ns = (
             self.precompile_time_taken_ns + benchmark_time_taken_ns
         )
+
+        # log the best config
+        launcher = self.launchers[0]
+        log.debug(
+            "Best config for %s: %s: %f, nreg %d, nspill %d, #shared-mem %s",
+            self.fn.__name__,
+            launcher.config,
+            timings[launcher],
+            launcher.n_regs,
+            launcher.n_spills,
+            launcher.shared,
+        )
+
         if self.save_cache_hook:
-            self.save_cache_hook(self.launchers[0].config, self.autotune_time_taken_ns)
+            self.save_cache_hook(launcher.config, self.autotune_time_taken_ns)
 
     def save_gpu_kernel(self, grid, stream, launcher):
         if callable(grid):
@@ -806,6 +840,17 @@ class CachingAutotuner(KernelInterface):
 
         config2launcher = {launcher.config: launcher}
 
+        # TODO: should we just load the kernels ahead of time if we know we're going to call this?
+        if self.fn.fn is None:
+            """
+            We are in the parent process, while this program was compiled in a worker
+            and the fn was dropped in prepare_for_pickle().  We haven't loaded the module
+            containing the real fn yet.
+            """
+            assert hasattr(self, "_reload_kernel")
+            assert callable(self._reload_kernel)
+            self.fn = self._reload_kernel().fn
+
         def benchmark_one_config(config):
             with self.lock:
                 launcher = self._precompile_config(config).make_launcher()
@@ -825,7 +870,9 @@ class CachingAutotuner(KernelInterface):
         assert not (
             self.heuristic_type == HeuristicType.PERSISTENT_REDUCTION
             and "R0_BLOCK" in launcher.config.kwargs
-        ), "Coordinate descent tuner relies on the assumption that persistent reduction's triton config does not have R0_BLOCK"
+        ), (
+            "Coordinate descent tuner relies on the assumption that persistent reduction's triton config does not have R0_BLOCK"
+        )
         start_time = time.time_ns()
         best_config = self.coordesc_tuner.autotune(
             benchmark_one_config, launcher.config, None
@@ -841,9 +888,7 @@ class CachingAutotuner(KernelInterface):
             )
         return config2launcher.get(best_config)
 
-    def run(
-        self, *args, grid, stream, benchmark_run=False, **kwargs
-    ):  # type:ignore[override]
+    def run(self, *args, grid, stream, benchmark_run=False, **kwargs):  # type:ignore[override]
         if self.triton_interpret:
             return self.fn[grid](
                 *args,
@@ -886,16 +931,25 @@ class CachingAutotuner(KernelInterface):
             else:
                 grid_info = getattr(grid, "grid_fn_str", "")
 
+            kernel_kwargs_str = ",".join(
+                f"{k}={v}" for (k, v) in launcher.config.kwargs.items()
+            )
+
+            profiler_kwargs = {
+                "kernel_file": (self.filename or ""),
+                "kernel_hash": self.kernel_hash,
+                "kernel_backend": "triton",
+                "grid": grid_info,
+                "stream": stream,
+                "num_warps": launcher.config.num_warps,
+                "num_stages": launcher.config.num_stages,
+                "kernel_kwargs": kernel_kwargs_str,
+            }
+
             with torch._C._profiler._RecordFunctionFast(
                 self.inductor_meta.get("kernel_name", "triton kernel"),
                 args,
-                {
-                    "kernel_file": (self.filename or ""),
-                    "kernel_hash": self.kernel_hash,
-                    "kernel_backend": "triton",
-                    "grid": grid_info,
-                    "stream": stream,
-                },
+                profiler_kwargs,
             ):
                 return launcher(
                     *args,
@@ -944,12 +998,50 @@ class TritonCompileResult:
         self.compile_meta = compile_meta
         self.inductor_meta = inductor_meta
 
+    @staticmethod
+    def _serialize_metadata(metadata):
+        """
+        Triton uses a nested class called KernelMetadata to store metadata information.
+        Pickle does not work well with nested namedtuples, as the namedtuple doesn't appear
+        in the toplevel namespace of the module. So these serialization/deser functions
+        are used to convert the namedtuples to a dict and back.
+
+        As for packed_metadata, depending on the triton backend, KernelMetadata can be
+        a namedtuple, or a regular tuple! So the serialization function branches on whether
+        the metadata to be serialized is a namedtuple or regular, serializable one.
+        """
+
+        def is_namedtuple(obj) -> bool:
+            return (
+                isinstance(obj, tuple)
+                and hasattr(obj, "_asdict")
+                and hasattr(obj, "_fields")
+            )
+
+        if is_namedtuple(metadata):
+            return metadata._asdict()
+        else:
+            return metadata
+
+    @staticmethod
+    def _deserialize_metadata(metadata):
+        if isinstance(metadata, dict):
+            return TritonCompileResult._kernel_metadata_cls(tuple(metadata.keys()))(
+                **metadata
+            )
+        else:
+            return metadata
+
     def __getstate__(self) -> dict[str, Any]:
         kernel = self.kernel
         # replace the fields that don't pickle nicely
         kernel_state = {
             **kernel.__dict__,
-            "metadata": kernel.metadata._asdict(),
+            # See doc about serializing metadata above
+            "metadata": self._serialize_metadata(kernel.metadata),
+            "packed_metadata": self._serialize_metadata(
+                getattr(kernel, "packed_metadata", None)
+            ),
             "module": None,  # regenerated by kernel._init_handles()
             "function": None,  # regenerated by kernel._init_handles()
             "run": None,  # regenerated by kernel._init_handles()
@@ -962,13 +1054,13 @@ class TritonCompileResult:
         # TODO(jansel): need to fixup src.fn which is now None
         kernel = CompiledKernel.__new__(CompiledKernel)
         metadata = state["kernel"]["metadata"]
+        packed_metadata = state["kernel"]["packed_metadata"]
         kernel.__dict__.update(
             {
                 **state["kernel"],
                 # "src": src,
-                "metadata": self._kernel_metadata_cls(tuple(metadata.keys()))(
-                    **metadata
-                ),
+                "metadata": self._deserialize_metadata(metadata),
+                "packed_metadata": self._deserialize_metadata(packed_metadata),
             }
         )
         self.__dict__.update(state)
@@ -1104,12 +1196,12 @@ class TritonCompileResult:
 
         exec(
             f"""
-            def launcher({', '.join(def_args)}, grid, stream):
+            def launcher({", ".join(def_args)}, grid, stream):
                 if callable(grid):
                     grid_0, grid_1, grid_2 = grid(grid_meta)
                 else:
                     grid_0, grid_1, grid_2 = grid
-                runner({', '.join(runner_args)})
+                runner({", ".join(runner_args)})
                 return bin
             """.lstrip(),
             scope,
@@ -1415,9 +1507,9 @@ def check_max_block(cfg: dict[str, int]):
         if block_suffix in var:
             prefix = var.removesuffix(block_suffix)
             max_block = TRITON_MAX_BLOCK[prefix]
-            assert (
-                val <= max_block
-            ), f"'{var}' too large. Maximum: {max_block}. Actual: {val}."
+            assert val <= max_block, (
+                f"'{var}' too large. Maximum: {max_block}. Actual: {val}."
+            )
 
 
 def _num_warps(num_warps, max_num_warps=8, min_num_warps=2, register_intensive=False):
@@ -1569,20 +1661,20 @@ def _get_nd_reduction_numels(r: int, size_hints: dict[str, int]) -> dict[str, in
         prefix = f"r{idx}_"
         max_size = min(size_hints[prefix], TRITON_MAX_BLOCK[prefix.upper()])
         dim = min(max_size, remaining)
-        assert (
-            remaining % dim == 0
-        ), f"Expected dimension '{dim}' to divide remaining size '{remaining}'"
+        assert remaining % dim == 0, (
+            f"Expected dimension '{dim}' to divide remaining size '{remaining}'"
+        )
         rnumels[prefix] = dim
         remaining //= dim
 
     # Sanity check the results.
     final_numel = conditional_product(*rnumels.values())
-    assert (
-        r == final_numel
-    ), f"Expected ND reduction size ({rnumels}) to have {r} elements."
-    assert all(
-        rnumels[prefix] <= size_hints[prefix] for prefix in rnumels
-    ), f"rnumels exceed size_hints. {rnumels} > {size_hints}"
+    assert r == final_numel, (
+        f"Expected ND reduction size ({rnumels}) to have {r} elements."
+    )
+    assert all(rnumels[prefix] <= size_hints[prefix] for prefix in rnumels), (
+        f"rnumels exceed size_hints. {rnumels} > {size_hints}"
+    )
 
     return rnumels
 
@@ -1879,9 +1971,9 @@ def cooperative_reduction(
         size_hints["x"] = 1
 
     # Cooperative reductions currently only support a single reduction dimension.
-    assert (
-        len(size_hints) == 2
-    ), "Cooperative reductions don't support tiling reduction dims"
+    assert len(size_hints) == 2, (
+        "Cooperative reductions don't support tiling reduction dims"
+    )
     xnumel, rnumel = size_hints["x"], size_hints["r0_"]
 
     # TODO(jansel): we should base target on the SM count of the local GPU
@@ -2186,9 +2278,9 @@ def grid_combo_kernels(
             assert min_blocks_d is not None
             min_blocks = min_blocks_d
         else:
-            assert (
-                min_blocks_d is None or min_blocks == min_blocks_d
-            ), f"inconsistent min_blocks {min_blocks} vs  x grid {numels[-1]}"
+            assert min_blocks_d is None or min_blocks == min_blocks_d, (
+                f"inconsistent min_blocks {min_blocks} vs  x grid {numels[-1]}"
+            )
     else:
         # sequential dispatch
         seq_numels = list(numels)

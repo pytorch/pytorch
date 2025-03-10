@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
-from typing import Callable, cast, Generic, List, Optional, TypeVar, Union
+from typing import Callable, cast, Generic, Optional, TypeVar, Union
 
 import torch
 

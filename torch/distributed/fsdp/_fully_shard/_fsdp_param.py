@@ -73,7 +73,9 @@ lib.define("copy_(Tensor(a!) tensor, Tensor data) -> ()")
 @torch.library.impl(lib, "copy_", "Meta")
 @torch.library.impl(lib, "copy_", "CUDA")
 @torch.library.impl(lib, "copy_", "XPU")
+@torch.library.impl(lib, "copy_", "HPU")
 @torch.library.impl(lib, "copy_", "CPU")
+@torch.library.impl(lib, "copy_", "MTIA")
 def copy_(tensor, data):
     tensor.copy_(data)
 
@@ -303,9 +305,9 @@ class FSDPParam:
                     f"FSDP only supports 1D TP, not {self._tp_spec.placements}"
                 )
             split_factor = self._tp_spec.num_shards_map[shard_dim]
-            assert (
-                2 <= self._spmd_mesh.ndim <= 3
-            ), f"_spmd_mesh.ndim can only be 2 or 3 but got {self._spmd_mesh.ndim}."
+            assert 2 <= self._spmd_mesh.ndim <= 3, (
+                f"_spmd_mesh.ndim can only be 2 or 3 but got {self._spmd_mesh.ndim}."
+            )
             self._spmd_placements: tuple[Placement, ...]
             dp_shard_tp_placement = (
                 (
@@ -519,8 +521,9 @@ class FSDPParam:
             unsharded_param = _from_local_no_grad(unsharded_param, self._tp_spec)
         if hasattr(self, "_unsharded_param"):
             assert compiled_autograd_enabled()
-            with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(
-                self._unsharded_param
+            with (
+                torch.no_grad(),
+                torch.autograd._unsafe_preserve_version_counter(self._unsharded_param),
             ):
                 # NOTE: Under compile, if an unsharded param goes through
                 # resize_(full) -> copy_ -> resize_(0) pattern, we will remove those
@@ -784,9 +787,9 @@ class FSDPParam:
             assert isinstance(grad, DTensor), f"{type(grad)}"
             placements = self._tp_spec.placements
             if placements != grad.placements:
-                assert len(self._tp_spec.placements) == len(
-                    grad.placements
-                ), f"{self._tp_spec=} {grad.placements=}"
+                assert len(self._tp_spec.placements) == len(grad.placements), (
+                    f"{self._tp_spec=} {grad.placements=}"
+                )
                 grad = grad.redistribute(placements=placements)
             grad = grad._local_tensor
         return grad
@@ -845,9 +848,9 @@ class FSDPParam:
         shard_dim = self.fsdp_placement.dim
         length = local_tensor.size(shard_dim) if local_tensor.numel() > 0 else 0
         if local_tensor.size() != padded_sharded_size:
-            assert (
-                shard_dim == 0
-            ), f"Shard({shard_dim}) requires even sharding: {local_tensor.size()=}"
+            assert shard_dim == 0, (
+                f"Shard({shard_dim}) requires even sharding: {local_tensor.size()=}"
+            )
             padded_local_tensor = local_tensor.new_zeros(padded_sharded_size)
             padded_local_tensor.narrow(dim=shard_dim, start=0, length=length).copy_(
                 local_tensor
