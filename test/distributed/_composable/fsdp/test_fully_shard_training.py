@@ -1155,9 +1155,7 @@ class TestFullyShardNDTraining(FSDPTest):
             {
                 "reshard_after_forward": [False, True],
                 "use_activation_checkpointing": [False, True],
-                # TODO: change "mlp_dim" back to [3, 16, 17] when uneven sharding
-                # is supported for FSDP+TP
-                "mlp_dim": [4, 16, 20],
+                "mlp_dim": [3, 16, 17],
                 "foreach": [False],
             },
             functools.partial(self._test_2d_mlp_with_nd_mesh, global_mesh),
@@ -1230,9 +1228,7 @@ class TestFullyShardHSDP3DTraining(FSDPTest):
             {
                 "reshard_after_forward": [False, True],
                 "use_activation_checkpointing": [False, True],
-                # TODO: change "mlp_dim" back to [3, 16, 17] when uneven sharding
-                # is supported for FSDP+TP
-                "mlp_dim": [4, 16, 20],
+                "mlp_dim": [3, 16, 17],
                 "foreach": [False],
             },
             functools.partial(self._test_3d_mlp_with_nd_mesh, global_mesh),
