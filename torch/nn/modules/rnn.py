@@ -258,7 +258,7 @@ class RNNBase(Module):
         if len(unique_data_ptrs) != len(self._flat_weights):
             return
 
-        with torch.cuda.device_of(first_fw):
+        with first_fw:
             import torch.backends.cudnn.rnn as rnn
 
             # Note: no_grad() is necessary since _cudnn_rnn_flatten_weight is
