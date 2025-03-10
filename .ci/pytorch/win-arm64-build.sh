@@ -19,7 +19,7 @@ if [[ -n "$PYTORCH_FINAL_PACKAGE_DIR" ]]; then
     mkdir -p "$PYTORCH_FINAL_PACKAGE_DIR" || true
 fi
 
-export SCRIPT_HELPERS_DIR=$SCRIPT_PARENT_DIR/win-arm64-test-helpers
+export SCRIPT_HELPERS_DIR=$SCRIPT_PARENT_DIR/win-test-helpers/arm64
 
 "$SCRIPT_HELPERS_DIR"/build_pytorch.bat
 
