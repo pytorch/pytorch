@@ -557,7 +557,10 @@ def _broadcast_tensors(
             if (local_state := local_state_dict.get(key)) is not None:
                 local_state_dict[key] = (
                     (local_state[0], full_tensor.to(device))
-                    if isinstance(local_state, tuple) and isinstance(local_state[0], DTensor)
+                    if (
+                        isinstance(local_state, tuple)
+                        and isinstance(local_state[0], DTensor)
+                    )
                     else full_tensor.to(device)
                 )
 
