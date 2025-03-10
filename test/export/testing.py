@@ -263,6 +263,12 @@ def expectedFailureNonStrict(fn):
     return fn
 
 
+# Controls tests generated in test/export/test_export_nonstrict.py
+def expectedFailureStrict(fn):
+    fn._expected_failure_strict = True
+    return fn
+
+
 # Controls tests generated in test/export/test_retraceability.py
 def expectedFailureRetraceability(fn):
     fn._expected_failure_retrace = True
