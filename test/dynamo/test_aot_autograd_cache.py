@@ -300,9 +300,12 @@ class AOTAutogradCacheTests(InductorTestCase):
 
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
-    @functorch_config.patch({"enable_autograd_cache": True})
+    @functorch_config.patch(
+        {"enable_autograd_cache": True, "strict_autograd_cache": True}
+    )
     @dynamo_config.patch("compiled_autograd", True)
     def test_compiled_autograd_bypass(self):
+        # Need to make the compiled autograd graph serializable
         def fn(a, b):
             out = a.cos() + b
             loss = out.sum()
@@ -310,16 +313,12 @@ class AOTAutogradCacheTests(InductorTestCase):
 
         a = torch.randn(25, requires_grad=True)
         b = torch.randn(25, requires_grad=True)
-        a2 = a.detach().clone().requires_grad_(True)
-        b2 = b.detach().clone().requires_grad_(True)
         compiled_fn = torch.compile(fn, backend="inductor")
-        self.assertEqual(fn(a, b), compiled_fn(a2, b2))
-        self.assertEqual(
-            counters["aot_autograd"]["autograd_cache_miss"], 1
-        )  # from compiled forward
-        self.assertEqual(
-            counters["aot_autograd"]["autograd_cache_bypass"], 1
-        )  # from compiled autograd
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.BackendCompilerFailed,
+            "BypassAOTAutogradCache: Unsupported call_function target torch._dynamo.compiled_autograd.ops.validate_outputs",
+        ):
+            compiled_fn(a, b)
 
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
