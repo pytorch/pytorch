@@ -823,19 +823,19 @@ id<MTLLibrary> MetalShaderLibrary::getLibrary(const std::initializer_list<std::s
   auto it = params.begin();
   switch (nparams) {
     case 1:
-      lib = compileLibrary(fmt::format(shaderSource, *it));
+      lib = compileLibrary(fmt::format(fmt::runtime(shaderSource), *it));
       break;
     case 2: {
       auto& first = *it++;
       auto& second = *it;
-      lib = compileLibrary(fmt::format(shaderSource, first, second));
+      lib = compileLibrary(fmt::format(fmt::runtime(shaderSource), first, second));
       break;
     }
     case 3: {
       auto& first = *it++;
       auto& second = *it++;
       auto& third = *it;
-      lib = compileLibrary(fmt::format(shaderSource, first, second, third));
+      lib = compileLibrary(fmt::format(fmt::runtime(shaderSource), first, second, third));
       break;
     }
     default:
