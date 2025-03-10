@@ -556,12 +556,14 @@ at::Tensor shard_dim_alltoall(
   std::vector<int64_t> in_split_sizes;
   c10d::AllToAllOptions opts;
 
-  auto work = group->alltoall_base(recv_tensor, tensor_for_comm, out_split_sizes, in_split_sizes, opts);
+  auto work = group->alltoall_base(
+      recv_tensor, tensor_for_comm, out_split_sizes, in_split_sizes, opts);
 
-  // TODO: it's tricky to get the current async behavior work for shard dim alltoall
-  // so for now we just keep this comm op to be synchronous. We might need to
-  // have sth similar to future callback to do the permute, contiguous and view calls.
-  // We can revisit later how to support the async case with the Work registry.
+  // TODO: it's tricky to get the current async behavior work for shard dim
+  // alltoall so for now we just keep this comm op to be synchronous. We might
+  // need to have sth similar to future callback to do the permute, contiguous
+  // and view calls. We can revisit later how to support the async case with the
+  // Work registry.
   work->wait();
 
   auto output = recv_tensor.movedim(0, gather_dim).contiguous();
