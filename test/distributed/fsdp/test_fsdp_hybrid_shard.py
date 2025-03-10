@@ -121,8 +121,9 @@ class TestFSDPHybridShard(FSDPTest):
     def test_hsdp_save_load_state_dict(self):
         model = MyModel().cuda()
         num_node_devices = torch.cuda.device_count()
-        shard_rank_lists = list(range(0, num_node_devices // 2)), list(
-            range(num_node_devices // 2, num_node_devices)
+        shard_rank_lists = (
+            list(range(0, num_node_devices // 2)),
+            list(range(num_node_devices // 2, num_node_devices)),
         )
         shard_groups = (
             dist.new_group(shard_rank_lists[0]),
@@ -171,8 +172,9 @@ class TestFSDPHybridShard(FSDPTest):
     def test_hsdp_sync_module_state(self):
         model = MyModel().cuda()
         num_node_devices = torch.cuda.device_count()
-        shard_rank_lists = list(range(0, num_node_devices // 2)), list(
-            range(num_node_devices // 2, num_node_devices)
+        shard_rank_lists = (
+            list(range(0, num_node_devices // 2)),
+            list(range(num_node_devices // 2, num_node_devices)),
         )
         shard_groups = (
             dist.new_group(shard_rank_lists[0]),
