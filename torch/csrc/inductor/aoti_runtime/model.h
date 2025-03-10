@@ -54,15 +54,6 @@ namespace {
 
 using RAIIDataPtr = std::unique_ptr<void, std::function<void(void*)>>;
 
-RAIIDataPtr RAII_cpuMalloc(size_t num_bytes) {
-  void* data_ptr = std::malloc(num_bytes);
-  if (!data_ptr) {
-    throw std::bad_alloc();
-  }
-  auto deleter = [](void* ptr) { std::free(ptr); };
-  return RAIIDataPtr(data_ptr, deleter);
-}
-
 #ifdef USE_CUDA
 
 RAIIDataPtr RAII_gpuMalloc(size_t num_bytes) {
@@ -72,9 +63,7 @@ RAIIDataPtr RAII_gpuMalloc(size_t num_bytes) {
   return RAIIDataPtr(data_ptr, deleter);
 }
 
-#endif // USE_CUDA
-
-#ifdef USE_XPU
+#elif defined(USE_XPU)
 
 RAIIDataPtr RAII_gpuMalloc(size_t num_bytes) {
   sycl::queue* queue_ptr = nullptr;
@@ -84,7 +73,18 @@ RAIIDataPtr RAII_gpuMalloc(size_t num_bytes) {
   return RAIIDataPtr(data_ptr, deleter);
 }
 
-#endif // USE_XPU
+#else
+
+RAIIDataPtr RAII_cpuMalloc(size_t num_bytes) {
+  void* data_ptr = std::malloc(num_bytes);
+  if (!data_ptr) {
+    throw std::bad_alloc();
+  }
+  auto deleter = [](void* ptr) { std::free(ptr); };
+  return RAIIDataPtr(data_ptr, deleter);
+}
+
+#endif // USE_CUDA
 
 } // anonymous namespace
 
@@ -229,6 +229,24 @@ class AOTInductorModelBase {
 #else // !USE_CUDA && !USE_XPU
     run_finished_ = true;
 #endif // USE_CUDA
+  }
+
+  // Non-thread-aware variant of run(). Obviously unsafe to use in a threaded
+  // environment :)
+  void run_single_threaded(
+      AtenTensorHandle*
+          input_handles, // array of input AtenTensorHandle; handles
+                         // are stolen; the array itself is borrowed
+      AtenTensorHandle*
+          output_handles, // array for writing output AtenTensorHandle; handles
+                          // will be stolen by the caller; the array itself is
+                          // borrowed
+      DeviceStreamType stream,
+      AOTIProxyExecutorHandle proxy_executor) {
+    // don't bother with any of the run_finished stuff; this is unsafe to call
+    // in a threaded context
+    auto* model = static_cast<Model*>(this);
+    model->run_impl(input_handles, output_handles, stream, proxy_executor);
   }
 
   std::unordered_map<std::string, AtenTensorHandle> run_const_fold(

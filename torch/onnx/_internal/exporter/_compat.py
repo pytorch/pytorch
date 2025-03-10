@@ -12,6 +12,7 @@ from typing import Any, Callable, TYPE_CHECKING
 import torch
 from torch.onnx._internal._lazy_import import onnxscript_apis, onnxscript_ir as ir
 from torch.onnx._internal.exporter import (
+    _constants,
     _core,
     _dynamic_shapes,
     _onnx_program,
@@ -67,7 +68,7 @@ def export_compat(
     fallback: bool = False,
 ) -> _onnx_program.ONNXProgram:
     if opset_version is None:
-        opset_version = onnxscript_apis.torchlib_opset_version()
+        opset_version = _constants.TORCHLIB_OPSET
 
     if isinstance(model, torch.export.ExportedProgram):
         # We know the model is already exported program, so the args, kwargs, and dynamic_shapes
@@ -81,6 +82,7 @@ def export_compat(
                 "and may lead to 'torch._dynamo.exc.UserError: Constraints violated.' "
                 "Supply the 'dynamic_shapes' argument instead if export is unsuccessful.",
                 UserWarning,
+                stacklevel=3,
             )
             try:
                 dynamic_shapes, args, kwargs = (

@@ -821,6 +821,9 @@ class TestMaxAutotune(TestCase):
     def test_cat_max_autotune_extern(self):
         self._test_cat_max_autotune_impl(using_triton_mm=False)
 
+    @skipIfXpu(
+        msg="The fusion not happend because it do not speedup on XPU, see issue #146568"
+    )
     @config.patch(max_autotune_gemm_backends="TRITON")
     def test_cat_max_autotune_triton(self):
         self._test_cat_max_autotune_impl(using_triton_mm=True)
@@ -1032,7 +1035,7 @@ class TestMaxAutotuneRemoteCache(TestCase):
 
     @parametrize("dynamic", (False, True))
     @config.patch(
-        {"compile_threads": 1}
+        {"compile_threads": 1, "prologue_fusion": False}
     )  # Worker processes do not register PatchCaches() properly
     def test_max_autotune_remote_caching(self, dynamic: bool):
         from unittest.mock import patch

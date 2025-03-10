@@ -50,6 +50,8 @@ elif TEST_HPU:
     DEVICE_TYPE = "hpu"
 elif TEST_XPU:
     DEVICE_TYPE = "xpu"
+elif TEST_XPU:
+    DEVICE_TYPE = "xpu"
 else:
     DEVICE_TYPE = "cpu"
 
@@ -57,6 +59,7 @@ DEVICE_MODULE = torch.get_device_module(DEVICE_TYPE)
 DEVICE_COUNT = DEVICE_MODULE.device_count()
 BACKEND = dist.get_default_backend_for_device(DEVICE_TYPE)
 NUM_DEVICES = 4
+
 
 # We use this as a proxy for "multiple GPUs/XPUs/HPUs exist"
 if any((TEST_CUDA, TEST_XPU, TEST_HPU)) and DEVICE_COUNT > 1:

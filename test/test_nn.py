@@ -4899,26 +4899,47 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                     helper(self, nn.BatchNorm3d, shape, dtype, mixed_dtype, torch.channels_last_3d, precisons[dtype])
 
     def test_batchnorm_half_overflow(self):
-        def helper(self, mod, size, format):
+        def helper(self, mod, size, param_dtype, fwd_format, bwd_format):
             channels = size[1]
-            input = torch.randn(size, dtype=torch.half, device='cpu', requires_grad=True)
-            input = input.contiguous(memory_format=format)
-            bn = mod(channels).cpu().to(torch.half)
+            input = torch.randn(size, dtype=torch.half, device='cpu')
+            input = input.contiguous(memory_format=fwd_format).requires_grad_(True)
+            bn = mod(channels).cpu().to(param_dtype)
             out = bn(input)
 
+            ref_input = input.detach().clone().requires_grad_(True)
             ref_bn = mod(channels).cpu().to(torch.float)
             ref_bn.load_state_dict(bn.to(torch.float).state_dict())
-            ref_out = ref_bn(input)
+            ref_out = ref_bn(ref_input)
 
             self.assertFalse(out.isinf().any())
             self.assertFalse(out.isnan().any())
             self.assertEqual(out, ref_out)
 
+            if param_dtype != torch.half:
+                grad_input = torch.empty(size=ref_out.shape).uniform_(0, 1).to(dtype=torch.half)
+                grad_input = grad_input.contiguous(memory_format=bwd_format)
+                ref_grad_input = grad_input.clone()
+                out.backward(grad_input)
+                ref_out.backward(ref_grad_input)
+                self.assertFalse(input.grad.isinf().any())
+                self.assertFalse(input.grad.isnan().any())
+                self.assertEqual(input.grad, ref_input.grad)
+
         for format in [torch.contiguous_format, torch.channels_last]:
-            helper(self, nn.BatchNorm2d, (4, 80, 500, 500), format)
+            helper(self, nn.BatchNorm2d, (4, 80, 500, 500), torch.half, format, format)
 
         for format in [torch.contiguous_format, torch.channels_last_3d]:
-            helper(self, nn.BatchNorm3d, (4, 80, 20, 100, 100), format)
+            helper(self, nn.BatchNorm3d, (4, 80, 20, 100, 100), torch.half, format, format)
+
+        formats = {
+            2: [torch.contiguous_format, torch.channels_last],
+            3: [torch.contiguous_format, torch.channels_last_3d],
+        }
+        for (fwd_format, bwd_format) in itertools.product(formats[2], formats[2]):
+            helper(self, nn.BatchNorm2d, (16, 3, 224, 224), torch.float, fwd_format, bwd_format)
+
+        for (fwd_format, bwd_format) in itertools.product(formats[3], formats[3]):
+            helper(self, nn.BatchNorm3d, (16, 20, 40, 40, 40), torch.float, fwd_format, bwd_format)
 
     @parametrize_test(
         'bn_module',
@@ -8475,6 +8496,31 @@ class TestNNDeviceType(NNTestCase):
             layer_norm.cpu()
             Y_cpu = layer_norm(X.cpu())
             self.assertEqual(Y_cpu, Y, rtol=0, atol=1e-5)
+
+    @onlyNativeDeviceTypes
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_rmsnorm_numeric(self, device, dtype):
+        def rms_norm_reference_fn(i, normalized_shape, weight, eps=None):
+            if eps is None:
+                eps = torch.finfo(i.dtype).eps
+            ndim = i.ndim
+            dims = [ndim - i - 1 for i in range(len(normalized_shape))]
+            upcasted_i = i.float()
+            result = upcasted_i * torch.rsqrt(
+                upcasted_i.pow(2).mean(dim=dims, keepdim=True) + eps
+            )
+            if weight is not None:
+                result *= weight
+            return result.type_as(i)
+
+        shape = (1, 2, 3)
+        X = torch.rand(*shape, dtype=dtype, device=device)
+        w = torch.rand(*shape, dtype=dtype, device=device)
+
+        Y = torch.nn.functional.rms_norm(X, shape, w, 0.5)
+        Y_ref = rms_norm_reference_fn(X, shape, w, 0.5)
+
+        self.assertEqual(Y_ref, Y)
 
     @onlyCPU
     def test_glu_bfloat16(self, device):
