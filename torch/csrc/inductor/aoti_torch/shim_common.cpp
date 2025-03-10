@@ -1320,7 +1320,7 @@ class StableIValueBoxedKernel : public c10::OperatorKernel {
     const auto num_returns = schema.returns().size();
     const auto num_arguments = schema.arguments().size();
 
-    std::vector<StableIValue> ministack(num_arguments + num_returns);
+    std::vector<StableIValue> ministack(std::max(num_arguments, num_returns));
 
     for (const auto idx : c10::irange(num_arguments)) {
       const c10::IValue& arg = torch::jit::pop(stack);
@@ -1352,7 +1352,7 @@ class StableIValueBoxedKernel : public c10::OperatorKernel {
       const c10::TypePtr& ret_type = schema.returns()[idx].type();
       if (*ret_type == *c10::getTypePtr<at::Tensor>()) {
         auto ret_raiiath = torch::aot_inductor::RAIIAtenTensorHandle(
-            to<AtenTensorHandle>(ministack[num_arguments + idx]));
+            to<AtenTensorHandle>(ministack[idx]));
         at::Tensor out = *torch::aot_inductor::tensor_handle_to_tensor_pointer(
             ret_raiiath.get());
         torch::jit::push(stack, c10::IValue(out));

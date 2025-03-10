@@ -93,7 +93,7 @@ void boxed_sgd_out_of_place(StableIValue* stack, int64_t num_args, int64_t num_o
     lr,
     maximize);
 
-  stack[num_args] = from(raiiath_res.release());
+  stack[0] = from(raiiath_res.release());
 }
 
 STABLE_TORCH_LIBRARY(libtorch_agnostic, m) {
@@ -111,7 +111,7 @@ RAIIATH identity(RAIIATH t) {
 void boxed_identity(StableIValue* stack, int64_t num_args, int64_t num_outputs) {
   RAIIATH t(to<AtenTensorHandle>(stack[0]));
   RAIIATH raiiath_res = identity(std::move(t));
-  stack[num_args] = from(raiiath_res.release());
+  stack[0] = from(raiiath_res.release());
 }
 
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
