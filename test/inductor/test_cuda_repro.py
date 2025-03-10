@@ -151,6 +151,37 @@ class CudaReproTests(TestCase):
         # dont check rng state
         self.assertEqual(out[:2], fn(query, key, value, input_tensor2)[:2])
 
+    def test_effn_attn_bias_padding_misaligned(self):
+        seqlen_start = 1008
+
+        for offset in range(-1, 2):
+            seqlen = seqlen_start + offset
+            torch._dynamo.reset()
+
+            bsz = 32
+            q = torch.randn(bsz, 16, seqlen, 64, dtype=torch.bfloat16, device="cuda")
+            k = torch.randn(bsz, 16, seqlen, 64, dtype=torch.bfloat16, device="cuda")
+            v = torch.randn(bsz, 16, seqlen, 64, dtype=torch.bfloat16, device="cuda")
+            mask = torch.ones([bsz, 1, seqlen, seqlen], dtype=torch.bool, device="cuda")
+            inputs = [q, k, v, mask]
+
+            def f(q, k, v, mask):
+                return F.scaled_dot_product_attention(
+                    q, k, v, attn_mask=mask, dropout_p=0.0
+                )
+
+            f_compiled = torch.compile(f)
+
+            out, code = run_and_get_code(f_compiled, *inputs)
+            # padded bias should have an expanded dim
+            FileCheck().check("buf0 =").check_same(", 0, ").run(code[0])
+            # single fused padded kernel
+            FileCheck().check("def call").check_count(
+                "empty_strided_cuda", 1, exactly=True
+            ).check("return").run(code[0])
+
+            self.assertEqual(out, f(*inputs))
+
     @skipIfRocm
     def test_input_channels_last(self):
         m = torch.nn.Sequential(
@@ -520,9 +551,15 @@ class CudaReproTests(TestCase):
         from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
         from torch._inductor.runtime.hints import AttrsDescriptorWrapper, HeuristicType
         from torch._inductor.runtime.triton_heuristics import CachingAutotuner, grid
+        from torch._inductor.utils import triton_version_uses_attrs_dict
 
         def autotune(configs, meta):
             def decorator(fn):
+                if triton_version_uses_attrs_dict():
+                    # Newer versions of Triton puts constexpr in signature
+                    # Ref: https://github.com/pytorch/pytorch/pull/145051
+                    meta["signature"]["XBLOCK"] = "constexpr"
+
                 return CachingAutotuner(
                     # force autotune by setting save_cache_hook to False
                     fn,
@@ -1022,6 +1059,43 @@ class CudaReproTests(TestCase):
         actual = opt_fn(values, offsets)
 
         self.assertEqual(expect, actual)
+
+    @config.patch(
+        {
+            "max_autotune_gemm_backends": "TRITON",
+            "triton.disallow_failing_autotune_kernels_TESTING_ONLY": True,
+            "compile_threads": 1,
+        }
+    )
+    def test_bucketize_epilogue(self):
+        """
+        See https://github.com/pytorch/pytorch/issues/148764.
+        Make sure that when torch.bucketize appears as an epilogue, the codegen is valid.
+
+        Note: during autotuning, there's also the option to _not_ do the fusion.
+        So if you run the test with standard configs, the fused kernel would fail during
+        autotuning, and another non-fused kernel would be selected (and Inductor would
+        throw some errors, but the test would pass)
+
+        So we set disallow_failing_autotune_kernels_TESTING_ONLY=True to prevent the
+        autotuner from catching failures. And set compile_threads=1 so that compile
+        failures aren't caught by the asyn runner infra.
+        """
+
+        def fn(x: torch.Tensor, y: torch.Tensor, buckets: torch.Tensor) -> torch.Tensor:
+            z = torch.mm(x, y)
+            return torch.bucketize(z, buckets)
+
+        buckets = torch.arange(-100, 100, 10, device="cuda")
+        x = torch.randn(64, 64, device="cuda").clamp(-99, 99)
+        y = torch.randn(64, 64, device="cuda").clamp(-99, 99)
+
+        opt_fn = torch.compile(fn, mode="max-autotune")
+
+        expected = fn(x, y, buckets)
+        actual = opt_fn(x, y, buckets)
+
+        self.assertEqual(expected, actual)
 
     def test_float64_constants(self):
         def fn():

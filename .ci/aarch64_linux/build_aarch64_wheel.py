@@ -329,7 +329,7 @@ def build_ArmComputeLibrary(host: RemoteHost, git_clone_flags: str = "") -> None
         ]
     )
     host.run_cmd(
-        f"git clone https://github.com/ARM-software/ComputeLibrary.git -b v24.09 {git_clone_flags}"
+        f"git clone https://github.com/ARM-software/ComputeLibrary.git -b v25.02 {git_clone_flags}"
     )
 
     host.run_cmd(f"cd ComputeLibrary && scons Werror=1 -j8 {acl_build_flags}")
@@ -761,7 +761,7 @@ def start_build(
         version = host.check_output("cat pytorch/version.txt").strip()[:-2]
         build_vars += f"BUILD_TEST=0 PYTORCH_BUILD_VERSION={version}.dev{build_date} PYTORCH_BUILD_NUMBER=1"
     if branch.startswith(("v1.", "v2.")):
-        build_vars += f"BUILD_TEST=0 PYTORCH_BUILD_VERSION={branch[1:branch.find('-')]} PYTORCH_BUILD_NUMBER=1"
+        build_vars += f"BUILD_TEST=0 PYTORCH_BUILD_VERSION={branch[1 : branch.find('-')]} PYTORCH_BUILD_NUMBER=1"
     if host.using_docker():
         build_vars += " CMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=0x10000"
     if enable_mkldnn:

@@ -4799,10 +4799,18 @@ SinBackward0, MulBackward0, torch::autograd::AccumulateGrad
         # version counter doesn't change inside of the context manager
         self.assertEqual(2, x._version)
 
-        torch._C._autograd._unsafe_set_version_counter(x, 0)
+        torch._C._autograd._unsafe_set_version_counter((x,), (0,))
         self.assertEqual(0, x._version)
         with self.assertRaisesRegex(RuntimeError, "Cannot set"):
-            torch._C._autograd._unsafe_set_version_counter(x, -1)
+            torch._C._autograd._unsafe_set_version_counter((x,), (-1,))
+
+        y = torch.ones(2, requires_grad=True).clone()
+        with torch.autograd._unsafe_preserve_version_counter((x, y)):
+            x.mul_(2)
+            y.mul_(3)
+        # version counter doesn't change inside of the context manager
+        self.assertEqual(0, x._version)
+        self.assertEqual(0, y._version)
 
     def test_current_node(self):
         pr = []
@@ -8083,7 +8091,7 @@ for shape in [(1,), ()]:
         view_a = a.unbind()[0]
         with self.assertRaisesRegex(
             RuntimeError,
-            "This view is the output of a function that returns " "multiple views.",
+            "This view is the output of a function that returns multiple views.",
         ):
             view_a.copy_(b)
 
@@ -12488,6 +12496,18 @@ class TestAllowMutationOnSaved(TestCase):
             with self.assertRaisesRegex(RuntimeError, msg):
                 with torch.autograd.graph.allow_mutation_on_saved_tensors() as ctx:
                     pass
+
+    def test_inplace_foreach(self):
+        with torch.autograd.graph.allow_mutation_on_saved_tensors():
+            a = [
+                torch.tensor(1.0, requires_grad=True),
+                torch.tensor(1.0, requires_grad=True),
+            ]
+            b = torch._foreach_exp(a)
+            torch._foreach_add_(b, 1)
+            (b[0] + b[1]).backward()
+
+        self.assertEqual([a[0].grad, a[1].grad], torch._foreach_exp(a))
 
 
 class TestAutogradInferenceMode(TestCase):

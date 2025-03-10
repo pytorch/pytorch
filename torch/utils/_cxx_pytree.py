@@ -61,6 +61,10 @@ __all__ = [
 ]
 
 
+__TORCH_DICT_SESSION = optree.dict_insertion_ordered(True, namespace="torch")
+__TORCH_DICT_SESSION.__enter__()  # enable globally and permanently
+
+
 T = TypeVar("T")
 S = TypeVar("S")
 U = TypeVar("U")
@@ -285,20 +289,15 @@ def tree_flatten(
 
     >>> tree = {"b": (2, [3, 4]), "a": 1, "c": None, "d": 5}
     >>> tree_flatten(tree)
-    ([1, 2, 3, 4, None, 5], PyTreeSpec({'a': *, 'b': (*, [*, *]), 'c': *, 'd': *}, NoneIsLeaf))
+    ([2, 3, 4, 1, None, 5], PyTreeSpec({'b': (*, [*, *]), 'a': *, 'c': *, 'd': *}, NoneIsLeaf, namespace='torch'))
     >>> tree_flatten(1)
-    ([1], PyTreeSpec(*, NoneIsLeaf))
+    ([1], PyTreeSpec(*, NoneIsLeaf, namespace='torch'))
     >>> tree_flatten(None)
-    ([None], PyTreeSpec(*, NoneIsLeaf))
-
-    For unordered dictionaries, :class:`dict` and :class:`collections.defaultdict`, the order is
-    dependent on the **sorted** keys in the dictionary. Please use :class:`collections.OrderedDict`
-    if you want to keep the keys in the insertion order.
-
+    ([None], PyTreeSpec(*, NoneIsLeaf, namespace='torch'))
     >>> from collections import OrderedDict
     >>> tree = OrderedDict([("b", (2, [3, 4])), ("a", 1), ("c", None), ("d", 5)])
     >>> tree_flatten(tree)
-    ([2, 3, 4, 1, None, 5], PyTreeSpec(OrderedDict({'b': (*, [*, *]), 'a': *, 'c': *, 'd': *}), NoneIsLeaf))
+    ([2, 3, 4, 1, None, 5], PyTreeSpec(OrderedDict({'b': (*, [*, *]), 'a': *, 'c': *, 'd': *}), NoneIsLeaf, namespace='torch'))
 
     Args:
         tree (pytree): A pytree to flatten.
@@ -357,7 +356,7 @@ def tree_iter(
 
     >>> tree = {"b": (2, [3, 4]), "a": 1, "c": None, "d": 5}
     >>> list(tree_iter(tree))
-    [1, 2, 3, 4, None, 5]
+    [2, 3, 4, 1, None, 5]
     >>> list(tree_iter(1))
     [1]
     >>> list(tree_iter(None))
@@ -392,7 +391,7 @@ def tree_leaves(
 
     >>> tree = {"b": (2, [3, 4]), "a": 1, "c": None, "d": 5}
     >>> tree_leaves(tree)
-    [1, 2, 3, 4, None, 5]
+    [2, 3, 4, 1, None, 5]
     >>> tree_leaves(1)
     [1]
     >>> tree_leaves(None)
@@ -427,11 +426,11 @@ def tree_structure(
 
     >>> tree = {"b": (2, [3, 4]), "a": 1, "c": None, "d": 5}
     >>> tree_structure(tree)
-    PyTreeSpec({'a': *, 'b': (*, [*, *]), 'c': *, 'd': *}, NoneIsLeaf)
+    PyTreeSpec({'b': (*, [*, *]), 'a': *, 'c': *, 'd': *}, NoneIsLeaf, namespace='torch')
     >>> tree_structure(1)
-    PyTreeSpec(*, NoneIsLeaf)
+    PyTreeSpec(*, NoneIsLeaf, namespace='torch')
     >>> tree_structure(None)
-    PyTreeSpec(*, NoneIsLeaf)
+    PyTreeSpec(*, NoneIsLeaf, namespace='torch')
 
     Args:
         tree (pytree): A pytree to flatten.
@@ -557,17 +556,17 @@ MapOnlyFn = Callable[[T], Callable[[Any], Any]]
 # These specializations help with type inference on the lambda passed to this
 # function
 @overload
+def map_only(type_or_types_or_pred: type[T], /) -> MapOnlyFn[Fn[T, Any]]:
+    ...
+
+
+@overload
 def map_only(type_or_types_or_pred: Type2[T, S], /) -> MapOnlyFn[Fn2[T, S, Any]]:
     ...
 
 
 @overload
 def map_only(type_or_types_or_pred: Type3[T, S, U], /) -> MapOnlyFn[Fn3[T, S, U, Any]]:
-    ...
-
-
-@overload
-def map_only(type_or_types_or_pred: type[T], /) -> MapOnlyFn[Fn[T, Any]]:
     ...
 
 
@@ -663,6 +662,17 @@ def tree_map_only(
 
 @overload
 def tree_map_only(
+    type_or_types_or_pred: TypeAny,
+    /,
+    func: FnAny[Any],
+    tree: PyTree,
+    is_leaf: Optional[Callable[[PyTree], bool]] = None,
+) -> PyTree:
+    ...
+
+
+@overload
+def tree_map_only(
     type_or_types_or_pred: Callable[[Any], bool],
     /,
     func: FnAny[Any],
@@ -709,6 +719,17 @@ def tree_map_only_(
     type_or_types_or_pred: Type3[T, S, U],
     /,
     func: Fn3[T, S, U, Any],
+    tree: PyTree,
+    is_leaf: Optional[Callable[[PyTree], bool]] = None,
+) -> PyTree:
+    ...
+
+
+@overload
+def tree_map_only_(
+    type_or_types_or_pred: TypeAny,
+    /,
+    func: FnAny[Any],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> PyTree:
@@ -930,6 +951,7 @@ def treespec_dumps(treespec: TreeSpec, protocol: Optional[int] = None) -> str:
     return python_pytree.treespec_dumps(orig_treespec, protocol=protocol)
 
 
+@functools.lru_cache
 def treespec_loads(serialized: str) -> TreeSpec:
     """Deserialize a treespec from a JSON string."""
     orig_treespec = python_pytree.treespec_loads(serialized)

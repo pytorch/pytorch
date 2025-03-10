@@ -49,9 +49,9 @@ MODULES_TO_SKIP: set[type] = {
 }
 
 # List of all module classes to test.
-MODULE_CLASSES: list[type] = list(chain(*[
+MODULE_CLASSES: list[type] = [*chain.from_iterable([
     [getattr(namespace, module_name) for module_name in namespace.__all__]  # type: ignore[attr-defined]
-    for namespace in MODULE_NAMESPACES]))
+    for namespace in MODULE_NAMESPACES])]
 MODULE_CLASSES = [cls for cls in MODULE_CLASSES if cls not in MODULES_TO_SKIP]
 
 # Dict of module class -> common name. Useful for making test names more intuitive.
@@ -222,6 +222,9 @@ class ModuleInfo:
                                                       # channels last output
                  train_and_eval_differ=False,  # whether the module has differing behavior between train and eval
                  module_error_inputs_func=None,  # Function to generate module inputs that error
+                 gradcheck_fast_mode=None,  # Whether to use the fast implementation for gradcheck/gradgradcheck.
+                                            # When set to None, defers to the default value provided by the wrapper
+                                            # function around gradcheck (testing._internal.common_utils.gradcheck)
                  ):
         self.module_cls = module_cls
         self.module_inputs_func = module_inputs_func
@@ -234,6 +237,7 @@ class ModuleInfo:
         self.module_memformat_affects_out = module_memformat_affects_out
         self.train_and_eval_differ = train_and_eval_differ
         self.module_error_inputs_func = module_error_inputs_func
+        self.gradcheck_fast_mode = gradcheck_fast_mode
         self.is_lazy = issubclass(module_cls, torch.nn.modules.lazy.LazyModuleMixin)
 
     def get_decorators(self, test_class, test_name, device, dtype, param_kwargs):
@@ -1941,10 +1945,9 @@ def module_inputs_torch_nn_RMSNorm(module_info, device, dtype, requires_grad, tr
         dims = [ndim - i - 1 for i in range(len(normalized_shape))]
         upcasted_i = i.float()
         result = upcasted_i * torch.rsqrt(upcasted_i.pow(2).mean(dim=dims, keepdim=True) + m.eps)
-        result = result.type_as(i)
         if weight is not None:
             result *= weight
-        return result
+        return result.type_as(i)
 
     return [
         ModuleInput(
@@ -3571,7 +3574,7 @@ module_db: list[ModuleInfo] = [
                    DecorateInfo(skipCUDAIfCudnnVersionLessThan(version=7603), 'TestModule', 'test_memory_format'),
                    # Failure on ROCM for float32 issue #70125
                    DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),
-                   # Not implmented for chalf on CPU
+                   # Not implemented for chalf on CPU
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_cpu_gpu_parity',
                                 dtypes=(torch.chalf,), device_type='cuda'),
                    # See #119108: MPSNDArrayConvolutionA14.mm:3976: failed assertion `destination datatype must be fp32'
@@ -3636,7 +3639,7 @@ module_db: list[ModuleInfo] = [
                    # These fail only on ROCm
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format", device_type='cuda',
                                 dtypes=[torch.complex32, torch.complex64], active_if=TEST_WITH_ROCM),
-                   # Not implmented for chalf on CPU
+                   # Not implemented for chalf on CPU
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_cpu_gpu_parity',
                                 dtypes=(torch.chalf,), device_type='cuda'),
                ),
@@ -4179,6 +4182,9 @@ module_db: list[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.Transformer,
                module_inputs_func=module_inputs_torch_nn_Transformer,
+               # Inputs are too large to run with slow gradcheck
+               # https://github.com/pytorch/pytorch/issues/117140
+               gradcheck_fast_mode=True,
                decorators=[
                    # Not implemented for SDPA backward derivative
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_gradgrad',

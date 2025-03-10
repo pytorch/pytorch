@@ -1,5 +1,22 @@
 # mypy: allow-untyped-defs
 
+"""
+Core guard system for Dynamo that detects when compiled code needs to be recompiled due to
+changes in program state. Guards are conditions that must remain true for previously-compiled
+code to be valid for reuse.
+
+This module provides the infrastructure for creating, managing and checking guards, including:
+- Guard creation and composition
+- Guard state management and invalidation
+- Guard checking and failure handling
+- Utilities for guard optimization and debugging
+- Integration with Dynamo's compilation caching
+
+The guard system is critical for Dynamo's ability to efficiently reuse compiled code while
+maintaining correctness by detecting when recompilation is necessary due to changes in
+program state, tensor properties, or control flow.
+"""
+
 from __future__ import annotations
 
 import ast
@@ -10,7 +27,6 @@ import enum
 import functools
 import importlib
 import inspect
-import itertools
 import logging
 import math
 import sys
@@ -48,6 +64,7 @@ from torch._dynamo.source import (
     TensorProperty,
     TensorPropertySource,
 )
+from torch._dynamo.utils import CompileEventLogger
 from torch._guards import (
     CompileContext,
     CompileId,
@@ -90,6 +107,7 @@ from .source import (
     GlobalStateSource,
     GlobalWeakRefSource,
     GradSource,
+    ListGetItemSource,
     LocalSource,
     NNModuleSource,
     NumpyTensorSource,
@@ -1087,6 +1105,14 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
+        elif istype(source, ListGetItemSource):
+            assert base_guard_manager  # to make mypy happy
+            out = base_guard_manager.list_getitem_manager(
+                key=source.index,
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
         elif istype(source, GetItemSource):
             assert base_guard_manager  # to make mypy happy
             assert not isinstance(
@@ -1601,15 +1627,11 @@ class GuardBuilder(GuardBuilderBase):
                 DeviceMesh,
             )
 
-        if istype(val, dict):
-            assert all(
-                istype(x, ok_types) for x in itertools.chain(val.keys(), val.values())
-            )
-        else:
-            assert istype(
-                val,
-                ok_types,
-            ), f"Unexpected type {type(val)}, not in {ok_types}"
+        import torch.utils._pytree as pytree
+
+        assert istype(val, ok_types) or pytree.is_constant_class(type(val)), (
+            f"Unexpected type {type(val)}"
+        )
 
         # Special case for nan because float("nan") == float("nan") evaluates to False
         if istype(val, float) and math.isnan(val):
@@ -1641,7 +1663,7 @@ class GuardBuilder(GuardBuilderBase):
         code = [f"{ref} == {val!r}"]
         if istype(val, ok_mutable_types):
             # C++ guards perform a pointer equality check to speedup guards, but the assumption is that the object
-            # is mutable. For a few corner cases like sets and lists, we make a deepcopy to purposefully fail the
+            # is immutable. For a few corner cases like sets and lists, we make a deepcopy to purposefully fail the
             # pointer equality check.
             val = deepcopy(val)
         self.get_guard_manager(guard).add_equals_match_guard(
@@ -1664,7 +1686,15 @@ class GuardBuilder(GuardBuilderBase):
             assert istype(val.training, bool)
             self._guard_on_attribute(guard, "training", GuardBuilder.CONSTANT_MATCH)
         else:
-            exc.unimplemented(f"Guard setup for uninitialized class {type(val)}")
+            exc.unimplemented_v2(
+                gb_type="Attempted to guard on uninitialized nn.Module",
+                context="",
+                explanation="Attempted to setup an NN_MODULE guard on uninitialized "
+                f"nn.Module subclass `{type(val)}`.",
+                hints=[
+                    "Ensure the `nn.Module` subclass instance has called `super().__init__()`.",
+                ],
+            )
 
     def FUNCTION_MATCH(self, guard: Guard):
         """things like torch.add and user defined functions"""
@@ -1780,6 +1810,16 @@ class GuardBuilder(GuardBuilderBase):
         self.get_guard_manager(guard).add_not_none_guard(
             get_verbose_code_parts(code, guard)
         )
+
+    def MAPPING_KEYS_CHECK(self, guard):
+        """Guard on the key order of types.MappingProxyType object"""
+        ref = self.arg_ref(guard)
+        value = self.get(guard.name)
+
+        code = []
+        code.append(f"list({ref}.keys()) == {list(value.keys())}")
+        self._set_guard_export_info(guard, code)
+        self.get_guard_manager(guard).add_mapping_keys_guard(value, code)
 
     def DICT_KEYS_MATCH(self, guard):
         """Insert guard to check that the keys of a dict are same"""
@@ -2197,9 +2237,9 @@ class GuardBuilder(GuardBuilderBase):
         func_name = caller.f_code.co_name
         del caller
         # We use func_name for export, so might as well get a nice defensive check out of it
-        assert (
-            func_name in self.__class__.__dict__
-        ), f"_produce_guard_code must be called from inside GuardedCode. Called from {func_name}"
+        assert func_name in self.__class__.__dict__, (
+            f"_produce_guard_code must be called from inside GuardedCode. Called from {func_name}"
+        )
 
         # Not all guards have names, some can be installed globally (see asserts on HAS_GRAD)
         if provided_guarded_object is None:
@@ -2447,10 +2487,6 @@ class CheckFunctionManager:
         # in some form.
         self.guard_manager.id_matched_objs = builder.id_matched_objs
 
-        # TODO: don't do the string rep, do something more structured here
-        torch._logging.trace_structured(
-            "dynamo_cpp_guards_str", payload_fn=lambda: str(self.guard_manager)
-        )
         guards_log.debug("%s", self.guard_manager)
         self.guard_manager.id_matched_objs = builder.id_matched_objs
 
@@ -2458,6 +2494,7 @@ class CheckFunctionManager:
         # recompile.
         # TODO(anijain2305, ydwu4) - Skipping export because of following test
         # python -s test/dynamo/test_export.py -k test_export_with_symbool_inputs
+        latency = 0.0
         if not output_graph.export:
             if not self.guard_manager.check(output_graph.local_scope):
                 reasons = get_guard_fail_reason_helper(
@@ -2472,12 +2509,30 @@ class CheckFunctionManager:
                     self.guard_manager, output_graph.local_scope
                 )
 
-            if guards_log.isEnabledFor(logging.DEBUG):
-                latency = profile_guard_manager(
-                    self.guard_manager.root, output_graph.local_scope
-                )
-                guards_log.debug("Guard eval latency = %s us", f"{latency:.2f}")
+            # NB for developers: n_iters is chosen to be 50 to achieve
+            # statistical significance.  If you are working on a guard
+            # optimization, it might be a good idea to increase this number for
+            # more stabiilty during development.
+            latency = profile_guard_manager(
+                self.guard_manager.root, output_graph.local_scope, 50
+            )
+            guards_log.debug("Guard eval latency = %s us", f"{latency:.2f}")
+            # Note: We use `increment_toplevel` instead of `compilation_metric`
+            # here.  This is because, in scenarios where `torch._dynamo.reset`
+            # is invoked, the same frame ID and compile ID may be reused during
+            # a new compilation cycle.  This behavior causes issues with
+            # `compilation_metric`, as it expects the metric field to be empty.
+            # Ideally, we would overwrite the existing entry in such cases, but
+            # we currently lack an API to support overwriting metrics.  However,
+            # since these situations are rare and typically impractical to
+            # account for, we simply increment at the toplevel instead.
+            CompileEventLogger.increment_toplevel("guard_latency_us", int(latency))
 
+        # TODO: don't do the string rep, do something more structured here
+        torch._logging.trace_structured(
+            "dynamo_cpp_guards_str",
+            payload_fn=lambda: f"{self.guard_manager}\nGuard latency = {latency:.2f} us",
+        )
         # NB - We have to very careful of cleaning up here. Because of the
         # invalidate function, we can create a weakref finalizer that keeps
         # `self` alive for very long. Sometimes by mistake, we can run
@@ -2877,7 +2932,7 @@ def get_guard_fail_reason(
     return reason_str
 
 
-def get_and_maybe_log_recompilation_reason(
+def get_and_maybe_log_recompilation_reasons(
     cache_entry, frame: DynamoFrameType
 ) -> list[str]:
     """

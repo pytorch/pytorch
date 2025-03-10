@@ -38,6 +38,10 @@ on:
         default: ""
         description: |
           List of tests to include (empty string implies default list)
+      dashboard-tag:
+        required: false
+        type: string
+        default: ""
       disable-monitor:
         description: |
           [Experimental] Disable utilization monitoring for tests.
@@ -63,7 +67,6 @@ jobs:
       fail-fast: false
     timeout-minutes: ${{ matrix.mem_leak_check == 'mem_leak_check' && 600 || inputs.timeout-minutes }}
     runs-on: ${{ matrix.runner }}
-    environment: upload-benchmark-results
     steps:
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
@@ -175,6 +178,7 @@ jobs:
           PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.mem_leak_check && '1' || '0' }}
           PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
           TESTS_TO_INCLUDE: ${{ inputs.tests-to-include }}
+          DASHBOARD_TAG: ${{ inputs.dashboard-tag }}
         timeout-minutes: ${{ fromJson(steps.test-timeout.outputs.timeout) }}
         run: |
           set -x
@@ -221,6 +225,7 @@ jobs:
             -e PYTORCH_TEST_CUDA_MEM_LEAK_CHECK \
             -e PYTORCH_TEST_RERUN_DISABLED_TESTS \
             -e TESTS_TO_INCLUDE \
+            -e DASHBOARD_TAG \
             --env-file="${RUNNER_TEMP}/github_env_${GITHUB_RUN_ID}" \
             --ulimit stack=10485760:83886080 \
             --ulimit core=0 \
@@ -245,6 +250,11 @@ jobs:
         run: |
           # copy test results back to the mounted workspace, needed sudo, resulting permissions were correct
           docker exec -t "${{ env.CONTAINER_NAME }}" sh -c "cd ../pytorch && sudo cp -R test/test-reports ../workspace/test"
+
+      - name: Change permissions (only needed for MI300 runners for now)
+        if: ${{ always() && steps.test.conclusion && contains(matrix.runner, 'mi300') }}
+        run: |
+          docker exec -t "${{ env.CONTAINER_NAME }}" sh -c "sudo chown -R 1001:1001 test"
 
       - name: Print remaining test logs
         shell: bash

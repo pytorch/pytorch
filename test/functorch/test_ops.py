@@ -46,8 +46,6 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
-    IS_MACOS,
-    IS_X86,
     noncontiguous_like,
     parametrize,
     run_tests,
@@ -587,11 +585,6 @@ class TestOperators(TestCase):
                 xfail("as_strided"),
                 xfail("as_strided", "partial_views"),
                 xfail("as_strided_scatter"),
-                decorate(
-                    "linalg.det",
-                    "singular",
-                    decorator=expectedFailureIf(IS_MACOS and IS_X86),
-                ),
             }
         ),
     )
@@ -877,9 +870,6 @@ class TestOperators(TestCase):
             tol1("masked.cumprod", {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
             tol1("cumprod", {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
             tol1("linalg.vander", {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
-            tol2(
-                "linalg.det", "singular", {torch.float32: tol(atol=2e-05, rtol=2e-05)}
-            ),
         ),
     )
     def test_vjpvjp(self, device, dtype, op):
@@ -1357,11 +1347,6 @@ class TestOperators(TestCase):
         vmapjvpall_fail.union(
             {
                 xfail("as_strided_copy"),
-                decorate(
-                    "linalg.det",
-                    "singular",
-                    decorator=expectedFailureIf(IS_MACOS and IS_X86),
-                ),
             }
         ),
     )

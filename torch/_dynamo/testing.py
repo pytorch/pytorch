@@ -1,3 +1,18 @@
+"""Testing utilities and infrastructure for Dynamo.
+
+This module provides a comprehensive set of testing utilities including:
+- Test result collection and validation
+- Graph manipulation and comparison tools
+- Test case management and execution helpers
+- Specialized test decorators for different Python versions and features
+- RNG state management
+- Compilation counting and monitoring
+- Debug utilities for bytecode transformation
+
+The utilities in this module are used across Dynamo's test suite to ensure
+consistent testing patterns and proper test isolation.
+"""
+
 import contextlib
 import dis
 import functools
@@ -26,7 +41,7 @@ from .bytecode_transformation import (
     transform_code_object,
 )
 from .guards import CheckFunctionManager, CompileId, GuardedCode
-from .types import DynamoFrameType
+from .types import ConvertFrameReturn, DynamoFrameType, wrap_guarded_code
 from .utils import same
 
 
@@ -125,15 +140,13 @@ def requires_bwd_pass(out: Any) -> bool:
 
 
 @overload
-def reduce_to_scalar_loss(out: torch.Tensor) -> torch.Tensor:
-    ...
+def reduce_to_scalar_loss(out: torch.Tensor) -> torch.Tensor: ...
 
 
 @overload
 def reduce_to_scalar_loss(
-    out: Union[list[Any], tuple[Any, ...], dict[Any, Any]]
-) -> float:
-    ...
+    out: Union[list[Any], tuple[Any, ...], dict[Any, Any]],
+) -> float: ...
 
 
 def reduce_to_scalar_loss(out: Any) -> Union[torch.Tensor, float]:
@@ -174,37 +187,41 @@ def debug_dump(name: str, code: types.CodeType, extra: str = "") -> None:
 
 def debug_insert_nops(
     frame: DynamoFrameType, cache_size: int, hooks: Any, _: Any, *, skip: int = 0
-) -> Optional[GuardedCode]:
+) -> ConvertFrameReturn:
     """used to debug jump updates"""
 
     def insert_nops(instructions: list[Any], code_options: Any) -> None:
         instructions.insert(0, create_instruction("NOP"))
         instructions.insert(0, create_instruction("NOP"))
 
-    if is_generator(frame.f_code):
-        return None
+    metrics_context = torch._dynamo.utils.get_metrics_context()
+    with torch._dynamo.utils.dynamo_timed("debug_insert_nops"), metrics_context:
+        if is_generator(frame.f_code):
+            return ConvertFrameReturn()
 
-    debug_checks(frame.f_code)
-    code = transform_code_object(frame.f_code, insert_nops)
-    graph = OutputGraph(
-        code_options={},
-        compiler_fn=None,
-        root_tx=None,
-        export=False,
-        export_constraints=None,
-        frame_state={"_id": 0},
-        # TODO: shouldn't this be f_locals/f_globals from frame?
-        local_scope=locals(),
-        global_scope=globals(),
-        f_code=frame.f_code,
-        torch_function_mode_stack=[],
-    )
+        debug_checks(frame.f_code)
+        code = transform_code_object(frame.f_code, insert_nops)
+        graph = OutputGraph(
+            code_options={},
+            compiler_fn=None,
+            root_tx=None,
+            export=False,
+            export_constraints=None,
+            frame_state={"_id": 0},
+            # TODO: shouldn't this be f_locals/f_globals from frame?
+            local_scope=locals(),
+            global_scope=globals(),
+            f_code=frame.f_code,
+            torch_function_mode_stack=[],
+        )
 
-    return GuardedCode(
-        code,
-        CheckFunctionManager(frame.f_code, graph).guard_manager,  # type: ignore[arg-type]
-        CompileId(frame_id=0, frame_compile_id=0),
-    )
+        return wrap_guarded_code(
+            GuardedCode(
+                code,
+                CheckFunctionManager(frame.f_code, graph).guard_manager,  # type: ignore[arg-type]
+                CompileId(frame_id=0, frame_compile_id=0),
+            )
+        )
 
 
 class CompileCounter:
