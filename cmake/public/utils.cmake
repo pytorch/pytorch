@@ -368,6 +368,11 @@ function(torch_compile_options libname)
         /EHsc
         /bigobj>
       )
+    # Use standards conformance mode, see
+    # https://learn.microsoft.com/en-us/cpp/build/reference/permissive-standards-conformance
+    # https://learn.microsoft.com/en-us/cpp/build/reference/zc-preprocessor
+    target_compile_options_if_supported(${libname} PRIVATE "/permissive-")
+    target_compile_options_if_supported(${libname} PRIVATE "/Zc:preprocessor")
   else()
     set(private_compile_options
       -Wall
