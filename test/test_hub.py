@@ -2,13 +2,12 @@
 
 import os
 import tempfile
-import unittest
 import warnings
 from unittest.mock import patch
 
 import torch
 import torch.hub as hub
-from torch.testing._internal.common_utils import IS_SANDCASTLE, retry, TestCase
+from torch.testing._internal.common_utils import retry, skipIfSandcastle, TestCase
 
 
 def sum_of_state_dict(state_dict):
@@ -24,7 +23,7 @@ TORCHHUB_EXAMPLE_RELEASE_URL = (
 )
 
 
-@unittest.skipIf(IS_SANDCASTLE, "Sandcastle cannot ping external")
+@skipIfSandcastle("Sandcastle cannot ping external")
 class TestHub(TestCase):
     def setUp(self):
         super().setUp()
