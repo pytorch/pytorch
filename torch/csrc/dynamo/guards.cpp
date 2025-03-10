@@ -11,6 +11,7 @@
 #include <torch/csrc/dynamo/guards.h>
 #include <torch/csrc/inductor/inductor_ops.h>
 #include <torch/csrc/utils/disable_torch_function.h>
+#include <torch/csrc/utils/numpy_stub.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/utils/python_numbers.h>
@@ -1758,6 +1759,55 @@ class DATA_PTR_MATCH : public LeafGuard {
  private:
   // Original tensor data pointer.
   void* _data_ptr;
+};
+
+class NDARRAY_MATCH : public LeafGuard {
+ public:
+  NDARRAY_MATCH(py::object ndarray, py::object verbose_code_parts)
+      : LeafGuard(std::move(verbose_code_parts)) {
+    PyObject* value = ndarray.ptr();
+    if (!PyArray_Check(value)) {
+      throw py::value_error("Expecting a ndarray");
+    }
+    PyArrayObject* array = (PyArrayObject*)value;
+
+    _expected_ndims = PyArray_NDIM(array);
+    _expected_dtype = PyArray_TYPE(array);
+    for (int i = 0; i < _expected_ndims; i++) {
+      _expected_shape.push_back(PyArray_DIM(array, i));
+    }
+  }
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    // First, check if the PyObject is indeed a NumPy array.
+    if (!PyArray_Check(value)) {
+      return false;
+    }
+
+    // Convert the PyObject to a PyArrayObject.
+    PyArrayObject* array = (PyArrayObject*)value;
+
+    if (_expected_ndims != PyArray_NDIM(array)) {
+      return false;
+    }
+
+    if (_expected_dtype != PyArray_TYPE(array)) {
+      return false;
+    }
+
+    for (int i = 0; i < _expected_ndims; i++) {
+      if (_expected_shape[i] != PyArray_DIM(array, i)) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+ private:
+  int _expected_ndims;
+  int _expected_dtype;
+  std::vector<Py_ssize_t> _expected_shape;
 };
 
 // Checks that an attr is absent in the object. We don't need the opposite
@@ -5286,6 +5336,10 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "DATA_PTR_MATCH")
       .def(py::init<py::object, py::list>())
       .def("__call__", &DATA_PTR_MATCH::check);
+  py::class_<NDARRAY_MATCH, LeafGuard, std::shared_ptr<NDARRAY_MATCH>>(
+      py_m, "NDARRAY_MATCH")
+      .def(py::init<py::object, py::list>())
+      .def("__call__", &NDARRAY_MATCH::check);
   py::class_<NO_HASATTR, LeafGuard, std::shared_ptr<NO_HASATTR>>(
       py_m, "NO_HASATTR")
       .def(py::init<py::object, py::list>())
@@ -5588,6 +5642,15 @@ PyObject* torch_c_dynamo_guards_init() {
             SKIP_IF_GUARD_ALREADY_PRESENT("DATA_PTR_MATCH");
             self.add_leaf_guard(std::make_shared<DATA_PTR_MATCH>(
                 std::move(data_ptr), std::move(verbose_code_parts)));
+          })
+      .def(
+          "add_ndarray_match_guard",
+          [](GuardManager& self,
+             py::object ndarray,
+             py::object verbose_code_parts) -> void {
+            SKIP_IF_GUARD_ALREADY_PRESENT("NDARRAY_MATCH");
+            self.add_leaf_guard(std::make_shared<NDARRAY_MATCH>(
+                std::move(ndarray), std::move(verbose_code_parts)));
           })
       .def(
           "add_no_hasattr_guard",

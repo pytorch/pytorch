@@ -1448,6 +1448,19 @@ class GuardBuilder(GuardBuilderBase):
             not invert, key, get_verbose_code_parts(code, guard)
         )
 
+    def NDARRAY_MATCH(self, guard: Guard):
+        # Add ndarray match
+        ref = self.arg_ref(guard)
+        val = self.get(guard.name)
+
+        # Code string is just a placeholder, it does not run at runtime.
+        code = f"__ndarray_match({ref}, ({val.shape}, {val.dtype})"
+        self._set_guard_export_info(guard, [code])
+
+        self.get_guard_manager(guard).add_ndarray_match_guard(
+            val, get_verbose_code_parts(code, guard)
+        )
+
     def ID_MATCH(self, guard: Guard):
         # ___check_obj_id is same as `id(x) == y`
         if isinstance(guard.originating_source, TypeSource):

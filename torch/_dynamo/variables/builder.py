@@ -1823,16 +1823,10 @@ class VariableBuilder:
         if isinstance(source, GradSource) and is_from_optimizer_source(source):
             guard_type = GuardBuilder.NOT_NONE_MATCH
 
-        self.install_guards(
-            functools.partial(
-                guard_type,
-                value=(
-                    value
-                    if isinstance(source, NumpyTensorSource)
-                    else TensorWeakRef(value)
-                ),
+        if not isinstance(source, NumpyTensorSource):
+            self.install_guards(
+                functools.partial(guard_type, value=TensorWeakRef(value))
             )
-        )
 
         # We install TYPE_MATCH guards for traceable wrapper subclass object,
         # and recursively install corresponding guard for each inner attribute.
@@ -1867,6 +1861,7 @@ class VariableBuilder:
     def wrap_numpy_ndarray(self, value):
         assert np is not None
         assert isinstance(value, np.ndarray)
+        self.install_guards(GuardBuilder.NDARRAY_MATCH)
 
         source = NumpyTensorSource(self.get_source())
 
