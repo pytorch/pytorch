@@ -742,6 +742,14 @@ def low_precision_fp(dtype: torch.dtype) -> bool:
     return dtype.itemsize <= 2 and dtype.is_floating_point
 
 
+def low_precision_fp_var(var: Union[CSEVariable, Any]) -> bool:
+    if not isinstance(var, CSEVariable):
+        return False
+
+    dtype = var.dtype
+    return low_precision_fp(dtype) if isinstance(dtype, torch.dtype) else False
+
+
 class TritonCSEVariable(CSEVariable):
     def __init__(self, name, bounds: ValueRanges[Any], dtype: torch.dtype) -> None:
         super().__init__(name, bounds, dtype)
@@ -936,7 +944,7 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def truediv(x, y):
         out = f"({x} / {y})"
-        if low_precision_fp(x.dtype) or low_precision_fp(y.dtype):
+        if low_precision_fp_var(x) or low_precision_fp_var(y):
             out_dtype = get_dtype_handler().truediv(x, y)
             if out_dtype in (torch.float16, torch.float32):
                 out = f"{out}.to({triton_type(out_dtype)})"
@@ -946,7 +954,7 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def mod(x, y):
         out = f"({x} % {y})"
-        if low_precision_fp(x.dtype) or low_precision_fp(y.dtype):
+        if low_precision_fp_var(x) or low_precision_fp_var(y):
             out_dtype = get_dtype_handler().mod(x, y)
             if out_dtype in (torch.float16, torch.float32):
                 out = f"{out}.to({triton_type(out_dtype)})"
@@ -2347,7 +2355,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         boundary_stride = self.index_to_str(boundaries[3])
         sorter_ptr = self.args.input(sorter[0]) if sorter else "None"
         sorter_stride = self.index_to_str(sorter[1]) if sorter else "None"
-        block_size = self.dense_size_str()
 
         if indexing_dtype == torch.int32:
             triton_dtype = "tl.int32"
@@ -2367,7 +2374,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             f"{right}, "
             f"{sorter_ptr}, {sorter_stride}, "
             f"{sorter_indices}, "
-            f"{block_size}, "
             ")",
             dtype=indexing_dtype,  # type: ignore[attr-defined]
         )
@@ -2530,7 +2536,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 )
 
             masked_value: Union[CSEVariable, Sequence[CSEVariable]]
-            if isinstance(value, tuple):
+            if reduction_type == "online_softmax_reduce":
+                # Don't generate mask value for online_softmax since we
+                # will fallback below
+                pass
+            elif isinstance(value, tuple):
                 masked_value = [_mask_value(v, d) for v, d in zip(value, default)]
             else:
                 masked_value = _mask_value(value, default)
@@ -2569,6 +2579,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         self.compute, mean, m2, weight, dim, dtype
                     )
                 )
+            elif reduction_type == "online_softmax_reduce":
+                # All data is loaded to register anyway, no need to do
+                # online softmax
+                result_var = self.prepare_softmax_twopass_fallback(dtype, value)
             else:
                 assert isinstance(masked_value, CSEVariable)
                 result_var = self.cse.generate(
@@ -2609,6 +2623,51 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             elif is_welford_reduction(reduction_type):
                 result_var = self.welford_reduce(
                     result_var, reduction_type, value, where_cond, acc_type, dtype
+                )
+            elif reduction_type == "online_softmax_reduce":
+                accumulator_max = f"_{result_var}_max"
+                accumulator_sum = f"_{result_var}_sum"
+
+                # setup accumulator
+                self.body.writeline(
+                    f"{accumulator_max} = tl.full({self.dense_size_str()}, float('-inf'), {acc_type})"
+                )
+                self.body.writeline(
+                    f"{accumulator_sum} = tl.zeros({self.dense_size_str()}, {acc_type})"
+                )
+
+                # combine
+                # Note, we pass config.use_fast_math to the JITFunction
+                # since a triton kernel can not access a config.
+                self.compute.splice(
+                    f"""
+                    {accumulator_max}_next, {accumulator_sum}_next = triton_helpers.online_softmax_combine(
+                        {accumulator_max}, {accumulator_sum}, {value}, {config.use_fast_math}
+                    )
+                    """
+                )
+
+                # mask
+                self.compute.splice(
+                    f"""
+                    {accumulator_max} = {where_cond(f"{accumulator_max}_next", accumulator_max)}
+                    {accumulator_sum} = {where_cond(f"{accumulator_sum}_next", accumulator_sum)}
+                    """
+                )
+
+                # reduce. Similar to the final reduction for coopereative
+                # reduction
+                result_max = result_var
+                result_sum = self.cse.newvar(dtype=dtype)
+
+                result_var = self.online_softmax_reduce_final_reduction(
+                    self.post_loop_combine,
+                    result_max,
+                    result_sum,
+                    accumulator_max,
+                    accumulator_sum,
+                    dim,
+                    dtype,
                 )
             else:
                 combine_fn = ir.get_reduction_combine_fn(reduction_type, src_dtype)
@@ -2680,6 +2739,23 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     dim,
                     dtype,
                 )
+            elif reduction_type == "online_softmax_reduce":
+                result_max, result_sum = result_var
+                peer_max = self.codegen_cooperative_reduction_peer_combine(
+                    result_max, upcast_acc_dtype(src_dtype), default[0]
+                )
+                peer_sum = self.codegen_cooperative_reduction_peer_combine(
+                    result_sum, upcast_acc_dtype(src_dtype), default[1]
+                )
+                self.online_softmax_reduce_final_reduction(
+                    self.post_loop_store,
+                    result_max,
+                    result_sum,
+                    peer_max,
+                    peer_sum,
+                    dim,
+                    dtype,
+                )
             else:
                 peers = self.codegen_cooperative_reduction_peer_combine(
                     result_var, upcast_acc_dtype(src_dtype), default
@@ -2696,7 +2772,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             self.outside_loop_vars.update(result_var)
 
             # Match output dtype with input dtype
-            if reduction_type == "welford_reduce":
+            if reduction_type in ("welford_reduce", "online_softmax_reduce"):
                 assert len(original_dtypes) == 1
                 original_dtypes = len(result_var) * original_dtypes
 
@@ -2719,6 +2795,23 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 )
 
         return result_var
+
+    def _online_softmax_reduce(
+        self, buffer, accumulator_max, accumulator_sum, dim, dtype: torch.dtype
+    ):
+        accumulator_max = self.reduction_collapse_dims(buffer, accumulator_max, dtype)
+        accumulator_sum = self.reduction_collapse_dims(buffer, accumulator_sum, dtype)
+        result_max, result_sum = [str(self.cse.newvar(dtype=dtype)) for _ in range(2)]
+        buffer.splice(
+            f"""
+            {result_max}, {result_sum} = triton_helpers.online_softmax_reduce(
+                {accumulator_max}, {accumulator_sum}, {dim}, {config.use_fast_math})
+            {result_max} = {self.reduction_resize(f"{result_max}")}
+            {result_sum} = {self.reduction_resize(f"{result_sum}")}
+            """
+        )
+
+        return result_max, result_sum
 
     def _welford(self, buffer, mean, m2, weight, dim, dtype: torch.dtype):
         """
@@ -2813,6 +2906,16 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             buffer.splice(f"{result_expr} = {value}")
 
         return result_mean, result_m2, result_weight
+
+    def online_softmax_reduce_final_reduction(
+        self, buffer, result_max, result_sum, peer_max, peer_sum, dim, dtype
+    ):
+        values = self._online_softmax_reduce(buffer, peer_max, peer_sum, dim, dtype)
+        result_exprs = [result_max, result_sum]
+        for result_expr, value in zip(result_exprs, values):
+            buffer.splice(f"{result_expr} = {value}")
+
+        return result_max, result_sum
 
     def max_rsplit(self):
         if self.fixed_config:
@@ -4109,6 +4212,8 @@ class TritonScheduling(SIMDScheduling):
             try:
                 call(wrapped_jit_function.clone_args(*args)[0])
             except Exception as e:
+                if config.triton.disallow_failing_autotune_kernels_TESTING_ONLY:
+                    raise
                 log.debug(
                     "Exception (%s) in compiling fused nodes %s",
                     e,
