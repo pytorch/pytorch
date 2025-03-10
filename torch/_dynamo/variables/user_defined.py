@@ -1439,10 +1439,16 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
             self.exc_vt.call_setattr(tx, args[0], args[1])
         return super().call_method(tx, name, args, kwargs)
 
-    def __getattr__(self, name):
-        if name in self.__class__.__dict__.keys():
-            return getattr(self, name)
-        return getattr(self.exc_vt, name)
+    @property
+    def __context__(self):
+        return self.exc_vt.__context__
+
+    def set_context(self, context: "variables.ExceptionVariable"):
+        return self.exc_vt.set_context(context)
+
+    @property
+    def exc_type(self):
+        return self.exc_vt.exc_type
 
 
 class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
