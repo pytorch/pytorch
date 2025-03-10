@@ -4728,7 +4728,7 @@ class TestLinalg(TestCase):
     @skipCUDAIfNotRocm
     @runOnRocmArch(MI300_ARCH)
     @dtypes(torch.torch.float8_e4m3fnuz, torch.float8_e5m2fnuz)
-    def test_matmul_scaled_gemm_offline_tunableop(self, device, dtype):
+    def test_scaled_gemm_offline_tunableop(self, device, dtype):
         # This test is the offline version of test_scaled_gemm_tunableop
         import os
 
