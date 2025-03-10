@@ -1217,7 +1217,7 @@ class GraphModuleSerializer(metaclass=Final):
         else:
             raise AssertionError("TODO")
 
-    def serialize_treespec(self, treespec):
+    def serialize_treespec(self, treespec, should_store_namedtuple_fields: bool = True):
         # We want to additionally save all the field names of the namedtuples in
         # case users want to check that the treespec types are equivalent
         def store_namedtuple_fields(ts):
@@ -1240,11 +1240,12 @@ class GraphModuleSerializer(metaclass=Final):
                 store_namedtuple_fields(child)
 
         serialized_treespec = treespec_dumps(treespec, TREESPEC_VERSION)
-        store_namedtuple_fields(treespec)
+        if should_store_namedtuple_fields:
+            store_namedtuple_fields(treespec)
         return serialized_treespec
 
     def serialize_module_call_signature(
-        self, module_call_signature: ep.ModuleCallSignature
+        self, module_call_signature: ep.ModuleCallSignature, should_store_namedtuple_fields: bool = True
     ) -> ModuleCallSignature:
         log.debug("[serialize_module_call_signature] %s", module_call_signature)
         return ModuleCallSignature(
@@ -1254,20 +1255,20 @@ class GraphModuleSerializer(metaclass=Final):
             outputs=[
                 self.serialize_argument_spec(x) for x in module_call_signature.outputs
             ],
-            in_spec=self.serialize_treespec(module_call_signature.in_spec),
-            out_spec=self.serialize_treespec(module_call_signature.out_spec),
+            in_spec=self.serialize_treespec(module_call_signature.in_spec, should_store_namedtuple_fields),
+            out_spec=self.serialize_treespec(module_call_signature.out_spec, should_store_namedtuple_fields),
             forward_arg_names=names if (names := module_call_signature.forward_arg_names) else None
         )
 
     def serialize_module_call_graph(
-        self, module_call_graph: list[ep.ModuleCallEntry]
+        self, module_call_graph: list[ep.ModuleCallEntry], should_store_namedtuple_fields: bool = True
     ) -> list[ModuleCallEntry]:
         log.debug("\n[serialize_module_call_graph]")
         return [
             ModuleCallEntry(
                 fqn=entry.fqn,
                 signature=(
-                    self.serialize_module_call_signature(entry.signature)
+                    self.serialize_module_call_signature(entry.signature, should_store_namedtuple_fields)
                     if entry.signature
                     else None
                 ),
@@ -1502,14 +1503,14 @@ class GraphModuleSerializer(metaclass=Final):
 
         return ret
 
-    def serialize(self, graph_module: torch.fx.GraphModule) -> GraphModule:
+    def serialize(self, graph_module: torch.fx.GraphModule, should_store_namedtuple_fields: bool = True) -> GraphModule:
         log.debug("\n[serialize]")
         graph = self.serialize_graph(graph_module)
 
         return GraphModule(
             graph=graph,
             signature=self.serialize_signature(self.graph_signature),
-            module_call_graph=self.serialize_module_call_graph(self.module_call_graph),
+            module_call_graph=self.serialize_module_call_graph(self.module_call_graph, should_store_namedtuple_fields),
             metadata=self.serialize_graph_module_metadata(graph_module.meta),
             treespec_namedtuple_fields=self.treespec_namedtuple_fields
         )
@@ -1526,7 +1527,7 @@ class ExportedProgramSerializer(metaclass=Final):
 
         self.pickle_protocol = pickle_protocol
 
-    def serialize(self, exported_program: ep.ExportedProgram) -> _SerializedProgram:
+    def serialize(self, exported_program: ep.ExportedProgram, should_store_namedtuple_fields: bool = True) -> _SerializedProgram:
         """
         Args:
             exported_program: Exported Program to serialize
@@ -1536,7 +1537,7 @@ class ExportedProgramSerializer(metaclass=Final):
         gm_serializer = GraphModuleSerializer(
             exported_program.graph_signature, exported_program.module_call_graph
         )
-        serialized_graph_module = gm_serializer.serialize(exported_program.graph_module)
+        serialized_graph_module = gm_serializer.serialize(exported_program.graph_module, should_store_namedtuple_fields)
         serialized_range_constraints = serialize_range_constraints(
             exported_program.range_constraints
         )
