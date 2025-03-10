@@ -24,6 +24,7 @@ PyObject* THPDevice_New(const at::Device& device) {
     throw python_error();
   auto self_ = reinterpret_cast<THPDevice*>(self.get());
   self_->device = device;
+  self_->context = nullptr;
   return self.release();
 }
 
@@ -176,22 +177,59 @@ static PyObject* THPDevice_reduce(PyObject* _self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPDevice_enter(PyObject* self, PyObject* noargs) {
+static PyObject* THPDevice_enter(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   py::object mode = py::module::import("torch.utils._device")
-                        .attr("DeviceContext")(py::handle(self));
+                        .attr("DeviceContext")(py::handle(_self));
   at::impl::PythonTorchFunctionTLS::push_onto_stack(
       std::make_shared<c10::SafePyObject>(
           mode.release().ptr(), getPyInterpreter()));
+  auto self = (THPDevice*)_self;
+  auto device_type = at::accelerator::getAccelerator();
+  if (device_type.has_value() && device_type.value() == self->device.type() &&
+      self->device.has_index()) {
+    c10::DeviceIndex cur_device_idx = at::accelerator::getDeviceIndex();
+    at::accelerator::setDeviceIndex(self->device.index());
+    auto ctx_device_index =
+        THPObjectPtr(THPUtils_packDeviceIndex(cur_device_idx));
+    TORCH_CHECK(
+        !(self->context), "Device's context should not be initialized.");
+    auto dict = THPObjectPtr(PyDict_New());
+    if (!dict) {
+      throw python_error();
+    }
+    self->context = dict.release();
+    if (PyDict_SetItemString(
+            self->context, "_ctx_device_index", ctx_device_index.get()) < 0) {
+      throw python_error();
+    }
+  }
   // So that with torch.device('cuda') as dev: works
-  Py_INCREF(self);
-  return self;
+  Py_INCREF(_self);
+  return _self;
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPDevice_exit(PyObject* self, PyObject* unused) {
+static PyObject* THPDevice_exit(PyObject* _self, PyObject* unused) {
   HANDLE_TH_ERRORS
   at::impl::PythonTorchFunctionTLS::pop_stack();
+  auto self = (THPDevice*)_self;
+  auto device_type = at::accelerator::getAccelerator();
+  if (device_type.has_value() && device_type.value() == self->device.type() &&
+      self->device.has_index()) {
+    PyObject* py_device_index = nullptr;
+    if (PyDict_GetItemStringRef(
+            self->context, "_ctx_device_index", &py_device_index) < 0) {
+      throw python_error();
+    }
+    auto ctx_device_index = THPObjectPtr(py_device_index);
+    TORCH_INTERNAL_ASSERT(
+        ctx_device_index.get(),
+        "ctx_device_index should be present on the context dict.");
+    auto prev_device_index = THPUtils_unpackDeviceIndex(ctx_device_index.get());
+    at::accelerator::setDeviceIndex(prev_device_index);
+    Py_CLEAR(self->context);
+  }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
