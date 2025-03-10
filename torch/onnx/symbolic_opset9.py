@@ -3854,18 +3854,8 @@ def unsqueeze(g: jit_utils.GraphContext, self, dim):
 
 @_onnx_symbolic("aten::sort")
 # TODO(justinchuby): Support multiple quantized args in output
-@symbolic_helper.parse_args(
-    "v", "i", "i", "none", "none", "none"
-)  # TODO: how to add dtype in parse_arags??
-def sort(
-    g: jit_utils.GraphContext,
-    self,
-    dim,
-    decending,
-    indices_dtype,
-    dynamic_indices_dtype,
-    out=None,
-):
+@symbolic_helper.parse_args("v", "i", "i", "none")
+def sort(g: jit_utils.GraphContext, self, dim, decending, out=None):
     if out is not None:
         symbolic_helper._unimplemented(
             "Sort", "Out parameter is not supported for sort", self

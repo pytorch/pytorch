@@ -6371,30 +6371,8 @@ def upsample_nearest3d(input, output_size, scales_d=None, scales_h=None, scales_
         aten.sort.values_stable,
     ]
 )
-def meta_sort(
-    self,
-    stable=None,
-    dim=-1,
-    descending=False,
-    indices_dtype=torch.long,
-    dynamic_indices_dtype=False,
-    values=None,
-    indices=None,
-):
-    print("py meta_sort")
-    v = torch.empty_like(self)
-    if dynamic_indices_dtype:
-        sort_size = self.size()[dim] if self.dim() > 0 else 1
-        if sort_size - 1 <= torch.iinfo(torch.uint8).max:
-            indices_dtype = torch.uint8
-        elif sort_size - 1 <= torch.iinfo(torch.uint16).max:
-            indices_dtype = torch.uint16
-        elif sort_size - 1 <= torch.iinfo(torch.uint32).max:
-            indices_dtype = torch.uint32
-        else:
-            indices_dtype = torch.uint64
-    i = torch.empty_like(self, dtype=indices_dtype)
-
+def meta_sort(self, stable=None, dim=-1, descending=False, values=None, indices=None):
+    v, i = torch.empty_like(self), torch.empty_like(self, dtype=torch.int64)
     if values is not None and indices is not None:
         assert isinstance(values, TensorLike)
         assert isinstance(indices, TensorLike)

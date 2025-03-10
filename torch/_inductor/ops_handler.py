@@ -267,8 +267,6 @@ class OpsHandler(Generic[T]):
         values: tuple[T, ...],
         stable: bool,
         descending: bool,
-        indices_dtype: torch.dtype = torch.long,
-        dynamic_indices_dtype: bool = False,
     ) -> tuple[T, ...]:
         """
         Sort values along the reduction dimension.
@@ -846,14 +844,7 @@ class NoopHandler(DefaultHandler):
         return (None,) * len(values)
 
     @staticmethod
-    def sort(
-        dtypes,
-        values,
-        stable,
-        descending,
-        indices_dtype=torch.long,
-        dynamic_indices_dtype=False,
-    ) -> tuple[None, ...]:
+    def sort(dtypes, values, stable, descending) -> tuple[None, ...]:
         return (None,) * len(values)
 
     @staticmethod
@@ -965,17 +956,9 @@ class MockHandler(BasicMathOpsMixin, DefaultHandler):
         )
 
     @staticmethod
-    def sort(
-        dtypes,
-        values,
-        stable,
-        descending,
-        indices_dtype=torch.long,
-        dynamic_indices_dtype=False,
-    ):
+    def sort(dtypes, values, stable, descending):
         return tuple(
-            f"ops.sort({dtypes}, {values}, stable={stable}, descending={descending}, "
-            f"indices_dtype={indices_dtype}, dynamic_indices_dtype={dynamic_indices_dtype})[{i}]"
+            f"ops.sort({dtypes}, {values}, stable={stable}, descending={descending})[{i}]"
             for i in range(len(values))
         )
 

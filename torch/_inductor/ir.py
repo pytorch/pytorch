@@ -2286,8 +2286,6 @@ class Sort(Loops):
 
     stable: bool
     descending: bool
-    indices_dtype: torch.dtype = torch.long
-    dynamic_indices_dtype: bool = False
 
     # HACK we mimick reduction
 
@@ -2311,14 +2309,7 @@ class Sort(Loops):
     ) -> None:
         idx = self.reindex(vars, reduction_vars)
         values = tuple(inner_fn(idx) for inner_fn in self.inner_fns)
-        result = ops.sort(
-            self.dtypes,
-            values,
-            self.stable,
-            self.descending,
-            self.indices_dtype,
-            self.dynamic_indices_dtype,
-        )
+        result = ops.sort(self.dtypes, values, self.stable, self.descending)
         return ops.store(
             output_name or "unnamed", indexer(idx), result[self.output_index]
         )
@@ -2360,8 +2351,6 @@ class Sort(Loops):
         axis: int,
         stable: bool,
         descending: bool,
-        indices_dtype: torch.dtype = torch.long,
-        dynamic_indices_dtype: bool = False,
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
         **kwargs: Any,
     ) -> Sequence[Optional[TensorBox]]:
@@ -2420,8 +2409,6 @@ class Sort(Loops):
                     output_index=output_index,
                     stable=stable,
                     descending=descending,
-                    indices_dtype=indices_dtype,
-                    dynamic_indices_dtype=dynamic_indices_dtype,
                     **kwargs,
                 )
             )
