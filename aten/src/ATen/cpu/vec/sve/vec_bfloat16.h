@@ -34,12 +34,8 @@ public:
 
   Vectorized() {}
   Vectorized(svbfloat16_t v) : values(v) {}
-  Vectorized(int val) {
-    values = svdup_n_bf16(*reinterpret_cast<bfloat16_t*>(&val));
-  }
-  Vectorized(BFloat16 val) {
-    values = svdup_n_bf16(*reinterpret_cast<bfloat16_t*>(&val));
-  }
+  Vectorized(int val);
+  Vectorized(BFloat16 val);
 
   template <
       typename... Args,
@@ -83,12 +79,18 @@ public:
     return svld1_bf16(pg, reinterpret_cast<const bfloat16_t*>(ptr));
   }
   void store(void* ptr, int64_t count = size()) const {
+    __at_align__ bfloat16_t tmp[size()];
+    std::memset(tmp, 0, sizeof(tmp));
     if (count == size()) {
-      svst1_bf16(ptrue, reinterpret_cast<bfloat16_t*>(ptr), values);
+      svst1_bf16(ptrue, reinterpret_cast<bfloat16_t*>(tmp), values);
     } else {
       svbool_t pg = svwhilelt_b16(0ull, count);
-      svst1_bf16(pg, reinterpret_cast<bfloat16_t*>(ptr), values);
+      svst1_bf16(pg, reinterpret_cast<bfloat16_t*>(tmp), values);
     }
+    std::memcpy(
+      reinterpret_cast<bfloat16_t*>(ptr),
+      reinterpret_cast<const bfloat16_t*>(tmp),
+      count * sizeof(bfloat16_t));
   }
   const BFloat16& operator[](int idx) const = delete;
   BFloat16& operator[](int idx) = delete;
@@ -160,16 +162,7 @@ public:
   Vectorized<BFloat16> digamma() const {
     return map(calc_digamma);
   }
-  Vectorized<BFloat16> igamma(const Vectorized<BFloat16> &x) const {
-    __at_align__ BFloat16 tmp[size()];
-    __at_align__ BFloat16 tmp_x[size()];
-    store(tmp);
-    x.store(tmp_x);
-    for (int64_t i = 0; i < size(); i++) {
-      tmp[i] = calc_igamma(tmp[i], tmp_x[i]);
-    }
-    return loadu(tmp);
-  }
+  Vectorized<BFloat16> igamma(const Vectorized<BFloat16> &x) const;
   Vectorized<BFloat16> igammac(const Vectorized<BFloat16> &x) const;
   Vectorized<BFloat16> nextafter(const Vectorized<BFloat16> &b) const;
   Vectorized<BFloat16> log() const;
@@ -308,6 +301,17 @@ Vectorized<c10::BFloat16> inline operator/(
   return binary_operator_via_float(std::divides<Vectorized<float>>(), a, b);
 }
 
+inline Vectorized<BFloat16>::Vectorized(int val) {
+  auto vals_f = svdup_n_f32(val);
+  values = convert_float_bfloat16(vals_f, vals_f);
+}
+
+
+inline Vectorized<BFloat16>::Vectorized(BFloat16 val) {
+  auto vals_f = svdup_n_f32((float) val);
+  values = convert_float_bfloat16(vals_f, vals_f);
+}
+
 Vectorized<BFloat16> inline Vectorized<c10::BFloat16>::isnan() const {
   // NaN check
   svbool_t mask = svcmpuo_f16(ptrue, convert_bfloat16_svfloat16(values), ZERO_F16);
@@ -355,6 +359,7 @@ DEFINE_BF16_FUNC_VIA_FLOAT(exp2);
 DEFINE_BF16_FUNC_VIA_FLOAT(expm1);
 DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(fmod);
 DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(hypot);
+DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(igamma);
 DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(igammac);
 DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(nextafter);
 DEFINE_BF16_FUNC_VIA_FLOAT(log);
