@@ -108,7 +108,7 @@ def check_meta_consistency_vt(
     lhs_name: str,
     rhs_name: str,
 ) -> None:
-    from torch._higher_order_ops.while_loop import check_meta_consistency
+    from torch._higher_order_ops.utils import check_meta_consistency
 
     from . import TensorVariable
 
