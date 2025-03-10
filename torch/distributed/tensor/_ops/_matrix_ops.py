@@ -434,8 +434,8 @@ def scaled_dot_product_efficient_attention_strategy(op_schema: OpSchema) -> OpSt
     all_replicate: PlacementList = [
         Replicate(),
         Replicate(),
-        None,
-        None,
+        Replicate(),
+        Replicate(),
         Replicate(),
         Replicate(),
         Replicate(),
@@ -446,13 +446,13 @@ def scaled_dot_product_efficient_attention_strategy(op_schema: OpSchema) -> OpSt
     # Context Parallelism: shards on the sequence dim
     single_mesh_dim_strategies.append(
         [
-            Shard(2),  # output
-            Shard(2),  # logsumexp
-            None,  # philox_seed
-            None,  # philox_offset
-            Shard(2),  # q
-            Shard(2),  # k
-            Shard(2),  # v
+            Shard(2),     # output
+            Shard(2),     # logsumexp
+            Replicate(),  # philox_seed
+            Replicate(),  # philox_offset
+            Shard(2),     # q
+            Shard(2),     # k
+            Shard(2),     # v
         ]
     )
 
@@ -471,8 +471,8 @@ def scaled_dot_product_efficient_attention_strategy(op_schema: OpSchema) -> OpSt
     num_heads_dim_sharding = [
         output_sharding,
         logsumexp_sharding,
-        None,
-        None,
+        Replicate(),
+        Replicate(),
         qkv_sharding,
         qkv_sharding,
         qkv_sharding,
