@@ -95,11 +95,12 @@ jobs:
           { config: "inductor_timm_perf_rocm", shard: 3, num_shards: 5, runner: "linux.rocm.gpu.mi300.2" },
           { config: "inductor_timm_perf_rocm", shard: 4, num_shards: 5, runner: "linux.rocm.gpu.mi300.2" },
           { config: "inductor_timm_perf_rocm", shard: 5, num_shards: 5, runner: "linux.rocm.gpu.mi300.2" },
-          { config: "inductor_torchbench_perf_rocm", shard: 1, num_shards: 5, runner: "linux.rocm.gpu.mi300.2" },
-          { config: "inductor_torchbench_perf_rocm", shard: 2, num_shards: 5, runner: "linux.rocm.gpu.mi300.2" },
-          { config: "inductor_torchbench_perf_rocm", shard: 3, num_shards: 5, runner: "linux.rocm.gpu.mi300.2" },
-          { config: "inductor_torchbench_perf_rocm", shard: 4, num_shards: 5, runner: "linux.rocm.gpu.mi300.2" },
-          { config: "inductor_torchbench_perf_rocm", shard: 5, num_shards: 5, runner: "linux.rocm.gpu.mi300.2" },
+          { config: "inductor_torchbench_perf_rocm", shard: 1, num_shards: 6, runner: "linux.rocm.gpu.mi300.2" },
+          { config: "inductor_torchbench_perf_rocm", shard: 2, num_shards: 6, runner: "linux.rocm.gpu.mi300.2" },
+          { config: "inductor_torchbench_perf_rocm", shard: 3, num_shards: 6, runner: "linux.rocm.gpu.mi300.2" },
+          { config: "inductor_torchbench_perf_rocm", shard: 4, num_shards: 6, runner: "linux.rocm.gpu.mi300.2" },
+          { config: "inductor_torchbench_perf_rocm", shard: 5, num_shards: 6, runner: "linux.rocm.gpu.mi300.2" },
+           { config: "inductor_torchbench_perf_rocm", shard: 6, num_shards: 6, runner: "linux.rocm.gpu.mi300.2" },
         ]}
     secrets: inherit
 
@@ -115,7 +116,7 @@ jobs:
       dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-cppwrapper-true-aotinductor-true-maxautotune-true-freezing_cudagraphs-true-cudagraphs_low_precision-true
       docker-image: ${{ needs.linux-focal-rocm6_3-py3_10-inductor-benchmark-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-rocm6_3-py3_10-inductor-benchmark-build.outputs.test-matrix }}
-      timeout-minutes: 720
+      timeout-minutes: 1440
       # Disable monitor in perf tests for more investigation
       disable-monitor: true
     secrets: inherit
