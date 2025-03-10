@@ -7,12 +7,14 @@ import logging
 import math
 import operator
 import os
+import os.path
 from collections import defaultdict
 from dataclasses import dataclass, replace
 from typing import Callable, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch._inductor.inductor_prims
+import torch.distributed
 import torch.fx as fx
 import torch.utils._pytree as pytree
 from torch._functorch._activation_checkpointing.ac_logging_utils import (
@@ -1799,18 +1801,33 @@ def choose_saved_values_set(
         return saved_values, expected_runtime
 
     if config.visualize_memory_budget_pareto:
-        options = []
-        for sweep_memory_budget in range(100, -1, -5):
+
+        def estimate_for_budget(b):
             saved_values, expected_runtime = get_saved_values_knapsack(
-                sweep_memory_budget / 100, node_info=node_info, joint_graph=joint_graph
+                b, node_info=node_info, joint_graph=joint_graph
             )
-            options.append(
-                (
-                    sweep_memory_budget,
-                    sum(runtimes_banned_nodes) - expected_runtime,
-                    get_mem_ratio(saved_values),
-                )
+            return (
+                b,
+                sum(runtimes_banned_nodes) - expected_runtime,
+                get_mem_ratio(saved_values),
             )
+
+        options = [estimate_for_budget(0.0), estimate_for_budget(1.0)]
+
+        if options[0][1:] != options[1][1:]:
+            bisects = [(options[0], options[1])]
+            while bisects:
+                lhs, rhs = bisects.pop()
+                if rhs[0] - lhs[0] < 1e-3:
+                    options.append(lhs)
+                    options.append(rhs)
+                    continue
+                mid = estimate_for_budget((lhs[0] + rhs[0]) / 2)
+                if mid[1:] != lhs[1:]:
+                    bisects.append((lhs, mid))
+                if mid[1:] != rhs[1:]:
+                    bisects.append((mid, rhs))
+        options.sort()
 
         import matplotlib.pyplot as plt
 
@@ -1824,7 +1841,7 @@ def choose_saved_values_set(
         # Adding labels for each point
         for i, txt in enumerate(x_values):
             plt.annotate(
-                f"{txt:.2f}",
+                f"{txt:.4f}",
                 (txt, y_values[i]),
                 textcoords="offset points",
                 xytext=(0, 10),
@@ -1837,7 +1854,16 @@ def choose_saved_values_set(
         plt.grid(True)
         fig = plt.gcf()
         plt.show()
-        fig_name = f"memory_budget_pareto_{get_aot_graph_name()}.png"
+        fig_dir = os.getcwd()
+        if config.memory_budget_pareto_dir is not None:
+            fig_dir = config.memory_budget_pareto_dir
+            os.makedirs(fig_dir, exist_ok=True)
+        rank_suffix = ""
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            rank_suffix = f"_rank_{torch.distributed.get_rank()}"
+        fig_name = os.path.join(
+            fig_dir, f"memory_budget_pareto{rank_suffix}_{get_aot_graph_name()}.svg"
+        )
         fig.savefig(fig_name)
         log.warning("Generated Pareto frontier curve at %s", fig_name)
 

@@ -9,7 +9,6 @@ import unittest.mock as mock
 from pathlib import Path
 from typing import Callable, Optional
 
-from torch._inductor.exc import InductorError
 from torch._inductor.utils import clear_inductor_caches
 from torch.export import Dim
 from torch.testing._internal.logging_utils import log_settings
@@ -28,6 +27,7 @@ from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
 from torch._inductor.codegen.cuda.cutlass_utils import get_max_alignment
+from torch._inductor.exc import InductorError
 from torch._inductor.ir import ChoiceCaller, FixedLayout
 from torch._inductor.select_algorithm import NoValidChoicesError
 from torch._inductor.test_case import run_tests, TestCase
@@ -898,7 +898,9 @@ class TestCutlassBackend(TestCase):
                     "torch._inductor.kernel.mm.autotune_select_algorithm",
                     wraps=select_no_algorithm,
                 ) as sa:
-                    with self.assertRaises(InductorError, r".*NoValidChoicesError.*"):
+                    with self.assertRaisesRegex(
+                        InductorError, r".*NoValidChoicesError.*"
+                    ):
                         torch.compile(my_addmm, dynamic=False)(x, a, b, 1.0, 2.0)
                     args, _ = sa.call_args
                     op_name, choices, _, __ = args
@@ -944,7 +946,9 @@ class TestCutlassBackend(TestCase):
                     "torch._inductor.kernel.mm.autotune_select_algorithm",
                     wraps=select_no_algorithm,
                 ) as sa:
-                    with self.assertRaises(InductorError, r".*NoValidChoicesError.*"):
+                    with self.assertRaisesRegex(
+                        InductorError, r".*NoValidChoicesError.*"
+                    ):
                         torch.compile(addmm, dynamic=False)(x, a, b, 1.0, 1.0)
                     args, _ = sa.call_args
                     op_name, choices, _, __ = args
@@ -1010,7 +1014,7 @@ class TestCutlassBackend(TestCase):
                 M, K = A.shape
                 _, N = B.shape
 
-                with self.assertRaises(InductorError, r".*NoValidChoicesError.*"):
+                with self.assertRaisesRegex(InductorError, r".*NoValidChoicesError.*"):
                     torch.compile(torch.mm, dynamic=False)(*input)
 
                 self.assertTrue(
