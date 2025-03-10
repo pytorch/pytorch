@@ -1,5 +1,34 @@
 # mypy: ignore-errors
 
+"""TorchDynamo support for __torch_function__ tensor subclasses.
+
+This module implements support for tensor subclasses with __torch_function__ overrides.
+A tensor subclass instance is represented as a TensorWithTFOverrideVariable, which handles
+dispatching __torch_function__ on attribute accesses, method calls, and torch API calls.
+
+Unsupported features:
+- Triggering __torch_function__ on tensor subclass non-tensor custom attributes
+- Graph breaking on mutating guardable tensor properties within a __torch_function__ context
+  (can cause excessive recompiles in certain cases)
+- Matching exact eager behavior of ignoring __torch_function__ objects in non-tensor
+  argument positions of Torch API calls
+
+Supported features:
+- Static method implementations of __torch_function__ on custom objects (triggers on torch
+  API calls with the object as any argument)
+- Triggering __torch_function__ on torch API calls with tensor subclass arguments
+- __torch_function__ calls on base tensor attribute access and method calls for tensor
+  subclass instances
+- Matches dispatch ordering behavior of eager __torch_function__ with subclass/object
+  arguments in any position
+
+See https://docs.google.com/document/d/1WBxBSvW3NXhRp9ncmtokJloMLCtF4AYNhJaffvHe8Kw/edit#heading=h.vacn73lozd9w
+for more information on the design.
+
+To enable subclass behavior, add your tensor subclass type to traceable_tensor_subclasses
+in torch/_dynamo/config.py
+"""
+
 import collections
 import contextlib
 import functools
@@ -42,27 +71,6 @@ from .user_defined import UserDefinedObjectVariable
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
-
-# [Note: __torch_function__] This feature is a prototype and has some rough edges (contact mlazos with issues):
-# At a high level, a torch function tensor subclass is represented as a TensorWithTFOverrideVariable, which dispatches
-# __torch_function__ on attribute accesses, method calls, and torch API calls.
-# The following is not supported:
-# - triggering __torch_function__ on tensor subclass non-tensor custom attributes
-# - graph breaking on mutating guardable tensor properties within a __torch_function__ context, this can cause
-# excessive recompiles in certain degenerate cases
-# - Matching the exact eager behavior of *ignoring* __torch_function__ objects in non-tensor argument positions of Torch API calls
-
-# The following is supported:
-# - static method impls of __torch_function__ on custom objects; this will trigger on torch API calls with the object as
-# any argument
-# - triggering __torch_function__ on torch API calls with tensor subclass arguments
-# - __torch_function__ calls on base tensor attribute access and method calls for tensor subclass instances
-# - matches the dispatch ordering behavior of eager __torch_function__ with subclass/object argumnents in any argument position
-
-# See https://docs.google.com/document/d/1WBxBSvW3NXhRp9ncmtokJloMLCtF4AYNhJaffvHe8Kw/edit#heading=h.vacn73lozd9w
-# for more information on the design.
-
-# To enable subclass behavior, add your tensor subclass type to traceable_tensor_subclasses in dynamo/config.py
 
 bin_ops = [
     operator.pow,
@@ -253,9 +261,9 @@ class SymbolicTorchFunctionState:
 
         TorchFunctionModeStackVariable.reset()
 
-        self.mode_stack: collections.deque[
-            TorchFunctionModeVariable
-        ] = collections.deque()
+        self.mode_stack: collections.deque[TorchFunctionModeVariable] = (
+            collections.deque()
+        )
 
         for i, val in enumerate(py_stack):
             self.mode_stack.append(
@@ -579,9 +587,9 @@ class TensorWithTFOverrideVariable(TensorVariable):
         import torch
 
         kwargs = dict(tensor_var.__dict__)
-        assert (
-            kwargs.pop("class_type") is torch.Tensor
-        ), "invalid class type in TensorWithTFOverrideVariable.from_tensor_var"
+        assert kwargs.pop("class_type") is torch.Tensor, (
+            "invalid class type in TensorWithTFOverrideVariable.from_tensor_var"
+        )
         var = cls(torch_function_fn=torch_function_fn, class_type=class_type, **kwargs)
         var.install_global(tx)
         return var

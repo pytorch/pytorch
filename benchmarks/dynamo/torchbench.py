@@ -146,6 +146,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         return self._skip["freezing"]["cuda"]
 
     @property
+    def disable_cudagraph_models(self):
+        return self._config["disable_cudagraph"]
+
+    @property
     def skip_models_for_freezing_cpu(self):
         return self._skip["freezing"]["cpu"]
 
@@ -200,6 +204,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
     @property
     def skip_models_due_to_control_flow(self):
         return self._skip["control_flow"]
+
+    @property
+    def skip_models_due_to_export_not_supported(self):
+        return self._skip["export_not_supported"]
 
     @property
     def guard_on_nn_module_models(self):

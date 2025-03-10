@@ -69,6 +69,10 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     return false;
   }
 
+  virtual bool supportsCoalescing() const {
+    return false;
+  }
+
   virtual void startCoalescing() {
     TORCH_CHECK(
         false,
@@ -416,6 +420,29 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         c10::str(
             "Backend ", getBackendName(), " does not support getMemAllocator"));
   }
+
+  // Allocate tensor (aten::empty) from backend's communication-optimized memory
+  // pool
+  virtual at::Tensor allocateTensor(long size, at::TensorOptions options = {}) {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "Backend ", getBackendName(), " does not support allocateTensor"));
+  }
+
+  // Returns true if backend supports tensor allocation
+  virtual bool supportsTensorAlloc(c10::DeviceIndex deviceIdx) {
+    // Change to true in concrete backend if supported
+    return false;
+  }
+
+  // Aborts all pending operations and connections in the backend if the backend
+  // supports it.
+  virtual void abort() {}
+
+  // Shutdown the backend if the backend supports it. This should be used for
+  // normal shutdown.
+  virtual void shutdown() {}
 
  protected:
   // Implementations of this interface need to call this to setup

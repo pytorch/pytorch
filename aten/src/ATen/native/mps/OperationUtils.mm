@@ -20,7 +20,6 @@
 #include <ATen/ops/scalar_tensor.h>
 #endif
 
-#include <c10/util/env.h>
 #include <mach-o/dyld.h>
 #include <mach-o/getsect.h>
 
@@ -639,28 +638,28 @@ MPSScalar getMPSScalar(const Scalar& scalar, ScalarType type) {
   switch (type) {
     case ScalarType::Double:
     case ScalarType::Float:
-      return {.value.f = scalar.to<float>(), .size = sizeof(float), .type = type};
+      return {.size = sizeof(float), .type = type, .value.f = scalar.to<float>()};
     case ScalarType::Half:
-      return {.value.h = scalar.to<Half>(), .size = sizeof(short), .type = type};
+      return {.size = sizeof(short), .type = type, .value.h = scalar.to<Half>()};
     case ScalarType::BFloat16:
-      return {.value.bf16 = scalar.to<BFloat16>(), .size = sizeof(short), .type = type};
+      return {.size = sizeof(short), .type = type, .value.bf16 = scalar.to<BFloat16>()};
     case ScalarType::Long:
-      return {.value.i = scalar.to<int64_t>(), .size = sizeof(int64_t), .type = type};
+      return {.size = sizeof(int64_t), .type = type, .value.i = scalar.to<int64_t>()};
     case ScalarType::Int:
-      return {.value.i = scalar.to<int32_t>(), .size = sizeof(int32_t), .type = type};
+      return {.size = sizeof(int32_t), .type = type, .value.i = scalar.to<int32_t>()};
     case ScalarType::Short:
-      return {.value.i = scalar.to<int16_t>(), .size = sizeof(int16_t), .type = type};
+      return {.size = sizeof(int16_t), .type = type, .value.i = scalar.to<int16_t>()};
     case ScalarType::Char:
-      return {.value.i = scalar.to<int8_t>(), .size = sizeof(int8_t), .type = type};
+      return {.size = sizeof(int8_t), .type = type, .value.i = scalar.to<int8_t>()};
     case ScalarType::Byte:
-      return {.value.i = scalar.to<uint8_t>(), .size = sizeof(uint8_t), .type = type};
+      return {.size = sizeof(uint8_t), .type = type, .value.i = scalar.to<uint8_t>()};
     case ScalarType::Bool:
-      return {.value.b = scalar.to<bool>(), .size = sizeof(bool), .type = type};
+      return {.size = sizeof(bool), .type = type, .value.b = scalar.to<bool>()};
     case ScalarType::ComplexHalf:
-      return {.value.ch = scalar.to<c10::complex<Half>>(), .size = sizeof(int32_t), .type = type};
+      return {.size = sizeof(int32_t), .type = type, .value.ch = scalar.to<c10::complex<Half>>()};
     case ScalarType::ComplexFloat:
     case ScalarType::ComplexDouble:
-      return {.value.cf = scalar.to<c10::complex<float>>(), .size = sizeof(int64_t), .type = type};
+      return {.size = sizeof(int64_t), .type = type, .value.cf = scalar.to<c10::complex<float>>()};
     default:
       TORCH_INTERNAL_ASSERT(false, "Unsupported scalar type '", type, "' on MPS backend.");
   }
@@ -824,19 +823,19 @@ id<MTLLibrary> MetalShaderLibrary::getLibrary(const std::initializer_list<std::s
   auto it = params.begin();
   switch (nparams) {
     case 1:
-      lib = compileLibrary(fmt::format(shaderSource, *it));
+      lib = compileLibrary(fmt::format(fmt::runtime(shaderSource), *it));
       break;
     case 2: {
       auto& first = *it++;
       auto& second = *it;
-      lib = compileLibrary(fmt::format(shaderSource, first, second));
+      lib = compileLibrary(fmt::format(fmt::runtime(shaderSource), first, second));
       break;
     }
     case 3: {
       auto& first = *it++;
       auto& second = *it++;
       auto& third = *it;
-      lib = compileLibrary(fmt::format(shaderSource, first, second, third));
+      lib = compileLibrary(fmt::format(fmt::runtime(shaderSource), first, second, third));
       break;
     }
     default:
@@ -847,8 +846,8 @@ id<MTLLibrary> MetalShaderLibrary::getLibrary(const std::initializer_list<std::s
 
 id<MTLLibrary> MetalShaderLibrary::compileLibrary(const std::string& src) {
   static auto fast_math = []() {
-    auto const val = c10::utils::get_env("PYTORCH_MPS_FAST_MATH");
-    return val.has_value() && val != "0";
+    auto val = std::getenv("PYTORCH_MPS_FAST_MATH");
+    return val && std::stoi(val) != 0;
   }();
   NSError* error = nil;
   MTLCompileOptions* options = compile_options;
@@ -961,6 +960,56 @@ class BundledShaderLibary : public MetalShaderLibrary {
   }
 };
 
+void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
+                                           const std::string& name,
+                                           std::optional<int64_t> extra) {
+  auto inputTensor = iter.input(0);
+  auto outputTensor = iter.output(0);
+  bool is_storage_dense = is_dense_in_storage(inputTensor) && inputTensor.strides().equals(outputTensor.strides());
+  uint32_t length = iter.numel();
+  if (length == 0) {
+    return;
+  }
+  using namespace mps;
+  @autoreleasepool {
+    id<MTLComputePipelineState> cplState = nil;
+    cplState = getPipelineStateForFunc(fmt::format("{}_{}_{}_{}",
+                                                   name,
+                                                   is_storage_dense ? "dense" : "strided",
+                                                   scalarToMetalTypeString(outputTensor),
+                                                   scalarToMetalTypeString(inputTensor)));
+
+    MPSStream* mpsStream = getCurrentMPSStream();
+    dispatch_sync(mpsStream->queue(), ^() {
+      auto computeEncoder = mpsStream->commandEncoder();
+
+      getMPSProfiler().beginProfileKernel(cplState, name, {inputTensor});
+
+      [computeEncoder setComputePipelineState:cplState];
+      if (is_storage_dense) {
+        mtl_setArgs(computeEncoder, outputTensor, inputTensor);
+        if (extra) {
+          mtl_setBytes(computeEncoder, *extra, 2);
+        }
+      } else {
+        mtl_setArgs(computeEncoder,
+                    outputTensor,
+                    inputTensor,
+                    outputTensor.sizes(),
+                    inputTensor.strides(),
+                    outputTensor.strides(),
+                    inputTensor.ndimension());
+        if (extra) {
+          mtl_setBytes(computeEncoder, *extra, 6);
+        }
+      }
+      mtl_dispatch1DJob(computeEncoder, cplState, length);
+
+      getMPSProfiler().endProfileKernel(cplState);
+    });
+  }
+}
+
 MetalShaderLibrary& MetalShaderLibrary::getBundledLibrary() {
   static BundledShaderLibary l;
   return l;
@@ -992,7 +1041,9 @@ void MetalKernelFunction::startEncoding() {
 }
 
 void MetalKernelFunction::dispatch(uint64_t length, std::optional<uint64_t> group_size) {
-  auto group_size_val = group_size.value_or(std::min(length, getMaxThreadsPerThreadgroup()));
+  const auto max_tg_size = getMaxThreadsPerThreadgroup();
+  const auto group_size_val = group_size.value_or(std::min(length, max_tg_size));
+  TORCH_CHECK_VALUE(group_size_val <= max_tg_size, "Threadgroup size exceeds ", max_tg_size, " limit");
   [encoder dispatchThreads:MTLSizeMake(length, 1, 1) threadsPerThreadgroup:MTLSizeMake(group_size_val, 1, 1)];
 }
 
@@ -1000,11 +1051,17 @@ void MetalKernelFunction::dispatch(c10::ArrayRef<uint64_t> length, c10::Optional
   TORCH_CHECK(length.size() > 0 && length.size() < 4, "Dispatch dimentions must be less than 3 and non-empty");
   TORCH_CHECK(!group_size.has_value() || group_size->size() == length.size(),
               "size and group_size must have same number of dimentions");
-  auto group_size_length = group_size.has_value() ? group_size->size() : 0;
+  const auto max_tg_size = getMaxThreadsPerThreadgroup();
+  const auto group_size_length = group_size.has_value() ? group_size->size() : 0;
+  auto tg_size = MTLSizeMake(group_size_length > 0 ? group_size->at(0) : max_tg_size,
+                             group_size_length > 1 ? group_size->at(1) : 1,
+                             group_size_length > 2 ? group_size->at(2) : 1);
+  TORCH_CHECK_VALUE(tg_size.width * tg_size.height * tg_size.depth <= max_tg_size,
+                    "Threadgroup size exceeds ",
+                    max_tg_size,
+                    " limit");
   [encoder dispatchThreads:MTLSizeMake(length[0], length.size() > 1 ? length[1] : 1, length.size() == 3 ? length[2] : 1)
-      threadsPerThreadgroup:MTLSizeMake(group_size_length > 0 ? group_size->at(0) : getMaxThreadsPerThreadgroup(),
-                                        group_size_length > 1 ? group_size->at(1) : 1,
-                                        group_size_length == 3 ? group_size->at(2) : 1)];
+      threadsPerThreadgroup:tg_size];
 }
 
 void MetalKernelFunction::setArg(unsigned idx, const at::TensorBase& t) {
