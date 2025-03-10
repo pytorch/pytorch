@@ -37,14 +37,11 @@ constexpr int64_t kCommInitBusyWaitMillis = 2;
 #define NCCL_REMOTE_ERROR
 #endif
 
+// Set the minimum NCCL version to 2.7. This is the minimum version that
+// supports P2P.
 static_assert(
     NCCL_VERSION_CODE >= NCCL_VERSION(2, 7, 0),
-    "NCCL version must be 2.7 or later");
-// The following macros represent features supported prior to NCCL 2.7,
-// therefore we can define them unconditionally, given the static_assert above.
-// TODO: remove these macros from code.
-#define ENABLE_NCCL_P2P_SUPPORT
-// End of macros for NCCL 2.7 and below.
+    "NCCL version must be 2.7 or later, otherwise P2P code won't compile.");
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 11, 0)
 #define ENABLE_NCCL_PREMUL_SUM_SUPPORT
