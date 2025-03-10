@@ -60,7 +60,6 @@ def init_lists():
         "nonzero",  # ASAN failure (paste: P501906539)
         "all",  # ASAN failure
         "any",  # ASAN failure
-        "logdet",  # ASAN failure
     }
     SKIP_INCORRECT_RESULTS_LIST = {
         "squeeze",  # Value out of range
