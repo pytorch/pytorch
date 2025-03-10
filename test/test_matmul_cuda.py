@@ -1117,7 +1117,6 @@ class TestFP8MatmulCuda(TestCase):
                 B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e4m3fn)
 
         elif test_case_name == "data_random_scales_from_data":
-            # TODO(next): nvfp4 recipe
             if not K % BLOCK_SIZE == 0:
                 return unittest.skip(f"this test is only defined for K a multiple of {BLOCK_SIZE}, skipping")
             require_exact_match = False
