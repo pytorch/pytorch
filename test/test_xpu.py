@@ -309,6 +309,20 @@ print(torch.xpu.device_count())
         with self.assertRaisesRegex(RuntimeError, "The device index is out of range"):
             torch.accelerator.current_stream(torch.accelerator.device_count())
 
+    def test_device_context_manager(self):
+        prev_device = torch.xpu.current_device()
+        with torch.device("cpu"):
+            self.assertEqual(torch.xpu.current_device(), prev_device)
+        self.assertEqual(torch.xpu.current_device(), prev_device)
+        if not torch.xpu.device_count() > 1:
+            return
+        src_device = 0
+        dst_device = 1
+        torch.xpu.set_device(src_device)
+        with torch.device(dst_device):
+            self.assertEqual(torch.xpu.current_device(), 1)
+        self.assertEqual(torch.xpu.set_device(), src_device)
+
     def test_stream_context_manager(self):
         prev_stream = torch.xpu.current_stream()
         with torch.xpu.Stream() as stream:
