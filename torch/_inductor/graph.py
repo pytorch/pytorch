@@ -1229,9 +1229,9 @@ class GraphLowering(torch.fx.Interpreter):
             self.constant_reprs[target] = ""
             return TorchBindObject(name=target, value=value)
         elif isinstance(value, FakeScriptObject):
-            self.torchbind_constants[target] = value.real_obj
+            self.torchbind_constants[target] = value
             self.constant_reprs[target] = ""
-            return TorchBindObject(name=target, value=value.real_obj)
+            return TorchBindObject(name=target, value=value)
 
         assert isinstance(value, torch.Tensor)
         if (
@@ -1523,6 +1523,8 @@ class GraphLowering(torch.fx.Interpreter):
                 else:
                     result = super().run_node(n)
             else:
+                # if n.name == "with_effects":
+                #     breakpoint() # why result[1] is TensorBox, not a list?
                 debug("")
                 result = super().run_node(n)
 
