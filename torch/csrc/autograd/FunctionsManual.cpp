@@ -3827,27 +3827,64 @@ std::tuple<Tensor, Tensor> linalg_eig_jvp(
   return std::make_pair(std::move(dL), std::move(dV));
 }
 
-Tensor linalg_lstsq_jvp(
+Tensor linalg_lstsq_solution_jvp(
     const Tensor& A,
-    const Tensor& B,
+    const Tensor& B_,
     const Tensor& dA,
-    const Tensor& dB) {
+    const Tensor& dB_) {
   at::NoTF32Guard disable_tf32;
+  const bool vector_case = at::native::linalg_solve_is_vector_rhs(A, B_);
+  const auto vector_to_matrix = [vector_case](const Tensor& X) {
+    return vector_case ? X.unsqueeze(-1) : X;
+  };
+  const auto matrix_to_vector = [vector_case](const Tensor& X) {
+    return vector_case ? X.squeeze(-1) : X;
+  };
+  auto B = vector_to_matrix(B_);
+  auto dB = vector_to_matrix(dB_);
   auto pinvA = at::linalg_pinv(A);
   auto dpinvA = pinv_jvp(A, pinvA, dA);
-  auto dX = dpinvA.matmul(B) + pinvA.matmul(dB);
+  auto dX = matrix_to_vector(dpinvA.matmul(B) + pinvA.matmul(dB));
   return dX;
+}
+
+Tensor linalg_lstsq_residuals_jvp(
+    const Tensor& A,
+    const Tensor& B_,
+    const Tensor& dA,
+    const Tensor& dB_,
+    const Tensor& X_,
+    const Tensor& L) {
+  at::NoTF32Guard disable_tf32;
+  if (L.numel() == 0) {
+    return L.clone();
+  }
+  const bool vector_case = at::native::linalg_solve_is_vector_rhs(A, B_);
+  const auto vector_to_matrix = [vector_case](const Tensor& X) {
+    return vector_case ? X.unsqueeze(-1) : X;
+  };
+  auto B = vector_to_matrix(B_);
+  auto dB = vector_to_matrix(dB_);
+  auto X = vector_to_matrix(X_);
+  auto r = A.matmul(X) - B;
+  auto dr = dA.matmul(X) - dB;
+  // Danskin's theorem lets us compute dL as if X did not depend on A and B
+  auto dL = 2 * at::real(r * dr.conj()).sum(-2);
+  return dL;
 }
 
 std::tuple<Tensor, Tensor> linalg_lstsq_backward(
     const Tensor& gX_,
+    const Tensor& gL_,
     const Tensor& A,
     const Tensor& B_,
+    const Tensor& X_,
     const std::array<bool, 2>& grad_input_mask) {
   at::NoTF32Guard disable_tf32;
   auto A_requires_grad = grad_input_mask[0];
   auto B_requires_grad = grad_input_mask[1];
-  if (!gX_.defined() || (!A_requires_grad && !B_requires_grad)) {
+  if ((!gX_.defined() && !gL_.numel()) || // gL_ undefined or have shape [0]
+      (!A_requires_grad && !B_requires_grad)) {
     return {};
   }
 
@@ -3859,20 +3896,39 @@ std::tuple<Tensor, Tensor> linalg_lstsq_backward(
     return vector_case ? X.squeeze(-1) : X;
   };
 
-  auto gX = vector_to_matrix(gX_);
   auto B = vector_to_matrix(B_);
-  Tensor pinvA = at::linalg_pinv(A);
-  Tensor A_grad, B_grad;
-  if (A_requires_grad) {
-    auto pinvA_grad = gX.matmul(B.mH());
-    A_grad = pinv_backward(pinvA_grad, pinvA, A);
+  Tensor A_grad_X, B_grad_X, A_grad, B_grad;
+
+  if (gX_.defined()) { // Gradient from solution
+    auto gX = vector_to_matrix(gX_);
+    Tensor pinvA = at::linalg_pinv(A);
+    if (A_requires_grad) {
+      auto pinvA_grad = gX.matmul(B.mH());
+      A_grad_X = pinv_backward(pinvA_grad, pinvA, A);
+    }
+    if (B_requires_grad) {
+      // Equivalent to
+      // B_grad = std::get<0>(at::linalg_lstsq(A.mH(), gX, rcond, driver));
+      // but we avoid this approach as `gelsy` is non-deterministic
+      B_grad_X = matrix_to_vector(pinvA.mH().matmul(gX));
+    }
   }
 
-  if (B_requires_grad) {
-    // Equivalent to
-    // B_grad = std::get<0>(at::linalg_lstsq(A.mH(), gX, rcond, driver));
-    // but we avoid this approach as `gelsy` is non-deterministic
-    B_grad = matrix_to_vector(pinvA.mH().matmul(gX));
+  if (gL_.numel()) { // Gradient from residuals
+    auto X = vector_to_matrix(X_);
+    auto r = A.matmul(X) - B;
+    auto gL = gL_.unsqueeze(-2);
+    if (A_requires_grad) {
+      auto A_grad_L = 2 * (gL * r).matmul(X.mH());
+      A_grad = A_grad_X.defined() ? A_grad_X + A_grad_L : A_grad_L;
+    }
+    if (B_requires_grad) {
+      auto B_grad_L = matrix_to_vector(-2 * gL * r);
+      B_grad = B_grad_X.defined() ? B_grad_X + B_grad_L : B_grad_L;
+    }
+  } else { // gX_.defined() == true
+    A_grad = A_grad_X;
+    B_grad = B_grad_X;
   }
 
   return std::make_tuple(A_grad, B_grad);
