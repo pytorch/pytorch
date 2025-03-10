@@ -282,16 +282,6 @@ class TestCppExtensionAOT(common.TestCase):
         with self.assertRaises(RuntimeError):
             libtorch_agnostic.ops.identity(t)
 
-        # finally, clean up the folder
-        cmd = [sys.executable, "setup.py", "clean"]
-        return_code = shell(
-            cmd,
-            cwd=os.path.join("cpp_extensions", "libtorch_agnostic_extension"),
-            env=os.environ.copy(),
-        )
-        if return_code != 0:
-            return return_code
-
 
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestPybindTypeCasters(common.TestCase):
