@@ -3833,7 +3833,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 )
 
             include_ops = [
-                "aoti_torch_cpu__weight_int4pack_mm_cpu_tensor"
+                "aoti_torch_cpu__weight_int4pack_mm_for_cpu"
                 if torch._inductor.config.cpp_wrapper
                 else "extern_kernels.int4mm_packed_weight_cpu"
             ]
