@@ -1795,12 +1795,34 @@ def select_int(func, *args, **kwargs):
 
     if operating_on_batch:
         index = new_kwargs["index"]
-        begin, end = inp._offsets[[index, index+1]]
+        begin, end = inp._offsets.narrow(0, index, 2)
+        size = inp._values.size(inp._ragged_idx - 1)
+        begin = begin.item()
+        end = end.item()
+#        torch._check_is_size(begin)
+#        torch._check_is_size(end)
+        torch._check(begin >= 0)
+        torch._check(begin < size)
         if inp._lengths is not None:
-            length = inp._lengths[index]
+            length = inp._lengths[index].item()
+            torch._check(length >= 0)
+            torch._check(begin + length < size)
+            torch._check(begin < size)
+#            torch._check_is_size(begin + length)
         else:
+            torch._check(begin >= 0)
+            torch._check(end >= 0)
+            torch._check(end >= begin)
+            torch._check(end < size)
             length = end - begin
+            torch._check(length >= 0)
+            torch._check(begin + length == end)
+            torch._check(begin + length < size)
+            torch._check(end - length == begin)
+            torch._check(end - length < size)
         # if tensor has no holes, we can just select from the start and end pos
+        torch._check_is_size(begin)
+        torch._check_is_size(length)
         return inp._values.narrow(inp._ragged_idx - 1, begin, length)
 #        return inp._values[begin:end]
 
