@@ -51,13 +51,12 @@ void add_clamp_kernel(
     auto max_vec = Vectorized<scalar_t>(max_scalar);
     cpu_kernel_vec(
         iter,
-        [=](scalar_t a, scalar_t b) __ubsan_ignore_undefined__ -> scalar_t {
+        [=](scalar_t a, scalar_t b) -> scalar_t {
           return std::min(
               max_scalar,
               std::max(min_scalar, static_cast<scalar_t>(a + alpha * b)));
         },
-        [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b)
-            __ubsan_ignore_undefined__ {
+        [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
               auto add_clamp_res = vec::fmadd(b, alpha_vec, a);
               add_clamp_res = vec::clamp_min(add_clamp_res, min_vec);
               add_clamp_res = vec::clamp_max(add_clamp_res, max_vec);
@@ -142,10 +141,10 @@ void mul_kernel(TensorIteratorBase& iter) {
       iter.remove_operand(2);
       cpu_kernel_vec(
           iter,
-          [=](scalar_t a) __ubsan_ignore_undefined__ -> scalar_t {
+          [=](scalar_t a) -> scalar_t {
             return static_cast<opmath_t>(a) * b;
           },
-          [=](Vectorized<scalar_t> a) __ubsan_ignore_undefined__ {
+          [=](Vectorized<scalar_t> a) {
             return binary_op_scalar(
                 a,
                 b,
@@ -157,10 +156,8 @@ void mul_kernel(TensorIteratorBase& iter) {
     _AT_DISPATCH_MUL_TYPES(dtype, "mul_cpu", [&]() {
       cpu_kernel_vec(
           iter,
-          [=](scalar_t a, scalar_t b)
-              __ubsan_ignore_undefined__ -> scalar_t { return a * b; },
-          [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b)
-              __ubsan_ignore_undefined__ { return a * b; });
+          [=](scalar_t a, scalar_t b) -> scalar_t { return a * b; },
+          [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b) { return a * b; });
     });
   }
 }
