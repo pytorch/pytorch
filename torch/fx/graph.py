@@ -90,7 +90,7 @@ _register_custom_builtin("pytree", "import torch.utils._pytree as pytree", pytre
 
 
 # __add__ => add
-_strip_magic_method = functools.partial(re.compile(r"^__|__$").sub, "")
+_magic_method_regex = re.compile(r"^__(.*)__$")
 
 
 def _snake_case(s: str) -> str:
@@ -1554,7 +1554,10 @@ class Graph:
             op = target.__name__
         else:
             # target must be a str, regex will error if it's not
-            op = _strip_magic_method(target)
+            m = _magic_method_regex.match(target)
+            if m is not None:
+                return m.group(1)
+            return target
         return _snake_case(op)
 
     @compatibility(is_backward_compatible=True)
