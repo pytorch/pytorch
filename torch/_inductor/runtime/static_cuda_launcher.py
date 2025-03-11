@@ -1,3 +1,5 @@
+import functools
+
 from typing import Any, Optional
 from typing_extensions import Unpack
 
@@ -118,17 +120,9 @@ class StaticallyLaunchedCudaKernel:
             del self.cubin
         self.cubin_path = filepath
 
-    def extract_type(self, ty: str) -> str:
-        """
-        Takes a triton type from CompiledKernel.signature and
-        converts it into a single char encoding. _StaticCudaLauncher
-        will switch on this char to figure out what type the underlying
-        value should be passed to the triton kernel as.
-        """
-        if ty[0] == "*":
-            return "O"
-        elif ty == "nvTmaDesc":
-            raise NotImplementedError("nvTmaDesc kernels are not yet supported")
+    @staticmethod
+    @functools.lru_cache
+    def type_mappings():
         return {
             "i1": "i",
             "i8": "b",
@@ -146,7 +140,20 @@ class StaticallyLaunchedCudaKernel:
             "f32": "f",
             "fp64": "d",
             # TODO handle nvTmaDesc/CUtensormap
-        }[ty]
+        }
+
+    def extract_type(self, ty: str) -> str:
+        """
+        Takes a triton type from CompiledKernel.signature and
+        converts it into a single char encoding. _StaticCudaLauncher
+        will switch on this char to figure out what type the underlying
+        value should be passed to the triton kernel as.
+        """
+        if ty[0] == "*":
+            return "O"
+        elif ty == "nvTmaDesc":
+            raise NotImplementedError("nvTmaDesc kernels are not yet supported")
+        return StaticallyLaunchedCudaKernel.type_mappings()[ty]
 
     def arg_ty_from_signature(self, src: ASTSource) -> tuple[str, OrderedSet[int]]:
         def index_key(i: Any) -> int:

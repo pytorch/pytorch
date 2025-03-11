@@ -18,7 +18,7 @@ class TestStaticCudaLauncher(TestCase):
     def setUp(self):
         # Create a temporary file to store the cubin.
         # We set delete=False so that the file persists after closing.
-        self.tmp_file = tempfile.NamedTemporaryFile(mode="wb", delete=False)
+        self.tmp_file = tempfile.NamedTemporaryFile(mode="wb")
         self.tmp_file.close()  # Close now; we'll open it for writing later.
         super().setUp()
 
