@@ -3340,6 +3340,7 @@ class AssociativeScanTests(TestCase):
             inputs=inp,
         )
 
+    @skipIfTorchDynamo("don't test compile on compile")
     @skipIfNoDynamoSupport
     @skipIfCrossRef  # Arg order changes with crossref
     def test_associative_scan_pytree_output(self):
