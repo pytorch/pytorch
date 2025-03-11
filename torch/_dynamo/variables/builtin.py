@@ -1871,16 +1871,25 @@ class BuiltinVariable(VariableTracker):
             ),
         ):
             if (
-                name == "assertRaisesRegex"
+                name
+                in (
+                    "assertRaisesRegex",
+                    "assertNotWarns",
+                    "assertWarnsRegex",
+                    "assertSequenceEqual",
+                    "assertDictEqual",
+                    "assertMultiLineEqual",
+                    "assertWarns",
+                )
                 and isinstance(obj, variables.UserDefinedObjectVariable)
                 and isinstance(obj.value, unittest.TestCase)
             ):
                 unimplemented_v2(
                     gb_type="Failed to trace builtin operator",
-                    context="ctx manager unittest.TestCase.assertRaisesRegex",
+                    context=f"ctx manager unittest.TestCase.{name}",
                     explanation="Dynamo does not know how to trace builtin operator `assertRaisesRegex` ",
                     hints=[
-                        "Avoid calling builtin `assertRaisesRegex` "
+                        f"Avoid calling builtin `{name}` "
                         "Please report an issue to PyTorch.",
                     ],
                 )
