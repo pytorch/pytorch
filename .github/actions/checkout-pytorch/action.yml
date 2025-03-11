@@ -23,27 +23,20 @@ runs:
       id: check_container_runner
       run: echo "IN_CONTAINER_RUNNER=$(if [ -f /.inarc ] || [ -f /.incontainer ]; then echo true ; else echo false; fi)" >> "$GITHUB_OUTPUT"
 
-    - name: Clean workspace
+    - name: Set up parallel fetch and clean workspace
       shell: bash
       if: ${{ steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' }}
-      env:
-        NO_SUDO: ${{ inputs.no-sudo }}
       run: |
-        retry () {
-          $* || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
-        }
-        echo "${GITHUB_WORKSPACE}"
-        if [ -z "${NO_SUDO}" ]; then
-          retry sudo rm -rf "${GITHUB_WORKSPACE}"
-        else
-          retry rm -rf "${GITHUB_WORKSPACE}"
-        fi
-        mkdir "${GITHUB_WORKSPACE}"
-
         # Use all available CPUs for fetching
         cd "${GITHUB_WORKSPACE}"
         git config --global fetch.parallel 0
         git config --global submodule.fetchJobs 0
+
+        # Clean workspace. The default checkout action should also do this, but
+        # do it here as well just in case
+        if [[ -d .git ]]; then
+          git clean -ffdx
+        fi
 
     - name: Checkout PyTorch
       uses: actions/checkout@v4
