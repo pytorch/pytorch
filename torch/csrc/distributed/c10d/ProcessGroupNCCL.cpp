@@ -3158,8 +3158,6 @@ ProcessGroupNCCL::Options::Options(bool is_high_priority_stream)
     : Backend::Options(NCCL_BACKEND_NAME, kProcessGroupNCCLDefaultTimeout),
       is_high_priority_stream(is_high_priority_stream) {}
 
-static constexpr int CoalActive = 0x01, CoalColl = 0x02, CoalP2P = 0x04;
-
 void ProcessGroupNCCL::startCoalescing() {
   // Other collective ops bump seq_ before creating a work. Thus, if coalesced
   // ops bump seq_ only after initing a work they will collide with (reuse) the
@@ -3170,44 +3168,37 @@ void ProcessGroupNCCL::startCoalescing() {
   // start, which has one minor downside- we burn a seq_ if someone ever does a
   // 'start' and 'end' coalescing region without doing an operation inbetween.
 
-  coalescedDevice_.set_index(-1);
-  coalescedComm_ = nullptr;
-  coalescing_state_ |= CoalActive;
+  coalescingState_.reset();
   groupStart();
 }
 
 // `optype` is for specifying a composite optype, such as ALLGATHER and
 // REDUCE_SCATTER
 c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
-  if (coalescedComm_ == nullptr) {
+  // `coalescingState_.comm` should have same set of comms across collectives
+  auto comm = coalescingState_.comm;
+  if (comm == nullptr) {
     // There is no actual work being coalesced, return here
     groupEnd();
-    coalescing_state_ = 0;
+    coalescingState_.reset();
     return nullptr;
   }
-  TORCH_CHECK(
-      coalescedDevice_.index() >= 0,
-      "Somthing went wrong. Did you call end_coalescing before start_coalescing?");
-
-  // `coalescedComm_` should have same set of comms across collectives
-  auto comm = coalescedComm_;
-  // `coalescedDevice_` should have same set of devices across collectives
-  auto device = coalescedDevice_;
 
   // `getKeyFromDevice` is how we get keys for both collectives and batch P2P
+  auto device = at::Device(c10::DeviceType::CUDA, comm->deviceIndex_);
   const auto key = getKeyFromDevice(device);
   auto ncclStream = ncclStreams_.at(key);
 
   // Create Work object
   c10::cuda::CaptureStatus capture_status =
       c10::cuda::currentStreamCaptureStatusMayInitCtx();
-  bool enqueue =
-      (coalescing_state_) && capture_status == c10::cuda::CaptureStatus::None;
+  bool enqueue = coalescingState_.active &&
+      capture_status == c10::cuda::CaptureStatus::None;
   auto work = initWork(
       device,
       rank_,
       optype,
-      coalescing_state_ & CoalP2P,
+      coalescingState_.opType & CoalP2P,
       "nccl:coalesced",
       {},
       {},
@@ -3236,12 +3227,12 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
     workEnqueue(work);
   }
 
+  bool async = coalescingState_.async;
   // Reset coalescing state
-  coalescing_state_ = 0;
-  coalescedComm_ = nullptr;
+  coalescingState_.reset();
   // If in async mode, return work; otherwise, kernel is enqueued on current
   // stream, no need to return work
-  return coalescedAsync_ ? work : nullptr;
+  return async ? work : nullptr;
 }
 
 c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing() {
@@ -3273,7 +3264,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   errorIfCapturingNonCapturableNCCL(capture_status);
 
   // Bump collective counter
-  if (!coalescing_state_) {
+  if (!coalescingState_.active) {
     seqCollective_++;
   }
   op_id_++;
@@ -3284,24 +3275,18 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
     ncclComm = initNCCLComm(key, device, opType);
   }
 
-  if (coalescing_state_ & CoalActive) {
-    if ((coalescing_state_ & CoalColl) == 0) {
+  if (coalescingState_.active) {
+    if ((coalescingState_.opType & CoalColl) == 0) {
       // First op in coalesced operations
       seqCollective_++;
     }
-    coalescing_state_ |= CoalColl;
-    if (coalescedDevice_.index() < 0) {
-      coalescedDevice_ = device;
+    coalescingState_.opType |= CoalColl;
+    if (coalescingState_.comm == nullptr) {
+      coalescingState_.comm = ncclComm;
     } else {
-      TORCH_CHECK(
-          coalescedDevice_.index() == device.index(), MULTI_DEVICE_ERROR_MSG);
+      TORCH_CHECK(coalescingState_.comm == ncclComm, MULTI_DEVICE_ERROR_MSG);
     }
-    if (coalescedComm_ == nullptr) {
-      coalescedComm_ = ncclComm;
-    } else {
-      TORCH_CHECK(coalescedComm_ == ncclComm, MULTI_DEVICE_ERROR_MSG);
-    }
-    coalescedAsync_ = asyncOp;
+    coalescingState_.async = asyncOp;
   }
 
   // in asyncOp=false [default] mode, we use currentStream as ncclStream
@@ -3313,8 +3298,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
     syncStream(device, ncclEvents_[key], ncclStream);
   }
 
-  bool enqueue =
-      !coalescing_state_ && capture_status == c10::cuda::CaptureStatus::None;
+  bool enqueue = !coalescingState_.active &&
+      capture_status == c10::cuda::CaptureStatus::None;
   auto work = initWork(
       device, rank_, opType, false, profilingTitle, inputs, outputs, enqueue);
 
@@ -3374,7 +3359,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   post(ncclStream, work);
 
   // End event should only be recorded after the ncclGroupEnd()
-  if (!coalescing_state_) {
+  if (!coalescingState_.active) {
     work->ncclEndEvent_->record(ncclStream);
   }
   work->ncclComm_ = ncclComm;
@@ -3463,20 +3448,14 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
     ncclComm = initNCCLComm(key, device, opType);
   }
 
-  if (coalescing_state_ & CoalActive) {
-    coalescing_state_ |= CoalColl;
-    if (coalescedDevice_.index() < 0) {
-      coalescedDevice_ = device;
+  if (coalescingState_.active) {
+    coalescingState_.opType |= CoalColl;
+    if (coalescingState_.comm == nullptr) {
+      coalescingState_.comm = ncclComm;
     } else {
-      TORCH_CHECK(
-          coalescedDevice_.index() == device.index(), MULTI_DEVICE_ERROR_MSG);
+      TORCH_CHECK(coalescingState_.comm == ncclComm, MULTI_DEVICE_ERROR_MSG);
     }
-    if (coalescedComm_ == nullptr) {
-      coalescedComm_ = ncclComm;
-    } else {
-      TORCH_CHECK(coalescedComm_ == ncclComm, MULTI_DEVICE_ERROR_MSG);
-    }
-    coalescedAsync_ = asyncOp;
+    coalescingState_.async = asyncOp;
   }
 
   // in asyncOp=false [default] mode, we use currentStream as ncclStream
@@ -3644,7 +3623,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     isSendRecvSelf = rank_ == peer;
     p2pTargetRank = isSendRecvSelf ? 0 : 1 - p2pRank;
 
-    if (!coalescing_state_) {
+    if (!coalescingState_.active) {
       // Bump P2P sequence number.
       seqP2P_++;
     }
@@ -3659,25 +3638,21 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     ncclComm = initNCCLComm(key, device, opType, p2pRank, isSendRecvSelf);
   }
 
-  if (coalescing_state_ & CoalActive) {
+  if (coalescingState_.active) {
     // Bump  seqP2P_ once per coalesced group, not once per individual op.
-    if ((coalescing_state_ & CoalP2P) == 0) {
+    if ((coalescingState_.opType & CoalP2P) == 0) {
       seqP2P_++;
     }
-    coalescing_state_ |= CoalP2P;
-    if (coalescedDevice_.index() < 0) {
-      coalescedDevice_ = device;
+    coalescingState_.opType |= CoalP2P;
+    if (coalescingState_.comm == nullptr) {
+      coalescingState_.comm = ncclComm;
     } else {
-      TORCH_CHECK(
-          coalescedDevice_.index() == device.index(), MULTI_DEVICE_ERROR_MSG);
+      TORCH_CHECK(coalescingState_.comm == ncclComm, MULTI_DEVICE_ERROR_MSG);
     }
-    if (coalescedComm_ == nullptr) {
-      coalescedComm_ = ncclComm;
-    } else {
-      TORCH_CHECK(coalescedComm_ == ncclComm, MULTI_DEVICE_ERROR_MSG);
-    }
-    // For now, P2P ops are always put on internal stream
-    coalescedAsync_ = true;
+    // For now, `pointToPoint` function is basically isend and irecv, thus it is
+    // always async wrt the main stream, i.e. P2P ops are always put on internal
+    // stream
+    coalescingState_.async = true;
   }
 
   // Used many times below, so we stash the unordered_map lookup
@@ -3687,7 +3662,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
 
   // Work itself will create the CUDA events on all GPUs of tensors
   c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> work;
-  if (coalescing_state_) {
+  if (coalescingState_.active) {
     // When coalescing, we record events per op that lack timing/state
     // information becuase there is no 'work' associated with them, and then
     // later in endCoalescing we record a 'coalesced' Work which has
@@ -3757,7 +3732,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     checkForNan(tensor, ncclStream);
   }
 
-  if (!coalescing_state_) {
+  if (!coalescingState_.active) {
     // Start event should only be recorded before the ncclGroupStart()
     if (work->timingEnabled_) {
       work->ncclStartEvent_->record(ncclStream);
@@ -3792,7 +3767,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
       ncclGroupEnd(), ncclComm, ncclComm->getNcclCommFailureReason());
 #endif // NCCL_HAS_COMM_NONBLOCKING
 
-  if (!coalescing_state_) {
+  if (!coalescingState_.active) {
     post(ncclStream);
 
     // End event should only be recorded after the ncclGroupEnd()
@@ -3835,7 +3810,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   c10::cuda::CaptureStatus capture_status =
       c10::cuda::currentStreamCaptureStatusMayInitCtx();
 
-  if (!coalescing_state_ && capture_status == c10::cuda::CaptureStatus::None) {
+  if (!coalescingState_.active &&
+      capture_status == c10::cuda::CaptureStatus::None) {
     workEnqueue(work);
   }
   return work;
@@ -4938,8 +4914,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::send(
 
   RECORD_PARAM_COMMS_DATA(
       std::make_tuple(
-          static_cast<int64_t>(seqP2P_) + (coalescing_state_ & CoalP2P ? 0 : 1),
-          true), // the 1st p2p in coalesced range sets coalescing_state_ and
+          static_cast<int64_t>(seqP2P_) +
+              (coalescingState_.opType & CoalP2P ? 0 : 1),
+          true), // the 1st p2p in coalesced range sets coalescingState_ and
                  // bumps seqP2P_
       std::make_tuple(pg_uid_, pg_desc_), // PG name tuple
       tensors, // inputTensors
@@ -4986,8 +4963,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::recv(
 
   RECORD_PARAM_COMMS_DATA(
       std::make_tuple(
-          static_cast<int64_t>(seqP2P_) + (coalescing_state_ & CoalP2P ? 0 : 1),
-          true), // the 1st p2p in coalesced range sets coalescing_state_ and
+          static_cast<int64_t>(seqP2P_) +
+              (coalescingState_.opType & CoalP2P ? 0 : 1),
+          true), // the 1st p2p in coalesced range sets coalescingState_ and
                  // bumps seqP2P_
       std::make_tuple(pg_uid_, pg_desc_), // PG name tuple
       tensors, // inputTensors

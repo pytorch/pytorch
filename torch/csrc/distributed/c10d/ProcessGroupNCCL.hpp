@@ -235,6 +235,28 @@ struct DumpPipe {
 };
 #endif
 
+static constexpr int CoalColl = 0x02, CoalP2P = 0x04;
+
+struct CoalescingState {
+  // Are we coalescing?
+  bool active = false;
+  // Are we coalescing collectives or P2Ps? See CoalColl and CoalP2P above.
+  int opType = 0;
+  // Stores communicators for all collectives run inside a coalescing block
+  std::shared_ptr<NCCLComm> comm = nullptr;
+  // Whether the coalesced calls are sync or async.
+  bool async = false;
+  // Stores the list of tensors for all collectives run inside a coalescing
+  // TODO (eqy)
+
+  void reset() {
+    active = false;
+    opType = 0;
+    comm = nullptr;
+    async = false;
+  }
+};
+
 // ProcessGroupNCCL implements NCCL bindings for c10d.
 //
 // All functions of the class are expected to be called in the same order
@@ -1221,16 +1243,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::set<c10::DeviceIndex> usedDeviceIdxs_;
 
   // Flag to denote if a coalescing groupStart/groupEnd block is active
-  int coalescing_state_ = 0;
-
-  // Stores device indexes for all collectives run inside a coalescing block
-  at::Device coalescedDevice_ = at::Device("cuda");
-
-  // Stores communicators for all collectives run inside a coalescing block
-  std::shared_ptr<NCCLComm> coalescedComm_ = nullptr;
-
-  // Whether the coalesced calls are sync or async.
-  bool coalescedAsync_;
+  struct CoalescingState coalescingState_;
 
   // Whether or not wait() and synchronize() are blocking operations that wait
   // for the operation to complete.
