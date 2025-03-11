@@ -201,7 +201,7 @@ struct PyCompilerInterfaceImpl : PyCompilerInterface {
         view.sym_sizes(),
         view.sym_strides(),
         view.sym_storage_offset());
-    return py::cast<std::vector<at::Tensor>>(stuff);
+    return py::cast<std::vector<at::Tensor>>(std::move(stuff));
   }
   variable_list call_copy_slices_epilogue(
       PyObject* py_compiler,
@@ -212,7 +212,8 @@ struct PyCompilerInterfaceImpl : PyCompilerInterface {
     py::handle handle(py_compiler);
     py::object stuff = handle.attr("call_copy_slices_epilogue")(
         needs_input_grad, result, res, grad_slice);
-    auto output = py::cast<std::vector<std::optional<at::Tensor>>>(stuff);
+    auto output =
+        py::cast<std::vector<std::optional<at::Tensor>>>(std::move(stuff));
     return toTensorList(output);
   }
   at::Tensor call_unpack(
@@ -713,7 +714,7 @@ static at::Tensor call_accumulate(
   }
   py::handle handle(py_compiler);
   py::object stuff = handle.attr("accumulate")(old_var, new_var);
-  return py::cast<at::Tensor>(stuff);
+  return py::cast<at::Tensor>(std::move(stuff));
 }
 
 static TraceState call_begin_capture(
