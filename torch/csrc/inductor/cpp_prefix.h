@@ -791,17 +791,18 @@ inline void transpose_mxn(
 }
 #endif
 
+// NOLINTBEGIN(*-avoid-c-arrays)
 inline std::tuple<std::shared_ptr<int64_t[]>, int> _get_factors(
     int64_t number) {
   int count = 0;
-  for (int64_t i = std::sqrt(number); i > 0; --i) {
+  for (auto i = static_cast<int64_t>(std::sqrt(number)); i > 0; --i) {
     if (number % i == 0) {
       count += 2;
     }
   }
   auto factors = std::shared_ptr<int64_t[]>(new int64_t[count]);
   int index = 0;
-  for (int64_t i = std::sqrt(number); i > 0; --i) {
+  for (auto i = static_cast<int64_t>(std::sqrt(number)); i > 0; --i) {
     if (number % i == 0) {
       factors[index++] = number / i;
       factors[index++] = i;
@@ -822,6 +823,7 @@ inline std::tuple<std::shared_ptr<int64_t[]>, int> get_factors(int64_t number) {
     return factors;
   }
 }
+// NOLINTEND(*-avoid-c-arrays)
 
 inline void _mm_get_thread_blocking(
     int num_threads,
@@ -970,11 +972,11 @@ void _mm_get_cache_blocking(
   // algorithm.
   // TODO(jgong5): cache cache blocking results
   // TODO: tune the factor here
-  float L1_limit_factor = 0.8;
-  float L2_limit_factor = 0.5;
+  constexpr double L1_limit_factor = 0.8;
+  constexpr double L2_limit_factor = 0.5;
 
-  auto L1 = L1_cache_size * L1_limit_factor;
-  auto L2 = L2_cache_size * L2_limit_factor;
+  const auto L1 = static_cast<uint32_t>(L1_cache_size * L1_limit_factor);
+  const auto L2 = static_cast<uint32_t>(L2_cache_size * L2_limit_factor);
 
   constexpr size_t num_byte_A = sizeof(X_t);
   constexpr size_t num_byte_B = sizeof(W_t);
@@ -985,24 +987,34 @@ void _mm_get_cache_blocking(
     Kc_blocks = (int64_t)std::floor(L1 / (Kr * Nr * num_byte_B));
   }
 
-  float min_Mc_ratio = 2;
-  int64_t min_Mc_blocks = std::ceil(min_Mc_ratio * Mr / Nr);
+  constexpr double min_Mc_ratio = 2.0;
+  int64_t min_Mc_blocks = std::ceil(
+      min_Mc_ratio * static_cast<double>(Mr) / static_cast<double>(Nr));
   auto Kt_bytes = Kt_blocks * Kr * num_byte_A;
   if (min_Mc_blocks * Mr * Kt_bytes < L2) {
     Mc_blocks = std::min(Mt_blocks, (int64_t)std::floor(L2 / (Mr * Kt_bytes)));
     Nc_blocks = 1;
   } else {
     Mc_blocks = Mt_blocks;
-    Nc_blocks =
-        std::min((int64_t)std::ceil((float)Mc_blocks * Mr / Nr), Nt_blocks);
+    Nc_blocks = std::min(
+        static_cast<int64_t>(std::ceil(
+            static_cast<double>(Mc_blocks) * static_cast<double>(Mr) /
+            static_cast<double>(Nr))),
+        Nt_blocks);
     auto Nc_bytes = Nc_blocks * Nr * 4;
     auto Kc_bytes = Kc_blocks * Kr * num_byte_A;
     if (Mc_blocks * Mr * (Kc_bytes + Nc_bytes) > L2) {
-      auto M_max = (std::sqrt(Kc_bytes * Kc_bytes + 16 * L2) - Kc_bytes) / 8;
+      auto M_max = static_cast<int64_t>(
+          (std::sqrt(Kc_bytes * Kc_bytes + static_cast<size_t>(16 * L2)) -
+           static_cast<double>(Kc_bytes)) /
+          8);
       if (M_max < Mc_blocks * Mr) {
-        Mc_blocks = (int64_t)std::floor(M_max / Mr);
-        Nc_blocks =
-            std::min((int64_t)std::ceil((float)Mc_blocks * Mr / Nr), Nt_blocks);
+        Mc_blocks = static_cast<int64_t>(std::floor(M_max / Mr));
+        Nc_blocks = std::min(
+            static_cast<int64_t>(std::ceil(
+                static_cast<double>(Mc_blocks) * static_cast<double>(Mr) /
+                static_cast<double>(Nr))),
+            Nt_blocks);
       }
     }
   }
@@ -1082,9 +1094,9 @@ void mm_get_cache_blocking(
 struct amx_tilecfg {
   uint8_t palette_id{0};
   uint8_t start_row{0};
-  uint8_t reserved_0[14]{};
-  uint16_t colsb[16]{};
-  uint8_t rows[16]{};
+  std::array<uint8_t, 14> reserved_0{};
+  std::array<uint16_t, 16> colsb{};
+  std::array<uint8_t, 16> rows{};
 };
 
 class AMXState {
