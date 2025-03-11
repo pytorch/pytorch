@@ -2794,7 +2794,7 @@ e.
     if IS_WINDOWS:
         compiler_name = "$cxx" if IS_HIP_EXTENSION else "cl"
         compile_rule.append(
-                f'  command = {compiler_name} /showIncludes $cflags -c $in /Fo$out $post_cflags')
+            f'  command = {compiler_name} /showIncludes $cflags -c $in /Fo$out $post_cflags')
         if not IS_HIP_EXTENSION:
             compile_rule.append('  deps = msvc')
     else:
