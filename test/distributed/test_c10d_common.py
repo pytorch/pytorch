@@ -8,6 +8,7 @@ import sys
 import tempfile
 import threading
 import time
+import unittest
 from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import timedelta
@@ -35,6 +36,8 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_FBCODE,
+    IS_SANDCASTLE,
     load_tests,
     parametrize,
     retry_on_connect_failures,
@@ -1908,6 +1911,7 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
 
             dist.destroy_process_group()
 
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
     def test_default_process_group(self):
         script = """
 # Hide all GPUs
