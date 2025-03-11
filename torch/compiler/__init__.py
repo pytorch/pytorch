@@ -2,9 +2,9 @@
 from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
-from . import config
-
 import torch
+
+from . import config
 
 
 if TYPE_CHECKING:
