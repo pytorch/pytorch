@@ -2272,7 +2272,8 @@ class SubgraphTracer(fx.Tracer):
     def create_graph_input(
         self, name, type_expr, example_value, before=False, source=None
     ):
-        self._input_versions_at_beginning.append(example_value._version)
+        if isinstance(example_value, torch.Tensor):
+            self._input_versions_at_beginning.append(example_value._version)
         log.debug(
             "create_graph_input %s %s %s at debug_level %s before=%s",
             name,
@@ -2688,7 +2689,9 @@ class SubgraphTracer(fx.Tracer):
         input_versions_at_end = []
         for node in self.graph.nodes:
             if node.op == "placeholder":
-                input_versions_at_end.append(node.meta["example_value"]._version)
+                example_value = node.meta["example_value"]
+                if isinstance(example_value, torch.Tensor):
+                    input_versions_at_end.append(example_value._version)
             else:
                 break
 
