@@ -144,7 +144,7 @@ class CapabilityBasedPartitioner:
                 return False
 
             # find new partition users if merge.
-            all_user_nodes = (partition_users[self_id] | partition_users[other_id])
+            all_user_nodes = partition_users[self_id] | partition_users[other_id]
             all_user_nodes.difference_update(other_nodes, self_nodes)
 
             # check if merge would create cyclic dependency.
