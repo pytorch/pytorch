@@ -89,7 +89,6 @@ class TestFxGraphCache(TestCase):
         PyCodeCache.cache_clear(purge=True)
         torch._dynamo.reset()
         clear_inductor_caches()
-        CacheArtifactManager.clear()
 
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
@@ -364,6 +363,61 @@ class TestFxGraphCache(TestCase):
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
             self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 1)
 
+    @config.patch(
+        {
+            "fx_graph_cache": True,
+            "fx_graph_remote_cache": False,
+        }
+    )
+    def test_cache_hot_load_repeat(self):
+        def fn(x, y):
+            return x @ y.sin()
+
+        compiled_fn = torch.compile(fn, dynamic=False)
+
+        a = torch.randn(4, 4)
+        b = torch.randn(4, 4)
+
+        a2 = torch.randn(4, 8)
+        b2 = torch.randn(8, 4)
+
+        with fresh_inductor_cache():
+            eager_result = fn(a, b)
+            compiled_result = compiled_fn(a, b)
+            self.assertEqual(eager_result, compiled_result)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+        artifacts = torch.compiler.save_cache_artifacts()
+
+        self.assertFalse(torch.compiler._cache.CacheArtifactManager.need_serialize())
+        self.assertIsNotNone(artifacts)
+
+        artifact_bytes, cache_info = artifacts
+
+        self.reset()
+
+        with fresh_inductor_cache():
+            torch.compiler.load_cache_artifacts(artifact_bytes)
+            eager_result = fn(a, b)
+            compiled_result = compiled_fn(a, b)
+            self.assertEqual(eager_result, compiled_result)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+
+        self.assertFalse(torch.compiler._cache.CacheArtifactManager.need_serialize())
+
+        self.reset()
+
+        with fresh_inductor_cache():
+            eager_result = fn(a2, b2)
+            compiled_result = compiled_fn(a2, b2)
+            self.assertEqual(eager_result, compiled_result)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+
+        self.assertTrue(torch.compiler._cache.CacheArtifactManager.need_serialize())
+
     @torch._dynamo.config.patch(automatic_dynamic_local_pgo=True)
     @torch._functorch.config.patch({"enable_autograd_cache": False})
     @config.patch({"fx_graph_cache": True, "fx_graph_remote_cache": False})
@@ -462,7 +516,7 @@ class TestFxGraphCache(TestCase):
         # And the results should be the same.
         self.assertEqual(grads1, grads2)
 
-    @largeTensorTest("64GB", device=GPU_TYPE)
+    @largeTensorTest("64GB", device=GPU_TYPE, inductor=True)
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @parametrize("device", (GPU_TYPE,))

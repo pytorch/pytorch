@@ -267,6 +267,7 @@ mha_fwd(
     bool is_causal,
     int window_size_left,
     int window_size_right,
+    const float softcap,
     const bool return_softmax,
     std::optional<at::Generator> gen_) {
 #if defined(USE_CK_FLASH_ATTENTION)
@@ -351,6 +352,7 @@ mha_varlen_fwd(
     bool is_causal,
     int window_size_left,
     int window_size_right,
+    const float softcap,
     const bool return_softmax,
     std::optional<at::Generator> gen_) {
 #if defined(USE_CK_FLASH_ATTENTION)
@@ -441,6 +443,7 @@ inline std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> mha_bwd(
     const bool is_causal,
     int window_size_left,
     int window_size_right,
+    const float softcap,
     const bool deterministic,
     const at::Tensor philox_seed,
     const at::Tensor philox_offset) {
@@ -541,6 +544,7 @@ inline std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> mha_varlen_bwd
     const bool is_causal,
     int window_size_left,
     int window_size_right,
+    const float softcap,
     const bool deterministic,
     const at::Tensor philox_seed,
     const at::Tensor philox_offset) {

@@ -125,7 +125,8 @@ class ConstantFolder(torch.fx.Interpreter):
                 and is_woq_int8_pattern(next(iter(node.users)))
             )
         ) and is_const_source(
-            node.args[0], self.lifted_constant_names  # type: ignore[arg-type]
+            node.args[0],  # type: ignore[arg-type]
+            self.lifted_constant_names,
         ):
             # Case 1: int8_weight -> dq -> bf16_weight
             # Case 2: int8_weight -> permute -> dq -> bf16_weight

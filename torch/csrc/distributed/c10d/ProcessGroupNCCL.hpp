@@ -611,6 +611,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     return true;
   }
 
+  bool supportsCoalescing() const override {
+    return true;
+  }
+
   void startCoalescing() override;
 
   c10::intrusive_ptr<Work> endCoalescing() override;
@@ -757,11 +761,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   c10::intrusive_ptr<intra_node_comm::IntraNodeComm> initIntraNodeComm();
 
   // Destroy (shutdown) this backend -- normal exit.
-  void shutdown();
+  void shutdown() override;
 
   // Provides an API to abort the ProcessGroup (similar to ncclCommAbort)
   // instead of relying on ProcessGroupNCCL destructor.
-  void abort();
+  void abort() override;
 
   void eagerConnectSingleDevice(at::Device device) override;
 
@@ -778,7 +782,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   at::Tensor allocateTensor(long size, at::TensorOptions options = {}) override;
 
   // Whether tensor allocation from NCCL memory pool is supported
-  bool supportsTensorAlloc() override;
+  bool supportsTensorAlloc(c10::DeviceIndex deviceIdx) override;
 
   // Performs NCCL user buffer registration for all buffers in
   // the given MemPool
@@ -1035,6 +1039,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::string getNCCLWatchdogTimeoutExitMsg(const std::string& exitReason);
 
   void checkAndSetRemoteError();
+
+  // A helper function to guess the device id of the current rank, based on
+  // bounded device or used device. Do not use this function if you already know
+  // the device id to operate on.
+  c10::DeviceIndex guessDeviceId() const;
 
   static const int64_t kWatchdogThreadSleepMillis;
 

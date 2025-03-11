@@ -866,9 +866,10 @@ class TracingContext:
     @contextlib.contextmanager
     def clear_frame():
         tc = TracingContext.get()
-        with unittest.mock.patch.object(
-            tc, "frame_summary_stack", []
-        ), unittest.mock.patch.object(tc, "loc_in_frame", None):
+        with (
+            unittest.mock.patch.object(tc, "frame_summary_stack", []),
+            unittest.mock.patch.object(tc, "loc_in_frame", None),
+        ):
             try:
                 yield
             except Exception as e:
@@ -1015,6 +1016,12 @@ class ChainedSource(Source):
 
     def is_ephemeral(self):
         return self.base.is_ephemeral()
+
+    def get_base(self) -> Source:
+        current: Source = self
+        while isinstance(current, ChainedSource):
+            current = current.base
+        return current
 
 
 def detect_fake_mode(inputs: Any = None):

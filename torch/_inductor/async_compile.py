@@ -10,12 +10,17 @@ import sys
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from functools import partial
-from time import time
+from time import time, time_ns
 from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import torch
 from torch._dynamo.device_interface import get_registered_device_interfaces
-from torch._dynamo.utils import counters, dynamo_timed, set_feature_use
+from torch._dynamo.utils import (
+    counters,
+    dynamo_timed,
+    get_metrics_context,
+    set_feature_use,
+)
 from torch._inductor import config
 from torch._inductor.codecache import (
     _load_triton_kernel_from_source,
@@ -176,6 +181,12 @@ class CompiledTritonKernels:
     def cache_clear():
         CompiledTritonKernels._cache = {}
 
+    @staticmethod
+    def remove_future(kernel_src: str) -> None:
+        key = CompiledTritonKernels.key(kernel_src)
+        if key in CompiledTritonKernels._cache:
+            del CompiledTritonKernels._cache[key]
+
 
 class AsyncCompile:
     def __init__(self) -> None:
@@ -245,8 +256,7 @@ class AsyncCompile:
 
     def use_process_pool(self):
         return (
-            get_compile_threads() > 1
-            and self.process_pool().ready_future.done()  # type: ignore[union-attr]
+            get_compile_threads() > 1 and self.process_pool().ready_future.done()  # type: ignore[union-attr]
         )
 
     def triton(self, kernel_name: str, source_code: str, device_str: str = "cuda"):
@@ -307,10 +317,16 @@ class AsyncCompile:
                 with dynamo_timed("reload_kernel_in_parent"):
                     return load_kernel()
 
-            def get_result() -> CachingAutotuner:
-                kernel = task.result()
+            def get_result() -> tuple[CachingAutotuner, int]:
+                kernel, elapsed_us = task.result()
+                # Now that we've compiled, we should clear the future
+                # so it can't be used again
+                CompiledTritonKernels.remove_future(source_code)
                 kernel.precompile(
                     warm_cache_only=False, reload_kernel=reload_kernel_in_parent
+                )
+                get_metrics_context().add_top_n(
+                    "triton_kernel_compile_times_us", kernel_name, elapsed_us
                 )
                 return kernel
 
@@ -324,9 +340,14 @@ class AsyncCompile:
                 dynamo_compile_column_us="triton_compile_time_us",
                 log_waitcounter=True,
             ):
+                start_ns = time_ns()
                 _set_triton_ptxas_path()
                 kernel = load_kernel()
                 kernel.precompile(warm_cache_only=False)
+                elapsed_us = (time_ns() - start_ns) // 1000
+                get_metrics_context().add_top_n(
+                    "triton_kernel_compile_times_us", kernel_name, elapsed_us
+                )
                 return kernel
 
     def multi_kernel(self, *args, **kwargs) -> Any:
@@ -393,42 +414,43 @@ class AsyncCompile:
             return LambdaFuture(get_result)
 
     def wait(self, scope: dict[str, Any]) -> None:
-        with dynamo_timed(
-            "async_compile.wait",
-            log_pt2_compile_event=True,
-            dynamo_compile_column_us="triton_compile_time_us",
-            log_waitcounter=True,
-        ):
-            num_kernels = len(
-                [
-                    value
-                    for key, value in scope.items()
-                    if isinstance(value, (Future, CodeCacheFuture))
-                ]
-            )
-            pbar = tqdm(
-                total=num_kernels,
-                desc="Inductor Compilation",
-                disable=config.disable_progress,
-                delay=0,
-            )
-            if get_compile_threads() > 1:
-                for key, result in scope.items():
-                    if config.verbose_progress and not isinstance(pbar, _Faketqdm):
-                        pbar.set_postfix_str(key)
-                    if isinstance(result, (Future, CodeCacheFuture)):
-                        try:
-                            scope[key] = result.result()
-                        except BrokenProcessPool as e:
-                            raise RuntimeError(
-                                "A compilation subprocess exited unexpectedly. This "
-                                "is likely due to a crash. To facilitate debugging, "
-                                "you can re-run with TORCHINDUCTOR_COMPILE_THREADS=1 "
-                                "to cause compilation to occur in the main process."
-                            ) from e
-                        pbar.update(1)
+        if get_compile_threads() > 1:
+            with dynamo_timed(
+                "async_compile.wait",
+                log_pt2_compile_event=True,
+                dynamo_compile_column_us="triton_compile_time_us",
+                log_waitcounter=True,
+            ):
+                self._wait_futures(scope)
 
-            _compile_end()
+        _compile_end()
+
+    def _wait_futures(self, scope: dict[str, Any]) -> None:
+        kernels = {
+            key: value
+            for key, value in scope.items()
+            if isinstance(value, (Future, CodeCacheFuture))
+        }
+        pbar = tqdm(
+            total=len(kernels),
+            desc="Inductor Compilation",
+            disable=config.disable_progress,
+            delay=0,
+        )
+
+        for key, result in kernels.items():
+            if config.verbose_progress and not isinstance(pbar, _Faketqdm):
+                pbar.set_postfix_str(key)
+            try:
+                scope[key] = result.result()
+            except BrokenProcessPool as e:
+                raise RuntimeError(
+                    "A compilation subprocess exited unexpectedly. This "
+                    "is likely due to a crash. To facilitate debugging, "
+                    "you can re-run with TORCHINDUCTOR_COMPILE_THREADS=1 "
+                    "to cause compilation to occur in the main process."
+                ) from e
+            pbar.update(1)
 
 
 if (

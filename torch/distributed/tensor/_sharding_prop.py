@@ -8,7 +8,6 @@ from typing import Callable, cast, Optional, Union
 import torch
 from torch._ops import OpOverload
 from torch._subclasses import FakeTensorMode
-from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
     OpInfo,
@@ -24,7 +23,6 @@ from torch.distributed.tensor._op_schema import (
 from torch.distributed.tensor._utils import (
     compute_local_shape_and_global_offset,
     compute_local_stride,
-    try_find_mesh_from_args,
 )
 
 
@@ -55,7 +53,7 @@ class ShardingPropagator:
         self.op_to_rules: dict[OpOverload, Callable[[OpSchema], OutputSharding]] = {}
         self.op_strategy_funcs: dict[
             OpOverload,
-            Callable[[DeviceMesh, OpSchema], StrategyType],
+            Callable[[OpSchema], StrategyType],
         ] = {}
         # op map to save static argnum to decide to reuse sharding prop cache or
         # re-run sharding prop
@@ -97,7 +95,7 @@ class ShardingPropagator:
     def register_op_strategy(
         self,
         op_overload: OpOverload,
-        strategy_func: Callable[[DeviceMesh, OpSchema], StrategyType],
+        strategy_func: Callable[[OpSchema], StrategyType],
         schema_info: Optional[RuntimeSchemaInfo] = None,
     ):
         """
@@ -218,6 +216,42 @@ class ShardingPropagator:
 
                     spec.tensor_meta = output_tensor_meta_i
 
+    def _wrap_with_op_strategy(self, op_schema: OpSchema) -> OpSchema:
+        """
+        wrap a op_schema that contains DTensorSpec to another op_schema that contains
+        OpStrategy/TupleStrategy, the returned op_schema is then used for sharding
+        strategy propagation on pytorch operators.
+        """
+
+        def spec_to_strategy(spec: object) -> object:
+            if isinstance(spec, DTensorSpec):
+                return OpStrategy([PlacementStrategy(spec)])
+            elif (
+                isinstance(spec, (list, tuple))
+                and len(spec) > 0
+                and isinstance(spec[0], DTensorSpec)
+            ):
+                # tensor list create tuple strategy
+                tuple_strategy = [spec_to_strategy(s) for s in spec]
+                tuple_strategy = cast(Sequence[StrategyType], tuple_strategy)
+                return TupleStrategy(
+                    tuple(tuple_strategy) if isinstance(spec, tuple) else tuple_strategy
+                )
+            else:
+                return spec
+
+        args_op_strategy = [spec_to_strategy(i) for i in op_schema.args_schema]
+
+        kwargs_op_strategy = {
+            k: spec_to_strategy(v) for k, v in op_schema.kwargs_schema.items()
+        }
+
+        return OpSchema(
+            op=op_schema.op,
+            args_schema=tuple(args_op_strategy),
+            kwargs_schema=kwargs_op_strategy,
+        )
+
     def propagate(self, op_info: OpInfo) -> None:
         # We cannot use an lru cache if we know that inputs will have dynamic shapes,
         # because SymInts are not hashable.
@@ -242,41 +276,12 @@ class ShardingPropagator:
 
         out_tensor_meta = self._propagate_tensor_meta_non_cached(op_schema)
 
-        def spec_to_strategy(spec: object) -> object:
-            if isinstance(spec, DTensorSpec):
-                return OpStrategy([PlacementStrategy(spec)])
-            elif (
-                isinstance(spec, (list, tuple))
-                and len(spec) > 0
-                and isinstance(spec[0], DTensorSpec)
-            ):
-                # tensor list create tuple strategy
-                tuple_strategy = [spec_to_strategy(s) for s in spec]
-                tuple_strategy = cast(Sequence[StrategyType], tuple_strategy)
-                return TupleStrategy(
-                    tuple(tuple_strategy) if isinstance(spec, tuple) else tuple_strategy
-                )
-            else:
-                return spec
-
         if op_schema.op in self.op_strategy_funcs:
-            # generate op strategy for the op.
-            mesh = try_find_mesh_from_args(op_schema.op, op_schema.args_schema)
-            # swap the args spec with args strategies
-            args_op_strategy = [spec_to_strategy(i) for i in op_schema.args_schema]
+            # wrap the op_schema with op strategy for sharding strategy propagation
+            strategy_schema = self._wrap_with_op_strategy(op_schema)
 
-            kwargs_op_strategy = {
-                k: spec_to_strategy(v) for k, v in op_schema.kwargs_schema.items()
-            }
-
-            # construct a new OpSchema on args for strategy based propagation
-            strategy_schema: OpSchema = OpSchema(
-                op=op_schema.op,
-                args_schema=tuple(args_op_strategy),
-                kwargs_schema=kwargs_op_strategy,
-            )
-
-            op_strategy = self.op_strategy_funcs[op_schema.op](mesh, strategy_schema)
+            # run sharding strategy propagation/generation
+            op_strategy = self.op_strategy_funcs[op_schema.op](strategy_schema)
 
             if isinstance(op_strategy, OpStrategy):
                 # single Op strategy
@@ -323,7 +328,7 @@ class ShardingPropagator:
                         schema = suggestion_schema or op_schema
                         assert isinstance(out_tensor_meta, TensorMeta)
                         suggestion_schema = self._adjust_shape_and_stride_args(
-                            out_tensor_meta, schema, output_strategy.output_spec, mesh
+                            out_tensor_meta, schema, output_strategy.output_spec
                         )
                         needs_redistribute = True
 
@@ -487,9 +492,9 @@ class ShardingPropagator:
 
         strategy_costs: list[float] = []
         for strtg in strategy.strategies:
-            assert (
-                strtg.redistribute_cost is not None
-            ), "must set redistribute cost each strategy!"
+            assert strtg.redistribute_cost is not None, (
+                "must set redistribute cost each strategy!"
+            )
             redistribute_cost = sum(chain.from_iterable(strtg.redistribute_cost))
             strategy_costs.append(redistribute_cost)
 
@@ -501,7 +506,6 @@ class ShardingPropagator:
         out_tensor_meta: TensorMeta,
         schema: OpSchema,
         spec: DTensorSpec,
-        mesh: DeviceMesh,
     ) -> OpSchema:
         shape_stride_idx = self.op_to_shape_and_stride_idx[schema.op]
         if isinstance(shape_stride_idx, tuple):
@@ -514,13 +518,13 @@ class ShardingPropagator:
         # adjust shape to be the same as that of the _local_tensor
         # of the DTensor input arg at index 0, which is inferred
         expected_input_schema[shape_idx], _ = compute_local_shape_and_global_offset(
-            out_tensor_meta.shape, mesh, spec.placements
+            out_tensor_meta.shape, spec.mesh, spec.placements
         )
 
         # adjust the stride arg for aten.new_empty_strided.default
         if stride_idx:
             expected_input_schema[stride_idx] = compute_local_stride(
-                out_tensor_meta.stride, mesh, spec.placements
+                out_tensor_meta.stride, spec.mesh, spec.placements
             )
 
         return OpSchema(schema.op, tuple(expected_input_schema), schema.kwargs_schema)

@@ -10,7 +10,6 @@
 #include <utility>
 
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/CUDAGraph.h>
 #include <c10/core/DeviceType.h>
 #include <c10/cuda/CUDAAllocatorConfig.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
@@ -30,6 +29,7 @@
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/cuda/utils.hpp>
 #include <torch/torch.h>
 #include <optional>
 
@@ -2136,7 +2136,7 @@ void ProcessGroupNCCL::checkAndSetRemoteError() {
   }
 }
 
-// NCCL recommends to evenly distribute ncclUniqueIds accross the ranks
+// NCCL recommends to evenly distribute ncclUniqueIds across the ranks
 // https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/usage/communicators.html#init-rank-config
 // Let’s consider an example where:
 // nRanks = 10 (total ranks),
@@ -2317,6 +2317,10 @@ void ProcessGroupNCCL::watchdogHandler() {
         pgStatus_->lastStartedNumelOut = work.numelOut_;
       }
 
+      // allow watchdog to do an event query on a side thread
+      at::cuda::CUDAGuard device_guard(work.ncclEndEvent_->device_index());
+      at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeThreadLocal};
+
       // Clean up completed work
       if (work.isCompleted()) {
         // Work status logging for desync debug
@@ -2353,7 +2357,6 @@ void ProcessGroupNCCL::watchdogHandler() {
           it = workMetaList_.erase(it);
           lastWorkListUpdateTime_ = std::chrono::steady_clock::now();
         }
-        at::cuda::CUDAGraph::dec_pending_event_queries();
       } else {
         // Increment the iterator if the current WorkNCCL object is not
         // completed.
@@ -2710,6 +2713,20 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
     rank = p2pRank;
   }
 
+  RECORD_PARAM_COMMS(
+      std::make_tuple(0, false), // seq
+      std::make_tuple(pg_uid_, pg_desc_), // PG name tuple
+      rank, // rank
+      "init", // collective name
+      0, // inNelems
+      0, // outNelems
+      at::kByte, // dType
+      std::vector<int64_t>(), // inSplitSizes
+      std::vector<int64_t>(), // outSplitSizes
+      globalRankStart, // globalRankStart
+      globalRankStride, // globalRankStride
+      size_); // worldSize
+
 #ifdef NCCL_HAS_COMM_NONBLOCKING
   bool useNb = useNonblocking();
   options_->config.blocking = useNb ? 0 : 1;
@@ -2831,20 +2848,6 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
 
   FlightRecorder::get()->record_pg_ranks(
       std::make_tuple(pg_uid_, pg_desc_), groupRanks());
-
-  RECORD_PARAM_COMMS(
-      std::make_tuple(0, false), // seq
-      std::make_tuple(pg_uid_, pg_desc_), // PG name tuple
-      rank, // rank
-      "init", // collective name
-      0, // inNelems
-      0, // outNelems
-      at::kByte, // dType
-      std::vector<int64_t>(), // inSplitSizes
-      std::vector<int64_t>(), // outSplitSizes
-      globalRankStart, // globalRankStart
-      globalRankStride, // globalRankStride
-      size_); // worldSize
 
   VLOG(2) << logPrefix() << "ProcessGroupNCCL created ncclComm_ "
           << ncclComm->repr()
@@ -3208,13 +3211,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
         std::make_shared<std::vector<at::Tensor>>();
   }
 
-  // Notify graphs before we check the capture status preemptively
-  at::cuda::CUDAGraph::inc_pending_event_queries();
-
   if (enqueue) {
     workEnqueue(work);
-  } else {
-    at::cuda::CUDAGraph::dec_pending_event_queries();
   }
 
   coalescing_state_ = 0;
@@ -3404,12 +3402,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
     work->numelOut_ += output.numel();
   }
 
-  // Notify graphs before we check the capture status preemptively
-  at::cuda::CUDAGraph::inc_pending_event_queries();
   if (enqueue) {
     workEnqueue(work);
-  } else {
-    at::cuda::CUDAGraph::dec_pending_event_queries();
   }
 
   return work;
@@ -3591,34 +3585,22 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
 
   /* Note [cuda graph capture and workEnqueue]
 
-  Normal behavior of the C10D watchdog is to query cuda events on work objects
-  periodically, but when cuda graph recording is active these event queries
-  would crash or mess up the recording.
-
-  To ensure we do not enqueue a work object to the watchdog when cuda graph
-  capture is active, we use a one-way sync. We increment a flag pre-emptively,
-  indicating our intent to enqueue a work object. Then we check capture_status
-  to see if (a) capturing is already in progress (we cannot enqueue in this
-  case), (b) capturing hasn't started yet, so we can trust that no capture will
-  start (since a pre-condition of starting a capture is to check the event query
-  count is 0).
-
-  If we are not able to enqueue the work due to capture-in-progress, we finally
-  decrement the counter.
-
-  For this reason we cannot easily move the increment inside workEnqueue unless
-  we also change the semantic of workEnqueue to 'maybeWorkEnqueue'.
+  Normal behavior of the C10D watchdog is to query cuda events on work objects.
+  We disable this event query behavior during graph capture as it is disallowed
+  during capture under the strictest capture mode setting.
+  Note that previously recorded events (e.g., before the capture) can be queried
+  as the watchdog capture mode has been changed to thread-local, but user-side
+  event queries (from the main thread) via .is_completed() are still disallowed.
+  TODO(eqy): Is there a path to allowing workEnqueue during graph capture for
+  watchdog-thread usage only?
 
   TODO:
    - Is our design for flight recorder safe in this context?  are we recording
   any FR events during cudagraph capture? if so, they won't be safe to poll for
   completion status.
   */
-  at::cuda::CUDAGraph::inc_pending_event_queries();
   if (capture_status == c10::cuda::CaptureStatus::None) {
     workEnqueue(work);
-  } else {
-    at::cuda::CUDAGraph::dec_pending_event_queries();
   }
   // TODO(whc) if the work isn't enqueued, I don't feel great about returning
   // it, since interactions with it by usercode won't behave normally - they
@@ -3860,16 +3842,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   c10::cuda::CaptureStatus capture_status =
       c10::cuda::currentStreamCaptureStatusMayInitCtx();
 
-  // Notify graphs before we check the capture status preemptively
-  at::cuda::CUDAGraph::inc_pending_event_queries();
-
   if (!coalescing_state_ && capture_status == c10::cuda::CaptureStatus::None) {
     workEnqueue(work);
-    return work;
-  } else {
-    at::cuda::CUDAGraph::dec_pending_event_queries();
-    return nullptr;
   }
+  return work;
 }
 
 template <typename Fn, typename PreProcess, typename PostProcess>
@@ -4715,6 +4691,38 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter_tensor_coalesced(
       "nccl:reduce_scatter_tensor_coalesced");
 }
 
+c10::DeviceIndex ProcessGroupNCCL::guessDeviceId() const {
+  // 1st choice: don't use this function if your API can take a device_id
+  // argument.
+  if (getBoundDeviceId().has_value()) {
+    // 2nd choice: Use the bound GPU device id if available.
+    // Bounded device id can be passed to `init_process_group`.
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    return getBoundDeviceId().value().index();
+  } else if (!usedDeviceIdxs_.empty()) {
+    // 3rd choice: infer the device id from the used device ids.
+    return *usedDeviceIdxs_.begin();
+  }
+  // This means there is not yet a NCCL collective being called
+  // Here we have to use the best guesses and will use a single GPU to call
+  // allreduce to achieve barrier.
+  // In case the multiple processes fall into the same node, we use rank to
+  // ensure that each process is on a different GPU
+  // Note: it is better to use global rank because the group-local rank can be
+  // offset wrt the device id if intra-node GPUs are sharded into multiple
+  // dimensions.
+  int devIdx = globalRank() % localDeviceCount_;
+  LOG(WARNING)
+      << logPrefix()
+      << c10::str(
+             " using GPU ",
+             devIdx,
+             " as device used by this process is currently unknown. ",
+             "This can potentially cause a hang if this rank to GPU mapping is incorrect. ",
+             "You can pecify device_id in init_process_group() to force use of a particular device.");
+  return static_cast<c10::DeviceIndex>(devIdx);
+}
+
 c10::intrusive_ptr<Work> ProcessGroupNCCL::barrier(const BarrierOptions& opts) {
   RECORD_PARAM_COMMS(
       std::make_tuple(
@@ -4740,33 +4748,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::barrier(const BarrierOptions& opts) {
   if (!opts.device_ids.empty()) {
     // Use the first device id because PG NCCL is single-device now
     barDevIdx = static_cast<c10::DeviceIndex>(opts.device_ids[0]);
-  } else if (getBoundDeviceId().has_value()) {
-    // 2nd choice: Use the bound GPU device id if available.
-    // Bounded device id can be passed to `init_process_group`.
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    barDevIdx = getBoundDeviceId().value().index();
-  } else if (!usedDeviceIdxs_.empty()) {
-    // 3rd choice: infer the device id from the used device ids.
-    barDevIdx = *usedDeviceIdxs_.begin();
   } else {
-    // This means there is not yet a NCCL collective being called
-    // Here we have to use the best guesses and will use a single GPU to call
-    // allreduce to achieve barrier.
-    // In case the multiple processes fall into the same node, we use rank to
-    // ensure that each process is on a different GPU
-    // Note: it is better to use global rank because the group-local rank can be
-    // offset wrt the device id if intra-node GPUs are sharded into multiple
-    // dimensions.
-    barDevIdx = static_cast<c10::DeviceIndex>(globalRank() % localDeviceCount_);
-    LOG(WARNING)
-        << logPrefix()
-        << c10::str(
-               " using GPU ",
-               static_cast<int>(barDevIdx),
-               " to perform barrier as devices used by this process are currently unknown. ",
-               "This can potentially cause a hang if this rank to GPU mapping is incorrect. ",
-               "Specify device_ids in barrier() to force use of a particular device, ",
-               "or call init_process_group() with a device_id.");
+    // 2nd choice: Use the bound or used GPU device id if available.
+    barDevIdx = guessDeviceId();
   }
 
   TORCH_CHECK_WITH(
@@ -5391,7 +5375,8 @@ static void _ncclMemFree(void* ptr, size_t size, int device, void* stream) {
 // Create a `CUDAPluggableAllocator` that uses the above functions.
 std::shared_ptr<c10::Allocator> ProcessGroupNCCL::getMemAllocator() {
   C10_LOG_API_USAGE_ONCE("ProcessGroupNCCL.getMemAllocator");
-  if (!supportsTensorAlloc()) {
+  c10::DeviceIndex deviceIdx = guessDeviceId();
+  if (!supportsTensorAlloc(deviceIdx)) {
     TORCH_CHECK(
         false, "NCCL mem allocator is not supported in this NCCL version");
   }
@@ -5402,14 +5387,20 @@ std::shared_ptr<c10::Allocator> ProcessGroupNCCL::getMemAllocator() {
   return ncclMemAllocator;
 }
 
-bool ProcessGroupNCCL::supportsTensorAlloc() {
+bool ProcessGroupNCCL::supportsTensorAlloc(c10::DeviceIndex deviceIdx) {
+  // Check if NCCL has `ncclMemAlloc` and `ncclMemFree` functions
   int version = 0;
   // Rely on link-time versioning
   ncclGetVersion(&version);
-  if (version >= NCCL_VERSION(2, 19, 0)) {
-    return true;
+  if (version < NCCL_VERSION(2, 19, 0)) {
+    return false;
   }
-  return false;
+
+  // We do an extra check to see if CUDA driver supports multicast.  If not, we
+  // will return false. Although `ncclMemAlloc` will fall back to regular
+  // `cudaMalloc` and hence not error out, we may still want to avoid creating a
+  // separate memory pool for NCCL.
+  return c10d::cuda::deviceSupportsMulticast(deviceIdx);
 }
 
 at::Tensor ProcessGroupNCCL::allocateTensor(

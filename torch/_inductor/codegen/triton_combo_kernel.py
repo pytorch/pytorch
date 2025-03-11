@@ -86,7 +86,9 @@ def _default_custom_combo_kernel_horizontal_partition(
         # rnumel > 2048 usually has long execution time
         # BaseSchedulerNode.group[-1][-1] is rnumel for reduction nodes
         long_reduction = [
-            n for n in reduction if V.graph.sizevars.size_hint(n.group[-1][-1]) > 2048  # type: ignore[arg-type]
+            n
+            for n in reduction
+            if V.graph.sizevars.size_hint(n.group[-1][-1]) > 2048  # type: ignore[arg-type]
         ]
         short_reduction = [n for n in reduction if n not in long_reduction]
         if long_reduction:
@@ -138,7 +140,7 @@ def set_custom_combo_kernel_horizontal_partition(
             dict[BaseSchedulerNode, tuple[Any, Any, Any, Any]],
         ],
         list[list[BaseSchedulerNode]],
-    ]
+    ],
 ) -> None:
     """Sets the algorithm used to partition nodes into horizontal partitions. Nodes in different partitions
     are implemented in different combo kernels. Nodes in the same partition are likely to be implemented
@@ -593,9 +595,9 @@ class ComboKernel(Kernel):
             num_persistent_reduction = len(
                 [e for e in heuristics_list if e == "persistent_reduction"]
             )
-            assert (
-                num_reduction == 0
-            ), "combining pointwise and reduction are not supported yet."
+            assert num_reduction == 0, (
+                "combining pointwise and reduction are not supported yet."
+            )
             heuristics = (
                 "pointwise_with_reduction"
                 if num_persistent_reduction > 0
@@ -784,13 +786,13 @@ class ComboKernel(Kernel):
                         name, tree, suffix=str(num)
                     )
                 if not tree.is_reduction:
-                    assert isinstance(
-                        grid[i][num], str
-                    ), f"Grid {grid[i][num]} should be a dynamic shape."
+                    assert isinstance(grid[i][num], str), (
+                        f"Grid {grid[i][num]} should be a dynamic shape."
+                    )
                     numel_sign = grid[i][num][0] if grid[i][num][0] == "-" else ""
-                    assert (
-                        grid[i][num] == numel_sign + numel_name
-                    ), f"numel args mismatch: {grid[i][num]} vs {numel_name}"
+                    assert grid[i][num] == numel_sign + numel_name, (
+                        f"numel args mismatch: {grid[i][num]} vs {numel_name}"
+                    )
                     grid[i][num] = -expr if numel_sign == "-" else expr
 
                 if not tree.is_reduction or sub_kernel.inside_reduction:
@@ -807,13 +809,13 @@ class ComboKernel(Kernel):
                     continue
                 expr = V.graph.sizevars.size_hint(tree.numel)
                 if not tree.is_reduction:
-                    assert isinstance(
-                        grid[i][num], str
-                    ), f"Grid {grid[i][num]} should be a dynamic shape."
+                    assert isinstance(grid[i][num], str), (
+                        f"Grid {grid[i][num]} should be a dynamic shape."
+                    )
                     numel_sign = grid[i][num][0] if grid[i][num][0] == "-" else ""
-                    assert (
-                        grid[i][num] == numel_sign + numel_name
-                    ), f"grid mismatch: {grid[i][num]} vs {numel_name}"
+                    assert grid[i][num] == numel_sign + numel_name, (
+                        f"grid mismatch: {grid[i][num]} vs {numel_name}"
+                    )
                     grid[i][num] = -expr if numel_sign == "-" else expr
                 if not tree.is_reduction or sub_kernel.inside_reduction:
                     extra_args.append(expr)
@@ -1015,9 +1017,7 @@ class ComboKernel(Kernel):
             {}
             import torch
             from torch._inductor.runtime.triton_heuristics import grid, split_scan_grid, grid_combo_kernels
-        """.format(
-                V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
-            )
+        """.format(V.graph.device_ops.import_get_raw_stream_as("get_raw_stream"))
         )
 
     def uniquify_block_sizes(

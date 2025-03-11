@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import copy
 import sys
 
 import torch
@@ -22,6 +23,7 @@ from torch.distributed.checkpoint.default_planner import (
     create_default_local_load_plan,
     create_default_local_save_plan,
     DefaultLoadPlanner,
+    DefaultSavePlanner,
 )
 from torch.distributed.checkpoint.metadata import (
     BytesStorageMetadata,
@@ -30,7 +32,12 @@ from torch.distributed.checkpoint.metadata import (
     TensorProperties,
     TensorStorageMetadata,
 )
-from torch.distributed.checkpoint.planner import LoadItemType, SavePlan, WriteItemType
+from torch.distributed.checkpoint.planner import (
+    LoadItemType,
+    SavePlan,
+    SavePlanner,
+    WriteItemType,
+)
 from torch.distributed.checkpoint.planner_helpers import (
     _compare_save_plans,
     _merge_delta_local_plans,
@@ -135,6 +142,28 @@ class TestSavePlan(TestCase):
         self.assertEqual(bytes_wi.index, MetadataIndex("value"))
         self.assertIsNone(bytes_wi.tensor_data)
 
+    @with_fake_comms(rank=1, world_size=4)
+    def test_local_plan_with_caching(self):
+        tensor = torch.rand(10)
+        val = [1, 2, 3]
+        st = create_sharded_tensor(rank=1, world_size=4, shards_per_rank=1)
+        state_dict = {"tensor": tensor, "value": val, "st": st}
+        planner = DefaultSavePlanner(enable_plan_caching=True)
+        planner.set_up_planner(state_dict, is_coordinator=False)
+        # First iteration, should create a new plan
+        first_plan = planner.create_local_plan()
+
+        # Validate that the plan has been cached
+        cached_plan = SavePlanner._cached_save_plan[planner._cached_plans_key]
+        self.assertEqual(first_plan, cached_plan)
+
+        # second iteration, should create an empty unusable plan
+        second_plan = planner.create_local_plan()
+        self.assertFalse(second_plan.usable)
+        self.assertEqual(0, len(second_plan.items))
+        self.assertIsNone(second_plan.planner_data)
+        self.assertIsNone(second_plan.storage_data)
+
     def test_global_plan(self):
         def create_data(rank):
             with with_dist(rank=rank, world_size=4):
@@ -171,6 +200,113 @@ class TestSavePlan(TestCase):
                     self.assertEqual(
                         item_md.chunks[new_item.index.index], old_item.tensor_data.chunk
                     )
+
+    def test_global_plan_with_caching(self):
+        def create_data(rank):
+            with with_dist(rank=rank, world_size=4):
+                planner = DefaultSavePlanner(enable_plan_caching=True)
+                tensor = torch.rand(10)
+                val = [1, 2, 3]
+                st = create_sharded_tensor(rank=rank, world_size=4, shards_per_rank=1)
+                state_dict = {"tensor": tensor, "value": val, "st": st}
+                planner.set_up_planner(state_dict, is_coordinator=(rank == 0))
+                return planner.create_local_plan()
+
+        all_plans = [create_data(0), create_data(1), create_data(2), create_data(3)]
+        expected_all_plans = copy.deepcopy(all_plans)
+        planner = DefaultSavePlanner(enable_plan_caching=True)
+        # First iteration, should create a new plan
+        first_global_plan, first_metadata = planner.create_global_plan(all_plans)
+
+        # Validate that the plan has been cached
+        cached_global_plan = SavePlanner._cached_global_plan[planner._cached_plans_key]
+        self.assertEqual(cached_global_plan, first_global_plan)
+
+        # Validate that all_plans are cached
+        cached_all_plans = SavePlanner._cached_all_plans[planner._cached_plans_key]
+        self.assertEqual(cached_all_plans, expected_all_plans)
+
+        # Second iteration, should return empty plans
+        # Recreate the plans as the previous ones are deduped.
+        all_plans = [create_data(0), create_data(1), create_data(2), create_data(3)]
+        expected_all_plans = copy.deepcopy(all_plans)
+        second_global_plan, second_metadata = planner.create_global_plan(all_plans)
+        # All the plans should be empty and usable
+        for plan in second_global_plan:
+            self.assertFalse(plan.usable)
+            self.assertEqual(0, len(plan.items))
+            self.assertIsNone(plan.planner_data)
+            self.assertIsNone(plan.storage_data)
+
+        self.assertEqual(first_metadata, second_metadata)
+
+        # Validate that all_plans are cached and remain unchanged.
+        cached_all_plans = SavePlanner._cached_all_plans[planner._cached_plans_key]
+        self.assertEqual(cached_all_plans, expected_all_plans)
+
+        # Third iteration with changed plans
+        def create_data_v2(rank):
+            with with_dist(rank=rank, world_size=4):
+                planner = DefaultSavePlanner(enable_plan_caching=True)
+                tensor = torch.rand(20)
+                val = [1, 2, 3]
+                st = create_sharded_tensor(rank=rank, world_size=4, shards_per_rank=1)
+                state_dict = {"tensor": tensor, "value": val, "st": st}
+                planner.set_up_planner(state_dict, is_coordinator=(rank == 0))
+                return planner.create_local_plan()
+
+        all_plans = [
+            create_data_v2(0),
+            create_data_v2(1),
+            create_data_v2(2),
+            create_data_v2(3),
+        ]
+        expected_all_plans = copy.deepcopy(all_plans)
+        third_global_plan, third_metadata = planner.create_global_plan(all_plans)
+        # Only the rank 0 plan should be non-empty. The rest should be empty
+        tensor_plan = third_global_plan[0]
+        self.assertNotEqual(0, len(tensor_plan.items))
+        self.assertTrue(tensor_plan.usable)
+
+        # Validate that all_plans are updated and cached
+        cached_all_plans = SavePlanner._cached_all_plans[planner._cached_plans_key]
+        self.assertEqual(cached_all_plans, expected_all_plans)
+
+        for plan in third_global_plan[1:]:
+            self.assertFalse(plan.usable)
+            self.assertEqual(0, len(plan.items))
+            self.assertIsNone(plan.planner_data)
+            self.assertIsNone(plan.storage_data)
+
+        # Global metadata should be different as one plan has changed
+        self.assertNotEqual(second_metadata, third_metadata)
+
+        # Validate that the new plan has been cached
+        cached_global_plan = SavePlanner._cached_global_plan[planner._cached_plans_key][
+            0
+        ]
+        self.assertEqual(cached_global_plan, tensor_plan)
+
+    def test_finish_plan_with_caching(self):
+        planner = DefaultSavePlanner(enable_plan_caching=True)
+        tensor = torch.rand(10)
+        val = [1, 2, 3]
+        state_dict = {"tensor": tensor, "value": val}
+        planner.set_up_planner(state_dict, is_coordinator=True)
+        plan = planner.create_local_plan()
+
+        # First iteration, should create a new plan
+        first_finished_plan = planner.finish_plan(plan)
+
+        # Validate that the plan has been cached
+        cached_finished_plan = SavePlanner._cached_final_save_plan[
+            planner._cached_plans_key
+        ]
+        self.assertEqual(first_finished_plan, cached_finished_plan)
+
+        # second iteration, should return the cached plan
+        second_finished_plan = planner.finish_plan(SavePlan([], usable=False))
+        self.assertEqual(second_finished_plan, first_finished_plan)
 
     def test_local_load_plan(self):
         def create_state_dict(rank):
@@ -366,20 +502,20 @@ class TestPlannerHelpers(TestCase):
 
         # Only the first plan changed.
         # Merge plan should have the first plan from the delta plans and the second plan from the cached plans
-        delta_plans = [create_data(2), SavePlan([])]
+        delta_plans = [create_data(2), SavePlan([], usable=False)]
         merged_plans = _merge_delta_local_plans(cached_plans, delta_plans)
         _validate_plans(delta_plans[0], merged_plans[0])
         _validate_plans(cached_plans[1], merged_plans[1])
 
         # Only the second plan changed.
         # Merge plan should have the first plan from the cached plans and the second plan from the delta plans
-        delta_plans = [SavePlan([]), create_data(3)]
+        delta_plans = [SavePlan([], usable=False), create_data(3)]
         merged_plans = _merge_delta_local_plans(cached_plans, delta_plans)
         _validate_plans(cached_plans[0], merged_plans[0])
         _validate_plans(delta_plans[1], merged_plans[1])
 
         # None of the plans changed. Cached plans should be returned
-        delta_plans = [SavePlan([]), SavePlan([])]
+        delta_plans = [SavePlan([], usable=False), SavePlan([], usable=False)]
         merged_plans = _merge_delta_local_plans(cached_plans, delta_plans)
         _validate_plans(cached_plans[0], merged_plans[0])
         _validate_plans(cached_plans[1], merged_plans[1])

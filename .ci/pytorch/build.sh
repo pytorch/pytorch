@@ -173,6 +173,7 @@ if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   source /opt/intel/oneapi/compiler/latest/env/vars.sh
   # XPU kineto feature dependencies are not fully ready, disable kineto build as temp WA
   export USE_KINETO=0
+  export TORCH_XPU_ARCH_LIST=pvc
 fi
 
 # sccache will fail for CUDA builds if all cores are used for compiling
