@@ -106,13 +106,17 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cufile-cu12==1.13.0.11; platform_system == 'Linux' and platform_machine == 'x86_64'"
     ),
     "xpu": (
-        "intel-cmplr-lib-rt==2025.0.2 | "
-        "intel-cmplr-lib-ur==2025.0.2 | "
-        "intel-cmplr-lic-rt==2025.0.2 | "
-        "intel-sycl-rt==2025.0.2 | "
+        "intel-cmplr-lib-rt==2025.0.4; platform_system == 'Linux' | "
+        "intel-cmplr-lib-ur==2025.0.4; platform_system == 'Linux' | "
+        "intel-cmplr-lic-rt==2025.0.4; platform_system == 'Linux' | "
+        "intel-sycl-rt==2025.0.4; platform_system == 'Linux' | "
+        "intel-cmplr-lib-rt==2025.0.5; platform_system == 'Windows' | "
+        "intel-cmplr-lib-ur==2025.0.5; platform_system == 'Windows' | "
+        "intel-cmplr-lic-rt==2025.0.5; platform_system == 'Windows' | "
+        "intel-sycl-rt==2025.0.5; platform_system == 'Windows' | "
         "tcmlib==1.2.0 | "
         "umf==0.9.1 | "
-        "intel-pti==0.10.0"
+        "intel-pti==0.10.1"
     ),
 }
 
@@ -275,11 +279,15 @@ def generate_libtorch_matrix(
                         gpu_arch_type, gpu_arch_version
                     ),
                     "libtorch_variant": libtorch_variant,
-                    "libtorch_config": abi_version if os == "windows" else "",
-                    "devtoolset": abi_version if os != "windows" else "",
+                    "libtorch_config": abi_version
+                    if os in ("windows", "windows-arm64")
+                    else "",
+                    "devtoolset": abi_version
+                    if os not in ("windows", "windows-arm64")
+                    else "",
                     "container_image": (
                         LIBTORCH_CONTAINER_IMAGES[(arch_version, abi_version)]
-                        if os != "windows"
+                        if os not in ("windows", "windows-arm64")
                         else ""
                     ),
                     "package_type": "libtorch",
@@ -355,22 +363,23 @@ def generate_wheels_matrix(
                 and os == "linux"
                 or arch_version in CUDA_AARCH64_ARCHES
             ):
+                desired_cuda = translate_desired_cuda(gpu_arch_type, gpu_arch_version)
                 ret.append(
                     {
                         "python_version": python_version,
                         "gpu_arch_type": gpu_arch_type,
                         "gpu_arch_version": gpu_arch_version,
-                        "desired_cuda": translate_desired_cuda(
-                            gpu_arch_type, gpu_arch_version
-                        ),
+                        "desired_cuda": desired_cuda,
                         "use_split_build": "True" if use_split_build else "False",
                         "devtoolset": "cxx11-abi",
                         "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
                         "package_type": package_type,
                         "pytorch_extra_install_requirements": (
-                            PYTORCH_EXTRA_INSTALL_REQUIREMENTS[arch_version]
-                            if os != "linux-aarch64"
-                            else ""
+                            PYTORCH_EXTRA_INSTALL_REQUIREMENTS[
+                                f"{desired_cuda[2:4]}.{desired_cuda[4:]}"  # for cuda-aarch64: cu126 -> 12.6
+                            ]
+                            if os == "linux-aarch64"
+                            else PYTORCH_EXTRA_INSTALL_REQUIREMENTS[arch_version]
                         ),
                         "build_name": (
                             f"{package_type}-py{python_version}-{gpu_arch_type}"

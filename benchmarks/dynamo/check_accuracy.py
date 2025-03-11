@@ -12,6 +12,7 @@ flaky_models = {
     "yolov3",
     "gluon_inception_v3",
     "detectron2_maskrcnn_r_101_c4",
+    "timm_efficientnet",  # see https://github.com/pytorch/pytorch/issues/148699
     "XGLMForCausalLM",  # discovered in https://github.com/pytorch/pytorch/pull/128148
 }
 
