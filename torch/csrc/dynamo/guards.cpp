@@ -1868,19 +1868,24 @@ class NO_TENSOR_ALIASING : public RelationalGuard {
   }
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
-    // Typically we don't have to increment the ref count here because the
-    // tensors are held in f_locals. But there is a special case for
-    // `from_numpy` source. `from_numpy` converts integers and such into tensors
-    // and these tensors are ephemeral. If we don't incref, those tensors can be
-    // garbage collected, and the next time from_numpy can reuse the memory
-    // address. Therefore, we incref here. They are decref'd in reset_state.
-    Py_INCREF(value);
     auto insertion = _unique_tensors.insert({value, nullptr});
     if (!insertion.second) {
       // No need to clear _unique_tensors, reset_state will do
       // it.
       return false;
     }
+
+    // Typically we don't have to increment the ref count here because the
+    // tensors are held in f_locals. But there is a special case for
+    // `from_numpy` source. `from_numpy` converts integers and such into tensors
+    // and these tensors are ephemeral. If we don't incref, those tensors can be
+    // garbage collected, and the next time from_numpy can reuse the memory
+    // address. Therefore, we incref here. They are decref'd in reset_state.
+    //
+    // IMPORTANT NOTE - Do not move this Py_INCREF before the insertion into
+    // _unique_tensors. If there is a tensor aliasing, you will end up
+    // incrementing the refcount twice, while the reset decrements only once.
+    Py_INCREF(value);
     return true;
   }
 
@@ -2154,14 +2159,7 @@ class GuardAccessor {
       py::object accessor_key,
       std::string source,
       py::handle example_value,
-      py::handle guard_manager_enum)
-      : _guard_manager(make_guard_manager(
-            root,
-            source,
-            example_value,
-            guard_manager_enum)),
-        _accessor_key(std::move(accessor_key)),
-        _source(std::move(source)) {}
+      py::handle guard_manager_enum);
 
   // Return by reference as GuardAccessor owns the GuardManager.
   std::unique_ptr<GuardManager>& get_guard_manager() {
@@ -2189,11 +2187,8 @@ class GuardAccessor {
 
   virtual ~GuardAccessor() = default;
 
- public: // Cloning related functions
-  GuardAccessor(GuardManager* guard_manager, GuardAccessor* from)
-      : _guard_manager(std::unique_ptr<GuardManager>(guard_manager)) {
-    from->clone_visitor(this);
-  }
+  // Cloning related functions
+  GuardAccessor(GuardManager* guard_manager, GuardAccessor* from);
 
   virtual GuardAccessor* clone(
       RootGuardManager* cloned_root,
@@ -2630,6 +2625,23 @@ class GuardManager {
   bool _is_dict;
   uint64_t _dict_tag{0};
 };
+
+GuardAccessor::GuardAccessor(
+    RootGuardManager* root,
+    py::object accessor_key,
+    std::string source,
+    py::handle example_value,
+    py::handle guard_manager_enum)
+    : _guard_manager(
+          make_guard_manager(root, source, example_value, guard_manager_enum)),
+      _accessor_key(std::move(accessor_key)),
+      _source(std::move(source)) {}
+
+// Cloning related functions
+GuardAccessor::GuardAccessor(GuardManager* guard_manager, GuardAccessor* from)
+    : _guard_manager(std::unique_ptr<GuardManager>(guard_manager)) {
+  from->clone_visitor(this);
+}
 
 /**
  Note on [Ownership with cloning] - GuardManagers have the facility to clone
