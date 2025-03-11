@@ -611,6 +611,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     return true;
   }
 
+  bool supportsCoalescing() const override {
+    return true;
+  }
+
   void startCoalescing() override;
 
   c10::intrusive_ptr<Work> endCoalescing() override;
@@ -757,11 +761,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   c10::intrusive_ptr<intra_node_comm::IntraNodeComm> initIntraNodeComm();
 
   // Destroy (shutdown) this backend -- normal exit.
-  void shutdown();
+  void shutdown() override;
 
   // Provides an API to abort the ProcessGroup (similar to ncclCommAbort)
   // instead of relying on ProcessGroupNCCL destructor.
-  void abort();
+  void abort() override;
 
   void eagerConnectSingleDevice(at::Device device) override;
 

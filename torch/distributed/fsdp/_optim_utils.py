@@ -6,6 +6,7 @@ import warnings
 from collections.abc import Iterable, Iterator, Sequence
 from contextlib import ExitStack
 from dataclasses import dataclass, field
+from itertools import chain
 from typing import Any, cast, NamedTuple, no_type_check, Optional, TYPE_CHECKING, Union
 
 import torch
@@ -145,9 +146,9 @@ def _unflatten_optim_state(
         dict will need to map these entries using the proper unflattened
         parameter IDs.
     """
-    assert (
-        not shard_state or to_save
-    ), "If ``shard_state`` is True, ``to_save`` has to be True."
+    assert not shard_state or to_save, (
+        "If ``shard_state`` is True, ``to_save`` has to be True."
+    )
     consolidated_state = _communicate_optim_state(
         fsdp_param_info,
         flat_param_state,
@@ -218,9 +219,9 @@ def _communicate_optim_state(
             ):
                 tensor_state[state_name] = value
                 continue
-            assert (
-                fsdp_state.compute_device is not None
-            ), "compute_device has not been initialized"
+            assert fsdp_state.compute_device is not None, (
+                "compute_device has not been initialized"
+            )
             if value.device.type != fsdp_state.compute_device.type:
                 value = value.to(fsdp_state.compute_device)
             # Assume that positive-dimension tensor optimizer state
@@ -394,7 +395,10 @@ def _shard_orig_param_state(
             and value.dim() > 0
             and fsdp_state.sharding_strategy != ShardingStrategy.NO_SHARD
         ):
-            value = value.flatten()[intra_param_start_idx : intra_param_end_idx + 1].clone()  # type: ignore[operator]
+            value = value.flatten()[
+                intra_param_start_idx : intra_param_end_idx  # type: ignore[operator]
+                + 1
+            ].clone()
         new_optim_state[state_name] = value
     return new_optim_state
 
@@ -489,9 +493,9 @@ def _flatten_optim_state_dict(
             if flat_state:
                 flat_osd_state[key] = flat_state
             elif use_orig_params:
-                assert (
-                    len(fqns) == 1
-                ), f"use_orig_params is True but there are multiple FQNs, {fqns}."
+                assert len(fqns) == 1, (
+                    f"use_orig_params is True but there are multiple FQNs, {fqns}."
+                )
                 if optim is not None:  # NamedOptimizer or KeyedOptimizer case.
                     state = optim.state.get(param, None)  # type: ignore[call-overload]
                     if state is not None:
@@ -570,14 +574,13 @@ def _flatten_optim_state(
     flat_param = handle.flat_param
     num_unflat_params = len(unflat_param_names)
     assert num_unflat_params > 0, (
-        "Expects at least one unflattened parameter corresponding to the "
-        "flat parameter"
+        "Expects at least one unflattened parameter corresponding to the flat parameter"
     )
     unflat_param_shapes = flat_param._shapes
     num_unflat_param_shapes = len(unflat_param_shapes)
-    assert (
-        num_unflat_params == num_unflat_param_shapes
-    ), f"Expects {num_unflat_params} shapes but got {num_unflat_param_shapes}"
+    assert num_unflat_params == num_unflat_param_shapes, (
+        f"Expects {num_unflat_params} shapes but got {num_unflat_param_shapes}"
+    )
 
     # Check if these unflattened parameters have any optimizer state
     has_state = [
@@ -759,8 +762,7 @@ def _flatten_tensor_optim_state(
     flat_tensor = handle.flatten_tensors(tensors_to_flatten, handle._aligned_numel)
     flat_param_shape = flat_param._unpadded_unsharded_size  # type: ignore[attr-defined]
     assert flat_tensor.shape == flat_param_shape, (
-        f"tensor optim state: {flat_tensor.shape} "
-        f"flat parameter: {flat_param_shape}"
+        f"tensor optim state: {flat_tensor.shape} flat parameter: {flat_param_shape}"
     )
     return flat_tensor
 
@@ -1065,9 +1067,9 @@ def _get_param_key_to_param(
     """
     clean_fqn_to_curr_fqn: dict[str, str] = {}
     if is_named_optimizer:
-        assert (
-            param_to_fqns is not None and flat_param_to_fqn is not None
-        ), "The optimizer is a NamedOptimizer, `param_to_fqns` must not be None."
+        assert param_to_fqns is not None and flat_param_to_fqn is not None, (
+            "The optimizer is a NamedOptimizer, `param_to_fqns` must not be None."
+        )
         assert model is not None
         for key, _ in _named_parameters_with_duplicates(model):
             clean_fqn_to_curr_fqn[clean_tensor_name(key)] = key
@@ -1150,9 +1152,9 @@ def _check_missing_keys_on_rank(
             continue
         param_key = optim_state_key_to_param_key[r0_optim_state_key]
         if isinstance(param_key, int):
-            assert param_key >= 0 and param_key < len(
-                param_key_to_param
-            ), "Check the `param_key_to_param` construction"
+            assert param_key >= 0 and param_key < len(param_key_to_param), (
+                "Check the `param_key_to_param` construction"
+            )
     # We cannot use FSDPState.compute_device as this API is a global view.
     device = _get_pg_default_device(group)
     num_missing = torch.tensor([len(missing_keys)], dtype=torch.int32, device=device)
@@ -1219,9 +1221,7 @@ def _map_param_key_to_optim_keys(
             [] for _ in range(dist.get_world_size(group))
         ]
         dist.all_gather_object(all_keys, all_optim_state_keys, group=group)
-        merge_all_optim_state_keys = [
-            key for local_keys in all_keys for key in local_keys
-        ]
+        merge_all_optim_state_keys = [*chain.from_iterable(all_keys)]
         all_optim_state_keys = sorted(set(merge_all_optim_state_keys))
     else:
         key_obj_list: list[Optional[list[_OptimStateKey]]] = (
@@ -1256,9 +1256,7 @@ def _unflatten_param_groups(
             param_to_fqns[param] for param in param_group_params
         ]
         unflat_param_group["params"] = [
-            unflat_param_name
-            for unflat_param_names in nested_unflat_param_names
-            for unflat_param_name in unflat_param_names
+            *chain.from_iterable(nested_unflat_param_names)
         ]  # flatten the list of lists
         param_groups.append(unflat_param_group)
     return param_groups

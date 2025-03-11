@@ -386,6 +386,21 @@ class TestDraftExport(TestCase):
         self.assertTrue(report.successful())
         self.assertEqual(inp[0], torch.ones(3, 3))
 
+    def test_masked_linear(self):
+        class M(torch.nn.Module):
+            def forward(self, x, mask, weight, bias):
+                masked = x[mask != 0, :, :]
+                return torch.nn.functional.linear(masked, weight, bias)
+
+        x = torch.zeros(10)
+        inp = (torch.randn(10, 8, 7), x, torch.randn(25, 7), torch.randn(25))
+        draft_ep = draft_export(M(), inp)
+        ep = export(M(), inp)
+        self.assertEqual(draft_ep.module()(*inp), ep.module()(*inp))
+        x[2] += 1
+        x[3] += 1
+        self.assertEqual(draft_ep.module()(*inp), ep.module()(*inp))
+
     def test_torchbind(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
