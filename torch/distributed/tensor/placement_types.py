@@ -89,39 +89,22 @@ class Shard(Placement):
 
         # chunk tensor over dimension `dim` into n slices
         tensor_list = list(torch.chunk(tensor, num_chunks, dim=self.dim))
-        num_empty_tensors = num_chunks - len(tensor_list)
-
-        # if no need to have padding or tensor dim size is evenly sharded already
-        # we can return early.
-        if not with_padding or tensor.size(self.dim) % num_chunks == 0:
-            if contiguous:
-                tensor_list = [t.contiguous() for t in tensor_list]
-            return (
-                fill_empty_tensor_to_shards(tensor_list, self.dim, num_empty_tensors),
-                [],
-            )
+        tensor_list = fill_empty_tensor_to_shards(
+            tensor_list, self.dim, num_chunks - len(tensor_list)
+        )
 
         # compute the chunk size inline with ``torch.chunk`` to calculate padding
         full_chunk_size = (tensor.size(self.dim) + num_chunks - 1) // num_chunks
 
-        # Compute chunk size for each chunk for ``self.dim``
-        chunk_sizes = [
-            tensor_list[idx].size(self.dim) if idx < len(tensor_list) else 0
-            for idx in range(num_chunks)
-        ]
-        # Compute pad size on each chunk
-        pad_sizes = [full_chunk_size - chunk_size for chunk_size in chunk_sizes]
-
-        # Reuse tensor to fill empty chunk with empty tensor
-        tensor_list = fill_empty_tensor_to_shards(
-            tensor_list, self.dim, num_empty_tensors
-        )
-        shard_list = []
-        for shard, pad_size in zip(tensor_list, pad_sizes):
-            # Fill the empty tensor with zeroes with padding.
-            if with_padding and pad_size > 0:
+        shard_list: list[torch.Tensor] = []
+        pad_sizes: list[int] = []
+        for shard in tensor_list:
+            if with_padding:
+                pad_size = full_chunk_size - shard.size(self.dim)
                 shard = pad_tensor(shard, self.dim, pad_size)
-            shard = shard.contiguous() if contiguous else shard
+                pad_sizes.append(pad_size)
+            if contiguous:
+                shard = shard.contiguous()
             shard_list.append(shard)
         return shard_list, pad_sizes
 
@@ -192,8 +175,10 @@ class Shard(Placement):
         )
 
         # Only unpad if the local_tensor was padded on the dimension.
-        if pad_sizes and pad_sizes[mesh_dim_local_rank] > 0:
+        if pad_sizes[mesh_dim_local_rank] > 0:
             output = unpad_tensor(output, self.dim, pad_sizes[mesh_dim_local_rank])
+            # Unpad might return a view, hence we need to remake it contiguous
+            output = output.contiguous()
         return output
 
     def _reduce_shard_tensor(
@@ -243,15 +228,13 @@ class Shard(Placement):
         is replicated on the previously sharded mesh dimension
         """
         num_chunks = mesh.size(mesh_dim=mesh_dim)
-        # check if it's uneven, so we need to pad input tensor before all_gather
-        local_shape = list(local_tensor.size())
 
         logical_dim_size = current_logical_shape[self.dim]
         is_padded = logical_dim_size % num_chunks != 0
 
         if is_padded:
             full_chunk_size = (logical_dim_size + num_chunks - 1) // num_chunks
-            pad_size = full_chunk_size - local_shape[self.dim]
+            pad_size = full_chunk_size - local_tensor.size(self.dim)
             local_tensor = pad_tensor(local_tensor, self.dim, pad_size)
 
         if not local_tensor.is_contiguous():
@@ -427,8 +410,6 @@ class _StridedShard(Shard):
     dimension into 2 shards before being sharded on the "dp" dimension. Therefore, the
     `split_factor` of the _StridedShard placement on "dp" dim is 2.
 
-    TODO: strided sharding needs to work fine with uneven sharding. Now it forbids
-    resharding if the tensor is unevenly sharded.
     TODO: we should remove _StridedShard placement once we can unify it with Shard
     """
 
@@ -465,37 +446,35 @@ class _StridedShard(Shard):
         with_padding: bool = True,
         contiguous: bool = True,
     ) -> tuple[list[torch.Tensor], list[int]]:
-        """
-        TODO: currently _StridedShard does not support padding
-        """
         assert self.dim <= tensor.ndim, (
             f"Sharding dim {self.dim} greater than tensor ndim {tensor.ndim}"
         )
 
         total_split = num_chunks * self.split_factor
-        assert tensor.size(self.dim) % total_split == 0, (
-            "_StridedShard currently only allows even sharding but got tensor size"
-            f" {tensor.size(self.dim)} on dim {self.dim} and total split"
-            f" {total_split}={num_chunks} * {self.split_factor}"
+
+        tensor_list = list(torch.chunk(tensor, total_split, dim=self.dim))
+        tensor_list = fill_empty_tensor_to_shards(
+            tensor_list, self.dim, total_split - len(tensor_list)
         )
 
-        group_size = self.split_factor
-        total_split_tensor_list = list(torch.chunk(tensor, total_split, dim=self.dim))
-        tensor_list = [
-            torch.cat(
-                [
-                    total_split_tensor_list[i + j * num_chunks]  # stride is num_chunks
-                    for j in range(group_size)
-                ],
+        # compute the chunk size inline with ``torch.chunk`` to calculate padding
+        full_chunk_size = (tensor.size(self.dim) + total_split - 1) // total_split
+
+        shard_list: list[torch.Tensor] = []
+        pad_sizes: list[int] = []
+        for i in range(num_chunks):
+            shard = torch.cat(
+                [tensor_list[i + j * num_chunks] for j in range(self.split_factor)],
                 dim=self.dim,
             )
-            for i in range(num_chunks)
-        ]
-
-        if contiguous:
-            tensor_list = [t.contiguous() for t in tensor_list]
-
-        return tensor_list, []
+            if with_padding:
+                pad_size = full_chunk_size * self.split_factor - shard.size(self.dim)
+                shard = pad_tensor(shard, self.dim, pad_size)
+                pad_sizes.append(pad_size)
+            if contiguous:
+                shard = shard.contiguous()
+            shard_list.append(shard)
+        return shard_list, pad_sizes
 
     def _to_replicate_tensor(
         self,
@@ -504,18 +483,19 @@ class _StridedShard(Shard):
         mesh_dim: int,
         current_logical_shape: list[int],
     ) -> torch.Tensor:
-        """
-        Note: currently _StridedShard does not support padding
-        """
         num_chunks = mesh.size(mesh_dim=mesh_dim)
         total_split = num_chunks * self.split_factor
-        # NOTE: we require Strided Sharding to be even for now
-        assert current_logical_shape[self.dim] % total_split == 0, (
-            "_StridedShard requires even sharding but got tensor size "
-            f"{current_logical_shape[self.dim]} on dim {self.dim} and "
-            f"total split {total_split}=num_chunks {num_chunks} "
-            f"* split_factor {self.split_factor}"
-        )
+
+        logical_dim_size = current_logical_shape[self.dim]
+        is_padded = logical_dim_size % total_split != 0
+
+        if is_padded:
+            full_chunk_size = (logical_dim_size + total_split - 1) // total_split
+            pad_size = full_chunk_size - local_tensor.size(self.dim)
+            local_tensor = pad_tensor(local_tensor, self.dim, pad_size)
+
+        if not local_tensor.is_contiguous():
+            local_tensor = local_tensor.contiguous()
 
         result = funcol.all_gather_tensor(
             local_tensor,
@@ -536,6 +516,10 @@ class _StridedShard(Shard):
             # new shard and placed on mesh's local rank `idx % num_chunks`
             idx_after_split = idx % num_chunks * self.split_factor + idx // num_chunks
             new_tensor_shard_list.append(tensor_shard_list[idx_after_split])
+
+        if is_padded:
+            unpad_size = full_chunk_size * num_chunks - logical_dim_size  # type: ignore[possibly-undefined]
+            result = unpad_tensor(result, self.dim, unpad_size)
 
         return torch.cat(new_tensor_shard_list, dim=self.dim).contiguous()
 
