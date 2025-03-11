@@ -89,7 +89,7 @@ from torch._utils_internal import (
 from torch.fx._utils import _format_graph_code, lazy_format_graph_code
 from torch.monitor import _WaitCounter
 from torch.nn.modules.lazy import LazyModuleMixin
-from torch.utils._triton import has_triton, has_triton_package
+from torch.utils._triton import has_triton_package
 from torch.utils.hooks import RemovableHandle
 
 
@@ -1034,6 +1034,16 @@ cmp_name_to_op_mapping = {
 }
 
 
+cmp_name_to_op_str_mapping = {
+    "__eq__": "==",
+    "__ne__": "!=",
+    "__lt__": "<",
+    "__le__": "<=",
+    "__gt__": ">",
+    "__ge__": ">=",
+}
+
+
 def is_wrapper_or_member_descriptor(value):
     return isinstance(
         value,
@@ -1186,7 +1196,7 @@ class CompilationMetrics:
     inductor_cumulative_compile_time_us: Optional[int] = None
     inductor_code_gen_cumulative_compile_time_us: Optional[int] = None
     triton_compile_time_us: Optional[int] = None
-    runtime_cudagraphify_time_us: Optional[int] = None  # TODO: instrument
+    runtime_cudagraphify_time_us: Optional[int] = None
     runtime_triton_autotune_time_us: Optional[int] = None
     dynamo_compile_time_before_restart_us: Optional[int] = None
     cuda_synchronize_time_us: Optional[int] = None  # TODO: instrument
@@ -1220,6 +1230,7 @@ class CompilationMetrics:
     recompile_reason: Optional[str] = None
     num_graph_breaks: Optional[int] = None
     triton_kernel_compile_times_us: Optional[str] = None
+    ir_count: Optional[int] = None
 
     @classmethod
     def create(cls, metrics: dict[str, Any]):
@@ -1478,7 +1489,7 @@ def record_compilation_metrics(
         "dynamo_config": _get_dynamo_config_for_logging(),
         "inductor_config": _scrubbed_inductor_config_for_logging(),
         "cuda_version": torch.version.cuda,
-        "triton_version": triton.__version__ if has_triton() else "",
+        "triton_version": triton.__version__ if has_triton_package() else "",
         "remote_cache_version": remote_cache_version,
         "inductor_fx_remote_cache_backend_type": inductor_fx_remote_cache_backend_type,
     }
@@ -2842,11 +2853,11 @@ def same(
                     )
 
                     if use_larger_multiplier_for_smaller_tensor and (
-                        fp64_ref.numel() <= 10 and tol >= 4 * 1e-2
+                        fp64_ref.numel() <= 10
                     ):
                         multiplier = 10.0
                     elif use_larger_multiplier_for_smaller_tensor and (
-                        fp64_ref.numel() <= 500 and tol >= 4 * 1e-2
+                        fp64_ref.numel() <= 500
                     ):
                         multiplier = 5.0
                     elif (
@@ -3733,17 +3744,10 @@ def build_checkpoint_variable(**options):
     )
 
 
-def is_compile_supported(device_type):
-    from .eval_frame import is_dynamo_supported
+def is_compile_supported(device_type: str) -> bool:
+    from .eval_frame import is_inductor_supported
 
-    compile_supported = is_dynamo_supported()
-    if device_type == "cpu":
-        pass
-    elif device_type in ["cuda", "xpu"] and compile_supported:
-        compile_supported = has_triton()
-    else:
-        compile_supported = False
-    return compile_supported
+    return is_inductor_supported(device_type)
 
 
 # The following 3.11 source code functions are adapted from
