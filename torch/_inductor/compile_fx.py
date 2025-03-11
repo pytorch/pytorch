@@ -1501,6 +1501,17 @@ def compile_fx_aot(
         if config_patches is None
         else {**config_patches, "cpp_wrapper": True}
     )
+    config_patches.update(
+        # Set freezing to True as default if the option is not explicitly set,
+        # but if use_runtime_constant_folding is True then we can't do freezing.
+        {
+            "freezing": (
+                config.freezing
+                if config.freezing is not None
+                else not config.aot_inductor.use_runtime_constant_folding
+            ),
+        }
+    )
 
     output_path = config_patches.get(
         "aot_inductor.output_path", config.aot_inductor.output_path
