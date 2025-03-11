@@ -424,11 +424,11 @@ class MetalKernel(SIMDKernel):
         var_name = f"tmp_acc_{next(self.acc_var_ids)}"
         var = V.kernel.create_cse_var(var_name, bounds, dtype)
         if elem_count:
-            self.loads.writeline(
+            self.indexing_code.writeline(
                 f"threadgroup {self.dtype_to_str(dtype)} {var_name}[{elem_count}];"
             )
         else:
-            self.loads.writeline(f"threadgroup {self.dtype_to_str(dtype)} {var_name};")
+            self.indexing_code.writeline(f"threadgroup {self.dtype_to_str(dtype)} {var_name};")
         return var
 
     def reduction(
@@ -442,14 +442,16 @@ class MetalKernel(SIMDKernel):
         reduction_dim = next(t for t in self.range_trees if t.is_reduction)
         if reduction_type == "any":
             acc = self._new_accvar(dtype)
-            self.loads.writeline(f"{acc} = false;")
-            self.body.splice(
+            self.indexing_code.writeline(f"{acc} = false;")
+            self.indexing_code.writeline("threadgroup_barrier(metal::mem_flags::mem_threadgroup);")
+            self.compute.splice(
                 f"""
                 if ({value}) {{
                     {acc} = true;
                 }}
             """
             )
+            self.stores.writeline("threadgroup_barrier(metal::mem_flags::mem_threadgroup);")
             return acc
         if reduction_type in ["prod", "sum"]:
             acc_buf = self._new_accvar(src_dtype, reduction_dim.numel)
@@ -534,16 +536,9 @@ class MetalKernel(SIMDKernel):
                 if len(idx_var_names) > 1:
                     for idx, name in enumerate(idx_var_names):
                         code.writeline(f"auto {name} = thread_pos.{chr(120 + idx)};")
+                code.splice(self.indexing_code)
                 code.splice(self.loads)
-                if self.inside_reduction:
-                    code.writeline(
-                        "threadgroup_barrier(metal::mem_flags::mem_threadgroup);"
-                    )
                 code.splice(self.body)
-                if self.inside_reduction:
-                    code.writeline(
-                        "threadgroup_barrier(metal::mem_flags::mem_threadgroup);"
-                    )
                 code.splice(self.stores)
             code.writeline("}")
         code.writeline('""")')
