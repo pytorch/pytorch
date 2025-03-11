@@ -24,7 +24,9 @@ from torch._inductor.autoheuristic.autoheuristic_utils import (
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.utils._mode_utils import no_dispatch
 
-from ...utils._triton import has_triton
+from ..codegen.common import get_scheduling_for_device
+from ..codegen.cuda_combined_scheduling import CUDACombinedScheduling
+from ..codegen.triton import TritonScheduling
 from ..pattern_matcher import (
     fwd_only,
     gen_register_replacement,
@@ -458,7 +460,11 @@ def _should_pad_bench(
         ):
             return True
 
-        if not has_triton():
+        scheduling_factory = get_scheduling_for_device(mat1.device.type)
+        if scheduling_factory is None or not isinstance(
+            scheduling_factory(None),
+            (TritonScheduling, CUDACombinedScheduling),
+        ):
             return False
 
         if not is_mm_compute_bound(m, k, n, mat1.dtype):
