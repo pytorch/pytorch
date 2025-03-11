@@ -54,6 +54,7 @@ from ..exc import (
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
 from ..utils import (
+    is_namedtuple_cls,
     check_constant_args,
     check_unspec_or_constant_args,
     cmp_name_to_op_mapping,
@@ -924,6 +925,16 @@ class UserMethodVariable(UserFunctionVariable):
         if self.is_constant:
             fn = getattr(self.obj.value, self.fn.__name__)
             return invoke_and_store_as_constant(tx, fn, self.get_name(), args, kwargs)
+
+        if (
+            is_namedtuple_cls(self.obj.value)
+            and (make := inspect.getattr_static(self.obj.value, "_make"))
+            and self.fn is make.__func__
+        ):
+            return variables.NamedTupleVariable(
+                args[0].force_unpack_var_sequence(tx), self.obj.value
+            )
+
         return super().call_function(tx, args, kwargs)
 
     def inspect_parameter_names(self):
