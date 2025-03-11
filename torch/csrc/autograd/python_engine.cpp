@@ -181,7 +181,7 @@ static Edge parseGradientEdge(PyObject* obj, int64_t index) {
 }
 
 // Implementation of torch._C._EngineBase.run_backward
-PyObject* THPEngine_run_backward(
+static PyObject* THPEngine_run_backward(
     PyObject* self,
     PyObject* args,
     PyObject* kwargs) {
@@ -396,7 +396,7 @@ PyObject* THPEngine_run_backward(
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPEngine_queue_callback(PyObject* self, PyObject* _callback) {
+static PyObject* THPEngine_queue_callback(PyObject* self, PyObject* _callback) {
   HANDLE_TH_ERRORS
   auto& engine = python::PythonEngine::get_python_engine();
   std::shared_ptr<PyObject> callback(_callback, [](PyObject* obj) {
@@ -431,7 +431,9 @@ PyObject* THPEngine_queue_callback(PyObject* self, PyObject* _callback) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPEngine_is_checkpoint_valid(PyObject* self, PyObject* noargs) {
+static PyObject* THPEngine_is_checkpoint_valid(
+    PyObject* self,
+    PyObject* noargs) {
   HANDLE_TH_ERRORS
   auto& engine = python::PythonEngine::get_python_engine();
   if (engine.is_checkpoint_valid()) {
@@ -442,7 +444,10 @@ PyObject* THPEngine_is_checkpoint_valid(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPEngine_new(PyTypeObject* type, PyObject* args, PyObject* kwargs) {
+static PyObject* THPEngine_new(
+    PyTypeObject* type,
+    PyObject* args,
+    PyObject* kwargs) {
   return type->tp_alloc(type, 0);
 }
 
@@ -459,7 +464,7 @@ static struct PyMethodDef THPEngine_methods[] = {
      nullptr},
     {nullptr}};
 
-PyTypeObject THPEngineType = {
+static PyTypeObject THPEngineType = {
     PyVarObject_HEAD_INIT(nullptr, 0)
     "torch._C._EngineBase", /* tp_name */
     sizeof(THPEngine), /* tp_basicsize */

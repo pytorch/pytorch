@@ -46,7 +46,7 @@ namespace torch::autograd {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyObject* THPVariableFunctionsModule = nullptr;
 
-inline Tensor dispatch_range(
+inline static Tensor dispatch_range(
     const Scalar& start,
     const Scalar& end,
     const Scalar& step,
@@ -56,7 +56,7 @@ inline Tensor dispatch_range(
   return at::range_out(result, start, end, step);
 }
 
-inline Tensor dispatch_range(
+inline static Tensor dispatch_range(
     const Scalar& start,
     const Scalar& end,
     const Scalar& step,
@@ -490,7 +490,7 @@ void gatherTorchFunctions_0(std::vector<PyMethodDef>& torch_functions);
 void gatherTorchFunctions_1(std::vector<PyMethodDef>& torch_functions);
 void gatherTorchFunctions_2(std::vector<PyMethodDef>& torch_functions);
 
-void gatherTorchFunctions(std::vector<PyMethodDef>& torch_functions) {
+static void gatherTorchFunctions(std::vector<PyMethodDef>& torch_functions) {
   constexpr size_t num_functions =
       sizeof(torch_functions_manual) / sizeof(torch_functions_manual[0]);
   torch_functions.assign(
