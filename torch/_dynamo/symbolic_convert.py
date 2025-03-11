@@ -1656,6 +1656,41 @@ class InstructionTranslatorBase(
             self.jump(inst)
 
     def _raise_exception_variable(self, inst):
+        def set_context_recursive(val, prev_idx):
+            if (ctx := val.__context__) and type(ctx) is not ConstantVariable:
+                return val
+            if len(self.exn_vt_stack) + prev_idx > 0:
+                prev = self.exn_vt_stack[prev_idx]
+                set_context_recursive(prev, prev_idx - 1)
+                val.set_context(prev)
+            return val
+
+        def break_context_reference_cycle(val):
+            # See test_exceptions::test_raise_does_not_create_context_chain_cycle
+            # Based on https://github.com/python/cpython/blob/e635bf2e49797ecb976ce45a67fce2201a25ca68/Python/errors.c#L207-L228
+            # As noted on CPython, this is O(chain length) but the context chains
+            # are usually very small
+            o = slow_o = val
+            slow_update_toggle = False  # floyd's algorithm for detecting cycle
+            while True:
+                context = o.__context__
+                if type(context) is ConstantVariable:  # context not set
+                    break
+
+                if context is val:
+                    o.set_context(ConstantVariable(None))
+                    break
+
+                o = context
+                if o is slow_o:
+                    # pre-existing cycle - all exceptions on the path were
+                    # visited and checked
+                    break
+
+                if slow_update_toggle:
+                    slow_o = slow_o.__context__  # visited all exceptions
+                slow_update_toggle = not slow_update_toggle
+
         val = self.pop()
         # User can raise exception in 2 ways
         #   1) raise exception type - raise NotImplementedError
@@ -1676,6 +1711,10 @@ class InstructionTranslatorBase(
             and val.exc_type is StopIteration
         ):
             val = variables.BuiltinVariable(RuntimeError).call_function(self, [], {})  # type: ignore[arg-type]
+
+        # set Exception.__context__
+        set_context_recursive(val, len(self.exn_vt_stack) - 1)
+        break_context_reference_cycle(val)
 
         # Save the exception in a global data structure
         self.exn_vt_stack.append(val)

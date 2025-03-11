@@ -2899,7 +2899,7 @@ class CPythonContextManagerTestCase(torch._dynamo.test_case.TestCase):
 
         f(torch.randn(2))
 
-    @unittest.expectedFailure
+    @unittest.skipIf(sys.version_info < (3, 11), "Python 3.11+")
     def test_contextmanager_except(self):
         state = []
 
