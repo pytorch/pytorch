@@ -993,7 +993,7 @@ class MultiheadAttention(Module):
 
     In addition to support for the new ``scaled_dot_product_attention()``
     function, for speeding up Inference, MHA will use
-    fastpath inference with support for Nested Tensors, if:
+    fastpath inference with support for Nested Tensors, if and only if:
 
     - self attention is being computed (i.e., ``query``, ``key``, and ``value`` are the same tensor).
     - inputs are batched (3D) with ``batch_first==True``
