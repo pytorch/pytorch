@@ -21,6 +21,7 @@ from torch._inductor.autoheuristic.autoheuristic_utils import (
     pad_mm_operations,
     pad_mm_precondition,
 )
+from torch._inductor.virtualized import V
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.utils._mode_utils import no_dispatch
 
@@ -63,16 +64,7 @@ def unwrap_fake_args(
 
 
 def get_alignment_size(x: Tensor) -> int:
-    return get_alignment_size_dtype(x.dtype)
-
-
-def get_alignment_size_dtype(dtype: torch.dtype) -> int:
-    if dtype == torch.float16 or dtype == torch.half or dtype == torch.bfloat16:
-        return 8
-    elif dtype == torch.float32 or dtype == torch.float:
-        return 4
-    else:
-        return 0
+    return V.choices.pad_mm_get_alignment_size_dtype(x.dtype)
 
 
 def check_device(a: Tensor, b: Tensor) -> bool:

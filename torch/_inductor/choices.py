@@ -756,3 +756,17 @@ class InductorChoices:
                 or box.has_large_inner_fn()
             )
         return False
+
+    @staticmethod
+    def pad_mm_get_alignment_size_dtype(dtype: torch.dtype) -> int:
+        """
+        This heuristic determines the mapping from dtype to the multiple of which matmul dimensions are padded.
+
+        This padding is applied to all dimensions in a padded matmul. See pad_mm for usage.
+        """
+        if dtype == torch.float16 or dtype == torch.half or dtype == torch.bfloat16:
+            return 8
+        elif dtype == torch.float32 or dtype == torch.float:
+            return 4
+        else:
+            return 0
