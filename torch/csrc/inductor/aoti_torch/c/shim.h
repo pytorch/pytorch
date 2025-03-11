@@ -741,12 +741,4 @@ DEFINE_DTYPE_SPECIALIZATION(int64_t, int64)
 DEFINE_DTYPE_SPECIALIZATION(bool, bool)
 
 #endif
-
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__weight_int4pack_mm_cpu_tensor(
-    AtenTensorHandle X,
-    AtenTensorHandle w,
-    AtenTensorHandle qGroupSize,
-    AtenTensorHandle qScaleAndZeros,
-    AtenTensorHandle* ret0);
-
 #endif // AOTI_TORCH_SHIM
