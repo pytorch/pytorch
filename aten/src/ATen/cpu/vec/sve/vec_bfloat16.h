@@ -231,14 +231,6 @@ inline Vectorized<c10::BFloat16> convert_float_bfloat16(
   return Vectorized<c10::BFloat16>(svuzp1_bf16(x1, x2));
 }
 
-inline svfloat16_t convert_bfloat16_svfloat16(
-    const Vectorized<c10::BFloat16>& a) {
-  const auto [floats1, floats2] = convert_bfloat16_float(a);
-  auto f16_1 = svcvt_f16_f32_x(ptrue, floats1);
-  auto f16_2 = svcvt_f16_f32_x(ptrue, floats2);
-  return svtrn1_f16(f16_1, f16_2);
-}
-
 inline void load_fp32_from_bf16(const BFloat16* data, Vectorized<float>& out) {
   __at_align__ float values[Vectorized<float>::size()];
   for (const auto k : c10::irange(Vectorized<float>::size())) {
@@ -307,15 +299,9 @@ inline Vectorized<BFloat16>::Vectorized(BFloat16 val) {
   values = convert_float_bfloat16(vals_f, vals_f);
 }
 
-Vectorized<BFloat16> inline Vectorized<c10::BFloat16>::isnan() const {
-  // NaN check
-  svbool_t mask = svcmpuo_f16(ptrue, convert_bfloat16_svfloat16(values), ZERO_F16);
-  return svsel_bf16(mask, ALL_BF16_TRUE_MASK, ALL_BF16_FALSE_MASK);
-}
 bool inline Vectorized<c10::BFloat16>::has_inf_nan() const {
-  auto vals = convert_bfloat16_svfloat16(values);
-  return svptest_any(ptrue, svcmpuo_f16(ptrue, svsub_f16_x(ptrue, vals,
-  vals), ZERO_F16));
+  auto [v1, v2] = convert_bfloat16_float(values);
+  return v1.has_inf_nan() || v2.has_inf_nan();
 }
 // frac. Implement this here so we can use subtraction
 Vectorized<BFloat16> inline Vectorized<BFloat16>::frac() const {
@@ -339,6 +325,7 @@ Vectorized<BFloat16> inline Vectorized<BFloat16>::frac() const {
     return convert_float_bfloat16(v1, v2); \
   }
 
+DEFINE_BF16_FUNC_VIA_FLOAT(isnan);
 DEFINE_BF16_FUNC_VIA_FLOAT(angle);
 DEFINE_BF16_FUNC_VIA_FLOAT(acos);
 DEFINE_BF16_FUNC_VIA_FLOAT(acosh);
