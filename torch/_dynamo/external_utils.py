@@ -198,24 +198,21 @@ def _set_ignore_skip_function_variable(value: bool) -> None:
     _ignore_skip_function_variable = value
 
 
-def ignore_trace_rules_recursively_wrapper(fn: Callable[_P, _R]) -> Callable[_P, _R]:
-    def wrap(*args: Any, **kwargs: Any) -> _R:
-        _set_ignore_skip_function_variable(True)
-        try:
-            return fn(*args, **kwargs)
-        finally:
-            _set_ignore_skip_function_variable(False)
-
-    return wrap
-
-
 def dont_skip_tracing_wrapper(recursive: bool) -> Any:
-    def wrap(fn: Callable[_P, _R]) -> Callable[_P, _R]:
+    def decorator_wrapper(fn: Callable[..., _R]) -> Callable[..., _R]:
         if recursive:
-            return ignore_trace_rules_recursively_wrapper(fn)
+
+            def wrap(*args: Any, **kwargs: Any) -> _R:
+                _set_ignore_skip_function_variable(True)
+                try:
+                    return fn(*args, **kwargs)
+                finally:
+                    _set_ignore_skip_function_variable(False)
+
+            return wrap
         else:
             raise NotImplementedError(
                 "dont_skip_tracing(recursive=False) not yet implemented"
             )
 
-    return wrap
+    return decorator_wrapper
