@@ -9,7 +9,6 @@ import unittest.mock as mock
 from pathlib import Path
 from typing import Callable, Optional
 
-from torch._inductor.exc import InductorError
 from torch._inductor.utils import clear_inductor_caches
 from torch.export import Dim
 from torch.testing._internal.logging_utils import log_settings
@@ -28,6 +27,7 @@ from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
 from torch._inductor.codegen.cuda.cutlass_utils import get_max_alignment
+from torch._inductor.exc import InductorError
 from torch._inductor.ir import ChoiceCaller, FixedLayout
 from torch._inductor.select_algorithm import NoValidChoicesError
 from torch._inductor.test_case import run_tests, TestCase
@@ -232,53 +232,6 @@ class TestCutlassBackend(TestCase):
             torch.testing.assert_close(Y_compiled, Y)
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    def test_aoti_rerun_with_different_shapes(self):
-        """
-        Compile with one shape, then re-run with different input shapes
-        """
-        max_autotune_gemm_backends = "CUTLASS"
-
-        class MyModel(torch.nn.Module):
-            def forward(self, a, b):
-                return a @ b
-
-        model = MyModel()
-        a = torch.randn(128, 16).cuda().half()
-        b = torch.randn(16, 512).cuda().half()
-        x = torch.randn(256, 32).cuda().half()
-        y = torch.randn(32, 256).cuda().half()
-
-        with config.patch(
-            {
-                "max_autotune": True,
-                "autotune_in_subproc": True,
-                "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "cuda.cutlass_max_profiling_configs": 3,
-                "autotune_fallback_to_aten": False,
-            }
-        ):
-            from torch.export import Dim
-
-            M = Dim("M", min=1, max=1024)
-            N = Dim("N", min=1, max=1024)
-            K = Dim("K", min=1, max=1024)
-            dynamic_shapes = {
-                "a": {0: M, 1: K},
-                "b": {0: K, 1: N},
-            }
-
-            actual = AOTIRunnerUtil.run_multiple(
-                "cuda",
-                model,
-                [(a, b), (x, y)],
-                dynamic_shapes=dynamic_shapes,
-            )
-            expected = [model(a, b), model(x, y)]
-            torch.testing.assert_close(actual[0], expected[0])
-            torch.testing.assert_close(actual[1], expected[1])
-
-    @unittest.skipIf(not SM90OrLater, "need sm_90")
     @parametrize("dynamic", (False, True))
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_diff_matmul_share_same_kernel(self, dynamic):
@@ -432,6 +385,7 @@ class TestCutlassBackend(TestCase):
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @parametrize("dynamic", (False,))
+    @parametrize("use_aoti", (False, True))
     @parametrize("dtype", (torch.float16, torch.bfloat16))
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_addmm(
@@ -462,6 +416,8 @@ class TestCutlassBackend(TestCase):
             # lambda M, N: (N,),
         ]
         for x_shape in x_shapes:
+            torch._dynamo.reset()
+            clear_inductor_caches()
             inputs = [
                 (
                     torch.randn(x_shape(M, N)).cuda().to(dtype),
@@ -479,18 +435,25 @@ class TestCutlassBackend(TestCase):
                 }
             ), dynamo_config.patch({"error_on_recompile": dynamic}):
                 expected = [model(*input) for input in inputs]
-                compiled_model = torch.compile(model, dynamic=dynamic)
-                actual = [compiled_model(*input) for input in inputs]
+                if use_aoti:
+                    actual = AOTIRunnerUtil.run_multiple(
+                        "cuda", model, inputs, dynamic_shapes=None
+                    )
+                else:
+                    compiled_model = torch.compile(model, dynamic=dynamic)
+                    actual = [compiled_model(*input) for input in inputs]
 
                 torch.testing.assert_close(actual, expected)
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @parametrize("dynamic", (False,))
+    @parametrize("use_aoti", (False, True))
     @parametrize("dtype", (torch.float16, torch.bfloat16))
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_bmm(
         self,
         dynamic: bool,
+        use_aoti: bool = False,
         max_autotune_gemm_backends: str = "CUTLASS",
         dtype: torch.dtype = torch.float16,
     ):
@@ -524,8 +487,13 @@ class TestCutlassBackend(TestCase):
             }
         ):
             expected = [model(*input) for input in inputs]
-            compiled_model = torch.compile(model, dynamic=dynamic)
-            actual = [compiled_model(*input) for input in inputs]
+            if use_aoti:
+                actual = AOTIRunnerUtil.run_multiple(
+                    "cuda", model, inputs, dynamic_shapes=None
+                )
+            else:
+                compiled_model = torch.compile(model, dynamic=dynamic)
+                actual = [compiled_model(*input) for input in inputs]
             torch.testing.assert_close(actual, expected)
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
@@ -898,7 +866,9 @@ class TestCutlassBackend(TestCase):
                     "torch._inductor.kernel.mm.autotune_select_algorithm",
                     wraps=select_no_algorithm,
                 ) as sa:
-                    with self.assertRaises(InductorError, r".*NoValidChoicesError.*"):
+                    with self.assertRaisesRegex(
+                        InductorError, r".*NoValidChoicesError.*"
+                    ):
                         torch.compile(my_addmm, dynamic=False)(x, a, b, 1.0, 2.0)
                     args, _ = sa.call_args
                     op_name, choices, _, __ = args
@@ -944,7 +914,9 @@ class TestCutlassBackend(TestCase):
                     "torch._inductor.kernel.mm.autotune_select_algorithm",
                     wraps=select_no_algorithm,
                 ) as sa:
-                    with self.assertRaises(InductorError, r".*NoValidChoicesError.*"):
+                    with self.assertRaisesRegex(
+                        InductorError, r".*NoValidChoicesError.*"
+                    ):
                         torch.compile(addmm, dynamic=False)(x, a, b, 1.0, 1.0)
                     args, _ = sa.call_args
                     op_name, choices, _, __ = args
@@ -1010,7 +982,7 @@ class TestCutlassBackend(TestCase):
                 M, K = A.shape
                 _, N = B.shape
 
-                with self.assertRaises(InductorError, r".*NoValidChoicesError.*"):
+                with self.assertRaisesRegex(InductorError, r".*NoValidChoicesError.*"):
                     torch.compile(torch.mm, dynamic=False)(*input)
 
                 self.assertTrue(
@@ -1212,6 +1184,26 @@ class TestCutlassBackend(TestCase):
             assert match, "Expect to find the cutlass configs log"
             num_ops = int(match.group(1))
             self.assertTrue(num_ops > 0, "The number of ops should be greater than 0")
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_cutlass_backend_matmul_same_tensor(self):
+        max_autotune_gemm_backends = "CUTLASS"
+
+        M = 128
+        A = torch.randn(M, M).cuda().half()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                "cuda.cutlass_max_profiling_configs": 2,
+                "autotune_fallback_to_aten": False,
+            }
+        ):
+            compiled = torch.compile(torch.mm)
+
+            torch.testing.assert_close(A @ A.t(), compiled(A, A.t()))
 
 
 if __name__ == "__main__":

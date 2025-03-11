@@ -4001,7 +4001,7 @@ class CommonTemplate:
             _, code = run_and_get_code(foo, grouped_conv, input_tensor)
             # no to channels last permuting before kernel
             if config.cpp_wrapper:
-                FileCheck().check_not("launchKernel(triton").check("_convolution(").run(
+                FileCheck().check_not("  call_triton").check("_convolution(").run(
                     code[0]
                 )
             else:
@@ -4429,7 +4429,7 @@ class CommonTemplate:
         gemm_opt(x1, y1)
         self.assertTrue(failed_guard is not None)
         self.assertTrue(
-            "tensor 'L['x']' Tensor device index mismatch. Expected device index to be"
+            "tensor 'x' Tensor device index mismatch. Expected device index to be"
             in failed_guard.reason
         )
 
@@ -4603,7 +4603,11 @@ class CommonTemplate:
             check_lowp=False,
         )
 
-    def test_conv3d_channels_last(self):
+    @parametrize(
+        "use_block_ptr",
+        [subtest(False), subtest(True, decorators=[skip_if_not_triton])],
+    )
+    def test_conv3d_channels_last(self, use_block_ptr: bool):
         if self.device == GPU_TYPE:
             raise unittest.SkipTest("only support cpu conv3d channels_last")
 
@@ -4611,21 +4615,30 @@ class CommonTemplate:
             torch.nn.Conv3d(3, 3, 1, 1),
             ToTuple(),
         )
-        # only weight is channels_last
-        self.common(
-            m.to(memory_format=torch.channels_last_3d),
-            (torch.randn([2, 3, 16, 16, 16]),),
-        )
-        # only activation is channels_last
-        self.common(
-            m,
-            (torch.randn([2, 3, 16, 16, 16]).to(memory_format=torch.channels_last_3d),),
-        )
-        # activation and weight are all channels_last
-        self.common(
-            m.to(memory_format=torch.channels_last_3d),
-            (torch.randn([2, 3, 16, 16, 16]).to(memory_format=torch.channels_last_3d),),
-        )
+        with config.patch({"triton.use_block_ptr": use_block_ptr}):
+            # only weight is channels_last
+            self.common(
+                m.to(memory_format=torch.channels_last_3d),
+                (torch.randn([2, 3, 16, 16, 16]),),
+            )
+            # only activation is channels_last
+            self.common(
+                m,
+                (
+                    torch.randn([2, 3, 16, 16, 16]).to(
+                        memory_format=torch.channels_last_3d
+                    ),
+                ),
+            )
+            # activation and weight are all channels_last
+            self.common(
+                m.to(memory_format=torch.channels_last_3d),
+                (
+                    torch.randn([2, 3, 16, 16, 16]).to(
+                        memory_format=torch.channels_last_3d
+                    ),
+                ),
+            )
 
     @skip_if_gpu_halide  # slow
     @xfail_if_mps  # Non-divisible input sizes are not implemented on MPS device
