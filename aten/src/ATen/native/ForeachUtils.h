@@ -347,14 +347,16 @@ inline FlatMap _group_tensors_by_first_tensors_device_and_dtype(
                 // Note: `step` or `state_step` is float32 by default.
                 if (key.first == d) {
                   return key.second == s || s == at::ScalarType::Float ||
-                      s == at::ScalarType::Double;
+                      s == at::ScalarType::Double || s == at::ScalarType::Int ||
+                      s == at::ScalarType::Long;
                 } else if (d.is_cpu()) {
                   // note(crcrpar): There are some test cases (e.g.
                   // TestOptim::test_adam) where state_steps are on CPU and the
                   // others are on CUDA. Currently a state_step Tensor has the
                   // dtype of float.
                   return s == at::ScalarType::Float ||
-                      s == at::ScalarType::Double;
+                      s == at::ScalarType::Double || s == at::ScalarType::Int ||
+                      s == at::ScalarType::Long;
                 } else {
                   return false;
                 }
