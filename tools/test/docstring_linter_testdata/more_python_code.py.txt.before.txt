@@ -1,3 +1,11 @@
+tools/test/docstring_linter_testdata/more_python_code.py.txt:10: No docstring found for class 'LintInit' (6 lines)
+    8 |
+    9 |
+   10 | class LintInit:
+        ^
+   11 |     def __init__(self) -> None:
+   12 |         # Lots of lines!
+
 tools/test/docstring_linter_testdata/python_code.py.txt:17: No docstring found for class 'LongWithoutDocstring' (4 lines)
    15 |
    16 |

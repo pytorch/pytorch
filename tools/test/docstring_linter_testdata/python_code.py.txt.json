@@ -33,39 +33,6 @@
     "severity": "error"
   },
   {
-    "char": 8,
-    "code": "DOCSTRING_LINTER",
-    "description": null,
-    "line": 72,
-    "name": "No docstring found for function 'not_short' (11 lines)",
-    "original": null,
-    "path": "tools/test/docstring_linter_testdata/python_code.py.txt",
-    "replacement": null,
-    "severity": "error"
-  },
-  {
-    "char": 12,
-    "code": "DOCSTRING_LINTER",
-    "description": null,
-    "line": 73,
-    "name": "No docstring found for class 'Long' (6 lines)",
-    "original": null,
-    "path": "tools/test/docstring_linter_testdata/python_code.py.txt",
-    "replacement": null,
-    "severity": "error"
-  },
-  {
-    "char": 0,
-    "code": "DOCSTRING_LINTER",
-    "description": null,
-    "line": 84,
-    "name": "No docstring found for class 'NotDocstring' (12 lines)",
-    "original": null,
-    "path": "tools/test/docstring_linter_testdata/python_code.py.txt",
-    "replacement": null,
-    "severity": "error"
-  },
-  {
     "char": null,
     "code": "DOCSTRING_LINTER",
     "description": null,
