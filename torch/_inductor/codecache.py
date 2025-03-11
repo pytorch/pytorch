@@ -2058,11 +2058,11 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         "shared": True,
     }
     entry_function = "kernel"
-    call_entry_function = "kernel(%s);Py_RETURN_NONE;"
+    call_entry_function = "kernel({}); Py_RETURN_NONE;"
     extra_parse_arg = ""
     suffix_template = textwrap.dedent(
         """
-        // Python bindings to call %s():
+        // Python bindings to call {entry_func}():
         #define PY_SSIZE_T_CLEAN
         #include <Python.h>
         #include <sstream>
@@ -2084,68 +2084,68 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         // We manually link it below to workaround issues with fbcode build.
         static void* (*_torchinductor_pyobject_tensor_data_ptr)(PyObject* obj);
 
-        template <typename T> static inline T parse_arg(PyObject* args, size_t n) {
+        template <typename T> static inline T parse_arg(PyObject* args, size_t n) {{
             static_assert(std::is_pointer_v<T>, "arg type must be pointer or long");
             return static_cast<T>(_torchinductor_pyobject_tensor_data_ptr(PyTuple_GET_ITEM(args, n)));
-        }
-        template <> inline int64_t parse_arg<int64_t>(PyObject* args, size_t n) {
+        }}
+        template <> inline int64_t parse_arg<int64_t>(PyObject* args, size_t n) {{
             auto result = PyLong_AsSsize_t(PyTuple_GET_ITEM(args, n));
             if(unlikely(result == -1 && PyErr_Occurred()))
                 throw std::runtime_error("expected int arg");
             return result;
-        }
-        template <> inline uintptr_t parse_arg<uintptr_t>(PyObject* args, size_t n) {
+        }}
+        template <> inline uintptr_t parse_arg<uintptr_t>(PyObject* args, size_t n) {{
             auto result = PyLong_AsVoidPtr(PyTuple_GET_ITEM(args, n));
             if(unlikely(result == reinterpret_cast<void*>(-1) && PyErr_Occurred()))
                 throw std::runtime_error("expected int arg");
             return reinterpret_cast<uintptr_t>(result);
-        }
+        }}
 
-        %s
+        {extra_parse_arg}
 
-        static PyObject* %s_py(PyObject* self, PyObject* args) {
-            try {
+        static PyObject* {entry_func}_py(PyObject* self, PyObject* args) {{
+            try {{
                 if(unlikely(!PyTuple_CheckExact(args)))
                     throw std::runtime_error("tuple args required");
-                if(unlikely(PyTuple_GET_SIZE(args) != %s))
-                    throw std::runtime_error("requires %s args");
-                %s
-            } catch(std::exception const& e) {
+                if(unlikely(PyTuple_GET_SIZE(args) != {arg_len}))
+                    throw std::runtime_error("requires {arg_len} args");
+                {call_entry_func}
+            }} catch(std::exception const& e) {{
                 PyErr_SetString(PyExc_RuntimeError, e.what());
                 return nullptr;
-            } catch(...) {
+            }} catch(...) {{
                 PyErr_SetString(PyExc_RuntimeError, "unhandled error");
                 return nullptr;
-            }
-        }
+            }}
+        }}
 
-        static PyMethodDef py_methods[] = {
-            {"%s", %s_py, METH_VARARGS, ""},
-            {NULL, NULL, 0, NULL}};
+        static PyMethodDef py_methods[] = {{
+            {{"{entry_func}", {entry_func}_py, METH_VARARGS, ""}},
+            {{NULL, NULL, 0, NULL}}}};
 
         static struct PyModuleDef py_module =
-            {PyModuleDef_HEAD_INIT, "%s", NULL, -1, py_methods};
+            {{PyModuleDef_HEAD_INIT, "{entry_func}", NULL, -1, py_methods}};
 
-        PyMODINIT_FUNC PyInit_%s(void) {
+        PyMODINIT_FUNC PyInit_{entry_func}(void) {{
             const char* str_addr = std::getenv("_TORCHINDUCTOR_PYOBJECT_TENSOR_DATA_PTR");
-            if(!str_addr) {
+            if(!str_addr) {{
                 PyErr_SetString(PyExc_RuntimeError, "_TORCHINDUCTOR_PYOBJECT_TENSOR_DATA_PTR must be set");
                 return nullptr;
-            }
+            }}
             std::istringstream iss(str_addr);
             uintptr_t addr = 0;
             iss >> addr;
             _torchinductor_pyobject_tensor_data_ptr =
                 reinterpret_cast<decltype(_torchinductor_pyobject_tensor_data_ptr)>(addr);
             PyObject* module = PyModule_Create(&py_module);
-            if (module == NULL) {
+            if (module == NULL) {{
                 return NULL;
-            }
+            }}
             #ifdef Py_GIL_DISABLED
                 PyUnstable_Module_SetGIL(mod, Py_MOD_GIL_NOT_USED);
             #endif
             return module;
-        }
+        }}
         """
     )
 
@@ -2190,17 +2190,11 @@ class CppPythonBindingsCodeCache(CppCodeCache):
             f"parse_arg<{argtype.replace('const ', '')}>(args, {n})"
             for n, argtype in enumerate(argtypes)
         )
-        suffix = cls.suffix_template % (
-            cls.entry_function,
-            cls.extra_parse_arg % num_outputs if cls.extra_parse_arg else "",
-            cls.entry_function,
-            len(argtypes),
-            len(argtypes),
-            cls.call_entry_function % parseargs,
-            cls.entry_function,
-            cls.entry_function,
-            cls.entry_function,
-            cls.entry_function,
+        suffix = cls.suffix_template.format(
+            arg_len=len(argtypes),
+            call_entry_func=cls.call_entry_function.format(parseargs),
+            entry_func=cls.entry_function,
+            extra_parse_arg=cls.extra_parse_arg.format(array_len=num_outputs),
         )
         get_result = cls.load_async(
             source_code + suffix,
@@ -2233,59 +2227,58 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
         "shared": True,
     }
     entry_function = "inductor_entry_cpp"
-    call_entry_function = "return inductor_entry_cpp(%s);"
+    call_entry_function = "return inductor_entry_cpp({});"
     extra_parse_arg = textwrap.dedent(
         """
         #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 
-        static inline std::vector<AtenTensorHandle> unpack_tensor_handle_list(PyObject* pyvec) {
+        static inline std::vector<AtenTensorHandle> unpack_tensor_handle_list(PyObject* pyvec) {{
             std::vector<AtenTensorHandle> result;
             size_t result_len = PyList_GET_SIZE(pyvec);
             result.reserve(result_len);
-            for (size_t i = 0; i < result_len; i++) {
+            for (size_t i = 0; i < result_len; i++) {{
                 // AtenTensorHandle is essentially a pointer
                 void* elem = PyCapsule_GetPointer(PyList_GET_ITEM(pyvec, i), NULL);
                 result.push_back(reinterpret_cast<AtenTensorHandle>(elem));
-            }
+            }}
             return result;
-        }
+        }}
 
-        static inline PyObject* pack_tensor_handle_list(const std::vector<AtenTensorHandle>& cppvec) {
-            size_t result_len = cppvec.size();
-            PyObject* result = PyList_New(static_cast<Py_ssize_t>(result_len));
-            for (size_t i = 0; i < result_len; i++) {
+        static inline PyObject* pack_tensor_handle_list(const std::array<AtenTensorHandle, {array_len}>& arr) {{
+            PyObject* result = PyList_New({array_len});
+            for (size_t i = 0; i < {array_len}; i++) {{
                 PyObject *elem =
-                    cppvec[i] == nullptr
+                    arr[i] == nullptr
                         ? Py_None
                         // Store AtenTensorHandle as PyCapsulate
-                        : PyCapsule_New(reinterpret_cast<void*>(cppvec[i]), NULL, NULL);
+                        : PyCapsule_New(reinterpret_cast<void*>(arr[i]), NULL, NULL);
                 PyList_SET_ITEM(result, i, elem);
-            }
+            }}
             return result;
-        }
+        }}
 
-        template <> inline std::vector<AtenTensorHandle> parse_arg<std::vector<AtenTensorHandle>>(PyObject* args, size_t n) {
+        template <> inline std::vector<AtenTensorHandle> parse_arg<std::vector<AtenTensorHandle>>(PyObject* args, size_t n) {{
             return unpack_tensor_handle_list(PyTuple_GET_ITEM(args, n));
-        }
+        }}
 
-        PyObject* inductor_entry_cpp(std::vector<AtenTensorHandle>&& input_handles) {
-            // For outputs, we only allocate a vector to hold returned tensor handles,
-            // not allocating the actual output tensor storage here
-            std::vector<AtenTensorHandle> output_handles(%s);
-            try {
+        PyObject* inductor_entry_cpp(std::vector<AtenTensorHandle>&& input_handles) {{
+            // For outputs, we only allocate an array to hold returned tensor handles,
+            // not the actual output tensor storage.
+            std::array<AtenTensorHandle, {array_len}> output_handles{{}};
+            try {{
                 inductor_entry_impl(input_handles.data(), output_handles.data());
-                if (PyErr_Occurred()) {
+                if (PyErr_Occurred()) {{
                     return nullptr;
-                }
+                }}
                 return pack_tensor_handle_list(output_handles);
-            } catch(std::exception const& e) {
+            }} catch(std::exception const& e) {{
                 PyErr_SetString(PyExc_RuntimeError, e.what());
                 return nullptr;
-            } catch(...) {
+            }} catch(...) {{
                 PyErr_SetString(PyExc_RuntimeError, "unhandled error");
                 return nullptr;
-            }
-        }
+            }}
+        }}
         """
     )
 
