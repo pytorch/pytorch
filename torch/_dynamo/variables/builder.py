@@ -1512,12 +1512,19 @@ class VariableBuilder:
         from ..eval_frame import OptimizedModule
 
         try:
-            params = list(value.parameters(recurse=False))
+            _, params = list(
+                value.named_parameters(recurse=False, remove_deuplicate=True)
+            )
         except AttributeError:
             params = []
-        for p in params:
-            if not isinstance(p, torch.nn.parameter.UninitializedParameter):
-                get_metrics_context().increment("num_params", p.numel())
+        initialized_params = [p for p in params if not torch.nn.parameter.is_lazy(p)]
+        param_total_numel = sum(p.numel() for p in initialized_params)
+        param_total_nbytes = sum(p.nbytes for p in initialized_params)
+        param_count = len(params)
+        metrics_context = get_metrics_context()
+        metrics_context.increment("param_total_numel", param_total_numel)
+        metrics_context.increment("param_total_nbytes", param_total_nbytes)
+        metrics_context.increment("param_count", param_count)
 
         if len(value.__dict__) == 0:
             unimplemented_v2(
