@@ -245,6 +245,14 @@ def _check_supported_callable_arg(
         )
 
 
+def get_tensor_versions(arg_vts):
+    versions = []
+    for arg_vt in arg_vts:
+        if isinstance(arg_vt, variables.TensorVariable):
+            versions.append(arg_vt.as_proxy().node.meta["example_value"]._version)
+    return versions
+
+
 def validate_args_and_maybe_create_graph_inputs(
     sub_args,
     tracer,
@@ -3003,14 +3011,14 @@ class BaseHOPVariable(WrapHigherOrderVariable):
         )
         assert len(p_kwargs) == 0
 
-        from torch._higher_order_ops.utils import has_potential_input_alias_or_mutation
+        from torch._higher_order_ops.utils import _has_potential_branch_input_alias
 
         fake_inputs = [
             node.meta["example_value"]
             for node in body_gmod.graph.nodes
             if node.op == "placeholder"
         ]
-        if has_potential_input_alias_or_mutation(body_gmod, fake_inputs):
+        if _has_potential_branch_input_alias(body_gmod, fake_inputs):
             raise RuntimeError(
                 f"{self.value._name} where the inputs are mutated or the "
                 f"outputs are aliases of the inputs. Please ensure that this doesn't happen."
@@ -3035,7 +3043,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         # inputs have already been seen before. If yes, the subgraph is already
         # installed in the output graph and we can just access the subgraph
         # using the saved attr name.
-        from torch._higher_order_ops.utils import has_potential_input_alias_or_mutation
+        from torch._higher_order_ops.utils import _has_potential_branch_input_alias
 
         fake_inputs = [
             node.meta["example_value"]
@@ -3045,7 +3053,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
 
         # TODO(anijain2305) - This might be too big of a limitation. Consider
         # supporting mutation/aliasing in HOP itself to remove this restriction.
-        if has_potential_input_alias_or_mutation(body_gmod, fake_inputs):
+        if _has_potential_branch_input_alias(body_gmod, fake_inputs):
             unimplemented("NYI: invoke_subgraph with aliasing/mutation")
 
         key = hash_graph_and_inputs(tx, body_gmod, fake_inputs)
@@ -3074,6 +3082,8 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        before_versions = get_tensor_versions(args[1:])
+
         # This flattens the kwargs into lifted args
         (
             p_args,
@@ -3084,6 +3094,16 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
             body_gmod,
             body_name,
         ) = self.create_wrapped_node(tx, args[0], args[1:], kwargs, "invoke_subgraph")
+
+        after_versions = get_tensor_versions(args[1:])
+        mutated_inputs = [
+            i
+            for i, (v1, v2) in enumerate(zip(before_versions, after_versions))
+            if v1 != v2
+        ]
+
+        if len(mutated_inputs) > 0:
+            unimplemented("NYI: invoke_subgraph with mutated inputs")
 
         if len(p_kwargs) > 0:
             unimplemented("kwargs should have been flattened into lifted args")
