@@ -231,6 +231,13 @@ AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(
     ComplexDouble)
 #undef AOTI_TORCH_SCALAR_TO_TENSOR_IMPL
 
+#ifndef C10_MOBILE
+#include <torch/version.h>
+uint64_t aoti_torch_abi_version() {
+  return TORCH_ABI_VERSION;
+}
+#endif // C10_MOBILE
+
 bool aoti_torch_grad_mode_is_enabled() {
   return c10::GradMode::is_enabled();
 }
@@ -371,6 +378,15 @@ AOTITorchError aoti_torch_get_storage_offset(
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
     *ret_storage_offset = t->storage_offset();
+  });
+}
+
+AOTITorchError aoti_torch_new_tensor_handle(
+    AtenTensorHandle orig_handle,
+    AtenTensorHandle* new_handle) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t = tensor_handle_to_tensor_pointer(orig_handle);
+    *new_handle = new_tensor_handle(at::Tensor(*t));
   });
 }
 
@@ -1273,21 +1289,5 @@ AOTITorchError aoti_torch_zero_(AtenTensorHandle tensor) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
     t->zero_();
-  });
-}
-
-AOTITorchError aoti_torch_cpu__weight_int4pack_mm_cpu_tensor(
-    AtenTensorHandle X,
-    AtenTensorHandle w,
-    AtenTensorHandle qGroupSize,
-    AtenTensorHandle qScaleAndZeros,
-    AtenTensorHandle* ret0) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    auto tmp_result = at::native::_weight_int4pack_mm_cpu_tensor(
-        *tensor_handle_to_tensor_pointer(X),
-        *tensor_handle_to_tensor_pointer(w),
-        *tensor_handle_to_tensor_pointer(qGroupSize),
-        *tensor_handle_to_tensor_pointer(qScaleAndZeros));
-    *ret0 = new_tensor_handle(std::move(tmp_result));
   });
 }

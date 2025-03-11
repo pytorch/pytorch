@@ -471,7 +471,7 @@ static PyObject* THPStorage_newSharedCuda(PyObject* _unused, PyObject* args) {
     auto ipc_event_handle = reinterpret_cast<const cudaIpcEventHandle_t*>(
         s_ipc_event_handle.c_str());
     cudaEvent_t event = nullptr;
-    cudaIpcOpenEventHandle(&event, *ipc_event_handle);
+    C10_CUDA_CHECK(cudaIpcOpenEventHandle(&event, *ipc_event_handle));
     C10_CUDA_CHECK(
         cudaStreamWaitEvent(c10::cuda::getCurrentCUDAStream(device), event, 0));
   }
@@ -527,6 +527,9 @@ static PyObject* THPStorage_newSharedCuda(PyObject* _unused, PyObject* args) {
         // TODO: Instead of cudaStreamSynchronize it is possible to add Stream
         // Callback and release counter inside of it (need to check performance
         // impact)
+
+        // TODO: this isn't needed since CUDACachingAllocator already
+        // synchronizes on free.
         at::cuda::stream_synchronize(
             c10::cuda::getCurrentCUDAStream(ctx->device));
 

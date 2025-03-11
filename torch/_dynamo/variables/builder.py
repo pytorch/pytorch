@@ -57,6 +57,7 @@ from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mo
 from torch._subclasses.meta_utils import is_sparse_any, safe_grad
 from torch._utils_internal import justknobs_check
 from torch.fx.experimental._backward_state import BackwardState
+from torch.fx.experimental._dynamism import normalize_source_name
 from torch.fx.experimental.symbolic_shapes import (
     _constrain_range_for_size,
     _nested_int_aware_sort,
@@ -87,6 +88,7 @@ from ..source import (
     AttrProxySource,
     AttrSource,
     CallMethodItemSource,
+    ChainedSource,
     ConstDictKeySource,
     ConvertIntSource,
     DictGetItemSource,
@@ -565,9 +567,9 @@ class VariableBuilder:
 
     def _wrap(self, value):
         # import here to avoid circular dependencies
-        from torch.utils._triton import has_triton, has_triton_tma
+        from torch.utils._triton import has_triton_package, has_triton_tma
 
-        if has_triton():
+        if has_triton_package():
             from triton.runtime.autotuner import Autotuner
             from triton.runtime.jit import JITFunction
         else:
@@ -1973,6 +1975,11 @@ class VariableBuilder:
             # know if bare integers are actually going to be sizevars
             # and it is inappropriate to eagerly duck size them with
             # real sizevars
+            normalized_source_name = normalize_source_name(self.source.name())
+            base_source = self.source
+            if isinstance(base_source, ChainedSource):
+                base_source = base_source.get_base()
+
             if self.source.name() in get_dynamic_sources():
                 log.debug("%s marked dynamic via source whitelist", self.source.name())
                 dynamic_dim = DimDynamic.DYNAMIC
@@ -1981,7 +1988,13 @@ class VariableBuilder:
                 and frame_state_entry.scalar is auto_dynamic
             ):
                 dynamic_dim = get_automatic_dynamic_shapes_mark_as()
-            elif not config.assume_static_by_default:
+            elif (
+                isinstance(base_source, LocalSource)
+                and base_source.dynamism is not None
+                and dict(base_source.dynamism).get(normalized_source_name, {0: False})[
+                    0
+                ]
+            ) or not config.assume_static_by_default:
                 dynamic_dim = DimDynamic.DYNAMIC
             else:  # assume_static_by_default
                 # TODO: dynamic_dim = DimDynamic.STATIC should work but
@@ -2851,7 +2864,17 @@ def _automatic_dynamic(
 
         # Reflect the user directive in the frame_state
         # For dynamic, apply None always
-        if marked_dynamic:
+
+        normalized_source_name = normalize_source_name(source.name())
+        base_source = source
+        if isinstance(base_source, ChainedSource):
+            base_source = base_source.get_base()
+
+        if marked_dynamic or (
+            isinstance(base_source, LocalSource)
+            and base_source.dynamism is not None
+            and dict(base_source.dynamism).get(normalized_source_name, {i: False})[i]
+        ):
             # TODO: This can be batched
             # TODO: Doing this here is kind of sus, maybe better to set this
             # up when we initially created the FrameStateSizeEntry to bong

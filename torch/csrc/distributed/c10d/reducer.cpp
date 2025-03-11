@@ -183,21 +183,23 @@ Reducer::Reducer(
 #endif
       // Hook to execute after the gradient accumulator has executed.
       hooks_.emplace_back(
-          grad_accumulator->add_post_hook(
-              std::make_unique<torch::autograd::utils::LambdaPostHook>(
-                  [this, variable_index](
-                      const torch::autograd::variable_list& outputs,
-                      const torch::autograd::variable_list& /* unused */) {
+          grad_accumulator->add_post_hook(std::make_unique<
+                                          torch::autograd::utils::
+                                              LambdaPostHook>(
+              [this, variable_index](
+                  const torch::autograd::variable_list& outputs,
+                  const torch::autograd::variable_list& /* unused */) {
 #ifndef _WIN32
-                    this->rpc_context_.set(
-                        ThreadLocalDistAutogradContext::getContextPtr());
+                this->rpc_context_.set(
+                    ThreadLocalDistAutogradContext::getContextPtr());
 #endif
-                    this->autograd_hook(variable_index);
-                    return outputs;
-                  },
-                  [=](torch::autograd::CompiledNodeArgs& args) {
-                    // Make post_hook an noop if compiled_autograds is enabled.
-                  })),
+                this->autograd_hook(variable_index);
+                return outputs;
+              },
+              [=](torch::autograd::CompiledNodeArgs& args) {
+                TORCH_INTERNAL_ASSERT(
+                    "Compiled autograd is not compatible with C++ DDP Reducer, please use torch._dynamo.config.optimize_ddp=\"python_reducer\".");
+              })),
           grad_accumulator);
 
       // Map raw function pointer to parameter index.
@@ -2315,14 +2317,14 @@ void verify_params_across_processes(
     }
   }
 
-  auto metadata_dev = metadata.clone().to(params[0].device());
-  std::vector<at::Tensor> vec{metadata_dev};
+  metadata = metadata.to(params[0].device());
+  std::vector<at::Tensor> vec{metadata};
   process_group->broadcast(vec)->wait();
 
   // Technically, process 0 doesn't need to double-check metadata, because it
   // was the source.  But no harm keeping work aligned.
   auto control = at::empty({static_cast<long>(i)}, options);
-  control.copy_(metadata_dev, /*non_blocking=*/false);
+  control.copy_(metadata, /*non_blocking=*/false);
   auto control_accessor = control.accessor<int64_t, 1>();
   i = 0;
   for (const auto p : c10::irange(params.size())) {

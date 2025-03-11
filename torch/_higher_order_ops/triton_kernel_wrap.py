@@ -37,14 +37,14 @@ if TYPE_CHECKING:
     from torch._dynamo.variables.functions import TritonKernelVariable
     from torch._subclasses.functional_tensor import BaseFunctionalizeAPI
     from torch.fx.proxy import Proxy
-    from torch.utils._triton import has_triton
+    from torch.utils._triton import has_triton_package
 
     TritonMetaParamsType = dict[str, int]
     TritonGridTupleType = tuple[Union[int, sympy.Expr, SymInt], ...]
     TritonGridCallableType = Callable[[TritonMetaParamsType], tuple[int, ...]]
     TritonGridType = Union[TritonGridTupleType, TritonGridCallableType]
 
-    if has_triton():
+    if has_triton_package():
         from triton.runtime.autotuner import Autotuner, Config as TritonConfig
         from triton.runtime.jit import JITFunction
     else:
@@ -257,8 +257,13 @@ def generate_ttir(
                 get_triton_attrs_descriptor_version()
                 == TritonAttrsDescriptorVersion.V4_DICT
             )
+            # specialize_impl switched to create_specialize_impl in https://github.com/triton-lang/triton/pull/6099
+            if hasattr(triton.runtime.jit, "create_specialize_impl"):
+                specialize_impl = triton.runtime.jit.create_specialize_impl()
+            else:
+                from triton.runtime.jit import specialize_impl  # type: ignore[no-redef]
+
             from triton._utils import find_paths_if, get_iterable_path
-            from triton.runtime.jit import specialize_impl
 
             # logic is copied from: binder = create_function_from_signature(self.signature, self.params, backend)
             attrvals = []

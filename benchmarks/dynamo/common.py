@@ -1825,6 +1825,14 @@ class BenchmarkRunner:
         return set()
 
     @property
+    def skip_models_due_to_export_not_supported(self):
+        return set()
+
+    @property
+    def disable_cudagraph_models(self):
+        return set()
+
+    @property
     def guard_on_nn_module_models(self):
         return set()
 
@@ -3782,6 +3790,7 @@ def run(runner, args, original_dir=None):
 
             # AOTInductor doesn't support control flow yet
             runner.skip_models.update(runner.skip_models_due_to_control_flow)
+            runner.skip_models.update(runner.skip_models_due_to_export_not_supported)
         elif args.backend == "torchao":
             assert "cuda" in args.devices, "Quantization requires CUDA device."
             assert args.bfloat16, "Quantization requires dtype bfloat16."
@@ -3833,6 +3842,9 @@ def run(runner, args, original_dir=None):
         )
         experiment = coverage_experiment
         output_filename = "coverage.csv"
+
+    if args.only in runner.disable_cudagraph_models:
+        args.disable_cudagraphs = True
 
     if args.inductor or args.backend == "inductor" or args.export_aot_inductor:
         inductor_config.triton.cudagraphs = not args.disable_cudagraphs

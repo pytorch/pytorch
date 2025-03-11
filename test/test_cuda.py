@@ -432,6 +432,9 @@ class TestCuda(TestCase):
         torch.cuda.reset_peak_memory_stats()
 
     @serialTest()
+    @unittest.skipIf(
+        IS_JETSON, "oom reporting has issues on jetson igx due to partial nvml support"
+    )
     def test_set_per_process_memory_fraction(self):
         orig = torch.cuda.get_per_process_memory_fraction(0)
         try:
@@ -2148,7 +2151,7 @@ exit(2)
                 )
 
     @unittest.skipIf(
-        (not TEST_CUDA) or TEST_WITH_ROCM or int(torch.version.cuda.split(".")[0]) < 11,
+        (not TEST_CUDA) or TEST_WITH_ROCM,
         "CUDA >= 11.0 required for graphs",
     )
     def test_graph_warn_if_has_zero_nodes(self):
@@ -3594,8 +3597,9 @@ def fork_and_check_is_pinned():
     def worker(conn):
         try:
             x = torch.randn(10)
-            x.is_pinned(device="cuda")
-            x = torch.ones(10, device="cuda")[0].item()
+            x.is_pinned()
+            dev = torch.accelerator.current_accelerator()
+            x = torch.ones(10, device=dev)[0].item()
             conn.send(x)
         except Exception as e:
             conn.send(str(e))
@@ -3615,7 +3619,7 @@ def fork_and_check_is_pinned():
 
 x = torch.randn(10)
 # check that is_pinned won't poison future fork
-x.is_pinned(device="cuda")
+x.is_pinned()
 ret = fork_and_check_is_pinned()
 print(ret)
 
@@ -4207,6 +4211,9 @@ class TestCudaMallocAsync(TestCase):
                 m.record(False, False)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled")
+    @unittest.skipIf(
+        IS_JETSON, "oom reporting has issues on jetson igx due to partial nvml support"
+    )
     def test_notifies_oom(self):
         x = False
 
@@ -4971,6 +4978,18 @@ class TestMemPool(TestCase):
         # each thread should have different active mempool, since
         # the pointer to the mempool is thread local
         self.assertEqual(len(set(active_pool_ids)), 4)
+
+    @skipIfRocm(msg="expandable_segments mode is not supported on ROCm")
+    def test_mempool_expandable(self):
+        torch.cuda.memory._set_allocator_settings("expandable_segments:True")
+        pool = torch.cuda.MemPool()
+
+        # torch.cuda.MemPool doesn't work with expandable segments
+        with self.assertRaises(RuntimeError):
+            nelem_1mb = 1024 * 1024 // 4
+            with torch.cuda.use_mem_pool(pool):
+                out_0 = torch.randn(nelem_1mb, device="cuda")
+        torch.cuda.memory._set_allocator_settings("expandable_segments:False")
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")

@@ -60,7 +60,7 @@ auto CopyBackwards::apply(variable_list&& grads) -> variable_list {
       src_options);
 }
 
-void CopyBackwards::compiled_args(CompiledNodeArgs& args) {
+void CopyBackwards::compiled_args(CompiledNodeArgs& args) const {
   args.collect(src_options);
 }
 
@@ -235,7 +235,7 @@ void CopySlices::release_variables() {
   fn = nullptr;
 }
 
-void CopySlices::compiled_args(CompiledNodeArgs& args) {
+void CopySlices::compiled_args(CompiledNodeArgs& args) const {
   TORCH_CHECK(!view_fn, "view_fn not supported by compiled autograd")
   TORCH_INTERNAL_ASSERT((bool)fn);
   args.collect(base);

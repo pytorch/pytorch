@@ -349,6 +349,9 @@ struct AutogradCompilerCall {
   std::vector<uint32_t> size_input_origins;
   std::unordered_map<const SavedVariable*, std::pair<size_t, size_t>>
       sv_to_hooks;
+  // pynode -> backward and backward state idx
+  std::unordered_map<const Node*, std::pair<size_t, std::optional<size_t>>>
+      pynode_objs;
 };
 
 class CompiledNodeArgs {
@@ -535,7 +538,7 @@ class CompiledNodeArgs {
     // Note: this is only capturing the ID of the node not everything
     // contained inside it.  This is used for tracking connections between
     // nodes and the actual details of the node itself must be handled by
-    // a seperate call to `node->compiled_args()`.
+    // a separate call to `node->compiled_args()`.
     if (cond((bool)t)) {
       collect(_compiler.node_calls.lookup(t));
     }
@@ -619,12 +622,17 @@ class CompiledNodeArgs {
         typeid(*node), _specialization_key, _specialization_key_size);
   }
 
-  size_t add_backward(c10::SafePyObject&& obj) {
-    return _compiler.emplace_hook(std::move(obj));
-  }
-
-  size_t add_backward_state(c10::SafePyObject&& obj) {
-    return _compiler.emplace_hook(std::move(obj));
+  void collect_pynode_objs(
+      const Node* pynode,
+      c10::SafePyObject&& bwd,
+      std::optional<c10::SafePyObject>&& bwd_state) {
+    size_t bwd_idx = _compiler.emplace_hook(std::move(bwd));
+    std::optional<size_t> bwd_state_idx;
+    if (auto state = std::move(bwd_state); state.has_value()) {
+      bwd_state_idx = _compiler.emplace_hook(std::move(state.value()));
+    }
+    _compiler.pynode_objs.emplace(
+        pynode, std::make_pair(bwd_idx, bwd_state_idx));
   }
 
   void add_tensor_pre_hook(c10::SafePyObject&& obj, int index) {
@@ -743,6 +751,13 @@ class SwapSavedVariables {
   // cache-miss. It swaps any 'lifted' inputs (tensors, symints) to proxy nodes,
   // allows tracing to happen, then swaps them back afterwards.
  public:
+  std::pair<size_t, std::optional<size_t>> retrieve_pynode_objs(
+      Node* pynode) const {
+    auto it = compiler.pynode_objs.find(pynode);
+    TORCH_INTERNAL_ASSERT(it != compiler.pynode_objs.end());
+    return it->second;
+  }
+
   void before(at::Tensor& t) {
     TensorArg& arg = compiler.tensor_args.lookup(t);
     stashed_tensors.save(&t, std::move(t));
@@ -948,7 +963,7 @@ class SwapSavedVariables {
       const NodeCall& n)
       : compiler(c), state(s), py_compiler(p), curr_node_call(n) {}
 
-  PyObject* get_py_compiler() {
+  PyObject* get_py_compiler() const {
     return py_compiler;
   }
 
@@ -1057,6 +1072,13 @@ struct IValuePacker {
   // That's what the TypePtr is for: it contains the information to do the
   // parsing. See torch::jit::toIValue for more information.
   static at::TypePtr packed_type() {
+#ifdef _WIN32
+    // NB: the if-constexpr usage triggers compilation errors on Windows
+    // with certain compiler settings
+    // (see https://github.com/pytorch/pytorch/pull/144707 for examples).
+    // It's not clear what the problem is, so we're going to ignore it for now.
+    TORCH_INTERNAL_ASSERT(false, "torch.compile not supported on Windows");
+#else
     if constexpr (::std::is_same_v<T, at::Tensor>) {
       return at::TensorType::get();
     } else if constexpr (::std::is_same_v<T, int64_t>) {
@@ -1095,6 +1117,7 @@ struct IValuePacker {
       TORCH_INTERNAL_ASSERT(false, "IValuePacker not implemented for type");
       return at::NoneType::get();
     }
+#endif
   }
 };
 
