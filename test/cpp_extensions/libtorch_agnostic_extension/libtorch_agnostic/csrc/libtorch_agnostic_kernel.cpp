@@ -125,3 +125,25 @@ STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CUDA, m) {
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CPU, m) {
   m.impl("identity", &boxed_identity);
 }
+
+RAIIATH my_abs(RAIIATH t) {
+  const auto num_args = 1;
+  StableIValue stack[num_args];
+  stack[0] = from(t.release());
+  aoti_torch_call_dispatcher("aten::abs", "", stack);
+  return RAIIATH(to<AtenTensorHandle>(stack[0]));
+}
+
+void boxed_my_abs(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
+  RAIIATH t(to<AtenTensorHandle>(stack[0]));
+  RAIIATH raiiath_res = my_abs(std::move(t));
+  stack[0] = from(raiiath_res.release());
+}
+
+STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
+  m.def("my_abs(Tensor t) -> Tensor");
+}
+
+STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
+  m.impl("my_abs", &boxed_my_abs);
+}
