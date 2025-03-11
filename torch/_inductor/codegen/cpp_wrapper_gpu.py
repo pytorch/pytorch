@@ -278,18 +278,17 @@ class CppWrapperGpu(CppWrapperCpu):
         kernel_name: str,
         kernel_body: str,
         metadata: Optional[str] = None,
-        gpu: bool = True,
-        cpp_definition: Optional[str] = None,
+        gpu=True,
     ):
         if gpu:
             if config.triton.autotune_at_compile_time:
                 # Call PythonWrapperCodegen to create the autotune code block
                 PythonWrapperCodegen.define_kernel(
-                    self, kernel_name, kernel_body, metadata, gpu, cpp_definition
+                    self, kernel_name, kernel_body, metadata, gpu
                 )
         else:
             return CppWrapperCpu.define_kernel(
-                self, kernel_name, kernel_body, metadata, gpu, cpp_definition
+                self, kernel_name, kernel_body, metadata, gpu
             )
 
     def generate(self, is_inference):

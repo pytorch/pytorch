@@ -887,11 +887,8 @@ class CKGemmTemplate(CKTemplate):
         M = X_meta.size[-2]
         K = X_meta.size[-1]
         N = W_meta.size[-1]
-        if K // max(M, N) < config.rocm.split_k_threshold:
+        if K < 16 * max(M, N):
             return [1]
-        # if the user is telling us which kBatches to sweep, just use those
-        if config.rocm.kBatch_sweep is not None:
-            return config.rocm.kBatch_sweep
         # Calculate the number of blocks needed for each dimension
         total_k_blocks = math.ceil(K / op.k_per_block)
         # we want to calculate how many blocks we need to fit per CU
@@ -930,6 +927,7 @@ class CKGemmTemplate(CKTemplate):
 
         assert generator is not None
 
+        # TODO(coconutruben): allow users to provide a list of kBatches to sweep over
         rops = generator()
         ops = []
         for o in rops:
