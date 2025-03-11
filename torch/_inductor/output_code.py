@@ -270,8 +270,10 @@ def cudagraph_partition_post_compile(
     assert compiled_graph.recursively_apply_fns is not None
     is_inference = compiled_graph.fx_kwargs["is_inference"]
     is_backward = compiled_graph.fx_kwargs["is_backward"]
-    static_input_idxs = compiled_graph.fx_kwargs["static_input_idxs"] or ()
-    mutated_input_idxs = tuple(compiled_graph.mutated_input_idxs)
+    static_input_idxs = (
+        OrderedSet(compiled_graph.fx_kwargs["static_input_idxs"]) or OrderedSet()
+    )
+    mutated_input_idxs = compiled_graph.mutated_input_idxs
     device_index = next(iter(compiled_graph.device_idxs))
 
     graph_metadata = CudagraphMetadata(
@@ -296,7 +298,7 @@ def cudagraph_partition_post_compile(
 
         cudagraphify_fn = partial(
             cudagraphify,
-            static_input_idxs=partition_metadata.static_input_idxs,
+            static_input_idxs=tuple(partition_metadata.static_input_idxs),
             device_index=device_index,
             stack_traces=partition_metadata.stack_traces,
             is_backward=is_backward,

@@ -348,8 +348,8 @@ class CudagraphMetadata:
     """
 
     placeholders: Sequence[PlaceholderInfo]
-    static_input_idxs: Sequence[int]
-    mutated_input_idxs: Sequence[int]
+    static_input_idxs: OrderedSet[int]
+    mutated_input_idxs: OrderedSet[int]
     stack_traces: list[Optional[str]]
     constants: dict[str, torch.Tensor]
 
@@ -365,16 +365,16 @@ def get_partition_cudagraph_metadata(
     """
 
     partition_placeholders = []
-    partition_static_input_idxs = []
-    partition_mutated_input_idxs = []
+    partition_static_input_idxs: OrderedSet[int] = OrderedSet()
+    partition_mutated_input_idxs: OrderedSet[int] = OrderedSet()
     for partition_input_idx, graph_input_idx in enumerate(
         partition_map.input_index_mapping
     ):
         if graph_input_idx in metadata.static_input_idxs:
-            partition_static_input_idxs.append(partition_input_idx)
+            partition_static_input_idxs.add(partition_input_idx)
 
         if graph_input_idx in metadata.mutated_input_idxs:
-            partition_mutated_input_idxs.append(partition_input_idx)
+            partition_mutated_input_idxs.add(partition_input_idx)
 
         if graph_input_idx:
             placeholder = metadata.placeholders[graph_input_idx]
