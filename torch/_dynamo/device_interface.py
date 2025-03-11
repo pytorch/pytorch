@@ -17,6 +17,7 @@ The abstraction layer enables device-agnostic code in TorchDynamo while allowing
 specialized implementations for each hardware backend's unique features.
 """
 
+import inspect
 import time
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -31,8 +32,6 @@ if torch.cuda._is_compiled():
 else:
     get_cuda_stream = None
 
-_device_t = Union[torch.device, str, int, None]
-
 # Recording the device properties in the main process but used in worker process.
 caching_worker_device_properties: dict[str, Any] = {}
 caching_worker_current_devices: dict[str, int] = {}
@@ -45,7 +44,7 @@ class DeviceInterface:
     """
 
     class device:
-        def __new__(cls, device: _device_t):
+        def __new__(cls, device: torch.types.Device):
             raise NotImplementedError
 
     class Event:
@@ -77,7 +76,7 @@ class DeviceInterface:
             raise NotImplementedError
 
         @staticmethod
-        def get_device_properties(device: _device_t = None):
+        def get_device_properties(device: torch.types.Device = None):
             raise NotImplementedError
 
     @staticmethod
@@ -85,7 +84,7 @@ class DeviceInterface:
         raise NotImplementedError
 
     @staticmethod
-    def set_device(device: _device_t):
+    def set_device(device: torch.types.Device):
         raise NotImplementedError
 
     @staticmethod
@@ -125,15 +124,15 @@ class DeviceInterface:
         raise NotImplementedError
 
     @staticmethod
-    def synchronize(device: _device_t = None):
+    def synchronize(device: torch.types.Device = None):
         raise NotImplementedError
 
     @classmethod
-    def get_device_properties(cls, device: _device_t = None):
+    def get_device_properties(cls, device: torch.types.Device = None):
         return cls.Worker.get_device_properties(device)
 
     @staticmethod
-    def get_compute_capability(device: _device_t = None):
+    def get_compute_capability(device: torch.types.Device = None):
         raise NotImplementedError
 
     @staticmethod
@@ -147,8 +146,29 @@ class DeviceInterface:
         return dtype != torch.bfloat16 or cls.is_bf16_supported(including_emulation)
 
     @staticmethod
-    def memory_allocated(device: _device_t = None) -> int:
+    def memory_allocated(device: torch.types.Device = None) -> int:
         raise NotImplementedError
+
+    @staticmethod
+    def is_triton_capable(device: torch.types.Device = None) -> bool:
+        """
+        Returns True if the device has Triton support, False otherwise, even if
+        the appropriate Triton backend is not available.
+        """
+        return False
+
+    @classmethod
+    def raise_if_triton_unavailable(cls, device: torch.types.Device = None) -> None:
+        """
+        Raises a `RuntimeError` with the appropriate human-readable instructions
+        to resolve the issue if Triton is not available for the given device, or
+        the default device if `device` is `None`.
+
+        The caller should ensure the presence of the 'triton' package before
+        calling this method.
+        """
+        if not cls.is_triton_capable():
+            raise RuntimeError("This device is not capable of supporting Triton")
 
 
 class DeviceGuard:
@@ -198,7 +218,7 @@ class CudaInterface(DeviceInterface):
             return torch.cuda.current_device()
 
         @staticmethod
-        def get_device_properties(device: _device_t = None):
+        def get_device_properties(device: torch.types.Device = None):
             if device is not None:
                 if isinstance(device, str):
                     device = torch.device(device)
@@ -238,12 +258,35 @@ class CudaInterface(DeviceInterface):
         return torch.cuda.is_available()
 
     @staticmethod
-    def get_compute_capability(device: _device_t = None):
+    def get_compute_capability(device: torch.types.Device = None):
         if torch.version.hip is None:
             major, min = torch.cuda.get_device_capability(device)
             return major * 10 + min
         else:
             return torch.cuda.get_device_properties(device).gcnArchName.split(":", 1)[0]
+
+    @staticmethod
+    def is_triton_capable(device: torch.types.Device = None) -> bool:
+        return (
+            torch.version.hip is not None
+            or torch.cuda.get_device_properties(device).major >= 7
+        )
+
+    @staticmethod
+    def raise_if_triton_unavailable(device: torch.types.Device = None) -> None:
+        from torch._inductor.exc import GPUTooOldForTriton
+
+        if not CudaInterface.is_triton_capable(device):
+            device_props = torch.cuda.get_device_properties(device)
+            raise GPUTooOldForTriton(device_props, inspect.currentframe())
+
+        import triton.backends
+
+        if torch.version.hip is not None:
+            if "amd" not in triton.backends.backends:
+                raise RuntimeError("triton not built with the 'amd' backend")
+        elif "nvidia" not in triton.backends.backends:
+            raise RuntimeError("triton not built with the 'nvidia' backend")
 
 
 get_xpu_stream: Optional[Callable[[int], int]]
@@ -270,7 +313,7 @@ class XpuInterface(DeviceInterface):
             return torch.xpu.current_device()
 
         @staticmethod
-        def get_device_properties(device: _device_t = None):
+        def get_device_properties(device: torch.types.Device = None):
             if device is not None:
                 if isinstance(device, str):
                     device = torch.device(device)
@@ -309,13 +352,24 @@ class XpuInterface(DeviceInterface):
         return torch.xpu.is_available()
 
     @staticmethod
-    def get_compute_capability(device: _device_t = None):
+    def get_compute_capability(device: torch.types.Device = None):
         cc = torch.xpu.get_device_capability(device)
         return cc
 
     @staticmethod
     def is_bf16_supported(including_emulation: bool = False) -> bool:
         return torch.xpu.is_bf16_supported()
+
+    @staticmethod
+    def is_triton_capable(device: torch.types.Device = None) -> bool:
+        return True
+
+    @staticmethod
+    def raise_if_triton_unavailable(evice: torch.types.Device = None) -> None:
+        import triton.backends
+
+        if "intel" not in triton.backends.backends:
+            raise RuntimeError("triton not built with the 'intel' backend")
 
 
 @dataclass
@@ -334,6 +388,14 @@ class CpuInterface(DeviceInterface):
         def record(self, stream=None):
             self.time = time.perf_counter()
 
+    class Worker:
+        @staticmethod
+        def get_device_properties(device: torch.types.Device = None):
+            import multiprocessing
+
+            cpu_count = multiprocessing.cpu_count()
+            return CpuDeviceProperties(cpu_count)
+
     @staticmethod
     def is_available() -> bool:
         return True
@@ -343,7 +405,7 @@ class CpuInterface(DeviceInterface):
         return True
 
     @staticmethod
-    def get_compute_capability(device: _device_t = None) -> str:
+    def get_compute_capability(device: torch.types.Device = None) -> str:
         return ""
 
     @staticmethod
@@ -355,16 +417,19 @@ class CpuInterface(DeviceInterface):
         return 0
 
     @staticmethod
-    def synchronize(device: _device_t = None):
+    def synchronize(device: torch.types.Device = None):
         pass
 
-    class Worker:
-        @staticmethod
-        def get_device_properties(device: _device_t = None):
-            import multiprocessing
+    @staticmethod
+    def is_triton_capable(device: torch.types.Device = None) -> bool:
+        return True
 
-            cpu_count = multiprocessing.cpu_count()
-            return CpuDeviceProperties(cpu_count)
+    @staticmethod
+    def raise_if_triton_unavailable(device: torch.types.Device = None) -> None:
+        import triton.backends
+
+        if "cpu" not in triton.backends.backends:
+            raise RuntimeError("triton not built with the 'cpu' backend")
 
 
 class MpsInterface(DeviceInterface):
@@ -389,16 +454,16 @@ class MpsInterface(DeviceInterface):
         return 0
 
     @staticmethod
-    def get_compute_capability(device: _device_t = None) -> str:
+    def get_compute_capability(device: torch.types.Device = None) -> str:
         return ""
 
     @staticmethod
-    def synchronize(device: _device_t = None):
+    def synchronize(device: torch.types.Device = None):
         torch.mps.synchronize()
 
     class Worker:
         @staticmethod
-        def get_device_properties(device: _device_t = None):
+        def get_device_properties(device: torch.types.Device = None):
             return {}
 
         @staticmethod

@@ -1,6 +1,11 @@
 # mypy: allow-untyped-defs
 import functools
 import hashlib
+from typing import TYPE_CHECKING
+
+
+if TYPE_CHECKING:
+    from torch.types import Device
 
 
 @functools.lru_cache(None)
@@ -9,10 +14,46 @@ def has_triton_package() -> bool:
         from triton.compiler.compiler import triton_key
 
         return triton_key is not None
-    except ImportError:
+    except (ImportError, RuntimeError):
         return False
-    except RuntimeError:
+
+
+@functools.lru_cache(None)
+def has_triton(device: "Device" = None) -> bool:
+    """
+    Determine if Triton is available for use on this system for a given device
+    (if device is not None) or any available device type if no device is given.
+    """
+    import torch
+    from torch._dynamo.device_interface import (
+        DeviceInterface,
+        get_interface_for_device,
+        get_registered_device_interfaces,
+    )
+
+    if not has_triton_package():
         return False
+
+    def device_has_triton(di: type[DeviceInterface]) -> bool:
+        if not di.is_available():
+            return False
+
+        try:
+            di.raise_if_triton_unavailable(device)
+        except RuntimeError:
+            return False
+
+        return True
+
+    if device is None:
+        return any(
+            device_has_triton(di) for _, di in get_registered_device_interfaces()
+        )
+
+    if not isinstance(device, (str, torch.device)):
+        device = torch.device(device)
+
+    return device_has_triton(get_interface_for_device(device))
 
 
 @functools.lru_cache(None)
@@ -59,40 +100,6 @@ def has_triton_tma_device():
                 pass
 
     return False
-
-
-@functools.lru_cache(None)
-def has_triton() -> bool:
-    if not has_triton_package():
-        return False
-
-    from torch._dynamo.device_interface import get_interface_for_device
-
-    def cuda_extra_check(device_interface):
-        return device_interface.Worker.get_device_properties().major >= 7
-
-    def cpu_extra_check(device_interface):
-        import triton.backends
-
-        return "cpu" in triton.backends.backends
-
-    def _return_true(device_interface):
-        return True
-
-    triton_supported_devices = {
-        "cuda": cuda_extra_check,
-        "xpu": _return_true,
-        "cpu": cpu_extra_check,
-    }
-
-    def is_device_compatible_with_triton():
-        for device, extra_check in triton_supported_devices.items():
-            device_interface = get_interface_for_device(device)
-            if device_interface.is_available() and extra_check(device_interface):
-                return True
-        return False
-
-    return is_device_compatible_with_triton()
 
 
 @functools.lru_cache(None)
