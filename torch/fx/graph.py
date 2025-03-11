@@ -1779,7 +1779,7 @@ class Graph:
                                 f"Node {node} target {node.target} {atom} of {seen_qualname} does "
                                 "not reference an nn.Module"
                             )
-    
+
                         m_itr = new_m_itr
 
     @compatibility(is_backward_compatible=True)
