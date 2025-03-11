@@ -161,28 +161,26 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
         cache_fail_test(
             a,
             a[0:2, :, :],
-            "tensor 'L['a']' size mismatch at index 0. expected 3, actual 2",
+            "tensor 'a' size mismatch at index 0. expected 3, actual 2",
         )
         cache_fail_test(
             a,
             a.clone().as_strided((3, 4, 5), stride=(1, 3, 12)),
-            "tensor 'L['a']' stride mismatch at index 0. expected 20, actual 1",
+            "tensor 'a' stride mismatch at index 0. expected 20, actual 1",
         )
-        cache_fail_test(
-            a, a[0, :, :], "tensor 'L['a']' rank mismatch. expected 3, actual 2"
-        )
-        cache_fail_test(a, a.to("meta"), "tensor 'L['a']' dispatch key set mismatch.")
+        cache_fail_test(a, a[0, :, :], "tensor 'a' rank mismatch. expected 3, actual 2")
+        cache_fail_test(a, a.to("meta"), "tensor 'a' dispatch key set mismatch.")
         cache_fail_test(
             a,
             a.to(torch.float16),
-            "tensor 'L['a']' dtype mismatch. expected Float, actual Half",
+            "tensor 'a' dtype mismatch. expected Float, actual Half",
         )
         a_grad = a.clone()
         a_grad.requires_grad = True
         cache_fail_test(
             a,
             a_grad,
-            "tensor 'L['a']' requires_grad mismatch. expected requires_grad=0",
+            "tensor 'a' requires_grad mismatch. expected requires_grad=0",
         )
 
     def test_mismatched_type(self):
@@ -201,7 +199,7 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
             opt_func(a, 1)
         self.assert_single_log_contains(
             logs,
-            "expected type of 'L['b']' to be a tensor type, ' but found <class 'int'>",
+            "expected type of 'b' to be a tensor type, ' but found <class 'int'>",
         )
 
     @torch._dynamo.config.patch(recompile_limit=1, fail_on_recompile_limit_hit=True)
@@ -237,10 +235,10 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
 
         failure_str = "\n".join(failure_reasons)
         for line in """\
-tensor 'L['x']' size mismatch at index 0. expected 11, actual 12
-tensor 'L['x']' size mismatch at index 0. expected 10, actual 12
-tensor 'L['x']' size mismatch at index 0. expected 9, actual 12
-tensor 'L['x']' size mismatch at index 0. expected 8, actual 12""".split(
+tensor 'x' size mismatch at index 0. expected 11, actual 12
+tensor 'x' size mismatch at index 0. expected 10, actual 12
+tensor 'x' size mismatch at index 0. expected 9, actual 12
+tensor 'x' size mismatch at index 0. expected 8, actual 12""".split(
             "\n"
         ):
             self.assertIn(
@@ -278,7 +276,7 @@ tensor 'L['x']' size mismatch at index 0. expected 8, actual 12""".split(
             opt_f([7, 8])
 
             for line in """\
-len(L['x']) == 3""".split(
+len(x) == 3""".split(
                 "\n"
             ):
                 self.assertIn(line, filter_reasons())
@@ -287,8 +285,8 @@ len(L['x']) == 3""".split(
             opt_f([9])
 
             for line in """\
-len(L['x']) == 2
-len(L['x']) == 3""".split(
+len(x) == 2
+len(x) == 3""".split(
                 "\n"
             ):
                 self.assertIn(line, filter_reasons())
