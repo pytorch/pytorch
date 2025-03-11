@@ -520,6 +520,9 @@ class MetalKernel(SIMDKernel):
                 f"{self.index_dtype} {entry.name} = {index_str};"
             )
             return
+        # When reducing the thensor whose size exceeds max threadgroup size
+        # loop over extra indices per reduction thread and perform part of the operation
+        # using values in the shared memory
         loop_size = (
             entry.root.numel + self.max_threadgroup_size - 1
         ) // self.max_threadgroup_size
@@ -530,7 +533,7 @@ class MetalKernel(SIMDKernel):
             self.body.writeline(
                 f"{self.index_dtype} {entry.name} = {loop_size} * {index_str} + {entry.name}_cnt;"
             )
-            # Add boundary checks
+            # Check that reduction is performed only within tensor boundary
             if loop_size * self.max_threadgroup_size != entry.root.numel:
                 self.body.writeline(f"if ({entry.name} >= {entry.root.numel}) break;")
 
@@ -622,6 +625,8 @@ class MetalKernel(SIMDKernel):
         args = [*self.args.output_buffers.keys(), *self.args.input_buffers.keys()]
         args = [arg for arg in args if arg not in self.removed_buffers]
         args += [str(v) for v in self.args.sizevars.keys()]
+        # For reduction kernels, limit the maximum size over reduction dimentions to
+        # a maximum threadgroup size
         if len(self.active_range_trees()) > 0:
             threads = [
                 self.pexpr(
