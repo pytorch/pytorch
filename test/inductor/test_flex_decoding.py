@@ -23,6 +23,7 @@ from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16
 from torch.testing._internal.common_device_type import (
+    expectedFailureXPU,
     flex_attention_supported_platform as supported_platform,
 )
 from torch.testing._internal.common_utils import skipIfRocm
@@ -1668,6 +1669,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         out = flex_attention_compiled(q, k, v, block_mask=mask_2)
         torch.testing.assert_close(eager, out, atol=5e-3, rtol=5e-3)
 
+    # Double and complex datatype matmul is not supported in oneDNN
+    @expectedFailureXPU
     @common_utils.parametrize("dtype", test_dtypes_fast)
     @common_utils.parametrize("score_mod", test_score_mods)
     @supported_platform

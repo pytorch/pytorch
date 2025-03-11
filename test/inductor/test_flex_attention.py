@@ -36,6 +36,7 @@ from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16, TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
+    expectedFailureXPU,
     flex_attention_supported_platform as supported_platform,
 )
 from torch.testing._internal.common_utils import IS_MACOS, skipIfXpu, TEST_WITH_ROCM
@@ -2835,6 +2836,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             KV_S=1023,
         )
 
+    # Double and complex datatype matmul is not supported in oneDNN
+    @expectedFailureXPU
     @supported_platform
     def test_head_bias_req_grad(self):
         B, H, S, D = 1, 4, 256, 64
@@ -2866,6 +2869,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             bias_sdpa_gold,
         )
 
+    # Double and complex datatype matmul is not supported in oneDNN
+    @expectedFailureXPU
     @supported_platform
     def test_comparison_vs_sdpa_with_learnable_bias(self):
         # 1-dimensional bias:
@@ -3593,7 +3598,8 @@ def forward(self, child : torch.Tensor, child_1 : torch.Tensor, child_2 : torch.
     @supported_platform
     def test_fw_bw_graph_correctness(self):
         cnt = CompileCounterWithBackend("aot_eager")
-        gold_dtype = torch.float64 if not HAS_XPU else torch.float32
+        gold_dtype = torch.float64 if not GPU_TYPE == "xpu" else torch.float32
+        gold_dtype_str = {torch.float64: "f64", torch.float32: "f32"}[gold_dtype]
         make_tensor = functools.partial(
             torch.randn,
             (2, 2, 128, 4),
@@ -3615,10 +3621,7 @@ def forward(self, child : torch.Tensor, child_1 : torch.Tensor, child_2 : torch.
         self.assertEqual(len(cnt.graphs), 1)
         graph = cnt.graphs[0]
         norm_graph = normalize_gm(graph.print_readable(print_output=False))
-
-        self.assertExpectedInline(
-            norm_graph,
-            """\
+        expected_norm_graph = """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_query_: "f64[2, 2, 128, 4]", L_key_: "f64[2, 2, 128, 4]", L_value_: "f64[2, 2, 128, 4]", L_block_mask_kv_indices: "i32[1, 1, 1, 1]", L_block_mask_kv_num_blocks: "i32[1, 1, 1]", L_block_mask_full_kv_num_blocks: "i32[1, 1, 1]", L_block_mask_full_kv_indices: "i32[1, 1, 1, 1]", L_block_mask_q_num_blocks: "i32[1, 1, 1]", L_block_mask_q_indices: "i32[1, 1, 1, 1]", L_block_mask_full_q_num_blocks: "i32[1, 1, 1]", L_block_mask_full_q_indices: "i32[1, 1, 1, 1]"):
         l_query_ = L_query_
@@ -3648,7 +3651,13 @@ class GraphModule(torch.nn.Module):
         def forward(self, child: "i32[]", child_1: "i32[]", child_2: "i32[]", child_3: "i32[]"):
             ge: "b8[]" = child_2 >= child_3;  child_2 = child_3 = None
             return ge
-""",  # noqa: B950
+""".replace(
+            "f64", gold_dtype_str
+        )  # noqa: B950
+
+        self.assertExpectedInline(
+            norm_graph,
+            expected_norm_graph,
         )
         # Save the AOT graphs
         aot_graphs = []
@@ -3666,13 +3675,10 @@ class GraphModule(torch.nn.Module):
         out.sum().backward()
 
         joint_graph = normalize_gm(aot_graphs[1].print_readable(print_output=False))
-
-        self.assertExpectedInline(
-            joint_graph,
-            """\
+        expected_joint_graph = """\
 class GraphModule(torch.nn.Module):
     def forward(self, primals_1: "f64[2, 2, 128, 4]", primals_2: "f64[2, 2, 128, 4]", primals_3: "f64[2, 2, 128, 4]", full: "i32[1, 1, 1]", full_default: "i32[1, 1, 1, 1]", convert_element_type: "i32[1, 1, 1]", convert_element_type_1: "i32[1, 1, 1, 1]", getitem_2: "f64[2, 2, 128, 4]", getitem_3: "f32[2, 2, 128]", tangents_1: "f64[2, 2, 128, 4]"):
-        full_default_4: "f32[2, 2, 128]" = torch.ops.aten.full.default([2, 2, 128], 0, dtype = torch.float32, layout = torch.strided, device = device(type='cuda', index=0), pin_memory = False)
+        full_default_4: "f32[2, 2, 128]" = torch.ops.aten.full.default([2, 2, 128], 0, dtype = torch.float32, layout = torch.strided, device = device(type='GPU_TYPE', index=0), pin_memory = False)
         fw_graph0 = self.fw_graph0
         joint_graph0 = self.joint_graph0
         mask_graph0 = self.mask_graph0
@@ -3697,9 +3703,17 @@ class GraphModule(torch.nn.Module):
 
     class mask_graph0(torch.nn.Module):
         def forward(self, arg0_1: "i32[]", arg1_1: "i32[]", arg2_1: "i32[]", arg3_1: "i32[]"):
-            full: "b8[]" = torch.ops.aten.full.default([], True, dtype = torch.bool, layout = torch.strided, device = device(type='cuda', index=0), pin_memory = False)
+            full: "b8[]" = torch.ops.aten.full.default([], True, dtype = torch.bool, layout = torch.strided, device = device(type='GPU_TYPE', index=0), pin_memory = False)
             return full
-""",  # noqa: B950
+""".replace(
+            "f64", gold_dtype_str
+        ).replace(
+            "GPU_TYPE", GPU_TYPE
+        )  # noqa: B950
+
+        self.assertExpectedInline(
+            joint_graph,
+            expected_joint_graph,
         )
 
     @unittest.skipIf(HAS_GPU, "Testing CPU error message")
