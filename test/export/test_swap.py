@@ -74,7 +74,7 @@ class TestSwap(TestCase):
             {"foo.nested": NestedChild(), "bar": Child2()},
         )
 
-        self.assertTrue(torch.allclose(ep.module()(*inps), swapped_gm(*inps)))
+        torch.testing.assert_close(ep.module()(*inps), swapped_gm(*inps))
 
     def test_unflatten_preserve_with_unused_input(self):
         class M1(torch.nn.Module):
@@ -103,7 +103,7 @@ class TestSwap(TestCase):
         )
 
         inps = (torch.randn(2), torch.randn(5))
-        self.assertTrue(torch.allclose(ep.module()(*inps), swapped_gm(*inps)))
+        torch.testing.assert_close(ep.module()(*inps), swapped_gm(*inps))
 
     def test_nested_leaf(self):
         class Leaf(torch.nn.Module):
@@ -139,7 +139,7 @@ class TestSwap(TestCase):
         )
 
         inps = (torch.randn(3),)
-        self.assertTrue(torch.allclose(ep.module()(*inps), swapped_gm(*inps)))
+        torch.testing.assert_close(ep.module()(*inps), swapped_gm(*inps))
 
     def test_dedup_sym_size(self):
         # Here, sym_size & floor div are used in 3 subgraphs (top-level, m1, m2),
@@ -186,10 +186,10 @@ class TestSwap(TestCase):
         )
 
         inps = (torch.randn(10), torch.randn(10))
-        self.assertTrue(torch.allclose(ep.module()(*inps), swapped_gm(*inps)))
+        torch.testing.assert_close(ep.module()(*inps), swapped_gm(*inps))
 
         inps = (torch.randn(20), torch.randn(20))
-        self.assertTrue(torch.allclose(ep.module()(*inps), swapped_gm(*inps)))
+        torch.testing.assert_close(ep.module()(*inps), swapped_gm(*inps))
 
     def test_remove_duplicate_pytree_simple(self):
         class Child1(torch.nn.Module):
@@ -236,7 +236,7 @@ class TestSwap(TestCase):
             {"foo": Child1(), "bar": Child2()},
         )
 
-        self.assertTrue(torch.allclose(ep.module()(*inps), swapped_gm(*inps)))
+        torch.testing.assert_close(ep.module()(*inps), swapped_gm(*inps))
         self.assertExpectedInline(
             swapped_gm.code.strip(),
             """\
@@ -313,7 +313,7 @@ def forward(self, x, y):
             {"foo": Child1(), "bar": Child2()},
         )
 
-        self.assertTrue(torch.allclose(ep.module()(*inps), swapped_gm(*inps)))
+        torch.testing.assert_close(ep.module()(*inps), swapped_gm(*inps))
         self.assertExpectedInline(
             swapped_gm.code.strip(),
             """\
@@ -358,7 +358,7 @@ def forward(self, x, y):
         inp = (CustomInput(torch.randn(2, 3), torch.randn(3, 2)),)
         res1 = torch.fx.Interpreter(swapped).run(*inp)
         res2 = swapped(*inp)
-        self.assertTrue(torch.allclose(res1, res2))
+        torch.testing.assert_close(res1, res2)
 
     def test_custom_input_kwargs(self):
         @dataclass
@@ -386,7 +386,7 @@ def forward(self, x, y):
         inp_kwargs = {"inputs": CustomInput(torch.randn(2, 3), torch.randn(3, 2))}
         res1 = torch.fx.Interpreter(swapped).run(*(*inp_args, *inp_kwargs.values()))
         res2 = swapped(*inp_args, **inp_kwargs)
-        self.assertTrue(torch.allclose(res1, res2))
+        torch.testing.assert_close(res1, res2)
 
     def test_custom_output(self):
         @dataclass
@@ -408,10 +408,10 @@ def forward(self, x, y):
         inp = (torch.randn(2, 3), torch.randn(3, 2))
         res1 = torch.fx.Interpreter(swapped).run(*inp)
         res2 = swapped(*inp)
-        self.assertTrue(torch.allclose(res1[0].a, res2[0].a))
-        self.assertTrue(torch.allclose(res1[0].b, res2[0].b))
-        self.assertTrue(torch.allclose(res1[1].a, res2[1].a))
-        self.assertTrue(torch.allclose(res1[1].b, res2[1].b))
+        torch.testing.assert_close(res1[0].a, res2[0].a)
+        torch.testing.assert_close(res1[0].b, res2[0].b)
+        torch.testing.assert_close(res1[1].a, res2[1].a)
+        torch.testing.assert_close(res1[1].b, res2[1].b)
 
 
 if __name__ == "__main__":

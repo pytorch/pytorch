@@ -1311,8 +1311,8 @@ class TestQuantizedOps(TestCase):
         qC_hat_1 = torch.ops.quantized.add(qA, qB, output_scale, output_zp)
         qC_hat_2 = torch.ops.quantized.add(qB, qA, output_scale, output_zp)
 
-        self.assertTrue(torch.allclose(qC.dequantize(), qC_hat_1.dequantize()))
-        self.assertTrue(torch.allclose(qC.dequantize(), qC_hat_2.dequantize()))
+        torch.testing.assert_close(qC.dequantize(), qC_hat_1.dequantize())
+        torch.testing.assert_close(qC.dequantize(), qC_hat_2.dequantize())
 
     """Tests channel shuffle operation on quantized tensors."""
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
@@ -7818,8 +7818,8 @@ class TestQNNPackOps(TestCase):
             qC_hat_1 = torch.ops.quantized.add(qA, qB, output_scale, output_zp)
             qC_hat_2 = torch.ops.quantized.add(qB, qA, output_scale, output_zp)
 
-            self.assertTrue(torch.allclose(qC.dequantize(), qC_hat_1.dequantize()))
-            self.assertTrue(torch.allclose(qC.dequantize(), qC_hat_2.dequantize()))
+            torch.testing.assert_close(qC.dequantize(), qC_hat_1.dequantize())
+            torch.testing.assert_close(qC.dequantize(), qC_hat_2.dequantize())
 
         with override_quantized_engine("qnnpack"):
             for dtype in (torch.qint8, torch.quint8):

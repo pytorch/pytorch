@@ -126,7 +126,7 @@ class TestOnlineSoftmax(TestCase):
         opt_f = torch.compile(f)
         ref = f(q, k, v)
         act, (code,) = run_and_get_code(opt_f, q, k, v)
-        self.assertTrue(torch.allclose(ref, act, atol=1e-2, rtol=1e-2))
+        torch.testing.assert_close(ref, act, atol=1e-2, rtol=1e-2)
         self.assertTrue("aten._scaled_dot_product_" in code)
 
     @parametrize("nrow", [2, 2048])
@@ -163,7 +163,7 @@ class TestOnlineSoftmax(TestCase):
         x = torch.randn(1, 2**20, dtype=torch.bfloat16, device=GPU_TYPE)
         ref = torch.softmax(x, dim=-1)
         act, (code,) = run_and_get_code(torch.compile(torch.softmax), x, dim=-1)
-        self.assertTrue(torch.allclose(ref, act, atol=1e-3, rtol=1e-3))
+        torch.testing.assert_close(ref, act, atol=1e-3, rtol=1e-3)
         self.assertTrue(code.count("def triton") >= 2)
         self.assertTrue("online_softmax_reduce" not in code)
 
@@ -247,7 +247,7 @@ class TestOnlineSoftmax(TestCase):
         x = torch.randn(1, device=GPU_TYPE)
         ref = f(x)
         act, (code,) = run_and_get_code(torch.compile(f), x)
-        self.assertTrue(torch.allclose(ref, act))
+        torch.testing.assert_close(ref, act)
         self.assertTrue("online_softmax_reduce" not in code)
 
     def test_causal_mask(self):
@@ -262,7 +262,7 @@ class TestOnlineSoftmax(TestCase):
         act = torch.compile(f)(x)
         self.assertTrue(not ref.isnan().any())
         self.assertTrue(not act.isnan().any())
-        self.assertTrue(torch.allclose(ref, act))
+        torch.testing.assert_close(ref, act)
 
     def test_tb_speech_transformer_attn(self):
         """
@@ -291,7 +291,7 @@ class TestOnlineSoftmax(TestCase):
         act = torch.compile(f)(x, mask)
         self.assertTrue(not ref.isnan().any())
         self.assertTrue(not act.isnan().any())
-        self.assertTrue(torch.allclose(ref, act))
+        torch.testing.assert_close(ref, act)
 
 
 instantiate_parametrized_tests(TestOnlineSoftmax)

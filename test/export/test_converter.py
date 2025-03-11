@@ -135,7 +135,7 @@ class TestConverter(TestCase):
         for x, y in zip(xs, ys):
             if isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
                 self.assertEqual(x.shape, y.shape)
-                self.assertTrue(torch.allclose(x, y))
+                torch.testing.assert_close(x, y)
             else:
                 self.assertEqual(type(x), type(y))
                 self.assertEqual(x, y)

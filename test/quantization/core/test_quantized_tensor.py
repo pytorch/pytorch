@@ -429,7 +429,7 @@ class TestQuantizedTensor(TestCase):
         data_fp16_dequant = data_fp16.dequantize()
         data_fp16_fp32 = data_fp16.to(torch.float)
         self.assertTrue(data_fp16_dequant.dtype == torch.float)
-        self.assertTrue(torch.allclose(data_fp16_fp32, data_fp16_dequant))
+        torch.testing.assert_close(data_fp16_fp32, data_fp16_dequant)
 
     def test_dequantize_fp16_cpu(self):
         self._test_dequantize_fp16(torch.device('cpu'))

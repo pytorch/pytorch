@@ -48,7 +48,7 @@ class TestLazyGraphModule(TestCase):
         expected = x.cos()
         actual = gm(x)
 
-        self.assertTrue(torch.allclose(expected, actual))
+        torch.testing.assert_close(expected, actual)
         code = gm.print_readable(False)
         self.assertTrue("cos()" in code)
         self.assertTrue(isinstance(gm, _LazyGraphModule))
@@ -65,7 +65,7 @@ class TestLazyGraphModule(TestCase):
         expected = x.cos()
         actual = gm.forward(x)
 
-        self.assertTrue(torch.allclose(expected, actual))
+        torch.testing.assert_close(expected, actual)
 
     def test_needs_recompile(self):
         """
@@ -94,7 +94,7 @@ class TestLazyGraphModule(TestCase):
         self.assertTrue(gm._needs_recompile())
         x = torch.randn(2, 3)
         # trigger the first recompilation
-        self.assertTrue(torch.allclose(x.sin(), gm(x)))
+        torch.testing.assert_close(x.sin(), gm(x))
         self.assertFalse(gm._needs_recompile())
 
         self.replace_sin_with_cos(gm)
@@ -102,7 +102,7 @@ class TestLazyGraphModule(TestCase):
         gm.recompile()
         self.assertTrue(gm._needs_recompile())
         # trigger the second recompilation
-        self.assertTrue(torch.allclose(x.cos(), gm(x)))
+        torch.testing.assert_close(x.cos(), gm(x))
         self.assertFalse(gm._needs_recompile())
 
     def test_accessing_code_cause_recompiling(self):

@@ -53,12 +53,12 @@ class TestTorchbind(TestCase):
         compiled = torch._inductor.compile(ep.module(), inputs)
 
         new_res = compiled(*inputs)
-        self.assertTrue(torch.allclose(orig_res, new_res))
+        torch.testing.assert_close(orig_res, new_res)
 
     def test_torchbind_compile(self):
         _, inputs, orig_res, mod = self.get_exported_model()
         new_res = torch.compile(mod, backend="inductor")(*inputs)
-        self.assertTrue(torch.allclose(orig_res, new_res))
+        torch.testing.assert_close(orig_res, new_res)
 
     def test_torchbind_get_buf_bytes(self):
         a = torch.classes._TorchScriptTesting._Foo(10, 20)

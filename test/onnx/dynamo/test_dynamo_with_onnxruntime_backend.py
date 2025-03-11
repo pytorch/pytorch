@@ -753,7 +753,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         result = compiled_model(data, ref_data)
 
-        self.assertTrue(torch.allclose(result, data.view(ref_data.shape)))
+        torch.testing.assert_close(result, data.view(ref_data.shape))
 
     def test_no_input(self):
         def reshape_wrapper():

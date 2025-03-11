@@ -3089,9 +3089,9 @@ class GraphModule(torch.nn.Module):
         out_buffer_ref = out_ref.values()
         ga_ref, gb_ref, gc_ref = torch.autograd.grad(out_buffer_ref.sum(), (a, b, c))
 
-        self.assertTrue(torch.allclose(ga, ga_ref))
-        self.assertTrue(torch.allclose(gb, gb_ref))
-        self.assertTrue(torch.allclose(gc, gc_ref))
+        torch.testing.assert_close(ga, ga_ref)
+        torch.testing.assert_close(gb, gb_ref)
+        torch.testing.assert_close(gc, gc_ref)
 
     def test_basic_autograd(self):
         self._test_autograd("aot_eager")
@@ -3153,7 +3153,7 @@ class GraphModule(torch.nn.Module):
         # correctness
         self.assertEqual(len(out), len(out_ref))
         for x, x_ref in zip(out, out_ref):
-            self.assertTrue(torch.allclose(x, x_ref))
+            torch.testing.assert_close(x, x_ref)
 
         # We specialize on the length of offsets, e.g. (1) we recompile if the
         # length of the offsets is different. (2) we don't recompile if the
@@ -3206,9 +3206,9 @@ class GraphModule(torch.nn.Module):
         self.assertTrue(out.size() == out_ref.size())
         self.assertTrue(out.stride() == out_ref.stride())
         if out.is_nested:
-            self.assertTrue(torch.allclose(out.values(), out_ref.values()))
+            torch.testing.assert_close(out.values(), out_ref.values())
         else:
-            self.assertTrue(torch.allclose(out, out_ref))
+            torch.testing.assert_close(out, out_ref)
 
         # Check that no upper/lower bound guards are incurred
         def backend(gm, args):

@@ -1541,11 +1541,11 @@ class TestAutograd(TestCase):
             return g * 2
 
         def posthook(gO, gI):
-            self.assertTrue(torch.allclose(gI[0], a * 2))
+            torch.testing.assert_close(gI[0], a * 2)
             self.assertEqual(len(gO), 0)
 
         def prehook(gI):
-            self.assertTrue(torch.allclose(gI[0], a * 2))
+            torch.testing.assert_close(gI[0], a * 2)
             self.assertEqual(len(gI), 1)
 
         b = a.clone()
@@ -1849,8 +1849,8 @@ class TestAutograd(TestCase):
 
             def posthook(grad_input, grad_output):
                 self.assertEqual(pre_counter[0], 3)
-                self.assertTrue(torch.allclose(grad_output[0], torch.ones(1) * 8))
-                self.assertTrue(torch.allclose(grad_input[0], torch.ones(1) * 16))
+                torch.testing.assert_close(grad_output[0], torch.ones(1) * 8)
+                torch.testing.assert_close(grad_input[0], torch.ones(1) * 16)
                 post_counter[0] += 1
                 return grad_input
 
@@ -1885,7 +1885,7 @@ class TestAutograd(TestCase):
             b.grad_fn.register_prehook(prehook)
             b.sum().backward()
             self.assertEqual(pre_counter[0], 4)
-            self.assertTrue(torch.allclose(a.grad, torch.ones(3, 3) * 2))
+            torch.testing.assert_close(a.grad, torch.ones(3, 3) * 2)
 
     def test_grad_fn_prehooks_multiple_outputs(self):
         # Compute gradients without hooks
@@ -1908,7 +1908,7 @@ class TestAutograd(TestCase):
 
         self.assertEqual(counter[0], 1)
         # Compare
-        self.assertTrue(torch.allclose(a.grad, b.grad * 2))
+        torch.testing.assert_close(a.grad, b.grad * 2)
 
         # Test with custom Function
         class DoubleMul2(Function):
@@ -1937,8 +1937,8 @@ class TestAutograd(TestCase):
         (c + d).sum().backward()
 
         self.assertEqual(counter[0], 1)
-        self.assertTrue(torch.allclose(a.grad, torch.ones(1) * 4 * k))
-        self.assertTrue(torch.allclose(b.grad, torch.ones(1) * 4 * k))
+        torch.testing.assert_close(a.grad, torch.ones(1) * 4 * k)
+        torch.testing.assert_close(b.grad, torch.ones(1) * 4 * k)
 
     def test_grad_fn_prehooks_remove_hooks(self):
         for use_custom_function in (True, False):
@@ -1958,7 +1958,7 @@ class TestAutograd(TestCase):
             b.grad_fn.register_prehook(prehook)
             handle.remove()
             b.sum().backward()
-            self.assertTrue(torch.allclose(a.grad, torch.ones(3, 3) * 2))
+            torch.testing.assert_close(a.grad, torch.ones(3, 3) * 2)
             self.assertEqual(counter[0], 1)
 
             # Remove hooks during backward
@@ -1982,7 +1982,7 @@ class TestAutograd(TestCase):
             handle3 = b.grad_fn.register_prehook(prehook2)
             handle3.remove()
             b.sum().backward()
-            self.assertTrue(torch.allclose(a.grad, torch.ones(3, 3) * 2))
+            torch.testing.assert_close(a.grad, torch.ones(3, 3) * 2)
             self.assertEqual(counter[0], 1)
 
     def test_node_post_hook_registered_during_unpack_hook(self):
@@ -2166,8 +2166,8 @@ class TestAutograd(TestCase):
             var.mul_(2)
             out = (var + mean).sum()
             gvar_expected, gmean_expected = torch.autograd.grad(out, inputs=(var, mean))
-            self.assertTrue(torch.allclose(gvar, gvar_expected))
-            self.assertTrue(torch.allclose(gmean, gmean_expected))
+            torch.testing.assert_close(gvar, gvar_expected)
+            torch.testing.assert_close(gmean, gmean_expected)
 
     def test_retain_grad_inplace_over_view(self):
         base = torch.tensor([1.0], requires_grad=True).clone()
@@ -10685,7 +10685,7 @@ class TestAutogradForwardMode(TestCase):
             # # Verify that mutating unpacked tangent does not affect the original tangent
             tangent_clone = tangent.clone()
             unpacked_tangent *= 2
-            self.assertTrue(torch.allclose(tangent_clone, tangent))
+            torch.testing.assert_close(tangent_clone, tangent)
 
             # as_strided runs without error
             dual.as_strided((5,), (1,), 0)
@@ -11178,8 +11178,8 @@ class TestAutogradForwardMode(TestCase):
                 view *= 2
                 p, t = fwAD.unpack_dual(base)
 
-                self.assertTrue(torch.allclose(p_clone * 2, p))
-                self.assertTrue(torch.allclose(t_clone * 2, t))
+                torch.testing.assert_close(p_clone * 2, p)
+                torch.testing.assert_close(t_clone * 2, t)
 
     def test_grad_cleanup(self):
         foo = torch.rand(2)
@@ -12339,7 +12339,7 @@ class TestAllowMutationOnSaved(TestCase):
         with torch.autograd.graph.allow_mutation_on_saved_tensors() as ctx:
             da = fn(a)
 
-        self.assertTrue(torch.allclose(a * 2, da))
+        torch.testing.assert_close(a * 2, da)
         self.assertClonedLenEqual(ctx, 0)
 
     def test_views(self):
@@ -12363,7 +12363,7 @@ class TestAllowMutationOnSaved(TestCase):
             da = fn(a)
 
         self.assertClonedLenEqual(ctx, 0)
-        self.assertTrue(torch.allclose(a * 2, da))
+        torch.testing.assert_close(a * 2, da)
 
     def test_save_base_and_modify_view(self):
         with torch.autograd.graph.allow_mutation_on_saved_tensors() as ctx:
@@ -12378,7 +12378,7 @@ class TestAllowMutationOnSaved(TestCase):
             self.assertClonedLenEqual(ctx, 0)
 
         self.assertClonedLenEqual(ctx, 0)
-        self.assertTrue(torch.allclose(a * 2, a.grad))
+        torch.testing.assert_close(a * 2, a.grad)
 
     def test_save_view_modify_base(self):
         with torch.autograd.graph.allow_mutation_on_saved_tensors() as ctx:
@@ -12388,7 +12388,7 @@ class TestAllowMutationOnSaved(TestCase):
             out = (c**2).sum()
             b *= 2
             out.backward()
-            self.assertTrue(torch.allclose(a * 2, a.grad))
+            torch.testing.assert_close(a * 2, a.grad)
 
     def test_double_backward(self):
         with torch.autograd.graph.allow_mutation_on_saved_tensors() as ctx:
@@ -12400,7 +12400,7 @@ class TestAllowMutationOnSaved(TestCase):
             (da,) = torch.autograd.grad(out, a, create_graph=True)
             (d2a,) = torch.autograd.grad(da.sum(), a)
 
-        self.assertTrue(torch.allclose(torch.ones_like(a) * 2, d2a))
+        torch.testing.assert_close(torch.ones_like(a) * 2, d2a)
         self.assertClonedLenEqual(ctx, 0)
 
     def test_saved_but_not_anymore(self):
@@ -13441,7 +13441,7 @@ class TestNestedCheckpoint(TestCase):
 
                     for actual_fn in actual_fns:
                         actual = actual_fn(x)
-                        self.assertTrue(torch.allclose(expected, actual))
+                        torch.testing.assert_close(expected, actual)
                         self.check_graph_dies(actual_fn)
 
     @parametrize("early_stop", [True, False])
@@ -13464,10 +13464,10 @@ class TestNestedCheckpoint(TestCase):
             a = torch.randn(3, 3, requires_grad=True)
             expected = grad(sum(grad(sum(h))))(a)
             actual = grad(sum(grad(sum(c(hc)))))(a)
-            self.assertTrue(torch.allclose(expected, actual))
+            torch.testing.assert_close(expected, actual)
 
             actual = grad(sum(c(grad(sum(c(hc))))))(a)
-            self.assertTrue(torch.allclose(expected, actual))
+            torch.testing.assert_close(expected, actual)
 
             self.check_graph_dies(grad(c(hc)))
             self.check_graph_dies(grad(sum(grad(sum(c(hc))))))
@@ -13492,7 +13492,7 @@ class TestNestedCheckpoint(TestCase):
         out, _unused1, _unused2 = fn(k, a, b, f)
         expected_grads = torch.autograd.grad(out, (a, b))
         for actual, expected in zip(actual_grads, expected_grads):
-            self.assertTrue(torch.allclose(actual, expected))
+            torch.testing.assert_close(actual, expected)
 
     @parametrize("early_stop", [True, False])
     def test_nested_checkpoint_kwargs(self, early_stop):
@@ -13512,7 +13512,7 @@ class TestNestedCheckpoint(TestCase):
             out = fn(a, blah=b)
             expected_grads = torch.autograd.grad(out, (a, b))
             for actual, expected in zip(actual_grads, expected_grads):
-                self.assertTrue(torch.allclose(actual, expected))
+                torch.testing.assert_close(actual, expected)
 
     @parametrize("early_stop", [True, False])
     def test_nested_checkpoint_same_graph(self, early_stop):

@@ -3617,7 +3617,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         opt_fn = torch.compile(indirect, backend=cnts)
         result1, result2 = opt_fn()
         self.assertAlmostEqual(cell1 + 1, result1)
-        self.assertTrue(torch.allclose(cell2 + 3, result2))
+        torch.testing.assert_close(cell2 + 3, result2)
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 1)
 
@@ -3647,7 +3647,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         for i in range(1, 4):
             result1, result2, _ = opt_fn()
             self.assertAlmostEqual(orig1 + 1 * i, result1)
-            self.assertTrue(torch.allclose(orig2 + 10 * i, result2))
+            torch.testing.assert_close(orig2 + 10 * i, result2)
             if i == 1:
                 # No automatic dynamic
                 self.assertEqual(cnts.frame_count, 1)
@@ -3727,8 +3727,8 @@ utils_device.CURRENT_DEVICE == None""".split(
         actual1 = opt_mod(torch.tensor(False), inp)
         exp2 = mod(torch.tensor(True), inp)
         actual2 = opt_mod(torch.tensor(True), inp)
-        self.assertTrue(torch.allclose(exp1, actual1))
-        self.assertTrue(torch.allclose(exp2, actual2))
+        torch.testing.assert_close(exp1, actual1)
+        torch.testing.assert_close(exp2, actual2)
 
     def test_closure_write_across_functions(self):
         z = 1
@@ -3774,7 +3774,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             return t + 1, x, res
 
         res = root(torch.ones(1))
-        self.assertTrue(torch.allclose(torch.ones(1) + 1, res[0]))
+        torch.testing.assert_close(torch.ones(1) + 1, res[0])
         self.assertEqual(0, res[1])
         self.assertEqual(10, res[2])
 
@@ -3793,8 +3793,8 @@ utils_device.CURRENT_DEVICE == None""".split(
             return get_inner()
 
         res, inner = root()
-        self.assertTrue(torch.allclose(x + x, res))
-        self.assertTrue(torch.allclose(inner(), res))
+        torch.testing.assert_close(x + x, res)
+        torch.testing.assert_close(inner(), res)
 
     def test_writes_to_cells_across_frames1(self):
         # This regression test was added when Dynamo accidentally had both
@@ -3818,7 +3818,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             return t + 1, res
 
         res = root(torch.zeros(1))
-        self.assertTrue(torch.allclose(res[0], torch.ones(1)))
+        torch.testing.assert_close(res[0], torch.ones(1))
         self.assertEqual(res[1], 1)
         self.assertEqual(x, 1)
 
@@ -3846,7 +3846,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             return t + 1, res
 
         res = root(torch.zeros(1))
-        self.assertTrue(torch.allclose(res[0], torch.ones(1)))
+        torch.testing.assert_close(res[0], torch.ones(1))
         self.assertEqual(res[1], 1)
         self.assertEqual(x, 1)
 
@@ -3877,7 +3877,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         result = fn(torch.ones(1))
         inner_x = get_x()
-        self.assertTrue(torch.allclose(result, torch.ones(1)))
+        torch.testing.assert_close(result, torch.ones(1))
         self.assertEqual(inner_x, 42)
 
     def test_existing_func_that_creates_capturing_nested_func(self):
@@ -3896,7 +3896,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             return res, get_x
 
         res, get_x = root(torch.ones(1))
-        self.assertTrue(torch.allclose(res, torch.ones(1)))
+        torch.testing.assert_close(res, torch.ones(1))
         self.assertEqual(0, get_x())
         x += 1
         self.assertEqual(1, get_x())
@@ -5193,7 +5193,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         input = rand_3_5
         output = loss(input, target)
 
-        self.assertTrue(torch.allclose(dynamo_output, output))
+        torch.testing.assert_close(dynamo_output, output)
 
     def test_cross_entropy_loss_fancy_ctor2(self):
         rand_3_5 = torch.randn(3, 5)
@@ -5208,7 +5208,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         input = rand_3_5
         output = loss(input, target)
 
-        self.assertTrue(torch.allclose(dynamo_output, output))
+        torch.testing.assert_close(dynamo_output, output)
 
     def test_cross_entropy_loss_simple_ctor(self):
         output = None
@@ -5224,7 +5224,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         input = rand_3_5
         output = loss(input, target)
 
-        self.assertTrue(torch.allclose(dynamo_output, output))
+        torch.testing.assert_close(dynamo_output, output)
 
     def test_nn_functional_reduction(self):
         def fn(loss, reduction):
@@ -5241,7 +5241,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         ref = fn(x, y)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x, y)
-        self.assertTrue(torch.allclose(ref, res))
+        torch.testing.assert_close(ref, res)
 
     def test_large_reduction_list(self):
         dtype = torch.float32
@@ -5309,7 +5309,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             k_a, v_a = actual_params[idx]
             k, v = params[idx]
             self.assertEqual(k_a, k)
-            self.assertTrue(torch.allclose(v_a, v))
+            torch.testing.assert_close(v_a, v)
 
         # Prefix
         params = []
@@ -5327,7 +5327,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             k_a, v_a = actual_params[idx]
             k, v = params[idx]
             self.assertEqual(k_a, k)
-            self.assertTrue(torch.allclose(v_a, v))
+            torch.testing.assert_close(v_a, v)
 
     @torch._dynamo.config.patch(guard_nn_modules=True)
     def test_module_complex_iter(self):
@@ -6002,7 +6002,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         def f():
             return C().fn(torch.ones(2, 3))
 
-        self.assertTrue(torch.allclose(f(), torch.tensor([2.0])))
+        torch.testing.assert_close(f(), torch.tensor([2.0]))
 
     def test_object_staticmethod(self):
         class C:
@@ -6014,7 +6014,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         def f():
             return C().fn(torch.ones(2, 3))
 
-        self.assertTrue(torch.allclose(f(), torch.tensor([2.0])))
+        torch.testing.assert_close(f(), torch.tensor([2.0]))
 
     def test_user_function_variable_supports_enum_argument(self):
         class Foo(enum.Enum):
@@ -6034,7 +6034,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         ref = fn(x)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x)
-        self.assertTrue(torch.allclose(ref, res))
+        torch.testing.assert_close(ref, res)
 
     def test_user_function_variable_supports_type_abcmeta_argument(self):
         class Foo(metaclass=abc.ABCMeta):
@@ -6062,7 +6062,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         ref = fn(x)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x)
-        self.assertTrue(torch.allclose(ref, res))
+        torch.testing.assert_close(ref, res)
 
     def test_user_function_variable_supports_function_argument(self):
         # Test user defined function default arguments can be:
@@ -6082,7 +6082,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         ref = fn(x)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x)
-        self.assertTrue(torch.allclose(ref, res))
+        torch.testing.assert_close(ref, res)
 
     def test_typing_variable_isinstance(self):
         def fn(x, m):
@@ -6096,7 +6096,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         ref = fn(x, m)
         opt_fn = torch.compile(fn, backend="eager")
         res = opt_fn(x, m)
-        self.assertTrue(torch.allclose(ref, res))
+        torch.testing.assert_close(ref, res)
 
     @torch._dynamo.config.patch(guard_nn_modules=True)
     def test_repro_graph_breaks_in__get_item_by_idx(self):

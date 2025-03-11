@@ -235,7 +235,7 @@ class TestArgumentCloneAndRestore(TestCase):
         # Record peak memory before that.
         peak_mem_after = torch.cuda.max_memory_allocated()
 
-        self.assertTrue(torch.allclose(gpu_tensor, gpu_tensor_clone))
+        torch.testing.assert_close(gpu_tensor, gpu_tensor_clone)
         self.assertTrue(
             peak_mem_after <= peak_mem_before + self.MEM_TOLERANCE,
             f"{peak_mem_before=} v.s. {peak_mem_after=}",

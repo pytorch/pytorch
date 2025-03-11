@@ -750,7 +750,7 @@ class TestDeserialize(TestCase):
                     if orig.is_meta:
                         self.assertEqual(orig, loaded)
                     else:
-                        self.assertTrue(torch.allclose(orig, loaded))
+                        torch.testing.assert_close(orig, loaded)
                 else:
                     self.assertEqual(orig, loaded)
             self._check_graph_nodes(
@@ -1249,8 +1249,8 @@ class TestDeserialize(TestCase):
         inp = (torch.randn(3),)
         orig_res = ep.module()(*inp)
         res = deserialized_ep.module()(*inp)
-        self.assertTrue(torch.allclose(orig_res[0], res[0]))
-        self.assertTrue(torch.allclose(orig_res[1], res[1]))
+        torch.testing.assert_close(orig_res[0], res[0])
+        torch.testing.assert_close(orig_res[1], res[1])
 
         # The deserialized graph should have deduped getitem calls
         self.assertExpectedInline(
@@ -1379,7 +1379,7 @@ def forward(self, x):
         ep = torch.export.export_for_training(M(), ())
         ep._example_inputs = None
         roundtrip_ep = deserialize(serialize(ep))
-        self.assertTrue(torch.allclose(ep.module()(), roundtrip_ep.module()()))
+        torch.testing.assert_close(ep.module()(), roundtrip_ep.module()())
 
     def test_serialize_float8(self):
         for dtype in [torch.float8_e5m2, torch.float8_e4m3fn]:
@@ -1447,7 +1447,7 @@ class TestSaveLoad(TestCase):
         buffer.seek(0)
         loaded_ep = load(buffer)
 
-        self.assertTrue(torch.allclose(ep.module()(*inp), loaded_ep.module()(*inp)))
+        torch.testing.assert_close(ep.module()(*inp), loaded_ep.module()(*inp))
 
     def test_save_file(self):
         class Foo(torch.nn.Module):
@@ -1464,7 +1464,7 @@ class TestSaveLoad(TestCase):
             f.seek(0)
             loaded_ep = load(f)
 
-        self.assertTrue(torch.allclose(ep.module()(*inp), loaded_ep.module()(*inp)))
+        torch.testing.assert_close(ep.module()(*inp), loaded_ep.module()(*inp))
 
     def test_save_path(self):
         class Foo(torch.nn.Module):
@@ -1481,7 +1481,7 @@ class TestSaveLoad(TestCase):
             save(ep, path)
             loaded_ep = load(path)
 
-        self.assertTrue(torch.allclose(ep.module()(*inp), loaded_ep.module()(*inp)))
+        torch.testing.assert_close(ep.module()(*inp), loaded_ep.module()(*inp))
 
     def test_save_extra(self):
         inp = (torch.tensor([0.1, 0.1]),)
@@ -1500,7 +1500,7 @@ class TestSaveLoad(TestCase):
         extra_files = {"extra.txt": ""}
         loaded_ep = load(buffer, extra_files=extra_files)
 
-        self.assertTrue(torch.allclose(ep.module()(*inp), loaded_ep.module()(*inp)))
+        torch.testing.assert_close(ep.module()(*inp), loaded_ep.module()(*inp))
         self.assertEqual(extra_files["extra.txt"], "moo")
 
     def test_version_error(self):
@@ -1543,7 +1543,7 @@ class TestSaveLoad(TestCase):
         loaded_ep = load(buffer)
 
         inp = (torch.tensor(1),)
-        self.assertTrue(torch.allclose(ep.module()(*inp), loaded_ep.module()(*inp)))
+        torch.testing.assert_close(ep.module()(*inp), loaded_ep.module()(*inp))
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")

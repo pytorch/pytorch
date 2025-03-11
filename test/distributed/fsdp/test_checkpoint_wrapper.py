@@ -43,7 +43,7 @@ class CheckpointWrapperTest(TestCase):
         lin_new.load_state_dict(state_dict)
         for p1, p2 in zip(lin.parameters(), lin_new.parameters()):
             self.assertEqual(p1, p2)
-            self.assertTrue(torch.allclose(p1, p2))
+            torch.testing.assert_close(p1, p2)
 
         # Load non-checkpoint wrapped module into checkpoint wrapped one
         # Make params different

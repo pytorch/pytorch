@@ -84,7 +84,7 @@ class TestBits(TestCase):
         t = torch.zeros(20, dtype=torch.int16).view(torch.bits16)
         s = Int16Tensor(t)
         s = s + 1 - 1
-        self.assertTrue(torch.allclose(s, torch.zeros(20, dtype=torch.bits16)))
+        torch.testing.assert_close(s, torch.zeros(20, dtype=torch.bits16))
 
 instantiate_device_type_tests(TestBits, globals())
 

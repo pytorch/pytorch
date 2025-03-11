@@ -195,7 +195,7 @@ class RingAttentionTest(DTensorTestBase):
                 if backend == SDPBackend.EFFICIENT_ATTENTION
                 else 1e-3 * self.world_size
             )
-            self.assertTrue(torch.allclose(out, cp_out, atol=atol))
+            torch.testing.assert_close(out, cp_out, atol=atol)
 
             if not test_forward_only:
                 cp_dq, cp_dk, cp_dv = context_parallel_unshard(
@@ -208,9 +208,9 @@ class RingAttentionTest(DTensorTestBase):
                     if backend == SDPBackend.EFFICIENT_ATTENTION
                     else 8e-3 * self.world_size
                 )
-                self.assertTrue(torch.allclose(q.grad, cp_dq, atol=atol))
-                self.assertTrue(torch.allclose(k.grad, cp_dk, atol=atol))
-                self.assertTrue(torch.allclose(v.grad, cp_dv, atol=atol))
+                torch.testing.assert_close(q.grad, cp_dq, atol=atol)
+                torch.testing.assert_close(k.grad, cp_dk, atol=atol)
+                torch.testing.assert_close(v.grad, cp_dv, atol=atol)
 
                 cp_q.grad = None
                 cp_k.grad = None

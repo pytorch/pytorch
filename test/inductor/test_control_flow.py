@@ -320,11 +320,11 @@ class CondTests(TestCase):
         opt_model = torch.compile(main_model)
         out1 = main_model(x1, 1)
         opt_out1 = opt_model(x1, 1)
-        self.assertTrue(torch.allclose(out1, opt_out1, atol=1e-5))
+        torch.testing.assert_close(out1, opt_out1, atol=1e-5)
 
         out2 = main_model(x2, 30)
         opt_out2 = opt_model(x2, 30)
-        self.assertTrue(torch.allclose(out2, opt_out2, atol=1e-5))
+        torch.testing.assert_close(out2, opt_out2, atol=1e-5)
 
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])

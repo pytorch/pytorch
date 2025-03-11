@@ -536,7 +536,7 @@ class TestWithNCCL(MultiProcessTestCase):
             in_, w, out_grad
         )
 
-        self.assertTrue(torch.allclose(compile_w_grad, eager_w_grad))
+        torch.testing.assert_close(compile_w_grad, eager_w_grad)
 
 
 def dummy_init_pg() -> None:

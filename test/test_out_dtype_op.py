@@ -33,13 +33,13 @@ class TestOutDtypeOp(TestCase):
         x = torch.randint(-128, 127, (5, 5), dtype=torch.int8)
 
         gm = make_fx(m)(x)
-        self.assertTrue(torch.allclose(m(x), gm(x)))
+        torch.testing.assert_close(m(x), gm(x))
 
         gm = make_fx(torch.func.functionalize(M(weight)))(x)
-        self.assertTrue(torch.allclose(m(x), gm(x)))
+        torch.testing.assert_close(m(x), gm(x))
 
         FileCheck().check("torch.ops.higher_order.out_dtype").check("aten.mm.default").run(gm.code)
-        self.assertTrue(torch.allclose(m(x), gm(x)))
+        torch.testing.assert_close(m(x), gm(x))
         for node in gm.graph.nodes:
             if node.op == "call_function" and node.target is out_dtype:
                 # Result of this node should be int32
@@ -65,7 +65,7 @@ class TestOutDtypeOp(TestCase):
         FileCheck().check("torch.ops.higher_order.out_dtype").check(
             "aten.mm.default"
         ).run(ep.graph_module.code)
-        self.assertTrue(torch.allclose(m(x), ep.module()(x)))
+        torch.testing.assert_close(m(x), ep.module()(x))
         for node in ep.graph.nodes:
             if node.op == "call_function" and node.target is out_dtype:
                 # Result of this node should be int32
@@ -93,7 +93,7 @@ class TestOutDtypeOp(TestCase):
         x_casted = x.to(torch.int32)
         weight_casted = weight.to(torch.int32)
         numerical_res = torch.ops.aten.mm.default(x_casted, weight_casted)
-        self.assertTrue(torch.allclose(numerical_res, gm(x)))
+        torch.testing.assert_close(numerical_res, gm(x))
 
     def test_out_dtype_dynamo(self):
         def f(x, y):
@@ -104,7 +104,7 @@ class TestOutDtypeOp(TestCase):
         inp = (torch.randint(-128, 127, (5, 5), dtype=torch.int8), 3.0)
 
         compiled = torch.compile(f, backend="eager", fullgraph=True)
-        self.assertTrue(torch.allclose(f(*inp), compiled(*inp)))
+        torch.testing.assert_close(f(*inp), compiled(*inp))
 
     def test_out_dtype_mul_scalar_numerical(self):
         def f(x, y):
@@ -116,7 +116,7 @@ class TestOutDtypeOp(TestCase):
 
         gm = make_fx(f)(*inp)
         numerical_res = torch.ops.aten.mul.Scalar(inp[0].to(dtype=torch.int32), 3)
-        self.assertTrue(torch.allclose(numerical_res, gm(*inp)))
+        torch.testing.assert_close(numerical_res, gm(*inp))
 
     def test_out_dtype_non_functional(self):
         class M(torch.nn.Module):
@@ -180,8 +180,8 @@ class TestOutDtypeOp(TestCase):
         test_out = func(x, w)
         func_comp = torch.compile(func, fullgraph=True, mode="max-autotune")
         test_out_c = func_comp(x, w)
-        self.assertTrue(torch.allclose(ref, test_out))
-        self.assertTrue(torch.allclose(ref, test_out_c))
+        torch.testing.assert_close(ref, test_out)
+        torch.testing.assert_close(ref, test_out_c)
 
     @unittest.skipIf(not TEST_CUDA, "cuda only")
     def test_out_dtype_inductor_decomp_trace(self) -> None:

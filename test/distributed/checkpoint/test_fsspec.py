@@ -165,7 +165,7 @@ class TestFSSpec(ShardedTensorTestBase):
 
         sd = {"random": torch.zeros(10)}
         dcp.load(sd, checkpoint_id=self.temp_dir)
-        self.assertTrue(torch.allclose(sd["random"], t2))
+        torch.testing.assert_close(sd["random"], t2)
 
         with self.assertRaisesRegex(
             CheckpointException, ".*Checkpoint already exists.*"

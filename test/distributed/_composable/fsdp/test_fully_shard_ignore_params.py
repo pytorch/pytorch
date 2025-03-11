@@ -213,7 +213,7 @@ class TestFullyShardIgnoreParams(FSDPTest):
     def compare_params(self, name, ref_param, test_param):
         ref_full_tensor = _get_full_tensor(name, ref_param)
         test_full_tensor = _get_full_tensor(name, test_param)
-        self.assertTrue(torch.allclose(ref_full_tensor, test_full_tensor))
+        torch.testing.assert_close(ref_full_tensor, test_full_tensor)
 
     def compare_ref_test_params(self, ref_name_to_param_map, test_name_to_param_map):
         for name in ref_name_to_param_map:
@@ -296,7 +296,7 @@ class TestFullyShardIgnoreParams(FSDPTest):
             test_loss = test_model(test_inp)
 
             # Compare ref and test loss at each step
-            self.assertTrue(torch.allclose(ref_loss, test_loss))
+            torch.testing.assert_close(ref_loss, test_loss)
             ref_loss.backward()
             test_loss.backward()
 

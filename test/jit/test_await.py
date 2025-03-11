@@ -42,8 +42,8 @@ class TestAwait(JitTestCase):
         sm = torch.jit.script(fn)
         out = fn(inp)
         script_out = sm(inp)
-        self.assertTrue(torch.allclose(torch.eye(2) + 102, script_out))
-        self.assertTrue(torch.allclose(script_out, out))
+        torch.testing.assert_close(torch.eye(2) + 102, script_out)
+        torch.testing.assert_close(script_out, out)
 
     def test_nowait(self):
         def fn(x: Tensor):
@@ -57,8 +57,8 @@ class TestAwait(JitTestCase):
         sm = torch.jit.script(fn)
         out = fn(inp)
         script_out = sm(inp)
-        self.assertTrue(torch.allclose(torch.eye(2) + 13, script_out))
-        self.assertTrue(torch.allclose(script_out, out))
+        torch.testing.assert_close(torch.eye(2) + 13, script_out)
+        torch.testing.assert_close(script_out, out)
 
     def test_nowait_class(self):
         class C:
@@ -81,8 +81,8 @@ class TestAwait(JitTestCase):
         sm = torch.jit.script(fn)
         out = fn(inp)
         script_out = sm(inp)
-        self.assertTrue(torch.allclose(torch.eye(2), script_out))
-        self.assertTrue(torch.allclose(script_out, out))
+        torch.testing.assert_close(torch.eye(2), script_out)
+        torch.testing.assert_close(script_out, out)
 
     def test_await_class_arg(self):
         class C:
@@ -110,8 +110,8 @@ class TestAwait(JitTestCase):
         sm = torch.jit.script(fn)
         out = fn(inp)
         script_out = sm(inp)
-        self.assertTrue(torch.allclose(torch.eye(2), script_out))
-        self.assertTrue(torch.allclose(script_out, out))
+        torch.testing.assert_close(torch.eye(2), script_out)
+        torch.testing.assert_close(script_out, out)
 
     def test_awaitable_to_await(self):
         class C:
@@ -139,8 +139,8 @@ class TestAwait(JitTestCase):
         sm = torch.jit.script(fn)
         out = fn(inp)
         script_out = sm(inp)
-        self.assertTrue(torch.allclose(torch.eye(2) + 2 * torch.ones(2), script_out))
-        self.assertTrue(torch.allclose(script_out, out))
+        torch.testing.assert_close(torch.eye(2) + 2 * torch.ones(2), script_out)
+        torch.testing.assert_close(script_out, out)
 
     def test_await_class_return(self):
         class C:
@@ -171,8 +171,8 @@ class TestAwait(JitTestCase):
         sm = torch.jit.script(fn)
         out = fn(inp)
         script_out = sm(inp)
-        self.assertTrue(torch.allclose(torch.eye(2) + 6 * torch.ones(2), script_out))
-        self.assertTrue(torch.allclose(script_out, out))
+        torch.testing.assert_close(torch.eye(2) + 6 * torch.ones(2), script_out)
+        torch.testing.assert_close(script_out, out)
         self.assertGraphContainsExactly(
             sm.graph, kind="prim::awaitable_wait", num_kind_nodes=1
         )
@@ -209,8 +209,8 @@ class TestAwait(JitTestCase):
         sm = torch.jit.script(fn)
         out = fn(inp)
         script_out = sm(inp)
-        self.assertTrue(torch.allclose(torch.eye(2) + 7 * torch.ones(2), script_out))
-        self.assertTrue(torch.allclose(script_out, out))
+        torch.testing.assert_close(torch.eye(2) + 7 * torch.ones(2), script_out)
+        torch.testing.assert_close(script_out, out)
         self.assertGraphContainsExactly(
             sm.graph, kind="prim::awaitable_wait", num_kind_nodes=2
         )
@@ -241,8 +241,8 @@ class TestAwait(JitTestCase):
         sm = torch.jit.script(main)
         out = main(inp)
         script_out = sm(inp)
-        self.assertTrue(torch.allclose(6 * torch.eye(2), script_out))
-        self.assertTrue(torch.allclose(script_out, out))
+        torch.testing.assert_close(6 * torch.eye(2), script_out)
+        torch.testing.assert_close(script_out, out)
 
     def test_eager_await_non_scriptable(self):
         # Tree type can not be compiled (Recursive type)
@@ -279,7 +279,7 @@ class TestAwait(JitTestCase):
         self.assertTrue(
             torch.allclose(2 * torch.eye(2) + 2 * torch.ones(2), script_out)
         )
-        self.assertTrue(torch.allclose(script_out, out))
+        torch.testing.assert_close(script_out, out)
 
     def test_await_eager_lazy(self):
         def delayed(x: Tensor) -> Tensor:
@@ -309,7 +309,7 @@ class TestAwait(JitTestCase):
         self.assertTrue(
             torch.allclose(2 * torch.eye(2) + 2 * torch.ones(2), script_out)
         )
-        self.assertTrue(torch.allclose(script_out, out))
+        torch.testing.assert_close(script_out, out)
 
     def test_jit_trace(self):
         def gap(x: Tensor):
@@ -349,15 +349,15 @@ class TestAwait(JitTestCase):
         out = main(inp)
         script_out = sm(inp)
         expected = 4.8415 * torch.eye(2)
-        self.assertTrue(torch.allclose(expected, script_out))
-        self.assertTrue(torch.allclose(script_out, out))
+        torch.testing.assert_close(expected, script_out)
+        torch.testing.assert_close(script_out, out)
 
         iofile = io.BytesIO()
         torch.jit.save(sm, iofile)
         iofile.seek(0)
         sm = torch.jit.load(iofile)
         script_out_load = sm(inp)
-        self.assertTrue(torch.allclose(expected, script_out_load))
+        torch.testing.assert_close(expected, script_out_load)
 
     def test_await_func_arg(self):
         def gap(x: Tensor):
@@ -381,12 +381,12 @@ class TestAwait(JitTestCase):
         out = main(inp)
         script_out = sm(inp)
         expected = -2 * torch.eye(2)
-        self.assertTrue(torch.allclose(expected, script_out))
-        self.assertTrue(torch.allclose(script_out, out))
+        torch.testing.assert_close(expected, script_out)
+        torch.testing.assert_close(script_out, out)
 
         iofile = io.BytesIO()
         torch.jit.save(sm, iofile)
         iofile.seek(0)
         sm = torch.jit.load(iofile)
         script_out_load = sm(inp)
-        self.assertTrue(torch.allclose(expected, script_out_load))
+        torch.testing.assert_close(expected, script_out_load)

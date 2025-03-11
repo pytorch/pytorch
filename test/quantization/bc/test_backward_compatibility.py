@@ -277,7 +277,7 @@ class TestSerialization(TestCase):
             f"get_attrs: expected {expected_get_attrs}, got {get_attrs}",
         )
         output_tensor = mq(input_tensor)
-        self.assertTrue(torch.allclose(output_tensor, expected_output_tensor))
+        torch.testing.assert_close(output_tensor, expected_output_tensor)
 
     @override_qengines
     def test_linear(self):

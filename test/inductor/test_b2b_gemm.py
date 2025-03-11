@@ -45,7 +45,7 @@ class B2BGEMMTest(TestCase):
         B = torch.randn((32, 256), device=GPU_TYPE, dtype=torch.float16)
         C = torch.randn((256, 32), device=GPU_TYPE, dtype=torch.float16)
         res, (code,) = run_and_get_code(f_opt, A, B, C)
-        self.assertTrue(torch.allclose(f_32(A, B, C), res, atol=0.1, rtol=0.01))
+        torch.testing.assert_close(f_32(A, B, C), res, atol=0.1, rtol=0.01)
         self.assertTrue("B2B_GEMM_LEFT_TRITON_ENTRANCE" in code)
 
     @torch._dynamo.config.patch(recompile_limit=32)
@@ -71,7 +71,7 @@ class B2BGEMMTest(TestCase):
         B = torch.randn((256, 32), device=GPU_TYPE, dtype=torch.float16)
         C = torch.randn((32, 256), device=GPU_TYPE, dtype=torch.float16)
         res, (code,) = run_and_get_code(f_opt, A, B, C)
-        self.assertTrue(torch.allclose(f_32(A, B, C), res, atol=0.1, rtol=0.01))
+        torch.testing.assert_close(f_32(A, B, C), res, atol=0.1, rtol=0.01)
         self.assertTrue("B2B_GEMM_RIGHT_TRITON_ENTRANCE" in code)
 
     @torch._dynamo.config.patch(recompile_limit=32)
@@ -96,7 +96,7 @@ class B2BGEMMTest(TestCase):
         B = torch.randn((32, 256), device=GPU_TYPE, dtype=torch.float16)
         C = torch.randn((256, 32), device=GPU_TYPE, dtype=torch.float16)
         res, (code,) = run_and_get_code(f_opt, A, B, C)
-        self.assertTrue(torch.allclose(f_32(A, B, C), res, atol=0.1, rtol=0.01))
+        torch.testing.assert_close(f_32(A, B, C), res, atol=0.1, rtol=0.01)
         self.assertTrue("B2B_GEMM_LEFT_TRITON_ENTRANCE" in code)
 
     @torch._dynamo.config.patch(recompile_limit=32)
@@ -121,7 +121,7 @@ class B2BGEMMTest(TestCase):
         B = torch.randn((256, 32), device=GPU_TYPE, dtype=torch.float16)
         C = torch.randn((32, 256), device=GPU_TYPE, dtype=torch.float16)
         res, (code,) = run_and_get_code(f_opt, A, B, C)
-        self.assertTrue(torch.allclose(f_32(A, B, C), res, atol=0.1, rtol=0.01))
+        torch.testing.assert_close(f_32(A, B, C), res, atol=0.1, rtol=0.01)
         self.assertTrue("B2B_GEMM_RIGHT_TRITON_ENTRANCE" in code)
 
     @torch._dynamo.config.patch(recompile_limit=32)
@@ -141,7 +141,7 @@ class B2BGEMMTest(TestCase):
         B = torch.randn((32, 256), device=GPU_TYPE, dtype=torch.float16)
         C = torch.randn((256, 32), device=GPU_TYPE, dtype=torch.float16)
         res, (code,) = run_and_get_code(f_opt, A, B, C)
-        self.assertTrue(torch.allclose(f(A, B, C), res, atol=0.1, rtol=0.01))
+        torch.testing.assert_close(f(A, B, C), res, atol=0.1, rtol=0.01)
         self.assertTrue("B2B_GEMM_LEFT_TRITON_ENTRANCE" not in code)
         self.assertTrue("B2B_GEMM_RIGHT_TRITON_ENTRANCE" not in code)
 
@@ -160,7 +160,7 @@ class B2BGEMMTest(TestCase):
         B = torch.randn((100, 100), device=GPU_TYPE, dtype=torch.float16)
         C = torch.randn((100, 100), device=GPU_TYPE, dtype=torch.float16)
         res, (code,) = run_and_get_code(f_opt, A, B, C)
-        self.assertTrue(torch.allclose(f(A, B, C), res, atol=0.1, rtol=0.01))
+        torch.testing.assert_close(f(A, B, C), res, atol=0.1, rtol=0.01)
         self.assertTrue("B2B_GEMM_LEFT_TRITON_ENTRANCE" not in code)
         self.assertTrue("B2B_GEMM_RIGHT_TRITON_ENTRANCE" not in code)
 

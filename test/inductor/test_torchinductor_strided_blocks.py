@@ -79,7 +79,7 @@ def run_and_compare(
     for ref, actual in zip(ref_tensors, actual_tensors):
         # Don't clobber the default tolerance values
         tol = {t: v for t, v in {"rtol": rtol, "atol": atol}.items() if v is not None}
-        self.assertTrue(torch.allclose(ref, actual, **tol))
+        torch.testing.assert_close(ref, actual, **tol)
 
     def count_code(substr: str, expected: Optional[int]):
         count = sum(prog.count(substr) for prog in code)

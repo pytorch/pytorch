@@ -29,7 +29,7 @@ class TestExperiment(TestCase):
             traced_module_by_torchscript, inps
         )
 
-        self.assertTrue(torch.allclose(exported_module(*inps), model_to_trace(*inps)))
+        torch.testing.assert_close(exported_module(*inps), model_to_trace(*inps))
 
     def test_torchscript_module_export_single_input(self):
         class M(torch.nn.Module):
@@ -44,7 +44,7 @@ class TestExperiment(TestCase):
             traced_module_by_torchscript, inps
         )
 
-        self.assertTrue(torch.allclose(exported_module(inps), model_to_trace(inps)))
+        torch.testing.assert_close(exported_module(inps), model_to_trace(inps))
 
     def test_torchscript_module_export_various_inputs_with_annotated_input_names(self):
         def _check_equality_and_annotations(m_func, inps):

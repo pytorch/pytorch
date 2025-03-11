@@ -537,7 +537,7 @@ class TestExport(TestCase):
         ep = export(model, (torch.randint(0, 8, (5,), dtype=torch.int64),))
         print(ep)
         inp = torch.randint(0, 8, (5,), dtype=torch.int64)
-        self.assertTrue(torch.allclose(ep.module()(inp), M()(inp)))
+        torch.testing.assert_close(ep.module()(inp), M()(inp))
 
     def test_symint_output(self):
         class Foo(torch.nn.Module):
@@ -990,14 +990,14 @@ graph():
             },
         )
         ep_output = ep.module()(seq_embeddings, mask, exp)
-        self.assertTrue(torch.allclose(output, ep_output))
+        torch.testing.assert_close(output, ep_output)
 
         seq_embeddings = torch.randn(6, 5)
         mask = torch.ones(6, 5, dtype=torch.bool)
         exp = torch.randn(30)
         output = m(seq_embeddings, mask, exp)
         ep_output = ep.module()(seq_embeddings, mask, exp)
-        self.assertTrue(torch.allclose(output, ep_output))
+        torch.testing.assert_close(output, ep_output)
 
     def test_setgrad_lifted_tensor(self):
         class M(torch.nn.Module):
@@ -1469,7 +1469,7 @@ graph():
         model = TestModule()
         x = torch.randn(20, 10)
         ep_model = export(model, (x,), strict=False).module()
-        self.assertTrue(torch.allclose(model(x), ep_model(x)))
+        torch.testing.assert_close(model(x), ep_model(x))
 
     def test_output_node_name(self):
         class TestModule(torch.nn.Module):
@@ -1484,7 +1484,7 @@ graph():
         x = torch.randn(20, 10)
         ep_model = export(model, (x,), strict=False).module()
         self.assertEqual(list(ep_model.graph.nodes)[-1].name, "output")
-        self.assertTrue(torch.allclose(model(x), ep_model(x)))
+        torch.testing.assert_close(model(x), ep_model(x))
 
     def test_real_tensor_size_mismatch(self):
         from torch._subclasses.fake_tensor import MetadataMismatchError
@@ -1975,7 +1975,7 @@ graph():
         ref_x = torch.randn(3, 4)
         ref_out = m(ref_x)
         ep_training = torch.export.export_for_training(m, (ref_x,), strict=False)
-        self.assertTrue(torch.allclose(ep_training.module()(ref_x), ref_out))
+        torch.testing.assert_close(ep_training.module()(ref_x), ref_out)
         self.assertExpectedInline(
             str(ep_training.graph).strip(),
             """\
@@ -1994,7 +1994,7 @@ graph():
     return (add_2,)""",
         )
         ep = export(m, (ref_x,))
-        self.assertTrue(torch.allclose(ep.module()(ref_x), ref_out))
+        torch.testing.assert_close(ep.module()(ref_x), ref_out)
 
     @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
     @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
@@ -2050,7 +2050,7 @@ graph():
     return (add_2,)""",
         )
         ep = export(m, (ref_x,))
-        self.assertTrue(torch.allclose(ep.module()(ref_x), ref_out))
+        torch.testing.assert_close(ep.module()(ref_x), ref_out)
 
     @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
     @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
@@ -2090,7 +2090,7 @@ graph():
     return (add_2,)""",
         )
         ep = export(m, (ref_x,))
-        self.assertTrue(torch.allclose(ep.module()(ref_x), ref_out))
+        torch.testing.assert_close(ep.module()(ref_x), ref_out)
 
     @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
     @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
@@ -2130,7 +2130,7 @@ graph():
     return (add_2,)""",
         )
         ep = export(m, (ref_x,))
-        self.assertTrue(torch.allclose(ep.module()(ref_x), ref_out))
+        torch.testing.assert_close(ep.module()(ref_x), ref_out)
 
     @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
     @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
@@ -2174,7 +2174,7 @@ graph():
     return (add_3,)""",
         )
         ep = export(m, (ref_x,))
-        self.assertTrue(torch.allclose(ep.module()(ref_x), ref_out))
+        torch.testing.assert_close(ep.module()(ref_x), ref_out)
 
     @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
     @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
@@ -2213,7 +2213,7 @@ graph():
     return (add_2,)""",
         )
         ep = export(m, (ref_x,))
-        self.assertTrue(torch.allclose(ep.module()(ref_x), ref_out))
+        torch.testing.assert_close(ep.module()(ref_x), ref_out)
 
     def test_real_tensor_errors_on_aliasing_custom_op(self):
         @torch.library.custom_op("export::foo_alias", mutates_args={})
@@ -2628,7 +2628,7 @@ def forward(self, p_linear_weight, p_linear_bias, x):
         mod = ModWith2Bars()
         inputs = (torch.randn(4),)
         ep = export(mod, inputs)
-        self.assertTrue(torch.allclose(ep.module()(*inputs), mod(*inputs)))
+        torch.testing.assert_close(ep.module()(*inputs), mod(*inputs))
 
     def test_derived_dim_basic(self):
         class Foo(torch.nn.Module):
@@ -3275,7 +3275,7 @@ def forward(self, x):
 
         ep = export(M(), (torch.ones(3, 3),))
         inp = torch.randn(3, 3)
-        self.assertTrue(torch.allclose(ep.module()(inp)[0], inp + 1))
+        torch.testing.assert_close(ep.module()(inp)[0], inp + 1)
 
     def test_derived_dim_out_of_order_simplified(self):
         _dimz = torch.export.Dim("_dimz", min=6, max=8)
@@ -4562,9 +4562,9 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ep = export(M(), inputs)
         orig_res = M()(*inputs)
         ep_res = ep.module()(*inputs)
-        self.assertTrue(torch.allclose(orig_res[0], ep_res[0]))
-        self.assertTrue(torch.allclose(orig_res[1], ep_res[1]))
-        self.assertTrue(torch.allclose(orig_res[2], ep_res[2]))
+        torch.testing.assert_close(orig_res[0], ep_res[0])
+        torch.testing.assert_close(orig_res[1], ep_res[1])
+        torch.testing.assert_close(orig_res[2], ep_res[2])
 
     def test_sequential_slicing(self):
         # See https://github.com/pytorch/pytorch/issues/137455
@@ -4600,7 +4600,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         inp = (torch.randn(4, 4),)
         for mod in [TestModule1(), TestModule2()]:
             epm = export(mod, inp).module()
-            self.assertTrue(torch.allclose(epm(*inp), mod(*inp)))
+            torch.testing.assert_close(epm(*inp), mod(*inp))
 
     def test_unflatten_isinstance(self):
         class N(torch.nn.Module):
@@ -4626,7 +4626,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             preserve_module_call_signature=tuple(types.keys()),
         )
         ufm = torch.export.unflatten(ep)
-        self.assertTrue(torch.allclose(ufm(x), x + 5))
+        torch.testing.assert_close(ufm(x), x + 5)
         for fqn, mod in ufm.named_modules(remove_duplicate=False):
             if cls := types.get(fqn):
                 ty = f"{cls.__module__}.{cls.__qualname__}"
@@ -4666,15 +4666,15 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         )
         orig_res = M2()(*inputs)
         ep_res = ep.module()(*inputs)
-        self.assertTrue(torch.allclose(orig_res[0], ep_res[0]))
-        self.assertTrue(torch.allclose(orig_res[1], ep_res[1]))
-        self.assertTrue(torch.allclose(orig_res[2], ep_res[2]))
+        torch.testing.assert_close(orig_res[0], ep_res[0])
+        torch.testing.assert_close(orig_res[1], ep_res[1])
+        torch.testing.assert_close(orig_res[2], ep_res[2])
 
         unflattened = torch.export.unflatten(ep)
         ep_res = unflattened(*inputs)
-        self.assertTrue(torch.allclose(orig_res[0], ep_res[0]))
-        self.assertTrue(torch.allclose(orig_res[1], ep_res[1]))
-        self.assertTrue(torch.allclose(orig_res[2], ep_res[2]))
+        torch.testing.assert_close(orig_res[0], ep_res[0])
+        torch.testing.assert_close(orig_res[1], ep_res[1])
+        torch.testing.assert_close(orig_res[2], ep_res[2])
 
     def test_export_func_with_var_keyword_pytree_args(self):
         class Module(torch.nn.Module):
@@ -4807,18 +4807,18 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         m = M()
         rx = torch.randn(5)
 
-        self.assertTrue(torch.allclose(m.t, epm_foo.t))
-        self.assertTrue(torch.allclose(m.t, epm_bar.t))
+        torch.testing.assert_close(m.t, epm_foo.t)
+        torch.testing.assert_close(m.t, epm_bar.t)
 
         # ...foo
-        self.assertTrue(torch.allclose(epm_foo(rx), m.foo(rx)))
-        self.assertTrue(torch.allclose(m.t, epm_foo.t))
-        self.assertTrue(torch.allclose(m.t, epm_bar.t))
+        torch.testing.assert_close(epm_foo(rx), m.foo(rx))
+        torch.testing.assert_close(m.t, epm_foo.t)
+        torch.testing.assert_close(m.t, epm_bar.t)
 
         # ...bar
-        self.assertTrue(torch.allclose(epm_bar(rx), m.bar(rx)))
-        self.assertTrue(torch.allclose(m.t, epm_foo.t))
-        self.assertTrue(torch.allclose(m.t, epm_bar.t))
+        torch.testing.assert_close(epm_bar(rx), m.bar(rx))
+        torch.testing.assert_close(m.t, epm_foo.t)
+        torch.testing.assert_close(m.t, epm_bar.t)
 
     def test_export_api_with_dynamic_shapes(self):
         from torch.export import Dim, dims
@@ -5804,7 +5804,7 @@ def forward(self, x):
             (torch.randint(1, 2, (2, 2)), torch.randint(3, 5, (2, 3))),
         )
         test_inp = (torch.randint(1, 2, (2, 2)), torch.randint(3, 5, (2, 3)))
-        self.assertTrue(torch.allclose(ep.module()(*test_inp), fn(*test_inp)))
+        torch.testing.assert_close(ep.module()(*test_inp), fn(*test_inp))
 
     def test_constrain_size_with_constrain_value(self):
         class Module(torch.nn.Module):
@@ -6088,7 +6088,7 @@ def forward(self, x):
             m_result = m(*inp)
             ep_result = export(m, inp).module()(*inp)
             for m_t, ep_t in zip(m_result, ep_result):
-                self.assertTrue(torch.allclose(m_t, ep_t))
+                torch.testing.assert_close(m_t, ep_t)
 
         test(M())
         test(Wrapper(M().forward))
@@ -6159,10 +6159,10 @@ def forward(self, x):
         export_return_val = stateful_gm(torch.ones(5, 5))
         eager = Foo()
         eager_return_val = eager(torch.ones(5, 5))
-        self.assertTrue(torch.allclose(eager_return_val, export_return_val))
+        torch.testing.assert_close(eager_return_val, export_return_val)
 
         for name, buffer in stateful_gm.named_buffers():
-            self.assertTrue(torch.allclose(torch.ones(1), buffer))
+            torch.testing.assert_close(torch.ones(1), buffer)
 
         changed = stateful_gm.graph.eliminate_dead_code()
         self.assertFalse(changed)
@@ -6171,7 +6171,7 @@ def forward(self, x):
         )
 
         for name, buffer in stateful_gm.named_buffers():
-            self.assertTrue(torch.allclose(torch.tensor(2, dtype=torch.float), buffer))
+            torch.testing.assert_close(torch.tensor(2, dtype=torch.float), buffer)
 
     def test_to_module_with_mutated_buffer_multiple(self):
         class Bar(torch.nn.Module):
@@ -6200,11 +6200,11 @@ def forward(self, x):
         export_return_val = stateful_gm(torch.ones(5, 5))
         eager = Foo()
         eager_return_val = eager(torch.ones(5, 5))
-        self.assertTrue(torch.allclose(eager_return_val, export_return_val))
+        torch.testing.assert_close(eager_return_val, export_return_val)
 
         for name, buffer in stateful_gm.named_buffers():
             if name == "L__self___buf":
-                self.assertTrue(torch.allclose(torch.ones(1), buffer))
+                torch.testing.assert_close(torch.ones(1), buffer)
             if name == "L__self___bar_buf":
                 self.assertTrue(
                     torch.allclose(torch.tensor(4, dtype=torch.float), buffer)
@@ -6296,7 +6296,7 @@ def forward(self, x):
             RuntimeError, "to be equal to trunc, but got floor"
         ):
             _ = exported.module()(torch.randn(4, 4), torch.randn(4), "floor")
-        self.assertTrue(torch.allclose(exported.module()(*inps), foo(*inps)))
+        torch.testing.assert_close(exported.module()(*inps), foo(*inps))
 
     def test_redundant_assert_max_upper_bound(self):
         class M(torch.nn.Module):
@@ -6340,11 +6340,11 @@ def forward(self, x):
         export_return_val = stateful_gm(torch.ones(5, 5))
         eager = Foo()
         eager_return_val = eager(torch.ones(5, 5))
-        self.assertTrue(torch.allclose(eager_return_val, export_return_val))
+        torch.testing.assert_close(eager_return_val, export_return_val)
 
         for name, buffer in stateful_gm.named_buffers():
             if name == "L__self___buf":
-                self.assertTrue(torch.allclose(torch.ones(1), buffer))
+                torch.testing.assert_close(torch.ones(1), buffer)
             if name == "L__self___bar_buf":
                 self.assertTrue(
                     torch.allclose(torch.tensor(4, dtype=torch.float), buffer)
@@ -6392,7 +6392,7 @@ def forward(self, x):
         exported = torch.export.export(Foo(), (inp,))
         reexported = torch.export.export(exported.module(), (inp,))
 
-        self.assertTrue(torch.allclose(Foo()(inp), reexported.module()(inp)))
+        torch.testing.assert_close(Foo()(inp), reexported.module()(inp))
 
         dim0_x = torch.export.Dim("dim0_x")
         exported = torch.export.export(Foo(), (inp,), dynamic_shapes=({0: dim0_x},))
@@ -6502,7 +6502,7 @@ def forward(self, b_a_buffer, x):
         ep = torch.export.export(M(), (inp,))
         inp = torch.randn(2, 3)
         epm = ep.module()
-        self.assertTrue(torch.allclose(epm(inp), M()(inp)))
+        torch.testing.assert_close(epm(inp), M()(inp))
 
         for gm in epm.named_modules():
             if not isinstance(gm, torch.fx.GraphModule):
@@ -6528,7 +6528,7 @@ def forward(self, b_a_buffer, x):
                 return associative_scan(self.combine_fn, x, 2)
 
         ep = export(Foo(), (xs,), dynamic_shapes={"x": {1: dim1}})
-        self.assertTrue(torch.allclose(ep.module()(xs), Foo()(xs)))
+        torch.testing.assert_close(ep.module()(xs), Foo()(xs))
 
     @requires_cuda
     @testing.expectedFailureCppRuntime
@@ -6547,7 +6547,7 @@ def forward(self, b_a_buffer, x):
                 return associative_scan(self.combine_fn, x, 1)
 
         ep = export(Foo(), (xs,), dynamic_shapes={"x": {1: dim1}})
-        self.assertTrue(torch.allclose(ep.module()(xs), Foo()(xs)))
+        torch.testing.assert_close(ep.module()(xs), Foo()(xs))
 
     # TODO: need combine_mode='pointwise' here in order to avoid,
     # but 'pointwise does not support lifted arguments yet supported in inductor
@@ -6570,7 +6570,7 @@ def forward(self, b_a_buffer, x):
         inp = torch.ones(3, 10, 2, device=torch.device("cuda"))
         ep = export(M(), (inp,))
         epm = ep.module()
-        self.assertTrue(torch.allclose(epm(inp), M()(inp)))
+        torch.testing.assert_close(epm(inp), M()(inp))
 
         for gm in epm.named_modules():
             if not isinstance(gm, torch.fx.GraphModule):
@@ -6605,7 +6605,7 @@ def forward(self, b_a_buffer, x):
         ep = torch.export.export(M(), example_inputs)
         example_inputs = (torch.randn(3, 2), torch.tensor(3))
         epm = ep.module()
-        self.assertTrue(torch.allclose(epm(*example_inputs), M()(*example_inputs)))
+        torch.testing.assert_close(epm(*example_inputs), M()(*example_inputs))
 
         for gm in epm.named_modules():
             if not isinstance(gm, torch.fx.GraphModule):
@@ -6679,11 +6679,11 @@ def forward(self, b_a_buffer, x):
         self.assertEqual(len(ep.constants), 3)
 
         inp = (torch.tensor(5),)
-        self.assertTrue(torch.allclose(ep.module()(*inp), Foo()(*inp)))
+        torch.testing.assert_close(ep.module()(*inp), Foo()(*inp))
 
         transform = ep.run_decompositions()
         self.assertEqual(len(ep.graph_signature.input_specs), 4)
-        self.assertTrue(torch.allclose(ep.module()(*inp), transform.module()(*inp)))
+        torch.testing.assert_close(ep.module()(*inp), transform.module()(*inp))
 
         class Boo(torch.nn.Module):
             def __init__(self) -> None:
@@ -6701,11 +6701,11 @@ def forward(self, b_a_buffer, x):
         self.assertEqual(len(ep.constants), 3)
 
         inp = (torch.tensor(True),)
-        self.assertTrue(torch.allclose(ep.module()(*inp), Boo()(*inp)))
+        torch.testing.assert_close(ep.module()(*inp), Boo()(*inp))
 
         transform = ep.run_decompositions()
         self.assertEqual(len(ep.graph_signature.input_specs), 4)
-        self.assertTrue(torch.allclose(ep.module()(*inp), transform.module()(*inp)))
+        torch.testing.assert_close(ep.module()(*inp), transform.module()(*inp))
 
     def test_tensor_attribute_zero_args(self):
         class Foo(torch.nn.Module):
@@ -6791,7 +6791,7 @@ def forward(self, b_a_buffer, x):
         ep = export(m, inp)
         state_dict = ep.state_dict
 
-        self.assertTrue(torch.allclose(ep.module()(*inp), m(*inp)))
+        torch.testing.assert_close(ep.module()(*inp), m(*inp))
 
         core_aten_ep = ep.run_decompositions()
         FileCheck().check_count("torch.ops.aten.permute.default", 1, exactly=True).run(
@@ -6800,7 +6800,7 @@ def forward(self, b_a_buffer, x):
         FileCheck().check_count("torch.ops.aten.t.default", 0, exactly=True).run(
             core_aten_ep.graph_module.code
         )
-        self.assertTrue(torch.allclose(core_aten_ep.module()(*inp), m(*inp)))
+        torch.testing.assert_close(core_aten_ep.module()(*inp), m(*inp))
         self.assertEqual(id(state_dict), id(ep.state_dict))
 
     @unittest.skipIf(IS_FBCODE, "We can't customize decomp in fbcode")
@@ -6957,7 +6957,7 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
         FileCheck().check_count("torch.ops.aten.t.default", 0, exactly=True).run(
             core_aten_ep.graph_module.code
         )
-        self.assertTrue(torch.allclose(core_aten_ep.module()(*inp), m(*inp)))
+        torch.testing.assert_close(core_aten_ep.module()(*inp), m(*inp))
 
     def test_nonzero_2(self):
         class Module(torch.nn.Module):
@@ -6967,7 +6967,7 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
         f = Module()
         ep = export(f, (torch.ones(2),))
         inp = torch.randn(2)
-        self.assertTrue(torch.allclose(ep.module()(inp), torch.nonzero(inp)))
+        torch.testing.assert_close(ep.module()(inp), torch.nonzero(inp))
 
     def test_redundant_asserts(self):
         class Foo(torch.nn.Module):
@@ -7114,7 +7114,7 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
 
         inps = (torch.randn(3, 3),)
         ep = export(M2(), inps)
-        self.assertTrue(torch.allclose(ep.module()(*inps), M2()(*inps)))
+        torch.testing.assert_close(ep.module()(*inps), M2()(*inps))
 
         add_nodes = [
             node
@@ -7137,7 +7137,7 @@ graph():
         )
 
         unflattened = unflatten(ep)
-        self.assertTrue(torch.allclose(unflattened(*inps), M2()(*inps)))
+        torch.testing.assert_close(unflattened(*inps), M2()(*inps))
 
     def test_nested_module_with_init_buffer(self):
         class M1(torch.nn.Module):
@@ -7155,7 +7155,7 @@ graph():
 
         inps = (torch.randn(3, 3),)
         ep = export(M2(), inps)
-        self.assertTrue(torch.allclose(ep.module()(*inps), M2()(*inps)))
+        torch.testing.assert_close(ep.module()(*inps), M2()(*inps))
 
         self.assertEqual(len(ep.state_dict), 0)
         self.assertEqual(len(ep.constants), 0)
@@ -7172,7 +7172,7 @@ graph():
         )
 
         unflattened = unflatten(ep)
-        self.assertTrue(torch.allclose(unflattened(*inps), M2()(*inps)))
+        torch.testing.assert_close(unflattened(*inps), M2()(*inps))
 
     def test_nested_module_with_constant_buffer(self):
         class M1(torch.nn.Module):
@@ -7190,7 +7190,7 @@ graph():
 
         inps = (torch.randn(3, 3),)
         ep = export_for_training(M2(), inps).run_decompositions({})
-        self.assertTrue(torch.allclose(ep.module()(*inps), M2()(*inps)))
+        torch.testing.assert_close(ep.module()(*inps), M2()(*inps))
 
         self.assertEqual(len(ep.state_dict), 0)
         self.assertEqual(len(ep.constants), 1)
@@ -7207,7 +7207,7 @@ graph():
         )
 
         unflattened = unflatten(ep)
-        self.assertTrue(torch.allclose(unflattened(*inps), M2()(*inps)))
+        torch.testing.assert_close(unflattened(*inps), M2()(*inps))
 
     def test_nested_module_with_parameter(self):
         class M1(torch.nn.Module):
@@ -7227,7 +7227,7 @@ graph():
         inps = (torch.randn(3, 3),)
         # Strict export segfaults (Issue #128109)
         ep = export_for_training(M2(), inps, strict=False).run_decompositions({})
-        self.assertTrue(torch.allclose(ep.module()(*inps), M2()(*inps)))
+        torch.testing.assert_close(ep.module()(*inps), M2()(*inps))
 
         self.assertEqual(len(ep.state_dict), 0)
         self.assertEqual(len(ep.constants), 1)
@@ -7253,7 +7253,7 @@ graph():
         )
 
         unflattened = unflatten(ep)
-        self.assertTrue(torch.allclose(unflattened(*inps), M2()(*inps)))
+        torch.testing.assert_close(unflattened(*inps), M2()(*inps))
 
     def test_module_dict_key(self):
         class Module(torch.nn.Module):
@@ -7317,7 +7317,7 @@ graph():
         )
 
         test_inp = torch.ones(8, 4)
-        self.assertTrue(torch.allclose(ep.module()(test_inp), Foo().forward(test_inp)))
+        torch.testing.assert_close(ep.module()(test_inp), Foo().forward(test_inp))
 
     def test_runtime_assert_with_size(self):
         class M(torch.nn.Module):
@@ -7333,7 +7333,7 @@ graph():
             dynamic_shapes={"x": None, "y": {0: torch.export.Dim("t")}},
         )
         inp = (torch.tensor(6), torch.randn(13))
-        self.assertTrue(torch.allclose(ep.module()(*inp), M()(*inp)))
+        torch.testing.assert_close(ep.module()(*inp), M()(*inp))
 
     @unittest.skip("Test is only supposed to work with non-strict mode")
     def test_issue_113041(self):
@@ -7781,7 +7781,7 @@ graph():
             normalized_k = k.replace(".", "_")
             self.assertIn(normalized_k, torch_gm.state_dict())
             self.assertEqual(v, torch_gm.state_dict()[normalized_k])
-        self.assertTrue(torch.allclose(torch_gm(test_inp), orig_eager(test_inp)))
+        torch.testing.assert_close(torch_gm(test_inp), orig_eager(test_inp))
 
         pre_autograd_gm = torch.export._trace._export(
             orig_eager, (torch.rand(2, 3),), {}, pre_dispatch=True
@@ -7790,7 +7790,7 @@ graph():
             normalized_k = k.replace(".", "_")
             self.assertIn(k, pre_autograd_gm.state_dict())
             self.assertEqual(v, pre_autograd_gm.state_dict()[k])
-        self.assertTrue(torch.allclose(pre_autograd_gm(test_inp), orig_eager(test_inp)))
+        torch.testing.assert_close(pre_autograd_gm(test_inp), orig_eager(test_inp))
 
         ep = export(orig_eager, (torch.rand(2, 3),), {})
         for k, v in orig_eager.state_dict().items():
@@ -7798,7 +7798,7 @@ graph():
             # program's state dict is able to contain the module information.
             self.assertIn(k, ep.state_dict)
             self.assertEqual(v, ep.state_dict[k])
-        self.assertTrue(torch.allclose(ep.module()(test_inp), orig_eager(test_inp)))
+        torch.testing.assert_close(ep.module()(test_inp), orig_eager(test_inp))
 
     def test_nn_module_stack(self):
         class Leaf(torch.nn.Module):
@@ -7992,8 +7992,8 @@ graph():
         ep = export(n0, inp)
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
-        self.assertTrue(torch.allclose(epm(*inp), eager))
-        self.assertTrue(torch.allclose(ufm(*inp), eager))
+        torch.testing.assert_close(epm(*inp), eager)
+        torch.testing.assert_close(ufm(*inp), eager)
 
     def test_unflatten_random_dag_6(self):
         # dag: {0: [1, 2, 4, 5], 1: [3, 5], 2: [4, 5], 3: [], 4: [5], 5: []}
@@ -8060,8 +8060,8 @@ graph():
         ep = export(n0, inp)
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
-        self.assertTrue(torch.allclose(epm(*inp), eager))
-        self.assertTrue(torch.allclose(ufm(*inp), eager))
+        torch.testing.assert_close(epm(*inp), eager)
+        torch.testing.assert_close(ufm(*inp), eager)
 
     def test_unflatten_random_dag_buf_8(self):
         class N7(torch.nn.Module):
@@ -9195,15 +9195,15 @@ graph():
                 ufm = torch.export.unflatten(ep)
 
                 exported_result = epm(*inp)
-                self.assertTrue(torch.allclose(exported_result, eager_result))
+                torch.testing.assert_close(exported_result, eager_result)
 
                 unflattened_result = ufm(*inp)
-                self.assertTrue(torch.allclose(unflattened_result, eager_result))
+                torch.testing.assert_close(unflattened_result, eager_result)
 
                 for fqn, mod in swap.items():
                     ufm.set_submodule(fqn, mod)
                 unflattened_result = ufm(*inp)
-                self.assertTrue(torch.allclose(unflattened_result, eager_result))
+                torch.testing.assert_close(unflattened_result, eager_result)
 
             if not is_retracebility_test(self._testMethodName):
                 # swapping will not work with retrace
@@ -9246,14 +9246,14 @@ graph():
             ufm = torch.export.unflatten(ep)
 
             exported_result = epm(*inp)
-            self.assertTrue(torch.allclose(exported_result, eager_result))
+            torch.testing.assert_close(exported_result, eager_result)
 
             unflattened_result = ufm(*inp)
-            self.assertTrue(torch.allclose(unflattened_result, eager_result))
+            torch.testing.assert_close(unflattened_result, eager_result)
 
             ufm.set_submodule("n", N())
             unflattened_result = ufm(*inp)
-            self.assertTrue(torch.allclose(unflattened_result, eager_result))
+            torch.testing.assert_close(unflattened_result, eager_result)
 
     def test_unflatten_multiple_graphs_dispatch(self):
         class N(torch.nn.Module):
@@ -9287,10 +9287,10 @@ graph():
             ufm = torch.export.unflatten(ep)
 
             exported_result = epm(*inp)
-            self.assertTrue(torch.allclose(exported_result, eager_result))
+            torch.testing.assert_close(exported_result, eager_result)
 
             unflattened_result = ufm(*inp)
-            self.assertTrue(torch.allclose(unflattened_result, eager_result))
+            torch.testing.assert_close(unflattened_result, eager_result)
 
         if is_training_ir_test(self._testMethodName):
             test(
@@ -9334,16 +9334,16 @@ graph():
             ufm = torch.export.unflatten(ep)
 
             exported_result = epm(*inp)
-            self.assertTrue(torch.allclose(exported_result, eager_result))
+            torch.testing.assert_close(exported_result, eager_result)
 
             unflattened_result = ufm(*inp)
-            self.assertTrue(torch.allclose(unflattened_result, eager_result))
+            torch.testing.assert_close(unflattened_result, eager_result)
 
             if swap:
                 for fqn, mod in swap.items():
                     ufm.set_submodule(fqn, mod)
                 unflattened_result = ufm(*inp)
-                self.assertTrue(torch.allclose(unflattened_result, eager_result))
+                torch.testing.assert_close(unflattened_result, eager_result)
 
         if not is_retracebility_test(self._testMethodName):
             # swapping will not work with retrace
@@ -9391,16 +9391,16 @@ graph():
             ufm = torch.export.unflatten(ep)
 
             exported_result = epm(*inp)
-            self.assertTrue(torch.allclose(exported_result, eager_result))
+            torch.testing.assert_close(exported_result, eager_result)
 
             unflattened_result = ufm(*inp)
-            self.assertTrue(torch.allclose(unflattened_result, eager_result))
+            torch.testing.assert_close(unflattened_result, eager_result)
 
             if swap:
                 for fqn, mod in swap.items():
                     ufm.set_submodule(fqn, mod)
                 unflattened_result = ufm(*inp)
-                self.assertTrue(torch.allclose(unflattened_result, eager_result))
+                torch.testing.assert_close(unflattened_result, eager_result)
 
         if not is_retracebility_test(self._testMethodName):
             # swapping will not work with retrace
@@ -9441,7 +9441,7 @@ graph():
         ep = export(M(), inp)
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
-        self.assertTrue(torch.allclose(ufm(*inp), epm(*inp)))
+        torch.testing.assert_close(ufm(*inp), epm(*inp))
 
     def test_placeholder_update_preserving(self):
         class Child(torch.nn.Module):
@@ -9469,10 +9469,10 @@ graph():
 
         inp = torch.ones(2, 3, dtype=torch.float32)
         ep1_result = ep1.module()(inp)
-        self.assertTrue(torch.allclose(ep1_result, orig_result))
+        torch.testing.assert_close(ep1_result, orig_result)
         inp = torch.ones(2, 3, dtype=torch.float32)
         ep2_result = ep2.module()(inp)
-        self.assertTrue(torch.allclose(ep2_result, orig_result))
+        torch.testing.assert_close(ep2_result, orig_result)
 
     @testing.expectedFailureLegacyExportNonStrict
     @testing.expectedFailureLegacyExportStrict
@@ -9581,7 +9581,7 @@ def forward(self, c_submod_params, x):
         ep = export(M(), inp)
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
-        self.assertTrue(torch.allclose(ufm(*inp), epm(*inp)))
+        torch.testing.assert_close(ufm(*inp), epm(*inp))
 
     def test_unflatten_multiple_graphs_shared_submodule(self):
         class N(torch.nn.Module):
@@ -9624,13 +9624,13 @@ def forward(self, c_submod_params, x):
             ep = export(m, inp)
             exported_result = ep.module()(*inp)
             # exported and eager results should match (baseline)
-            self.assertTrue(torch.allclose(exported_result, eager_result))
+            torch.testing.assert_close(exported_result, eager_result)
 
             unflattened = torch.export.unflatten(ep)
             unflattened_result = unflattened(*inp)
             # unflattened and eager results should match
             # (needs multiple specialized graphs for shared submodule instance)
-            self.assertTrue(torch.allclose(unflattened_result, eager_result))
+            torch.testing.assert_close(unflattened_result, eager_result)
 
             # expected graph should call minimal number of specialized submodules
             self.assertExpectedInline(
@@ -9665,11 +9665,11 @@ def forward(self, c_submod_params, x):
 
             ep = export(m, inp, preserve_module_call_signature=("n", "p"))
             exported_result = ep.module()(*inp)
-            self.assertTrue(torch.allclose(exported_result, eager_result))
+            torch.testing.assert_close(exported_result, eager_result)
 
             unflattened = torch.export.unflatten(ep)
             unflattened_result = unflattened(*inp)
-            self.assertTrue(torch.allclose(unflattened_result, eager_result))
+            torch.testing.assert_close(unflattened_result, eager_result)
 
         test(
             gen_m(n=True, n_1=False, p=False, p_1=False),
@@ -9953,7 +9953,7 @@ def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
             "t": (Dim.STATIC,),
         }
         ep = export(Model(), inp, dynamic_shapes=spec)
-        self.assertTrue(torch.allclose(Model()(*inp), ep.module()(*inp)))
+        torch.testing.assert_close(Model()(*inp), ep.module()(*inp))
 
     def test_predispatch_cond(self):
         class Model(torch.nn.Module):
@@ -10112,7 +10112,7 @@ def forward(self, x, b_t, y):
         mod = ModuleListTruncated()
 
         epm = export(mod, (x,)).module()
-        self.assertTrue(torch.allclose(mod(x), epm(x)))
+        torch.testing.assert_close(mod(x), epm(x))
 
     def test_non_persistent_buffer(self):
         class MyModule(torch.nn.Module):
@@ -10225,7 +10225,7 @@ def forward(self, x, b_t, y):
 
         inp = (torch.randn(3, 3), torch.randn(3, 3))
         new_res = torch.compile(f, backend=my_custom_backend)(*inp)
-        self.assertTrue(torch.allclose(f(*inp), new_res))
+        torch.testing.assert_close(f(*inp), new_res)
 
     def test_nonstrict_retrace_preserves_metadata(self):
         class MyModule(torch.nn.Module):
@@ -10295,7 +10295,7 @@ def forward(self, x, b_t, y):
         m = EmptyM()
         ep = torch.export.export(m, ())
         for out, real_out in zip(ep.module()(), m()):
-            self.assertTrue(torch.allclose(out, real_out))
+            torch.testing.assert_close(out, real_out)
 
     def test_trace_under_fake(self):
         class MyModule(torch.nn.Module):
@@ -10365,9 +10365,9 @@ def forward(self, x, b_t, y):
             ep_strict = export(m, (input,), strict=True)
             ep_non_strict = export(m, (input,), strict=False)
 
-            self.assertTrue(torch.allclose(input * 3, m(input)))
-            self.assertTrue(torch.allclose(input * 2, ep_strict.module()(input)))
-            self.assertTrue(torch.allclose(input * 2, ep_non_strict.module()(input)))
+            torch.testing.assert_close(input * 3, m(input))
+            torch.testing.assert_close(input * 2, ep_strict.module()(input))
+            torch.testing.assert_close(input * 2, ep_non_strict.module()(input))
 
     def test_user_input_and_buffer_mutation(self):
         class MyModule(torch.nn.Module):
@@ -10410,17 +10410,17 @@ def forward(self, x, b_t, y):
         ep = torch.export.export(M(), inps_for_export)
         x_new_eager, z_new_eager, legit_eager = M()(*inps)
         x_new_export, z_new_export, legit_export = ep.module()(*inps_for_export)
-        self.assertTrue(torch.allclose(x_new_eager, x_new_export))
-        self.assertTrue(torch.allclose(z_new_eager, z_new_export))
-        self.assertTrue(torch.allclose(legit_eager, legit_export))
+        torch.testing.assert_close(x_new_eager, x_new_export)
+        torch.testing.assert_close(z_new_eager, z_new_export)
+        torch.testing.assert_close(legit_eager, legit_export)
 
         ep = ep.run_decompositions()
         x_new_export, z_new_export, legit_export = ep.module()(
             *inps_for_export_with_decomp
         )
-        self.assertTrue(torch.allclose(x_new_eager, x_new_export))
-        self.assertTrue(torch.allclose(z_new_eager, z_new_export))
-        self.assertTrue(torch.allclose(legit_eager, legit_export))
+        torch.testing.assert_close(x_new_eager, x_new_export)
+        torch.testing.assert_close(z_new_eager, z_new_export)
+        torch.testing.assert_close(legit_eager, legit_export)
 
     def test_custom_op_auto_functionalize_pre_dispatch(self):
         class M(torch.nn.Module):
@@ -11015,8 +11015,8 @@ def forward(self, x, y):
         ep = export(M(), (torch.ones(4, 4),)).run_decompositions()
         mod = ep.module()
         a, b = mod(torch.zeros(4, 4))
-        self.assertTrue(torch.allclose(a, torch.ones(4, 4)))
-        self.assertTrue(torch.allclose(b, torch.ones(4, 4)))
+        torch.testing.assert_close(a, torch.ones(4, 4))
+        torch.testing.assert_close(b, torch.ones(4, 4))
 
     @testing.expectedFailureLegacyExportNonStrict
     @testing.expectedFailureLegacyExportStrict
@@ -11103,7 +11103,7 @@ graph():
         self.assertEqual(num_constant_inputs, 1)
         # unflatten
         unflattened = unflatten(ep)
-        self.assertTrue(torch.allclose(m1(*inps), unflattened(*inps)))
+        torch.testing.assert_close(m1(*inps), unflattened(*inps))
 
     @testing.expectedFailureRetraceability
     def test_unused_aliases(self):
@@ -11456,8 +11456,8 @@ def forward(self, x):
         comp_mod = ep.module()
         inp1 = torch.randn(3, 4)
         inp2 = torch.randn(7, 4)
-        self.assertTrue(torch.allclose(comp_mod(inp1), mod(inp1)))
-        self.assertTrue(torch.allclose(comp_mod(inp2), mod(inp2)))
+        torch.testing.assert_close(comp_mod(inp1), mod(inp1))
+        torch.testing.assert_close(comp_mod(inp2), mod(inp2))
 
     def test_automatic_dynamic_shapes_simple_equality(self):
         # The next 3 test cases tests for automatic dynamic shapes specs, verifying that automatic dynamism
@@ -12217,7 +12217,7 @@ class GraphModule(torch.nn.Module):
             m = Foo()
             ep = export(m, (torch.randn(4, 4),))
             inp = (torch.randn(4, 4),)
-            self.assertTrue(torch.allclose(ep.module()(*inp), m(*inp)))
+            torch.testing.assert_close(ep.module()(*inp), m(*inp))
 
     @unittest.skipIf(IS_MACOS, "Distributed not packaged in macos")
     def test_distributed_all_gather(self):
@@ -12247,7 +12247,7 @@ class GraphModule(torch.nn.Module):
             m = Foo()
             ep = export(m, (torch.randn(2),))
             inp = (torch.randn(2),)
-            self.assertTrue(torch.allclose(ep.module()(*inp), m(*inp)))
+            torch.testing.assert_close(ep.module()(*inp), m(*inp))
 
     @unittest.skipIf(IS_MACOS, "Distributed not packaged in macos")
     @testing.expectedFailureCppRuntime

@@ -448,7 +448,7 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
         load_tensor = self.load_tensor(model_to_load.sharded_tensor)
 
         if dist.get_rank() == 0:
-            self.assertTrue(torch.allclose(store_tensor, load_tensor))
+            torch.testing.assert_close(store_tensor, load_tensor)
 
     @with_comms(init_rpc=False, backend="gloo")
     @parametrize("thread_count", _THREAD_COUNTS)

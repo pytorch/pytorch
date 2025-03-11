@@ -430,8 +430,8 @@ class TestPoolingNN(NNTestCase):
 
         self.assertTrue(upout.is_contiguous(memory_format=torch.channels_last))
         self.assertTrue(ref_upout.is_contiguous())
-        self.assertTrue(torch.allclose(upout, ref_upout))
-        self.assertTrue(torch.allclose(out.grad, ref_out.grad))
+        torch.testing.assert_close(upout, ref_upout)
+        torch.testing.assert_close(out.grad, ref_out.grad)
 
     def test_max_unpool(self):
         with set_default_dtype(torch.double):

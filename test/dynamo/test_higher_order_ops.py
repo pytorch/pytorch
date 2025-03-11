@@ -2257,8 +2257,8 @@ def forward(self):
 
         opt_test = torch.compile(test, backend="eager")
         inp = torch.ones(3, 3)
-        self.assertTrue(torch.allclose(test(True, inp), opt_test(True, inp)))
-        self.assertTrue(torch.allclose(test(False, inp), opt_test(False, inp)))
+        torch.testing.assert_close(test(True, inp), opt_test(True, inp))
+        torch.testing.assert_close(test(False, inp), opt_test(False, inp))
 
     def test_map_graph_break(self):
         backend = EagerAndRecordGraphs()
@@ -6907,7 +6907,7 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         inp = torch.ones(3, 3)
         true_pred = torch.Tensor([True])
         false_pred = torch.Tensor([False])
-        self.assertTrue(torch.allclose(test(true_pred, inp), opt_test(true_pred, inp)))
+        torch.testing.assert_close(test(true_pred, inp), opt_test(true_pred, inp))
         self.assertEqual(cnt.frame_count, 1)
         self.assertTrue(
             torch.allclose(test(false_pred, inp), opt_test(false_pred, inp))

@@ -240,7 +240,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         inputs = (torch.randn(2, 3),)
 
         res = torch.compile(f, backend="aot_eager")(*inputs)
-        self.assertTrue(torch.allclose(res, f(*inputs)))
+        torch.testing.assert_close(res, f(*inputs))
 
     @unittest.skipIf(IS_WINDOWS, "triton")
     @unittest.skipIf(not SM70OrLater, "triton")
@@ -254,7 +254,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         inputs = (torch.randn(2, 3),)
 
         res = torch.compile(f, backend="inductor")(*inputs)
-        self.assertTrue(torch.allclose(res, f(*inputs)))
+        torch.testing.assert_close(res, f(*inputs))
 
     @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
     @skipIfNoDynamoSupport
@@ -281,7 +281,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             inputs = (torch.randn(3),)
 
             res = torch.compile(f, backend="inductor")(*inputs)
-            self.assertTrue(torch.allclose(res, f(*inputs)))
+            torch.testing.assert_close(res, f(*inputs))
 
     def test_compile_aot_eager_requires_grad(self):
         def f(x):
@@ -293,7 +293,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         inputs = (torch.randn(2, 3, requires_grad=True),)
 
         res = torch.compile(f, backend="aot_eager")(*inputs)
-        self.assertTrue(torch.allclose(res, f(*inputs)))
+        torch.testing.assert_close(res, f(*inputs))
 
         res.sum().backward()
 
@@ -417,7 +417,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             opt_mod = torch.compile(backend="inductor")(mod)
             y = opt_mod(x)
 
-            self.assertTrue(torch.allclose(y, mod(x)))
+            torch.testing.assert_close(y, mod(x))
             # Ensure it works well with backward
             y.sum().backward()
             # Ensure the grad is existing

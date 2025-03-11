@@ -459,7 +459,7 @@ class TestDraftExport(TestCase):
         ep = draft_export(mod, inputs)
         report = ep._report
         for ep_out, eager_out in zip(ep.module()(*inputs), mod(*inputs)):
-            self.assertTrue(torch.allclose(ep_out, eager_out))
+            torch.testing.assert_close(ep_out, eager_out)
             self.assertEqual(ep_out.dtype, eager_out.dtype)
 
         self.assertEqual(len(report.failures), 2)
@@ -504,7 +504,7 @@ class TestDraftExport(TestCase):
         for ep_out, eager_out in zip(
             tree_leaves(ep.module()(*inputs)), tree_leaves(mod(*inputs))
         ):
-            self.assertTrue(torch.allclose(ep_out, eager_out))
+            torch.testing.assert_close(ep_out, eager_out)
             self.assertEqual(ep_out.dtype, eager_out.dtype)
 
         self.assertEqual(len(report.failures), 1)
@@ -537,7 +537,7 @@ class TestDraftExport(TestCase):
         ep = draft_export(mod, inputs)
         report = ep._report
         for ep_out, eager_out in zip(ep.module()(*inputs), mod(*inputs)):
-            self.assertTrue(torch.allclose(ep_out, eager_out))
+            torch.testing.assert_close(ep_out, eager_out)
             self.assertEqual(ep_out.dtype, eager_out.dtype)
 
         self.assertEqual(len(report.failures), 1)

@@ -1285,7 +1285,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         ref = m(x)
         opt_m = torch.compile(m, backend="eager")
         res = opt_m(x)
-        self.assertTrue(torch.allclose(ref, res))
+        torch.testing.assert_close(ref, res)
 
     def test_unsupportedmethod(self):
         m = UnsupportedMethodCall()
@@ -1586,7 +1586,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         # would be initialized when running eager mode.
         res = opt_m(x)
         ref = m(x)
-        self.assertTrue(torch.allclose(ref, res))
+        torch.testing.assert_close(ref, res)
 
     # RuntimeError: SymIntArrayRef expected to contain only concrete integers
     @expectedFailureDynamic
@@ -1598,7 +1598,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         # first iteration
         res = opt_m(x)
         ref = m(x)
-        self.assertTrue(torch.allclose(ref, res))
+        torch.testing.assert_close(ref, res)
         # input shape changed and second iteration
         x = torch.rand([20, 20])
         try:
@@ -1615,7 +1615,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         opt_m = torch.compile(m, backend="eager", fullgraph=True)
         res = opt_m(x)
         ref = m(x)
-        self.assertTrue(torch.allclose(ref, res))
+        torch.testing.assert_close(ref, res)
 
     # RuntimeError: SymIntArrayRef expected to contain only concrete integers
     @expectedFailureDynamic
@@ -1626,7 +1626,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         opt_m = torch.compile(m, backend="eager", fullgraph=True)
         res = opt_m(x)
         ref = m(x)
-        self.assertTrue(torch.allclose(ref, res))
+        torch.testing.assert_close(ref, res)
 
     # RuntimeError: SymIntArrayRef expected to contain only concrete integers
     @expectedFailureDynamic
@@ -1640,7 +1640,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         opt_m = torch.compile(backend="eager", fullgraph=True)(m)
         res = opt_m(x)
         ref = m(x)
-        self.assertTrue(torch.allclose(ref, res))
+        torch.testing.assert_close(ref, res)
 
     def test_lazy_module_no_cls_to_become(self):
         # make sure super() works in the case where cls_to_become is None
@@ -1649,7 +1649,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         opt_m = torch.compile(m, backend="eager", fullgraph=True)
         res = opt_m(x)
         ref = m(x)
-        self.assertTrue(torch.allclose(ref, res))
+        torch.testing.assert_close(ref, res)
 
     def test_lazy_module_kwargs(self):
         m = LazyModuleKwArgs()
@@ -1657,7 +1657,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         y = [torch.rand([5, 5])] * 2
         opt_m = torch.compile(backend="eager", fullgraph=True)(m)
         exp_res = m(x, y)
-        self.assertTrue(torch.allclose(exp_res, opt_m(x, y)))
+        torch.testing.assert_close(exp_res, opt_m(x, y))
 
     # RuntimeError: SymIntArrayRef expected to contain only concrete integers
     @expectedFailureDynamic
@@ -1692,10 +1692,10 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         # Make sure we don't get recompilation across multiple runs
         actual_res = test(mod, x)
         expect_res = mod(x)
-        self.assertTrue(torch.allclose(expect_res, actual_res))
+        torch.testing.assert_close(expect_res, actual_res)
         actual_res = test(mod, x)
         expect_res = mod(x)
-        self.assertTrue(torch.allclose(expect_res, actual_res))
+        torch.testing.assert_close(expect_res, actual_res)
         self.assertEqual(cnt.frame_count, 1)
 
     def test_call_fn_with_non_const_inputs_safe(self):
@@ -1724,7 +1724,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         ref = m(x)
         opt_m = torch.compile(backend="eager", fullgraph=True)(m)
         res = opt_m(x)
-        self.assertTrue(torch.allclose(ref, res))
+        torch.testing.assert_close(ref, res)
 
     def test_conv_transpose_call_forward_directly(self):
         m = ConvTransposeCallForwardDirectly()
@@ -1732,7 +1732,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         ref = m(x)
         opt_m = torch.compile(backend="eager", fullgraph=True)(m)
         res = opt_m(x)
-        self.assertTrue(torch.allclose(ref, res))
+        torch.testing.assert_close(ref, res)
 
     def test_conv_call_super_forward_directly(self):
         x = torch.randn(4, 4)
@@ -1740,7 +1740,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         ref = m(x)
         opt_m = torch.compile(backend="eager", fullgraph=True)(m)
         res = opt_m(x)
-        self.assertTrue(torch.allclose(ref, res))
+        torch.testing.assert_close(ref, res)
 
     def test_conv_transpose_call_super_forward_directly(self):
         x = torch.randn(4, 4, 4)
@@ -1748,7 +1748,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         ref = m(x)
         opt_m = torch.compile(backend="eager", fullgraph=True)(m)
         res = opt_m(x)
-        self.assertTrue(torch.allclose(ref, res))
+        torch.testing.assert_close(ref, res)
 
     @torch._dynamo.config.patch("allow_unspec_int_on_nn_module", True)
     def test_nn_module_unspec_int_attr(self):
@@ -1761,7 +1761,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             # Compiling `self.step` as static
             ref1 = mod(x)
             res1 = opt_mod(x)
-            self.assertTrue(torch.allclose(ref1, res1))
+            torch.testing.assert_close(ref1, res1)
             self.assertEqual(cnt.frame_count, 1)
 
             mod.step += 1
@@ -1770,7 +1770,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             # Second time: compiling `self.step` as dynamic
             ref2 = mod(x)
             res2 = opt_mod(x)
-            self.assertTrue(torch.allclose(ref2, res2))
+            torch.testing.assert_close(ref2, res2)
             self.assertEqual(cnt.frame_count, ifdynstaticdefault(2, 1))
 
             mod.step += 1
@@ -1779,7 +1779,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             # Third time: no re-compilation!
             ref3 = mod(x)
             res3 = opt_mod(x)
-            self.assertTrue(torch.allclose(ref3, res3))
+            torch.testing.assert_close(ref3, res3)
             self.assertEqual(cnt.frame_count, ifdynstaticdefault(2, 1))
 
 
@@ -1794,13 +1794,13 @@ class NNModuleTestsDevice(torch._dynamo.test_case.TestCase):
         # first iteration
         res = opt_m(x)
         ref = m(x)
-        self.assertTrue(torch.allclose(ref, res))
+        torch.testing.assert_close(ref, res)
         # move to device and second iteration
         m = m.to(device)
         x = x.to(device)
         res = opt_m(x)
         ref = m(x)
-        self.assertTrue(torch.allclose(ref, res))
+        torch.testing.assert_close(ref, res)
         self.assertEqual(cnt.frame_count, 2)
 
 

@@ -242,7 +242,7 @@ class TestAOTInductorPackage(TestCase):
                 self.assertTrue(so_path.exists())
                 optimized = torch._export.aot_load(str(so_path), self.device)
                 actual = optimized(*example_inputs)
-                self.assertTrue(torch.allclose(actual, expected))
+                torch.testing.assert_close(actual, expected)
 
     def test_metadata(self):
         class Model(torch.nn.Module):

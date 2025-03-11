@@ -373,7 +373,7 @@ class TestOnDeviceDynamicPTQFinalize(TestCase):
         m.observe_forward(*inputs)
         m.quantize_forward(*inputs)
         output = m.quantized_forward(*inputs)
-        self.assertTrue(torch.allclose(ref_output, output))
+        torch.testing.assert_close(ref_output, output)
         thrown = False
         try:
             m(*inputs)
@@ -393,7 +393,7 @@ class TestOnDeviceDynamicPTQFinalize(TestCase):
         m.observe_forward(*inputs)
         m.quantize_forward(*inputs)
         output = m.quantized_forward(*inputs)
-        self.assertTrue(torch.allclose(ref_output, output))
+        torch.testing.assert_close(ref_output, output)
         thrown = False
         try:
             m(*inputs)
@@ -427,7 +427,7 @@ class TestOnDeviceDynamicPTQFinalize(TestCase):
             m.observe_forward(*inputs)
             m.quantize_forward(*inputs)
             output = m.quantized_forward(*inputs)
-            self.assertTrue(torch.allclose(ref_output, output))
+            torch.testing.assert_close(ref_output, output)
         else:
             # check for lite interpreter
             m = OnDevicePTQUtils.ptq_dynamic_quantize(model, qconfig_dict)
@@ -445,14 +445,14 @@ class TestOnDeviceDynamicPTQFinalize(TestCase):
             self.assertFalse(m.find_method("observe_forward"))
             self.assertFalse(m.find_method("reset_observers_forward"))
             output = m(*inputs)
-            self.assertTrue(torch.allclose(ref_output, output))
+            torch.testing.assert_close(ref_output, output)
 
             # Now serialize to flabuffer and load from fb and check
             dict_: dict[str, str] = {}
             bytes = torch._C._save_mobile_module_to_bytes(m._c, dict_)
             m = LiteScriptModule(torch._C._load_mobile_module_from_bytes(bytes))
             fb_output = m(*inputs)
-            self.assertTrue(torch.allclose(ref_output, fb_output))
+            torch.testing.assert_close(ref_output, fb_output)
 
         model.eval()
         inputs = model.get_example_inputs()
@@ -477,7 +477,7 @@ class TestOnDeviceDynamicPTQFinalize(TestCase):
             m.observe_forward(*inputs)
             m.quantize_forward(*inputs)
             output = m.quantized_forward(*inputs)
-            self.assertTrue(torch.allclose(ref_output, output))
+            torch.testing.assert_close(ref_output, output)
         else:
             # check for lite interpreter
             m = OnDevicePTQUtils.ptq_dynamic_quantize(model, qconfig_dict)
@@ -495,7 +495,7 @@ class TestOnDeviceDynamicPTQFinalize(TestCase):
             self.assertFalse(m.find_method("observe_forward"))
             self.assertFalse(m.find_method("reset_observers_forward"))
             output = m(*inputs)
-            self.assertTrue(torch.allclose(ref_output, output))
+            torch.testing.assert_close(ref_output, output)
 
     def _check_serialization_deserialization(self, model):
         self._check_serdes_and_device_side_api_helper(model, False)

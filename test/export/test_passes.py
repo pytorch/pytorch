@@ -604,8 +604,8 @@ class TestPasses(TestCase):
         without_token_ep.verifier().check(without_token_ep)
         without_token_res = without_token_ep.module()(inp)
 
-        self.assertTrue(torch.allclose(orig_res, ep_res))
-        self.assertTrue(torch.allclose(orig_res, without_token_res))
+        torch.testing.assert_close(orig_res, ep_res)
+        torch.testing.assert_close(orig_res, without_token_res)
 
     def test_remove_effect_token_kwargs(self):
         class MyModule(torch.nn.Module):

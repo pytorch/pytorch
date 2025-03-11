@@ -4821,7 +4821,7 @@ class CommonTemplate:
             opt_mod = torch.compile(mod)
             res = opt_mod(x)
             expected = mod(x)
-            self.assertTrue(torch.allclose(res, expected))
+            torch.testing.assert_close(res, expected)
 
     def test_buffer_copied_in_graph(self):
         class MyModel(torch.nn.Module):
@@ -8486,9 +8486,9 @@ class CommonTemplate:
                 b2 = fn(x).clone()
 
                 # same seed, same values
-                self.assertTrue(torch.allclose(a0, b0))
-                self.assertTrue(torch.allclose(a1, b1))
-                self.assertTrue(torch.allclose(a2, b2))
+                torch.testing.assert_close(a0, b0)
+                torch.testing.assert_close(a1, b1)
+                torch.testing.assert_close(a2, b2)
 
                 # different calls, different values
                 self.assertFalse(torch.allclose(a0, a1))
@@ -8512,9 +8512,9 @@ class CommonTemplate:
         b2 = fn(x)[0].clone()
 
         # same seed, same values
-        self.assertTrue(torch.allclose(a0, b0))
-        self.assertTrue(torch.allclose(a1, b1))
-        self.assertTrue(torch.allclose(a2, b2))
+        torch.testing.assert_close(a0, b0)
+        torch.testing.assert_close(a1, b1)
+        torch.testing.assert_close(a2, b2)
 
         # different calls, different values
         self.assertFalse(torch.allclose(a0, a1))
@@ -8787,7 +8787,7 @@ class CommonTemplate:
             c = fn(x)
 
             # same seed, same values
-            self.assertTrue(torch.allclose(a, c))
+            torch.testing.assert_close(a, c)
 
             # different calls, different values
             self.assertFalse(torch.allclose(a, b))
@@ -9910,7 +9910,7 @@ class CommonTemplate:
                 expected = po(*inps0)
                 actual = compiled(*inps0)
 
-            self.assertTrue(torch.allclose(actual, expected, atol=1e-3, rtol=1e-3))
+            torch.testing.assert_close(actual, expected, atol=1e-3, rtol=1e-3)
 
     def test_unfold_zero_dimension_tensor(self):
         def forward(x):
@@ -11702,7 +11702,7 @@ class CommonTemplate:
             compiled_inductor_f = torch.compile(f, backend="inductor", fullgraph=True)
             compiled_inductor_out = compiled_inductor_f(x)
 
-        self.assertTrue(torch.allclose(compiled_inductor_out, eager_out))
+        torch.testing.assert_close(compiled_inductor_out, eager_out)
 
     @skip_if_gpu_halide  # cuda error
     def test_buffer_use_after_remove(self):
@@ -14262,7 +14262,7 @@ if HAS_GPU:
             x = torch.randn(2, 1024, device=GPU_TYPE)
             ref = f(x)
             actual, code = run_and_get_code(torch.compile(f), x)
-            self.assertTrue(torch.allclose(ref, actual))
+            torch.testing.assert_close(ref, actual)
 
             code = code[0]
             if config.cpp_wrapper:

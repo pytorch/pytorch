@@ -107,7 +107,7 @@ class InplacePaddingTest(TestCase):
             r"as_strided\(\(2048, 2047\), \(2048, 1\)\)"
         ).run(code)
 
-        self.assertTrue(torch.allclose(ref, act, atol=1e-2, rtol=1e-2))
+        torch.testing.assert_close(ref, act, atol=1e-2, rtol=1e-2)
         self.assertEqual(num_inplace_padding(), 1)
 
     @inductor_config.patch(cpp_wrapper=True)
@@ -151,7 +151,7 @@ class InplacePaddingTest(TestCase):
             r"aoti_torch_as_strided\(buf0_handle, .*, &buf0_handle_restrided\)"
         ).run(code)
 
-        self.assertTrue(torch.allclose(ref, act, atol=1e-2, rtol=1e-2))
+        torch.testing.assert_close(ref, act, atol=1e-2, rtol=1e-2)
 
         self.assertEqual(num_inplace_padding(), 1)
         self.assertTrue(compile_time_autotune_called)

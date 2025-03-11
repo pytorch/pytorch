@@ -564,7 +564,7 @@ class TestGroupBatchFusion(TestCase):
         self.assertEqual(counters["inductor"]["batch_nan_to_num"], 1)
         self.assertEqual(counters["inductor"]["unbind_stack_to_slices_pass"], 2)
         self.assertEqual(counters["inductor"]["unbind_stack_pass"], 2)
-        self.assertTrue(torch.allclose(ref, res))
+        torch.testing.assert_close(ref, res)
         counters.clear()
 
 
@@ -598,7 +598,7 @@ class TestPostGradBatchLinearFusion(TestCase):
         eager_output = pt1_module(inputs)
         pt2_module = torch.compile(pt1_module)
         pt2_output = pt2_module(inputs)
-        self.assertTrue(torch.allclose(eager_output, pt2_output))
+        torch.testing.assert_close(eager_output, pt2_output)
         self.assertEqual(
             counters["inductor"]["batch_linear_post_grad"],
             2,

@@ -8195,7 +8195,7 @@ class TestNNDeviceType(NNTestCase):
         o_cpu = m(a_cpu)
         o_cpu.sum().backward()
         # workaround for memory usage overhead of assertEqual
-        self.assertTrue(torch.allclose(a.grad.cpu(), a_cpu.grad.half()))
+        torch.testing.assert_close(a.grad.cpu(), a_cpu.grad.half())
 
     @onlyCUDA
     @largeTensorTest("48GB", "cpu")
@@ -10087,7 +10087,7 @@ class TestNNDeviceType(NNTestCase):
         out = torch.nn.functional.interpolate(x.to(memory_format=torch.channels_last), scale_factor=2, mode='nearest')
         out_ref = torch.nn.functional.interpolate(x, scale_factor=2, mode='nearest')
         del x
-        self.assertTrue(torch.allclose(out, out_ref))
+        torch.testing.assert_close(out, out_ref)
 
         x = torch.ones((17, 256, 512, 512), dtype=dtype).cuda().to(memory_format=torch.channels_last)
         out = torch.nn.functional.interpolate(x, scale_factor=2, mode='nearest')
@@ -10441,10 +10441,10 @@ class TestNNDeviceType(NNTestCase):
             yy.backward(yy)
             # workaround to reduce memory usage vs. self.assertEqual, see #84944
             rtol, atol = torch.testing._comparison.get_tolerances(dtype, rtol=None, atol=None)
-            self.assertTrue(torch.allclose(y.cpu(), yy, rtol=rtol, atol=atol))
+            torch.testing.assert_close(y.cpu(), yy, rtol=rtol, atol=atol)
             # x is half
             rtol, _ = torch.testing._comparison.get_tolerances(torch.half, rtol=None, atol=None)
-            self.assertTrue(torch.allclose(x.grad.cpu(), xx.grad, rtol=rtol, atol=1e-3))
+            torch.testing.assert_close(x.grad.cpu(), xx.grad, rtol=rtol, atol=1e-3)
 
         run_test(1100000000, 2)  # Illegal memory access https://github.com/pytorch/pytorch/issues/52715
         run_test(2200000000, 1)  # invalid configuration argument https://github.com/pytorch/pytorch/issues/52716
@@ -11742,7 +11742,7 @@ class TestNNDeviceType(NNTestCase):
             orig_rtol, orig_atol = rtol, atol
             rtol, atol = 7 * rtol, 3 * atol
         with torch.no_grad():
-            self.assertTrue(torch.allclose(out.cpu(), out_cpu, rtol=rtol, atol=atol))
+            torch.testing.assert_close(out.cpu(), out_cpu, rtol=rtol, atol=atol)
         if reduction == "sum":
             rtol, atol = orig_rtol, orig_atol
 
@@ -11750,7 +11750,7 @@ class TestNNDeviceType(NNTestCase):
             out.backward()
             out_cpu.backward()
             with torch.no_grad():
-                self.assertTrue(torch.allclose(input.grad.cpu(), input_cpu.grad, rtol=rtol, atol=atol))
+                torch.testing.assert_close(input.grad.cpu(), input_cpu.grad, rtol=rtol, atol=atol)
 
     # Ref: https://github.com/pytorch/pytorch/issue/108345
     @onlyCUDA
@@ -11763,7 +11763,7 @@ class TestNNDeviceType(NNTestCase):
         loss = torch.nn.functional.cross_entropy(logits, labels)
         loss_cpu = torch.nn.functional.cross_entropy(logits.cpu(), labels.cpu())
         print(logits.numel(), labels.numel(), loss.numel())
-        self.assertTrue(torch.allclose(loss_cpu, loss.cpu(), rtol=1e-4, atol=1e-4))
+        torch.testing.assert_close(loss_cpu, loss.cpu(), rtol=1e-4, atol=1e-4)
 
     def _nll_loss_helper(self, input_size, reduction, expected, device, dtype):
         input = torch.rand(input_size, requires_grad=True, device=device, dtype=dtype)
@@ -12138,9 +12138,9 @@ if __name__ == '__main__':
 
         # workaround to reduce memory usage vs. self.assertEqual, see #84944
         rtol, atol = torch.testing._comparison.get_tolerances(torch.float32, rtol=None, atol=None)
-        self.assertTrue(torch.allclose(loss.cpu(), loss_cpu, rtol=rtol, atol=atol))
+        torch.testing.assert_close(loss.cpu(), loss_cpu, rtol=rtol, atol=atol)
         if reduction != "none":
-            self.assertTrue(torch.allclose(logits.grad.cpu(), logits_cpu.grad, rtol=rtol, atol=atol))
+            torch.testing.assert_close(logits.grad.cpu(), logits_cpu.grad, rtol=rtol, atol=atol)
 
     def test_smoothl1loss_backward_zero_beta(self, device):
         input = torch.randn(300, 256, requires_grad=True, device=device)

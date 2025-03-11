@@ -1058,7 +1058,7 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
         data = torch.randn(4, 4)
         r1 = m_ref(data)
         r2 = m(data)
-        self.assertTrue(torch.allclose(r1, r2))
+        torch.testing.assert_close(r1, r2)
 
     @skipIfNoXNNPACK
     @override_qengines
@@ -1081,7 +1081,7 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
         data = torch.randn(4, 4)
         r1 = m_ref(data)
         r2 = m(data)
-        self.assertTrue(torch.allclose(r1, r2))
+        torch.testing.assert_close(r1, r2)
 
     @override_qengines
     def test_linear_bn_workflow(self):

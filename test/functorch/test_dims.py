@@ -317,8 +317,8 @@ class TestMin(TestCase):
         A = torch.rand(4, 5)
         _r = stack([A[i, j]], d, j)
         # a, b = r.unbind(d)
-        # self.assertTrue(torch.allclose(a.order(i, j), i.expand(j).order(i, j)))
-        # self.assertTrue(torch.allclose(b.order(i, j), j.expand(i).order(i, j)))
+        # torch.testing.assert_close(a.order(i, j), i.expand(j).order(i, j))
+        # torch.testing.assert_close(b.order(i, j), j.expand(i).order(i, j))
 
     def test_max(self):
         ap = torch.rand(2, 3, 2)

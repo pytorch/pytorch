@@ -148,14 +148,14 @@ class TestShardedTensorBinaryOps(ShardedTensorTestBase):
         spec, _ = self.get_gpu_specs()
 
         st1, st2 = self.get_random_tensors(spec, spec, 10, 10)
-        self.assertTrue(torch.allclose(st1, st2))
-        self.assertTrue(torch.allclose(st1, st2, atol=0))
+        torch.testing.assert_close(st1, st2)
+        torch.testing.assert_close(st1, st2, atol=0)
 
         # compare different arrays
         st1, st2 = self.get_random_tensors(spec, spec, 10, 10, seed_offset=1)
         self.assertFalse(torch.allclose(st1, st2))
         # sharded_tensor.rand produces uniform values in the [0,1] range.
-        self.assertTrue(torch.allclose(st1, st2, atol=1))
+        torch.testing.assert_close(st1, st2, atol=1)
 
 
 if __name__ == "__main__":

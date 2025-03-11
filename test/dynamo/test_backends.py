@@ -220,7 +220,7 @@ class TestExplainWithBackend(torch._dynamo.test_case.TestCase):
         result = optimized_fn(input_tensor)
 
         # Check that fn still produces the same output when wrapped by ExplainWithBackend
-        self.assertTrue(torch.allclose(result, fn(input_tensor)))
+        torch.testing.assert_close(result, fn(input_tensor))
 
         # Verify ExplainOutput object contents, output might change but make sure these fields are present
         explain_output = eb.output()

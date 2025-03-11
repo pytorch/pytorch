@@ -567,7 +567,7 @@ class TestNew2dParallelTraining(DTensorTestBase):
                         continue
                     if type(p2) is DTensor:
                         p2 = p2.redistribute(p2.device_mesh, [Replicate()]).to_local()
-                    self.assertTrue(torch.allclose(p1, p2), f"{p1} vs {p2}")
+                    torch.testing.assert_close(p1, p2)
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -877,7 +877,7 @@ class TestNew2dParallelStateDict(DTensorTestBase):
                         .to_local()
                     )
                 self.assertTrue(isinstance(dist_state, torch.Tensor))
-                self.assertTrue(torch.allclose(state, dist_state))
+                torch.testing.assert_close(state, dist_state)
 
         # Update the parameters 2d optim states will be different from ref_optim_state_dict.
         model_2d(model_2d.get_input().cuda(self.rank)).sum().backward()

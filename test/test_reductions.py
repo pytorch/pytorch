@@ -895,7 +895,7 @@ class TestReductions(TestCase):
         return_out = torch.mean(a, dim=0, keepdim=True, out=out)
         target = torch.tensor([[[2.0, 2.0, 2.0, 2.0]]], dtype=dtype, device=device)
         self.assertTrue(torch._C._is_alias_of(out, return_out))
-        self.assertTrue(torch.allclose(out, target))
+        torch.testing.assert_close(out, target)
 
     # TODO: update this and tests that use it to handle device properly
     def _test_reduce_integer_upcast(self, fn, has_out=True, test_complex=True):

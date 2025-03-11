@@ -952,7 +952,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         mq2.load_state_dict(mq1.state_dict())
         ref2 = mq2(data2)
 
-        self.assertTrue(torch.allclose(ref1, ref2))
+        torch.testing.assert_close(ref1, ref2)
 
     def test_dropout_serialization(self):
         data1 = torch.randn(2, 4, 6, 8)
@@ -1021,7 +1021,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         mq2.load_state_dict(mq1.state_dict())
         ref2 = mq2(data2)
 
-        self.assertTrue(torch.allclose(ref1, ref2))
+        torch.testing.assert_close(ref1, ref2)
 
     def test_batch_norm2d_serialization(self):
         data1 = torch.randn(2, 4, 6, 8)

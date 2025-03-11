@@ -1143,8 +1143,8 @@ class DecompOneOffTests(TestCase):
 
         ref = torch.ops.aten._weight_norm_interface(g, v, 2)
         res = torch._decomp.decompositions._weight_norm_interface(g, v, 2)
-        self.assertTrue(torch.allclose(ref[0], res[0]))
-        self.assertTrue(torch.allclose(ref[1], res[1]))
+        torch.testing.assert_close(ref[0], res[0])
+        torch.testing.assert_close(ref[1], res[1])
 
         inp = torch.rand([30, 10], device=device)
         inp2 = torch.rand([30, 1], device=device)
@@ -1199,7 +1199,7 @@ class DecompOneOffTests(TestCase):
                 is_causal=is_causal,
             )
 
-            self.assertTrue(torch.allclose(actual_res, eager_res, atol=atol, rtol=rtol))
+            torch.testing.assert_close(actual_res, eager_res, atol=atol, rtol=rtol)
 
     @onlyCPU
     def test_native_layer_norm_cpu_decomp(self, device):

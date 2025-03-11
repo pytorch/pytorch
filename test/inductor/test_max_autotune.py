@@ -696,7 +696,7 @@ class TestMaxAutotune(TestCase):
         with fresh_inductor_cache():
             act = torch.compile(f)(x, y)
         ref = f(x, y)
-        self.assertTrue(torch.allclose(act, ref, atol=4 * 1e-3, rtol=4 * 1e-3))
+        torch.testing.assert_close(act, ref, atol=4 * 1e-3, rtol=4 * 1e-3)
 
     @config.patch(max_autotune=True)
     def test_empty_conv_input(self, kernel_size=3):
@@ -719,7 +719,7 @@ class TestMaxAutotune(TestCase):
         opt_f = torch.compile(f)
         ref = f(x, weight)
         act = opt_f(x, weight)
-        self.assertTrue(torch.allclose(ref, act, atol=4 * 1e-3, rtol=4 * 1e-3))
+        torch.testing.assert_close(ref, act, atol=4 * 1e-3, rtol=4 * 1e-3)
 
     @config.patch(max_autotune=True)
     def test_empty_conv_input_with_1x1_kernel(self):

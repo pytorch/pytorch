@@ -698,7 +698,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
         for output, input in zip(outputs, inputs):
             expect = torch.cat([input] * self.world_size)
-            self.assertTrue(torch.allclose(output, expect))
+            torch.testing.assert_close(output, expect)
 
     @requires_gloo()
     def test_reduce_scatter_tensor(self):
@@ -722,7 +722,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             input.view(self.world_size, *out_shape).chunk(self.world_size)[self.rank]
             * self.world_size
         )
-        self.assertTrue(torch.allclose(output, expect))
+        torch.testing.assert_close(output, expect)
 
     @requires_gloo()
     def test_reduce_scatter_tensor_coalesced(self):
@@ -749,7 +749,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 ]
                 * self.world_size
             )
-            self.assertTrue(torch.allclose(output, expect))
+            torch.testing.assert_close(output, expect)
 
     @requires_gloo()
     def test_scatter_checks(self):

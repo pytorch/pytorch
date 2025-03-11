@@ -70,7 +70,7 @@ class NamedOptimizerTest(unittest.TestCase):
                 self.assertEqual(val, group_2[key])
             else:
                 for tensors in zip(val, group_2[key]):
-                    self.assertTrue(torch.allclose(tensors[0], tensors[1]))
+                    torch.testing.assert_close(tensors[0], tensors[1])
 
     def test_state_dict(self):
         """Check that NamedOptimizer exposes the expected state dict

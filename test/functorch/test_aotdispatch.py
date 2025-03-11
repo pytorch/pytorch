@@ -858,7 +858,7 @@ metadata incorrectly.
         compiled_f = torch.compile(f, backend="aot_eager")
         out = compiled_f(custom_aa_compile)
 
-        self.assertTrue(torch.allclose(out_eager, out))
+        torch.testing.assert_close(out_eager, out)
 
         out.sum().backward()
 
@@ -891,7 +891,7 @@ metadata incorrectly.
         out_eager = f(x_nested, y_nested, z)
         compiled_f = torch.compile(f, backend="aot_eager")
         out = compiled_f(x_nested_compile, y_nested_compile, z_compile)
-        self.assertTrue(torch.allclose(out_eager, out))
+        torch.testing.assert_close(out_eager, out)
 
         self.assertTrue(isinstance(out, TwoTensor))
         self.assertTrue(isinstance(out.a, TwoTensor))
@@ -912,10 +912,10 @@ metadata incorrectly.
         self.assertTrue(isinstance(y_nested_compile.grad.a, TwoTensor))
         self.assertTrue(isinstance(y_nested_compile.grad.b, TwoTensor))
 
-        self.assertTrue(torch.allclose(x_nested_compile.grad.a.a, x_nested.grad.a.a))
-        self.assertTrue(torch.allclose(x_nested_compile.grad.a.b, x_nested.grad.a.b))
-        self.assertTrue(torch.allclose(y_nested_compile.grad.a.a, y_nested.grad.a.a))
-        self.assertTrue(torch.allclose(y_nested_compile.grad.a.b, y_nested.grad.a.b))
+        torch.testing.assert_close(x_nested_compile.grad.a.a, x_nested.grad.a.a)
+        torch.testing.assert_close(x_nested_compile.grad.a.b, x_nested.grad.a.b)
+        torch.testing.assert_close(y_nested_compile.grad.a.a, y_nested.grad.a.a)
+        torch.testing.assert_close(y_nested_compile.grad.a.b, y_nested.grad.a.b)
 
     @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
     def test_nested_subclasses_complicated_inps_mixed(self):
@@ -946,13 +946,13 @@ metadata incorrectly.
         compiled_f = torch.compile(f, backend="aot_eager")
         out_eager = f(x_nested, custom_aa)
         out = compiled_f(x_nested_compile, custom_aa_compile)
-        self.assertTrue(torch.allclose(out_eager, out))
+        torch.testing.assert_close(out_eager, out)
 
         out.sum().backward()
         out_eager.sum().backward()
 
-        self.assertTrue(torch.allclose(x_nested_compile.grad, x_nested.grad))
-        self.assertTrue(torch.allclose(custom_aa_compile.grad, custom_aa.grad))
+        torch.testing.assert_close(x_nested_compile.grad, x_nested.grad)
+        torch.testing.assert_close(custom_aa_compile.grad, custom_aa.grad)
 
     def test_composite_impl_compile(self):
         class Foo(torch.nn.Module):
@@ -4235,11 +4235,11 @@ def forward(self, arg0_1, arg1_1):
         eager_mod = Foo()
         output_1, output_2 = gm(torch.zeros(2, 2), inp)
         eager_output = eager_mod(inp)
-        self.assertTrue(torch.allclose(output_2, eager_output[0]))
+        torch.testing.assert_close(output_2, eager_output[0])
 
         _, output_2 = gm(output_1, inp)
         eager_output = eager_mod(inp)
-        self.assertTrue(torch.allclose(output_2, eager_output[0]))
+        torch.testing.assert_close(output_2, eager_output[0])
         self.assertTrue("foo" in graph_sig.buffers)
         self.assertTrue(graph_sig.inputs_to_buffers["arg0_1"] == "foo")
 

@@ -634,11 +634,11 @@ class SymmetricMemoryTest(MultiProcessTestCase):
 
         x = restride_A_shard_for_fused_all_gather_matmul(t, dim)
         self.assertTrue(x.movedim(dim, 0).is_contiguous())
-        self.assertTrue(torch.allclose(x, t))
+        torch.testing.assert_close(x, t)
 
         x = restride_A_for_fused_matmul_reduce_scatter(t, dim)
         self.assertTrue(x.movedim(dim, 0).is_contiguous())
-        self.assertTrue(torch.allclose(x, t))
+        torch.testing.assert_close(x, t)
 
     @skipIfRocm
     @skip_if_lt_x_gpu(2)

@@ -25,7 +25,7 @@ class TestUnflatten(TestCase):
     def compare_outputs(self, eager, unflattened, args):
         orig_output = eager(*args)
         unflattened_output = unflattened(*args)
-        self.assertTrue(torch.allclose(orig_output, unflattened_output))
+        torch.testing.assert_close(orig_output, unflattened_output)
 
     def test_unflatten_nested(self):
         class NestedChild(torch.nn.Module):
@@ -83,7 +83,7 @@ class TestUnflatten(TestCase):
         orig_state_dict = orig_eager.state_dict()
         exported_state_dict = unflattened.state_dict()
         for name, value in orig_state_dict.items():
-            self.assertTrue(torch.allclose(value, exported_state_dict[name]))
+            torch.testing.assert_close(value, exported_state_dict[name])
 
     def test_unflatten_buffer_mutation(self):
         class Child(torch.nn.Module):
@@ -114,12 +114,12 @@ class TestUnflatten(TestCase):
         # Buffer should look the same before and after one run
         eager_buffer = eager_module.foo.child2buffer
         unflattened_buffer = unflattened_module.foo.child2buffer
-        self.assertTrue(torch.allclose(eager_buffer, unflattened_buffer))
+        torch.testing.assert_close(eager_buffer, unflattened_buffer)
 
         inputs = (torch.rand(2, 3),)
         eager_module(*inputs)
         unflattened_module(*inputs)
-        self.assertTrue(torch.allclose(eager_buffer, unflattened_buffer))
+        torch.testing.assert_close(eager_buffer, unflattened_buffer)
 
     def test_unflatten_nested_access(self):
         class Child(torch.nn.Module):
@@ -252,7 +252,7 @@ class TestUnflatten(TestCase):
 
             unflattened = unflatten(export_module, KeepTwoFlatArgsAdapter())
             new_outs = unflattened(*new_inps)
-            self.assertTrue(torch.allclose(orig_outs, new_outs))
+            torch.testing.assert_close(orig_outs, new_outs)
 
     def test_unflatten_param_list_dict(self):
         class Mod(torch.nn.Module):
@@ -483,7 +483,7 @@ class TestUnflatten(TestCase):
 
         gm_unflat_non_strict = unflatten(ep_non_strict)
         ep = torch.export.export(gm_unflat_non_strict, inp, strict=False)
-        self.assertTrue(torch.allclose(ep.module()(*inp), mod(*inp)))
+        torch.testing.assert_close(ep.module()(*inp), mod(*inp))
 
     def test_unflattened_module_nodes_has_meta_val(self):
         class SubMod(torch.nn.Module):
@@ -768,11 +768,11 @@ class TestUnflatten(TestCase):
 
         ep_strict = export(copy.deepcopy(mod), (input_,), strict=True)
         umod = unflatten(ep_strict)
-        self.assertTrue(torch.allclose(umod(input_), mod(input_)))
+        torch.testing.assert_close(umod(input_), mod(input_))
 
         ep_non_strict = export(copy.deepcopy(mod), (input_,), strict=False)
         umod = unflatten(ep_non_strict)
-        self.assertTrue(torch.allclose(umod(input_), mod(input_)))
+        torch.testing.assert_close(umod(input_), mod(input_))
 
     def test_simple_alias(self):
         # handle weight sharing, check tensor ids after unflattening
@@ -810,7 +810,7 @@ class TestUnflatten(TestCase):
         inps = (torch.randn(4, 4),)
         ep = export(m, inps, strict=True)
         unep = unflatten(ep)
-        self.assertTrue(torch.allclose(unep(*inps), m(*inps)))
+        torch.testing.assert_close(unep(*inps), m(*inps))
 
     def test_attr_as_submod_input(self):
         class layer(torch.nn.Module):
@@ -942,12 +942,12 @@ class TestUnflatten(TestCase):
         orig_state_dict = orig_eager.state_dict()
         exported_state_dict = unflattened.state_dict()
         for name, value in orig_state_dict.items():
-            self.assertTrue(torch.allclose(value, exported_state_dict[name]))
+            torch.testing.assert_close(value, exported_state_dict[name])
 
         # Check composability with symbolic trace, as torchrec ddp uses symbolic
         # tracer
         symbolic_traced = torch.fx.symbolic_trace(unflattened, concrete_args=inputs)
-        self.assertTrue(torch.allclose(orig_eager(*inputs), symbolic_traced(*inputs)))
+        torch.testing.assert_close(orig_eager(*inputs), symbolic_traced(*inputs))
 
         # torch.compile submodule
         unflattened.foo = torch.compile(unflattened.foo, fullgraph=True)

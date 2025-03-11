@@ -232,7 +232,7 @@ class TestCase(InductorTestCase):
 
         # Check accuracy.
         ref = func(*inputs)
-        self.assertTrue(torch.allclose(ref, result))
+        torch.testing.assert_close(ref, result)
 
         # Check for exactly one upcast.
         num_upcasts = code.count(".to(tl.float32)")

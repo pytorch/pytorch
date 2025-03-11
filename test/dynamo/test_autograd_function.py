@@ -247,7 +247,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
                 for _ in range(3):
                     ref = model(x)
                     res = opt_model(x)
-                    self.assertTrue(torch.allclose(ref, res))
+                    torch.testing.assert_close(ref, res)
                 self.assertEqual(cnts.frame_count, 2)
 
     def test_linear_setup_context(self):

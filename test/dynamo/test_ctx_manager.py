@@ -767,7 +767,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         res = fn(x)
         opt_fn = torch.compile(fn, backend="eager")
         opt_res = opt_fn(x)
-        self.assertTrue(torch.allclose(res, opt_res))
+        torch.testing.assert_close(res, opt_res)
         self.assertEqual(res.dtype, torch.bfloat16)
         self.assertEqual(opt_res.dtype, torch.bfloat16)
 

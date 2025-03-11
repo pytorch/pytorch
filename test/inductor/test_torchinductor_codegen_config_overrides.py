@@ -52,7 +52,7 @@ class CodegenInductorTest(InductorTestCase):
         ref_tensors = flatten_tensors(func(*args))
         actual_tensors = flatten_tensors(result)
         for ref, actual in zip(ref_tensors, actual_tensors):
-            self.assertTrue(torch.allclose(ref, actual))
+            torch.testing.assert_close(ref, actual)
 
         return result, code
 

@@ -4432,7 +4432,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
                     out_expected = func(
                         nt.values(), dim=reduce_dim_expected, keepdim=keepdim
                     )
-                    self.assertTrue(torch.allclose(out_actual, out_expected))
+                    torch.testing.assert_close(out_actual, out_expected)
                 else:  # raggedness preserved
                     out_expected = func(nt.values(), dim=reduce_dim_expected)
                     self.assertTrue(
@@ -4596,7 +4596,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
                 out_actual.is_nested,
                 "softmax(): the result of reducing a nested tensor along the ragged dimension is a nested tensor",
             )  # output is a nested tensor
-            self.assertTrue(torch.allclose(out_actual.values(), out_expected))
+            torch.testing.assert_close(out_actual.values(), out_expected)
 
     @dtypes(torch.float32)
     @parametrize("requires_grad", [False, True])
@@ -4680,7 +4680,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
                     "layer_norm(): the result of reducing a nested tensor along the ragged dimension is a nested tensor",
                 )  # output is a nested tensor
                 self.assertEqual(out_actual._values.shape, out_expected.shape)
-                self.assertTrue(torch.allclose(out_actual.values(), out_expected))
+                torch.testing.assert_close(out_actual.values(), out_expected)
 
     @dtypes(torch.float32)
     @parametrize("requires_grad", [False, True])
@@ -4936,7 +4936,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
                     out_expected = func(
                         nt.values(), dim=reduce_dim_expected, keepdim=keepdim
                     )
-                    self.assertTrue(torch.allclose(out_actual, out_expected))
+                    torch.testing.assert_close(out_actual, out_expected)
                 else:  # raggedness preserved
                     out_expected = func(nt.values(), dim=reduce_dim_expected)
                     self.assertTrue(
@@ -7214,8 +7214,8 @@ torch.cuda.synchronize()
         value.grad = None
         attn_output_eager, _, _ = m_eager(query, value, offsets)
         attn_output_eager.sum().backward()
-        self.assertTrue(torch.allclose(attn_output_eager, attn_output))
-        self.assertTrue(torch.allclose(value_grad, value.grad))
+        torch.testing.assert_close(attn_output_eager, attn_output)
+        torch.testing.assert_close(value_grad, value.grad)
 
     # Helper function to generate random query, key, value NJTs in (B, n_heads, *, D) format.
     # If noncontig_with_holes is True, the results will be non-contiguous with holes (i.e. have

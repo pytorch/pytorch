@@ -3925,8 +3925,8 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
 
         inp_test = (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50, 100))
 
-        self.assertTrue(torch.allclose(gm(inp_test)[0], gm2(inp_test)[0]))
-        self.assertTrue(torch.allclose(gm(inp_test)[1], gm2(inp_test)[1]))
+        torch.testing.assert_close(gm(inp_test)[0], gm2(inp_test)[0])
+        torch.testing.assert_close(gm(inp_test)[1], gm2(inp_test)[1])
 
     def test_retracibility_dict_container_inp_out(self):
         class MyLinear(torch.nn.Module):
@@ -3974,9 +3974,9 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
             "b": torch.randn(20, 16, 50, 100),
         }
 
-        self.assertTrue(torch.allclose(gm(inp_test)["a"][0], gm2(inp_test)["a"][0]))
-        self.assertTrue(torch.allclose(gm(inp_test)["a"][1], gm2(inp_test)["a"][1]))
-        self.assertTrue(torch.allclose(gm(inp_test)["b"], gm2(inp_test)["b"]))
+        torch.testing.assert_close(gm(inp_test)["a"][0], gm2(inp_test)["a"][0])
+        torch.testing.assert_close(gm(inp_test)["a"][1], gm2(inp_test)["a"][1])
+        torch.testing.assert_close(gm(inp_test)["b"], gm2(inp_test)["b"])
 
     def test_retracibility_nested_list_out(self):
         class MyLinear(torch.nn.Module):
@@ -4027,10 +4027,10 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
             "b": torch.randn(20, 16, 50, 100),
         }
 
-        self.assertTrue(torch.allclose(gm(inp_test)[0][0], gm2(inp_test)[0][0]))
-        self.assertTrue(torch.allclose(gm(inp_test)[0][1], gm2(inp_test)[0][1]))
-        self.assertTrue(torch.allclose(gm(inp_test)[1][0], gm2(inp_test)[1][0]))
-        self.assertTrue(torch.allclose(gm(inp_test)[1][1], gm2(inp_test)[1][1]))
+        torch.testing.assert_close(gm(inp_test)[0][0], gm2(inp_test)[0][0])
+        torch.testing.assert_close(gm(inp_test)[0][1], gm2(inp_test)[0][1])
+        torch.testing.assert_close(gm(inp_test)[1][0], gm2(inp_test)[1][0])
+        torch.testing.assert_close(gm(inp_test)[1][1], gm2(inp_test)[1][1])
 
     def test_fx_pytree(self):
         def foo(args):
@@ -4042,7 +4042,7 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
 
         gm, _ = torch._dynamo.export(foo, inp_container, aten_graph=True)
 
-        self.assertTrue(torch.allclose(foo(inp_container), gm(inp_container)))
+        torch.testing.assert_close(foo(inp_container), gm(inp_container))
 
     @config.patch(suppress_errors=True)
     @config.patch(verbose=True)
@@ -4080,7 +4080,7 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
         name, buffer = buffers[0]
         self.assertEqual(name, "L__self___buffer1")
 
-        self.assertTrue(torch.allclose(buffer, torch.zeros(5)))
+        torch.testing.assert_close(buffer, torch.zeros(5))
 
     def test_param_buffer_safe_from_mutation_recurse(self):
         class Child(torch.nn.Module):
@@ -4104,7 +4104,7 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
 
         gm, _ = torch._dynamo.export(Module(), torch.ones(5), aten_graph=False)
         for _, buffer in gm.named_buffers():
-            self.assertTrue(torch.allclose(buffer, torch.zeros(5)))
+            torch.testing.assert_close(buffer, torch.zeros(5))
 
     def test_predispatch_with_higher_order(self):
         def f(x):
@@ -4115,8 +4115,8 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
         )
         inp1 = torch.randn(4, 4)
         inp2 = torch.randn(6, 4)
-        self.assertTrue(torch.allclose(f(inp1), gm(inp1)))
-        self.assertTrue(torch.allclose(f(inp2), gm(inp2)))
+        torch.testing.assert_close(f(inp1), gm(inp1))
+        torch.testing.assert_close(f(inp2), gm(inp2))
 
     def test_predispatch_with_higher_order_nested(self):
         def f(x):
@@ -4131,9 +4131,9 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
         inp1 = torch.randn(4, 4)
         inp2 = torch.randn(6, 4)
         inp3 = torch.randn(8, 4)
-        self.assertTrue(torch.allclose(f(inp1), gm(inp1)))
-        self.assertTrue(torch.allclose(f(inp2), gm(inp2)))
-        self.assertTrue(torch.allclose(f(inp3), gm(inp3)))
+        torch.testing.assert_close(f(inp1), gm(inp1))
+        torch.testing.assert_close(f(inp2), gm(inp2))
+        torch.testing.assert_close(f(inp3), gm(inp3))
 
     def test_predispatch_with_for_out_dtype(self):
         class M(torch.nn.Module):
@@ -4149,7 +4149,7 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
         x = torch.randint(-128, 127, (5, 5), dtype=torch.int8)
         gm, _ = torch._dynamo.export(m, x, aten_graph=True, pre_dispatch=True)
 
-        self.assertTrue(torch.allclose(m(x), gm(x)))
+        torch.testing.assert_close(m(x), gm(x))
 
     def test_predispatch_with_for_out_dtype_nested(self):
         class M(torch.nn.Module):
@@ -4175,9 +4175,9 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
         x = torch.ones((5, 5), dtype=torch.int8)
         gm, _ = torch._dynamo.export(m, x, aten_graph=True, pre_dispatch=True)
 
-        self.assertTrue(torch.allclose(m(x), gm(x)))
+        torch.testing.assert_close(m(x), gm(x))
         y = torch.zeros((5, 5), dtype=torch.int8)
-        self.assertTrue(torch.allclose(m(y), gm(y)))
+        torch.testing.assert_close(m(y), gm(y))
 
         self.assertExpectedInline(
             gm.true_graph_0.code.strip(),
@@ -4218,7 +4218,7 @@ def forward(self, arg0_1, arg1_1):
         x, y = torch.rand(3), torch.rand(3)
         gm, _ = torch._dynamo.export(t, x, y)
 
-        self.assertTrue(torch.allclose(forward(None, x, y), gm(x, y)))
+        torch.testing.assert_close(forward(None, x, y), gm(x, y))
         for node in gm.graph.nodes:
             if node.op == "call_function":
                 self.assertIn("nn_module_stack", node.meta)

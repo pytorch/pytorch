@@ -288,7 +288,7 @@ class TestLayoutOptim(TestCase):
             a = torch.randn(2, size, requires_grad=True).to(GPU_TYPE)
             b = torch.randn(2, size).to(GPU_TYPE)
             actual = torch.compile(f, dynamic=True)(a, b)
-            self.assertTrue(torch.allclose(f(a, b), actual))
+            torch.testing.assert_close(f(a, b), actual)
 
             # Trigger the compiling of the backward graph
             actual.sum().backward()
@@ -338,7 +338,7 @@ class TestLayoutOptim(TestCase):
         loss.backward()
 
         ref = model(x, targets)
-        self.assertTrue(torch.allclose(ref, loss))
+        torch.testing.assert_close(ref, loss)
 
 
 if __name__ == "__main__":

@@ -5209,7 +5209,7 @@ class CPUReproTests(TestCase):
             output = model(x)
             c_model = torch.compile(model)
             c_output = c_model(x)
-            self.assertTrue(torch.allclose(output, c_output))
+            torch.testing.assert_close(output, c_output)
 
     @requires_vectorization
     def test_bool_max(self):

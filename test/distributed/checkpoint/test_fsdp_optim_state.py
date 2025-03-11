@@ -125,7 +125,7 @@ class FsdpOptimStateCheckpoint(DTensorTestBase):
                 state2 = after_optim_state.get(fqn).get(state_name)
                 if isinstance(state, ShardedTensor):
                     self.assertTrue(isinstance(state2, ShardedTensor))
-                    self.assertTrue(torch.allclose(state, state2))
+                    torch.testing.assert_close(state, state2)
                 else:
                     self.assertEqual(state, state2)
 
