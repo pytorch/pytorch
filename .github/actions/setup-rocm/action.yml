@@ -9,7 +9,7 @@ runs:
       if: always()
       shell: bash
       run: |
-        hostname
+        echo "Hostname: ${NODE_NAME:-$(hostname)}"
     - name: Stop all running docker containers
       if: always()
       shell: bash
