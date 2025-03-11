@@ -36,7 +36,7 @@ from .bytecode_transformation import (
     create_rot_n,
     Instruction,
 )
-from .exc import IncorrectUsage, unimplemented, unimplemented_v2
+from .exc import IncorrectUsage, unimplemented_v2
 from .source import AttrSource, ChainedSource, DictGetItemSource, Source
 from .utils import is_safe_constant, rot_n_helper
 from .variables.base import ValueMutationExisting, VariableTracker
@@ -197,7 +197,12 @@ class PyCodegen:
             try:
                 self.call_reconstruct(source)
             except NotImplementedError:
-                unimplemented(f"reconstruct: {source}")
+                unimplemented_v2(
+                    gb_type="Reconstruction failure: source.reconstruct not implemented",
+                    context=str(source),
+                    explanation=f"Dynamo has no bytecode reconstruction implemented for {type(source)} variable {source}.",
+                    hints=[*graph_break_hints.DYNAMO_BUG],
+                )
 
             self._output.append(create_dup_top())
             self.add_cache(source)
