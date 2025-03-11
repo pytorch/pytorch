@@ -20,6 +20,7 @@ from torch.distributed.tensor._ops._common_rules import pointwise_rule
 from torch.distributed.tensor._ops._embedding_ops import _MaskPartial
 from torch.distributed.tensor._ops.utils import (
     expand_to_full_mesh_op_strategy,
+    generate_redistribute_costs,
     is_tensor_dim_sharded,
     is_tensor_evenly_shardable,
     is_tensor_partial,
@@ -739,7 +740,6 @@ def prop_index(op_schema: OpSchema) -> OutputSharding:
 
 @register_prop_rule(
     [
-        aten.split.Tensor,
         aten.split_with_sizes.default,
         aten.split_with_sizes_copy.default,
     ],
@@ -804,3 +804,70 @@ def split_rule(op_schema: OpSchema) -> OutputSharding:
         for _ in range(len(output_size_list))
     ]
     return OutputSharding(output_spec_list)
+
+
+@register_op_strategy(aten.split.Tensor, schema_info=RuntimeSchemaInfo(1))
+def split_strategy(op_schema: OpSchema) -> TupleStrategy:
+    input_strategy = op_schema.args_schema[0]
+    assert isinstance(input_strategy, OpStrategy)
+
+    split_size_or_sections = op_schema.args_schema[1]
+
+    dim = op_schema.args_schema[2] if len(op_schema.args_schema) > 2 else 0
+    assert isinstance(dim, int)
+    dim = normalize_dim(dim, input_strategy.ndim)
+
+    def size_split(N, i) -> list:
+        # Last chunk will be smaller if the tensor size N
+        # along the given dimension dim is not divisible by i.
+        assert i > 0
+        return [i] * (N // i) + ([N % i] if N % i != 0 else [])
+
+    output_size_list = (
+        size_split(
+            input_strategy.strategies[0].output_spec.shape[dim], split_size_or_sections
+        )
+        if isinstance(split_size_or_sections, int)
+        else split_size_or_sections
+    )
+    assert isinstance(output_size_list, Sized)
+
+    output_strategy_childs = [OpStrategy([]) for _ in range(len(output_size_list))]
+    for input_placement_strategy in input_strategy.strategies:
+        op_args_target_specs = []
+        redistribute_costs = []
+        input_spec = input_placement_strategy.output_spec
+
+        output_placements = input_spec.placements
+        if is_tensor_dim_sharded(input_spec, dim=dim):
+            # need reshard before splitting
+            placements_after_unshard = unshard_tensor_dim(
+                input_spec.placements, dim=dim
+            )
+            input_target_spec = DTensorSpec(
+                mesh=input_spec.mesh,
+                placements=placements_after_unshard,
+                tensor_meta=input_spec.tensor_meta,
+            )
+            op_args_target_specs.append(input_target_spec)
+            redistribute_costs.append(
+                generate_redistribute_costs(input_strategy, input_target_spec)
+            )
+            output_placements = placements_after_unshard
+        else:
+            op_args_target_specs.append(input_spec)
+            redistribute_costs.append([0.0 for _ in input_strategy.strategies])
+
+        for child in output_strategy_childs:
+            child.strategies.append(
+                PlacementStrategy(
+                    output_specs=DTensorSpec(
+                        mesh=input_spec.mesh,
+                        placements=output_placements,
+                    ),
+                    input_specs=op_args_target_specs,
+                    redistribute_cost=redistribute_costs,
+                )
+            )
+
+    return TupleStrategy(output_strategy_childs)
