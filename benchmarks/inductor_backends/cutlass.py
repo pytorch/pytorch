@@ -167,7 +167,7 @@ def get_inputs(
 
     if op_name == "mm":
         A = torch.randn(M, K, dtype=dtype, device=device)
-        B = torch.randn(K, N, dtype=dtype, device=device)
+        B = torch.randn(N, K, dtype=dtype, device=device).t()
         C = None
         return A, B, C
     else:
