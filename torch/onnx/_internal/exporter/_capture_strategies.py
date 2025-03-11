@@ -126,7 +126,9 @@ class CaptureStrategy(abc.ABC):
             )
         self._success(model)
         return Result(
-            exported_program, strategy=self.__class__.__name__, exception=self._exception
+            exported_program,
+            strategy=self.__class__.__name__,
+            exception=self._exception,
         )
 
     @abc.abstractmethod
