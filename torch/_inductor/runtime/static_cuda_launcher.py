@@ -2,8 +2,6 @@ import functools
 from typing import Any, Optional
 from typing_extensions import Unpack
 
-from torch.utils._ordered_set import OrderedSet
-
 from .triton_compat import ASTSource, CompiledKernel
 
 
@@ -45,6 +43,10 @@ class StaticallyLaunchedCudaKernel:
 
         # TODO: is this right?
         self.name = kernel.src.fn.__name__
+
+        # Used by torch.compile to filter constants in older triton versions
+        self.arg_names = kernel.src.fn.arg_names
+
         self.hash = kernel.hash
         if (
             kernel.__class__.launch_enter_hook is not None
@@ -66,7 +68,8 @@ class StaticallyLaunchedCudaKernel:
             )
 
         # Newer triton versions pass an extra global scratch parameter to the compiled cuda kernel.
-        # Inductor never uses this field or enables it, but we still have to pass an extra None into the set of params if its enabled
+        # Inductor never uses this field or enables it, but we still have to pass
+        # an extra None into the set of params if its enabled
         if hasattr(kernel.metadata, "global_scratch_size"):
             if kernel.metadata.global_scratch_size > 0:
                 raise NotImplementedError("Global scratch not yet supported")
@@ -75,7 +78,7 @@ class StaticallyLaunchedCudaKernel:
         else:
             self.has_global_scratch = False
 
-        self.arg_tys, self.constant_idxs = self.arg_ty_from_signature(kernel.src)
+        self.arg_tys = self.arg_ty_from_signature(kernel.src)
         self.function: Optional[int] = (
             None  # Loaded by load_kernel(on the parent process)
         )
@@ -154,31 +157,41 @@ class StaticallyLaunchedCudaKernel:
             raise NotImplementedError("nvTmaDesc kernels are not yet supported")
         return StaticallyLaunchedCudaKernel.type_mappings()[ty]
 
-    def arg_ty_from_signature(self, src: ASTSource) -> tuple[str, OrderedSet[int]]:
+    def arg_ty_from_signature(self, src: ASTSource) -> str:
         def index_key(i: Any) -> int:
             return src.fn.arg_names.index(i) if isinstance(i, str) else i
 
         signature = {index_key(key): value for key, value in src.signature.items()}
+        # Triton uses these as the main way to filter out constants passed to their cubin
         constants = [index_key(key) for key in getattr(src, "constants", dict())]
+        # This value is always a superset of kernel.fn.constexprs: kernel.fn.constexprs are
+        # constants declared by the triton kernel directly, whereas this list can have
+        # constants that are unused by the triton kernel that triton figured out during
+        # compilation.
+        self.constexprs = constants
         # Despite requiring them to be passed in, the triton CUDA launcher
         # completely ignores the constexprs passed into it when generating code.
         # So we can ignore them here too
         params = []
 
-        constant_idxs: OrderedSet[int] = OrderedSet()
         for i in sorted(signature.keys()):
             ty = signature[i]
             # In newer triton versions, constants are passed in to signature with type `constexpr`
             # In older triton versions, there can be constants in src.constants that are not `constexpr` in signature
             # so we check both here
             if ty == "constexpr" or i in constants:
-                constant_idxs.add(i)
+                pass
             else:
                 params.append(self.extract_type(ty))
-        return "".join(params), constant_idxs
+        return "".join(params)
 
     def run(
-        self, grid: tuple[int, ...], stream: int, *args: Unpack[tuple[object, ...]]
+        self,
+        grid_x: int,
+        grid_y: int,
+        grid_z: int,
+        stream: int,
+        *args: Unpack[tuple[object, ...]],
     ) -> None:
         """Actually run the kernel at runtime. This function is the hot codepath."""
         from torch._C import _StaticCudaLauncher
@@ -191,11 +204,6 @@ class StaticallyLaunchedCudaKernel:
         # thing, it should always match.
         # Get rid of constants before passing to cubin launcher
 
-        # TODO: is this (and the check below) slow to do at runtime? The thing is,
-        # we already spend the time in CachingAutotuner.launch() to massage the arguments
-        # properly anyways so this isn't exactly slower than that...
-        args = tuple(args[i] for i in range(len(args)) if i not in self.constant_idxs)
-
         # Add a None if triton wants an extra parameter to the cubin
         if self.has_global_scratch:
             arg_tys = self.arg_tys + "O"
@@ -207,9 +215,6 @@ class StaticallyLaunchedCudaKernel:
 
         # TODO: can handle grid functions here or in C++, so
         # that we don't need the grid handler above.
-        grid_x = grid[0]
-        grid_y = grid[1] if len(grid) > 1 else 1
-        grid_z = grid[2] if len(grid) > 2 else 1
         _StaticCudaLauncher._launch_kernel(
             self.function,
             grid_x,

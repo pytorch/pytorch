@@ -559,14 +559,14 @@ class CachingAutotuner(KernelInterface):
             triton_hash_to_path_key(binary.hash), self.triton_meta.get("device", 0)
         )
         # If the binary has a cubin file to directly launch, save it on the binary
-        static_launcher = StaticTritonCompileResult.can_statically_launch(
-            binary, self.inductor_meta, self.triton_meta, self.heuristic_type
-        )
-        if static_launcher is not None:
-            result = StaticTritonCompileResult(
-                static_launcher, cfg, compile_meta, self.inductor_meta
-            )
-            return result
+        # static_launcher = StaticTritonCompileResult.can_statically_launch(
+        #     binary, self.inductor_meta, self.triton_meta, self.heuristic_type
+        # )
+        # if static_launcher is not None:
+        #     result = StaticTritonCompileResult(
+        #         static_launcher, cfg, compile_meta, self.inductor_meta
+        #     )
+        #     return result
 
         return TritonCompileResult(binary, cfg, compile_meta, self.inductor_meta)
 
@@ -1018,8 +1018,92 @@ class CompileResult(Generic[_T]):
     ):
         self.kernel = kernel
         self.config = config
+        self.compile_meta = compile_meta
+        self.inductor_meta = inductor_meta
 
     def make_launcher(self) -> LauncherType: ...
+
+    def _gen_launcher_code(self, scope, def_args, runner_args) -> LauncherType:
+        if "extra_launcher_args" in self.inductor_meta:
+            def_args = [*def_args, *self.inductor_meta["extra_launcher_args"]]
+
+        grid = GridExpr.from_meta(self.inductor_meta, self.config)
+        # grid.prefix is usually empty, grid.x_grid is something like `-(xnumel//-1024)`
+        lines = [
+            f"def launcher({', '.join(def_args)}, stream):",
+            *[f"    {line}" for line in grid.prefix],
+            f"    grid_0 = {grid.x_grid}",
+            f"    grid_1 = {grid.y_grid}",
+            f"    grid_2 = {grid.z_grid}",
+            f"    runner({', '.join(runner_args)})",
+        ]
+        exec("\n".join(lines), scope)
+        return scope["launcher"]
+
+    def _get_arg_lists(
+        self, arg_names, constexprs
+    ) -> tuple[list[str], list[str], OrderedSet[str]]:
+        """
+        Return a bunch of intermediate lists of args needed for generating
+        launcher code.
+        """
+        compile_meta = self.compile_meta
+        cfg = self.config
+        known_constants = OrderedSet(
+            arg for i, arg in enumerate(arg_names) if i in constexprs
+        )
+
+        """
+        https://github.com/pytorch/pytorch/issues/115344
+
+        self.fn.constexprs doesn't properly deal with None args, so when we filter out
+        an arg in UserDefinedTritonKernel.codegen, we need to filter it here as well.
+        We also don't want to modify self.fn.
+
+        We know that we removed something from the signature if:
+            1. It's in compile_meta["constants"]
+            2. It isn't a constant we already know about
+                Note: The value of interest has already been added to compile_meta['constants'],
+                    so we use self.fn.constexprs instead.
+            3. It isn't in the compile_meta signature
+        """
+        none_args = OrderedSet(
+            k
+            for k, v in compile_meta["constants"].items()
+            if v is None and k not in known_constants
+        )
+        none_args = none_args.difference(OrderedSet(compile_meta["signature"].keys()))
+
+        if triton_version_uses_attrs_dict():
+            call_args = arg_names
+            def_args = arg_names
+            if (
+                "num_warps" in compile_meta["constants"]
+                or "num_stages" in compile_meta["constants"]
+            ):
+                # num_warps/num_stages are special implicit args that are not in the signature
+                # see test_triton_kernel_special_params
+                def_args = [
+                    arg for arg in def_args if arg not in ("num_warps", "num_stages")
+                ]
+                repl = {
+                    k: str(compile_meta["constants"].get(k))
+                    for k in ("num_warps", "num_stages")
+                }
+                call_args = [repl.get(arg, arg) for arg in call_args]
+        else:
+            call_args = [
+                arg
+                for i, arg in enumerate(arg_names)
+                if i not in constexprs and arg not in none_args
+            ]
+            cfg_dict = config_to_dict(cfg)
+            def_args = [
+                name
+                for name in arg_names
+                if name not in cfg_dict and name not in none_args
+            ]
+        return call_args, def_args, none_args
 
 
 class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
@@ -1067,16 +1151,17 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
     def make_launcher(self) -> LauncherType:
         # Load the binary on the parent
         self.kernel.load_kernel()
-        grid_meta = self.config.kwargs
-
-        def launcher(*args, grid, stream):
-            if callable(grid):
-                grid_tuple = grid(grid_meta)
-            else:
-                grid_tuple = grid
-            self.kernel.run(grid_tuple, stream, *args)
-            return self.kernel
-
+        scope = {
+            "runner": self.kernel.run,
+        }
+        # StaticallyLaunchedCudaKernel handles constexprs and stuff already in its run function:
+        # we just have to pass in the arg_names directly
+        call_args, def_args, _none_args = self._get_arg_lists(
+            self.kernel.arg_names, self.kernel.constexprs
+        )
+        # StaticallyLaunchedCudaKernel.run takes in order grid_0, grid_1, grid_2, stream, and call_args
+        runner_args = ["grid_0", "grid_1", "grid_2", "stream", *call_args]
+        launcher = self._gen_launcher_code(scope, def_args, runner_args)
         launcher.config = self.config  # type: ignore[attr-defined]
         launcher.n_regs = self.kernel.n_regs  # type: ignore[attr-defined]
         launcher.n_spills = self.kernel.n_spills  # type: ignore[attr-defined]
@@ -1096,18 +1181,6 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
     @functools.lru_cache(32)
     def _kernel_metadata_cls(fields: tuple[str, ...]) -> Any:
         return namedtuple("KernelMetadata", sorted(fields))
-
-    def __init__(
-        self,
-        kernel: CompiledKernel,
-        config: Config,
-        compile_meta: dict[str, Any],
-        inductor_meta: dict[str, Any],
-    ) -> None:
-        self.kernel = kernel
-        self.config = config
-        self.compile_meta = compile_meta
-        self.inductor_meta = inductor_meta
 
     @staticmethod
     def _serialize_metadata(metadata):
@@ -1188,59 +1261,9 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
         binary = self.kernel
         fn = binary.src.fn
         binary._init_handles()
-        """
-        https://github.com/pytorch/pytorch/issues/115344
-
-        self.fn.constexprs doesn't properly deal with None args, so when we filter out
-        an arg in UserDefinedTritonKernel.codegen, we need to filter it here as well.
-        We also don't want to modify self.fn.
-
-        We know that we removed something from the signature if:
-            1. It's in compile_meta["constants"]
-            2. It isn't a constant we already know about
-                Note: The value of interest has already been added to compile_meta['constants'],
-                    so we use self.fn.constexprs instead.
-            3. It isn't in the compile_meta signature
-        """
-        known_constants = OrderedSet(
-            arg for i, arg in enumerate(fn.arg_names) if i in fn.constexprs
+        (call_args, def_args, none_args) = self._get_arg_lists(
+            fn.arg_names, fn.constexprs
         )
-        none_args = OrderedSet(
-            k
-            for k, v in compile_meta["constants"].items()
-            if v is None and k not in known_constants
-        )
-        none_args = none_args.difference(OrderedSet(compile_meta["signature"].keys()))
-
-        if triton_version_uses_attrs_dict():
-            call_args = fn.arg_names
-            def_args = fn.arg_names
-            if (
-                "num_warps" in compile_meta["constants"]
-                or "num_stages" in compile_meta["constants"]
-            ):
-                # num_warps/num_stages are special implicit args that are not in the signature
-                # see test_triton_kernel_special_params
-                def_args = [
-                    arg for arg in def_args if arg not in ("num_warps", "num_stages")
-                ]
-                repl = {
-                    k: str(compile_meta["constants"].get(k))
-                    for k in ("num_warps", "num_stages")
-                }
-                call_args = [repl.get(arg, arg) for arg in call_args]
-        else:
-            call_args = [
-                arg
-                for i, arg in enumerate(fn.arg_names)
-                if i not in fn.constexprs and arg not in none_args
-            ]
-            cfg_dict = config_to_dict(cfg)
-            def_args = [
-                name
-                for name in fn.arg_names
-                if name not in cfg_dict and name not in none_args
-            ]
         binary_shared = (
             binary.shared if hasattr(binary, "shared") else binary.metadata.shared
         )
@@ -1317,20 +1340,7 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
                 *call_args,
             ]
 
-        if "extra_launcher_args" in self.inductor_meta:
-            def_args = [*def_args, *self.inductor_meta["extra_launcher_args"]]
-
-        grid = GridExpr.from_meta(self.inductor_meta, cfg)
-        # grid.prefix is usually empty, grid.x_grid is something like `-(xnumel//-1024)`
-        lines = [
-            f"def launcher({', '.join(def_args)}, stream):",
-            *[f"    {line}" for line in grid.prefix],
-            f"    grid_0 = {grid.x_grid}",
-            f"    grid_1 = {grid.y_grid}",
-            f"    grid_2 = {grid.z_grid}",
-            f"    runner({', '.join(runner_args)})",
-        ]
-        exec("\n".join(lines), scope)
+        launcher = self._gen_launcher_code(scope, def_args, runner_args)
 
         launcher = scope["launcher"]
         launcher.config = cfg
