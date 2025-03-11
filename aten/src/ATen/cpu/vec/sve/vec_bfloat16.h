@@ -18,7 +18,8 @@ namespace vec {
 // accessed as `at::vec`.
 inline namespace CPU_CAPABILITY {
 
-#if defined(CPU_CAPABILITY_SVE) && defined(__ARM_FEATURE_BF16)
+#if defined(CPU_CAPABILITY_SVE256) && defined(__ARM_FEATURE_BF16)
+
 template <>
 class Vectorized<BFloat16> {
 private:
@@ -153,15 +154,9 @@ public:
   }
   Vectorized<BFloat16> fmod(const Vectorized<BFloat16>& q) const;
   Vectorized<BFloat16> hypot(const Vectorized<BFloat16> &b) const;
-  Vectorized<BFloat16> i0() const {
-    return map(calc_i0);
-  }
-  Vectorized<BFloat16> i0e() const {
-    return map(calc_i0e);
-  }
-  Vectorized<BFloat16> digamma() const {
-    return map(calc_digamma);
-  }
+  Vectorized<BFloat16> i0() const;
+  Vectorized<BFloat16> i0e() const;
+  Vectorized<BFloat16> digamma() const;
   Vectorized<BFloat16> igamma(const Vectorized<BFloat16> &x) const;
   Vectorized<BFloat16> igammac(const Vectorized<BFloat16> &x) const;
   Vectorized<BFloat16> nextafter(const Vectorized<BFloat16> &b) const;
@@ -359,6 +354,9 @@ DEFINE_BF16_FUNC_VIA_FLOAT(exp2);
 DEFINE_BF16_FUNC_VIA_FLOAT(expm1);
 DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(fmod);
 DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(hypot);
+DEFINE_BF16_FUNC_VIA_FLOAT(i0);
+DEFINE_BF16_FUNC_VIA_FLOAT(i0e);
+DEFINE_BF16_FUNC_VIA_FLOAT(digamma);
 DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(igamma);
 DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(igammac);
 DEFINE_BF16_FUNC_VIA_FLOAT_W_ARG(nextafter);
