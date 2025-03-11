@@ -4406,7 +4406,7 @@ def _max_pool2d_with_offsets(
         prefix = idx[:-dim]
         bh = idx[-dim:]
         ih = [
-            bh[i] * stride[i] + reduction_idx[i] * dilation[i] - padding[i]
+            (bh[i] * stride[i]) + (reduction_idx[i] * dilation[i]) - padding[i]
             for i in range(dim)
         ]
         return x_loader([*prefix, *ih])

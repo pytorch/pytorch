@@ -4259,14 +4259,14 @@ class CommonTemplate:
             (torch.randn([2, 2, 10]),),
         )
 
-    def test_low_memory_max_pool(self):
+    @parametrize("dilation", (1, 2))
+    def test_low_memory_max_pool(self, dilation):
         prims = torch.ops.prims
 
         def fn(x):
             kernel_size = [3, 3]
             stride = [2, 2]
             padding = [1, 1]
-            dilation = [1, 1]
             ceil_mode = False
 
             vals, offsets = prims._low_memory_max_pool2d_with_offsets(
@@ -4274,7 +4274,7 @@ class CommonTemplate:
                 kernel_size,
                 stride,
                 padding,
-                dilation,
+                [dilation] * 2,
                 ceil_mode,
             )
             indices = prims._low_memory_max_pool2d_offsets_to_indices(
@@ -4283,7 +4283,7 @@ class CommonTemplate:
                 x.size(-1),
                 stride,
                 padding,
-                dilation=dilation,
+                dilation=[dilation] * 2,
             )
             return vals, indices, offsets
 
@@ -5045,7 +5045,7 @@ class CommonTemplate:
 
     # From https://github.com/pytorch/pytorch/issues/93384
     def test_max_pool2d8(self):
-        # dialtion is not 1, use fallback
+        # dilation is not 1
         def fn(x):
             return aten.max_pool2d_with_indices(x, [3, 2], [2, 1], [1, 1], [1, 2])
 
