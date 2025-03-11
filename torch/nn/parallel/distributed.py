@@ -2226,7 +2226,6 @@ class DistributedDataParallel(Module, Joinable):
         if hook.__name__ in ["bf16_compress_hook", "bf16_compress_wrapper_hook"]:
             cuda_supported = (
                 torch.version.cuda is not None
-                and int(torch.version.cuda.split(".")[0]) >= 11
             ) or torch.version.hip is not None
             nccl_supported = (
                 dist.is_available()

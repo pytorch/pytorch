@@ -256,7 +256,7 @@ class profile:
             ), "Device-only events supported only with Kineto (use_kineto=True)"
 
         if self.use_device is not None:
-            VALID_DEVICE_OPTIONS = ["cuda", "xpu", "mtia"]
+            VALID_DEVICE_OPTIONS = ["cuda", "xpu", "mtia", "hpu"]
             if _get_privateuse1_backend_name() != "privateuseone":
                 VALID_DEVICE_OPTIONS.append(_get_privateuse1_backend_name())
             if self.use_device not in VALID_DEVICE_OPTIONS:
@@ -270,6 +270,12 @@ class profile:
 
             if self.use_device == "xpu" and not torch.xpu.is_available():
                 warn("XPU is not available, disabling XPU profiling")
+                self.use_device = None
+
+            if self.use_device == "hpu" and not (
+                hasattr(torch, "hpu") and torch.hpu.is_available()
+            ):
+                warn("HPU is not available, disabling HPU profiling")
                 self.use_device = None
 
         self.kineto_activities = set()
@@ -293,6 +299,11 @@ class profile:
                 use_kineto and ProfilerActivity.MTIA in _supported_activities()
             ), "Legacy MTIA profiling is not supported. Requires use_kineto=True on MTIA devices."
             self.kineto_activities.add(ProfilerActivity.MTIA)
+        elif self.use_device == "hpu":
+            assert (
+                use_kineto and ProfilerActivity.HPU in _supported_activities()
+            ), "Legacy HPU profiling is not supported. Requires use_kineto=True on HPU devices."
+            self.kineto_activities.add(ProfilerActivity.HPU)
         elif self.use_device is not None and self.use_device != "privateuseone":
             if (
                 not use_kineto
@@ -497,11 +508,16 @@ class profile:
         """
         return _toggle_collection_dynamic(enabled, set(activities))
 
-    def key_averages(self, group_by_input_shape=False, group_by_stack_n=0):
+    def key_averages(
+        self,
+        group_by_input_shape=False,
+        group_by_stack_n=0,
+        group_by_overload_name=False,
+    ):
         self._ensure_function_events()
         assert self._function_events is not None, "Expected profiling results"
         return self._function_events.key_averages(
-            group_by_input_shape, group_by_stack_n
+            group_by_input_shape, group_by_stack_n, group_by_overload_name
         )
 
     key_averages.__doc__ = EventList.key_averages.__doc__
@@ -585,6 +601,7 @@ class profile:
             fe = FunctionEvent(
                 id=kineto_event.correlation_id(),
                 name=_rewrite_name(name=kineto_event.name(), with_wildcard=True),
+                overload_name=kineto_event.overload_name(),
                 trace_name=_rewrite_name(name=kineto_event.name(), with_wildcard=False),
                 thread=kineto_event.start_thread_id(),
                 start_us=rel_start_ns / 1000,
@@ -664,6 +681,7 @@ class profile:
             fe = FunctionEvent(
                 id=max_evt_id,
                 name=evt.name(),
+                overload_name="",
                 trace_name=None,  # not outputting in the trace
                 thread=evt.start_thread_id(),
                 start_us=rel_start_ns / 1000,
