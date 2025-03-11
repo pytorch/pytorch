@@ -321,7 +321,7 @@ In this mode PyTorch computations will leverage your GPU via CUDA for faster num
 NVTX is a part of CUDA distributive, where it is called "Nsight Compute". To install it onto an already installed CUDA run CUDA installation once again and check the corresponding checkbox.
 Make sure that CUDA with Nsight Compute is installed after Visual Studio.
 
-Currently, VS 2017 / 2019, and Ninja are supported as the generator of CMake. If `ninja.exe` is detected in `PATH`, then Ninja will be used as the default generator, otherwise, it will use VS 2017 / 2019.
+Currently, VS 2022 and Ninja are supported as the generator of CMake. If `ninja.exe` is detected in `PATH`, then Ninja will be used as the default generator, otherwise, it will use VS 2022.
 <br/> If Ninja is selected as the generator, the latest MSVC will get selected as the underlying toolchain.
 
 Additional libraries such as
