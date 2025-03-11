@@ -38,15 +38,14 @@ def identity(t) -> Tensor:
     return torch.ops.libtorch_agnostic.identity.default(t)
 
 
-def my_ones_like(t, device) -> Tensor:
+def my_abs(t) -> Tensor:
     """
-    Returns an ones tensor with the same shape and dtype as the input tensor.
+    Returns abs on the input tensor, outputs a new Tensor
 
     Args:
         t: any Tensor
-        device: a string, e.g., "cpu" or "cuda"
 
     Returns:
-        a new empty Tensor with the same shape and dtype as input, with device being settable
+        a Tensor
     """
-    return torch.ops.libtorch_agnostic.my_ones_like.default(t, device)
+    return torch.ops.libtorch_agnostic.my_abs.default(t)

@@ -1459,20 +1459,8 @@ c10::IValue to_ivalue(
     case c10::TypeKind::LayoutType: {
       return c10::IValue(to<c10::Layout>(stable_ivalue));
     }
-    case c10::TypeKind::DeviceObjType: {
-      return c10::IValue(to<c10::Device>(stable_ivalue));
-    }
     case c10::TypeKind::MemoryFormatType: {
       return c10::IValue(to<c10::MemoryFormat>(stable_ivalue));
-    }
-    case c10::TypeKind::OptionalType: {
-      auto inner_type = arg_type->castRaw<at::OptionalType>()->getElementType();
-
-      // our contract is that IValue None = StableIValue nullptr
-      if (to<std::nullptr_t>(stable_ivalue) == nullptr) {
-        return c10::IValue();
-      }
-      return to_ivalue(inner_type, stable_ivalue);
     }
     default: {
       TORCH_CHECK(false, "Not yet supported argument type: ", arg_type->str());

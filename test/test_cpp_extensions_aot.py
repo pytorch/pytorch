@@ -272,13 +272,13 @@ class TestCppExtensionAOT(common.TestCase):
 
         # (3) test calling our dispatcher on ones_like
         t = torch.rand(32, 16, device=device)
-        cpu_t = libtorch_agnostic.ops.my_ones_like(t, "cpu")
-        self.assertEqual(cpu_t, torch.ones_like(t, device="cpu"))
+        cpu_t = libtorch_agnostic.ops.my_abs(t)
+        self.assertEqual(cpu_t, torch.abs(t))
 
         def _make_cuda_tensors(prior_mem):
-            cuda_t = libtorch_agnostic.ops.my_ones_like(t, "cuda")
+            cuda_t = libtorch_agnostic.ops.my_abs(t)
             self.assertGreater(torch.cuda.memory_allocated(device), prior_mem)
-            self.assertEqual(cuda_t, torch.ones_like(t, device=device))
+            self.assertEqual(cuda_t, torch.abs(t))
 
         if t.is_cuda:
             init_mem = torch.cuda.memory_allocated(device)
