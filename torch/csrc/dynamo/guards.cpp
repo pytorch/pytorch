@@ -11,7 +11,6 @@
 #include <torch/csrc/dynamo/guards.h>
 #include <torch/csrc/inductor/inductor_ops.h>
 #include <torch/csrc/utils/disable_torch_function.h>
-#include <torch/csrc/utils/numpy_stub.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/utils/python_numbers.h>
@@ -1761,69 +1760,6 @@ class DATA_PTR_MATCH : public LeafGuard {
   void* _data_ptr;
 };
 
-class NDARRAY_MATCH : public LeafGuard {
- public:
-  NDARRAY_MATCH(py::object ndarray, py::object verbose_code_parts)
-      : LeafGuard(std::move(verbose_code_parts)) {
-#ifdef USE_NUMPY
-    PyObject* value = ndarray.ptr();
-    if (!PyArray_Check(value) && !PyArray_CheckScalar(value)) {
-      throw py::value_error("Expecting a ndarray");
-    }
-    PyArrayObject* array;
-    if (PyArray_Check(value)) {
-      array = (PyArrayObject*)value;
-    } else {
-      array = (PyArrayObject*)(PyArray_FromScalar(value, nullptr));
-    }
-
-    _expected_ndims = PyArray_NDIM(array);
-    _expected_dtype = PyArray_TYPE(array);
-    for (int i = 0; i < _expected_ndims; i++) {
-      _expected_shape.push_back(PyArray_DIM(array, i));
-    }
-#else
-    throw std::runtime_error("expecting build with USE_NUMPY");
-#endif
-  }
-
-  bool check_nopybind(PyObject* value) override { // borrowed ref
-#ifdef USE_NUMPY
-    PyArrayObject* array;
-    if (PyArray_Check(value)) {
-      array = (PyArrayObject*)value;
-    } else if (PyArray_CheckScalar(value)) {
-      array = (PyArrayObject*)(PyArray_FromScalar(value, nullptr));
-    } else {
-      return false;
-    }
-
-    if (_expected_ndims != PyArray_NDIM(array)) {
-      return false;
-    }
-
-    if (_expected_dtype != PyArray_TYPE(array)) {
-      return false;
-    }
-
-    for (int i = 0; i < _expected_ndims; i++) {
-      if (_expected_shape[i] != PyArray_DIM(array, i)) {
-        return false;
-      }
-    }
-
-    return true;
-#else
-    throw std::runtime_error("expecting build with USE_NUMPY");
-#endif
-  }
-
- private:
-  int _expected_ndims;
-  int _expected_dtype;
-  std::vector<Py_ssize_t> _expected_shape;
-};
-
 // Checks that an attr is absent in the object. We don't need the opposite
 // HASATTR guard because we can just rely on GetAttrGuardAccessor to act as
 // HASATTR guard.
@@ -1938,6 +1874,18 @@ class NO_TENSOR_ALIASING : public RelationalGuard {
       // it.
       return false;
     }
+
+    // Typically we don't have to increment the ref count here because the
+    // tensors are held in f_locals. But there is a special case for
+    // `from_numpy` source. `from_numpy` converts integers and such into tensors
+    // and these tensors are ephemeral. If we don't incref, those tensors can be
+    // garbage collected, and the next time from_numpy can reuse the memory
+    // address. Therefore, we incref here. They are decref'd in reset_state.
+    //
+    // IMPORTANT NOTE - Do not move this Py_INCREF before the insertion into
+    // _unique_tensors. If there is a tensor aliasing, you will end up
+    // incrementing the refcount twice, while the reset decrements only once.
+    Py_INCREF(value);
     return true;
   }
 
@@ -1952,6 +1900,9 @@ class NO_TENSOR_ALIASING : public RelationalGuard {
   }
 
   void reset_state() final {
+    for (auto item : _unique_tensors) {
+      Py_DECREF(item.first);
+    }
     _unique_tensors.clear();
   }
 
@@ -5350,10 +5301,6 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "DATA_PTR_MATCH")
       .def(py::init<py::object, py::list>())
       .def("__call__", &DATA_PTR_MATCH::check);
-  py::class_<NDARRAY_MATCH, LeafGuard, std::shared_ptr<NDARRAY_MATCH>>(
-      py_m, "NDARRAY_MATCH")
-      .def(py::init<py::object, py::list>())
-      .def("__call__", &NDARRAY_MATCH::check);
   py::class_<NO_HASATTR, LeafGuard, std::shared_ptr<NO_HASATTR>>(
       py_m, "NO_HASATTR")
       .def(py::init<py::object, py::list>())
@@ -5656,15 +5603,6 @@ PyObject* torch_c_dynamo_guards_init() {
             SKIP_IF_GUARD_ALREADY_PRESENT("DATA_PTR_MATCH");
             self.add_leaf_guard(std::make_shared<DATA_PTR_MATCH>(
                 std::move(data_ptr), std::move(verbose_code_parts)));
-          })
-      .def(
-          "add_ndarray_match_guard",
-          [](GuardManager& self,
-             py::object ndarray,
-             py::object verbose_code_parts) -> void {
-            SKIP_IF_GUARD_ALREADY_PRESENT("NDARRAY_MATCH");
-            self.add_leaf_guard(std::make_shared<NDARRAY_MATCH>(
-                std::move(ndarray), std::move(verbose_code_parts)));
           })
       .def(
           "add_no_hasattr_guard",
