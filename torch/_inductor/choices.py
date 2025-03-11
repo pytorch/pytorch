@@ -360,6 +360,22 @@ class InductorChoices:
         """
         A heuristic to decide loop iteration orders.  This has not been well
         tuned and may be something we should autotune.
+
+        This heuristic:
+         - Moves dimensions of size 1 to the end.
+         - Sorts dimensions based on their stride sizes.
+         - Prefers dimensions with smaller strides first (memory locality.)
+         - Breaks ties based on the dimension index.
+
+        Example:
+        stride_lengths = [
+            [256, 16, 1],
+            [512, 32, 1],
+        ]
+        sizes = [4, 16, 32]
+        priority_idx = ()
+
+        Starting order: [2, 1, 0]
         """
 
         @functools.cmp_to_key
