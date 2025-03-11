@@ -189,6 +189,7 @@ for test_name in [
     "test_min_max_reduction_nan",
     "test_nan_to_num",
     "test_pow2",
+    "test_prod",
     "test_randint_int64_mod",
     "test_randn_generator",
     "test_remainder",

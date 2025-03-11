@@ -1,11 +1,12 @@
+warning: Selection `RUF030` has no effect because preview is not enabled.
 # This is not a feature-complete compiler backend
 # Just an early prototype that shows that one can compile elementwise ops into a Metal shader
 from __future__ import annotations
 
 import itertools
-import sympy
 from typing import Any, Optional, TYPE_CHECKING
 
+import sympy
 from sympy.printing.precedence import PRECEDENCE
 
 import torch
@@ -27,7 +28,6 @@ from .simd import IterationRangesEntry, SIMDKernel, SIMDScheduling
 
 if TYPE_CHECKING:
     from typing import Union
-
 
     from ..ops_handler import ReductionType, StoreMode
     from ..scheduler import Scheduler, SchedulerNode
@@ -414,7 +414,10 @@ class MetalKernel(SIMDKernel):
         index = self.prepare_indexing(index)
         dtype_str = self.dtype_to_str(V.graph.get_dtype(name))
         line = f"{var}[{self.index_to_str(index)}] = static_cast<{dtype_str}>({value});"
-        self.stores.writeline(DeferredLine(name, line))
+        if self.inside_reduction:
+            self.compute.writeline(DeferredLine(name, line))
+        else:
+            self.stores.writeline(DeferredLine(name, line))
 
     def _new_accvar(
         self,
@@ -464,8 +467,15 @@ class MetalKernel(SIMDKernel):
         if reduction_type in ["prod", "sum"]:
             acc_buf = self._new_accvar(src_dtype, acc_buf_size)
             if self.multistage_reduction:
-                self.indexing_code.writeline(f"{acc_buf}[{reduction_dim.name}] = 0;")
-                self.compute.splice(f"{acc_buf}[{reduction_dim.name}] += {value};")
+                default_val, reduction_op = (
+                    (0, "+") if reduction_type == "sum" else (1, "*")
+                )
+                self.indexing_code.writeline(
+                    f"{acc_buf}[{reduction_dim.name}] = {default_val};"
+                )
+                self.compute.splice(
+                    f"{acc_buf}[{reduction_dim.name}] {reduction_op}= {value};"
+                )
             else:
                 self.compute.splice(f"{acc_buf}[{reduction_dim.name}] = {value};")
             return self.cse.generate(
@@ -474,7 +484,9 @@ class MetalKernel(SIMDKernel):
                 dtype=DTYPE_TO_COMPUTATION_DTYPE[dtype],
             )
         if reduction_type in ["max", "min", "argmax", "argmin"]:
-            assert not self.multistage_reduction, f"Multistage reduction not yet supported for {reduction_type}"
+            assert (
+                not self.multistage_reduction
+            ), f"Multistage reduction not yet supported for {reduction_type}"
             acc_buf = self._new_accvar(src_dtype, acc_buf_size)
             self.compute.splice(
                 f"{acc_buf}[{reduction_dim.name}] = static_cast<{DTYPE_TO_METAL[src_dtype]}>({value});"
@@ -485,7 +497,9 @@ class MetalKernel(SIMDKernel):
                 dtype=dtype,
             )
         if reduction_type == "welford_reduce":
-            assert not self.multistage_reduction, f"Multistage reduction not yet supported for {reduction_type}"
+            assert (
+                not self.multistage_reduction
+            ), f"Multistage reduction not yet supported for {reduction_type}"
             acc_buf = self._new_accvar(src_dtype, acc_buf_size)
             self.compute.splice(f"{acc_buf}[{reduction_dim.name}] = {value};")
             wf_res = self.cse.generate(
@@ -498,17 +512,27 @@ class MetalKernel(SIMDKernel):
         raise NotImplementedError(reduction_type)
 
     def codegen_iteration_ranges_entry(self, entry: IterationRangesEntry) -> None:
-        self.multistage_reduction = entry.is_reduction and entry.root.numel > self.max_threadgroup_size
+        self.multistage_reduction = (
+            entry.is_reduction and entry.root.numel > self.max_threadgroup_size
+        )
         index_expr = self.rename_indexing(entry.expr)
         index_str = self.sexpr(index_expr)  # type: ignore[misc]
         if not self.multistage_reduction:
             self.body.writeline(f"{self.index_dtype} {entry.name} = {index_str};")
             return
-        loop_size = (entry.root.numel + self.max_threadgroup_size - 1) // self.max_threadgroup_size
-        self.body.splice(f"""
-        for(auto {entry.name}_cnt = 0; {entry.name}_cnt < {loop_size}; ++{entry.name}_cnt) {{
-            {self.index_dtype} {entry.name} = {loop_size} * {index_str} + {entry.name}_cnt;
-        """)
+        loop_size = (
+            entry.root.numel + self.max_threadgroup_size - 1
+        ) // self.max_threadgroup_size
+        self.body.writeline(
+            f"for(auto {entry.name}_cnt = 0; {entry.name}_cnt < {loop_size}; ++{entry.name}_cnt) {{"
+        )
+        with self.body.indent():
+            self.body.writeline(
+                f"{self.index_dtype} {entry.name} = {loop_size} * {index_str} + {entry.name}_cnt;"
+            )
+            # Add boundary checks
+            if loop_size * self.max_threadgroup_size != entry.root.numel:
+                self.body.writeline(f"if ({entry.name} >= {entry.root.numel}) break;")
 
     def codegen_body(self):
         """
@@ -582,7 +606,9 @@ class MetalKernel(SIMDKernel):
             with code.indent():
                 if len(idx_vars) > 1:
                     for idx, var in enumerate(idx_vars):
-                        code.writeline(f"auto {var.name} = thread_pos.{chr(120 + idx)};")
+                        code.writeline(
+                            f"auto {var.name} = thread_pos.{chr(120 + idx)};"
+                        )
                 code.splice(self.indexing_code)
                 code.splice(self.body)
             code.writeline("}")
@@ -597,11 +623,20 @@ class MetalKernel(SIMDKernel):
         args = [arg for arg in args if arg not in self.removed_buffers]
         args += [str(v) for v in self.args.sizevars.keys()]
         if len(self.active_range_trees()) > 0:
-            threads = [self.pexpr(v.numel) for v in self.active_range_trees()]  # type: ignore[misc]
+            threads = [
+                self.pexpr(
+                    sympy.Min(v.numel, self.max_threadgroup_size)
+                    if v.is_reduction
+                    else v.numel
+                )
+                for v in self.active_range_trees()
+            ]  # type: ignore[misc]
             args += [f"threads=[{', '.join(threads)}]"]
         if self.inside_reduction:
             threads = [
-                self.pexpr(sympy.Min(v.numel, self.max_threadgroup_size)) if v.is_reduction else "1"  # type: ignore[misc]
+                self.pexpr(sympy.Min(v.numel, self.max_threadgroup_size))
+                if v.is_reduction
+                else "1"  # type: ignore[misc]
                 for v in self.active_range_trees()
             ]
             args += [f"group_size=[{', '.join(threads)}]"]
