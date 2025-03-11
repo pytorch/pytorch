@@ -175,7 +175,7 @@ class Shard(Placement):
         )
 
         # Only unpad if the local_tensor was padded on the dimension.
-        if pad_sizes and pad_sizes[mesh_dim_local_rank] > 0:
+        if pad_sizes[mesh_dim_local_rank] > 0:
             output = unpad_tensor(output, self.dim, pad_sizes[mesh_dim_local_rank])
             # Unpad might return a view, hence we need to remake it contiguous
             output = output.contiguous()
