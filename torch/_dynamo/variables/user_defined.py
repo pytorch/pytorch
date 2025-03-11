@@ -1429,6 +1429,14 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
             self.exc_vt.args = args
             self.value.args = args
             return variables.ConstantVariable(None)
+        if (
+            name == "__setattr__"
+            and len(args) == 2
+            and isinstance(args[0], variables.ConstantVariable)
+            and args[0].value
+            in ("__cause__", "__context__", "__suppress_context__", "__traceback__")
+        ):
+            self.exc_vt.call_setattr(tx, args[0], args[1])
         return super().call_method(tx, name, args, kwargs)
 
     @property
