@@ -1512,9 +1512,7 @@ class VariableBuilder:
         from ..eval_frame import OptimizedModule
 
         try:
-            _, params = list(
-                value.named_parameters(recurse=False, remove_deuplicate=True)
-            )
+            params = [p for _, p in value.named_parameters(recurse=False, remove_duplicate=True)]
         except AttributeError:
             params = []
         initialized_params = [p for p in params if not torch.nn.parameter.is_lazy(p)]
@@ -1522,8 +1520,8 @@ class VariableBuilder:
         param_total_nbytes = sum(p.nbytes for p in initialized_params)
         param_count = len(params)
         metrics_context = get_metrics_context()
-        metrics_context.increment("param_total_numel", param_total_numel)
-        metrics_context.increment("param_total_nbytes", param_total_nbytes)
+        metrics_context.increment("param_numel", param_total_numel)
+        metrics_context.increment("param_bytes", param_total_nbytes)
         metrics_context.increment("param_count", param_count)
 
         if len(value.__dict__) == 0:

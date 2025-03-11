@@ -278,6 +278,9 @@ class TestDynamoTimed(TestCase):
         # much easier.
         raw = dataclasses.asdict(compilation_events[0])
         del raw["feature_usage"]
+        del raw["param_numel"]
+        del raw["param_bytes"]
+        del raw["param_count"]
         # guard_latency_us is not deterministic
         del raw["guard_latency_us"]
         self.assertExpectedInline(
@@ -334,7 +337,6 @@ class TestDynamoTimed(TestCase):
  'log_format_version': 3,
  'non_compliant_ops': set(),
  'num_graph_breaks': 0,
- 'num_params': 4,
  'num_triton_bundles': None,
  'post_grad_pass_time_us': 0,
  'pre_grad_pass_time_us': 0,
@@ -366,6 +368,9 @@ class TestDynamoTimed(TestCase):
         raw = dataclasses.asdict(compilation_events[1])
         del raw["feature_usage"]
         del raw["guard_latency_us"]
+        del raw["param_numel"]
+        del raw["param_bytes"]
+        del raw["param_count"]
         self.assertExpectedInline(
             pprint.pformat(raw),
             """\
@@ -420,7 +425,6 @@ class TestDynamoTimed(TestCase):
  'log_format_version': 3,
  'non_compliant_ops': None,
  'num_graph_breaks': 0,
- 'num_params': None,
  'num_triton_bundles': None,
  'post_grad_pass_time_us': 0,
  'pre_grad_pass_time_us': None,
@@ -510,7 +514,9 @@ class TestDynamoTimed(TestCase):
             m = ModelSimple()
             torch.compile(m)(torch.randn(1, 10, 10))
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
-        self.assertEqual(compilation_events[0].num_params, 520)
+        self.assertEqual(compilation_events[0].param_numel, 520)
+        self.assertEqual(compilation_events[0].param_bytes, 4*520)
+        self.assertEqual(compilation_events[0].param_count, 2)
 
         class ModelWrapped(nn.Module):
             def __init__(self) -> None:
@@ -526,7 +532,9 @@ class TestDynamoTimed(TestCase):
             m = ModelWrapped()
             torch.compile(m)(torch.randn(1, 10, 10))
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
-        self.assertEqual(compilation_events[0].num_params, 1040)
+        self.assertEqual(compilation_events[0].param_numel, 1040)
+        self.assertEqual(compilation_events[0].param_bytes, 4*1040)
+        self.assertEqual(compilation_events[0].param_count, 4)
 
 
 class TestInductorConfigParsingForLogging(TestCase):
