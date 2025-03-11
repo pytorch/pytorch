@@ -1565,7 +1565,7 @@ def fw_compiler_freezing(
     # partition_fn won't be called
     _recursive_joint_graph_passes(aot_autograd_model)
 
-    layout_opt = GraphLowering.decide_layout_opt(aot_autograd_model, is_inference=True)
+    layout_opt = V.choices.decide_layout_opt(aot_autograd_model, is_inference=True)
     if layout_opt:
         # make sure meta['val'] is properly setup
         fake_tensor_prop(aot_autograd_model, aot_example_inputs, True)
