@@ -41,7 +41,7 @@ from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, Criteri
     module_tests, criterion_tests, loss_reference_fns, _create_basic_net, \
     ctcloss_reference, get_new_module_tests, single_batch_reference_fn, _test_bfloat16_ops, _test_module_empty_input
 from torch.testing._internal.common_device_type import dtypesIfMPS, instantiate_device_type_tests, dtypes, \
-    dtypesIfCUDA, precisionOverride, skipCUDAIfCudnnVersionLessThan, onlyCUDA, onlyCPU, \
+    dtypesIfCUDA, precisionOverride, onlyCUDA, onlyCPU, \
     skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, \
     onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, expectedFailureMPS, \
     skipMeta, get_all_device_types
@@ -10913,7 +10913,6 @@ class TestNNDeviceType(NNTestCase):
         out = m(inp)
 
     @onlyCUDA
-    @skipCUDAIfCudnnVersionLessThan(7600)
     def test_CTCLoss_cudnn(self, device):
         def _helper(zero_infinity):
             target_lengths = [30, 25, 20]
@@ -11456,7 +11455,6 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyCUDA
     @skipCUDAIfRocm(msg="skipped Cudnn test on ROCm")
-    @skipCUDAIfCudnnVersionLessThan(7600)
     def test_ctc_loss_cudnn(self, device):
         batch_size = 16
         input_length = 30
@@ -11481,7 +11479,6 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyCUDA
     @skipCUDAIfRocm(msg="skipped Cudnn test on ROCm")
-    @skipCUDAIfCudnnVersionLessThan(8000)
     def test_ctc_loss_cudnn_tensor(self, device):
         batch_size = 16
         input_length = 30
