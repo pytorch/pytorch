@@ -267,7 +267,7 @@ jobs:
           set -eou pipefail
           # Generate PyTorch version to use
           echo "MIN_PYTHON_VERSION=$(python3 .github/scripts/get_ci_variable.py --min-python-version)" >> "${GITHUB_OUTPUT}"
-      - name: Setup Min Python version
+      - name: Setup Old Python version
         if: matrix.test_type == 'older_python_version'
         uses: actions/setup-python@v4
         with:
@@ -277,11 +277,11 @@ jobs:
           cache: pip
           cache-dependency-path: |
             **/requirements.txt
-      - name: Setup Python 3.9
+      - name: Setup Min Python version
         if: matrix.test_type != 'older_python_version'
         uses: actions/setup-python@v4
         with:
-          python-version: ${{ steps.get-min-python-version.outputs.OLD_PYTHON_VERSION }}
+          python-version: ${{ steps.get-min-python-version.outputs.MIN_PYTHON_VERSION }}
           architecture: x64
           check-latest: false
           cache: pip
