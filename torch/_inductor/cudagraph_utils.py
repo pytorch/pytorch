@@ -376,7 +376,7 @@ def get_partition_cudagraph_metadata(
         if graph_input_idx in metadata.mutated_input_idxs:
             partition_mutated_input_idxs.add(partition_input_idx)
 
-        if graph_input_idx:
+        if graph_input_idx is not None:
             placeholder = metadata.placeholders[graph_input_idx]
         else:
             # create a dummy placeholder info since this partition input is not a graph input
