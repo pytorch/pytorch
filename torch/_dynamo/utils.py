@@ -4461,7 +4461,3 @@ def get_optimize_ddp_mode():
         f"Invalid dynamo config optimize_ddp value {mode=}"
     )
     return mode
-
-
-def trace_rules_skipped_function_for_testing(x):
-    return x + 1

@@ -30,7 +30,7 @@ from .eval_frame import (
     skip_code,
 )
 from .exc import IncorrectUsage
-from .external_utils import ignore_trace_rules_recursively_wrapper, is_compiling
+from .external_utils import dont_skip_tracing_wrapper, is_compiling
 from .utils import is_function
 
 
@@ -715,7 +715,7 @@ def _allow_in_graph_einops():
 trace_rules.add_module_init_func("einops", _allow_in_graph_einops)
 
 
-def ignore_intentional_skips(fn=None, recursive=True):
+def dont_skip_tracing(fn=None, recursive=True):
     """
     Decorator to trace into functions intentionally marked by developers to be skipped
     when tracing.
@@ -725,15 +725,8 @@ def ignore_intentional_skips(fn=None, recursive=True):
     If recursive=True, this decorator will also apply to recursively invoked functions.
     """
 
-    def wrap(fn):
-        fn = innermost_fn(fn)
-        assert callable(fn)
-        if recursive:
-            return ignore_trace_rules_recursively_wrapper(fn)
-        else:
-            fn._torchdynamo_ignore_skip_function_variable = True
-            return fn
+    wrapper = dont_skip_tracing_wrapper(recursive)
 
     if fn is None:
-        return wrap
-    return wrap(fn)
+        return wrapper
+    return wrapper(fn)

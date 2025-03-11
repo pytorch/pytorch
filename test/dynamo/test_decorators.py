@@ -1459,6 +1459,63 @@ If the above doesn't work, please subtmit an issue to GitHub.
         with torch.compiler.set_stance("default", force_backend=fail_backend):
             f(torch.randn(3, 3))
 
+    def test_dont_skip_tracing_recursive(self):
+        from torch._dynamo.test_dont_skip_tracing_functions import f1, f3, f4, f5, f6
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        # make sure test_dont_skip_tracing_functions is actually skipped by trace rules
+        torch.compile(f1, backend=cnts)(torch.randn(3))
+        self.assertEqual(cnts.frame_count, 0)
+
+        f1_unskip = torch._dynamo.dont_skip_tracing(f1)
+
+        # basic test
+        def g1(x):
+            return f1_unskip(x)
+
+        cnts.clear()
+        torch.compile(g1, backend=cnts, fullgraph=True)(torch.randn(3))
+        self.assertEqual(cnts.frame_count, 1)
+
+        # test that dont_skip_tracing is traceable
+        def g2(x):
+            return torch._dynamo.dont_skip_tracing(f1)(x)
+
+        cnts.clear()
+        torch.compile(g2, backend=cnts, fullgraph=True)(torch.randn(3))
+        self.assertEqual(cnts.frame_count, 1)
+
+        # test that dont_skip_tracing is recursive, applied to non-skipped function
+        @torch._dynamo.dont_skip_tracing
+        def g3(x):
+            return f1(x)
+
+        cnts.clear()
+        torch.compile(g3, backend=cnts, fullgraph=True)(torch.randn(3))
+        self.assertEqual(cnts.frame_count, 1)
+
+        # test that dont_skip_tracing is recursive, applied to skipped function
+        f3_unskip = torch._dynamo.dont_skip_tracing(f3)
+        cnts.clear()
+        torch.compile(f3_unskip, backend=cnts, fullgraph=True)(torch.randn(3))
+        self.assertEqual(cnts.frame_count, 1)
+
+        # test dont_skip_tracing with graph breaks
+        inp = torch.ones(3)
+        res = torch.compile(f4, backend="eager")(inp)
+        self.assertEqual(res, inp + 6)
+
+        @torch.compile(backend="eager")
+        def g4(x):
+            x = f5(x, 1)
+            x = torch._dynamo.dont_skip_tracing(f6)(x)
+            x = f5(x, 8)
+            return x
+
+        res = g4(inp)
+        self.assertEqual(res, inp + 6)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

@@ -27,6 +27,7 @@ import torch.distributed
 import torch.utils._content_store
 from torch.utils import _config_module
 
+from . import external_utils
 from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
 from .utils import getfile, hashable, NP_SUPPORTED_MODULES, unwrap_if_wrapper
 from .variables import (
@@ -141,7 +142,7 @@ manual_torch_name_rule_map: dict[str, Any] = {
     "torch._utils.is_compiling": TorchInGraphFunctionVariable,
     "torch.fx._symbolic_trace.is_fx_tracing": TorchInGraphFunctionVariable,
     "torch._dynamo.external_utils.is_compiling": TorchInGraphFunctionVariable,
-    "torch.compiler.ignore_intentional_skips": UserFunctionVariable,
+    # "torch.compiler.dont_skip_tracing": UserFunctionVariable,
     "torch.compiler.is_compiling": TorchInGraphFunctionVariable,
     "torch.compiler.is_dynamo_compiling": TorchInGraphFunctionVariable,
     "torch.compiler.is_exporting": TorchInGraphFunctionVariable,
@@ -306,7 +307,8 @@ manual_torch_name_rule_map: dict[str, Any] = {
     "torch._tensor._convert": UserFunctionVariable,
     "torch.jit._unwrap_optional": UserFunctionVariable,
     "torch.backends.mha.get_fastpath_enabled": UserFunctionVariable,
-    "torch._dynamo.ignore_intentional_skips": UserFunctionVariable,
+    "torch._dynamo.eval_frame.innermost_fn": UserFunctionVariable,
+    "torch._dynamo.dont_skip_tracing": UserFunctionVariable,
     "torch._dynamo.mark_static": UserFunctionVariable,
     "torch._dynamo.nonstrict_trace": UserFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.guard_size_oblivious": TorchInGraphFunctionVariable,
@@ -3744,7 +3746,40 @@ def lookup(obj):
     return lookup_inner(obj)
 
 
+# take external_utils._ignore_skip_function_variable into account
 def lookup_inner(
+    obj,
+    name=None,
+    filename=None,
+    is_direct_call=True,
+    reasons: Union[None, set[str]] = None,
+):
+    result = _lookup_inner(
+        obj,
+        name=name,
+        filename=filename,
+        is_direct_call=is_direct_call,
+        reasons=reasons,
+    )
+    # there are still some modules we should absolutely NOT trace into - e.g. torch._dynamo, as this
+    # can result in really weird tracing behaviors.
+    if external_utils._ignore_skip_function_variable and result is SkipFunctionVariable:
+        if filename is None:
+            filename = getfile(obj)
+        filename = _as_posix_path(filename)
+        if filename.startswith("torch/_dynamo") and not filename.endswith(
+            "test_dont_skip_tracing_functions.py"
+        ):
+            return SkipFunctionVariable
+        if reasons is not None:
+            reasons.add(
+                "Attempted skip but we are ignoring skips due to dont_skip_tracing"
+            )
+        return UserFunctionVariable
+    return result
+
+
+def _lookup_inner(
     obj,
     name=None,
     filename=None,

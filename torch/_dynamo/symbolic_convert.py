@@ -57,7 +57,6 @@ from torch.utils._functools import cache_method
 from . import (
     config,
     exc,
-    external_utils,
     graph_break_hints,
     logging as torchdynamo_logging,
     trace_rules,
@@ -3566,13 +3565,19 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 "Dynamo is expected to decompose method calls into function calls with a `self` argument.",
                 hints=[],
             )
+        if isinstance(func, UserFunctionVariable) and inspect.getattr_static(
+            func.get_function(), "_torchdynamo_disable", False
+        ):
+            unimplemented_v2(
+                gb_type="Skip inlining `torch.compiler.disable()`d function",
+                context=str(func.get_function()),
+                explanation=f"Skip inlining function {func.get_function()} since it was wrapped with `torch.compiler.disable`",
+                hints=[
+                    "Remove the `torch.compiler.disable` call",
+                ],
+            )
 
         result = trace_rules.check_verbose(func, is_inlined_call=True)
-        if result.skipped and external_utils._ignore_skip_function_variable:
-            return trace_rules.SkipResult(
-                False,
-                "Attempted to skip but skipped functions are being force inlined.",
-            )
         if result.skipped:
             from torch._dynamo.variables.misc import produce_trampoline_autograd_apply
 
@@ -3591,7 +3596,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             ]
             if "_dynamo" not in func.get_filename():
                 hints += [
-                    f"Apply `@torch.compiler.ignore_intentional_skips` to the function `{fn_qualname}` "
+                    f"Apply `@torch._dynamo.dont_skip_tracing` to the function `{fn_qualname}` "
                     "to force tracing into the function. "
                     "More graph breaks may occur as a result of attempting to trace into the function.",
                     f"Remove the file`{func.get_filename()}` from torch/_dynamo/trace_rules.py. "
@@ -3607,19 +3612,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 hints=hints,
             )
 
-        if isinstance(func, UserFunctionVariable) and inspect.getattr_static(
-            func.get_function(), "_torchdynamo_disable", False
-        ):
-            unimplemented_v2(
-                gb_type="Skip inlining `torch.compiler.disable()`d function",
-                context=str(func.get_function()),
-                explanation=f"Skip inlining function {func.get_function()} since it was wrapped with `torch.compiler.disable`",
-                hints=[
-                    "Remove the `torch.compiler.disable` call",
-                ],
-            )
-        else:
-            return result
+        return result
 
     @staticmethod
     def build_inline_tracer(
