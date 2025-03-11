@@ -36,6 +36,26 @@ class ExportStrategiesTest(common_utils.TestCase):
         assert ep is not None
         torch.testing.assert_close(ep.module()(a, b), model(a, b))
 
+    def test_draft_export_on_data_dependent_model(self):
+        class Model(torch.nn.Module):
+            def forward(self, a, b):
+                if a.sum() > 0:
+                    return a.cos()
+                return b.sin()
+
+        model = Model()
+        a = torch.tensor(0.0)
+        b = torch.tensor(1.0)
+
+        strategy = _capture_strategies.TorchExportDraftExportStrategy()
+        with self.assertLogs("torch.export", level="WARNING") as cm:
+            result = strategy(model, (a, b), kwargs=None, dynamic_shapes=None)
+            expected_warning = "1 issue(s) found during export, and it was not able to soundly produce a graph."
+            self.assertIn(expected_warning, str(cm.output))
+        ep = result.exported_program
+        assert ep is not None
+        torch.testing.assert_close(ep.module()(a, b), model(a, b))
+
     def test_jit_trace_supports_dynamic_shapes_as_tuple(self):
         class Model(torch.nn.Module):
             def forward(self, a, b):
