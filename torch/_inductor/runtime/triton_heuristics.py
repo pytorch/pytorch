@@ -221,7 +221,7 @@ class CachingAutotuner(KernelInterface):
             for c in self.configs:
                 log.debug(c)
 
-        self.compile_results: list[TritonCompileResult] = []
+        self.compile_results: list[CompileResult] = []
         self.launchers: list[LauncherType] = []
         self.lock = threading.Lock()
         if os.getenv("TRITON_CACHE_DIR") is None:
@@ -468,7 +468,7 @@ class CachingAutotuner(KernelInterface):
 
         return get_interface_for_device(self.device_props.type.replace("hip", "cuda"))
 
-    def _precompile_config(self, cfg: Config) -> TritonCompileResult:
+    def _precompile_config(self, cfg: Config) -> CompileResult:
         """Ahead of time compile a given autotuner config."""
         compile_meta = copy.deepcopy(self.triton_meta)
         cfg_kwargs = cfg.kwargs
@@ -541,13 +541,11 @@ class CachingAutotuner(KernelInterface):
             triton_hash_to_path_key(binary.hash), self.triton_meta.get("device", 0)
         )
         # If the binary has a cubin file to directly launch, save it on the binary
-        cubin_location = os.path.join(
-            triton_cache_dir(self.triton_meta.get("device, 0")),
-            triton_hash_to_path_key(binary.hash),
-            f"{binary.src.fn.__name__}.cubin"
-        )
-        if os.path.exists(cubin_location):
-            binary._cubin_path = cubin_location
+        static_launcher = StaticTritonCompileResult.can_statically_launch(binary, self.inductor_meta, self.triton_meta, self.heuristic_type)
+        if static_launcher is not None:
+            result = StaticTritonCompileResult(static_launcher, cfg)
+            return result
+
         return TritonCompileResult(binary, cfg, compile_meta, self.inductor_meta)
 
 
@@ -984,7 +982,83 @@ class _ConstRepr:
         return self.value
 
 
-class TritonCompileResult:
+class CompileResult:
+    def make_launcher(self) -> Callable:
+        ...
+
+class StaticTritonCompileResult(CompileResult):
+    """
+    TritonCompileResult that uses StaticCudaLauncher,
+    which vastly simplifies the setup and metadata needed to be kept.
+    """
+
+    @staticmethod
+    def can_statically_launch(
+        kernel: CompiledKernel,
+        inductor_meta: dict[str, Any],
+        triton_meta: dict[str, Any],
+        heuristic_type : HeuristicType,
+    ) -> Optional[StaticallyLaunchedCudaKernel]:
+        if triton_meta.get("device_type", None) != "cuda":
+            # Only cuda kernels
+            return None
+        if heuristic_type == HeuristicType.USER_AUTOTUNE:
+            return None
+
+        if inductor_meta.get("store_cubin", None):
+            # Requires storing the entire binary
+            return None
+
+        cubin_location = os.path.join(
+            triton_cache_dir(triton_meta.get("device, 0")),
+            triton_hash_to_path_key(kernel.hash),
+            f"{kernel.src.fn.__name__}.cubin"
+        )
+
+        if not os.path.exists(cubin_location):
+            return None
+        else:
+            kernel._cubin_path = cubin_location
+
+        try:
+            static_kernel = StaticallyLaunchedCudaKernel(kernel)
+        except NotImplementedError:
+            log.warning("Bypassing StaticallyLaunchedCudaKernel due to %s", str(e))
+            return None
+
+        return static_kernel
+
+    def __init__(
+        self,
+        kernel: StaticallyLaunchedCudaKernel,
+        config: Config,
+    ):
+        self.kernel = kernel
+        self.config = config
+
+
+    def make_launcher(self):
+        # Load the binary on the parent
+        self.kernel.load_kernel()
+        grid_meta = self.config.kwargs
+
+        def launcher(*args, grid, stream):
+            if callable(grid):
+                grid_tuple = grid(grid_meta)
+            else:
+                grid_tuple = grid
+            self.kernel.run(grid_tuple, stream, *args)
+            return self.kernel
+
+        launcher.config = self.config
+        launcher.n_regs = self.kernel.n_regs
+        launcher.n_spills = self.kernel.n_spills
+        launcher.shared = self.kernel.shared
+        launcher.store_cubin = False
+        return launcher
+
+
+class TritonCompileResult(CompileResult):
     """
     Upstream Triton CompileKernel can not be pickled.  This is a wrapper
     to support serialization and generate the launcher function.
@@ -1157,29 +1231,11 @@ class TritonCompileResult:
                     else ()
                 )
             ),
+            "function": get_first_attr(binary, "function", "cu_function"),
+            "runner": get_first_attr(binary, "run", "c_wrapper"),
         }
-        try:
-            static_binary = StaticallyLaunchedCudaKernel(binary)
-            static_binary.load_kernel()
-            binary = static_binary
-            scope["runner"] = binary.run
-        except NotImplementedError as e:
-            log.warning("Bypassing StaticallyLaunchedCudaKernel due to %s", str(e))
-            binary._init_handles()
-            scope.update(
-                {
-                    "function": get_first_attr(binary, "function", "cu_function"),
-                    "runner": get_first_attr(binary, "run", "c_wrapper"),
-                }
-            )
 
-        if isinstance(binary, StaticallyLaunchedCudaKernel):
-            runner_args = [
-                "(grid_0, grid_1, grid_2,)",
-                "stream",
-                *call_args,
-            ]
-        elif not hasattr(binary, "launch_metadata"):
+        if not hasattr(binary, "launch_metadata"):
             # launch args before CompiledKernel.launch_metadata is added.
             # TODO(jansel): delete this branch in mid-2025
             runner_args = [
@@ -2354,6 +2410,7 @@ def grid_combo_kernels(
     else:
         return grid_fn_default_meta if not is_sequential else seq_grid_fn_default_meta
 
+MAX_SHARED_MEMORY = 49152
 
 class StaticallyLaunchedCudaKernel:
     """
@@ -2379,10 +2436,9 @@ class StaticallyLaunchedCudaKernel:
     to the parent process in inductor.
     """
 
-    def __init__(self, kernel: CompiledKernel, cubin_path: Optional[str] = None):
+    def __init__(self, kernel: CompiledKernel):
         # TODO: Can only import this if we know torch was compiled with CUDA
         # Maybe we make a class that just errors otherwise?
-        from torch._C import _StaticCudaLauncher
         if hasattr(kernel, "_cubin_path"):
             self.cubin_path = kernel._cubin_path
         else:
@@ -2390,9 +2446,13 @@ class StaticallyLaunchedCudaKernel:
 
         # TODO: is this right?
         self.name = kernel.src.fn.__name__
-        self.metadata = kernel.metadata
+        self.hash = kernel.hash
+        if kernel.__class__.launch_enter_hook is not None or kernel.__class__.launch_exit_hook is not None:
+            raise NotImplementedError("We don't support launch enter or launch exit hooks")
         self.num_warps = kernel.metadata.num_warps
-        self.shared = kernel.metadata.shared
+        self.shared = kernel.shared if hasattr(kernel, "shared") else kernel.metadata.shared
+        if self.shared > MAX_SHARED_MEMORY:
+            raise NotImplementedError("Shared memory size > 48KB requires special triton handling")
         self.arg_tys = self.arg_ty_from_signature(kernel.src)
         self.function: Optional[int] = (
             None  # Loaded by load_kernel(on the parent process)
@@ -2411,9 +2471,8 @@ class StaticallyLaunchedCudaKernel:
 
         if num_args > 25 or num_args == 0:
             raise NotImplementedError(
-                "No static cuda launcher available for %d arguments"
+                "No static cuda launcher available for %d arguments", num_args
             )
-        self.launcher = _StaticCudaLauncher._launch_kernel
 
     def load_kernel(self):
         from torch._C import _StaticCudaLauncher
@@ -2471,7 +2530,7 @@ class StaticallyLaunchedCudaKernel:
 
         signature = {index_key(key): value for key, value in src.signature.items()}
         # Sorts signature by index_key
-        tys = [signature[i] for i in range(len(signature))]
+        tys = [signature[i] for i in sorted(signature.keys())]
         # Despite requiring them to be passed in, the triton CUDA launcher
         # completely ignores the constexprs passed into it when generating code.
         # So we can ignore them here too
@@ -2480,6 +2539,7 @@ class StaticallyLaunchedCudaKernel:
 
     def run(self, grid: tuple[int, ...], stream: int, *args):
         """Actually run the kernel at runtime. This function is the hot codepath."""
+        from torch._C import _StaticCudaLauncher
 
         # Assert load_kernel() has been called and args match
         assert self.function is not None
@@ -2494,7 +2554,7 @@ class StaticallyLaunchedCudaKernel:
         grid_x = grid[0]
         grid_y = grid[1] if len(grid) > 1 else 1
         grid_z = grid[2] if len(grid) > 2 else 1
-        self.launcher(
+        _StaticCudaLauncher._launch_kernel(
             self.function,
             grid_x,
             grid_y,
