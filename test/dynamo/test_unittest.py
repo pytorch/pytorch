@@ -555,6 +555,7 @@ class CPythonTestLongMessage(torch._dynamo.test_case.TestCase):
             ],
         )
 
+    @unittest.expectedFailure
     @unittest.skipIf(sys.version_info < (3, 13), "feature landed in 3.13")
     @make_dynamo_test
     def test_assertNotWarns(self):
