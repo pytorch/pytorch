@@ -2,6 +2,8 @@
 from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
+from . import config
+
 import torch
 
 
@@ -11,6 +13,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "compile",
+    "config",
     "assume_constant_result",
     "reset",
     "allow_in_graph",
