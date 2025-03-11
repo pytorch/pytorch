@@ -22,7 +22,9 @@ def main(args: list[str]) -> None:
 
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--cuda-stable-version", action="store_true", help="get cuda stable version"
+        "--cuda-stable-version",
+        action="store_true",
+        help="get cuda stable version",
     )
     parser.add_argument(
         "--min-python-version",
