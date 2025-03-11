@@ -11,7 +11,7 @@ from torch._inductor.codegen.triton import (
     TritonCSEVariable,
     TritonKernel,
 )
-from torch._inductor.runtime.triton_heuristics import split_scan_grid
+from torch._inductor.runtime.triton_heuristics import SplitScanGrid
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import CeilDiv
 
@@ -203,5 +203,5 @@ class TritonSplitScanKernel(TritonKernel):
     def _get_heuristic(self):
         return "split_scan"
 
-    def _get_grid_fn(self):
-        return split_scan_grid
+    def _get_grid_type(self) -> type[SplitScanGrid]:
+        return SplitScanGrid
