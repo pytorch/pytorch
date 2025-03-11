@@ -511,13 +511,14 @@ class MetalKernel(SIMDKernel):
         raise NotImplementedError(reduction_type)
 
     def codegen_iteration_ranges_entry(self, entry: IterationRangesEntry) -> None:
-        self.multistage_reduction = (
-            entry.is_reduction and entry.root.numel > self.max_threadgroup_size
-        )
         index_expr = self.rename_indexing(entry.expr)
         index_str = self.sexpr(index_expr)  # type: ignore[misc]
-        if not self.multistage_reduction:
-            self.body.writeline(f"{self.index_dtype} {entry.name} = {index_str};")
+        if entry.is_reduction:
+            self.multistage_reduction = entry.root.numel > self.max_threadgroup_size
+        if not entry.is_reduction or not self.multistage_reduction:
+            self.indexing_code.writeline(
+                f"{self.index_dtype} {entry.name} = {index_str};"
+            )
             return
         loop_size = (
             entry.root.numel + self.max_threadgroup_size - 1
@@ -533,7 +534,7 @@ class MetalKernel(SIMDKernel):
             if loop_size * self.max_threadgroup_size != entry.root.numel:
                 self.body.writeline(f"if ({entry.name} >= {entry.root.numel}) break;")
 
-    def codegen_body(self):
+    def codegen_body(self) -> None:
         """
         Concat output code from index_code, loads, compute, stores,
         suffix into self.body.
@@ -624,18 +625,18 @@ class MetalKernel(SIMDKernel):
         if len(self.active_range_trees()) > 0:
             threads = [
                 self.pexpr(
-                    sympy.Min(v.numel, self.max_threadgroup_size)
+                    sympy.Min(v.numel, self.max_threadgroup_size)  # type: ignore[misc]
                     if v.is_reduction
                     else v.numel
                 )
                 for v in self.active_range_trees()
-            ]  # type: ignore[misc]
+            ]
             args += [f"threads=[{', '.join(threads)}]"]
         if self.inside_reduction:
             threads = [
-                self.pexpr(sympy.Min(v.numel, self.max_threadgroup_size))
+                self.pexpr(sympy.Min(v.numel, self.max_threadgroup_size))  # type: ignore[misc]
                 if v.is_reduction
-                else "1"  # type: ignore[misc]
+                else "1"
                 for v in self.active_range_trees()
             ]
             args += [f"group_size=[{', '.join(threads)}]"]
