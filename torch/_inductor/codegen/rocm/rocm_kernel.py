@@ -232,7 +232,9 @@ class ROCmTemplateCaller(ChoiceCaller):
         ],
         bmreq: ROCmBenchmarkRequest,
         template: "ROCmTemplate",  # type: ignore[name-defined]
-        info_kwargs: Optional[dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]],  # type: ignore[type-arg]
+        info_kwargs: Optional[
+            dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]
+        ],  # type: ignore[type-arg]
     ) -> None:
         super().__init__(name, input_nodes, layout, description="")
         self.category = category

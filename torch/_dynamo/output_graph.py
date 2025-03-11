@@ -98,6 +98,7 @@ from .source import (
     is_constant_source,
     is_from_local_source,
     LocalSource,
+    NumpyTensorSource,
     ParamBufferSource,
     ShapeEnvSource,
     SyntheticLocalSource,
@@ -351,9 +352,9 @@ class OutputGraph:
                 export=self.export,
             )
         self.tracing_context: TracingContext = TracingContext(fake_mode)
-        self.dynamo_compile_id: Optional[
-            CompileId
-        ] = CompileContext.current_compile_id()
+        self.dynamo_compile_id: Optional[CompileId] = (
+            CompileContext.current_compile_id()
+        )
         self.init_ambient_guards()
 
         # Map each tensor id to a list of sources. This is necessary because
@@ -361,9 +362,9 @@ class OutputGraph:
         # We use this map to interpret (i.e., check for violations of) constraints,
         # specifically equality constraints, which have shared tensor ids in them.
         # This map should also be generally useful, e.g., for (de)serialization.
-        self.tracked_fakes_id_to_source: dict[
-            int, list[Source]
-        ] = collections.defaultdict(list)
+        self.tracked_fakes_id_to_source: dict[int, list[Source]] = (
+            collections.defaultdict(list)
+        )
         # Stores the full fqn of a param or buffer to the relevant source.
         self.param_name_to_source: Optional[dict[str, Source]] = {}
         self.side_effects = SideEffects(self)
@@ -806,7 +807,9 @@ class OutputGraph:
                 if target in self.root_tx.output.side_effects:
                     return self.root_tx.output.side_effects[target]
 
-                if get_static_address_type(target) == "guarded":
+                if get_static_address_type(target) == "guarded" and not isinstance(
+                    source, NumpyTensorSource
+                ):
                     install_guard(source.make_guard(GuardBuilder.ID_MATCH))
                 elif not is_constant_source(source):
                     install_guard(source.make_guard(GuardBuilder.TENSOR_MATCH))
@@ -1030,9 +1033,9 @@ class OutputGraph:
                     )
                 else:
                     prefix_insts.append(copy.copy(inst))
-        assert not (
-            self.pregraph_bytecode and self.export
-        ), "export does not support pregraph_bytecode"
+        assert not (self.pregraph_bytecode and self.export), (
+            "export does not support pregraph_bytecode"
+        )
         prefix_insts.extend(self.pregraph_bytecode)
         alias_insts, overridden_sources = self.handle_aliases_for_stolen_lists(tx)
         prefix_insts.extend(alias_insts)
@@ -1327,9 +1330,10 @@ class OutputGraph:
                 },
                 payload_fn=lambda: ds.local_state.render(),
             )
-            with torch.cuda.device(
-                compile_pg.rank() % torch.cuda.device_count()
-            ), dynamo_timed("compiler_collective", log_pt2_compile_event=True):
+            with (
+                torch.cuda.device(compile_pg.rank() % torch.cuda.device_count()),
+                dynamo_timed("compiler_collective", log_pt2_compile_event=True),
+            ):
                 all_states = [None] * compile_pg.size()
                 dist.all_gather_object(all_states, ds.local_state, group=compile_pg)
                 ds.all_states = all_states
@@ -1367,6 +1371,13 @@ class OutputGraph:
 
             tx.output.current_tracer._maybe_preserve_original_meta(tx, output_node)
             if not config.do_not_emit_runtime_asserts:
+                # There is a rare scenario where codegen_suffix adds a new entry
+                # to self.nn_modules while `root` knows only about the
+                # nn_modules at the time of its creation. This causes failures
+                # while creating the graph module because self.graph and root
+                # are out of sync. This only happens for `get_attr` nodes, so
+                # here we clean up the get_attr nodes that are unused.
+                self.remove_unused_get_attr_nodes()
                 insert_deferred_runtime_asserts(
                     fx.GraphModule(root, self.graph),
                     self.shape_env,
@@ -1389,9 +1400,9 @@ class OutputGraph:
                 register_finalizer(gm)
 
             gm.compile_subgraph_reason = self.compile_subgraph_reason
-            gm.meta[
-                "dynamo_flat_name_to_original_fqn"
-            ] = self.dynamo_flat_name_to_original_fqn.copy()
+            gm.meta["dynamo_flat_name_to_original_fqn"] = (
+                self.dynamo_flat_name_to_original_fqn.copy()
+            )
             gm.meta["dynamo_compile_id"] = self.dynamo_compile_id
 
             graph_code_log.debug(
@@ -1565,6 +1576,11 @@ class OutputGraph:
     def example_inputs(self) -> list[torch.Tensor]:
         result = [arg.example for arg in self.graphargs]
         return result
+
+    def remove_unused_get_attr_nodes(self) -> None:
+        for node in sorted(self.graph.find_nodes(op="get_attr"), reverse=True):
+            if len(list(node.users)) == 0:
+                self.remove_node(node)
 
     def remove_unused_graphargs(self) -> None:
         # NB: It's always OK to drop GraphArg for symbols that ended up being
@@ -1866,8 +1882,7 @@ def check_pt2_compliant_op(output_graph, kind, target, args, kwargs):
             return
         encountered_non_compliant_op(
             target,
-            f"Encountered the torch.ops.OpOverload {target} "
-            f"that is not PT2 compliant.",
+            f"Encountered the torch.ops.OpOverload {target} that is not PT2 compliant.",
         )
         return
 
@@ -2222,9 +2237,9 @@ class SubgraphTracer(fx.Tracer):
             for arg in flat_args:
                 if not isinstance(arg, torch.fx.Node):
                     continue
-                assert (
-                    arg.graph == self.graph
-                ), "create_node using arg not from this SubgraphTracer"
+                assert arg.graph == self.graph, (
+                    "create_node using arg not from this SubgraphTracer"
+                )
 
         node = super().create_node(op, target, args, kwargs, name, type_expr)
         node.meta["creation_timestamp"] = self.output_graph.timestamp
@@ -2267,9 +2282,9 @@ class SubgraphTracer(fx.Tracer):
             before,
         )
         if source is None:
-            assert (
-                self.parent is not None
-            ), f"you are required to provide a source for inputs {name} example_val {example_value} on the root tracer"
+            assert self.parent is not None, (
+                f"you are required to provide a source for inputs {name} example_val {example_value} on the root tracer"
+            )
 
         # Note [Export inputs must be explicitly passed in]
         # In eager, we are generally OK with adding graph inputs whenever we
@@ -2349,9 +2364,9 @@ class SubgraphTracer(fx.Tracer):
     def lift_tracked_freevar_to_input(self, proxy):
         # You're doing something wrong if we are the root SubgraphTracer because
         # Dynamo adds tensors to graph inputs before creating a proxy for them.
-        assert (
-            self.parent is not None
-        ), "lift_tracked_freevar_to_input should not be called on root SubgraphTracer"
+        assert self.parent is not None, (
+            "lift_tracked_freevar_to_input should not be called on root SubgraphTracer"
+        )
 
         example_value = proxy.node.meta["example_value"]
 
@@ -2661,9 +2676,9 @@ class SubgraphTracer(fx.Tracer):
             if isinstance(proxy, LazyProxy):
                 proxy = proxy()
                 self.bound_symbols[s0] = proxy
-            assert (
-                isinstance(proxy, torch.fx.Proxy) and proxy.tracer is self
-            ), f"The proxy of symbol {s0} doesn't belong to current tracer."
+            assert isinstance(proxy, torch.fx.Proxy) and proxy.tracer is self, (
+                f"The proxy of symbol {s0} doesn't belong to current tracer."
+            )
         # Sort the symbols so that we can have a deterministic lifting order
         return sorted(to_be_bound, key=lambda s: s.name)
 

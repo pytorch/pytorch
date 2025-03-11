@@ -93,6 +93,8 @@ def mps_ops_grad_modifier(ops):
         'linalg.solve_ex': [torch.float16, torch.float32],  # missing `aten::lu_solve`.
         'linalg.tensorsolve': [torch.float16, torch.float32],  # missing `aten::lu_solve`.
         'linalg.det': [torch.float16, torch.float32],  # missing aten::lu_solve.out
+        'linalg.slogdet': [torch.float16, torch.float32],  # missing aten::lu_solve.out
+        'logdet': [torch.float16, torch.float32],  # missing aten::lu_solve.out
         'aminmax': [torch.float32, torch.float16],
         'special.i1': [torch.float16],  # "i1_backward" not implemented for 'Half'
 
@@ -332,6 +334,7 @@ def mps_ops_modifier(ops):
         'split_with_sizes',
         'split_with_sizes_copy',
         'splitlist_args',
+        'sqrt',
         'squeeze',
         'squeeze_copy',
         'squeezemultiple',
@@ -592,11 +595,9 @@ def mps_ops_modifier(ops):
         'linalg.norm': [torch.float32],
         'linalg.normsubgradients_at_zero': [torch.float32],
         'linalg.qr': None,
-        'linalg.slogdet': None,
         'linalg.svdvals': None,
         'linalg.vecdot': None,
         'logcumsumexp': None,
-        'logdet': None,
         'lu_solve': None,
         'masked.median': None,
         'matrix_exp': None,
@@ -4864,6 +4865,9 @@ class TestMPS(TestCaseMPS):
         # verify if changes in shape would cause cached graph lookup problems
         helper([7, 5, 2, 4, 6], 'sum')
         helper([8, 4, 5, 7, 6], 'mean')
+        helper((3, 3, 0), 'sum')
+        helper((3, 3, 0), 'mean')
+        helper((3, 3, 0), 'none')
 
     def test_mse_loss_strided_output(self):
         # https://github.com/pytorch/pytorch/issues/124621
@@ -6559,6 +6563,12 @@ class TestMPS(TestCaseMPS):
         # align_corners=True
         helper([2, 3, 4, 5], [3, 4], None, 'bilinear', True)
         helper([2, 3, 4, 5], None, [1.4, 1.7], 'bilinear', True)
+        # Regression test for https://github.com/pytorch/pytorch/issues/144245
+        inp = torch.tensor([[[1.]], [[2]], [[4]]], device='mps')
+        for align_corners in [True, False]:
+            def interp(x):
+                return F.interpolate(x, 3, mode='linear', align_corners=align_corners)
+            self.assertEqual(interp(inp).cpu(), interp(inp.cpu()))
 
     # Test concat forward
     def test_cat1(self):
@@ -6846,6 +6856,12 @@ class TestMPS(TestCaseMPS):
             self.assertEqual(x.grad, cpu_x.grad)
 
         helper((2, 8, 4, 5))
+
+        # Test complex half
+        x = torch.rand(8, device='mps', dtype=torch.chalf)
+        rc_h = x.sqrt()
+        rc_f = x.cfloat().sqrt().chalf()
+        self.assertEqual(rc_h, rc_f)
 
     # Test selu, elu, celu
     def test_elu(self):
@@ -8501,12 +8517,26 @@ class TestMPS(TestCaseMPS):
                 op(mps_x, out=mps_y)
                 self.assertEqual(mps_y, cpu_y)
 
+                # test for non contiguous but dense input/output with similar strides
+                cpu_x = torch.randn(shape, device='cpu', dtype=dtype).mT
+                mps_x = cpu_x.to('mps')
+                cpu_y = torch.empty_like(cpu_x)
+                mps_y = cpu_y.to('mps')
+                op(cpu_x, out=cpu_y)
+                op(mps_x, out=mps_y)
+                self.assertEqual(mps_y, cpu_y)
+                # test for sliced inputs and outputs with similar strides
+                mps_x, mps_y = torch.randn((2, shape[0] * 2, shape[1] * 2), device='mps', dtype=dtype).unbind(0)
+                op(mps_x[::2, ::2], out=mps_y[::2, ::2])
+                self.assertEqual(mps_y[::2, ::2], op(mps_x[::2, ::2].contiguous()))
+
 
         helper((5, 5), torch.exp, False)
         helper((5, 5), torch.cos, False)
         helper((5, 5), torch.neg, False)
         helper((5, 5), torch.tanh, False)
         helper((5, 5), torch.tanh_, True)
+        helper((5, 5), lambda x, **kwargs: torch.round(x, decimals=2, **kwargs), False)
 
     def test_atan2(self):
         def helper(shape):
@@ -8762,45 +8792,47 @@ class TestLogical(TestCaseMPS):
         x_cpu = x.cpu()
         self.assertEqual((x >> 3).cpu(), x_cpu >> 3)
         self.assertEqual((x << 1).cpu(), x_cpu << 1)
+        # Regression test for https://github.com/pytorch/pytorch/issues/147889
+        x = x.clamp(0, 8)
+        x_cpu = x.cpu()
+        self.assertEqual((4095 >> x).cpu(), 4095 >> x_cpu)
+        self.assertEqual((257 << x).cpu(), 257 << x_cpu)
 
 
 class TestSmoothL1Loss(TestCaseMPS):
+    @parametrize("reduction", ["none", "mean", "sum"])
+    @parametrize("requires_grad", [False, True])
+    def test_smooth_l1_loss(self, reduction, requires_grad):
+        def helper(sizes):
+            # CPU
+            input_cpu = torch.randn(*sizes, requires_grad=requires_grad)
+            target_cpu = torch.randn(*sizes)
 
-    def _smooth_l1_loss_helper(self, reduction="mean", requires_grad=False):
-        # CPU
-        input_cpu = torch.randn(4, 7, requires_grad=requires_grad)
-        target_cpu = torch.randn(4, 7)
+            # MPS
+            input_mps = input_cpu.detach().clone().to('mps').requires_grad_()
+            target_mps = target_cpu.detach().clone().to('mps')
 
-        # MPS
-        input_mps = input_cpu.detach().clone().to('mps').requires_grad_()
-        target_mps = target_cpu.detach().clone().to('mps')
+            smooth_l1_loss_cpu = F.smooth_l1_loss(input_cpu, target_cpu, beta=1.0, reduction=reduction)
+            smooth_l1_loss_mps = F.smooth_l1_loss(input_mps, target_mps, beta=1.0, reduction=reduction)
 
-        smooth_l1_loss_cpu = F.smooth_l1_loss(input_cpu, target_cpu, beta=1.0, reduction=reduction)
-        smooth_l1_loss_mps = F.smooth_l1_loss(input_mps, target_mps, beta=1.0, reduction=reduction)
+            self.assertEqual(smooth_l1_loss_cpu, smooth_l1_loss_mps)
 
-        self.assertEqual(smooth_l1_loss_cpu, smooth_l1_loss_mps)
+            if requires_grad:
+                if reduction == "none":
+                    grad_cpu = torch.zeros_like(smooth_l1_loss_cpu)
+                    grad_mps = grad_cpu.to('mps')
 
-        if requires_grad:
-            smooth_l1_loss_cpu.backward()
-            smooth_l1_loss_mps.backward()
-            self.assertEqual(input_cpu.grad, input_mps.grad.to("cpu"))
+                    smooth_l1_loss_cpu.backward(grad_cpu)
+                    smooth_l1_loss_mps.backward(grad_mps)
+                else:
+                    smooth_l1_loss_cpu.backward()
+                    smooth_l1_loss_mps.backward()
+                self.assertEqual(input_cpu.grad, input_mps.grad.to("cpu"))
 
-        return smooth_l1_loss_cpu, smooth_l1_loss_mps
-
-    def test_smooth_l1_loss_reduction_none(self):
-        self._smooth_l1_loss_helper(reduction="none")
-
-    def test_smooth_l1_loss_reduction_mean(self):
-        self._smooth_l1_loss_helper(reduction="mean")
-
-    def test_smooth_l1_loss_reduction_sum(self):
-        self._smooth_l1_loss_helper(reduction="sum")
-
-    def test_smooth_l1_loss_reduction_mean_backward(self):
-        self._smooth_l1_loss_helper(reduction="mean", requires_grad=True)
-
-    def test_smooth_l1_loss_reduction_mean_sum_backward(self):
-        self._smooth_l1_loss_helper(reduction="sum", requires_grad=True)
+        helper((2, 3, 4))
+        helper((8, 5))
+        helper((3, ))
+        helper((3, 3, 0))
 
 class TestNLLLoss(TestCaseMPS):
     def test_nll_loss_mismatched_batch(self, device='mps'):
@@ -9791,6 +9823,8 @@ class TestSDPA(TestCaseMPS):
             self._compare_tensors(y.cpu(), y_ref)
 
     def test_sdpa_mask_fp32(self):
+        self._test_sdpa_mask(torch.float32)
+        # Test twice to catch https://github.com/pytorch/pytorch/issues/148194
         self._test_sdpa_mask(torch.float32)
 
     def test_sdpa_mask_fp16(self):
@@ -12507,8 +12541,6 @@ class TestConsistency(TestCaseMPS):
             # The result of pow(9 , 8) is showing 43046716, whereas it should've been 43046721.
             # fixed in macOS 13.3+
             return (1e-6, 2e-3 if dtype == torch.float16 else 4e-6)
-        if op.name == "nn.functional.interpolate":
-            return (1e-3, 1e-4)
         if op.name in ['fft.rfftn', 'fft.hfftn', 'fft.hfft2', 'fft.fft', 'fft.fftn', 'fft.rfft']:
             # TODO: Investigate why this is needed
             # See https://github.com/pytorch/pytorch/issues/120237
@@ -12886,6 +12918,7 @@ instantiate_device_type_tests(TestLinalgMPS, globals(), allow_mps=True, only_for
 instantiate_parametrized_tests(TestLogical)
 instantiate_parametrized_tests(TestMPS)
 instantiate_parametrized_tests(TestSDPA)
+instantiate_parametrized_tests(TestSmoothL1Loss)
 
 if __name__ == "__main__":
     run_tests()

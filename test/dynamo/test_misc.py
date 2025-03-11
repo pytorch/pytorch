@@ -51,6 +51,7 @@ from torch._dynamo.testing import (
     unsupported,
 )
 from torch._dynamo.utils import counters, ifdynstaticdefault
+from torch._dynamo.variables import builder
 from torch._inductor.utils import run_and_get_code
 from torch.ao.quantization import MinMaxObserver
 from torch.ao.quantization.fake_quantize import FakeQuantize
@@ -896,7 +897,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
         opt_fn(torch.randn([3, 4]))
         opt_fn(torch.randn([4, 3]))
         self.assertIn(
-            """tensor 'L['a']' size mismatch at index 0. expected 3, actual 4""",
+            """tensor 'a' size mismatch at index 0. expected 3, actual 4""",
             guard_failure.reason,
         )
 
@@ -6656,11 +6657,11 @@ utils_device.CURRENT_DEVICE == None""".split(
         first_guard_failure = guard_failure[0].partition("\n")[0]
         if torch._dynamo.config.assume_static_by_default:
             self.assertIn(
-                """tensor 'L['x']' size mismatch at index 0. expected 2, actual 5""",
+                """tensor 'x' size mismatch at index 0. expected 2, actual 5""",
                 first_guard_failure,
             )
         else:
-            self.assertIn("""L['x'].size()[0] < 3""", first_guard_failure)
+            self.assertIn("""x.size()[0] < 3""", first_guard_failure)
 
     def test_guard_failure_fn2(self):
         def fn(x, y):
@@ -6689,7 +6690,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         if torch._dynamo.config.assume_static_by_default:
             self.assertIn(
-                """tensor 'L['x']' size mismatch at index 0. expected 2, actual 3""",
+                """tensor 'x' size mismatch at index 0. expected 2, actual 3""",
                 guard_failure[0],
             )
         else:
@@ -6724,7 +6725,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         # guard is expected for both static and dynamic shapes
         self.assertTrue(guard_failure is not None)
         self.assertIn(
-            """len(L['x']) == 10""",
+            """len(x) == 10""",
             guard_failure[0],
         )
 
@@ -6781,7 +6782,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         opt_out = opt_fn(args2)
         self.assertEqual(out, opt_out)
         self.assertTrue(guard_failure is not None)
-        self.assertIn("""tensor 'L['x']' size mismatch at index 0""", guard_failure[0])
+        self.assertIn("""tensor 'x' size mismatch at index 0""", guard_failure[0])
 
     def test_restore_graphstate(self):
         # This function does some guard accumulation,
@@ -6850,9 +6851,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         x = torch.randn(3)
         self.assertEqual(fn(x), opt_fn(x))
         self.assertTrue(guard_failure is not None)
-        self.assertIn(
-            """tensor 'L['rank']' size mismatch at index 0""", guard_failure[0]
-        )
+        self.assertIn("""tensor 'rank' size mismatch at index 0""", guard_failure[0])
 
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     def test_symint_as_device_kwarg_non_strict_export(self):
@@ -7771,6 +7770,109 @@ utils_device.CURRENT_DEVICE == None""".split(
         torch._dynamo.mark_dynamic(y, 0)
         with self.assertRaises(ConstraintViolationError):
             torch.compile(my_dyn_fn, backend="eager")(y, y)
+
+    @torch._dynamo.config.patch(force_parameter_static_shapes=True)
+    @torch._dynamo.config.patch(force_nn_module_property_static_shapes=True)
+    @torch.compiler.config.patch(
+        dynamic_sources="L['x'],L['y'],L['self']._modules['y'].x,L['self']._modules['y']._modules['c']._parameters['weight'],L['self']._modules['y']._modules['c']._parameters['bias']"
+    )
+    def test_dynamic_sources_force_parameter_static_shapes_and_property_static_shapes_override(
+        self,
+    ):
+        builder._DYNAMIC_SOURCES = None
+
+        counter = CompileCounter()
+
+        class Y(torch.nn.Module):
+            def __init__(self, n_input, n_output):
+                super().__init__()
+                self.c = torch.nn.Linear(n_input, n_output)
+                self.x = n_input
+
+            def forward(self, x):
+                return self.c(x) * self.x
+
+        class M(torch.nn.Module):
+            def __init__(self, n_input, n_output):
+                self.n_input = n_input
+                self.n_output = n_output
+                super().__init__()
+                self.y = Y(n_input, n_output)
+
+            @torch.compile(backend=counter)
+            def forward(self, x, y):
+                return self.y(x) * y
+
+        model = M(3210, 30)
+        model(torch.randn(1, 3210), 2)
+        model = M(3211, 30)
+        model(torch.randn(1, 3211), 3)
+        model = M(3212, 30)
+        model(torch.randn(1, 3212), 4)
+
+        self.assertEqual(counter.frame_count, 1)
+
+    @torch.compiler.config.patch(dynamic_sources="L['x']")
+    def test_dynamic_sources_int(self):
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter)
+        def fn(x):
+            return torch.randn(5) * x
+
+        fn(1)
+        fn(2)
+        fn(3)
+
+        self.assertEqual(counter.frame_count, 1)
+
+    @torch.compiler.config.patch(dynamic_sources="L['x']")
+    def test_dynamic_sources_tensor(self):
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter)
+        def fn(x):
+            return x * x
+
+        fn(torch.randn(2))
+        fn(torch.randn(3))
+        fn(torch.randn(4))
+
+        self.assertEqual(counter.frame_count, 1)
+
+    @torch.compiler.config.patch(dynamic_sources="L['x']")
+    def test_dynamic_sources_graph_break(self):
+        counter = CompileCounter()
+
+        def foo(x):
+            return x * x
+
+        @torch.compile(backend=counter)
+        def fn(x):
+            x = x * x
+            torch._dynamo.graph_break()
+            return foo(x)
+
+        fn(torch.randn(2))
+        fn(torch.randn(3))
+        fn(torch.randn(4))
+
+        # 2 since graph break produces 2 graphs. NB: there are no recompiles
+        self.assertEqual(counter.frame_count, 2)
+
+    @torch.compiler.config.patch(dynamic_sources="L['x'], L['y']")
+    def test_dynamic_sources_dynamic_override(self):
+        counter = CompileCounter()
+
+        @torch.compile(dynamic=False, backend=counter)
+        def fn(x, y):
+            return x * y
+
+        fn(2, torch.randn(2))
+        fn(3, torch.randn(3))
+        fn(4, torch.randn(4))
+
+        self.assertEqual(counter.frame_count, 1)
 
     def test_cannot_trace_mark_dynamic(self):
         y = torch.randn([3, 3, 3])

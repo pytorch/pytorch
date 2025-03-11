@@ -3,7 +3,6 @@ from __future__ import annotations
 import collections
 import dataclasses
 import functools
-import inspect
 import itertools
 import logging
 import math
@@ -31,14 +30,12 @@ from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.symbol import free_symbol_is_type, SymT
-from torch.utils._triton import has_triton
 
 from . import comms, config, dependencies, ir, metrics
 from .analyze_preserves_zero_mask import can_codegen_without_upcasts
 from .codegen.common import BackendFeature, get_scheduling_for_device, Kernel
 from .comm_analysis import estimate_nccl_collective_runtime
 from .dependencies import Dep, MemoryDep, StarDep, WeakDep
-from .exc import GPUTooOldForTriton, TritonMissing
 from .ir import (
     ComputedBuffer,
     get_device_type,
@@ -200,9 +197,9 @@ class BaseSchedulerNode:
 
     def __init__(self, scheduler: Scheduler) -> None:
         self.scheduler: Scheduler = scheduler
-        self.debug_device_str: Callable[
-            [BaseSchedulerNode], list[str]
-        ] = lambda *args, **kwargs: []
+        self.debug_device_str: Callable[[BaseSchedulerNode], list[str]] = (
+            lambda *args, **kwargs: []
+        )
 
     def _init_from_node(self, node: ir.Operation) -> None:
         self.node: Optional[ir.Operation] = node
@@ -232,7 +229,7 @@ class BaseSchedulerNode:
         buf = IndentedBuffer()
         buf.splice(
             f"""\
-{name}: {type(self).__name__}({type(getattr(self, 'node', None)).__name__})
+{name}: {type(self).__name__}({type(getattr(self, "node", None)).__name__})
 {name}.writes = {pformat(self.read_writes.writes)}
 {name}.unmet_dependencies = {pformat(self.unmet_dependencies)}
 {name}.met_dependencies = {pformat(self.read_writes.reads - self.unmet_dependencies)}
@@ -525,9 +522,9 @@ class BaseSchedulerNode:
                             V.kernel.mutations.add(input_buf.get_name())
                             V.kernel.mutations.add(buf.get_name())
 
-                        V.kernel.inplace_update_buffers[
-                            buf.get_name()
-                        ] = input_buf.get_name()
+                        V.kernel.inplace_update_buffers[buf.get_name()] = (
+                            input_buf.get_name()
+                        )
                         break
 
     def codegen_originating_info(
@@ -693,7 +690,7 @@ class BaseSchedulerNode:
                 continue
 
             def get_buf_bytes(
-                buf: Optional[Union[ir.Buffer, ir.TensorBox, ir.TorchBindObject]]
+                buf: Optional[Union[ir.Buffer, ir.TensorBox, ir.TorchBindObject]],
             ) -> int:
                 if not buf:
                     return 0
@@ -794,12 +791,11 @@ class BaseSchedulerNode:
                     # runtime for that today
                     return 0
 
-                with FakeTensorMode() as fake_mode, FlopCounterMode(
-                    display=False
-                ) as flop_counter_mode, V.set_current_node(
-                    self.node.fx_node
-                ), V.set_fake_mode(
-                    fake_mode
+                with (
+                    FakeTensorMode() as fake_mode,
+                    FlopCounterMode(display=False) as flop_counter_mode,
+                    V.set_current_node(self.node.fx_node),
+                    V.set_fake_mode(fake_mode),
                 ):
                     from .ir import ir_node_to_tensor
 
@@ -1123,15 +1119,15 @@ class SchedulerNode(BaseSchedulerNode):
         return self._sizes
 
     def is_reduction(self) -> bool:
-        assert isinstance(
-            self.node, (ir.ComputedBuffer, ir.TemplateBuffer)
-        ), f"{type(self.node)=}"
+        assert isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer)), (
+            f"{type(self.node)=}"
+        )
         return bool(self.node.get_reduction_type())
 
     def is_split_scan(self) -> bool:
-        assert isinstance(
-            self.node, (ir.ComputedBuffer, ir.TemplateBuffer)
-        ), f"{type(self.node)=}"
+        assert isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer)), (
+            f"{type(self.node)=}"
+        )
         return isinstance(self.node, ir.ComputedBuffer) and isinstance(
             self.node.data, ir.SplitScan
         )
@@ -1163,9 +1159,10 @@ class SchedulerNode(BaseSchedulerNode):
     def codegen(self, index_vars: Sequence[Sequence[sympy.Expr]]) -> None:
         var_ranges = self.ranges_from_index_vars(index_vars)
         try:
-            with V.set_ops_handler(
-                SimplifyIndexing(V.get_ops_handler(), var_ranges)
-            ), V.kernel.set_current_node(self):
+            with (
+                V.set_ops_handler(SimplifyIndexing(V.get_ops_handler(), var_ranges)),
+                V.kernel.set_current_node(self),
+            ):
                 self._body(*index_vars)
         except Exception:
             log.fatal("Error in codegen for %s", self.node)
@@ -1231,7 +1228,7 @@ class SchedulerNode(BaseSchedulerNode):
 
 
 def refresh_group_node_dependencies(
-    group_snode: Union[FusedSchedulerNode, GroupedSchedulerNode]
+    group_snode: Union[FusedSchedulerNode, GroupedSchedulerNode],
 ) -> None:
     snodes = group_snode.snodes
     group_snode.set_read_writes(
@@ -1754,7 +1751,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
 
     @staticmethod
     def set_group_algorithm_for_combo_kernels(
-        custom_group_algorithm: Callable[[Scheduler], list[list[BaseSchedulerNode]]]
+        custom_group_algorithm: Callable[[Scheduler], list[list[BaseSchedulerNode]]],
     ) -> None:
         ForeachKernelSchedulerNode.group_algorithm_for_combo_kernels = (
             custom_group_algorithm
@@ -1975,9 +1972,9 @@ class Scheduler:
         for node in self.nodes:
             node.prune_deps()
 
-        self.name_to_donated_buffer: dict[
-            str, SchedulerDonatedBuffer
-        ] = self.get_donated_buffers()
+        self.name_to_donated_buffer: dict[str, SchedulerDonatedBuffer] = (
+            self.get_donated_buffers()
+        )
         self.name_to_node: dict[str, BaseSchedulerNode] = {
             n.get_name(): n for n in self.nodes
         }
@@ -2018,7 +2015,9 @@ class Scheduler:
         self.compute_ancestors()
 
         metrics.ir_nodes_pre_fusion += len(self.nodes)
-        V.debug.ir_pre_fusion(self.nodes)
+        from torch._inductor.debug import log_ir_post_fusion, log_ir_pre_fusion
+
+        log_ir_pre_fusion(self.nodes)
         self.num_orig_nodes = len(self.nodes)
         self.create_foreach_nodes()
         self.nodes = self.topological_sort_schedule(self.nodes)
@@ -2047,7 +2046,7 @@ class Scheduler:
             self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
         self.process_grouped_nodes()
         self.compute_last_usage()
-        V.debug.ir_post_fusion(self.nodes)
+        log_ir_post_fusion(self.nodes)
         V.debug.graph_diagram(self.nodes)
         self.debug_draw_graph()
 
@@ -2099,9 +2098,9 @@ class Scheduler:
                 node.log_details()
 
     def create_scheduler_node(self, node: ir.Operation) -> BaseSchedulerNode:
-        assert (
-            node.get_origins() is not None
-        ), "All nodes passed to scheduling must have an origin"
+        assert node.get_origins() is not None, (
+            "All nodes passed to scheduling must have an origin"
+        )
         if node.is_no_op():
             return NopKernelSchedulerNode(self, node)
         elif isinstance(node, (ir.ComputedBuffer, ir.TemplateBuffer)):
@@ -2260,9 +2259,9 @@ class Scheduler:
             )
             # if a kernel takes unbacked symints, register dependencies
             for s in unbacked_symbol_uses:
-                assert (
-                    s in unbacked_symbol_to_origin_node
-                ), f"{s} not in {unbacked_symbol_to_origin_node}"
+                assert s in unbacked_symbol_to_origin_node, (
+                    f"{s} not in {unbacked_symbol_to_origin_node}"
+                )
                 if (r := unbacked_symbol_to_origin_node[s]) is not None:
                     for buf in self.name_to_node[r].get_outputs():
                         node.add_fake_dep(StarDep(buf.get_name()))
@@ -2310,9 +2309,9 @@ class Scheduler:
                 for alt_name in buf.get_mutations():
                     self.mutation_renames[rename(alt_name)] = buf.get_name()
                     self.mutation_renames[alt_name] = buf.get_name()
-                    self.mutation_real_name[
-                        buf.get_name()
-                    ] = self.mutation_real_name.get(alt_name, alt_name)
+                    self.mutation_real_name[buf.get_name()] = (
+                        self.mutation_real_name.get(alt_name, alt_name)
+                    )
 
         # make sure outputs aren't dead-code-eliminated
         for buf_name in V.graph.get_output_names():
@@ -2322,9 +2321,9 @@ class Scheduler:
         # make sure unbacked symints aren't dead-code-eliminated
         for out in V.graph.graph_outputs:
             for s in out.get_unbacked_symbol_uses():
-                assert (
-                    s in unbacked_symbol_to_origin_node
-                ), f"{s} not in {unbacked_symbol_to_origin_node.keys()}"
+                assert s in unbacked_symbol_to_origin_node, (
+                    f"{s} not in {unbacked_symbol_to_origin_node.keys()}"
+                )
                 if r := unbacked_symbol_to_origin_node[s]:
                     for buf_name in self.name_to_node[r].get_buffer_names():
                         log.debug(
@@ -3304,15 +3303,15 @@ class Scheduler:
             rhs_dep = node2_name2dep[buf_name]
 
             if not isinstance(lhs_dep, MemoryDep) or not isinstance(rhs_dep, MemoryDep):
-                reasons[
-                    buf_name
-                ] = f"not MemoryDep: {type(lhs_dep)} v.s. {type(rhs_dep)}"
+                reasons[buf_name] = (
+                    f"not MemoryDep: {type(lhs_dep)} v.s. {type(rhs_dep)}"
+                )
                 continue
 
             if lhs_dep.get_numel() != rhs_dep.get_numel():
-                reasons[
-                    buf_name
-                ] = f"different numel: {lhs_dep.get_numel()} v.s. {rhs_dep.get_numel()}"
+                reasons[buf_name] = (
+                    f"different numel: {lhs_dep.get_numel()} v.s. {rhs_dep.get_numel()}"
+                )
                 continue
 
             # same numel but different MemoryDep.size. Should be broadcasting
@@ -3340,9 +3339,9 @@ class Scheduler:
             layout_str = ""
             if not isinstance(buf, ir.TorchBindObject):
                 layout_str = f"Layout: {buf.layout}"
-            reasons[
-                buf_name
-            ] = f"Unknown reason: {lhs_dep} v.s. {rhs_dep}. {layout_str}"
+            reasons[buf_name] = (
+                f"Unknown reason: {lhs_dep} v.s. {rhs_dep}. {layout_str}"
+            )
 
         return str(reasons)
 
@@ -3903,25 +3902,19 @@ class Scheduler:
         self.free_buffers()
 
     def create_backend(self, device: torch.device) -> BaseScheduling:
-        assert (
-            not is_gpu(device.type) or device.index is not None
-        ), f"{device} should have been normalized in lowering"
+        assert not is_gpu(device.type) or device.index is not None, (
+            f"{device} should have been normalized in lowering"
+        )
         V.graph.add_device_info(device)
 
-        device_scheduling = get_scheduling_for_device(device.type)
-        if device_scheduling is None:
+        device_scheduling_type = get_scheduling_for_device(device.type)
+        if device_scheduling_type is None:
             raise RuntimeError(f"Unsupported device type: {device.type}")
 
-        if not has_triton():
-            if (
-                device.type == "cuda"
-                and (device_props := torch.cuda.get_device_properties(device)).major < 7
-            ):
-                raise GPUTooOldForTriton(device_props, inspect.currentframe())
-            elif is_gpu(device.type) and not device.type == "mps":
-                raise TritonMissing(inspect.currentframe())
+        scheduling = device_scheduling_type(self)
+        scheduling.raise_if_unavailable(device)
 
-        return device_scheduling(self)
+        return scheduling
 
     def get_backend(self, device: Optional[torch.device]) -> BaseScheduling:
         assert device is not None
@@ -4119,7 +4112,7 @@ class Scheduler:
             self._codegen(partition)
             partition_code, _ = V.graph.wrapper_code.generate(V.graph.is_inference)
 
-        V.graph.wrapper_code.define_subgraph_launcher_fn(partition_code)
+        V.graph.wrapper_code.define_subgraph_launcher_fn(partition_code.value)
 
         V.graph.wrapper_code.codegen_partition_call(graph_partition_id, signature)
         V.graph.wrapper_code.allocated.update(
@@ -4135,9 +4128,9 @@ class Scheduler:
         partitions, signatures = self.graph_partition()
 
         for partition, signature in zip(partitions, signatures):
-            assert (
-                len(partition) >= 1
-            ), f"Each partition must have at least one node but found {len(partition)}"
+            assert len(partition) >= 1, (
+                f"Each partition must have at least one node but found {len(partition)}"
+            )
 
             if signature.skip_cudagraph:
                 self._codegen(partition)
@@ -4369,6 +4362,17 @@ class BaseScheduling:
     def get_backend_features(self, device: torch.device) -> OrderedSet[BackendFeature]:
         """Return a set of .codegen.common.BackendFeature()"""
         return OrderedSet()
+
+    @classmethod
+    def raise_if_unavailable(
+        cls, device: Union[str, torch.device, None] = None
+    ) -> None:
+        """
+        Raises a RuntimeError if the given device does not support this codegen or required
+        prerequisites are not available with a useful description for the user. If None is given,
+        the default device is checked.
+        """
+        return None
 
     def can_fuse_vertical(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode

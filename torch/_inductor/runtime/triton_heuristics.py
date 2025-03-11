@@ -450,9 +450,9 @@ class CachingAutotuner(KernelInterface):
         self.launchers = []
 
     def __getstate__(self) -> dict[str, Any]:
-        assert (
-            not self.launchers
-        ), "pickle should not be called with after make_launchers()"
+        assert not self.launchers, (
+            "pickle should not be called with after make_launchers()"
+        )
         return {
             **self.__dict__,
             "lock": None,
@@ -678,7 +678,9 @@ class CachingAutotuner(KernelInterface):
                 assert isinstance(
                     arg,
                     torch.Tensor,
-                ), "self.reset_to_zero_arg_names should only contain valid argument names"
+                ), (
+                    "self.reset_to_zero_arg_names should only contain valid argument names"
+                )
                 arg.zero_()
 
         for name, arg in kwargs.items():
@@ -686,7 +688,9 @@ class CachingAutotuner(KernelInterface):
                 assert isinstance(
                     arg,
                     torch.Tensor,
-                ), "self.reset_to_zero_arg_names should only contain valid argument names"
+                ), (
+                    "self.reset_to_zero_arg_names should only contain valid argument names"
+                )
                 arg.zero_()
 
     def maybe_clone_args(
@@ -866,7 +870,9 @@ class CachingAutotuner(KernelInterface):
         assert not (
             self.heuristic_type == HeuristicType.PERSISTENT_REDUCTION
             and "R0_BLOCK" in launcher.config.kwargs
-        ), "Coordinate descent tuner relies on the assumption that persistent reduction's triton config does not have R0_BLOCK"
+        ), (
+            "Coordinate descent tuner relies on the assumption that persistent reduction's triton config does not have R0_BLOCK"
+        )
         start_time = time.time_ns()
         best_config = self.coordesc_tuner.autotune(
             benchmark_one_config, launcher.config, None
@@ -882,9 +888,7 @@ class CachingAutotuner(KernelInterface):
             )
         return config2launcher.get(best_config)
 
-    def run(
-        self, *args, grid, stream, benchmark_run=False, **kwargs
-    ):  # type:ignore[override]
+    def run(self, *args, grid, stream, benchmark_run=False, **kwargs):  # type:ignore[override]
         if self.triton_interpret:
             return self.fn[grid](
                 *args,
@@ -1192,12 +1196,12 @@ class TritonCompileResult:
 
         exec(
             f"""
-            def launcher({', '.join(def_args)}, grid, stream):
+            def launcher({", ".join(def_args)}, grid, stream):
                 if callable(grid):
                     grid_0, grid_1, grid_2 = grid(grid_meta)
                 else:
                     grid_0, grid_1, grid_2 = grid
-                runner({', '.join(runner_args)})
+                runner({", ".join(runner_args)})
                 return bin
             """.lstrip(),
             scope,
@@ -1503,9 +1507,9 @@ def check_max_block(cfg: dict[str, int]):
         if block_suffix in var:
             prefix = var.removesuffix(block_suffix)
             max_block = TRITON_MAX_BLOCK[prefix]
-            assert (
-                val <= max_block
-            ), f"'{var}' too large. Maximum: {max_block}. Actual: {val}."
+            assert val <= max_block, (
+                f"'{var}' too large. Maximum: {max_block}. Actual: {val}."
+            )
 
 
 def _num_warps(num_warps, max_num_warps=8, min_num_warps=2, register_intensive=False):
@@ -1657,20 +1661,20 @@ def _get_nd_reduction_numels(r: int, size_hints: dict[str, int]) -> dict[str, in
         prefix = f"r{idx}_"
         max_size = min(size_hints[prefix], TRITON_MAX_BLOCK[prefix.upper()])
         dim = min(max_size, remaining)
-        assert (
-            remaining % dim == 0
-        ), f"Expected dimension '{dim}' to divide remaining size '{remaining}'"
+        assert remaining % dim == 0, (
+            f"Expected dimension '{dim}' to divide remaining size '{remaining}'"
+        )
         rnumels[prefix] = dim
         remaining //= dim
 
     # Sanity check the results.
     final_numel = conditional_product(*rnumels.values())
-    assert (
-        r == final_numel
-    ), f"Expected ND reduction size ({rnumels}) to have {r} elements."
-    assert all(
-        rnumels[prefix] <= size_hints[prefix] for prefix in rnumels
-    ), f"rnumels exceed size_hints. {rnumels} > {size_hints}"
+    assert r == final_numel, (
+        f"Expected ND reduction size ({rnumels}) to have {r} elements."
+    )
+    assert all(rnumels[prefix] <= size_hints[prefix] for prefix in rnumels), (
+        f"rnumels exceed size_hints. {rnumels} > {size_hints}"
+    )
 
     return rnumels
 
@@ -1967,9 +1971,9 @@ def cooperative_reduction(
         size_hints["x"] = 1
 
     # Cooperative reductions currently only support a single reduction dimension.
-    assert (
-        len(size_hints) == 2
-    ), "Cooperative reductions don't support tiling reduction dims"
+    assert len(size_hints) == 2, (
+        "Cooperative reductions don't support tiling reduction dims"
+    )
     xnumel, rnumel = size_hints["x"], size_hints["r0_"]
 
     # TODO(jansel): we should base target on the SM count of the local GPU
@@ -2274,9 +2278,9 @@ def grid_combo_kernels(
             assert min_blocks_d is not None
             min_blocks = min_blocks_d
         else:
-            assert (
-                min_blocks_d is None or min_blocks == min_blocks_d
-            ), f"inconsistent min_blocks {min_blocks} vs  x grid {numels[-1]}"
+            assert min_blocks_d is None or min_blocks == min_blocks_d, (
+                f"inconsistent min_blocks {min_blocks} vs  x grid {numels[-1]}"
+            )
     else:
         # sequential dispatch
         seq_numels = list(numels)

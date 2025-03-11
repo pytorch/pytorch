@@ -14,8 +14,8 @@ from typing import TYPE_CHECKING
 import torch
 from torch._dynamo.source import AttrSource, GetItemSource
 
-from .. import variables
-from ..exc import raise_observed_exception, unimplemented
+from .. import graph_break_hints, variables
+from ..exc import raise_observed_exception, unimplemented_v2
 from ..utils import cmp_name_to_op_mapping, common_constant_types, istype, np
 from .base import VariableTracker
 
@@ -68,9 +68,7 @@ class ConstantVariable(VariableTracker):
 
     def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
-        assert ConstantVariable.is_base_literal(
-            value
-        ), f"""
+        assert ConstantVariable.is_base_literal(value), f"""
 Cannot construct `ConstantVariable` for value of type {type(value)}.
 
 This failure likely due to PyTorch-internal use of `ConstantVariable` on
@@ -234,7 +232,14 @@ class EnumVariable(VariableTracker):
             for member in list(cls_type):
                 if member.value == value_vt.as_python_constant():
                     return cls(member, **options)
-        unimplemented("Enum variable is constructed with non constant values")
+        unimplemented_v2(
+            gb_type="Failed to construct Enum variable",
+            context=f"value: {value_vt}, allowed enum values: {list(cls_type)}",
+            explanation="Attempted to construct an Enum value that is non-constant (e.g. int, string) "
+            "or is not an acceptable value for the Enum. "
+            f"Acceptable values for Enum `{cls_type}`: {list(cls_type)}.",
+            hints=[*graph_break_hints.USER_ERROR, *graph_break_hints.SUPPORTABLE],
+        )
 
     def as_proxy(self):
         if isinstance(self.value, int):

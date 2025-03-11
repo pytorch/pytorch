@@ -53,6 +53,11 @@ def eager_force_stride(input_tensor: Tensor, stride) -> Tensor:
     return new_tensor
 
 
+def eager_prepare_softmax(x: Tensor, dim: int) -> tuple[Tensor, Tensor]:
+    amax = torch.amax(x, dim, keepdim=True)
+    return amax, torch.sum(torch.exp(x - amax), dim, keepdim=True)
+
+
 # Custom prims used for handling randomness
 seed = make_prim(
     "inductor_seed(Device device) -> Tensor",
@@ -105,6 +110,12 @@ fma = make_prim(
     "fma(Tensor a, Tensor b, Tensor c) -> Tensor",
     lambda a, b, c: (a * b) + c,
     doc="Fused multiply add: fma(a, b, c) -> (a * b) + c without rounding after the multiplication",
+)
+prepare_softmax_online = make_prim(
+    "prepare_softmax_online(Tensor a, int dim) -> (Tensor, Tensor)",
+    eager_prepare_softmax,
+    return_type=(_prims.RETURN_TYPE.NEW, _prims.RETURN_TYPE.NEW),
+    doc="Prepare the softmax by computing the max and sum.",
 )
 
 

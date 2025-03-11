@@ -41,10 +41,11 @@ TORCH_SDT_DEFINE_SEMAPHORE(free)
 
 namespace c10 {
 
-C10_DEFINE_REGISTRY(FreeCudaMemoryCallbacksRegistry, FreeMemoryCallback);
+C10_DEFINE_REGISTRY(FreeCudaMemoryCallbacksRegistry, FreeMemoryCallback)
 
 namespace cuda::CUDACachingAllocator {
 
+using namespace c10::CachingAllocator;
 using namespace c10::CachingDeviceAllocator;
 
 // Included here as this is externally used in CUDAAllocatorConfig
@@ -855,7 +856,7 @@ BlockState::BlockState(Block* block)
   TORCH_CHECK(
       block->event_count == 0,
       "Events should have synchronized when checkpointing block");
-};
+}
 
 SegmentState::SegmentState(Block* head) {
   TORCH_INTERNAL_ASSERT(head->prev == nullptr && head->pool != nullptr);
@@ -2710,6 +2711,7 @@ class DeviceCachingAllocator {
     bool in_fbcode = false;
 #endif
 
+    auto active_pool = MemPoolContext::getActiveMemPool();
     if (set_fraction &&
         total_allocated_memory + size > allowed_memory_maximum) {
       p.err = cudaErrorMemoryAllocation;
@@ -2718,6 +2720,9 @@ class DeviceCachingAllocator {
     } else if (
         CUDAAllocatorConfig::expandable_segments() &&
         !(in_fbcode && p.pool->owner_PrivatePool)) {
+      TORCH_CHECK(
+          !active_pool,
+          "torch.cuda.MemPool doesn't currently support expandable_segments.");
       p.block = try_allocate_expandable_block(
           p.device(), p.stream(), p.pool, p.size(), ctx);
       if (p.block) {
@@ -2731,7 +2736,6 @@ class DeviceCachingAllocator {
       }
       return bool(p.block);
     } else {
-      auto active_pool = MemPoolContext::getActiveMemPool();
       if (active_pool && active_pool->allocator() &&
           p.pool->owner_PrivatePool) {
         // Ensure that active_pool and p.pool are the same
@@ -3899,11 +3903,17 @@ class NativeCachingAllocator : public CUDAAllocator {
              curr_device, handle, *device_allocator[curr_device])});
     auto sp = std::shared_ptr<void>(
         inserted->second.ptr(), [handle, this](void* ptr) {
-          std::lock_guard<std::mutex> deleter_lock(IpcMutex);
+          std::unique_lock<std::mutex> deleter_lock(IpcMutex);
+
           auto it = ipcMemHandle_to_devptr.find(handle);
           TORCH_INTERNAL_ASSERT(it != ipcMemHandle_to_devptr.end());
-          it->second.clear();
+          auto entry = std::move(it->second);
           ipcMemHandle_to_devptr.erase(it);
+
+          // ExpandableSegment synchronizes on destruction in unmapHandles, so
+          // we need to release the lock first to minimize the performance hit.
+          deleter_lock.unlock();
+          entry.clear();
         });
     inserted->second.wp_ = sp;
     return sp;

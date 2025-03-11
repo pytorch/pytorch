@@ -468,6 +468,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._cuda_getDevice",
         "torch._C._cuda_getDeviceCount",
         "torch._C._cuda_hasPrimaryContext",
+        "torch._C._cuda_hostMemoryStats",
         "torch._C._cuda_init",
         "torch._C._cuda_ipc_collect",
         "torch._C._cuda_isCurrentStreamCapturing",
@@ -481,7 +482,9 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._cuda_record_memory_history_legacy",
         "torch._C._cuda_record_memory_history",
         "torch._C._cuda_releasePool",
+        "torch._C._cuda_resetAccumulatedHostMemoryStats",
         "torch._C._cuda_resetAccumulatedMemoryStats",
+        "torch._C._cuda_resetPeakHostMemoryStats",
         "torch._C._cuda_resetPeakMemoryStats",
         "torch._C._cuda_set_cudnn_benchmark_limit",
         "torch._C._cuda_set_sync_debug_mode",
@@ -2546,6 +2549,8 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.cuda.memory.empty_cache",
         "torch.cuda.memory.get_allocator_backend",
         "torch.cuda.memory.get_per_process_memory_fraction",
+        "torch.cuda.memory.host_memory_stats_as_nested_dict",
+        "torch.cuda.memory.host_memory_stats",
         "torch.cuda.memory.list_gpu_processes",
         "torch.cuda.memory.max_memory_allocated",
         "torch.cuda.memory.max_memory_cached",
@@ -2558,9 +2563,11 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.cuda.memory.memory_stats_as_nested_dict",
         "torch.cuda.memory.memory_stats",
         "torch.cuda.memory.memory_summary",
+        "torch.cuda.memory.reset_accumulated_host_memory_stats",
         "torch.cuda.memory.reset_accumulated_memory_stats",
         "torch.cuda.memory.reset_max_memory_allocated",
         "torch.cuda.memory.reset_max_memory_cached",
+        "torch.cuda.memory.reset_peak_host_memory_stats",
         "torch.cuda.memory.reset_peak_memory_stats",
         "torch.cuda.memory.set_per_process_memory_fraction",
         "torch.cuda.nccl._check_sequence_type",
@@ -3641,7 +3648,10 @@ def check_verbose(obj, is_inlined_call=False):
         fi = FunctionInfo(None, obj.co_name, obj.co_filename, obj)
     elif isinstance(obj, (types.FunctionType, types.MethodType)):
         fi = FunctionInfo(
-            obj, obj.__name__, getfile(obj), obj.__code__  # type: ignore[union-attr] # FIXME Add MethodType.__code__ to typeshed
+            obj,
+            obj.__name__,
+            getfile(obj),
+            obj.__code__,  # type: ignore[union-attr] # FIXME Add MethodType.__code__ to typeshed
         )
     else:
         fi = FunctionInfo(obj, None, getfile(obj), None)
@@ -3660,6 +3670,11 @@ def check_verbose(obj, is_inlined_call=False):
         return SkipResult(
             False,
             f"inlined according trace_rules.lookup {reasons.pop()}",
+        )
+    elif issubclass(rule, TorchInGraphFunctionVariable):
+        return SkipResult(
+            False,
+            f"registered in torch_obj_rule {reasons.pop()}",
         )
     else:
         assert rule == SkipFunctionVariable, rule

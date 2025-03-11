@@ -458,6 +458,13 @@ class TestJit(JitTestCase):
 
             pkl_fn = pickle.dumps(fn, protocol=0)
 
+    def test_script_fn_valid_name(self):
+        @torch.jit.script
+        def fn(x: torch.Tensor) -> torch.Tensor:
+            return x
+        self.assertIsNotNone(fn.__name__)
+        self.assertIsNotNone(fn.__qualname__)
+
     def test_restore_device(self):
         class M(torch.jit.ScriptModule):
             def __init__(self, cpu_device_str):
