@@ -18498,7 +18498,7 @@ op_db: list[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            skips=(
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values',
-                            dtypes=[torch.bool], device_type='cuda'),
+                            dtypes=[torch.bool], device_type='cuda', active_if=not TEST_WITH_ROCM),
            )),
     OpInfo('unique',
            dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16, torch.uint16, torch.uint32, torch.uint64),
@@ -19549,12 +19549,7 @@ op_db: list[OpInfo] = [
            check_batched_gradgrad=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs_msort,
-           skips=(
-               # https://github.com/pytorch/pytorch/issues/139972
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values',
-                            dtypes=[torch.bool], device_type='cuda', active_if=TEST_WITH_ROCM),
-           )),
+           sample_inputs_func=sample_inputs_msort),
     OpInfo('movedim',
            aliases=('moveaxis',),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
@@ -21380,6 +21375,7 @@ op_db: list[OpInfo] = [
                 "test_non_standard_bool_values",
                 dtypes=[torch.bool],
                 device_type='cuda',
+                active_if=not TEST_WITH_ROCM
             ),
         ),
     ),
