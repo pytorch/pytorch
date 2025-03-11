@@ -471,13 +471,16 @@ class CachingAutotuner(KernelInterface):
     def _precompile_config(self, cfg: Config) -> TritonCompileResult:
         """Ahead of time compile a given autotuner config."""
         compile_meta = copy.deepcopy(self.triton_meta)
-        cfg_kwargs = cfg.kwargs
+
+        local_kwargs = dict(cfg.kwargs)
+        local_kwargs.pop("triton_cache_hash", None)
+
         if self.device_props.type == "hip":
-            cfg_kwargs = {**cfg_kwargs}
+            local_kwargs = {**local_kwargs}
             for k in ("matrix_instr_nonkdim", "waves_per_eu", "kpack"):
-                if k in cfg_kwargs:
-                    compile_meta[k] = cfg_kwargs.pop(k)
-        compile_meta["constants"].update(cfg_kwargs)
+                if k in local_kwargs:
+                    compile_meta[k] = local_kwargs.pop(k)
+        compile_meta["constants"].update(local_kwargs)
         compile_meta["num_warps"] = cfg.num_warps
         compile_meta["num_stages"] = cfg.num_stages
         compile_meta["debug"] = self.inductor_meta.get(
@@ -775,7 +778,11 @@ class CachingAutotuner(KernelInterface):
         )
 
         if self.save_cache_hook:
-            self.save_cache_hook(launcher.config, self.autotune_time_taken_ns)
+            self.save_cache_hook(
+                launcher.config,
+                self.autotune_time_taken_ns,
+                triton_cache_hash=launcher.cache_hash,
+            )
 
     def save_gpu_kernel(self, grid, stream, launcher):
         if callable(grid):
@@ -1212,6 +1219,7 @@ class TritonCompileResult:
         launcher.n_regs = getattr(binary, "n_regs", None)
         launcher.n_spills = getattr(binary, "n_spills", None)
         launcher.shared = binary_shared
+        launcher.cache_hash = triton_hash_to_path_key(binary.hash)
         launcher.store_cubin = self.inductor_meta.get("store_cubin", False)
         # store this global variable to avoid the high overhead of reading it when calling run
         if launcher.store_cubin:
