@@ -1127,7 +1127,6 @@ class TestPatternMatcher(TestCase):
         self.assertIn("return (buf0, )", code[0])
         self.assertNotIn("async_compile.cpp", code[0])
 
-    @expectedFailureXPU
     def test_unfuse_bias_addmm(self):
         args = [
             torch.randn(20, device=GPU_TYPE),

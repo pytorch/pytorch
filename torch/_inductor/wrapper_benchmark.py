@@ -14,8 +14,7 @@ from .runtime.runtime_utils import create_bandwidth_info_str, get_num_bytes
 
 
 class BenchmarkCallableType(Protocol):
-    def __call__(self, times: int, repeat: int) -> float:
-        ...
+    def __call__(self, times: int, repeat: int) -> float: ...
 
 
 _kernel_category_choices = [
@@ -138,9 +137,9 @@ def benchmark_all_kernels(
                 )
         else:
             ms = benchmarker.benchmark_gpu(lambda: kernel_mod.call(args), rep=40)
-            assert (
-                len(triton_kernel.launchers) == 1
-            ), "Autotuner should have selected the best config"
+            assert len(triton_kernel.launchers) == 1, (
+                "Autotuner should have selected the best config"
+            )
             launcher = triton_kernel.launchers[0]
             print(
                 get_info_str(
@@ -256,9 +255,9 @@ def parse_profile_event_list(
             "triton_unknown",
             "unknown",
         ]
-        assert OrderedSet(all_events.keys()).issubset(
-            OrderedSet(category_list)
-        ), f"{list(all_events.keys())}"
+        assert OrderedSet(all_events.keys()).issubset(OrderedSet(category_list)), (
+            f"{list(all_events.keys())}"
+        )
 
         per_category_wall_time = {}
         total_device_ms = 0.0

@@ -15,7 +15,6 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_inductor_cache
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import xfailIfSM89
-from torch.testing._internal.common_device_type import expectedFailureXPU
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -136,8 +135,9 @@ class TestKernelBenchmark(TestCase):
 
     # TODO: Currently the Triton mm template +  relu fusion causes slowdown on XPU,
     # Need to refine the template and config for XPU.
-    @expectedFailureXPU
-    @config.patch(max_autotune=True, max_autotune_gemm_backends="TRITON")
+    @config.patch(
+        max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
+    )
     @fresh_inductor_cache()
     def test_matmul_triton_kernel_benchmark(self):
         M = 12544
@@ -153,7 +153,9 @@ class TestKernelBenchmark(TestCase):
         f(a, b)
         self.verify_compiled_kernels()
 
-    @config.patch(max_autotune=True, max_autotune_gemm_backends="TRITON")
+    @config.patch(
+        max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
+    )
     @fresh_inductor_cache()
     def test_mm_triton_kernel_benchmark(self):
         M = 2048
@@ -358,12 +360,6 @@ class TestKernelBenchmark(TestCase):
         # num_gb = (1000 * 1000 + 2 * 1000 * 1000 + 1000 * 1000) * 2/ 1e9
         #        = 0.008
         num_gb = "0.008"
-        if GPU_TYPE == "xpu":
-            # In XPU backend, mm + add + add will be fused as admm + add
-            # And CUDA prefer not fuse add + mm, please check in function
-            # `should_prefer_unfused_addmm` in torch/_inductor/fx_passes/post_grad.py
-            num_gb = "0.006"
-
         self.check_bandwidth(compiled_module, num_gb)
 
     def test_mm_slice_add_bandwidth_computation_2(self):

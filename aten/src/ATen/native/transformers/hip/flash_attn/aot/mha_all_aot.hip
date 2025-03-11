@@ -60,8 +60,13 @@
 #include <c10/util/Exception.h>
 
 // AOTriton headers
+#include <aotriton/config.h>
 #include <aotriton/flash.h>
 #include <aotriton/runtime.h>
+
+#if AOTRITON_VERSION_MINOR != 9
+#error "This adaptor code is only tested with AOTriton 0.9.x"
+#endif
 
 namespace pytorch_flash {
 
@@ -202,18 +207,25 @@ mha_fwd_aot(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x 
     softmax_fa_t = at::empty({ 0, 0, 0, 0 }, opts);
   }
 
+  at::Tensor atomic_counter;
+  if (is_causal) {
+    atomic_counter = at::zeros({1}, opts.dtype(at::kInt));
+  }
+
   hipError_t err; // TODO: Error handling
   using aotriton::v2::flash::attn_fwd;
   using sdp::aotriton_adapter::mk_aotensor;
   using sdp::aotriton_adapter::mk_aoscalartensor;
   using sdp::aotriton_adapter::mk_philoxtensor;
+  using sdp::aotriton_adapter::mk_atomictensor;
   using sdp::aotriton_adapter::cast_dtype;
   aotriton::TensorView<4> empty_bias(0, {0,0,0,0}, {0,0,0,0}, cast_dtype(q.dtype()));
   auto seed = use_philox_state ? mk_philoxtensor(philox_state.seed_.ptr) : mk_aoscalartensor(seed_t);
   auto offset1 = use_philox_state ? mk_philoxtensor(philox_state.offset_.ptr) : mk_aoscalartensor(offset_t);
   auto offset2 = use_philox_state ? philox_state.offset_intragraph_ : 0;
-  auto seed_output = use_philox_state ? mk_philoxtensor(seed_t.data_ptr<int64_t>()) : mk_philoxtensor(nullptr);
-  auto offset_output = use_philox_state ? mk_philoxtensor(offset_t.data_ptr<int64_t>()) : mk_philoxtensor(nullptr);
+  auto seed_output = mk_philoxtensor(use_philox_state ? seed_t.data_ptr<int64_t>() : nullptr);
+  auto offset_output = mk_philoxtensor(use_philox_state ? offset_t.data_ptr<int64_t>() : nullptr);
+  auto persistent_counter = mk_atomictensor(is_causal ? atomic_counter.data_ptr<int32_t>() : nullptr);
   err = attn_fwd(mk_aotensor(q_t, "q"),
                  mk_aotensor(k_t, "k"),
                  mk_aotensor(v_t, "v"),
@@ -229,6 +241,7 @@ mha_fwd_aot(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x 
                  offset_output,
                  mk_aotensor(softmax_fa_t, "encoded_softmax"),
                  is_causal,
+                 persistent_counter,
                  stream);
 
   return {out, q_padded, k_padded, v_padded, M.view({batch_size, num_heads, seqlen_q}), seed_t, offset_t, softmax_fa_t};
@@ -365,20 +378,26 @@ mha_varlen_fwd_aot(const at::Tensor &q,  // total_q x num_heads x head_size, tot
     using sdp::aotriton_adapter::mk_aoscalartensor;
     using sdp::aotriton_adapter::mk_philoxtensor;
     using sdp::aotriton_adapter::cast_dtype;
+    at::Tensor atomic_counter;
+    if (is_causal) {
+      atomic_counter = at::zeros({1}, q.options());
+    }
     aotriton::TensorView<4> empty_bias(0, {0,0,0,0}, {0,0,0,0}, cast_dtype(q.dtype()));
     auto seed = use_philox_state ? mk_philoxtensor(philox_state.seed_.ptr) : mk_aoscalartensor(seed_t);
     auto offset1 = use_philox_state ? mk_philoxtensor(philox_state.offset_.ptr) : mk_aoscalartensor(offset_t);
     auto offset2 = use_philox_state ? philox_state.offset_intragraph_ : 0;
-    auto seed_output = use_philox_state ? mk_philoxtensor(seed_t.data_ptr<int64_t>()) : mk_philoxtensor(nullptr);
-    auto offset_output = use_philox_state ? mk_philoxtensor(offset_t.data_ptr<int64_t>()) : mk_philoxtensor(nullptr);
+    auto nullscalar = mk_philoxtensor(nullptr);
+    auto seed_output = use_philox_state ? mk_philoxtensor(seed_t.data_ptr<int64_t>()) : nullscalar;
+    auto offset_output = use_philox_state ? mk_philoxtensor(offset_t.data_ptr<int64_t>()) : nullscalar;
+    auto persistent_counter = is_causal ? mk_philoxtensor(atomic_counter.data_ptr<int64_t>()) : nullscalar;
     err = attn_fwd_compact_varlen(mk_aotensor(q_padded, "q"),
                                   mk_aotensor(k_padded, "k"),
                                   mk_aotensor(v_padded, "v"),
+                                  empty_bias,
                                   mk_aotensor<1>(cu_seqlens_q, "cu_seqlens_q"),
                                   mk_aotensor<1>(cu_seqlens_k, "cu_seqlens_k"),
                                   max_seqlen_q,
                                   max_seqlen_k,
-                                  empty_bias,
                                   softmax_scale,
                                   mk_aotensor<2>(M, "M"),
                                   mk_aotensor(out_padded, "Out"),
@@ -390,6 +409,7 @@ mha_varlen_fwd_aot(const at::Tensor &q,  // total_q x num_heads x head_size, tot
                                   offset_output,
                                   mk_aotensor(softmax_fa_t, "encoded_softmax"),
                                   is_causal,
+                                  persistent_counter,
                                   stream);
   } else {
     // If seqlen_k == 0, then we have an empty tensor. We need to set the output to 0.
@@ -517,11 +537,36 @@ mha_bwd_aot(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x hea
   at::Tensor dout_t = dout.permute({0,2,1,3});
 
   at::Tensor softmax_lse_cont = softmax_lse.view({batch_size * num_heads, seqlen_q}).contiguous();
-  at::Tensor delta = at::empty_like(softmax_lse_cont).contiguous();
 
   int d_head = head_size_og;
+  bool use_fused_bwd = d_head <= 192 && d_head * seqlen_q < 64 * 512;
   hipError_t err; // TODO: Error handling
-  {
+  if (use_fused_bwd) {
+    using aotriton::v2::flash::attn_bwd_fused;
+    using sdp::aotriton_adapter::mk_aotensor;
+    using sdp::aotriton_adapter::mk_aoscalartensor;
+    using sdp::aotriton_adapter::cast_dtype;
+    aotriton::TensorView<4> empty_bias(0, {0,0,0,0}, {0,0,0,0}, cast_dtype(q.dtype()));
+    err = attn_bwd_fused(mk_aotensor(q_t, "q"),
+                         mk_aotensor(k_t, "k"),
+                         mk_aotensor(v_t, "v"),
+                         empty_bias,
+                         softmax_scale,
+                         mk_aotensor(out_t, "out"),
+                         mk_aotensor(dout_t, "dout"),
+                         mk_aotensor(dq_t, "dq"),
+                         mk_aotensor(dk_t, "dk"),
+                         mk_aotensor(dv_t, "dv"),
+                         empty_bias,  // dbb
+                         mk_aotensor<2>(softmax_lse_cont, "L"),
+                         p_dropout,
+                         mk_aoscalartensor(philox_seed),
+                         mk_aoscalartensor(philox_offset),
+                         0,
+                         is_causal,
+                         stream);
+  } else {
+    at::Tensor delta = at::empty_like(softmax_lse_cont).contiguous();
     using aotriton::v2::flash::attn_bwd;
     using sdp::aotriton_adapter::mk_aotensor;
     using sdp::aotriton_adapter::mk_aoscalartensor;
@@ -537,7 +582,7 @@ mha_bwd_aot(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x hea
                    mk_aotensor(dq_t, "dq"),
                    mk_aotensor(dk_t, "dk"),
                    mk_aotensor(dv_t, "dv"),
-                   empty_bias,
+                   empty_bias,  // db
                    mk_aotensor<2>(softmax_lse_cont, "L"),
                    mk_aotensor<2>(delta, "delta"),
                    p_dropout,

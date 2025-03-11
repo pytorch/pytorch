@@ -426,7 +426,7 @@ class CompiledFxGraph(OutputCode):
                     (not complex_memory_overlap_inputs, "complex memory overlap"),
                     (
                         all(
-                            isinstance(t, (torch.Tensor, torch.SymInt))
+                            isinstance(t, (torch.Tensor, torch.SymInt, torch.Generator))
                             for t in example_inputs
                         ),
                         "non-Tensor inputs",

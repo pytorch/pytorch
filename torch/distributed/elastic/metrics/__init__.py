@@ -52,11 +52,12 @@ The example below measures the latency for the ``calculate()`` function.
   metrics.configure(metrics.NullMetricsHandler())
   metrics.configure(metrics.ConsoleMetricsHandler(), "my_module")
 
+
   def my_method():
-    start = time.time()
-    calculate()
-    end = time.time()
-    metrics.put_metric("calculate_latency", int(end-start), "my_module")
+      start = time.time()
+      calculate()
+      end = time.time()
+      metrics.put_metric("calculate_latency", int(end - start), "my_module")
 
 You may also use the torch.distributed.elastic.metrics.prof` decorator
 to conveniently and succinctly profile functions
@@ -70,15 +71,16 @@ to conveniently and succinctly profile functions
   metrics.configure(metrics.ConsoleMetricsHandler(), "foobar")
   metrics.configure(metrics.ConsoleMetricsHandler(), "Bar")
 
+
   @metrics.prof
   def foo():
-    pass
+      pass
 
-  class Bar():
 
-    @metrics.prof
-    def baz():
-        pass
+  class Bar:
+      @metrics.prof
+      def baz():
+          pass
 
 ``@metrics.prof`` will publish the following metrics
 ::
@@ -102,8 +104,8 @@ console.
 
   import torch.distributed.elastic.metrics as metrics
 
-  metrics.configure(metrics.ConsoleMetricHandler(), group = "torchelastic")
-  metrics.configure(metrics.ConsoleMetricHandler(), group = "my_app")
+  metrics.configure(metrics.ConsoleMetricHandler(), group="torchelastic")
+  metrics.configure(metrics.ConsoleMetricHandler(), group="my_app")
 
 **Writing a Custom Metric Handler**:
 
@@ -117,13 +119,15 @@ Below is a toy example that prints the metrics to ``stdout``
 
   import torch.distributed.elastic.metrics as metrics
 
+
   class StdoutMetricHandler(metrics.MetricHandler):
-     def emit(self, metric_data):
-         ts = metric_data.timestamp
-         group = metric_data.group_name
-         name = metric_data.name
-         value = metric_data.value
-         print(f"[{ts}][{group}]: {name}={value}")
+      def emit(self, metric_data):
+          ts = metric_data.timestamp
+          group = metric_data.group_name
+          name = metric_data.name
+          value = metric_data.value
+          print(f"[{ts}][{group}]: {name}={value}")
+
 
   metrics.configure(StdoutMetricHandler(), group="my_app")
 

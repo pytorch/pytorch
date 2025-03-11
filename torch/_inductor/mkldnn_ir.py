@@ -751,9 +751,9 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             unary_algorithm,
         ]
 
-        assert (
-            binary_attr == "sum"
-        ), "For now, only post op sum is supported in QConvPointWiseBinaryPT2E."
+        assert binary_attr == "sum", (
+            "For now, only post op sum is supported in QConvPointWiseBinaryPT2E."
+        )
 
         V.graph.mark_buffer_mutated(qaccum.get_name())
         packed = QConvPointWiseBinaryPT2E(

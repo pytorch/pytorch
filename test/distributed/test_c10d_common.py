@@ -3,6 +3,7 @@
 import copy
 import os
 import pickle
+import subprocess
 import sys
 import tempfile
 import threading
@@ -1559,6 +1560,11 @@ class DummyWork(dist._Work):
 
 
 class DummyProcessGroup(dist.ProcessGroup):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._aborted = False
+        self._shutdown = False
+
     def getBackendName(self):
         return "Dummy"
 
@@ -1621,6 +1627,12 @@ class DummyProcessGroup(dist.ProcessGroup):
             tensor.add_(2)
 
         return DummyWork()
+
+    def abort(self) -> None:
+        self._aborted = True
+
+    def shutdown(self) -> None:
+        self._shutdown = True
 
 
 class PythonProcessGroupExtensionTest(MultiProcessTestCase):
@@ -1794,6 +1806,36 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
         # intentionally not calling into `destroy_process_group` as not all
         # user applications would explicitly that.
 
+    def test_shutdown(self) -> None:
+        dist.Backend.register_backend(
+            "dummy", PythonProcessGroupExtensionTest.create_dummy
+        )
+
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = "6789"
+        dist.init_process_group("dummy", rank=self.rank, world_size=self.world_size)
+
+        pg = c10d._get_default_group()
+
+        dist.destroy_process_group()
+
+        self.assertTrue(pg._shutdown)
+
+    def test_abort(self) -> None:
+        dist.Backend.register_backend(
+            "dummy", PythonProcessGroupExtensionTest.create_dummy
+        )
+
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = "6789"
+        dist.init_process_group("dummy", rank=self.rank, world_size=self.world_size)
+
+        pg = c10d._get_default_group()
+
+        c10d._abort_process_group()
+
+        self.assertTrue(pg._aborted)
+
 
 instantiate_parametrized_tests(CommonDistributedDataParallelTest)
 
@@ -1865,6 +1907,35 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
             self.assertEqual(pg.name(), str(excepted_backend))
 
             dist.destroy_process_group()
+
+    def test_default_process_group(self):
+        script = """
+# Hide all GPUs
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = ""
+
+import torch
+from torch import distributed as dist
+
+# This should initialize on CPU even though this is a CUDA-enabled build
+dist.init_process_group(rank=0, world_size=1, store=dist.HashStore())
+"""
+        try:
+            subprocess.check_output(
+                [sys.executable, "-c", script],
+                stderr=subprocess.STDOUT,
+                # On Windows, opening the subprocess with the default CWD makes `import torch`
+                # fail, so just set CWD to this script's directory
+                cwd=os.path.dirname(os.path.realpath(__file__)),
+                # It is ok to have an extra long timeout here as a timeout means the test failed
+                timeout=20,
+            )
+        except subprocess.TimeoutExpired:
+            self.fail(
+                msg="Example code timed out! See the code sample in the test for details."
+            )
+        except subprocess.CalledProcessError as e:
+            self.fail(f"""Subprocess failed with {e.output.decode("utf-8")}""")
 
     def _call_collective_with_varying_tensors(self, backend, collective, *args):
         # call collective with varying tensors to ensure that the tensors are
