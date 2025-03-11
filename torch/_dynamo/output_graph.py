@@ -63,6 +63,7 @@ from torch.fx.experimental.symbolic_shapes import (
     ShapeEnv,
 )
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
+from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from . import config, exc, graph_break_hints, logging as torchdynamo_logging, variables
@@ -2704,6 +2705,36 @@ class SubgraphTracer(fx.Tracer):
         ]
 
         return len(mutated_inputs) > 0
+
+    def has_aliasing(self):
+        input_storages = set()
+        for node in self.graph.nodes:
+            if node.op == "placeholder":
+                example_value = node.meta["example_value"]
+                if isinstance(example_value, torch.Tensor):
+                    storage = StorageWeakRef(example_value._typed_storage())
+                    if storage in input_storages:
+                        # input-input aliasing
+                        return True
+                    input_storages.add(storage)
+            else:
+                break
+
+        output_storages = set()
+        out_nodes = self.graph.find_nodes(op="output")[0]
+        for out_node in out_nodes.args[0]:
+            example_value = out_node.meta["example_value"]
+            if isinstance(example_value, torch.Tensor):
+                storage = StorageWeakRef(example_value._typed_storage())
+                if storage in output_storages:
+                    # output-output aliasing
+                    return True
+                output_storages.add(storage)
+
+        if input_storages.intersection(output_storages):
+            # Input-output aliasing
+            return True
+        return False
 
 
 # NOTE: [HigherOrderOperator tracing design]

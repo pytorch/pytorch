@@ -518,7 +518,7 @@ class GraphModule(torch.nn.Module):
         ):
             opt_fn(x)
 
-    def test_input_aliasing(self):
+    def test_input_output_aliasing(self):
         @mark_compile_region
         def gn(x, y):
             return (x, torch.mul(x, y))
@@ -535,6 +535,39 @@ class GraphModule(torch.nn.Module):
             torch._dynamo.exc.Unsupported, "NYI: invoke_subgraph with aliasing"
         ):
             opt_fn(x, y)
+
+    def test_input_input_aliasing(self):
+        @mark_compile_region
+        def gn(x, y):
+            return torch.mul(x, y)
+
+        def fn(x):
+            return gn(x, x.view(1, 8))
+
+        x = torch.randn(8, requires_grad=False)
+
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "NYI: invoke_subgraph with aliasing"
+        ):
+            opt_fn(x)
+
+    def test_output_output_aliasing(self):
+        @mark_compile_region
+        def gn(x):
+            z = torch.cos(x)
+            return z, z.view(1, 8)
+
+        def fn(x):
+            return gn(x)
+
+        x = torch.randn(8, requires_grad=False)
+
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "NYI: invoke_subgraph with aliasing"
+        ):
+            opt_fn(x)
 
     def test_mod_attr_aliasing(self):
         class MutateParam(torch.nn.Module):
