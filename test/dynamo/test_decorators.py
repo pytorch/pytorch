@@ -1503,10 +1503,10 @@ If the above doesn't work, please subtmit an issue to GitHub.
 
         # test dont_skip_tracing with graph breaks
         inp = torch.ones(3)
-        res = torch.compile(f4, backend="eager")(inp)
+        res = torch.compile(f4, backend=cnts)(inp)
         self.assertEqual(res, inp + 6)
 
-        @torch.compile(backend="eager")
+        @torch.compile(backend=cnts)
         def g4(x):
             x = f5(x, 1)
             x = torch._dynamo.dont_skip_tracing(f6)(x)
@@ -1515,6 +1515,15 @@ If the above doesn't work, please subtmit an issue to GitHub.
 
         res = g4(inp)
         self.assertEqual(res, inp + 6)
+
+        # test nested dont_skip_tracing
+        # this also happens to test if a previously skipped frame (f4)
+        # can actually be compiled if called as a top-level function (in the case of a graph break)
+        torch._dynamo.reset()
+        f4_unskip = torch._dynamo.dont_skip_tracing(f4)
+        cnts.clear()
+        res = torch.compile(f4_unskip, backend=cnts)(inp)
+        self.assertEqual(res, inp + 15)
 
 
 if __name__ == "__main__":

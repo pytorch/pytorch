@@ -203,11 +203,12 @@ def dont_skip_tracing_wrapper(recursive: bool) -> Any:
         if recursive:
 
             def wrap(*args: Any, **kwargs: Any) -> _R:
+                prev = _ignore_skip_function_variable
                 _set_ignore_skip_function_variable(True)
                 try:
                     return fn(*args, **kwargs)
                 finally:
-                    _set_ignore_skip_function_variable(False)
+                    _set_ignore_skip_function_variable(prev)
 
             return wrap
         else:

@@ -1401,7 +1401,20 @@ class CatchErrorsWrapper:
                     skip_reason,
                     frame.f_code.co_filename,
                 )
-            return ConvertFrameReturn()
+
+            apply_to_code = False
+            # if this function might be traced due to dont_skip_tracing in the future,
+            # then don't skip this code for all future invocations.
+            if is_skipfile:
+                prev_ignore_skip_function_variable = (
+                    external_utils._ignore_skip_function_variable
+                )
+                if not trace_rules.check(frame.f_code):
+                    apply_to_code = True
+                external_utils._ignore_skip_function_variable = (
+                    prev_ignore_skip_function_variable
+                )
+            return ConvertFrameReturn(apply_to_code=apply_to_code)
 
         if frame.f_code.co_filename == "<string>" and frame.f_code.co_name == "__new__":
             # nametuple constructor

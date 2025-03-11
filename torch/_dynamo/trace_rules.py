@@ -3746,7 +3746,7 @@ def lookup(obj):
     return lookup_inner(obj)
 
 
-# take external_utils._ignore_skip_function_variable into account
+# also takes external_utils._ignore_skip_function_variable into account
 def lookup_inner(
     obj,
     name=None,
@@ -3767,7 +3767,8 @@ def lookup_inner(
         if filename is None:
             filename = getfile(obj)
         filename = _as_posix_path(filename)
-        if filename.startswith("torch/_dynamo") and not filename.endswith(
+        dynamo_path = _as_posix_path(_module_dir(torch)) + "_dynamo"
+        if filename.startswith(dynamo_path) and not filename.endswith(
             "test_dont_skip_tracing_functions.py"
         ):
             return SkipFunctionVariable
