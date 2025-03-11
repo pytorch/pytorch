@@ -16576,7 +16576,7 @@ op_db: list[OpInfo] = [
     ),
     BinaryUfuncInfo('nextafter',
                     dtypes=floating_types_and(torch.bfloat16, torch.half),
-                    supports_autograd=False,
+                    supports_autograd=True,
                     supports_rhs_python_scalar=False),
     OpInfo(
         "to",

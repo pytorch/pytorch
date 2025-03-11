@@ -1297,9 +1297,9 @@
   reserve: not_implemented("batch_norm_backward reserve")
 
 - name: nextafter(Tensor self, Tensor other) -> Tensor
-  self: nextafter_backward(grad, self, other)
+  self: torch.where(self != other, grad, torch.zeros_like(grad))
   other: zeros_like(other)
-  result: nextafter_jvp(self_p, self_t, other_p, other_t)
+  result: torch.where(self_p != other_p, self_t, torch.zeros_like(self_t))
 
 - name: norm.Scalar(Tensor self, Scalar p=2) -> Tensor
   self: norm_backward(grad, self, p, result)
