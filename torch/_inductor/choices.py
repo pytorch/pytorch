@@ -4,7 +4,7 @@ import functools
 import logging
 import typing
 from collections import defaultdict
-from typing import Any, TYPE_CHECKING
+from typing import Any, Callable, TYPE_CHECKING
 
 import sympy
 
@@ -13,9 +13,15 @@ from torch.utils._ordered_set import OrderedSet
 
 from . import config, ir
 from .codecache import write_text
+from .memory import (
+    reorder_for_peak_memory,
+    topological_sort_bfs,
+    topological_sort_dfs,
+    topological_sort_lpmf,
+)
 from .metrics import get_metric_table, is_metric_table_enabled
 from .runtime.hints import DeviceProperties, ReductionHint
-from .scheduler import BaseSchedulerNode, Scheduler, WhyNoFuse
+from .scheduler import BaseSchedulerNode, Scheduler, SchedulerBuffer, WhyNoFuse
 from .utils import cmp, has_free_symbols
 from .virtualized import V
 
@@ -708,3 +714,25 @@ class InductorChoices:
             return False
 
         return True
+
+    @staticmethod
+    def reorder_for_peak_memory(
+        nodes: list[BaseSchedulerNode],
+        name_to_buf: dict[str, SchedulerBuffer],
+        name_to_fused_node: dict[str, BaseSchedulerNode],
+        graph_inputs: OrderedSet[str],
+        graph_outputs: OrderedSet[str],
+        methods: list[Callable[..., list[BaseSchedulerNode]]] = [  # noqa: B006
+            topological_sort_lpmf,
+            topological_sort_bfs,
+            topological_sort_dfs,
+        ],
+    ) -> list[BaseSchedulerNode]:
+        """
+        Try a few heuristics based topological sort algorithms, and pick the one whose
+        resulting topological order has the lowest peak memory estimation.
+        """
+
+        return reorder_for_peak_memory(
+            nodes, name_to_buf, name_to_fused_node, graph_inputs, graph_outputs, methods
+        )

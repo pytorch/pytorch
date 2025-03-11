@@ -1986,9 +1986,7 @@ class Scheduler:
         # Peak memory pass and overlap pass must run last, otherwise
         # other reordering passes could undo their effects.
         if config.reorder_for_peak_memory:
-            from .memory import reorder_for_peak_memory
-
-            self.nodes = reorder_for_peak_memory(
+            self.nodes = V.choices.reorder_for_peak_memory(
                 self.nodes,
                 self.name_to_buf,
                 self.name_to_fused_node,
