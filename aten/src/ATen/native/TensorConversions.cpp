@@ -430,13 +430,14 @@ bool to_will_alias(
 //     std::optional<Device> device,
 //     std::optional<bool> pin_memory,
 //     std::optional<c10::MemoryFormat> optional_memory_format) {
-//   bool device_differs = device.has_value() && device.value() != self.device();
-//   bool dtype_differs = dtype.has_value() && dtype.value() != self.scalar_type();
-//   bool layout_differs = layout.has_value() && layout.value() != self.layout();
-//   bool pin_memory_differs =
+//   bool device_differs = device.has_value() && device.value() !=
+//   self.device(); bool dtype_differs = dtype.has_value() && dtype.value() !=
+//   self.scalar_type(); bool layout_differs = layout.has_value() &&
+//   layout.value() != self.layout(); bool pin_memory_differs =
 //       pin_memory.has_value() && pin_memory.value() != self.is_pinned();
-//   auto memory_format = optional_memory_format.value_or(MemoryFormat::Preserve);
-//   bool memory_format_differs = memory_format != MemoryFormat::Preserve &&
+//   auto memory_format =
+//   optional_memory_format.value_or(MemoryFormat::Preserve); bool
+//   memory_format_differs = memory_format != MemoryFormat::Preserve &&
 //       memory_format != self.suggest_memory_format();
 //   return device_differs && !dtype_differs && !layout_differs &&
 //       !pin_memory_differs && !memory_format_differs;

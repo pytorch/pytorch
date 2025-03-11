@@ -5342,23 +5342,15 @@ else:
             ('cpu', 'cuda:1'),
             ('cuda:1', 'cuda:0'),
             ('cuda:0', 'cuda:1'),
+            # NOTE: CUDA -> CPU does not work at the moment, because at the
+            # moment, we always use the target device Allocator's `clone`
+            # function. The CPU allocator's `clone` function just calls memcopy,
+            # which does not understand CUDA data pointers. In order to get it
+            # to work, we would need to call cudaMemcpy to copy data from CUDA
+            # to CPU. It is of course possible to make this happen, but since
+            # CUDA-CPU is not the main purpose (MPS-CPU) is, we may not need to
+            # solve this problem at the moment.
             # ('cuda', 'cpu'),
-            # NOTE: CUDA -> CPU doesn't work at the moment. Traceback shows that
-            # apparently the CPU Allocator's `clone` method doesn't know how to
-            # deal with a CUDA data pointer. May not need to solve this problem
-            # at the moment, because the whole point is MPS-CPU, not CUDA-CPU.
-            #
-            #   Thread 1 "python" received signal SIGSEGV, Segmentation fault.
-            #   __memcpy_avx_unaligned () at ../sysdeps/x86_64/multiarch/memmove-vec-unaligned-erms.S:220
-            #   warning: 220    ../sysdeps/x86_64/multiarch/memmove-vec-unaligned-erms.S: No such file or directory
-            #   (gdb) bt
-            #   #0  __memcpy_avx_unaligned () at ../sysdeps/x86_64/multiarch/memmove-vec-unaligned-erms.S:220
-            #   #1  0x00007ffff3d22e40 in c10::Allocator::clone (this=0x7ffff3df8010 <c10::g_cpu_alloc>,
-            #       data=0x7ffc89000200, n=40)
-            #       at /home/kurtamohler/develop/pytorch-0/c10/util/UniqueVoidPtr.h:61
-            #   #2  0x00007ffff3d751cf in c10::impl::cow::materialize_cow_storage (storage=...)
-            #       at /home/kurtamohler/develop/pytorch-0/c10/util/UniqueVoidPtr.h:61
-            #
         ]
         for from_device, to_device in device_pairs:
             from_device_check = torch.empty(0, device=from_device).device

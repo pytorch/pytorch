@@ -14,6 +14,7 @@
 #include <ATen/ops/_unpack_dual_native.h>
 #include <ATen/ops/_lazy_clone_native.h>
 #include <ATen/ops/alias.h>
+#include <ATen/ops/empty.h>
 #include <ATen/ops/zeros.h>
 #endif
 
@@ -93,9 +94,13 @@ bool _has_same_storage_numel(const at::Tensor& base, const at::Tensor& other) {
 }
 
 Tensor _lazy_clone(Tensor const& self, optional<c10::Device> device_opt) {
+  optional<c10::Allocator*> allocator_opt = nullopt;
+  if (device_opt.has_value()) {
+    allocator_opt = at::empty({}, at::TensorOptions().device(device_opt.value())).storage().allocator();
+  }
   c10::StorageImpl* self_storage = self.storage().unsafeGetStorageImpl();
   c10::intrusive_ptr<c10::StorageImpl> storage =
-    c10::impl::cow::lazy_clone_storage(*self_storage, device_opt);
+    c10::impl::cow::lazy_clone_storage(*self_storage, device_opt, allocator_opt);
   TORCH_CHECK(storage != nullptr);
   c10::DispatchKeySet key_set = self.key_set();
   // If the target device differs, then we must change the key set

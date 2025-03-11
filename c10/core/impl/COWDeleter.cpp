@@ -44,8 +44,4 @@ c10::Device cow::COWDeleterContext::original_device() {
   return original_device_;
 }
 
-std::int64_t cow::COWDeleterContext::refcount() {
-  return refcount_.load();
-}
-
 } // namespace c10::impl

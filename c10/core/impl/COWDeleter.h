@@ -50,8 +50,6 @@ class C10_API COWDeleterContext {
 
   c10::Device original_device();
 
-  std::int64_t refcount();
-
  private:
   // The destructor is hidden, this should only ever be used within
   // UniqueVoidPtr using cow::delete_context as the deleter.

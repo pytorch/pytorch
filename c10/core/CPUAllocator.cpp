@@ -41,7 +41,11 @@ struct C10_API DefaultCPUAllocator final : at::Allocator {
     return &ReportAndDelete;
   }
 
-  void copy_data(void* dest, const void* src, std::size_t count) const final {
+  void copy_data(
+      void* dest,
+      const void* src,
+      std::size_t count,
+      bool sync = false) const final {
     default_copy_data(dest, src, count);
   }
 };
@@ -149,7 +153,11 @@ class DefaultMobileCPUAllocator final : public at::Allocator {
         PreGuardBytes;
   }
 
-  void copy_data(void* dest, const void* src, std::size_t count) const final {
+  void copy_data(
+      void* dest,
+      const void* src,
+      std::size_t count,
+      bool sync = false) const final {
     default_copy_data(dest, src, count);
   }
 };

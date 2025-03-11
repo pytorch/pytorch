@@ -173,8 +173,13 @@ struct C10_API Allocator {
   // Note that this explicitly ignores any context that may have been
   // attached to the input data.
   //
-  // Requires: input data was allocated by the same allocator.
-  DataPtr clone(const void* data, std::size_t n);
+  // If `sync=true` is given, then the device will synchronize after the clone
+  // happens, if the device is normally asynchronous.
+  //
+  // Requires: Depending on the details of the allocator, input data may need to
+  // have been allocated by the same allocator. Some allocators do support
+  // cloning from a different device.
+  DataPtr clone(const void* data, std::size_t n, bool sync = false);
 
   // Checks if DataPtr has a simple context, not wrapped with any out of the
   // ordinary contexts.
@@ -205,8 +210,11 @@ struct C10_API Allocator {
   //
   // Requires: src and dest were allocated by this allocator
   // Requires: src and dest both have length >= count
-  virtual void copy_data(void* dest, const void* src, std::size_t count)
-      const = 0;
+  virtual void copy_data(
+      void* dest,
+      const void* src,
+      std::size_t count,
+      bool sync = false) const = 0;
 
  protected:
   // Uses `std::memcpy` to copy data.

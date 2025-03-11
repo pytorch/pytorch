@@ -157,7 +157,8 @@ struct ZeroTensorAllocator final : public at::Allocator {
   void copy_data(
       void* dest [[maybe_unused]],
       const void* src [[maybe_unused]],
-      std::size_t count [[maybe_unused]]) const final {}
+      std::size_t count [[maybe_unused]],
+      bool sync [[maybe_unused]] = false) const final {}
   at::Device device_;
 };
 

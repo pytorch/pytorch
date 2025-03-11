@@ -9,11 +9,6 @@
 #include <c10/util/ParallelGuard.h>
 #include <c10/util/UniqueVoidPtr.h>
 
-#ifdef USE_CUDA
-#include <c10/cuda/CUDACachingAllocator.h>
-#include <c10/cuda/CUDAFunctions.h>
-#endif
-
 #include <memory>
 #include <optional>
 
@@ -56,7 +51,10 @@ bool is_cow_data_ptr(const c10::DataPtr& data_ptr) {
 
 c10::intrusive_ptr<StorageImpl> lazy_clone_storage(
     StorageImpl& storage,
-    c10::optional<c10::Device> device_opt) {
+    c10::optional<c10::Device> device_opt,
+    c10::optional<c10::Allocator*> allocator_opt) {
+  TORCH_INTERNAL_ASSERT(device_opt.has_value() == allocator_opt.has_value());
+
   const at::DataPtr& data_ptr = storage.data_ptr();
 
   // There are three possible circumstances:
@@ -114,6 +112,8 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(
   c10::DeviceType device_type = storage.device_type();
 
   if (device_opt.has_value()) {
+    allocator = allocator_opt.value();
+
     DeviceGuard device_guard(device_opt.value());
     Device device = device_guard.current_device();
 
@@ -124,16 +124,6 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(
       auto* ctx = new_data_ptr.cast_context<c10::impl::cow::COWDeleterContext>(
           c10::impl::cow::cow_deleter);
       device_type = device.type();
-
-#ifdef USE_CUDA
-      if (device_type == c10::kCUDA) {
-        allocator = c10::cuda::CUDACachingAllocator::get();
-      } else
-#endif
-      {
-        allocator = c10::GetAllocator(device.type());
-      }
-
       new_data_ptr.release_context();
       new_data_ptr_opt = c10::DataPtr(
           new_data_ptr.get(), ctx, c10::impl::cow::cow_deleter, device);
@@ -175,14 +165,8 @@ C10_API void materialize_cow_storage(StorageImpl& storage) {
   } else {
     // We don't need to consume the result, it's just a shared lock ensuring
     // that the data will remain while we copy it.
-    new_data_ptr = storage.allocator()->clone(data_ptr.get(), storage.nbytes());
-    if (!devices_match) {
-#ifdef USE_CUDA
-      if (storage.device().type() == c10::kCUDA) {
-        c10::cuda::device_synchronize();
-      }
-#endif
-    }
+    new_data_ptr = storage.allocator()->clone(
+        data_ptr.get(), storage.nbytes(), /*sync=*/!devices_match);
   }
 
   TORCH_INTERNAL_ASSERT(new_data_ptr.has_value());

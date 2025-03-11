@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/core/Allocator.h>
 #include <c10/core/Device.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Optional.h>
@@ -24,7 +25,8 @@ namespace c10::impl::cow {
 // when materialization occurs.
 C10_API c10::intrusive_ptr<StorageImpl> lazy_clone_storage(
     StorageImpl& storage,
-    optional<Device> device_opt = nullopt);
+    optional<Device> device_opt = nullopt,
+    optional<Allocator*> allocator_opt = nullopt);
 
 // Check if a storage has a simple DataPtr with no abnormal context
 C10_API bool has_simple_data_ptr(const c10::StorageImpl& storage);
