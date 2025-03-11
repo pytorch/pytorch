@@ -10,7 +10,6 @@ import csv
 import dataclasses
 import functools
 import importlib
-import inspect
 import itertools
 import json
 import logging
