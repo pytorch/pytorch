@@ -14,6 +14,7 @@ from torch.ao.quantization.quantize_fx import (
     prepare_fx,
     prepare_qat_fx,
 )
+from torch.testing._internal.common_quantization import skipIfNoFBGEMM
 from torch.testing._internal.common_utils import TestCase, xfailIfS390X
 
 
@@ -71,6 +72,7 @@ def _calculate_sparsity(tensor):
 # This series of tests are to check the composability goals for sparsity and quantization. Namely
 # that performing quantization and sparsity model manipulations in various orderings
 # does not cause problems
+@skipIfNoFBGEMM
 class TestComposability(TestCase):
     # This test checks whether performing quantization prepare before sparse prepare
     # causes any issues and verifies that the correct observers are inserted and that
