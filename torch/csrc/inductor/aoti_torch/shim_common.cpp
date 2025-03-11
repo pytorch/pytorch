@@ -1430,7 +1430,7 @@ aoti_torch_delete_library_object(TorchLibraryHandle tlh) {
       { delete reinterpret_cast<torch::Library*>(tlh); });
 }
 
-c10::IValue to_ivalue(
+static c10::IValue to_ivalue(
     const c10::TypePtr& arg_type,
     const StableIValue stable_ivalue) {
   switch (arg_type->kind()) {
