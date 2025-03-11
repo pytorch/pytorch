@@ -50,8 +50,6 @@ elif TEST_HPU:
     DEVICE_TYPE = "hpu"
 elif TEST_XPU:
     DEVICE_TYPE = "xpu"
-elif TEST_XPU:
-    DEVICE_TYPE = "xpu"
 else:
     DEVICE_TYPE = "cpu"
 

@@ -257,15 +257,12 @@ class DistTensorRandomOpTest(DTensorTestBase):
         seed_from_rank_0 = int(object_list[0])
 
         device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
-        # seed synchronization happens after the first `distribute_tensor` call
-        distribute_tensor(
-            torch.empty([self.world_size], device=self.device_type),
-            device_mesh,
-            [Shard(0)],
         # seed synchronization now does NOT happen after the first `distribute_tensor`
         # call
         dt = distribute_tensor(
-            torch.empty([self.world_size], device=self.device_type), device_mesh, [Shard(0)]
+            torch.empty([self.world_size], device=self.device_type),
+            device_mesh,
+            [Shard(0)],
         )
         self.assertTrue(random._rng_tracker is None)
         # seed synchronization only happens after `manual_seed` or the first DTensor
