@@ -22,8 +22,8 @@ from tools.testing.test_run import TestRun
 ADDITIONAL_MAPPINGS = {
     # Not actual test files but rather functions defined in run_test.py that run
     # tests in test/cpp_extensions.
-    "test_cpp_extensions_aot_ninja": [r"test\/cpp_extensions.*\/test.*\.py"],
-    "test_cpp_extensions_aot_no_ninja": [r"test\/cpp_extensions.*\/test.*\.py"],
+    "test_cpp_extensions_aot_ninja": [r"test\/cpp_extensions.*"],
+    "test_cpp_extensions_aot_no_ninja": [r"test\/cpp_extensions.*"],
 }
 
 
