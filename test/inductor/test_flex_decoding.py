@@ -4,7 +4,7 @@
 import functools
 from collections import namedtuple
 from typing import Callable, Optional, Union
-from unittest import expectedFailure, skipUnless
+from unittest import expectedFailure
 from unittest.mock import patch
 
 import torch
@@ -22,13 +22,12 @@ from torch.nn.attention.flex_attention import (
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16
-from torch.testing._internal.common_utils import skipIfRocm
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, HAS_CUDA, HAS_XPU
-from torch.utils._triton import has_triton
-
 from torch.testing._internal.common_device_type import (
     flex_attention_supported_platform as supported_platform,
 )
+from torch.testing._internal.common_utils import skipIfRocm
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA, HAS_GPU, HAS_XPU
+
 
 Tolerances = namedtuple("Tolerances", ["atol", "rtol"])
 torch.set_float32_matmul_precision("high")
@@ -52,8 +51,9 @@ def create_block_mask_test(score_mod, query, key):
     )
     return block_mask
 
+
 if HAS_GPU:
-    if HAS_CUDA:        
+    if HAS_CUDA:
         test_device = "cuda"
         test_dtypes = (
             [torch.float32, torch.bfloat16, torch.float16]
@@ -421,7 +421,9 @@ class TestFlexDecoding(InductorTestCase):
         )
 
         # "randomly" initialize the page table
-        paged_attention = PagedAttention(n_pages, page_size, max_batch_size, device=self.device)
+        paged_attention = PagedAttention(
+            n_pages, page_size, max_batch_size, device=GPU_TYPE
+        )
         batch_reserve(
             paged_attention,
             torch.tensor([KV_S // 4, KV_S // 2, KV_S // 4, KV_S // 3], device=GPU_TYPE),
@@ -529,7 +531,9 @@ class TestFlexDecoding(InductorTestCase):
         q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, gold_dtype)
 
         if block_mask is None:
-            block_mask = create_block_mask(noop_mask, Q_B, 1, 1, KV_S, device=self.device)
+            block_mask = create_block_mask(
+                noop_mask, Q_B, 1, 1, KV_S, device=self.device
+            )
 
         sdpa_partial = create_attention(
             score_mod, block_mask, enable_gqa=(not Q_H == KV_H)
@@ -590,9 +594,13 @@ class TestFlexDecoding(InductorTestCase):
         ref_out = golden_call(q_ref, k_ref, v_ref)
 
         if mask_mod is not None:
-            block_mask = create_block_mask(mask_mod, Q_B, 1, Q_S, KV_S, device=self.device)
+            block_mask = create_block_mask(
+                mask_mod, Q_B, 1, Q_S, KV_S, device=self.device
+            )
         else:
-            block_mask = create_block_mask(noop_mask, Q_B, 1, Q_S, KV_S, device=self.device)
+            block_mask = create_block_mask(
+                noop_mask, Q_B, 1, Q_S, KV_S, device=self.device
+            )
 
         compiled_out, _ = self.run_paged_attention(
             score_mod, q, k, v, dtype, block_mask
@@ -670,7 +678,9 @@ class TestFlexDecoding(InductorTestCase):
         mod = generate_causal_offset(
             torch.tensor(192, device=GPU_TYPE, dtype=torch.int32)
         )
-        block_mask = create_block_mask(mod, B, 1, 1, S, BLOCK_SIZE=page_size, device=self.device)
+        block_mask = create_block_mask(
+            mod, B, 1, 1, S, BLOCK_SIZE=page_size, device=self.device
+        )
 
         self.run_test_with_paged_attention(
             score_mod,
@@ -693,7 +703,9 @@ class TestFlexDecoding(InductorTestCase):
         score_mod: Callable,
         BLOCK_SIZE: Union[int, tuple[int, int]],
     ):
-        block_mask = create_block_mask(noop_mask, B, 1, 1, S, BLOCK_SIZE=BLOCK_SIZE, device=self.device)
+        block_mask = create_block_mask(
+            noop_mask, B, 1, 1, S, BLOCK_SIZE=BLOCK_SIZE, device=self.device
+        )
         self.run_test(score_mod, dtype, block_mask=block_mask)
 
     def input_strides_1(B, H, S, D):
@@ -1734,12 +1746,24 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         golden_outs = torch.cat(golden_outs)
 
         # init paged attention
-        paged_cache = PagedAttention(n_pages, page_size, max_batch_size, device=self.device)
-        batch_reserve(paged_cache, torch.tensor([100, 200, 50, 300], device=self.device))
-        batch_reserve(paged_cache, torch.tensor([100, 512, 300, 300], device=self.device))
-        batch_reserve(paged_cache, torch.tensor([512, 512, 300, 300], device=self.device))
-        batch_reserve(paged_cache, torch.tensor([512, 512, 512, 300], device=self.device))
-        batch_reserve(paged_cache, torch.tensor([512, 512, 512, 512], device=self.device))
+        paged_cache = PagedAttention(
+            n_pages, page_size, max_batch_size, device=self.device
+        )
+        batch_reserve(
+            paged_cache, torch.tensor([100, 200, 50, 300], device=self.device)
+        )
+        batch_reserve(
+            paged_cache, torch.tensor([100, 512, 300, 300], device=self.device)
+        )
+        batch_reserve(
+            paged_cache, torch.tensor([512, 512, 300, 300], device=self.device)
+        )
+        batch_reserve(
+            paged_cache, torch.tensor([512, 512, 512, 300], device=self.device)
+        )
+        batch_reserve(
+            paged_cache, torch.tensor([512, 512, 512, 512], device=self.device)
+        )
 
         # allocate paged kv cache
         MAX_CACHED_SEQ_LEN = n_pages * page_size
@@ -1763,18 +1787,18 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         # prefill paged kv cache
         for i, seq_len in enumerate(prefill_length):
             batch_idx = torch.tensor([i], device=self.device, dtype=torch.int32)
-            input_pos = torch.arange(seq_len, device=self.device, dtype=torch.int32).view(
-                1, seq_len
-            )
+            input_pos = torch.arange(
+                seq_len, device=self.device, dtype=torch.int32
+            ).view(1, seq_len)
             paged_cache.assign(
                 batch_idx, input_pos, keys[i], values[i], k_cache, v_cache
             )
 
         # get paged out and check correctness
         batch_idx = torch.arange(max_batch_size, device=self.device, dtype=torch.int32)
-        input_pos = torch.tensor(prefill_length, device=self.device, dtype=torch.int32).view(
-            max_batch_size, 1
-        )
+        input_pos = torch.tensor(
+            prefill_length, device=self.device, dtype=torch.int32
+        ).view(max_batch_size, 1)
         new_block_mask = paged_cache.convert_logical_block_mask(block_mask)
         new_block_mask.seq_lengths = (1, new_block_mask.seq_lengths[1])
         compiled_sdpa = torch.compile(
