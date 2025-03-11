@@ -303,7 +303,6 @@ fx_passes_numeric_check: dict[str, Any] = {
 mixed_mm_choice: Literal["default", "triton", "aten", "heuristic"] = "heuristic"
 
 # enable reordering pass for increasing overlap between compute and communication
-# only use with fsdp
 reorder_for_compute_comm_overlap = False
 
 # passes (in execution order) for increasing overlap between compute and communication
