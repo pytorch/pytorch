@@ -677,6 +677,15 @@ aoti_torch_library_def(TorchLibraryHandle self, const char* schema);
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_delete_library_object(TorchLibraryHandle tlh);
 
+// calls the op overload defined by a given opName, overloadName, and a
+// stack of StableIValues. This call will populate any return values of the
+// op into the stack in their StableIValue form, with ret0 at index 0, ret1
+// at index 1, and so on.
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_call_dispatcher(
+    const char* opName,
+    const char* overloadName,
+    StableIValue* stack);
+
 #ifdef USE_CUDA
 
 struct CUDAGuardOpaque;
