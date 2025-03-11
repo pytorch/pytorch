@@ -396,7 +396,11 @@ def _extract_fwd_bwd_modules(
 
 
 def default_partition(
-    joint_module: fx.GraphModule, _joint_inputs, *, num_fwd_outputs
+    joint_module: fx.GraphModule,
+    _joint_inputs,
+    *,
+    num_fwd_outputs,
+    static_input_indices: Optional[list[int]] = None,
 ) -> tuple[fx.GraphModule, fx.GraphModule]:
     """
     Partitions the :attr:`joint_module` in a manner that closely resembles the
