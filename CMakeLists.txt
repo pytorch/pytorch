@@ -389,6 +389,7 @@ if(WIN32)
   # https://github.com/pytorch/pytorch/pull/138996
   # set(USE_MIMALLOC_ON_MKL ON)
 endif()
+# set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE "${CMAKE_COMMAND} -E time")
 
 if(USE_CCACHE)
   find_program(CCACHE_PROGRAM ccache)
