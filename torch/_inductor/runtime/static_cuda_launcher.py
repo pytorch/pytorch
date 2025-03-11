@@ -1,5 +1,4 @@
 import functools
-
 from typing import Any, Optional
 from typing_extensions import Unpack
 
@@ -122,7 +121,7 @@ class StaticallyLaunchedCudaKernel:
 
     @staticmethod
     @functools.lru_cache
-    def type_mappings():
+    def type_mappings() -> dict[str, str]:
         return {
             "i1": "i",
             "i8": "b",
