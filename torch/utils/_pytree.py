@@ -290,36 +290,18 @@ def register_dataclass(cls: type[Any]) -> None:
     torch.export.register_dataclass(cls)
 
 
-CONSTANT_NODES: set[type] = set()
-
-
 def register_constant(cls: type[Any]) -> None:
     """Registers a type as a pytree node with no leaves.
 
-    In a :func:`torch.compile` region, if instances of these types get passed to
-    :func:`torch._dynamo.nonstrict_trace`-ed function, they treated as a
-    constant (sometimes referred to as "static"):
-
-    1. if the instance object existed before the :func:`torch.compile` region,
-    we _assume_ no mutation will happen to it inside the :func:`torch.compile`
-    region, require that it has non-default `__eq__` and `__hash__` methods, and
-    we guard on the instance based on its `__eq__` method, i.e., if a new
-    instance fails to match any instances from the previous compilations,
+    Instances of these types are treated as a constant (sometimes referred to as
+    "static") by :func:`torch.compile`. When used in a function compiled by
+    :func:`torch.compile`, :func:`torch.compile` guards on the instance
+    object's hash: if :func:`torch.compile` sees a new hash then
     :func:`torch.compile` will recompile the function using the new instance.
-
-    2. else if the instance object is created inside the :func:`torch.compile`
-    region, we currently don't support using it in a
-    :func:`torch._dynamo.nonstrict_trace`-ed function.
 
     In general, if your class holds Tensors or dynamic int/float/bool (values that
     may change from run-to-run of a function being compiled), then you probably
     do not want to register it as a constant.
-
-    Otherwise if you want to pass instance of a class to a
-    :func:`torch._dynamo.nonstrict_trace`-ed function, but you either can't use
-    :func:`register_pytree_node` on the class, or the class is "constant" enough
-    that you don't want to bother using :func:`register_pytree_node`, you should
-    consider using this function.
 
     Args:
         cls: the type to register as a constant. This type must be hashable.
@@ -329,7 +311,7 @@ def register_constant(cls: type[Any]) -> None:
         >>> from dataclasses import dataclass
         >>> import torch.utils._pytree as pytree
         >>>
-        >>> @dataclass(frozen=True)
+        >>> @dataclass
         >>> class Config:
         >>>     norm: str
         >>>
@@ -340,17 +322,6 @@ def register_constant(cls: type[Any]) -> None:
         >>> assert len(values) == 0
 
     """
-    if cls.__eq__ is object.__eq__:  # type: ignore[comparison-overlap]
-        raise TypeError(
-            "register_constant(cls) expects `cls` to have a non-default `__eq__` implementation."
-        )
-
-    # Class with a custom `__eq__` without `__hash__` won't inherit the default
-    # `__hash__` from object; see https://stackoverflow.com/a/1608907.
-    if cls.__hash__ is None:  # type: ignore[comparison-overlap]
-        raise TypeError(
-            "register_constant(cls) expects `cls` to have a non-default `__hash__` implementation."
-        )
 
     def _flatten(x):  # type: ignore[no-untyped-def]
         return [], ConstantNode(x)
@@ -367,14 +338,9 @@ def register_constant(cls: type[Any]) -> None:
         _unflatten,
         flatten_with_keys_fn=_flatten_with_keys,
     )
-    CONSTANT_NODES.add(cls)
 
 
-def is_constant_class(cls: type[Any]) -> bool:
-    return isinstance(cls, type) and cls in CONSTANT_NODES
-
-
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass
 class ConstantNode:
     value: Any
 
@@ -489,7 +455,6 @@ def _deregister_pytree_node(
         node_def = SUPPORTED_SERIALIZED_TYPES[cls]
         del SERIALIZED_TYPE_TO_PYTHON_TYPE[node_def.serialized_type_name]
         del SUPPORTED_SERIALIZED_TYPES[cls]
-        CONSTANT_NODES.discard(cls)
 
 
 def _private_register_pytree_node(

@@ -194,17 +194,6 @@ def is_side_effect_safe(m: MutationType):
     return m.scope == scope_id
 
 
-# This helps users of `as_python_constant` to catch unimplemented error with
-# more information; it inherits `NotImplementedError` for backward
-# compatibility reasons.
-class AsPythonConstantNotImplementedError(NotImplementedError):
-    vt: "VariableTracker"
-
-    def __init__(self, vt: "VariableTracker"):
-        super().__init__(self, f"{vt} is not a constant")
-        self.vt = vt
-
-
 class VariableTrackerMeta(type):
     all_subclasses = []
 
@@ -330,7 +319,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def as_python_constant(self):
         """For constants"""
-        raise AsPythonConstantNotImplementedError(self)
+        raise NotImplementedError(f"{self} is not a constant")
 
     def guard_as_python_constant(self):
         """Similar to as_python_constant(), but add ID_MATCH guards to try to force things to become constants"""

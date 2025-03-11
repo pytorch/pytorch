@@ -396,7 +396,6 @@ max_autotune_gemm_search_space: Literal["DEFAULT", "EXHAUSTIVE"] = os.environ.ge
     "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_SEARCH_SPACE", "DEFAULT"
 ).upper()  # type: ignore[assignment]
 
-# NOTE: This feature is deprecated and will be defauled to False in the future.
 # Whether we fall back to ATen or hard error when no matches are found during autotuning
 autotune_fallback_to_aten = (
     os.environ.get("TORCHINDUCTOR_AUTOTUNE_FALLBACK_TO_ATEN", "1") == "1"
@@ -1378,13 +1377,6 @@ class rocm:
     # Flag to use a short list of CK instances which perform well across a variety of shapes.
     # Currently RCR and F16 only
     use_preselected_instances: bool = False
-
-    # List to determine kBatch parameters to sweep over. By default, we calculate one in splitK
-    # scenarios, and run on kBatch=1 in non-splitK scenarios
-    kBatch_sweep: Optional[list[int]] = None
-
-    # The threshold at which we trigger a splitK config - K // max(M,N) has to be greater than this
-    split_k_threshold: int = 16
 
 
 # Backend to use for CPU codegen either "cpp" or "triton" (experimental) or "halide" (experimental)
