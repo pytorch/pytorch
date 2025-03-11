@@ -1,6 +1,10 @@
-from typing import Optional
+from typing import Any, Optional
+from typing_extensions import Unpack
+
 from torch.utils._ordered_set import OrderedSet
-from .triton_compat import CompiledKernel, ASTSource
+
+from .triton_compat import ASTSource, CompiledKernel
+
 
 MAX_SHARED_MEMORY = 49152
 
@@ -29,9 +33,10 @@ class StaticallyLaunchedCudaKernel:
     to the parent process in inductor.
     """
 
-    def __init__(self, kernel: CompiledKernel):
-        # TODO: Can only import this if we know torch was compiled with CUDA
-        # Maybe we make a class that just errors otherwise?
+    def __init__(self, kernel: CompiledKernel) -> None:
+        # To be used later when hooking up with torch.compile:
+        # inductor knows where the cubin file should be from triton,
+        # so won't need to write to a tmp file directly.
         if hasattr(kernel, "_cubin_path"):
             self.cubin_path = kernel._cubin_path
         else:
@@ -51,6 +56,9 @@ class StaticallyLaunchedCudaKernel:
         self.shared = (
             kernel.shared if hasattr(kernel, "shared") else kernel.metadata.shared
         )
+        # When shared memory > 48 KB, triton allocates CUDA memory via both static and dynamic
+        # memory allocation, which gets really complicated. We'll handle it later.
+        # See triton/third-party/nvidia/driver.c in loadBinary
         if self.shared > MAX_SHARED_MEMORY:
             raise NotImplementedError(
                 "Shared memory size > 48KB requires special triton handling"
@@ -76,7 +84,7 @@ class StaticallyLaunchedCudaKernel:
                 "No static cuda launcher available for %d arguments", num_args
             )
 
-    def load_kernel(self):
+    def load_kernel(self) -> None:
         from torch._C import _StaticCudaLauncher
 
         assert hasattr(self, "cubin_path")
@@ -86,7 +94,10 @@ class StaticallyLaunchedCudaKernel:
             self.cubin_path, self.name, self.shared
         )
 
-    def write_cubin_to_file(self, filepath):
+    def write_cubin_to_file(self, filepath: str) -> None:
+        """
+        Only used for tests where we don't have a cubin path.
+        """
         if hasattr(self, "cubin_path"):
             return
         # Just used by tests for now.
@@ -126,8 +137,8 @@ class StaticallyLaunchedCudaKernel:
             # TODO handle nvTmaDesc/CUtensormap
         }[ty]
 
-    def arg_ty_from_signature(self, src: ASTSource):
-        def index_key(i) -> int:
+    def arg_ty_from_signature(self, src: ASTSource) -> tuple[str, OrderedSet[int]]:
+        def index_key(i: Any) -> int:
             return src.fn.arg_names.index(i) if isinstance(i, str) else i
 
         signature = {index_key(key): value for key, value in src.signature.items()}
@@ -136,6 +147,7 @@ class StaticallyLaunchedCudaKernel:
         # completely ignores the constexprs passed into it when generating code.
         # So we can ignore them here too
         params = []
+
         constant_idxs: OrderedSet[int] = OrderedSet()
         for i in sorted(signature.keys()):
             ty = signature[i]
@@ -148,7 +160,9 @@ class StaticallyLaunchedCudaKernel:
                 params.append(self.extract_type(ty))
         return "".join(params), constant_idxs
 
-    def run(self, grid: tuple[int, ...], stream: int, *args):
+    def run(
+        self, grid: tuple[int, ...], stream: int, *args: Unpack[tuple[object, ...]]
+    ) -> None:
         """Actually run the kernel at runtime. This function is the hot codepath."""
         from torch._C import _StaticCudaLauncher
 
