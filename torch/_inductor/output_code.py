@@ -136,7 +136,7 @@ def complex_memory_overlap(t: torch.Tensor) -> bool:
     return False
 
 
-def try_handle_backward_generation(compiled_graph: CompiledFxGraph) -> None:
+def maybe_handle_backward_generation(compiled_graph: CompiledFxGraph) -> None:
     assert compiled_graph.current_callable is not None
     is_backward = compiled_graph.fx_kwargs["is_backward"]
     boxed_forward_device_index = compiled_graph.boxed_forward_device_index
@@ -223,7 +223,7 @@ def cudagraph_post_compile(
 
     else:
         BoxedBool.disable(cudagraphs)
-        try_handle_backward_generation(compiled_graph)
+        maybe_handle_backward_generation(compiled_graph)
 
         if "cuda" in compiled_graph.device_types:
             # prefer better disable_cudagraphs_reason bc stack trace
@@ -261,7 +261,7 @@ def cudagraph_partition_post_compile(
     ):
         # cudagraphify is not called if there are no partitions
         BoxedBool.disable(cudagraphs)
-        try_handle_backward_generation(compiled_graph)
+        maybe_handle_backward_generation(compiled_graph)
         return
 
     from .compile_fx import cudagraphify
@@ -284,6 +284,9 @@ def cudagraph_partition_post_compile(
 
     prepare_cudagraph_post_compile(compiled_graph, example_inputs)
 
+    # cudagraphify each partition function, assuming every graph partition function
+    # is cudagraphable. Non-cudagraphable ops (e.g., cpu ops) are inlined into
+    # `call` function and not included in partition functions.
     cudagraphify_fns = []
     for partition_map in compiled_graph.partition_maps:
         partition_metadata = get_partition_cudagraph_metadata(
