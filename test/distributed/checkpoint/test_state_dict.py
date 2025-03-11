@@ -84,8 +84,12 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         self,
         init_model_optim: Callable,
         test_frozen: bool = False,
+        flatten_optimizer: bool = False,
     ) -> None:
-        options = StateDictOptions(ignore_frozen_params=test_frozen)
+        options = StateDictOptions(
+            ignore_frozen_params=test_frozen,
+            flatten_optimizer_state_dict=flatten_optimizer,
+        )
         # Initialize original model and distributed model.
         model, optim, copy_optim, dist_model, dist_optim = init_model_optim()
 
@@ -104,6 +108,9 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             for d_optim in _dist_optim:
                 d_optim.step()
 
+        # We need to ensure gradients don't exist, this the invarient of using DSD.
+        optim.zero_grad()
+
         # Get the state_dict, and compare the result
         msd = model.state_dict()
         osd = optim.state_dict()
@@ -112,7 +119,8 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         )
         self._verify_msd(msd, dist_msd, options)
         self._verify_osd_by_load(model, optim, copy_optim, dist_osd)
-        self._verify_osd(model, optim, osd, dist_osd)
+        if not flatten_optimizer:
+            self._verify_osd(model, optim, osd, dist_osd)
 
         # Initialize a completely new model to simulate checkpoint load.
         _, _, _, dist_model, dist_optim = init_model_optim()
@@ -148,7 +156,8 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         self._verify_msd(msd, dist_msd, options)
         # TODO: Ditto
         # self._verify_osd_by_load(model, optim, copy_optim, dist_osd)
-        self._verify_osd(model, optim, osd, dist_osd)
+        if not flatten_optimizer:
+            self._verify_osd(model, optim, osd, dist_osd)
 
         # Test _patch_model_state_dict, and _patch_optimizer_state_dict
         _patch_model_state_dict(dist_model, options=options)
@@ -157,7 +166,8 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         dist_osd = dist_optim[0].state_dict()
         self._verify_msd(msd, dist_msd, options)
         self._verify_osd_by_load(model, optim, copy_optim, dist_osd)
-        self._verify_osd(model, optim, osd, dist_osd)
+        if not flatten_optimizer:
+            self._verify_osd(model, optim, osd, dist_osd)
 
     def _test_fsdp(
         self,
@@ -823,6 +833,13 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             return orig_model, orig_optim, copy_optim, dist_model, dist_optim
 
         self._test_save_load(init_model_optim)
+        self.run_subtests(
+            {
+                "init_model_optim": [init_model_optim],
+                "flatten_optimizer": [True, False],
+            },
+            self._test_save_load,
+        )
 
     @with_comms
     @skip_if_lt_x_gpu(2)
