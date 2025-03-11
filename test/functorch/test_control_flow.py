@@ -156,6 +156,10 @@ def get_scan_combine_fn(name, associative=True):
         W = torch.diag(torch.ones(2, device=x.device))
         return x @ W + y @ W
 
+    def tuple_single(x: torch.Tensor, y: torch.Tensor):
+        a, b = (x[0] + y, x[1] - y)
+        return (a, b), a - b
+
     if name == "add":
         fct = add
     elif name == "adds":
@@ -174,6 +178,8 @@ def get_scan_combine_fn(name, associative=True):
         fct = complex_pointwise
     elif name == "non_pointwise":
         fct = non_pointwise
+    elif name == "tuple_single":
+        fct = tuple_single
     else:
         raise ValueError("Combine_fn name unknown!")
 
@@ -2860,13 +2866,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
         def f(fct, init, xs):
             return scan(fct, init, xs, dim=0, reverse=True)
 
-        def combine_fn(init, x):
-            a, b = (init[0] + x, init[1] - x)
-            return (a, b), a - b
-
         # Check graph
         backend = EagerAndRecordGraphs()
-        torch.compile(f, backend=backend)(combine_fn, (init, init.clone()), x)
+        torch.compile(f, backend=backend)(
+            get_scan_combine_fn("tuple_single", True), (init, init.clone()), x
+        )
         gm = backend.graphs[0]
 
         self.assertExpectedInline(
