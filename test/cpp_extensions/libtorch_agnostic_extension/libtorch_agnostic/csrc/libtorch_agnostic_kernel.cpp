@@ -79,7 +79,7 @@ RAIIATH sgd_out_of_place(
 }
 
 
-void boxed_sgd_out_of_place(StableIValue* stack, int64_t num_args, int64_t num_outputs) {
+void boxed_sgd_out_of_place(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
   RAIIATH param(to<AtenTensorHandle>(stack[0]));
   RAIIATH grad(to<AtenTensorHandle>(stack[1]));
   auto weight_decay = to<double>(stack[2]);
@@ -108,7 +108,7 @@ RAIIATH identity(RAIIATH t) {
   return std::move(t);
 }
 
-void boxed_identity(StableIValue* stack, int64_t num_args, int64_t num_outputs) {
+void boxed_identity(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
   RAIIATH t(to<AtenTensorHandle>(stack[0]));
   RAIIATH raiiath_res = identity(std::move(t));
   stack[0] = from(raiiath_res.release());

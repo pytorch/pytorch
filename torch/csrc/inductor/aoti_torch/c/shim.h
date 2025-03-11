@@ -662,7 +662,7 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_library_init_fragment(
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_library_impl(
     TorchLibraryHandle self,
     const char* name,
-    void (*fn)(StableIValue*, int64_t, int64_t));
+    void (*fn)(StableIValue*, uint64_t, uint64_t));
 
 // stable corollary to torch::Library method m.def(), should be
 // called from StableLibrary

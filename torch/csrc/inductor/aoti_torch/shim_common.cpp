@@ -1316,7 +1316,7 @@ AOTITorchError aoti_torch_cpu__weight_int4pack_mm_cpu_tensor(
 
 class StableIValueBoxedKernel : public c10::OperatorKernel {
  public:
-  StableIValueBoxedKernel(void (*fn)(StableIValue*, int64_t, int64_t))
+  StableIValueBoxedKernel(void (*fn)(StableIValue*, uint64_t, uint64_t))
       : fn_(fn) {}
 
   void operator()(
@@ -1370,7 +1370,7 @@ class StableIValueBoxedKernel : public c10::OperatorKernel {
   }
 
  private:
-  void (*fn_)(StableIValue*, int64_t, int64_t);
+  void (*fn_)(StableIValue*, uint64_t, uint64_t);
 };
 
 AOTITorchError aoti_torch_library_init_impl(
@@ -1425,7 +1425,7 @@ AOTITorchError aoti_torch_library_init_fragment(
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_library_impl(
     TorchLibraryHandle self,
     const char* name,
-    void (*fn)(StableIValue*, int64_t, int64_t)) {
+    void (*fn)(StableIValue*, uint64_t, uint64_t)) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     reinterpret_cast<torch::Library*>(self)->impl(
         name,

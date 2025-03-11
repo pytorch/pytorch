@@ -70,7 +70,7 @@ class StableLibrary final {
   // Inputs:
   //   name: the name of the function to implement
   //   fn: a boxed function with schema
-  //       (StableIValue* stack, int64_t num_inputs, int64_t num_outputs) ->
+  //       (StableIValue* stack, uint64_t num_inputs, uint64_t num_outputs) ->
   //       void
   // fn should follow the calling convention of our boxed kernels that convert
   // to IValues. fn will be called with a StableIValue* array of length
@@ -90,7 +90,7 @@ class StableLibrary final {
   //    [stable_ret1, stable_ret2, -, -]
   StableLibrary& impl(
       const char* name,
-      void (*fn)(StableIValue*, int64_t, int64_t)) {
+      void (*fn)(StableIValue*, uint64_t, uint64_t)) {
     aoti_torch_library_impl(lib_, name, fn);
     return *this;
   }
