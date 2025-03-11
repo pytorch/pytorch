@@ -253,7 +253,7 @@ jobs:
         with:
           submodules: false
           fetch-depth: 1
-      - name: Setup min python version
+      - name: Get min python version
         id: get-min-python-version
         if: matrix.test_type == 'older_python_version'
         run: |
