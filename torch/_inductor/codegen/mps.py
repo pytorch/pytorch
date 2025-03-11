@@ -482,7 +482,30 @@ class MetalKernel(SIMDKernel):
                 f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {acc_buf_size})",
                 dtype=DTYPE_TO_COMPUTATION_DTYPE[dtype],
             )
-        if reduction_type in ["max", "min", "argmax", "argmin"]:
+        if reduction_type in ["max", "min"]:
+            acc_buf = self._new_accvar(src_dtype, acc_buf_size)
+            acc_thread_var = f"{acc_buf}[{reduction_dim.name}]"
+            src_metal_type = DTYPE_TO_METAL[src_dtype]
+            if self.multistage_reduction:
+                lim_fn, reduction_op = (
+                    ("lowest", ">") if reduction_type == "max" else ("max", "<")
+                )
+                self.indexing_code.writeline(
+                    f"{acc_thread_var} = ::metal::numeric_limits<{src_metal_type}>::{lim_fn}();"
+                )
+                self.compute.writeline(
+                    f"{acc_thread_var} = ::c10::metal::{reduction_type}({acc_thread_var}, {value});"
+                )
+            else:
+                self.compute.splice(
+                    f"{acc_thread_var} = static_cast<{src_metal_type}>({value});"
+                )
+            return self.cse.generate(
+                self.stores,
+                f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {acc_buf_size})",
+                dtype=dtype,
+            )
+        if reduction_type in ["argmax", "argmin"]:
             assert not self.multistage_reduction, (
                 f"Multistage reduction not yet supported for {reduction_type}"
             )
