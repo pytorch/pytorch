@@ -16,7 +16,7 @@ from typing import Any, Callable, ClassVar, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, HAS_XPU
+from torch._inductor.utils import GPU_TYPES
 from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
     _get_torch_rocm_version,
@@ -51,6 +51,7 @@ from torch.testing._internal.common_utils import (
     TEST_XPU,
     TestCase,
 )
+from torch.testing._internal.inductor_utils import HAS_XPU
 
 
 _T = TypeVar("_T")
@@ -1963,8 +1964,8 @@ def get_all_device_types() -> list[str]:
 
 
 flex_attention_supported_platform = unittest.skipUnless(
-    HAS_XPU or
-    torch.cuda.is_available()
+    HAS_XPU
+    or torch.cuda.is_available()
     and torch.utils._triton.has_triton()
     and torch.cuda.get_device_capability() >= (8, 0),
     "Requires CUDA and Triton",
