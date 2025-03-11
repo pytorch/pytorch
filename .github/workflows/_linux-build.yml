@@ -343,6 +343,12 @@ jobs:
         run: |
           kill "$MONITOR_SCRIPT_PID"
 
+      - name: Cleanup docker
+        if: always() && inputs.build-environment == 'linux-s390x-binary-manywheel'
+        shell: bash
+        run: |
+          ls usage_log_build*
+  
       - name: Upload raw usage log to s3
         if: ${{ always() && steps.build.outcome != 'skipped' && !inputs.disable-monitor && inputs.build-environment != 'linux-s390x-binary-manywheel'}}
         uses: seemethere/upload-artifact-s3@v5
