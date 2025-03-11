@@ -4086,10 +4086,9 @@ class AOTInductorTestsTemplate:
         # input u0 was defined as int32_t initially, verify for every kernel var args downstream,
         # it gets explicitly declared using its data types in the cpp wrapper codegen code.
         expected_scalar_args = [
-            "int64_t var_1 = u0;",
-            "int64_t var_4 = u0;",
-            "int64_t var_7 = u0;",
-            "int64_t var_12 = u0;",
+            "buf3, u0",
+            "buf4, u0",
+            "buf3, buf4, buf2, u0",
         ]
         # check the new behavior of codegen is expected
         result, code = run_and_get_cpp_code(
@@ -4618,7 +4617,7 @@ class AOTInductorTestsTemplate:
         model_kwargs = {
             "input": torch.randn(3, 10, device=self.device),
         }
-        ep = torch.export.export(model, args=(), kwargs=model_kwargs)
+        ep = torch.export.export(model, args=(), kwargs=model_kwargs, strict=True)
 
         optimized = torch._inductor.aoti_load_package(
             torch._inductor.aoti_compile_and_package(
