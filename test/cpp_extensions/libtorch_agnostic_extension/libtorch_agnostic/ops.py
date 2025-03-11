@@ -36,3 +36,16 @@ def identity(t) -> Tensor:
         a Tensor, the same as input.
     """
     return torch.ops.libtorch_agnostic.identity.default(t)
+
+
+def my_abs(t) -> Tensor:
+    """
+    Returns abs on the input tensor, outputs a new Tensor
+
+    Args:
+        t: any Tensor
+
+    Returns:
+        a Tensor
+    """
+    return torch.ops.libtorch_agnostic.my_abs.default(t)
