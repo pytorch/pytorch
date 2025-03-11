@@ -946,7 +946,6 @@ void dispatch_fp8_rowwise_kernel_on_input_dtypes(
   }
 }
 
-template <typename... Types>
 void dispatch_fp8_rowwise_kernel_on_bias_dtype(
     at::Tensor XQ,
     at::Tensor WQ,
@@ -957,12 +956,13 @@ void dispatch_fp8_rowwise_kernel_on_bias_dtype(
     at::Tensor out) {
   if (bias.has_value() && bias->dtype() == at::kBFloat16) {
     dispatch_fp8_rowwise_kernel_on_input_dtypes<
-        cutlass::bfloat16_t,
-        Types...>(XQ, WQ, x_scale, w_scale, bias, use_fast_accum, out);
+        cutlass::bfloat16_t>
+        (XQ, WQ, x_scale, w_scale, bias, use_fast_accum, out);
   } else {
     dispatch_fp8_rowwise_kernel_on_input_dtypes<
-        float,
-        Types...>(XQ, WQ, x_scale, w_scale, bias, use_fast_accum, out);
+        float>
+        //Types...>
+        (XQ, WQ, x_scale, w_scale, bias, use_fast_accum, out);
   }
 }
 
