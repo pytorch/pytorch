@@ -1,4 +1,3 @@
-warning: Selection `RUF030` has no effect because preview is not enabled.
 # This is not a feature-complete compiler backend
 # Just an early prototype that shows that one can compile elementwise ops into a Metal shader
 from __future__ import annotations
