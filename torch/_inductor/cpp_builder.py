@@ -1544,7 +1544,7 @@ class CppBuilder:
 
         if precompiled_header := BuildOption.precompiled_header:
             if _IS_WINDOWS:
-                self._include_dirs_args = f"/Yu{precompiled_header} "
+                self._include_dirs_args = f"/FI{precompiled_header} /Yu{precompiled_header} "
             else:
                 self._include_dirs_args = f"-include {precompiled_header} "
 

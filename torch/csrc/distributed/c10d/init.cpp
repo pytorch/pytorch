@@ -999,23 +999,20 @@ This class does not support ``__members__`` property.)");
   py::class_<::c10d::AllreduceOptions>(module, "AllreduceOptions")
       .def(py::init<>())
       .def_readwrite("reduceOp", &::c10d::AllreduceOptions::reduceOp)
-      .def_readwrite("timeout", &::c10d::AllreduceOptions::timeout)
-      .def_readwrite("asyncOp", &::c10d::AllreduceOptions::asyncOp);
+      .def_readwrite("timeout", &::c10d::AllreduceOptions::timeout);
 
   py::class_<::c10d::AllreduceCoalescedOptions>(
       module, "AllreduceCoalescedOptions")
       .def(py::init<>())
       .def_readwrite("reduceOp", &::c10d::AllreduceCoalescedOptions::reduceOp)
-      .def_readwrite("timeout", &::c10d::AllreduceCoalescedOptions::timeout)
-      .def_readwrite("asyncOp", &::c10d::AllreduceCoalescedOptions::asyncOp);
+      .def_readwrite("timeout", &::c10d::AllreduceCoalescedOptions::timeout);
 
   py::class_<::c10d::ReduceOptions>(module, "ReduceOptions")
       .def(py::init<>())
       .def_readwrite("reduceOp", &::c10d::ReduceOptions::reduceOp)
       .def_readwrite("rootRank", &::c10d::ReduceOptions::rootRank)
       .def_readwrite("rootTensor", &::c10d::ReduceOptions::rootTensor)
-      .def_readwrite("timeout", &::c10d::ReduceOptions::timeout)
-      .def_readwrite("asyncOp", &::c10d::ReduceOptions::asyncOp);
+      .def_readwrite("timeout", &::c10d::ReduceOptions::timeout);
 
   py::class_<::c10d::AllgatherOptions>(module, "AllgatherOptions")
       .def(py::init<>())
@@ -1025,8 +1022,7 @@ This class does not support ``__members__`` property.)");
   py::class_<::c10d::GatherOptions>(module, "GatherOptions")
       .def(py::init<>())
       .def_readwrite("rootRank", &::c10d::GatherOptions::rootRank)
-      .def_readwrite("timeout", &::c10d::GatherOptions::timeout)
-      .def_readwrite("asyncOp", &::c10d::GatherOptions::asyncOp);
+      .def_readwrite("timeout", &::c10d::GatherOptions::timeout);
 
   py::class_<::c10d::ScatterOptions>(module, "ScatterOptions")
       .def(py::init<>())
@@ -1044,13 +1040,11 @@ This class does not support ``__members__`` property.)");
       .def(py::init<>())
       .def_readwrite("device_ids", &::c10d::BarrierOptions::device_ids)
       .def_readwrite("timeout", &::c10d::BarrierOptions::timeout)
-      .def_readwrite("device", &::c10d::BarrierOptions::device)
-      .def_readwrite("asyncOp", &::c10d::BarrierOptions::asyncOp);
+      .def_readwrite("device", &::c10d::BarrierOptions::device);
 
   py::class_<::c10d::AllToAllOptions>(module, "AllToAllOptions")
       .def(py::init<>())
-      .def_readwrite("timeout", &::c10d::AllToAllOptions::timeout)
-      .def_readwrite("asyncOp", &::c10d::AllToAllOptions::asyncOp);
+      .def_readwrite("timeout", &::c10d::AllToAllOptions::timeout);
 
   py::class_<::c10d::DistributedBackendOptions>(
       module, "_DistributedBackendOptions")
@@ -3236,10 +3230,11 @@ Example::
       .def_readonly("time_started", &::c10d::WorkInfo::timeStarted)
       .def_readonly("time_finished", &::c10d::WorkInfo::timeFinished)
       .def_readonly("active_duration", &::c10d::WorkInfo::activeDuration);
+
   auto work =
       py::class_<
           ::c10d::Work,
-          c10::intrusive_ptr<::c10d::Work>,
+          IntrusivePtrNoGilDestructor<::c10d::Work>,
           ::c10d::PyProcessGroup::PyWork>(module, "Work", R"(
 A `Work` object represents the handle to a pending asynchronous operation in
 PyTorch's distributed package. It is returned by non-blocking collective operations,
