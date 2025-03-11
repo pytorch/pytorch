@@ -93,7 +93,7 @@ from .._dynamo.backends.common import aot_autograd
 from .._dynamo.exc import ShortenTraceback, SkipFrame
 from ..fx._lazy_graph_module import _use_lazy_graph_module
 from ..fx.graph import _PyTreeCodeGen
-from ..utils._triton import has_triton_package
+from ..utils._triton import has_triton
 from . import config, metrics
 from .debug import DebugContext
 from .decomposition import select_decomp_table
@@ -1177,8 +1177,6 @@ class _InProcessFxCompile(FxCompile):
                                     serialized_extern_kernel_nodes,
                                 )
 
-                            additional_files = graph.wrapper_code.additional_files
-
                             with dynamo_timed(
                                 "AotCodeCompiler.compile", log_pt2_compile_event=True
                             ):
@@ -1189,7 +1187,11 @@ class _InProcessFxCompile(FxCompile):
                                     kernel_code.value,
                                     serialized_extern_kernel_nodes,
                                     device_type=graph.device_type,
-                                    additional_files=additional_files,
+                                    additional_files=[
+                                        *dict.fromkeys(
+                                            graph.wrapper_code.additional_files
+                                        )
+                                    ],
                                 )
                         else:
                             compiled_fn = graph.compile_to_module().call
@@ -1664,7 +1666,7 @@ def get_cpp_wrapper_config() -> dict[str, object]:
         "triton.autotune_at_compile_time": (
             config.triton.autotune_at_compile_time
             if config.triton.autotune_at_compile_time is not None
-            else has_triton_package()
+            else has_triton()
         ),
         "triton.autotune_cublasLt": False,
         "triton.cudagraphs": False,  # TODO: to be removed
