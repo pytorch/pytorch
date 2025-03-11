@@ -25,4 +25,10 @@ unpack(at::PhiloxCudaState arg) {
   }
 }
 
+// Adapted from TE
+// extract seed and offset from PhiloxCudaState
+__global__ void unpack_cudnn(at::PhiloxCudaState arg, int64_t* seed_ptr, int64_t* offset_ptr);
+
+void unpack_cudnn_wrapper(at::PhiloxCudaState arg, int64_t* seed_ptr, int64_t* offset_ptr, cudaStream_t stream);
+
 } // namespace at::cuda::philox
