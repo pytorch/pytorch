@@ -135,11 +135,11 @@ RAIIATH my_ones_like(RAIIATH t, StableIValue device) {
   auto mf = aoti_torch_memory_format_contiguous_format();
 
   stack[0] = from(t.release());
-  stack[1] = from(t_dtype); // Dtype
-  stack[2] = from(nullptr); // Layout
-  stack[3] = device; // device
-  stack[4] = from(false); // pin_memory
-  stack[5] = from(mf); // memory_format
+  stack[1] = from(t_dtype);    // dtype
+  stack[2] = from(nullptr);    // layout
+  stack[3] = device;           // device
+  stack[4] = from(false);      // pin_memory
+  stack[5] = from(mf);         // memory_format
 
   aoti_torch_call_dispatcher("aten::ones_like", "", stack);
 

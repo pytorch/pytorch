@@ -40,7 +40,7 @@ def identity(t) -> Tensor:
 
 def my_ones_like(t, device) -> Tensor:
     """
-    Returns an empty tensor with the same shape and dtype as the input tensor.
+    Returns an ones tensor with the same shape and dtype as the input tensor.
 
     Args:
         t: any Tensor

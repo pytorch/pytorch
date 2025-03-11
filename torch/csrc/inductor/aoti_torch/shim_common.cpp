@@ -1488,7 +1488,6 @@ c10::IValue to_ivalue(
       if (to<std::nullptr_t>(stable_ivalue) == nullptr) {
         return c10::IValue();
       }
-      // TODO: yes, I should deduplicate the next set of switch statements
       return to_ivalue(inner_type, stable_ivalue);
     }
     default: {
