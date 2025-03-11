@@ -463,7 +463,6 @@ class ConvertFrameAssert:
         one_graph: bool = True,
         export: bool = False,
         export_constraints: Optional[typing.Never] = None,
-        dynamism: Optional[dict[Any, Any]] = None,
     ) -> None:
         # assert export_constraints is None
         reset_graph_break_dup_checker()
@@ -471,7 +470,6 @@ class ConvertFrameAssert:
         self._one_graph = one_graph
         self._export = export
         self._export_constraints = export_constraints
-        self._dynamism = dynamism
 
     @property
     def _clone_with_backend(self) -> Callable[[CompilerFn], ConvertFrameAssert]:
@@ -480,7 +478,6 @@ class ConvertFrameAssert:
             self._one_graph,
             self._export,
             self._export_constraints,
-            self._dynamism,
         )
 
     def __call__(
@@ -607,7 +604,6 @@ class ConvertFrameAssert:
                 self._one_graph,
                 self._export,
                 self._export_constraints,
-                self._dynamism,
                 hooks,
                 cache_entry,
                 cache_size,
@@ -623,12 +619,9 @@ def convert_frame_assert(
     one_graph: bool = True,
     export: bool = False,
     export_constraints: Optional[typing.Never] = None,
-    dynamism: Optional[dict[Any, Any]] = None,
 ) -> ConvertFrameAssert:
     """Fully convert a frame into an FX graph"""
-    return ConvertFrameAssert(
-        compiler_fn, one_graph, export, export_constraints, dynamism
-    )
+    return ConvertFrameAssert(compiler_fn, one_graph, export, export_constraints)
 
 
 from collections import OrderedDict
@@ -663,7 +656,6 @@ def _compile(
     one_graph: bool,
     export: bool,
     export_constraints: Optional[typing.Never],
-    dynamism: Optional[dict[Any, Any]],
     hooks: Hooks,
     cache_entry: Optional[CacheEntry],
     cache_size: CacheSizeRelevantForFrame,
@@ -710,7 +702,6 @@ def _compile(
             one_graph,
             export,
             export_constraints,
-            dynamism,
             frame_state=frame_state,
             speculation_log=speculation_log,
             distributed_state=distributed_state,
@@ -1197,12 +1188,9 @@ class ConvertFrame:
         self,
         compiler_fn: CompilerFn,
         hooks: Hooks,
-        dynamism: Optional[dict[Any, Any]] = None,
     ) -> None:
         self._torchdynamo_orig_callable = compiler_fn
-        self._inner_convert = convert_frame_assert(
-            compiler_fn, one_graph=False, dynamism=dynamism
-        )
+        self._inner_convert = convert_frame_assert(compiler_fn, one_graph=False)
         self._hooks = hooks
 
     @property
@@ -1304,11 +1292,9 @@ class ConvertFrame:
         return ConvertFrameReturn()
 
 
-def convert_frame(
-    compiler_fn: CompilerFn, hooks: Hooks, dynamism: Optional[dict[Any, Any]] = None
-) -> ConvertFrame:
+def convert_frame(compiler_fn: CompilerFn, hooks: Hooks) -> ConvertFrame:
     """Try to convert a frame into an FX graph, if error leave frame unmodified"""
-    return ConvertFrame(compiler_fn, hooks, dynamism=dynamism)
+    return ConvertFrame(compiler_fn, hooks)
 
 
 # TODO mlazos: add support for same args, or record them
@@ -1332,7 +1318,6 @@ def replay(filename: str) -> None:
             one_graph=False,
             export=False,
             export_constraints=None,
-            dynamism=None,
             hooks=Hooks(),
             cache_size=CacheSizeRelevantForFrame(0, 0),
             cache_entry=None,

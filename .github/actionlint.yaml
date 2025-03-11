@@ -43,6 +43,8 @@ self-hosted-runner:
     - windows.8xlarge.nvidia.gpu
     - windows.8xlarge.nvidia.gpu.nonephemeral
     - windows.g5.4xlarge.nvidia.gpu
+    # Windows ARM64 runners
+    - windows-11-arm64
     # Organization-wide AMD hosted runners
     - linux.rocm.gpu
     - linux.rocm.gpu.2

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -13,6 +14,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
 #include <c10/util/UniqueVoidPtr.h>
+#include <c10/util/irange.h>
 
 namespace c10 {
 
@@ -329,4 +331,83 @@ struct GatheredContext {
   virtual ~GatheredContext() = default;
 };
 
+namespace CachingAllocator {
+struct Stat {
+  void increase(size_t amount) {
+    current += static_cast<int64_t>(amount);
+    peak = std::max(current, peak);
+    allocated += static_cast<int64_t>(amount);
+  }
+
+  void decrease(size_t amount) {
+    current -= static_cast<int64_t>(amount);
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        current >= 0,
+        "Negative tracked stat in device allocator (likely logic error).");
+    freed += static_cast<int64_t>(amount);
+  }
+
+  void reset_accumulated() {
+    allocated = 0;
+    freed = 0;
+  }
+
+  void reset_peak() {
+    peak = current;
+  }
+
+  int64_t current = 0;
+  int64_t peak = 0;
+  int64_t allocated = 0;
+  int64_t freed = 0;
+};
+
+enum struct StatType : uint64_t {
+  AGGREGATE = 0,
+  SMALL_POOL = 1,
+  LARGE_POOL = 2,
+  NUM_TYPES = 3 // remember to update this whenever a new stat type is added
+};
+
+using StatArray = std::array<Stat, static_cast<size_t>(StatType::NUM_TYPES)>;
+using StatTypes = std::array<bool, static_cast<size_t>(StatType::NUM_TYPES)>;
+
+template <typename Func>
+void for_each_selected_stat_type(const StatTypes& stat_types, Func f) {
+  for (const auto stat_type : c10::irange(stat_types.size())) {
+    if (stat_types[stat_type]) {
+      f(stat_type);
+    }
+  }
+}
+
+// Structure for keeping timing information
+struct DurationStat {
+  void increase(int64_t amount) {
+    total += amount;
+    count += 1;
+    max = std::max(amount, max);
+    if (min == 0) {
+      min = amount;
+    } else {
+      min = std::min(amount, min);
+    }
+  }
+
+  void reset_accumulated() {
+    total = 0;
+    count = 0;
+  }
+
+  void reset_peak() {
+    min = 0;
+    max = 0;
+  }
+
+  int64_t total = 0;
+  int64_t max = 0;
+  int64_t min = 0;
+  int64_t count = 0;
+};
+} // namespace CachingAllocator
 } // namespace c10

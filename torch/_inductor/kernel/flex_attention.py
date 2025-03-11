@@ -134,7 +134,11 @@ def maybe_realize(args: list[Optional[IRNode]]):
 
 
 def get_float32_precision():
-    if torch.get_float32_matmul_precision() == "highest" or torch.version.hip:
+    if (
+        torch.get_float32_matmul_precision() == "highest"
+        or torch.version.hip
+        or torch.mtia.is_available()
+    ):
         return "'ieee'"
     else:
         return "'tf32'"
@@ -694,7 +698,7 @@ flex_attention_template = TritonTemplate(
 )
 
 
-def _use_flex_decoding(query, kernel_options):
+def _use_flex_decoding(query, kv_indices, kernel_options, enable_gqa):
     """Decide which kernel to use, return true if use flex decoding kernel.
     Note:
        Since the number of splits is calculated based of the the number of batch and head dims
@@ -708,12 +712,28 @@ def _use_flex_decoding(query, kernel_options):
     non_zero_length = V.graph.sizevars.evaluate_expr(sympy.Gt(query.get_size()[-2], 0))
     static_batch = isinstance(query.get_size()[0], (int, sympy.Integer))
     static_num_heads = isinstance(query.get_size()[1], (int, sympy.Integer))
+    if enable_gqa:
+        # in the current flex decoding triton kernel, grouped query heads for the
+        # same kv head are handled by the same block. So it's hard to support different
+        # kv num blocks for grouped query heads. We just fall back to main flex_attention
+        # kernel where each query head is handled by a separate block.
+        valid_block_mask_num_heads = V.graph.sizevars.evaluate_expr(
+            sympy.Eq(kv_indices.get_size()[1], 1)
+        )
+    else:
+        valid_block_mask_num_heads = V.graph.sizevars.evaluate_expr(
+            sympy.Or(
+                sympy.Eq(kv_indices.get_size()[1], 1),
+                sympy.Eq(kv_indices.get_size()[1], query.get_size()[1]),
+            )
+        )
     return (
         not force_flex
         and short_query_length
         and static_batch
         and static_num_heads
         and non_zero_length
+        and valid_block_mask_num_heads
     )
 
 
@@ -796,7 +816,7 @@ def _get_nv_config(query, mode: Mode) -> tuple[int, int, int, int]:
     dtype = query.get_dtype()
     head_dim = V.graph.sizevars.evaluate_static_shape(query.get_size()[-1])
     fwd_config = None
-
+    bwd_config = None
     capability = torch.cuda.get_device_capability()
 
     if mode == Mode.fwd:
@@ -819,25 +839,26 @@ def _get_nv_config(query, mode: Mode) -> tuple[int, int, int, int]:
     else:  # bwd
         assert mode == Mode.bwd
         if dtype == torch.float32:
-            return (16, 16, 4, 1)
+            bwd_config = (16, 16, 4, 1)
         elif head_dim <= 256 and capability >= (9, 0):  # H100
             if head_dim == 64:
-                return (64, 64, 4, 3)
+                bwd_config = (64, 64, 4, 3)
             elif head_dim == 128:
-                return (64, 128, 8, 3)
+                bwd_config = (64, 128, 8, 3)
             else:
-                return (64, 64, 4, 2)
+                bwd_config = (64, 64, 4, 2)
         elif capability >= (8, 0):
             if head_dim >= 64:
-                return (32, 128, 4, 3)
+                bwd_config = (32, 128, 4, 3)
             elif head_dim == 128:
                 # SM86/89 have smaller shared memory sizes
                 num_stages = 3 if capability[-1] == 0 else 2
-                return (64, 64, 4, num_stages)
+                bwd_config = (64, 64, 4, num_stages)
             else:
-                return (64, 64, 4, 2)
+                bwd_config = (64, 64, 4, 2)
         else:  # modest hardware or extremely large head_dim
-            return (16, 16, 4, 1)
+            bwd_config = (16, 16, 4, 1)
+        return bwd_config
 
 
 def _get_default_config_fwd(query) -> tuple[int, int, int, int]:
@@ -1321,7 +1342,10 @@ def flex_attention(
         for k, v in kernel_options.items()
     }
     kernel_options.setdefault("FLOAT32_PRECISION", get_float32_precision())
-    if _use_flex_decoding(query, kernel_options):
+    enable_gqa = V.graph.sizevars.evaluate_expr(
+        sympy.Ne(query.get_size()[1], key.get_size()[1]),
+    )
+    if _use_flex_decoding(query, kv_indices, kernel_options, enable_gqa):
         return create_flex_decoding_kernel(
             query,
             key,
@@ -1444,6 +1468,10 @@ def flex_attention(
     # Mark SPARSE_KV_BLOCK_SIZE & SPARSE_Q_BLOCK_SIZE as static shapes and add guards.
     SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_KV_BLOCK_SIZE)
     SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_Q_BLOCK_SIZE)
+
+    # ROCm specific considerations
+    if torch.version.hip:
+        kernel_options["kpack"] = 2
 
     # Note, we don't need to pass in the captured buffers explicitly
     # because they're implicitly added by the score_mod function

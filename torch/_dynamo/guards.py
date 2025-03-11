@@ -27,7 +27,6 @@ import enum
 import functools
 import importlib
 import inspect
-import itertools
 import logging
 import math
 import sys
@@ -577,6 +576,14 @@ def getitem_on_dict_manager(
 
 def match_on_id_for_tensor(guard):
     source = guard.originating_source
+    # For numpy tensors, always use TENSOR_MATCH because __from_numpy leads
+    # to a new tensor everytime and therefore id differs.
+    if isinstance(source, NumpyTensorSource):
+        return False
+
+    if guard.is_specialized_nn_module():
+        return True
+
     return source.is_dict_key() and not isinstance(source, GradSource)
 
 
@@ -1628,15 +1635,11 @@ class GuardBuilder(GuardBuilderBase):
                 DeviceMesh,
             )
 
-        if istype(val, dict):
-            assert all(
-                istype(x, ok_types) for x in itertools.chain(val.keys(), val.values())
-            )
-        else:
-            assert istype(
-                val,
-                ok_types,
-            ), f"Unexpected type {type(val)}, not in {ok_types}"
+        import torch.utils._pytree as pytree
+
+        assert istype(val, ok_types) or pytree.is_constant_class(type(val)), (
+            f"Unexpected type {type(val)}"
+        )
 
         # Special case for nan because float("nan") == float("nan") evaluates to False
         if istype(val, float) and math.isnan(val):
@@ -1668,7 +1671,7 @@ class GuardBuilder(GuardBuilderBase):
         code = [f"{ref} == {val!r}"]
         if istype(val, ok_mutable_types):
             # C++ guards perform a pointer equality check to speedup guards, but the assumption is that the object
-            # is mutable. For a few corner cases like sets and lists, we make a deepcopy to purposefully fail the
+            # is immutable. For a few corner cases like sets and lists, we make a deepcopy to purposefully fail the
             # pointer equality check.
             val = deepcopy(val)
         self.get_guard_manager(guard).add_equals_match_guard(
@@ -2076,12 +2079,7 @@ class GuardBuilder(GuardBuilderBase):
         # For tensors that are part of the Dynamo extracted Fx graph module, an
         # ID_MATCH suffices. Once we turn on inline_inbuilt_nn_modules, these
         # will be lifted as inputs and have a TENSOR_MATCH guard.
-        # For numpy tensors, always use TENSOR_MATCH because __from_numpy leads
-        # to a new tensor everytime and therefore id differs.
-        if (
-            guard.is_specialized_nn_module()
-            and not isinstance(guard.originating_source, NumpyTensorSource)
-        ) or match_on_id_for_tensor(guard):
+        if match_on_id_for_tensor(guard):
             self.ID_MATCH(guard)
         else:
             if isinstance(value, TensorWeakRef):
@@ -2139,10 +2137,12 @@ class GuardBuilder(GuardBuilderBase):
                 # But we deliberately take this soundness hit because this
                 # usecase is quite rare and there is substantial reduction in
                 # guard overhead.
+                # For numpy tensors, since those are ephemeral, we dont have to
+                # insert aliasing guards on them
                 if not (
                     config.skip_no_tensor_aliasing_guards_on_parameters
                     and istype(value, torch.nn.Parameter)
-                ):
+                ) and not isinstance(guard.originating_source, NumpyTensorSource):
                     # Keep track of all the tensor guard managers to insert
                     # NoAliasing check at the end.
                     self.no_tensor_aliasing_names.append(tensor_name)
@@ -2846,6 +2846,19 @@ def recompilation_reason_for_no_tensor_aliasing_guard(guard_manager, scope):
     return [f"Duplicate tensors found: {reason}"]
 
 
+def strip_local_scope(s: str) -> str:
+    """
+    Replace occurrences of L[...] with just the inner content.
+    Handles both single and double quotes.
+
+    This is to generate user friendly recompilation messages.
+    """
+    import re
+
+    pattern = r"L\[\s*['\"](.*?)['\"]\s*\]"
+    return re.sub(pattern, r"\1", s)
+
+
 def get_guard_fail_reason_helper(
     guard_manager: GuardFn,
     f_locals: dict[str, object],
@@ -2910,7 +2923,7 @@ def get_guard_fail_reason_helper(
                     break
 
     reason_str = f"{compile_id}: " + "; ".join(reasons)
-    return reason_str
+    return strip_local_scope(reason_str)
 
 
 def get_guard_fail_reason(

@@ -278,14 +278,14 @@ jobs:
       test-matrix: ${{ needs.linux-focal-cuda11_8-py3_10-gcc9-build.outputs.test-matrix }}
     secrets: inherit
 
-  linux-focal-cuda12_4-py3_10-gcc9-build:
-    name: linux-focal-cuda12.4-py3.10-gcc9
+  linux-focal-cuda12_6-py3_10-gcc11-build:
+    name: linux-focal-cuda12.6-py3.10-gcc11
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-focal-cuda12.4-py3.10-gcc9
-      docker-image-name: pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9
+      build-environment: linux-focal-cuda12.6-py3.10-gcc11
+      docker-image-name: pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc11
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu" },
@@ -296,17 +296,17 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-focal-cuda12_4-py3_10-gcc9-test:
-    name: linux-focal-cuda12.4-py3.10-gcc9
+  linux-focal-cuda12_6-py3_10-gcc11-test:
+    name: linux-focal-cuda12.6-py3.10-gcc11
     uses: ./.github/workflows/_linux-test.yml
     needs:
-      - linux-focal-cuda12_4-py3_10-gcc9-build
+      - linux-focal-cuda12_6-py3_10-gcc11-build
       - target-determination
     with:
       timeout-minutes: 360
-      build-environment: linux-focal-cuda12.4-py3.10-gcc9
-      docker-image: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-build.outputs.test-matrix }}
+      build-environment: linux-focal-cuda12.6-py3.10-gcc11
+      docker-image: ${{ needs.linux-focal-cuda12_6-py3_10-gcc11-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-cuda12_6-py3_10-gcc11-build.outputs.test-matrix }}
     secrets: inherit
 
   linux-jammy-py3-clang12-mobile-build:
@@ -381,14 +381,14 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-focal-cpu-py3_10-gcc9-bazel-test:
-    name: linux-focal-cpu-py3.10-gcc9-bazel-test
+  linux-focal-cpu-py3_10-gcc11-bazel-test:
+    name: linux-focal-cpu-py3.10-gcc11-bazel-test
     uses: ./.github/workflows/_bazel-build-test.yml
     needs: get-label-type
     with:
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.large"
-      build-environment: linux-focal-cuda12.4-py3.10-gcc9-bazel-test
-      docker-image-name: pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9
+      build-environment: linux-focal-cuda12.6-py3.10-gcc11-bazel-test
+      docker-image-name: pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc11
       cuda-version: cpu
       test-matrix: |
         { include: [
@@ -402,7 +402,7 @@ jobs:
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-py3.9-gcc111-mobile-lightweight-dispatch-build
+      build-environment: linux-jammy-py3.9-gcc11-mobile-lightweight-dispatch-build
       docker-image-name: pytorch-linux-jammy-py3.9-gcc11
       build-generates-artifacts: false
       test-matrix: |
@@ -430,14 +430,14 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-focal-cuda12_4-py3_10-gcc9-sm89-build:
-    name: linux-focal-cuda12.4-py3.10-gcc9-sm89
+  linux-focal-cuda12_6-py3_10-gcc11-sm89-build:
+    name: linux-focal-cuda12.6-py3.10-gcc11-sm89
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-focal-cuda12.4-py3.10-gcc9-sm89
-      docker-image-name: pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9
+      build-environment: linux-focal-cuda12.6-py3.10-gcc11-sm89
+      docker-image-name: pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc11
       cuda-arch-list: 8.9
       test-matrix: |
         { include: [
@@ -449,16 +449,16 @@ jobs:
         ]}
     secrets: inherit
 
-  unstable-linux-focal-cuda12_4-py3_10-gcc9-sm89-build-xfail:
+  unstable-linux-focal-cuda12_6-py3_10-gcc11-sm89-build-xfail:
     # A version of the build that sets a larger number of jobs for a build.  May
     # OOM
-    name: unstable-linux-focal-cuda12.4-py3.10-gcc9-sm89-xfail
+    name: unstable-linux-focal-cuda12.6-py3.10-gcc11-sm89-xfail
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-focal-cuda12.4-py3.10-gcc9-sm89
-      docker-image-name: pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9
+      build-environment: linux-focal-cuda12.6-py3.10-gcc11-sm89
+      docker-image-name: pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc11
       cuda-arch-list: 8.9
       max-jobs: 4
       # Doesn't actually run tests, but need this in order to prevent the build
@@ -469,16 +469,16 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-focal-cuda12_4-py3_10-gcc9-sm89-test:
-    name: linux-focal-cuda12.4-py3.10-gcc9-sm89
+  linux-focal-cuda12_6-py3_10-gcc11-sm89-test:
+    name: linux-focal-cuda12.6-py3.10-gcc11-sm89
     uses: ./.github/workflows/_linux-test.yml
     needs:
-      - linux-focal-cuda12_4-py3_10-gcc9-sm89-build
+      - linux-focal-cuda12_6-py3_10-gcc11-sm89-build
       - target-determination
     with:
-      build-environment: linux-focal-cuda12.4-py3.10-gcc9-sm89
-      docker-image: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-sm89-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-sm89-build.outputs.test-matrix }}
+      build-environment: linux-focal-cuda12.6-py3.10-gcc11-sm89
+      docker-image: ${{ needs.linux-focal-cuda12_6-py3_10-gcc11-sm89-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-cuda12_6-py3_10-gcc11-sm89-build.outputs.test-matrix }}
     secrets: inherit
 
   linux-jammy-py3-clang12-executorch-build:
@@ -503,38 +503,6 @@ jobs:
       build-environment: linux-jammy-py3-clang12-executorch
       docker-image: ${{ needs.linux-jammy-py3-clang12-executorch-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3-clang12-executorch-build.outputs.test-matrix }}
-    secrets: inherit
-
-  linux-focal-py3_12-clang10-experimental-split-build:
-    if: false # See https://github.com/pytorch/pytorch/issues/138750
-    name: linux-focal-py3.12-clang10-experimental-split-build
-    uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
-    with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      use_split_build: True
-      build-environment: linux-focal-py3.12-clang10
-      docker-image-name: pytorch-linux-focal-py3.12-clang10
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 3, runner: "linux.4xlarge" },
-          { config: "default", shard: 2, num_shards: 3, runner: "linux.4xlarge" },
-          { config: "default", shard: 3, num_shards: 3, runner: "linux.4xlarge" },
-          { config: "dynamo_wrapped", shard: 1, num_shards: 3, runner: "linux.2xlarge" },
-          { config: "dynamo_wrapped", shard: 2, num_shards: 3, runner: "linux.2xlarge" },
-          { config: "dynamo_wrapped", shard: 3, num_shards: 3, runner: "linux.2xlarge" },
-        ]}
-    secrets: inherit
-
-  linux-focal-py3_12-clang10-experimental-split-build-test:
-    name: linux-focal-py3.12-clang10-experimental-split-build
-    uses: ./.github/workflows/_linux-test.yml
-    needs: linux-focal-py3_12-clang10-experimental-split-build
-    with:
-      build-environment: linux-focal-py3.12-clang10-experimental-split-build
-      docker-image: ${{ needs.linux-focal-py3_12-clang10-experimental-split-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-py3_12-clang10-experimental-split-build.outputs.test-matrix }}
-      timeout-minutes: 600
     secrets: inherit
 
   linux-focal-cuda12_4-py3_10-gcc9-inductor-build:

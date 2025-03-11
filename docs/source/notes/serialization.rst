@@ -505,6 +505,7 @@ Config
     See :func:`~torch.serialization.set_crc32_options`.
   * ``use_pinned_memory_for_d2h``: for storages that are on an accelerator when passed to ``torch.save``, whether to
     move storage to pinned memory or pageable memory on CPU within ``torch.save``. (Default: ``False`` (i.e. pageable))
+  * ``storage_alignment``: alignment of storages in the checkpoint during ``torch.save`` in bytes. (Default ``64``)
 
 ``torch.utils.serialization.config.load`` contains options that control the behavior of ``torch.load``.
 

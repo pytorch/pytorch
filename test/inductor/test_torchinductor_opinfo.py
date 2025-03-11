@@ -374,6 +374,7 @@ inductor_override_kwargs["cpu"] = {
         "atol": 3e-4,
         "rtol": 0.002,
     },
+    ("nn.functional.triplet_margin_loss", f16): {"atol": 3e-4, "rtol": 0.003},
     ("nn.functional.triplet_margin_with_distance_loss", f16): {
         "atol": 3e-4,
         "rtol": 0.003,

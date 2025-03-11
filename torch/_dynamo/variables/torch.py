@@ -196,7 +196,7 @@ def get_overridable_functions():
 
     from torch.overrides import get_overridable_functions as get_overridable_functions_
 
-    funcs = set(chain(*get_overridable_functions_().values()))
+    funcs = set(chain.from_iterable(get_overridable_functions_().values()))
     more = {
         torch.ones,
         torch.ones_like,
@@ -994,6 +994,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             from torch._subclasses.fake_tensor import fake_tensor_tls
             from torch.utils._pytree import tree_flatten
 
+            from .base import AsPythonConstantNotImplementedError
+
             # 1. Convert `args, kwargs` into pytree-flattened proxy forms.
             #
             # Rather than reconstructing `args, kwargs` into python objects and
@@ -1018,6 +1020,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     unimplemented(
                         f"""
 For `nonstrict_trace`-ed function, the only allowed input types are basic types (e.g., torch.Tensor, int, float) or pytree containers of those. Here you are calling the function with arguments that contain a value of type <{type_name}>, please use one of the following to register the type with pytree:
+  * `torch.utils._pytree.register_constant`
   * `torch.utils._pytree.register_dataclass`
   * `torch.utils._pytree.register_pytree_node`
 """  # NOQA: B950
@@ -1033,16 +1036,34 @@ For `nonstrict_trace`-ed function, the only allowed input types are basic types 
             # the spec not a graphable type, so we still have to reconstruct it
             # into a python object, and store it as a constant attribute on the
             # fx graph.
-            #
-            # TODO handle `pytree._register_constant`-ed values.
             try:
                 input_spec = input_spec_vt.as_python_constant()
-            except NotImplementedError:
-                unimplemented(
-                    """
-This error is most likely due to a call to `nonstrict_trace`-ed function, where one of the argument contains object of a type that has been (or needs to be) `torch.utils._pytree.register_constant`-ed. We currently don't support that.
+            except AsPythonConstantNotImplementedError as e:
+                typ = e.vt.python_type()
+                type_name = typ.__qualname__
+                import torch.utils._pytree as pytree
+
+                if pytree.is_constant_class(typ):
+                    unimplemented(
+                        f"""
+You are calling a `nonstrict_trace`-ed function with an input that contains an object of type <{type_name}>, which was marked with `pytree.register_constant`. However, the object was constructed _inside_ the `torch.compile` region.
+
+Please construct the object _outside_ the `torch.compile` region, or submit an issue to GitHub.
+    """  # NOQA: B950
+                    )
+                else:
+                    unimplemented(
+                        f"""
+You are calling a `nonstrict_trace`-ed function where one one of the inputs has been registered with a `pytree_flatten` that puts an object of type <{type_name}> into the context.
+
+Please consider modifying that `pytree_flatten` to avoid putting the object into context, and apply one of the following to <{type_name}>
+  * `torch.utils._pytree.register_constant`
+  * `torch.utils._pytree.register_dataclass`
+  * `torch.utils._pytree.register_pytree_node`
+
+If the above doesn't work, please subtmit an issue to GitHub.
 """  # NOQA: B950
-                )
+                    )
 
             fn = self.value
 

@@ -477,7 +477,6 @@ def _core_aten_decompositions_post_autograd() -> dict[
             aten.sinc,
             aten.sinc_,
             aten.slice_backward,
-            aten.slice_copy,
             aten.smooth_l1_loss,
             aten.smooth_l1_loss_backward,
             aten.soft_margin_loss,

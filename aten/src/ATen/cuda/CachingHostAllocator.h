@@ -34,4 +34,9 @@ inline TORCH_CUDA_CPP_API at::DataPtr HostAlloc(size_t size) {
   return getCachingHostAllocator()->allocate(size);
 }
 
+TORCH_CUDA_CPP_API at::HostStats CachingHostAllocator_getStats();
+
+TORCH_CUDA_CPP_API void CachingHostAllocator_resetAccumulatedStats();
+TORCH_CUDA_CPP_API void CachingHostAllocator_resetPeakStats();
+
 } // namespace at::cuda

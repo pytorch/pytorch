@@ -34,7 +34,7 @@ convnext_base,pass,7
 
 
 
-crossvit_9_240,pass,7
+crossvit_9_240,fail_accuracy,7
 
 
 

@@ -22,19 +22,22 @@ if(NOT __AOTRITON_INCLUDED)
   # Replaces .ci/docker/aotriton_version.txt
   # Note packages information may have versions skipped (due to no ABI breaks)
   # But they must be listed from lower version to higher version
-  set(__AOTRITON_VER "0.8.2b")
+  set(__AOTRITON_VER "0.9.2b")
   set(__AOTRITON_MANYLINUX_LIST
       "manylinux_2_28"  # rocm6.2
       "manylinux_2_28"  # rocm6.3
+      "manylinux_2_28"  # rocm6.4
       )
   set(__AOTRITON_ROCM_LIST
       "rocm6.2"
       "rocm6.3"
+      "rocm6.4"
       )
-  set(__AOTRITON_CI_COMMIT "b24f43a9771622faa157155568b9a200c3b49e41")
+  set(__AOTRITON_CI_COMMIT "b388d223d8c7213545603e00f6f3148c54d1f525")
   set(__AOTRITON_SHA256_LIST
-      "66445e6b0209b9f4080743b839cc9d424054dc5c8d07363f9f27f109231c324a"  # rocm6.2
-      "16356dc1813cf3e60da23eb2f29440cb35eedd3a2fbf81e6093a0bc42056ad08"  # rocm6.3
+      "08d84f96f4c984179f80f517c0431c7511ee26bb0ce9bd05a827573ddd78cc79"  # rocm6.2
+      "9094d59717e7e6eace9126ca100dd0e86510f07fc6c3a349569fc4e2d9056604"  # rocm6.3
+      "41190202c2736d5ff75b13a3abc0fb52ebfbb67226cf85dc3de7699c7000db44"  # rocm6.4
       )
   set(__AOTRITON_Z "gz")
 

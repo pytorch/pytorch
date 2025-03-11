@@ -137,13 +137,17 @@ activation_memory_budget_runtime_estimator = "flops"
 # (which has a scipy dependency).
 activation_memory_budget_solver = "dp"
 
-# This dumps out a png visualization of the expected runtime vs. activation
+# This dumps out a SVG visualization of the expected runtime vs. activation
 # memory tradeoffs for all memory budget values from 0 to 1 in increments of
 # 0.5. See an example here:
 # https://github.com/pytorch/pytorch/pull/126320#discussion_r1625104015
 visualize_memory_budget_pareto = (
     os.environ.get("PARTITIONER_MEMORY_BUDGET_PARETO", "0") == "1"
 )
+
+# This controls the directory in which to dump the SVG plot with the pareto
+# frontier of the activation checkpointing memory-vs-runtime tradeoffs.
+memory_budget_pareto_dir = os.environ.get("PARTITIONER_MEMORY_BUDGET_PARETO_DIR")
 
 # Sets all of the ban_recompute heuristics to False except ban_recompute_reductions
 # Generally, this will probably result in some memory improvement, but at the

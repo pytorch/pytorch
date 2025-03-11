@@ -39,6 +39,10 @@ __all__ = [
     "reset_peak_memory_stats",
     "reset_max_memory_allocated",
     "reset_max_memory_cached",
+    "host_memory_stats",
+    "host_memory_stats_as_nested_dict",
+    "reset_accumulated_host_memory_stats",
+    "reset_peak_host_memory_stats",
     "memory_allocated",
     "max_memory_allocated",
     "memory_reserved",
@@ -368,6 +372,100 @@ def reset_peak_memory_stats(device: Union[Device, int] = None) -> None:
     """
     device = _get_device_index(device, optional=True)
     return torch._C._cuda_resetPeakMemoryStats(device)
+
+
+def host_memory_stats() -> dict[str, Any]:
+    r"""Return a dictionary of CUDA memory allocator statistics for a given device.
+
+     The return value of this function is a dictionary of statistics, each of
+     which is a non-negative integer.
+
+     Core statistics:
+
+     - ``"allocated.{current,peak,allocated,freed}"``:
+       number of allocation requests received by the memory allocator.
+     - ``"allocated_bytes.{current,peak,allocated,freed}"``:
+       amount of allocated memory.
+     - ``"segment.{current,peak,allocated,freed}"``:
+       number of reserved segments from ``cudaMalloc()``.
+     - ``"reserved_bytes.{current,peak,allocated,freed}"``:
+       amount of reserved memory.
+
+     For these core statistics, values are broken down as follows.
+
+     Metric type:
+
+     - ``current``: current value of this metric.
+     - ``peak``: maximum value of this metric.
+     - ``allocated``: historical total increase in this metric.
+     - ``freed``: historical total decrease in this metric.
+
+     In addition to the core statistics, we also provide some simple event
+     counters:
+
+     - ``"num_host_alloc"``: number of CUDA allocation calls. This includes both
+       cudaHostAlloc and cudaHostRegister.
+     - ``"num_host_free"``: number of CUDA free calls. This includes both cudaHostFree
+       and cudaHostUnregister.
+
+     Finally, we also provide some simple timing counters:
+
+     - ``"host_alloc_time.{total,max,min,count,avg}"``:
+       timing of allocation requests going through CUDA calls.
+     - ``"host_free_time.{total,max,min,count,avg}"``:
+       timing of free requests going through CUDA calls.
+
+    For these timing statistics, values are broken down as follows.
+
+     Metric type:
+
+     - ``total``: total time spent.
+     - ``max``: maximum value per call.
+     - ``min``: minimum value per call.
+     - ``count``: number of times it was called.
+     - ``avg``: average time per call.
+    """
+    result = []
+
+    def _recurse_add_to_result(prefix, obj):
+        if isinstance(obj, dict):
+            if len(prefix) > 0:
+                prefix += "."
+            for k, v in obj.items():
+                _recurse_add_to_result(prefix + k, v)
+        else:
+            result.append((prefix, obj))
+
+    stats = host_memory_stats_as_nested_dict()
+    _recurse_add_to_result("", stats)
+    result.sort()
+
+    return collections.OrderedDict(result)
+
+
+def host_memory_stats_as_nested_dict() -> dict[str, Any]:
+    r"""Return the result of :func:`~torch.cuda.host_memory_stats` as a nested dictionary."""
+    if not is_initialized():
+        return {}
+    return torch._C._cuda_hostMemoryStats()
+
+
+def reset_accumulated_host_memory_stats() -> None:
+    r"""Reset the "accumulated" (historical) stats tracked by the host memory allocator.
+
+    See :func:`~torch.cuda.host_memory_stats` for details. Accumulated stats correspond to
+    the `"allocated"` and `"freed"` keys in each individual stat dict.
+    """
+    return torch._C._cuda_resetAccumulatedHostMemoryStats()
+
+
+def reset_peak_host_memory_stats() -> None:
+    r"""Reset the "peak" stats tracked by the host memory allocator.
+
+    See :func:`~torch.cuda.host_memory_stats` for details. Peak stats correspond to the
+    `"peak"` key in each individual stat dict.
+    """
+    return torch._C._cuda_resetPeakHostMemoryStats()
 
 
 def reset_max_memory_allocated(device: Union[Device, int] = None) -> None:

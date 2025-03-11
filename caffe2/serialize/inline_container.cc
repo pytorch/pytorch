@@ -252,7 +252,11 @@ constexpr int MZ_ZIP_DATA_DESCRIPTOR_ID = 0x08074b50;
 
 namespace detail {
 
-std::tuple<size_t, size_t> getOffset(size_t cursor, size_t filename_size, size_t size) {
+std::tuple<size_t, size_t> getOffset(
+    size_t cursor,
+    size_t filename_size,
+    size_t size,
+    uint64_t alignment) {
   size_t start = cursor + MZ_ZIP_LOCAL_DIR_HEADER_SIZE + filename_size +
       sizeof(mz_uint16) * 2;
   if (size >= MZ_UINT32_MAX || cursor >= MZ_UINT32_MAX) {
@@ -264,8 +268,8 @@ std::tuple<size_t, size_t> getOffset(size_t cursor, size_t filename_size, size_t
       start += sizeof(mz_uint64);
     }
   }
-  size_t mod = start % kFieldAlignment;
-  size_t next_offset = (mod == 0) ? start : (start + kFieldAlignment - mod);
+  size_t mod = start % alignment;
+  size_t next_offset = (mod == 0) ? start : (start + alignment - mod);
   std::tuple<size_t, size_t> result(next_offset, start);
   return result;
 }
@@ -274,8 +278,9 @@ size_t getPadding(
     size_t cursor,
     size_t filename_size,
     size_t size,
-    std::string& padding_buf) {
-  auto [next_offset, start] = getOffset(cursor, filename_size, size);
+    std::string& padding_buf,
+    uint64_t alignment) {
+  auto [next_offset, start] = getOffset(cursor, filename_size, size, alignment);
   size_t padding_size = next_offset - start;
   size_t padding_size_plus_fbxx = padding_size + 4;
   if (padding_buf.size() < padding_size_plus_fbxx) {
@@ -410,8 +415,7 @@ size_t PyTorchStreamReader::getRecordMultiReaders(
         }
         readSizes[i] = size;
         LOG(INFO) << "Thread " << i << " read [" << startPos << "-" << endPos
-                  << "] "
-                  << "from " << name << " of size " << n;
+                  << "] " << "from " << name << " of size " << n;
         TORCH_CHECK(
             threadReadSize == size,
             "record size ",
@@ -629,10 +633,12 @@ size_t PyTorchStreamReader::getRecordSize(const std::string& name) {
 size_t PyTorchStreamReader::getRecordOffsetNoRead(
     size_t cursor,
     std::string filename,
-    size_t size) {
+    size_t size,
+    uint64_t alignment) {
   std::string full_name = archive_name_plus_slash_ + filename;
   size_t full_name_size = full_name.size();
-  std::tuple<size_t, size_t> result = detail::getOffset(cursor, full_name_size, size);
+  std::tuple<size_t, size_t> result =
+      detail::getOffset(cursor, full_name_size, size, alignment);
   size_t offset = std::get<0>(result);
   return offset;
 }
@@ -673,17 +679,22 @@ size_t ostream_write_func(
 
 PyTorchStreamWriter::PyTorchStreamWriter(
     const std::string& file_name,
-    bool compute_crc32)
-    : archive_name_(basename(file_name)), compute_crc32_(compute_crc32) {
+    bool compute_crc32,
+    uint64_t alignment)
+    : archive_name_(basename(file_name)),
+      compute_crc32_(compute_crc32),
+      alignment_(alignment) {
   setup(file_name);
 }
 
 PyTorchStreamWriter::PyTorchStreamWriter(
     const std::function<size_t(const void*, size_t)> writer_func,
-    bool compute_crc32)
+    bool compute_crc32,
+    uint64_t alignment)
     : archive_name_("archive"),
       writer_func_(writer_func),
-      compute_crc32_(compute_crc32) {
+      compute_crc32_(compute_crc32),
+      alignment_(alignment) {
   setup(archive_name_);
 }
 
@@ -748,8 +759,12 @@ void PyTorchStreamWriter::writeRecord(
     return;
   }
   std::string full_name = archive_name_plus_slash_ + name;
-  size_t padding_size =
-      detail::getPadding(ar_->m_archive_size, full_name.size(), size, padding_);
+  size_t padding_size = detail::getPadding(
+      ar_->m_archive_size,
+      full_name.size(),
+      size,
+      padding_,
+      alignment_);
   uint32_t flags = compress ? MZ_BEST_COMPRESSION : 0;
   if (!compute_crc32_) {
 #if (!defined(FBCODE_CAFFE2))

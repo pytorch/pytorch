@@ -58,7 +58,8 @@ class TORCH_API AOTIModelContainerRunner {
       const std::string& model_so_path,
       size_t num_models,
       const std::string& device_str,
-      const std::string& cubin_dir);
+      const std::string& cubin_dir,
+      const bool run_single_threaded);
 
   virtual std::vector<at::Tensor> run_impl(
       std::vector<AtenTensorHandle>& input_handles,
@@ -100,7 +101,8 @@ using CreateAOTIModelRunnerFunc = std::unique_ptr<AOTIModelContainerRunner> (*)(
     const std::string& model_so_path,
     size_t num_models,
     const std::string& device_str,
-    const std::string& bin_dir);
+    const std::string& bin_dir,
+    const bool run_single_threaded);
 
 // Return a global map "device name" -> "aoti model runner create function" for
 // all registered in AOTI external backends

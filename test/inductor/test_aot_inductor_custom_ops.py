@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 # This test requires libaoti_custom_ops.so to be built, which happnes when BUILD_TEST = 1
 import logging
+import os
 import sys
 import unittest
 
@@ -387,6 +388,8 @@ class AOTICustomOpTestCase(TestCase):
             lib_file_path = find_library_location("libaoti_custom_ops.so")
             if IS_WINDOWS:
                 lib_file_path = find_library_location("aoti_custom_ops.dll")
+            if not os.path.exists(lib_file_path):
+                raise unittest.SkipTest("libaoti_custom_ops not built!")
             torch.ops.load_library(str(lib_file_path))
         super().setUp()
 

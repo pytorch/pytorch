@@ -44,8 +44,8 @@ def export_tracepoint_functional(ctx, *args, **kwargs):
     unwrapped_kwargs = ctx.unwrap_tensors(kwargs)
 
     with ctx.redispatch_to_next():
-        out = _export_tracepoint(*unwrapped_args, **unwrapped_kwargs)
-        return ctx.wrap_tensors(out)
+        _export_tracepoint(*unwrapped_args, **unwrapped_kwargs)
+        return args
 
 
 _export_tracepoint.py_impl(DispatchKey.Autograd)(

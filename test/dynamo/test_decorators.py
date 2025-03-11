@@ -204,6 +204,36 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 5)
 
+    def test_allow_in_graph_no_id_reuse(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def do_allow_in_graph(x):
+            return x + 1
+
+        torch._dynamo.allow_in_graph(do_allow_in_graph)
+        del do_allow_in_graph
+
+        # `id(dont_allow_in_graph)` would likely match `id(do_allow_in_graph)`
+        # We want to make sure Dynamo always trace through
+        # `dont_allow_in_graph`, by checking for the explicit graph break.
+        def dont_allow_in_graph(x):
+            torch._dynamo.graph_break()
+            return x + 1
+
+        @torch.compile(backend=cnts)
+        def fn(a):
+            x = torch.add(a, 1)
+            x = torch.add(x, 1)
+            x = dont_allow_in_graph(x)
+            x = torch.add(x, 1)
+            x = torch.add(x, 1)
+            return x
+
+        fn(torch.randn(10))
+
+        # Check for graph break
+        self.assertEqual(cnts.frame_count, 3)
+
     def test_incorrect_usage_disallow_in_graph(self):
         with self.assertRaises(IncorrectUsage):
 
@@ -441,6 +471,49 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, y)
         self.assertEqual(ref, res)
 
+    def test_nonstrict_trace_pre_existing_register_constant_type_guard(self):
+        class State:
+            def __init__(self, n):
+                self.n = n
+
+            def get_num(self):
+                torch._dynamo.graph_break()
+                return self.n
+
+            def __eq__(self, other):
+                return isinstance(other, State) and self.n == other.n
+
+            def __hash__(self):
+                return hash(self.n)
+
+        # Assume `State` is implemented in C, and the author didn't bother to
+        # provide a pytree decomposition for it, and its instances are safe to
+        # treat as a constant by `torch.compile`.
+        torch.utils._pytree.register_constant(State)
+
+        @torch._dynamo.nonstrict_trace
+        def trace_me(x, s):
+            return x * s.get_num()
+
+        cnts = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+
+        @torch.compile(fullgraph=True, backend=cnts)
+        def fn(x, s):
+            res = trace_me(x, s)
+            return res
+
+        x = torch.ones(10)
+        # Make sure recompilation didn't happen.
+        self.assertEqual(cnts.frame_count, 0)
+        fn(x, State(42))
+        self.assertEqual(cnts.frame_count, 1)
+        fn(x, State(42))
+        self.assertEqual(cnts.frame_count, 1)
+
+        # Make sure recompilation did happen.
+        fn(x, State(41))
+        self.assertEqual(cnts.frame_count, 2)
+
     def test_nonstrict_trace_tuple_and_sym_int_output(self):
         @torch._dynamo.nonstrict_trace
         def trace_me(x):
@@ -602,6 +675,7 @@ Applying `nonstrict_trace` to function <trace_me>; however, `nonstrict_trace` cu
         except torch._dynamo.exc.Unsupported as e:
             msg = """
 For `nonstrict_trace`-ed function, the only allowed input types are basic types (e.g., torch.Tensor, int, float) or pytree containers of those. Here you are calling the function with arguments that contain a value of type <DecoratorTests.test_nonstrict_trace_custom_class_error.<locals>.Point>, please use one of the following to register the type with pytree:
+  * `torch.utils._pytree.register_constant`
   * `torch.utils._pytree.register_dataclass`
   * `torch.utils._pytree.register_pytree_node`
 """  # NOQA: B950
@@ -653,39 +727,104 @@ For `nonstrict_trace`-ed function, the only allowed input types are basic types 
         except torch._dynamo.exc.Unsupported as e:
             msg = """
 For `nonstrict_trace`-ed function, the only allowed input types are basic types (e.g., torch.Tensor, int, float) or pytree containers of those. Here you are calling the function with arguments that contain a value of type <DecoratorTests.test_nonstrict_trace_nested_custom_class_error.<locals>.Point>, please use one of the following to register the type with pytree:
+  * `torch.utils._pytree.register_constant`
   * `torch.utils._pytree.register_dataclass`
   * `torch.utils._pytree.register_pytree_node`
 """  # NOQA: B950
             self.assertIn(msg, str(e))
 
-    def test_nonstrict_trace_pytree_register_constant_error(self):
+    def test_nonstrict_newly_constructed_trace_register_constant_type_error(self):
+        class State:
+            def __init__(self, n):
+                self.n = n
+
+            def get_num(self):
+                torch._dynamo.graph_break()
+                return self.n
+
+            def __eq__(self, other):
+                return isinstance(other, State) and self.n == other.n
+
+            def __hash__(self):
+                return hash(self.n)
+
+        # Assume `State` is implemented in C, and the author didn't bother to
+        # provide a pytree decomposition for it, and its instances are safe to
+        # treat as a constant by `torch.compile`.
+        torch.utils._pytree.register_constant(State)
+
+        @torch._dynamo.nonstrict_trace
+        def trace_me(x, s):
+            return x * s.get_num()
+
+        @torch.compile(fullgraph=True, backend="aot_eager")
+        def fn(x):
+            s = State(10)
+            res = trace_me(x, s)
+            return res
+
+        try:
+            x = torch.ones(10)
+            fn(x)
+            self.assertFalse(True)  # must raise error before this
+        except torch._dynamo.exc.Unsupported as e:
+            msg = """
+You are calling a `nonstrict_trace`-ed function with an input that contains an object of type <DecoratorTests.test_nonstrict_newly_constructed_trace_register_constant_type_error.<locals>.State>, which was marked with `pytree.register_constant`. However, the object was constructed _inside_ the `torch.compile` region.
+
+Please construct the object _outside_ the `torch.compile` region, or submit an issue to GitHub.
+"""  # NOQA: B950
+            self.assertIn(msg, str(e))
+
+    def test_nonstrict_trace_object_in_context_error(self):
         class Point:
-            x: int
-            y: int
+            x: torch.Tensor
+            y: torch.Tensor
 
             def __init__(self, x, y):
                 self.x = x
                 self.y = y
 
-        torch.utils._pytree.register_constant(Point)
+        class PointTensor:
+            p: Point
+            t: torch.Tensor
+
+            def __init__(self, p, t):
+                self.p = p
+                self.t = t
+
+        torch.utils._pytree.register_pytree_node(
+            PointTensor,
+            lambda pt: ((pt.t,), pt.p),
+            lambda ts, p: PointTensor(p, ts[0]),
+        )
 
         @torch._dynamo.nonstrict_trace
-        def trace_me(x, p):
+        def trace_me(pt):
             torch._dynamo.graph_break()
-            return x * p.x + p.y
+            return pt.t + pt.p.x * pt.p.y
 
         @torch.compile(fullgraph=True, backend="aot_eager")
-        def fn(x, p):
-            res = trace_me(x, p)
-            return res + 1
+        def fn(x, y):
+            p = Point(x, y)
+            t = x + y
+            pt = PointTensor(p, t)
+            res = trace_me(pt)
+            return res
 
         try:
-            p = Point(3, 4)
-            fn(torch.ones(10), p)
+            x, y = torch.ones(10), torch.ones(1)
+            fn(x, y)
             self.assertFalse(True)  # must raise error before this
         except torch._dynamo.exc.Unsupported as e:
             msg = """
-This error is most likely due to a call to `nonstrict_trace`-ed function, where one of the argument contains object of a type that has been (or needs to be) `torch.utils._pytree.register_constant`-ed. We currently don't support that.
+You are calling a `nonstrict_trace`-ed function where one one of the inputs has been registered with a `pytree_flatten` that puts an object of type <DecoratorTests.test_nonstrict_trace_object_in_context_error.<locals>.Point> into the context.
+
+Please consider modifying that `pytree_flatten` to avoid putting the object into context, and apply one of the following to <DecoratorTests.test_nonstrict_trace_object_in_context_error.<locals>.Point>
+  * `torch.utils._pytree.register_constant`
+  * `torch.utils._pytree.register_dataclass`
+  * `torch.utils._pytree.register_pytree_node`
+
+If the above doesn't work, please subtmit an issue to GitHub.
 """  # NOQA: B950
             self.assertIn(msg, str(e))
 
@@ -1049,6 +1188,21 @@ This error is most likely due to a call to `nonstrict_trace`-ed function, where 
         x = torch.tensor(1)
 
         self.assertEqual(fn(x, y), torch.compile(fn)(x, y))
+
+    def test_set_stance_aot_eager_then_compile(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(x, y, z):
+            return x * y * z[0]
+
+        with torch.compiler.set_stance("aot_eager_then_compile"):
+            fn(2, torch.randn(2), {0: torch.randn(2)})
+            fn(3, torch.randn(3), {0: torch.randn(3)})
+            fn(4, torch.randn(4), {0: torch.randn(4)})
+
+        # Would have been 4 without stance
+        self.assertEqual(cnts.op_count, 2)
 
     @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
     def test_mark_static_nn_module(self):

@@ -180,47 +180,16 @@ def _callback_from_stance(callback):
     if _stance.stance == "default":
         # force_backend
         if _stance.backend is not None and callback not in (False, None):
-            hooks = Hooks()
-            callback = convert_frame.catch_errors_wrapper(
-                convert_frame.convert_frame(  # type: ignore[arg-type]
-                    get_compiler_fn(_stance.backend),
-                    hooks,
-                ),
-                hooks,
-            )
+            callback = _create_wrapped_callback(get_compiler_fn(_stance.backend))
 
         return callback
     elif _stance.stance == "eager_then_compile":
         if callback not in (False, None):
-
-            def eager_then_compile(*args, **kwargs):
-                frame = args[0]
-                key = frame.f_code.co_filename + str(frame.f_code.co_firstlineno)
-                example_inputs = get_example_inputs(key)
-
-                if len(example_inputs) < 2:
-                    example_inputs.append(clone_and_convert_to_meta(frame.f_locals))
-
-                dynamism = track_dynamism_across_examples(example_inputs)
-                if len(example_inputs) == 1:
-                    return ConvertFrameReturn(
-                        frame_exec_strategy=FrameExecStrategy(
-                            FrameAction.DEFAULT, FrameAction.DEFAULT
-                        )
-                    )
-
-                compiler_fn = callback._torchdynamo_orig_callable._torchdynamo_orig_callable.compiler_fn
-                hooks = Hooks()
-                return convert_frame.catch_errors_wrapper(
-                    convert_frame.convert_frame(  # type: ignore[arg-type]
-                        compiler_fn,
-                        hooks,
-                        dynamism=dynamism,
-                    ),
-                    hooks,
-                )(*args, **kwargs)
-
-            return eager_then_compile
+            return _create_delayed_compile_callback(callback, _stance.stance)
+        return callback
+    elif _stance.stance == "aot_eager_then_compile":
+        if callback not in (False, None):
+            return _create_delayed_compile_callback(callback, _stance.stance)
         return callback
     elif _stance.stance == "force_eager":
         # disable
@@ -243,6 +212,51 @@ def _callback_from_stance(callback):
         return fail_callback
     else:
         raise RuntimeError(f"invalid torch.compile stance '{_stance}'")
+
+
+def _create_wrapped_callback(compiler_fn, dynamism=None):
+    hooks = Hooks()
+    return convert_frame.catch_errors_wrapper(
+        convert_frame.convert_frame(  # type: ignore[arg-type]
+            compiler_fn,
+            hooks,
+        ),
+        hooks,
+    )
+
+
+def _get_or_add_example_inputs(frame):
+    key = frame.f_code.co_filename + str(frame.f_code.co_firstlineno)
+    example_inputs = get_example_inputs(key)
+
+    if len(example_inputs) < 2:
+        example_inputs.append(clone_and_convert_to_meta(frame.f_locals))
+
+    return example_inputs
+
+
+def _create_delayed_compile_callback(callback, stance):
+    def callback_fn(*args, **kwargs):
+        frame = args[0]
+        example_inputs = _get_or_add_example_inputs(frame)
+
+        if len(example_inputs) == 1:
+            if stance == "eager_then_compile":
+                return ConvertFrameReturn(
+                    frame_exec_strategy=FrameExecStrategy(
+                        FrameAction.DEFAULT, FrameAction.DEFAULT
+                    )
+                )
+            elif stance == "aot_eager_then_compile":
+                aot_eager_fn = get_compiler_fn("aot_eager")
+                return _create_wrapped_callback(aot_eager_fn)(*args, **kwargs)
+
+        dynamism = track_dynamism_across_examples(example_inputs)
+        code_context.get_context(frame.f_code)["dynamism"] = dynamism
+        compiler_fn = callback._torchdynamo_orig_callable._torchdynamo_orig_callable
+        return _create_wrapped_callback(compiler_fn, dynamism)(*args, **kwargs)
+
+    return callback_fn
 
 
 def _is_skip_guard_eval_unsafe_stance():
@@ -472,7 +486,6 @@ class _TorchDynamoContext:
         *,
         export=False,
         dynamic=None,
-        dynamism=None,
         compiler_config=None,
     ) -> None:
         super().__init__()
@@ -483,7 +496,6 @@ class _TorchDynamoContext:
         self.first_ctx = first_ctx
         self.export = export
         self._dynamic = dynamic
-        self.dynamism = dynamism
         self.compiler_config = compiler_config
         self.cleanup_fns: list[Callable[[], Any]] = []
         self.enter_exit_hooks = []
@@ -725,7 +737,6 @@ class OptimizeContext(_TorchDynamoContext):
         *,
         export=False,
         dynamic=None,
-        dynamism=None,
         compiler_config=None,
         rebuild_ctx: Optional[
             Callable[[], Union[OptimizeContext, _NullDecorator]]
@@ -742,7 +753,6 @@ class OptimizeContext(_TorchDynamoContext):
             first_ctx=first_ctx,
             export=export,
             dynamic=dynamic,
-            dynamism=dynamism,
             compiler_config=compiler_config,
         )
 
@@ -850,7 +860,6 @@ def _optimize_catch_errors(
     backend_ctx_ctor=null_context,
     export=False,
     dynamic=None,
-    dynamism=None,
     compiler_config=None,
     rebuild_ctx=None,
 ):
@@ -860,7 +869,6 @@ def _optimize_catch_errors(
         first_ctx=True,
         export=export,
         dynamic=dynamic,
-        dynamism=None,
         compiler_config=compiler_config,
         rebuild_ctx=rebuild_ctx,
     )
@@ -885,7 +893,7 @@ class _NullDecorator(contextlib.nullcontext):  # type: ignore[type-arg]
         return fn
 
 
-def check_if_dynamo_supported():
+def raise_if_dynamo_unavailable() -> None:
     if sys.version_info >= (3, 14):
         raise RuntimeError("Python 3.14+ not yet supported for torch.compile")
     elif sysconfig.get_config_var("Py_GIL_DISABLED") == 1:
@@ -894,21 +902,40 @@ def check_if_dynamo_supported():
         )
 
 
-def is_dynamo_supported():
+def is_dynamo_supported() -> bool:
     try:
-        check_if_dynamo_supported()
+        raise_if_dynamo_unavailable()
         return True
     except Exception:
         return False
 
 
-def check_if_inductor_supported():
-    check_if_dynamo_supported()
+def raise_if_inductor_unavailable(device: torch.device | str | None = None) -> None:
+    from torch._inductor.codegen.common import (
+        get_scheduling_for_device,
+        init_backend_registration,
+    )
+
+    raise_if_dynamo_unavailable()
+
+    init_backend_registration()
+
+    if device is None:
+        device = torch.get_default_device()
+    elif isinstance(device, str):
+        device = torch.device(device)
+
+    scheduling_factory = get_scheduling_for_device(device.type)
+    if scheduling_factory is None:
+        raise RuntimeError(
+            f"No Inductor scheduling factory registered for {device.type}"
+        )
+    scheduling_factory(None).raise_if_unavailable(device)
 
 
-def is_inductor_supported():
+def is_inductor_supported(device: torch.device | str | None = None) -> bool:
     try:
-        check_if_inductor_supported()
+        raise_if_inductor_unavailable(device)
         return True
     except Exception:
         return False
@@ -945,7 +972,6 @@ def _optimize(
     guard_fail_fn=None,
     disable=False,
     dynamic=None,
-    dynamism=None,
 ) -> Union[OptimizeContext, _NullDecorator]:
     """
     The main entrypoint of TorchDynamo.  Do graph capture and call
@@ -972,7 +998,7 @@ def _optimize(
         @torch._dynamo.optimize()
         def toy_example(a, b): ...
     """
-    check_if_dynamo_supported()
+    raise_if_dynamo_unavailable()
     check_for_incompatible_configs()
     # Note: The hooks object could be global instead of passed around, *however* that would make
     # for a confusing API usage and plumbing story wherein we nest multiple .optimize calls.
@@ -1004,11 +1030,10 @@ def _optimize(
     # _optimize_catch_errors in the field _torchdynamo_orig_callable. This can
     # be used by eval_frame.c to insert a guard on the backend.
     return _optimize_catch_errors(
-        convert_frame.convert_frame(backend, hooks=hooks, dynamism=dynamism),
+        convert_frame.convert_frame(backend, hooks=hooks),
         hooks,
         backend_ctx_ctor,
         dynamic=dynamic,
-        dynamism=dynamism,
         compiler_config=(
             backend.get_compiler_config()
             if hasattr(backend, "get_compiler_config")
@@ -1541,7 +1566,7 @@ def export(
         f = _f
         specialize_float = _specialize_float
         assume_static_by_default = _assume_static_by_default
-        check_if_dynamo_supported()
+        raise_if_dynamo_unavailable()
         torch._C._log_api_usage_once("torch._dynamo.export")
         if decomposition_table is not None:
             assert aten_graph, (

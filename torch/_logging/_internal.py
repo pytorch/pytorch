@@ -129,11 +129,7 @@ class LogRegistry:
 
     # flattens all the qnames together (TODO: consider memoizing?)
     def get_log_qnames(self) -> set[str]:
-        return {
-            qname
-            for qnames in self.log_alias_to_log_qnames.values()
-            for qname in qnames
-        }
+        return set(itertools.chain.from_iterable(self.log_alias_to_log_qnames.values()))
 
     def get_artifact_log_qnames(self):
         return set(self.artifact_log_qnames)
