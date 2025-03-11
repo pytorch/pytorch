@@ -424,11 +424,13 @@ class MetalKernel(SIMDKernel):
         var_name = f"tmp_acc_{next(self.acc_var_ids)}"
         var = V.kernel.create_cse_var(var_name, bounds, dtype)
         if elem_count:
-            self.loads.writeline(
+            self.indexing_code.writeline(
                 f"threadgroup {self.dtype_to_str(dtype)} {var_name}[{elem_count}];"
             )
         else:
-            self.loads.writeline(f"threadgroup {self.dtype_to_str(dtype)} {var_name};")
+            self.indexing_code.writeline(
+                f"threadgroup {self.dtype_to_str(dtype)} {var_name};"
+            )
         return var
 
     def reduction(
@@ -442,38 +444,44 @@ class MetalKernel(SIMDKernel):
         reduction_dim = next(t for t in self.range_trees if t.is_reduction)
         if reduction_type == "any":
             acc = self._new_accvar(dtype)
-            self.loads.writeline(f"{acc} = false;")
-            self.body.splice(
+            self.indexing_code.writeline(f"{acc} = false;")
+            self.indexing_code.writeline(
+                "threadgroup_barrier(metal::mem_flags::mem_threadgroup);"
+            )
+            self.compute.splice(
                 f"""
                 if ({value}) {{
                     {acc} = true;
                 }}
             """
             )
+            self.stores.writeline(
+                "threadgroup_barrier(metal::mem_flags::mem_threadgroup);"
+            )
             return acc
         if reduction_type in ["prod", "sum"]:
             acc_buf = self._new_accvar(src_dtype, reduction_dim.numel)
-            self.body.splice(f"{acc_buf}[{reduction_dim.name}] = {value};")
+            self.compute.splice(f"{acc_buf}[{reduction_dim.name}] = {value};")
             return self.cse.generate(
-                self.body,
+                self.compute,
                 f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {reduction_dim.numel})",
                 dtype=DTYPE_TO_COMPUTATION_DTYPE[dtype],
             )
         if reduction_type in ["max", "min", "argmax", "argmin"]:
             acc_buf = self._new_accvar(src_dtype, reduction_dim.numel)
-            self.body.splice(
+            self.compute.splice(
                 f"{acc_buf}[{reduction_dim.name}] = static_cast<{DTYPE_TO_METAL[src_dtype]}>({value});"
             )
             return self.cse.generate(
-                self.body,
+                self.compute,
                 f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {reduction_dim.numel})",
                 dtype=dtype,
             )
         if reduction_type == "welford_reduce":
             acc_buf = self._new_accvar(src_dtype, reduction_dim.numel)
-            self.body.splice(f"{acc_buf}[{reduction_dim.name}] = {value};")
+            self.compute.splice(f"{acc_buf}[{reduction_dim.name}] = {value};")
             wf_res = self.cse.generate(
-                self.body,
+                self.compute,
                 f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {reduction_dim.numel})",
             )
             return OpsWrapper._unwrap(
@@ -534,16 +542,9 @@ class MetalKernel(SIMDKernel):
                 if len(idx_var_names) > 1:
                     for idx, name in enumerate(idx_var_names):
                         code.writeline(f"auto {name} = thread_pos.{chr(120 + idx)};")
+                code.splice(self.indexing_code)
                 code.splice(self.loads)
-                if self.inside_reduction:
-                    code.writeline(
-                        "threadgroup_barrier(metal::mem_flags::mem_threadgroup);"
-                    )
                 code.splice(self.body)
-                if self.inside_reduction:
-                    code.writeline(
-                        "threadgroup_barrier(metal::mem_flags::mem_threadgroup);"
-                    )
                 code.splice(self.stores)
             code.writeline("}")
         code.writeline('""")')
@@ -587,7 +588,7 @@ class MetalKernel(SIMDKernel):
             line = f"if (({lower_expr}) && ({upper_expr})) return"
         else:
             line = f"if ({lower_expr}{upper_expr}) return"
-        self.cse.generate(self.body, line, assignment=False)
+        self.cse.generate(self.compute, line, assignment=False)
 
 
 class MetalScheduling(SIMDScheduling):
