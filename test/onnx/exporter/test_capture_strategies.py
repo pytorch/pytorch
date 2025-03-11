@@ -36,11 +36,30 @@ class ExportStrategiesTest(common_utils.TestCase):
         assert ep is not None
         torch.testing.assert_close(ep.module()(a, b), model(a, b))
 
+    def test_jit_conversion_on_data_dependent_model(self):
+        class Model(torch.nn.Module):
+            def forward(self, a, b):
+                if a.sum() > 0:
+                    return a.cos()
+                # The branch is expected to be specialized
+                return b.sin()
+
+        model = Model()
+        a = torch.tensor(0.0)
+        b = torch.tensor(1.0)
+
+        strategy = _capture_strategies.JitTraceConvertStrategy()
+        result = strategy(model, (a, b), kwargs=None, dynamic_shapes=None)
+        ep = result.exported_program
+        assert ep is not None
+        torch.testing.assert_close(ep.module()(a, b), model(a, b))
+
     def test_draft_export_on_data_dependent_model(self):
         class Model(torch.nn.Module):
             def forward(self, a, b):
                 if a.sum() > 0:
                     return a.cos()
+                # The branch is expected to be specialized and a warning is logged
                 return b.sin()
 
         model = Model()
