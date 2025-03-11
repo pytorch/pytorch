@@ -253,13 +253,6 @@ jobs:
         with:
           submodules: false
           fetch-depth: 1
-      - name: Setup old python version
-        id: get-old-python-version
-        if: matrix.test_type == 'older_python_version'
-        run: |
-          set -eou pipefail
-          # Generate PyTorch version to use
-          echo "OLD_PYTHON_VERSION=$(python3 .github/scripts/get_ci_variable.py --old-python-version)" >> "${GITHUB_OUTPUT}"
       - name: Setup min python version
         id: get-min-python-version
         if: matrix.test_type == 'older_python_version'
@@ -271,7 +264,7 @@ jobs:
         if: matrix.test_type == 'older_python_version'
         uses: actions/setup-python@v4
         with:
-          python-version: ${{ steps.get-old-python-version.outputs.OLD_PYTHON_VERSION }}
+          python-version: 3.6
           architecture: x64
           check-latest: false
           cache: pip
