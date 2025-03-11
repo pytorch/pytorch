@@ -14,6 +14,7 @@ from tools.testing.target_determination.heuristics.utils import (
 )
 from tools.testing.test_run import TestRun
 
+
 # Some files run tests in other test files, so we map them to each other here.
 # This is a map from file that runs the test to regex that matches the file that
 # contains the test. Test file with path test/a/b.py should of the form a/b.
@@ -22,7 +23,7 @@ ADDITIONAL_MAPPINGS = {
     # Not actual test files but rather functions defined in run_test.py that run
     # tests in test/cpp_extensions.
     "test_cpp_extensions_aot_ninja": [r"test\/cpp_extensions.*\/test.*\.py"],
-    "test_cpp_extensions_aot_no_ninja": [r"test\/cpp_extensions.*\/test.*\.py"]
+    "test_cpp_extensions_aot_no_ninja": [r"test\/cpp_extensions.*\/test.*\.py"],
 }
 
 
@@ -42,7 +43,11 @@ def _get_modified_tests() -> set[str]:
         changed_files = query_changed_files()
         should_run = python_test_file_to_test_name(set(changed_files))
         for test_file, regexes in ADDITIONAL_MAPPINGS.items():
-            if any(re.search(regex, changed_file) is not None for regex in regexes for changed_file in changed_files):
+            if any(
+                re.search(regex, changed_file) is not None
+                for regex in regexes
+                for changed_file in changed_files
+            ):
                 should_run.add(test_file)
         return should_run
     except Exception as e:
