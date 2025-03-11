@@ -412,7 +412,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             """
             bool _check_aoti_runtime_check_inputs_env() {
                 const static char* env_var_value = getenv("AOTI_RUNTIME_CHECK_INPUTS");
-                const static bool result = env_var_value != nullptr && env_var_value[0] != '\0';
+                const static bool result = env_var_value != nullptr && env_var_value[0] != 0;
                 return result;
             }
 
