@@ -372,7 +372,8 @@ def trace_associative_scan(
         xs
     ), f"expected combine_fn to return {len(xs)} results but got {len(outputs)}"
 
-    check_meta_consistency(xs, [c.meta["val"] for c in outputs], "init", "carry")
+    output_fake_tensors: list[torch.Tensor] = [c.meta["val"] for c in outputs]
+    check_meta_consistency(xs, output_fake_tensors, "init", "carry")
 
     _, combine_graph_name = unique_graph_id(proxy_mode, prefix="scan_combine_graph")
 

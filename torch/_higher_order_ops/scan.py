@@ -315,7 +315,8 @@ def trace_scan(
     assert outputs is not None
 
     carry, output = _extract_carry_and_out(outputs, len(init))
-    check_meta_consistency(init, [c.meta["val"] for c in carry], "init", "carry")
+    carry_fake_tensors: list[torch.Tensor] = [c.meta["val"] for c in carry]
+    check_meta_consistency(init, carry_fake_tensors, "init", "carry")
 
     _, combine_graph_name = unique_graph_id(proxy_mode, prefix="scan_combine_graph")
 
