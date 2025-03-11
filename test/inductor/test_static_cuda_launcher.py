@@ -127,9 +127,10 @@ class TestStaticCudaLauncher(TestCase):
         args = (arg0, 1.0, 1.0, 1.0)
 
         launcher = self._make_launcher(floats, args, (1,))
-        self.assertEqual(arg0, torch.tensor([3.0], dtype=torch.float64, device="cuda"))
-        # TODO:
+        # TODO: in Pytorch's pinned version of triton, arg3 is typed as regular float
+        # but in triton 3.3.0, this is fixed and it's 0ffd. We'll need to update later.
         self.assertEqual(launcher.arg_tys, "Offf")
+        self.assertEqual(arg0, torch.tensor([3.0], dtype=torch.float64, device="cuda"))
         new_arg0 = torch.zeros(1, dtype=torch.float64, device="cuda")
         device_interface = get_interface_for_device("cuda")
         stream = device_interface.get_raw_stream(device_interface.current_device())
