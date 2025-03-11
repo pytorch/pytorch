@@ -3245,8 +3245,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     def test_captured_wrong_device_error_message(self):
-        means = torch.randn(64, 3, self.device)
-        length_scales = torch.logspace(0.001, 0.1, 8)
+        means = torch.randn(64, 3, device=GPU_TYPE)
+        length_scales = torch.logspace(0.001, 0.1, 8, device=GPU_TYPE)
 
         def euclidean_dist_pos_embed(score, b, h, q_idx, k_idx):
             q_pos = means[q_idx]
@@ -3265,8 +3265,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     def test_cant_lower_error_message(self):
         # We can't lower a 256-element reduction inside a pointwise reduction
-        means = torch.randn(64, 256, self.device)
-        length_scales = torch.logspace(0.001, 0.1, 8, self.device)
+        means = torch.randn(64, 256, device=GPU_TYPE)
+        length_scales = torch.logspace(0.001, 0.1, 8, device=GPU_TYPE)
 
         def euclidean_dist_pos_embed(score, b, h, q_idx, k_idx):
             q_pos = means[q_idx]
@@ -3285,8 +3285,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     def test_reduction_unrolled(self):
         # We can't lower a 256-element reduction inside a pointwise reduction
-        means = torch.randn(S, 3, self.device)
-        length_scales = torch.logspace(0.001, 0.1, H, self.device)
+        means = torch.randn(S, 3, device=GPU_TYPE)
+        length_scales = torch.logspace(0.001, 0.1, H, device=GPU_TYPE)
 
         def euclidean_dist_pos_embed(score, b, h, q_idx, k_idx):
             q_pos = means[q_idx]
@@ -3520,7 +3520,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 )
                 return y.transpose(1, 2).contiguous().view(B, T, C)
 
-        model = SimpleAttention().to(self.device)
+        model = SimpleAttention().to(GPU_TYPE)
         model.compile(mode="default", dynamic=True)
         sequence_len = 256
 
@@ -3578,7 +3578,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         torch._dynamo.reset()
         for batch_shape in [4, 16, 32]:
-            x = torch.randn(batch_shape, sequence_len, 512, self.device)
+            x = torch.randn(batch_shape, sequence_len, 512, device=GPU_TYPE)
             model(x)
         self.assertEqual(len(backend.graphs), 1)
         self.assertExpectedInline(
