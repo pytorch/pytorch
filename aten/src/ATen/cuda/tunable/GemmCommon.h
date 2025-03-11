@@ -583,7 +583,14 @@ struct ScaledGemmParams : OpParams {
   }
 
   std::string Signature() const override {
-    return fmt::sprintf("%c%c_%ld_%ld_%ld_ld_%ld_%ld_%ld_rw_%d", transa, transb, m, n, k, lda, ldb, ldc, use_rowwise);
+    // In Blas.cpp, code defaults to a bias_dtype of Half even when there is no bias vector.
+    // Search for this line::
+    // params.bias_dtype = bias ? bias->scalar_type() : isFloat8Type(out_dtype_) ? at::ScalarType::Half : out_dtype_;
+    //
+    // In TunableOp, we must distinguish in param signature these two cases: with and without a bias vector.
+    return fmt::sprintf("%c%c_%ld_%ld_%ld_ld_%ld_%ld_%ld_rw_%d_bias_%s",
+      transa, transb, m, n, k, lda, ldb, ldc, use_rowwise,
+      bias_ptr == nullptr ? "None" : at::toString(bias_dtype));
   }
 
   size_t GetSizeA() const {
