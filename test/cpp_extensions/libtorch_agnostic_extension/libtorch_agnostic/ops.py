@@ -36,3 +36,17 @@ def identity(t) -> Tensor:
         a Tensor, the same as input.
     """
     return torch.ops.libtorch_agnostic.identity.default(t)
+
+
+def my_ones_like(t, device) -> Tensor:
+    """
+    Returns an empty tensor with the same shape and dtype as the input tensor.
+
+    Args:
+        t: any Tensor
+        device: a string, e.g., "cpu" or "cuda"
+
+    Returns:
+        a new empty Tensor with the same shape and dtype as input, with device being settable
+    """
+    return torch.ops.libtorch_agnostic.my_ones_like.default(t, device)

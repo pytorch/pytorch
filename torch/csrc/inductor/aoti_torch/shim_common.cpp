@@ -1344,6 +1344,8 @@ class StableIValueBoxedKernel : public c10::OperatorKernel {
         AtenTensorHandle ath = torch::aot_inductor::new_tensor_handle(
             std::move(const_cast<at::Tensor&>(arg.toTensor())));
         ministack[ministack_idx] = from(ath);
+      } else if (arg.isDevice()) {
+        ministack[ministack_idx] = from(arg.toDevice());
       } else {
         TORCH_CHECK(false, "Other types of IValues not yet handled!");
       }
@@ -1446,7 +1448,9 @@ aoti_torch_delete_library_object(TorchLibraryHandle tlh) {
       { delete reinterpret_cast<torch::Library*>(tlh); });
 }
 
-c10::IValue to_ivalue(c10::TypePtr arg_type, StableIValue stable_ivalue) {
+c10::IValue to_ivalue(
+    const c10::TypePtr& arg_type,
+    const StableIValue stable_ivalue) {
   switch (arg_type->kind()) {
     case c10::TypeKind::TensorType: {
       // stable_ivalue must be an ATH

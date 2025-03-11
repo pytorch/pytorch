@@ -126,18 +126,38 @@ STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CPU, m) {
   m.impl("identity", &boxed_identity);
 }
 
-RAIIATH my_empty_like(RAIIATH t) {
-  auto num_args = 6;
-  auto num_rets = 1;
-  StableIValue stack[6];
-  stack[0] = from(t.release());
-  // stack[1] = 0; // Dtype
-  // stack[2] = nullptr; // Layout
-  // stack[3] = from(nullptr); // device
-  // stack[4] = from(false); // pin_memory
-  // stack[5] = from(nullptr); // memory_format
+RAIIATH my_ones_like(RAIIATH t, StableIValue device) {
+  const auto num_args = 6;
+  StableIValue stack[num_args];
 
-  // aoti_torch_call_dispatcher("at::empty_like", "", stack);
+  int32_t t_dtype;
+  aoti_torch_get_dtype(t.get(), &t_dtype);
+  auto mf = aoti_torch_memory_format_contiguous_format();
+
+  stack[0] = from(t.release());
+  stack[1] = from(t_dtype); // Dtype
+  stack[2] = from(nullptr); // Layout
+  stack[3] = device; // device
+  stack[4] = from(false); // pin_memory
+  stack[5] = from(mf); // memory_format
+
+  aoti_torch_call_dispatcher("aten::ones_like", "", stack);
 
   return RAIIATH(to<AtenTensorHandle>(stack[0]));
+}
+
+void boxed_my_ones_like(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
+  RAIIATH t(to<AtenTensorHandle>(stack[0]));
+  StableIValue device = stack[1];
+
+  RAIIATH raiiath_res = my_ones_like(std::move(t), device);
+  stack[0] = from(raiiath_res.release());
+}
+
+STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
+  m.def("my_ones_like(Tensor t, Device d) -> Tensor");
+}
+
+STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
+  m.impl("my_ones_like", &boxed_my_ones_like);
 }
