@@ -227,6 +227,49 @@ class TestCppExtensionAOT(common.TestCase):
         if return_code != 0:
             return return_code
 
+    @unittest.skipIf(not TEST_CUDA, "some aspects of this test require CUDA")
+    def test_libtorch_agnostic(self):
+        import libtorch_agnostic
+
+        # (1) first test that SGD CPU kernel works
+        param = torch.rand(5, device="cpu")
+        grad = torch.rand_like(param)
+        weight_decay = 0.01
+        lr = 0.001
+        maximize = False
+
+        new_param = libtorch_agnostic.ops.sgd_out_of_place(
+            param, grad, weight_decay, lr, maximize
+        )
+        torch._fused_sgd_(
+            (param,),
+            (grad,),
+            (),
+            weight_decay=weight_decay,
+            momentum=0.0,
+            lr=lr,
+            dampening=0.0,
+            nesterov=False,
+            maximize=maximize,
+            is_first_step=False,
+        )
+        self.assertEqual(new_param, param)
+
+        # (2) then test that we don't hog unnecessary memory
+        def _run_identity(prior_mem, device):
+            t = torch.rand(32, 32, device=device)
+            self.assertGreater(torch.cuda.memory_allocated(device), prior_mem)
+            identi_t = libtorch_agnostic.ops.identity(t)
+            assert identi_t is t
+
+        device = torch.cuda.current_device()
+        init_mem = torch.cuda.memory_allocated(device)
+
+        for _ in range(3):
+            _run_identity(init_mem, device)
+            curr_mem = torch.cuda.memory_allocated(device)
+            self.assertEqual(curr_mem, init_mem)
+
 
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestPybindTypeCasters(common.TestCase):

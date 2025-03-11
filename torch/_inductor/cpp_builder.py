@@ -1487,6 +1487,13 @@ class CppBuilder:
             self._compile_only or self._precompiling or self._preprocessing
         )
 
+        # MSVC produces two files when precompiling: the actual .pch file, as well as an
+        # object file which must be linked into the final library.  This class assumes
+        # only one output file of note, so for now we'll error out here.
+        assert not _IS_WINDOWS or not self._precompiling, (
+            "Cannot currently precompile headers on Windows!"
+        )
+
         if self._compile_only:
             file_ext, output_flags = self.__get_object_flags()
         elif self._precompiling:
@@ -1521,19 +1528,8 @@ class CppBuilder:
 
         if self._precompiling:
             assert len(sources) == 1
-            header = sources[0]
-
-            if _IS_WINDOWS:
-                # Visual C++ and ICC both require a dummy source file to compile, in
-                # addition to the header.  Do this in a temporary directory, rather than
-                # a NamedTemporaryFile, because Windows won't read from files with open
-                # write handles.
-                self._dummy_source_dir = tempfile.TemporaryDirectory()
-                dummy_source = Path(self._dummy_source_dir.name) / "source.cpp"
-                dummy_source.write_text(f'#include "{header}"\n')
-                self._sources_args = f"/Yc{header} {str(dummy_source)}"
-            else:
-                self._sources_args = f"-x c++-header {header}"
+            # See above; we can currently assume this is not on MSVC.
+            self._sources_args = f"-x c++-header {sources[0]}"
         else:
             self._sources_args = " ".join(sources)
 
@@ -1551,8 +1547,9 @@ class CppBuilder:
 
         if precompiled_header := BuildOption.precompiled_header:
             if _IS_WINDOWS:
-                self._include_dirs_args = (
-                    f"/FI{precompiled_header} /Yu{precompiled_header} "
+                log.warning(
+                    "Precompiled header support for MSVC is currently unavailable; ignoring %s",
+                    precompiled_header,
                 )
             else:
                 self._include_dirs_args = f"-include {precompiled_header} "

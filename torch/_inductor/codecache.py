@@ -1363,7 +1363,7 @@ def split_aot_inductor_output_path(path: str) -> tuple[str, str]:
 
 @clear_on_fresh_inductor_cache
 class CudaKernelParamCache:
-    cache: dict[str, dict[str, str]] = {}
+    cache: dict[str, dict[str, Any]] = {}
     cache_clear = staticmethod(cache.clear)
 
     @classmethod
@@ -1381,7 +1381,7 @@ class CudaKernelParamCache:
         cls.cache[key] = params
 
     @classmethod
-    def get(cls, key: str) -> Optional[dict[str, str]]:
+    def get(cls, key: str) -> Optional[dict[str, Any]]:
         return cls.cache.get(key, None)
 
     @classmethod
@@ -1695,7 +1695,7 @@ class AotCodeCompiler:
             )
 
             # potentially, precompile the AOT header for this device
-            if config.aot_inductor.precompile_headers:
+            if config.aot_inductor.precompile_headers and not _IS_WINDOWS:
                 header_file = _get_cpp_wrapper_header(
                     device_type, aot_mode=graph.aot_mode
                 )
@@ -1950,6 +1950,10 @@ def _precompile_header(
     hashable_cmd_line: str,
     **compile_command: Any,
 ) -> str:
+    assert not _IS_WINDOWS, (
+        "CppBuilder does not currently support precompiling on Windows!"
+    )
+
     # Get the preprocessed output from the header file to be precompiled.  This allows
     # us to properly invalidate the file cache when any header dependency changes.
     #
@@ -1968,14 +1972,7 @@ def _precompile_header(
         def _get_file_checksum(filename: str) -> str:
             """Reading the whole preprocessed header in for hashing is very expensive,
             but calling a fast hashing utility in a subprocess is cheap."""
-            if _IS_WINDOWS:
-                cmd_output = subprocess.run(
-                    ["certutil", "-hashfile", filename, "SHA512"],
-                    capture_output=True,
-                    text=True,
-                )
-                return cmd_output.stdout.splitlines()[1]
-
+            # If Windows support needs to be added here, use certutil -hashfile.
             cmd_output = subprocess.run(
                 ("openssl", "sha512", filename), capture_output=True, text=True
             )
@@ -1995,10 +1992,7 @@ def _precompile_header(
         specified_dir=_HEADER_DIR,
     )
     cpp_builder = CppBuilder(
-        # MSVC expects a precompiled header named header.pch, while GCC and Clang expect
-        # header.h.gch and header.h.pch, respectively.  Handle this by trimming off the
-        # last two characters in the name on Windows.
-        name=header_full_path[:-2] if _IS_WINDOWS else header_full_path,
+        name=header_full_path,
         sources=header_full_path,
         BuildOption=header_build_option,
     )
@@ -2103,7 +2097,7 @@ class CppCodeCache:
             lib = None
 
             # if requested, pre-compile any headers
-            if config.cpp_cache_precompile_headers and (
+            if config.cpp_cache_precompile_headers and not _IS_WINDOWS and (
                 header_file := cls._get_uncompiled_header(device_type)
             ):
                 cpp_build_option.precompiled_header = _precompile_header(
