@@ -235,6 +235,7 @@ dtype_abbrs = {
     torch.uint32: "u32",
     torch.uint64: "u64",
     torch.bits16: "b16",
+    torch.bits1x8: "b1x8",
 }
 
 
@@ -619,8 +620,10 @@ class CodeGen:
                     node.meta.get("tensor_meta", node.meta.get("example_value", None)),
                 )
                 # use string as annotation, to make it valid python code
-
-                if isinstance(meta_val, torch.Tensor):
+                if isinstance(meta_val, torch.Tensor) and meta_val.layout not in (
+                    torch.sparse_csc,
+                    torch.sparse_csr,
+                ):
                     stride_annotation = (
                         f"{stringify_shape(meta_val.stride())}"
                         if include_stride
