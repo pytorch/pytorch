@@ -1171,6 +1171,29 @@ class SDPAKernelVariable(ContextWrappingVariable):
         return "_sdpa_kernel_variadic"
 
 
+class StringIOVariable(GenericContextWrappingVariable):
+    def __init__(self, cm_obj, **kwargs):
+        super().__init__(cm_obj, **kwargs)
+        self.initial_value = ""
+        self.newline = "\n"
+        self.buffer = ""
+
+    def call_method(self, tx, name, args, kwargs):
+        if name == "__init__" and len(args) == 0:
+            return variables.ConstantVariable(None)
+        elif name == "write":
+            s = args[0].as_python_constant()
+            self.buffer += s
+            return variables.ConstantVariable(len(s))
+        elif name == "getvalue":
+            import io
+
+            s = io.StringIO(initial_value=self.initial_value, newline=self.newline)
+            s.write(self.buffer)
+            return variables.ConstantVariable(s.getvalue())
+        return super().call_method(tx, name, args, kwargs)
+
+
 class StreamVariable(VariableTracker):
     def __init__(self, proxy, value, device, **kwargs) -> None:
         if proxy is not None and "example_value" in proxy.node.meta:
