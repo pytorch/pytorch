@@ -28,6 +28,7 @@ Error Formatting:
 
 import logging
 import os
+import re
 import textwrap
 import typing
 from enum import auto, Enum
@@ -129,11 +130,7 @@ class ShortenTraceback(TorchDynamoException):
 
     def remove_dynamo_frames(self) -> typing.Self:
         tb = self.__traceback__
-        if (
-            self.first_useful_frame is None
-            or tb is None
-            or os.environ.get("TORCHDYNAMO_VERBOSE") == "1"
-        ):
+        if self.first_useful_frame is None or tb is None or config.verbose:
             return self
         while tb.tb_frame is not self.first_useful_frame:
             tb = tb.tb_next
@@ -469,6 +466,28 @@ def unimplemented_v2_with_warning(
     unimplemented_v2(gb_type, context, explanation, hints, from_exc=e, log_warning=True)
 
 
+def format_graph_break_message(
+    gb_type: str,
+    context: str,
+    explanation: str,
+    hints: list[str],
+) -> str:
+    explanation = textwrap.indent(explanation, "    ").lstrip()
+    hints_str = "\n".join(
+        "  Hint: " + textwrap.indent(hint, "    ").lstrip() for hint in hints
+    )
+    context = textwrap.indent(context, "    ").lstrip()
+
+    msg = f"""\
+{gb_type}
+  Explanation: {explanation}
+{hints_str}
+
+  Developer debug context: {context}
+"""
+    return msg
+
+
 # TODO replace old unimplemented later
 def unimplemented_v2(
     gb_type: str,
@@ -488,15 +507,8 @@ def unimplemented_v2(
         explanation: User-facing context-dependent explanation for the graph break. Can be dynamic.
         hints: List of user-facing hints for the graph break.
     """
-    hints_str = "\n".join(hints)
-    hints_str = textwrap.indent(hints_str, "  Hint: ")
-    msg = f"""\
-{gb_type}
-  Explanation: {explanation}
-{hints_str}
 
-  Developer debug context: {context}
-"""
+    msg = format_graph_break_message(gb_type, context, explanation, hints)
     if log_warning:
         log.warning(msg)
     if from_exc is not _NOTHING:
@@ -533,11 +545,17 @@ def augment_exc_message(exc: Exception, msg: str = "\n", export: bool = False) -
         msg += f"\nfrom user code:\n {''.join(traceback.format_list(real_stack))}"
 
     if config.replay_record_enabled and hasattr(exc, "record_filename"):
-        msg += f"\nLast frame execution written to {exc.record_filename}. To run only this frame while debugging, run\
+        msg += (
+            f"\nLast frame execution written to {exc.record_filename}. To run only this frame while debugging, run\
  torch._dynamo.replay('{exc.record_filename}').\n"
+        )
 
     if not config.verbose and hasattr(exc, "real_stack"):
-        msg += '\nSet TORCH_LOGS="+dynamo" and TORCHDYNAMO_VERBOSE=1 for more information\n'
+        msg += (
+            "\nSet TORCHDYNAMO_VERBOSE=1 for the internal stack trace "
+            "(please do this especially if you're reporting a bug to PyTorch). "
+            'For even more developer context, set TORCH_LOGS="+dynamo"\n'
+        )
 
     if hasattr(exc, "inner_exception") and hasattr(
         exc.inner_exception, "minifier_path"
@@ -575,6 +593,10 @@ def get_exc_message(
     return filename, lineno
 
 
+def get_stack_above_dynamo() -> StackSummary:
+    return filter_stack(extract_stack())
+
+
 def get_real_stack(
     exc: Exception, frame: Optional[DynamoFrameType] = None
 ) -> Optional[StackSummary]:
@@ -600,7 +622,7 @@ def get_real_stack(
         # from where we are right now and rely on filter_stack to
         # get rid of all the dynamo frames.  For ease of testing
         # we apply this behavior to ALL Python versions
-        stack_above_dynamo = filter_stack(extract_stack())
+        stack_above_dynamo = get_stack_above_dynamo()
     else:
         stack_above_dynamo = StackSummary()
 
@@ -622,6 +644,49 @@ def filter_stack(stack: StackSummary) -> StackSummary:
         user_stack.append(frame)
 
     return user_stack
+
+
+def remove_resume_prefix(name: str) -> Optional[str]:
+    from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
+
+    match = re.match(f"{TORCH_DYNAMO_RESUME_IN_PREFIX}_(\\w+)_at_\\d+", name)
+    if match:
+        return match.group(1)
+    return None
+
+
+def collapse_resume_frames(stack: StackSummary) -> StackSummary:
+    """
+    When we graph break, we create a resume function and make a regular Python call
+    to it, which gets intercepted by Dynamo. This behavior is normally shown in the
+    traceback, which can be confusing to a user. So we can filter out resume frames
+    for better traceback clarity.
+
+    Example:
+    File "..." line 3, in f
+        <line 3>
+    File "..." line 5, in torch_dynamo_resume_in_f_at_80
+        <line 5>
+    File "..." line 10, in torch_dynamo_resume_in_f_at_120
+        <line 10>
+
+    becomes
+    File "..." line 10, in f
+        <line 10>
+    """
+
+    new_stack = StackSummary()
+    for frame in stack:
+        if frame.filename is None:
+            continue
+        name = remove_resume_prefix(frame.name)
+        if new_stack and name and new_stack[-1].name == name:
+            new_stack[-1] = frame
+            frame.name = name
+        else:
+            new_stack.append(frame)
+
+    return new_stack
 
 
 def format_error_msg_verbose(
