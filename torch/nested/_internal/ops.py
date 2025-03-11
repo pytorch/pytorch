@@ -1796,7 +1796,7 @@ def select_int(func, *args, **kwargs):
     if operating_on_batch:
         index = new_kwargs["index"]
         size = inp._values.size(inp._ragged_idx - 1)
-        if size <= 1:
+        if inp.size(new_kwargs["dim"]) == 1:
             # i think this shortcut is necessary:
             # when adding the guards below, test_compile_backward_select will
             # try to guard (or rather test?) on the following
