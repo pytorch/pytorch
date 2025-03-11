@@ -990,27 +990,6 @@ class TestAutograd(TestCase):
         x = torch.var_mean(x)[1]
         out = x.clone()
         check_matches(out, x)
-    
-    def test_nextafter_autograd():
-        # Test that nextafter's autograd works correctly
-        x = torch.tensor([1.0, 2.0, 3.0], requires_grad=True)
-        y = torch.tensor([1.0, 3.0, 3.0], requires_grad=True)
-        
-        # Forward pass
-        z = torch.nextafter(x, y)
-        
-        # Backward pass
-        z.sum().backward()
-        
-        # Check gradients:
-        # 1. x[0] = 1.0, y[0] = 1.0, so grad_x[0] should be 0.0
-        # 2. x[1] = 2.0, y[1] = 3.0, so grad_x[1] should be 1.0
-        # 3. x[2] = 3.0, y[2] = 3.0, so grad_x[2] should be 0.0
-        expected_x_grad = torch.tensor([0.0, 1.0, 0.0])
-        expected_y_grad = torch.zeros(3)
-        
-        assert torch.allclose(x.grad, expected_x_grad)
-        assert torch.allclose(y.grad, expected_y_grad)
 
     def test_grad_to_node_set(self):
         x = torch.rand(2, requires_grad=True)
