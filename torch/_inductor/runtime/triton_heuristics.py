@@ -1160,6 +1160,7 @@ class TritonCompileResult(CompileResult):
         compile_meta = self.compile_meta
         binary = self.kernel
         fn = binary.src.fn
+        binary._init_handles()
         """
         https://github.com/pytorch/pytorch/issues/115344
 
