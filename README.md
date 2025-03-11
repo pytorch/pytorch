@@ -8,7 +8,7 @@ PyTorch is a Python package that provides two high-level features:
 
 You can reuse your favorite Python packages such as NumPy, SciPy, and Cython to extend PyTorch when needed.
 
-Our trunk health (Continuous Integration signals) can be found at [hud.pytorch.org](https://hud.pytorch.org/ci/pytorch/pytorch/main).
+Our trunk health (Continuous Integration signals) can bfound at [hud.pytorch.org](https://hud.pytorch.org/ci/pytorch/pytorch/main).
 
 <!-- toc -->
 
