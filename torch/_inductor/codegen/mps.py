@@ -596,7 +596,7 @@ class MetalScheduling(SIMDScheduling):
 
     def __init__(self, scheduler: Optional[Scheduler]) -> None:
         super().__init__(scheduler)
-        wrapper = getattr(V.graph, "wrapper_code", None)
+        wrapper = V.graph.wrapper_code
         if wrapper is not None:
             wrapper.header.splice(
                 "from torch._inductor.runtime.runtime_utils import compile_mps_shader"
