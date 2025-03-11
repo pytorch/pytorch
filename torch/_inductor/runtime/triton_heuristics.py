@@ -16,7 +16,7 @@ import sys
 import threading
 import time
 from collections import namedtuple
-from typing import Any, Callable, Optional, TYPE_CHECKING
+from typing import Any, Callable, Generic, Optional, TYPE_CHECKING, TypeVar, Union
 
 import torch
 from torch._prims_common import compute_required_storage_length
@@ -52,6 +52,7 @@ from .runtime_utils import (
     triton_hash_to_path_key,
     validate_triton_config,
 )
+from .static_cuda_launcher import StaticallyLaunchedCudaKernel
 from .triton_compat import (
     ASTSource,
     autograd_profiler,
@@ -75,6 +76,8 @@ if TYPE_CHECKING:
 
     LauncherType = Any
 
+_KernelType = Union[CompiledKernel, StaticallyLaunchedCudaKernel]
+_T = TypeVar("_T", bound=_KernelType)
 
 log = logging.getLogger(__name__)
 
@@ -221,7 +224,7 @@ class CachingAutotuner(KernelInterface):
             for c in self.configs:
                 log.debug(c)
 
-        self.compile_results: list[CompileResult] = []
+        self.compile_results: list[CompileResult[_KernelType]] = []
         self.launchers: list[LauncherType] = []
         self.lock = threading.Lock()
         if os.getenv("TRITON_CACHE_DIR") is None:
@@ -281,7 +284,7 @@ class CachingAutotuner(KernelInterface):
         if self.compile_results:
             for result in self.compile_results:
                 TritonBundler.put(
-                    triton_hash_to_path_key(result.kernel.hash),
+                    triton_hash_to_path_key(result.kernel.hash),  # type: ignore[attr-defined]
                     self.triton_meta.get("device", 0),
                 )
             return
@@ -468,7 +471,7 @@ class CachingAutotuner(KernelInterface):
 
         return get_interface_for_device(self.device_props.type.replace("hip", "cuda"))
 
-    def _precompile_config(self, cfg: Config) -> CompileResult:
+    def _precompile_config(self, cfg: Config) -> CompileResult[_KernelType]:
         """Ahead of time compile a given autotuner config."""
         compile_meta = copy.deepcopy(self.triton_meta)
         cfg_kwargs = cfg.kwargs
@@ -541,14 +544,16 @@ class CachingAutotuner(KernelInterface):
             triton_hash_to_path_key(binary.hash), self.triton_meta.get("device", 0)
         )
         # If the binary has a cubin file to directly launch, save it on the binary
-        static_launcher = StaticTritonCompileResult.can_statically_launch(binary, self.inductor_meta, self.triton_meta, self.heuristic_type)
+        static_launcher = StaticTritonCompileResult.can_statically_launch(
+            binary, self.inductor_meta, self.triton_meta, self.heuristic_type
+        )
         if static_launcher is not None:
-            result = StaticTritonCompileResult(static_launcher, cfg)
+            result = StaticTritonCompileResult(
+                static_launcher, cfg, compile_meta, self.inductor_meta
+            )
             return result
 
         return TritonCompileResult(binary, cfg, compile_meta, self.inductor_meta)
-
-
 
     def _get_args_with_constexprs(self, args, launcher):
         """
@@ -982,11 +987,21 @@ class _ConstRepr:
         return self.value
 
 
-class CompileResult:
-    def make_launcher(self) -> Callable:
-        ...
+class CompileResult(Generic[_T]):
+    def __init__(
+        self,
+        kernel: _T,
+        config: Config,
+        compile_meta: dict[str, Any],
+        inductor_meta: dict[str, Any],
+    ):
+        self.kernel = kernel
+        self.config = config
 
-class StaticTritonCompileResult(CompileResult):
+    def make_launcher(self) -> LauncherType: ...
+
+
+class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
     """
     TritonCompileResult that uses StaticCudaLauncher,
     which vastly simplifies the setup and metadata needed to be kept.
@@ -997,7 +1012,7 @@ class StaticTritonCompileResult(CompileResult):
         kernel: CompiledKernel,
         inductor_meta: dict[str, Any],
         triton_meta: dict[str, Any],
-        heuristic_type : HeuristicType,
+        heuristic_type: HeuristicType,
     ) -> Optional[StaticallyLaunchedCudaKernel]:
         if triton_meta.get("device_type", None) != "cuda":
             # Only cuda kernels
@@ -1010,9 +1025,9 @@ class StaticTritonCompileResult(CompileResult):
             return None
 
         cubin_location = os.path.join(
-            triton_cache_dir(triton_meta.get("device, 0")),
+            triton_cache_dir(triton_meta.get("device", 0)),
             triton_hash_to_path_key(kernel.hash),
-            f"{kernel.src.fn.__name__}.cubin"
+            f"{kernel.src.fn.__name__}.cubin",
         )
 
         if not os.path.exists(cubin_location):
@@ -1028,16 +1043,7 @@ class StaticTritonCompileResult(CompileResult):
 
         return static_kernel
 
-    def __init__(
-        self,
-        kernel: StaticallyLaunchedCudaKernel,
-        config: Config,
-    ):
-        self.kernel = kernel
-        self.config = config
-
-
-    def make_launcher(self):
+    def make_launcher(self) -> LauncherType:
         # Load the binary on the parent
         self.kernel.load_kernel()
         grid_meta = self.config.kwargs
@@ -1050,15 +1056,16 @@ class StaticTritonCompileResult(CompileResult):
             self.kernel.run(grid_tuple, stream, *args)
             return self.kernel
 
-        launcher.config = self.config
-        launcher.n_regs = self.kernel.n_regs
-        launcher.n_spills = self.kernel.n_spills
-        launcher.shared = self.kernel.shared
-        launcher.store_cubin = False
+        launcher.config = self.config  # type: ignore[attr-defined]
+        launcher.n_regs = self.kernel.n_regs  # type: ignore[attr-defined]
+        launcher.n_spills = self.kernel.n_spills  # type: ignore[attr-defined]
+        launcher.shared = self.kernel.shared  # type: ignore[attr-defined]
+        launcher.store_cubin = False  # type: ignore[attr-defined]
+        launcher._is_static = True  # type: ignore[attr-defined]
         return launcher
 
 
-class TritonCompileResult(CompileResult):
+class TritonCompileResult(CompileResult[CompiledKernel]):
     """
     Upstream Triton CompileKernel can not be pickled.  This is a wrapper
     to support serialization and generate the launcher function.
@@ -1076,7 +1083,6 @@ class TritonCompileResult(CompileResult):
         compile_meta: dict[str, Any],
         inductor_meta: dict[str, Any],
     ) -> None:
-        super().__init__()
         self.kernel = kernel
         self.config = config
         self.compile_meta = compile_meta
@@ -1199,7 +1205,6 @@ class TritonCompileResult(CompileResult):
                 for name in fn.arg_names
                 if name not in cfg.kwargs and name not in none_args
             ]
-
         binary_shared = (
             binary.shared if hasattr(binary, "shared") else binary.metadata.shared
         )
@@ -2410,159 +2415,3 @@ def grid_combo_kernels(
         return grid_fn if not is_sequential else seq_grid_fn
     else:
         return grid_fn_default_meta if not is_sequential else seq_grid_fn_default_meta
-
-MAX_SHARED_MEMORY = 49152
-
-class StaticallyLaunchedCudaKernel:
-    """
-    Parses the metadata of a CompiledKernel from Triton into a structure that can
-    launch the cuda kernel directly. Only works for triton kernels compiled to cubin.
-
-    Doing this avoids C++ codegen and compilation during compile, since we can use a
-    statically compiled library to launch the kernel. To avoid mallocing for the arguments,
-    we have a launcher for different numbers of arguments up to a max. StaticCudaLauncher
-    only supports # of arguments up until 10 for now.
-
-    Workflow:
-    Compile time:
-    1. Compile a kernel with triton and get a CompiledKernel
-    2. Instantiate kernel = StaticallyLaunchedCudaKernel(triton_kernel)
-    3. Write to a cubin file: kernel.write_cubin_to_file(filepath)
-    4. Call kernel.load_kernel() (CUDA should be initialized by this point) to load the cubin
-    Runtime:
-    5. Call kernel.run(grid, stream, args) to launch the kernel
-
-    Note that after step 3, StaticallyLaunchedCudaKernel is fully pickleable/serializable.
-    This allows it to be cached by FXGraphCache/TritonBundler, as well as sent from the worker
-    to the parent process in inductor.
-    """
-
-    def __init__(self, kernel: CompiledKernel):
-        # TODO: Can only import this if we know torch was compiled with CUDA
-        # Maybe we make a class that just errors otherwise?
-        if hasattr(kernel, "_cubin_path"):
-            self.cubin_path = kernel._cubin_path
-        else:
-            self.cubin = kernel.asm["cubin"]
-
-        # TODO: is this right?
-        self.name = kernel.src.fn.__name__
-        self.hash = kernel.hash
-        if kernel.__class__.launch_enter_hook is not None or kernel.__class__.launch_exit_hook is not None:
-            raise NotImplementedError("We don't support launch enter or launch exit hooks")
-        self.num_warps = kernel.metadata.num_warps
-        self.shared = kernel.shared if hasattr(kernel, "shared") else kernel.metadata.shared
-        if self.shared > MAX_SHARED_MEMORY:
-            raise NotImplementedError("Shared memory size > 48KB requires special triton handling")
-        self.arg_tys = self.arg_ty_from_signature(kernel.src)
-        self.function: Optional[int] = (
-            None  # Loaded by load_kernel(on the parent process)
-        )
-        num_args = len(self.arg_tys)
-        num_ctas = 1
-        if hasattr(kernel, "num_ctas"):
-            num_ctas = kernel.num_ctas
-        elif hasattr(kernel, "metadata"):
-            num_ctas = kernel.metadata.num_ctas
-
-        if num_ctas != 1:
-            raise NotImplementedError(
-                "Static cuda launcher only supports num_ctas == 1"
-            )
-
-        if num_args > 25 or num_args == 0:
-            raise NotImplementedError(
-                "No static cuda launcher available for %d arguments", num_args
-            )
-
-    def load_kernel(self):
-        from torch._C import _StaticCudaLauncher
-
-        assert hasattr(self, "cubin_path")
-        if self.function is not None:
-            return
-        (self.function, self.n_regs, self.n_spills) = _StaticCudaLauncher._load_kernel(
-            self.cubin_path, self.name, self.shared
-        )
-
-    def write_cubin_to_file(self, filepath):
-        if hasattr(self, "cubin_path"):
-            return
-        # Just used by tests for now.
-        # TODO: derive cubin_path from wherever triton stores the cubin file on disk.
-        with open(filepath, "wb") as f:
-            f.write(self.cubin)
-            del self.cubin
-        self.cubin_path = filepath
-
-    def extract_type(self, ty: str) -> str:
-        """
-        Takes a triton type from CompiledKernel.signature and
-        converts it into a single char encoding. _StaticCudaLauncher
-        will switch on this char to figure out what type the underlying
-        value should be passed to the triton kernel as.
-        """
-        if ty[0] == "*":
-            return "O"
-        elif ty == "nvTmaDesc":
-            raise NotImplementedError("nvTmaDesc kernels are not yet supported")
-        return {
-            "i1": "i",
-            "i8": "b",
-            "i16": "h",
-            "i32": "i",
-            "i64": "l",
-            "u1": "I",
-            "u8": "B",
-            "u16": "H",
-            "u32": "I",
-            "u64": "K",
-            "fp16": "f",
-            "bf16": "f",
-            "fp32": "f",
-            "f32": "f",
-            "fp64": "d",
-            # TODO handle nvTmaDesc/CUtensormap
-        }[ty]
-
-    def arg_ty_from_signature(self, src: ASTSource):
-        def index_key(i) -> int:
-            return src.fn.arg_names.index(i) if isinstance(i, str) else i
-
-        signature = {index_key(key): value for key, value in src.signature.items()}
-        # Sorts signature by index_key
-        tys = [signature[i] for i in sorted(signature.keys())]
-        # Despite requiring them to be passed in, the triton CUDA launcher
-        # completely ignores the constexprs passed into it when generating code.
-        # So we can ignore them here too
-        return "".join(self.extract_type(ty) for ty in tys if ty != "constexpr")
-
-
-    def run(self, grid: tuple[int, ...], stream: int, *args):
-        """Actually run the kernel at runtime. This function is the hot codepath."""
-        from torch._C import _StaticCudaLauncher
-
-        # Assert load_kernel() has been called and args match
-        assert self.function is not None
-
-        # TODO: actually, if the args *don't* match, we probably should
-        # throw an exception. But if inductor is the only one calling this
-        # thing, it should always match.
-        assert len(args) == len(self.arg_tys)
-
-        # TODO: can handle grid functions here or in C++, so
-        # that we don't need the grid handler above.
-        grid_x = grid[0]
-        grid_y = grid[1] if len(grid) > 1 else 1
-        grid_z = grid[2] if len(grid) > 2 else 1
-        _StaticCudaLauncher._launch_kernel(
-            self.function,
-            grid_x,
-            grid_y,
-            grid_z,
-            self.num_warps,
-            self.shared,
-            self.arg_tys,
-            args,
-            stream,
-        )
