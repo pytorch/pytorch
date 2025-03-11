@@ -20,8 +20,8 @@ from tools.testing.test_run import TestRun
 # contains the test. Test file with path test/a/b.py should of the form a/b.
 # Regexes should be based on repo root.
 ADDITIONAL_MAPPINGS = {
-    # Not actual test files but rather functions defined in run_test.py that run
-    # tests in test/cpp_extensions.
+    # Not files that are tracked by git but rather functions defined in
+    # run_test.py that generate test files which run tests in test/cpp_extensions.
     "test_cpp_extensions_aot_ninja": [r"test\/cpp_extensions.*"],
     "test_cpp_extensions_aot_no_ninja": [r"test\/cpp_extensions.*"],
 }
