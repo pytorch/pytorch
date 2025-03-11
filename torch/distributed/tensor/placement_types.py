@@ -463,9 +463,10 @@ class _StridedShard(Shard):
         shard_list: list[torch.Tensor] = []
         pad_sizes: list[int] = []
         for i in range(num_chunks):
-            shard = torch.cat([
-                tensor_list[i + j * num_chunks] for j in range(self.split_factor)
-            ], dim=self.dim)
+            shard = torch.cat(
+                [tensor_list[i + j * num_chunks] for j in range(self.split_factor)],
+                dim=self.dim,
+            )
             if with_padding:
                 pad_size = full_chunk_size * self.split_factor - shard.size(self.dim)
                 shard = pad_tensor(shard, self.dim, pad_size)
