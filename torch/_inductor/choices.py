@@ -13,6 +13,7 @@ from torch.utils._ordered_set import OrderedSet
 
 from . import config, ir
 from .codecache import write_text
+from .ir import is_cpu, Pointwise, Reduction, StorageBox
 from .memory import (
     reorder_for_peak_memory,
     topological_sort_bfs,
@@ -736,3 +737,22 @@ class InductorChoices:
         return reorder_for_peak_memory(
             nodes, name_to_buf, name_to_fused_node, graph_inputs, graph_outputs, methods
         )
+
+    @staticmethod
+    def should_realize_on_reuse(box: StorageBox, users):  # type: ignore[no-untyped-def]
+        """
+        A heuristic to decide if we should realize a tensor
+        that is used multiple times.
+        """
+        if users > 1 and isinstance(box.data, (Pointwise, Reduction)):
+            if is_cpu(box.data):
+                # Heuristic for realizing reused result of heavy ops on cpu
+                opcount = box.data.inner_fn_opcount()
+                heavy_ops = ["exp", "sigmoid"]  # a list of heavy ops
+                if any(x in opcount.used_ops for x in heavy_ops):
+                    return True
+            return (
+                box.num_reads() > config.realize_reads_threshold
+                or box.has_large_inner_fn()
+            )
+        return False
