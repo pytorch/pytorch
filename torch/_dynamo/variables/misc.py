@@ -380,12 +380,7 @@ class ExceptionVariable(VariableTracker):
         return super().var_getattr(tx, name)
 
     def __str__(self):
-        ctx = self.__context__
-        if istype(ctx, ConstantVariable):
-            ctx = None
-        else:
-            ctx = ctx.exc_type.__name__
-        return f"{self.__class__.__name__}({self.exc_type.__name__}, context={ctx})"
+        return f"{self.__class__.__name__}({self.exc_type})"
 
     __repr__ = __str__
 
