@@ -1380,6 +1380,13 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             set_subgraph_inputs="flatten_manual",
         )
 
+        # Ensure that the output of scan is a flattened list of elements,
+        # because downstream operations assume that the output of HOPs
+        # is flattened
+        output_node = combine_graph.find_nodes(op="output")[0]
+        output_node.args = (pytree.tree_leaves(output_node.args),)
+        combine_graph.lint()
+
         # Collect the results from the comnbine_fn
         results, _combine_treespec = _make_inlined(tx, pytree.tree_flatten)(
             combine_result
