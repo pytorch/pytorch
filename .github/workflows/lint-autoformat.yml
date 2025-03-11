@@ -15,7 +15,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' && github.event.pull_request.user.login != 'ezyang' && github.event.pull_request.user.login != 'malfet' && !startsWith(github.head_ref, 'export-') }}
     steps:
       - name: Checkout pytorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@csl/no_clean_workspace
         with:
           submodules: true
           fetch-depth: 0

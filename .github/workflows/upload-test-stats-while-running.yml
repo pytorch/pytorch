@@ -16,7 +16,7 @@ jobs:
     runs-on: linux.2xlarge
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@csl/no_clean_workspace
         with:
           fetch-depth: 1
           submodules: false

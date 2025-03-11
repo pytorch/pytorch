@@ -95,7 +95,7 @@ jobs:
 
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@csl/no_clean_workspace
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
