@@ -112,6 +112,34 @@ class AOTInductorModelContainer {
     pending_models_available_.notify_one();
   }
 
+  // Non-thread-aware variant of run(). Obviously unsafe to use in a threaded
+  // environment :)
+  void run_single_threaded(
+      AtenTensorHandle*
+          input_handles, // array of input AtenTensorHandle; handles
+                         // are stolen; the array itself is borrowed
+      AtenTensorHandle*
+          output_handles, // array for writing output AtenTensorHandle; handles
+                          // will be stolen by the caller; the array itself is
+                          // borrowed
+      DeviceStreamType stream,
+      AOTIProxyExecutorHandle proxy_executor) {
+    auto* model = available_models_[0];
+
+    if (!constant_folded_) {
+      auto folded_const_map = model->run_const_fold(
+          stream, proxy_executor, /* initialization = */ true);
+      update_constant_buffer(
+          std::move(folded_const_map),
+          /* use_inactive = */ false,
+          /* validate_full_update = */ false);
+      constant_folded_ = true;
+    }
+
+    model->run_single_threaded(
+        input_handles, output_handles, stream, proxy_executor);
+  }
+
   size_t num_constants() const {
     if (this->num_models() == 0) {
       throw std::runtime_error("No available models in container!");
@@ -223,7 +251,15 @@ class AOTInductorModelContainer {
 
   bool _should_skip_update(const size_t idx) const {
     auto constant_type = models_[0]->constant_type(static_cast<int64_t>(idx));
+    // We should skip constants
     return constant_type == ConstantType::TensorConstant;
+  }
+
+  bool _could_skip_update(const size_t idx) const {
+    auto constant_type = models_[0]->constant_type(static_cast<int64_t>(idx));
+    // Buffer can be optionally skipped, so if it not provided by upstream
+    // services, it is OK to relax the check.
+    return constant_type == ConstantType::Buffer;
   }
 
   void assert_all_constants(
@@ -238,10 +274,11 @@ class AOTInductorModelContainer {
           std::string(models_[0]->constant_name(static_cast<int64_t>(idx)));
       auto it = constants_map.find(constant_name);
       if (it == constants_map.end()) {
-        if (_should_skip_update(idx)) {
+        if (_should_skip_update(idx) || _could_skip_update(idx)) {
           // tracing sometimes creates tensors that are non-existent in
           // original graph. We could skip those and do a direct copy.
-          std::cerr << "[WARNING] Found constant " << constant_name
+          std::cerr << "[WARNING] Found constant or module state buffer "
+                    << constant_name
                     << " in model, but not provided by user!\n";
           continue;
         }
@@ -272,13 +309,12 @@ class AOTInductorModelContainer {
       auto constant_name =
           std::string(models_[0]->constant_name(static_cast<int64_t>(idx)));
       auto it = constants_map.find(constant_name);
-      if (it == constants_map.end() &&
-          !(_should_skip_update(idx) && use_inactive)) {
+      if (it == constants_map.end() && !use_inactive) {
         continue;
       }
 
       AtenTensorHandle tensor;
-      if (_should_skip_update(idx) && use_inactive) {
+      if (it == constants_map.end() && use_inactive) {
         aoti_torch_clone(
             original_constants_map->find(constant_name)->second.get(), &tensor);
       } else {
@@ -313,13 +349,12 @@ class AOTInductorModelContainer {
       auto constant_name =
           std::string(models_[0]->constant_name(static_cast<int64_t>(idx)));
       auto it = constants_map.find(constant_name);
-      if (it == constants_map.end() &&
-          !(_should_skip_update(idx) && use_inactive)) {
+      if (it == constants_map.end() && !use_inactive) {
         continue;
       }
 
       AtenTensorHandle tensor;
-      if (_should_skip_update(idx) && use_inactive) {
+      if (it == constants_map.end() && use_inactive) {
         tensor = original_constants_map->find(constant_name)->second.get();
       } else {
         tensor = it->second;

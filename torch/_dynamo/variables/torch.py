@@ -196,7 +196,7 @@ def get_overridable_functions():
 
     from torch.overrides import get_overridable_functions as get_overridable_functions_
 
-    funcs = set(chain(*get_overridable_functions_().values()))
+    funcs = set(chain.from_iterable(get_overridable_functions_().values()))
     more = {
         torch.ones,
         torch.ones_like,

@@ -459,7 +459,9 @@ class AOTInductorTestsTemplate:
         compile_inputs = (torch.randn(2048, 1, device=self.device),)
         dim0_x = Dim("dim0_x", min=2, max=2048)
         dynamic_shapes = {"x": {0: dim0_x}}
-        ep = torch.export.export(model, compile_inputs, dynamic_shapes=dynamic_shapes)
+        ep = torch.export.export(
+            model, compile_inputs, dynamic_shapes=dynamic_shapes, strict=True
+        )
         optimized = torch._inductor.aoti_load_package(
             torch._inductor.aoti_compile_and_package(
                 ep,
@@ -4084,10 +4086,9 @@ class AOTInductorTestsTemplate:
         # input u0 was defined as int32_t initially, verify for every kernel var args downstream,
         # it gets explicitly declared using its data types in the cpp wrapper codegen code.
         expected_scalar_args = [
-            "int64_t var_1 = u0;",
-            "int64_t var_4 = u0;",
-            "int64_t var_7 = u0;",
-            "int64_t var_12 = u0;",
+            "buf3, u0",
+            "buf4, u0",
+            "buf3, buf4, buf2, u0",
         ]
         # check the new behavior of codegen is expected
         result, code = run_and_get_cpp_code(
@@ -4565,6 +4566,78 @@ class AOTInductorTestsTemplate:
             "x": {0: dim_even},
         }
         self.check_model(Model(), example_inputs, dynamic_shapes=dynamic_shapes)
+
+    def test_with_cudagraphs(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        # define CUDAGraph handling wrapper (only works with kwargs for simplicity)
+        def cudagraph(f):
+            _graphs = {}
+
+            def f_(**kwargs):
+                key = hash(
+                    tuple(
+                        tuple(kwargs[a].shape)
+                        for a in sorted(kwargs.keys())
+                        if isinstance(kwargs[a], torch.Tensor)
+                    )
+                )
+                if key in _graphs:
+                    wrapped, *_ = _graphs[key]
+                    return wrapped(**kwargs)
+                g = torch.cuda.CUDAGraph()
+                in_tensors = {
+                    k: v.clone() if isinstance(v, torch.Tensor) else v
+                    for k, v in kwargs.items()
+                }
+                f(**in_tensors)  # stream warmup
+                with torch.cuda.graph(g):
+                    out_tensors = f(**in_tensors)
+
+                def wrapped(**kwargs):
+                    for key in kwargs:
+                        in_tensors[key].copy_(kwargs[key])
+                    g.replay()
+                    if isinstance(out_tensors, torch.Tensor):
+                        return out_tensors.clone()
+                    elif isinstance(out_tensors, (list, tuple)):
+                        return type(out_tensors)(o.clone() for o in out_tensors)
+                    raise ValueError("unsupported output type encountered")
+
+                _graphs[key] = (wrapped, g, in_tensors, out_tensors)
+                return wrapped(**kwargs)
+
+            return f_
+
+        # define a simple model
+        model = torch.nn.Linear(10, 20).to(device=self.device)
+
+        # export + AOTI
+        model_kwargs = {
+            "input": torch.randn(3, 10, device=self.device),
+        }
+        ep = torch.export.export(model, args=(), kwargs=model_kwargs, strict=True)
+
+        optimized = torch._inductor.aoti_load_package(
+            torch._inductor.aoti_compile_and_package(
+                ep,
+                inductor_configs={"max_autotune": True},
+            ),
+            # NB: this flag avoids a CUDAGraph + AOTI runtime multi-threading conflict
+            # "Error: operation not permitted when stream is capturing"
+            run_single_threaded=True,
+        )
+
+        # enable CUDAGraphs
+        optimized = cudagraph(optimized)
+
+        # warmup -> run with CUDAGraphs
+        for _ in range(3):
+            optimized(**model_kwargs)
+
+        # compare against eager
+        self.assertEqual(optimized(**model_kwargs), model(**model_kwargs))
 
 
 class AOTInductorLoggingTest(LoggingTestCase):
