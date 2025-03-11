@@ -19,7 +19,8 @@ class C10_EXPORT AOTIModelContainerRunnerXpu : public AOTIModelContainerRunner {
       const std::string& model_so_path,
       size_t num_models = 1,
       const std::string& device_str = "xpu",
-      const std::string& kernel_bin_dir = "");
+      const std::string& kernel_bin_dir = "",
+      const bool run_single_threaded = false);
 
   ~AOTIModelContainerRunnerXpu() override;
 

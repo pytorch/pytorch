@@ -1961,6 +1961,16 @@ communication mechanism.
           .def("rank", &::c10d::ProcessGroup::getRank, R"(Get the rank of this process group.)")
           .def("size", &::c10d::ProcessGroup::getSize, R"(Get the size of this process group.)")
           .def("name", &::c10d::ProcessGroup::getBackendName, R"(Get the name of this process group.)")
+          .def(
+              "abort",
+              &::c10d::ProcessGroup::abort,
+              py::call_guard<py::gil_scoped_release>(),
+              "abort all operations and connections if supported by the backend")
+          .def(
+              "shutdown",
+              &::c10d::ProcessGroup::shutdown,
+              py::call_guard<py::gil_scoped_release>(),
+              "shutdown the process group")
           .def("_id", &::c10d::ProcessGroup::getID)
           .def(
               "_backend_id",
@@ -2478,6 +2488,16 @@ Arguments:
           .def("rank", &::c10d::Backend::getRank)
           .def("size", &::c10d::Backend::getSize)
           .def("name", &::c10d::Backend::getBackendName)
+          .def(
+              "abort",
+              &::c10d::Backend::abort,
+              py::call_guard<py::gil_scoped_release>(),
+              "abort all operations and connections if supported by the backend")
+          .def(
+              "shutdown",
+              &::c10d::Backend::shutdown,
+              py::call_guard<py::gil_scoped_release>(),
+              "shutdown the backend")
           .def_property_readonly(
               "supports_splitting",
               &::c10d::Backend::supportsSplitting,
@@ -2972,12 +2992,6 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               py::arg("size"),
               py::arg("timeout") = ::c10d::kProcessGroupNCCLDefaultTimeout,
               R"(Create a new ProcessGroupNCCL instance.)")
-          .def(
-              "_shutdown",
-              [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self) {
-                return self->shutdown();
-              },
-              py::call_guard<py::gil_scoped_release>())
           .def("_group_start", &::c10d::ProcessGroupNCCL::groupStart)
           .def("_group_end", &::c10d::ProcessGroupNCCL::groupEnd)
           .def(
@@ -3025,11 +3039,6 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           .def(
               "deregister_mem_pool",
               &::c10d::ProcessGroupNCCL::deregisterMemPool)
-          .def(
-              "abort",
-              &::c10d::ProcessGroupNCCL::abort,
-              py::call_guard<py::gil_scoped_release>(),
-              R"(Abort the process group.)")
           .def(
               "_is_initialized",
               &::c10d::ProcessGroupNCCL::isInitialized,
@@ -3222,66 +3231,68 @@ Example::
       .def_readonly("time_finished", &::c10d::WorkInfo::timeFinished)
       .def_readonly("active_duration", &::c10d::WorkInfo::activeDuration);
 
-  py::class_<
-      ::c10d::Work,
-      c10::intrusive_ptr<::c10d::Work>,
-      ::c10d::PyProcessGroup::PyWork>(module, "Work", R"(
+  auto work =
+      py::class_<
+          ::c10d::Work,
+          IntrusivePtrNoGilDestructor<::c10d::Work>,
+          ::c10d::PyProcessGroup::PyWork>(module, "Work", R"(
 A `Work` object represents the handle to a pending asynchronous operation in
 PyTorch's distributed package. It is returned by non-blocking collective operations,
 such as `dist.all_reduce(tensor, async_op=True)`.
 )")
-      .def(py::init<>())
-      .def("is_completed", &::c10d::Work::isCompleted)
-      .def(
-          "is_success",
-          [](::c10d::Work& work) -> bool {
-            TORCH_WARN_ONCE(
-                fmt::format(kDeprecationWarning, "Work::is_success"));
-            return work.isSuccess();
-          })
-      .def(
-          "exception",
-          [](::c10d::Work& work) -> std::exception_ptr {
-            TORCH_WARN_ONCE(
-                fmt::format(kDeprecationWarning, "Work::exception"));
-            return work.exception();
-          })
-      .def(
-          "source_rank",
-          [](::c10d::Work& work) -> int {
-            TORCH_WARN_ONCE(
-                fmt::format(kDeprecationWarning, "Work::source_rank"));
-            return work.sourceRank();
-          })
-      .def("_source_rank", &::c10d::Work::sourceRank)
-      .def(
-          "result",
-          [](::c10d::Work& work) -> std::vector<at::Tensor> {
-            // Deprecation reason:
-            // Work.result() returns a vector of tensors. This signature is
-            // problematic as some collectives may just return one tensor
-            // (e.g all-reduce), while some others may return multiple
-            // tensors (e.g. all-gather).
-            // Deprecating work.result() would
-            // also allow us to remove the `outputs_` field in the Work
-            // class, avoiding an "artificial" reference to the tensors,
-            // which could potentially hold up the tensors' memory.
-            TORCH_WARN_ONCE(fmt::format(kDeprecationWarning, "Work::result"));
-            return work.result();
-          })
-      .def(
-          "synchronize",
-          [](::c10d::Work& work) -> void {
-            TORCH_WARN_ONCE(
-                fmt::format(kDeprecationWarning, "Work::synchronize"));
-            work.synchronize();
-          })
-      .def(
-          "wait",
-          &::c10d::Work::wait,
-          py::arg("timeout") = kNoTimeout,
-          py::call_guard<py::gil_scoped_release>(),
-          R"(
+          .def(py::init<>())
+          .def("is_completed", &::c10d::Work::isCompleted)
+          .def(
+              "is_success",
+              [](::c10d::Work& work) -> bool {
+                TORCH_WARN_ONCE(
+                    fmt::format(kDeprecationWarning, "Work::is_success"));
+                return work.isSuccess();
+              })
+          .def(
+              "exception",
+              [](::c10d::Work& work) -> std::exception_ptr {
+                TORCH_WARN_ONCE(
+                    fmt::format(kDeprecationWarning, "Work::exception"));
+                return work.exception();
+              })
+          .def(
+              "source_rank",
+              [](::c10d::Work& work) -> int {
+                TORCH_WARN_ONCE(
+                    fmt::format(kDeprecationWarning, "Work::source_rank"));
+                return work.sourceRank();
+              })
+          .def("_source_rank", &::c10d::Work::sourceRank)
+          .def(
+              "result",
+              [](::c10d::Work& work) -> std::vector<at::Tensor> {
+                // Deprecation reason:
+                // Work.result() returns a vector of tensors. This signature is
+                // problematic as some collectives may just return one tensor
+                // (e.g all-reduce), while some others may return multiple
+                // tensors (e.g. all-gather).
+                // Deprecating work.result() would
+                // also allow us to remove the `outputs_` field in the Work
+                // class, avoiding an "artificial" reference to the tensors,
+                // which could potentially hold up the tensors' memory.
+                TORCH_WARN_ONCE(
+                    fmt::format(kDeprecationWarning, "Work::result"));
+                return work.result();
+              })
+          .def(
+              "synchronize",
+              [](::c10d::Work& work) -> void {
+                TORCH_WARN_ONCE(
+                    fmt::format(kDeprecationWarning, "Work::synchronize"));
+                work.synchronize();
+              })
+          .def(
+              "wait",
+              &::c10d::Work::wait,
+              py::arg("timeout") = kNoTimeout,
+              py::call_guard<py::gil_scoped_release>(),
+              R"(
               Returns:
                   true/false.
 
@@ -3298,13 +3309,14 @@ such as `dist.all_reduce(tensor, async_op=True)`.
                   However, if timeout is set, it will block the CPU thread until the NCCL work is completed
                   or timed out. If timeout, exception will be thrown.
             )")
-      .def(
-          "get_future_result",
-          [](::c10d::Work& work) -> std::shared_ptr<jit::PythonFutureWrapper> {
-            return std::make_shared<jit::PythonFutureWrapper>(
-                work.getFutureResult());
-          },
-          R"(
+          .def(
+              "get_future_result",
+              [](::c10d::Work& work)
+                  -> std::shared_ptr<jit::PythonFutureWrapper> {
+                return std::make_shared<jit::PythonFutureWrapper>(
+                    work.getFutureResult());
+              },
+              R"(
             Returns:
                 A ``torch.futures.Future`` object of int type which maps to the enum type of WorkResult
                 As an example, a future object can be retrieved
@@ -3319,12 +3331,14 @@ such as `dist.all_reduce(tensor, async_op=True)`.
             .. warning ::
                 ``get_future_result`` API supports NCCL
            )")
-      .def(
-          "get_future",
-          [](::c10d::Work& work) -> std::shared_ptr<jit::PythonFutureWrapper> {
-            return std::make_shared<jit::PythonFutureWrapper>(work.getFuture());
-          },
-          R"(
+          .def(
+              "get_future",
+              [](::c10d::Work& work)
+                  -> std::shared_ptr<jit::PythonFutureWrapper> {
+                return std::make_shared<jit::PythonFutureWrapper>(
+                    work.getFuture());
+              },
+              R"(
             Returns:
                 A ``torch.futures.Future`` object which is associated with the completion of
                 the ``Work``. As an example, a future object can be retrieved
@@ -3363,16 +3377,16 @@ such as `dist.all_reduce(tensor, async_op=True)`.
                        true when tensors have arrived on respective nodes, but not yet necessarily synched on
                        respective GPUs (similarly to GPU work).
            )")
-      .def(
-          "_get_op_type",
-          [](::c10d::Work& work) -> int {
-            return static_cast<int>(work.retrieveOpType());
-          })
-      .def(
-          "_get_duration",
-          &::c10d::Work::getDuration,
-          py::call_guard<py::gil_scoped_release>(),
-          R"(
+          .def(
+              "_get_op_type",
+              [](::c10d::Work& work) -> int {
+                return static_cast<int>(work.retrieveOpType());
+              })
+          .def(
+              "_get_duration",
+              &::c10d::Work::getDuration,
+              py::call_guard<py::gil_scoped_release>(),
+              R"(
               Returns:
                   Duration of the corresponding collective communication.
 
@@ -3380,17 +3394,17 @@ such as `dist.all_reduce(tensor, async_op=True)`.
                   This API only works for NCCL backend for now and must set
                   TORCH_NCCL_ENABLE_TIMING environment variable.
             )")
-      .def(
-          "boxed",
-          [](c10::intrusive_ptr<::c10d::Work> self) {
-            return torch::jit::toPyObject(c10::IValue(std::move(self)));
-          })
-      .def_static("unbox", [](py::object obj) {
-        auto typePtr =
-            torch::getCustomClass("__torch__.torch.classes.c10d.Work");
-        auto ivalue = torch::jit::toIValue(std::move(obj), typePtr);
-        return ivalue.toCustomClass<::c10d::Work>();
-      });
+          .def(
+              "boxed",
+              [](c10::intrusive_ptr<::c10d::Work> self) {
+                return torch::jit::toPyObject(c10::IValue(std::move(self)));
+              })
+          .def_static("unbox", [](py::object obj) {
+            auto typePtr =
+                torch::getCustomClass("__torch__.torch.classes.c10d.Work");
+            auto ivalue = torch::jit::toIValue(std::move(obj), typePtr);
+            return ivalue.toCustomClass<::c10d::Work>();
+          });
 
   auto fakeProcessGroup =
       intrusive_ptr_no_gil_destructor_class_<::c10d::FakeProcessGroup>(
@@ -3402,6 +3416,13 @@ such as `dist.all_reduce(tensor, async_op=True)`.
               }),
               py::arg("rank"),
               py::arg("world_size"));
+  auto fakeWork =
+      intrusive_ptr_no_gil_destructor_class_<::c10d::FakeWork>(
+          module, "FakeWork", work)
+          .def(py::init<>())
+          .def_readwrite("seq_id", &::c10d::FakeWork::seq_id) // Expose seq_id
+          .def("wait", &::c10d::FakeWork::wait, py::arg("timeout") = kNoTimeout)
+          .def("getFuture", &::c10d::FakeWork::getFuture);
 
   py::class_<c10::DDPLoggingData>(module, "DDPLoggingData")
       .def(py::init<>())
