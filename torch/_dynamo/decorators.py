@@ -11,13 +11,13 @@ import sys
 import weakref
 from dataclasses import dataclass
 from typing import Any, Callable, TYPE_CHECKING, TypeVar
-from typing_extensions import ParamSpec
 
 import torch
 from torch._environment import is_fbcode
 from torch._vendor.packaging.version import Version
 from torch.utils._contextlib import _DecoratorContextManager
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+from typing_extensions import ParamSpec
 
 from . import trace_rules, variables
 from .comptime import comptime
@@ -66,8 +66,8 @@ def run(fn=None):
 
 
 # Used to identify that disable_wrapper is the current frame called.
-# We do this by giving disable_wrapper a _DisableWrapperObject freevar.
-_DisableWrapperObject = object()
+# We do this by giving disable_wrapper a _disable_wrapper_object freevar.
+_disable_wrapper_object = object()
 
 
 def disable(fn=None, recursive=True):
@@ -92,7 +92,7 @@ def disable(fn=None, recursive=True):
             fn = innermost_fn(fn)
             assert callable(fn)
             nonrecursive_disable_wrapper = get_nonrecursive_disable_wrapper(
-                fn, _DisableWrapperObject
+                fn, _disable_wrapper_object
             )
             nonrecursive_disable_wrapper._torchdynamo_disable = True  # type: ignore[attr-defined]
             nonrecursive_disable_wrapper._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]

@@ -42,7 +42,6 @@ import weakref
 from pathlib import Path
 from types import CellType, CodeType, FunctionType, ModuleType
 from typing import Any, Callable, Optional, TypeVar, Union
-from typing_extensions import ParamSpec
 from weakref import ReferenceType
 
 import torch
@@ -71,6 +70,7 @@ from torch.utils._python_dispatch import (
     is_in_torch_dispatch_mode,
 )
 from torch.utils._traceback import CapturedTraceback, format_traceback_short
+from typing_extensions import ParamSpec
 
 from . import config, decorators, exc, graph_break_hints, trace_rules
 from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
@@ -256,9 +256,9 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                 return fn(*args, **kwargs)
             finally:
                 cleanup.close()
-                assert torch._C._len_torch_function_stack() == 0, (
-                    "Torch function mode stack state changed while dynamo tracing, please report a bug"
-                )
+                assert (
+                    torch._C._len_torch_function_stack() == 0
+                ), "Torch function mode stack state changed while dynamo tracing, please report a bug"
                 exit_stack.close()
                 torch._C._set_grad_enabled(prior_grad_mode)
                 torch.autograd.grad_mode._enter_inference_mode(prior_inference_mode)
@@ -277,9 +277,9 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                     torch.cuda.set_rng_state(cuda_rng_state)
                 torch._C._set_cublas_allow_tf32(allow_tf32)
                 torch.fx.graph_module._forward_from_src = prior_fwd_from_src
-                assert guards.check(), (
-                    f"Global {guards.reason()}state changed while dynamo tracing, please report a bug"
-                )
+                assert (
+                    guards.check()
+                ), f"Global {guards.reason()}state changed while dynamo tracing, please report a bug"
 
     _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
     return _fn
@@ -554,12 +554,12 @@ class ConvertFrameAssert:
 
         # skip tracing non-recursive disabled functions
         # detect if this frame is torch._dynamo.decorators.disable_wrapper
-        # by looking for a torch._dynamo.decorators._DisableWrapperObject freevar
+        # by looking for a torch._dynamo.decorators._disable_wrapper_object freevar
         if frame.f_code.co_name == "nonrecursive_disable_wrapper":
             for name in frame.f_code.co_freevars:
                 if (
                     name in frame.f_locals
-                    and frame.f_locals[name] is decorators._DisableWrapperObject
+                    and frame.f_locals[name] is decorators._disable_wrapper_object
                 ):
                     return ConvertFrameReturn(skip_next_frame=True)
 
@@ -839,9 +839,9 @@ def _compile(
                     log.debug("No graph captured with one_graph=True")
                 return ConvertFrameReturn()
 
-        assert distributed_state is None or distributed_state.all_states is not None, (
-            "compiler collective wasn't run before compilation completed"
-        )
+        assert (
+            distributed_state is None or distributed_state.all_states is not None
+        ), "compiler collective wasn't run before compilation completed"
 
         assert out_code is not None
         log_bytecode(
@@ -1423,9 +1423,7 @@ class CatchErrorsWrapper:
                     )
                     assert hasattr(
                         self._torchdynamo_orig_callable, "_clone_with_backend"
-                    ), (
-                        "DDPOptimizer only supports callback fns that know how to clone themselves."
-                    )
+                    ), "DDPOptimizer only supports callback fns that know how to clone themselves."
                     hijacked_callback = (
                         self._torchdynamo_orig_callable._clone_with_backend(
                             ddp_optimizer.compile_fn,
