@@ -185,8 +185,7 @@ static PyObject* THPDevice_enter(PyObject* _self, PyObject* noargs) {
       std::make_shared<c10::SafePyObject>(
           mode.release().ptr(), getPyInterpreter()));
   auto self = (THPDevice*)_self;
-  auto device_type = at::accelerator::getAccelerator();
-  if (device_type.has_value() && device_type.value() == self->device.type() &&
+  if (at::accelerator::isAccelerator(self->device.type()) &&
       self->device.has_index()) {
     c10::DeviceIndex cur_device_idx = at::accelerator::getDeviceIndex();
     at::accelerator::setDeviceIndex(self->device.index());
@@ -214,8 +213,7 @@ static PyObject* THPDevice_exit(PyObject* _self, PyObject* unused) {
   HANDLE_TH_ERRORS
   at::impl::PythonTorchFunctionTLS::pop_stack();
   auto self = (THPDevice*)_self;
-  auto device_type = at::accelerator::getAccelerator();
-  if (device_type.has_value() && device_type.value() == self->device.type() &&
+  if (at::accelerator::isAccelerator(self->device.type()) &&
       self->device.has_index()) {
     PyObject* py_device_index = nullptr;
     if (PyDict_GetItemStringRef(
