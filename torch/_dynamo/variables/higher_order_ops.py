@@ -245,14 +245,6 @@ def _check_supported_callable_arg(
         )
 
 
-def get_tensor_versions(arg_vts):
-    versions = []
-    for arg_vt in arg_vts:
-        if isinstance(arg_vt, variables.TensorVariable):
-            versions.append(arg_vt.as_proxy().node.meta["example_value"]._version)
-    return versions
-
-
 def validate_args_and_maybe_create_graph_inputs(
     sub_args,
     tracer,
@@ -505,6 +497,7 @@ def speculate_subgraph(
     restore_side_effects=True,
     should_flatten_outputs=False,
     under_activation_checkpoint=False,
+    supports_input_mutation=True,
     # Pass in an originating tracer - this is needed for preserving context
     # across fwd-bwd for autograd.Function
     tracer=None,
@@ -692,6 +685,9 @@ def speculate_subgraph(
 
                 if len(lifted_freevars) > 0:
                     move_lifted_freevars_phs_to_end(graph, lifted_freevars)
+
+                if not supports_input_mutation and subtracer.has_input_mutation():
+                    unimplemented("NYI: invoke_subgraph with mutated inputs")
 
                 return (
                     (output, treespec),
@@ -1745,6 +1741,10 @@ class FunctionalCallVariable(FunctorchHigherOrderVariable):
 
 
 class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.supports_input_mutation = True
+
     def install_subgraph_in_output_graph(
         self, tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name="wrap_body"
     ):
@@ -1779,6 +1779,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             source_target=self.value,
             should_flatten_outputs=True,
             under_activation_checkpoint=under_activation_checkpoint,
+            supports_input_mutation=self.supports_input_mutation,
         )
 
         body_gmod = torch.fx.GraphModule(tx.output.nn_modules, body_graph)
@@ -3036,6 +3037,10 @@ class BaseHOPVariable(WrapHigherOrderVariable):
 
 
 class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.supports_input_mutation = False
+
     def install_subgraph_in_output_graph(
         self, tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name
     ):
@@ -3082,8 +3087,6 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        before_versions = get_tensor_versions(args[1:])
-
         # This flattens the kwargs into lifted args
         (
             p_args,
@@ -3094,16 +3097,6 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
             body_gmod,
             body_name,
         ) = self.create_wrapped_node(tx, args[0], args[1:], kwargs, "invoke_subgraph")
-
-        after_versions = get_tensor_versions(args[1:])
-        mutated_inputs = [
-            i
-            for i, (v1, v2) in enumerate(zip(before_versions, after_versions))
-            if v1 != v2
-        ]
-
-        if len(mutated_inputs) > 0:
-            unimplemented("NYI: invoke_subgraph with mutated inputs")
 
         if len(p_kwargs) > 0:
             unimplemented("kwargs should have been flattened into lifted args")
