@@ -356,14 +356,16 @@ def trace_associative_scan(
     additional_inputs: tuple[torch.Tensor],
 ):
     from torch._dynamo.utils import clone_input
-    
+
     with disable_proxy_modes_tracing():
         sample_xs = [first_slice_copy(x) for x in itertools.chain(xs, xs)]
         sample_additional_inputs = [
             clone_input(x) if isinstance(x, torch.Tensor) else x
             for x in additional_inputs
         ]
-        combine_graph = reenter_make_fx(combine_fn)(*sample_xs, *sample_additional_inputs)
+        combine_graph = reenter_make_fx(combine_fn)(
+            *sample_xs, *sample_additional_inputs
+        )
 
     outputs = None
     for node in combine_graph.graph.nodes:
@@ -385,7 +387,9 @@ def trace_associative_scan(
             + f"but got {o_meta.dtype}"
         )
 
-    _, combine_graph_name = unique_graph_id(proxy_mode, prefix="associative_scan_combine_graph")
+    _, combine_graph_name = unique_graph_id(
+        proxy_mode, prefix="associative_scan_combine_graph"
+    )
 
     proxy_mode.tracer.root.register_module(combine_graph_name, combine_graph)
 

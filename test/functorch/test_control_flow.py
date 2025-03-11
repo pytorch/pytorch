@@ -156,10 +156,6 @@ def get_scan_combine_fn(name, associative=True):
         W = torch.diag(torch.ones(2, device=x.device))
         return x @ W + y @ W
 
-    def tuple_single(x: torch.Tensor, y: torch.Tensor):
-        a, b = (x[0][0] + y[1], x[0][1] - y[1])
-        return (a, b), a - b
-
     if name == "add":
         fct = add
     elif name == "adds":
@@ -178,8 +174,6 @@ def get_scan_combine_fn(name, associative=True):
         fct = complex_pointwise
     elif name == "non_pointwise":
         fct = non_pointwise
-    elif name == "tuple_single":
-        fct = tuple_single
     else:
         raise ValueError("Combine_fn name unknown!")
 
@@ -3354,7 +3348,7 @@ class AssociativeScanTests(TestCase):
         x = (
             (
                 torch.randn(3, 10, 2, device=torch.device("cpu")),
-                torch.randn(3, 10, 2, device=torch.device("cpu")),
+                (torch.randn(3, 10, 2, device=torch.device("cpu")),),
             ),
             torch.randn(3, 10, 2, device=torch.device("cpu")),
         )
@@ -3364,11 +3358,9 @@ class AssociativeScanTests(TestCase):
                 fct, xs, dim=0, reverse=True, combine_mode="generic"
             )
 
-        # def tuple_single(x: torch.Tensor, y: torch.Tensor):
-        # a, b = (x[0] + y, x[1] - y)
-        # return (a, b), a - b
-
-        combine_fn = get_scan_combine_fn("tuple_single", True)
+        def combine_fn(x: torch.Tensor, y: torch.Tensor):
+            a, b = (x[0][0] + y[1], x[0][1][0] - y[1])
+            return (a, (b,)), a - b
 
         # Check graph
         backend = EagerAndRecordGraphs()
@@ -3379,13 +3371,13 @@ class AssociativeScanTests(TestCase):
             normalize_gm(gm.print_readable(print_output=False)),
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_xs_0_0_: "f32[3, 10, 2]", L_xs_0_1_: "f32[3, 10, 2]", L_xs_1_: "f32[3, 10, 2]"):
+    def forward(self, L_xs_0_0_: "f32[3, 10, 2]", L_xs_0_1_0_: "f32[3, 10, 2]", L_xs_1_: "f32[3, 10, 2]"):
         l_xs_0_0_ = L_xs_0_0_
-        l_xs_0_1_ = L_xs_0_1_
+        l_xs_0_1_0_ = L_xs_0_1_0_
         l_xs_1_ = L_xs_1_
 
         elem: "f32[3, 10, 2]" = torch.movedim(l_xs_0_0_, 0, 0);  l_xs_0_0_ = None
-        elem_1: "f32[3, 10, 2]" = torch.movedim(l_xs_0_1_, 0, 0);  l_xs_0_1_ = None
+        elem_1: "f32[3, 10, 2]" = torch.movedim(l_xs_0_1_0_, 0, 0);  l_xs_0_1_0_ = None
         elem_2: "f32[3, 10, 2]" = torch.movedim(l_xs_1_, 0, 0);  l_xs_1_ = None
 
         elem_3: "f32[3, 10, 2]" = torch.flip(elem, [0]);  elem = None
