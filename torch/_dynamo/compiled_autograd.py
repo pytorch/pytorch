@@ -743,6 +743,7 @@ class AutogradCompilerInstance:
         return GraphModule(self.fx_tracer.root, self.fx_tracer.graph, id)
 
     def end_capture(self, outputs):
+        from torch._inductor.fx_passes.post_grad import view_to_reshape2
         self.fx_tracer.create_proxy(
             "call_function",
             FakeCompiledAutogradEngine._exec_final_callbacks_stub,
@@ -780,6 +781,7 @@ class AutogradCompilerInstance:
                 f"CompiledAutograd{self.id}PreReordering",
             ).print_readable(print_output=False),
         )
+        view_to_reshape2(self.fx_tracer.graph)
         self.rename_aot_dispatcher_nodes()
         self.delay_unpack_hook_nodes()
         self.reorder_tensor_pre_hook_nodes()
@@ -856,15 +858,15 @@ class AutogradCompilerInstance:
                     and hasattr(aot.target, "__name__")
                     and ca.target.__name__ == aot.target.__name__
                 )
-            if (
-                not target_match
-                and hasattr(ca.target, "name")
-                and hasattr(aot.target, "name")
-                and aot.target.name() == "aten::reshape"
-                and hasattr(aot.meta.get("original_aten"), "name")
-            ):
-                # 3. undo view_to_reshape post grad pass
-                target_match = ca.target.name() == aot.meta["original_aten"].name()
+            # if (
+            #     not target_match
+            #     and hasattr(ca.target, "name")
+            #     and hasattr(aot.target, "name")
+            #     and aot.target.name() == "aten::reshape"
+            #     and hasattr(aot.meta.get("original_aten"), "name")
+            # ):
+            #     # 3. undo view_to_reshape post grad pass
+            #     target_match = ca.target.name() == aot.meta["original_aten"].name()
 
             return (
                 target_match

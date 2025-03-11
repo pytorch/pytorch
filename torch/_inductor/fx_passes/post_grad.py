@@ -932,6 +932,15 @@ def view_to_reshape(gm):
     ):
         nd.target = torch.ops.aten.reshape.default
 
+def view_to_reshape2(graph):
+    """
+    Replace view ops in the GraphModule to reshape ops.
+    """
+    for nd in graph.find_nodes(
+        op="call_function", target=torch.ops.aten.view.default
+    ):
+        nd.target = torch.ops.aten.reshape.default
+
 
 def should_prefer_unfused_addmm(match):
     inp = match.kwargs["inp"]
