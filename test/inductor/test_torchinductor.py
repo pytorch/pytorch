@@ -4429,7 +4429,7 @@ class CommonTemplate:
         gemm_opt(x1, y1)
         self.assertTrue(failed_guard is not None)
         self.assertTrue(
-            "tensor 'L['x']' Tensor device index mismatch. Expected device index to be"
+            "tensor 'x' Tensor device index mismatch. Expected device index to be"
             in failed_guard.reason
         )
 
