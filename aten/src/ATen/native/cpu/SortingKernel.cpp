@@ -107,8 +107,8 @@ TO_TYPE(int16_t, int16_t)
 TO_TYPE(int32_t, int32_t)
 TO_TYPE(int64_t, int64_t)
 
-#ifdef USE_FBGEMM
 static bool can_use_radix_sort(const TensorBase& values, const bool descending) {
+#ifdef USE_FBGEMM
   // radix_sort can be used only for 1D data
   if (values.dim() != 1) return false;
   // radix_sort sorts in ascending order
@@ -120,14 +120,19 @@ static bool can_use_radix_sort(const TensorBase& values, const bool descending) 
   if (values.numel() < at::internal::GRAIN_SIZE || !fbgemm::is_radix_sort_accelerated_with_openmp()) return false;
   // TODO(DamianSzwichtenberg): radix_sort is a stable sorting algorithm,
   // should we check here, whether stable is set to true?
-
   return true;
+#else
+  return false;
+#endif
+#
+
 }
 
 template<typename idx_scalar_t>
 static void parallel_sort1d_kernel(
     const TensorBase& values,
     idx_scalar_t* const vals) {
+#ifdef USE_FBGEMM
   AT_DISPATCH_INTEGRAL_TYPES(values.scalar_type(), "parallel_sort1d_kernel", [&] {
     const auto elements = values.numel();
     auto* const keys = values.data_ptr<scalar_t>();
@@ -154,8 +159,10 @@ static void parallel_sort1d_kernel(
       });
     }
   });
-}
+#else
+  return;
 #endif
+}
 
 template <typename scalar_t, typename value_accessor_t, typename indices_accessor_t>
 static inline void sort_kernel_impl(const value_accessor_t& value_accessor,
@@ -199,14 +206,12 @@ static void sort_kernel(
   }
 
   AT_DISPATCH_V2(indices.scalar_type(), "sort_kernel", AT_WRAP([&] {
-#ifdef USE_FBGEMM
     if (can_use_radix_sort(values, descending)) {
       using signed_t = UnsignedType<scalar_t>::signed_type; //FBGEMM explicit template instantiations don't contain unsigned type.
       auto* const indices_ptr = reinterpret_cast<signed_t *>(indices.data_ptr<scalar_t>());
       parallel_sort1d_kernel<signed_t>(values, indices_ptr);
       return;
     }
-#endif
     _dim_apply<scalar_t>(
       values, indices, dim,
       "sort_cpu", [&](
