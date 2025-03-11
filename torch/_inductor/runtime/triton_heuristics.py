@@ -1022,7 +1022,7 @@ class StaticTritonCompileResult(CompileResult):
 
         try:
             static_kernel = StaticallyLaunchedCudaKernel(kernel)
-        except NotImplementedError:
+        except NotImplementedError as e:
             log.warning("Bypassing StaticallyLaunchedCudaKernel due to %s", str(e))
             return None
 
