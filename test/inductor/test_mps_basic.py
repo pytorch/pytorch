@@ -104,12 +104,30 @@ class MPSBasicTests(TestCase):
     def test_pointwise_digamma(self):
         self.common(torch.special.digamma, (torch.rand(128, 128),), check_lowp=False)
 
+    def test_pointwise_sinc(self):
+        self.common(torch.special.sinc, (torch.rand(128, 128),), check_lowp=False)
+
     def test_pointwise_zeta(self):
         self.common(
             torch.special.zeta,
             (torch.rand(128, 128), torch.rand(128, 128)),
             check_lowp=False,
         )
+
+    def test_pointwise_spherical_bessel_j0(self):
+        self.common(
+            torch.special.spherical_bessel_j0, (torch.rand(128, 128),), check_lowp=False
+        )
+
+    def test_pointwise_xlog1py(self):
+        self.common(
+            torch.special.xlog1py,
+            (torch.rand(128, 128), torch.rand(128, 128)),
+            check_lowp=False,
+        )
+
+    def test_pointwise_entr(self):
+        self.common(torch.special.entr, (torch.rand(128, 128),), check_lowp=False)
 
     def test_broadcast(self):
         self.common(torch.add, (torch.rand(32, 1024), torch.rand(1024)))
@@ -131,6 +149,7 @@ class MPSBasicTests(TestCase):
 
 # Copy tests
 for test_name in [
+    "test_min_max_reduction",
     "test_add_const_int",
     "test_add_inplace_permuted",
     "test_addmm",
@@ -140,6 +159,7 @@ for test_name in [
     "test_argmax_argmin2",
     "test_avg_pool2d5",
     "test_avg_pool2d8",
+    "test_bernoulli1",
     "test_builtins_round",
     "test_builtins_round_float_ndigits_neg",
     "test_cat_empty",
@@ -160,6 +180,7 @@ for test_name in [
     "test_inf",
     "test_isinf",
     "test_isinf2",
+    "test_layer_norm",
     "test_lgamma",
     "test_linear_float64",
     "test_log_fp64",
@@ -169,6 +190,7 @@ for test_name in [
     "test_min_max_reduction_nan",
     "test_nan_to_num",
     "test_pow2",
+    "test_prod",
     "test_randint_int64_mod",
     "test_randn_generator",
     "test_remainder",
@@ -183,6 +205,7 @@ for test_name in [
     "test_slice_scatter4",
     "test_softmax",
     "test_sort",
+    "test_split_cumsum",
     "test_sum_int",
     "test_sum_keepdims",
     "test_tanh",

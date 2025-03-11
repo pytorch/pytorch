@@ -980,7 +980,16 @@ elseif(USE_CUDA)
     target_compile_definitions(torch_cuda PRIVATE USE_UCC)
   endif()
   if(USE_FLASH_ATTENTION)
-    target_compile_definitions(torch_cuda PRIVATE USE_FLASH_ATTENTION)
+    target_compile_definitions(torch_cuda PRIVATE
+        USE_FLASH_ATTENTION
+        FLASHATTENTION_DISABLE_ALIBI    # Disable alibi attention as it's not currently used
+        FLASHATTENTION_DISABLE_SOFTCAP
+        FLASH_NAMESPACE=pytorch_flash
+        UNFUSE_FMA                      # Addressing issue #121558
+      )
+    target_include_directories(torch_cuda PRIVATE
+        ${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc/flash_attn/src/
+    )
   endif()
   if(USE_MEM_EFF_ATTENTION)
     target_compile_definitions(torch_cuda PRIVATE USE_MEM_EFF_ATTENTION)
@@ -1220,6 +1229,11 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
   set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/quantized/qlinear_unpack.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
 endif()
 
+if(USE_MKLDNN_ACL)
+  find_package(ACL REQUIRED)
+  target_include_directories(torch_cpu PRIVATE ${ACL_INCLUDE_DIRS})
+endif()
+
 target_include_directories(torch_cpu PRIVATE ${ATen_CPU_INCLUDE})
 
 target_include_directories(torch_cpu PRIVATE
@@ -1372,7 +1386,13 @@ if(USE_ROCM)
     ${ROCM_SOURCE_DIR}/include/rccl/
     )
   if(USE_FLASH_ATTENTION)
-    target_compile_definitions(torch_hip PRIVATE USE_FLASH_ATTENTION)
+    target_compile_definitions(torch_hip PRIVATE
+        USE_FLASH_ATTENTION
+        FLASHATTENTION_DISABLE_ALIBI    # Disable alibi attention as it's not currently used
+        FLASHATTENTION_DISABLE_SOFTCAP
+        FLASH_NAMESPACE=pytorch_flash
+        UNFUSE_FMA                      # Addressing issue #121558
+      )
   endif()
   if(USE_MEM_EFF_ATTENTION)
     target_compile_definitions(torch_hip PRIVATE USE_MEM_EFF_ATTENTION)
@@ -1559,7 +1579,7 @@ if(USE_CUDA)
   # FIXME: If kineto is linked with CUPTI it pollutes torch_cpu with CUDA dependencies
   # Even worse, it never declares that it depends on cudart, but calls the API, see
   # https://github.com/pytorch/kineto/blob/aef2f5c0f15e3be52406ac0b885e8689de6bc9f6/libkineto/src/CudaDeviceProperties.cpp#L24
-  if(USE_KINETO AND NOT MSVC AND NOT LIBKINETO_NOCUPTI)
+  if(USE_KINETO AND NOT LIBKINETO_NOCUPTI)
     target_link_libraries(torch_cpu PRIVATE torch::cudart)
   endif()
   target_link_libraries(torch_cuda INTERFACE torch::cudart)

@@ -1,4 +1,23 @@
 # mypy: allow-untyped-defs
+
+"""This module implements tensor version operations for Dynamo tracing.
+
+It provides primitives for handling tensor versioning during tracing, particularly in the
+context of functionalization where version operations are handled eagerly on fake tensors.
+
+When we functionalize _tensor_version + _unsafe_set_version_counter, the ops disappear from
+the traced graph. We run them eagerly on the fake tensors used for tracing, in order to get
+past asserts that would fail in autograd.
+
+Why is this ok?
+1) Versions on functional tensors do not make any sense since you cannot mutate a functional
+   tensor.
+2) The whole point of version munging is to trick autograd into doing what we want, and after
+   AotAutograd there is no longer any need for these ops.
+
+Note this is similar to how no_grad is handled.
+"""
+
 import torch
 from torch._prims import _make_prim, RETURN_TYPE
 from torch._subclasses import FakeTensorMode
@@ -32,21 +51,6 @@ _unsafe_set_version_counter = _make_prim(
     doc="Tracable+SymInt version of torch._C._autograd._unsafe_set_version_counter",
 )
 torch.fx.node.has_side_effect(_unsafe_set_version_counter)
-
-
-"""
-When we functionalize _tensor_version + _unsafe_set_version_counter,
-the ops disappear from the traced graph.  We run them eagerly on the
-fake tensors used for tracing, in order to get past asserts that would
-fail in autograd.
-
-Why is this ok?
-1) Versions on functional tensors don't make any sense since you can't mutate a functional tensor.
-2) The whole point of version munging is to trick autograd into doing what we want, and after
-   AotAtuograd there is no longer any need for these ops.
-
-Note this is similar to how no_grad is handled.
-"""
 
 
 @_tensor_version.py_impl(FunctionalTensorMode)

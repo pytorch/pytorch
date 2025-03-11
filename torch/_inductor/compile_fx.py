@@ -12,19 +12,11 @@ import sys
 import time
 import warnings
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from collections import defaultdict
+from contextlib import AbstractContextManager
 from inspect import currentframe
 from itertools import count
-from typing import (
-    Any,
-    Callable,
-    ContextManager,
-    Mapping,
-    Optional,
-    TYPE_CHECKING,
-    TypeVar,
-    Union,
-)
+from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import Never, override, ParamSpec, Protocol, TypedDict, Unpack
 from unittest import mock
 
@@ -43,11 +35,13 @@ from torch._dynamo import (
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.repro.after_aot import wrap_compiler_debug
 from torch._dynamo.utils import (
+    chromium_event_timed,
     CompileEventLogger,
     counters,
     detect_fake_mode,
     dynamo_timed,
     flatten_graph_inputs,
+    get_metrics_context,
     lazy_format_graph_code,
     set_feature_use,
 )
@@ -60,18 +54,17 @@ from torch._functorch.aot_autograd import (
     make_boxed_func,
     SerializableAOTDispatchCompiler,
 )
-from torch._inductor.codecache import (
-    BypassFxGraphCache,
-    code_hash,
-    FxGraphCache,
-    output_code_log,
+from torch._inductor.codecache import code_hash, FxGraphCache, output_code_log
+from torch._inductor.cudagraph_utils import (
+    BoxedDeviceIndex,
+    format_default_skip_message,
+    log_cudagraph_skip_and_bump_counter,
+    PlaceholderInfo,
 )
-from torch._inductor.cudagraph_utils import BoxedDeviceIndex, PlaceholderInfo
 from torch._inductor.debug import save_args_for_compile_fx_inner
 from torch._inductor.output_code import (
     CompiledAOTI,
     CompiledFxGraph,
-    CompiledFxGraphConstants,
     CompiledFxGraphConstantsWithGm,
     get_expanded_dims,
     index_expanded_dims,
@@ -157,21 +150,20 @@ if TYPE_CHECKING:
     )
 
 
-# For testing - use the serde FxCompile scheme to debug serialization and
-# deserialization of GraphMoule and CompiledFxGraph.
 class FxCompileMode(enum.Enum):
     NORMAL = 0
     # For testing - use the serde FxCompile scheme to debug serialization and
     # deserialization of GraphMoule and CompiledFxGraph.
     SERIALIZE = 1
+    # Compile using a subprocess instead of in-process.
+    SUBPROCESS = 2
 
 
 def _fx_compile_mode_default() -> FxCompileMode:
     name = "TORCHINDUCTOR_FX_COMPILE_MODE"
     value = os.environ.get(name)
-    NORMAL = FxCompileMode.NORMAL
     if value is None:
-        return NORMAL
+        return FxCompileMode.NORMAL
     try:
         value = value.upper()
         return FxCompileMode[value]
@@ -191,7 +183,6 @@ def _fx_compile_mode_default() -> FxCompileMode:
 
 
 fx_compile_mode = _fx_compile_mode_default()
-
 
 log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
@@ -287,9 +278,9 @@ def _unlift_graph(
         elif node_name in graph_signature.inputs_to_buffers:
             buffer_name = graph_signature.inputs_to_buffers[node_name]
             lifted_inputs.append(buffer_name)
-            gm.meta[
-                get_cloned_parameter_buffer_name(buffer_name)
-            ] = clone_preserve_strides(state_dict[buffer_name])
+            gm.meta[get_cloned_parameter_buffer_name(buffer_name)] = (
+                clone_preserve_strides(state_dict[buffer_name])
+            )
         else:
             assert node_name in graph_signature.user_inputs
             lifted_inputs.append(None)
@@ -346,19 +337,22 @@ def _get_subgraph_names(gm: GraphModule) -> Generator[str, None, None]:
 
 
 def _recursive_pre_grad_passes(
-    gm: GraphModule, example_inputs: Sequence[InputType]
+    gm: GraphModule,
+    example_inputs: Sequence[InputType],
 ) -> GraphModule:
     with dynamo_timed(
         "_recursive_pre_grad_passes",
         log_pt2_compile_event=True,
         dynamo_compile_column_us="pre_grad_pass_time_us",
     ):
+        add_passes = config.add_pre_grad_passes
+        remove_passes = config.remove_pre_grad_passes
         for subgraph_name in _get_subgraph_names(gm):
             subgraph = getattr(gm, subgraph_name)
             # as we don't have recursive example inputs, passing empty set here
             new_subgraph = _recursive_pre_grad_passes(subgraph, ())
             setattr(gm, subgraph_name, new_subgraph)
-        return pre_grad_passes(gm, example_inputs)
+        return pre_grad_passes(gm, example_inputs, add_passes, remove_passes)
 
 
 def _recursive_joint_graph_passes(gm: GraphModule) -> None:
@@ -480,7 +474,7 @@ def is_tf32_warning_applicable(gm: GraphModule) -> bool:
 
 def maybe_disable_comprehensive_padding(
     example_inputs: Sequence[InputType],
-) -> contextlib.AbstractContextManager[None, None]:
+) -> AbstractContextManager[None, None]:
     """
     For CPU backend, enable comprehensive padding causes some unit tests
     fail due to changing number of generated kernels. Skip for now.
@@ -497,6 +491,18 @@ def maybe_disable_comprehensive_padding(
             "Skip comprehensive padding for use_runtime_constant_folding"
         )
         return config.patch(comprehensive_padding=False)
+    else:
+        return contextlib.nullcontext()
+
+
+def maybe_disable_graph_partition(
+    cpp_wrapper: bool, aot_mode: bool
+) -> AbstractContextManager[None, None]:
+    """
+    graph partition does not support cpp_wrapper and aot_mode yet.
+    """
+    if cpp_wrapper or aot_mode:
+        return config.patch(graph_partition=False)
     else:
         return contextlib.nullcontext()
 
@@ -533,7 +539,7 @@ def fake_tensor_prop(
 
 # pass config dict back to user
 def get_patched_config_dict(
-    config_patches: Optional[Union[str, dict[str, Any]]] = None
+    config_patches: Optional[Union[str, dict[str, Any]]] = None,
 ) -> dict[str, Any]:
     with config.patch(config_patches):
         return config.get_config_copy()
@@ -570,8 +576,7 @@ class _CompileFxCallable(Protocol):
         gm: GraphModule,
         example_inputs: Sequence[InputType],
         **kwargs: Unpack[_CompileFxKwargs],
-    ) -> OutputCode:
-        ...
+    ) -> OutputCode: ...
 
 
 def compile_fx_inner(
@@ -653,9 +658,9 @@ def _compile_fx_inner(
     static_inputs_log.debug("static input idxs compile_fx_inner: %s", static_input_idxs)
     inputs_to_check = get_input_idxs_to_check(example_inputs, static_input_idxs)
 
-    assert isinstance(
-        next(iter(reversed(gm.graph.nodes))).args[0], (tuple, list)
-    ), f"inductor can only compile FX graphs which return a tuple/list, but got {gm.graph}"
+    assert isinstance(next(iter(reversed(gm.graph.nodes))).args[0], (tuple, list)), (
+        f"inductor can only compile FX graphs which return a tuple/list, but got {gm.graph}"
+    )
 
     if (cudagraphs := graph_kwargs.get("cudagraphs")) is None:
         graph_kwargs["cudagraphs"] = cudagraphs = BoxedBool(config.triton.cudagraphs)
@@ -670,7 +675,10 @@ def _compile_fx_inner(
 
     fx_graph_remote_cache = should_use_remote_fx_graph_cache()
 
-    with _WaitCounter("pytorch.wait_counter.fx_codegen_and_compile").guard() as _:
+    with (
+        _WaitCounter("pytorch.wait_counter.fx_codegen_and_compile").guard() as _,
+        _WaitCounter("pytorch.wait_counter.all_compilation_types").guard(),
+    ):
         use_cache = (
             not config.force_disable_caches
             and (config.fx_graph_cache or fx_graph_remote_cache)
@@ -821,10 +829,21 @@ def _compile_fx_inner(
                 },
                 payload_fn=lambda: json.dumps(cache_info),
             )
-
         compiled_graph.post_compile(example_inputs, cudagraphs, constants)
 
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
+
+    # This message is for printing overview information of inductor mm counts, shapes,etc after lowering
+    log.info(
+        "Overview info of inductor aten mms: %s",
+        ", ".join(
+            f"({key}: {value})" for key, value in counters["aten_mm_info"].items()
+        ),
+    )
+
+    # Clear Compiled Triton Kernels per inductor compile, as the future objects
+    # may not be valid for use after they are run/autotuned
+    torch._inductor.async_compile.CompiledTritonKernels.cache_clear()
 
     _step_logger()(
         logging.INFO,
@@ -835,11 +854,22 @@ def _compile_fx_inner(
     return compiled_graph
 
 
+class _FxCompileStat:
+    # Count of successful compiles of this type
+    codegen_and_compile: int = 0
+
+    def __repr__(self) -> str:
+        return f"codegen_and_compile: {self.codegen_and_compile}"
+
+
 class FxCompile(ABC):
     """
     An FxCompile represents a mechanism that can turn a GraphModule into an
     OutputCode.
     """
+
+    # Some stats for logging/debugging
+    _compile_stats: dict[type[FxCompile], _FxCompileStat] = defaultdict(_FxCompileStat)
 
     # TODO: We should probably eventually add some kind of async version of this
     # so we can kick off a compile and then go do other things - but we'll need
@@ -851,8 +881,11 @@ class FxCompile(ABC):
         example_inputs: Sequence[InputType],
         inputs_to_check: Sequence[int],
         graph_kwargs: _CompileFxKwargs,
-    ) -> OutputCode:
-        ...
+    ) -> OutputCode: ...
+
+    @classmethod
+    def _reset_stats(cls) -> None:
+        cls._compile_stats.clear()
 
 
 class _InProcessFxCompile(FxCompile):
@@ -868,6 +901,7 @@ class _InProcessFxCompile(FxCompile):
         # to propagate it further on
         # TODO: _CompileFxKwargs actually has stronger types than in the
         # signature, need to tighten it up
+
         assert "cudagraphs" in graph_kwargs and graph_kwargs["cudagraphs"] is not None
         cudagraphs: BoxedBool = graph_kwargs["cudagraphs"]
         static_input_idxs: Sequence[int] = graph_kwargs.get("static_input_idxs", ())
@@ -876,16 +910,17 @@ class _InProcessFxCompile(FxCompile):
         cpp_wrapper: bool = graph_kwargs.get("cpp_wrapper", False)
         aot_mode: bool = V.aot_compilation
         is_inference: bool = graph_kwargs.get("is_inference", False)
-        extern_node_serializer: Optional[
-            Callable[[list[ExternKernelNode]], Any]
-        ] = graph_kwargs.get("extern_node_serializer", None)
+        extern_node_serializer: Optional[Callable[[list[ExternKernelNode]], Any]] = (
+            graph_kwargs.get("extern_node_serializer", None)
+        )
         boxed_forward_device_index: Optional[BoxedDeviceIndex] = graph_kwargs.get(
             "boxed_forward_device_index", None
         )
 
-        with _WaitCounter(
-            "pytorch.wait_counter.actual_codegen_and_compile"
-        ).guard(), dynamo_utils.preserve_rng_state():
+        with (
+            _WaitCounter("pytorch.wait_counter.actual_codegen_and_compile").guard(),
+            dynamo_utils.preserve_rng_state(),
+        ):
             if (sleep_sec := config.sleep_sec_TESTING_ONLY) is not None:
                 import time
 
@@ -1001,17 +1036,38 @@ class _InProcessFxCompile(FxCompile):
                     torch._inductor.debug._inductor_post_to_pre_grad_nodes = (
                         provenance_tracking_json
                     )
-                if config.is_fbcode():
-                    log_optimus_to_scuba(
-                        extra_logging={"pt2_configs": str(get_patched_config_dict())}
-                    )
 
-            with V.set_fake_mode(fake_mode), maybe_disable_comprehensive_padding(
-                example_inputs
+                metrics_context = get_metrics_context()
+                if metrics_context.in_progress():
+                    # TODO: Remove this when 3.9 is no longer supported
+                    if sys.version_info < (3, 10):
+                        num_graph_breaks = sum(counters["graph_break"].values())
+                    else:
+                        num_graph_breaks = counters["graph_break"].total()
+                    CompileEventLogger.compilation_metric(
+                        overwrite=True, num_graph_breaks=num_graph_breaks
+                    )
+                if config.is_fbcode():
+                    try:
+                        log_optimus_to_scuba(
+                            extra_logging={
+                                "pt2_configs": str(get_patched_config_dict())
+                            }
+                        )
+                    except ValueError:
+                        # TODO(T216453900): need to work around for now to support vllm
+                        # See details in vllm/compilation/pass_manager.py.
+                        log.warning("failed to log pt2_configs")
+
+            with (
+                V.set_fake_mode(fake_mode),
+                maybe_disable_comprehensive_padding(example_inputs),
+                maybe_disable_graph_partition(cpp_wrapper, aot_mode),
             ):
                 const_output_index = None
                 const_graph = None
-                const_code = None
+                const_wrapper_code = None
+                const_kernel_code = None
 
                 if aot_mode and config.aot_inductor.use_runtime_constant_folding:
                     const_gm, const_output_index = split_const_gm(gm)
@@ -1031,8 +1087,9 @@ class _InProcessFxCompile(FxCompile):
                     with V.set_graph_handler(const_graph):
                         assert cpp_wrapper, "AOT mode only supports C++ wrapper"
                         const_graph.run()
-
-                        const_code, _ = const_graph.codegen_with_cpp_wrapper()
+                        const_wrapper_code, const_kernel_code = (
+                            const_graph.codegen_with_cpp_wrapper()
+                        )
 
                 graph = GraphLowering(
                     gm,
@@ -1048,7 +1105,12 @@ class _InProcessFxCompile(FxCompile):
                     is_inference=is_inference,
                     is_backward=is_backward,
                     const_output_index=const_output_index,
-                    const_code=const_code,
+                    const_wrapper_code=const_wrapper_code.value
+                    if const_wrapper_code
+                    else None,
+                    const_kernel_code=const_kernel_code.value
+                    if const_kernel_code
+                    else None,
                     const_module=const_graph,
                     inputs_to_check=inputs_to_check,
                 )
@@ -1084,14 +1146,24 @@ class _InProcessFxCompile(FxCompile):
                     with dynamo_timed(
                         "GraphLowering.compile_to_fn", log_pt2_compile_event=True
                     ):
+                        # We are going to start code generating runtime asserts, so make sure
+                        # you don't start adding new ones in the lowering process
+                        graph.freeze_runtime_asserts()
+
                         if graph.aot_mode:
                             from .codecache import AotCodeCompiler
 
-                            assert (
-                                graph.cpp_wrapper
-                            ), "AOT mode only supports C++ wrapper"
-                            code, linemap = graph.codegen_with_cpp_wrapper()
-                            output_code_log.debug("Output code: \n%s", code)
+                            assert graph.cpp_wrapper, (
+                                "AOT mode only supports C++ wrapper"
+                            )
+                            wrapper_code, kernel_code = graph.codegen_with_cpp_wrapper()
+                            output_code_log.debug(
+                                "Output wrapper code: \n%s", wrapper_code.value
+                            )
+                            if kernel_code.value:
+                                output_code_log.debug(
+                                    "Output kernel code:\n%s", kernel_code.value
+                                )
 
                             serialized_extern_kernel_nodes = None
                             if graph.extern_kernel_nodes:
@@ -1105,18 +1177,21 @@ class _InProcessFxCompile(FxCompile):
                                     serialized_extern_kernel_nodes,
                                 )
 
-                            additional_files = graph.wrapper_code.additional_files
-
                             with dynamo_timed(
                                 "AotCodeCompiler.compile", log_pt2_compile_event=True
                             ):
                                 # Directly return the file path with the compiled code
                                 compiled_fn = AotCodeCompiler.compile(
                                     graph,
-                                    code,
+                                    wrapper_code.value,
+                                    kernel_code.value,
                                     serialized_extern_kernel_nodes,
                                     device_type=graph.device_type,
-                                    additional_files=additional_files,
+                                    additional_files=[
+                                        *dict.fromkeys(
+                                            graph.wrapper_code.additional_files
+                                        )
+                                    ],
                                 )
                         else:
                             compiled_fn = graph.compile_to_module().call
@@ -1177,6 +1252,8 @@ class _InProcessFxCompile(FxCompile):
                             )
                         )
 
+                    self._compile_stats[type(self)].codegen_and_compile += 1
+
                     return CompiledFxGraph(
                         compiled_fn,
                         graph,
@@ -1194,195 +1271,6 @@ class _InProcessFxCompile(FxCompile):
                     )
 
 
-def _current_fake_mode() -> torch._subclasses.FakeTensorMode:
-    fake_mode = None
-    if context := torch._guards.TracingContext.try_get():
-        fake_mode = context.fake_mode
-    if fake_mode is not None:
-        return fake_mode
-
-    shape_env = torch.fx.experimental.symbolic_shapes.ShapeEnv()
-    return torch._subclasses.FakeTensorMode(shape_env=shape_env)
-
-
-@dataclass
-class _WireProtocolInput:
-    """
-    For _SerializedFxCompile - encapsulates all the data being transferred
-    (sent) from the parent to the child.
-    """
-
-    gm: torch.fx.GraphModule
-    example_inputs: Sequence[InputType]
-    inputs_to_check: Sequence[int]
-    graph_kwargs: _CompileFxKwargs
-    # TODO: Add additional state to transfer to the child.
-
-    def serialize(self) -> _WireProtocolPickledInput:
-        """
-        Turns this object into a _WireProtocolPickledInput which can be
-        directly transferred across a stream.
-        """
-        from torch.fx._graph_pickler import GraphPickler
-
-        return _WireProtocolPickledInput(GraphPickler.dumps(self))
-
-
-@dataclass
-class _WireProtocolPickledInput:
-    value: bytes
-
-    def deserialize(self) -> _WireProtocolInput:
-        """
-        Turn this streamable object back into a _WireProtocolInput.
-        """
-        from torch.fx._graph_pickler import GraphPickler
-
-        fake_mode = _current_fake_mode()
-        result = GraphPickler.loads(self.value, fake_mode)
-        assert isinstance(result, _WireProtocolInput)
-        return result
-
-
-@dataclass
-class _WireProtocolOutput:
-    """
-    For _SerializedFxCompile - encapsulates all the data being transferred
-    (returned) back from the child to the parent.
-    """
-
-    graph: OutputCode
-
-    def serialize(self) -> _WireProtocolPickledOutput:
-        """
-        Turns this object into a _WireProtocolPickledOutput which can be
-        directly transferred across a stream.
-        """
-        from torch.fx._graph_pickler import GraphPickler
-
-        if isinstance(self.graph, CompiledFxGraph):
-            self.graph.prepare_for_serialization()
-        return _WireProtocolPickledOutput(GraphPickler.dumps(self))
-
-
-@dataclass
-class _WireProtocolPickledOutput:
-    value: bytes
-
-    def deserialize(self, constants: CompiledFxGraphConstants) -> _WireProtocolOutput:
-        """
-        Turn this streamable object back into a _WireProtocolOutput.
-        """
-        from torch.fx._graph_pickler import GraphPickler
-
-        fake_mode = _current_fake_mode()
-        result = GraphPickler.loads(self.value, fake_mode)
-        assert isinstance(result, _WireProtocolOutput)
-        if isinstance(result.graph, CompiledFxGraph):
-            result.graph.after_deserialization(constants)
-        return result
-
-
-class _SerializedFxCompile(FxCompile):
-    """
-    This is used to represent an FxCompile which occurs across a serialized
-    boundary.
-    """
-
-    @override
-    def codegen_and_compile(
-        self,
-        gm: GraphModule,
-        example_inputs: Sequence[InputType],
-        inputs_to_check: Sequence[int],
-        graph_kwargs: _CompileFxKwargs,
-    ) -> OutputCode:
-        # _context = torch._guards.TracingContext.try_get()
-        constants = CompiledFxGraphConstantsWithGm(gm)
-
-        try:
-            input = _WireProtocolInput(
-                gm,
-                example_inputs,
-                inputs_to_check,
-                graph_kwargs,
-            ).serialize()
-        except (AttributeError, BypassFxGraphCache):
-            # For example: AttributeError: Can't pickle local object
-            # 'make_opaque_unary_fn.<locals>.OpaqueUnaryFn'
-
-            # TODO: scuba record about not being able to do this?
-            log.debug("Unable to pickle input graph or example inputs", exc_info=True)
-
-            # Fallback to in-process
-            return _InProcessFxCompile().codegen_and_compile(
-                gm, example_inputs, inputs_to_check, graph_kwargs
-            )
-
-        output = self._send_to_child(input).deserialize(constants)
-
-        self._postprocess(output)
-
-        # TODO: Do we need to figure out what changed in TracingContext in the
-        # child and plumb that back up to the parent?
-
-        return output.graph
-
-    @abstractmethod
-    def _send_to_child(
-        self, pickled_input: _WireProtocolPickledInput
-    ) -> _WireProtocolPickledOutput:
-        # The implementation of this should transfer `input` to the child, call
-        # `_run_in_child(input)` and transfer the result back.
-        ...
-
-    def _postprocess(self, output: _WireProtocolOutput) -> None:
-        pass
-
-    @classmethod
-    def _run_in_child(
-        cls,
-        pickled_input: _WireProtocolPickledInput,
-        extra_env: Optional[Mapping[str, str]] = None,
-    ) -> _WireProtocolPickledOutput:
-        with contextlib.ExitStack() as stack:
-            if extra_env is not None:
-                import unittest
-
-                stack.enter_context(unittest.mock.patch.dict("os.environ", extra_env))
-
-            # TODO: Should we split the input into multiple sections where each
-            # section sets up state for the previous section? (i.e. a Config section
-            # which we decode and apply, followed by a FakeTensorMode section which
-            # we decode and apply, etc)
-            input = pickled_input.deserialize()
-
-            stack.enter_context(DebugContext())
-
-            output_graph = _InProcessFxCompile().codegen_and_compile(
-                input.gm,
-                input.example_inputs,
-                input.inputs_to_check,
-                input.graph_kwargs,
-            )
-
-        return _WireProtocolOutput(
-            output_graph,
-        ).serialize()
-
-
-# This is a debugging/testing implementation of FxCompile which serializes the
-# input and output but still runs the FxCompile in-process.
-class _DebugSerdeFxCompile(_SerializedFxCompile):
-    @override
-    def _send_to_child(
-        self, pickled_input: _WireProtocolPickledInput
-    ) -> _WireProtocolPickledOutput:
-        # For debugging just serde the input and output but don't run in a
-        # subprocess.
-        return self._run_in_child(pickled_input)
-
-
 def fx_codegen_and_compile(
     gm: GraphModule,
     example_inputs: Sequence[InputType],
@@ -1392,12 +1280,17 @@ def fx_codegen_and_compile(
     **graph_kwargs: Unpack[_CompileFxKwargs],
 ) -> OutputCode:
     scheme: FxCompile
+
     if fx_compile_mode == FxCompileMode.NORMAL:
         scheme = _InProcessFxCompile()
     elif fx_compile_mode == FxCompileMode.SERIALIZE:
+        from .compile_fx_ext import _DebugSerdeFxCompile
+
         scheme = _DebugSerdeFxCompile()
-    else:
-        raise NotImplementedError
+    elif fx_compile_mode == FxCompileMode.SUBPROCESS:
+        from .compile_fx_subproc import _SubprocessFxCompile
+
+        scheme = _SubprocessFxCompile()
 
     return scheme.codegen_and_compile(gm, example_inputs, inputs_to_check, graph_kwargs)
 
@@ -1464,6 +1357,7 @@ def cudagraphify(
             constants=constants,
             placeholders=placeholders,
             mutated_input_idxs=mutated_input_idxs,
+            compile_id=torch._guards.CompileContext.current_compile_id(),
         )
     else:
         cudagraphify_fn = cudagraphify_impl
@@ -1473,10 +1367,7 @@ def cudagraphify(
     def run(new_inputs: Sequence[InputType]) -> Any:
         nonlocal compiled_fn
         if compiled_fn is None:
-            with dynamo_utils.dynamo_timed(
-                "cudagraphify",
-                log_pt2_compile_event=True,
-            ), dynamo_utils.preserve_rng_state():
+            with dynamo_utils.preserve_rng_state():
                 compiled_fn = cudagraphify_fn(model, new_inputs, static_input_idxs)
         return compiled_fn(new_inputs)
 
@@ -1633,8 +1524,15 @@ def compile_fx_aot(
     extern_node_serializer = config_patches.pop("extern_node_serializer", None)
     saved_compile_id = model_.meta.get("dynamo_compile_id", None)
     saved_compile_context = torch._guards.CompileContext(saved_compile_id)
-    with V.set_aot_compilation(True), torch._guards.compile_context(
-        saved_compile_context
+    with (
+        V.set_aot_compilation(True),
+        torch._guards.compile_context(saved_compile_context),
+        chromium_event_timed(
+            "compile_fx_aot",
+            log_pt2_compile_event=True,
+            reset_event_log_on_exit=True,
+        ),
+        get_metrics_context(),
     ):
         compiled_artifacts = compile_fx(
             model_,
@@ -1758,6 +1656,11 @@ def fw_compiler_freezing(
 
 
 def get_cpp_wrapper_config() -> dict[str, object]:
+    if config.triton.cudagraphs:
+        log_cudagraph_skip_and_bump_counter(
+            format_default_skip_message("cpp wrapper enabled")
+        )
+
     return {
         # Set autotune_at_compile_time to True as default if the option is not explicitly set
         "triton.autotune_at_compile_time": (
@@ -1771,7 +1674,7 @@ def get_cpp_wrapper_config() -> dict[str, object]:
     }
 
 
-def get_cuda_device_context(gm: torch.fx.GraphModule) -> ContextManager[None]:
+def get_cuda_device_context(gm: torch.fx.GraphModule) -> AbstractContextManager[None]:
     """
     Returns a cuda device context manager if there is a single device in the graph
     """
@@ -1787,7 +1690,7 @@ def get_cuda_device_context(gm: torch.fx.GraphModule) -> ContextManager[None]:
 
     out_devices: OrderedSet[torch.device] = OrderedSet(
         arg.meta["val"].device
-        for arg in output_node(gm).args[0]
+        for arg in output_node(gm).args[0]  # type: ignore[union-attr]
         if isinstance(arg, fx.Node) and isinstance(arg.meta.get("val"), torch.Tensor)
     )
     cuda_devices: OrderedSet[torch.device] = OrderedSet(
@@ -1835,12 +1738,15 @@ def compile_fx(
 
     # TODO: This probably shouldn't be a recursive call
     if config.cpp_wrapper:
-        with config.patch(
-            {
-                "cpp_wrapper": False,  # reset to break recursive call to compile_fx
-                **get_cpp_wrapper_config(),
-            }
-        ), V.set_real_inputs(example_inputs_):
+        with (
+            config.patch(
+                {
+                    "cpp_wrapper": False,  # reset to break recursive call to compile_fx
+                    **get_cpp_wrapper_config(),
+                }
+            ),
+            V.set_real_inputs(example_inputs_),
+        ):
             inputs_: Sequence[InputType] = example_inputs_
 
             if isinstance(model_, GraphModule):
@@ -1900,10 +1806,10 @@ def compile_fx(
 
     # Do the actual work
 
-    with _use_lazy_graph_module(
-        dynamo_config.use_lazy_graph_module
-    ), enable_python_dispatcher(), torch.fx.traceback.preserve_node_meta(
-        config.trace.enabled
+    with (
+        _use_lazy_graph_module(dynamo_config.use_lazy_graph_module),
+        enable_python_dispatcher(),
+        torch.fx.traceback.preserve_node_meta(config.trace.enabled),
     ):
         # Pre-grad passes cannot be run if we weren't given a GraphModule.
         # Dynamo will always produce a GraphModule, but this handles cases
@@ -2045,9 +1951,9 @@ def compile_fx(
                     boxed_forward_device_index=forward_device,
                 )
 
-        fw_compiler: Callable[
-            [GraphModule, Sequence[InputType]], OutputCode
-        ] = functools.partial(fw_compiler_base, is_inference=False)
+        fw_compiler: Callable[[GraphModule, Sequence[InputType]], OutputCode] = (
+            functools.partial(fw_compiler_base, is_inference=False)
+        )
         fw_compiler = SerializableAOTDispatchCompiler(OutputCode, fw_compiler)
 
         if config.freezing and not torch.is_grad_enabled():
@@ -2084,9 +1990,10 @@ def compile_fx(
         ) -> OutputCode:
             from torch._dynamo.convert_frame import compile_lock
 
-            with dynamo_utils.dynamo_timed(
-                "compile_fx.<locals>.bw_compiler"
-            ), compile_lock:
+            with (
+                dynamo_utils.dynamo_timed("compile_fx.<locals>.bw_compiler"),
+                compile_lock,
+            ):
                 model_outputs_node = output_node(gm)
                 if config.bw_outputs_user_visible:
                     model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)
@@ -2132,6 +2039,24 @@ def compile_fx(
                     trace_joint=False,
                     decompositions=decompositions,
                 )
+
+                from torch._export.utils import _detect_fake_mode_from_gm
+
+                fake_mode = _detect_fake_mode_from_gm(gm)
+                # aot_export_module doesn't account for constant tensor attributes
+                # so we end up having tensors that don't have fake vals attached.
+                # This can happen when upstream export is non-strict where we
+                # preserve the original module params/buffers. Once AOTI switches
+                # to ep.run_decompositions() flow to lower to post-autograd opset
+                # this will go away.
+                for node in gm.graph.nodes:
+                    if node.op == "get_attr" and "val" not in node.meta:
+                        target = getattr(gm, node.target)
+                        if isinstance(target, torch.Tensor):
+                            node.meta["val"] = fake_mode.from_tensor(
+                                target, static_shapes=True
+                            )
+
             unlifted_gm = _unlift_graph(model_, gm, graph_signature)
             if "dynamo_flat_name_to_original_fqn" in model_.meta:
                 unlifted_gm.meta["dynamo_flat_name_to_original_fqn"] = model_.meta[
@@ -2154,10 +2079,11 @@ def compile_fx(
             with V.set_fake_mode(fake_mode), compiled_autograd._disable(), context():
                 return inference_compiler(unlifted_gm, example_inputs_)
 
-        with V.set_fake_mode(fake_mode), torch._guards.tracing(
-            tracing_context
-        ), compiled_autograd._disable(), functorch_config.patch(
-            unlift_effect_tokens=True
+        with (
+            V.set_fake_mode(fake_mode),
+            torch._guards.tracing(tracing_context),
+            compiled_autograd._disable(),
+            functorch_config.patch(unlift_effect_tokens=True),
         ):
             try:
                 return aot_autograd(

@@ -4,6 +4,7 @@ from __future__ import annotations
 import inspect
 import itertools
 import re
+import warnings
 from io import StringIO
 from typing import Any, Callable, Generic, Literal, NamedTuple, Optional, TypeVar, Union
 from unittest.mock import patch
@@ -39,10 +40,6 @@ def _arg_str(a: object) -> str:
     return str(a)
 
 
-# NB: This is not done as a parent class, because our ops handlers
-# implementations make heavy use of __getattr__ magic, and pre-existing
-# stubs for methods would interfere with this mechanism.
-#
 # See OpDecompositions for superclass that desugars operations like reciprocal/square.
 class OpsHandler(Generic[T]):
     """
@@ -770,6 +767,14 @@ class DefaultHandler(OpsHandler[Any]):
         """
         raise NotImplementedError
 
+    def __getattr__(self, name: str) -> Any:
+        def fallback(*args: Any, **kwargs: Any) -> Any:
+            return self._default(name, args, kwargs)
+
+        # would like to remove this function entirely, but it's used in MTIA backend
+        warnings.warn(f"undefined OpHandler.{name}, please add missing op schema")
+        return fallback
+
     @staticmethod
     def _call_default(target: str):
         def call_default(self, *args, **kwargs):
@@ -801,8 +806,8 @@ class DefaultHandler(OpsHandler[Any]):
                 assert self_arg == "self"
                 code.write(
                     f"""
-                    def {target}(self, {', '.join(args)}):
-                        return self._default({target!r}, ({', '.join(args)}, ), {{}})
+                    def {target}(self, {", ".join(args)}):
+                        return self._default({target!r}, ({", ".join(args)}, ), {{}})
                     """.strip()
                 )
                 code.write("\n\n")
@@ -989,8 +994,9 @@ class KernelFormatterHandler(DefaultHandler):
                 )
                 formatter._output.writeline(f"{lhs} = {name}")
 
-        with V.set_ops_handler(formatter), patch.object(
-            FlexibleLayout, "allow_indexing", True
+        with (
+            V.set_ops_handler(formatter),
+            patch.object(FlexibleLayout, "allow_indexing", True),
         ):
             result = ir_fn(*args)
             return formatter.getvalue(result)

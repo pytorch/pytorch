@@ -82,7 +82,6 @@ class _Config(Generic[T]):
     justknob: Optional[str] = None
     env_name_default: Optional[list[str]] = None
     env_name_force: Optional[list[str]] = None
-    value_type: Optional[type] = None
     alias: Optional[str] = None
 
     def __init__(
@@ -103,17 +102,13 @@ class _Config(Generic[T]):
         self.env_name_force = _Config.string_or_list_of_string_to_list(env_name_force)
         self.value_type = value_type
         self.alias = alias
-        if self.justknob is not None:
-            assert isinstance(
-                self.default, bool
-            ), f"justknobs only support booleans, {self.default} is not a boolean"
         if self.alias is not None:
             assert (
                 default is _UNSET_SENTINEL
                 and justknob is None
                 and env_name_default is None
                 and env_name_force is None
-            ), "if alias is set, default, justknob or env var cannot be set"
+            ), "if alias is set, none of {default, justknob and env var} can be set"
 
     @staticmethod
     def string_or_list_of_string_to_list(
@@ -325,6 +320,21 @@ class _ConfigEntry:
                 if (env_value := _read_env_variable(val)) is not None:
                     self.env_value_force = env_value
                     break
+
+        # Ensure justknobs and envvars are allowlisted types
+        if self.justknob is not None and self.default is not None:
+            assert isinstance(
+                self.default, bool
+            ), f"justknobs only support booleans, {self.default} is not a boolean"
+        if self.value_type is not None and (
+            config.env_name_default is not None or config.env_name_force is not None
+        ):
+            assert self.value_type in (
+                bool,
+                str,
+                Optional[bool],
+                Optional[str],
+            ), f"envvar configs only support (optional) booleans or strings, {self.value_type} is neither"
 
 
 class ConfigModule(ModuleType):
@@ -574,7 +584,9 @@ class ConfigModule(ModuleType):
         if self._is_dirty or self._hash_digest is None:
             dict_to_hash = self._get_dict(ignored_keys=list(self._compile_ignored_keys))
             string_to_hash = repr(sorted(dict_to_hash.items()))
-            self._hash_digest = hashlib.md5(string_to_hash.encode("utf-8")).digest()
+            self._hash_digest = hashlib.md5(
+                string_to_hash.encode("utf-8"), usedforsecurity=False
+            ).digest()
             self._is_dirty = False
         return self._hash_digest
 

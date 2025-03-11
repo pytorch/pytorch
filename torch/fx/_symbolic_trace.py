@@ -288,7 +288,9 @@ class Tracer(TracerBase):
         # this captures both `math.sqrt()` and `from math import sqrt` automatically
         self._autowrap_function_ids: set[int] = {
             id(value)
-            for name, value in chain(*[m.__dict__.items() for m in autowrap_modules])
+            for name, value in chain.from_iterable(
+                m.__dict__.items() for m in autowrap_modules
+            )
             if not name.startswith("_") and callable(value)
         }
         self._autowrap_function_ids.update({id(f) for f in autowrap_functions})
@@ -840,10 +842,7 @@ class Tracer(TracerBase):
 
             self.submodule_paths = None
         except RuntimeError as e:
-            if (
-                isinstance(e.args[0], str)
-                and "Could not guard on data-dependent" in e.args[0]
-            ):
+            if isinstance(e.args[0], str) and "data-dependent" in e.args[0]:
                 print(
                     "\n"
                     + self.graph.python_code(
