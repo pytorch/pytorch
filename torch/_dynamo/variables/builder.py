@@ -567,9 +567,9 @@ class VariableBuilder:
 
     def _wrap(self, value):
         # import here to avoid circular dependencies
-        from torch.utils._triton import has_triton_package, has_triton_tma
+        from torch.utils._triton import has_triton, has_triton_tma
 
-        if has_triton_package():
+        if has_triton():
             from triton.runtime.autotuner import Autotuner
             from triton.runtime.jit import JITFunction
         else:
