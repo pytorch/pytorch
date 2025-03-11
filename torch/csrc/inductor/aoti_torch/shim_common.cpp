@@ -1328,8 +1328,6 @@ class StableIValueBoxedKernel : public c10::OperatorKernel {
         AtenTensorHandle ath = torch::aot_inductor::new_tensor_handle(
             std::move(const_cast<at::Tensor&>(arg.toTensor())));
         ministack[ministack_idx] = from(ath);
-      } else if (arg.isDevice()) {
-        ministack[ministack_idx] = from(arg.toDevice());
       } else {
         TORCH_CHECK(false, "Other types of IValues not yet handled!");
       }
