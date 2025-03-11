@@ -1969,7 +1969,10 @@ def _precompile_header(
         specified_dir=_HEADER_DIR,
     )
     cpp_builder = CppBuilder(
-        name=header_full_path,
+        # MSVC expects a precompiled header named header.pch, while GCC and Clang expect
+        # header.h.gch and header.h.pch, respectively.  Handle this by trimming off the
+        # last two characters in the name on Windows.
+        name=header_full_path[:-2] if _IS_WINDOWS else header_full_path,
         sources=header_full_path,
         BuildOption=header_build_option,
     )
