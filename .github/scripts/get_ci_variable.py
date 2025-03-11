@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Return stable CUDA version for the current channel"""
+"""Helper script - Return CI variables such as stable cuda, min python version, etc."""
 
 import argparse
 import re
