@@ -5,8 +5,10 @@ from typing import Any, Callable
 
 import torch
 from torch._dynamo.device_interface import get_interface_for_device
+from torch._inductor.runtime import triton_helpers
+from torch._inductor.runtime.static_cuda_launcher import StaticallyLaunchedCudaKernel
 from torch._inductor.runtime.triton_compat import tl, triton
-from torch._inductor.runtime.triton_heuristics import StaticallyLaunchedCudaKernel
+from torch._inductor.runtime.triton_helpers import libdevice
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.triton_utils import requires_cuda
 
@@ -61,7 +63,7 @@ class TestStaticCudaLauncher(TestCase):
         device_interface = get_interface_for_device("cuda")
         stream = device_interface.get_raw_stream(device_interface.current_device())
 
-        launcher.run((1,), stream, (new_arg0, arg1))
+        launcher.run((1,), stream, new_arg0, arg1)
         self.assertEqual(new_arg0, arg0)
 
     # I wish I could macro all int types this into a single unit test on a loop, but
@@ -78,15 +80,16 @@ class TestStaticCudaLauncher(TestCase):
             tl.store(arg0, x + y)
 
         arg0 = torch.zeros(1, dtype=torch.uint64, device="cuda")
-        args = (arg0, 1, 1, 1, 1)
+        # Using small numbers creates a Literal type which triton treats as a constant
+        args = (arg0, 50, 50, 50, 50)
 
         launcher = self._make_launcher(unsigned_integers, args, (1,))
-        self.assertEqual(arg0, torch.tensor([4], dtype=torch.uint64, device="cuda"))
+        self.assertEqual(arg0, torch.tensor([200], dtype=torch.uint64, device="cuda"))
         self.assertEqual(launcher.arg_tys, "OBHIK")
         new_arg0 = torch.zeros(1, dtype=torch.uint64, device="cuda")
         device_interface = get_interface_for_device("cuda")
         stream = device_interface.get_raw_stream(device_interface.current_device())
-        launcher.run((1,), stream, (new_arg0, 1, 1, 1, 1))
+        launcher.run((1,), stream, new_arg0, 50, 50, 50, 50)
         self.assertEqual(new_arg0, arg0)
 
     def test_signed_integers(self):
@@ -98,24 +101,23 @@ class TestStaticCudaLauncher(TestCase):
             tl.store(arg0, x + y)
 
         arg0 = torch.zeros(1, dtype=torch.int64, device="cuda")
-        args = (arg0, 1, 1, 1, 1)
+        # Using small numbers creates a Literal type which triton treats as a constant
+        args = (arg0, 50, 50, 50, 50)
 
         launcher = self._make_launcher(signed_integers, args, (1,))
-        self.assertEqual(arg0, torch.tensor([4], dtype=torch.int64, device="cuda"))
+        self.assertEqual(arg0, torch.tensor([200], dtype=torch.int64, device="cuda"))
         self.assertEqual(launcher.arg_tys, "Obhil")
         new_arg0 = torch.zeros(1, dtype=torch.int64, device="cuda")
         device_interface = get_interface_for_device("cuda")
         stream = device_interface.get_raw_stream(device_interface.current_device())
-        launcher.run((1,), stream, (new_arg0, 1, 1, 1, 1))
+        launcher.run((1,), stream, new_arg0, 50, 50, 50, 50)
         self.assertEqual(new_arg0, arg0)
 
     # TODO: floats don't work properly, triton seems to think they're all tl.float32
     # despite type annotations.
     # There's also not really a good way for me to make a float16 in python...
     def test_floats(self):
-        def unsigned_integers(
-            arg0, arg1: tl.float16, arg2: tl.float32, arg3: tl.float64
-        ):
+        def floats(arg0, arg1: tl.float16, arg2: tl.float32, arg3: tl.float64):
             x = tl.load(arg0)
             y = arg1 + arg2 + arg3
             tl.store(arg0, x + y)
@@ -124,14 +126,14 @@ class TestStaticCudaLauncher(TestCase):
 
         args = (arg0, 1.0, 1.0, 1.0)
 
-        launcher = self._make_launcher(unsigned_integers, args, (1,))
+        launcher = self._make_launcher(floats, args, (1,))
         self.assertEqual(arg0, torch.tensor([3.0], dtype=torch.float64, device="cuda"))
         # TODO:
         self.assertEqual(launcher.arg_tys, "Offf")
         new_arg0 = torch.zeros(1, dtype=torch.float64, device="cuda")
         device_interface = get_interface_for_device("cuda")
         stream = device_interface.get_raw_stream(device_interface.current_device())
-        launcher.run((1,), stream, (new_arg0, 1.0, 1.0, 1.0))
+        launcher.run((1,), stream, new_arg0, 1.0, 1.0, 1.0)
         self.assertEqual(new_arg0, arg0)
 
     def test_basic_1arg(self):
@@ -147,7 +149,11 @@ class TestStaticCudaLauncher(TestCase):
         device_interface = get_interface_for_device("cuda")
         stream = device_interface.get_raw_stream(device_interface.current_device())
 
-        launcher.run((1,), stream, (new_arg0,))
+        launcher.run(
+            (1,),
+            stream,
+            new_arg0,
+        )
         self.assertEqual(new_arg0, arg0)
 
     def test_constexpr(self):
@@ -171,12 +177,95 @@ class TestStaticCudaLauncher(TestCase):
         new_arg0 = torch.zeros(1, dtype=torch.int32, device="cuda")
         device_interface = get_interface_for_device("cuda")
         stream = device_interface.get_raw_stream(device_interface.current_device())
-        launcher.run((1,), stream, (new_arg0,))
+        launcher.run(
+            (1,),
+            stream,
+            new_arg0,
+        )
         self.assertEqual(new_arg0, arg0)
+
+    def test_implied_constant(self):
+        """xnumel is unused in this kernel, but isn't explicitly marked as a constexpr"""
+
+        # This kernel was generated by inductor so it has a bunch of unused arguments. We don't change it
+        @triton.jit
+        def triton_red_fused_any_isinf_0(
+            in_ptr0,
+            out_ptr0,
+            xnumel,  # noqa: F841
+            r0_numel,
+            XBLOCK: tl.constexpr,
+            R0_BLOCK: tl.constexpr,
+        ):
+            xnumel = 1  # noqa: F841
+            rnumel = r0_numel  # noqa: F841
+            RBLOCK: tl.constexpr = R0_BLOCK  # noqa: F841
+            xoffset = tl.program_id(0) * XBLOCK
+            xindex = xoffset + tl.arange(0, XBLOCK)[:, None]  # noqa: F841
+            xmask = tl.full([XBLOCK, R0_BLOCK], True, tl.int1)  # noqa: F841
+            r0_base = tl.arange(0, R0_BLOCK)[None, :]
+            rbase = r0_base  # noqa: F841
+            _tmp3 = tl.full([XBLOCK, R0_BLOCK], False, tl.int1)
+            for r0_offset in range(0, r0_numel, R0_BLOCK):
+                r0_index = r0_offset + r0_base
+                r0_mask = r0_index < r0_numel
+                roffset = r0_offset  # noqa: F841
+                rindex = r0_index  # noqa: F841
+                r0_0 = r0_index
+                tmp0 = tl.load(
+                    in_ptr0 + (r0_0), r0_mask, eviction_policy="evict_first", other=0.0
+                )
+                tmp1 = libdevice.isinf(tmp0).to(tl.int1)
+                tmp2 = tl.broadcast_to(tmp1, [XBLOCK, R0_BLOCK])
+                tmp4 = _tmp3 | tmp2
+                _tmp3 = tl.where(r0_mask, tmp4, _tmp3)
+            tmp3 = triton_helpers.any(_tmp3.to(tl.int8), 1)[:, None].to(tl.int1)
+            tl.store(out_ptr0 + (tl.full([XBLOCK, 1], 0, tl.int32)), tmp3, None)
+
+        arg0 = torch.tensor([0.0, 0.5, float("inf"), 5], device="cuda")
+        arg1 = torch.tensor([False], device="cuda")
+        arg2 = torch.tensor([False], device="cuda")
+        compiled_kernel = triton_red_fused_any_isinf_0[1,](
+            arg0, arg1, 1, 128, XBLOCK=1, R0_BLOCK=1
+        )
+
+        launcher = StaticallyLaunchedCudaKernel(compiled_kernel)
+        launcher.write_cubin_to_file(self.tmp_file.name)
+        launcher.load_kernel()
+
+        device_interface = get_interface_for_device("cuda")
+        stream = device_interface.get_raw_stream(device_interface.current_device())
+        launcher.run((1,), stream, arg0, arg2, 1, 128)
+        self.assertEqual(arg1, arg2)
 
     def test_too_many_args(self):
         def kernel_too_many_args(
-            arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10, arg11
+            arg0,
+            arg1,
+            arg2,
+            arg3,
+            arg4,
+            arg5,
+            arg6,
+            arg7,
+            arg8,
+            arg9,
+            arg10,
+            arg11,
+            arg12,
+            arg13,
+            arg14,
+            arg15,
+            arg16,
+            arg17,
+            arg18,
+            arg19,
+            arg20,
+            arg21,
+            arg22,
+            arg23,
+            arg24,
+            arg25,
         ):
             x = tl.load(arg0)
             y = (
@@ -191,11 +280,25 @@ class TestStaticCudaLauncher(TestCase):
                 + arg9
                 + arg10
                 + arg11
+                + arg12
+                + arg13
+                + arg14
+                + arg15
+                + arg16
+                + arg17
+                + arg18
+                + arg19
+                + arg20
+                + arg21
+                + arg22
+                + arg23
+                + arg24
+                + arg25
             )
             tl.store(arg0, x + y)
 
         arg0 = torch.zeros(1, dtype=torch.int32, device="cuda")
-        scalar_args = (1,) * 11
+        scalar_args = (50,) * 25
         self.assertRaisesRegex(
             NotImplementedError,
             "No static cuda launcher available",
