@@ -362,7 +362,7 @@ def raise_observed_exception(
     # CPython here raises an exception. Since there is no python code, we have to manually setup the exception
     # stack and raise the exception.
     exception_vt = BuiltinVariable(exc_type).call_function(tx, args or [], kwargs or {})  # type: ignore[arg-type]
-    tx.exn_vt_stack.append(exception_vt)
+    tx.exn_vt_stack.set_current_exception(exception_vt)
     raise observed_exception_map[exc_type]
 
 
@@ -391,7 +391,7 @@ def handle_observed_exception(tx: Any) -> None:
     #
 
     # Fortunately this translates to a simple pop from the exn_vt_stack
-    tx.exn_vt_stack.pop()
+    tx.exn_vt_stack.clear_current_exception()
 
 
 # These exceptions are ok to fallback to eager/graph_break.
