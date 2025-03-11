@@ -1140,11 +1140,18 @@ class SDPAKernelVariable(ContextWrappingVariable):
         return nodes
 
     def enter(self, tx):
-        self.prev_backends = torch.nn.attention._cur_sdpa_kernel_backends(with_priority=self.set_priority)
-        self.set_cleanup_hook(
-            tx, lambda: torch.nn.attention._sdpa_kernel(self.prev_backends, set_priority=self.set_priority)
+        self.prev_backends = torch.nn.attention._cur_sdpa_kernel_backends(
+                with_priority=self.set_priority
         )
-        torch.nn.attention._sdpa_kernel(self.target_values, set_priority=self.set_priority)
+        self.set_cleanup_hook(
+            tx,
+            lambda: torch.nn.attention._sdpa_kernel(
+                self.prev_backends, set_priority=self.set_priority
+            ),
+        )
+        torch.nn.attention._sdpa_kernel(
+            self.target_values, set_priority=self.set_priority
+        )
         arg = self._backends_to_nodes(tx, self.target_values)
         tx.output.create_node(
             "call_function",

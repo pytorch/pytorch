@@ -74,17 +74,19 @@ def _backend_from_string(name: str):
 
 
 def _cur_sdpa_kernel_backends(with_priority: bool = False):
-    backends: list[SDPBackend] = []
+    backends = []
     for name, val in _backend_names.items():
         if getattr(torch.backends.cuda, f"{name}_sdp_enabled")():
             backends.append(getattr(SDPBackend, val))
     if with_priority:
         curr_priority = torch._C._get_sdp_priority_order()
-        backends = sorted(backends, key=lambda backend: curr_priority.index(int(backend)))
+        backends = sorted(
+            backends, key=lambda backend: curr_priority.index(int(backend))
+        )
     return backends
 
 
-def _sdpa_kernel(backends: Iterable[SDPBackend], set_priority: bool = False):
+def _sdpa_kernel(backends: Iterable, set_priority: bool = False):
     for name, val in _backend_names.items():
         enabled = getattr(SDPBackend, val) in backends
         getattr(torch.backends.cuda, f"enable_{name}_sdp")(enabled)

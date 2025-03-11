@@ -391,7 +391,9 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             assert len(args) == 1 or (len(kwargs) == 1 and "backends" in kwargs)
             backends = args[0] if len(args) == 1 else kwargs["backends"]
             set_priority = kwargs["set_priority"] if "set_priority" in kwargs else False
-            return SDPAKernelVariable.create(tx, backends.as_python_constant(), set_priority)
+            return SDPAKernelVariable.create(
+                    tx, backends.as_python_constant(), set_priority
+            )
         elif self.value is torch.nn.attention._sdpa_kernel_variadic:
             return SDPAKernelVariable.create(
                 tx, [arg.as_python_constant() for arg in args]
