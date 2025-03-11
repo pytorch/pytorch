@@ -1876,8 +1876,6 @@ class BuiltinVariable(VariableTracker):
                     "assertRaisesRegex",
                     "assertNotWarns",
                     "assertWarnsRegex",
-                    "assertSequenceEqual",
-                    "assertDictEqual",
                     "assertMultiLineEqual",
                     "assertWarns",
                 )
@@ -2136,6 +2134,10 @@ class BuiltinVariable(VariableTracker):
             return variables.ConstantVariable.create(id(args[0].value))
         elif istype(args[0], variables.FunctoolsPartialVariable):
             return variables.ConstantVariable.create(id(args[0].fake_value))
+        elif istype(args[0], variables.ConstDictVariable):
+            return variables.ConstantVariable.create(id(args[0].items))
+        elif istype(args[0], variables.ListVariable):
+            return variables.ConstantVariable.create(id(args[0].items))
         else:
             unimplemented(f"call_id with args {args}")
 
