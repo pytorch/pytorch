@@ -515,7 +515,7 @@ class TestDynamoTimed(TestCase):
             torch.compile(m)(torch.randn(1, 10, 10))
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
         self.assertEqual(compilation_events[0].param_numel, 520)
-        self.assertEqual(compilation_events[0].param_bytes, 4*520)
+        self.assertEqual(compilation_events[0].param_bytes, 4 * 520)
         self.assertEqual(compilation_events[0].param_count, 2)
 
         class ModelWrapped(nn.Module):
@@ -533,7 +533,7 @@ class TestDynamoTimed(TestCase):
             torch.compile(m)(torch.randn(1, 10, 10))
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
         self.assertEqual(compilation_events[0].param_numel, 1040)
-        self.assertEqual(compilation_events[0].param_bytes, 4*1040)
+        self.assertEqual(compilation_events[0].param_bytes, 4 * 1040)
         self.assertEqual(compilation_events[0].param_count, 4)
 
 

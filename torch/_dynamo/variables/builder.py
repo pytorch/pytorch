@@ -1512,17 +1512,27 @@ class VariableBuilder:
         from ..eval_frame import OptimizedModule
 
         try:
-            params = [p for _, p in value.named_parameters(recurse=False, remove_duplicate=True)]
-        except AttributeError:
+            params = [
+                p
+                for _, p in value.named_parameters(recurse=False, remove_duplicate=True)
+            ]
+        except (AttributeError, TypeError):
+            # Fails for weird things without params, and cpp_frontend_extension.cpp.Net, which doesn't support remove_duplicate
             params = []
-        initialized_params = [p for p in params if not torch.nn.parameter.is_lazy(p)]
-        param_total_numel = sum(p.numel() for p in initialized_params)
-        param_total_nbytes = sum(p.nbytes for p in initialized_params)
-        param_count = len(params)
-        metrics_context = get_metrics_context()
-        metrics_context.increment("param_numel", param_total_numel)
-        metrics_context.increment("param_bytes", param_total_nbytes)
-        metrics_context.increment("param_count", param_count)
+        try:
+            initialized_params = [
+                p for p in params if not torch.nn.parameter.is_lazy(p)
+            ]
+            param_total_numel = sum(p.numel() for p in initialized_params)
+            param_total_nbytes = sum(p.nbytes for p in initialized_params)
+            param_count = len(params)
+            metrics_context = get_metrics_context()
+            metrics_context.increment("param_numel", param_total_numel)
+            metrics_context.increment("param_bytes", param_total_nbytes)
+            metrics_context.increment("param_count", param_count)
+        except RuntimeError:
+            # Fails for sparse tensors, as well as expanded weights
+            pass
 
         if len(value.__dict__) == 0:
             unimplemented_v2(
