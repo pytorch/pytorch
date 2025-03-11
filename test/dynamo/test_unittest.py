@@ -277,7 +277,6 @@ class CPythonTestLongMessage(torch._dynamo.test_case.TestCase):
             ["^1 != 2$", "^oops$", "^1 != 2$", "^1 != 2 : oops$"],
         )
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def testAssertSequenceEqual(self):
         # Error messages are multiline so not testing on full message
@@ -322,7 +321,6 @@ class CPythonTestLongMessage(torch._dynamo.test_case.TestCase):
             ],
         )
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def testAssertDictEqual(self):
         self.assertMessages(
