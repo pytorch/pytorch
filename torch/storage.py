@@ -43,12 +43,8 @@ class _StorageBase:
     is_sparse: _bool = False
     is_sparse_csr: _bool = False
     device: torch.device
-    # Used when
-    # (1) stashing FakeTensor device onto storage in torch.serialization.skip_data
-    # (2) stashing device onto storage to propagate to FakeTensor when torch.load under FakeTensorMode
+    # Used when stashing FakeTensor device onto storage in torch.save(metadata_only=True)
     _fake_device: _Optional[torch.device] = None
-    # Used when loading with FakeTensorMode to give information about offset of storage in torch.saved-file
-    _checkpoint_offset: _Optional[int] = None
 
     def __init__(self, *args, **kwargs):
         pass
