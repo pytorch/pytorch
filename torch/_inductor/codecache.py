@@ -2076,8 +2076,10 @@ class CppCodeCache:
             lib = None
 
             # if requested, pre-compile any headers
-            if config.cpp_cache_precompile_headers and not _IS_WINDOWS and (
-                header_file := cls._get_uncompiled_header(device_type)
+            if (
+                config.cpp_cache_precompile_headers
+                and not _IS_WINDOWS
+                and (header_file := cls._get_uncompiled_header(device_type))
             ):
                 cpp_build_option.precompiled_header = _precompile_header(
                     header_file,
