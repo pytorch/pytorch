@@ -12,59 +12,11 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAEvent.h>
 #include <c10/util/Exception.h>
-#include <nccl.h>
+#include <torch/csrc/cuda/nccl.h>
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <optional>
 
 constexpr int64_t kCommInitBusyWaitMillis = 2;
-
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 14, 0)
-#define NCCL_HAS_COMM_NONBLOCKING
-#endif
-
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 18, 0)
-#define NCCL_HAS_COMM_SPLIT
-#endif
-
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 23, 0)
-#define NCCL_HAS_INIT_RANK_SCALABLE
-#endif
-
-// ncclGetLastError() is enabled only for NCCL versions 2.13+
-// ncclRemoteError only exists in NCCL versions 2.13+
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 13, 0)
-#define ENABLE_NCCL_GET_LAST_ERROR
-#define NCCL_REMOTE_ERROR
-#endif
-
-static_assert(
-    NCCL_VERSION_CODE >= NCCL_VERSION(2, 7, 0),
-    "NCCL version must be 2.7 or later");
-// The following macros represent features supported prior to NCCL 2.7,
-// therefore we can define them unconditionally, given the static_assert above.
-// TODO: remove these macros from code.
-#define ENABLE_NCCL_ERROR_CHECKING
-#define ENABLE_NCCL_P2P_SUPPORT
-// End of macros for NCCL 2.7 and below.
-
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 11, 0)
-#define ENABLE_NCCL_PREMUL_SUM_SUPPORT
-#endif
-
-// Note: the first version that supports ncclConfig_t is 2.14. Here we
-// fast-forward the version requirement to 2.17 where ncclConfig_t has CTA and
-// CGA fields because they have already been pybinded out.
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 17, 0)
-#define NCCL_HAS_CONFIG
-#endif
-
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 19, 0)
-#define NCCL_HAS_COMM_REGISTER
-#endif
-
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 19, 0)
-#define NCCL_HAS_MEM_ALLOC
-#endif
 
 // Macro to throw on a non-successful NCCL return value.
 #define C10D_NCCL_CHECK(cmd, failureReason)                                   \
@@ -253,6 +205,7 @@ class NCCLComm {
 
   ncclComm_t getNcclComm();
 
+#ifdef NCCL_HAS_COMM_NONBLOCKING
   // Wait for the communicator to be ready. This is a blocking function.
   // Useful in nonblocking mode: NCCL requires the communicator to be ready
   // before issuing a second command.
@@ -263,6 +216,7 @@ class NCCLComm {
   //   complete. Use `longInterval=false` when waiting collective call to return
   //   ncclSuccess.
   void waitReady(bool longInterval);
+#endif
 
   std::optional<std::string> getNcclCommFailureReason() const;
 
@@ -336,7 +290,7 @@ struct ncclRedOpRAII {
     std::swap(tmp.comm_, this->comm_);
     std::swap(tmp.premul_sum_, this->premul_sum_);
   }
-#if defined(ENABLE_NCCL_PREMUL_SUM_SUPPORT)
+#ifdef ENABLE_NCCL_PREMUL_SUM_SUPPORT
   ~ncclRedOpRAII() {
     if (premul_sum_) {
       ncclRedOpDestroy(op_, comm_);

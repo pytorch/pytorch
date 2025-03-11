@@ -1,5 +1,13 @@
 #pragma once
 
+// NOTE: [pytorch nccl defines]
+
+// All NCCL interactions should route through this header.
+// Direct inclusion of <nccl.h> should be avoided.
+// Version checks/compatibility macros centralized here.
+
+#include <nccl.h>
+
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 
@@ -7,15 +15,51 @@
 #include <optional>
 #include <vector>
 
+static_assert(
+    NCCL_VERSION_CODE >= NCCL_VERSION(2, 7, 0),
+    "NCCL version must be 2.7 or later");
+
 // NCCL BFloat16 is enabled only for CUDA 11+ and NCCL versions 2.10+, or for
 // HIP 3.1+
-#if defined(__CUDA_BF16_TYPES_EXIST__)
-#define HAS_NCCL_BF16_DATATYPE \
-  ((NCCL_MAJOR > 2) || (NCCL_MAJOR == 2) && (NCCL_MINOR >= 10))
-#elif defined(USE_ROCM) && (TORCH_HIP_VERSION >= 301)
-#define HAS_NCCL_BF16_DATATYPE 1
-#else
-#define HAS_NCCL_BF16_DATATYPE 0
+#if defined(__CUDA_BF16_TYPES_EXIST__) && \
+    (NCCL_VERSION_CODE >= NCCL_VERSION(2, 10, 0))
+#define NCCL_HAS_BF16_DATATYPE
+#elif defined(RCCL_BFLOAT16)
+#define NCCL_HAS_BF16_DATATYPE
+#endif
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 10, 0)
+#define NCCL_HAS_AVG
+#endif
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 11, 0)
+#define ENABLE_NCCL_PREMUL_SUM_SUPPORT
+#endif
+
+// ncclGetLastError() is enabled only for NCCL versions 2.13+
+// ncclRemoteError only exists in NCCL versions 2.13+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 13, 0)
+#define NCCL_HAS_REMOTE_ERROR
+#endif
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 14, 0)
+#define NCCL_HAS_COMM_NONBLOCKING
+#endif
+
+// Note: the first version that supports ncclConfig_t is 2.14. Here we
+// fast-forward the version requirement to 2.17 where ncclConfig_t has CTA and
+// CGA fields because they have already been pybinded out.
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 17, 0)
+#define NCCL_HAS_CONFIG
+#endif
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 18, 0)
+#define NCCL_HAS_COMM_SPLIT
+#endif
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 19, 0)
+#define NCCL_HAS_COMM_REGISTER
+#define NCCL_HAS_MEM_ALLOC
 #endif
 
 namespace torch::cuda::nccl {
