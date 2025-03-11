@@ -1,3 +1,5 @@
+import functools
+
 from typing import Any, Optional
 from typing_extensions import Unpack
 
@@ -63,6 +65,17 @@ class StaticallyLaunchedCudaKernel:
             raise NotImplementedError(
                 "Shared memory size > 48KB requires special triton handling"
             )
+
+        # Newer triton versions pass an extra global scratch parameter to the compiled cuda kernel.
+        # Inductor never uses this field or enables it, but we still have to pass an extra None into the set of params if its enabled
+        if hasattr(kernel.metadata, "global_scratch_size"):
+            if kernel.metadata.global_scratch_size > 0:
+                raise NotImplementedError("Global scratch not yet supported")
+            else:
+                self.has_global_scratch = True
+        else:
+            self.has_global_scratch = False
+
         self.arg_tys, self.constant_idxs = self.arg_ty_from_signature(kernel.src)
         self.function: Optional[int] = (
             None  # Loaded by load_kernel(on the parent process)
@@ -107,17 +120,9 @@ class StaticallyLaunchedCudaKernel:
             del self.cubin
         self.cubin_path = filepath
 
-    def extract_type(self, ty: str) -> str:
-        """
-        Takes a triton type from CompiledKernel.signature and
-        converts it into a single char encoding. _StaticCudaLauncher
-        will switch on this char to figure out what type the underlying
-        value should be passed to the triton kernel as.
-        """
-        if ty[0] == "*":
-            return "O"
-        elif ty == "nvTmaDesc":
-            raise NotImplementedError("nvTmaDesc kernels are not yet supported")
+    @staticmethod
+    @functools.lru_cache
+    def type_mappings():
         return {
             "i1": "i",
             "i8": "b",
@@ -135,7 +140,20 @@ class StaticallyLaunchedCudaKernel:
             "f32": "f",
             "fp64": "d",
             # TODO handle nvTmaDesc/CUtensormap
-        }[ty]
+        }
+
+    def extract_type(self, ty: str) -> str:
+        """
+        Takes a triton type from CompiledKernel.signature and
+        converts it into a single char encoding. _StaticCudaLauncher
+        will switch on this char to figure out what type the underlying
+        value should be passed to the triton kernel as.
+        """
+        if ty[0] == "*":
+            return "O"
+        elif ty == "nvTmaDesc":
+            raise NotImplementedError("nvTmaDesc kernels are not yet supported")
+        return StaticallyLaunchedCudaKernel.type_mappings()[ty]
 
     def arg_ty_from_signature(self, src: ASTSource) -> tuple[str, OrderedSet[int]]:
         def index_key(i: Any) -> int:
@@ -173,8 +191,20 @@ class StaticallyLaunchedCudaKernel:
         # throw an exception. But if inductor is the only one calling this
         # thing, it should always match.
         # Get rid of constants before passing to cubin launcher
+
+        # TODO: is this (and the check below) slow to do at runtime? The thing is,
+        # we already spend the time in CachingAutotuner.launch() to massage the arguments
+        # properly anyways so this isn't exactly slower than that...
         args = tuple(args[i] for i in range(len(args)) if i not in self.constant_idxs)
-        assert len(args) == len(self.arg_tys)
+
+        # Add a None if triton wants an extra parameter to the cubin
+        if self.has_global_scratch:
+            arg_tys = self.arg_tys + "O"
+            args = (*args, None)
+        else:
+            arg_tys = self.arg_tys
+
+        assert len(args) == len(arg_tys)
 
         # TODO: can handle grid functions here or in C++, so
         # that we don't need the grid handler above.
@@ -188,7 +218,7 @@ class StaticallyLaunchedCudaKernel:
             grid_z,
             self.num_warps,
             self.shared,
-            self.arg_tys,
+            arg_tys,
             args,
             stream,
         )
