@@ -349,6 +349,12 @@ inline ArrayRefTensor<T>& wrap_with_raii_handle_if_needed(
 }
 
 template <typename T>
+inline ArrayRefTensor<T> wrap_with_raii_handle_if_needed(
+    ArrayRefTensor<T>&& tensor) {
+  return std::move(tensor);
+}
+
+template <typename T>
 inline RAIIAtenTensorHandle expensive_copy_to_tensor_if_needed(
     const ArrayRefTensor<T>& tensor) {
   return tensor.expensiveCopyToTensor();

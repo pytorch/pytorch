@@ -49,8 +49,14 @@ class LineWithSets:
         )
 
     def is_braced_set(self, begin: int, end: int) -> bool:
-        if begin + 1 == end or self.tokens[begin].string != "{":
+        if (
+            begin + 1 == end
+            or self.tokens[begin].string != "{"
+            or begin
+            and self.tokens[begin - 1].string == "in"  # skip `x in {1, 2, 3}`
+        ):
             return False
+
         i = begin + 1
         empty = True
         while i < end:

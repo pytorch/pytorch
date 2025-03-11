@@ -69,6 +69,10 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     return false;
   }
 
+  virtual bool supportsCoalescing() const {
+    return false;
+  }
+
   virtual void startCoalescing() {
     TORCH_CHECK(
         false,
@@ -431,6 +435,14 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     // Change to true in concrete backend if supported
     return false;
   }
+
+  // Aborts all pending operations and connections in the backend if the backend
+  // supports it.
+  virtual void abort() {}
+
+  // Shutdown the backend if the backend supports it. This should be used for
+  // normal shutdown.
+  virtual void shutdown() {}
 
  protected:
   // Implementations of this interface need to call this to setup
