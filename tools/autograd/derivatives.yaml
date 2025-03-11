@@ -1297,7 +1297,7 @@
   reserve: not_implemented("batch_norm_backward reserve")
 
 - name: nextafter(Tensor self, Tensor other) -> Tensor
-  self: torch.where(self != other, grad, torch.zeros_like(grad))
+  self: at::where(self != other, grad, 0)
   other: zeros_like(other)
   result: torch.where(self_p != other_p, self_t, torch.zeros_like(self_t))
 
