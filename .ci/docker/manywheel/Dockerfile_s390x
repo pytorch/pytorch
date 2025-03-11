@@ -105,6 +105,30 @@ CMD ["/bin/bash"]
 RUN dnf install -y \
   protobuf-devel \
   protobuf-c-devel \
-  protobuf-lite-devel
+  protobuf-lite-devel \
+  hdf5-devel \
+  python3-h5py \
+  git
 
 RUN env GRPC_PYTHON_BUILD_SYSTEM_OPENSSL=True pip3 install grpcio
+
+# cmake-3.28.0 from pip for onnxruntime
+RUN python3 -mpip install cmake==3.28.0
+
+# build onnxruntime 1.21.0 from sources.
+# it is not possible to build it from sources using pip,
+# so just build it from upstream repository.
+# h5py is dependency of onnxruntime_training.
+# h5py==3.11.0 builds with hdf5-devel 1.10.5 from repository.
+# install newest flatbuffers version first:
+# for some reason old version is getting pulled in otherwise.
+# packaging package is required for onnxruntime wheel build.
+RUN pip3 install flatbuffers && \
+  pip3 install h5py==3.11.0 && \
+  pip3 install packaging && \
+  git clone https://github.com/microsoft/onnxruntime && \
+  cd onnxruntime && git checkout v1.21.0 && \
+  git submodule update --init --recursive && \
+  ./build.sh --config Release --parallel 0 --enable_pybind --build_wheel --enable_training --enable_training_apis --enable_training_ops --skip_tests --allow_running_as_root && \
+  pip3 install ./build/Linux/Release/dist/onnxruntime_training-*.whl && \
+  cd .. && /bin/rm -rf ./onnxruntime
