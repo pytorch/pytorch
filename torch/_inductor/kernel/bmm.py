@@ -2,6 +2,7 @@
 import logging
 
 import torch
+from torch._dynamo.utils import counters
 from torch._inductor.codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 
 from .. import ir, lowering as L
@@ -168,6 +169,8 @@ def tuned_bmm(mat1, mat2, *, layout=None):
 
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
 
+    # below is for getting an overview logging info of inductor mms
+    counters["aten_mm_info"][f"aten.bmm_{m}_{n}_{k}"] += 1
     log.info(
         "Tuned aten.bmm: m=%s, n=%s, k=%s, mat1_dtype=%s, mat2_dtype=%s, output_layout=%s",
         m,
@@ -215,6 +218,19 @@ def tuned_bmm(mat1, mat2, *, layout=None):
 @L.register_lowering(aten.baddbmm)
 def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     m, n, k, layout, mat1, mat2, inp = mm_args(mat1, mat2, inp, layout=layout)
+
+    # below is for getting an overview logging info of inductor mms
+    counters["aten_mm_info"][f"aten.baddbmm_{m}_{n}_{k}"] += 1
+    log.info(
+        "Tuned aten.baddbmm: m=%s, n=%s, k=%s, mat1_dtype=%s, mat2_dtype=%s, inp=%s, output_layout=%s",
+        m,
+        n,
+        k,
+        mat1.get_dtype(),
+        mat2.get_dtype(),
+        inp.get_dtype(),
+        layout,
+    )
 
     # options to tune from
     choices = (

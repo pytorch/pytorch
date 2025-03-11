@@ -143,6 +143,9 @@ AOTI_TORCH_EXPORT int32_t aoti_torch_memory_format_channels_last();
 AOTI_TORCH_EXPORT int32_t aoti_torch_memory_format_channels_last_3d();
 AOTI_TORCH_EXPORT int32_t aoti_torch_memory_format_preserve_format();
 
+// Get TORCH_ABI_VERSION of the built libtorch.so
+AOTI_TORCH_EXPORT uint64_t aoti_torch_abi_version();
+
 // Functions for converting a single-element tensor to a scalar value
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_item_float16(AtenTensorHandle tensor, c10::Half* ret_value);
@@ -268,6 +271,10 @@ aoti_torch_get_device_index(AtenTensorHandle tensor, int32_t* ret_device_index);
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_storage_offset(
     AtenTensorHandle tensor,
     int64_t* ret_storage_offset);
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_new_tensor_handle(
+    AtenTensorHandle orig_handle,
+    AtenTensorHandle* new_handle);
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch__alloc_from_pool(
     AtenTensorHandle self,
