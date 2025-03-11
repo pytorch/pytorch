@@ -327,7 +327,7 @@ def _get_decoding_default_config(key) -> tuple[int, int, int]:
     default_config = (64, 2, 1)
     if key.get_device().type == "xpu":
         return default_config
-    sm_version = torch.cuda.get_device_capability()    
+    sm_version = torch.cuda.get_device_capability()
     if sm_version >= (9, 0):
         if head_dim > 128 and dtype == torch.float32:
             return default_config
