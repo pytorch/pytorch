@@ -1,10 +1,12 @@
 #include <ATen/native/quantized/cpu/qlinear.h>
 #include <c10/core/DeviceType.h>
+#include <c10/core/DispatchKey.h>
 #include <c10/core/GradMode.h>
 #include <c10/core/Layout.h>
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
+#include <torch/csrc/inductor/aoti_runtime/utils.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/inductor/aoti_torch/mkldnn_tensor.h>
 #include <torch/csrc/inductor/aoti_torch/oss_proxy_executor.h>
@@ -13,10 +15,14 @@
 #include <torch/csrc/inductor/aoti_torch/utils.h>
 #include <torch/csrc/inductor/inductor_ops.h>
 #include <torch/csrc/jit/serialization/pickle.h>
+#include <torch/csrc/stable/library.h>
+#include <torch/library.h>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <fstream>
 #include <iostream>
+#include <vector>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -231,6 +237,13 @@ AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(
     ComplexDouble)
 #undef AOTI_TORCH_SCALAR_TO_TENSOR_IMPL
 
+#ifndef C10_MOBILE
+#include <torch/version.h>
+uint64_t aoti_torch_abi_version() {
+  return TORCH_ABI_VERSION;
+}
+#endif // C10_MOBILE
+
 bool aoti_torch_grad_mode_is_enabled() {
   return c10::GradMode::is_enabled();
 }
@@ -371,6 +384,15 @@ AOTITorchError aoti_torch_get_storage_offset(
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
     *ret_storage_offset = t->storage_offset();
+  });
+}
+
+AOTITorchError aoti_torch_new_tensor_handle(
+    AtenTensorHandle orig_handle,
+    AtenTensorHandle* new_handle) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t = tensor_handle_to_tensor_pointer(orig_handle);
+    *new_handle = new_tensor_handle(at::Tensor(*t));
   });
 }
 
@@ -1276,18 +1298,134 @@ AOTITorchError aoti_torch_zero_(AtenTensorHandle tensor) {
   });
 }
 
-AOTITorchError aoti_torch_cpu__weight_int4pack_mm_cpu_tensor(
-    AtenTensorHandle X,
-    AtenTensorHandle w,
-    AtenTensorHandle qGroupSize,
-    AtenTensorHandle qScaleAndZeros,
-    AtenTensorHandle* ret0) {
+class StableIValueBoxedKernel : public c10::OperatorKernel {
+ public:
+  StableIValueBoxedKernel(void (*fn)(StableIValue*, uint64_t, uint64_t))
+      : fn_(fn) {}
+
+  void operator()(
+      const c10::OperatorHandle& op,
+      c10::DispatchKeySet keyset,
+      torch::jit::Stack* stack) {
+    const auto& schema = op.schema();
+    const auto num_returns = schema.returns().size();
+    const auto num_arguments = schema.arguments().size();
+
+    std::vector<StableIValue> ministack(std::max(num_arguments, num_returns));
+
+    for (const auto idx : c10::irange(num_arguments)) {
+      const c10::IValue& arg = torch::jit::pop(stack);
+      const auto ministack_idx = num_arguments - idx - 1;
+      if (arg.isInt()) {
+        ministack[ministack_idx] = from(arg.toInt());
+      } else if (arg.isDouble()) {
+        ministack[ministack_idx] = from(arg.toDouble());
+      } else if (arg.isBool()) {
+        ministack[ministack_idx] = from(arg.toBool());
+      } else if (arg.isNone()) {
+        ministack[ministack_idx] = from(nullptr);
+      } else if (arg.isTensor()) {
+        AtenTensorHandle ath = torch::aot_inductor::new_tensor_handle(
+            std::move(const_cast<at::Tensor&>(arg.toTensor())));
+        ministack[ministack_idx] = from(ath);
+      } else {
+        TORCH_CHECK(false, "Other types of IValues not yet handled!");
+      }
+    }
+
+    // boxed function is going to take a stack of StableIValues, cast them to
+    // our schema values, and run the function and modify the StableIValue stack
+    fn_(ministack.data(), num_arguments, num_returns);
+
+    // read the output from the end of the stack and wrap that back into
+    // IValue from StableIValue
+    for (size_t idx = 0; idx < num_returns; idx++) {
+      const c10::TypePtr& ret_type = schema.returns()[idx].type();
+      if (*ret_type == *c10::getTypePtr<at::Tensor>()) {
+        auto ret_raiiath = torch::aot_inductor::RAIIAtenTensorHandle(
+            to<AtenTensorHandle>(ministack[idx]));
+        at::Tensor out = *torch::aot_inductor::tensor_handle_to_tensor_pointer(
+            ret_raiiath.get());
+        torch::jit::push(stack, c10::IValue(out));
+      } else {
+        TORCH_CHECK(false, "Only Tensor return types are currently supported!");
+      }
+    }
+  }
+
+ private:
+  void (*fn_)(StableIValue*, uint64_t, uint64_t);
+};
+
+AOTITorchError aoti_torch_library_init_impl(
+    const char* ns,
+    const char* k,
+    const char* file,
+    uint32_t line,
+    TorchLibraryHandle* ret_new_torch_lib) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    auto tmp_result = at::native::_weight_int4pack_mm_cpu_tensor(
-        *tensor_handle_to_tensor_pointer(X),
-        *tensor_handle_to_tensor_pointer(w),
-        *tensor_handle_to_tensor_pointer(qGroupSize),
-        *tensor_handle_to_tensor_pointer(qScaleAndZeros));
-    *ret0 = new_tensor_handle(std::move(tmp_result));
+    *ret_new_torch_lib =
+        reinterpret_cast<TorchLibraryOpaque*>(new torch::Library(
+            torch::Library::Kind::IMPL,
+            std::string(ns),
+            c10::parseDispatchKey(std::string(k)),
+            file,
+            line));
   });
+}
+
+AOTITorchError aoti_torch_library_init_def(
+    const char* ns,
+    const char* file,
+    uint32_t line,
+    TorchLibraryHandle* ret_new_torch_lib) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    *ret_new_torch_lib =
+        reinterpret_cast<TorchLibraryOpaque*>(new torch::Library(
+            torch::Library::Kind::DEF,
+            std::string(ns),
+            std::nullopt,
+            file,
+            line));
+  });
+}
+
+AOTITorchError aoti_torch_library_init_fragment(
+    const char* ns,
+    const char* file,
+    uint32_t line,
+    TorchLibraryHandle* ret_new_torch_lib) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    *ret_new_torch_lib =
+        reinterpret_cast<TorchLibraryOpaque*>(new torch::Library(
+            torch::Library::Kind::FRAGMENT,
+            std::string(ns),
+            std::nullopt,
+            file,
+            line));
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_library_impl(
+    TorchLibraryHandle self,
+    const char* name,
+    void (*fn)(StableIValue*, uint64_t, uint64_t)) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    reinterpret_cast<torch::Library*>(self)->impl(
+        name,
+        torch::CppFunction::makeFromBoxedFunctor(
+            std::make_unique<StableIValueBoxedKernel>(fn)));
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_library_def(TorchLibraryHandle self, const char* name) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { reinterpret_cast<torch::Library*>(self)->def(name); });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_delete_library_object(TorchLibraryHandle tlh) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { delete reinterpret_cast<torch::Library*>(tlh); });
 }
