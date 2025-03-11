@@ -175,6 +175,7 @@ from .event import Event
 
 
 __all__ = [
+    "compile_shader",
     "device_count",
     "get_rng_state",
     "manual_seed",
