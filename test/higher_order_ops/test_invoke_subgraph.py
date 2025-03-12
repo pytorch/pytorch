@@ -479,6 +479,27 @@ class GraphModule(torch.nn.Module):
         ):
             opt_fn(x, y)
 
+    # @unittest.skip("speculate_subgraph fails with inference_mode")
+    def test_input_mutation_inference_mode(self):
+        @mark_compile_region
+        def gn(x, y):
+            x.add_(1)
+            return torch.mul(x, y)
+
+        def fn(x, y):
+            return gn(x, y)
+
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        with torch.inference_mode():
+            x = torch.randn(8, requires_grad=False)
+            y = torch.randn(8, requires_grad=False)
+
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "NYI: invoke_subgraph with mutated inputs",
+            ):
+                opt_fn(x, y)
+
     def test_simple_module(self):
         mod = torch.nn.Linear(8, 8)
 
