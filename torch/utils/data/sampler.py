@@ -376,14 +376,16 @@ class RandomBatchSampler(Sampler[list[int]]):
         self.n_batches = len(data_source) // batch_size
 
     def sample_indices(self) -> NDArray[np.int_]:
-        indices = np.arange(len(self.data_source))
         generator = (
             self.generator if self.generator is not None else np.random.default_rng()
         )
+
         if self.replacement:
-            indices = generator.choice(indices, len(indices), replace=True)
+            indices = generator.integers(0, len(self.data_source), len(self.data_source))
         else:
+            indices = np.arange(len(self.data_source))
             generator.shuffle(indices)
+
         return indices
 
     def __iter__(self) -> Iterator[list[int]]:
