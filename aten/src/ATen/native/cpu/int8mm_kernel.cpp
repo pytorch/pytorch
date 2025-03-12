@@ -72,53 +72,37 @@ static inline void transpose_16x16_fp32(__m512 a[16]) {
   });
 }
 
-template <int N>
-void unpack_and_dequant(
+void dequant_pack_k_16(
     const int8_t* B,
-    BFloat16* B_unpack,
+    BFloat16* B_packed,
     const BFloat16* scales,
-    const int K,
-    const int ldb_unpack);
-
-template <>
-void unpack_and_dequant<1>(
-    const int8_t* B,
-    BFloat16* B_unpack,
-    const BFloat16* scales,
-    const int K,
-    const int ldb_unpack) {
-  for (int k = 0; k < K; k++) {
-    int8_t b8 = B[k];
-    B_unpack[k * ldb_unpack] = static_cast<BFloat16>(b8) * scales[0];
-  }
-}
-
-template <>
-void unpack_and_dequant<16>(
-    const int8_t* B,
-    BFloat16* B_unpack,
-    const BFloat16* scales,
-    const int K,
-    const int ldb_unpack) {
-  const int ldb = K;
+    const int ldb,
+    const int n) {
+  int ldb_packed = n;
   __m512 scale[16];
-  c10::ForcedUnroll<16>{}([&](auto i) {
-    float ss = static_cast<float>(scales[i]);
-    scale[i] = _mm512_set1_ps(ss);
-  });
-  for (int k = 0; k < K; k += 16) {
-    int kk = std::min(k, K - 16);
-    __m512 vb[16];
-    c10::ForcedUnroll<16>{}([&](auto i) {
-      __m128i b8 = _mm_load_si128((__m128i*)(B + kk + i * ldb));
+  __m512 vb[16];
+  for (int nn = 0; nn < n / 16; nn++) {
+    c10::ForcedUnroll<8>{}([&](auto i) {
+      float ss = static_cast<float>(scales[i + nn * 8]);
+      scale[i] = _mm512_set1_ps(ss);
+      __m128i b8 = _mm_load_si128((__m128i*)(B + (i + nn * 8) * ldb));
       __m512i b32 = _mm512_cvtepi8_epi32(b8);
       vb[i] = _mm512_cvtepi32_ps(b32);
       vb[i] = _mm512_mul_ps(vb[i], scale[i]);
     });
+    c10::ForcedUnroll<8>{}([&](auto i) {
+      float ss = static_cast<float>(scales[i + n / 2 + nn * 8]);
+      scale[i + 8] = _mm512_set1_ps(ss);
+      __m128i b8 = _mm_load_si128((__m128i*)(B + (i + n / 2 + nn * 8) * ldb));
+      __m512i b32 = _mm512_cvtepi8_epi32(b8);
+      vb[i + 8] = _mm512_cvtepi32_ps(b32);
+      vb[i + 8] = _mm512_mul_ps(vb[i + 8], scale[i + 8]);
+    });
     transpose_16x16_fp32(vb);
     c10::ForcedUnroll<16>{}([&](auto i) {
       _mm256_storeu_epi16(
-          (void*)(B_unpack + (kk + i) * 16), vec::cvtfp32_bf16(vb[i]));
+          (void*)(B_packed + i * ldb_packed + nn * 16),
+          vec::cvtfp32_bf16(vb[i]));
     });
   }
 }
@@ -140,69 +124,119 @@ void int8pack_mm_kernel_<BFloat16>(
   int lda = K;
   int ldb = K;
   int ldc = N;
-  int thread_num = get_num_threads();
-  static dnnl::ukernel::brgemm brg[3];
+  const int thread_num = get_num_threads();
+  const int L2_cache = 4.8 * 1024 * 1024;
+  const int n_block = 32;
+  int k_block = std::min(K, (L2_cache / (n_block * 3)) / 16 * 16);
+  int k_tail = (K % k_block + 15) / 16 * 16;
+  if (k_tail == 0)
+    k_tail = k_block;
+  // n=32 has a better performance than 16.
+  static dnnl::ukernel::brgemm brg, brg_tail;
   static bool init = false;
   static size_t max_scratchpad_size = -1;
   if (!init) {
-    for (int i = 0; i < 1; i++) {
-      int n = 16 * (i + 1);
-      brg[i] = dnnl::ukernel::brgemm(
-          M,
-          n,
-          K,
-          1,
-          lda,
-          n,
-          n,
-          dnnl::memory::data_type::bf16,
-          dnnl::memory::data_type::bf16,
-          dnnl::memory::data_type::f32);
-      brg[i].set_post_ops(N, dnnl::memory::data_type::bf16);
-      brg[i].set_add_C(false);
-      brg[i].finalize();
-      brg[i].generate();
-      max_scratchpad_size =
-          std::max(max_scratchpad_size, brg[i].get_scratchpad_size());
-    }
+    brg = dnnl::ukernel::brgemm(
+        M,
+        32,
+        k_block,
+        1,
+        lda,
+        n_block,
+        n_block,
+        dnnl::memory::data_type::bf16,
+        dnnl::memory::data_type::bf16,
+        dnnl::memory::data_type::f32);
+    brg.set_add_C(true);
+    brg.finalize();
+    brg.generate();
+    brg_tail = dnnl::ukernel::brgemm(
+        M,
+        n_block,
+        k_tail,
+        1,
+        lda,
+        n_block,
+        n_block,
+        dnnl::memory::data_type::bf16,
+        dnnl::memory::data_type::bf16,
+        dnnl::memory::data_type::f32);
+    brg_tail.set_post_ops(N, dnnl::memory::data_type::bf16);
+    brg_tail.set_add_C(true);
+    brg_tail.finalize();
+    brg_tail.generate();
+    max_scratchpad_size =
+        std::max(max_scratchpad_size, brg.get_scratchpad_size());
+    max_scratchpad_size =
+        std::max(max_scratchpad_size, brg_tail.get_scratchpad_size());
     init = true;
   }
-  BFloat16* B_unpack = (BFloat16*)malloc(N * K * sizeof(BFloat16));
-  float* tmp_data = (float*)malloc(M * N * sizeof(float));
-  uint8_t* scratchpad = (uint8_t*)malloc(thread_num * max_scratchpad_size);
-
-  int thread_size_pad16 = 16;
-  brg[0].set_hw_context();
-  at::parallel_for(0, N / thread_size_pad16, 0, [&](int begin, int end) {
-    int local_begin = begin * thread_size_pad16;
+  brg.set_hw_context();
+  at::parallel_for(0, N / n_block, 0, [&](int begin, int end) {
+    int local_begin = begin * n_block;
     const int8_t* B_local = B_data + local_begin * ldb;
-    BFloat16* B_unpack_local = B_unpack + local_begin * K;
     const BFloat16* scales_local = S_data + local_begin;
-    float* tmp_local = tmp_data + local_begin * M;
     BFloat16* C_local = C_data + local_begin;
-    uint8_t* scratchpad_local = scratchpad + begin * max_scratchpad_size;
 
-    int local_n = (end - begin) * 16;
-    if (end == N / thread_size_pad16 && N % 16 != 0) {
+    int local_n = (end - begin) * n_block;
+    if (end == N / n_block && N % n_block != 0) {
       local_n = N - local_begin;
     }
-    for (int i = 0; i < local_n; i += 16) {
-      int ii = std::min(i, local_n - 16);
-      unpack_and_dequant<16>(
-          B_local + ii * ldb, B_unpack_local + ii * K, scales_local + ii, K, N);
-      brg[0].execute(
-          A_data,
-          B_unpack_local + ii * K,
-          {{0, 0}},
-          tmp_local + ii * M,
-          C_local + ii,
-          scratchpad_local);
+    float* tmp_local = new float[M * n_block]; // todo: aline alloc?
+    BFloat16* B_pack_local = new BFloat16[k_block * n_block];
+    uint8_t scratchpad_local[max_scratchpad_size];
+    for (int n = 0; n < local_n; n += n_block) {
+      int nn = std::min(n, local_n - 16);
+      for (int k_begin = 0; k_begin < K; k_begin += k_block) {
+        bool is_tail = k_begin + k_block >= K;
+        int k_local = is_tail ? k_tail : k_block;
+        int k_back = is_tail ? K - k_begin - k_tail : 0;
+        if (k_back < 0) {
+          int8_t k_tmp[16 * n_block] = {0};
+          for (int ii = 0; ii < n_block; ii++)
+            memcpy(
+                k_tmp + 16 + k_back + nn * 16,
+                B_local + (nn + ii) * ldb + k_begin,
+                -k_back);
+          dequant_pack_k_16(k_tmp, B_pack_local, scales_local + nn, K, n_block);
+        } else {
+          dequant_pack_k_16(
+              B_local + nn * ldb + k_begin,
+              B_pack_local,
+              scales_local + nn,
+              K,
+              n_block);
+        }
+        for (int kk = 16; kk < k_local; kk += 16) {
+          dequant_pack_k_16(
+              B_local + nn * ldb + k_begin + kk,
+              B_pack_local + kk * n_block,
+              scales_local + nn,
+              K,
+              n_block);
+        }
+        if (is_tail) {
+          brg_tail.execute(
+              A_data + k_begin + k_back,
+              B_pack_local,
+              {{0, 0}},
+              tmp_local,
+              C_local + nn,
+              scratchpad_local);
+        } else {
+          brg.execute(
+              A_data + k_begin,
+              B_pack_local,
+              {{0, 0}},
+              tmp_local,
+              scratchpad_local);
+        }
+      }
     }
+    delete[] tmp_local;
+    delete[] B_pack_local;
   });
   dnnl::ukernel::brgemm::release_hw_context();
-  free(tmp_data);
-  free(B_unpack);
-  free(scratchpad);
 }
 
 // A block : {BLOCK_M, BLOCK_K}, lda = K
