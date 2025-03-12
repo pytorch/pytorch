@@ -325,15 +325,6 @@ jobs:
           if-no-files-found: error
           path: artifacts.zip
 
-      - name: Store PyTorch Build Artifacts for s390x for split build
-        uses: actions/upload-artifact@v4
-        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped' && inputs.use_split_build && inputs.build-environment == 'linux-s390x-binary-manywheel'
-        with:
-          name: ${{ inputs.build-environment }}-experimental-split-build
-          retention-days: 14
-          if-no-files-found: error
-          path: artifacts.zip
-
       - name: Stop monitoring script
         if: ${{ always() && steps.monitor-script.outputs.monitor-script-pid }}
         shell: bash
@@ -343,12 +334,12 @@ jobs:
         run: |
           kill "$MONITOR_SCRIPT_PID"
 
-      - name: Cleanup docker
-        if: always() && inputs.build-environment == 'linux-s390x-binary-manywheel'
+      - name: Check all txt
         shell: bash
+        continue-on-error:true
         run: |
-          ls usage_log_build*
-  
+          ls *.txt
+
       - name: Upload raw usage log to s3
         if: ${{ always() && steps.build.outcome != 'skipped' && !inputs.disable-monitor && inputs.build-environment != 'linux-s390x-binary-manywheel'}}
         uses: seemethere/upload-artifact-s3@v5
