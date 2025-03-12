@@ -233,7 +233,6 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
         # and leave.
         with (
             torch._C._PreserveDispatchKeyGuard(),
-            torch.inference_mode(False),
             torch._subclasses.meta_utils.disable_inference_mode_for_fake_prop(),
         ):
             prior_inference_mode = torch.is_inference_mode_enabled()
