@@ -32,7 +32,6 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIfNoMiopen,
     skipCUDAIfNotMiopenSuggestNHWC,
     skipCUDAIfRocm,
-    skipCUDAIfRocmVersionLessThan,
     skipMeta,
     skipMPS,
 )
@@ -893,7 +892,6 @@ class TestConvolutionNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
-    @skipIfRocmVersionLessThan((4, 3))
     @skipIfNotMiopenSuggestNHWC
     def test_grouped_conv_cudnn_nhwc_support(self):
         # in order to catch the hols in grouped convolution in nhwc support for earlier cudnn version
@@ -3640,7 +3638,6 @@ class TestConvolutionNNDeviceType(NNTestCase):
                 )
 
     @onlyCUDA
-    @skipCUDAIfRocmVersionLessThan((4, 3))
     @skipCUDAIfNotMiopenSuggestNHWC
     @skipCUDAIfCudnnVersionLessThan(7603)
     @dtypes(torch.half, torch.float, torch.cfloat)
@@ -3826,7 +3823,6 @@ class TestConvolutionNNDeviceType(NNTestCase):
                     )
 
     @onlyCUDA
-    @skipCUDAIfRocmVersionLessThan((4, 3))
     @skipCUDAIfNotMiopenSuggestNHWC
     @skipCUDAIfCudnnVersionLessThan(7603)
     @tf32_on_and_off(0.05)

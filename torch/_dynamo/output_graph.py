@@ -98,6 +98,7 @@ from .source import (
     is_constant_source,
     is_from_local_source,
     LocalSource,
+    NumpyTensorSource,
     ParamBufferSource,
     ShapeEnvSource,
     SyntheticLocalSource,
@@ -806,7 +807,9 @@ class OutputGraph:
                 if target in self.root_tx.output.side_effects:
                     return self.root_tx.output.side_effects[target]
 
-                if get_static_address_type(target) == "guarded":
+                if get_static_address_type(target) == "guarded" and not isinstance(
+                    source, NumpyTensorSource
+                ):
                     install_guard(source.make_guard(GuardBuilder.ID_MATCH))
                 elif not is_constant_source(source):
                     install_guard(source.make_guard(GuardBuilder.TENSOR_MATCH))

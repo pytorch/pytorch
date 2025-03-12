@@ -10,7 +10,11 @@ import torch.utils._pytree as pytree
 from torch._guards import detect_fake_mode
 from torch._ops import OperatorBase
 from torch._subclasses.fake_tensor import FakeTensor
-from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing, make_fx
+from torch.fx.experimental.proxy_tensor import (
+    _temp_remove_metadata_torch_function_mode,
+    disable_proxy_modes_tracing,
+    make_fx,
+)
 from torch.fx.passes.shape_prop import TensorMetadata
 from torch.multiprocessing.reductions import StorageWeakRef
 
@@ -79,6 +83,23 @@ def _maybe_run_with_interpreter(fn):
 
         maybe_interpreted_fn = graph_with_interpreter
     return maybe_interpreted_fn
+
+
+def _maybe_compile_and_run_fn(fn, *args):
+    if not torch._dynamo.is_compiling():
+        from torch._dynamo.backends.debugging import (
+            make_eager_backend_with_torch_function_mode,
+        )
+
+        with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
+            with _temp_remove_metadata_torch_function_mode() as metadata_mode:
+                if metadata_mode:
+                    backend = make_eager_backend_with_torch_function_mode(metadata_mode)
+                else:
+                    backend = "eager"
+                return torch.compile(fn, backend=backend, fullgraph=True)(*args)
+    else:
+        return fn(*args)
 
 
 def reenter_make_fx(fn):
