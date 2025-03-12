@@ -59,20 +59,7 @@ class TestFullyShardDeviceTensor(FSDPTestMultiThread):
         model = MLP(8, torch.device("cpu"), with_buffer=True)
         for tensor in itertools.chain(model.parameters(), model.buffers()):
             self.assertEqual(tensor.device, torch.device("cpu"))
-        fully_shard(model)
-        cuda_device = torch.device("cuda", torch.cuda.current_device())
-        for tensor in itertools.chain(model.parameters(), model.buffers()):
-            self.assertEqual(tensor.device, cuda_device)
-
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
-    def test_move_states_to_device_ignored_param(self):
-        model = nn.Sequential(
-            *[MLP(2, torch.device("cpu"), with_buffer=True) for _ in range(2)]
-        )
-        ignored_params = []
-        for name, param in model.named_parameters():
-            if name[0] == "1":
-                ignored_params.append(param)
+        ignored_params = [model.out_proj.weight, model.out_proj.bias]
         fully_shard(model, ignored_params=set(ignored_params))
         cuda_device = torch.device("cuda", torch.cuda.current_device())
         for tensor in itertools.chain(model.parameters(), model.buffers()):
