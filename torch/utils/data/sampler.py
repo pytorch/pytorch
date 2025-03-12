@@ -2,7 +2,10 @@
 import itertools
 from collections.abc import Iterable, Iterator, Sequence, Sized
 from typing import Generic, Optional, TypeVar, Union
+
 import numpy as np
+from numpy.typing import NDArray
+
 import torch
 
 
@@ -348,14 +351,15 @@ class BatchSampler(Sampler[list[int]]):
         else:
             return (len(self.sampler) + self.batch_size - 1) // self.batch_size  # type: ignore[arg-type]
 
+
 class RandomBatchSampler(Sampler[list[int]]):
     def __init__(
-            self,
-            data_source: Sized,
-            replacement: bool = False,
-            generator : np.random.Generator = None,
-            batch_size: int = 32,
-            drop_last: bool = False,
+        self,
+        data_source: Sized,
+        replacement: bool = False,
+        generator: Optional[np.random.Generator] = None,
+        batch_size: int = 32,
+        drop_last: bool = False,
     ) -> None:
         super().__init__()
         self.data_source = data_source
@@ -371,9 +375,11 @@ class RandomBatchSampler(Sampler[list[int]]):
 
         self.n_batches = len(data_source) // batch_size
 
-    def sample_indices(self) -> np.ndarray[int]:
+    def sample_indices(self) -> NDArray[np.int_]:
         indices = np.arange(len(self.data_source))
-        generator = self.generator if self.generator is not None else np.random.default_rng()
+        generator = (
+            self.generator if self.generator is not None else np.random.default_rng()
+        )
         if self.replacement:
             indices = generator.choice(indices, len(indices), replace=True)
         else:
@@ -382,7 +388,10 @@ class RandomBatchSampler(Sampler[list[int]]):
 
     def __iter__(self) -> Iterator[list[int]]:
         indices = self.sample_indices()
-        indices_batches = [indices[i:i + self.batch_size] for i in range(0, len(indices), self.batch_size)]
+        indices_batches = [
+            indices[i : i + self.batch_size]
+            for i in range(0, len(indices), self.batch_size)
+        ]
         if self.drop_last:
             indices_batches.pop()
         yield from indices_batches
