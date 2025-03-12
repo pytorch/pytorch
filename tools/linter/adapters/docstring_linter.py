@@ -38,7 +38,7 @@ def _is_def(t: TokenInfo) -> bool:
     return t.type == token.NAME and t.string in ("class", "def")
 
 
-class DocstringLinter(_linter.FileLinter):
+class DocstringLinter(_linter.FileLinter[_linter.PythonFile]):
     linter_name = "docstring_linter"
     description = DESCRIPTION
     is_fixer = False
@@ -87,7 +87,7 @@ class DocstringLinter(_linter.FileLinter):
             for i in range(start, len(tokens)):
                 if tokens[i].type == token_type:
                     return i
-            _linter.ParseError.check(False, tokens[-1], error)
+            raise _linter.ParseError(tokens[-1], error)
 
         for i in defs:
             name = next_token(i + 1, token.NAME, "Definition with no name")
