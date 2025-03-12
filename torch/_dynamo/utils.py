@@ -4472,3 +4472,9 @@ def get_optimize_ddp_mode():
         f"Invalid dynamo config optimize_ddp value {mode=}"
     )
     return mode
+
+
+def is_compiler_disabled():
+    return os.environ.get("TORCHDYNAMO_DISABLE", "") == "1" or (
+        not justknobs_check("pytorch/compiler:enable_dynamo")
+    )
