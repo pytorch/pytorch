@@ -5334,6 +5334,8 @@ else:
         run(10, 2, False, True)
         run(10, 2, True, True)
 
+    # TODO: Add another test for dynamo
+    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     @skipXLA
     @parametrize('src,dest', [
         ('cpu', None),
