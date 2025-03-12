@@ -3186,12 +3186,22 @@ class CppVecKernel(CppKernel):
             else welford_helper_vec_range
         )
         vec_num_range_thread_expr = cexpr_index(vec_num_range_thread)
-        return (
-            f"WelfordHelper<{self._get_vec_type(dtype)}> {welford_helper_val}"
-            f"("
-            f"{vec_num_range_thread_expr}"
-            f");"
-        )
+        chunk_size = 4096
+        num_chunks = CeilDiv(vec_num_range_thread, chunk_size)
+        if isinstance(num_chunks, sympy.Integer) and num_chunks <= 1:
+            return (
+                f"static WelfordHelper<{self._get_vec_type(dtype)}> {welford_helper_val}"
+                f"("
+                f"{vec_num_range_thread_expr}"
+                f");"
+            )
+        else:
+            return (
+                f"WelfordHelper<{self._get_vec_type(dtype)}> {welford_helper_val}"
+                f"("
+                f"{vec_num_range_thread_expr}"
+                f");"
+            )
 
     def reduction_combine_vec(
         self,
