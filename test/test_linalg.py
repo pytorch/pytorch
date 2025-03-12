@@ -2519,7 +2519,7 @@ class TestLinalg(TestCase):
                 a = a_input.to_dense()
 
             q = min(*size)
-            u, s, v = svd_lowrank(a_input, q=q, **options)
+            u, s, v = svd_lowrank(a_input, q=q, niter=3, **options)
 
             # check if u, s, v is a SVD
             u, s, v = u[..., :q], s[..., :q], v[..., :q]
@@ -4655,12 +4655,7 @@ class TestLinalg(TestCase):
     @onlyCUDA
     @dtypes(torch.half)
     def test_matmul_offline_tunableop(self, device, dtype):
-        import tempfile
         import os
-
-        # Pointing to temp files. The test cannot remove them on Windows because
-        # they are in use and locked
-        tmp_dir = tempfile.mkdtemp()
 
         ordinal = torch.cuda.current_device()
 
@@ -4670,8 +4665,8 @@ class TestLinalg(TestCase):
             set_tunableop_defaults()
             torch.cuda.tunable.set_rotating_buffer_size(0)
 
-            result_filename = os.path.join(tmp_dir, f"tunableop_results{ordinal}.csv")
-            os.putenv("PYTORCH_TUNABLEOP_UNTUNED_FILENAME", os.path.join(tmp_dir, "tunableop_untuned.csv"))
+            result_filename = f"tunableop_results{ordinal}.csv"
+            os.putenv("PYTORCH_TUNABLEOP_UNTUNED_FILENAME", "tunableop_untuned.csv")
             torch.cuda.tunable.set_filename(result_filename)
 
             torch.cuda.tunable.enable()
@@ -4689,7 +4684,7 @@ class TestLinalg(TestCase):
             self.assertTrue(torch.cuda.tunable.is_enabled())
             self.assertTrue(torch.cuda.tunable.tuning_is_enabled() is False)
 
-            untuned_filename = os.path.join(tmp_dir, f"tunableop_untuned{ordinal}.csv")
+            untuned_filename = f"tunableop_untuned{ordinal}.csv"
             self.assertTrue(os.path.exists(untuned_filename))
 
             # tuning the untuned GEMMs in file
@@ -4705,6 +4700,111 @@ class TestLinalg(TestCase):
             new_results = len(torch.cuda.tunable.get_results())
 
             self.assertGreater(new_results - ref_results, 0)
+            self.assertTrue(torch.cuda.tunable.write_file())
+
+            # Make sure the results file exists and that it is not zero
+            self.assertTrue(os.path.exists(result_filename))
+            self.assertGreater(os.path.getsize(result_filename), 0)
+
+        finally:
+            # disable TunableOp
+            torch.cuda.tunable.enable(False)
+
+            # undo all the environment variables set
+            try:
+                del os.environ["PYTORCH_TUNABLEOP_UNTUNED_FILENAME"]
+            except KeyError:
+                pass
+
+            # clean up, remove any files that were generated
+            for filename in [untuned_filename, result_filename]:
+                try:
+                    os.remove(filename)
+                # NB: The file is locked on Windows
+                except (FileNotFoundError, PermissionError):
+                    pass
+
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    @runOnRocmArch(MI300_ARCH)
+    @dtypes(torch.torch.float8_e4m3fnuz, torch.float8_e5m2fnuz)
+    def test_matmul_scaled_gemm_offline_tunableop(self, device, dtype):
+        # This test is the offline version of test_scaled_gemm_tunableop
+        import os
+
+        ordinal = torch.cuda.current_device()
+
+        # Test in try-finally block to avoid leaking state
+        # if test is interrupted.
+        try:
+            set_tunableop_defaults()
+            torch.cuda.tunable.set_rotating_buffer_size(0)
+
+            result_filename = f"tunableop_results{ordinal}.csv"
+            os.putenv("PYTORCH_TUNABLEOP_UNTUNED_FILENAME", "tunableop_untuned.csv")
+            torch.cuda.tunable.set_filename(result_filename)
+
+            torch.cuda.tunable.enable()
+            # record GEMM
+            torch.cuda.tunable.tuning_enable(False)
+            torch.cuda.tunable.record_untuned_enable(True)
+            self.assertTrue(torch.cuda.tunable.record_untuned_is_enabled())
+
+            # Scaled GEMM parameters
+            fillA = 0.25
+            fillB = 0.75
+            m = n = k = 16
+            scaleA = torch.tensor(0.8, device=device)
+            scaleB = torch.tensor(0.9, device=device)
+
+            dtypeA = dtypeB = dtype
+            matA = torch.full((k, m), fillA, dtype=dtypeA, device=device)
+            matB = torch.full((n, k), fillB, dtype=dtypeB, device=device).t()
+
+            # out_dtype = dtype
+            torch._scaled_mm(matA, matB, scale_a=scaleA, scale_b=scaleB, out_dtype=dtype)
+            # out_dtype = float32
+            torch._scaled_mm(matA, matB, scale_a=scaleA, scale_b=scaleB, out_dtype=torch.float32)
+            # out_dtype = bfloat16
+            torch._scaled_mm(matA, matB, scale_a=scaleA, scale_b=scaleB, out_dtype=torch.bfloat16)
+            # out_dtype = float16
+            torch._scaled_mm(matA, matB, scale_a=scaleA, scale_b=scaleB, out_dtype=torch.half)
+
+            # rowwise scaling, only supported for this dtype combination
+            if dtype is torch.torch.float8_e4m3fnuz:
+                scaleA = torch.ones((matA.shape[0], 1), device=device)
+                scaleB = torch.ones((1, matB.shape[0]), device=device)
+                torch._scaled_mm(matA, matB, scale_a=scaleA, scale_b=scaleB, out_dtype=torch.bfloat16)
+
+            self.assertTrue(torch.cuda.tunable.is_enabled())
+            self.assertTrue(torch.cuda.tunable.tuning_is_enabled() is False)
+
+            untuned_filename = f"tunableop_untuned{ordinal}.csv"
+            self.assertTrue(os.path.exists(untuned_filename))
+
+            # tuning the untuned GEMMs in file
+            torch.cuda.tunable.tuning_enable(True)
+            torch.cuda.tunable.record_untuned_enable(False)
+
+            # set these to single iterations to keep it short but still exercise the code
+            torch.cuda.tunable.set_max_tuning_duration(1)
+            torch.cuda.tunable.set_max_tuning_iterations(1)
+
+            ref_results = len(torch.cuda.tunable.get_results())
+            torch.cuda.tunable.tune_gemm_in_file(untuned_filename)
+            new_results = len(torch.cuda.tunable.get_results())
+
+            # This stores total number of cummulative results
+            total_num_results = new_results - ref_results
+
+            # There must be a four new tuning results unless you do
+            # rowwise in which case there is a 5th one
+            if dtype is torch.torch.float8_e4m3fnuz:  # rowwise
+                count = 5
+            else:
+                count = 4
+            self.assertEqual(total_num_results, count)
+
             self.assertTrue(torch.cuda.tunable.write_file())
 
             # Make sure the results file exists and that it is not zero
@@ -5189,6 +5289,87 @@ class TestLinalg(TestCase):
             pass
 
     @onlyCUDA
+    @dtypes(torch.bfloat16)
+    def test_gemm_bias_offline_tunableop(self, device, dtype):
+        # This test is the offline version of test_scaled_gemm_tunableop
+        import os
+
+        ordinal = torch.cuda.current_device()
+
+        # Test in try-finally block to avoid leaking state
+        # if test is interrupted.
+        try:
+            set_tunableop_defaults()
+            torch.cuda.tunable.set_rotating_buffer_size(0)
+
+            result_filename = f"tunableop_results{ordinal}.csv"
+            os.putenv("PYTORCH_TUNABLEOP_UNTUNED_FILENAME", "tunableop_untuned.csv")
+            torch.cuda.tunable.set_filename(result_filename)
+
+            torch.cuda.tunable.enable()
+            # record GEMM
+            torch.cuda.tunable.tuning_enable(False)
+            torch.cuda.tunable.record_untuned_enable(True)
+            self.assertTrue(torch.cuda.tunable.record_untuned_is_enabled())
+
+            m = 5
+            n = 7
+            k = 9
+            X = torch.rand(m, k, dtype=dtype, device=device)
+            matA = torch.rand(n, k, dtype=dtype, device=device)
+            bias = torch.rand(n, dtype=dtype, device=device)
+
+            torch.nn.functional.linear(X, matA, bias)
+
+            self.assertTrue(torch.cuda.tunable.is_enabled())
+            self.assertTrue(torch.cuda.tunable.tuning_is_enabled() is False)
+
+            untuned_filename = f"tunableop_untuned{ordinal}.csv"
+            self.assertTrue(os.path.exists(untuned_filename))
+
+            # tuning the untuned GEMMs in file
+            torch.cuda.tunable.tuning_enable(True)
+            torch.cuda.tunable.record_untuned_enable(False)
+
+            # set these to single iterations to keep it short but still exercise the code
+            torch.cuda.tunable.set_max_tuning_duration(1)
+            torch.cuda.tunable.set_max_tuning_iterations(1)
+
+            ref_results = len(torch.cuda.tunable.get_results())
+            torch.cuda.tunable.tune_gemm_in_file(untuned_filename)
+            new_results = len(torch.cuda.tunable.get_results())
+
+            # This stores total number of cummulative results
+            total_num_results = new_results - ref_results
+
+            # There must be a new tuning results
+            self.assertEqual(total_num_results, 1)
+
+            self.assertTrue(torch.cuda.tunable.write_file())
+
+            # Make sure the results file exists and that it is not zero
+            self.assertTrue(os.path.exists(result_filename))
+            self.assertGreater(os.path.getsize(result_filename), 0)
+
+        finally:
+            # disable TunableOp
+            torch.cuda.tunable.enable(False)
+
+            # undo all the environment variables set
+            try:
+                del os.environ["PYTORCH_TUNABLEOP_UNTUNED_FILENAME"]
+            except KeyError:
+                pass
+
+            # clean up, remove any files that were generated
+            for filename in [untuned_filename, result_filename]:
+                try:
+                    os.remove(filename)
+                # NB: The file is locked on Windows
+                except (FileNotFoundError, PermissionError):
+                    pass
+
+    @onlyCUDA
     @skipCUDAIfNotRocm
     @runOnRocmArch(MI300_ARCH)
     @dtypes(torch.torch.float8_e4m3fnuz, torch.float8_e5m2fnuz)
@@ -5215,7 +5396,7 @@ class TestLinalg(TestCase):
         # Scaled GEMM parameters
         fillA = 0.25
         fillB = 0.75
-        m = n = k = 16
+        m = n = k = 32
         scaleA = torch.tensor(0.8, device=device)
         scaleB = torch.tensor(0.9, device=device)
 
@@ -5232,11 +5413,22 @@ class TestLinalg(TestCase):
         # out_dtype = float16
         torch._scaled_mm(matA, matB, scale_a=scaleA, scale_b=scaleB, out_dtype=torch.half)
 
+        # rowwise scaling, only supported for this dtype combination
+        if dtype is torch.torch.float8_e4m3fnuz:
+            scaleA = torch.ones((matA.shape[0], 1), device=device)
+            scaleB = torch.ones((1, matB.shape[0]), device=device)
+            torch._scaled_mm(matA, matB, scale_a=scaleA, scale_b=scaleB, out_dtype=torch.bfloat16)
+
         # This stores total number of cummulative results
         total_num_results = len(torch.cuda.tunable.get_results())
 
-        # There must be a four new tuning results
-        self.assertEqual((total_num_results - ref_num_results), 4)
+        # There must be a four new tuning results unless you do
+        # rowwise in which case there is a 5th one
+        if dtype is torch.torch.float8_e4m3fnuz:  # rowwise
+            count = 5
+        else:
+            count = 4
+        self.assertEqual((total_num_results - ref_num_results), count)
 
         # disable TunableOp
         torch.cuda.tunable.enable(False)
