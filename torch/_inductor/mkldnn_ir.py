@@ -1227,3 +1227,58 @@ class MkldnnRnnLayer(ExternKernelAlloc):
     def codegen(self, wrapper):
         wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h")
         return super().codegen(wrapper)
+
+
+# Add this IR so that we can include shim_mkldnn.h for cpp_wrapper
+class WeightInt4PackMatmul(ExternKernelAlloc):
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args=(),
+    ) -> None:
+        """
+        inputs = [x, w, qGroupSize, qScalesAndZeros]
+        constant_args = ()
+        """
+        assert len(inputs) == 4
+        assert len(constant_args) == 0
+        super().__init__(
+            layout,
+            inputs,
+            constant_args,
+            None,
+            op_overload=(torch.ops.quantized.int4mm_packed_weight_cpu.default),
+            cpp_kernel_name=("aoti_torch_cpu__weight_int4pack_mm_cpu_tensor"),
+        )
+
+    def codegen(self, wrapper):
+        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h")
+        super().codegen(wrapper)
+
+        if isinstance(self.layout, Layout):
+            self.codegen_size_asserts(wrapper)
+
+    @classmethod
+    def create(
+        cls,
+        x: "TensorBox",
+        w: "TensorBox",
+        qGroupSize: "TensorBox",
+        qScalesAndZeros: "TensorBox",
+    ):
+        inputs = [x, w, qGroupSize, qScalesAndZeros]
+        *m, _ = x.get_size()
+        n, _ = w.get_size()
+        output_size = list(m) + [n]
+        output_stride = FlexibleLayout.contiguous_strides(output_size)
+        kernel_layout = FixedLayout(
+            x.get_device(),
+            x.get_dtype(),
+            output_size,
+            output_stride,
+        )
+        return WeightInt4PackMatmul(
+            layout=kernel_layout,
+            inputs=inputs,
+        )
