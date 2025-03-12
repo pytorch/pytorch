@@ -18,7 +18,7 @@ permissions:
 
 jobs:
   docker-cache:
-    runs-on: amd-docker
+    runs-on: rocm-docker
     steps:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
