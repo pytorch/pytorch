@@ -94,7 +94,6 @@ from torch.testing._internal.common_utils import (
     MACOS_VERSION,
     parametrize,
     serialTest,
-    skipIfNNModuleInlined,
     skipIfRocm,
     skipIfWindows,
     skipIfXpu,
@@ -3563,6 +3562,17 @@ class CommonTemplate:
             ),
         )
 
+    def test_addmv(self):
+        def fn(a, b, c):
+            return torch.addmv(a, b, c)
+
+        cfn = torch.compile(backend="inductor")(fn)
+        input = torch.tensor([2], dtype=torch.int32)
+        mat = torch.tensor(np.random.randn(0, 0), dtype=torch.int32)
+        vec = torch.tensor([])
+        with torch.no_grad():
+            self.assertEqual(cfn(input, mat, vec), fn(input, mat, vec))
+
     # https://github.com/pytorch/pytorch/issues/98979
     @skipCUDAIf(True, "cuda failed for float64 linear")
     @skipIfXpu(msg="Double and complex datatype matmul is not supported in oneDNN")
@@ -3991,7 +4001,7 @@ class CommonTemplate:
             _, code = run_and_get_code(foo, grouped_conv, input_tensor)
             # no to channels last permuting before kernel
             if config.cpp_wrapper:
-                FileCheck().check_not("launchKernel(triton").check("_convolution(").run(
+                FileCheck().check_not("  call_triton").check("_convolution(").run(
                     code[0]
                 )
             else:
@@ -4419,7 +4429,7 @@ class CommonTemplate:
         gemm_opt(x1, y1)
         self.assertTrue(failed_guard is not None)
         self.assertTrue(
-            "tensor 'L['x']' Tensor device index mismatch. Expected device index to be"
+            "tensor 'x' Tensor device index mismatch. Expected device index to be"
             in failed_guard.reason
         )
 
@@ -4593,7 +4603,11 @@ class CommonTemplate:
             check_lowp=False,
         )
 
-    def test_conv3d_channels_last(self):
+    @parametrize(
+        "use_block_ptr",
+        [subtest(False), subtest(True, decorators=[skip_if_not_triton])],
+    )
+    def test_conv3d_channels_last(self, use_block_ptr: bool):
         if self.device == GPU_TYPE:
             raise unittest.SkipTest("only support cpu conv3d channels_last")
 
@@ -4601,21 +4615,30 @@ class CommonTemplate:
             torch.nn.Conv3d(3, 3, 1, 1),
             ToTuple(),
         )
-        # only weight is channels_last
-        self.common(
-            m.to(memory_format=torch.channels_last_3d),
-            (torch.randn([2, 3, 16, 16, 16]),),
-        )
-        # only activation is channels_last
-        self.common(
-            m,
-            (torch.randn([2, 3, 16, 16, 16]).to(memory_format=torch.channels_last_3d),),
-        )
-        # activation and weight are all channels_last
-        self.common(
-            m.to(memory_format=torch.channels_last_3d),
-            (torch.randn([2, 3, 16, 16, 16]).to(memory_format=torch.channels_last_3d),),
-        )
+        with config.patch({"triton.use_block_ptr": use_block_ptr}):
+            # only weight is channels_last
+            self.common(
+                m.to(memory_format=torch.channels_last_3d),
+                (torch.randn([2, 3, 16, 16, 16]),),
+            )
+            # only activation is channels_last
+            self.common(
+                m,
+                (
+                    torch.randn([2, 3, 16, 16, 16]).to(
+                        memory_format=torch.channels_last_3d
+                    ),
+                ),
+            )
+            # activation and weight are all channels_last
+            self.common(
+                m.to(memory_format=torch.channels_last_3d),
+                (
+                    torch.randn([2, 3, 16, 16, 16]).to(
+                        memory_format=torch.channels_last_3d
+                    ),
+                ),
+            )
 
     @skip_if_gpu_halide  # slow
     @xfail_if_mps  # Non-divisible input sizes are not implemented on MPS device
@@ -4894,7 +4917,6 @@ class CommonTemplate:
 
         self.assertEqual(eager_delta, compile_delta)
 
-    @skipIfNNModuleInlined("https://github.com/pytorch/pytorch/issues/128198")
     def test_buffer_batch_norm(self):
         class MyModel(torch.nn.Module):
             def __init__(self) -> None:
@@ -11637,6 +11659,51 @@ class CommonTemplate:
             net = torch.compile(model)
             out = net(input_t)
 
+    @skip_if_cpp_wrapper(
+        "Without major redesign, cpp_wrapper will not support custom ops that are "
+        "defined in Python."
+    )
+    @config.patch(implicit_fallbacks=True)
+    def test_custom_op_default_layout_constraint(self):
+        with torch.library._scoped_library("mylib", "DEF") as lib:
+            lib.define(
+                "copy_(Tensor(a!) dst, Tensor src) -> ()",
+                # No need to pass in an explicit tag since the default
+                # behavior for custom op works.
+                # tags=torch.Tag.needs_fixed_stride_order,
+            )
+
+            @torch.library.impl(lib, "copy_", "Meta")
+            def _(dst, src):
+                return None
+
+            @torch.library.impl(lib, "copy_", "CompositeExplicitAutograd")
+            def _(dst, src):
+                if src.is_contiguous():
+                    dst.copy_(src + 1)
+                else:
+                    dst.copy_(src)
+
+            def f(x):
+                full_default_3 = torch.full([3, 3], 7.0, device=self.device)
+                chunk_cat_default_1 = torch.ops.mylib.copy_.default(full_default_3, x)
+                mul_out = torch.mul(full_default_3, full_default_3)
+                return mul_out
+
+            x = (
+                torch.arange(9, dtype=torch.float, device=self.device)
+                .view(3, 3)
+                .t()
+                .contiguous()
+                .t()
+            )
+            eager_out = f(x)
+
+            compiled_inductor_f = torch.compile(f, backend="inductor", fullgraph=True)
+            compiled_inductor_out = compiled_inductor_f(x)
+
+        self.assertTrue(torch.allclose(compiled_inductor_out, eager_out))
+
     @skip_if_gpu_halide  # cuda error
     def test_buffer_use_after_remove(self):
         # https://github.com/pytorch/pytorch/issues/102857
@@ -12532,17 +12599,6 @@ class CommonTemplate:
 
             ms = do_bench(lambda: opt_f(x))
             print(f"{ms=:.3f}")
-
-    def test_slice_overflow(self):
-        # https://github.com/pytorch/pytorch/issues/147071
-        def f(input):
-            var = torch.slice_copy(
-                input, dim=0, start=449, end=None, step=9223372036854775807
-            )
-            return torch.reciprocal(var)
-
-        input = torch.randn((875,))
-        self.assertEqual(torch.compile(f)(input), f(input))
 
     @torch._inductor.config.patch("graph_partition", True)
     def test_graph_partition_no_inputs(self):

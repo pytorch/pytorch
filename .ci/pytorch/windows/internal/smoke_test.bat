@@ -71,11 +71,20 @@ if "%DESIRED_PYTHON%" == "3.13" %PYTHON_EXEC% -m pip install --pre numpy==2.1.2 
 if "%DESIRED_PYTHON%" == "3.12" %PYTHON_EXEC% -m pip install --pre numpy==2.0.2 protobuf
 if "%DESIRED_PYTHON%" == "3.11" %PYTHON_EXEC% -m pip install --pre numpy==2.0.2 protobuf
 if "%DESIRED_PYTHON%" == "3.10" %PYTHON_EXEC% -m pip install --pre numpy==2.0.2 protobuf
-if "%DESIRED_PYTHON%" == "3.9" %PYTHON_EXEC% -m pip install --pre numpy==2.0.2 protobuf
+if "%DESIRED_PYTHON%" == "3.9" %PYTHON_EXEC% -m pip install --pre numpy==2.0.2 protobuf networkx
 
 if errorlevel 1 exit /b 1
 
-for /F "delims=" %%i in ('where /R "%PYTORCH_FINAL_PACKAGE_DIR:/=\%" *.whl') do %PYTHON_EXEC% -m pip install "%%i"
+if "%PYTORCH_BUILD_VERSION:dev=%" NEQ "%PYTORCH_BUILD_VERSION%" (
+    set "CHANNEL=nightly"
+) else (
+    set "CHANNEL=test"
+)
+
+set "EXTRA_INDEX= "
+if "%CUDA_VERSION%" == "xpu" set "EXTRA_INDEX=--index-url https://download.pytorch.org/whl/%CHANNEL%/xpu"
+
+for /F "delims=" %%i in ('where /R "%PYTORCH_FINAL_PACKAGE_DIR:/=\%" *.whl') do %PYTHON_EXEC% -m pip install "%%i" %EXTRA_INDEX%
 if errorlevel 1 exit /b 1
 
 goto smoke_test
