@@ -85,7 +85,26 @@ class AtenOpTests(PaddedTensorTestCase):
 
             self.assertEqual(z.shape, torch.Size([4, 6]))
             self.assertEqual(z.unpad().shape, torch.Size([3, 5]))
-            self.assert_padded_dims(z, [0, 1])
+
+    def test_embedding(self):
+        class MyModule(nn.Module):
+            def __init__(self, num_embeddings: int, embedding_dim: int) -> None:
+                super(MyModule, self).__init__()
+                self.embedding = nn.Embedding(num_embeddings, embedding_dim)
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return self.embedding(x.long())
+
+        my_module = MyModule(num_embeddings=10, embedding_dim=128)
+        my_module.embedding.weight = torch.nn.Parameter(
+            PaddedTensor(my_module.embedding.weight, [1, 1])
+        )
+
+        my_module = torch.compile(my_module)
+
+        x = PaddedTensor(torch.randint(0, 10, (32, 50)), [1, 1])
+        y = my_module(x)
+        print(y.shape)
 
     def test_squeeze(self):
         a = PaddedTensor(torch.randn(3, 1, 5), [4, 1, 6])
@@ -175,6 +194,7 @@ class ModelTests(PaddedTensorTestCase):
 
                 # Run
                 out = transformer(*inputs)
+                out_p = transformer(*inputs_p)
 
                 transformer = torch.compile(transformer)  # , mode="reduce-overhead")
                 out_p = transformer(*inputs_p)

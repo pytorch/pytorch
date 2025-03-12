@@ -36,6 +36,53 @@ def register_op(table: Dict[Any, Any], aten_ops: List[str]):
 register_padded_op = functools.partial(register_op, PADDED_OP_TABLE)
 
 
+def convert_to_padded_tensor(arg: torch.Tensor) -> object:
+    multipliers = [1] * len(arg.shape)
+    padded_arg = PaddedTensor(arg, multipliers)
+    log(
+        "Encountered tensor with shape",
+        arg.shape,
+        "and converted to padded tensor",
+    )
+
+    return padded_arg
+
+
+def convert_tensor_args(args: List[object]) -> Tuple[object]:
+    """Converts all tensors of a given list into padded tensors."""
+    args_padded = []
+    for arg in args:
+        if (
+            type(arg) is torch.Tensor
+            or type(arg) is torch.nn.Parameter
+            or type(arg) is FakeTensor
+            or type(arg) is FunctionalTensor
+        ):
+            args_padded.append(convert_to_padded_tensor(arg))
+        else:
+            args_padded.append(arg)
+    return tuple(args_padded)
+
+
+def convert_tensor_results(out, orig_out_shapes):
+    """Converts all tensors of a given list into padded tensors, incl. the original shape."""
+    out_flat, spec = pytree.tree_flatten(out)
+    out_flat_padded = []
+    for idx, out_tensor in enumerate(out_flat):
+        if type(out_tensor) in [
+            torch.Tensor,
+            FakeTensor,
+            FunctionalTensor,
+        ] and idx < len(orig_out_shapes):
+            s = orig_out_shapes[idx]
+            multipliers = [1] * len(out_tensor.shape)
+            out_flat_padded.append(PaddedTensor(out_tensor, multipliers, s))
+        else:
+            out_flat_padded.append(out_tensor)
+    out = pytree.tree_unflatten(out_flat_padded, spec)
+    return out
+
+
 def strip_common_suffix(
     list1: List[int], list2: List[int]
 ) -> Tuple[List[int], List[int]]:
@@ -115,11 +162,18 @@ class PaddedOp:
     def __init__(self) -> None:
         super().__init__()
 
+    def convert_tensor_args(self, args):
+        return convert_tensor_args(args)
+
     def infer_shapes(self, input_shapes, args, kwargs):
         """
         Infer the output shape of the operation, given the input shapes and the arguments.
         """
         raise NotImplementedError
+
+    def infer_shapes_T(self, input_shapes, args, kwargs):
+        print("INFER SHAPES CALLED on class", self.__class__.__name__)
+        return input_shapes[0]
 
     def modify_args(self, args, kwargs):
         """
@@ -488,6 +542,18 @@ class IndexOp(PaddedOp):
 
         return [torch.Size(input_shape_mod)]
 
+    def infer_shapes_T(self, input_shapes: List[torch.Tensor], args, kwargs):
+        input_shape = input_shapes[0]
+        index_shape_list = input_shapes[1]
+
+        for dim_idx, dim in enumerate(index_shape_list):
+            if dim is not None:
+                # breakpoint()
+                input_shape[dim_idx] = dim.shape[0]
+                # input_shape[dim_idx] = dim
+
+        return [input_shape]
+
 
 @register_padded_op(["select"])
 class SelectOp(PaddedOp):
@@ -576,6 +642,14 @@ class EmbeddingOp(PaddedOp):
         out_shape = list(indices.orig_shape) + list(input_shape)[1:]
 
         return [torch.Size(out_shape)]
+
+    def infer_shapes_T(self, input_shapes: List[torch.Tensor], args, kwargs):
+        shape = input_shapes[0]
+        indices = input_shapes[1]
+
+        out_shape = torch.concat([indices, shape[1:]])
+
+        return [out_shape]
 
 
 @register_padded_op(["cat"])
@@ -717,7 +791,7 @@ def log_function_with_shapes(func, args, tensor_args, out=None, orig_shape_out=N
     log(out_str)
 
 
-def log_op_not_in_op_table(opname: str, args, out):
+def log_op_not_in_op_table(opname: str, args, out=None):
     """Logs the function name and the shapes of its arguments and outputs."""
     print("Function '%s' is not implemented for PaddedTensor" % opname)
     print("arg types", [type(arg) for arg in args])
@@ -762,47 +836,6 @@ def get_pad(shape: torch.Size, multipliers: List[int]) -> Tuple[int, ...]:
         ]
         pad[2 * dim + 1] = 0
     return tuple(pad[::-1])
-
-
-def convert_tensor_args(args: List[object]) -> Tuple[object]:
-    """Converts all tensors of a given list into padded tensors."""
-    args_padded = []
-    for arg in args:
-        if (
-            type(arg) is torch.Tensor
-            or type(arg) is torch.nn.Parameter
-            or type(arg) is FakeTensor
-            or type(arg) is FunctionalTensor
-        ):
-            multipliers = [1] * len(arg.shape)
-            args_padded.append(PaddedTensor(arg, multipliers))
-            log(
-                "Encountered tensor with shape",
-                arg.shape,
-                "and converted to padded tensor",
-            )
-        else:
-            args_padded.append(arg)
-    return tuple(args_padded)
-
-
-def convert_tensor_results(out, orig_out_shapes):
-    """Converts all tensors of a given list into padded tensors, incl. the original shape."""
-    out_flat, spec = pytree.tree_flatten(out)
-    out_flat_padded = []
-    for idx, out_tensor in enumerate(out_flat):
-        if type(out_tensor) in [
-            torch.Tensor,
-            FakeTensor,
-            FunctionalTensor,
-        ] and idx < len(orig_out_shapes):
-            s = orig_out_shapes[idx]
-            multipliers = [1] * len(out_tensor.shape)
-            out_flat_padded.append(PaddedTensor(out_tensor, multipliers, s))
-        else:
-            out_flat_padded.append(out_tensor)
-    out = pytree.tree_unflatten(out_flat_padded, spec)
-    return out
 
 
 def get_tensors_from_padded(
@@ -985,17 +1018,14 @@ class PaddedTensor(torch.Tensor):
         log("-" * 40)
 
         if func._opname not in PADDED_OP_TABLE:
-            log_op_not_in_op_table(func._opname, args, out)
+            log_op_not_in_op_table(func._opname, args)
             raise NotImplementedError(
                 f"Function '{func._opname}' is not implemented for PaddedTensor"
             )
         op = PADDED_OP_TABLE[func._opname]
 
-        # Convert arg tensors to padded tensors
+        # Convert args of type tensor to padded tensor
         args = convert_tensor_args(args)
-
-        # Pad args
-        args, kwargs = op.modify_args(args, kwargs)
 
         # Run function
         tensor_args, tensor_kwargs = get_tensors_from_padded(args, kwargs)
@@ -1010,6 +1040,16 @@ class PaddedTensor(torch.Tensor):
             PaddedTensor, lambda x: x.orig_shape, args
         )
         orig_out_shapes = op.infer_shapes(orig_in_shapes, args, kwargs)
+
+        # Infer original shape T
+        orig_in_shapes_T = pytree.tree_map_only(
+            PaddedTensor, lambda x: x.orig_shape_T, args
+        )
+        print("orig_in_shapes_T", orig_in_shapes_T)
+        print(pytree.tree_map(type, orig_in_shapes_T))
+
+        orig_out_shapes_T = op.infer_shapes_T(orig_in_shapes_T, args, kwargs)
+        print("orig_out_shapes_T", orig_out_shapes_T)
 
         log_function_with_shapes(func, args, tensor_args, out, orig_out_shapes)
 
