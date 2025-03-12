@@ -26,7 +26,9 @@ FSTRING_START: int = getattr(token, "FSTRING_START", NO_TOKEN)
 FSTRING_END: int = getattr(token, "FSTRING_END", NO_TOKEN)
 
 START_OF_LINE_TOKENS = dict.fromkeys((token.DEDENT, token.INDENT, token.NEWLINE))
-IGNORED_TOKENS = dict.fromkeys((token.COMMENT, token.ENDMARKER, token.ENCODING, token.NL))
+IGNORED_TOKENS = dict.fromkeys(
+    (token.COMMENT, token.ENDMARKER, token.ENCODING, token.NL)
+)
 EMPTY_TOKENS = START_OF_LINE_TOKENS | IGNORED_TOKENS
 
 BRACKETS = {"{": "}", "(": ")", "[": "]"}
