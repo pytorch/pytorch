@@ -176,7 +176,7 @@ class ModelTests(PaddedTensorTestCase):
                 # Run
                 out = transformer(*inputs)
 
-                transformer = torch.compile(transformer, mode="reduce-overhead")
+                transformer = torch.compile(transformer)  # , mode="reduce-overhead")
                 out_p = transformer(*inputs_p)
                 out_p = pytree.tree_map(lambda x: x.unpad(), out_p)
 

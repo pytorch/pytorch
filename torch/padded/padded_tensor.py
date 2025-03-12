@@ -875,6 +875,7 @@ class PaddedTensor(torch.Tensor):
         multipliers: Optional[List[int]],
         orig_shape: Optional[torch.Size] = None,
         neutral_element=0,
+        orig_shape_T: Optional[torch.Tensor] = None,
     ):
         assert type(multipliers) is list
 
@@ -910,6 +911,7 @@ class PaddedTensor(torch.Tensor):
         multipliers: Optional[List[int]],
         orig_shape: Optional[torch.Size] = None,
         neutral_element: Optional[Any] = 0,
+        orig_shape_T: Optional[torch.Tensor] = None,
     ):
         if multipliers is None:
             multipliers = []
@@ -919,6 +921,8 @@ class PaddedTensor(torch.Tensor):
             self.orig_shape = torch.Size(convert_to_padded_dims(tensor, multipliers))
         else:
             self.orig_shape = orig_shape
+
+        self.orig_shape_T = torch.Tensor(list(self.orig_shape))
 
         self.neutral_element = neutral_element
         if tensor.shape != self.shape:
