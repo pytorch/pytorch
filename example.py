@@ -38,18 +38,29 @@ class Quant(torch.nn.Module):
         signed: bool,
         rounding_mode: str,
     ):
-        return torch.onnx.ops.onnx_symbolic(
-            "Quant",
-            (x, scale, zero_point, bit_width),
-            dict(
-                signed=signed,
+        if torch.onnx.is_in_onnx_export():
+            return torch.onnx.ops.onnx_symbolic(
+                "Quant",
+                (x, scale, zero_point, bit_width),
+                dict(
+                    signed=signed,
+                    narrow_range=narrow_range,
+                    rounding_mode=rounding_mode,
+                ),
+                dtype=x.dtype,
+                shape=x.shape,
+                domain=DOMAIN_STRING,
+            )
+        else:
+            float_to_int_impl = solve_float_to_int_impl_from_enum(rounding_mode)
+            quant = IntQuant(
+                float_to_int_impl=float_to_int_impl(),
+                tensor_clamp_impl=TensorClamp(),
+                input_view_impl=Identity(),
                 narrow_range=narrow_range,
-                rounding_mode=rounding_mode,
-            ),
-            dtype=x.dtype,
-            shape=x.shape,
-            domain=DOMAIN_STRING,
-        )
+                signed=signed)
+            y = quant(scale, zero_point, bit_width, x)
+            return y
 
 
 # https://github.com/microsoft/Olive/blob/7df3c0353b3b754dec23faee2d73f22af9526155/olive/passes/pytorch/tensor_parallel_layers.py#L19C1-L29C69
