@@ -10,9 +10,6 @@ from . import _impl
 def onnx_symbolic(
     op_type: str,
     inputs: Sequence[torch.Tensor],
-    *,
-    dtype: torch.dtype,
-    shape: Sequence[int | torch.SymInt],
     attrs: dict[
         str,
         int
@@ -27,6 +24,9 @@ def onnx_symbolic(
         | Sequence[torch.Tensor],
     ]
     | None = None,
+    *,
+    dtype: torch.dtype,
+    shape: Sequence[int | torch.SymInt],
     domain: str = "",
     version: Optional[int] = None,
     matadata_props: Optional[dict[str, str]] = None,
@@ -38,9 +38,6 @@ def onnx_symbolic(
 def onnx_symbolic(
     op_type: str,
     inputs: Sequence[torch.Tensor],
-    *,
-    dtype: torch.dtype,
-    shape: Sequence[int | torch.SymInt],
     attrs: dict[
         str,
         int
@@ -55,6 +52,10 @@ def onnx_symbolic(
         | Sequence[torch.Tensor],
     ]
     | None = None,
+    *,
+    dtype: torch.dtype,
+    shape: Sequence[int | torch.SymInt],
+
     domain: str = "",
     version: Optional[int] = None,
     matadata_props: Optional[dict[str, str]] = None,
@@ -65,9 +66,6 @@ def onnx_symbolic(
 def onnx_symbolic(
     op_type: str,
     inputs: Sequence[torch.Tensor],
-    *,
-    dtype: torch.dtype,
-    shape: Sequence[int | torch.SymInt],
     attrs: dict[
         str,
         int
@@ -82,6 +80,9 @@ def onnx_symbolic(
         | Sequence[torch.Tensor],
     ]
     | None = None,
+    *,
+    dtype: torch.dtype,
+    shape: Sequence[int | torch.SymInt],
     domain: str = "",
     version: Optional[int] = None,
     matadata_props: Optional[dict[str, str]] = None,
