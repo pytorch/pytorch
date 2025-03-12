@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
-from typing import Any, Optional, Union, Literal
-import torch
 import typing
+from collections.abc import Sequence
+from typing import Any, Literal, Optional, Union
+
+import torch
 
 from . import _impl
 
@@ -27,7 +28,7 @@ def symbolic(
     ]
     | None = None,
     *,
-    dtype: torch.dtype,
+    dtype: torch.dtype | int,
     shape: Sequence[int | torch.SymInt],
     version: int | None = None,
     matadata_props: dict[str, str] | None = None,

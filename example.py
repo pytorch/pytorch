@@ -1,6 +1,8 @@
 # https://github.com/Xilinx/brevitas/blob/4617f7bd136e96fa21c7f76e3c7e2e37fe563837/src/brevitas/export/onnx/qonnx/function.py#L36C1-L47C19
 import torch
 import torch.onnx.ops
+
+
 # def symbolic(g, x, scale, zero_point, bit_width, narrow_range, signed, rounding_mode):
 #     ret = g.op(
 #         f'{DOMAIN_STRING}::Quant',
@@ -176,6 +178,8 @@ class TestModule(torch.nn.Module):
             [torch.tensor(42)],
             shape=x.size(),
             attr_keys=["key"],
+            attr_types=["i"],
+            attr_pos=[(0, 1)],
             attr_ints=[1],
             attr_floats=[1.0],
             attr_strs=["attr"],
