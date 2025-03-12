@@ -65,6 +65,7 @@ runs:
 
     - name: Checkout PyTorch
       uses: actions/checkout@v4
+      if: ${{ steps.first-checkout-attempt.outcome != 'success' }}
       with:
         ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         fetch-depth: ${{ inputs.fetch-depth }}
