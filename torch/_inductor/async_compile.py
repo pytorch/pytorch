@@ -41,6 +41,7 @@ from torch._inductor.runtime.compile_tasks import (
     _worker_compile_triton,
 )
 from torch._inductor.utils import clear_on_fresh_inductor_cache
+from torch._inductor.virtualized import V
 from torch.hub import _Faketqdm, tqdm
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._triton import has_triton_package
@@ -300,6 +301,10 @@ class AsyncCompile:
         )
         is_parallel = self.use_process_pool()
         set_feature_use("parallel_compile_post_warmup", is_parallel)
+
+        compile_id = torch._guards.CompileContext.current_compile_id()
+        is_backward = getattr(V.graph, "is_backward", False)
+
         if is_parallel:
             # We want to support changing these env vars after (and while) the
             # process pool is running, so pass them to the subprocess to reset.
@@ -322,6 +327,7 @@ class AsyncCompile:
                 # Now that we've compiled, we should clear the future
                 # so it can't be used again
                 CompiledTritonKernels.remove_future(source_code)
+                kernel.set_compile_info(compile_id, is_backward)
                 kernel.precompile(
                     warm_cache_only=False, reload_kernel=reload_kernel_in_parent
                 )
@@ -343,6 +349,7 @@ class AsyncCompile:
                 start_ns = time_ns()
                 _set_triton_ptxas_path()
                 kernel = load_kernel()
+                kernel.set_compile_info(compile_id, is_backward)
                 kernel.precompile(warm_cache_only=False)
                 elapsed_us = (time_ns() - start_ns) // 1000
                 get_metrics_context().add_top_n(
