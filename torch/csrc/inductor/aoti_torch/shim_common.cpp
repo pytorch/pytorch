@@ -1454,11 +1454,24 @@ static c10::IValue to_ivalue(
     case c10::TypeKind::ScalarTypeType: {
       return c10::IValue(to<c10::ScalarType>(stable_ivalue));
     }
+    case c10::TypeKind::DeviceObjType: {  // this needs to be litigated
+      return c10::IValue(to<c10::Device>(stable_ivalue));
+    }
     case c10::TypeKind::LayoutType: {
       return c10::IValue(to<c10::Layout>(stable_ivalue));
     }
     case c10::TypeKind::MemoryFormatType: {
       return c10::IValue(to<c10::MemoryFormat>(stable_ivalue));
+    }
+    case c10::TypeKind::OptionalType: {
+      auto inner_type = arg_type->castRaw<at::OptionalType>()->getElementType();
+
+      auto sivp = to<StableIValue*>(stable_ivalue);
+      // our contract is that IValue None = StableIValue nullptr
+      if (sivp == nullptr) {
+        return c10::IValue();
+      }
+      return to_ivalue(inner_type, *sivp);
     }
     default: {
       TORCH_CHECK(false, "Not yet supported argument type: ", arg_type->str());

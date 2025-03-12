@@ -9,7 +9,14 @@
 namespace {
 
 // helpers for converting between StableIValue and actual IValues
-template <typename T>
+
+// utility functions to detect optional
+template <typename V>
+struct is_optional : std::false_type {};
+template <typename V>
+struct is_optional<std::optional<V>> : std::true_type {};
+
+template <typename T, std::enable_if_t<!is_optional<T>::value, bool> = true>
 StableIValue from(T val) {
   static_assert(
       sizeof(T) <= sizeof(StableIValue),
@@ -17,9 +24,37 @@ StableIValue from(T val) {
   return *reinterpret_cast<StableIValue*>(&val);
 }
 
-template <typename T>
+// Specialization for std::optional
+template <typename T, std::enable_if_t<is_optional<T>::value, bool> = true>
+StableIValue from(T val) {
+  if (val.has_value()) {
+    StableIValue* heap_val = new StableIValue(from(val.value()));
+    return from(heap_val);
+  }
+  return from(nullptr);
+}
+
+template <typename T, std::enable_if_t<!is_optional<T>::value, bool> = true>
 T to(StableIValue val) {
   return *reinterpret_cast<T*>(&val);
+}
+
+// Specialization for std::optional
+template <typename T, std::enable_if_t<is_optional<T>::value, bool> = true>
+T to(StableIValue val) {
+  using V = typename T::value_type;
+
+  auto sivp = to<StableIValue*>(val);
+  // val is either nullptr or a pointer to a StableIValue
+  if (sivp == nullptr) {
+    return std::optional<V>{};
+  }
+  auto inner_val = to<V>(*sivp);
+
+  // free the memory associated with StableIValue* val
+  delete val;
+  
+  return std::make_optional(inner_val);
 }
 // end to helpers for converting between StableIValue and actual IValues
 
