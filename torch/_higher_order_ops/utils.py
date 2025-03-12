@@ -348,11 +348,17 @@ def unique_graph_id(proxy_mode, prefix):
     # There are probably better ways - I know that create_arg has some self incrementing name
     # magic to it, but since we explicitly have to get the name for register_module,
     # I was not sure how to do that. This kinda simulates it.
+    return unique_graph_name_with_root(proxy_mode.tracer.root, prefix)
+
+
+def unique_graph_name_with_root(
+    root: torch.fx.GraphModule, prefix: str
+) -> tuple[int, str]:
     next_name = None
     i = 0
     while not next_name:
         candidate = f"{prefix}_{i}"
-        if hasattr(proxy_mode.tracer.root, candidate):
+        if hasattr(root, candidate):
             i += 1
         else:
             next_name = candidate
