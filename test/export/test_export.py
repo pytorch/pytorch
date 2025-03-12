@@ -8232,6 +8232,36 @@ graph():
         assert torch.allclose(epm(*inp), eager)
         assert torch.allclose(ufm(*inp), eager)
 
+    def test_u0_5_u0(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                n = x.item()
+                m = torch.zeros(n, 5)
+                input = torch.cat([m, y], dim=0)
+                # [5+u0, 5] -> [5, -1]
+                out = input.reshape(5, -1)
+                return out
+            
+        x = torch.tensor(5)
+        y = torch.ones(5, 5)
+        ep = export(Foo(), (x, y))
+        ep.module()(x, y)
+        ep.module()(torch.tensor(0), y)
+
+    def test_failed_unbacked_reshape(self):
+        class Foo(torch.nn.Module):
+            def forward(self, xs):
+                xsl = xs.tolist()
+                for x in xsl:
+                    torch._check_is_size(x)
+                a, b, c, d = xsl
+                x = torch.zeros(a, b)
+                return x.reshape(c, d)
+
+        xs = torch.tensor([4, 6, 8, 3])
+        ep = export(Foo(), (xs,))
+        print(ep)
+
     def test_unflatten_random_dag_mutating_buf_4(self):
         class N3(torch.nn.Module):
             def __init__(self):
