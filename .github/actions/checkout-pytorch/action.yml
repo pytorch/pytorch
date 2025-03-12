@@ -56,7 +56,7 @@ runs:
         show-progress: false
 
     - name: Remove entire workspace if checkout failed
-      if: ${{ steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' && first-checkout-attempt.outcome != 'success' }}
+      if: ${{ steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' && steps.first-checkout-attempt.outcome != 'success' }}
       shell: bash
       env:
         NO_SUDO: ${{ inputs.no-sudo }}
