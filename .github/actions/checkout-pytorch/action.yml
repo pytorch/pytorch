@@ -64,7 +64,16 @@ runs:
       env:
         NO_SUDO: ${{ inputs.no-sudo }}
       run: |
-        rm -rf "${GITHUB_WORKSPACE}"
+        retry () {
+          $* || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
+        }
+        echo "${GITHUB_WORKSPACE}"
+        if [ -z "${NO_SUDO}" ]; then
+          retry sudo rm -rf "${GITHUB_WORKSPACE}"
+        else
+          retry rm -rf "${GITHUB_WORKSPACE}"
+        fi
+        mkdir "${GITHUB_WORKSPACE}"
 
     - name: Checkout PyTorch
       uses: actions/checkout@v4
