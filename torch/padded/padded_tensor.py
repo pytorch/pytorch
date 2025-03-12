@@ -36,44 +36,6 @@ def register_op(table: Dict[Any, Any], aten_ops: List[str]):
 register_padded_op = functools.partial(register_op, PADDED_OP_TABLE)
 
 
-class Dimension(int):
-    """
-    A class representing a dimension with padding information. This allows
-    propagating the padding information of dimensions across the ops.
-    """
-
-    is_padded = None
-
-    def __new__(cls, value: int, is_padded: bool | None = None, *args, **kwargs):
-        ret = super(cls, cls).__new__(cls, value)
-        ret.is_padded = is_padded
-        return ret
-
-    def __is_padded(self, other):
-        is_padded = self.is_padded
-        if isinstance(other, Dimension):
-            is_padded = is_padded or other.is_padded
-        return is_padded
-
-    def __add__(self, other):
-        res = super(Dimension, self).__add__(other)
-        return self.__class__(res, self.__is_padded(other))
-
-    def __sub__(self, other):
-        res = super(Dimension, self).__sub__(other)
-        return self.__class__(res, self.__is_padded(other))
-
-    def __mul__(self, other):
-        res = super(Dimension, self).__mul__(other)
-        return self.__class__(res, self.__is_padded(other))
-
-    def __repr__(self) -> str:
-        if self.is_padded:
-            return super().__repr__() + "(P)"
-        else:
-            return super().__repr__()
-
-
 def strip_common_suffix(
     list1: List[int], list2: List[int]
 ) -> Tuple[List[int], List[int]]:
@@ -215,7 +177,7 @@ class ViewOp(PaddedOp):
             output_shape = []
 
             for current_mapping in mapping:
-                output_dim = Dimension(1, False)
+                output_dim = 1
                 for index in current_mapping:
                     output_dim = input_shape[index] * output_dim
 
@@ -445,14 +407,6 @@ class MatmulOp(PaddedOp):
     def infer_shapes(self, input_shapes, args, kwargs):
         return [torch.Size([args[0].orig_shape[0], args[1].orig_shape[1]])]
 
-    def validate(self, args, kwargs):
-        # Validate contraction dimension: Either both or none of them should be padded
-        if isinstance(args[0].orig_shape[1], Dimension) and isinstance(
-            args[1].orig_shape[0], Dimension
-        ):
-            pass
-            # assert args[0].orig_shape[1].is_padded == args[1].orig_shape[0].is_padded
-
 
 @register_padded_op(["bmm"])
 class BmmOp(PaddedOp):
@@ -492,12 +446,12 @@ class ScaledDotProductAttentionOp(PaddedOp):
         attn_shape = input_shape[:-1]
         return [input_shape, attn_shape]
 
-    def modify_args(self, args, kwargs):
-        slicers = get_outer_slicers(args[0].tensor.shape, args[1].orig_shape)
-        if any(s is not None for s in slicers):
-            args[0].tensor[slicers] = 0
+    # def modify_args(self, args, kwargs):
+    #    slicers = get_outer_slicers(args[0].tensor.shape, args[1].orig_shape)
+    #    if any(s is not None for s in slicers):
+    #        args[0].tensor[slicers] = 0
 
-        return args, kwargs
+    #    return args, kwargs
 
 
 @register_padded_op(["_scaled_dot_product_efficient_attention_backward"])
@@ -865,9 +819,7 @@ def get_tensors_from_padded(
     return tensor_args, tensor_kwargs
 
 
-def convert_to_padded_dims(
-    tensor: torch.Tensor, multipliers: List[int]
-) -> List[Dimension]:
+def convert_to_padded_dims(tensor: torch.Tensor, multipliers: List[int]) -> List[int]:
     """
     Converts the dimensions of a tensor into a list of Dimension objects, indicating whether each
     dimension is padded based on the given multipliers.
@@ -875,7 +827,7 @@ def convert_to_padded_dims(
     shape_new = []
     for dim_idx, dim in enumerate(tensor.shape):
         is_padded = multipliers[dim_idx] != 1
-        shape_new.append(Dimension(dim, is_padded))
+        shape_new.append(dim)
     return shape_new
 
 

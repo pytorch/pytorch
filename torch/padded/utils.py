@@ -147,4 +147,4 @@ def dot_aten_graph(model, inputs, output_file, max_nodes=sys.maxsize):
 
 def log(*msgs):
     msg = " ".join([str(x) for x in msgs])
-    # print(msg)
+    print(msg)
