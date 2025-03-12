@@ -389,9 +389,15 @@ class AutogradCompilerInstance:
                 deduped_aot_id += f"_{self.aot_id_counter[aot_id]}"
             self.aot_id_counter[aot_id] += 1
 
+            def make_unique(node_name):
+                # make it both informative and unique
+                return f"aot{deduped_aot_id}_{node_name}"
+
             for node in ctx._bw_module.graph.nodes:
                 if node.op == "placeholder":
-                    value_remap[node] = pall_args[args_idx].node
+                    ph = pall_args[args_idx].node
+                    ph.name = make_unique(node.name)
+                    value_remap[node] = ph
                     args_idx += 1
                 elif node.op == "output":
                     assert len(node.args) == 1
@@ -408,6 +414,7 @@ class AutogradCompilerInstance:
                         self.fx_tracer.root, qualname, getattr(ctx._bw_module, name)
                     )
                     result = self.fx_tracer.create_node("get_attr", qualname, (), {})
+                    result.name = make_unique(node.name)
                     value_remap[node] = result
                 elif node.op == "call_function":
                     if node.target == torch.ops.aten.view.default:
@@ -418,14 +425,11 @@ class AutogradCompilerInstance:
                     result = self.fx_tracer.graph.node_copy(
                         node, lambda n: value_remap[n]
                     )
+                    result.name = make_unique(node.name)
                     value_remap[node] = result
                 else:
                     raise AssertionError("shouldn't get here")
 
-                if node.op != "output":
-                    value_remap[
-                        node
-                    ].name = f"aot{deduped_aot_id}_{value_remap[node].name}"
             assert poutputs is not None
 
             # In general we don't know what the shapes of the outputs are, so allocate
@@ -1027,9 +1031,9 @@ class AutogradCompilerInstance:
                     acc_grad_node = n
                     break
 
-            assert acc_grad_node is not None, (
-                "post_acc_grad_hook must have corresponding acc grad node"
-            )
+            assert (
+                acc_grad_node is not None
+            ), "post_acc_grad_hook must have corresponding acc grad node"
 
             # append post_acc_grad_hook after acc_grad node
             acc_grad_node.append(getitem_node)
