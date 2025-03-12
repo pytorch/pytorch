@@ -353,49 +353,63 @@ TORCH_API void _cudnn_set_conv_benchmark_empty_cache(bool enable);
 TORCH_API bool _cudnn_get_conv_benchmark_empty_cache();
 
 
+#ifdef USE_ROCM
+static bool isChannelsLastSupportedROCm() {
+#if ROCM_VERSION < 60300
+    return false;
+#else
+    // Do not enable NHWC by default on RDNA cards currently
+    // to avoid any unintended regressions while investigations
+    // are ongoing
+    static const std::vector<std::string> unsupported_arch = {
+        "gfx1100", "gfx1101", "gfx1200", "gfx1201"
+    };
+
+    for (auto index : c10::irange(at::detail::getCUDAHooks().getNumGPUs())) {
+        if (at::detail::getCUDAHooks().isGPUArch(index, unsupported_arch)) {
+            return false;
+    }
+    }
+
+    return true;
+#endif
+}
+#endif
+
 inline bool miopen_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
 
-  // disable NHWC for float64 input.
+  // Disable NHWC for float64 input.
   if (!at::detail::getCUDAHooks().compiledWithMIOpen() ||
       input.scalar_type() == at::kDouble ||
       weight.scalar_type() == at::kDouble) {
     return false;
   }
 
-  // Check user level env var to override any setting below
+  // Check if NHWC usage is suggested
   static std::optional<bool> PYTORCH_MIOPEN_SUGGEST_NHWC = c10::utils::check_env("PYTORCH_MIOPEN_SUGGEST_NHWC");
-
-  bool can_use_miopen_channels_last_2d = false;
-
-#if defined(USE_ROCM) && (ROCM_VERSION >= 60300)
-  static const std::array<const char*, 4> unsupported_arch = {
-    "gfx1100", "gfx1101", "gfx1200", "gfx1201"
-  }
-
-  for (auto index: c10::irange(at::detail::getNumGPUs())) {
-    if (at::detail::getCUDAHooks().isGPUArch(index, archs)) {
-      return true;
-    }
-  }
-
-  return false;
-
-#else
-  return false;
-#endif
 
   auto input_memory_format = input.suggest_memory_format();
   auto weight_memory_format = weight.suggest_memory_format();
 
-  can_use_miopen_channels_last_2d = PYTORCH_MIOPEN_SUGGEST_NHWC &&  *PYTORCH_MIOPEN_SUGGEST_NHWC && (
-            ( (input_memory_format  == at::MemoryFormat::ChannelsLast) ||
-            (weight_memory_format == at::MemoryFormat::ChannelsLast) )
-        );
+  bool can_use_miopen_channels_last_2d =
+#ifdef USE_ROCM
+      isChannelsLastSupportedROCm() ||
+#endif
+      (PYTORCH_MIOPEN_SUGGEST_NHWC && *PYTORCH_MIOPEN_SUGGEST_NHWC);
 
-  bool can_use_miopen_channels_last_3d = false;
+  can_use_miopen_channels_last_2d = can_use_miopen_channels_last_2d && (
+    (input_memory_format  == at::MemoryFormat::ChannelsLast) ||
+    (weight_memory_format == at::MemoryFormat::ChannelsLast)
+  );
 
-  return can_use_miopen_channels_last_2d || can_use_miopen_channels_last_3d;
+  // Return false if 3D convolution
+  if (input.dim() >= 5) {
+    return false;
+  }
+
+  return can_use_miopen_channels_last_2d;
 }
+
 
 inline bool mkldnn_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
 
