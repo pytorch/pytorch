@@ -680,7 +680,7 @@ class MetalKernel(SIMDKernel):
         wrapper.generate_kernel_call(
             name,
             args,
-            device=torch.device("cpu"),  # TODO: Fix me, MPS does not expose streams now
+            gpu=False,  # TODO: Fix me, MPS does not expose streams now
             triton=False,
         )
 

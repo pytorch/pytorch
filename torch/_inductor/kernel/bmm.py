@@ -9,10 +9,10 @@ from .. import ir, lowering as L
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
-    SymbolicGridFn,
     TritonTemplate,
 )
 from ..utils import (
+    ceildiv as cdiv,
     use_aten_gemm_kernels,
     use_ck_gemm_template,
     use_cpp_bmm_template,
@@ -34,8 +34,7 @@ log = logging.getLogger(__name__)
 aten = torch.ops.aten
 
 
-@SymbolicGridFn
-def bmm_grid(b, m, n, meta, *, cdiv):
+def bmm_grid(b, m, n, meta):
     return (cdiv(m, meta["BLOCK_M"]) * cdiv(n, meta["BLOCK_N"]), b, 1)
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import copy
 import dataclasses
 import functools
 import itertools
@@ -5900,68 +5901,82 @@ class UserDefinedTritonKernel(ExternKernel):
         ) = self.get_kernel_and_metadata()
 
         # Definition of kernel
-        (
-            new_name,
-            triton_meta,
-            extra_launch_args,
-        ) = wrapper.define_user_defined_triton_kernel(
-            kernel,
-            configs,
-            self.kwargs,
-            restore_value_args,
-            reset_to_zero_args,
-            self.grid,
+        new_name, triton_meta = wrapper.define_user_defined_triton_kernel(
+            kernel, configs, self.kwargs, restore_value_args, reset_to_zero_args
         )
-        named_args = {
-            k: self.get_kwargs_value(k) for k in self.ordered_kwargs_for_cpp_kernel
-        }
-        constexpr_names = OrderedSet([kernel.arg_names[i] for i in kernel.constexprs])
+        raw_args = [
+            self.get_kwargs_value(k) for k in self.ordered_kwargs_for_cpp_kernel
+        ]
 
-        args: list[Any] = []
-        arg_types: list[Any] = []
-        raw_args_filtered: list[Any] = []
-        for name, arg in itertools.chain(
-            named_args.items(), zip(itertools.repeat(""), extra_launch_args)
-        ):
-            raw_args_filtered.append(arg)
-            if isinstance(arg, IRNode):
-                args.append(arg.codegen_reference())
-                arg_types.append(arg.get_dtype())
-            elif isinstance(arg, (int, float, bool, sympy.Expr)):
-                args.append(arg)
-                arg_types.append(type(arg))
-            elif name in constexpr_names:
-                # insert a dummy value for constexpr args of unsupported type
-                # constexprs will end up getting baked into the kernel at compile time
-                args.append(-1)
-                arg_types.append(int)
-            elif arg is None:
-                """
-                Filter out None args.
+        # NOTE: raw_args doesn't include autotuned args.
+        # But, kernel.constexprs includes indices of autotuned args.
+        # So, let's recalculate constexpr indices wrt to raw_args.
+        constexpr_indices = []
+        for idx, kwarg in enumerate(self.ordered_kwargs_for_cpp_kernel):
+            if kernel.arg_names.index(kwarg) in kernel.constexprs:
+                constexpr_indices.append(idx)
 
-                see https://github.com/pytorch/pytorch/issues/115344
+        # Create a copy of triton_meta to avoid modifying the original version.
+        triton_meta = copy.deepcopy(triton_meta)
+        if not triton_version_uses_attrs_dict():
+            """
+            Filter out None args.
 
-                Two cases for a None arg:
-                1. The arg is already tl.constexpr, so leave it in
-                2. The arg is not tl.constexpr so we have to remove it
-                """
-                if triton_version_uses_attrs_dict():
-                    args.append(-1)
-                    arg_types.append(int)
-                else:
-                    raw_args_filtered.pop()
-            else:
-                raise NotImplementedError(f"Unsupported arg type: {type(arg)}: {arg}")
+            see https://github.com/pytorch/pytorch/issues/115344
 
+            Two cases for a None arg:
+            1. The arg is already tl.constexpr, so leave it in
+            2. The arg is not tl.constexpr so we have to remove it
+            """
+
+            constexpr_indices_set = OrderedSet(constexpr_indices)
+            REMOVED = object()
+            raw_args = [
+                (
+                    (idx, arg)
+                    if (arg is not None)
+                    or (arg is None and idx in constexpr_indices_set)
+                    else (idx, REMOVED)
+                )
+                for idx, arg in enumerate(raw_args)
+            ]
+            removed_none_args = [idx for idx, val in raw_args if val == REMOVED]
+            raw_args = [val for idx, val in raw_args if val != REMOVED]
+
+            # We have to compute the constexpr indices for the new, filtered raw_args
+            # We also have to adjust equal_to_1.
+            if removed_none_args:
+                eq1_indices_set = OrderedSet[int](triton_meta["configs"][0].equal_to_1)
+                constexpr_indices = []
+                equal_to_1 = []
+                index_shift = 0
+                for idx, kwarg in enumerate(self.ordered_kwargs_for_cpp_kernel):
+                    # every time we encounter an idx we removed, adjust by one to account for it
+                    # So for example if we had [None, const X]
+                    # iter 1:
+                    #   None was removed, adjust=1
+                    # iter 2:
+                    #  X is const at idx=1, but the adjusted idx is 0 now, because None was removed
+                    if idx in removed_none_args:
+                        index_shift += 1
+                        continue
+                    arg_index = kernel.arg_names.index(kwarg)
+                    if arg_index in kernel.constexprs:
+                        constexpr_indices.append(idx - index_shift)
+                    if arg_index in eq1_indices_set:
+                        equal_to_1.append(idx - index_shift)
+
+                triton_meta["configs"][0].equal_to_1 = equal_to_1
+
+        # Call to kernel
         self.codegen_comment(wrapper)
-        wrapper.generate_kernel_call(
+        wrapper.generate_user_defined_triton_kernel(
             new_name,
-            args,
-            arg_types=arg_types,
-            raw_args=raw_args_filtered,
-            triton_meta=triton_meta,
-            triton=True,
-            device=self.get_device(),
+            raw_args,
+            self.grid,
+            configs,
+            triton_meta,
+            constexpr_indices,
         )
 
     def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:

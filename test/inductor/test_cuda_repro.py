@@ -550,7 +550,7 @@ class CudaReproTests(TestCase):
         """
         from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
         from torch._inductor.runtime.hints import AttrsDescriptorWrapper, HeuristicType
-        from torch._inductor.runtime.triton_heuristics import CachingAutotuner
+        from torch._inductor.runtime.triton_heuristics import CachingAutotuner, grid
         from torch._inductor.utils import triton_version_uses_attrs_dict
 
         def autotune(configs, meta):
@@ -570,7 +570,6 @@ class CudaReproTests(TestCase):
                     reset_to_zero_arg_names=[],
                     optimize_mem=True,
                     heuristic_type=HeuristicType.POINTWISE,
-                    inductor_meta={"grid_type": "Grid1D"},
                 )
 
             return decorator
@@ -610,8 +609,8 @@ class CudaReproTests(TestCase):
         inout2 = inout1.clone()
 
         stream0 = get_cuda_stream(0)
-        kernel.run(inout1, in0, xnumel, stream=stream0)
-        kernel.run(inout2, in0, xnumel, stream=stream0)
+        kernel.run(inout1, in0, xnumel, grid=grid(xnumel), stream=stream0)
+        kernel.run(inout2, in0, xnumel, grid=grid(xnumel), stream=stream0)
 
         assert same(
             inout1, inout2, tol=0.001, equal_nan=True

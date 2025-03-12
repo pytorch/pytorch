@@ -3865,7 +3865,7 @@ class Scheduler:
         for name in sorted(
             self.buffer_names_to_free
             - V.graph.removed_buffers
-            - V.graph.wrapper_code.freed  # type: ignore[has-type]
+            - V.graph.wrapper_code.freed
         ):
             if name in self.name_to_buf:
                 buf = self.name_to_buf[name]
@@ -4124,7 +4124,7 @@ class Scheduler:
         V.graph.wrapper_code.define_subgraph_launcher_fn(partition_code.value)
 
         V.graph.wrapper_code.codegen_partition_call(graph_partition_id, signature)
-        V.graph.wrapper_code.allocated.update(  # type: ignore[has-type]
+        V.graph.wrapper_code.allocated.update(
             [node.get_name() for node in signature.output_nodes]
         )
 
