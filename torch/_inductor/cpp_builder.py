@@ -731,7 +731,10 @@ def _setup_standard_sys_libs(
         include_dirs.append(build_paths.linux_kernel_include)
         include_dirs.append("include")
 
-        linker_script = os.path.basename(_LINKER_SCRIPT)
+        if aot_mode and not use_relative_path:
+            linker_script = _LINKER_SCRIPT
+        else:
+            linker_script = os.path.basename(_LINKER_SCRIPT)
 
         if _is_clang(cpp_compiler):
             passthrough_args.append(" --rtlib=compiler-rt")
@@ -1580,7 +1583,7 @@ class CppBuilder:
         It is must need a temperary directory to store object files in Windows.
         After build completed, delete the temperary directory to save disk space.
         """
-        if config.is_fbcode():
+        if self._use_relative_path:
             # remote build uses relative path
             return self.build_fbcode_re()
         _create_if_dir_not_exist(self._output_dir)

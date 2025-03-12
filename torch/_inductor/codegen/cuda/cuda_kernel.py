@@ -86,7 +86,7 @@ class CUDAKernel(Kernel):
         matches = [
             arg for arg in self.layout_args.values() if arg.matches(node, attr, dim)
         ]
-        if len(matches) > 1:
+        if len(matches) >= 1:
             # Verify all matches have the same node, attribute, and dimension
             # And if they come from the same node, whichever symbol we use is fine.
             # if in runtime the logic changes, this would trigger guard
@@ -353,7 +353,6 @@ class CUDATemplateKernel(CUDAKernel):
         wrapper.generate_kernel_call(
             name,
             call_args,
-            gpu=True,
             triton=False,
             arg_types=arg_types,
         )
