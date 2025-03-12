@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import atexit
+import copy
 import functools
 import logging
 import multiprocessing
@@ -11,7 +12,7 @@ from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from functools import partial
 from time import time, time_ns
-from typing import Any, Callable, Optional, TYPE_CHECKING
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch._dynamo.device_interface import get_registered_device_interfaces
@@ -40,6 +41,7 @@ from torch._inductor.runtime.compile_tasks import (
     _set_triton_ptxas_path,
     _worker_compile_triton,
 )
+from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 from torch._inductor.utils import clear_on_fresh_inductor_cache
 from torch.hub import _Faketqdm, tqdm
 from torch.utils._ordered_set import OrderedSet
@@ -48,7 +50,6 @@ from torch.utils._triton import has_triton_package
 
 if TYPE_CHECKING:
     from torch._inductor.runtime.hints import HalideMeta
-    from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 
 # timing metrics for time spent in the compilation
 _cumulative_compile_time = 0.0
@@ -147,7 +148,7 @@ class CompiledTritonKernels:
     Currently, the cache stores Future objects, but it should be generalizable for any kernels.
     """
 
-    _cache: dict[str, LambdaFuture] = {}
+    _cache: dict[str, Union[LambdaFuture | CachingAutotuner]] = {}
 
     @staticmethod
     def key(kernel_src: str):
@@ -182,10 +183,30 @@ class CompiledTritonKernels:
         CompiledTritonKernels._cache = {}
 
     @staticmethod
-    def remove_future(kernel_src: str) -> None:
+    def remove_future(
+        kernel_src: str, compiled_kernel: Optional[CachingAutotuner]
+    ) -> None:
         key = CompiledTritonKernels.key(kernel_src)
-        if key in CompiledTritonKernels._cache:
+
+        # Delete the LambdaFuture if there is one
+        if key in CompiledTritonKernels._cache and isinstance(
+            CompiledTritonKernels._cache[key], LambdaFuture
+        ):
             del CompiledTritonKernels._cache[key]
+
+        # Replace it with the fully compiled kernel if one exists
+        if compiled_kernel is not None:
+            new_kernel = copy.copy(compiled_kernel)
+            new_kernel.prepare_for_pickle()
+            CompiledTritonKernels._cache[key] = new_kernel
+
+    @staticmethod
+    def get_compiled_kernels() -> dict[str, CachingAutotuner]:
+        result = {}
+        for key, kernel in CompiledTritonKernels._cache.items():
+            if isinstance(kernel, CachingAutotuner):
+                result[key] = kernel
+        return result
 
 
 class AsyncCompile:
@@ -281,8 +302,20 @@ class AsyncCompile:
         - The AutotuneCache, if enabled, is constructed on each worker per triton config
           and pickled by to us via `CachingAutotuner.save_cache_hook`.
         """
+        def reload_kernel_in_parent():
+            # Benchmark how often this happens
+            with dynamo_timed("reload_kernel_in_parent"):
+                return load_kernel()
+
         if future := CompiledTritonKernels.get(source_code, None):
             counters["inductor"]["async_compile_cache_hit"] += 1
+            # If it's already a CachingAutotuner, we want to load it directly
+            if isinstance(future, CachingAutotuner):
+                with dynamo_timed("async_compile.warm_precompile"):
+                    future.precompile(
+                        warm_cache_only=False, reload_kernel=reload_kernel_in_parent
+                    )
+                    return future
             return future
 
         counters["inductor"]["async_compile_cache_miss"] += 1
@@ -312,16 +345,11 @@ class AsyncCompile:
                 extra_env,
             )
 
-            def reload_kernel_in_parent():
-                # Benchmark how often this happens
-                with dynamo_timed("reload_kernel_in_parent"):
-                    return load_kernel()
-
             def get_result() -> tuple[CachingAutotuner, int]:
                 kernel, elapsed_us = task.result()
                 # Now that we've compiled, we should clear the future
                 # so it can't be used again
-                CompiledTritonKernels.remove_future(source_code)
+                CompiledTritonKernels.remove_future(source_code, kernel)
                 kernel.precompile(
                     warm_cache_only=False, reload_kernel=reload_kernel_in_parent
                 )

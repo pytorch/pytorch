@@ -1148,8 +1148,26 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
 
         return static_kernel
 
+    def reload_cubin_path(self):
+        """
+        When loading from cache on disk, we want to reload cubin
+        files from their appropriate location on disc.
+        """
+        cubin_location = os.path.join(
+            triton_cache_dir(self.compile_meta.get("device", 0)),
+            triton_hash_to_path_key(self.kernel.hash),
+            f"{self.kernel.name}.cubin",
+        )
+        if not os.path.exists(cubin_location):
+            raise RuntimeError(
+                "Cubin file saved by TritonBundler not found at %s", cubin_location
+            )
+        self.kernel.cubin_path = cubin_location
+
     def make_launcher(self) -> LauncherType:
         # Load the binary on the parent
+        if not self.kernel.cubin_path:
+            self.reload_cubin_path()
         self.kernel.load_kernel()
         scope = {
             "runner": self.kernel.run,
