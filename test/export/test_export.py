@@ -9485,6 +9485,37 @@ graph():
         ufm = torch.export.unflatten(ep)
         self.assertTrue(torch.allclose(ufm(*inp), epm(*inp)))
 
+    def test_placeholder_update_preserving(self):
+        class Child(torch.nn.Module):
+            def forward(self, x):
+                a = x.add_(3)
+                return a - 2
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.child = Child()
+
+            def forward(self, x):
+                f1 = self.child(x)  # x <- 1 + 3 = 4, x - 2 = 2
+                f2 = x * 4  # x * 4 = 16
+                return f1 + f2
+
+        inp = torch.ones(2, 3, dtype=torch.float32)
+        ep1 = export(Foo(), (inp,))
+        inp = torch.ones(2, 3, dtype=torch.float32)
+        ep2 = export(Foo(), (inp,), preserve_module_call_signature=("child",))
+
+        inp = torch.ones(2, 3, dtype=torch.float32)
+        orig_result = Foo()(inp)
+
+        inp = torch.ones(2, 3, dtype=torch.float32)
+        ep1_result = ep1.module()(inp)
+        self.assertTrue(torch.allclose(ep1_result, orig_result))
+        inp = torch.ones(2, 3, dtype=torch.float32)
+        ep2_result = ep2.module()(inp)
+        self.assertTrue(torch.allclose(ep2_result, orig_result))
+
     @testing.expectedFailureLegacyExportNonStrict
     @testing.expectedFailureLegacyExportStrict
     def test_constant_tensor_with_non_functional(self):

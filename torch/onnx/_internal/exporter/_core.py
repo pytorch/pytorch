@@ -1402,7 +1402,7 @@ def export(
                 _reporting.create_onnx_export_report(
                     report_path,
                     f"{_format_exceptions_for_all_strategies(failed_results)}\n\n{_format_exception(e)}",
-                    program,
+                    decomposed_program,
                     decomp_comparison=_reporting.format_decomp_comparison(
                         pre_decomp_unique_ops, post_decomp_unique_ops
                     ),
