@@ -61,6 +61,7 @@ class CustomOpTestCaseBase(TestCase):
     def setUp(self):
         super().setUp()
         self.libraries = []
+        torch._dynamo.reset()
 
     def tearDown(self):
         super().tearDown()
@@ -76,6 +77,7 @@ class CustomOpTestCaseBase(TestCase):
         for lib in self.libraries:
             lib._destroy()
         del self.libraries
+        torch._dynamo.reset()
 
     def ns(self):
         return getattr(torch.ops, self.test_ns)

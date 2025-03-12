@@ -23,6 +23,7 @@ TEST(LazyTest, OptimisticLazy) {
   std::vector<std::thread> threads;
   std::atomic<std::string*> address = nullptr;
 
+  threads.reserve(kNumThreads);
   for (size_t i = 0; i < kNumThreads; ++i) {
     threads.emplace_back([&] {
       auto* p = &s.ensure(factory);
