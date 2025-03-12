@@ -131,7 +131,7 @@ jobs:
         conda activate "${CONDA_ENV}"
 
         # Regenerate workflows
-				export RELEASE_VERSION_TAG=2.7
+        export RELEASE_VERSION_TAG=2.7
         .github/scripts/generate_ci_workflows.py
 
         RC=0
@@ -142,7 +142,6 @@ jobs:
           echo 'are not up to date according to .github/templates.'
           echo 'Please run this command, commit, and push again to your PR:'
           echo
-				export RELEASE_VERSION_TAG=2.7
           echo '    .github/scripts/generate_ci_workflows.py'
           echo
           echo 'If running that command does nothing, you may need to rebase'
