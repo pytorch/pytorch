@@ -39,8 +39,8 @@ class Quant(torch.nn.Module):
         rounding_mode: str,
     ):
         if torch.onnx.is_in_onnx_export():
-            return torch.onnx.ops.onnx_symbolic(
-                "Quant",
+            return torch.onnx.ops.symbolic(
+                f"{DOMAIN_STRING}Quant",
                 (x, scale, zero_point, bit_width),
                 dict(
                     signed=signed,
@@ -49,7 +49,6 @@ class Quant(torch.nn.Module):
                 ),
                 dtype=x.dtype,
                 shape=x.shape,
-                domain=DOMAIN_STRING,
             )
         else:
             float_to_int_impl = solve_float_to_int_impl_from_enum(rounding_mode)
@@ -81,13 +80,12 @@ class Quant(torch.nn.Module):
 class AllReduce(torch.nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if torch.onnx.is_in_onnx_export():
-            return torch.onnx.ops.onnx_symbolic(
-                "AllReduce",
+            return torch.onnx.ops.symbolic(
+                "com.microsoft::AllReduce",
                 (x,),
                 {},
                 dtype=x.dtype,
                 shape=x.shape,
-                domain="com.microsoft",
             )
         torch.distributed.all_reduce(x, op=torch.distributed.ReduceOp.SUM)
         return x
@@ -148,8 +146,8 @@ class QuantLinearTorchFunction(torch.nn.Module):
             tensor_args = [x, qweight, scales, qzeros]
             if g_idx is not None:
                 tensor_args.append(g_idx)
-            return torch.onnx.ops.onnx_symbolic(
-                "QuantLinear",
+            return torch.onnx.ops.symbolic(
+                "com.microsoft::QuantLinear",
                 tensor_args,
                 dict(
                     bits=bits,
@@ -159,7 +157,6 @@ class QuantLinearTorchFunction(torch.nn.Module):
                 ),
                 dtype=x.dtype,
                 shape=(*x.shape[:-1], out_features),
-                domain="com.microsoft",
             )
         raise NotImplementedError(
             "QuantLinearTorchFunction forward is only implemented for onnx export"
