@@ -117,7 +117,10 @@ jobs:
           # To get QEMU binaries in our PATH
           echo "${RUNNER_TEMP}/bin" >> "${GITHUB_PATH}"
           # Generate PyTorch version to use
-          echo "PYTORCH_VERSION=$(python3 .github/scripts/generate_pytorch_version.py --no-build-suffix)" >> "${GITHUB_ENV}"
+          {
+            echo "PYTORCH_VERSION=$(python3 .github/scripts/generate_pytorch_version.py --no-build-suffix)";
+            echo "STABLE_CUDA_VERSION=$(python3 .github/scripts/get_ci_variable.py --stable-cuda-version)"
+          } >> "${GITHUB_ENV}"
       - name: Setup test specific variables
         if: ${{ startsWith(github.event.ref, 'refs/tags/v') }}
         run: |
@@ -154,7 +157,7 @@ jobs:
           docker push ghcr.io/pytorch/pytorch-nightly:"${PYTORCH_NIGHTLY_COMMIT}${CUDA_SUFFIX}"
 
           # Please note, here we ned to pin specific verison of CUDA as with latest label
-          if [[ ${CUDA_VERSION_SHORT} == "12.4" ]]; then
+          if [[ ${CUDA_VERSION_SHORT} == "${STABLE_CUDA_VERSION}" ]]; then
             docker tag ghcr.io/pytorch/pytorch-nightly:"${PYTORCH_NIGHTLY_COMMIT}${CUDA_SUFFIX}" \
                     ghcr.io/pytorch/pytorch-nightly:latest
             docker push ghcr.io/pytorch/pytorch-nightly:latest
