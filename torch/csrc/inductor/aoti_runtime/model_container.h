@@ -112,6 +112,34 @@ class AOTInductorModelContainer {
     pending_models_available_.notify_one();
   }
 
+  // Non-thread-aware variant of run(). Obviously unsafe to use in a threaded
+  // environment :)
+  void run_single_threaded(
+      AtenTensorHandle*
+          input_handles, // array of input AtenTensorHandle; handles
+                         // are stolen; the array itself is borrowed
+      AtenTensorHandle*
+          output_handles, // array for writing output AtenTensorHandle; handles
+                          // will be stolen by the caller; the array itself is
+                          // borrowed
+      DeviceStreamType stream,
+      AOTIProxyExecutorHandle proxy_executor) {
+    auto* model = available_models_[0];
+
+    if (!constant_folded_) {
+      auto folded_const_map = model->run_const_fold(
+          stream, proxy_executor, /* initialization = */ true);
+      update_constant_buffer(
+          std::move(folded_const_map),
+          /* use_inactive = */ false,
+          /* validate_full_update = */ false);
+      constant_folded_ = true;
+    }
+
+    model->run_single_threaded(
+        input_handles, output_handles, stream, proxy_executor);
+  }
+
   size_t num_constants() const {
     if (this->num_models() == 0) {
       throw std::runtime_error("No available models in container!");
