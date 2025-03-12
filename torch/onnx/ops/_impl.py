@@ -82,7 +82,7 @@ def _(
         onnx_dtype in _ONNX_DTYPE_TO_TORCH_DTYPE,
         f"{onnx_dtype} is invalid as an ONNX data type. Valid values are {list(_ONNX_DTYPE_TO_TORCH_DTYPE.keys())}",
     )
-    return torch.empty(*shape, dtype=_ONNX_DTYPE_TO_TORCH_DTYPE[onnx_dtype])
+    return torch.zeros(shape, dtype=_ONNX_DTYPE_TO_TORCH_DTYPE[onnx_dtype])
 
 
 torch.library.opcheck(
@@ -162,7 +162,7 @@ def _(
             f"{onnx_dtype} is invalid as an ONNX data type. Valid values are {list(_ONNX_DTYPE_TO_TORCH_DTYPE.keys())}",
         )
         outputs.append(
-            torch.empty(*shape, dtype=_ONNX_DTYPE_TO_TORCH_DTYPE[onnx_dtype])
+            torch.zeros(shape, dtype=_ONNX_DTYPE_TO_TORCH_DTYPE[onnx_dtype])
         )
     return outputs
 
