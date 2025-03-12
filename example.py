@@ -171,25 +171,39 @@ from torch.onnx.ops._impl import _symbolic
 
 class TestModule(torch.nn.Module):
     def forward(self, x):
-        return _symbolic(
-            [x],
-            "Add",
-            1,
-            [torch.tensor(42)],
-            shape=x.size(),
-            attr_keys=["key"],
-            attr_types=["i"],
-            attr_pos=[(0, 1)],
-            attr_ints=[1],
-            attr_floats=[1.0],
-            attr_strs=["attr"],
-            attr_bools=[True],
-            metadata_props_keys=["meta_key"],
-            metadata_props_values=["meta_value"],
-            domain="com.microsoft",
+        # return _symbolic(
+        #     [x],
+        #     "Add",
+        #     1,
+        #     [torch.tensor(42)],
+        #     shape=x.size(),
+        #     attr_keys=["key"],
+        #     attr_types=["i"],
+        #     attr_pos=[(0, 1)],
+        #     attr_ints=[1],
+        #     attr_floats=[1.0],
+        #     attr_strs=["attr"],
+        #     metadata_props_keys=["meta_key"],
+        #     metadata_props_values=["meta_value"],
+        #     domain="com.microsoft",
+        #     version=1,
+        # )
+        torch.onnx.ops.symbolic(
+            "com.microsoft::Add",
+            (x,),
+            dict(
+                key=1,
+                attr="attr",
+                attr_ints=[1],
+                attr_floats=[1.0],
+            ),
+            dtype=x.dtype,
+            shape=x.shape,
             version=1,
+            metadata_props={
+                "meta_key": "meta_value",
+            },
         )
-
 
 batch = torch.export.Dim("batch")
 ep = torch.export.export(
@@ -210,3 +224,8 @@ print(ep)
 #              # File: /home/justinchu/dev/pytorch/example.py:170 in forward, code: return _symbolic(
 #             _symbolic: "f32[s0, 1]" = torch.ops.onnx_symbolic._symbolic.default([x], 'Add', 1, [detach_], shape = [sym_size_int_1, 1], attr_keys = ['key'], attr_ints = [1], attr_floats = [1.0], attr_strs = ['attr'], attr_bools = [True], metadata_props_keys = ['meta_key'], metadata_props_values = ['meta_value'], domain = 'com.microsoft', version = 1);  x = detach_ = sym_size_int_1 = None
 #             return (_symbolic,)
+
+
+## Encoded
+
+# _symbolic: "f32[s0, 1]" = torch.ops.onnx_symbolic._symbolic.default([x], 'com.microsoft::Add', 1, [], shape = [sym_size_int_1, 1], attr_keys = ['key', 'attr', 'attr_bools', 'attr_ints', 'attr_floats'], attr_types = ['i', 's', 'is', 'is', 'fs'], attr_pos = [[0, 1], [0, 1], [1, 2], [2, 3], [0, 1]], attr_ints = [1, 1, 1], attr_floats = [1.0], attr_strs = ['attr'], attr_bools = [], metadata_props_keys = ['meta_key'], metadata_props_values = ['meta_value'], domain = 'com.microsoft::Add', version = 1);  x = sym_size_int_1 = _symbolic = None
