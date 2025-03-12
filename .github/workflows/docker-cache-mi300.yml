@@ -52,5 +52,5 @@ jobs:
 
       - name: Tar and upload to S3 bucket
         run: |
-          sudo docker save -o docker-data/pytorch/pytorch_docker_image.tar ${{ steps.calculate-docker-image.outputs.docker-image }}
-          sudo rclone copy -P --s3-upload-concurrency 64 --s3-chunk-size 200M --s3-upload-cutoff 300M docker-data/pytorch/pytorch_docker_image.tar oci:pytorchbucket0002 --progress
+          sudo docker save -o ~/docker-data/pytorch/pytorch_docker_image.tar ${{ steps.calculate-docker-image.outputs.docker-image }}
+          sudo rclone copy -P --s3-upload-concurrency 64 --s3-chunk-size 200M --s3-upload-cutoff 300M ~/docker-data/pytorch/pytorch_docker_image.tar oci:pytorchbucket0002 --progress
