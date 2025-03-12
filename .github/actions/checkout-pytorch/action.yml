@@ -37,18 +37,36 @@ runs:
         # Clean workspace. The default checkout action should also do this, but
         # do it here as well just in case
         if [[ -d .git ]]; then
-          if [ -z "${NO_SUDO}" ]; then
-            sudo git clean -ffdx
-          else
+          # if [ -z "${NO_SUDO}" ]; then
+          #   sudo git clean -ffdx
+          # else
             git clean -ffdx
-          fi
+          # fi
         fi
+
+    - name: Checkout PyTorch
+      id: first-checkout-attempt
+      continue-on-error: true
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        # --depth=1 for speed, manually fetch history and other refs as necessary
+        fetch-depth: ${{ inputs.fetch-depth }}
+        submodules: ${{ inputs.submodules }}
+        show-progress: false
+
+    - name: Remove entire workspace if checkout failed
+      if: ${{ steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' && first-checkout-attempt.outcome != 'success' }}
+      shell: bash
+      env:
+        NO_SUDO: ${{ inputs.no-sudo }}
+      run: |
+        rm -rf "${GITHUB_WORKSPACE}"
 
     - name: Checkout PyTorch
       uses: actions/checkout@v4
       with:
         ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-        # --depth=1 for speed, manually fetch history and other refs as necessary
         fetch-depth: ${{ inputs.fetch-depth }}
         submodules: ${{ inputs.submodules }}
         show-progress: false
