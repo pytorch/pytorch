@@ -156,6 +156,7 @@ for test_name in [
     "test_any",
     "test_arange5",
     "test_argmax_min_int32",
+    "test_argmax_argmin1",
     "test_argmax_argmin2",
     "test_avg_pool2d5",
     "test_avg_pool2d8",

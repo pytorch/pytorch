@@ -482,37 +482,47 @@ class MetalKernel(SIMDKernel):
                 f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {acc_buf_size})",
                 dtype=DTYPE_TO_COMPUTATION_DTYPE[dtype],
             )
-        if reduction_type in ["max", "min"]:
+        if reduction_type in ["max", "min", "argmin", "argmax"]:
             acc_buf = self._new_accvar(src_dtype, acc_buf_size)
             acc_thread_var = f"{acc_buf}[{reduction_dim.name}]"
             src_metal_type = DTYPE_TO_METAL[src_dtype]
-            if self.multistage_reduction:
-                lim_fn = "lowest" if reduction_type == "max" else "max"
-                self.indexing_code.writeline(
-                    f"{acc_thread_var} = ::metal::numeric_limits<{src_metal_type}>::{lim_fn}();"
-                )
-                self.compute.writeline(
-                    f"{acc_thread_var} = ::c10::metal::{reduction_type}({acc_thread_var}, {value});"
-                )
-            else:
+            if not self.multistage_reduction:
                 self.compute.splice(
                     f"{acc_thread_var} = static_cast<{src_metal_type}>({value});"
                 )
+                return self.cse.generate(
+                    self.stores,
+                    f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {acc_buf_size})",
+                    dtype=dtype,
+                )
+            lim_fn = "lowest" if reduction_type.endswith("max") else "max"
+            self.indexing_code.writeline(
+                f"{acc_thread_var} = ::metal::numeric_limits<{src_metal_type}>::{lim_fn}();"
+            )
+            if reduction_type.startswith("arg"):
+                idx_var = next(
+                    t for t in self.range_tree_nodes.values() if t.is_reduction
+                )
+                idx_acc_buf = self._new_accvar(torch.long, acc_buf_size)
+                cmp_op = ">" if reduction_type == "argmax" else "<"
+                idx_thread_var = f"{idx_acc_buf}[{reduction_dim.name}]"
+                self.indexing_code.splice(f"{idx_thread_var} = -1;")
+                self.compute.splice(f"""
+                if ({value} {cmp_op} {acc_thread_var}) {{
+                    {acc_thread_var} = {value};
+                    {idx_thread_var} = {idx_var.name};
+                }}
+                """)
+                return self.cse.generate(
+                    self.stores,
+                    f"{idx_acc_buf}[c10::metal::threadgroup_{reduction_type}({acc_buf}, {acc_buf_size})]",
+                    dtype=dtype,
+                )
+            self.compute.writeline(
+                f"{acc_thread_var} = ::c10::metal::{reduction_type}({acc_thread_var}, {value});"
+            )
             return self.cse.generate(
                 self.stores,
-                f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {acc_buf_size})",
-                dtype=dtype,
-            )
-        if reduction_type in ["argmax", "argmin"]:
-            assert not self.multistage_reduction, (
-                f"Multistage reduction not yet supported for {reduction_type}"
-            )
-            acc_buf = self._new_accvar(src_dtype, acc_buf_size)
-            self.compute.splice(
-                f"{acc_buf}[{reduction_dim.name}] = static_cast<{DTYPE_TO_METAL[src_dtype]}>({value});"
-            )
-            return self.cse.generate(
-                self.compute,
                 f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {acc_buf_size})",
                 dtype=dtype,
             )
