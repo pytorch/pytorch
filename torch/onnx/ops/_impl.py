@@ -1,5 +1,5 @@
 from collections.abc import Sequence
-from typing import Any, Optional, Union
+from typing import Optional, Union
 import torch
 
 
@@ -29,6 +29,7 @@ _ONNX_DTYPE_TO_TORCH_DTYPE = {
     23: torch.uint8,  # FLOAT4E2M1
 }
 
+
 @torch.library.custom_op(
     "onnx_symbolic::_symbolic",
     mutates_args=(),
@@ -40,7 +41,7 @@ def _symbolic(
     onnx_dtype: int,
     attr_tensors: Sequence[torch.Tensor],
     *,
-    shape: Sequence[int | torch.SymInt],
+    shape: Sequence[Union[int, torch.SymInt]],
     attr_keys: Sequence[str],
     attr_ints: Sequence[int],
     attr_floats: Sequence[float],
@@ -50,6 +51,10 @@ def _symbolic(
     version: Optional[int] = None,
 ) -> torch.Tensor:
     # TODO: Verify that shape supports SymInt
+    torch._check(
+        onnx_dtype in _ONNX_DTYPE_TO_TORCH_DTYPE,
+        f"{onnx_dtype} is invalid as an ONNX data type. Valid values are {list(_ONNX_DTYPE_TO_TORCH_DTYPE.keys())}",
+    )
     return torch.zeros(shape, dtype=_ONNX_DTYPE_TO_TORCH_DTYPE[onnx_dtype])
 
 
@@ -58,9 +63,9 @@ def _(
     inputs: Sequence[torch.Tensor],
     op_type: str,
     onnx_dtype: int,
-    attr_tensors: Sequence[torch.Tensor]=(),
+    attr_tensors: Sequence[torch.Tensor] = (),
     *,
-    shape: Sequence[int | torch.SymInt],
+    shape: Sequence[Union[int, torch.SymInt]],
     attr_keys: Sequence[str],
     attr_ints: Sequence[int],
     attr_floats: Sequence[float],
@@ -69,17 +74,16 @@ def _(
     domain: str = "",
     version: Optional[int] = None,
 ) -> torch.Tensor:
+    torch._check(
+        onnx_dtype in _ONNX_DTYPE_TO_TORCH_DTYPE,
+        f"{onnx_dtype} is invalid as an ONNX data type. Valid values are {list(_ONNX_DTYPE_TO_TORCH_DTYPE.keys())}",
+    )
     return torch.empty(*shape, dtype=_ONNX_DTYPE_TO_TORCH_DTYPE[onnx_dtype])
 
 
 torch.library.opcheck(
     _symbolic,
-    (
-        [torch.tensor(1)],
-        "Add",
-        1,
-        [torch.tensor(42)]
-    ),
+    ([torch.tensor(1)], "Add", 1, [torch.tensor(42)]),
     dict(
         shape=[
             1,
@@ -91,30 +95,86 @@ torch.library.opcheck(
         attr_bools=[True],
         domain="",
         version=1,
-    )
+    ),
 )
 
 
-# @torch.library.custom_op("onnx_symbolic::_symbolic", mutates_args=())
-# def _symbolic_multi_out(
-#     inputs: Sequence[torch.Tensor],
-#     *,
-#     op_type: str,
-#     # dtype: Sequence[torch.dtype],
-#     shape: Sequence[int],
-#     num_outputs: int,
-#     attr_keys: Optional[Sequence[str]],
-#     attr_ints: Optional[Sequence[int]],
-#     attr_floats: Optional[Sequence[float]],
-#     attr_strs: Optional[Sequence[str]],
-#     attr_bools: Optional[Sequence[bool]],
-#     attr_tensors: Optional[Sequence[torch.Tensor]],
-#     domain: str = "",
-#     version: Optional[int] = None,
-#     matadata_props: Optional[dict[str, str]] = None,
-# ) -> torch.Tensor:
-#     # TODO: Verify that shape supports SymInt
-#     return inputs
+@torch.library.custom_op(
+    "onnx_symbolic::_symbolic_multi_out",
+    mutates_args=(),
+    schema="(Tensor[] inputs, str op_type, int[] onnx_dtypes, Tensor[] attr_tensors, *, SymInt[][] shapes, str[] attr_keys, int[] attr_ints, float[] attr_floats, str[] attr_strs, bool[] attr_bools, str domain='', int? version=None) -> Tensor[]",
+)
+def _symbolic_multi_out(
+    inputs: Sequence[torch.Tensor],
+    op_type: str,
+    onnx_dtypes: Sequence[int],
+    attr_tensors: Sequence[torch.Tensor],
+    *,
+    shapes: Sequence[Sequence[Union[int, torch.SymInt]]],
+    attr_keys: Sequence[str],
+    attr_ints: Sequence[int],
+    attr_floats: Sequence[float],
+    attr_strs: Sequence[str],
+    attr_bools: Sequence[bool],
+    domain: str = "",
+    version: Optional[int] = None,
+) -> list[torch.Tensor]:
+    outputs = []
+    for shape, onnx_dtype in zip(shapes, onnx_dtypes):
+        torch._check(
+            onnx_dtype in _ONNX_DTYPE_TO_TORCH_DTYPE,
+            f"{onnx_dtype} is invalid as an ONNX data type. Valid values are {list(_ONNX_DTYPE_TO_TORCH_DTYPE.keys())}",
+        )
+        outputs.append(torch.zeros(shape, dtype=_ONNX_DTYPE_TO_TORCH_DTYPE[onnx_dtype]))
+    return outputs
+
+
+@_symbolic_multi_out.register_fake
+def _(
+    inputs: Sequence[torch.Tensor],
+    op_type: str,
+    onnx_dtypes: Sequence[int],
+    attr_tensors: Sequence[torch.Tensor],
+    *,
+    shapes: Sequence[Sequence[Union[int, torch.SymInt]]],
+    attr_keys: Sequence[str],
+    attr_ints: Sequence[int],
+    attr_floats: Sequence[float],
+    attr_strs: Sequence[str],
+    attr_bools: Sequence[bool],
+    domain: str = "",
+    version: Optional[int] = None,
+) -> list[torch.Tensor]:
+    outputs = []
+    for shape, onnx_dtype in zip(shapes, onnx_dtypes):
+        torch._check(
+            onnx_dtype in _ONNX_DTYPE_TO_TORCH_DTYPE,
+            f"{onnx_dtype} is invalid as an ONNX data type. Valid values are {list(_ONNX_DTYPE_TO_TORCH_DTYPE.keys())}",
+        )
+        outputs.append(
+            torch.empty(*shape, dtype=_ONNX_DTYPE_TO_TORCH_DTYPE[onnx_dtype])
+        )
+    return outputs
+
+
+torch.library.opcheck(
+    _symbolic_multi_out,
+    ([torch.tensor(1)], "Add", [1], [torch.tensor(42)]),
+    dict(
+        shapes=[
+            [
+                1,
+            ]
+        ],
+        attr_keys=["key"],
+        attr_ints=[1],
+        attr_floats=[1.0],
+        attr_strs=["attr"],
+        attr_bools=[True],
+        domain="",
+        version=1,
+    ),
+)
 
 
 def _encode_onnx_attr_key(name: str, attr_type, positions) -> str: ...
