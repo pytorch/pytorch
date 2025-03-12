@@ -59,7 +59,6 @@ struct Welford {
   // different. A single index can not express masked welford reduction.
   T weight = T(0);
   uint64_t index = 0;
-  uint64_t chunk_index = 0;
 };
 
 
@@ -78,10 +77,12 @@ struct WelfordHelper {
   static std::vector<typename T::value_type> weight_recps;
   std::vector<Welford<T>> welford_stk;
   uint64_t depth;
+  uint64_t num_chunks;
   WelfordHelper() {}
   WelfordHelper(uint64_t N) {
     uint64_t m = (N + kChunkSize - 1) / kChunkSize; //div up
     depth = m > 0 ? ceil(log2(m)) : 0;
+    num_chunks = 0;
     welford_stk.assign(depth, Welford<T>());
   }
 };
@@ -98,10 +99,10 @@ std::vector<typename T::value_type> WelfordHelper<T>::weight_recps = []() {
 
 template <typename T>
 Welford<T> welford_combine(const Welford<T>& a, const Welford<T>& b, bool use_index=false) {
-  if (a.index == 0 && a.chunk_index == 0) {
+  if (a.index == 0) {
     return b;
   }
-  if (b.index == 0 && b.chunk_index == 0) {
+  if (b.index == 0) {
     return a;
   }
   auto delta = b.mean - a.mean;
@@ -109,7 +110,6 @@ Welford<T> welford_combine(const Welford<T>& a, const Welford<T>& b, bool use_in
   auto b_weight = use_index ? T(b.index) : b.weight;
   auto new_weight = a_weight + b_weight;
   auto new_index = a.index + b.index;
-  auto new_chunk_index = a.chunk_index + b.chunk_index;
   auto wb_over_w = b_weight / new_weight;
   if constexpr (IsVecType<T>::value) {
     // Guard against division by zero
@@ -120,7 +120,6 @@ Welford<T> welford_combine(const Welford<T>& a, const Welford<T>& b, bool use_in
     a.m2 + b.m2 + delta * delta * a_weight * wb_over_w,
     new_weight,
     new_index,
-    new_chunk_index,
   };
   return result;
 }
@@ -148,12 +147,12 @@ Welford<T> welford_combine(Welford<T>& acc, T& data, WelfordHelper<T>* w=nullptr
   if constexpr (IsVecType<T>::value) {
     if (w != nullptr && w->depth > 0 && acc.index == kChunkSize) {
       w->welford_stk[0] = welford_combine(w->welford_stk[0], acc);
+      w->num_chunks += 1;
       acc.mean = T(0);
       acc.m2 = T(0);
       acc.weight = T(0);
       acc.index = 0;
-      acc.chunk_index += 1;
-      uint64_t mask = acc.chunk_index;
+      uint64_t mask = w->num_chunks;
       for (uint64_t j = 1; j < w->depth && (mask & 1) == 0; ++j) {
         w->welford_stk[j] = welford_combine(w->welford_stk[j], w->welford_stk[j - 1]);
         w->welford_stk[j - 1] = Welford<T>();
@@ -180,8 +179,7 @@ Welford<T> welford_combine(Welford<T>& acc, T& data, WelfordHelper<T>* w=nullptr
     new_mean,
     acc.m2 + delta * new_delta,
     new_weight,
-    new_index,
-    acc.chunk_index};
+    new_index};
   return result;
 }
 
@@ -201,8 +199,7 @@ Welford<T> welford_combine(Welford<T>& acc, T& data, int64_t tail_size, WelfordH
     T::set(acc.mean, out.mean, tail_size),
     T::set(acc.m2, out.m2, tail_size),
     T::set(acc.weight, out.weight, tail_size),
-    out.index,
-    out.chunk_index};
+    out.index};
 }
 
 template <typename T>
@@ -549,7 +546,7 @@ Welford<scalar_t> welford_vec_reduce_all(Welford<at::vec::Vectorized<scalar_t>> 
   }
   using Vec = at::vec::Vectorized<scalar_t>;
   Welford<scalar_t> result;
-  if (acc.index == 0 && acc.chunk_index == 0) {
+  if (acc.index == 0) {
     return result;
   }
   // if all values of acc.weight are same as index,
@@ -560,8 +557,7 @@ Welford<scalar_t> welford_vec_reduce_all(Welford<at::vec::Vectorized<scalar_t>> 
       vec_shuffle_down(acc.mean, n),
       vec_shuffle_down(acc.m2, n),
       use_index ? Vec(0) : vec_shuffle_down(acc.weight, n),
-      acc.index,
-      acc.chunk_index};
+      acc.index};
     acc = welford_combine(acc, shuffled, use_index);
   }
 
@@ -575,7 +571,6 @@ Welford<scalar_t> welford_vec_reduce_all(Welford<at::vec::Vectorized<scalar_t>> 
   acc.weight.store(array);
   result.weight = array[0];
   result.index = result.weight;
-  result.chunk_index = result.chunk_index;
 
   return result;
 }
@@ -594,14 +589,12 @@ Welford<scalar_t> welford_vec_reduce_all(Welford<at::vec::VectorizedN<scalar_t, 
     acc.mean[0],
     acc.m2[0],
     acc.weight[0],
-    acc.index,
-    acc.chunk_index};
+    acc.index};
   auto Welford1 = Welford<at::vec::Vectorized<scalar_t>>{
     acc.mean[1],
     acc.m2[1],
     acc.weight[1],
-    acc.index,
-    acc.chunk_index};
+    acc.index};
   return welford_vec_reduce_all(welford_combine(Welford0, Welford1));
 }
 #endif

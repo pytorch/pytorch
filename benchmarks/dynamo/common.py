@@ -1825,6 +1825,10 @@ class BenchmarkRunner:
         return set()
 
     @property
+    def skip_models_due_to_export_not_supported(self):
+        return set()
+
+    @property
     def disable_cudagraph_models(self):
         return set()
 
@@ -3786,6 +3790,7 @@ def run(runner, args, original_dir=None):
 
             # AOTInductor doesn't support control flow yet
             runner.skip_models.update(runner.skip_models_due_to_control_flow)
+            runner.skip_models.update(runner.skip_models_due_to_export_not_supported)
         elif args.backend == "torchao":
             assert "cuda" in args.devices, "Quantization requires CUDA device."
             assert args.bfloat16, "Quantization requires dtype bfloat16."

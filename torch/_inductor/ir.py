@@ -108,6 +108,16 @@ else:
     CUDATemplate: TypeAlias = object
 
 
+try:
+    import triton
+
+    triton_version = triton.__version__
+    has_triton = True
+except ImportError:
+    triton_version = None
+    has_triton = False
+
+
 _T = TypeVar("_T")
 _U = TypeVar("_U")
 _V = TypeVar("_V")
@@ -1503,6 +1513,7 @@ class Reduction(Loops):
             "any": zero,
             "welford_reduce": (zero, zero, zero),
             "welford_combine": (zero, zero, zero),
+            "online_softmax_reduce": (float("-inf"), zero),
         }[reduction_type]
 
     @staticmethod
@@ -1738,20 +1749,27 @@ class Reduction(Loops):
         )
 
 
-class WelfordReduction(Reduction):
+INNER_FN_TY = Callable[[Sequence[Expr], Sequence[Expr]], OpsValue]
+
+
+class MultiOutputReduction(Reduction):
     output_index: int
 
     def __init__(
         self,
         device: torch.device,
-        dtype: torch.dtype,
-        inner_fns: Sequence[Callable[[Sequence[Expr], Sequence[Expr]], OpsValue]],
+        dst_dtype: torch.dtype,
+        inner_fns: Union[INNER_FN_TY, Sequence[INNER_FN_TY]],
         ranges: Sequence[Integer],
         reduction_ranges: Sequence[Integer],
         reduction_type: ReductionType,
+        src_dtype: torch.dtype,
         reduction_hint: ReductionHint,
         output_index: int,
-    ) -> None:
+    ):
+        if callable(inner_fns):
+            inner_fns = (inner_fns,)
+
         loader: Callable[[Sequence[Expr], Sequence[Expr]], Any]
         if len(inner_fns) == 1:
             loader = inner_fns[0]
@@ -1764,12 +1782,12 @@ class WelfordReduction(Reduction):
 
         super().__init__(
             device=device,
-            dtype=dtype,
+            dtype=dst_dtype,
             inner_fn=loader,
             ranges=ranges,
             reduction_ranges=reduction_ranges,
             reduction_type=reduction_type,
-            src_dtype=dtype,
+            src_dtype=src_dtype,
             reduction_hint=reduction_hint,
         )
         self.output_index = output_index
@@ -1787,9 +1805,50 @@ class WelfordReduction(Reduction):
             self.reduction_type,
             self.inner_fn(vars, reduction_vars),
         )
+        assert isinstance(values, (tuple, list)), f"{type(values)}"
         value = values[self.output_index]
         return ops.store_reduction(output_name or "unnamed", indexer(vars), value)
 
+
+class OnlineSoftmaxReduction(MultiOutputReduction):
+    @classmethod
+    def create(  # type: ignore[override]
+        cls,
+        device: torch.device,
+        dst_dtype: torch.dtype,
+        src_dtype: torch.dtype,
+        inner_fn: Callable[..., Any],
+        ranges: Sequence[Expr],
+        reduction_ranges: Sequence[Expr],
+        num_output: int,
+        reduction_hint: ReductionHint = ReductionHint.DEFAULT,
+        input_node: Optional[IRNode] = None,
+    ) -> Sequence[TensorBox]:
+        """
+        Create the reduction disregarding splitting.
+        """
+        results = tuple(
+            TensorBox.create(
+                MultiOutputReduction(
+                    device,
+                    dst_dtype,
+                    inner_fn,
+                    ranges,
+                    reduction_ranges,
+                    "online_softmax_reduce",  # type: ignore[arg-type]
+                    src_dtype,
+                    reduction_hint,
+                    output_idx,
+                )
+            )
+            for output_idx in range(num_output)
+        )
+        for t in results:
+            t.realize()
+        return results
+
+
+class WelfordReduction(MultiOutputReduction):
     @classmethod
     def create(  # type: ignore[override]
         cls,
@@ -1900,6 +1959,7 @@ class WelfordReduction(Reduction):
                     ranges,
                     reduction_ranges,
                     reduction_type,
+                    dtype,
                     reduction_hint,
                     output_idx,
                 )
@@ -2135,7 +2195,9 @@ class Scan(Loops):
         )
         scan_type = Scan
         if num_splits > 1:
-            supports_split = torch.version.hip is None and len(dtypes) == 1
+            supports_split = (
+                torch.version.hip is None or (has_triton and triton_version >= "3.3.0")
+            ) and (len(dtypes) == 1)
             if not supports_split:
                 if can_fallback_to_aten:
                     # Fallback to ATen
@@ -4659,6 +4721,12 @@ class ConcatKernel(NopKernel):
             offsets_end.append(new_size[dim])
 
         output_stride = FlexibleLayout.contiguous_strides(new_size)
+        if config.comprehensive_padding:
+            # Ensure the output stride matches the alignment requirements
+            output_stride = Layout._pad_strides(
+                output_stride, new_size, inputs[0].dtype
+            )
+
         # If any of the inputs is in CL format, use CL format for the output
         for i in range(len(inputs)):
             x = inputs[i]
@@ -6348,14 +6416,16 @@ class AssertScalar(ExternKernel):
         return free_unbacked_symbols(self.scalar)
 
     def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
+        if not config.scalar_asserts:
+            return
         # NB: It is EXTREMELY important not to simplify the scalar under assertion here,
         # because simplify is done with respect to runtime asserts.  So if you have
         # "u0 == 0" in the runtime asserts, if you subsequently try to
         # simplify(u0 == 0), you will get True (because we've already runtime assert'ed
         # that it's true).  But we're code generating the actual runtime assert here!!
         symbol = next(iter(self.get_unbacked_symbol_uses()))
-        symbol_str = f"std::to_string({symbol})"
         if V.graph.cpp_wrapper:
+            symbol_str = f"std::to_string({symbol})"
             sizevar = V.graph.wrapper_code.codegen_cpp_sizevar(
                 self.scalar, simplify=False
             )

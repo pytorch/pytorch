@@ -474,7 +474,10 @@ class ConvertFrameAssert:
     @property
     def _clone_with_backend(self) -> Callable[[CompilerFn], ConvertFrameAssert]:
         return lambda backend: convert_frame_assert(
-            backend, self._one_graph, self._export, self._export_constraints
+            backend,
+            self._one_graph,
+            self._export,
+            self._export_constraints,
         )
 
     def __call__(
@@ -1181,7 +1184,11 @@ def _compile(
 
 
 class ConvertFrame:
-    def __init__(self, compiler_fn: CompilerFn, hooks: Hooks) -> None:
+    def __init__(
+        self,
+        compiler_fn: CompilerFn,
+        hooks: Hooks,
+    ) -> None:
         self._torchdynamo_orig_callable = compiler_fn
         self._inner_convert = convert_frame_assert(compiler_fn, one_graph=False)
         self._hooks = hooks
@@ -1278,7 +1285,7 @@ class ConvertFrame:
             elif isinstance(e, RecompileLimitExceeded):
                 return ConvertFrameReturn(
                     frame_exec_strategy=FrameExecStrategy(
-                        FrameAction.RUN_ONLY, FrameAction.SKIP
+                        FrameAction.RUN_ONLY, FrameAction.RUN_ONLY
                     )
                 )
 

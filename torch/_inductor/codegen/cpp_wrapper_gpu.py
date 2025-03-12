@@ -278,17 +278,18 @@ class CppWrapperGpu(CppWrapperCpu):
         kernel_name: str,
         kernel_body: str,
         metadata: Optional[str] = None,
-        gpu=True,
+        gpu: bool = True,
+        cpp_definition: Optional[str] = None,
     ):
         if gpu:
             if config.triton.autotune_at_compile_time:
                 # Call PythonWrapperCodegen to create the autotune code block
                 PythonWrapperCodegen.define_kernel(
-                    self, kernel_name, kernel_body, metadata, gpu
+                    self, kernel_name, kernel_body, metadata, gpu, cpp_definition
                 )
         else:
             return CppWrapperCpu.define_kernel(
-                self, kernel_name, kernel_body, metadata, gpu
+                self, kernel_name, kernel_body, metadata, gpu, cpp_definition
             )
 
     def generate(self, is_inference):
@@ -333,13 +334,12 @@ class CppWrapperGpu(CppWrapperCpu):
                 constexprs,
             )
 
-        if not triton_version_uses_attrs_dict():
-            # in C++ wrapper, we don't pass constexpr args, as they don't
-            # get added as parameters to the PTX code compiled from the
-            # user-defined Triton kernel (only non-constexpr args do)
-            raw_args = [
-                raw_arg for i, raw_arg in enumerate(raw_args) if i not in constexprs
-            ]
+        # in C++ wrapper, we don't pass constexpr args, as they don't
+        # get added as parameters to the PTX code compiled from the
+        # user-defined Triton kernel (only non-constexpr args do)
+        raw_args = [
+            raw_arg for i, raw_arg in enumerate(raw_args) if i not in constexprs
+        ]
         args = [self.val_to_arg_str(v) for v in raw_args]
         arg_types = [
             arg.get_dtype() if isinstance(arg, IRNode) else type(arg)
@@ -583,16 +583,18 @@ class CppWrapperGpu(CppWrapperCpu):
                     arg_signatures = [
                         val for val in signatures.values() if val != "constexpr"
                     ]
-                    call_args = [
-                        call_arg
-                        for call_arg, arg_name in zip(call_args, signatures)
-                        if signatures[arg_name] != "constexpr"
-                    ]
-                    arg_types = [
-                        arg_type
-                        for arg_type, arg_name in zip(arg_types, signatures)
-                        if signatures[arg_name] != "constexpr"
-                    ]
+                    # may already be filtered
+                    if len(arg_signatures) != len(call_args):
+                        call_args = [
+                            call_arg
+                            for call_arg, arg_name in zip(call_args, signatures)
+                            if signatures[arg_name] != "constexpr"
+                        ]
+                        arg_types = [
+                            arg_type
+                            for arg_type, arg_name in zip(arg_types, signatures)
+                            if signatures[arg_name] != "constexpr"
+                        ]
                     assert len(call_args) == len(arg_signatures), (
                         f"len of the following lists do not match: {call_args=} {arg_signatures=}"
                     )

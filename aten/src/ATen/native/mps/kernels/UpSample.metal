@@ -232,8 +232,8 @@ kernel void upsample_bilinear2d(
     constant float2& scales [[buffer(6)]],
     constant bool& align_corners [[buffer(7)]],
     uint thread_index [[thread_position_in_grid]]) {
-  auto output_x = thread_index % output_sizes.w;
-  auto output_y = thread_index / output_sizes.w;
+  auto output_x = thread_index % static_cast<uint>(output_sizes.w);
+  auto output_y = thread_index / static_cast<uint>(output_sizes.w);
   auto real_x = area_pixel_compute_source_index(
       scales.x, output_x, align_corners, /*cubic=*/false);
   auto t_x = fract(real_x);
@@ -283,8 +283,8 @@ kernel void upsample_bilinear2d_aa(
     constant float2& scales [[buffer(6)]],
     constant bool& align_corners [[buffer(7)]],
     uint thread_index [[thread_position_in_grid]]) {
-  auto output_x = thread_index % output_sizes.w;
-  auto output_y = thread_index / output_sizes.w;
+  auto output_x = thread_index % static_cast<uint>(output_sizes.w);
+  auto output_y = thread_index / static_cast<uint>(output_sizes.w);
   (void)align_corners; // Align corners is unused for AA algorithm
   auto x_center = area_pixel_compute_source_index(
       scales.x, output_x, /*align_corners=*/false, /*cubic=*/false);
@@ -329,8 +329,8 @@ kernel void upsample_bicubic2d(
     constant float2& scales [[buffer(6)]],
     constant bool& align_corners [[buffer(7)]],
     uint thread_index [[thread_position_in_grid]]) {
-  auto output_x = thread_index % output_sizes.w;
-  auto output_y = thread_index / output_sizes.w;
+  auto output_x = thread_index % static_cast<uint>(output_sizes.w);
+  auto output_y = thread_index / static_cast<uint>(output_sizes.w);
   auto real_x = area_pixel_compute_source_index(
       scales.x, output_x, align_corners, /*cubic=*/true);
   int in_x = floor(real_x);

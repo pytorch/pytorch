@@ -103,13 +103,14 @@ jobs:
           password: ${{ secrets.GHCR_PAT }}
       # Setup multi-arch image builds
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v2
+        uses: docker/setup-qemu-action@v3
         env:
           QEMU_BINARY_PATH: ${{ runner.temp }}/bin
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
+        uses: docker/setup-buildx-action@v3
         with:
-          version: v0.10.0
+          version: latest
+          driver-opts: image=moby/buildkit:v0.19.0
       - name: Setup job specific variables
         run: |
           set -eou pipefail

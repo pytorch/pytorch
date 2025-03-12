@@ -154,7 +154,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
             self.assertEqual(opt_fn, compiled_out)
 
     def test_device_mesh_compile(self):
-        def fn(x):
+        def fn(x: DeviceMesh):
             # test size()
             a = x.size()
             b = x.size(0)
@@ -163,13 +163,14 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
             # test get_coordinate()
             coord = x.get_coordinate()
             # test get_group()
-            group = x.get_group()
-            return size, coord, group
+            group0 = x.get_group(0)
+            group1 = x.get_group(mesh_dim=1)
+            return size, coord, group0, group1
 
         # Cant be fullgraph=True because ProcessGroup is not reconstructible in dynamo
         compiled_fn = torch.compile(backend="aot_eager")(fn)
 
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).unsqueeze(1))
         opt_fn = fn(mesh)
         compiled_out = compiled_fn(mesh)
         self.assertEqual(opt_fn, compiled_out)

@@ -11,7 +11,7 @@
 C10_DEFINE_bool(
     caffe2_report_cpu_memory_usage,
     false,
-    "If set, print out detailed memory usage");
+    "If set, print out detailed memory usage")
 
 namespace c10 {
 
@@ -196,7 +196,7 @@ at::Allocator* GetDefaultCPUAllocator() {
   return &g_cpu_alloc;
 }
 
-REGISTER_ALLOCATOR(DeviceType::CPU, &g_cpu_alloc);
+REGISTER_ALLOCATOR(DeviceType::CPU, &g_cpu_alloc)
 
 #endif /* C10_Mobile */
 
