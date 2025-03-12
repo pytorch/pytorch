@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import functools
 import itertools
@@ -59,6 +58,7 @@ from .split_cat import POST_GRAD_PATTERNS
 
 _T = TypeVar("_T")
 _P = ParamSpec("_P")
+_F = TypeVar("_F", bound=Callable[..., Any])
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -584,8 +584,8 @@ def same_meta(node1: torch.fx.Node, node2: torch.fx.Node):
 noop_registry: dict[Any, Any] = {}
 
 
-def register_noop_decomp(targets, nop_arg=0):
-    def register_fun(cond):
+def register_noop_decomp(targets, nop_arg=0) -> Callable[[_F], _F]:
+    def register_fun(cond: _F) -> _F:
         register_decomposition(targets, registry=noop_registry, unsafe=True)(
             (cond, nop_arg)  # type: ignore[arg-type]
         )

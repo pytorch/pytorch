@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import collections
 import copyreg
@@ -594,9 +593,9 @@ def register_parametrization(
 
         # add the new parametrization to the parametrization list
         assert isinstance(module.parametrizations, ModuleDict)  # Make mypy happy
-        module.parametrizations[tensor_name].append(parametrization)
+        module.parametrizations[tensor_name].append(parametrization)  # type: ignore[operator]
         # If unsafe was True in previous parametrization, keep it enabled
-        module.parametrizations[tensor_name].unsafe |= unsafe  # type: ignore[index, union-attr]
+        module.parametrizations[tensor_name].unsafe |= unsafe  # type: ignore[index, union-attr, operator]
     elif tensor_name in module._buffers or tensor_name in module._parameters:
         # Set the parametrization mechanism
         # Fetch the original buffer or parameter
@@ -698,7 +697,7 @@ def remove_parametrizations(
                     _maybe_set(original, t)
                 else:
                     try:
-                        _maybe_set(original, t)
+                        _maybe_set(original, t)  # type: ignore[arg-type]
                     except RuntimeError as e:
                         # TODO: Fix this for tensor subclasses that are parameters:
                         # RuntimeError: set_storage is not allowed on a Tensor created from .data or .detach().
@@ -792,7 +791,7 @@ def transfer_parametrizations_and_params(
                 )
 
             # apply the params's parametrizations to to_module
-            for param_func in from_module.parametrizations[parameter_name]:
+            for param_func in from_module.parametrizations[parameter_name]:  # type: ignore[attr-defined]
                 register_parametrization(to_module, parameter_name, param_func)
             assert isinstance(to_module.parametrizations, ModuleDict)  # for mypy
 

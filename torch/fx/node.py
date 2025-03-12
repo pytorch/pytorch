@@ -82,7 +82,7 @@ _side_effectful_need_to_be_preserved_pre_dispatch: list[Callable] = [
 
 # TODO: Either refactor this into 2 functions 1 dce for functional graphs and 1 dce for all graphs,
 # or add logic to correctly mark all inplace ops as side effectful.
-_side_effectful_functions: set[Callable] = {
+_side_effectful_functions: set[Callable] = {  # type: ignore[assignment]
     torch._assert,
     torch._assert_async,
     _ops.aten._assert_async.msg,

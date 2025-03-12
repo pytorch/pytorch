@@ -64,9 +64,9 @@ class _Checkpointer:
         state_dict: STATE_DICT_TYPE,
     ) -> Metadata:
         """Calls :py:meth: `torch.distributed.state_dict_saver.save`. Utilizing values passed during initialization."""
-        return saver.save(
+        return saver.save(  # type: ignore[call-arg, misc]
             state_dict,
-            self.storage_writer,
+            self.storage_writer,  # type: ignore[arg-type]
             process_group=self.process_group,
             coordinator_rank=self.coordinator_rank,
             no_dist=self.no_dist,

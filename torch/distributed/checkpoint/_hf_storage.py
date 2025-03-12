@@ -55,7 +55,7 @@ class _HuggingFaceStorageWriter(FsspecWriter):
                               Indices are from 1 to N, where N is the number of files.
 
         """
-        from huggingface_hub import HfFileSystem  # type: ignore[import-not-found]
+        from huggingface_hub import HfFileSystem  # type: ignore[import-not-found, import-untyped]
 
         if HfFileSystem.protocol not in fsspec.available_protocols():
             fsspec.register_implementation(HfFileSystem.protocol, HfFileSystem)

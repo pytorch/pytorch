@@ -176,7 +176,7 @@ _ALWAYS_MUTATING_SCATTER_OPS = OrderedSet(
 
 def scatter_always_uses_mutation(node: torch.fx.Node) -> bool:
     _, _, view_ops = node.args
-    return any(view.target in _ALWAYS_MUTATING_SCATTER_OPS for view in view_ops)  # type: ignore[union-attr]
+    return any(view.target in _ALWAYS_MUTATING_SCATTER_OPS for view in view_ops)  # type: ignore[union-attr, operator]
 
 
 def should_reinplace_scatter(node: torch.fx.Node) -> bool:
@@ -268,7 +268,7 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
         inp, src = node.args[:2]
 
         scatter_view_op = ViewOp(
-            _SCATTER_OP_TO_VIEW[node.target],
+            _SCATTER_OP_TO_VIEW[node.target],  # type: ignore[index]
             args=node.args[2:],
             kwargs=node.kwargs,
         )
@@ -313,7 +313,7 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
             if src.users:  # type: ignore[union-attr]
                 new_src = graph_call_function(
                     graph,
-                    _SCATTER_OP_TO_VIEW[node.target],
+                    _SCATTER_OP_TO_VIEW[node.target],  # type: ignore[index]
                     new_node,
                     *node.args[2:],
                     **node.kwargs,
@@ -351,7 +351,7 @@ try:
             c10d_functional.all_reduce_coalesced_.default, 0
         ),
     }
-    inplaceable_ops.update(inplaceable_collective_ops)
+    inplaceable_ops.update(inplaceable_collective_ops)  # type: ignore[arg-type]
 except AttributeError:
     # _c10d_functional ops are only available when torch
     # is built with USE_DISTRIBUTED=1.

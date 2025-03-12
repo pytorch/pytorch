@@ -30,9 +30,12 @@ from typing import (  # noqa: UP035, F401  # (Dict, List, Tuple) imported by tor
     get_origin,
     List,
     Optional,
+    overload,
     Tuple,
+    TypeVar,
     Union,
 )
+from typing_extensions import ParamSpec, TypedDict, Unpack
 
 import torch
 
@@ -45,6 +48,11 @@ from torch._awaits import _Await
 from torch._C import _Await as CAwait, Future as CFuture
 from torch._sources import fake_range, get_source_lines_and_file, parse_def
 from torch.futures import Future
+
+
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
+_F = TypeVar("_F", bound=Callable[..., Any])
 
 
 IS_PY310_PLUS: Final[bool] = sys.version_info >= (3, 10)
@@ -665,7 +673,7 @@ class FunctionModifiers:
     _DROP = "_drop (function is fully ignored, declaration can be unscriptable)"
 
 
-def export(fn):
+def export(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     """
     This decorator indicates that a method on an ``nn.Module`` is used as an entry point into a
     :class:`ScriptModule` and should be compiled.
@@ -707,11 +715,11 @@ def export(fn):
         # any compiled methods and wasn't decorated with `@torch.jit.export`
         m = torch.jit.script(MyModule())
     """
-    fn._torchscript_modifier = FunctionModifiers.EXPORT
+    fn._torchscript_modifier = FunctionModifiers.EXPORT  # type: ignore[attr-defined]
     return fn
 
 
-def unused(fn):
+def unused(fn: _F) -> _F:
     """
     This decorator indicates to the compiler that a function or method should
     be ignored and replaced with the raising of an exception. This allows you
@@ -764,7 +772,7 @@ def unused(fn):
 
         return prop
 
-    fn._torchscript_modifier = FunctionModifiers.UNUSED
+    fn._torchscript_modifier = FunctionModifiers.UNUSED  # type: ignore[attr-defined]
     return fn
 
 
@@ -777,7 +785,23 @@ class _IgnoreContextManager(contextlib.AbstractContextManager):
         pass
 
 
-def ignore(drop=False, **kwargs):
+class _IgnoreKwargs(TypedDict):
+    drop_on_export: bool
+
+
+@overload
+def ignore(
+    drop: bool = False, **kwargs: Unpack[_IgnoreKwargs]
+) -> Callable[[_F], _F]: ...
+
+
+@overload
+def ignore(fn: _F, /) -> _F: ...
+
+
+def ignore(
+    drop: Union[_F, bool] = False, **kwargs: Any
+) -> Union[Callable[[_F], _F], _F]:
     """
     This decorator indicates to the compiler that a function or method should
     be ignored and left as a Python function. This allows you to leave code in
@@ -847,7 +871,7 @@ def ignore(drop=False, **kwargs):
         #   @torch.jit.ignore
         #   def fn(...):
         fn = drop
-        fn._torchscript_modifier = FunctionModifiers.IGNORE
+        fn._torchscript_modifier = FunctionModifiers.IGNORE  # type: ignore[attr-defined]
         return fn
 
     if not isinstance(drop, bool):
@@ -887,8 +911,8 @@ def _drop(fn):
     return fn
 
 
-def _copy_to_script_wrapper(fn):
-    fn._torchscript_modifier = FunctionModifiers.COPY_TO_SCRIPT_WRAPPER
+def _copy_to_script_wrapper(fn: _F) -> _F:
+    fn._torchscript_modifier = FunctionModifiers.COPY_TO_SCRIPT_WRAPPER  # type: ignore[attr-defined]
     return fn
 
 
@@ -1072,7 +1096,7 @@ _overloaded_methods: dict[str, dict[str, list[Callable]]] = {}  # noqa: T484
 _overloaded_method_class_fileno: dict[tuple[str, str], int] = {}
 
 
-def _overload_method(func):
+def _overload_method(func: _F) -> _F:
     _check_overload_body(func)
     qual_name = _qualified_name(func)
     global _overloaded_methods

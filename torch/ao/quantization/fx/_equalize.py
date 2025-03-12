@@ -911,7 +911,7 @@ def get_layer_sqnr_dict(
         activation_comparison_dict,
         "fp32",
         "int8",
-        torch.ao.ns.fx.utils.compute_sqnr,
+        torch.ao.ns.fx.utils.compute_sqnr,  # type: ignore[arg-type]
         "sqnr",
     )
 

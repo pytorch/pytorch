@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 # temporarily skip RUF for this file for now, we can re-enable
 # after move the affine quantization related things to torchao

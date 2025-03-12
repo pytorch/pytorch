@@ -1,8 +1,8 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import functools
 from collections import defaultdict
-from typing import Callable
+from typing import Callable, TypeVar
+from typing_extensions import ParamSpec
 
 import torch
 import torch._decomp as decomp
@@ -14,8 +14,13 @@ aten = torch.ops.aten
 
 rng_decompositions: dict[str, dict[OpOverload, Callable]] = defaultdict(dict)
 
+_P = ParamSpec("_P")
+_T = TypeVar("_T")
 
-def register_rng_decomposition(aten_op):
+
+def register_rng_decomposition(
+    aten_op,
+) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     return decomp.register_decomposition(aten_op, rng_decompositions)
 
 

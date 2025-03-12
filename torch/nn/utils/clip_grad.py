@@ -1,9 +1,8 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import functools
 import typing
-from typing import cast, Optional, Union
-from typing_extensions import deprecated
+from typing import Callable, cast, Optional, TypeVar, Union
+from typing_extensions import deprecated, ParamSpec
 
 import torch
 from torch import Tensor
@@ -13,6 +12,9 @@ from torch.utils._foreach_utils import (
     _has_foreach_support,
 )
 
+
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
 
 __all__ = [
     "clip_grad_norm_",
@@ -27,13 +29,13 @@ _tensor_or_tensors = Union[
 ]
 
 
-def _no_grad(func):
+def _no_grad(func: Callable[_P, _T]) -> Callable[_P, _T]:
     """
     This wrapper is needed to avoid a circular import when using @torch.no_grad on the exposed functions
     clip_grad_norm_ and clip_grad_value_ themselves.
     """
 
-    def _no_grad_wrapper(*args, **kwargs):
+    def _no_grad_wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _T:
         with torch.no_grad():
             return func(*args, **kwargs)
 

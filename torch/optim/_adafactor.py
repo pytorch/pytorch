@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 from typing import cast, Optional, TYPE_CHECKING, Union
 

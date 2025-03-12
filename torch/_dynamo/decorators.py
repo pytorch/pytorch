@@ -10,7 +10,16 @@ import inspect
 import sys
 import weakref
 from dataclasses import dataclass
-from typing import Any, Callable, TYPE_CHECKING, TypeVar
+from typing import (
+    Any,
+    Callable,
+    Literal,
+    Optional,
+    overload,
+    TYPE_CHECKING,
+    TypeVar,
+    Union,
+)
 from typing_extensions import ParamSpec
 
 import torch
@@ -33,6 +42,8 @@ from .exc import IncorrectUsage
 from .external_utils import is_compiling
 from .utils import is_function
 
+
+_F = TypeVar("_F", bound=Callable[..., Any])
 
 if TYPE_CHECKING:
     from types import FunctionType
@@ -65,7 +76,29 @@ def run(fn=None):
     return RunOnlyContext()
 
 
-def disable(fn=None, recursive=True):
+@overload
+def disable() -> Callable[[_F], _F]:
+    ...
+
+
+@overload
+def disable(fn: Literal[None], recursive: bool = True) -> Callable[[_F], _F]:
+    ...
+
+
+@overload
+def disable(*, recursive: bool = True) -> Callable[[_F], _F]:
+    ...
+
+
+@overload
+def disable(fn: _F, recursive: bool = True) -> _F:
+    ...
+
+
+def disable(
+    fn: Optional[_F] = None, recursive: bool = True
+) -> Union[_F, Callable[[_F], _F]]:
     """
     Decorator to disable TorchDynamo
 
@@ -85,7 +118,22 @@ def disable(fn=None, recursive=True):
         return skip(fn)
 
 
-def skip(fn=None):
+@overload
+def skip() -> Callable[[_F], _F]:
+    ...
+
+
+@overload
+def skip(fn: Literal[None]) -> Callable[[_F], _F]:
+    ...
+
+
+@overload
+def skip(fn: _F) -> _F:
+    ...
+
+
+def skip(fn: Optional[_F] = None) -> Union[_F, Callable[[_F], _F]]:
     """
     Skip frames associated with the function code, but still process recursively
     invoked frames

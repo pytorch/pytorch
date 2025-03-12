@@ -1,12 +1,16 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import inspect
-from typing import Callable, Optional
+from typing import Callable, Optional, TypeVar
+from typing_extensions import ParamSpec
 
 import torch
 import torch._decomp
 from torch import Tensor
 from torch._prims_common.wrappers import _maybe_remove_out_wrapper
+
+
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
 
 
 decomposition_table = torch._decomp.decomposition_table
@@ -38,8 +42,8 @@ aten = torch.ops.aten
 # to enable the decomposition.
 
 
-def maybe_register_decomposition(op):
-    def decorator(f):
+def maybe_register_decomposition(op) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
+    def decorator(f: Callable[_P, _T]) -> Callable[_P, _T]:
         try:
             return register_decomposition(op)(f)
         except Exception:
@@ -54,7 +58,9 @@ def maybe_register_decomposition(op):
 decomposition_table_for_jvp = {}
 
 
-def register_decomposition_for_jvp(fn):
+def register_decomposition_for_jvp(
+    fn,
+) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     return register_decomposition(fn, registry=decomposition_table_for_jvp)
 
 

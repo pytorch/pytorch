@@ -1,9 +1,15 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import functools
 import logging
 from collections.abc import Sequence
-from typing import Any, Callable, Optional, TYPE_CHECKING
+from typing import (
+    Any,
+    Callable,
+    Optional,
+    TYPE_CHECKING,
+    TypeVar,
+)
+from typing_extensions import ParamSpec
 
 import torch
 import torch.nn as nn
@@ -28,6 +34,9 @@ from ._fsdp_common import (
 )
 from ._fsdp_param_group import FSDPCommContext, FSDPParamGroup
 
+
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
 
 if TYPE_CHECKING:
     from ._fsdp_param import FSDPParam
@@ -55,9 +64,9 @@ class FSDPStateContext:
         self.post_optim_event: Optional[torch.Event] = None
 
 
-def disable_if_config_true(func):
+def disable_if_config_true(func: Callable[_P, _T]) -> Callable[_P, _T]:
     @functools.wraps(func)
-    def fsdp_hook_wrapper(*args, **kwargs):
+    def fsdp_hook_wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _T:
         if torch._dynamo.config.skip_fsdp_hooks:
             return torch._dynamo.disable(func, recursive=True)(*args, **kwargs)
         else:

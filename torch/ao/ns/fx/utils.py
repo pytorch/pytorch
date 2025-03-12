@@ -1,8 +1,15 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import enum
 import operator
-from typing import Callable, Optional, Union
+from typing import (
+    Any,
+    Callable,
+    Optional,
+    overload,
+    Protocol,
+    TypeVar,
+    Union,
+)
 
 import torch
 import torch.ao.nn.intrinsic.quantized as nniq
@@ -18,6 +25,9 @@ from .ns_types import NSNodeTargetType, NSResultsType
 
 
 toq = torch.ops.quantized
+
+
+_T = TypeVar("_T")
 
 
 # TODO(future PR): consider deleting this enum and using the torch types
@@ -405,8 +415,40 @@ def maybe_add_missing_fqns(results: NSResultsType) -> None:
                         model_results[i]["fqn"] = fqn
 
 
-def maybe_dequantize_first_two_tensor_args_and_handle_tuples(f):
-    def inner(*args, **kwargs):
+_RecursiveTensorList = Optional[Union[torch.Tensor, list["_RecursiveTensorList"]]]
+
+
+class _MaybeDequantizeFirstTwoTensorArgsAndHandleTuplesResult(Protocol):
+    @overload
+    def __call__(self, a0: tuple[_T, ...], a1: tuple[_T, ...]) -> _RecursiveTensorList:
+        ...
+
+    @overload
+    def __call__(self, a0: list[_T], a1: list[_T]) -> _RecursiveTensorList:
+        ...
+
+    @overload
+    def __call__(self, a0: torch.Tensor, a1: torch.Tensor) -> Optional[torch.Tensor]:
+        ...
+
+
+# This type annotation is a little lie - the function can actually return None
+def maybe_dequantize_first_two_tensor_args_and_handle_tuples(
+    f: Callable[[torch.Tensor, torch.Tensor], torch.Tensor]
+) -> _MaybeDequantizeFirstTwoTensorArgsAndHandleTuplesResult:
+    @overload
+    def inner(a0: tuple[_T, ...], a1: tuple[_T, ...]) -> _RecursiveTensorList:
+        ...
+
+    @overload
+    def inner(a0: list[_T], a1: list[_T]) -> _RecursiveTensorList:
+        ...
+
+    @overload
+    def inner(a0: torch.Tensor, a1: torch.Tensor) -> Optional[torch.Tensor]:
+        ...
+
+    def inner(*args: Any, **kwargs: Any) -> _RecursiveTensorList:
         a0, a1, *a_other = args
 
         if (isinstance(a0, tuple) and isinstance(a1, tuple)) or (
@@ -425,7 +467,7 @@ def maybe_dequantize_first_two_tensor_args_and_handle_tuples(f):
                 a1 = a1.dequantize()
 
         # for the purposes of this util, only handle floats
-        if a0.dtype != torch.float or a1.dtype != torch.float:
+        if a0.dtype != torch.float or a1.dtype != torch.float:  # type: ignore[attr-defined]
             return None
 
         new_args = (a0, a1, *a_other)

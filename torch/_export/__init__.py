@@ -126,7 +126,7 @@ def aot_compile(
     aot_compile_warning()
 
     if config.is_predispatch:
-        gm = torch.export._trace._export(f, args, kwargs, dynamic_shapes, pre_dispatch=True).module()
+        gm = torch.export._trace._export(f, args, kwargs, dynamic_shapes, pre_dispatch=True).module()  # type: ignore[arg-type]
     else:
         # We want to export to Torch IR here to utilize the pre_grad passes in
         # inductor, which run on Torch IR.

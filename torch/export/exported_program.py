@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import contextlib
 import copy
@@ -10,7 +9,16 @@ import warnings
 from collections import namedtuple
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any, Callable, final, Optional, TYPE_CHECKING, Union
+from typing import (
+    Any,
+    Callable,
+    final,
+    Optional,
+    TYPE_CHECKING,
+    TypeVar,
+    Union,
+)
+from typing_extensions import ParamSpec
 
 from torch._higher_order_ops.utils import autograd_not_implemented
 from torch._library.fake_class_registry import FakeScriptObject
@@ -25,6 +33,9 @@ from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 
+
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
 
 if TYPE_CHECKING:
     # Import the following modules during type checking to enable code intelligence features,
@@ -114,9 +125,9 @@ class ModuleCallEntry:
     signature: Optional[ModuleCallSignature] = None
 
 
-def _disable_prexisiting_fake_mode(fn):
+def _disable_prexisiting_fake_mode(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     @functools.wraps(fn)
-    def wrapper(*args, **kwargs):
+    def wrapper(*args: _P.args, **kwargs: _P.kwargs):
         with unset_fake_temporarily():
             return fn(*args, **kwargs)
 

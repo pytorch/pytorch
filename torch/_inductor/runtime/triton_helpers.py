@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import math as pymath
 import warnings
@@ -157,7 +156,7 @@ def max_with_index(value, index, dim):
     return tl.reduce((value, index), dim, maximum_with_index)
 
 
-@triton.jit
+@triton.jit  # type: ignore[misc]  # Untyped decorator makes function "..." untyped
 def exp(x, use_fast_math: tl.constexpr):
     if use_fast_math:
         return libdevice.exp2(x * _LOG_2_E)
@@ -165,7 +164,7 @@ def exp(x, use_fast_math: tl.constexpr):
         return math.exp(x)
 
 
-@triton.jit
+@triton.jit  # type: ignore[misc]  # Untyped decorator makes function "..." untyped
 def online_softmax_reduce(lhs_max, lhs_sum, dim, use_fast_math: tl.constexpr):
     out_max = max2(lhs_max, dim)
     out_max_keepdim = out_max[:, None]
@@ -174,7 +173,7 @@ def online_softmax_reduce(lhs_max, lhs_sum, dim, use_fast_math: tl.constexpr):
     return out_max, out_sum
 
 
-@triton.jit
+@triton.jit  # type: ignore[misc]  # Untyped decorator makes function "..." untyped
 def online_softmax_combine(lhs_max, lhs_sum, rhs_max, use_fast_math: tl.constexpr):
     """
     When we do combine, we assume lhs is the accumulator and rhs is the next
@@ -257,7 +256,7 @@ def any(a, dim):
     return tl.reduce(a, dim, _any_combine)
 
 
-@triton.jit
+@triton.jit  # type: ignore[misc]  # triton.jit is untyped
 def bucketize_binary_search(
     values: tl.tensor,
     boundaries_ptr: tl.tensor,
@@ -336,7 +335,7 @@ def bucketize_binary_search(
     return low
 
 
-@triton.jit
+@triton.jit  # type: ignore[misc]  # triton.jit is untyped
 def pack_value_flag(
     value,
     flag,
@@ -369,7 +368,7 @@ def unpack_flag(pack, DTYPE_FLAG):
     return pack.to(DTYPE_FLAG)
 
 
-@triton.jit
+@triton.jit  # type: ignore[misc]  # triton.jit is untyped
 def exclusive_scan_decoupled_lookback(
     scratch_base,
     block_value,
@@ -506,7 +505,7 @@ def frexp(x):
     return mantissa, exponent
 
 
-@triton.jit
+@triton.jit  # type: ignore[misc]  # triton.jit is untyped
 def _compare_and_swap_with_index(
     x,
     idxs,
@@ -575,7 +574,7 @@ def _compare_and_swap_with_index(
     return ret.to(x.dtype, bitcast=True), new_idxs
 
 
-@triton.jit
+@triton.jit  # type: ignore[misc]  # triton.jit is untyped
 def _bitonic_merge_with_index(
     x,
     idxs,
@@ -608,7 +607,7 @@ def _bitonic_merge_with_index(
     return x, idxs
 
 
-@triton.jit
+@triton.jit  # type: ignore[misc]  # triton.jit is untyped
 def sort_with_index(
     x,  # value
     idxs,  # index

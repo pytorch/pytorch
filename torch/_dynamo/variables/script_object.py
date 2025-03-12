@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 
 """
@@ -22,6 +21,8 @@ by limiting operations to known-safe patterns and failing fast for unsafe usage.
 """
 
 import functools
+from typing import Callable, TypeVar
+from typing_extensions import ParamSpec
 
 import torch
 
@@ -30,10 +31,16 @@ from .base import VariableTracker
 from .user_defined import UserDefinedObjectVariable
 
 
-def _raise_hard_error_if_graph_break(reason):
-    def deco(fn):
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
+
+
+def _raise_hard_error_if_graph_break(
+    reason: str,
+) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
+    def deco(fn: Callable[_P, _T]) -> Callable[_P, _T]:
         @functools.wraps(fn)
-        def graph_break_as_hard_error(*args, **kwargs):
+        def graph_break_as_hard_error(*args: _P.args, **kwargs: _P.kwargs) -> _T:
             try:
                 return fn(*args, **kwargs)
             except Unsupported as e:

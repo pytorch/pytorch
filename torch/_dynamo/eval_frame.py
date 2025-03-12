@@ -42,7 +42,16 @@ import weakref
 from dataclasses import dataclass
 from enum import Enum
 from os.path import dirname, join
-from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING, Union
+from typing import (
+    Any,
+    Callable,
+    NamedTuple,
+    Optional,
+    TYPE_CHECKING,
+    TypeVar,
+    Union,
+)
+from typing_extensions import ParamSpec
 from unittest.mock import patch
 
 import sympy
@@ -99,6 +108,9 @@ from .hooks import Hooks
 from .mutation_guard import install_generation_tagging_init
 from .utils import common_constant_types, compile_times
 
+
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
 
 if TYPE_CHECKING:
     from torch._subclasses import fake_tensor
@@ -1952,8 +1964,8 @@ class TorchPatcher:
                 opt._init_group = disable(opt._init_group)
 
     @staticmethod
-    def suppress_torch_distributed_warnings(fn):
-        def inner_fn(*args, **kwargs):
+    def suppress_torch_distributed_warnings(fn: Callable[_P, _T]) -> Callable[_P, _T]:
+        def inner_fn(*args: _P.args, **kwargs: _P.kwargs) -> _T:
             warnings.filterwarnings(
                 "ignore", category=UserWarning, module="torch.distributed"
             )

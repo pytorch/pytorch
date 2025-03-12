@@ -63,7 +63,7 @@ class OpTypes:
 
     fusible_ops: OrderedSet[Callable]
     compute_intensive_ops: OrderedSet[Callable]
-    random_ops: OrderedSet[Callable]
+    random_ops: OrderedSet[torch._ops.OpOverloadPacket]
     view_ops: OrderedSet[Callable]
     recomputable_ops: OrderedSet[Callable]
 
@@ -1510,7 +1510,7 @@ def get_default_op_list() -> OpTypes:
     default_recomputable_ops += [method_to_operator(m) for m in magic_methods]
     recomputable_ops = OrderedSet(default_recomputable_ops)
 
-    random_ops = OrderedSet([aten.native_dropout, aten.rand_like, aten.randn_like])
+    random_ops = OrderedSet((aten.native_dropout, aten.rand_like, aten.randn_like))
     compute_intensive_ops = [
         aten.mm,
         aten.convolution,

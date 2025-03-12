@@ -1231,7 +1231,7 @@ class TS2FXGraphConverter:
     def _convert_standard_operators(self, node: torch._C.Node):
         target = kind_to_standard_operators[node.kind()]
         args = tuple(self.get_fx_value_by_ir_value(input) for input in node.inputs())
-        fx_node = self.fx_graph.call_function(target, args)
+        fx_node = self.fx_graph.call_function(target, args)  # type: ignore[arg-type]
         output_name = node.output().debugName()
         self.name_to_node[output_name] = fx_node
 

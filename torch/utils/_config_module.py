@@ -27,6 +27,8 @@ from unittest import mock
 from torch._utils_internal import justknobs_check
 
 
+_F = TypeVar("_F", bound=Callable[..., Any])
+
 # Types saved/loaded in configs
 CONFIG_TYPES = (int, float, bool, type(None), str, list, set, tuple, dict)
 
@@ -728,7 +730,7 @@ class ContextDecorator(contextlib.ContextDecorator):
     def __exit__(self, exc_type, exc_val, exc_tb) -> NoReturn:  # type: ignore[no-untyped-def]
         raise NotImplementedError("NYI")
 
-    def __call__(self, func: Callable[[Any], Any]) -> Any:
+    def __call__(self, func: _F) -> _F:
         if isinstance(func, type) and issubclass(func, unittest.TestCase):
 
             class _TestCase(func):  # type: ignore[valid-type, misc]
@@ -752,9 +754,9 @@ class ContextDecorator(contextlib.ContextDecorator):
             _TestCase.__qualname__ = func.__qualname__
             _TestCase.__module__ = func.__module__
 
-            return _TestCase
+            return _TestCase  # type: ignore[return-value]
 
-        return super().__call__(func)
+        return super().__call__(func)  # type: ignore[return-value]
 
 
 class SubConfigProxy:

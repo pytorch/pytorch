@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import math
 import os
@@ -1327,7 +1326,7 @@ if has_triton():
     import triton
     import triton.language as tl
 
-    @triton.jit
+    @triton.jit  # type: ignore[misc]  # triton.jit is untyped
     def _sampled_addmm_kernel(
         alpha,
         beta,
@@ -1453,7 +1452,7 @@ if has_triton():
             values_block_ptrs += values_nnz_stride
             col_index_nnz_ptr += col_indices_stride
 
-    @triton.jit
+    @triton.jit  # type: ignore[misc]  # triton.jit is untyped
     def _bsr_strided_dense_rowspace_kernel(
         # values prologue
         values_ptr,
@@ -1780,7 +1779,7 @@ if has_triton():
         # as a placeholder for input because their shapes match:
         return bsr_dense_addmm(out, bsr, dense, alpha=1, beta=0, out=out)
 
-    @triton.jit
+    @triton.jit  # type: ignore[misc]  # triton.jit is untyped
     def _bsr_softmax_kernel(
         crow_indices_ptr,
         crow_indices_batch_stride,
@@ -1986,7 +1985,7 @@ if has_triton():
         sdpa = bsr_dense_mm(sdpa, value)
         return sdpa
 
-    @triton.jit
+    @triton.jit  # type: ignore[misc]  # triton.jit is untyped
     def _scatter_mm2_kernel(
         M: tl.constexpr,
         K: tl.constexpr,
@@ -2111,7 +2110,7 @@ if has_triton():
             **meta,
         )
 
-    @triton.jit
+    @triton.jit  # type: ignore[misc]  # triton.jit is untyped
     def _scatter_mm6_kernel(
         nbatches,
         Ms,
@@ -2315,7 +2314,7 @@ if has_triton():
         if force_contiguous and not accumulators.is_contiguous():
             accumulators.copy_(accumulators_)
 
-    @triton.jit
+    @triton.jit  # type: ignore[misc]  # triton.jit is untyped
     def _bsr_strided_addmm_kernel(
         # values prologue
         values_ptr,

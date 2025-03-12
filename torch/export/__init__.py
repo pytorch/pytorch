@@ -249,7 +249,7 @@ def export_for_inference(
         preserve_module_call_signature=preserve_module_call_signature,
     )
 
-    return ep_for_training.run_decompositions(decomp_table=decomp_table)
+    return ep_for_training.run_decompositions(decomp_table=decomp_table)  # type: ignore[arg-type]
 
 
 def export(

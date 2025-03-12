@@ -174,8 +174,15 @@ def _convert_out_params(f):
     return f
 
 
+_OpType = Union[OperatorBase, OpOverloadPacket]
+
+
 def register_decomposition(
-    aten_op, registry=None, *, type="post_autograd", unsafe=False
+    aten_op: Union[_OpType, Sequence[_OpType]],
+    registry=None,
+    *,
+    type="post_autograd",
+    unsafe=False,
 ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     """
     A decorator to register a function as a decomposition to the Python

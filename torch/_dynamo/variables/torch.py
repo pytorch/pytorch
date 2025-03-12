@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 
 """
@@ -34,7 +33,8 @@ import logging
 import math
 import re
 from collections.abc import Sequence
-from typing import TYPE_CHECKING
+from typing import Callable, TYPE_CHECKING, TypeVar
+from typing_extensions import ParamSpec
 
 import torch._C
 import torch._refs
@@ -90,6 +90,9 @@ try:
 except ModuleNotFoundError:
     _fsdp_param_group = None  # type: ignore[assignment]
 
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
+
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
@@ -123,10 +126,8 @@ supported_ctx_manager_classes = dict.fromkeys(
 )
 
 
-REWRITE_OPS_TO_TENSOR_SIZE_METHOD = dict.fromkeys(
-    [
-        torch._shape_as_tensor,
-    ]
+REWRITE_OPS_TO_TENSOR_SIZE_METHOD = (
+    torch._shape_as_tensor,
 )
 
 constant_fold_functions_need_guards = [
@@ -183,11 +184,11 @@ tracing_state_functions = {
 
 bin_ops = dict.fromkeys(["add", "sub", "mul", "div", "sqrt"])
 
-dispatch_key_set_functions = {
+dispatch_key_set_functions = (
     torch._C._dispatch_keys,
     torch._C._dispatch_tls_local_include_set,
     torch._C._dispatch_tls_local_exclude_set,
-}
+)
 
 
 @functools.lru_cache(None)
@@ -423,8 +424,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         in terms of the number of function with special handling."""
         handlers = {}
 
-        def register(*fns):
-            def _register(handler):
+        def register(
+            *fns: Callable[..., object]
+        ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
+            def _register(handler: Callable[_P, _T]) -> Callable[_P, _T]:
                 for fn in fns:
                     assert fn not in handlers, fn
                     handlers[fn] = handler

@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 # mypy: disable-error-code=arg-type
 """This file exports ONNX ops for opset 9.
@@ -14,7 +13,7 @@ import functools
 import math
 import sys
 import warnings
-from typing import Callable, TYPE_CHECKING
+from typing import Callable, TYPE_CHECKING, TypeVar
 from typing_extensions import deprecated
 
 import torch
@@ -28,6 +27,10 @@ from torch.onnx import _constants, _type_utils, errors, symbolic_helper
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import jit_utils, registration
 
+
+_T = TypeVar("_T")
+_U = TypeVar("_U")
+_R = TypeVar("_R")
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -1954,10 +1957,17 @@ def bitwise_or(g, self, other):
     return g.op("Or", self, other)
 
 
-def wrap_logical_op_with_cast_to(to_type):
-    def decorator(fn):
+def wrap_logical_op_with_cast_to(
+    to_type: str,
+) -> Callable[
+    [Callable[[jit_utils.GraphContext, _T, _U], _R]],
+    Callable[[jit_utils.GraphContext, _T, _U], _R],
+]:
+    def decorator(
+        fn: Callable[[jit_utils.GraphContext, _T, _U], _R],
+    ) -> Callable[[jit_utils.GraphContext, _T, _U], _R]:
         @functools.wraps(fn)
-        def wrap_with_cast(g, input, other):
+        def wrap_with_cast(g: jit_utils.GraphContext, input: _T, other: _U) -> _R:
             to_cast_func = globals()[f"_cast_{to_type}"]
             return fn(g, to_cast_func(g, input, False), to_cast_func(g, other, False))
 

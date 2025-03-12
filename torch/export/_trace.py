@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import dataclasses
 import functools
@@ -9,6 +8,7 @@ import time
 import warnings
 from contextlib import contextmanager, nullcontext
 from typing import Any, Callable, Optional, Union
+from typing_extensions import ParamSpec
 
 import torch
 import torch._dynamo
@@ -98,6 +98,8 @@ from .exported_program import (
 )
 from .graph_signature import _convert_to_export_graph_signature, ExportGraphSignature
 
+
+_P = ParamSpec("_P")
 
 log = logging.getLogger(__name__)
 
@@ -1056,9 +1058,11 @@ _EXPORT_FLAGS: Optional[set[str]] = None
 _EXPORT_MODULE_HIERARCHY: Optional[dict[str, str]] = None
 
 
-def _log_export_wrapper(fn):
+def _log_export_wrapper(
+    fn: Callable[_P, ExportedProgram]
+) -> Callable[_P, ExportedProgram]:
     @functools.wraps(fn)
-    def wrapper(*args, **kwargs):
+    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> ExportedProgram:
         global _EXPORT_FLAGS, _EXPORT_MODULE_HIERARCHY
         try:
             start = time.time()
@@ -1271,7 +1275,7 @@ def _convert_ts_to_export_experimental(traced_callable, args, kwargs=None):
 
         if isinstance(traced_callable, (TopLevelTracedModule, torch._C.ScriptModule)):  # type: ignore[operator]
             return _export(
-                traced_callable,
+                traced_callable,  # type: ignore[arg-type]
                 export_args,
                 export_kwargs,
                 strict=False,

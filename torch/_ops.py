@@ -7,7 +7,7 @@ import inspect
 import sys
 import types
 from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
-from typing_extensions import Concatenate, ParamSpec
+from typing_extensions import Concatenate, Never, ParamSpec
 
 import torch
 import torch.utils._pytree as pytree
@@ -1086,10 +1086,13 @@ class OpOverloadPacket:
             for overload_name in self._overload_names
         }
 
-    def __getattr__(self, key):
+    if TYPE_CHECKING:
+        __file__: str
+
+    def __getattr__(self, key: str) -> OpOverload:
         # It is not a valid op_name when __file__ is passed in
         if key == "__file__":
-            return "torch.ops"
+            return "torch.ops"  # type: ignore[return-value]
 
         # ensure that query for dunder attributes that does not exist on
         # opoverloadpacket but instead exists on the self._op object does not unnecessarily call
@@ -1246,10 +1249,15 @@ class _OpNamespace(types.ModuleType):
     def __iter__(self):
         return iter(self._dir)
 
-    def __getattr__(self, op_name):
+    if TYPE_CHECKING:
+        __file__: str
+        __origin__: Never
+        __self__: Never
+
+    def __getattr__(self, op_name: str) -> OpOverloadPacket:
         # It is not a valid op_name when __file__ is passed in
         if op_name == "__file__":
-            return "torch.ops"
+            return "torch.ops"  # type: ignore[return-value]
         elif op_name in ["__origin__", "__self__"]:
             raise AttributeError(
                 f"Invalid attribute '{op_name}' for '_OpNamespace' '{self.name}'"
@@ -1330,7 +1338,7 @@ class _Ops(types.ModuleType):
         )
         self._dir = []
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> _OpNamespace:
         # Check if the name is a HigherOrderOperator
         if name == "higher_order":
             return self._higher_order_op_namespace

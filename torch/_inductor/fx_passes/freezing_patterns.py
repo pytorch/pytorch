@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import functools
+from typing import Any, Callable, TypeVar
 
 import torch
 from torch._inductor.compile_fx import fake_tensor_prop
@@ -21,6 +22,8 @@ from ..pattern_matcher import (
     stable_topological_sort,
 )
 
+
+_F = TypeVar("_F", bound=Callable[..., Any])
 
 aten = torch.ops.aten
 
@@ -101,7 +104,9 @@ def lazy_init():
     binary_folding_init()
 
 
-def register_freezing_graph_pattern(pattern, extra_check=_return_true, pass_number=0):
+def register_freezing_graph_pattern(
+    pattern, extra_check=_return_true, pass_number=0
+) -> Callable[[_F], _F]:
     while pass_number > len(pass_patterns) - 1:
         pass_patterns.append(PatternMatcherPass())
     return register_graph_pattern(

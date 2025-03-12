@@ -447,7 +447,7 @@ def draft_export(
         # Add asserts around custom ops
         insert_custom_op_guards(ep.graph_module, list(custom_ops_logs.keys()))
 
-    ep._report = report
+    ep._report = report  # type: ignore[attr-defined]
     if not report.successful():
         log_filename = capture_structured_log.stream.name
 

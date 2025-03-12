@@ -682,11 +682,11 @@ def _impl(
 def _impl(
     qualname: str,
     types: Union[str, Sequence[str]],
-    func: Optional[Callable[..., object]] = None,
+    func: Optional[Callable[_P, _T]] = None,
     *,
     lib: Optional[Library] = None,
     disable_dynamo: bool = False,
-) -> Optional[Callable[[Callable[..., object]], None]]:
+) -> Optional[Callable[[Callable[_P, _T]], None]]:
     # See impl()
     if isinstance(types, str):
         types = (types,)
@@ -704,7 +704,7 @@ def _impl(
         else:
             keys.add(_device_type_to_key(typ))
 
-    def register_(func: Callable[..., object]) -> None:
+    def register_(func: Callable[_P, _T]) -> None:
         namespace, _ = torch._library.utils.parse_namespace(qualname)
 
         if lib is None:

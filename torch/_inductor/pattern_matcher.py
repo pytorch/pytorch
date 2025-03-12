@@ -86,6 +86,8 @@ prims = torch.ops.prims
 Constant = Any
 NodeOrConstant = Union[Constant, torch.fx.Node]
 
+_F = TypeVar("_F", bound=Callable[..., Any])
+
 
 class SearchFn(Protocol):
     __name__: str
@@ -1445,7 +1447,7 @@ def register_replacement(
         if search_fn_pattern is None:
             pattern, gm = gen_pattern_and_search_gm(
                 search_fn,
-                example_inputs,
+                example_inputs,  # type: ignore[arg-type]
                 trace_fn,
                 scalar_workaround,
                 exclusive_arg_names,
@@ -1466,13 +1468,13 @@ def register_replacement(
                 ):
                     return False
 
-        pattern = ReplacementPatternEntry(
+        pattern = ReplacementPatternEntry(  # type: ignore[assignment]
             pattern=pattern,
             extra_check=check_fn,
             normalize_args=normalize_args,
         )
-        pattern.register(pass_dicts)
-        return pattern.pattern
+        pattern.register(pass_dicts)  # type: ignore[attr-defined]
+        return pattern.pattern  # type: ignore[attr-defined]
 
 
 _serialized_patterns = OrderedSet[str]()
@@ -1701,13 +1703,13 @@ def register_graph_pattern(
     *,
     pass_dict: _PassDictsType,
     prepend: bool = False,
-) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+) -> Callable[[_F], _F]:
     """
     Register a pattern that runs a function on the FX graph, allowing
     custom transformation code.
     """
 
-    def decorator(handler: Callable[..., Any]) -> Callable[..., Any]:
+    def decorator(handler: _F) -> _F:
         assert callable(handler)
         GraphPatternEntry(
             pattern=pattern, extra_check=extra_check, handler=handler

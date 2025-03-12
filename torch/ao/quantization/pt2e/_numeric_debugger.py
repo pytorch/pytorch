@@ -214,7 +214,7 @@ class QuantizationComparisonResult:
 
     @property
     def sqnr(self) -> object:
-        return self.loss(compute_sqnr)
+        return self.loss(compute_sqnr)  # type: ignore[arg-type]
 
     def loss(
         self, loss_function: Callable[[torch.Tensor, torch.Tensor], torch.Tensor]

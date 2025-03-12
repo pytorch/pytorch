@@ -99,7 +99,7 @@ class LinearLeakyReLU(nnq.Linear):
         activation_post_process = mod.activation_post_process
         leaky_relu = mod[1]
         mod = mod[0]
-        weight_post_process = mod.qconfig.weight()
+        weight_post_process = mod.qconfig.weight()  # type: ignore[union-attr, operator]
         weight_post_process(mod.weight)
         dtype = weight_post_process.dtype
         act_scale, act_zp = activation_post_process.calculate_qparams()  # type: ignore[union-attr,operator]
@@ -108,7 +108,7 @@ class LinearLeakyReLU(nnq.Linear):
         qlinear_leaky_relu = cls(
             mod.in_features, mod.out_features, leaky_relu.negative_slope, dtype=dtype
         )
-        qlinear_leaky_relu.set_weight_bias(qweight, mod.bias)
+        qlinear_leaky_relu.set_weight_bias(qweight, mod.bias)  # type: ignore[arg-type]
         qlinear_leaky_relu.scale = float(act_scale)
         qlinear_leaky_relu.zero_point = int(act_zp)
         return qlinear_leaky_relu
@@ -164,14 +164,14 @@ class LinearTanh(nnq.Linear):
         assert hasattr(mod, "qconfig"), "Input float module must have qconfig defined"
         activation_post_process = mod.activation_post_process
         mod = mod[0]
-        weight_post_process = mod.qconfig.weight()
+        weight_post_process = mod.qconfig.weight()  # type: ignore[union-attr, operator]
         weight_post_process(mod.weight)
         dtype = weight_post_process.dtype
         act_scale, act_zp = activation_post_process.calculate_qparams()  # type: ignore[union-attr,operator]
         assert dtype == torch.qint8, "Weight observer must have dtype torch.qint8"
         qweight = _quantize_weight(mod.weight.float(), weight_post_process)
         qlinear_tanh = cls(mod.in_features, mod.out_features, dtype=dtype)
-        qlinear_tanh.set_weight_bias(qweight, mod.bias)
+        qlinear_tanh.set_weight_bias(qweight, mod.bias)  # type: ignore[arg-type]
         qlinear_tanh.scale = float(act_scale)
         qlinear_tanh.zero_point = int(act_zp)
         return qlinear_tanh
