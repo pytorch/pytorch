@@ -104,6 +104,8 @@ if TYPE_CHECKING:
     from types import ModuleType
     from typing import TypeVar
 
+    from torch._inductor.dtype_propagation import DtypePropagationOpsHandler
+
     from ..ir import IRNode
     from .simd_kernel_features import SIMDKernelFeatures
 
@@ -736,6 +738,18 @@ def triton_acc_type(dtype: torch.dtype) -> str:
     return triton_compute_type(upcast_acc_dtype(dtype))
 
 
+def low_precision_fp(dtype: torch.dtype) -> bool:
+    return dtype.itemsize <= 2 and dtype.is_floating_point
+
+
+def low_precision_fp_var(var: Union[CSEVariable, Any]) -> bool:
+    if not isinstance(var, CSEVariable):
+        return False
+
+    dtype = var.dtype
+    return low_precision_fp(dtype) if isinstance(dtype, torch.dtype) else False
+
+
 class TritonCSEVariable(CSEVariable):
     def __init__(self, name, bounds: ValueRanges[Any], dtype: torch.dtype) -> None:
         super().__init__(name, bounds, dtype)
@@ -755,6 +769,12 @@ class TritonCSEVariable(CSEVariable):
                     if symbol_is_type(arg, symt):
                         self.mask_vars.update([f"{prefix_str[symt]}mask"])
                         break
+
+
+def get_dtype_handler() -> DtypePropagationOpsHandler:
+    from torch._inductor.dtype_propagation import DtypePropagationOpsHandler
+
+    return DtypePropagationOpsHandler()
 
 
 def maybe_upcast_float32(convert_output: bool = True) -> Callable[[_T], _T]:
@@ -783,27 +803,17 @@ def maybe_upcast_float32(convert_output: bool = True) -> Callable[[_T], _T]:
             upcast_args = [maybe_upcast_arg(arg) for arg in args]
             upcast_kwargs = {key: maybe_upcast_arg(val) for key, val in kwargs.items()}
 
-            # Infer the output dtype from the inputs.
-            # This promotes to the largest input type.
-            all_args = args + tuple(kwargs.values())
-            input_dtypes = [
-                var.dtype
-                for var in all_args
-                if isinstance(var, CSEVariable) and var.dtype is not None
-            ]
-            result_dtype = (
-                functools.reduce(torch.promote_types, input_dtypes)
-                if len(input_dtypes) > 0
-                else None
-            )
-
             # Call the decorated function, optionally downcasting the result.
             result = func(*upcast_args, **upcast_kwargs)
-            needs_downcast = (
-                convert_output
-                and any(needs_upcast(var) for var in all_args)
-                and result_dtype not in (torch.float32, None)
+            any_needs_upcast = convert_output and any(
+                needs_upcast(var) for var in itertools.chain(args, kwargs.values())
             )
+            result_dtype = (
+                None
+                if not any_needs_upcast
+                else getattr(get_dtype_handler(), func.__name__)(*args, **kwargs)
+            )
+            needs_downcast = result_dtype not in (torch.float32, None)
             downcast_string = (
                 f".to({triton_type(result_dtype)})"
                 if needs_downcast and result_dtype is not None
@@ -927,6 +937,28 @@ class TritonOverrides(OpOverrides):
     @maybe_upcast_float32()
     def abs(x):
         return f"tl_math.abs({x})"
+
+    # TODO - register these ops as having divergent dtype
+    # output if doing graph pass to remove consecutive casts
+
+    @staticmethod
+    def truediv(x, y):
+        out = f"({x} / {y})"
+        if low_precision_fp_var(x) or low_precision_fp_var(y):
+            out_dtype = get_dtype_handler().truediv(x, y)
+            if out_dtype in (torch.float16, torch.float32):
+                out = f"{out}.to({triton_type(out_dtype)})"
+
+        return out
+
+    @staticmethod
+    def mod(x, y):
+        out = f"({x} % {y})"
+        if low_precision_fp_var(x) or low_precision_fp_var(y):
+            out_dtype = get_dtype_handler().mod(x, y)
+            if out_dtype in (torch.float16, torch.float32):
+                out = f"{out}.to({triton_type(out_dtype)})"
+        return out
 
     @staticmethod
     @maybe_upcast_float32()
