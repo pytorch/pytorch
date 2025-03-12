@@ -288,6 +288,51 @@ void StaticQuantMatmul::configure() {
       gemm_info_);
 }
 
+QuantAdd::QuantAdd(
+    arm_compute::DataType dtype,
+    const std::vector<int64_t>& input_dims,
+    double qa_scale,
+    int64_t qa_offset,
+    double qb_scale,
+    int64_t qb_offset,
+    double dst_scale,
+    int64_t dst_offset) {
+  arm_compute::QuantizationInfo qa_qinfo = {
+      static_cast<float>(qa_scale), static_cast<int32_t>(qa_offset), false};
+  arm_compute::QuantizationInfo qb_qinfo = {
+      static_cast<float>(qb_scale), static_cast<int32_t>(qb_offset), false};
+  arm_compute::QuantizationInfo qdst_qinfo = {
+      static_cast<float>(dst_scale), static_cast<int32_t>(dst_offset), false};
+
+  arm_compute::TensorShape qa_acl_tensor_shape;
+  arm_compute::TensorShape qb_acl_tensor_shape;
+  arm_compute::TensorShape qdst_acl_tensor_shape;
+  for (int i = input_dims.size() - 1; i >= 0; i--) {
+    qa_acl_tensor_shape.set(i, input_dims[i], false, true);
+    qb_acl_tensor_shape.set(i, input_dims[i], false, true);
+    qdst_acl_tensor_shape.set(i, input_dims[i], false, true);
+  }
+  arm_compute::TensorInfo qa_acl_tensor_info(
+      qa_acl_tensor_shape, 1, dtype, qa_qinfo);
+  arm_compute::TensorInfo qb_acl_tensor_info(
+      qb_acl_tensor_shape, 1, dtype, qb_qinfo);
+  arm_compute::TensorInfo qdst_acl_tensor_info(
+      qdst_acl_tensor_shape, 1, dtype, qdst_qinfo);
+
+  qa_tensor.allocator()->init(qa_acl_tensor_info);
+  qb_tensor.allocator()->init(qb_acl_tensor_info);
+  qdst_tensor.allocator()->init(qdst_acl_tensor_info);
+}
+
+arm_compute::Status QuantAdd::validate() {
+  return q_add.validate(
+      qa_tensor.info(), qb_tensor.info(), qdst_tensor.info(), policy);
+}
+
+void QuantAdd::configure() {
+  q_add.configure(&qa_tensor, &qb_tensor, &qdst_tensor, policy);
+}
+
 } // namespace at::native::acl_utils
 
 PackedLinearWeightsACL::PackedLinearWeightsACL(
