@@ -33,7 +33,7 @@ _ONNX_DTYPE_TO_TORCH_DTYPE = {
 @torch.library.custom_op(
     "onnx_symbolic::_symbolic",
     mutates_args=(),
-    schema="(Tensor[] inputs, str op_type, int onnx_dtype, Tensor[] attr_tensors, *, SymInt[] shape, str[] attr_keys, int[] attr_ints, float[] attr_floats, str[] attr_strs, bool[] attr_bools, str domain='', int? version=None) -> Tensor",
+    schema="(Tensor[] inputs, str op_type, int onnx_dtype, Tensor[] attr_tensors, *, SymInt[] shape, str[] attr_keys, int[] attr_ints, float[] attr_floats, str[] attr_strs, bool[] attr_bools, str[] metadata_props_keys, str[] metadata_props_values, str domain='', int? version=None) -> Tensor",
 )
 def _symbolic(
     inputs: Sequence[torch.Tensor],
@@ -47,6 +47,8 @@ def _symbolic(
     attr_floats: Sequence[float],
     attr_strs: Sequence[str],
     attr_bools: Sequence[bool],
+    metadata_props_keys: Sequence[str] = [],
+    metadata_props_values: Sequence[str] = [],
     domain: str = "",
     version: Optional[int] = None,
 ) -> torch.Tensor:
@@ -71,6 +73,8 @@ def _(
     attr_floats: Sequence[float],
     attr_strs: Sequence[str],
     attr_bools: Sequence[bool],
+    metadata_props_keys: Sequence[str] = [],
+    metadata_props_values: Sequence[str] = [],
     domain: str = "",
     version: Optional[int] = None,
 ) -> torch.Tensor:
@@ -93,6 +97,8 @@ torch.library.opcheck(
         attr_floats=[1.0],
         attr_strs=["attr"],
         attr_bools=[True],
+        metadata_props_keys=["meta_key"],
+        metadata_props_values=["meta_value"],
         domain="",
         version=1,
     ),
@@ -102,7 +108,7 @@ torch.library.opcheck(
 @torch.library.custom_op(
     "onnx_symbolic::_symbolic_multi_out",
     mutates_args=(),
-    schema="(Tensor[] inputs, str op_type, int[] onnx_dtypes, Tensor[] attr_tensors, *, SymInt[][] shapes, str[] attr_keys, int[] attr_ints, float[] attr_floats, str[] attr_strs, bool[] attr_bools, str domain='', int? version=None) -> Tensor[]",
+    schema="(Tensor[] inputs, str op_type, int[] onnx_dtypes, Tensor[] attr_tensors, *, SymInt[][] shapes, str[] attr_keys, int[] attr_ints, float[] attr_floats, str[] attr_strs, bool[] attr_bools, str[] metadata_props_keys, str[] metadata_props_values, str domain='', int? version=None) -> Tensor[]",
 )
 def _symbolic_multi_out(
     inputs: Sequence[torch.Tensor],
@@ -116,6 +122,8 @@ def _symbolic_multi_out(
     attr_floats: Sequence[float],
     attr_strs: Sequence[str],
     attr_bools: Sequence[bool],
+    metadata_props_keys: Sequence[str] = [],
+    metadata_props_values: Sequence[str] = [],
     domain: str = "",
     version: Optional[int] = None,
 ) -> list[torch.Tensor]:
@@ -142,6 +150,8 @@ def _(
     attr_floats: Sequence[float],
     attr_strs: Sequence[str],
     attr_bools: Sequence[bool],
+    metadata_props_keys: Sequence[str] = [],
+    metadata_props_values: Sequence[str] = [],
     domain: str = "",
     version: Optional[int] = None,
 ) -> list[torch.Tensor]:
@@ -171,6 +181,8 @@ torch.library.opcheck(
         attr_floats=[1.0],
         attr_strs=["attr"],
         attr_bools=[True],
+        metadata_props_keys=["meta_key"],
+        metadata_props_values=["meta_value"],
         domain="",
         version=1,
     ),
@@ -180,7 +192,7 @@ torch.library.opcheck(
 def _encode_onnx_attr_key(name: str, attr_type, positions) -> str: ...
 
 
-def _encode_onnx_attrs(
+def encode_onnx_attrs(
     attrs: dict[
         str,
         int
@@ -195,20 +207,21 @@ def _encode_onnx_attrs(
         | Sequence[torch.Tensor],
     ],
 ) -> tuple[
-    Optional[Sequence[str]],
-    Optional[Sequence[int]],
-    Optional[Sequence[float]],
-    Optional[Sequence[str]],
-    Optional[Sequence[bool]],
-    Optional[Sequence[torch.Tensor]],
+    Sequence[str],
+    Sequence[int],
+    Sequence[float],
+    Sequence[str],
+    Sequence[bool],
+    Sequence[torch.Tensor],
 ]:
-    attr_keys: Optional[Sequence[str]] = []
-    attr_ints: Optional[Sequence[int]] = []
-    attr_floats: Optional[Sequence[float]] = []
-    attr_strs: Optional[Sequence[str]] = []
-    attr_bools: Optional[Sequence[bool]] = []
-    attr_tensors: Optional[Sequence[torch.Tensor]] = []
+    attr_keys: Sequence[str] = []
+    attr_ints: Sequence[int] = []
+    attr_floats: Sequence[float] = []
+    attr_strs: Sequence[str] = []
+    attr_bools: Sequence[bool] = []
+    attr_tensors: Sequence[torch.Tensor] = []
 
     for i, (k, v) in enumerate(attrs.items()):
         if isinstance(v, int):
             attr_ints.append(v)
+    return attr_keys, attr_ints, attr_floats, attr_strs, attr_bools, attr_tensors
