@@ -290,7 +290,7 @@ void StaticQuantMatmul::configure() {
 
 QuantAdd::QuantAdd(
     arm_compute::DataType dtype,
-    std::vector<int64_t> input_dims,
+    const std::vector<int64_t>& input_dims,
     double qa_scale,
     int64_t qa_offset,
     double qb_scale,
