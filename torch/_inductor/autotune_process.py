@@ -639,19 +639,21 @@ class TritonBenchmarkRequest(BenchmarkRequest):
         extra_args: Iterable[Any],
         module_path: str,  # the path of the module defining the triton kernel
         module_cache_key: str,
-        grid: list[int],
         num_stages: int,
         num_warps: int,
         matrix_instr_nonkdim: int = 0,  # only used for hip to choose the shape of mfma instruction.
+        waves_per_eu: int = 0,  # only used for hip to schedule waves per execution unit
+        kpack: int = 0,  # ROCm specific gemm paramete
         workspace_arg: Optional[WorkspaceArg] = None,
     ) -> None:
         super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, extra_args)
         self.module_path = module_path
         self.module_cache_key = module_cache_key
-        self.grid = grid
         self.num_stages = num_stages
         self.num_warps = num_warps
         self.matrix_instr_nonkdim = matrix_instr_nonkdim
+        self.waves_per_eu = waves_per_eu
+        self.kpack = kpack
         self.workspace_arg = workspace_arg
 
     def make_run_fn(
@@ -700,16 +702,15 @@ class TritonBenchmarkRequest(BenchmarkRequest):
                 )
 
                 # Handle zero initialization if needed
-                if workspace_arg.zero_mode == WorkspaceZeroMode.ZERO_ON_CALL:
+                if workspace_arg.zero_mode != WorkspaceZeroMode.UNINITIALIZED:
                     workspace_tensor.zero_()
 
                 # Run the kernel with workspace
                 run_method(
                     *input_tensors,
                     output_tensor,
-                    *extra_args,
                     workspace_tensor,
-                    grid=self.grid,
+                    *extra_args,
                     **warmup_arg,
                     stream=stream,
                     benchmark_run=True,
@@ -725,7 +726,6 @@ class TritonBenchmarkRequest(BenchmarkRequest):
                 *input_tensors,
                 output_tensor,
                 *extra_args,
-                grid=self.grid,
                 **warmup_arg,
                 stream=stream,
             )
@@ -735,7 +735,6 @@ class TritonBenchmarkRequest(BenchmarkRequest):
                 *input_tensors,
                 output_tensor,
                 *extra_args,
-                grid=self.grid,
                 **warmup_arg,
                 stream=stream,
                 benchmark_run=True,
