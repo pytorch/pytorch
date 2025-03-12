@@ -33,7 +33,6 @@ from torch.utils._pytree import (  # these type aliases are identical in both im
 __all__ = [
     "PyTreeSpec",
     "register_pytree_node",
-    "tree_is_leaf",
     "tree_flatten",
     "tree_unflatten",
     "tree_iter",
@@ -48,12 +47,6 @@ __all__ = [
     "tree_all_only",
     "tree_any_only",
     "treespec_pprint",
-    "is_namedtuple",
-    "is_namedtuple_class",
-    "is_namedtuple_instance",
-    "is_structseq",
-    "is_structseq_class",
-    "is_structseq_instance",
 ]
 
 
@@ -81,12 +74,6 @@ _sys.modules[f"{__name__}.cxx"] = _sys.modules.get("torch.utils._cxx_pytree")  #
 
 if not PYTORCH_USE_CXX_PYTREE:
     from torch.utils._pytree import (
-        is_namedtuple as is_namedtuple,
-        is_namedtuple_class as is_namedtuple_class,
-        is_namedtuple_instance as is_namedtuple_instance,
-        is_structseq as is_structseq,
-        is_structseq_class as is_structseq_class,
-        is_structseq_instance as is_structseq_instance,
         PyTreeSpec as PyTreeSpec,
         register_pytree_node as _register_pytree_node,
         tree_all as tree_all,
@@ -94,7 +81,6 @@ if not PYTORCH_USE_CXX_PYTREE:
         tree_any as tree_any,
         tree_any_only as tree_any_only,
         tree_flatten as tree_flatten,
-        tree_is_leaf as tree_is_leaf,
         tree_iter as tree_iter,
         tree_leaves as tree_leaves,
         tree_map as tree_map,
@@ -109,12 +95,6 @@ if not PYTORCH_USE_CXX_PYTREE:
     PyTreeSpec = _exposed_in(__name__)(PyTreeSpec)  # type: ignore[misc]
 else:
     from torch.utils._cxx_pytree import (  # type: ignore[assignment,no-redef]
-        is_namedtuple as is_namedtuple,
-        is_namedtuple_class as is_namedtuple_class,
-        is_namedtuple_instance as is_namedtuple_instance,
-        is_structseq as is_structseq,
-        is_structseq_class as is_structseq_class,
-        is_structseq_instance as is_structseq_instance,
         PyTreeSpec as PyTreeSpec,
         register_pytree_node as _register_pytree_node,
         tree_all as tree_all,
@@ -122,7 +102,6 @@ else:
         tree_any as tree_any,
         tree_any_only as tree_any_only,
         tree_flatten as tree_flatten,
-        tree_is_leaf as tree_is_leaf,
         tree_iter as tree_iter,
         tree_leaves as tree_leaves,
         tree_map as tree_map,
@@ -143,7 +122,6 @@ __func_names = frozenset(
         "tree_any",
         "tree_any_only",
         "tree_flatten",
-        "tree_is_leaf",
         "tree_iter",
         "tree_leaves",
         "tree_map",
@@ -153,12 +131,6 @@ __func_names = frozenset(
         "tree_structure",
         "tree_unflatten",
         "treespec_pprint",
-        "is_namedtuple",
-        "is_namedtuple_class",
-        "is_namedtuple_instance",
-        "is_structseq",
-        "is_structseq_class",
-        "is_structseq_instance",
     }
 )
 globals().update(
