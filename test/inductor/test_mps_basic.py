@@ -187,6 +187,7 @@ for test_name in [
     "test_low_memory_max_pool",
     "test_max_min",
     "test_max_pool2d2",
+    "test_multilayer_prime_size",
     "test_min_max_reduction_nan",
     "test_nan_to_num",
     "test_pow2",
