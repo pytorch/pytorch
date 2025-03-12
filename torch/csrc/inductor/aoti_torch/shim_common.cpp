@@ -1429,3 +1429,88 @@ aoti_torch_delete_library_object(TorchLibraryHandle tlh) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
       { delete reinterpret_cast<torch::Library*>(tlh); });
 }
+
+static c10::IValue to_ivalue(
+    const c10::TypePtr& arg_type,
+    const StableIValue stable_ivalue) {
+  switch (arg_type->kind()) {
+    case c10::TypeKind::TensorType: {
+      // stable_ivalue must be an ATH
+      auto ret_raiiath = torch::aot_inductor::RAIIAtenTensorHandle(
+          to<AtenTensorHandle>(stable_ivalue));
+      at::Tensor arg = *torch::aot_inductor::tensor_handle_to_tensor_pointer(
+          ret_raiiath.get());
+      return (c10::IValue(arg));
+    }
+    case c10::TypeKind::IntType: {
+      return c10::IValue(to<int64_t>(stable_ivalue));
+    }
+    case c10::TypeKind::FloatType: {
+      return c10::IValue(to<double>(stable_ivalue));
+    }
+    case c10::TypeKind::BoolType: {
+      return c10::IValue(to<bool>(stable_ivalue));
+    }
+    case c10::TypeKind::ScalarTypeType: {
+      return c10::IValue(to<c10::ScalarType>(stable_ivalue));
+    }
+    case c10::TypeKind::LayoutType: {
+      return c10::IValue(to<c10::Layout>(stable_ivalue));
+    }
+    case c10::TypeKind::MemoryFormatType: {
+      return c10::IValue(to<c10::MemoryFormat>(stable_ivalue));
+    }
+    default: {
+      TORCH_CHECK(false, "Not yet supported argument type: ", arg_type->str());
+    }
+  }
+}
+
+AOTITorchError aoti_torch_call_dispatcher(
+    const char* opName,
+    const char* overloadName,
+    StableIValue* stack) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    static auto op =
+        c10::Dispatcher::singleton().findSchemaOrThrow(opName, overloadName);
+
+    const auto& schema = op.schema();
+    const auto num_returns = schema.returns().size();
+    const auto num_arguments = schema.arguments().size();
+
+    torch::jit::Stack ivalue_stack;
+    // we will only need max(num_args, num_returns)
+    ivalue_stack.reserve(std::max(num_arguments, num_returns));
+
+    // convert StableIValue stack to c10::IValue stack
+    for (const auto idx : c10::irange(num_arguments)) {
+      auto stable_ivalue = stack[idx];
+      auto arg_type = schema.arguments()[idx].type();
+      torch::jit::push(ivalue_stack, to_ivalue(arg_type, stable_ivalue));
+    }
+
+    op.callBoxed(ivalue_stack);
+
+    // there should then be num_returns IValues on the stack, which
+    // we will convert to StableIValue and repopulate user input stack
+    for (const auto idx : c10::irange(num_returns)) {
+      const c10::IValue& ret = torch::jit::pop(ivalue_stack);
+      const auto stack_idx = num_returns - idx - 1;
+      if (ret.isInt()) {
+        stack[stack_idx] = from(ret.toInt());
+      } else if (ret.isDouble()) {
+        stack[stack_idx] = from(ret.toDouble());
+      } else if (ret.isBool()) {
+        stack[stack_idx] = from(ret.toBool());
+      } else if (ret.isNone()) {
+        stack[stack_idx] = from(nullptr);
+      } else if (ret.isTensor()) {
+        AtenTensorHandle ath = torch::aot_inductor::new_tensor_handle(
+            std::move(const_cast<at::Tensor&>(ret.toTensor())));
+        stack[stack_idx] = from(ath);
+      } else {
+        TORCH_CHECK(false, "Other types of IValue returns not yet handled!");
+      }
+    }
+  });
+}
