@@ -1308,7 +1308,7 @@ class MetaConverter(Generic[_TensorT]):
         if self.get_tensor_memo(t) is None:
             GRAD_TENSOR_SENTINEL_VALUE = -2
 
-            with torch.inference_mode(False):
+            with torch.inference_mode(t.is_inference):
                 if t.is_sparse:
                     is_leaf = t.is_leaf
 
