@@ -4053,27 +4053,6 @@ class Scheduler:
                 )
             )
 
-    def graph_partition_signature_reorder(
-        self, names: OrderedSet[str], order: OrderedSet[str]
-    ) -> OrderedSet[str]:
-        """
-        Returns an ordered set of names that includes all strings in 'names'
-        but follows the order in 'order'. This supports the assumption on input
-        and output orders, such as backward inputs take saved tensors first and
-        then tangents.
-        """
-        ordered_names: OrderedSet[str] = OrderedSet()
-
-        for name in order:
-            if name in names:
-                ordered_names.add(name)
-
-        for name in names:
-            if name not in ordered_names:
-                ordered_names.add(name)
-
-        return ordered_names
-
     def get_graph_partition_signature(
         self, partitions: list[PartitionType], skip_cudagraphs: list[bool]
     ) -> list[GraphPartitionSignature]:
@@ -4082,9 +4061,6 @@ class Scheduler:
         whether deallocating an input within graph partition.
         """
         signatures = []
-
-        input_names_order = OrderedSet(V.graph.graph_input_names)
-        output_names_order = OrderedSet(V.graph.get_output_names())
 
         unmet_output_names = OrderedSet(V.graph.get_output_names())
         name_to_node = self.get_name_to_nodes()
@@ -4107,9 +4083,6 @@ class Scheduler:
             partition_input_names = (
                 OrderedSet([x.name for x in read_writes.reads | read_writes.writes])
                 - output_names
-            )
-            partition_input_names = self.graph_partition_signature_reorder(
-                partition_input_names, input_names_order
             )
 
             buffer_names_to_free: OrderedSet[str] = OrderedSet()
@@ -4137,9 +4110,6 @@ class Scheduler:
             ]
 
             returned_output_names.update(extra_output_names)
-            returned_output_names = self.graph_partition_signature_reorder(
-                returned_output_names, output_names_order
-            )
 
             output_nodes = [name_to_node[name] for name in returned_output_names]
 
