@@ -59,7 +59,7 @@ runs:
 
     - name: Clean workspace (try again)
       if: ${{ steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' &&
-        (steps.first-clean != 'success' || steps.first-checkout-attempt.outcome != 'success') }}
+        (steps.first-clean.outcome != 'success' || steps.first-checkout-attempt.outcome != 'success') }}
       shell: bash
       env:
         NO_SUDO: ${{ inputs.no-sudo }}
@@ -77,7 +77,7 @@ runs:
 
     - name: Checkout PyTorch (try again)
       uses: actions/checkout@v4
-      if: ${{ steps.first-clean != 'success' || steps.first-checkout-attempt.outcome != 'success' }}
+      if: ${{ steps.first-clean.outcome != 'success' || steps.first-checkout-attempt.outcome != 'success' }}
       with:
         ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         fetch-depth: ${{ inputs.fetch-depth }}
