@@ -201,6 +201,7 @@ def _get_managed_states(
 def _move_states_to_device(
     params: list[nn.Parameter],
     buffers: list[torch.Tensor],
+    ignored_params: set[nn.Parameter],
     device: torch.device,
 ) -> None:
     """
@@ -210,7 +211,7 @@ def _move_states_to_device(
     the future.
     """
     # Follow the logic in `nn.Module._apply`
-    for tensor in itertools.chain(params, buffers):
+    for tensor in itertools.chain(params, buffers, list(ignored_params)):
         if tensor.device == device or tensor.device.type == "meta":
             # Keep meta-device tensors on meta device for deferred init
             continue

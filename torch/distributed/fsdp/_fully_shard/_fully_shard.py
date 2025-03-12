@@ -212,7 +212,7 @@ def fully_shard(
     managed_modules = _get_managed_modules(modules, ignored_params)
     params, buffers = _get_managed_states(managed_modules, ignored_params)
 
-    _move_states_to_device(params, buffers, device)
+    _move_states_to_device(params, buffers, ignored_params, device)
     if params:
         state._fsdp_param_group = FSDPParamGroup(
             params,
