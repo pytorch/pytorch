@@ -487,9 +487,7 @@ class MetalKernel(SIMDKernel):
             acc_thread_var = f"{acc_buf}[{reduction_dim.name}]"
             src_metal_type = DTYPE_TO_METAL[src_dtype]
             if self.multistage_reduction:
-                lim_fn, reduction_op = (
-                    ("lowest", ">") if reduction_type == "max" else ("max", "<")
-                )
+                lim_fn = "lowest" if reduction_type == "max" else "max"
                 self.indexing_code.writeline(
                     f"{acc_thread_var} = ::metal::numeric_limits<{src_metal_type}>::{lim_fn}();"
                 )
