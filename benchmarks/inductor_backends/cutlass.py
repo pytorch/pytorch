@@ -188,7 +188,18 @@ def run_single_experiment_group(
         compiled_op = torch.compile(op, fullgraph=True, options=config.to_options())
 
         start_time = time.perf_counter()
-        _ = compiled_op(A, B)
+        try:
+            _ = compiled_op(A, B)
+        except Exception as e:
+            print(f"Benchmark config {config.name()} failed: {e}")
+            results.append(
+                ExperimentResults(
+                    name=config.name(),
+                    forward_time=float("inf"),
+                    compilation_time=float("inf"),
+                )
+            )
+            continue
         compilation_time = time.perf_counter() - start_time
 
         forward_time = benchmark_torch_function_in_microseconds(
@@ -309,10 +320,9 @@ def main():
             CUTLASS_INSTANTIATION_LEVELS,
         )
     ):
+        group_results = run_single_experiment_group(group_config)
         results.append(
-            ExperimentGroup(
-                config=group_config, results=run_single_experiment_group(group_config)
-            ),
+            ExperimentGroup(config=group_config, results=group_results),
         )
 
     print_results(results)
