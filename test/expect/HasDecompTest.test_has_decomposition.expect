@@ -75,6 +75,7 @@ aten::_ctc_loss.out
 aten::_ctc_loss_backward
 aten::_ctc_loss_backward.Tensor
 aten::_ctc_loss_backward.out
+aten::_cudnn_attention_forward
 aten::_cudnn_ctc_loss
 aten::_cudnn_ctc_loss.Tensor
 aten::_cudnn_ctc_loss.out
@@ -517,6 +518,7 @@ aten::_scaled_dot_product_flash_attention_backward
 aten::_scaled_dot_product_flash_attention_for_cpu_backward
 aten::_scaled_dot_product_fused_attention_overrideable
 aten::_scaled_dot_product_fused_attention_overrideable_backward
+aten::_scaled_grouped_mm
 aten::_scaled_mm
 aten::_scaled_mm.out
 aten::_segment_reduce_backward
@@ -1167,6 +1169,8 @@ aten::set_
 aten::set_.source_Storage
 aten::set_.source_Storage_storage_offset
 aten::set_.source_Tensor
+aten::slice_copy.Tensor
+aten::slice_copy.Tensor_out
 aten::slice_inverse
 aten::slow_conv3d_forward
 aten::slow_conv3d_forward.output
