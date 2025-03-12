@@ -308,8 +308,7 @@ jobs:
 
       - name: Store PyTorch Build Artifacts on S3
         uses: seemethere/upload-artifact-s3@v5
-        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped' && inputs.build-environment != 'linux-s390x-binary-manywheel'
-        with:
+        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped' && !inputs.use_split_build && inputs.build-environment != 'linux-s390x-binary-manywheel'
           name: ${{ inputs.build-environment }}
           retention-days: 14
           if-no-files-found: error
