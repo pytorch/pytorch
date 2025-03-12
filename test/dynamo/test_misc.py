@@ -4009,6 +4009,38 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(cnts3.frame_count, 1)
         self.assertEqual(cnts3.op_count, 4)
 
+    @patch.dict(os.environ, {"TORCHDYNAMO_DISABLE": "1"})
+    def test_nested_optimize_decorator_disabled(self):
+        class MyException(Exception):
+            pass
+
+        cnts2 = torch._dynamo.testing.CompileCounter()
+        cnts3 = torch._dynamo.testing.CompileCounter()
+
+        @torch._dynamo.run()
+        def fn1(x):
+            raise MyException
+
+        @torch.compile(backend=cnts2, fullgraph=True)
+        def fn2(x):
+            return fn1(x) + 1
+
+        @torch.compile(backend=cnts3, fullgraph=True)
+        def fn3(x):
+            return torch.relu(fn2(x))
+
+        try:
+            fn3(torch.randn(4, 5))
+        except MyException as e:
+            self.assertNotIn("eval_frame", traceback.format_exc())
+
+        self.assertEqual(cnts2.frame_count, 0)
+        self.assertEqual(cnts3.frame_count, 0)
+        self.assertEqual(cnts3.op_count, 0)
+        self.assertEqual(counters["eval_frame"]["RunOnlyContext"], 0)
+        self.assertEqual(counters["eval_frame"]["DisableContext"], 0)
+        self.assertEqual(counters["eval_frame"]["OptimizeContext"], 0)
+
     def test_nested_optimize_run(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
@@ -4026,6 +4058,29 @@ utils_device.CURRENT_DEVICE == None""".split(
         fn = torch._dynamo.run(fn)
         fn(torch.randn(4, 4, 4))
         self.assertEqual(cnts.frame_count, 2)
+
+    @patch.dict(os.environ, {"TORCHDYNAMO_DISABLE": "1"})
+    def test_nested_optimize_run_disabled(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(x):
+            return torch.relu(torch.cos(x) + torch.sin(x))
+
+        fn(torch.randn(4))
+        self.assertEqual(cnts.frame_count, 0)
+
+        fn(torch.randn(4, 4))
+        self.assertEqual(cnts.frame_count, 0)
+
+        # Test that run works on a decorated fn
+        fn = torch._dynamo.run(fn)
+        fn(torch.randn(4, 4, 4))
+        self.assertEqual(cnts.frame_count, 0)
+
+        self.assertEqual(counters["eval_frame"]["RunOnlyContext"], 0)
+        self.assertEqual(counters["eval_frame"]["DisableContext"], 0)
+        self.assertEqual(counters["eval_frame"]["OptimizeContext"], 0)
 
     def test_nested_optimize(self):
         cnts1 = torch._dynamo.testing.CompileCounter()
@@ -4057,6 +4112,42 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(cnts1.frame_count, 1)
         torch._dynamo.run()(fn2)(torch.randn(4))
         self.assertEqual(cnts2.frame_count, 0)
+
+    @patch.dict(os.environ, {"TORCHDYNAMO_DISABLE": "1"})
+    def test_nested_optimize_disabled(self):
+        cnts1 = torch._dynamo.testing.CompileCounter()
+        cnts2 = torch._dynamo.testing.CompileCounter()
+
+        def fn(x):
+            return torch.relu(torch.cos(x) + torch.sin(x))
+
+        fn1 = torch.compile(fn, backend=cnts1, fullgraph=True)
+        fn2 = torch.compile(fn1, backend=cnts2, fullgraph=True)
+
+        # The first optimize in the nesting should be ignored
+        fn2(torch.randn(4))
+        self.assertEqual(cnts2.frame_count, 0)
+        self.assertEqual(cnts1.frame_count, 0)
+
+        # Since the fn code object is already compiled, calling fn1 should
+        # directly call the compiled_fn callable.
+        torch._dynamo.run()(fn1)(torch.randn(4))
+        self.assertEqual(cnts1.frame_count, 0)
+
+        # Test same behavior by reversing the calls
+        torch._dynamo.reset()
+        cnts1 = torch._dynamo.testing.CompileCounter()
+        cnts2 = torch._dynamo.testing.CompileCounter()
+        fn1 = torch.compile(fn, backend=cnts1, fullgraph=True)
+        fn2 = torch.compile(fn1, backend=cnts2, fullgraph=True)
+        fn1(torch.randn(4))
+        self.assertEqual(cnts1.frame_count, 0)
+        torch._dynamo.run()(fn2)(torch.randn(4))
+        self.assertEqual(cnts2.frame_count, 0)
+
+        self.assertEqual(counters["eval_frame"]["RunOnlyContext"], 0)
+        self.assertEqual(counters["eval_frame"]["DisableContext"], 0)
+        self.assertEqual(counters["eval_frame"]["OptimizeContext"], 0)
 
     def test_torch_size(self):
         cnts = torch._dynamo.testing.CompileCounter()

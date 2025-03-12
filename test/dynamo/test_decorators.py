@@ -1459,6 +1459,67 @@ If the above doesn't work, please subtmit an issue to GitHub.
         with torch.compiler.set_stance("default", force_backend=fail_backend):
             f(torch.randn(3, 3))
 
+    @patch.dict(os.environ, {"TORCHDYNAMO_DISABLE": "1"})
+    def test_compiler_disabled_stack_trace(self):
+        class MyException(Exception):
+            pass
+
+        # 1. As decorators
+        with self.assertRaises(MyException):
+
+            @torch._dynamo.run
+            def fn():
+                raise MyException
+
+            fn()
+
+        with self.assertRaises(MyException):
+
+            @torch._dynamo.disable
+            def fn():
+                raise MyException
+
+            fn()
+
+        with self.assertRaises(MyException):
+
+            @torch.compile(backend="eager")
+            def fn():
+                raise MyException
+
+            fn()
+
+        # 2. As wrappers
+        def create_fn():
+            def fn():
+                raise MyException
+
+            return fn
+
+        with self.assertRaises(MyException):
+            torch._dynamo.run(create_fn())()
+
+        with self.assertRaises(MyException):
+            torch._dynamo.disable(create_fn())()
+
+        with self.assertRaises(MyException):
+            torch.compile(create_fn(), backend="eager")()
+
+        # 3. As deferred wrappers
+        with self.assertRaises(MyException):
+            torch._dynamo.run()(create_fn())()
+
+        with self.assertRaises(MyException):
+            torch._dynamo.disable()(create_fn())()
+
+        with self.assertRaises(MyException):
+            torch.compile(backend="eager")(create_fn())()
+
+        # Verify we didn't accidentally wrap user code
+        self.assertEqual(counters["eval_frame"]["RunOnlyContext"], 0)
+        self.assertEqual(counters["eval_frame"]["DisableContext"], 0)
+        self.assertEqual(counters["eval_frame"]["OptimizeContext"], 0)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
