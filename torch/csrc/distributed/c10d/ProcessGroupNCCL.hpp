@@ -382,9 +382,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Clone of blockingWait_ from ProcessGroupNCCL.
     bool blockingWait_{false};
 
-    // Clone of avoidRecordStreams_ from ProcessGroupNCCL.
-    bool avoidRecordStreams_{false};
-
     // Clone of opTimeout_ from ProcessGroupNCCL.
     std::chrono::milliseconds opTimeout_{};
 
@@ -431,6 +428,13 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // exception_ptr.
     bool finishedGPUExecutionInternal() const;
 
+    // Stash tensors so that CachingAllocator cannot recycle them prematurely.
+    // Used in case of async ops.
+    void stashTensors(std::vector<at::Tensor>& tensors);
+
+    // Unstage the stashed tensors so that CachingAllocator can recycle them
+    void unstashTensors();
+
     // Reference to the store so that we can write aborted communicators
     // to the store.
     c10::intrusive_ptr<Store> store_;
@@ -450,6 +454,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // For in-place collectives, some refs stashed here may alias outputs_,
     // but that doesn't do any harm.
     std::shared_ptr<std::vector<at::Tensor>> stashed_for_allocator_safety_;
+    // Need a mutex to protect stashed_for_allocator_safety_ because it can be
+    // accessed from both main thread and watchdog thread.
+    std::mutex stashMutex_;
 
     // The future returned by getFuture.
     c10::intrusive_ptr<at::ivalue::Future> future_;
@@ -611,6 +618,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     return true;
   }
 
+  bool supportsCoalescing() const override {
+    return true;
+  }
+
   void startCoalescing() override;
 
   c10::intrusive_ptr<Work> endCoalescing() override;
@@ -757,11 +768,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   c10::intrusive_ptr<intra_node_comm::IntraNodeComm> initIntraNodeComm();
 
   // Destroy (shutdown) this backend -- normal exit.
-  void shutdown();
+  void shutdown() override;
 
   // Provides an API to abort the ProcessGroup (similar to ncclCommAbort)
   // instead of relying on ProcessGroupNCCL destructor.
-  void abort();
+  void abort() override;
 
   void eagerConnectSingleDevice(at::Device device) override;
 
@@ -874,8 +885,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       at::Tensor& output,
       Fn fn,
       OpType opType,
+      bool asyncOp,
       const char* profilingTitle = nullptr,
-      bool avoidRecordStreams = false,
       bool nanCheck = true);
 
   template <typename Fn, typename PreProcess, typename PostProcess>
@@ -886,8 +897,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       PreProcess pre,
       PostProcess post,
       OpType opType,
+      bool asyncOp,
       const char* profilingTitle = nullptr,
-      bool avoidRecordStreams = false,
       bool nanCheck = true);
 
   template <typename Fn, typename PreProcess, typename PostProcess>
@@ -898,8 +909,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       PreProcess pre,
       PostProcess post,
       OpType opType,
+      bool asyncOp,
       const char* profilingTitle = nullptr,
-      bool avoidRecordStreams = false,
       bool nanCheck = true);
 
   template <typename Fn>
@@ -908,8 +919,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       std::vector<at::Tensor>& output,
       Fn fn,
       OpType opType,
-      const char* profilingTitle = nullptr,
-      bool avoidRecordStreams = false);
+      bool asyncOp,
+      const char* profilingTitle = nullptr);
 
   // Helper that encapsulates work shared across point-to-point communication
   // primitives. It is the same structure as the helper used for collective
@@ -1217,6 +1228,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Stores communicators for all collectives run inside a coalescing block
   std::shared_ptr<NCCLComm> coalescedComm_ = nullptr;
+
+  // Whether the coalesced calls are sync or async.
+  bool coalescedAsync_;
 
   // Whether or not wait() and synchronize() are blocking operations that wait
   // for the operation to complete.
