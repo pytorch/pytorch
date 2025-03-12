@@ -214,9 +214,6 @@ def reduction_combine(
     next_value,
     index: Optional[sympy.Symbol] = None,
     src_dtype=None,
-    welford_helper=None,
-    masked_welford_helper=None,
-    num_threads=None,
 ):
     is_bool = src_dtype == torch.bool
     if reduction_type == "sum":
@@ -231,16 +228,7 @@ def reduction_combine(
     if reduction_type in ("min", "max"):
         return f"{reduction_type}_propagate_nan({var}, {next_value})"
     if reduction_type == "welford_reduce":
-        if welford_helper and masked_welford_helper:
-            if num_threads:
-                return (
-                    f"welford_combine({var}, {next_value}, &{welford_helper}_arr[0], "
-                    f"&{masked_welford_helper}_arr[0], {num_threads})"
-                )
-            else:
-                return f"welford_combine({var}, {next_value}, &{welford_helper}, &{masked_welford_helper})"
-        else:
-            return f"welford_combine({var}, {next_value})"
+        return f"welford_combine({var}, {next_value})"
     if reduction_type == "welford_combine":
         if isinstance(next_value, tuple):
             mean, m2, weight = next_value
@@ -1893,7 +1881,8 @@ class CppKernel(Kernel):
         self.local_reduction_stores = IndentedBuffer()
         self.is_reduction = False
         self.non_parallel_reduction_prefix = IndentedBuffer()
-        self.non_parallel_reduction_suffix = IndentedBuffer()
+        self.welford_reduction_stores = IndentedBuffer()
+        self.local_welford_reduction_stores = IndentedBuffer()
         self.reduction_cse = CSE(self.newvar_prefix, self.suffix, name_prefix="tmp_acc")
         self.welford_helper_cse = CSE(
             self.newvar_prefix, self.suffix, name_prefix="welford_helper"
@@ -2231,8 +2220,6 @@ class CppKernel(Kernel):
                     suffix = kernel.reduction_suffix
                     if parallel:
                         suffix = kernel.parallel_reduction_suffix + suffix
-                    else:
-                        suffix = kernel.non_parallel_reduction_suffix + suffix
                     return suffix
                 else:
                     prefix = kernel.reduction_prefix
@@ -2263,6 +2250,14 @@ class CppKernel(Kernel):
                             code.splice(kernel.local_reduction_init)
 
                     gen_loop_at(_loop_nest, depth)
+
+                    if loop.is_reduction and not in_reduction:
+                        if loop.parallel:
+                            if kernel.local_welford_reduction_stores:
+                                code.splice(kernel.local_welford_reduction_stores)
+                        else:
+                            if kernel.welford_reduction_stores:
+                                code.splice(kernel.welford_reduction_stores)
 
                     if is_reduction_loop and loop.parallel:
                         if kernel.local_reduction_stores:
@@ -2910,6 +2905,18 @@ class CppVecKernel(CppKernel):
             self.stores.writeline(
                 f"{acc_vec_} = {self.reduction_combine_vec(reduction_type, acc_vec_, value, True)};"
             )
+            self.welford_reduction_stores.writeline(
+                f"{acc_vec} = welford_combine({acc_vec}, &{self.welford_helper_val});"
+            )
+            self.welford_reduction_stores.writeline(
+                f"{masked_acc_vec} = welford_combine({masked_acc_vec}, &{self.masked_welford_helper_val});"
+            )
+            self.local_welford_reduction_stores.writeline(
+                f"{acc_vec}_local = welford_combine({acc_vec}_local, &{self.welford_helper_val});"
+            )
+            self.local_welford_reduction_stores.writeline(
+                f"{masked_acc_vec}_local = welford_combine({masked_acc_vec}_local, &{self.masked_welford_helper_val});"
+            )
         else:
             assert self.reduction_depth is not None
             index = self.itervars[self.reduction_depth]
@@ -2941,16 +2948,6 @@ class CppVecKernel(CppKernel):
             reduction_init_fn=reduction_init,
         )
         if reduction_type == "welford_reduce":
-            num_threads = (
-                "max_threads" if config.cpp.dynamic_threads else parallel_num_threads()
-            )
-            self.parallel_reduction_prefix.writeline(
-                f"WelfordHelper<{self._get_vec_type(dtype)}> {self.welford_helper_val}_arr[{num_threads}];"
-            )
-            self.welford_helper_val_in_array = f"{self.welford_helper_val}_arr[tid]"
-            self.local_reduction_stores.writeline(
-                f"{self.welford_helper_val_in_array} = {self.welford_helper_val};"
-            )
             # use masked acc_vec for tail vec kernel
             self._gen_parallel_reduction_buffers(
                 masked_acc_vec,
@@ -2959,15 +2956,6 @@ class CppVecKernel(CppKernel):
                 dtype,
                 reduction_combine_fn=self.reduction_combine_vec,
                 reduction_init_fn=self.reduction_init_vec,
-            )
-            self.parallel_reduction_prefix.writeline(
-                f"WelfordHelper<{self._get_vec_type(dtype)}> {self.masked_welford_helper_val}_arr[{num_threads}];"
-            )
-            self.masked_welford_helper_val_in_array = (
-                f"{self.masked_welford_helper_val}_arr[tid]"
-            )
-            self.local_reduction_stores.writeline(
-                f"{self.masked_welford_helper_val_in_array} = {self.masked_welford_helper_val};"
             )
         tmpvar: Union[str, CSEVariable]
         is_bool = dtype == torch.bool
@@ -2978,81 +2966,46 @@ class CppVecKernel(CppKernel):
                     1,
                     2,
                 ], "Welford reduction does not support VectorizedN (N>2)"
-                next_value = (
-                    f"welford_vec_reduce_all({acc_vec}, &{self.welford_helper_val})"
-                )
-                self.non_parallel_reduction_suffix.writeline(
-                    f"{acc} = {reduction_combine(reduction_type, acc, next_value, src_dtype=src_dtype)};"
-                )
-                parallel_next_value = f"welford_vec_reduce_all({acc_vec}, &{self.welford_helper_val}_arr[0], {self.num_threads})"
-                self.parallel_reduction_suffix.writeline(
-                    f"{acc} = {reduction_combine(reduction_type, acc, parallel_next_value, src_dtype=src_dtype)};"
-                )
-                masked_next_value = f"welford_vec_reduce_all({masked_acc_vec}, &{self.masked_welford_helper_val})"
-                self.non_parallel_reduction_suffix.writeline(
+                next_value = f"welford_vec_reduce_all({acc_vec})"
+                masked_next_value = f"welford_vec_reduce_all({masked_acc_vec})"
+                self.reduction_suffix.writeline(
                     f"{acc} = {reduction_combine(reduction_type, acc, masked_next_value)};"
                 )
-                parallel_masked_next_value = (
-                    f"welford_vec_reduce_all({masked_acc_vec}, "
-                    f"&{self.masked_welford_helper_val}_arr[0], {self.num_threads})"
-                )
-                self.parallel_reduction_suffix.writeline(
-                    f"{acc} = {reduction_combine(reduction_type, acc, parallel_masked_next_value, src_dtype=src_dtype)};"
-                )
-            else:
-                if argmax_or_argmin:
-                    next_value = f"{reduction_type}_vec_reduce_all({acc_vec})"
-                elif is_bool:
-                    if reduction_type in (
-                        "any",
-                        "sum",
-                        "max",
-                    ):
-                        next_value = f"!{acc_vec}.all_zero()"
-                    else:
-                        assert reduction_type == "min"
-                        next_value = f"{acc_vec}.all_masked()"
+            elif argmax_or_argmin:
+                next_value = f"{reduction_type}_vec_reduce_all({acc_vec})"
+            elif is_bool:
+                if reduction_type in (
+                    "any",
+                    "sum",
+                    "max",
+                ):
+                    next_value = f"!{acc_vec}.all_zero()"
                 else:
-                    reduce_all_body = (
-                        "{ return "
-                        + self.reduction_combine_vec(reduction_type, "x", "y")
-                        + "; }"
-                    )
-                    is_bool = dtype == torch.bool
-                    # we are using at::vec::VecMask<float, N> for bool
-                    vec_dtype = torch.float if is_bool else dtype
-                    vec = f"at::vec::Vectorized<{DTYPE_TO_CPP[vec_dtype]}>"
-                    vec_reduce_all_func = f"at::vec::vec_reduce_all<{DTYPE_TO_CPP[vec_dtype]}, {self._get_num_vectors(vec_dtype)}>"
-                    next_value = f"{vec_reduce_all_func}([]({vec}& x, {vec}& y) {reduce_all_body}, {acc_vec})"
-
-                self.reduction_suffix.writeline(
-                    f"{acc} = {reduction_combine(reduction_type, acc, next_value, src_dtype=src_dtype)};"
+                    assert reduction_type == "min"
+                    next_value = f"{acc_vec}.all_masked()"
+            else:
+                reduce_all_body = (
+                    "{ return "
+                    + self.reduction_combine_vec(reduction_type, "x", "y")
+                    + "; }"
                 )
+                is_bool = dtype == torch.bool
+                # we are using at::vec::VecMask<float, N> for bool
+                vec_dtype = torch.float if is_bool else dtype
+                vec = f"at::vec::Vectorized<{DTYPE_TO_CPP[vec_dtype]}>"
+                vec_reduce_all_func = f"at::vec::vec_reduce_all<{DTYPE_TO_CPP[vec_dtype]}, {self._get_num_vectors(vec_dtype)}>"
+                next_value = f"{vec_reduce_all_func}([]({vec}& x, {vec}& y) {reduce_all_body}, {acc_vec})"
+
+            self.reduction_suffix.writeline(
+                f"{acc} = {reduction_combine(reduction_type, acc, next_value, src_dtype=src_dtype)};"
+            )
             tmpvar = acc
         else:
             tmpvar = acc_vec
             if is_welford_reduction(reduction_type):
                 masked_tmpvar = f"masked_{tmpvar}"
-                non_parallel_reduction_combine_line = reduction_combine(
-                    reduction_type,
-                    tmpvar,
-                    masked_tmpvar,
-                    welford_helper=self.welford_helper_val,
-                    masked_welford_helper=self.masked_welford_helper_val,
-                )
-                self.non_parallel_reduction_suffix.writeline(
-                    f"{tmpvar} = {non_parallel_reduction_combine_line};"
-                )
-                parallel_reduction_combine_line = reduction_combine(
-                    reduction_type,
-                    tmpvar,
-                    masked_tmpvar,
-                    welford_helper=self.welford_helper_val,
-                    masked_welford_helper=self.masked_welford_helper_val,
-                    num_threads=self.num_threads,
-                )
-                self.parallel_reduction_suffix.writeline(
-                    f"{tmpvar} = {parallel_reduction_combine_line};"
+                self.reduction_suffix.writeline(
+                    f"{tmpvar} = {reduction_combine(reduction_type, tmpvar, masked_tmpvar)};"
                 )
 
         result = reduction_project(reduction_type, tmpvar)
@@ -4446,8 +4399,9 @@ class CppKernelProxy(CppKernel):
         self.non_parallel_reduction_prefix.splice(
             main_kernel.non_parallel_reduction_prefix
         )
-        self.non_parallel_reduction_suffix.splice(
-            main_kernel.non_parallel_reduction_suffix
+        self.welford_reduction_stores.splice(main_kernel.welford_reduction_stores)
+        self.local_welford_reduction_stores.splice(
+            main_kernel.local_welford_reduction_stores
         )
 
 
