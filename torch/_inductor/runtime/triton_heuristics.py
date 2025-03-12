@@ -559,14 +559,14 @@ class CachingAutotuner(KernelInterface):
             triton_hash_to_path_key(binary.hash), self.triton_meta.get("device", 0)
         )
         # If the binary has a cubin file to directly launch, save it on the binary
-        # static_launcher = StaticTritonCompileResult.can_statically_launch(
-        #     binary, self.inductor_meta, self.triton_meta, self.heuristic_type
-        # )
-        # if static_launcher is not None:
-        #     result = StaticTritonCompileResult(
-        #         static_launcher, cfg, compile_meta, self.inductor_meta
-        #     )
-        #     return result
+        static_launcher = StaticTritonCompileResult.can_statically_launch(
+            binary, self.inductor_meta, self.triton_meta, self.heuristic_type
+        )
+        if static_launcher is not None:
+            result = StaticTritonCompileResult(
+                static_launcher, cfg, compile_meta, self.inductor_meta
+            )
+            return result
 
         return TritonCompileResult(binary, cfg, compile_meta, self.inductor_meta)
 
