@@ -193,10 +193,10 @@ def run_single_experiment_group(
         except Exception as e:
             print(f"Benchmark config {config.name()} failed: {e}")
             results.append(
-            ExperimentResults(
+                ExperimentResults(
                     name=config.name(),
-                    forward_time=float('inf'),
-                    compilation_time=float('inf'),
+                    forward_time=float("inf"),
+                    compilation_time=float("inf"),
                 )
             )
             continue
@@ -322,9 +322,7 @@ def main():
     ):
         group_results = run_single_experiment_group(group_config)
         results.append(
-            ExperimentGroup(
-                config=group_config, results=group_results
-            ),
+            ExperimentGroup(config=group_config, results=group_results),
         )
 
     print_results(results)
