@@ -57,7 +57,7 @@ runs:
         submodules: ${{ inputs.submodules }}
         show-progress: false
 
-    - name: Remove entire workspace if checkout failed
+    - name: Clean workspace (try again)
       if: ${{ steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' &&
         (steps.first-clean != 'success' || steps.first-checkout-attempt.outcome != 'success') }}
       shell: bash
@@ -75,7 +75,7 @@ runs:
         fi
         mkdir "${GITHUB_WORKSPACE}"
 
-    - name: Checkout PyTorch
+    - name: Checkout PyTorch (try again)
       uses: actions/checkout@v4
       if: ${{ steps.first-clean != 'success' || steps.first-checkout-attempt.outcome != 'success' }}
       with:
