@@ -68,8 +68,8 @@ struct IsVecType: std::false_type {};
 #if INDUCTOR_USE_VECTOR_TYPES()
 template <typename T>
 struct IsVecType<at::vec::Vectorized<T>>: std::true_type {};
-template <typename T>
-struct IsVecType<at::vec::VectorizedN<T, 2>>: std::true_type {};
+template <typename T, int N>
+struct IsVecType<at::vec::VectorizedN<T, N>>: std::true_type {};
 #endif
 
 template <typename T>

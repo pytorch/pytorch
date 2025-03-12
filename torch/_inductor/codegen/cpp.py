@@ -2814,10 +2814,10 @@ class CppVecKernel(CppKernel):
                 self.reduction_init_vec,
             )
         )
-        reduction_size = functools.reduce(
-            lambda x, y: x * y, self.ranges[self.reduction_depth :]
-        )
         if reduction_type == "welford_reduce":
+            reduction_size = functools.reduce(
+                lambda x, y: x * y, self.ranges[self.reduction_depth :]
+            )
             # save the reciprocal of weights for welford reduce
             assert self.reduction_depth is not None
             # use masked acc_vec for tail vec kernel
