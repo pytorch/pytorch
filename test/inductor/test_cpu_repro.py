@@ -1028,6 +1028,21 @@ class CPUReproTests(TestCase):
         a = torch.randn(1, 3)
         self.common(fn, (a,))
 
+    def test_tanh_atan2(self):
+        # https://github.com/pytorch/pytorch/issues/148241
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.shrink = nn.Tanhshrink()
+
+            def forward(self, x):
+                x = self.shrink(x)
+                x = torch.atan2(x, x)
+                return x
+
+        x = torch.randn(1, 3, 64, 64)
+        self.common(Model(), (x,))
+
     def test_index_propagation_issue_102065(self):
         def fn(x):
             x = torch.arange(x.numel())
@@ -3587,8 +3602,10 @@ class CPUReproTests(TestCase):
         opt_fn = torch.compile(fn, backend="inductor")
         _, code = run_and_get_cpp_code(opt_fn, x)
         self.assertTrue(same(fn(x), opt_fn(x)))
-        # def and use
-        FileCheck().check_count("cpp_fused", 2, exactly=True).run(code)
+        # declare, def, and use (declare and def are the same in non-cpp_wrapper mode)
+        FileCheck().check_count(
+            "cpp_fused", 3 if config.cpp_wrapper else 2, exactly=True
+        ).run(code)
 
     def test_invalid_index_of_empty_tensor(self):
         def fn(a):
