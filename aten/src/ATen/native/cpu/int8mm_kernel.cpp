@@ -72,31 +72,23 @@ static inline void transpose_16x16_fp32(__m512 a[16]) {
   });
 }
 
-void dequant_pack_k_16(
+void pack_k_16(
     const int8_t* B,
     BFloat16* B_packed,
-    const BFloat16* scales,
     const int ldb,
     const int n) {
   int ldb_packed = n;
-  __m512 scale[16];
   __m512 vb[16];
   for (int nn = 0; nn < n / 16; nn++) {
     c10::ForcedUnroll<8>{}([&](auto i) {
-      float ss = static_cast<float>(scales[i + nn * 8]);
-      scale[i] = _mm512_set1_ps(ss);
       __m128i b8 = _mm_load_si128((__m128i*)(B + (i + nn * 8) * ldb));
       __m512i b32 = _mm512_cvtepi8_epi32(b8);
       vb[i] = _mm512_cvtepi32_ps(b32);
-      vb[i] = _mm512_mul_ps(vb[i], scale[i]);
     });
     c10::ForcedUnroll<8>{}([&](auto i) {
-      float ss = static_cast<float>(scales[i + n / 2 + nn * 8]);
-      scale[i + 8] = _mm512_set1_ps(ss);
       __m128i b8 = _mm_load_si128((__m128i*)(B + (i + n / 2 + nn * 8) * ldb));
       __m512i b32 = _mm512_cvtepi8_epi32(b8);
       vb[i + 8] = _mm512_cvtepi32_ps(b32);
-      vb[i + 8] = _mm512_mul_ps(vb[i + 8], scale[i + 8]);
     });
     transpose_16x16_fp32(vb);
     c10::ForcedUnroll<16>{}([&](auto i) {
@@ -124,7 +116,6 @@ void int8pack_mm_kernel_<BFloat16>(
   int lda = K;
   int ldb = K;
   int ldc = N;
-  const int thread_num = get_num_threads();
   const int L2_cache = 4.8 * 1024 * 1024;
   const int n_block = 32;
   int k_block = std::min(K, (L2_cache / (n_block * 3)) / 16 * 16);
@@ -132,10 +123,26 @@ void int8pack_mm_kernel_<BFloat16>(
   if (k_tail == 0)
     k_tail = k_block;
   // n=32 has a better performance than 16.
-  static dnnl::ukernel::brgemm brg, brg_tail;
+  static dnnl::ukernel::brgemm brg_first, brg, brg_tail;
   static bool init = false;
   static size_t max_scratchpad_size = -1;
   if (!init) {
+    brg_first = dnnl::ukernel::brgemm(
+        M,
+        32,
+        k_block,
+        1,
+        lda,
+        n_block,
+        n_block,
+        dnnl::memory::data_type::bf16,
+        dnnl::memory::data_type::bf16,
+        dnnl::memory::data_type::f32);
+    brg_first.set_add_C(false);
+    brg_first.finalize();
+    brg_first.generate();
+    max_scratchpad_size =
+        std::max(max_scratchpad_size, brg_first.get_scratchpad_size());
     brg = dnnl::ukernel::brgemm(
         M,
         32,
@@ -150,6 +157,8 @@ void int8pack_mm_kernel_<BFloat16>(
     brg.set_add_C(true);
     brg.finalize();
     brg.generate();
+    max_scratchpad_size =
+        std::max(max_scratchpad_size, brg.get_scratchpad_size());
     brg_tail = dnnl::ukernel::brgemm(
         M,
         n_block,
@@ -162,11 +171,10 @@ void int8pack_mm_kernel_<BFloat16>(
         dnnl::memory::data_type::bf16,
         dnnl::memory::data_type::f32);
     brg_tail.set_post_ops(N, dnnl::memory::data_type::bf16);
+    brg_tail.set_B_scales(2);
     brg_tail.set_add_C(true);
     brg_tail.finalize();
     brg_tail.generate();
-    max_scratchpad_size =
-        std::max(max_scratchpad_size, brg.get_scratchpad_size());
     max_scratchpad_size =
         std::max(max_scratchpad_size, brg_tail.get_scratchpad_size());
     init = true;
@@ -187,6 +195,12 @@ void int8pack_mm_kernel_<BFloat16>(
     uint8_t scratchpad_local[max_scratchpad_size];
     for (int n = 0; n < local_n; n += n_block) {
       int nn = std::min(n, local_n - 16);
+      dnnl::ukernel::attr_params params;
+      float scale_fp32[n_block];
+      for (int i = 0; i < n_block; i++) {
+        scale_fp32[i] = static_cast<float>(scales_local[nn + i]);
+      }
+      params.set_B_scales(scale_fp32);
       for (int k_begin = 0; k_begin < K; k_begin += k_block) {
         bool is_tail = k_begin + k_block >= K;
         int k_local = is_tail ? k_tail : k_block;
@@ -198,20 +212,14 @@ void int8pack_mm_kernel_<BFloat16>(
                 k_tmp + 16 + k_back + nn * 16,
                 B_local + (nn + ii) * ldb + k_begin,
                 -k_back);
-          dequant_pack_k_16(k_tmp, B_pack_local, scales_local + nn, K, n_block);
+          pack_k_16(k_tmp, B_pack_local, K, n_block);
         } else {
-          dequant_pack_k_16(
-              B_local + nn * ldb + k_begin,
-              B_pack_local,
-              scales_local + nn,
-              K,
-              n_block);
+          pack_k_16(B_local + nn * ldb + k_begin, B_pack_local, K, n_block);
         }
         for (int kk = 16; kk < k_local; kk += 16) {
-          dequant_pack_k_16(
+          pack_k_16(
               B_local + nn * ldb + k_begin + kk,
               B_pack_local + kk * n_block,
-              scales_local + nn,
               K,
               n_block);
         }
@@ -222,14 +230,23 @@ void int8pack_mm_kernel_<BFloat16>(
               {{0, 0}},
               tmp_local,
               C_local + nn,
-              scratchpad_local);
+              scratchpad_local,
+              params);
         } else {
-          brg.execute(
-              A_data + k_begin,
-              B_pack_local,
-              {{0, 0}},
-              tmp_local,
-              scratchpad_local);
+          if (k_begin == 0)
+            brg_first.execute(
+                A_data + k_begin,
+                B_pack_local,
+                {{0, 0}},
+                tmp_local,
+                scratchpad_local);
+          else
+            brg.execute(
+                A_data + k_begin,
+                B_pack_local,
+                {{0, 0}},
+                tmp_local,
+                scratchpad_local);
         }
       }
     }
