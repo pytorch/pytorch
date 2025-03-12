@@ -1318,8 +1318,8 @@ If the above doesn't work, please subtmit an issue to GitHub.
 
         inp = torch.ones(3)
         out1 = a(inp, 1)
-        out2 = a(inp, 1)
         with torch.compiler.set_stance("fail_on_recompile"):
+            out2 = a(inp, 1)
             with self.assertRaisesRegex(RuntimeError, "fail_on_recompile"):
                 a(inp, 2)
 
