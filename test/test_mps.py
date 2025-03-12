@@ -710,8 +710,6 @@ def mps_ops_modifier(ops):
         'index_add': [torch.int64],
         'log1p': [torch.int64],
         'sigmoid': [torch.int64],
-        'atan2': [torch.int64],
-        'angle': [torch.int64],
 
         # Operations not supported for integral types
         'special.xlog1py': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],

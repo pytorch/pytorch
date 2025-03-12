@@ -272,7 +272,6 @@ Tensor& logical_not_out_mps(const Tensor& self, Tensor& output) {
 }
 
 Tensor& angle_out_mps(const Tensor& self, Tensor& output) {
-  TORCH_CHECK(self.scalar_type() != ScalarType::Long, "MPS does not support angle op with int64 input");
   if (mps::supportsComplex()) {
     mps::unary_op(self, output, "angle_out_mps", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
       auto realPart = [mpsGraph realPartOfTensor:inputTensor name:nil];
