@@ -1318,8 +1318,8 @@ If the above doesn't work, please subtmit an issue to GitHub.
 
         inp = torch.ones(3)
         out1 = a(inp, 1)
+        out2 = a(inp, 1)
         with torch.compiler.set_stance("fail_on_recompile"):
-            out2 = a(inp, 1)
             with self.assertRaisesRegex(RuntimeError, "fail_on_recompile"):
                 a(inp, 2)
 
@@ -1519,6 +1519,8 @@ If the above doesn't work, please subtmit an issue to GitHub.
         # test nested dont_skip_tracing
         # this also happens to test if a previously skipped frame (f4)
         # can actually be compiled if called as a top-level function (in the case of a graph break)
+        # TODO the reset is necessary for now since attempting to trace f4 previously
+        # resulted in an unconditional skip
         torch._dynamo.reset()
         f4_unskip = torch._dynamo.dont_skip_tracing(f4)
         cnts.clear()

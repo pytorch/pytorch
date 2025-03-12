@@ -18,7 +18,6 @@ __all__ = [
     "list_backends",
     "disable",
     "set_stance",
-    "dont_skip_tracing",
     "cudagraph_mark_step_begin",
     "wrap_numpy",
     "is_compiling",
@@ -311,20 +310,6 @@ def set_stance(
 
 # forbid in graph
 set_stance._dynamo_forbidden = True  # type: ignore[attr-defined]
-
-
-def dont_skip_tracing(fn=None, recursive=True):
-    """
-    This function provides a decorator to enable tracing of functions
-    intentionally marked by Dynamo developers to not be traced.
-
-    Args:
-        fn (optional): The function to enable
-        recursive (optional): A boolean value indicating whether to apply dont_skip_tracing recursively.
-    """
-    import torch._dynamo
-
-    return torch._dynamo.dont_skip_tracing(fn, recursive)
 
 
 def cudagraph_mark_step_begin():
