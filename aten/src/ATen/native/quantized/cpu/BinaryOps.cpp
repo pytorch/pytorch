@@ -387,15 +387,16 @@ Tensor xnnp_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
 
 #if AT_MKLDNN_ACL_ENABLED()
 Tensor acl_qadd(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
-  TORCH_CHECK(qa.ndimension() > 0, "acl_qadd(): Got empty input tensor.");
   TORCH_CHECK(
       qa.qscheme() == kPerTensorAffine || qa.qscheme() == kPerTensorSymmetric,
       "Only per tensor quantization is supported in ACL quantized add.");
 
-  auto qa_mem_format = qa.suggest_memory_format();
+  Tensor qa_contig = qa.contiguous(qa.suggest_memory_format());
+  Tensor qb_contig = qb.contiguous(qa.suggest_memory_format());
+  auto qa_mem_format = qa_contig.suggest_memory_format();
   Tensor dst = at::native::empty_affine_quantized(
-      at::infer_size_dimvector(qa.sizes(), qb.sizes()),
-      qa.scalar_type(),
+      at::infer_size_dimvector(qa_contig.sizes(), qb_contig.sizes()),
+      qa_contig.scalar_type(),
       std::nullopt /* layout */,
       kCPU,
       std::nullopt /* pin_memory */,
@@ -403,21 +404,21 @@ Tensor acl_qadd(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
       zero_point,
       qa_mem_format);
 
-  if (qb.size(0) == 0) {
+  if (qb_contig.size(0) == 0) {
     return dst;
   }
 
-  auto input_dims = qa.sizes().vec();
+  auto input_dims = qa_contig.sizes().vec();
   auto acl_dtype = dst.scalar_type() == kQInt8
       ? arm_compute::DataType::QASYMM8_SIGNED
       : arm_compute::DataType::QASYMM8;
   auto acl_add = std::make_shared<acl_utils::QuantAdd>(
       acl_dtype,
       input_dims,
-      qa.q_scale(),
-      qa.q_zero_point(),
-      qb.q_scale(),
-      qb.q_zero_point(),
+      qa_contig.q_scale(),
+      qa_contig.q_zero_point(),
+      qb_contig.q_scale(),
+      qb_contig.q_zero_point(),
       dst.q_scale(),
       dst.q_zero_point());
 
@@ -429,8 +430,8 @@ Tensor acl_qadd(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
 
   acl_add->configure();
 
-  acl_add->qa_tensor.allocator()->import_memory(qa.data_ptr());
-  acl_add->qb_tensor.allocator()->import_memory(qb.data_ptr());
+  acl_add->qa_tensor.allocator()->import_memory(qa_contig.data_ptr());
+  acl_add->qb_tensor.allocator()->import_memory(qb_contig.data_ptr());
   acl_add->qdst_tensor.allocator()->import_memory(dst.data_ptr());
 
   acl_add->q_add.run();
@@ -469,7 +470,7 @@ Tensor qadd(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
   }
 
 #if AT_MKLDNN_ACL_ENABLED()
-  if (!ReLUFused && qa.sizes() == qb.sizes() &&
+  if (!ReLUFused && qa.ndimension() > 0 && qa.sizes() == qb.sizes() &&
       qa.scalar_type() == qb.scalar_type() &&
       (qa.scalar_type() == kQInt8 || qa.scalar_type() == kQUInt8)) {
     return acl_qadd(qa, qb, scale, zero_point);
