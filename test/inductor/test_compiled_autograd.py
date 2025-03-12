@@ -3387,11 +3387,11 @@ class CompiledAutograd0(torch.nn.Module):
         validate_outputs_2 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_16, getitem_17], [((None, None, device(type='cpu'), 6, 0, None), [4, 4], False), ((None, None, device(type='cpu'), 6, 0, None), [4, 4], False)]);  getitem_16 = getitem_17 = None
         getitem_19 = validate_outputs_2[0]
 
-        accumulate_grad__1 = torch.ops.inductor.accumulate_grad_.default(getitem_4, getitem_19);  getitem_4 = getitem_19 = accumulate_grad__1 = None
+        accumulate_grad__default_1 = torch.ops.inductor.accumulate_grad_.default(getitem_4, getitem_19);  getitem_4 = getitem_19 = accumulate_grad__default_1 = None
 
         getitem_20 = validate_outputs_2[1];  validate_outputs_2 = None
 
-        accumulate_grad_ = torch.ops.inductor.accumulate_grad_.default(getitem_3, getitem_20);  getitem_3 = getitem_20 = accumulate_grad_ = None
+        accumulate_grad__default = torch.ops.inductor.accumulate_grad_.default(getitem_3, getitem_20);  getitem_3 = getitem_20 = accumulate_grad__default = None
 
         _exec_final_callbacks_stub = torch__dynamo_external_utils__exec_final_callbacks_stub();  _exec_final_callbacks_stub = None
         return []
@@ -3628,7 +3628,7 @@ class CompiledAutograd0(torch.nn.Module):
         validate_outputs_4 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_19], [((None, None, device(type='cpu'), 6, 0, None), [10, 10], False)]);  getitem_19 = None
         getitem_20 = validate_outputs_4[0];  validate_outputs_4 = None
 
-        accumulate_grad_ = torch.ops.inductor.accumulate_grad_.default(getitem_1, getitem_20);  getitem_1 = getitem_20 = accumulate_grad_ = None
+        accumulate_grad__default = torch.ops.inductor.accumulate_grad_.default(getitem_1, getitem_20);  getitem_1 = getitem_20 = accumulate_grad__default = None
         _exec_final_callbacks_stub = torch__dynamo_external_utils__exec_final_callbacks_stub();  _exec_final_callbacks_stub = None
         return []
 """,  # noqa: B950
@@ -3708,7 +3708,7 @@ class CompiledAutograd1(torch.nn.Module):
         validate_outputs_3 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_14], [((None, None, device(type='cpu'), 6, 0, None), [getitem_4], False)]);  getitem_14 = getitem_4 = None
         getitem_15 = validate_outputs_3[0];  validate_outputs_3 = None
 
-        accumulate_grad_ = torch.ops.inductor.accumulate_grad_.default(getitem_1, getitem_15);  getitem_1 = getitem_15 = accumulate_grad_ = None
+        accumulate_grad__default = torch.ops.inductor.accumulate_grad_.default(getitem_1, getitem_15);  getitem_1 = getitem_15 = accumulate_grad__default = None
         _exec_final_callbacks_stub = torch__dynamo_external_utils__exec_final_callbacks_stub();  _exec_final_callbacks_stub = None
         return []
 """,  # noqa: B950
@@ -3788,7 +3788,7 @@ class CompiledAutograd1(torch.nn.Module):
         validate_outputs_2 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_11], [((None, None, device(type='cpu'), 6, 0, None), [getitem_3], False)]);  getitem_11 = getitem_3 = None
         getitem_12 = validate_outputs_2[0];  validate_outputs_2 = None
 
-        accumulate_grad_ = torch.ops.inductor.accumulate_grad_.default(getitem_1, getitem_12);  getitem_1 = getitem_12 = accumulate_grad_ = None
+        accumulate_grad__default = torch.ops.inductor.accumulate_grad_.default(getitem_1, getitem_12);  getitem_1 = getitem_12 = accumulate_grad__default = None
         _exec_final_callbacks_stub = torch__dynamo_external_utils__exec_final_callbacks_stub();  _exec_final_callbacks_stub = None
         return []
 """,  # noqa: B950
