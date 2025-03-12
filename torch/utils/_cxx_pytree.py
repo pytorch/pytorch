@@ -34,12 +34,6 @@ from torch.utils._pytree import (
     FlattenFunc as FlattenFunc,
     FlattenWithKeysFunc as FlattenWithKeysFunc,
     FromDumpableContextFunc as FromDumpableContextFunc,
-    is_namedtuple as is_namedtuple,
-    is_namedtuple_class as is_namedtuple_class,
-    is_namedtuple_instance as is_namedtuple_instance,
-    is_structseq as is_structseq,
-    is_structseq_class as is_structseq_class,
-    is_structseq_instance as is_structseq_instance,
     KeyPath as KeyPath,
     PyTree as PyTree,
     ToDumpableContextFunc as ToDumpableContextFunc,
@@ -61,7 +55,6 @@ __all__ = [
     "keystr",
     "key_get",
     "register_pytree_node",
-    "tree_is_leaf",
     "tree_flatten",
     "tree_flatten_with_path",
     "tree_unflatten",
@@ -81,12 +74,6 @@ __all__ = [
     "treespec_dumps",
     "treespec_loads",
     "treespec_pprint",
-    "is_namedtuple",
-    "is_namedtuple_class",
-    "is_namedtuple_instance",
-    "is_structseq",
-    "is_structseq_class",
-    "is_structseq_instance",
 ]
 
 
