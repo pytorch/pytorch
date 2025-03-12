@@ -191,100 +191,128 @@ torch.library.opcheck(
 
 @dataclasses.dataclass
 class EncodedAttrs:
-    attr_keys: Sequence[str]
-    attr_types: Sequence[str]
-    attr_pos: Sequence[tuple[int, int]]
-    attr_ints: Sequence[int]
-    attr_floats: Sequence[float]
-    attr_strs: Sequence[str]
-    attr_tensors: Sequence[torch.Tensor]
+    attr_keys: list[str]
+    attr_types: list[str]
+    attr_pos: list[tuple[int, int]]
+    attr_ints: list[int]
+    attr_floats: list[float]
+    attr_strs: list[str]
+    attr_tensors: list[torch.Tensor]
 
-
-def encode_onnx_attrs(
-    attrs: dict[
-        str,
-        int
-        | float
-        | str
-        | bool
-        | torch.Tensor
-        | Sequence[int]
-        | Sequence[float]
-        | Sequence[str]
-        | Sequence[bool]
-        | Sequence[torch.Tensor],
-    ],
-) -> EncodedAttrs:
-    attr_keys: Sequence[str] = []
-    attr_types: Sequence[str] = []
-    attr_pos: Sequence[tuple[int, int]] = []
-    attr_ints: Sequence[int] = []
-    attr_floats: Sequence[float] = []
-    attr_strs: Sequence[str] = []
-    attr_tensors: Sequence[torch.Tensor] = []
-
-    for i, (k, v) in enumerate(attrs.items()):
-        attr_keys.append(k)
-        if isinstance(v, int):
-            start_pos = len(attr_ints)
-            attr_ints.append(v)
-            attr_pos.append((start_pos, start_pos + 1))
-            attr_types.append("i")
-        elif isinstance(v, float):
-            start_pos = len(attr_floats)
-            attr_floats.append(v)
-            attr_pos.append((start_pos, start_pos + 1))
-            attr_types.append("f")
-        elif isinstance(v, str):
-            start_pos = len(attr_strs)
-            attr_strs.append(v)
-            attr_pos.append((start_pos, start_pos + 1))
-            attr_types.append("s")
-        elif isinstance(v, torch.Tensor):
-            start_pos = len(attr_tensors)
-            attr_tensors.append(v)
-            attr_pos.append((start_pos, start_pos + 1))
-            attr_types.append("t")
-        elif isinstance(v, Sequence):
-            if len(v) == 0:
-                raise ValueError(f"Empty sequence for attribute {k}")
-            if any(isinstance(elem, float) for elem in v):
-                start_pos = len(attr_floats)
-                attr_floats.extend([float(elem) for elem in v])
-                attr_pos.append((start_pos, start_pos + len(v)))
-                attr_types.append("fs")
-            elif isinstance(v[0], int):
-                start_pos = len(attr_ints)
-                attr_ints.extend([int(elem) for elem in v])
-                attr_pos.append((start_pos, start_pos + len(v)))
-                attr_types.append("is")
-            elif isinstance(v[0], str):
-                start_pos = len(attr_strs)
-                attr_strs.extend([str(elem) for elem in v])
-                attr_pos.append((start_pos, start_pos + len(v)))
-                attr_types.append("ss")
-            elif isinstance(v[0], torch.Tensor):
-                start_pos = len(attr_tensors)
-                attr_tensors.extend([torch.tensor(elem) for elem in v])
-                attr_pos.append((start_pos, start_pos + len(v)))
-                attr_types.append("ts")
+    @classmethod
+    def from_dict(
+        cls,
+        attrs: dict[
+            str,
+            Union[
+                int,
+                float,
+                str,
+                bool,
+                torch.Tensor,
+                Sequence[int],
+                Sequence[float],
+                Sequence[str],
+                Sequence[bool],
+                Sequence[torch.Tensor],
+            ],
+        ],
+    ) -> "EncodedAttrs":
+        encoded = cls(
+            attr_keys=[],
+            attr_types=[],
+            attr_pos=[],
+            attr_ints=[],
+            attr_floats=[],
+            attr_strs=[],
+            attr_tensors=[],
+        )
+        for i, (k, v) in enumerate(attrs.items()):
+            encoded.attr_keys.append(k)
+            if isinstance(v, int):
+                start_pos = len(encoded.attr_ints)
+                encoded.attr_ints.append(v)
+                encoded.attr_pos.append((start_pos, start_pos + 1))
+                encoded.attr_types.append("i")
+            elif isinstance(v, float):
+                start_pos = len(encoded.attr_floats)
+                encoded.attr_floats.append(v)
+                encoded.attr_pos.append((start_pos, start_pos + 1))
+                encoded.attr_types.append("f")
+            elif isinstance(v, str):
+                start_pos = len(encoded.attr_strs)
+                encoded.attr_strs.append(v)
+                encoded.attr_pos.append((start_pos, start_pos + 1))
+                encoded.attr_types.append("s")
+            elif isinstance(v, torch.Tensor):
+                start_pos = len(encoded.attr_tensors)
+                encoded.attr_tensors.append(v)
+                encoded.attr_pos.append((start_pos, start_pos + 1))
+                encoded.attr_types.append("t")
+            elif isinstance(v, Sequence):
+                if len(v) == 0:
+                    raise ValueError(f"Empty sequence for attribute {k}")
+                if any(isinstance(elem, float) for elem in v):
+                    start_pos = len(encoded.attr_floats)
+                    encoded.attr_floats.extend([float(elem) for elem in v])
+                    encoded.attr_pos.append((start_pos, start_pos + len(v)))
+                    encoded.attr_types.append("fs")
+                elif isinstance(v[0], int):
+                    start_pos = len(encoded.attr_ints)
+                    encoded.attr_ints.extend([int(elem) for elem in v])
+                    encoded.attr_pos.append((start_pos, start_pos + len(v)))
+                    encoded.attr_types.append("is")
+                elif isinstance(v[0], str):
+                    start_pos = len(encoded.attr_strs)
+                    encoded.attr_strs.extend([str(elem) for elem in v])
+                    encoded.attr_pos.append((start_pos, start_pos + len(v)))
+                    encoded.attr_types.append("ss")
+                elif isinstance(v[0], torch.Tensor):
+                    start_pos = len(encoded.attr_tensors)
+                    encoded.attr_tensors.extend([torch.tensor(elem) for elem in v])
+                    encoded.attr_pos.append((start_pos, start_pos + len(v)))
+                    encoded.attr_types.append("ts")
+                else:
+                    raise ValueError(f"Unsupported sequence type for attribute {k}")
             else:
-                raise ValueError(f"Unsupported sequence type for attribute {k}")
-        else:
-            raise ValueError(f"Unsupported attribute type for {k}: {type(v)}")
-    assert len(attr_keys) == len(attr_types), (
-        f"Mismatch between number of attribute keys and types: {len(attr_keys)} != {len(attr_types)}"
-    )
-    assert len(attr_keys) == len(attr_pos), (
-        f"Mismatch between number of attribute keys and positions: {len(attr_keys)} != {len(attr_pos)}"
-    )
+                raise ValueError(f"Unsupported attribute type for {k}: {type(v)}")
+        assert len(encoded.attr_keys) == len(encoded.attr_types), (
+            f"Mismatch between number of attribute keys and types: {len(encoded.attr_keys)} != {len(encoded.attr_types)}"
+        )
+        assert len(encoded.attr_keys) == len(encoded.attr_pos), (
+            f"Mismatch between number of attribute keys and positions: {len(encoded.attr_keys)} != {len(encoded.attr_pos)}"
+        )
+        return encoded
 
-    return EncodedAttrs(
-        attr_keys=attr_keys,
-        attr_types=attr_types,
-        attr_pos=attr_pos,
-        attr_ints=attr_ints,
-        attr_floats=attr_floats,
-        attr_strs=attr_strs,
-        attr_tensors=attr_tensors,
-    )
+    @classmethod
+    def to_dict(cls, encoded: "EncodedAttrs") -> dict[str, Union[int, float, str]]:
+        attrs = {}
+        for i, key in enumerate(encoded.attr_keys):
+            attr_type = encoded.attr_types[i]
+            if attr_type == "i":
+                attrs[key] = encoded.attr_ints[encoded.attr_pos[i][0]]
+            elif attr_type == "f":
+                attrs[key] = encoded.attr_floats[encoded.attr_pos[i][0]]
+            elif attr_type == "s":
+                attrs[key] = encoded.attr_strs[encoded.attr_pos[i][0]]
+            elif attr_type == "t":
+                attrs[key] = encoded.attr_tensors[encoded.attr_pos[i][0]]
+            elif attr_type == "fs":
+                attrs[key] = encoded.attr_floats[
+                    encoded.attr_pos[i][0] : encoded.attr_pos[i][1]
+                ]
+            elif attr_type == "is":
+                attrs[key] = encoded.attr_ints[
+                    encoded.attr_pos[i][0] : encoded.attr_pos[i][1]
+                ]
+            elif attr_type == "ss":
+                attrs[key] = encoded.attr_strs[
+                    encoded.attr_pos[i][0] : encoded.attr_pos[i][1]
+                ]
+            elif attr_type == "ts":
+                attrs[key] = encoded.attr_tensors[
+                    encoded.attr_pos[i][0] : encoded.attr_pos[i][1]
+                ]
+            else:
+                raise ValueError(f"Unsupported attribute type: {attr_type}")
+        return attrs

@@ -74,7 +74,7 @@ def symbolic(
             raise ValueError(f"Unsupported dtype: {dtype}")
         dtype = _TORCH_DTYPE_TO_ONNX_DTYPE[dtype]
     domain, op_type = _parse_domain_op_type(domain_op)
-    encoded_attrs = _impl.encode_onnx_attrs(attrs)
+    encoded_attrs = _impl.EncodedAttrs.from_dict(attrs)
     # TODO: Parse domain
     return _impl._symbolic(
         inputs,
@@ -128,7 +128,7 @@ def symbolic_multi_out(
         else:
             onnx_dtypes.append(dtype)
     domain, op_type = _parse_domain_op_type(domain_op)
-    encoded_attrs = _impl.encode_onnx_attrs(attrs)
+    encoded_attrs = _impl.EncodedAttrs.from_dict(attrs)
     # Use the size of dtypes to determine the number of outputs
     return _impl._symbolic_multi_out(
         inputs,
