@@ -6,9 +6,9 @@ import typing
 from . import _impl
 
 
-@typing.overload
-def onnx_symbolic(
-    op_type: str,
+def symbolic(
+    domain_op: str,
+    /,
     inputs: Sequence[torch.Tensor],
     attrs: dict[
         str,
@@ -27,16 +27,17 @@ def onnx_symbolic(
     *,
     dtype: torch.dtype,
     shape: Sequence[int | torch.SymInt],
-    domain: str = "",
     version: Optional[int] = None,
     matadata_props: Optional[dict[str, str]] = None,
-    num_outputs: Literal[1] = 1,
-) -> torch.Tensor: ...
+    num_outputs: int = 1,
+) -> torch.Tensor:
+    return _impl._symbolic(...)
 
 
-@typing.overload
-def onnx_symbolic(
-    op_type: str,
+
+def symbolic_multi_out(
+    domain_op: str,
+    /,
     inputs: Sequence[torch.Tensor],
     attrs: dict[
         str,
@@ -55,38 +56,8 @@ def onnx_symbolic(
     *,
     dtype: torch.dtype,
     shape: Sequence[int | torch.SymInt],
-
-    domain: str = "",
     version: Optional[int] = None,
     matadata_props: Optional[dict[str, str]] = None,
     num_outputs: int,
 ) -> Sequence[torch.Tensor]: ...
-
-
-def onnx_symbolic(
-    op_type: str,
-    inputs: Sequence[torch.Tensor],
-    attrs: dict[
-        str,
-        int
-        | float
-        | str
-        | bool
-        | torch.Tensor
-        | Sequence[int]
-        | Sequence[float]
-        | Sequence[str]
-        | Sequence[bool]
-        | Sequence[torch.Tensor],
-    ]
-    | None = None,
-    *,
-    dtype: torch.dtype,
-    shape: Sequence[int | torch.SymInt],
-    domain: str = "",
-    version: Optional[int] = None,
-    matadata_props: Optional[dict[str, str]] = None,
-    num_outputs: int = 1,
-) -> torch.Tensor | Sequence[torch.Tensor]:
-    if num_outputs == 1:
-        return _impl._onnx_symbolic_single_output(...)
+    return _impl._symbolic_multi_out(...)
