@@ -336,9 +336,8 @@ jobs:
 
       - name: Check all txt
         shell: bash
-        continue-on-error:true
         run: |
-          ls *.txt
+          ls ./*.txt
 
       - name: Upload raw usage log to s3
         if: ${{ always() && steps.build.outcome != 'skipped' && !inputs.disable-monitor && inputs.build-environment != 'linux-s390x-binary-manywheel'}}
