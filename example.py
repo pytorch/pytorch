@@ -166,9 +166,6 @@ class QuantLinearTorchFunction(torch.nn.Module):
         )
 
 
-from torch.onnx.ops._impl import _symbolic
-
-
 class TestModule(torch.nn.Module):
     def forward(self, x):
         # return _symbolic(
@@ -205,6 +202,7 @@ class TestModule(torch.nn.Module):
             },
         )
 
+
 batch = torch.export.Dim("batch")
 ep = torch.export.export(
     TestModule(), (torch.ones(2, 1),), dynamic_shapes=({0: batch},), strict=False
@@ -213,19 +211,13 @@ print(ep)
 
 # ExportedProgram:
 #     class GraphModule(torch.nn.Module):
-#         def forward(self, c_lifted_tensor_0: "i64[]", x: "f32[s0, 1]"):
+#         def forward(self, x: "f32[s0, 1]"):
 #              #
 #             sym_size_int_1: "Sym(s0)" = torch.ops.aten.sym_size.int(x, 0)
 
-#              # File: /home/justinchu/dev/pytorch/example.py:174 in forward, code: [torch.tensor(42)],
-#             lift_fresh_copy: "i64[]" = torch.ops.aten.lift_fresh_copy.default(c_lifted_tensor_0);  c_lifted_tensor_0 = None
-#             detach_: "i64[]" = torch.ops.aten.detach_.default(lift_fresh_copy);  lift_fresh_copy = None
+#              # File: /home/justinchu/dev/pytorch/example.py:191 in forward, code: torch.onnx.ops.symbolic(
+#             _symbolic: "f32[s0, 1]" = torch.ops.onnx_symbolic._symbolic.default([x], 'Add', 1, [], shape = [sym_size_int_1, 1], attr_keys = ['key', 'attr', 'attr_ints', 'attr_floats'], attr_types = ['i', 's', 'is', 'fs'], attr_pos = [[0, 1], [0, 1], [1, 2], [0, 1]], attr_ints = [1, 1], attr_floats = [1.0], attr_strs = ['attr'], metadata_props_keys = ['meta_key'], metadata_props_values = ['meta_value'], domain = 'com.microsoft', version = 1);  x = sym_size_int_1 = _symbolic = None
+#             return (None,)
 
-#              # File: /home/justinchu/dev/pytorch/example.py:170 in forward, code: return _symbolic(
-#             _symbolic: "f32[s0, 1]" = torch.ops.onnx_symbolic._symbolic.default([x], 'Add', 1, [detach_], shape = [sym_size_int_1, 1], attr_keys = ['key'], attr_ints = [1], attr_floats = [1.0], attr_strs = ['attr'], attr_bools = [True], metadata_props_keys = ['meta_key'], metadata_props_values = ['meta_value'], domain = 'com.microsoft', version = 1);  x = detach_ = sym_size_int_1 = None
-#             return (_symbolic,)
-
-
-## Encoded
-
-# _symbolic: "f32[s0, 1]" = torch.ops.onnx_symbolic._symbolic.default([x], 'com.microsoft::Add', 1, [], shape = [sym_size_int_1, 1], attr_keys = ['key', 'attr', 'attr_bools', 'attr_ints', 'attr_floats'], attr_types = ['i', 's', 'is', 'is', 'fs'], attr_pos = [[0, 1], [0, 1], [1, 2], [2, 3], [0, 1]], attr_ints = [1, 1, 1], attr_floats = [1.0], attr_strs = ['attr'], attr_bools = [], metadata_props_keys = ['meta_key'], metadata_props_values = ['meta_value'], domain = 'com.microsoft::Add', version = 1);  x = sym_size_int_1 = _symbolic = None
+# Graph signature: ExportGraphSignature(input_specs=[InputSpec(kind=<InputKind.USER_INPUT: 1>, arg=TensorArgument(name='x'), target=None, persistent=None)], output_specs=[OutputSpec(kind=<OutputKind.USER_OUTPUT: 1>, arg=ConstantArgument(name='', value=None), target=None)])
+# Range constraints: {s0: VR[0, int_oo]}

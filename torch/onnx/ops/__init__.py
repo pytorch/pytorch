@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import torch
-
 from torch.onnx.ops import _impl
 
 
@@ -35,6 +34,17 @@ _TORCH_DTYPE_TO_ONNX_DTYPE = {
 }
 
 
+def _parse_domain_op_type(domain_op: str) -> tuple[str, str]:
+    splitted = domain_op.split("::", 1)
+    if len(splitted) == 1:
+        domain = ""
+        op_type = splitted[0]
+    else:
+        domain = splitted[0]
+        op_type = splitted[1]
+    return domain, op_type
+
+
 def symbolic(
     domain_op: str,
     /,
@@ -63,11 +73,12 @@ def symbolic(
         if dtype not in _TORCH_DTYPE_TO_ONNX_DTYPE:
             raise ValueError(f"Unsupported dtype: {dtype}")
         dtype = _TORCH_DTYPE_TO_ONNX_DTYPE[dtype]
+    domain, op_type = _parse_domain_op_type(domain_op)
     encoded_attrs = _impl.encode_onnx_attrs(attrs)
     # TODO: Parse domain
     return _impl._symbolic(
         inputs,
-        domain_op,
+        op_type,
         dtype,
         encoded_attrs.attr_tensors,
         shape=shape,
@@ -77,10 +88,9 @@ def symbolic(
         attr_ints=encoded_attrs.attr_ints,
         attr_floats=encoded_attrs.attr_floats,
         attr_strs=encoded_attrs.attr_strs,
-        attr_bools=encoded_attrs.attr_bools,
         metadata_props_keys=metadata_props.keys() if metadata_props else [],
         metadata_props_values=metadata_props.values() if metadata_props else [],
-        domain=domain_op,
+        domain=domain,
         version=version,
     )
 
@@ -117,11 +127,12 @@ def symbolic_multi_out(
             onnx_dtypes.append(_TORCH_DTYPE_TO_ONNX_DTYPE[dtype])
         else:
             onnx_dtypes.append(dtype)
+    domain, op_type = _parse_domain_op_type(domain_op)
     encoded_attrs = _impl.encode_onnx_attrs(attrs)
     # Use the size of dtypes to determine the number of outputs
     return _impl._symbolic_multi_out(
         inputs,
-        domain_op,
+        op_type,
         onnx_dtypes,
         encoded_attrs.attr_tensors,
         shape=shapes,
@@ -129,9 +140,8 @@ def symbolic_multi_out(
         attr_ints=encoded_attrs.attr_ints,
         attr_floats=encoded_attrs.attr_floats,
         attr_strs=encoded_attrs.attr_strs,
-        attr_bools=encoded_attrs.attr_bools,
         metadata_props_keys=metadata_props.keys() if metadata_props else [],
         metadata_props_values=metadata_props.values() if metadata_props else [],
-        domain=domain_op,
+        domain=domain,
         version=version,
     )

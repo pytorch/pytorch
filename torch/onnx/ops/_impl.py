@@ -190,7 +190,7 @@ torch.library.opcheck(
 
 
 @dataclasses.dataclass
-class EncodeOnnxAttrs:
+class EncodedAttrs:
     attr_keys: Sequence[str]
     attr_types: Sequence[str]
     attr_pos: Sequence[tuple[int, int]]
@@ -214,7 +214,7 @@ def encode_onnx_attrs(
         | Sequence[bool]
         | Sequence[torch.Tensor],
     ],
-) -> EncodeOnnxAttrs:
+) -> EncodedAttrs:
     attr_keys: Sequence[str] = []
     attr_types: Sequence[str] = []
     attr_pos: Sequence[tuple[int, int]] = []
@@ -272,10 +272,14 @@ def encode_onnx_attrs(
                 raise ValueError(f"Unsupported sequence type for attribute {k}")
         else:
             raise ValueError(f"Unsupported attribute type for {k}: {type(v)}")
-    assert len(attr_keys) == len(attr_types), f"Mismatch between number of attribute keys and types: {len(attr_keys)} != {len(attr_types)}"
-    assert len(attr_keys) == len(attr_pos), f"Mismatch between number of attribute keys and positions: {len(attr_keys)} != {len(attr_pos)}"
+    assert len(attr_keys) == len(attr_types), (
+        f"Mismatch between number of attribute keys and types: {len(attr_keys)} != {len(attr_types)}"
+    )
+    assert len(attr_keys) == len(attr_pos), (
+        f"Mismatch between number of attribute keys and positions: {len(attr_keys)} != {len(attr_pos)}"
+    )
 
-    return EncodeOnnxAttrs(
+    return EncodedAttrs(
         attr_keys=attr_keys,
         attr_types=attr_types,
         attr_pos=attr_pos,
