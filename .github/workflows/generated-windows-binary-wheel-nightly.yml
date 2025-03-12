@@ -154,7 +154,7 @@ jobs:
     needs:
       - wheel-py3_9-cpu-build
       - get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -1103,7 +1103,7 @@ jobs:
     needs:
       - wheel-py3_9-xpu-build
       - get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -1338,7 +1338,7 @@ jobs:
     needs:
       - wheel-py3_10-cpu-build
       - get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -2287,7 +2287,7 @@ jobs:
     needs:
       - wheel-py3_10-xpu-build
       - get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -2522,7 +2522,7 @@ jobs:
     needs:
       - wheel-py3_11-cpu-build
       - get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -3471,7 +3471,7 @@ jobs:
     needs:
       - wheel-py3_11-xpu-build
       - get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -3706,7 +3706,7 @@ jobs:
     needs:
       - wheel-py3_12-cpu-build
       - get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -4655,7 +4655,7 @@ jobs:
     needs:
       - wheel-py3_12-xpu-build
       - get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -4890,7 +4890,7 @@ jobs:
     needs:
       - wheel-py3_13-cpu-build
       - get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -5839,7 +5839,7 @@ jobs:
     needs:
       - wheel-py3_13-xpu-build
       - get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -6074,7 +6074,7 @@ jobs:
     needs:
       - wheel-py3_13t-cpu-build
       - get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -7023,7 +7023,7 @@ jobs:
     needs:
       - wheel-py3_13t-xpu-build
       - get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 300
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
