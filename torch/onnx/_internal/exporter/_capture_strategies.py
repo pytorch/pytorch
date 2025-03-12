@@ -116,7 +116,7 @@ class CaptureStrategy(abc.ABC):
                 exception=e,
             )
         self._success(model)
-        return Result(exported_program, strategy=self.__call__.__name__)
+        return Result(exported_program, strategy=self.__class__.__name__)
 
     @abc.abstractmethod
     def _capture(
@@ -230,8 +230,6 @@ class JitTraceConvertStrategy(CaptureStrategy):
         # Avoid circular import
         from torch._export import converter as _torchscript_converter
 
-        del dynamic_shapes  # Unused
-
         flattened_args, spec = _pytree.tree_flatten((args, kwargs))
         flattened_args = tuple(flattened_args)
 
@@ -293,9 +291,16 @@ class JitTraceConvertStrategy(CaptureStrategy):
                 self._verbose_print(
                     f"Torch Script model has been saved to '{program_path}'."
                 )
-        return _torchscript_converter.TS2EPConverter(
-            jit_model, flattened_args
-        ).convert()
+        ep = _torchscript_converter.TS2EPConverter(jit_model, flattened_args).convert()
+        if dynamic_shapes is not None:
+            # Retrace with torch.export to get dynamic shapes
+            ep = torch.export.export(
+                ep.module(),
+                flattened_args,
+                dynamic_shapes=dynamic_shapes,
+                strict=False,
+            )
+        return ep
 
     def _enter(self, model) -> None:
         model_repr = _take_first_line(repr(model))
