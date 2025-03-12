@@ -1466,8 +1466,8 @@ class ScanModels:
     class ScanInCond(torch.nn.Module):
         def __init__(self, reverse, dim):
             super().__init__()
-            self.true_scan_linear = ScanModels.ScanConvAndLinear(reverse, dim)
-            self.false_scan_linear = ScanModels.ScanConvAndLinear(not reverse, dim)
+            self.true_scan_linear = ScanModels.ScanLinearWithView(reverse, dim)
+            self.false_scan_linear = ScanModels.ScanLinearWithView(not reverse, dim)
 
         def forward(self, scan_op, pred, init, xs):
             def true_fn():
@@ -1754,7 +1754,7 @@ class ScanTests(TestCase):
     @parametrize("scan_length", [1, 5])
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_scan_in_cond(self, device, dynamic, reverse, dim, pred, scan_length):
-        init = torch.randn(2, 4, 4, 4)
+        init = torch.randn(4, 4, 4)
         xs = torch.randn(scan_length, 4, 4, 4)
         xs = xs.movedim(0, dim)
         self._run_test(
