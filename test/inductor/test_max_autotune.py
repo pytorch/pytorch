@@ -57,7 +57,7 @@ def _get_func_call() -> str:
 
 
 def _get_kernel_launch() -> str:
-    return "call_triton_" if config.cpp_wrapper else ".run("
+    return "launchKernel(" if config.cpp_wrapper else ".run("
 
 
 def benchmark_choice(choice, args, out, expected_out, timings):

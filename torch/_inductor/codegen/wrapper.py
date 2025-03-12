@@ -49,7 +49,6 @@ from ..utils import (
     LineContext,
     sympy_product,
     sympy_str,
-    sympy_subs,
     triton_version_uses_attrs_dict,
 )
 from ..virtualized import V
@@ -62,7 +61,6 @@ from .common import (
     WorkspaceArg,
     WorkspaceZeroMode,
 )
-from .cpp_utils import cexpr
 from .triton_utils import config_of, should_unwrap_unspec_arg, signature_to_meta
 
 
@@ -842,7 +840,14 @@ class PythonWrapperCodegen(CodeGen):
         import_str = f"""
             import triton
             import triton.language as tl
-            from {triton_heuristics.__name__} import start_graph, end_graph
+            from {triton_heuristics.__name__} import (
+                grid,
+                split_scan_grid,
+                grid_combo_kernels,
+                start_graph,
+                end_graph,
+                cooperative_reduction_grid,
+            )
             """
         if config.triton.autotune_at_compile_time:
             self.kernel_autotune_calls.splice(import_str)
@@ -1128,6 +1133,44 @@ class PythonWrapperCodegen(CodeGen):
         args.append(f"out={out_view if out_view else out}")
         with debug_printer_manager:
             self.writeline(f"{kernel}({', '.join(args)})")
+
+    def generate_user_defined_triton_kernel(
+        self,
+        kernel_name: str,
+        raw_args: list[Any],
+        grid: list[Any],
+        configs,
+        triton_meta,
+        constexprs,
+    ):
+        grid_fn, code = user_defined_kernel_grid_fn_code(
+            kernel_name, configs, grid, wrapper=self
+        )
+        if not (config.triton.autotune_at_compile_time and V.graph.cpp_wrapper):
+            # When codegen the autotune block only, do no insert Triton kernel
+            # code into the main block
+            #
+            # Must happen after free symbols are already codegened
+            # Emit the grid wrapper function right before the call
+            for line in code.split("\n"):
+                self.writeline(line)
+
+        # Explicitly call the Python version of val_to_arg_str
+        args = [PythonWrapperCodegen.val_to_arg_str(self, v) for v in raw_args]
+        arg_types = [
+            arg.get_dtype() if isinstance(arg, IRNode) else type(arg)
+            for arg in raw_args
+        ]
+        # Because generate_kernel_call can be overriden by a subclass, explicitly call
+        # PythonWrapperCodegen.generate_kernel_call here
+        PythonWrapperCodegen.generate_kernel_call(
+            self,
+            kernel_name,
+            args,
+            grid_fn=grid_fn,
+            arg_types=arg_types,
+            raw_args=raw_args,
+        )
 
     def _generate_tma_descriptor_call(self, desc, apply_size_hints=False):
         dims = desc.dims
@@ -1656,15 +1699,13 @@ class PythonWrapperCodegen(CodeGen):
         kwargs,
         restore_value_args,
         reset_to_zero_args,
-        grids: list[list[Union[int, sympy.Expr]]],
     ):
         from torch.utils._triton import patch_triton_dtype_repr
 
-        from ..runtime.triton_heuristics import (
-            config_to_dict,
-            FixedGrid,
-            PrecomputedGrid,
-        )
+        patch_triton_dtype_repr()
+
+        original_name = kernel.__name__
+
         from .common import (
             ConstexprArg,
             KernelArgType,
@@ -1672,10 +1713,7 @@ class PythonWrapperCodegen(CodeGen):
             TensorArg,
             TMADescriptorArg,
         )
-        from .triton import gen_common_triton_imports, TritonKernel
 
-        patch_triton_dtype_repr()
-        original_name = kernel.__name__
         signature: list[KernelArgType] = []
         constants: dict[str, Any] = {}
         arg_indices: list[int] = []
@@ -1806,67 +1844,22 @@ class PythonWrapperCodegen(CodeGen):
         if reset_to_zero_args:
             triton_meta["reset_to_zero"] = tuple(reset_to_zero_args)
 
-        if len(grids) == 1:
-            # compute the grid in the wrapper and pass it in as an arg
-            inductor_meta: dict[str, Any] = FixedGrid.setup_grid_as_args()
-            extra_launcher_call_args = [*map(sympy.sympify, grids[0])]
-        else:
-
-            def rename_sizes_for_launcher(expr: Union[int, sympy.Expr]) -> sympy.Expr:
-                if isinstance(expr, sympy.Expr):
-                    symbols = [*expr.free_symbols]
-                    if not symbols:
-                        return expr
-                    symbols.sort(key=str)
-                    for sym in symbols:
-                        if sym in extra_launcher_args:
-                            continue
-                        extra_launcher_args[sym] = sympy.Symbol(
-                            f"_launcher_s{len(extra_launcher_args)}"
-                        )
-                    return sympy_subs(expr, extra_launcher_args)
-                assert isinstance(expr, int)
-                return sympy.Integer(expr)
-
-            extra_launcher_args: dict[sympy.Symbol, sympy.Symbol] = {}
-            grids = [[*map(rename_sizes_for_launcher, grid)] for grid in grids]
-
-            assert grids and len(grids) == len(configs)
-            precomputed_grids = []
-            for grid, cfg in sorted(
-                zip(grids, configs), key=lambda x: len(x[1].kwargs), reverse=True
-            ):
-                precomputed_grids.append(
-                    {
-                        "config": config_to_dict(cfg),
-                        "python": [*map(pexpr, grid)],
-                        "cpp": [*map(cexpr, grid)],
-                    }
-                )
-            inductor_meta = {
-                "grid_type": PrecomputedGrid.__name__,
-                "precomputed_grids": precomputed_grids,
-                "extra_launcher_args": [*map(str, extra_launcher_args.values())],
-            }
-            extra_launcher_call_args = [*extra_launcher_args.keys()]
-
         # Distinguish between different functions using function id
-        cache_key: Any = [id(kernel.fn)]
+        cache_key: list[Any] = [id(kernel.fn)]
         if len(configs) > 0:
             for arg in kwargs.values():
                 # We need to key on non tensor arg only in autotune mode
                 if not isinstance(arg, (ir.Buffer, ir.ReinterpretView)):
                     cache_key.append(arg)
         cache_key.append(str(triton_meta))
-        cache_key.extend(str(inductor_meta))
         cache_key = tuple(cache_key)
+
         if cache_key in self.user_defined_kernel_cache:
-            return (
-                *self.user_defined_kernel_cache[cache_key],
-                extra_launcher_call_args,
-            )
+            return self.user_defined_kernel_cache[cache_key]
 
         name = f"{original_name}_{len(self.user_defined_kernel_cache)}"
+        # Add to the cache for the next use
+        self.user_defined_kernel_cache[cache_key] = (name, triton_meta)
 
         compile_wrapper = IndentedBuffer()
         if config.triton.unique_user_kernel_names:
@@ -1874,14 +1867,28 @@ class PythonWrapperCodegen(CodeGen):
         else:
             compile_wrapper.writeline(f"async_compile.triton({original_name!r}, '''")
 
-        inductor_meta["kernel_name"] = name
-        inductor_meta.update(TritonKernel.inductor_meta_common())
+        from .triton import gen_common_triton_imports, TritonKernel
 
         compile_wrapper.splice(gen_common_triton_imports())
+
+        inductor_meta = {
+            "kernel_name": name,
+            **TritonKernel.inductor_meta_common(),
+        }
+
+        configs = [
+            {
+                "kwargs": config.kwargs,
+                "num_warps": config.num_warps,
+                "num_stages": config.num_stages,
+            }
+            for config in configs
+        ]
+
         compile_wrapper.splice(
             f"""
             @triton_heuristics.user_autotune(
-                configs={[*map(config_to_dict, configs)]!r},
+                configs={configs!r},
                 inductor_meta={inductor_meta!r},
                 triton_meta={triton_meta!r},
                 filename=__file__,
@@ -1906,9 +1913,7 @@ class PythonWrapperCodegen(CodeGen):
             compile_wrapper.getvalue(),
             metadata,
         )
-        # Add to the cache for the next use
-        self.user_defined_kernel_cache[cache_key] = (name, triton_meta)
-        return name, triton_meta, extra_launcher_call_args
+        return name, triton_meta
 
     def generate_numel_expr(self, kernel_name: str, tree, suffix: Optional[str] = None):
         expr = f"{kernel_name}_{tree.prefix}numel"
@@ -2021,7 +2026,17 @@ class PythonWrapperCodegen(CodeGen):
             """
         )
 
-    def prepare_triton_kernel_call(self, call_args):
+    def generate_default_grid(
+        self,
+        kernel_name: str,
+        grid_args: list[Any],
+        gpu: bool = True,
+        grid_callable: Optional[Callable[..., Any]] = None,
+        **grid_extra_kwags,
+    ):
+        return grid_args
+
+    def prepare_triton_kernel_call(self, device_index, call_args):
         def wrap_arg(arg):
             if isinstance(arg, str):
                 # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
@@ -2031,7 +2046,13 @@ class PythonWrapperCodegen(CodeGen):
             else:
                 return pexpr(V.graph.sizevars.simplify(arg))
 
-        return [wrap_arg(arg) for arg in call_args]
+        call_args = [wrap_arg(arg) for arg in call_args]
+
+        if device_index is None:
+            current_device = V.graph.get_current_device_or_throw()
+            device_index = current_device.index
+
+        return device_index, call_args
 
     def generate_example_arg_value(self, arg, arg_type, raw_arg=None, index=None):
         if isinstance(arg_type, torch_dtype):
@@ -2128,28 +2149,35 @@ class PythonWrapperCodegen(CodeGen):
         self,
         kernel_name: str,
         call_args,
-        *,
-        device=None,
+        grid=None,
+        device_index=None,
+        gpu=True,
         triton=True,
         arg_types=None,
         raw_args=None,
+        grid_fn: str = "grid",
         triton_meta=None,
+        autotune_configs=None,
+        grid_extra_kwargs="",
     ):
         """
         Generates kernel call code.
 
+        gpu: Defines whether the backend is GPU. Otherwise the backend is CPU.
+
         triton: Defines whether the backend uses Triton for codegen. Otherwise it uses the CUDA language when gpu=True,
                 and C++ when gpu=False.
         """
-        device = device or V.graph.get_current_device_or_throw()
-        if not (triton or device.type != "cpu"):
+        if not (triton or gpu):
             self.writeline(self.wrap_kernel_call(kernel_name, call_args))
             return
 
-        call_args_str = self.prepare_triton_kernel_call(call_args)
+        device_index, call_args_str = self.prepare_triton_kernel_call(
+            device_index, call_args
+        )
         call_args_str = ", ".join(call_args_str)
         stream_name = PythonWrapperCodegen.write_get_raw_stream(
-            self, device.index, V.graph
+            self, device_index, V.graph
         )
         if not triton:
             stream_ptr = f"c_void_p({stream_name})"
@@ -2204,8 +2232,17 @@ class PythonWrapperCodegen(CodeGen):
                     arg_str = self.generate_example_arg_value(arg, arg_type, raw_arg, i)
                 all_args.append(arg_str if key is None else f"{key}={arg_str}")
 
+            if grid is None:
+                grid_str = grid_fn
+            else:
+                grid_str = ", ".join(
+                    self.generate_example_arg_value(g, type(g)) for g in grid
+                )
+                if grid_extra_kwargs:
+                    grid_str = f"{grid_str}, {grid_extra_kwargs}"
+                grid_str = f"{grid_fn}({grid_str})"
             self.kernel_autotune_calls.writeline(
-                f"{kernel_name}.run({', '.join(all_args)}, stream={stream_name})"
+                f"{kernel_name}.run({', '.join(all_args)}, grid={grid_str}, stream={stream_name})"
             )
             self.kernel_autotune_calls.writeline(
                 f"del {', '.join(arg for arg in tensor_args.values())}\n",
@@ -2215,11 +2252,22 @@ class PythonWrapperCodegen(CodeGen):
                 # For cpp wrapper, no need to continue codegen for the main body
                 return
 
+        if grid is None:
+            grid_str = grid_fn
+        else:
+            grid_str = ", ".join(
+                PythonWrapperCodegen._grid_dim_str(self, item) for item in grid
+            )
+            if grid_extra_kwargs:
+                grid_str = f"{grid_str}, {grid_extra_kwargs}"
+            grid_str = f"{grid_fn}({grid_str})"
         # add debug printer code for triton kernel calls at (jit) inductor level
         debug_printer_manager = V.graph.wrapper_code.debug_printer
         debug_printer_manager.set_printer_args(call_args, kernel_name, arg_types, None)
         with debug_printer_manager:
-            self.writeline(f"{kernel_name}.run({call_args_str}, stream={stream_name})")
+            self.writeline(
+                f"{kernel_name}.run({call_args_str}, grid={grid_str}, stream={stream_name})"
+            )
 
     def writeline(self, line):
         self.lines.append(line)
