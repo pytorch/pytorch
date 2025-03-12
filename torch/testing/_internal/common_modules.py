@@ -1945,10 +1945,9 @@ def module_inputs_torch_nn_RMSNorm(module_info, device, dtype, requires_grad, tr
         dims = [ndim - i - 1 for i in range(len(normalized_shape))]
         upcasted_i = i.float()
         result = upcasted_i * torch.rsqrt(upcasted_i.pow(2).mean(dim=dims, keepdim=True) + m.eps)
-        result = result.type_as(i)
         if weight is not None:
             result *= weight
-        return result
+        return result.type_as(i)
 
     return [
         ModuleInput(
