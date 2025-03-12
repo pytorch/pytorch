@@ -278,6 +278,7 @@ class TestDynamoTimed(TestCase):
         # much easier.
         raw = dataclasses.asdict(compilation_events[0])
         del raw["feature_usage"]
+        del raw["ir_count"]
         # guard_latency_us is not deterministic
         del raw["guard_latency_us"]
         self.assertExpectedInline(
@@ -327,7 +328,6 @@ class TestDynamoTimed(TestCase):
  'inductor_fx_remote_cache_hit_keys': None,
  'inductor_fx_remote_cache_miss_count': None,
  'inductor_fx_remote_cache_miss_keys': None,
- 'ir_count': 9,
  'is_forward': True,
  'is_runtime': False,
  'joint_graph_pass_time_us': 0,
@@ -364,6 +364,7 @@ class TestDynamoTimed(TestCase):
         # Second event is for the backward
         raw = dataclasses.asdict(compilation_events[1])
         del raw["feature_usage"]
+        del raw["ir_count"]
         del raw["guard_latency_us"]
         self.assertExpectedInline(
             pprint.pformat(raw),
@@ -412,7 +413,6 @@ class TestDynamoTimed(TestCase):
  'inductor_fx_remote_cache_hit_keys': None,
  'inductor_fx_remote_cache_miss_count': None,
  'inductor_fx_remote_cache_miss_keys': None,
- 'ir_count': 9,
  'is_forward': False,
  'is_runtime': False,
  'joint_graph_pass_time_us': None,

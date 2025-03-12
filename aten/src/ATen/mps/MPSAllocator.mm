@@ -5,6 +5,7 @@
 #include <ATen/mps/MPSAllocator.h>
 #include <c10/core/Allocator.h>
 #include <c10/core/Storage.h>
+#include <ATen/detail/MPSHooksInterface.h>
 
 #include <iostream>
 
@@ -822,6 +823,9 @@ struct TORCH_API MPSAllocator final : public IMPSAllocator {
 
   void copy_data(void* dest, const void* src, std::size_t count, bool sync = false) const final {
     default_copy_data(dest, src, count);
+    if (sync) {
+      at::detail::getMPSHooks().deviceSynchronize();
+    }
   }
 
  private:
