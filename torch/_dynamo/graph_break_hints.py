@@ -19,3 +19,7 @@ SUPPORTABLE = [
 CAUSED_BY_EARLIER_GRAPH_BREAK = [
     "This graph break may have been caused by an earlier graph break. Resolving the earlier graph break may resolve this one.",
 ]
+INFERENCE_MODE = [
+    "Avoid using `tensor.is_inference()` and `torch.is_inference_mode_enabled()` in your compile code. "
+    "This is primarily used in conjunction with `torch.inference_mode`. ",
+]
