@@ -307,10 +307,20 @@ jobs:
           END_TIME=$(date +%s)
           echo "build_time=$((END_TIME - START_TIME))" >> "$GITHUB_OUTPUT"
 
+      - name: Check all txt
+        shell: bash
+        run: |
+          ls ./*.txt
+
       - name: Archive artifacts into zip
         if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped'
         run: |
           zip -1 -r artifacts.zip dist/ build/custom_test_artifacts build/lib build/bin .additional_ci_files
+
+      - name: Check all txt
+        shell: bash
+        run: |
+          ls ./*.txt
 
       - name: Store PyTorch Build Artifacts on S3
         uses: seemethere/upload-artifact-s3@v5
@@ -321,6 +331,11 @@ jobs:
           if-no-files-found: error
           path: artifacts.zip
           s3-bucket: ${{ inputs.s3-bucket }}
+          
+      - name: Check all txt
+        shell: bash
+        run: |
+          ls ./*.txt
 
       - name: Store PyTorch Build Artifacts for s390x
         uses: actions/upload-artifact@v4
