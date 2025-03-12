@@ -40,6 +40,7 @@ class ExampleTests(TestCase):
             args_export,
             kwargs_export,
             dynamic_shapes=case.dynamic_shapes,
+            strict=True,
         )
         exported_program.graph_module.print_readable()
 
@@ -72,6 +73,7 @@ class ExampleTests(TestCase):
                 case.example_args,
                 case.example_kwargs,
                 dynamic_shapes=case.dynamic_shapes,
+                strict=True,
             )
 
     exportdb_not_supported_rewrite_cases = [

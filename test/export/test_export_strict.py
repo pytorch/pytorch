@@ -12,22 +12,22 @@ from torch.export import export
 test_classes = {}
 
 
-def mocked_non_strict_export(*args, **kwargs):
-    # If user already specified strict, don't make it non-strict
+def mocked_strict_export(*args, **kwargs):
+    # If user already specified strict, don't make it strict
     if "strict" in kwargs:
         return export(*args, **kwargs)
-    return export(*args, **kwargs, strict=False)
+    return export(*args, **kwargs, strict=True)
 
 
 def make_dynamic_cls(cls):
-    cls_prefix = "NonStrictExport"
+    cls_prefix = "StrictExport"
 
     test_class = testing.make_test_cls_with_mocked_export(
         cls,
         cls_prefix,
-        test_export.NON_STRICT_SUFFIX,
-        mocked_non_strict_export,
-        xfail_prop="_expected_failure_non_strict",
+        test_export.STRICT_SUFFIX,
+        mocked_strict_export,
+        xfail_prop="_expected_failure_strict",
     )
 
     test_classes[test_class.__name__] = test_class
