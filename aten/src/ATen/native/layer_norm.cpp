@@ -315,16 +315,16 @@ Tensor rms_norm_symint(
       rqrst_input = rsqrt(at::pow(upcasted_input, 2).mean(dims_to_reduce_ref, /*keepdim=*/true).add_(eps_val));
     }
 
-    Tensor result = upcasted_input.mul(rqrst_input).type_as(input);
+    Tensor upcasted_result = upcasted_input.mul(rqrst_input);
 
     if (weight_opt.has_value()) {
-      result = result.mul(weight_opt.value());
+      upcasted_result = upcasted_result.mul(weight_opt.value());
     }
 
-    return result;
+    return upcasted_result;
   });
 
-  return result;
+  return result.type_as(input);
 
 }
 } // namespace at::native
