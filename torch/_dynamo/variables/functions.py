@@ -60,7 +60,6 @@ from ..utils import (
     counters,
     identity,
     is_function,
-    is_namedtuple_cls,
     is_wrapper_or_member_descriptor,
     istype,
     make_cell,
@@ -926,8 +925,7 @@ class UserMethodVariable(UserFunctionVariable):
             return invoke_and_store_as_constant(tx, fn, self.get_name(), args, kwargs)
 
         if (
-            inspect.isclass(self.obj.value)
-            and is_namedtuple_cls(self.obj.value)
+            isinstance(self.obj, variables.UserDefinedClassVariable)
             and (make := inspect.getattr_static(self.obj.value, "_make"))
             and self.fn is make.__func__
         ):
