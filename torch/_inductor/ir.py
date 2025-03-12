@@ -6053,8 +6053,7 @@ class UserDefinedTritonKernel(ExternKernel):
         # NOTE: raw_args doesn't include autotuned args.
         # But, kernel.constexprs includes indices of autotuned args.
         # So, let's recalculate constexpr indices wrt to raw_args.
-        constexpr_indices: list[int] = []
-
+        constexpr_indices = []
         assert hasattr(kernel, "arg_names") and hasattr(kernel, "constexprs")
         for idx, kwarg in enumerate(self.ordered_kwargs_for_cpp_kernel):
             if kernel.arg_names.index(kwarg) in kernel.constexprs:
@@ -6104,10 +6103,10 @@ class UserDefinedTritonKernel(ExternKernel):
                     if idx in removed_none_args:
                         index_shift += 1
                         continue
+                    arg_index = kernel.arg_names.index(kwarg)
                     assert hasattr(kernel, "arg_names") and hasattr(
                         kernel, "constexprs"
                     )
-                    arg_index = kernel.arg_names.index(kwarg)
                     if arg_index in kernel.constexprs:
                         constexpr_indices.append(idx - index_shift)
                     if arg_index in eq1_indices_set:
@@ -6750,7 +6749,7 @@ class FallbackKernel(ExternKernelAlloc):
         for info, arg in torch._library.utils.zip_schema(schema, args, kwargs):
             handle_aliasing_and_mutation(info, arg)
 
-    def codegen_unbacked_symbol_defs(self, wrapper) -> None:  # type: ignore[no-untyped-def]
+    def codegen_unbacked_symbol_defs(self, wrapper: PythonWrapperCodegen) -> None:
         return wrapper.codegen_unbacked_symbol_defs_for_outputs(
             self.get_name(), self.outputs, getattr(self, "unbacked_bindings", None)
         )
@@ -6885,19 +6884,23 @@ class FallbackKernel(ExternKernelAlloc):
             else:
                 raise RuntimeError(f"Unsupported return type {type(return_type)}")
 
-        assert isinstance(target, torch._ops.OpOverload)
-        returns = target._schema.returns
+        if isinstance(target, torch._higher_order_ops.torchbind.CallTorchBind):
+            returns = target.schema(args[0], args[1]).returns  # type: ignore[union-attr]
+        else:
+            assert isinstance(target, torch._ops.OpOverload)
+            returns = target._schema.returns
+
         if len(returns) == 1:
             # NOTE: [special handling of all_reduce_coalesced_'s return value]
             # all_reduce_coalesced_ return a list of tensors via self.mutation_outputs
             outputs = self.outputs if self.outputs else self.mutation_outputs
-            return_type = returns[0].real_type
+            return_type = returns[0].real_type  # type: ignore[attr-defined]
             output_arguments = [handle_single_output(return_type, outputs)]
         else:
-            # For tuple returns, e.g "-> (Tensor, Tensor)" or "-> (Tensor, Tensor[])"
+            # For tuple returns, e.g "-> (Tensor, Tensor)" or "-> (Tesnor, Tensor[])"
             # Not generating output args for self.mutation_outputs
             output_arguments = [
-                handle_single_output(return_schema.real_type, output)
+                handle_single_output(return_schema.real_type, output)  # type: ignore[attr-defined]
                 for return_schema, output in zip(returns, self.outputs)
             ]
 
@@ -7003,9 +7006,11 @@ class FallbackKernel(ExternKernelAlloc):
     @classmethod
     def create(cls, kernel: _OpOverloads, *args: Any, **kwargs: Any) -> FallbackKernel:
         fake_incorrect_kernels = (aten._fused_moving_avg_obs_fq_helper_functional,)
-        context: AbstractContextManager[None] = (
-            V.graph.fake_mode if kernel not in fake_incorrect_kernels else nullcontext()  # type: ignore[assignment]
-        )
+        if kernel not in fake_incorrect_kernels:
+            context = cast(AbstractContextManager[None], V.graph.fake_mode)
+        else:
+            context = nullcontext()
+
         with context:
             (
                 example_output,
@@ -7663,7 +7668,7 @@ class Conditional(ExternKernel):
             )
         ]
 
-        conditional.outputs = outputs  # type: ignore[assignment]
+        conditional.outputs = outputs  # Hype: ignore[assignment]
         return outputs
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
@@ -7678,7 +7683,7 @@ class Conditional(ExternKernel):
                 V.graph.sizevars.shape_env, unbacked_bindings
             )
             assert resolved is not None
-            return resolved.keys()  # type: ignore[return-value]
+            return OrderedSet(resolved.keys())
         else:
             return OrderedSet()
 
@@ -7906,7 +7911,7 @@ class TorchBindObject(NonTensorObj):
     name: str
     value: Union[FakeScriptObject, torch.ScriptObject]
 
-    def get_name(self):  # type: ignore[no-untyped-def]
+    def get_name(self) -> str:
         return self.name
 
     def codegen_reference(self, writer: Optional[IndentedBuffer] = None) -> str:
@@ -7924,7 +7929,10 @@ class TorchBindObject(NonTensorObj):
     def get_buf_bytes(self) -> int:
         # Returns the sum of all tensors in the flattened object
         real_script_obj = self.get_real_obj()
-        flat_dict = dict(real_script_obj.__obj_flatten__())  # type: ignore[attr-defined]
+        assert hasattr(real_script_obj, "__obj_flatten__")
+        flat_dict = dict(
+            real_script_obj.__obj_flatten__()
+        )  # Hype: ignore[attr-defined]
         flat_elems = pytree.tree_flatten(flat_dict)[0]
         flat_sizes = [
             x.element_size() * x.numel()
