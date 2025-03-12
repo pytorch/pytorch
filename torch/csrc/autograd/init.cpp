@@ -397,9 +397,6 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
     if (at::hasXPU()) {
       activities.insert(torch::profiler::impl::ActivityType::XPU);
     }
-    if (at::hasHPU()) {
-      activities.insert(torch::profiler::impl::ActivityType::HPU);
-    }
     if (at::hasMTIA()) {
       activities.insert(torch::profiler::impl::ActivityType::MTIA);
     }
