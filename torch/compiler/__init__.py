@@ -4,6 +4,8 @@ from typing_extensions import ParamSpec
 
 import torch
 
+from . import config
+
 
 if TYPE_CHECKING:
     from ._cache import CacheInfo
@@ -11,6 +13,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "compile",
+    "config",
     "assume_constant_result",
     "reset",
     "allow_in_graph",
