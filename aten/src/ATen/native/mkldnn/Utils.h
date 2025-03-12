@@ -11,6 +11,7 @@
 #include <vector>
 
 #if AT_MKLDNN_ENABLED()
+#include <ATen/core/grad_mode.h>
 #include <ideep/tensor.hpp>
 #endif // AT_MKLDNN_ENABLED()
 
@@ -110,8 +111,16 @@ constexpr bool is_arm_neoverse() {
 #if AT_MKLDNN_ENABLED()
 inline bool mkldnn_bf16_device_check() {
 #if defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC))
-  // Use ideep to check bf16 on X64 as cpuinfo has no avx_ne_convert check.
-  return ideep::has_bf16_type_support();
+  // Use ideep to check bf16 on X64 as cpuinfo has no check for avx_ne_convert,
+  // i.e., avx2_vnni_2.
+  if (ideep::has_bf16_type_support()) {
+    // oneDNN/mkldnn does not support bf16 backward on avx2_vnni_2
+    if (ideep::check_isa_is_avx2_vnni_2() && GradMode::is_enabled()) {
+      return false;
+    }
+    return true;
+  }
+  return false;
 #else
   return mkldnn_bf16_device_check_arm();
 #endif
@@ -119,7 +128,14 @@ inline bool mkldnn_bf16_device_check() {
 
 inline bool mkldnn_fp16_device_check() {
 #if defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC))
-  return ideep::has_fp16_type_support();
+  if (ideep::has_fp16_type_support()) {
+    // oneDNN/mkldnn does not support fp16 backward on avx2_vnni_2
+    if (ideep::check_isa_is_avx2_vnni_2() && GradMode::is_enabled()) {
+      return false;
+    }
+    return true;
+  }
+  return false;
 #else
   return false;
 #endif
