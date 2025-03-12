@@ -57,7 +57,8 @@ class Quant(torch.nn.Module):
                 tensor_clamp_impl=TensorClamp(),
                 input_view_impl=Identity(),
                 narrow_range=narrow_range,
-                signed=signed)
+                signed=signed,
+            )
             y = quant(scale, zero_point, bit_width, x)
             return y
 
@@ -163,8 +164,9 @@ class QuantLinearTorchFunction(torch.nn.Module):
         )
 
 
-
 from torch.onnx.ops._impl import _symbolic
+
+
 class TestModule(torch.nn.Module):
     def forward(self, x):
         return _symbolic(
@@ -185,19 +187,22 @@ class TestModule(torch.nn.Module):
         )
 
 
-ep = torch.export.export(TestModule(), (torch.tensor(1.0),), strict=False)
+batch = torch.export.Dim("batch")
+ep = torch.export.export(
+    TestModule(), (torch.ones(2, 1),), dynamic_shapes=({0: batch},), strict=False
+)
 print(ep)
 
 # ExportedProgram:
 #     class GraphModule(torch.nn.Module):
-#         def forward(self, c_lifted_tensor_0: "i64[]", x: "f32[]"):
-#              # File: /home/justinchu/dev/pytorch/torch/onnx/ops/_impl.py:236 in forward, code: [torch.tensor(42)],
+#         def forward(self, c_lifted_tensor_0: "i64[]", x: "f32[s0, 1]"):
+#              #
+#             sym_size_int_1: "Sym(s0)" = torch.ops.aten.sym_size.int(x, 0)
+
+#              # File: /home/justinchu/dev/pytorch/example.py:174 in forward, code: [torch.tensor(42)],
 #             lift_fresh_copy: "i64[]" = torch.ops.aten.lift_fresh_copy.default(c_lifted_tensor_0);  c_lifted_tensor_0 = None
 #             detach_: "i64[]" = torch.ops.aten.detach_.default(lift_fresh_copy);  lift_fresh_copy = None
 
-#              # File: /home/justinchu/dev/pytorch/torch/onnx/ops/_impl.py:232 in forward, code: return _symbolic(
-#             _symbolic: "f32[]" = torch.ops.onnx_symbolic._symbolic.default([x], 'Add', 1, [detach_], shape = [], attr_keys = ['key'], attr_ints = [1], attr_floats = [1.0], attr_strs = ['attr'], attr_bools = [True], metadata_props_keys = ['meta_key'], metadata_props_values = ['meta_value'], domain = 'com.microsoft', version = 1);  x = detach_ = None
+#              # File: /home/justinchu/dev/pytorch/example.py:170 in forward, code: return _symbolic(
+#             _symbolic: "f32[s0, 1]" = torch.ops.onnx_symbolic._symbolic.default([x], 'Add', 1, [detach_], shape = [sym_size_int_1, 1], attr_keys = ['key'], attr_ints = [1], attr_floats = [1.0], attr_strs = ['attr'], attr_bools = [True], metadata_props_keys = ['meta_key'], metadata_props_values = ['meta_value'], domain = 'com.microsoft', version = 1);  x = detach_ = sym_size_int_1 = None
 #             return (_symbolic,)
-
-# Graph signature: ExportGraphSignature(input_specs=[InputSpec(kind=<InputKind.CONSTANT_TENSOR: 4>, arg=TensorArgument(name='c_lifted_tensor_0'), target='lifted_tensor_0', persistent=None), InputSpec(kind=<InputKind.USER_INPUT: 1>, arg=TensorArgument(name='x'), target=None, persistent=None)], output_specs=[OutputSpec(kind=<OutputKind.USER_OUTPUT: 1>, arg=TensorArgument(name='_symbolic'), target=None)])
-# Range constraints: {}
