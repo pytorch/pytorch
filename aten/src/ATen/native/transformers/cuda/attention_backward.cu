@@ -47,6 +47,7 @@
 #include <ATen/native/transformers/hip/aotriton_adapter.h>
 #include <aotriton/flash.h>
 #include <aotriton/runtime.h>
+#include <ATen/native/transformers/hip/flash_attn/ck/me_ck_api.h>
 #endif
 #endif
 
@@ -412,90 +413,155 @@ _efficient_attention_backward(
 
 #ifdef USE_ROCM
   // ROCM Implementation
-  TORCH_CHECK(!num_splits_key.has_value(),
-              "ROCM does not support num_split_keys in _efficient_attention_forward");
-  TORCH_CHECK(!window_size.has_value(),
-              "ROCM does not support window_size in _efficient_attention_forward");
-  auto ret = aotriton::v2::flash::check_gpu(stream);
-  if (hipSuccess != ret) {
-    TORCH_CHECK(false,
-                "[AOTriton] Accelerated SDPA only supports MI200/MI300X/Navi31 GPUs"
-                " (gfx90a:sramecc+:xnack-/gfx942:sramecc+:xnack-/gfx1100)")
-  }
-  const auto softmax_scale = sdp::calculate_scale(query, scale).expect_float();
-  bool is_causal;
-  if (static_cast<int64_t>(sdp::CustomMaskType::CausalFromTopLeft) == custom_mask_type) {
-    is_causal = true;
-  } else if (static_cast<int64_t>(sdp::CustomMaskType::NoCustomMask) == custom_mask_type) {
-    is_causal = false;
-  } else {
-    TORCH_CHECK(false, "[_efficient_attention_backward] Unsupported mask type in AOTriton, for now");
-  }
-  at::Tensor q_t = query.permute({0,2,1,3});
-  at::Tensor k_t = key.permute({0,2,1,3});
-  at::Tensor v_t = value.permute({0,2,1,3});
-  at::Tensor out_t = out.permute({0,2,1,3});
-  at::Tensor dq_t = grad_q.permute({0,2,1,3});
-  at::Tensor dk_t = grad_k.permute({0,2,1,3});
-  at::Tensor dv_t = grad_v.permute({0,2,1,3});
-  at::Tensor dout_t = grad_out.permute({0,2,1,3});
-  at::Tensor softmax_lse = logsumexp.view({B * nH, max_seqlen_q});
-  at::Tensor delta = at::empty_like(softmax_lse).contiguous();
-
-  hipError_t err;
-  using aotriton::v2::flash::attn_bwd;
-  using aotriton::v2::flash::attn_bwd_compact_varlen;
-  using sdp::aotriton_adapter::mk_aotensor;
-  using sdp::aotriton_adapter::mk_aoscalartensor;
-  using sdp::aotriton_adapter::cast_dtype;
-  aotriton::TensorView<4> empty_t4(0, {0, 0, 0, 0}, {0, 0, 0, 0}, cast_dtype(query.dtype()));
-  if (cu_seqlens_q.has_value()) {
-    // varlen aka Nested tensor
-    err = attn_bwd_compact_varlen(mk_aotensor(q_t, "q"),
-                                  mk_aotensor(k_t, "k"),
-                                  mk_aotensor(v_t, "v"),
-                                  mk_aotensor<1>(cu_seqlens_q.value(), "cu_seqlens_q"),
-                                  mk_aotensor<1>(cu_seqlens_k.value(), "cu_seqlens_k"),
-                                  max_seqlen_q,
-                                  max_seqlen_k,
-                                  bias.has_value() ? mk_aotensor(bias.value(), "bias") : empty_t4,
-                                  softmax_scale,
-                                  mk_aotensor(out_t, "out"),
-                                  mk_aotensor(dout_t, "dout"),
-                                  mk_aotensor(dq_t, "dq"),
-                                  mk_aotensor(dk_t, "dk"),
-                                  mk_aotensor(dv_t, "dv"),
-                                  bias_requires_grad ? mk_aotensor(grad_bias, "db") : empty_t4,
-                                  mk_aotensor<2>(softmax_lse, "L"),
-                                  mk_aotensor<2>(delta, "delta"),
-                                  float(dropout_p),
-                                  mk_aoscalartensor(philox_seed),
-                                  mk_aoscalartensor(philox_offset),
-                                  0,
-                                  is_causal,
-                                  stream);
-  } else {
-    err = attn_bwd(mk_aotensor(q_t, "q"),
-                   mk_aotensor(k_t, "k"),
-                   mk_aotensor(v_t, "v"),
-                   bias.has_value() ? mk_aotensor(bias.value(), "bias") : empty_t4,
-                   softmax_scale,
-                   mk_aotensor(out_t, "out"),
-                   mk_aotensor(dout_t, "dout"),
-                   mk_aotensor(dq_t, "dq"),
-                   mk_aotensor(dk_t, "dk"),
-                   mk_aotensor(dv_t, "dv"),
-                   bias_requires_grad ? mk_aotensor(grad_bias, "db") : empty_t4,
-                   mk_aotensor<2>(softmax_lse, "L"),
-                   mk_aotensor<2>(delta, "delta"),
-                   float(dropout_p),
-                   mk_aoscalartensor(philox_seed),
-                   mk_aoscalartensor(philox_offset),
-                   0,
-                   is_causal,
-                   stream);
-  }
+  if(at::globalContext().getROCmFAPreferredBackend() == at::ROCmFABackend::Ck)
+  {
+#if defined(USE_CK_FLASH_ATTENTION)
+    const auto my_softmax_scale = sdp::calculate_scale(query, scale).expect_float();
+    // Store grad_bias in optional
+    std::optional<at::Tensor> opt_grad_bias = grad_bias;
+    auto
+        [dQ,
+         dK,
+         dV,
+         dBias] =
+             pytorch_flash::mem_eff_backward_ck(
+                     grad_out,
+                     query,
+                     key,
+                     value,
+                     out,
+                     logsumexp,
+                     grad_q,
+                     grad_k,
+                     grad_v,
+                     bias,
+                     bias_requires_grad,
+                     opt_grad_bias,
+                     cu_seqlens_q,
+                     cu_seqlens_k,
+                     max_seqlen_q,
+                     max_seqlen_k,
+                     float(dropout_p),
+                     my_softmax_scale,
+                     custom_mask_type == 0 ? false : true, // is_causal
+                     false, // deterministic
+                     false, // zero_tensors
+                     philox_seed,
+                     philox_offset);
+    grad_bias = dBias;
 #else
+    TORCH_CHECK(false, "Attempting to use CK mem_eff_backward backend in a build that has not built CK");
+#endif
+  } else {
+    TORCH_CHECK(!num_splits_key.has_value(),
+              "ROCM does not support num_split_keys in _efficient_attention_forward");
+    TORCH_CHECK(!window_size.has_value(),
+              "ROCM does not support window_size in _efficient_attention_forward");
+    auto ret = aotriton::v2::flash::check_gpu(stream);
+    if (hipSuccess != ret) {
+      TORCH_CHECK(false,
+                "[AOTriton] Accelerated SDPA only supports MI200/MI300X/7900XTX/9070XT GPUs"
+                " (gfx90a/gfx942/gfx1100/gfx1201)")
+    }
+    const auto softmax_scale = sdp::calculate_scale(query, scale).expect_float();
+    bool is_causal;
+    if (static_cast<int64_t>(sdp::CustomMaskType::CausalFromTopLeft) == custom_mask_type) {
+      is_causal = true;
+    } else if (static_cast<int64_t>(sdp::CustomMaskType::NoCustomMask) == custom_mask_type) {
+      is_causal = false;
+    } else {
+      TORCH_CHECK(false, "[_efficient_attention_backward] Unsupported mask type in AOTriton, for now");
+    }
+    at::Tensor q_t = query.permute({0,2,1,3});
+    at::Tensor k_t = key.permute({0,2,1,3});
+    at::Tensor v_t = value.permute({0,2,1,3});
+    at::Tensor out_t = out.permute({0,2,1,3});
+    at::Tensor dq_t = grad_q.permute({0,2,1,3});
+    at::Tensor dk_t = grad_k.permute({0,2,1,3});
+    at::Tensor dv_t = grad_v.permute({0,2,1,3});
+    at::Tensor dout_t = grad_out.permute({0,2,1,3});
+    at::Tensor softmax_lse = logsumexp.view({B * nH, max_seqlen_q});
+    hipError_t err;
+    using aotriton::v2::flash::attn_bwd;
+    using aotriton::v2::flash::attn_bwd_fused;
+    using aotriton::v2::flash::attn_bwd_compact_varlen;
+    using sdp::aotriton_adapter::mk_aotensor;
+    using sdp::aotriton_adapter::mk_aoscalartensor;
+    using sdp::aotriton_adapter::cast_dtype;
+    aotriton::TensorView<4> empty_t4(0, {0, 0, 0, 0}, {0, 0, 0, 0}, cast_dtype(query.dtype()));
+    if (cu_seqlens_q.has_value()) {
+      at::Tensor delta = at::empty_like(softmax_lse).contiguous();
+      // varlen aka Nested tensor
+      err = attn_bwd_compact_varlen(mk_aotensor(q_t, "q"),
+                                    mk_aotensor(k_t, "k"),
+                                    mk_aotensor(v_t, "v"),
+                                    mk_aotensor<1>(cu_seqlens_q.value(), "cu_seqlens_q"),
+                                    mk_aotensor<1>(cu_seqlens_k.value(), "cu_seqlens_k"),
+                                    max_seqlen_q,
+                                    max_seqlen_k,
+                                    bias.has_value() ? mk_aotensor(bias.value(), "bias") : empty_t4,
+                                    softmax_scale,
+                                    mk_aotensor(out_t, "out"),
+                                    mk_aotensor(dout_t, "dout"),
+                                    mk_aotensor(dq_t, "dq"),
+                                    mk_aotensor(dk_t, "dk"),
+                                    mk_aotensor(dv_t, "dv"),
+                                    bias_requires_grad ? mk_aotensor(grad_bias, "db") : empty_t4,
+                                    mk_aotensor<2>(softmax_lse, "L"),
+                                    mk_aotensor<2>(delta, "delta"),
+                                    float(dropout_p),
+                                    mk_aoscalartensor(philox_seed),
+                                    mk_aoscalartensor(philox_offset),
+                                    0,
+                                    is_causal,
+                                    stream);
+    } else { // cu_seqlens.has_value
+      auto d_head = Kv;
+      bool use_fused_bwd = d_head <= 192 && d_head * max_seqlen_q < 64 * 512;
+      if (use_fused_bwd) {
+        err = attn_bwd_fused(mk_aotensor(q_t, "q"),
+                             mk_aotensor(k_t, "k"),
+                             mk_aotensor(v_t, "v"),
+                             bias.has_value() ? mk_aotensor(bias.value(), "bias") : empty_t4,
+                             softmax_scale,
+                             mk_aotensor(out_t, "out"),
+                             mk_aotensor(dout_t, "dout"),
+                             mk_aotensor(dq_t, "dq"),
+                             mk_aotensor(dk_t, "dk"),
+                             mk_aotensor(dv_t, "dv"),
+                             bias_requires_grad ? mk_aotensor(grad_bias, "db") : empty_t4,
+                             mk_aotensor<2>(softmax_lse, "L"),
+                             float(dropout_p),
+                             mk_aoscalartensor(philox_seed),
+                             mk_aoscalartensor(philox_offset),
+                             0,
+                             is_causal,
+                             stream);
+      } else {
+        at::Tensor delta = at::empty_like(softmax_lse).contiguous();
+        err = attn_bwd(mk_aotensor(q_t, "q"),
+                     mk_aotensor(k_t, "k"),
+                     mk_aotensor(v_t, "v"),
+                     bias.has_value() ? mk_aotensor(bias.value(), "bias") : empty_t4,
+                     softmax_scale,
+                     mk_aotensor(out_t, "out"),
+                     mk_aotensor(dout_t, "dout"),
+                     mk_aotensor(dq_t, "dq"),
+                     mk_aotensor(dk_t, "dk"),
+                     mk_aotensor(dv_t, "dv"),
+                     bias_requires_grad ? mk_aotensor(grad_bias, "db") : empty_t4,
+                     mk_aotensor<2>(softmax_lse, "L"),
+                     mk_aotensor<2>(delta, "delta"),
+                     float(dropout_p),
+                     mk_aoscalartensor(philox_seed),
+                     mk_aoscalartensor(philox_offset),
+                     0,
+                     is_causal,
+                     stream);
+      } //used_fused_bwd
+    } // cuseqlen.has_value
+  } // Use CK
+#else // USE_CUDA
   at::Tensor workspace;
   cudaDeviceProp* p = at::cuda::getDeviceProperties(query.device().index());
   const int computeCapability = p->major * 10 + p->minor;

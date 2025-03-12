@@ -23,14 +23,14 @@ THPUtils_PySequence_to_CUDAStreamList(PyObject* obj) {
   for (Py_ssize_t i = 0; i < length; i++) {
     PyObject* stream = PySequence_Fast_GET_ITEM(seq.get(), i);
 
-    if (PyObject_IsInstance(stream, THCPStreamClass)) {
+    if (PyObject_IsInstance(stream, THPStreamClass)) {
       // Spicy hot reinterpret cast!!
       streams.emplace_back(at::cuda::CUDAStream::unpack3(
-          (reinterpret_cast<THCPStream*>(stream))->stream_id,
+          (reinterpret_cast<THPStream*>(stream))->stream_id,
           static_cast<c10::DeviceIndex>(
-              reinterpret_cast<THCPStream*>(stream)->device_index),
+              reinterpret_cast<THPStream*>(stream)->device_index),
           static_cast<c10::DeviceType>(
-              (reinterpret_cast<THCPStream*>(stream))->device_type)));
+              (reinterpret_cast<THPStream*>(stream))->device_type)));
     } else if (stream == Py_None) {
       streams.emplace_back();
     } else {

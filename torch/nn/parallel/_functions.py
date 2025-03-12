@@ -98,9 +98,7 @@ class Scatter(Function):
         streams = None
         if torch.accelerator.is_available() and ctx.input_device == -1:
             # Perform CPU to GPU copies in a background stream
-            streams = [
-                _get_stream(torch.device(device)) for device in target_gpus
-            ]
+            streams = [_get_stream(torch.device(device)) for device in target_gpus]
         outputs = comm.scatter(input, target_gpus, chunk_sizes, ctx.dim, streams)
         # Synchronize with the copy stream
         if streams is not None:
