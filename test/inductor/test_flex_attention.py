@@ -36,7 +36,6 @@ from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16, TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
-    expectedFailureXPU,
     flex_attention_supported_platform as supported_platform,
 )
 from torch.testing._internal.common_utils import IS_MACOS, skipIfXpu, TEST_WITH_ROCM
@@ -110,7 +109,7 @@ TEST_ON_CUDA = (
 )
 if HAS_GPU:
     if TEST_ON_CUDA:
-        test_device = GPU_TYPE
+        test_device = "cuda"
         test_dtypes = (
             [torch.float32, torch.bfloat16, torch.float16]
             if PLATFORM_SUPPORTS_BF16
@@ -328,6 +327,7 @@ class TestFlexAttention(InductorTestCase):
     def setUp(self):
         super().setUp()
         self.device = test_device
+        self.gold_dtype = torch.float64 if test_device != "xpu" else torch.float32
         if self.device == "cpu":
             if LONG_COMPILATION_ON_CPU:
                 self.skipTest(
@@ -467,9 +467,8 @@ class TestFlexAttention(InductorTestCase):
             block_mask = create_block_mask(
                 noop_mask, Q_B, Q_H, Q_S, KV_S, device=self.device
             )
-        gold_dtype = torch.float64 if not HAS_XPU else torch.float32
         q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
-        q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, gold_dtype)
+        q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, self.gold_dtype)
         sdpa_partial = create_attention(
             score_mod, block_mask, enable_gqa=(not Q_H == KV_H)
         )
@@ -490,7 +489,7 @@ class TestFlexAttention(InductorTestCase):
                 (Q_B, Q_H, Q_S, V_D), dtype=dtype, device=self.device
             )
 
-            golden_out.backward(backward_grad.to(gold_dtype))
+            golden_out.backward(backward_grad.to(self.gold_dtype))
             ref_out.backward(backward_grad)
             compiled_out.backward(backward_grad)
 
@@ -699,9 +698,7 @@ class TestFlexAttention(InductorTestCase):
             requires_grad=False,
         )
         q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
-        q_gold, k_gold, v_gold = query_key_value_clones(
-            q, k, v, torch.float64 if not HAS_XPU else torch.float32
-        )
+        q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, self.gold_dtype)
 
         if block_mask is None:
             block_mask = create_block_mask(
@@ -713,6 +710,7 @@ class TestFlexAttention(InductorTestCase):
         )
         golden_out, golden_lse = sdpa_partial(q_gold, k_gold, v_gold, return_lse=True)
         ref_out, ref_lse = sdpa_partial(q_ref, k_ref, v_ref, return_lse=True)
+
         compiled_out, compiled_lse = self.run_paged_attention(
             score_mod, q, k, v, dtype, block_mask
         )
@@ -767,9 +765,7 @@ class TestFlexAttention(InductorTestCase):
             requires_grad=not test_inference_only,
         )
         q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
-        q_gold, k_gold, v_gold = query_key_value_clones(
-            q, k, v, torch.float64 if not HAS_XPU else torch.float32
-        )
+        q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, self.gold_dtype)
         compiled_sdpa = torch.compile(sdpa_call)
         golden_out = sdpa_call(q_gold, k_gold, v_gold)
         ref_out = sdpa_call(q_ref, k_ref, v_ref)
@@ -786,9 +782,7 @@ class TestFlexAttention(InductorTestCase):
                 (Q_B, Q_H, Q_S, V_D), dtype=dtype, device=self.device
             )
 
-            golden_out.backward(
-                backward_grad.to(torch.float64 if not HAS_XPU else torch.float32)
-            )
+            golden_out.backward(backward_grad.to(self.gold_dtype))
             ref_out.backward(backward_grad)
             compiled_out.backward(backward_grad)
 
@@ -822,20 +816,22 @@ class TestFlexAttention(InductorTestCase):
         block_mask1 = create_block_mask(mask_mod, 1, 1, S, S, device=self.device)
         sdpa_partial1 = create_attention(score_mod, block_mask=block_mask1)
 
-        q1 = torch.randn((B, H, S, D), dtype=dtype, device=GPU_TYPE, requires_grad=True)
-        k1 = torch.randn((B, H, S, D), dtype=dtype, device=GPU_TYPE, requires_grad=True)
-        v1 = torch.randn((B, H, S, D), dtype=dtype, device=GPU_TYPE, requires_grad=True)
-        q1_ref, k1_ref, v1_ref = query_key_value_clones(q1, k1, v1)
-        q1_gold, k1_gold, v1_gold = query_key_value_clones(
-            q1, k1, v1, torch.float64 if not HAS_XPU else torch.float32
+        q1 = torch.randn(
+            (B, H, S, D), dtype=dtype, device=self.device, requires_grad=True
         )
+        k1 = torch.randn(
+            (B, H, S, D), dtype=dtype, device=self.device, requires_grad=True
+        )
+        v1 = torch.randn(
+            (B, H, S, D), dtype=dtype, device=self.device, requires_grad=True
+        )
+        q1_ref, k1_ref, v1_ref = query_key_value_clones(q1, k1, v1)
+        q1_gold, k1_gold, v1_gold = query_key_value_clones(q1, k1, v1, self.gold_dtype)
         ref_out1 = sdpa_partial1(q1_ref, k1_ref, v1_ref)
         golden_out1 = sdpa_partial1(q1_gold, k1_gold, v1_gold)
 
-        backward_grad1 = torch.randn((B, H, S, D), dtype=dtype, device=GPU_TYPE)
-        golden_out1.backward(
-            backward_grad1.to(torch.float64 if not HAS_XPU else torch.float32)
-        )
+        backward_grad1 = torch.randn((B, H, S, D), dtype=dtype, device=self.device)
+        golden_out1.backward(backward_grad1.to(self.gold_dtype))
         ref_out1.backward(backward_grad1)
 
         # Second batch with modified dimensions (B * 2, H, S / 2, D)
@@ -844,18 +840,23 @@ class TestFlexAttention(InductorTestCase):
         block_mask2 = create_block_mask(mask_mod, 1, 1, S, S, device=self.device)
         sdpa_partial2 = create_attention(score_mod, block_mask=block_mask2)
 
-        q2 = torch.randn((B, H, S, D), dtype=dtype, device=GPU_TYPE, requires_grad=True)
-        k2 = torch.randn((B, H, S, D), dtype=dtype, device=GPU_TYPE, requires_grad=True)
-        v2 = torch.randn((B, H, S, D), dtype=dtype, device=GPU_TYPE, requires_grad=True)
+        q2 = torch.randn(
+            (B, H, S, D), dtype=dtype, device=self.device, requires_grad=True
+        )
+        k2 = torch.randn(
+            (B, H, S, D), dtype=dtype, device=self.device, requires_grad=True
+        )
+        v2 = torch.randn(
+            (B, H, S, D), dtype=dtype, device=self.device, requires_grad=True
+        )
 
-        gold_dtype = torch.float64 if not HAS_XPU else torch.float32
         q2_ref, k2_ref, v2_ref = query_key_value_clones(q2, k2, v2)
-        q2_gold, k2_gold, v2_gold = query_key_value_clones(q2, k2, v2, gold_dtype)
+        q2_gold, k2_gold, v2_gold = query_key_value_clones(q2, k2, v2, self.gold_dtype)
         ref_out2 = sdpa_partial2(q2_ref, k2_ref, v2_ref)
         golden_out2 = sdpa_partial2(q2_gold, k2_gold, v2_gold)
 
-        backward_grad2 = torch.randn((B, H, S, D), dtype=dtype, device=GPU_TYPE)
-        golden_out2.backward(backward_grad2.to(gold_dtype))
+        backward_grad2 = torch.randn((B, H, S, D), dtype=dtype, device=self.device)
+        golden_out2.backward(backward_grad2.to(self.gold_dtype))
         ref_out2.backward(backward_grad2)
 
         # Third batch with modified dimensions (B * 2, H, S / 4, D)
@@ -863,16 +864,22 @@ class TestFlexAttention(InductorTestCase):
         block_mask3 = create_block_mask(mask_mod, 1, 1, S, S, device=self.device)
         sdpa_partial3 = create_attention(score_mod, block_mask=block_mask3)
 
-        q3 = torch.randn((B, H, S, D), dtype=dtype, device=GPU_TYPE, requires_grad=True)
-        k3 = torch.randn((B, H, S, D), dtype=dtype, device=GPU_TYPE, requires_grad=True)
-        v3 = torch.randn((B, H, S, D), dtype=dtype, device=GPU_TYPE, requires_grad=True)
+        q3 = torch.randn(
+            (B, H, S, D), dtype=dtype, device=self.device, requires_grad=True
+        )
+        k3 = torch.randn(
+            (B, H, S, D), dtype=dtype, device=self.device, requires_grad=True
+        )
+        v3 = torch.randn(
+            (B, H, S, D), dtype=dtype, device=self.device, requires_grad=True
+        )
         q3_ref, k3_ref, v3_ref = query_key_value_clones(q3, k3, v3)
-        q3_gold, k3_gold, v3_gold = query_key_value_clones(q3, k3, v3, gold_dtype)
+        q3_gold, k3_gold, v3_gold = query_key_value_clones(q3, k3, v3, self.gold_dtype)
         ref_out3 = sdpa_partial3(q3_ref, k3_ref, v3_ref)
         golden_out3 = sdpa_partial3(q3_gold, k3_gold, v3_gold)
 
-        backward_grad3 = torch.randn((B, H, S, D), dtype=dtype, device=GPU_TYPE)
-        golden_out3.backward(backward_grad3.to(gold_dtype))
+        backward_grad3 = torch.randn((B, H, S, D), dtype=dtype, device=self.device)
+        golden_out3.backward(backward_grad3.to(self.gold_dtype))
         ref_out3.backward(backward_grad3)
 
         # Clear dynamo counters
@@ -976,9 +983,8 @@ class TestFlexAttention(InductorTestCase):
             device=self.device,
             requires_grad=not test_inference_only,
         )
-        gold_dtype = torch.float64 if not HAS_XPU else torch.float32
         golden_out1 = sdpa_partial1(
-            q1.to(gold_dtype), k1.to(gold_dtype), v1.to(gold_dtype)
+            q1.to(self.gold_dtype), k1.to(self.gold_dtype), v1.to(self.gold_dtype)
         )
         ref_out1 = sdpa_partial1(q1, k1, v1)
 
@@ -1006,7 +1012,7 @@ class TestFlexAttention(InductorTestCase):
             requires_grad=not test_inference_only,
         )
         golden_out2 = sdpa_partial2(
-            q2.to(gold_dtype), k2.to(gold_dtype), v2.to(gold_dtype)
+            q2.to(self.gold_dtype), k2.to(self.gold_dtype), v2.to(self.gold_dtype)
         )
         ref_out2 = sdpa_partial2(q2, k2, v2)
 
@@ -1034,7 +1040,7 @@ class TestFlexAttention(InductorTestCase):
             requires_grad=not test_inference_only,
         )
         golden_out3 = sdpa_partial3(
-            q3.to(gold_dtype), k3.to(gold_dtype), v3.to(gold_dtype)
+            q3.to(self.gold_dtype), k3.to(self.gold_dtype), v3.to(self.gold_dtype)
         )
         ref_out3 = sdpa_partial3(q3, k3, v3)
 
@@ -1268,10 +1274,10 @@ class TestFlexAttention(InductorTestCase):
     )
     @common_utils.parametrize("do_s", test_strides[:3])
     def test_strided_inputs(self, dtype: torch.dtype, q_s, k_s, v_s, do_s):
-        q1 = torch.randn((B * H * S * D * 2), dtype=dtype, device=GPU_TYPE)
-        k1 = torch.randn((B * H * S * D * 2), dtype=dtype, device=GPU_TYPE)
-        v1 = torch.randn((B * H * S * D * 2), dtype=dtype, device=GPU_TYPE)
-        do1 = torch.randn((B * H * S * D * 2), dtype=dtype, device=GPU_TYPE)
+        q1 = torch.randn((B * H * S * D * 2), dtype=dtype, device=self.device)
+        k1 = torch.randn((B * H * S * D * 2), dtype=dtype, device=self.device)
+        v1 = torch.randn((B * H * S * D * 2), dtype=dtype, device=self.device)
+        do1 = torch.randn((B * H * S * D * 2), dtype=dtype, device=self.device)
 
         q_shape = (B, H, S // 2, D)
         k_shape = (B, H, S, D)
@@ -1331,7 +1337,7 @@ class TestFlexAttention(InductorTestCase):
 
     @supported_platform
     def test_doc_mask_sparse(self):
-        document_id = torch.zeros(S, dtype=torch.int, device=GPU_TYPE)
+        document_id = torch.zeros(S, dtype=torch.int, device=self.device)
         for i in range(0, S, 256):
             document_id[i : i + 256] = i // 256
 
@@ -1345,7 +1351,7 @@ class TestFlexAttention(InductorTestCase):
 
     @supported_platform
     def test_index_multiple(self):
-        bias = torch.randn(B, S, device=GPU_TYPE)
+        bias = torch.randn(B, S, device=self.device)
 
         def index_multiple(score, b, h, q_idx, kv_idx):
             return score + bias[b][q_idx]
@@ -1355,7 +1361,7 @@ class TestFlexAttention(InductorTestCase):
 
     @supported_platform
     def test_index_weird1(self):
-        bias = torch.randn(4, B, H, S, device=GPU_TYPE)
+        bias = torch.randn(4, B, H, S, device=self.device)
 
         def index_weird1(score, b, h, q_idx, kv_idx):
             return score + bias[0][b, h][q_idx]
@@ -1365,8 +1371,8 @@ class TestFlexAttention(InductorTestCase):
 
     @supported_platform
     def test_index_weird2(self):
-        bias = torch.randn(B, H, 4, S, device=GPU_TYPE)
-        which_bias = torch.tensor(0, device=GPU_TYPE)
+        bias = torch.randn(B, H, 4, S, device=self.device)
+        which_bias = torch.tensor(0, device=self.device)
 
         def index_weird2(score, b, h, q_idx, kv_idx):
             return score + bias[b][h][which_bias, q_idx]
@@ -1401,9 +1407,9 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
     def test_captured_buffers_all_dims(self, dtype: torch.dtype):
-        head_scale = torch.randn(H, device=GPU_TYPE)
-        batch_scale = torch.randn(B, device=GPU_TYPE)
-        tok_scale = torch.randn(S, device=GPU_TYPE)
+        head_scale = torch.randn(H, device=self.device)
+        batch_scale = torch.randn(B, device=self.device)
+        tok_scale = torch.randn(S, device=self.device)
 
         def all_bias(score, batch, head, token_q, token_kv):
             score = score + tok_scale[token_q]
@@ -1417,7 +1423,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
     def test_seq_masking(self, dtype):
-        seq_idx = torch.zeros(S, device=GPU_TYPE, dtype=torch.bool)
+        seq_idx = torch.zeros(S, device=self.device, dtype=torch.bool)
         seq_idx[S // 2 :] = 1
 
         def seq_mask_mod(score, b, h, q, kv):
@@ -1429,7 +1435,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
     def test_load_from_bias_seq_only(self, dtype):
-        bias = torch.randn(S, S, device=GPU_TYPE, dtype=dtype)
+        bias = torch.randn(S, S, device=self.device, dtype=dtype)
 
         def bias_mod(score, b, h, q, kv):
             return score + bias[q, kv]
@@ -1440,7 +1446,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
     def test_load_from_bias_seq_batch(self, dtype):
-        bias = torch.randn(B, S, S, device=GPU_TYPE, dtype=dtype)
+        bias = torch.randn(B, S, S, device=self.device, dtype=dtype)
 
         def bias_mod(score, b, h, q, kv):
             return score + bias[b, q, kv]
@@ -1451,7 +1457,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     def test_load_from_view_buffer(self):
         dtype = torch.float16
-        device = GPU_TYPE
+        device = self.device
         W = 8
 
         class SimpleAttention(torch.nn.Module):
@@ -1498,7 +1504,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
     def test_load_from_bias_head_seq_batch(self, dtype):
-        bias = torch.randn(B, H, S, S, device=GPU_TYPE, dtype=dtype)
+        bias = torch.randn(B, H, S, S, device=self.device, dtype=dtype)
 
         def bias_mod(score, b, h, q, kv):
             return score + bias[b, h, q, kv]
@@ -1509,7 +1515,7 @@ class TestFlexAttention(InductorTestCase):
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
     def test_load_rel_bias(self, dtype):
-        rel_bias = torch.randn(2 * S, device=GPU_TYPE, dtype=dtype)
+        rel_bias = torch.randn(2 * S, device=self.device, dtype=dtype)
 
         def bias_mod(score, b, h, q, kv):
             return score + rel_bias[(q - kv) + S]
@@ -1521,7 +1527,7 @@ class TestFlexAttention(InductorTestCase):
     @common_utils.parametrize("dtype", test_dtypes_fast)
     def test_dependent_causal_bidirectional(self, dtype):
         num_bidirectional = torch.randint(
-            0, S, (B,), device=GPU_TYPE, dtype=torch.int32
+            0, S, (B,), device=self.device, dtype=torch.int32
         )
 
         def bias_mod(score, b, h, q, kv):
@@ -1572,12 +1578,11 @@ class TestFlexAttention(InductorTestCase):
         def score_mod_func(score, b, h, q, kv):
             return score - q // (1 + kv)
 
-        gold_dtype = torch.float64 if not HAS_XPU else torch.float32
         make_tensor = functools.partial(
             torch.randn,
             (2, 2, 128, 4),
-            device=GPU_TYPE,
-            dtype=gold_dtype,
+            device=self.device,
+            dtype=self.gold_dtype,
             requires_grad=True,
         )
         query, key, value = make_tensor(), make_tensor(), make_tensor()
@@ -1620,7 +1625,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
     def test_padded_dense_causal(self, dtype):
-        seq_len = torch.arange(B, device=GPU_TYPE, dtype=torch.int32) + 1
+        seq_len = torch.arange(B, device=self.device, dtype=torch.int32) + 1
 
         def create_padded_dense_wrapper(orig_score_mod):
             def njt_score_mod(qk, b, h, q, kv):
@@ -1637,7 +1642,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
     def test_captured_scale(self, dtype):
-        scale = torch.ones((), device=GPU_TYPE, dtype=torch.int32)
+        scale = torch.ones((), device=self.device, dtype=torch.int32)
 
         def score_mod_scale(qk, b, h, q, kv):
             return qk + scale
@@ -1648,7 +1653,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
     def test_recompile_changed_score_mod(self, dtype):
-        scale = torch.ones((), device=GPU_TYPE, dtype=torch.int32)
+        scale = torch.ones((), device=self.device, dtype=torch.int32)
         ADD = True
 
         def score_mod_scale(qk, b, h, q, kv):
@@ -1668,7 +1673,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @expectedFailure  # If we capture a tensor then we can perform a reduction on it, and that shouldn't be allowed
     @common_utils.parametrize("dtype", test_dtypes_fast)
     def test_captured_reduction(self, dtype):
-        scale = torch.randn((B, 8), device=GPU_TYPE)
+        scale = torch.randn((B, 8), device=self.device)
 
         def score_mod_scale(qk, b, h, q, kv):
             return qk + scale[b].sum(dim=-1)
@@ -1677,13 +1682,13 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     def test_multiple_score_mod_calls(self):
-        query = torch.randn((1, 8, 1024, 64), dtype=torch.float32, device=GPU_TYPE)
+        query = torch.randn((1, 8, 1024, 64), dtype=torch.float32, device=self.device)
         keys = [
-            torch.randn((1, 8, 1024, 64), dtype=torch.float32, device=GPU_TYPE)
+            torch.randn((1, 8, 1024, 64), dtype=torch.float32, device=self.device)
             for _ in range(2)
         ]
         values = [
-            torch.randn((1, 8, 1024, 64), dtype=torch.float32, device=GPU_TYPE)
+            torch.randn((1, 8, 1024, 64), dtype=torch.float32, device=self.device)
             for _ in range(2)
         ]
 
@@ -1710,13 +1715,13 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             )
         # Create inputs
         query = torch.randn(
-            (1, 4, 512, 64), dtype=torch.float32, device=GPU_TYPE, requires_grad=True
+            (1, 4, 512, 64), dtype=torch.float32, device=self.device, requires_grad=True
         )
         key = torch.randn(
-            (1, 4, 512, 64), dtype=torch.float32, device=GPU_TYPE, requires_grad=True
+            (1, 4, 512, 64), dtype=torch.float32, device=self.device, requires_grad=True
         )
         value = torch.randn(
-            (1, 4, 512, 64), dtype=torch.float32, device=GPU_TYPE, requires_grad=True
+            (1, 4, 512, 64), dtype=torch.float32, device=self.device, requires_grad=True
         )
 
         window_size = 32
@@ -1760,13 +1765,13 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     def test_multiple_score_mod_calls2(self):
-        query = torch.randn((1, 8, 1024, 64), dtype=torch.float32, device=GPU_TYPE)
+        query = torch.randn((1, 8, 1024, 64), dtype=torch.float32, device=self.device)
         keys = [
-            torch.randn((1, 8, 1024, 64), dtype=torch.float32, device=GPU_TYPE)
+            torch.randn((1, 8, 1024, 64), dtype=torch.float32, device=self.device)
             for _ in range(3)
         ]
         values = [
-            torch.randn((1, 8, 1024, 64), dtype=torch.float32, device=GPU_TYPE)
+            torch.randn((1, 8, 1024, 64), dtype=torch.float32, device=self.device)
             for _ in range(3)
         ]
 
@@ -1789,13 +1794,13 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     def test_multiple_score_mod_calls_paged_attention(self):
-        query = torch.randn((1, 8, 1024, 64), dtype=torch.float32, device=GPU_TYPE)
+        query = torch.randn((1, 8, 1024, 64), dtype=torch.float32, device=self.device)
         keys = [
-            torch.randn((1, 8, 1024, 64), dtype=torch.float32, device=GPU_TYPE)
+            torch.randn((1, 8, 1024, 64), dtype=torch.float32, device=self.device)
             for _ in range(2)
         ]
         values = [
-            torch.randn((1, 8, 1024, 64), dtype=torch.float32, device=GPU_TYPE)
+            torch.randn((1, 8, 1024, 64), dtype=torch.float32, device=self.device)
             for _ in range(2)
         ]
 
@@ -1856,13 +1861,13 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     def test_multiple_score_mod_calls2_paged_attention(self):
-        query = torch.randn((1, 8, 1024, 64), dtype=torch.float32, device=GPU_TYPE)
+        query = torch.randn((1, 8, 1024, 64), dtype=torch.float32, device=self.device)
         keys = [
-            torch.randn((1, 8, 1024, 64), dtype=torch.float32, device=GPU_TYPE)
+            torch.randn((1, 8, 1024, 64), dtype=torch.float32, device=self.device)
             for _ in range(3)
         ]
         values = [
-            torch.randn((1, 8, 1024, 64), dtype=torch.float32, device=GPU_TYPE)
+            torch.randn((1, 8, 1024, 64), dtype=torch.float32, device=self.device)
             for _ in range(3)
         ]
 
@@ -1941,7 +1946,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     def test_inputs_are_realized(self):
         def f(q, k, v):
-            x = torch.randn(1024, device=GPU_TYPE)
+            x = torch.randn(1024, device=self.device)
             x = x * 2
 
             def func(qk, b, h, q, kv):
@@ -1950,7 +1955,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             return flex_attention(q.sin(), k, v, score_mod=func).cos()
 
         q, k, v = (
-            torch.randn(1, 8, 1024, 64, device=GPU_TYPE, requires_grad=True)
+            torch.randn(1, 8, 1024, 64, device=self.device, requires_grad=True)
             for _ in range(3)
         )
         ref = f(q, k, v)
@@ -1969,9 +1974,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             return q_idx >= kv_idx
 
         block_mask_a = torch.compile(create_block_mask)(
-            causal_mask, 1, 1, 512, 512, device=GPU_TYPE
+            causal_mask, 1, 1, 512, 512, device=self.device
         )
-        block_mask_b = create_block_mask(causal_mask, 1, 1, 512, 512, device=GPU_TYPE)
+        block_mask_b = create_block_mask(
+            causal_mask, 1, 1, 512, 512, device=self.device
+        )
         self.assertEqual(block_mask_a.kv_num_blocks, block_mask_b.kv_num_blocks)
         self.assertEqual(block_mask_a.kv_indices, block_mask_b.kv_indices)
         self.assertEqual(block_mask_a.q_num_blocks, block_mask_b.q_num_blocks)
@@ -2012,7 +2019,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             out = flex_attention(q, k, v)
             return out.cos()
 
-        q, k, v = (torch.randn(1, 8, 1024, 64, device=GPU_TYPE) for _ in range(3))
+        q, k, v = (torch.randn(1, 8, 1024, 64, device=self.device) for _ in range(3))
         metrics.reset()
         _, code = run_and_get_code(f, q, k, v)
         fc = FileCheck()
@@ -2030,9 +2037,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @common_utils.parametrize("dtype", test_dtypes)
     def test_njt_causal(self, dtype):
         offsets = torch.tensor(
-            [0, 1024, 1024 + 512, S], device=GPU_TYPE, dtype=torch.int32
+            [0, 1024, 1024 + 512, S], device=self.device, dtype=torch.int32
         )
-        seq_idx = torch.zeros(S, device=GPU_TYPE, dtype=torch.int32)
+        seq_idx = torch.zeros(S, device=self.device, dtype=torch.int32)
         for idx in range(len(offsets) - 1):
             seq_idx[offsets[idx] : offsets[idx + 1]] = idx
 
@@ -2051,9 +2058,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     def test_mixed_dtypes_fails(self):
-        query = torch.randn((1, 1, 1024, 64), dtype=torch.float32, device=GPU_TYPE)
-        key = torch.randn((1, 1, 1024, 64), dtype=torch.float16, device=GPU_TYPE)
-        value = torch.randn((1, 1, 1024, 64), dtype=torch.float16, device=GPU_TYPE)
+        query = torch.randn((1, 1, 1024, 64), dtype=torch.float32, device=self.device)
+        key = torch.randn((1, 1, 1024, 64), dtype=torch.float16, device=self.device)
+        value = torch.randn((1, 1, 1024, 64), dtype=torch.float16, device=self.device)
         with self.assertRaisesRegex(
             ValueError, "Expected query, key, and value to have the same dtype"
         ):
@@ -2072,9 +2079,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @skip("TODO: Figure out why this is erroring")
     @patch.object(torch._inductor.config, "max_autotune", True)
     def test_max_autotune_with_captured(self):
-        head_scale = torch.randn(H, device=GPU_TYPE)
-        batch_scale = torch.randn(B, device=GPU_TYPE)
-        tok_scale = torch.randn(S, device=GPU_TYPE)
+        head_scale = torch.randn(H, device=self.device)
+        batch_scale = torch.randn(B, device=self.device)
+        tok_scale = torch.randn(S, device=self.device)
 
         def bias_mod(score, batch, head, token_q, token_kv):
             score = score + tok_scale[token_q]
@@ -2119,7 +2126,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         func = torch.compile(flex_attention, fullgraph=True)
 
         q, k, v = (
-            torch.randn(1, 8, 1024, 64, device=GPU_TYPE, requires_grad=True)
+            torch.randn(1, 8, 1024, 64, device=self.device, requires_grad=True)
             for _ in range(3)
         )
 
@@ -2151,9 +2158,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     def test_new_empty_mask_mod(self):
         S = 128
-        q, k, v = (torch.randn(4, 1, S, 64, device=GPU_TYPE) for _ in range(3))
+        q, k, v = (torch.randn(4, 1, S, 64, device=self.device) for _ in range(3))
 
-        attn_mask = torch.ones(4, 1, S, S, dtype=torch.bool, device=GPU_TYPE).tril()
+        attn_mask = torch.ones(4, 1, S, S, dtype=torch.bool, device=self.device).tril()
 
         def score_mod(score, b, h, q_idx, kv_idx):
             h_ = h.new_zeros(h.shape)
@@ -2216,8 +2223,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         BLOCK_SIZE = 128
 
         def causal_constructor(S):
-            num_blocks = torch.arange(S // BLOCK_SIZE, device=GPU_TYPE) + 1
-            indices = torch.arange(S // BLOCK_SIZE, device=GPU_TYPE).expand(
+            num_blocks = torch.arange(S // BLOCK_SIZE, device=self.device) + 1
+            indices = torch.arange(S // BLOCK_SIZE, device=self.device).expand(
                 S // BLOCK_SIZE, S // BLOCK_SIZE
             )
             num_blocks = num_blocks[None, None, :]
@@ -2237,7 +2244,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             torch.randn,
             (B, H, S, D),
             dtype=dtype,
-            device=GPU_TYPE,
+            device=self.device,
             requires_grad=True,
         )
         q, k, v = make_tensor(), make_tensor(), make_tensor()
@@ -2250,16 +2257,15 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def eager_sdpa_hop(q, k, v, score_mod):
             return flex_attention(q, k, v, score_mod, return_lse=True)
 
-        gold_dtype = torch.float64 if not HAS_XPU else torch.float32
         ref_out, ref_lse = eager_sdpa_hop(
-            q.to(gold_dtype),
-            k.to(gold_dtype),
-            v.to(gold_dtype),
+            q.to(self.gold_dtype),
+            k.to(self.gold_dtype),
+            v.to(self.gold_dtype),
             score_mod,
         )
         compiled_out, compiled_lse = sdpa_hop(q, k, v, score_mod)
 
-        self.assertTrue(ref_lse.dtype == gold_dtype)
+        self.assertTrue(ref_lse.dtype == self.gold_dtype)
         self.assertTrue(compiled_lse.dtype == torch.float32)
 
         tolerance = Tolerances(atol=2e-2, rtol=2e-2)
@@ -2282,7 +2288,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             torch.randn,
             (B, H, S, D),
             dtype=torch.float32,
-            device=GPU_TYPE,
+            device=self.device,
             requires_grad=True,
         )
         q, k, v = make_tensor(), make_tensor(), make_tensor()
@@ -2304,12 +2310,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         "score_mod", [_identity, _causal, _times_two, _squared, _trig, _trig2]
     )
     def test_aot_eager_gradcheck(self, score_mod):
-        gold_dtype = torch.float64 if not HAS_XPU else torch.float32
         make_tensor = functools.partial(
             torch.randn,
             (2, 2, 11, 4),
-            device=GPU_TYPE,
-            dtype=gold_dtype,
+            device=self.device,
+            dtype=self.gold_dtype,
             requires_grad=True,
         )
         query, key, value = make_tensor(), make_tensor(), make_tensor()
@@ -2346,18 +2351,17 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 return x
 
         model = Repro().to(self.device)
-        x = torch.randn((1, 512, 256), device=GPU_TYPE, requires_grad=True)
+        x = torch.randn((1, 512, 256), device=self.device, requires_grad=True)
         out = torch.compile(model, backend="aot_eager")(x)
         out.backward(torch.ones_like(out))
 
     @supported_platform
     def test_differentiable_logsumexp_gradcheck(self):
-        gold_dtype = torch.float64 if not HAS_XPU else torch.float32
         make_tensor = functools.partial(
             torch.randn,
             (2, 2, 11, 4),
-            device=GPU_TYPE,
-            dtype=gold_dtype,
+            device=self.device,
+            dtype=self.gold_dtype,
             requires_grad=True,
         )
         query, key, value = make_tensor(), make_tensor(), make_tensor()
@@ -2378,12 +2382,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         make_tensor = functools.partial(
             torch.randn,
             (2, 2, 128, 64),
-            device=GPU_TYPE,
+            device=self.device,
             dtype=torch.float32,
             requires_grad=True,
         )
         q, k, v = make_tensor(), make_tensor(), make_tensor()
-        lse_mask = torch.randn(2, 2, 128, device=GPU_TYPE)
+        lse_mask = torch.randn(2, 2, 128, device=self.device)
 
         out, lse = flex_attention(q, k, v, return_lse=True)
         (out.mean() + (lse * lse_mask).sum()).backward()
@@ -2418,7 +2422,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         make_tensor = functools.partial(
             torch.randn,
             (4, 4, 4096, 64),
-            device=GPU_TYPE,
+            device=self.device,
             dtype=torch.float32,
             requires_grad=True,
         )
@@ -2432,7 +2436,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         make_tensor2 = functools.partial(
             torch.randn,
             (4, 4, 2048, 64),
-            device=GPU_TYPE,
+            device=self.device,
             dtype=torch.float32,
             requires_grad=True,
         )
@@ -2476,7 +2480,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         make_tensor = functools.partial(
             torch.zeros,
             (2, 2, 128, 32),
-            device=GPU_TYPE,
+            device=self.device,
             dtype=torch.float32,
             requires_grad=False,
         )
@@ -2508,18 +2512,17 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     def test_captured_score_mod_aot_eager_gradcheck(
         self, score_mod_name: str, mode: str
     ):
-        gold_dtype = torch.float64 if not HAS_XPU else torch.float32
         make_tensor = functools.partial(
             torch.randn,
             (2, 2, 11, 4),
-            device=GPU_TYPE,
-            dtype=gold_dtype,
+            device=self.device,
+            dtype=self.gold_dtype,
             requires_grad=True,
         )
         query, key, value = make_tensor(), make_tensor(), make_tensor()
 
         func = torch.compile(flex_attention, backend=mode, fullgraph=True)
-        score_mod = captured_buffers_map[score_mod_name](gold_dtype)
+        score_mod = captured_buffers_map[score_mod_name](self.gold_dtype)
 
         self.assertTrue(
             torch.autograd.gradcheck(
@@ -2530,19 +2533,18 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @common_utils.parametrize("mode", ["eager", "aot_eager"])
     def test_document_masking_edge_case(self, mode):
-        document_masks = torch.full((2, 128), 0, dtype=torch.int32, device=GPU_TYPE)
+        document_masks = torch.full((2, 128), 0, dtype=torch.int32, device=self.device)
         document_masks[:, 64:] = 1
 
         def mask_mod(b, h, q, kv):
             same_doc = document_masks[b, q] == document_masks[b, kv]
             return same_doc
 
-        gold_dtype = torch.float64 if not HAS_XPU else torch.float32
         make_tensor = functools.partial(
             torch.randn,
             (2, 1, 128, 4),
-            device=GPU_TYPE,
-            dtype=gold_dtype,
+            device=self.device,
+            dtype=self.gold_dtype,
             requires_grad=True,
         )
         query, key, value = make_tensor(), make_tensor(), make_tensor()
@@ -2598,7 +2600,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         make_tensor = functools.partial(
             torch.randn,
             shape,
-            device=GPU_TYPE,
+            device=self.device,
             dtype=dtype,
             requires_grad=False if mode == "paged_attention" else True,
         )
@@ -2687,13 +2689,13 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     def test_fully_masked_out_rows_0_check(self, compile: bool):
         # Ensure fully masked out rows won't cause NaNs.
         query = torch.randn(
-            (B, H, S, D), dtype=torch.float32, device=GPU_TYPE, requires_grad=True
+            (B, H, S, D), dtype=torch.float32, device=self.device, requires_grad=True
         )
         key = torch.randn(
-            (B, H, S, D), dtype=torch.float32, device=GPU_TYPE, requires_grad=True
+            (B, H, S, D), dtype=torch.float32, device=self.device, requires_grad=True
         )
         value = torch.randn(
-            (B, H, S, D), dtype=torch.float32, device=GPU_TYPE, requires_grad=True
+            (B, H, S, D), dtype=torch.float32, device=self.device, requires_grad=True
         )
 
         M = S // 2
@@ -2734,7 +2736,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         make_tensor = functools.partial(
             torch.randn,
             (2, 2, 128, 64),
-            device=GPU_TYPE,
+            device=self.device,
             dtype=torch.float32,
             requires_grad=True,
         )
@@ -2779,14 +2781,15 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                     2,
                     2048,
                     64,
-                    device=GPU_TYPE,
+                    device=self.device,
                     dtype=torch.float16,
                     requires_grad=True,
                 )
                 for _ in range(3)
             ]
-            gold_dtype = torch.float64 if not HAS_XPU else torch.float32
-            gradOut = torch.randn(2, 2, 2048, 64, device=GPU_TYPE, dtype=torch.float16)
+            gradOut = torch.randn(
+                2, 2, 2048, 64, device=self.device, dtype=torch.float16
+            )
             out_ref = torch.nn.functional.scaled_dot_product_attention(
                 *inputs, is_causal=True
             )
@@ -2796,13 +2799,13 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             out_flex = torch.compile(attention_call)(*inputs_flex)
             out_flex.backward(gradOut)
             inputs_golden = [
-                i.detach().clone().to(dtype=gold_dtype).requires_grad_(True)
+                i.detach().clone().to(dtype=self.gold_dtype).requires_grad_(True)
                 for i in inputs
             ]
             out_golden = torch.nn.functional.scaled_dot_product_attention(
                 *inputs_golden, is_causal=True
             )
-            out_golden.backward(gradOut.to(dtype=gold_dtype))
+            out_golden.backward(gradOut.to(dtype=self.gold_dtype))
 
             for ref, flex, golden in [
                 (out_ref, out_flex, out_golden),
@@ -2823,36 +2826,39 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     def test_block_mask_non_divisible(self):
-        seq = torch.arange(1023, device=GPU_TYPE) // 128
+        seq = torch.arange(1023, device=self.device) // 128
 
         def mod(b, h, q, kv):
             return seq[q] == seq[kv]
 
-        block_mask = create_block_mask(mod, None, None, 1023, 1023, device=GPU_TYPE)
-        torch.compile(create_block_mask)(mod, None, None, 1023, 1023, device=GPU_TYPE)
+        block_mask = create_block_mask(mod, None, None, 1023, 1023, device=self.device)
+        torch.compile(create_block_mask)(
+            mod, None, None, 1023, 1023, device=self.device
+        )
         self.run_test_with_call(
             lambda q, k, v: flex_attention(q, k, v, block_mask=block_mask),
             Q_S=1023,
             KV_S=1023,
         )
 
-    # Double and complex datatype matmul is not supported in oneDNN
-    @expectedFailureXPU
     @supported_platform
     def test_head_bias_req_grad(self):
         B, H, S, D = 1, 4, 256, 64
-        bias = torch.randn(H, device=GPU_TYPE, dtype=torch.float16, requires_grad=True)
+        bias = torch.randn(
+            H, device=self.device, dtype=torch.float16, requires_grad=True
+        )
 
         bias_flex = bias.detach().clone().requires_grad_(True)
 
         def head_bias(score, b, h, q_idx, kv_idx):
             return score + bias_flex[h]
 
-        gold_dtype = torch.float64 if not HAS_XPU else torch.float32
         bias_sdpa_ref = bias.detach().clone().requires_grad_(True)
         implicit_bias_sdpa_ref = bias_sdpa_ref
         implicit_bias_sdpa_ref = implicit_bias_sdpa_ref.view(H, 1, 1).expand(H, S, S)
-        bias_sdpa_gold = bias.detach().clone().to(dtype=gold_dtype).requires_grad_(True)
+        bias_sdpa_gold = (
+            bias.detach().clone().to(dtype=self.gold_dtype).requires_grad_(True)
+        )
         implicit_bias_sdpa_gold = bias_sdpa_gold
         implicit_bias_sdpa_gold = implicit_bias_sdpa_gold.view(H, 1, 1).expand(H, S, S)
 
@@ -2869,14 +2875,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             bias_sdpa_gold,
         )
 
-    # Double and complex datatype matmul is not supported in oneDNN
-    @expectedFailureXPU
     @supported_platform
     def test_comparison_vs_sdpa_with_learnable_bias(self):
         # 1-dimensional bias:
         B, H, S, D = 1, 1, 256, 64
         bias = torch.randn(
-            2 * S, device=GPU_TYPE, dtype=torch.float16, requires_grad=True
+            2 * S, device=self.device, dtype=torch.float16, requires_grad=True
         )
 
         bias_flex = bias.detach().clone().requires_grad_(True)
@@ -2884,11 +2888,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def rel_pos_1d(score, b, h, q_idx, kv_idx):
             return score + bias_flex[q_idx + kv_idx]
 
-        gold_dtype = torch.float64 if not HAS_XPU else torch.float32
         bias_indices = torch.arange(S)[:, None] + torch.arange(S)
         bias_sdpa_ref = bias.detach().clone().requires_grad_(True)
         implicit_bias_sdpa_ref = bias_sdpa_ref[bias_indices]
-        bias_sdpa_gold = bias.detach().clone().to(dtype=gold_dtype).requires_grad_(True)
+        bias_sdpa_gold = (
+            bias.detach().clone().to(dtype=self.gold_dtype).requires_grad_(True)
+        )
         implicit_bias_sdpa_gold = bias_sdpa_gold[bias_indices]
 
         self._test_learnable_bias_inner(
@@ -2907,7 +2912,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         # 2-dimensional bias:
         B, H, S, D = 1, 1, 256, 64
         bias = torch.randn(
-            S, S, device=GPU_TYPE, dtype=torch.float16, requires_grad=True
+            S, S, device=self.device, dtype=torch.float16, requires_grad=True
         )
 
         bias_flex = bias.detach().clone().requires_grad_(True)
@@ -2917,7 +2922,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         bias_sdpa_ref = bias.detach().clone().requires_grad_(True)
         implicit_bias_sdpa_ref = bias_sdpa_ref
-        bias_sdpa_gold = bias.detach().clone().to(dtype=gold_dtype).requires_grad_(True)
+        bias_sdpa_gold = (
+            bias.detach().clone().to(dtype=self.gold_dtype).requires_grad_(True)
+        )
         implicit_bias_sdpa_gold = bias_sdpa_gold
 
         self._test_learnable_bias_inner(
@@ -2936,7 +2943,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         # 2-dimensional bias + index multiple
         B, H, S, D = 1, 1, 256, 64
         bias = torch.randn(
-            S, S, device=GPU_TYPE, dtype=torch.float16, requires_grad=True
+            S, S, device=self.device, dtype=torch.float16, requires_grad=True
         )
 
         bias_flex = bias.detach().clone().requires_grad_(True)
@@ -2946,7 +2953,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         bias_sdpa_ref = bias.detach().clone().requires_grad_(True)
         implicit_bias_sdpa_ref = bias_sdpa_ref
-        bias_sdpa_gold = bias.detach().clone().to(dtype=gold_dtype).requires_grad_(True)
+        bias_sdpa_gold = (
+            bias.detach().clone().to(dtype=self.gold_dtype).requires_grad_(True)
+        )
         implicit_bias_sdpa_gold = bias_sdpa_gold
 
         self._test_learnable_bias_inner(
@@ -2965,7 +2974,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         # 2-dimensional bias + transposed:
         B, H, S, D = 1, 1, 256, 64
         bias = torch.randn(
-            S, S, device=GPU_TYPE, dtype=torch.float16, requires_grad=True
+            S, S, device=self.device, dtype=torch.float16, requires_grad=True
         )
 
         bias_flex = bias.detach().clone().requires_grad_(True)
@@ -2975,7 +2984,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         bias_sdpa_ref = bias.detach().clone().requires_grad_(True)
         implicit_bias_sdpa_ref = bias_sdpa_ref.transpose(-1, -2)
-        bias_sdpa_gold = bias.detach().clone().to(dtype=gold_dtype).requires_grad_(True)
+        bias_sdpa_gold = (
+            bias.detach().clone().to(dtype=self.gold_dtype).requires_grad_(True)
+        )
         implicit_bias_sdpa_gold = bias_sdpa_gold.transpose(-1, -2)
 
         self._test_learnable_bias_inner(
@@ -2994,7 +3005,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         # 3-dimensional bias + transposed
         B, H, S, D = 4, 8, 256, 64
         bias = torch.randn(
-            H, S, S, device=GPU_TYPE, dtype=torch.float16, requires_grad=True
+            H, S, S, device=self.device, dtype=torch.float16, requires_grad=True
         )
 
         bias_flex = bias.detach().clone().requires_grad_(True)
@@ -3004,7 +3015,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         bias_sdpa_ref = bias.detach().clone().requires_grad_(True)
         implicit_bias_sdpa_ref = bias_sdpa_ref.transpose(-1, -2)
-        bias_sdpa_gold = bias.detach().clone().to(gold_dtype).requires_grad_(True)
+        bias_sdpa_gold = bias.detach().clone().to(self.gold_dtype).requires_grad_(True)
         implicit_bias_sdpa_gold = bias_sdpa_gold.transpose(-1, -2)
 
         self._test_learnable_bias_inner(
@@ -3036,13 +3047,13 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         make_tensor = functools.partial(
             torch.ones,
             (B, H, S, D),
-            device=GPU_TYPE,
+            device=self.device,
             dtype=torch.float16,
             requires_grad=True,
         )
         q_ref, k_ref, v_ref = make_tensor(), make_tensor(), make_tensor()
         q_gold, k_gold, v_gold = query_key_value_clones(
-            q_ref, k_ref, v_ref, torch.float64
+            q_ref, k_ref, v_ref, self.gold_dtype
         )
         q_flex, k_flex, v_flex = query_key_value_clones(q_ref, k_ref, v_ref)
 
@@ -3086,7 +3097,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     def test_modular_indexing(self):
         B, H, N, D = 100, 12, 128, 64
         dtype = torch.bfloat16
-        device = torch.device(GPU_TYPE)
+        device = torch.device(self.device)
 
         class Attention(torch.nn.Module):
             def __init__(self):
@@ -3124,7 +3135,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         make_tensor = functools.partial(
             torch.randn,
             (2, 2, 128, 16),
-            device=GPU_TYPE,
+            device=self.device,
             dtype=dtype,
             requires_grad=False,
         )
@@ -3163,7 +3174,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         make_tensor = functools.partial(
             torch.randn,
             (2, 2, N_CTX, 64),
-            device=GPU_TYPE,
+            device=self.device,
             dtype=torch.float32,
             requires_grad=True,
         )
@@ -3234,7 +3245,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     def test_mixed_device_error_message(self):
         # Create tensors on different devices
         cpu_tensor = torch.randn(2, 2, 128, 16, device="cpu")
-        cuda_tensor = torch.randn(2, 2, 128, 16, device=GPU_TYPE)
+        cuda_tensor = torch.randn(2, 2, 128, 16, device=self.device)
 
         # Use different devices for query, key, and value
         query, key, value = cpu_tensor, cuda_tensor, cpu_tensor
@@ -3250,8 +3261,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     def test_captured_wrong_device_error_message(self):
-        means = torch.randn(64, 3, device=GPU_TYPE)
-        length_scales = torch.logspace(0.001, 0.1, 8, device=GPU_TYPE)
+        means = torch.randn(64, 3, device=self.device)
+        length_scales = torch.logspace(0.001, 0.1, 8, device=self.device)
 
         def euclidean_dist_pos_embed(score, b, h, q_idx, k_idx):
             q_pos = means[q_idx]
@@ -3263,15 +3274,15 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         expected_error_message = "Buffers cannot be created"
 
-        q, k, v = (torch.randn(1, 8, 64, 64, device=GPU_TYPE) for _ in range(3))
+        q, k, v = (torch.randn(1, 8, 64, 64, device=self.device) for _ in range(3))
         with self.assertRaisesRegex(RuntimeError, expected_error_message):
             torch.compile(flex_attention)(q, k, v, score_mod=euclidean_dist_pos_embed)
 
     @supported_platform
     def test_cant_lower_error_message(self):
         # We can't lower a 256-element reduction inside a pointwise reduction
-        means = torch.randn(64, 256, device=GPU_TYPE)
-        length_scales = torch.logspace(0.001, 0.1, 8, device=GPU_TYPE)
+        means = torch.randn(64, 256, device=self.device)
+        length_scales = torch.logspace(0.001, 0.1, 8, device=self.device)
 
         def euclidean_dist_pos_embed(score, b, h, q_idx, k_idx):
             q_pos = means[q_idx]
@@ -3283,15 +3294,15 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         expected_error_message = "Buffers cannot be created"
 
-        q, k, v = (torch.randn(1, 8, 64, 64, device=GPU_TYPE) for _ in range(3))
+        q, k, v = (torch.randn(1, 8, 64, 64, device=self.device) for _ in range(3))
         with self.assertRaisesRegex(RuntimeError, expected_error_message):
             torch.compile(flex_attention)(q, k, v, score_mod=euclidean_dist_pos_embed)
 
     @supported_platform
     def test_reduction_unrolled(self):
         # We can't lower a 256-element reduction inside a pointwise reduction
-        means = torch.randn(S, 3, device=GPU_TYPE)
-        length_scales = torch.logspace(0.001, 0.1, H, device=GPU_TYPE)
+        means = torch.randn(S, 3, device=self.device)
+        length_scales = torch.logspace(0.001, 0.1, H, device=self.device)
 
         def euclidean_dist_pos_embed(score, b, h, q_idx, k_idx):
             q_pos = means[q_idx]
@@ -3306,7 +3317,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     def test_invalid_block_size(self):
         # Create tensors on different devices
-        q, k, v = (torch.randn(1, 8, 128, 64, device=GPU_TYPE) for _ in range(3))
+        q, k, v = (torch.randn(1, 8, 128, 64, device=self.device) for _ in range(3))
 
         expected_error_message = (
             "ValueError: Q and KV block size must be divisible by BLOCK_M and BLOCK_N."
@@ -3323,7 +3334,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         make_tensor = functools.partial(
             torch.ones,
             (1, 1, 1, 16),
-            device=GPU_TYPE,
+            device=self.device,
             dtype=torch.float32,
             requires_grad=True,
         )
@@ -3378,7 +3389,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                     H=None,
                     Q_LEN=max_time,
                     KV_LEN=max_time,
-                    device=GPU_TYPE,
+                    device=self.device,
                 )
 
                 x = torch.compile(
@@ -3394,8 +3405,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         model = Model(128).to(self.device)
         B, F, T = 16, 256, 12
         for _ in range(5):
-            x = torch.randn(B, T, F, device=GPU_TYPE)
-            l = torch.randint(0, T, (B,), device=GPU_TYPE)
+            x = torch.randn(B, T, F, device=self.device)
+            l = torch.randint(0, T, (B,), device=self.device)
             model(x, l)
 
         assert (
@@ -3445,8 +3456,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     def test_causal_block_non_divisible_with_captured_buffer(self):
         Q_S = S - 3
         KV_S = S - 3
-        offset_q = torch.randn(Q_S, device=GPU_TYPE, dtype=torch.bfloat16)
-        offset_kv = torch.randn(KV_S, device=GPU_TYPE, dtype=torch.bfloat16)
+        offset_q = torch.randn(Q_S, device=self.device, dtype=torch.bfloat16)
+        offset_kv = torch.randn(KV_S, device=self.device, dtype=torch.bfloat16)
 
         def score_mod(score, b, h, q, kv):
             return score + offset_q[q] + offset_kv[kv]
@@ -3465,7 +3476,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         Q_S = S + 3
         KV_S = S + 3
 
-        multiplier = torch.randn(Q_S, device=GPU_TYPE, dtype=torch.bfloat16)
+        multiplier = torch.randn(Q_S, device=self.device, dtype=torch.bfloat16)
 
         def apply_multiplicative_bias(score, b, h, q_idx, kv_idx):
             return score * multiplier[q_idx]
@@ -3526,7 +3537,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 )
                 return y.transpose(1, 2).contiguous().view(B, T, C)
 
-        model = SimpleAttention().to(GPU_TYPE)
+        model = SimpleAttention().to(self.device)
         model.compile(mode="default", dynamic=True)
         sequence_len = 256
 
@@ -3535,7 +3546,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         for batch_shape in [4, 16, 32]:
             # Create dense mask
             rand_mask = torch.randint(
-                0, 2, (batch_shape, sequence_len), device=GPU_TYPE
+                0, 2, (batch_shape, sequence_len), device=self.device
             ).bool()
             block_mask = torch.compile(create_block_mask, dynamic=True)(
                 B=batch_shape,
@@ -3544,11 +3555,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 H=None,
                 Q_LEN=sequence_len,
                 KV_LEN=sequence_len,
-                device=GPU_TYPE,
+                device=self.device,
             )
 
             # Run forward pass
-            x = torch.randn(batch_shape, sequence_len, 512, device=GPU_TYPE)
+            x = torch.randn(batch_shape, sequence_len, 512, device=self.device)
             model(x, block_mask=block_mask)
 
         self.assertEqual(torch._dynamo.utils.counters["aot_autograd"]["ok"], 2)
@@ -3584,7 +3595,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         torch._dynamo.reset()
         for batch_shape in [4, 16, 32]:
-            x = torch.randn(batch_shape, sequence_len, 512, device=GPU_TYPE)
+            x = torch.randn(batch_shape, sequence_len, 512, device=self.device)
             model(x)
         self.assertEqual(len(backend.graphs), 1)
         self.assertExpectedInline(
@@ -3598,13 +3609,12 @@ def forward(self, child : torch.Tensor, child_1 : torch.Tensor, child_2 : torch.
     @supported_platform
     def test_fw_bw_graph_correctness(self):
         cnt = CompileCounterWithBackend("aot_eager")
-        gold_dtype = torch.float64 if not GPU_TYPE == "xpu" else torch.float32
-        gold_dtype_str = {torch.float64: "f64", torch.float32: "f32"}[gold_dtype]
+        gold_dtype_str = {torch.float64: "f64", torch.float32: "f32"}[self.gold_dtype]
         make_tensor = functools.partial(
             torch.randn,
             (2, 2, 128, 4),
-            device=GPU_TYPE,
-            dtype=gold_dtype,
+            device=self.device,
+            dtype=self.gold_dtype,
             requires_grad=True,
         )
         query, key, value = make_tensor(), make_tensor(), make_tensor()
@@ -3708,7 +3718,7 @@ class GraphModule(torch.nn.Module):
 """.replace(
             "f64", gold_dtype_str
         ).replace(
-            "GPU_TYPE", GPU_TYPE
+            "GPU_TYPE", self.device
         )  # noqa: B950
 
         self.assertExpectedInline(
@@ -3786,7 +3796,7 @@ class TestBlockMask(InductorTestCase):
 
     @supported_platform
     def test_block_mask_attributes(self):
-        offset = torch.zeros(8, device=GPU_TYPE)
+        offset = torch.zeros(8, device=self.device)
 
         def causal_mask(b, h, q, kv):
             return (q + (offset[b] * 128)) >= kv
@@ -3803,7 +3813,7 @@ class TestBlockMask(InductorTestCase):
         self.assertEqual(block_mask[1, 0].sparsity(), 46.875)
         self.assertEqual(block_mask.sparsity(), block_mask[1].sparsity())
 
-        offset = torch.arange(8, device=GPU_TYPE)
+        offset = torch.arange(8, device=self.device)
         block_mask = create_block_mask(
             causal_mask, 8, 1, 2048, 2048, device=self.device
         )
@@ -3831,7 +3841,7 @@ class TestBlockMask(InductorTestCase):
 
     @supported_platform
     def test_getitem(self):
-        offset = torch.zeros(8, device=GPU_TYPE)
+        offset = torch.zeros(8, device=self.device)
 
         def causal_mask(b, h, q, kv):
             return (q + (offset[b] * 128)) >= kv
@@ -3888,7 +3898,7 @@ class TestBlockMask(InductorTestCase):
 
     @supported_platform
     def test_block_mask_device_change(self):
-        offset = torch.zeros(8, device=GPU_TYPE)
+        offset = torch.zeros(8, device=self.device)
 
         def causal_mask(b, h, q, kv):
             return (q + (offset[b] * 128)) >= kv
@@ -3905,7 +3915,7 @@ class TestBlockMask(InductorTestCase):
         assert block_mask.q_indices.is_cpu
         assert block_mask.q_num_blocks.is_cpu
 
-        block_mask = block_mask.to(GPU_TYPE)
+        block_mask = block_mask.to(self.device)
         assert block_mask.kv_indices.is_cuda
         assert block_mask.kv_num_blocks.is_cuda
         assert block_mask.q_indices.is_cuda
@@ -3913,13 +3923,13 @@ class TestBlockMask(InductorTestCase):
 
     @supported_platform
     def test_compiling_create_block_mask(self):
-        seq = torch.arange(512, device=GPU_TYPE) // 127
+        seq = torch.arange(512, device=self.device) // 127
 
         def mask_mod(b, h, q, kv):
             return (q >= kv) & (seq[q] == seq[kv])
 
         block_mask = torch.compile(create_block_mask, fullgraph=True)(
-            mask_mod, 1, 1, 512, 512, device=GPU_TYPE
+            mask_mod, 1, 1, 512, 512, device=self.device
         )
         self.assertIsInstance(block_mask, BlockMask)
         self.assertEqual(block_mask.kv_num_blocks.shape, torch.Size((1, 1, 4)))
@@ -3932,7 +3942,7 @@ class TestBlockMask(InductorTestCase):
 
         torch._dynamo.reset()
         block_mask = torch.compile(create_block_mask)(
-            mask_mod, 2, 4, 1024, 1024, device=GPU_TYPE
+            mask_mod, 2, 4, 1024, 1024, device=self.device
         )
         self.assertIsInstance(block_mask, BlockMask)
         self.assertEqual(block_mask.kv_num_blocks.shape, torch.Size((2, 4, 8)))
@@ -3941,7 +3951,7 @@ class TestBlockMask(InductorTestCase):
 
         # automatic dynamic shapes triggered and recompilation.
         block_mask = torch.compile(create_block_mask)(
-            mask_mod, 4, 8, 2048, 2048, device=GPU_TYPE
+            mask_mod, 4, 8, 2048, 2048, device=self.device
         )
         self.assertIsInstance(block_mask, BlockMask)
         self.assertEqual(block_mask.kv_num_blocks.shape, torch.Size((4, 8, 16)))
@@ -3950,7 +3960,7 @@ class TestBlockMask(InductorTestCase):
 
         # no recompilation.
         block_mask = torch.compile(create_block_mask)(
-            mask_mod, 6, 16, 3072, 3072, device=GPU_TYPE
+            mask_mod, 6, 16, 3072, 3072, device=self.device
         )
         self.assertIsInstance(block_mask, BlockMask)
         self.assertEqual(block_mask.kv_num_blocks.shape, torch.Size((6, 16, 24)))
@@ -4000,7 +4010,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
 )""",
         )
 
-        offset = torch.arange(8, device=GPU_TYPE)
+        offset = torch.arange(8, device=self.device)
 
         def causal_offset_mask(b, h, q, kv):
             return (q + offset[b] * 128) >= kv
@@ -4039,7 +4049,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
     @supported_platform
     @common_utils.parametrize("full_indices", [False, True])
     def test_from_kv_blocks(self, full_indices: bool):
-        device = torch.device(GPU_TYPE if torch.cuda.is_available() else "cpu")
+        device = torch.device(self.device if torch.cuda.is_available() else "cpu")
         (
             kv_num_blocks,
             kv_indices,
@@ -4093,7 +4103,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
 
     @supported_platform
     def test_block_size(self):
-        device = torch.device(GPU_TYPE if torch.cuda.is_available() else "cpu")
+        device = torch.device(self.device if torch.cuda.is_available() else "cpu")
         kv_num_blocks, kv_indices, _, _ = self.generate_test_inputs(False, device)
         block_mask = BlockMask.from_kv_blocks(kv_num_blocks, kv_indices)
         self.assertEqual(
@@ -4121,7 +4131,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
 
     @supported_platform
     def test_init_mismatched_full_kv(self):
-        device = torch.device(GPU_TYPE if torch.cuda.is_available() else "cpu")
+        device = torch.device(self.device if torch.cuda.is_available() else "cpu")
         kv_num_blocks, kv_indices, full_kv_num_blocks, _ = self.generate_test_inputs(
             True, device
         )
@@ -4143,7 +4153,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
 
     @supported_platform
     def test_init_mismatched_full_q(self):
-        device = torch.device(GPU_TYPE if torch.cuda.is_available() else "cpu")
+        device = torch.device(self.device if torch.cuda.is_available() else "cpu")
         kv_num_blocks, kv_indices, _, _ = self.generate_test_inputs(False, device)
 
         with self.assertRaises(AssertionError):
@@ -4187,7 +4197,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
                 2,
                 2048,
                 64,
-                device=GPU_TYPE,
+                device=self.device,
                 dtype=torch.float16,
                 requires_grad=True,
             )
@@ -4238,7 +4248,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
                 lengths[index] += 1
             return lengths
 
-        device = GPU_TYPE
+        device = self.device
         max_seq_len, doc_count = 128, 4
         SEQ_LEN = max_seq_len
 
@@ -4268,7 +4278,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         )
         for i in range(5):
             lengths = generate_random_lengths(1024 + i, 5)
-            offsets = length_to_offsets(lengths, GPU_TYPE)
+            offsets = length_to_offsets(lengths, self.device)
             doc_ids = _offsets_to_doc_ids_tensor(offsets)
 
             def doc_mask_mod(b, h, q_idx, kv_idx):
@@ -4295,7 +4305,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         batch_size = 1
 
         make_tensor = functools.partial(
-            torch.randn, device=GPU_TYPE, dtype=torch.float16
+            torch.randn, device=self.device, dtype=torch.float16
         )
         q = make_tensor(*(batch_size, q_heads, seq_len, qk_dims))
         k = make_tensor(*(batch_size, kv_heads, seq_len, qk_dims))
@@ -4350,7 +4360,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
                     64,
                     dtype=torch.float16,
                     requires_grad=True,
-                    device=GPU_TYPE,
+                    device=self.device,
                 )
                 for _ in range(3)
             )
@@ -4381,6 +4391,7 @@ class TestPagedAttention(InductorTestCase):
                 )
             if not IS_PLATFORM_SUPPORTED:
                 self.skipTest("skip UT due to not support on those platforms")
+        self.gold_dtype = torch.float64 if test_device != "xpu" else torch.float32
 
     def _check_equal(
         self,
@@ -4415,7 +4426,7 @@ class TestPagedAttention(InductorTestCase):
     @supported_platform
     def test_page_allocation(self):
         n_pages, page_size = 12, 4
-        paged_cache = self.allocate_page_cache(n_pages, page_size, device=GPU_TYPE)
+        paged_cache = self.allocate_page_cache(n_pages, page_size, device=self.device)
 
         batch_reserve(paged_cache, torch.tensor([8, 24, 16]))
 
@@ -4423,12 +4434,14 @@ class TestPagedAttention(InductorTestCase):
             AssertionError, "requested 2 pages but there are only 0 empty pages"
         ):
             paged_cache.reserve(
-                torch.tensor([0], device=GPU_TYPE), torch.tensor([16], device=GPU_TYPE)
+                torch.tensor([0], device=self.device),
+                torch.tensor([16], device=self.device),
             )
 
-        paged_cache.erase(torch.tensor([1], device=GPU_TYPE))
+        paged_cache.erase(torch.tensor([1], device=self.device))
         paged_cache.reserve(
-            torch.tensor([0], device=GPU_TYPE), torch.tensor([16], device=GPU_TYPE)
+            torch.tensor([0], device=self.device),
+            torch.tensor([16], device=self.device),
         )
 
     @supported_platform
@@ -4446,7 +4459,7 @@ class TestPagedAttention(InductorTestCase):
         )
 
         # deallocate batch 1
-        paged_cache.erase(torch.tensor([1], device=GPU_TYPE))
+        paged_cache.erase(torch.tensor([1], device=self.device))
         target_seq_len = torch.tensor([3, 0, 8])
         expected_allocated_pages = self.cdiv(target_seq_len, page_size).sum()
         self.assertEqual(paged_cache.capacity, self.roundup(target_seq_len, page_size))
@@ -4472,21 +4485,21 @@ class TestPagedAttention(InductorTestCase):
     def test_convert_logical_block_mask(self):
         n_pages, page_size, max_batch_size, max_seq_len = 8, 128, 2, 512
         paged_cache = PagedAttention(
-            n_pages, page_size, max_batch_size, device=GPU_TYPE
+            n_pages, page_size, max_batch_size, device=self.device
         )
 
-        batch_reserve(paged_cache, torch.tensor([100, 200], device=GPU_TYPE))
-        batch_reserve(paged_cache, torch.tensor([150, 300], device=GPU_TYPE))
-        batch_reserve(paged_cache, torch.tensor([300, 512], device=GPU_TYPE))
-        batch_reserve(paged_cache, torch.tensor([512, 512], device=GPU_TYPE))
+        batch_reserve(paged_cache, torch.tensor([100, 200], device=self.device))
+        batch_reserve(paged_cache, torch.tensor([150, 300], device=self.device))
+        batch_reserve(paged_cache, torch.tensor([300, 512], device=self.device))
+        batch_reserve(paged_cache, torch.tensor([512, 512], device=self.device))
 
         expected_page_table = torch.tensor(
             [[0, 3, 5, 7, -1, -1, -1, -1], [2, 1, 4, 6, -1, -1, -1, -1]],
-            device=GPU_TYPE,
+            device=self.device,
         )
         self.assertEqual(
             paged_cache.capacity,
-            torch.tensor([512, 512], device=GPU_TYPE),
+            torch.tensor([512, 512], device=self.device),
         )
         self.assertEqual(paged_cache.page_table, expected_page_table)
 
@@ -4502,7 +4515,7 @@ class TestPagedAttention(InductorTestCase):
         zeros = [0, 0, 0, 0]
         # Check that the new block mask is correct
         expected_kv_num_blocks = torch.tensor(
-            [[[1, 1, 1, 1]], [[1, 1, 1, 1]]], device=GPU_TYPE, dtype=torch.int32
+            [[[1, 1, 1, 1]], [[1, 1, 1, 1]]], device=self.device, dtype=torch.int32
         )
         expected_kv_indices = torch.tensor(
             [
@@ -4523,11 +4536,11 @@ class TestPagedAttention(InductorTestCase):
                     ]
                 ],
             ],
-            device=GPU_TYPE,
+            device=self.device,
             dtype=torch.int32,
         )
         expected_full_kv_num_blocks = torch.tensor(
-            [[[0, 1, 2, 3]], [[0, 1, 2, 3]]], device=GPU_TYPE, dtype=torch.int32
+            [[[0, 1, 2, 3]], [[0, 1, 2, 3]]], device=self.device, dtype=torch.int32
         )
         expected_full_kv_indices = torch.tensor(
             [
@@ -4548,7 +4561,7 @@ class TestPagedAttention(InductorTestCase):
                     ]
                 ],
             ],
-            device=GPU_TYPE,
+            device=self.device,
             dtype=torch.int32,
         )
         self.assertEqual(new_block_mask.kv_num_blocks, expected_kv_num_blocks)
@@ -4560,27 +4573,27 @@ class TestPagedAttention(InductorTestCase):
     def test_convert_mask_mod(self):
         n_pages, page_size, max_batch_size = 8, 128, 2
         paged_cache = PagedAttention(
-            n_pages, page_size, max_batch_size, device=GPU_TYPE
+            n_pages, page_size, max_batch_size, device=self.device
         )
 
-        batch_reserve(paged_cache, torch.tensor([100, 200], device=GPU_TYPE))
-        batch_reserve(paged_cache, torch.tensor([150, 300], device=GPU_TYPE))
-        batch_reserve(paged_cache, torch.tensor([300, 512], device=GPU_TYPE))
-        batch_reserve(paged_cache, torch.tensor([512, 512], device=GPU_TYPE))
+        batch_reserve(paged_cache, torch.tensor([100, 200], device=self.device))
+        batch_reserve(paged_cache, torch.tensor([150, 300], device=self.device))
+        batch_reserve(paged_cache, torch.tensor([300, 512], device=self.device))
+        batch_reserve(paged_cache, torch.tensor([512, 512], device=self.device))
 
         expected_page_table = torch.tensor(
             [[0, 3, 5, 7, -1, -1, -1, -1], [2, 1, 4, 6, -1, -1, -1, -1]],
-            device=GPU_TYPE,
+            device=self.device,
         )
         self.assertEqual(
             paged_cache.capacity,
-            torch.tensor([512, 512], device=GPU_TYPE),
+            torch.tensor([512, 512], device=self.device),
         )
         self.assertEqual(paged_cache.page_table, expected_page_table)
 
         expected_physical_to_logical = torch.tensor(
             [[0, -1, -1, 1, -1, 2, -1, 3], [-1, 1, 0, -1, 2, -1, 3, -1]],
-            device=GPU_TYPE,
+            device=self.device,
         )
         self.assertEqual(paged_cache.physical_to_logical, expected_physical_to_logical)
 
@@ -4605,32 +4618,32 @@ class TestPagedAttention(InductorTestCase):
 
         n_pages, page_size, max_batch_size, max_seq_len = 6, 2, 2, 6
         paged_cache = PagedAttention(
-            n_pages, page_size, max_batch_size, device=GPU_TYPE
+            n_pages, page_size, max_batch_size, device=self.device
         )
 
         n_heads, head_dim = 2, 3
         cache_shape = (1, n_heads, n_pages * page_size, head_dim)
-        k_cache = torch.zeros(cache_shape, dtype=dtype, device=GPU_TYPE)
+        k_cache = torch.zeros(cache_shape, dtype=dtype, device=self.device)
 
-        batch_reserve(paged_cache, torch.tensor([1, 3], device=GPU_TYPE))
-        batch_reserve(paged_cache, torch.tensor([4, 5], device=GPU_TYPE))
-        batch_reserve(paged_cache, torch.tensor([6, 6], device=GPU_TYPE))
+        batch_reserve(paged_cache, torch.tensor([1, 3], device=self.device))
+        batch_reserve(paged_cache, torch.tensor([4, 5], device=self.device))
+        batch_reserve(paged_cache, torch.tensor([6, 6], device=self.device))
 
         expected_page_table = torch.tensor(
             [[0, 3, 5, -1, -1, -1], [2, 1, 4, -1, -1, -1]],
-            device=GPU_TYPE,
+            device=self.device,
         )
         self.assertEqual(paged_cache.page_table, expected_page_table)
 
-        batch_idx = torch.arange(max_batch_size, device=GPU_TYPE, dtype=torch.int32)
+        batch_idx = torch.arange(max_batch_size, device=self.device, dtype=torch.int32)
         input_pos = (
-            torch.arange(max_seq_len, device=GPU_TYPE, dtype=torch.int32)
+            torch.arange(max_seq_len, device=self.device, dtype=torch.int32)
             .unsqueeze(0)
             .expand(max_batch_size, max_seq_len)
         )
         k = torch.arange(
             max_batch_size * n_heads * max_seq_len * head_dim,
-            device=GPU_TYPE,
+            device=self.device,
             dtype=dtype,
         ).view(max_batch_size, n_heads, max_seq_len, head_dim)
 
@@ -4686,7 +4699,7 @@ class TestPagedAttention(InductorTestCase):
                     ],
                 ]
             ],
-            device=GPU_TYPE,
+            device=self.device,
             dtype=dtype,
         )
         self.assertEqual(k_cache, expected_cache)
@@ -4731,9 +4744,8 @@ class TestPagedAttention(InductorTestCase):
             requires_grad=False,
         )
 
-        gold_dtype = torch.float64 if dtype == torch.float64 else torch.float32
         q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
-        q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, gold_dtype)
+        q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, self.gold_dtype)
 
         sdpa_partial = create_attention(score_mod, block_mask, enable_gqa=False)
 
@@ -4844,8 +4856,9 @@ supports_learnable_bias = unittest.skipUnless(
 class TestLearnableBiases(InductorTestCase):
     def setUp(self):
         super().setUp()
-        self.device = GPU_TYPE
+        self.device = test_device
         self.dtype = torch.float32
+        self.gold_dtype = torch.float64 if test_device != "xpu" else torch.float32
         self.atol = 3e-2
         self.rtol = 3e-2
 
@@ -4929,11 +4942,10 @@ class TestLearnableBiases(InductorTestCase):
         flex_compiled = torch.compile(flex_attention, mode=mode)
         out_eager = flex_attention(query, key, value, score_mod=bias_func)
         out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
-        gold_dtype = torch.float32 if HAS_XPU else torch.float64
         out_gold = flex_attention(
-            query.to(gold_dtype),
-            key.to(gold_dtype),
-            value.to(gold_dtype),
+            query.to(self.gold_dtype),
+            key.to(self.gold_dtype),
+            value.to(self.gold_dtype),
             score_mod=bias_func,
         )
 
@@ -4963,11 +4975,10 @@ class TestLearnableBiases(InductorTestCase):
         flex_compiled = torch.compile(flex_attention)
         out_eager = flex_attention(query, key, value, score_mod=bias_func)
         out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
-        gold_dtype = torch.float32 if HAS_XPU else torch.float64
         out_gold = flex_attention(
-            query.to(gold_dtype),
-            key.to(gold_dtype),
-            value.to(gold_dtype),
+            query.to(self.gold_dtype),
+            key.to(self.gold_dtype),
+            value.to(self.gold_dtype),
             score_mod=bias_func,
         )
 
@@ -4998,11 +5009,10 @@ class TestLearnableBiases(InductorTestCase):
         flex_compiled = torch.compile(flex_attention)
         out_eager = flex_attention(query, key, value, score_mod=bias_func)
         out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
-        gold_dtype = torch.float32 if HAS_XPU else torch.float64
         out_gold = flex_attention(
-            query.to(gold_dtype),
-            key.to(gold_dtype),
-            value.to(gold_dtype),
+            query.to(self.gold_dtype),
+            key.to(self.gold_dtype),
+            value.to(self.gold_dtype),
             score_mod=bias_func,
         )
 
@@ -5034,11 +5044,10 @@ class TestLearnableBiases(InductorTestCase):
         flex_compiled = torch.compile(flex_attention)
         out_eager = flex_attention(query, key, value, score_mod=bias_func)
         out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
-        gold_dtype = torch.float32 if HAS_XPU else torch.float64
         out_gold = flex_attention(
-            query.to(gold_dtype),
-            key.to(gold_dtype),
-            value.to(gold_dtype),
+            query.to(self.gold_dtype),
+            key.to(self.gold_dtype),
+            value.to(self.gold_dtype),
             score_mod=bias_func,
         )
 
@@ -5067,11 +5076,10 @@ class TestLearnableBiases(InductorTestCase):
         flex_compiled = torch.compile(flex_attention)
         out_eager = flex_attention(query, key, value, score_mod=bias_func)
         out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
-        gold_dtype = torch.float32 if HAS_XPU else torch.float64
         out_gold = flex_attention(
-            query.to(gold_dtype),
-            key.to(gold_dtype),
-            value.to(gold_dtype),
+            query.to(self.gold_dtype),
+            key.to(self.gold_dtype),
+            value.to(self.gold_dtype),
             score_mod=bias_func,
         )
 
@@ -5102,11 +5110,10 @@ class TestLearnableBiases(InductorTestCase):
         flex_compiled = torch.compile(flex_attention)
         out_eager = flex_attention(query, key, value, score_mod=bias_func)
         out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
-        gold_dtype = torch.float32 if HAS_XPU else torch.float64
         out_gold = flex_attention(
-            query.to(gold_dtype),
-            key.to(gold_dtype),
-            value.to(gold_dtype),
+            query.to(self.gold_dtype),
+            key.to(self.gold_dtype),
+            value.to(self.gold_dtype),
             score_mod=bias_func,
         )
 
@@ -5135,11 +5142,10 @@ class TestLearnableBiases(InductorTestCase):
         flex_compiled = torch.compile(flex_attention)
         out_eager = flex_attention(query, key, value, score_mod=bias_func)
         out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
-        gold_dtype = torch.float32 if HAS_XPU else torch.float64
         out_gold = flex_attention(
-            query.to(gold_dtype),
-            key.to(gold_dtype),
-            value.to(gold_dtype),
+            query.to(self.gold_dtype),
+            key.to(self.gold_dtype),
+            value.to(self.gold_dtype),
             score_mod=bias_func,
         )
 
@@ -5172,11 +5178,10 @@ class TestLearnableBiases(InductorTestCase):
         flex_compiled = torch.compile(flex_attention)
         out_eager = flex_attention(query, key, value, score_mod=bias_func)
         out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
-        gold_dtype = torch.float32 if HAS_XPU else torch.float64
         out_gold = flex_attention(
-            query.to(gold_dtype),
-            key.to(gold_dtype),
-            value.to(gold_dtype),
+            query.to(self.gold_dtype),
+            key.to(self.gold_dtype),
+            value.to(self.gold_dtype),
             score_mod=bias_func,
         )
 
@@ -5212,11 +5217,10 @@ class TestLearnableBiases(InductorTestCase):
         flex_compiled = torch.compile(flex_attention)
         out_eager = flex_attention(query, key, value, score_mod=bias_func)
         out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
-        gold_dtype = torch.float32 if HAS_XPU else torch.float64
         out_gold = flex_attention(
-            query.to(gold_dtype),
-            key.to(gold_dtype),
-            value.to(gold_dtype),
+            query.to(self.gold_dtype),
+            key.to(self.gold_dtype),
+            value.to(self.gold_dtype),
             score_mod=bias_func,
         )
 
@@ -5246,11 +5250,10 @@ class TestLearnableBiases(InductorTestCase):
         flex_compiled = torch.compile(flex_attention, mode=mode)
         out_eager = flex_attention(query, key, value, score_mod=bias_func)
         out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
-        gold_dtype = torch.float32 if HAS_XPU else torch.float64
         out_gold = flex_attention(
-            query.to(gold_dtype),
-            key.to(gold_dtype),
-            value.to(gold_dtype),
+            query.to(self.gold_dtype),
+            key.to(self.gold_dtype),
+            value.to(self.gold_dtype),
             score_mod=bias_func,
         )
         # Error in backwards
@@ -5284,11 +5287,10 @@ class TestLearnableBiases(InductorTestCase):
         flex_compiled = torch.compile(flex_attention)
         out_eager = flex_attention(query, key, value, score_mod=bias_func)
         out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
-        gold_dtype = torch.float32 if HAS_XPU else torch.float64
         out_gold = flex_attention(
-            query.to(gold_dtype),
-            key.to(gold_dtype),
-            value.to(gold_dtype),
+            query.to(self.gold_dtype),
+            key.to(self.gold_dtype),
+            value.to(self.gold_dtype),
             score_mod=bias_func,
         )
 
@@ -5318,11 +5320,10 @@ class TestLearnableBiases(InductorTestCase):
         flex_compiled = torch.compile(flex_attention, mode=mode)
         out_eager = flex_attention(query, key, value, score_mod=bias_func)
         out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
-        gold_dtype = torch.float32 if HAS_XPU else torch.float64
         out_gold = flex_attention(
-            query.to(gold_dtype),
-            key.to(gold_dtype),
-            value.to(gold_dtype),
+            query.to(self.gold_dtype),
+            key.to(self.gold_dtype),
+            value.to(self.gold_dtype),
             score_mod=bias_func,
         )
 
@@ -5358,11 +5359,10 @@ class TestLearnableBiases(InductorTestCase):
         flex_compiled = torch.compile(flex_attention)
         out_eager = flex_attention(query, key, value, score_mod=bias_func)
         out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
-        gold_dtype = torch.float32 if HAS_XPU else torch.float64
         out_gold = flex_attention(
-            query.to(gold_dtype),
-            key.to(gold_dtype),
-            value.to(gold_dtype),
+            query.to(self.gold_dtype),
+            key.to(self.gold_dtype),
+            value.to(self.gold_dtype),
             score_mod=bias_func,
         )
 
@@ -5405,12 +5405,11 @@ class TestLearnableBiases(InductorTestCase):
         flex_compiled = torch.compile(flex_attention)
         out_eager = flex_attention(query, key, value, score_mod=bias_func)
         out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
-        gold_dtype = torch.float32 if HAS_XPU else torch.float64
 
         out_gold = flex_attention(
-            query.to(gold_dtype),
-            key.to(gold_dtype),
-            value.to(gold_dtype),
+            query.to(self.gold_dtype),
+            key.to(self.gold_dtype),
+            value.to(self.gold_dtype),
             score_mod=bias_func,
         )
 
