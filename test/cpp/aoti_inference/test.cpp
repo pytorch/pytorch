@@ -76,7 +76,9 @@ void test_aoti_script(const std::string& device) {
   }
 }
 
-void test_aoti_package_loader(const std::string& device, bool use_runtime_constant_folding) {
+void test_aoti_package_loader(
+    const std::string& device,
+    bool use_runtime_constant_folding) {
   torch::NoGradGuard no_grad;
 
   std::string data_path =
