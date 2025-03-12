@@ -4100,9 +4100,10 @@ class Scheduler:
                 if name in name_to_node
             }
 
-            # returns an input tensor as output if it is not freed. This allows
-            # more cudagraph managed tensors and is important for handling saved
-            # tensors.
+            # if an input tensor is not freed in the partition function, it should
+            # also be returned as an output. This brings benefits to cudagraph
+            # since the returned output tensor is a cudagraph managed tensor with
+            # a static tensor address.
             extra_output_names = [
                 name
                 for name in partition_input_names
@@ -4114,7 +4115,7 @@ class Scheduler:
             output_nodes = [name_to_node[name] for name in returned_output_names]
 
             constant_names = [
-                name for name in partition_input_names if name not in name_to_node
+                name for name in partition_input_names if name in V.graph.constants
             ]
 
             partition_signature = GraphPartitionSignature(
