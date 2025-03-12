@@ -272,7 +272,15 @@ class _VerificationInterpreter(torch.fx.Interpreter):
         node_name = n.name
         if node_name not in self._onnx_values:
             return result
-        (onnx_result,) = self._onnx_program.compute_values([node_name], self._args)
+        try:
+            (onnx_result,) = self._onnx_program.compute_values([node_name], self._args)
+        except Exception as e:
+            logger.warning(
+                "Failed to compute value for node %s: %s",
+                node_name,
+                e,
+            )
+            return result
         info = VerificationInfo.from_tensors(
             name=node_name,
             expected=result,
