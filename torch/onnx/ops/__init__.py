@@ -36,6 +36,7 @@ def symbolic(
         _impl.encode_onnx_attrs(attrs)
     )
     # TODO: Convert dtype
+    # TODO: Parse domain
     return _impl._symbolic(
         inputs,
         domain_op,
