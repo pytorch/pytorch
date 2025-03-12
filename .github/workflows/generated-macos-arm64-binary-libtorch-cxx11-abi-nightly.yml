@@ -75,7 +75,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           show-progress: false
@@ -126,7 +125,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu-main
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu-2.7
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cpu-shared-with-deps-cxx11-abi

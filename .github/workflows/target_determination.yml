@@ -9,7 +9,7 @@ jobs:
     name: get-label-type
     # Don't run on forked repos
     if: github.repository_owner == 'pytorch'
-    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@release/2.7
     with:
       triggering_actor: ${{ github.triggering_actor }}
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
@@ -27,7 +27,7 @@ jobs:
       # checkout because when we run this action we don't *have* a local
       # checkout. In other cases you should prefer a local checkout.
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.7
         with:
           submodules: false
 

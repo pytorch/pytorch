@@ -38,7 +38,7 @@ jobs:
   get-label-type:
     if: github.repository_owner == 'pytorch'
     name: get-label-type
-    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@release/2.7
     with:
       triggering_actor: ${{ github.triggering_actor }}
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
@@ -55,7 +55,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu-main
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu-2.7
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -76,7 +76,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu-main
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu-2.7
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cpu-shared-with-deps-cxx11-abi
@@ -98,7 +98,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu-main
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu-2.7
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cpu-shared-with-deps-cxx11-abi
@@ -118,7 +118,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.8-2.7
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -140,7 +140,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.8-2.7
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cuda11_8-shared-with-deps-cxx11-abi
@@ -163,7 +163,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.8-2.7
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cuda11_8-shared-with-deps-cxx11-abi
@@ -183,7 +183,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.6-main
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.6-2.7
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -205,7 +205,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.6-main
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.6-2.7
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cuda12_6-shared-with-deps-cxx11-abi
@@ -228,7 +228,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.6-main
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.6-2.7
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cuda12_6-shared-with-deps-cxx11-abi
@@ -248,7 +248,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.8-main
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.8-2.7
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -270,7 +270,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.8-main
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.8-2.7
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cuda12_8-shared-with-deps-cxx11-abi
@@ -293,7 +293,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.8-main
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.8-2.7
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cuda12_8-shared-with-deps-cxx11-abi
@@ -313,7 +313,7 @@ jobs:
       DESIRED_CUDA: rocm6.2.4
       GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm6.2.4-main
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm6.2.4-2.7
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -337,7 +337,7 @@ jobs:
       GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm6.2.4-main
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm6.2.4-2.7
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
@@ -351,7 +351,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           show-progress: false
@@ -364,9 +363,9 @@ jobs:
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.7
         with:
-          docker-image: pytorch/libtorch-cxx11-builder:rocm6.2.4-main
+          docker-image: pytorch/libtorch-cxx11-builder:rocm6.2.4-2.7
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
@@ -385,7 +384,7 @@ jobs:
       DESIRED_CUDA: rocm6.2.4
       GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm6.2.4-main
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm6.2.4-2.7
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-rocm6_2_4-shared-with-deps-cxx11-abi
@@ -405,7 +404,7 @@ jobs:
       DESIRED_CUDA: rocm6.3
       GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm6.3-main
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm6.3-2.7
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -429,7 +428,7 @@ jobs:
       GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm6.3-main
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm6.3-2.7
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
@@ -443,7 +442,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           show-progress: false
@@ -456,9 +454,9 @@ jobs:
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.7
         with:
-          docker-image: pytorch/libtorch-cxx11-builder:rocm6.3-main
+          docker-image: pytorch/libtorch-cxx11-builder:rocm6.3-2.7
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
@@ -477,7 +475,7 @@ jobs:
       DESIRED_CUDA: rocm6.3
       GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm6.3-main
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm6.3-2.7
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-rocm6_3-shared-with-deps-cxx11-abi

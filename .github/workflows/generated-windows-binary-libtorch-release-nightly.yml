@@ -34,7 +34,7 @@ jobs:
   get-label-type:
     if: github.repository_owner == 'pytorch'
     name: get-label-type
-    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@release/2.7
     with:
       triggering_actor: ${{ github.triggering_actor }}
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
@@ -74,7 +74,7 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
           echo "system info $(uname -a)"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        uses: pytorch/test-infra/.github/actions/setup-ssh@release/2.7
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
@@ -115,7 +115,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           show-progress: false
@@ -188,7 +187,7 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
           echo "system info $(uname -a)"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        uses: pytorch/test-infra/.github/actions/setup-ssh@release/2.7
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
@@ -234,7 +233,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           show-progress: false
@@ -321,7 +319,7 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
           echo "system info $(uname -a)"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        uses: pytorch/test-infra/.github/actions/setup-ssh@release/2.7
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
@@ -362,7 +360,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           show-progress: false
@@ -436,7 +433,7 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
           echo "system info $(uname -a)"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        uses: pytorch/test-infra/.github/actions/setup-ssh@release/2.7
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
@@ -482,7 +479,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           show-progress: false
@@ -570,7 +566,7 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
           echo "system info $(uname -a)"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        uses: pytorch/test-infra/.github/actions/setup-ssh@release/2.7
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
@@ -611,7 +607,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           show-progress: false
@@ -685,7 +680,7 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
           echo "system info $(uname -a)"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        uses: pytorch/test-infra/.github/actions/setup-ssh@release/2.7
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
@@ -731,7 +726,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           show-progress: false
@@ -819,7 +813,7 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
           echo "system info $(uname -a)"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        uses: pytorch/test-infra/.github/actions/setup-ssh@release/2.7
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
@@ -860,7 +854,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           show-progress: false
@@ -934,7 +927,7 @@ jobs:
           echo "instance-type: $(get_ec2_metadata instance-type)"
           echo "system info $(uname -a)"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        uses: pytorch/test-infra/.github/actions/setup-ssh@release/2.7
         continue-on-error: true
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
@@ -980,7 +973,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           show-progress: false

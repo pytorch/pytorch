@@ -13,7 +13,7 @@ jobs:
   get-label-type:
     if: github.repository_owner == 'pytorch'
     name: get-label-type
-    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@release/2.7
     with:
       triggering_actor: ${{ github.triggering_actor }}
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
@@ -35,7 +35,7 @@ jobs:
 
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@release/2.7
         with:
           docker-image-name: pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9
           working-directory: pytorch
@@ -50,13 +50,13 @@ jobs:
           echo "docker pull ghcr.io/pytorch/ci-image:${tag/:/-}"
 
       - name: Pull docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.7
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
         id: install-nvidia-driver
-        uses: pytorch/test-infra/.github/actions/setup-nvidia@main
+        uses: pytorch/test-infra/.github/actions/setup-nvidia@release/2.7
 
       - name: Clone CodeLlama
         uses: actions/checkout@v3
@@ -147,7 +147,7 @@ jobs:
             "s3://target-determinator-assets/indexes/latest/${ZIP_NAME}"
 
       - name: Teardown Linux
-        uses: pytorch/test-infra/.github/actions/teardown-linux@main
+        uses: pytorch/test-infra/.github/actions/teardown-linux@release/2.7
         if: always()
 
 concurrency:

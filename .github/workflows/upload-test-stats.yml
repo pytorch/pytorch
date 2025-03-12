@@ -17,7 +17,7 @@ jobs:
     steps:
       - name: Get workflow run conclusion
         # TODO (huydhn): Pin this once https://github.com/octokit/request-action/issues/315 is resolved
-        uses: octokit/request-action@main
+        uses: octokit/request-action@release/2.7
         id: get_conclusion
         with:
           route: GET /repos/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}/attempts/${{ github.event.workflow_run.run_attempt }}
@@ -39,7 +39,7 @@ jobs:
         run: echo "${TRIGGERING_WORKFLOW}"
 
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.7
 
       - name: Configure aws credentials
         uses: aws-actions/configure-aws-credentials@v3

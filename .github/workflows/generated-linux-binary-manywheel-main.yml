@@ -33,7 +33,7 @@ jobs:
   get-label-type:
     if: github.repository_owner == 'pytorch'
     name: get-label-type
-    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@release/2.7
     with:
       triggering_actor: ${{ github.triggering_actor }}
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
@@ -51,7 +51,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -75,7 +75,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -98,7 +98,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -122,7 +122,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -145,7 +145,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -169,7 +169,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-2.7
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"

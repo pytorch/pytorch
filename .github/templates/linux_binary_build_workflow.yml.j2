@@ -53,7 +53,7 @@ jobs:
   get-label-type:
     if: github.repository_owner == 'pytorch'
     name: get-label-type
-    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@release/2.7
     with:
       triggering_actor: ${{ github.triggering_actor }}
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
@@ -147,9 +147,9 @@ jobs:
         with:
           name: !{{ config["build_name"] }}
           path: "${{ runner.temp }}/artifacts/"
-      !{{ common.checkout(deep_clone=False, directory="pytorch") }}
+      !{{ common.checkout(deep_clone=False, directory="pytorch", checkout_pr_head=False) }}
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.7
         with:
           docker-image: !{{ config["container_image"] }}
       - name: Test Pytorch binary
@@ -168,12 +168,12 @@ jobs:
         with:
           name: !{{ config["build_name"] }}
           path: "${{ runner.temp }}/artifacts/"
-      !{{ common.checkout(deep_clone=False, directory="pytorch") }}
+      !{{ common.checkout(deep_clone=False, directory="pytorch", checkout_pr_head=False) }}
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.7
         with:
           docker-image: !{{ config["container_image"] }}
       - name: Test Pytorch binary
