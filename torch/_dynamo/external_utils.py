@@ -25,10 +25,10 @@ Key functionality groups:
 import functools
 import warnings
 from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
-from typing_extensions import deprecated, ParamSpec
 
 import torch
 import torch.utils._pytree as pytree
+from typing_extensions import deprecated, ParamSpec
 
 
 try:
@@ -203,6 +203,8 @@ def dont_skip_tracing_wrapper(recursive: bool) -> Any:
         if recursive:
 
             def wrap(*args: Any, **kwargs: Any) -> _R:
+                # TODO consider turning this into a context variable
+                # in order to support nested graph breaks better.
                 prev = _ignore_skip_function_variable
                 _set_ignore_skip_function_variable(True)
                 try:
