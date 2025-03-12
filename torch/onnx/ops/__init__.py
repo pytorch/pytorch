@@ -74,7 +74,6 @@ def symbolic_multi_out(
     ]
     | None = None,
     *,
-    num_outputs: int,
     dtypes: torch.dtype,
     shapes: Sequence[Sequence[Union[int, torch.SymInt]]],
     version: int | None = None,
@@ -83,6 +82,7 @@ def symbolic_multi_out(
     attr_keys, attr_ints, attr_floats, attr_strs, attr_bools, attr_tensors = (
         _impl.encode_onnx_attrs(attrs)
     )
+    # Use the size of dtypes to determine the number of outputs
     return _impl._symbolic_multi_out(
         inputs,
         domain_op,
