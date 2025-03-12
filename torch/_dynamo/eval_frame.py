@@ -30,7 +30,6 @@ import contextlib
 import functools
 import inspect
 import logging
-import os
 import sys
 import sysconfig
 import textwrap
@@ -97,7 +96,7 @@ from .exc import (
 )
 from .hooks import Hooks
 from .mutation_guard import install_generation_tagging_init
-from .utils import common_constant_types, compile_times
+from .utils import common_constant_types, compile_times, counters, is_compiler_disabled
 
 
 if TYPE_CHECKING:
@@ -742,6 +741,8 @@ class OptimizeContext(_TorchDynamoContext):
             Callable[[], Union[OptimizeContext, _NullDecorator]]
         ] = None,
     ) -> None:
+        counters["eval_frame"]["OptimizeContext"] += 1
+
         def on_enter():
             install_generation_tagging_init()
 
@@ -783,6 +784,8 @@ class OptimizeContext(_TorchDynamoContext):
 
 class RunOnlyContext(_TorchDynamoContext):
     def __init__(self) -> None:
+        counters["eval_frame"]["RunOnlyContext"] += 1
+
         # cudagraph trees relies on generation increment
         def on_enter():
             torch._dynamo.mutation_guard.GenerationTracker.generation += 1
@@ -795,6 +798,7 @@ class RunOnlyContext(_TorchDynamoContext):
 
 class DisableContext(_TorchDynamoContext):
     def __init__(self) -> None:
+        counters["eval_frame"]["DisableContext"] += 1
         super().__init__(callback=None)
 
     def __call__(self, fn):
@@ -988,11 +992,7 @@ def _optimize(
     # easier to understand UX at the cost of a little more plumbing on our end.
     hooks = Hooks(guard_export_fn=guard_export_fn, guard_fail_fn=guard_fail_fn)
     torch._C._log_api_usage_once("torch._dynamo.optimize")
-    if (
-        disable
-        or os.environ.get("TORCHDYNAMO_DISABLE", "") == "1"
-        or (not justknobs_check("pytorch/compiler:enable_dynamo"))
-    ):
+    if disable or is_compiler_disabled():
         return _NullDecorator()
 
     backend = get_compiler_fn(backend)
