@@ -33,6 +33,16 @@ class MyException(OSError):
     pass
 
 
+class CustomException(Exception):
+    ...
+
+
+class CustomExceptionWithArgs(Exception):
+    def __init__(self, a, b=None):
+        self.a = a
+        self.b = b
+
+
 class ExceptionTests(torch._dynamo.test_case.TestCase):
     def test_exception(self):
         def fn(x):

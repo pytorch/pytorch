@@ -8014,6 +8014,42 @@ torch.cuda.synchronize()
 
         self.assertEqual(res.shape, (4, nt.shape[1], 6))
 
+    @skipIfTorchDynamo("compiles internally")
+    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
+    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    @dtypes(torch.float32)
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_broadcast_shapes_on_in_graph_constructed_njt(self, device, dtype):
+        # Tests that a guard isn't wrongly installed on a freshly-created nested int when
+        # broadcast_shapes() is used on NJT shapes.
+        # See https://github.com/pytorch/pytorch/issues/145874 for more context.
+        nt = torch.nested.nested_tensor(
+            [
+                torch.randn(2),
+                torch.randn(3),
+                torch.randn(4),
+            ],
+            layout=torch.jagged,
+            device=device,
+            dtype=dtype,
+        )
+
+        values = nt._values.detach().clone()
+        offsets = nt._offsets.detach().clone()
+
+        @torch.compile(fullgraph=True)
+        def f(values, offsets):
+            nt = torch.nested.nested_tensor_from_jagged(values, offsets)
+            # NB: torch.where() utilizes broadcast_shapes() underneath
+            return torch.where(nt > 0.0, torch.ones_like(nt), torch.zeros_like(nt))
+
+        output = f(values, offsets)
+        self.assertTrue(output.is_nested)
+        self.assertEqual(nt.shape[:-1], output.shape[:-1])
+        for nt_component, output_component in zip(nt.unbind(), output.unbind()):
+            self.assertEqual(nt_component.shape, output_component.shape)
+
 
 # The following lists specify skips and xfails for particular SampleInputs. Note that
 # these are attempted to be matched from top to bottom and only one at most will
