@@ -587,6 +587,44 @@ jit_sources_full = [
 
 libtorch_core_jit_sources = sorted(jit_sources_full)
 
+libtorch_runtime_sources = [
+    "torch/csrc/nativert/common/ConfigUtils.cpp",
+    "torch/csrc/nativert/common/Conv.cpp",
+    "torch/csrc/nativert/common/FileUtil.cpp",
+    "torch/csrc/nativert/common/Pytree.cpp",
+    "torch/csrc/nativert/common/String.cpp",
+    "torch/csrc/nativert/executor/AOTInductorModelImpl.cpp",
+    "torch/csrc/nativert/executor/SerialGraphExecutor.cpp",
+    "torch/csrc/nativert/executor/AOTIDelegateExecutor.cpp",
+    "torch/csrc/nativert/executor/Executor.cpp",
+    "torch/csrc/nativert/executor/GraphExecutorBase.cpp",
+    "torch/csrc/nativert/executor/ConstantFolder.cpp",
+    "torch/csrc/nativert/executor/DelegateExecutor.cpp",
+    "torch/csrc/nativert/executor/ExecutionFrame.cpp",
+    "torch/csrc/nativert/executor/ExecutionPlanner.cpp",
+    "torch/csrc/nativert/executor/ModelRunnerBase.cpp",
+    "torch/csrc/nativert/executor/OpKernel.cpp",
+    "torch/csrc/nativert/executor/ParallelGraphExecutor.cpp",
+    "torch/csrc/nativert/executor/Placement.cpp",
+    "torch/csrc/nativert/executor/Weights.cpp",
+    "torch/csrc/nativert/graph/Graph.cpp",
+    "torch/csrc/nativert/graph/GraphPasses.cpp",
+    "torch/csrc/nativert/graph/GraphSignature.cpp",
+    "torch/csrc/nativert/graph/Serialization.cpp",
+    "torch/csrc/nativert/graph/TensorMeta.cpp",
+    "torch/csrc/nativert/kernels/NativeKernels.cpp",
+    "torch/csrc/nativert/kernels/AOTICallDelegateKernel.cpp",
+    "torch/csrc/nativert/kernels/AOTIKernel.cpp",
+    "torch/csrc/nativert/kernels/CallTorchBindKernel.cpp",
+    "torch/csrc/nativert/kernels/GeneratedStaticDispatchKernels.cpp",
+    "torch/csrc/nativert/kernels/AutoFunctionalizeKernel.cpp",
+    "torch/csrc/nativert/kernels/C10Kernel.cpp",
+    "torch/csrc/nativert/kernels/HigherOrderKernel.cpp",
+    "torch/csrc/nativert/kernels/KernelFactory.cpp",
+    "torch/csrc/nativert/kernels/KernelRegistry.cpp",
+    "torch/csrc/nativert/ModelRunner.cpp",
+]
+
 torch_mobile_tracer_sources = [
     "torch/csrc/jit/mobile/model_tracer/tracer.cpp",
     "torch/csrc/jit/mobile/model_tracer/TensorUtils.cpp",
@@ -619,7 +657,7 @@ libtorch_lite_cmake_sources = sorted(
     torch_mobile_core,
 )
 
-libtorch_cmake_sources = libtorch_core_sources + libtorch_core_jit_sources
+libtorch_cmake_sources = libtorch_core_sources + libtorch_core_jit_sources + libtorch_runtime_sources
 
 libtorch_extra_sources = libtorch_core_jit_sources + [
     "torch/csrc/autograd/TraceTypeManual.cpp",
@@ -935,6 +973,8 @@ libtorch_python_core_sources = [
     "torch/csrc/utils/verbose.cpp",
     "torch/csrc/cpu/Module.cpp",
     "torch/csrc/instruction_counter/Module.cpp",
+    "torch/csrc/nativert/ModelRunnerPybind.cpp",
+    "torch/csrc/nativert/package/pt2_archive_constants_pybind.cpp",
 ] + lazy_tensor_core_python_sources
 
 libtorch_python_distributed_core_sources = [

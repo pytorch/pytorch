@@ -129,6 +129,9 @@
 #endif
 #endif
 
+#include <torch/csrc/nativert/ModelRunnerPybind.h>
+#include <torch/csrc/nativert/package/pt2_archive_constants_pybind.h>
+
 #if defined(USE_VALGRIND)
 #include <callgrind.h>
 #endif
@@ -2586,6 +2589,13 @@ Call this whenever a new thread is created in order to propagate values from
 #ifdef USE_KINETO
   torch::global_kineto_init();
 #endif
+  {
+    auto py_module_runtime = py_module.def_submodule("nativert");
+    torch::nativert::initModelRunnerPybind(py_module_runtime);
+    auto py_module_constants =
+        py_module_runtime.def_submodule("pt2_archive_constants");
+    torch::nativert::initPt2ArchiveConstantsPybind(py_module_constants);
+  }
   return module;
   END_HANDLE_TH_ERRORS
 }
