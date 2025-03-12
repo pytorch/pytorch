@@ -2598,6 +2598,50 @@ def forward(self, p_linear_weight, p_linear_bias, x):
             ep.graph_module.false_graph_0.code
         )
 
+    def test_ends_of_bounds_oblivious(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf", torch.zeros(10))
+
+            def forward(self, x, y):
+                self.buf[0 : x.shape[0]] = x
+                return x + 2, y[:, ::1]
+
+        inps = (torch.randn(10), torch.randn(32, 36))
+        dynamic_shapes = {
+            "x": {0: Dim("dx", min=1, max=10)},
+            "y": {0: Dim("dy0"), 1: Dim("dy1")},
+        }
+        with torch.fx.experimental._config.patch(backed_size_oblivious=True):
+            ep = export(Foo(), inps, dynamic_shapes=dynamic_shapes)
+        ep.module()(torch.randn(9), torch.randn(4, 4))
+        ep.module()(torch.randn(1), torch.randn(1, 1))
+
+    def test_colin_unbacked_backed_vr_sub(self):
+        class Model(torch.nn.Module):
+            def forward(self, a, b, c):
+                nz = torch.nonzero(a)
+                ones = a.new_ones([nz.size(0), b.size(0)])
+                torch._check(ones.size(0) >= 1)
+                equals = torch.add(ones, c)
+                return equals
+
+        model = Model()
+        example_inputs = (
+            torch.ones(64),
+            torch.randn(32),
+            torch.randn(64, 32),
+        )
+        dynamic_shapes = {"a": None, "b": None, "c": (Dim.DYNAMIC, Dim.STATIC)}
+        with torch.fx.experimental._config.patch(backed_size_oblivious=True):
+            ep = export(model, example_inputs, dynamic_shapes=dynamic_shapes)
+
+        # check lower bound
+        for sym, vr in ep.range_constraints.items():
+            if str(sym) in ["u0", "s0"]:
+                self.assertEqual(vr.lower, 1)
+
     def test_duplicate_modules_with_non_persistent_buffers(self):
         class FooWithBuf(torch.nn.Module):
             def __init__(self):
@@ -9439,6 +9483,37 @@ graph():
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
         self.assertTrue(torch.allclose(ufm(*inp), epm(*inp)))
+
+    def test_placeholder_update_preserving(self):
+        class Child(torch.nn.Module):
+            def forward(self, x):
+                a = x.add_(3)
+                return a - 2
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.child = Child()
+
+            def forward(self, x):
+                f1 = self.child(x)  # x <- 1 + 3 = 4, x - 2 = 2
+                f2 = x * 4  # x * 4 = 16
+                return f1 + f2
+
+        inp = torch.ones(2, 3, dtype=torch.float32)
+        ep1 = export(Foo(), (inp,))
+        inp = torch.ones(2, 3, dtype=torch.float32)
+        ep2 = export(Foo(), (inp,), preserve_module_call_signature=("child",))
+
+        inp = torch.ones(2, 3, dtype=torch.float32)
+        orig_result = Foo()(inp)
+
+        inp = torch.ones(2, 3, dtype=torch.float32)
+        ep1_result = ep1.module()(inp)
+        self.assertTrue(torch.allclose(ep1_result, orig_result))
+        inp = torch.ones(2, 3, dtype=torch.float32)
+        ep2_result = ep2.module()(inp)
+        self.assertTrue(torch.allclose(ep2_result, orig_result))
 
     @testing.expectedFailureLegacyExportNonStrict
     @testing.expectedFailureLegacyExportStrict

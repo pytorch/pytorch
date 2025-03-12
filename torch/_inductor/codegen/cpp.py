@@ -4704,6 +4704,8 @@ class CppScheduling(BaseScheduling):
             assert isinstance(node.node, ir.ComputedBuffer)
             _, original_body, _ = node.node.get_default_sizes_body()
             for name, expr in original_body.indexing_exprs.items():
+                if not isinstance(expr, sympy.Expr):
+                    continue
                 for div_expr in expr.find(FloorDiv):
                     if (
                         any(div_expr.has(var) for var in original_body.iter_vars)
@@ -4948,7 +4950,7 @@ class CppScheduling(BaseScheduling):
                 )
                 kernel_group.finalize_kernel(
                     outer_fusion_cpp_kernel_proxy,
-                    [_node for _nodes in nodes_list for _node in _nodes],
+                    [*itertools.chain.from_iterable(nodes_list)],
                 )
 
             return True
