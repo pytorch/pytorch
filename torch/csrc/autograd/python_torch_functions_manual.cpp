@@ -486,8 +486,11 @@ static PyObject* THPVariable_numel(
 }
 
 // Sharded function definitions
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 void gatherTorchFunctions_0(std::vector<PyMethodDef>& torch_functions);
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 void gatherTorchFunctions_1(std::vector<PyMethodDef>& torch_functions);
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 void gatherTorchFunctions_2(std::vector<PyMethodDef>& torch_functions);
 
 static void gatherTorchFunctions(std::vector<PyMethodDef>& torch_functions) {

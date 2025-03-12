@@ -17,6 +17,7 @@
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/python_cpp_function.h>
 #include <torch/csrc/autograd/python_hook.h>
+#include <torch/csrc/autograd/python_torch_functions.h>
 #include <torch/csrc/autograd/python_variable_indexing.h>
 #include <torch/csrc/autograd/utils/error_messages.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
@@ -2396,7 +2397,6 @@ namespace torch::autograd {
 
 // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 extern PyMethodDef variable_methods[];
-extern void initTorchFunctions(PyObject* module);
 
 static void initTensorImplConversion(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
