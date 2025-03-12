@@ -3000,10 +3000,10 @@ class TestSDPACudaOnly(NNTestCase):
         times = list()
         for order in orders:
             if use_compile:
-                out = compiled_func(order)
+                compiled_func(order)
             else:
                 with sdpa_kernel(order, set_priority=True):
-                    out = scaled_dot_product_attention(q, q, q)
+                    scaled_dot_product_attention(q, q, q)
             torch.cuda.synchronize()
             t0 = time.perf_counter()
             if use_compile:

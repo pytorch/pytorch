@@ -1141,7 +1141,7 @@ class SDPAKernelVariable(ContextWrappingVariable):
 
     def enter(self, tx):
         self.prev_backends = torch.nn.attention._cur_sdpa_kernel_backends(
-                with_priority=self.set_priority
+            with_priority=self.set_priority
         )
         self.set_cleanup_hook(
             tx,
