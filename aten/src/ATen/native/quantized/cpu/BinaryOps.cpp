@@ -386,80 +386,63 @@ Tensor xnnp_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
 #endif // USE_XNNPACK
 
 #if AT_MKLDNN_ACL_ENABLED()
-  template <typename T>
-  Tensor acl_qadd(Tensor qa, Tensor qb, double scale, int64_t zero_point){
-    TORCH_CHECK(qa.ndimension() > 0, "acl_qadd(): Got empty input tensor.");
-    TORCH_CHECK(qa.qscheme() == kPerTensorAffine ||
-                qa.qscheme() == kPerTensorSymmetric,
-                "Only per tensor quantization is supported in ACL quantized add.");
+Tensor acl_qadd(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
+  TORCH_CHECK(qa.ndimension() > 0, "acl_qadd(): Got empty input tensor.");
+  TORCH_CHECK(
+      qa.qscheme() == kPerTensorAffine || qa.qscheme() == kPerTensorSymmetric,
+      "Only per tensor quantization is supported in ACL quantized add.");
 
-    auto qa_mem_format = qa.suggest_memory_format();
-    Tensor dst = at::native::empty_affine_quantized(
-          at::infer_size_dimvector(qa.sizes(), qb.sizes()),
-          qa.scalar_type(),
-          std::nullopt /* layout */,
-          kCPU,
-          std::nullopt /* pin_memory */,
-          scale,
-          zero_point,
-          qa_mem_format);
+  auto qa_mem_format = qa.suggest_memory_format();
+  Tensor dst = at::native::empty_affine_quantized(
+      at::infer_size_dimvector(qa.sizes(), qb.sizes()),
+      qa.scalar_type(),
+      std::nullopt /* layout */,
+      kCPU,
+      std::nullopt /* pin_memory */,
+      scale,
+      zero_point,
+      qa_mem_format);
 
-    if (qb.size(0) == 0){
-      return dst;
-    }
-
-    // acl_obj created here to enable to cache this in the future
-    std::shared_ptr<at::native::acl_utils::ACLInt8Add> acl_obj = std::make_shared<at::native::acl_utils::ACLInt8Add>();
-
-    auto input_dims = qa.sizes().vec();
-
-    arm_compute::TensorShape qa_acl_tensor_shape;
-    arm_compute::TensorShape qb_acl_tensor_shape;
-    arm_compute::TensorShape qdst_acl_tensor_shape;
-    for(size_t i = input_dims.size() - 1; i != (size_t)-1; i--){
-      qa_acl_tensor_shape.set(i, input_dims[i], false, true);
-      qb_acl_tensor_shape.set(i, input_dims[i], false, true);
-      qdst_acl_tensor_shape.set(i, input_dims[i], false, true);
-    }
-
-    arm_compute::QuantizationInfo qa_qinfo = { static_cast<float>(qa.q_scale()), static_cast<int32_t>(qa.q_zero_point()), false };
-    arm_compute::QuantizationInfo qb_qinfo = { static_cast<float>(qb.q_scale()), static_cast<int32_t>(qb.q_zero_point()),  false };
-    arm_compute::QuantizationInfo qdst_qinfo = { static_cast<float>(scale), static_cast<int32_t>(zero_point),  false };
-
-    arm_compute::DataType acl_data_t;
-    if(typeid(T) == typeid(int8_t)){
-      acl_data_t = arm_compute::DataType::QASYMM8_SIGNED;
-    }
-    else{
-      acl_data_t = arm_compute::DataType::QASYMM8; // unsigned
-    }
-
-    arm_compute::TensorInfo qa_acl_tensor_info(qa_acl_tensor_shape, 1, acl_data_t, qa_qinfo);
-    arm_compute::TensorInfo qb_acl_tensor_info(qb_acl_tensor_shape, 1, acl_data_t, qb_qinfo);
-    arm_compute::TensorInfo qdst_acl_tensor_info(qdst_acl_tensor_shape, 1, acl_data_t, qdst_qinfo);
-
-    acl_obj->qa_acl_tensor.allocator()->init(qa_acl_tensor_info);
-    acl_obj->qb_acl_tensor.allocator()->init(qb_acl_tensor_info);
-    acl_obj->qdst_acl_tensor.allocator()->init(qdst_acl_tensor_info);
-
-    arm_compute::ConvertPolicy policy = arm_compute::ConvertPolicy::SATURATE;
-    auto stat = acl_obj->acl_add.validate(&qa_acl_tensor_info, &qb_acl_tensor_info, &qdst_acl_tensor_info, policy);
-    TORCH_CHECK(stat.error_code() == arm_compute::ErrorCode::OK,
-                "arm_compute::NEArithmeticAddition config error.");
-    acl_obj->acl_add.configure(&(acl_obj->qa_acl_tensor), &(acl_obj->qb_acl_tensor), &(acl_obj->qdst_acl_tensor), policy);
-
-    acl_obj->qa_acl_tensor.allocator()->import_memory((T*)qa.data_ptr());
-    acl_obj->qb_acl_tensor.allocator()->import_memory((T*)qb.data_ptr());
-    acl_obj->qdst_acl_tensor.allocator()->import_memory((T*)dst.data_ptr());
-
-    // If creating acl_obj once and caching need to reset QuantizationInfo with:
-    // acl_obj->qa_acl_tensor.info()->set_quantization_info(qa_qinfo);
-    // acl_obj->qb_acl_tensor.info()->set_quantization_info(qb_qinfo);
-    // acl_obj->qdst_acl_tensor.info()->set_quantization_info(qdst_qinfo);
-    acl_obj->acl_add.run();
-
+  if (qb.size(0) == 0) {
     return dst;
   }
+
+  auto input_dims = qa.sizes().vec();
+  auto acl_dtype = dst.scalar_type() == kQInt8
+      ? arm_compute::DataType::QASYMM8_SIGNED
+      : arm_compute::DataType::QASYMM8;
+  auto acl_add = std::make_shared<acl_utils::QuantAdd>(
+      acl_dtype,
+      input_dims,
+      qa.q_scale(),
+      qa.q_zero_point(),
+      qb.q_scale(),
+      qb.q_zero_point(),
+      dst.q_scale(),
+      dst.q_zero_point());
+
+  auto status = acl_add->validate();
+  TORCH_CHECK(
+      status.error_code() == arm_compute::ErrorCode::OK,
+      "Arm Compute Library's Quantized Matmul Validation Failed: " +
+          status.error_description());
+
+  acl_add->configure();
+
+  acl_add->qa_tensor.allocator()->import_memory(qa.data_ptr());
+  acl_add->qb_tensor.allocator()->import_memory(qb.data_ptr());
+  acl_add->qdst_tensor.allocator()->import_memory(dst.data_ptr());
+
+  acl_add->q_add.run();
+
+  // this will not free memory, it will just tell ACL that we're no longer
+  // using the pointer
+  acl_add->qa_tensor.allocator()->free();
+  acl_add->qb_tensor.allocator()->free();
+  acl_add->qdst_tensor.allocator()->free();
+
+  return dst;
+}
 #endif // AT_MKLDNN_ACL_ENABLED()
 
 template <bool ReLUFused = false>
@@ -486,13 +469,10 @@ Tensor qadd(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
   }
 
 #if AT_MKLDNN_ACL_ENABLED()
-  if((!ReLUFused) && (qa.sizes() == qb.sizes())){
-    if(qa.scalar_type() == c10::ScalarType::QInt8){
-      return acl_qadd<int8_t>(qa, qb, scale, zero_point);
-    }
-    else if(qa.scalar_type() == c10::ScalarType::QUInt8){
-      return acl_qadd<uint8_t>(qa, qb, scale, zero_point);
-    }
+  if (!ReLUFused && qa.sizes() == qb.sizes() &&
+      qa.scalar_type() == qb.scalar_type() &&
+      (qa.scalar_type() == kQInt8 || qa.scalar_type() == kQUInt8)) {
+    return acl_qadd(qa, qb, scale, zero_point);
   }
 #endif // AT_MKLDNN_ACL_ENABLED()
 

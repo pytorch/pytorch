@@ -122,19 +122,27 @@ struct StaticQuantMatmul : public QuantMatmul {
   std::optional<at::Tensor> bia_q_tensor_orig_;
 };
 
-struct ACLInt8Add {
-  arm_compute::Tensor qa_acl_tensor;
-  arm_compute::Tensor qb_acl_tensor;
-  arm_compute::Tensor qdst_acl_tensor;
-  arm_compute::NEArithmeticAddition acl_add;
+struct QuantAdd {
+  arm_compute::Tensor qa_tensor;
+  arm_compute::Tensor qb_tensor;
+  arm_compute::Tensor qdst_tensor;
+  arm_compute::NEArithmeticAddition q_add;
 
-  ~ACLInt8Add() {
-    // This will free memory allocated for the quantized src tensor since the
-    // allocation happened through ACL: src_s8_tensor.allocator()->allocate()
-    qa_acl_tensor.allocator()->free();
-    qb_acl_tensor.allocator()->free();
-    qdst_acl_tensor.allocator()->free();
-  }
+  QuantAdd(
+      arm_compute::DataType dtype,
+      std::vector<int64_t> input_dims,
+      double qa_scale,
+      int64_t qa_offset,
+      double qb_scale,
+      int64_t qb_offset,
+      double dst_scale,
+      int64_t dst_offset);
+
+  arm_compute::Status validate();
+  void configure();
+
+ private:
+  arm_compute::ConvertPolicy policy{arm_compute::ConvertPolicy::SATURATE};
 };
 
 } // namespace at::native::acl_utils
