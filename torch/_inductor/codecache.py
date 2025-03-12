@@ -91,6 +91,7 @@ from torch.compiler._cache import CacheArtifactManager, CacheArtifactType
 from torch.fx.experimental.symbolic_shapes import has_hint, hint_int, ShapeEnv
 from torch.utils._ordered_set import OrderedSet
 
+from .package.pt2_archive_constants import CUSTOM_OBJ_FILENAME_PREFIX
 from .remote_cache import create_cache
 from .runtime import autotune_cache
 from .runtime.autotune_cache import AutotuneCacheBundler
@@ -1758,6 +1759,37 @@ class AotCodeCompiler:
                 aot_constants = struct.pack("qq", consts_size + 8, magic_number)
 
             consts_o = _compile_consts(aot_constants, sys.platform)
+            custom_obj_idx = 0
+            # Note that custom_objs_config.json file is different from the model_constants_config.json file produced
+            # in package_sigmoid(). The keys in custom_objs_config.json directly correspond to the arg name in extern
+            # nodes json. The key in model_constants_config.json produced by package_sigmoid is the attribute name in the
+            # user model code.
+
+            qual_name_to_id = {}  # Map from constant name to its name in constants folder
+            for custom_obj_idx, (name, constant) in enumerate(
+                graph.torchbind_constants.items()
+            ):
+                assert isinstance(constant, torch._C.ScriptObject)
+                custom_obj_name = f"{CUSTOM_OBJ_FILENAME_PREFIX}{custom_obj_idx}"
+
+                log.debug("saving script object %s as %s", name, custom_obj_name)
+
+                qual_name_to_id[name] = custom_obj_name
+                custom_obj_bytes = torch._C._pickle_save(constant)
+                custom_obj_path = os.path.join(
+                    wrapper_path_operator.parent, custom_obj_name
+                )
+
+                write_atomic(custom_obj_path, custom_obj_bytes, True)
+                generated_files.append(custom_obj_path)
+
+            constants_config_json = os.path.join(
+                wrapper_path_operator.parent, "custom_objs_config.json"
+            )
+            with open(constants_config_json, "w") as f:
+                f.write(json.dumps(qual_name_to_id))
+            generated_files.append(constants_config_json)
+
             gpu_codecache: Union[ROCmCodeCache, CUDACodeCache] = (
                 ROCmCodeCache() if torch.version.hip else CUDACodeCache()
             )
