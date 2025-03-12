@@ -927,7 +927,7 @@ class UserMethodVariable(UserFunctionVariable):
 
         if (
             isinstance(self.obj, variables.UserDefinedClassVariable)
-            and (make := inspect.getattr_static(self.obj.value, "_make"))
+            and (make := inspect.getattr_static(self.obj.value, "_make", None))
             and self.fn is make.__func__
         ):
             return variables.NamedTupleVariable(
