@@ -6837,6 +6837,10 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         expected = m(input1.view(6, 5), input2.view(6, 6)).view(2, 3, 8)
         self.assertEqual(expected, m(input1, input2))
 
+    def test_bilinear_value_error(self):
+        with self.assertRaisesRegex(ValueError, "in1_features must be > 0"):
+            nn.Bilinear(0, 0, 0)
+
     def test_fold_invalid_arg(self):
         # input.size(1) not divisible by \prod(kernel_size)
 
