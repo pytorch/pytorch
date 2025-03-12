@@ -5466,6 +5466,7 @@ class TestLinalg(TestCase):
             pass
 
     @onlyCUDA
+    @skipCUDAIfNotRocm
     @dtypes(torch.float16)
     def test_blaslog_tunableop(self, device, dtype):
         # Test that PYTORCH_TUNABLEOP_BLAS_LOG=1 gives
