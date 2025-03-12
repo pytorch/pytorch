@@ -76,6 +76,29 @@ void test_aoti_script(const std::string& device) {
   }
 }
 
+void test_aoti_package_loader(const std::string& device, bool use_runtime_constant_folding) {
+  torch::NoGradGuard no_grad;
+
+  std::string data_path =
+      (std::filesystem::path(STRINGIZE(CMAKE_CURRENT_BINARY_DIR)) / "data.pt")
+           .string();
+  torch::jit::script::Module data_loader = torch::jit::load(data_path);
+  std::string suffix = use_runtime_constant_folding
+      ? device + "_use_runtime_constant_folding"
+      : device;
+  std::string path_attr = "model_so_path_" + suffix;
+  std::string inputs_attr = "inputs_" + suffix;
+  std::string outputs_attr = "outputs_" + suffix;
+  const auto& model_so_path = data_loader.attr(path_attr.c_str()).toStringRef();
+  const auto& ref_output_tensors =
+      data_loader.attr(outputs_attr.c_str()).toTensorList().vec();
+
+  torch::inductor::AOTIModelPackageLoader runner(model_so_path);
+  auto actual_output_tensors =
+      runner.run(data_loader.attr(inputs_attr.c_str()).toTensorList().vec());
+  ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
+}
+
 void test_aoti_constants_update(
     const std::string& device,
     bool use_runtime_constant_folding) {
@@ -300,6 +323,10 @@ TEST(AotInductorTest, BasicScriptTestCpu) {
   test_aoti_script("cpu");
 }
 
+TEST(AotInductorTest, BasicPackageLoaderTestCpu) {
+  test_aoti_package_loader("cpu", false);
+}
+
 #ifdef USE_CUDA
 TEST(AotInductorTest, BasicTestCuda) {
   test_aoti("cuda", true);
@@ -308,6 +335,11 @@ TEST(AotInductorTest, BasicTestCuda) {
 
 TEST(AotInductorTest, BasicScriptTestCuda) {
   test_aoti_script("cuda");
+}
+
+TEST(AotInductorTest, BasicPackageLoaderTestCuda) {
+  test_aoti_package_loader("cuda", true);
+  test_aoti_package_loader("cuda", false);
 }
 
 TEST(AotInductorTest, RuntimeUpdateConstantsCuda) {
