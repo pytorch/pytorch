@@ -6,7 +6,11 @@ import torch
 from torch._C import DispatchKey  # @manual
 from torch._functorch._aot_autograd.utils import KNOWN_TYPES
 from torch._higher_order_ops.utils import autograd_not_implemented
-from torch._library.fake_class_registry import _ns_and_class_name, FakeScriptObject
+from torch._library.fake_class_registry import (
+    _is_script_object,
+    _ns_and_class_name,
+    FakeScriptObject,
+)
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
@@ -29,6 +33,25 @@ class CallTorchBind(HigherOrderOperator):
     def __call__(self, obj, method, *args, **kwargs):
         return super().__call__(obj, method, *args, **kwargs)
 
+    @staticmethod
+    def schema(obj, method) -> torch.FunctionSchema:
+        """
+        Returns the schema of ``CallTorchbind.__call__``.
+        """
+        assert isinstance(obj, torch._inductor.ir.TorchBindObject)
+        val = obj.get_real_obj()
+        schema = val._get_method(method).schema
+        schema_str = str(schema)
+        new_schema_str = (
+            "call_torchbind(" + str(schema.arguments[0].real_type) + " obj,"
+        )
+        first_comma_index = schema_str.find(",")
+        new_schema_str = (
+            new_schema_str + " str method," + schema_str[first_comma_index + 1 :]
+        )
+        new_schema = torch._C.parse_schema(new_schema_str)
+        return new_schema
+
 
 call_torchbind = CallTorchBind()
 
@@ -43,7 +66,7 @@ _orig_scriptmethod_call = torch.ScriptMethod.__call__
 
 
 def torchbind_method_redispatch(self, *args, **kwargs):
-    if isinstance(self.raw_owner, torch.ScriptObject):
+    if _is_script_object(self.raw_owner):
         return call_torchbind(self.raw_owner, self.name, *args, **kwargs)
     return _orig_scriptmethod_call(self, *args, **kwargs)
 

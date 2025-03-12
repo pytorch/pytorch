@@ -30,7 +30,7 @@ from torch.onnx import errors
 from torch.onnx._internal import io_adapter
 from torch.onnx._internal._lazy_import import onnxscript_apis, onnxscript_ir as ir
 from torch.onnx._internal.diagnostics import infra
-from torch.onnx._internal.exporter import _onnx_program
+from torch.onnx._internal.exporter import _constants, _onnx_program
 from torch.onnx._internal.fx import (
     decomposition_table,
     patcher as patcher,
@@ -81,12 +81,12 @@ class ONNXFakeContext:
 
 
 @deprecated(
-    "torch.onnx.dynamo_export is deprecated since 2.6.0. Please use torch.onnx.export(..., dynamo=True) instead."
+    "torch.onnx.dynamo_export is deprecated since 2.7.0. Please use torch.onnx.export(..., dynamo=True) instead.",
 )
 class OnnxRegistry:
     """Registry for ONNX functions.
 
-    .. deprecated:: 2.6
+    .. deprecated:: 2.7
         Please use ``torch.onnx.export(..., dynamo=True)`` instead.
 
     The registry maintains a mapping from qualified names to symbolic functions under a
@@ -105,7 +105,7 @@ class OnnxRegistry:
             defaultdict(list)
         )
 
-        self._opset_version = onnxscript_apis.torchlib_opset_version()
+        self._opset_version = _constants.TORCHLIB_OPSET
         warnings.warn(
             f"torch.onnx.dynamo_export only implements opset version {self._opset_version} for now. If you need to use a "
             "different opset version, please register them with register_custom_op."
@@ -231,12 +231,13 @@ class OnnxRegistry:
 
 
 @deprecated(
-    "torch.onnx.dynamo_export is deprecated since 2.6.0. Please use torch.onnx.export(..., dynamo=True) instead."
+    "torch.onnx.dynamo_export is deprecated since 2.7.0. Please use torch.onnx.export(..., dynamo=True) instead.",
+    category=None,
 )
 class ExportOptions:
     """Options to influence the TorchDynamo ONNX exporter.
 
-    .. deprecated:: 2.6
+    .. deprecated:: 2.7
         Please use ``torch.onnx.export(..., dynamo=True)`` instead.
 
     Attributes:
@@ -280,6 +281,10 @@ class ExportOptions:
         self.diagnostic_options = diagnostic_options or DiagnosticOptions()
 
 
+@deprecated(
+    "torch.onnx.dynamo_export is deprecated since 2.7.0. Please use torch.onnx.export(..., dynamo=True) instead.",
+    category=None,
+)
 class ResolvedExportOptions(ExportOptions):
     """Consolidates :class:`ExportOptions` with default values.
     All unspecified options from :class:`ExportOptions` are assigned a default value.
@@ -448,12 +453,12 @@ def enable_fake_mode():
 
 
 @deprecated(
-    "torch.onnx.dynamo_export is deprecated since 2.6.0. Please use torch.onnx.export(..., dynamo=True) instead."
+    "torch.onnx.dynamo_export is deprecated since 2.7.0. Please use torch.onnx.export(..., dynamo=True) instead.",
 )
 class ONNXRuntimeOptions:
     """Options to influence the execution of the ONNX model through ONNX Runtime.
 
-    .. deprecated:: 2.6
+    .. deprecated:: 2.7
         Please use ``torch.onnx.export(..., dynamo=True)`` instead.
 
     Attributes:
@@ -564,9 +569,13 @@ class Exporter:
         # https://github.com/pytorch/pytorch/issues/103764
         from torch.onnx._internal.fx import decomposition_skip
 
-        with self.options.diagnostic_context, decomposition_skip.enable_decomposition_skips(
-            self.options
-        ), torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):
+        with (
+            self.options.diagnostic_context,
+            decomposition_skip.enable_decomposition_skips(self.options),
+            torch._dynamo.config.patch(
+                dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)
+            ),
+        ):
             graph_module = self.options.fx_tracer.generate_fx(
                 self.options, self.model, self.model_args, self.model_kwargs
             )
@@ -707,9 +716,6 @@ def _assert_dependencies(export_options: ResolvedExportOptions):
         raise missing_opset("onnxscript")
 
 
-@deprecated(
-    "torch.onnx.dynamo_export is deprecated since 2.6.0. Please use torch.onnx.export(..., dynamo=True) instead."
-)
 def dynamo_export(
     model: torch.nn.Module | Callable,
     /,
@@ -719,7 +725,7 @@ def dynamo_export(
 ) -> _onnx_program.ONNXProgram:
     """Export a torch.nn.Module to an ONNX graph.
 
-    .. deprecated:: 2.6
+    .. deprecated:: 2.7
         Please use ``torch.onnx.export(..., dynamo=True)`` instead.
 
     Args:

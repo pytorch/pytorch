@@ -34,6 +34,11 @@ from torch.distributed.fsdp import (
 )
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.distributed.optim import _apply_optimizer_in_backward
+from torch.distributed.tensor.parallel import (
+    ColwiseParallel,
+    parallelize_module,
+    RowwiseParallel,
+)
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.optim import Optimizer
 from torch.testing._internal.common_dist_composable import (
@@ -47,7 +52,12 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     MultiProcessTestCase,
     with_comms,
 )
-from torch.testing._internal.distributed.common_state_dict import VerifyStateDictMixin
+from torch.testing._internal.distributed.common_state_dict import (
+    FusionEmbedding,
+    FusionEmbeddingWithHook,
+    FusionEmbeddingWithModifier,
+    VerifyStateDictMixin,
+)
 from torch.utils._pytree import tree_all, tree_all_only
 
 
@@ -74,8 +84,12 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         self,
         init_model_optim: Callable,
         test_frozen: bool = False,
+        flatten_optimizer: bool = False,
     ) -> None:
-        options = StateDictOptions(ignore_frozen_params=test_frozen)
+        options = StateDictOptions(
+            ignore_frozen_params=test_frozen,
+            flatten_optimizer_state_dict=flatten_optimizer,
+        )
         # Initialize original model and distributed model.
         model, optim, copy_optim, dist_model, dist_optim = init_model_optim()
 
@@ -94,6 +108,9 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             for d_optim in _dist_optim:
                 d_optim.step()
 
+        # We need to ensure gradients don't exist, this the invarient of using DSD.
+        optim.zero_grad()
+
         # Get the state_dict, and compare the result
         msd = model.state_dict()
         osd = optim.state_dict()
@@ -102,7 +119,8 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         )
         self._verify_msd(msd, dist_msd, options)
         self._verify_osd_by_load(model, optim, copy_optim, dist_osd)
-        self._verify_osd(model, optim, osd, dist_osd)
+        if not flatten_optimizer:
+            self._verify_osd(model, optim, osd, dist_osd)
 
         # Initialize a completely new model to simulate checkpoint load.
         _, _, _, dist_model, dist_optim = init_model_optim()
@@ -138,7 +156,8 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         self._verify_msd(msd, dist_msd, options)
         # TODO: Ditto
         # self._verify_osd_by_load(model, optim, copy_optim, dist_osd)
-        self._verify_osd(model, optim, osd, dist_osd)
+        if not flatten_optimizer:
+            self._verify_osd(model, optim, osd, dist_osd)
 
         # Test _patch_model_state_dict, and _patch_optimizer_state_dict
         _patch_model_state_dict(dist_model, options=options)
@@ -147,7 +166,8 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         dist_osd = dist_optim[0].state_dict()
         self._verify_msd(msd, dist_msd, options)
         self._verify_osd_by_load(model, optim, copy_optim, dist_osd)
-        self._verify_osd(model, optim, osd, dist_osd)
+        if not flatten_optimizer:
+            self._verify_osd(model, optim, osd, dist_osd)
 
     def _test_fsdp(
         self,
@@ -813,6 +833,13 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             return orig_model, orig_optim, copy_optim, dist_model, dist_optim
 
         self._test_save_load(init_model_optim)
+        self.run_subtests(
+            {
+                "init_model_optim": [init_model_optim],
+                "flatten_optimizer": [True, False],
+            },
+            self._test_save_load,
+        )
 
     @with_comms
     @skip_if_lt_x_gpu(2)
@@ -918,6 +945,96 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
                     broadcast_from_rank0=True, full_state_dict=True, strict=False
                 ),
             )
+
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_state_dict_with_hook_on_keys(self) -> None:
+        with torch.device("meta"):
+            metamodel = FusionEmbedding(4, 4, 4)
+        with torch.device("cuda"):
+            gpumodel = FusionEmbeddingWithHook(4, 4, 4)
+        gpumodel_state_dict = get_model_state_dict(gpumodel)
+        with self.assertRaisesRegex(RuntimeError, "Missing key"):
+            set_model_state_dict(metamodel, gpumodel_state_dict)
+        with torch.device("meta"):
+            metamodel_modified = FusionEmbeddingWithModifier(4, 4, 4)
+        set_model_state_dict(metamodel_modified, gpumodel_state_dict)
+
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_multi_param_groups(self) -> None:
+        class TestModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = torch.nn.Linear(64, 64)
+                self.fc1 = torch.nn.Linear(64, 64)
+
+            def forward(self, x):
+                return self.fc1(self.fc(x))
+
+        device_mesh = init_device_mesh("cuda", (self.world_size,))
+        model = TestModel().cuda()
+        parallelize_module(
+            model,
+            device_mesh,
+            {
+                "fc": ColwiseParallel(use_local_output=False),
+                "fc1": RowwiseParallel(use_local_output=False),
+            },
+        )
+
+        def _test_multi(
+            optim_kwargs, full_state_dict, broadcast_from_rank0, cpu_offload
+        ):
+            if broadcast_from_rank0 and not full_state_dict:
+                return
+
+            optim = torch.optim.AdamW(**optim_kwargs)
+            optim.zero_grad()
+            model(torch.randn(64, 64).cuda()).sum().backward()
+            optim.step()
+            optim.zero_grad()
+
+            options = torch.distributed.checkpoint.state_dict.StateDictOptions(
+                full_state_dict=full_state_dict,
+                broadcast_from_rank0=broadcast_from_rank0,
+                cpu_offload=cpu_offload,
+            )
+            optim_state_dict = get_optimizer_state_dict(model, optim, options=options)
+
+            new_optim = torch.optim.AdamW(**optim_kwargs)
+            set_optimizer_state_dict(
+                model, new_optim, optim_state_dict, options=options
+            )
+            self.assertEqual(optim.param_groups, new_optim.param_groups)
+            self.assertEqual(optim.state, new_optim.state)
+
+        _multi_optim_kwargs = {
+            "params": [
+                {"params": [model.fc.weight]},
+                {"params": [model.fc1.weight], "lr": 0.2},
+            ],
+            "lr": 0.1,
+        }
+        _multi_optim_kwargs_empty_pg = {
+            "params": [
+                {"params": [model.fc.weight, model.fc1.weight]},
+                {"params": [], "lr": 0.2},  # empty pg group here
+            ],
+            "lr": 0.1,
+        }
+
+        self.run_subtests(
+            {
+                "optim_kwargs": [_multi_optim_kwargs_empty_pg, _multi_optim_kwargs],
+                "full_state_dict": [False, True],
+                "broadcast_from_rank0": [False, True],
+                # TODO: cpu_offload will cause get_optimizer_state_dict complain that
+                # tensors are not on GPU.
+                "cpu_offload": [False],
+            },
+            _test_multi,
+        )
 
 
 class TestNoComm(MultiProcessTestCase):

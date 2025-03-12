@@ -284,7 +284,10 @@ class NCCLComm {
 
   ncclResult_t checkForNcclError();
 
-  ncclResult_t registerSegment(void* ptr, size_t size);
+  ncclResult_t registerSegment(
+      void* ptr,
+      size_t size,
+      bool errorOnRereg = true);
 
   ncclResult_t deregisterSegment(void* ptr);
 
