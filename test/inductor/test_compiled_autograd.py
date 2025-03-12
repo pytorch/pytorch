@@ -4142,7 +4142,6 @@ known_failing_tests = {
     "test_dtensor_different_gradient_placement",
     "test_dtensor_noncontiguous_output",
     "test_dtensor_partial_placement_graph_output",
-    "test_tp_compile_comm_reordering",
     "test_unwrap_async_collective_tensor_tangent",
     # Uncategorized
     "test_not_implemented_grad",  # Dynamo changes the types of exceptions
