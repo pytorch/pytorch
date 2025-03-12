@@ -35,7 +35,7 @@ _ONNX_DTYPE_TO_TORCH_DTYPE = {
 @torch.library.custom_op(
     "onnx_symbolic::_symbolic",
     mutates_args=(),
-    schema="(Tensor[] inputs, str op_type, int onnx_dtype, Tensor[] attr_tensors, *, SymInt[] shape, str[] attr_keys, str[] attr_types, int[][] attr_pos, int[] attr_ints, float[] attr_floats, str[] attr_strs, bool[] attr_bools, str[] metadata_props_keys, str[] metadata_props_values, str domain='', int? version=None) -> Tensor",
+    schema="(Tensor[] inputs, str op_type, int onnx_dtype, Tensor[] attr_tensors, *, SymInt[] shape, str[] attr_keys, str[] attr_types, int[][] attr_pos, int[] attr_ints, float[] attr_floats, str[] attr_strs, str[] metadata_props_keys, str[] metadata_props_values, str domain='', int? version=None) -> Tensor",
 )
 def _symbolic(
     inputs: Sequence[torch.Tensor],
@@ -50,7 +50,6 @@ def _symbolic(
     attr_ints: Sequence[int],
     attr_floats: Sequence[float],
     attr_strs: Sequence[str],
-    attr_bools: Sequence[bool],
     metadata_props_keys: Sequence[str] = [],
     metadata_props_values: Sequence[str] = [],
     domain: str = "",
@@ -78,7 +77,6 @@ def _(
     attr_ints: Sequence[int],
     attr_floats: Sequence[float],
     attr_strs: Sequence[str],
-    attr_bools: Sequence[bool],
     metadata_props_keys: Sequence[str] = [],
     metadata_props_values: Sequence[str] = [],
     domain: str = "",
@@ -104,7 +102,6 @@ torch.library.opcheck(
         attr_ints=[1],
         attr_floats=[1.0],
         attr_strs=["attr"],
-        attr_bools=[True],
         metadata_props_keys=["meta_key"],
         metadata_props_values=["meta_value"],
         domain="",
@@ -116,7 +113,7 @@ torch.library.opcheck(
 @torch.library.custom_op(
     "onnx_symbolic::_symbolic_multi_out",
     mutates_args=(),
-    schema="(Tensor[] inputs, str op_type, int[] onnx_dtypes, Tensor[] attr_tensors, *, SymInt[][] shapes, str[] attr_keys, int[] attr_ints, float[] attr_floats, str[] attr_strs, bool[] attr_bools, str[] metadata_props_keys, str[] metadata_props_values, str domain='', int? version=None) -> Tensor[]",
+    schema="(Tensor[] inputs, str op_type, int[] onnx_dtypes, Tensor[] attr_tensors, *, SymInt[][] shapes, str[] attr_keys, int[] attr_ints, float[] attr_floats, str[] attr_strs, str[] metadata_props_keys, str[] metadata_props_values, str domain='', int? version=None) -> Tensor[]",
 )
 def _symbolic_multi_out(
     inputs: Sequence[torch.Tensor],
@@ -129,7 +126,6 @@ def _symbolic_multi_out(
     attr_ints: Sequence[int],
     attr_floats: Sequence[float],
     attr_strs: Sequence[str],
-    attr_bools: Sequence[bool],
     metadata_props_keys: Sequence[str] = [],
     metadata_props_values: Sequence[str] = [],
     domain: str = "",
@@ -157,7 +153,6 @@ def _(
     attr_ints: Sequence[int],
     attr_floats: Sequence[float],
     attr_strs: Sequence[str],
-    attr_bools: Sequence[bool],
     metadata_props_keys: Sequence[str] = [],
     metadata_props_values: Sequence[str] = [],
     domain: str = "",
@@ -186,7 +181,6 @@ torch.library.opcheck(
         attr_ints=[1],
         attr_floats=[1.0],
         attr_strs=["attr"],
-        attr_bools=[True],
         metadata_props_keys=["meta_key"],
         metadata_props_values=["meta_value"],
         domain="",
@@ -203,7 +197,6 @@ class EncodeOnnxAttrs:
     attr_ints: Sequence[int]
     attr_floats: Sequence[float]
     attr_strs: Sequence[str]
-    attr_bools: Sequence[bool]
     attr_tensors: Sequence[torch.Tensor]
 
 
@@ -228,12 +221,59 @@ def encode_onnx_attrs(
     attr_ints: Sequence[int] = []
     attr_floats: Sequence[float] = []
     attr_strs: Sequence[str] = []
-    attr_bools: Sequence[bool] = []
     attr_tensors: Sequence[torch.Tensor] = []
 
     for i, (k, v) in enumerate(attrs.items()):
+        attr_keys.append(k)
         if isinstance(v, int):
+            start_pos = len(attr_ints)
             attr_ints.append(v)
+            attr_pos.append((start_pos, start_pos + 1))
+            attr_types.append("i")
+        elif isinstance(v, float):
+            start_pos = len(attr_floats)
+            attr_floats.append(v)
+            attr_pos.append((start_pos, start_pos + 1))
+            attr_types.append("f")
+        elif isinstance(v, str):
+            start_pos = len(attr_strs)
+            attr_strs.append(v)
+            attr_pos.append((start_pos, start_pos + 1))
+            attr_types.append("s")
+        elif isinstance(v, torch.Tensor):
+            start_pos = len(attr_tensors)
+            attr_tensors.append(v)
+            attr_pos.append((start_pos, start_pos + 1))
+            attr_types.append("t")
+        elif isinstance(v, Sequence):
+            if len(v) == 0:
+                raise ValueError(f"Empty sequence for attribute {k}")
+            if any(isinstance(elem, float) for elem in v):
+                start_pos = len(attr_floats)
+                attr_floats.extend([float(elem) for elem in v])
+                attr_pos.append((start_pos, start_pos + len(v)))
+                attr_types.append("fs")
+            elif isinstance(v[0], int):
+                start_pos = len(attr_ints)
+                attr_ints.extend([int(elem) for elem in v])
+                attr_pos.append((start_pos, start_pos + len(v)))
+                attr_types.append("is")
+            elif isinstance(v[0], str):
+                start_pos = len(attr_strs)
+                attr_strs.extend([str(elem) for elem in v])
+                attr_pos.append((start_pos, start_pos + len(v)))
+                attr_types.append("ss")
+            elif isinstance(v[0], torch.Tensor):
+                start_pos = len(attr_tensors)
+                attr_tensors.extend([torch.tensor(elem) for elem in v])
+                attr_pos.append((start_pos, start_pos + len(v)))
+                attr_types.append("ts")
+            else:
+                raise ValueError(f"Unsupported sequence type for attribute {k}")
+        else:
+            raise ValueError(f"Unsupported attribute type for {k}: {type(v)}")
+    assert len(attr_keys) == len(attr_types), f"Mismatch between number of attribute keys and types: {len(attr_keys)} != {len(attr_types)}"
+    assert len(attr_keys) == len(attr_pos), f"Mismatch between number of attribute keys and positions: {len(attr_keys)} != {len(attr_pos)}"
 
     return EncodeOnnxAttrs(
         attr_keys=attr_keys,
@@ -242,6 +282,5 @@ def encode_onnx_attrs(
         attr_ints=attr_ints,
         attr_floats=attr_floats,
         attr_strs=attr_strs,
-        attr_bools=attr_bools,
         attr_tensors=attr_tensors,
     )
