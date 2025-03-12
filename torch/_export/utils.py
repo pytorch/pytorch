@@ -1259,7 +1259,7 @@ def register_module_as_pytree_input_node(cls: type[torch.nn.Module]) -> None:
 
     class PrototypeModule(weakref.ref):
         def __init__(self, m, *args, **kwargs):
-            super().__init__(m, *args, **kwargs)
+            super().__init__(m, *args, **kwargs)  # type: ignore[call-arg]
             assert isinstance(m, torch.nn.Module)
             assert not hasattr(self, "_proto_cls")
             self._proto_cls = cls
