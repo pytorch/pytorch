@@ -374,7 +374,7 @@ def generate_wheels_matrix(
                     }
                 )
                 # Special build building to use on Colab. Python 3.11 for 12.6 CUDA
-                if python_version == "3.11" and arch_version == "12.6":
+                if python_version == "3.11" and arch_version == CUDA_STABLE:
                     ret.append(
                         {
                             "python_version": python_version,
@@ -417,7 +417,7 @@ def generate_wheels_matrix(
                         "pytorch_extra_install_requirements": (
                             PYTORCH_EXTRA_INSTALL_REQUIREMENTS["xpu"]
                             if gpu_arch_type == "xpu"
-                            else PYTORCH_EXTRA_INSTALL_REQUIREMENTS["12.6"]
+                            else PYTORCH_EXTRA_INSTALL_REQUIREMENTS[CUDA_STABLE]
                             if os != "linux"
                             else ""
                         ),
