@@ -24,6 +24,8 @@ runs:
       run: echo "IN_CONTAINER_RUNNER=$(if [ -f /.inarc ] || [ -f /.incontainer ]; then echo true ; else echo false; fi)" >> "$GITHUB_OUTPUT"
 
     - name: Set up parallel fetch and clean workspace
+      id: first-clean
+      continue-on-error: true
       shell: bash
       if: ${{ steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' }}
       env:
@@ -56,7 +58,8 @@ runs:
         show-progress: false
 
     - name: Remove entire workspace if checkout failed
-      if: ${{ steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' && steps.first-checkout-attempt.outcome != 'success' }}
+      if: ${{ steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' &&
+        (steps.first-clean != 'success' || steps.first-checkout-attempt.outcome != 'success') }}
       shell: bash
       env:
         NO_SUDO: ${{ inputs.no-sudo }}
@@ -65,7 +68,7 @@ runs:
 
     - name: Checkout PyTorch
       uses: actions/checkout@v4
-      if: ${{ steps.first-checkout-attempt.outcome != 'success' }}
+      if: ${{ steps.first-clean != 'success' || steps.first-checkout-attempt.outcome != 'success' }}
       with:
         ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         fetch-depth: ${{ inputs.fetch-depth }}
