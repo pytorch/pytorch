@@ -7,7 +7,6 @@ import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import (
-    _has_potential_branch_input_mutation,
     _maybe_reenter_make_fx,
     autograd_not_implemented,
     reenter_make_fx,
