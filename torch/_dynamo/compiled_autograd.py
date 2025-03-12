@@ -402,6 +402,11 @@ class AutogradCompilerInstance:
                     result = self.fx_tracer.create_node("get_attr", qualname, (), {})
                     value_remap[node] = result
                 elif node.op == "call_function":
+                    if node.target == torch.ops.aten.view.default:
+                        # this aot bwd graph is being lazily compiled
+                        # we must manually apply the view_to_reshape post grad pass
+                        # since it was already applied to the aot fwd, and baked into the gradients
+                        node.target = torch.ops.aten.reshape.default
                     result = self.fx_tracer.graph.node_copy(
                         node, lambda n: value_remap[n]
                     )
