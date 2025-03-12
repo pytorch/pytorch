@@ -309,7 +309,6 @@ class GraphLowering(torch.fx.Interpreter):
             shape_env = ShapeEnv()
             self.reuse_shape_env = False
         else:
-            self._shape_env = shape_env
             self.reuse_shape_env = True
         self._shape_env = shape_env
         # We're going to mutate ras_by_symbol as we finish generating them
