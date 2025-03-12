@@ -102,10 +102,10 @@ networkx==2.8.8
 #Pinned versions: 2.8.8
 #test that import: functorch
 
-#ninja
-#Description: build system.  Note that it install from
-#here breaks things so it is commented out
-#Pinned versions: 1.10.0.post1
+ninja==1.11.1.3
+#Description: build system. Used in some tests. Used in build to generate build
+#time tracing information
+#Pinned versions: 1.11.1.3
 #test that import: run_test.py, test_cpp_extensions_aot.py,test_determination.py
 
 numba==0.49.0 ; python_version < "3.9"
@@ -365,7 +365,6 @@ PyYAML
 pyzstd
 setuptools
 
-ninja==1.11.1 ; platform_machine == "aarch64"
 scons==4.5.2 ; platform_machine == "aarch64"
 
 pulp==2.9.0 ; python_version >= "3.8"
