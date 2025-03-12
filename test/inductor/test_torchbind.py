@@ -234,13 +234,6 @@ class TestTorchbind(TestCase):
         # TODO: add accuracy test after we support loading and running compiled models with
         # torchbind objects.
 
-    @torch._inductor.config.patch("aot_inductor.use_runtime_constant_folding", True)
-    def test_torchbind_aot_compile_constant_folding(self):
-        ep, inputs, _, _ = self.get_exported_model()
-        aot_compile(ep.module(), inputs, options={"aot_inductor.package": True})
-        # TODO: add accuracy test after we support loading and running compiled models with
-        # torchbind objects.
-
 
 if __name__ == "__main__":
     run_tests()

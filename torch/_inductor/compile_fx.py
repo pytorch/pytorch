@@ -1070,16 +1070,7 @@ class _InProcessFxCompile(FxCompile):
                 const_kernel_code = None
 
                 if aot_mode and config.aot_inductor.use_runtime_constant_folding:
-                    # torchbind objects have name that starts with _torchbind_obj
-                    # See caffe2/torch/fx/_symbolic_trace.py?lines=406
-                    # We don't use node.meta["val"] because we don't typically
-                    # attach meta["val"] for get_attr nodes.
-                    const_gm, const_output_index = split_const_gm(
-                        gm,
-                        skip_folding_node_fn=lambda node: node.op == "get_attr"
-                        and isinstance(node.target, str)
-                        and node.target.startswith("_torchbind_obj"),
-                    )
+                    const_gm, const_output_index = split_const_gm(gm)
 
                     const_graph = GraphLowering(
                         const_gm,
