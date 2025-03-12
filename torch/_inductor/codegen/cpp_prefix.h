@@ -74,10 +74,14 @@ struct IsVecType<at::vec::VectorizedN<T, N>>: std::true_type {};
 
 template <typename T>
 struct WelfordHelper {
+  // A data struct to help welford reduction:
+  // 1. Save the reciprocal of weights to avoid redundant divisions.
+  // 2. Save the welford stack, which is used to combine welford reduction
+  //    with cascade summation to improve numerical stability.
   static std::vector<typename T::value_type> weight_recps;
   std::vector<Welford<T>> welford_stk;
-  uint64_t depth;
-  uint64_t num_chunks;
+  uint64_t depth; // depth of welford_stk.
+  uint64_t num_chunks; // number of chunks stored in welford_stk.
   WelfordHelper() {}
   WelfordHelper(uint64_t N) {
     uint64_t m = (N + kChunkSize - 1) / kChunkSize; //div up
@@ -126,7 +130,9 @@ Welford<T> welford_combine(const Welford<T>& a, const Welford<T>& b, bool use_in
 
 template <typename T>
 Welford<T> welford_combine(Welford<T>& acc, T& data, WelfordHelper<T>* w=nullptr) {
-  // Combine Welford algorithm with cascade sum to improve numerical stability.
+  // Combine welford reduction with cascade summation to improve numerical stability.
+  // https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance
+  // https://en.wikipedia.org/wiki/Pairwise_summation
   if constexpr (IsVecType<T>::value) {
     if (w != nullptr && w->depth > 0 && acc.index == kChunkSize) {
       w->welford_stk[0] = welford_combine(w->welford_stk[0], acc);
