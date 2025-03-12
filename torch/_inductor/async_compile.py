@@ -302,6 +302,10 @@ class AsyncCompile:
         - The AutotuneCache, if enabled, is constructed on each worker per triton config
           and pickled by to us via `CachingAutotuner.save_cache_hook`.
         """
+        load_kernel = functools.partial(
+            _load_triton_kernel_from_source, kernel_name, source_code
+        )
+
         def reload_kernel_in_parent():
             # Benchmark how often this happens
             with dynamo_timed("reload_kernel_in_parent"):
@@ -311,11 +315,10 @@ class AsyncCompile:
             counters["inductor"]["async_compile_cache_hit"] += 1
             # If it's already a CachingAutotuner, we want to load it directly
             if isinstance(future, CachingAutotuner):
-                with dynamo_timed("async_compile.warm_precompile"):
-                    future.precompile(
-                        warm_cache_only=False, reload_kernel=reload_kernel_in_parent
-                    )
-                    return future
+                future.precompile(
+                    warm_cache_only=False, reload_kernel=reload_kernel_in_parent
+                )
+                return future
             return future
 
         counters["inductor"]["async_compile_cache_miss"] += 1
@@ -328,9 +331,6 @@ class AsyncCompile:
                 torch._inductor.codecache.PyCodeCache.load(source_code), kernel_name
             )
 
-        load_kernel = functools.partial(
-            _load_triton_kernel_from_source, kernel_name, source_code
-        )
         is_parallel = self.use_process_pool()
         set_feature_use("parallel_compile_post_warmup", is_parallel)
         if is_parallel:
@@ -371,6 +371,8 @@ class AsyncCompile:
                 start_ns = time_ns()
                 _set_triton_ptxas_path()
                 kernel = load_kernel()
+                kernel.precompile(warm_cache_only=True)
+                CompiledTritonKernels.remove_future(source_code, kernel)
                 kernel.precompile(warm_cache_only=False)
                 elapsed_us = (time_ns() - start_ns) // 1000
                 get_metrics_context().add_top_n(
