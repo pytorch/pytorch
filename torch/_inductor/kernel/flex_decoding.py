@@ -12,7 +12,7 @@ from .. import config, ir
 from ..ir import FixedLayout, FlexibleLayout
 from ..lowering import empty, empty_strided, lowerings
 from ..runtime.runtime_utils import is_power_of_2, next_power_of_2
-from ..select_algorithm import autotune_select_algorithm, TritonTemplate
+from ..select_algorithm import autotune_select_algorithm, SymbolicGridFn, TritonTemplate
 from .flex_attention import (
     compute_forward_block_mn,
     compute_forward_inner,
@@ -30,6 +30,7 @@ aten = torch.ops.aten
 prims = torch.ops.prims
 
 
+@SymbolicGridFn
 def flex_decoding_grid(batch_size, kv_heads, gqa_group_size, n_keys, d_model, meta):
     """How is this kernel parallelized?
     We create a grid of (batch_size * kv_heads, SPLIT_KV, 1)
