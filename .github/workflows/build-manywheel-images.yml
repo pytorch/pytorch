@@ -36,7 +36,7 @@ jobs:
   get-label-type:
     if: github.repository_owner == 'pytorch'
     name: get-label-type
-    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@release/2.7
     with:
       triggering_actor: ${{ github.triggering_actor }}
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
@@ -57,12 +57,12 @@ jobs:
       - name: Purge tools folder (free space for build)
         run: rm -rf /opt/hostedtoolcache
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.7
         with:
           submodules: false
       - name: Calculate docker image
         if: env.WITH_PUSH == 'false'
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@release/2.7
         with:
             docker-image-name: manylinux2_28-builder-cuda${{matrix.cuda_version}}
             docker-build-dir:  .ci/docker/manywheel
@@ -102,7 +102,7 @@ jobs:
         uses: actions/checkout@v3
       - name: Calculate docker image
         if: env.WITH_PUSH == 'false'
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@release/2.7
         with:
             docker-image-name: manylinuxaarch64-builder-cuda${{matrix.cuda_version}}
             docker-build-dir:  .ci/docker/manywheel
@@ -139,12 +139,12 @@ jobs:
       GPU_ARCH_VERSION: ${{ matrix.rocm_version }}
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.7
         with:
           submodules: false
       - name: Calculate docker image
         if: env.WITH_PUSH == 'false'
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@release/2.7
         with:
             docker-image-name: manylinux2_28-builder-rocm${{matrix.rocm_version}}
             docker-build-dir:  .ci/docker/manywheel
@@ -177,12 +177,12 @@ jobs:
       GPU_ARCH_TYPE: cpu-manylinux_2_28
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.7
         with:
           submodules: false
       - name: Calculate docker image
         if: env.WITH_PUSH == 'false'
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@release/2.7
         with:
             docker-image-name: manylinux2_28-builder-cpu
             docker-build-dir:  .ci/docker/manywheel
@@ -215,12 +215,12 @@ jobs:
       GPU_ARCH_TYPE: cpu-aarch64
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.7
         with:
           submodules: false
       - name: Calculate docker image
         if: env.WITH_PUSH == 'false'
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@release/2.7
         with:
             docker-image-name: manylinuxaarch64-builder-cpu-aarch64
             docker-build-dir:  .ci/docker/manywheel
@@ -253,12 +253,12 @@ jobs:
       GPU_ARCH_TYPE: cpu-aarch64-2_28
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.7
         with:
           submodules: false
       - name: Calculate docker image
         if: env.WITH_PUSH == 'false'
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@release/2.7
         with:
             docker-image-name: manylinux2_28_aarch64-builder-cpu-aarch64
             docker-build-dir:  .ci/docker/manywheel
@@ -294,12 +294,12 @@ jobs:
       GPU_ARCH_TYPE: cpu-cxx11-abi
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.7
         with:
           submodules: false
       - name: Calculate docker image
         if: env.WITH_PUSH == 'false'
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@release/2.7
         with:
             docker-image-name: manylinuxcxx11-abi-builder-cpu-cxx11-abi
             docker-build-dir:  .ci/docker/manywheel
@@ -332,12 +332,12 @@ jobs:
       GPU_ARCH_TYPE: xpu
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.7
         with:
           submodules: false
       - name: Calculate docker image
         if: env.WITH_PUSH == 'false'
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@release/2.7
         with:
             docker-image-name: manylinux2_28-builder-xpu
             docker-build-dir:  .ci/docker/manywheel

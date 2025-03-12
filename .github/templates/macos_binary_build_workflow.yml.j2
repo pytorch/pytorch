@@ -76,7 +76,7 @@ jobs:
           elif [ -d "/Applications/Xcode_13.3.1.app" ]; then
             echo "DEVELOPER_DIR=/Applications/Xcode_13.3.1.app/Contents/Developer" >> "${GITHUB_ENV}"
           fi
-      !{{ common.checkout(deep_clone=False, directory="pytorch") }}
+      !{{ common.checkout(deep_clone=False, directory="pytorch", checkout_pr_head=False) }}
       - name: Populate binary env
         run: |
           # shellcheck disable=SC1091
