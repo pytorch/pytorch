@@ -3040,36 +3040,94 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         with ctx():
             self.check_output_and_recompiles(fn)
 
-        expected_logs = [
-            "code: CompiledFunctionBackward (NodeCall 2)",
-            "code: CompiledFunctionBackward0 (NodeCall 2)",
-            "aot0_primals_3",
-            "aot0_relu",
-            "aot0_le",
-            "aot0_permute_2",
-            "aot0_full_default",
-            "aot0_where",
-            "aot0_mm",
-            "aot0_permute_3",
-            "aot0_mm_1",
-            "aot0_sum_1",
-            "aot0_view",
-            "aot0_le_1",
-            "aot0_where_1",
-            "aot0_permute_6",
-            "aot0_mm_2",
-            "aot0_sum_2",
-            "aot0_view_1",
-        ]
+        self.assertExpectedInline(
+            logs.getvalue(),
+            """\
+Cache miss due to new autograd node: torch::autograd::GraphRoot (NodeCall 0) with key size 39, previous key sizes=[]
+DCE removed 4 nodes
+TRACED GRAPH
+ ===== Compiled autograd graph =====
+ <eval_with_key>.10 class CompiledAutograd0(torch.nn.Module):
+    def forward(self, inputs, sizes, scalars, hooks, packed_data):
+         # File: /data/users/hirsheybar/checkout2/pytorch/torch/_dynamo/compiled_autograd.py:1237 in set_node_origin, code: torch::autograd::GraphRoot (NodeCall 0)
+        getitem = inputs[0]
+        
+         # File: /data/users/hirsheybar/checkout2/pytorch/torch/_dynamo/compiled_autograd.py:1237 in set_node_origin, code: CompiledFunctionBackward (NodeCall 2)
+        getitem_1 = inputs[1]
+        getitem_2 = inputs[2]
+        getitem_3 = inputs[3]
+        getitem_4 = inputs[4]
+        
+         # File: /data/users/hirsheybar/checkout2/pytorch/torch/_dynamo/compiled_autograd.py:1237 in set_node_origin, code: torch::autograd::AccumulateGrad (NodeCall 3)
+        getitem_5 = inputs[5]
+        
+         # File: /data/users/hirsheybar/checkout2/pytorch/torch/_dynamo/compiled_autograd.py:1237 in set_node_origin, code: torch::autograd::AccumulateGrad (NodeCall 5)
+        getitem_6 = inputs[6]
+        
+         # File: /data/users/hirsheybar/checkout2/pytorch/torch/_dynamo/compiled_autograd.py:1237 in set_node_origin, code: torch::autograd::AccumulateGrad (NodeCall 6)
+        getitem_7 = inputs[7];  inputs = None
+        
+         # File: /data/users/hirsheybar/checkout2/pytorch/torch/_dynamo/compiled_autograd.py:1237 in set_node_origin, code: torch::autograd::GraphRoot (NodeCall 0)
+        validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type='cpu'), 6, 0, None), [], False)]);  getitem = None
+        getitem_8 = validate_outputs[0];  validate_outputs = None
+        
+         # File: /data/users/hirsheybar/checkout2/pytorch/torch/_dynamo/compiled_autograd.py:1237 in set_node_origin, code: SumBackward0 (NodeCall 1)
+        sum_backward0 = torch__dynamo_compiled_autograd_ops_SumBackward0([getitem_8], [True], [2, 4]);  getitem_8 = None
+        getitem_9 = sum_backward0[0];  sum_backward0 = None
+        validate_outputs_1 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_9], [((None, None, device(type='cpu'), 6, 0, None), [2, 4], False)]);  getitem_9 = None
+        getitem_10 = validate_outputs_1[0];  validate_outputs_1 = None
+        
+         # File: /data/users/hirsheybar/checkout2/pytorch/torch/_dynamo/compiled_autograd.py:1237 in set_node_origin, code: CompiledFunctionBackward0 (NodeCall 2)
+        getitem_11 = hooks[0];  hooks = getitem_11 = None
+        call_aot_bwd_prologue = torch__dynamo_compiled_autograd_call_aot_bwd_prologue((getitem_1, getitem_2, getitem_3, getitem_4), [], getitem_10);  getitem_1 = getitem_3 = getitem_4 = getitem_10 = None
+        aot0_primals_3 = call_aot_bwd_prologue[0]
+        aot0_primals_4 = call_aot_bwd_prologue[1]
+        aot0_relu = call_aot_bwd_prologue[2]
+        aot0_le = call_aot_bwd_prologue[3]
+        aot0_tangents_1 = call_aot_bwd_prologue[4];  call_aot_bwd_prologue = None
+        
+         # File: /data/users/hirsheybar/checkout2/pytorch/test/inductor/test_compiled_autograd.py:3028 in forward, code: return model(x)
+        aot0_full_default = torch.ops.aten.full.default([], 0.0, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
+        aot0_where = torch.ops.aten.where.self(aot0_le, aot0_full_default, aot0_tangents_1);  aot0_le = aot0_tangents_1 = None
+        aot0_permute_1 = torch.ops.aten.permute.default(aot0_primals_4, [1, 0]);  aot0_primals_4 = None
+        aot0_permute_2 = torch.ops.aten.permute.default(aot0_permute_1, [1, 0]);  aot0_permute_1 = None
+        aot0_mm = torch.ops.aten.mm.default(aot0_where, aot0_permute_2);  aot0_permute_2 = None
+        aot0_permute_3 = torch.ops.aten.permute.default(aot0_where, [1, 0])
+        aot0_mm_1 = torch.ops.aten.mm.default(aot0_permute_3, aot0_relu);  aot0_permute_3 = None
+        
+         # File: /data/users/hirsheybar/checkout2/pytorch/torch/_dynamo/compiled_autograd.py:1237 in set_node_origin, code: torch::autograd::AccumulateGrad (NodeCall 4)
+        accumulate_grad__1 = torch.ops.inductor.accumulate_grad_.default(getitem_2, aot0_mm_1);  getitem_2 = aot0_mm_1 = accumulate_grad__1 = None
+        
+         # File: /data/users/hirsheybar/checkout2/pytorch/test/inductor/test_compiled_autograd.py:3028 in forward, code: return model(x)
+        aot0_sum_1 = torch.ops.aten.sum.dim_IntList(aot0_where, [0], True);  aot0_where = None
+        aot0_view = torch.ops.aten.reshape.default(aot0_sum_1, [4]);  aot0_sum_1 = None
+        
+         # File: /data/users/hirsheybar/checkout2/pytorch/torch/_dynamo/compiled_autograd.py:1237 in set_node_origin, code: torch::autograd::AccumulateGrad (NodeCall 3)
+        accumulate_grad_ = torch.ops.inductor.accumulate_grad_.default(getitem_5, aot0_view);  getitem_5 = aot0_view = accumulate_grad_ = None
+        
+         # File: /data/users/hirsheybar/checkout2/pytorch/test/inductor/test_compiled_autograd.py:3028 in forward, code: return model(x)
+        aot0_le_1 = torch.ops.aten.le.Scalar(aot0_relu, 0);  aot0_relu = None
+        aot0_where_1 = torch.ops.aten.where.self(aot0_le_1, aot0_full_default, aot0_mm);  aot0_le_1 = aot0_full_default = aot0_mm = None
+        aot0_permute_6 = torch.ops.aten.permute.default(aot0_where_1, [1, 0])
+        aot0_mm_2 = torch.ops.aten.mm.default(aot0_permute_6, aot0_primals_3);  aot0_permute_6 = aot0_primals_3 = None
+        
+         # File: /data/users/hirsheybar/checkout2/pytorch/torch/_dynamo/compiled_autograd.py:1237 in set_node_origin, code: torch::autograd::AccumulateGrad (NodeCall 6)
+        accumulate_grad__3 = torch.ops.inductor.accumulate_grad_.default(getitem_7, aot0_mm_2);  getitem_7 = aot0_mm_2 = accumulate_grad__3 = None
+        
+         # File: /data/users/hirsheybar/checkout2/pytorch/test/inductor/test_compiled_autograd.py:3028 in forward, code: return model(x)
+        aot0_sum_2 = torch.ops.aten.sum.dim_IntList(aot0_where_1, [0], True);  aot0_where_1 = None
+        aot0_view_1 = torch.ops.aten.reshape.default(aot0_sum_2, [4]);  aot0_sum_2 = None
+        
+         # File: /data/users/hirsheybar/checkout2/pytorch/torch/_dynamo/compiled_autograd.py:1237 in set_node_origin, code: torch::autograd::AccumulateGrad (NodeCall 5)
+        accumulate_grad__2 = torch.ops.inductor.accumulate_grad_.default(getitem_6, aot0_view_1);  getitem_6 = aot0_view_1 = accumulate_grad__2 = None
+        
+         # File: /data/users/hirsheybar/checkout2/pytorch/torch/_dynamo/compiled_autograd.py:1237 in set_node_origin, code: torch::autograd::AccumulateGrad (NodeCall 6)
+        _exec_final_callbacks_stub = torch__dynamo_external_utils__exec_final_callbacks_stub();  _exec_final_callbacks_stub = None
+        return []
+        
 
-        found = 0
-        for line in logs.getvalue().split("\n"):
-            if found == len(expected_logs):
-                break
-            if expected_logs[found] in line:
-                found += 1
-
-        self.assertEqual(found, len(expected_logs))
+"""
+        )
 
     @mock.patch(
         "torch._functorch.aot_autograd.AOT_COUNTER", new_callable=itertools.count
