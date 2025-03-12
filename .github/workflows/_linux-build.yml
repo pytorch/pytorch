@@ -206,6 +206,11 @@ jobs:
           job_identifier: ${{ github.workflow }}_${{ inputs.build-environment }}
           s3_bucket: ${{ inputs.s3-bucket }}
 
+      - name: Check all txt
+        shell: bash
+        run: |
+          ls ./*.txt
+
       - name: Build
         if: steps.filter.outputs.is-test-matrix-empty == 'False' || inputs.test-matrix == ''
         id: build
