@@ -1493,6 +1493,124 @@ class TestMPS(TestCaseMPS):
             a = torch.tensor(v, dtype=dtype, device="mps") * b
             self.compare_with_numpy(torch.exp, np.exp, a)
 
+    # TODO: I would like to only have one copy of this test code and run it on
+    # both CUDA and MPS, but I'm not sure where is a good place to put it so
+    # that both test_torch and test_mps can have access to it. I guess
+    # probably somewhere in `torch.testing`
+    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
+    @skipXLA
+    @parametrize('device', ['mps'])
+    @parametrize('src,dest', [
+        ('cpu', None),
+        (None, None),
+        ('cpu', 0),
+        ('cpu', 1),
+        (1, 0),
+        (0, 1),
+        (None, 'cpu'),
+    ])
+    @parametrize('materialize_first', ('src', 'dest'))
+    def test_lazy_clone_to_device(self, device, src, dest, materialize_first):
+        device_type = torch.device(device).type
+
+        def get_device_str(arg):
+            if isinstance(arg, str):
+                return arg
+            elif isinstance(arg, int):
+                if device_type == 'cuda':
+                    if arg >= torch.cuda.device_count():
+                        self.skipTest(f'CUDA index {arg} not found')
+                elif device_type == 'mps':
+                    if arg >= torch.mps.device_count():
+                        self.skipTest(f'MPS index {arg} not found')
+                else:
+                    self.skipTest(f'Index not supported for device type {device_type}')
+
+                return f'{device_type}:{arg}'
+            elif arg is None:
+                return device_type
+            else:
+                raise AssertionError(f'Test parameter not recognized: {arg}')
+
+        src_device = get_device_str(src)
+        dest_device = get_device_str(dest)
+
+        src_device_check = torch.empty(0, device=src_device).device
+        dest_device_check = torch.empty(0, device=dest_device).device
+
+        if src_device_check.type == 'cuda' and dest_device_check.type == 'cpu':
+            # NOTE: CUDA -> CPU does not work yet because upon materialization
+            # we always use the target device Allocator's `clone` function. The
+            # CPU allocator's `clone` function just calls memcopy, which does
+            # not understand CUDA data pointers. In order to get it to work, we
+            # would need to call cudaMemcpy with the appropriate args to copy
+            # data from CUDA to CPU. It is of course possible to make this work,
+            # but since CUDA-CPU is not the main reason for this feature
+            # (MPS-CPU is), we don't need to solve this problem at the moment.
+            self.skipTest('CUDA to CPU does not work yet')
+
+        a = torch.randn(10, device=src_device)
+        orig_data_ptr = a.data_ptr()
+        b = a._lazy_clone(device=dest_device)
+
+        self.assertEqual(a.device, src_device_check)
+        self.assertEqual(b.device, dest_device_check)
+        self.assertTrue(torch._C._is_cow_tensor(a))
+        self.assertEqual(torch._C._data_address(a), orig_data_ptr)
+        self.assertTrue(torch._C._is_cow_tensor(b))
+        self.assertEqual(torch._C._data_address(b), orig_data_ptr)
+
+        if materialize_first == 'src':
+            a[0] = 1
+
+            self.assertEqual(a.device, src_device_check)
+            self.assertEqual(b.device, dest_device_check)
+            self.assertFalse(torch._C._is_cow_tensor(a))
+            self.assertNotEqual(torch._C._data_address(a), orig_data_ptr)
+            self.assertTrue(torch._C._is_cow_tensor(b))
+            self.assertEqual(torch._C._data_address(b), orig_data_ptr)
+            self.assertEqual(a[0], 1)
+
+            b[0] = 2
+
+            self.assertEqual(a.device, src_device_check)
+            self.assertEqual(b.device, dest_device_check)
+            self.assertFalse(torch._C._is_cow_tensor(a))
+            self.assertNotEqual(torch._C._data_address(a), orig_data_ptr)
+            self.assertFalse(torch._C._is_cow_tensor(b))
+            if src_device_check == dest_device_check:
+                self.assertEqual(torch._C._data_address(b), orig_data_ptr)
+            else:
+                self.assertNotEqual(torch._C._data_address(b), orig_data_ptr)
+            self.assertEqual(a[0], 1)
+            self.assertEqual(b[0], 2)
+
+        elif materialize_first == 'dest':
+            b[0] = 2
+
+            self.assertEqual(a.device, src_device_check)
+            self.assertEqual(b.device, dest_device_check)
+            self.assertFalse(torch._C._is_cow_tensor(b))
+            self.assertNotEqual(torch._C._data_address(b), orig_data_ptr)
+            self.assertTrue(torch._C._is_cow_tensor(a))
+            self.assertEqual(torch._C._data_address(a), orig_data_ptr)
+            self.assertEqual(b[0], 2)
+
+            a[0] = 1
+
+            self.assertEqual(a.device, src_device_check)
+            self.assertEqual(b.device, dest_device_check)
+            self.assertFalse(torch._C._is_cow_tensor(b))
+            self.assertNotEqual(torch._C._data_address(b), orig_data_ptr)
+            self.assertFalse(torch._C._is_cow_tensor(a))
+            self.assertEqual(torch._C._data_address(a), orig_data_ptr)
+
+            self.assertEqual(a[0], 1)
+            self.assertEqual(b[0], 2)
+
+        else:
+            raise RuntimeError(f'Not recognized: materialize_first={materialize_first}')
+
     @xfailIf(MACOS_VERSION > 15.0)
     def test_conv_raises_error(self, device='mps', dtype=torch.float):
         conv = nn.Conv1d(1, 65537, 3, padding=1).to('mps')
