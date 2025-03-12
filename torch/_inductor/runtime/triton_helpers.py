@@ -8,7 +8,7 @@ from .triton_compat import _log2, libdevice, math, tl, triton  # noqa: F401
 
 
 _T = TypeVar("_T")
-_LOG_2_E: tl.constexpr = pymath.log2(pymath.e)
+_LOG_2_E: tl.constexpr = tl.constexpr(pymath.log2(pymath.e))
 
 
 def set_driver_to_cpu():
@@ -270,7 +270,6 @@ def bucketize_binary_search(
     sorter_ptr: tl.tensor,
     SORTER_STRIDE: int,
     sorter_indices: tl.tensor,
-    BLOCK_SHAPE,
 ):
     """
     See [Note: Inductor bucketize op]
@@ -300,8 +299,8 @@ def bucketize_binary_search(
     BLOCK_SHAPE: the shape of the data block being processed.
     """
 
-    low = tl.zeros(BLOCK_SHAPE, dtype=indexing_dtype)
-    high = tl.full(BLOCK_SHAPE, BOUNDARIES_SIZE, dtype=indexing_dtype)
+    low = tl.zeros(values.shape, dtype=indexing_dtype)
+    high = tl.full(values.shape, BOUNDARIES_SIZE, dtype=indexing_dtype)
 
     full_range = BOUNDARIES_SIZE + 1
     while full_range > 1:
