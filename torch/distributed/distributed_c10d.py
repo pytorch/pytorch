@@ -331,18 +331,12 @@ class Backend(str):  # noqa: SLOT000
         .. note:: This support of 3rd party backend is experimental and subject to change.
 
         """
-        # Allow UCC plugin if Pytorch is not built with native support.
-        # TODO: remove this exception once UCC plugin is fully deprecated.
-        if name != Backend.UCC or (name == Backend.UCC and is_ucc_available()):
-            assert not hasattr(Backend, name.upper()), (
-                f"{name.upper()} c10d backend already exist"
-            )
-        assert name.upper() not in Backend._plugins, (
-            f"{name.upper()} c10d backend creator function already exist"
-        )
+        # This takes care of CUSTOM Out-of-tree backend types, update in backend_list indicates availability
+        if not hasattr(Backend, name.upper()):
+            setattr(Backend, name.upper(), name.lower())
+        if name.lower() not in Backend.backend_list:
+            Backend.backend_list.append(name.lower())
 
-        setattr(Backend, name.upper(), name.lower())
-        Backend.backend_list.append(name.lower())
         if devices is not None:
             for device in devices:
                 if device != "cpu" and device != "cuda":
@@ -1804,36 +1798,6 @@ def _get_split_source(pg):
     return split_from
 
 
-def _shutdown_backend(pg):
-    """
-    Try to shut down the backend of a process group.
-    Currently, only ProcessGroupNCCL backend is supported.
-    No op for other backends.
-    """
-    backend = None
-    try:
-        backend = pg._get_backend(torch.device("cuda"))
-    except RuntimeError:
-        pass
-    if is_nccl_available() and isinstance(backend, ProcessGroupNCCL):
-        # explicitly call shutdown to ensure that NCCL resources are released
-        backend._shutdown()
-
-
-def _abort_backend(pg: ProcessGroup):
-    """
-    Abort the backend of a process group.
-    Currently, only ProcessGroupNCCL backend is supported.
-    No op for other backends.
-    """
-    try:
-        backend = pg._get_backend(torch.device("cuda"))
-    except RuntimeError:
-        backend = None
-    if isinstance(backend, ProcessGroupNCCL):
-        backend.abort()
-
-
 def _new_process_group_helper(
     group_size,
     group_rank,
@@ -1918,13 +1882,34 @@ def _new_process_group_helper(
         group_rank,
         group_size,
     )
-    # Set the default backend when only single backend is passed in.
+    backend_config = BackendConfig(backend)
+    # Set the default backend when single backend is passed in.
     if "," not in str(backend) and ":" not in str(backend):
         assert backend in Backend.backend_type_map, f"Unknown backend type {backend}"
-        pg._set_default_backend(Backend.backend_type_map[backend])
+        if backend == Backend.UNDEFINED:
+            # Currently when backend is UNDEFINED, both ``gloo`` and ``nccl`` backends
+            # will be created, we use nccl(if cuda is available) or gloo as default
+            # backend so we can correctly call getDefaultBackend which in ProcessGroup.
+            if Backend.NCCL in backend_config.get_device_backend_map().values():
+                pg._set_default_backend(ProcessGroup.BackendType.NCCL)
+            else:
+                pg._set_default_backend(ProcessGroup.BackendType.GLOO)
+        else:
+            pg._set_default_backend(Backend.backend_type_map[backend])
+    # In order to correctly call pg._has_hooks(), we should set the default backend
+    # when multi backend is passed in
+    else:
+        if Backend.NCCL in backend_config.device_backend_map.values():
+            pg._set_default_backend(ProcessGroup.BackendType.NCCL)
+        elif Backend._plugins.keys():
+            custom_backend = next(iter(Backend._plugins.keys()))
+            if custom_backend in backend_config.device_backend_map.values():
+                pg._set_default_backend(ProcessGroup.BackendType.CUSTOM)
+        else:
+            pg._set_default_backend(ProcessGroup.BackendType.GLOO)
+
     if device_id:
         pg.bound_device_id = device_id
-    backend_config = BackendConfig(backend)
     backend_class: torch._C._distributed_c10d.Backend
     for device, backend_str in backend_config.get_device_backend_map().items():
         # Use the group name as prefix in the default store, such that
@@ -2138,7 +2123,7 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
     # alive until all works and hooks are done. The current implementation does the
     # latter. Therefore, we explicitly call _wait_for_pending_works() here to wait
     # for the pending hooks to finish.
-    if pg.name().lower() == "nccl" and pg._has_hooks():
+    if type(pg) == ProcessGroup and pg._has_hooks():
         pg._wait_for_pending_works()
 
     if group is None or group == GroupMember.WORLD:
@@ -2147,7 +2132,7 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
         for pg_to_shutdown in sorted(
             _world.pg_names, key=lambda x: _world.pg_names[x], reverse=True
         ):
-            _shutdown_backend(pg_to_shutdown)
+            pg_to_shutdown.shutdown()
 
         _update_default_pg(None)
         _world.pg_map.clear()
@@ -2169,7 +2154,7 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
         # process group is in good state, we aren't dealing with failures.
         _world.group_count = 0
     else:
-        _shutdown_backend(pg)
+        pg.shutdown()
         del _world.pg_map[pg]
         del _world.pg_names[pg]
         del _world.pg_group_ranks[pg]
@@ -2225,24 +2210,19 @@ def _abort_process_group(group: Optional[ProcessGroup] = None):
     except RuntimeError:
         backend = None
 
-    if not isinstance(backend, ProcessGroupNCCL):
-        logger.warning(
-            "`abort_process_group` currently only has implementation for ProcessGroupNCCL; "
-            "however, no NCCL backend is found. This call will be a no-op."
-        )
-        return
-
-    if group == GroupMember.WORLD:
+    if group is None or group == GroupMember.WORLD:
         # Abort all backends within a ncclGroupStart|End semantic.
         # This ensures that different NCCL communicators' abort calls won't
         # deadlock each other.
         # For details, please see: https://github.com/pytorch/pytorch/issues/119797
-        backend._group_start()
+        if is_nccl_available() and isinstance(backend, ProcessGroupNCCL):
+            backend._group_start()
         for pg_to_abort in sorted(
             _world.pg_names, key=lambda x: _world.pg_names[x], reverse=True
         ):
-            _abort_backend(pg_to_abort)
-        backend._group_end()
+            pg_to_abort.abort()
+        if is_nccl_available() and isinstance(backend, ProcessGroupNCCL):
+            backend._group_end()
 
         _update_default_pg(None)
         _world.pg_map.clear()
@@ -2264,7 +2244,7 @@ def _abort_process_group(group: Optional[ProcessGroup] = None):
         # process group is in good state, we aren't dealing with failures.
         _world.group_count = 0
     else:
-        _abort_backend(pg)
+        pg.abort()
         del _world.pg_map[pg]
         del _world.pg_names[pg]
         del _world.pg_group_ranks[pg]
@@ -2514,7 +2494,7 @@ class _CoalescingManager:
     def __init__(self) -> None:
         self.works: list[Work] = []
 
-    def append(self, work: Work):
+    def append(self, work: Optional[Work] = None):
         if work:
             self.works.append(work)
 
@@ -2527,7 +2507,7 @@ class _CoalescingManager:
 def _coalescing_manager(
     group: Optional[ProcessGroup] = None,
     device: Optional[torch.device] = None,
-    async_ops: Optional[bool] = False,
+    async_ops: bool = False,
 ):
     """
     Context manager used to coalesce collectives or P2P operations when possible.
@@ -2566,6 +2546,7 @@ def _coalescing_manager(
         group._start_coalescing(device)
     cm = _CoalescingManager()
     yield cm
+    work = None
     op_list = _world.pg_coalesce_state.pop(group)
     if op_list:
         # Collectives supporting "Fast Path" coalescing are captured.
@@ -2579,6 +2560,7 @@ def _coalescing_manager(
             tensors = [op.tensor for op in op_list]
             all_reduce_opts = AllreduceCoalescedOptions()
             all_reduce_opts.reduceOp = not_none(op_list[0].redop)
+            all_reduce_opts.asyncOp = async_ops
             work = group.allreduce_coalesced(tensors, all_reduce_opts)
         elif op0 == all_gather_into_tensor:
             inputs = []
@@ -2586,6 +2568,8 @@ def _coalescing_manager(
             for op in op_list:
                 inputs.append(op.tensor)
                 outputs.append(not_none(op.dst_tensor))
+            all_gather_opts = AllgatherOptions()
+            all_gather_opts.asyncOp = async_ops
             work = group.allgather_into_tensor_coalesced(outputs, inputs)
         elif op0 == reduce_scatter_tensor:
             inputs = []
@@ -2595,6 +2579,7 @@ def _coalescing_manager(
                 outputs.append(not_none(op.dst_tensor))
             reduce_opts = ReduceScatterOptions()
             reduce_opts.reduceOp = not_none(op_list[0].redop)
+            reduce_opts.asyncOp = async_ops
             work = group.reduce_scatter_tensor_coalesced(outputs, inputs, reduce_opts)
         else:
             raise AssertionError(
@@ -2607,9 +2592,12 @@ def _coalescing_manager(
         work = group._end_coalescing(device)
 
     if async_ops:
-        cm.append(work)  # type: ignore[possibly-undefined]
-    else:
-        work.wait()  # type: ignore[possibly-undefined]
+        cm.append(work)
+    elif (
+        work is not None
+    ):  # Backward compatible with backends that don't sync at CPP level
+        work.wait()
+    # Otherwise, the backend has sync'ed at CPP level
 
 
 def batch_isend_irecv(p2p_op_list: list[P2POp]) -> list[Work]:
@@ -2656,13 +2644,15 @@ def batch_isend_irecv(p2p_op_list: list[P2POp]) -> list[Work]:
     """
     _check_p2p_op_list(p2p_op_list)
     group = p2p_op_list[0].group
+    if group is None:
+        group = _get_default_group()
     device = p2p_op_list[0].tensor.device
 
     def peer_kwarg(op: P2POp) -> dict[str, int]:
         key = "group_dst" if op.op == isend else "group_src"
         return {key: op.group_peer}
 
-    if device.type == "cuda":
+    if type(group) == ProcessGroup and group._get_backend(device).supports_coalescing:
         # NCCL style coalescing
         with _coalescing_manager(group, device, async_ops=True) as cm:
             for p2p_op in p2p_op_list:
@@ -2675,7 +2665,7 @@ def batch_isend_irecv(p2p_op_list: list[P2POp]) -> list[Work]:
 
         return cm.works
     else:
-        # Backward support for Gloo
+        # backend not support coalescing
         reqs = []
         for p2p_op in p2p_op_list:
             work = p2p_op.op(
@@ -2732,8 +2722,11 @@ def broadcast(
     work = group.broadcast([tensor], opts)
     if async_op:
         return work
-    else:
+    elif (
+        work is not None
+    ):  # Backward compatible with backends that don't sync at CPP level
         work.wait()
+    # Otherwise, the backend has sync'ed at CPP level
 
 
 @_exception_logger
@@ -2813,6 +2806,7 @@ def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op=False):
 
     opts = AllreduceOptions()
     opts.reduceOp = op
+    opts.asyncOp = async_op
     if group is None:
         group = _get_default_group()
 
@@ -2829,8 +2823,11 @@ def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op=False):
 
     if async_op:
         return work
-    else:
+    elif (
+        work is not None
+    ):  # Backward compatible with backends that don't sync at CPP level
         work.wait()
+    # Otherwise, the backend has sync'ed at CPP level
 
 
 @_exception_logger
@@ -2889,13 +2886,17 @@ def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op=False):
 
     opts = AllreduceCoalescedOptions()
     opts.reduceOp = op
+    opts.asyncOp = async_op
     group = group or _get_default_group()
     work = group.allreduce_coalesced(tensors, opts)
 
     if async_op:
         return work.get_future()
-    else:
+    elif (
+        work is not None
+    ):  # Backward compatible with backends that don't sync at CPP level
         work.wait()
+    # Otherwise, the backend has sync'ed at CPP level
 
 
 @_exception_logger
@@ -2940,11 +2941,15 @@ def reduce(
     opts = ReduceOptions()
     opts.reduceOp = op
     opts.rootRank = group_dst
+    opts.asyncOp = async_op
     work = group.reduce([tensor], opts)
     if async_op:
         return work
-    else:
+    elif (
+        work is not None
+    ):  # Backward compatible with backends that don't sync at CPP level
         work.wait()
+    # Otherwise, the backend has sync'ed at CPP level
 
 
 def _object_to_tensor(obj, device, group):
@@ -3743,12 +3748,17 @@ def all_gather(tensor_list, tensor, group=None, async_op=False):
     tensor = tensor if not tensor.is_complex() else torch.view_as_real(tensor)
 
     group = group or _get_default_group()
-    work = group.allgather([tensor_list], [tensor])
+    opts = AllgatherOptions()
+    opts.asyncOp = async_op
+    work = group.allgather([tensor_list], [tensor], opts)
 
     if async_op:
         return work
-    else:
+    elif (
+        work is not None
+    ):  # Backward compatible with backends that don't sync at CPP level
         work.wait()
+    # Otherwise, the backend has sync'ed at CPP level
 
 
 @_exception_logger
@@ -3855,8 +3865,11 @@ def all_gather_into_tensor(output_tensor, input_tensor, group=None, async_op=Fal
 
     if async_op:
         return work
-    else:
+    elif (
+        work is not None
+    ):  # Backward compatible with backends that don't sync at CPP level
         work.wait()
+    # Otherwise, the backend has sync'ed at CPP level
 
 
 @_exception_logger
@@ -3966,12 +3979,17 @@ def all_gather_coalesced(
     ]
 
     group = group or _get_default_group()
-    work = group.allgather_coalesced(output_tensor_lists, input_tensor_list)
+    opts = AllgatherOptions()
+    opts.asyncOp = async_op
+    work = group.allgather_coalesced(output_tensor_lists, input_tensor_list, opts)
 
     if async_op:
         return work.get_future()
-    else:
+    elif (
+        work is not None
+    ):  # Backward compatible with backends that don't sync at CPP level
         work.wait()
+    # Otherwise, the backend has sync'ed at CPP level
 
 
 def _validate_output_list_for_rank(my_rank, dst, gather_list):
@@ -4058,12 +4076,16 @@ def gather(
 
     opts = GatherOptions()
     opts.rootRank = group_dst
+    opts.asyncOp = async_op
     work = group.gather(output_tensors, input_tensors, opts)
 
     if async_op:
         return work
-    else:
+    elif (
+        work is not None
+    ):  # Backward compatible with backends that don't sync at CPP level
         work.wait()
+    # Otherwise, the backend has sync'ed at CPP level
 
 
 @_exception_logger
@@ -4165,8 +4187,11 @@ def scatter(
 
     if async_op:
         return work
-    else:
+    elif (
+        work is not None
+    ):  # Backward compatible with backends that don't sync at CPP level
         work.wait()
+    # Otherwise, the backend has sync'ed at CPP level
 
 
 @_exception_logger
@@ -4198,14 +4223,18 @@ def reduce_scatter(output, input_list, op=ReduceOp.SUM, group=None, async_op=Fal
 
     opts = ReduceScatterOptions()
     opts.reduceOp = op
+    opts.asyncOp = async_op
 
     group = group or _get_default_group()
     work = group.reduce_scatter([output], [input_list], opts)
 
     if async_op:
         return work
-    else:
+    elif (
+        work is not None
+    ):  # Backward compatible with backends that don't sync at CPP level
         work.wait()
+    # Otherwise, the backend has sync'ed at CPP level
 
 
 @_exception_logger
@@ -4305,8 +4334,11 @@ def reduce_scatter_tensor(output, input, op=ReduceOp.SUM, group=None, async_op=F
 
     if async_op:
         return work
-    else:
+    elif (
+        work is not None
+    ):  # Backward compatible with backends that don't sync at CPP level
         work.wait()
+    # Otherwise, the backend has sync'ed at CPP level
 
 
 @deprecated(
@@ -4459,6 +4491,7 @@ def all_to_all_single(
         return
 
     opts = AllToAllOptions()
+    opts.asyncOp = async_op
     _check_single_tensor(output, "output")
     _check_single_tensor(input, "input")
     _ensure_all_tensors_same_dtype(output, input)
@@ -4478,8 +4511,11 @@ def all_to_all_single(
 
     if async_op:
         return work
-    else:
+    elif (
+        work is not None
+    ):  # Backward compatible with backends that don't sync at CPP level
         work.wait()
+    # Otherwise, the backend has sync'ed at CPP level
 
 
 @_exception_logger
@@ -4580,6 +4616,7 @@ def all_to_all(output_tensor_list, input_tensor_list, group=None, async_op=False
         return
 
     opts = AllToAllOptions()
+    opts.asyncOp = async_op
     _check_tensor_list(output_tensor_list, "output_tensor_list")
     _check_tensor_list(input_tensor_list, "input_tensor_list")
     _ensure_all_tensors_same_dtype(output_tensor_list, input_tensor_list)
@@ -4596,8 +4633,11 @@ def all_to_all(output_tensor_list, input_tensor_list, group=None, async_op=False
 
     if async_op:
         return work
-    else:
+    elif (
+        work is not None
+    ):  # Backward compatible with backends that don't sync at CPP level
         work.wait()
+    # Otherwise, the backend has sync'ed at CPP level
 
 
 @_exception_logger
@@ -4628,6 +4668,7 @@ def barrier(
 
     opts = BarrierOptions()
     opts.device = torch.device(_get_object_coll_device(group))
+    opts.asyncOp = async_op
     if device_ids is not None:
         if isinstance(device_ids, list):
             opts.device_ids = device_ids
@@ -4641,8 +4682,11 @@ def barrier(
 
     if async_op:
         return work
-    else:
+    elif (
+        work is not None
+    ):  # Backward compatible with backends that don't sync at CPP level
         work.wait()
+    # Otherwise, the backend has sync'ed at CPP level
 
 
 def monitored_barrier(
@@ -4812,7 +4856,7 @@ def split_group(
     warning:: This is an experimental API and only the ``NCCL`` backend supports this API.
     Other backends will raise an error.
     Users of this API must gurantee that all ranks in the parent group enter this API call,
-    and the split of the sub groups is the same accross all ranks in the parent group.
+    and the split of the sub groups is the same across all ranks in the parent group.
 
     Args:
         parent_pg (ProcessGroup, optional): The parent process group. If None,
