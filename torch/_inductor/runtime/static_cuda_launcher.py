@@ -159,7 +159,13 @@ class StaticallyLaunchedCudaKernel:
 
     def arg_ty_from_signature(self, src: ASTSource) -> str:
         def index_key(i: Any) -> int:
-            return src.fn.arg_names.index(i) if isinstance(i, str) else i
+            if isinstance(i, str):
+                return src.fn.arg_names.index(i)
+            elif isinstance(i, tuple):
+                # In triton 3.3, src.fn.constants has tuples as a key
+                return i[0]
+            else:
+                return i
 
         signature = {index_key(key): value for key, value in src.signature.items()}
         # Triton uses these as the main way to filter out constants passed to their cubin

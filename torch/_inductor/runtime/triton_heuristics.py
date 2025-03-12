@@ -1156,9 +1156,21 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
         }
         # StaticallyLaunchedCudaKernel handles constexprs and stuff already in its run function:
         # we just have to pass in the arg_names directly
-        call_args, def_args, _none_args = self._get_arg_lists(
+        call_args, def_args, none_args = self._get_arg_lists(
             self.kernel.arg_names, self.kernel.constexprs
         )
+        print(self.kernel.constexprs)
+
+        if triton_version_uses_attrs_dict():
+            # When launching directly from cubin on later triton versions,
+            # we actually need to get rid constexpr call args
+            call_args = [
+                arg
+                for i, arg in enumerate(self.kernel.arg_names)
+                if i not in self.kernel.constexprs and arg not in none_args
+            ]
+        print("Pruned", call_args)
+
         # StaticallyLaunchedCudaKernel.run takes in order grid_0, grid_1, grid_2, stream, and call_args
         runner_args = ["grid_0", "grid_1", "grid_2", "stream", *call_args]
         launcher = self._gen_launcher_code(scope, def_args, runner_args)
