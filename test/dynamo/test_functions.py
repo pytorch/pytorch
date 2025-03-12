@@ -1003,13 +1003,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         fn = torch.Tensor.dim
         return fn(x + 1)
 
-    @make_test
-    def test_tensor_is_inference(x):
-        if x.is_inference():
-            return x + 1
-        else:
-            return x - 1
-
     def test_is_inference_recompilation(self):
         def fn(x):
             if x.is_inference():
@@ -1021,7 +1014,28 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             x_inference = torch.randn(2, 2)
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=False)
+
+        x = torch.randn(2, 2)
+
+        self.assertEqual(fn(x), opt_fn(x))
+        self.assertEqual(cnts.frame_count, 1)
+
+        self.assertEqual(fn(x_inference), opt_fn(x_inference))
+        self.assertEqual(cnts.frame_count, 2)  # Recompiles
+
+    def test_is_inference_mode_global_recompilation(self):
+        def fn(x):
+            if torch.is_inference_mode_enabled():
+                return x + 1
+            else:
+                return x - 1
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=False)
+
+        with torch.inference_mode():
+            x_inference = torch.randn(2, 2)
 
         x = torch.randn(2, 2)
 

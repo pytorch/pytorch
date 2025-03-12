@@ -47,6 +47,7 @@ from weakref import ReferenceType
 
 import torch
 import torch._logging
+import torch._subclasses.meta_utils
 from torch._C._dynamo.guards import GlobalStateGuard
 from torch._dynamo.distributed import get_compile_pg
 from torch._dynamo.symbolic_convert import TensorifyState
@@ -230,7 +231,11 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
         # it. This can happen because the dispatch bits aren't a true
         # stack/counter - so we can't just increment/decrement them as we enter
         # and leave.
-        with torch._C._PreserveDispatchKeyGuard():
+        with (
+            torch._C._PreserveDispatchKeyGuard(),
+            torch.inference_mode(False),
+            torch._subclasses.meta_utils.disable_inference_mode_for_fake_prop(),
+        ):
             prior_inference_mode = torch.is_inference_mode_enabled()
             prior_deterministic = torch.are_deterministic_algorithms_enabled()
             prior_warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
