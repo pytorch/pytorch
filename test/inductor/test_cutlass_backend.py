@@ -385,6 +385,7 @@ class TestCutlassBackend(TestCase):
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @parametrize("dynamic", (False,))
+    @parametrize("use_aoti", (False, True))
     @parametrize("dtype", (torch.float16, torch.bfloat16))
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_addmm(
@@ -415,6 +416,8 @@ class TestCutlassBackend(TestCase):
             # lambda M, N: (N,),
         ]
         for x_shape in x_shapes:
+            torch._dynamo.reset()
+            clear_inductor_caches()
             inputs = [
                 (
                     torch.randn(x_shape(M, N)).cuda().to(dtype),
@@ -432,18 +435,25 @@ class TestCutlassBackend(TestCase):
                 }
             ), dynamo_config.patch({"error_on_recompile": dynamic}):
                 expected = [model(*input) for input in inputs]
-                compiled_model = torch.compile(model, dynamic=dynamic)
-                actual = [compiled_model(*input) for input in inputs]
+                if use_aoti:
+                    actual = AOTIRunnerUtil.run_multiple(
+                        "cuda", model, inputs, dynamic_shapes=None
+                    )
+                else:
+                    compiled_model = torch.compile(model, dynamic=dynamic)
+                    actual = [compiled_model(*input) for input in inputs]
 
                 torch.testing.assert_close(actual, expected)
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @parametrize("dynamic", (False,))
+    @parametrize("use_aoti", (False, True))
     @parametrize("dtype", (torch.float16, torch.bfloat16))
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_bmm(
         self,
         dynamic: bool,
+        use_aoti: bool = False,
         max_autotune_gemm_backends: str = "CUTLASS",
         dtype: torch.dtype = torch.float16,
     ):
@@ -477,8 +487,13 @@ class TestCutlassBackend(TestCase):
             }
         ):
             expected = [model(*input) for input in inputs]
-            compiled_model = torch.compile(model, dynamic=dynamic)
-            actual = [compiled_model(*input) for input in inputs]
+            if use_aoti:
+                actual = AOTIRunnerUtil.run_multiple(
+                    "cuda", model, inputs, dynamic_shapes=None
+                )
+            else:
+                compiled_model = torch.compile(model, dynamic=dynamic)
+                actual = [compiled_model(*input) for input in inputs]
             torch.testing.assert_close(actual, expected)
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")

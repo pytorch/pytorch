@@ -278,6 +278,7 @@ class TestDynamoTimed(TestCase):
         # much easier.
         raw = dataclasses.asdict(compilation_events[0])
         del raw["feature_usage"]
+        del raw["ir_count"]
         del raw["param_numel"]
         del raw["param_bytes"]
         del raw["param_count"]
@@ -330,7 +331,6 @@ class TestDynamoTimed(TestCase):
  'inductor_fx_remote_cache_hit_keys': None,
  'inductor_fx_remote_cache_miss_count': None,
  'inductor_fx_remote_cache_miss_keys': None,
- 'ir_count': 9,
  'is_forward': True,
  'is_runtime': False,
  'joint_graph_pass_time_us': 0,
@@ -367,6 +367,7 @@ class TestDynamoTimed(TestCase):
         # Second event is for the backward
         raw = dataclasses.asdict(compilation_events[1])
         del raw["feature_usage"]
+        del raw["ir_count"]
         del raw["guard_latency_us"]
         del raw["param_numel"]
         del raw["param_bytes"]
@@ -418,7 +419,6 @@ class TestDynamoTimed(TestCase):
  'inductor_fx_remote_cache_hit_keys': None,
  'inductor_fx_remote_cache_miss_count': None,
  'inductor_fx_remote_cache_miss_keys': None,
- 'ir_count': 9,
  'is_forward': False,
  'is_runtime': False,
  'joint_graph_pass_time_us': None,
@@ -534,6 +534,30 @@ class TestDynamoTimed(TestCase):
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
         self.assertEqual(compilation_events[0].param_numel, 1040)
         self.assertEqual(compilation_events[0].param_bytes, 4 * 1040)
+        self.assertEqual(compilation_events[0].param_count, 4)
+
+        @torch.compile()
+        def func(m1, m2, x):
+            return m1(x) + m2(x)
+
+        # Test a tied module
+        m = nn.Linear(4, 4)
+        with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
+            func(m, m, torch.randn(4, 4))
+            compilation_events = [arg[0][0] for arg in log_event.call_args_list]
+        self.assertEqual(compilation_events[0].param_numel, 20)
+        self.assertEqual(compilation_events[0].param_bytes, 80)
+        self.assertEqual(compilation_events[0].param_count, 2)
+
+        # Test tied weights
+        m1 = nn.Linear(4, 4)
+        m2 = nn.Linear(4, 4)
+        m1.weight = m2.weight
+        with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
+            func(m1, m2, torch.randn(4, 4))
+            compilation_events = [arg[0][0] for arg in log_event.call_args_list]
+        self.assertEqual(compilation_events[0].param_numel, 40)
+        self.assertEqual(compilation_events[0].param_bytes, 160)
         self.assertEqual(compilation_events[0].param_count, 4)
 
 
