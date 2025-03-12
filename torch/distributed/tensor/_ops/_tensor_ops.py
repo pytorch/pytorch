@@ -4,7 +4,8 @@ from collections.abc import Sequence, Sized
 from typing import cast, Optional
 
 import torch
-from torch.distributed.tensor._dtensor_spec import DTensorSpec
+form torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
     _is_inplace_op,
     OpSchema,
@@ -284,6 +285,81 @@ def gen_slice_strategy(op_schema: OpSchema) -> StrategyType:
                 PlacementStrategy(output_specs=unshard_spec)
             )
     return slice_strategy
+
+
+@register_op_strategy(
+    torch.ops.aten.select.int,
+    schema_info=RuntimeSchemaInfo(1),
+)
+def select_int_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
+    # func: select.int(Tensor(a) self, int dim, SymInt index) -> Tensor(a)
+    args_schema = op_schema.args_schema
+    input_strategy, dim = args_schema[0], args_schema[1]
+    assert isinstance(input_strategy, OpStrategy), f"{input_strategy=}"
+    assert isinstance(dim, int), f"{dim=}"
+    output_strategies: list[PlacementStrategy] = []
+    for placement_strategy in input_strategy.strategies:
+        output_spec = placement_strategy.output_spec
+        new_placements = []
+        for placement in output_spec.placements:
+            if isinstance(placement, Shard) and placement.dim == dim:
+                # Indexing into the sharded dim requires replication
+                new_placements.append(Replicate())
+            elif isinstance(placement, Shard):
+                shard_dim = placement.dim
+                if dim < shard_dim:
+                    # If the dim being selected is less than the shard dim,
+                    # then we must decrement the shard dim since the selected
+                    # dim is now removed
+                    new_placements.append(Shard(shard_dim - 1))
+                else:
+                    new_placements.append(Shard(shard_dim))
+            else:
+                new_placements.append(placement)
+        assert isinstance(output_spec.tensor_meta, TensorMeta)
+        new_size = list(output_spec.tensor_meta.shape)
+        new_size[dim] = 1
+        tensor_meta = TensorMeta(torch.Size(new_size), (0,), dtype=output_spec.tensor_meta.dtype)
+        new_spec = DTensorSpec(mesh=mesh, placements=tuple(new_placements), tensor_meta=tensor_meta)
+        new_strategy = PlacementStrategy(output_specs=new_spec, input_specs=(output_spec,))
+        output_strategies.append(new_strategy)
+    return OpStrategy(output_strategies)
+
+
+@register_op_strategy(
+    torch.ops.aten.select_backward.default,  # type: ignore
+    schema_info=RuntimeSchemaInfo(1),
+)
+def select_backward_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
+    # func: select_backward(Tensor grad_output, SymInt[] input_sizes, int dim, SymInt index) -> Tensor
+    args_schema = op_schema.args_schema
+    input_strategy, dim = args_schema[0], args_schema[2]
+    assert isinstance(input_strategy, OpStrategy), f"{input_strategy}"
+    assert isinstance(dim, int)
+    output_strategies: list[PlacementStrategy] = []
+    for placement_strategy in input_strategy.strategies:
+        output_spec = placement_strategy.output_spec
+        new_placements = []
+        for placement in output_spec.placements:
+            # Redistribute to replicate only if the dim is sharded and matches
+            # the slice dim
+            if isinstance(placement, Shard) and placement.dim == dim:
+                new_placements.append(Replicate())
+            elif isinstance(placement, Shard):
+                shard_dim = placement.dim
+                if dim < shard_dim:
+                    # If the dim being selected is less than the shard dim,
+                    # then we must increment the shard dim since the selected
+                    # dim is now added
+                    new_placements.append(Shard(shard_dim + 1))
+                else:
+                    new_placements.append(Shard(shard_dim))
+            else:
+                new_placements.append(placement)
+        new_spec = DTensorSpec(mesh, tuple(new_placements))
+        new_strategy = PlacementStrategy(output_specs=new_spec, input_specs=(output_spec,))
+        output_strategies.append(new_strategy)
+    return OpStrategy(output_strategies)
 
 
 def unshard_tensor_dim(
