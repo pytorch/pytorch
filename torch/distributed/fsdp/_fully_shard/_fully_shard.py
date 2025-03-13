@@ -355,9 +355,10 @@ class FSDPModule:
         self, reshard_after_forward: bool, *, recurse: bool = True
     ) -> None:
         """
-        Sets if the module should reshard parameters after forward. This can
-        be used to save computation time for since the unsharded parameter fo not
-        need to be re-all-gathered before setting to True in training.
+        Sets if the module should reshard parameters after forward. Setting
+        this to False can save computation time, as unsharded parameters do
+        not need to be re-all-gathered before setting it back to True during
+        training.
 
         Args:
             reshard_after_forward (bool): Whether to reshard parameters after
