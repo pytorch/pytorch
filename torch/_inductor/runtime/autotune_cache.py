@@ -11,7 +11,7 @@ from typing_extensions import override
 
 import torch
 from torch.compiler._cache import CacheArtifactManager, CacheArtifactType
-from torch.utils._triton import has_triton
+from torch.utils._triton import has_triton_package
 
 from ..remote_cache import (
     create_cache,
@@ -36,7 +36,7 @@ def inductor_meta_from_config() -> _InductorMetaTy:
     from torch._inductor import config
 
     backend_hash = None
-    if has_triton():
+    if has_triton_package():
         try:
             backend_hash = torch.utils._triton.triton_hash_with_backend()
         except RuntimeError:
@@ -197,11 +197,7 @@ class AutotuneCache:
 
     # Save the config in the caches
     def save(
-        self,
-        config: Config,
-        time_taken_ns: int,
-        found_by_coordesc: bool = False,
-        triton_cache_hash: Optional[str] = None,
+        self, config: Config, time_taken_ns: int, found_by_coordesc: bool = False
     ) -> None:
         data = {
             **config.kwargs,
@@ -210,7 +206,6 @@ class AutotuneCache:
             "configs_hash": self.configs_hash,
             "found_by_coordesc": found_by_coordesc,
             "time_taken_ms": time_taken_ns // 1000000,  # Convert from NS to MS
-            "triton_cache_hash": triton_cache_hash,
         }
 
         if local_cache := self.local_cache:
