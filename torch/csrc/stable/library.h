@@ -4,6 +4,8 @@
 
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 
+#include <optional>
+
 // use anonymous namespace to avoid collisions between differing
 // versions of this file that may be included by different sources
 namespace {
@@ -24,14 +26,19 @@ StableIValue from(T val) {
   return *reinterpret_cast<StableIValue*>(&val);
 }
 
-// Specialization for std::optional
-template <typename T, std::enable_if_t<is_optional<T>::value, bool> = true>
-StableIValue from(T val) {
-  if (val.has_value()) {
-    StableIValue* heap_val = new StableIValue(from(val.value()));
-    return from(heap_val);
-  }
+template<>
+StableIValue from(std::nullopt_t val) {
   return from(nullptr);
+}
+
+// Specialization for std::optional
+template <typename T>
+StableIValue from(std::optional<T> val) {
+  if (!val.has_value()) {
+    return from(std::nullopt);
+  }
+  StableIValue* heap_val = new StableIValue(from(val.value()));
+  return from(heap_val);
 }
 
 template <typename T, std::enable_if_t<!is_optional<T>::value, bool> = true>
@@ -39,15 +46,21 @@ T to(StableIValue val) {
   return *reinterpret_cast<T*>(&val);
 }
 
+template <typename T, std::enable_if_t<std::is_same_v<T, std::nullopt_t>, bool> = true>
+T to(StableIValue val) {
+  // val should be equivalent to from(nullptr)
+  return std::nullopt;
+}
+
 // Specialization for std::optional
 template <typename T, std::enable_if_t<is_optional<T>::value, bool> = true>
 T to(StableIValue val) {
   using V = typename T::value_type;
-
   auto sivp = to<StableIValue*>(val);
-  // val is either nullptr or a pointer to a StableIValue
+
+  // sivp is either nullptr or a pointer to a StableIValue
   if (sivp == nullptr) {
-    return std::optional<V>{};
+    return {};
   }
   auto inner_val = to<V>(*sivp);
 

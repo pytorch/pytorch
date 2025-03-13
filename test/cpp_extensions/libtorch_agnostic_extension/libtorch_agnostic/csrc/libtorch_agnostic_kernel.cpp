@@ -2,6 +2,8 @@
 #include <torch/csrc/inductor/aoti_runtime/utils.h>
 #include <torch/csrc/stable/library.h>
 
+#include <optional>
+
 using RAIIATH = torch::aot_inductor::RAIIAtenTensorHandle;
 
 void inline sgd_math(
@@ -151,14 +153,17 @@ STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
 RAIIATH my_ones_like(RAIIATH t, StableIValue device) {
   const auto num_args = 6;
   StableIValue stack[num_args];
+
+  int32_t t_dtype;
+  aoti_torch_get_dtype(t.get(), &t_dtype);
+  auto mf = aoti_torch_memory_format_contiguous_format();
+
   stack[0] = from(t.release());
-  StableIValue* heap_dtype = new StableIValue(from(t_dtype));
-  stack[1] = from(heap_dtype); // from(t_dtype);    // dtype
-  stack[1] = from<std::optional(t_dtype)>(std::optional(t_dtype));    // dtype
-  stack[2] = from(nullptr);    // layout
-  stack[3] = device;           // device
-  stack[4] = from(false);      // pin_memory
-  stack[5] = from(mf);         // memory_format
+  stack[1] = from(std::optional(t_dtype));    // dtype
+  stack[2] = from(std::nullopt);              // layout
+  stack[3] = from(std::optional(device));     // device
+  stack[4] = from(std::optional(false));      // pin_memory
+  stack[5] = from(std::optional(mf));         // memory_format
 
   aoti_torch_call_dispatcher("aten::ones_like", "", stack);
 

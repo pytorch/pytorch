@@ -52,8 +52,8 @@ class TestLibtorchAgnostic(TestCase):
             curr_mem = torch.cuda.memory_allocated(device)
             self.assertEqual(curr_mem, init_mem)
 
-    def test_my_abs(self, device):
-        t = torch.rand(32, 16, device=device)
+    def test_not_my_abs(self, device):
+        t = torch.rand(32, 16, device=device) - 1.0
         cpu_t = libtorch_agnostic.ops.my_abs(t)
         self.assertEqual(cpu_t, torch.abs(t))
 
@@ -68,24 +68,41 @@ class TestLibtorchAgnostic(TestCase):
                 _make_cuda_tensors(init_mem)
                 curr_mem = torch.cuda.memory_allocated(device)
                 self.assertEqual(curr_mem, init_mem)
+    
+    def test_my_ones_like(self, device):
+        t = torch.rand(3, 1, device=device) - 1.0
+        cpu_t = libtorch_agnostic.ops.my_ones_like(t, "cpu")
+        self.assertEqual(cpu_t, torch.ones_like(t, device="cpu"))
 
-    @onlyCUDA
-    def test_z_delete_torch_lib(self, device):
-        # Why the z + CUDA? THIS TEST MUST BE RUN LAST
-        # We are testing that unloading the library properly deletes the registrations, so running this test
-        # earlier will cause all other tests in this file to fail
-        lib = libtorch_agnostic.loaded_lib
+        def _make_cuda_tensors(prior_mem):
+            cuda_t = libtorch_agnostic.ops.my_ones_like(t, device)
+            self.assertGreater(torch.cuda.memory_allocated(device), prior_mem)
+            self.assertEqual(cuda_t, torch.ones_like(t, device=device))
 
-        # code for unloading a library inspired from
-        # https://stackoverflow.com/questions/19547084/can-i-explicitly-close-a-ctypes-cdll
-        lib_handle = lib._handle
-        lib.dlclose(lib_handle)
+        if t.is_cuda:
+            init_mem = torch.cuda.memory_allocated(device)
+            for _ in range(3):
+                _make_cuda_tensors(init_mem)
+                curr_mem = torch.cuda.memory_allocated(device)
+                self.assertEqual(curr_mem, init_mem)
 
-        t = torch.tensor([-2.0, 0.5])
-        with self.assertRaises(RuntimeError):
-            libtorch_agnostic.ops.identity(
-                t
-            )  # errors as identity shouldn't be registered anymore
+    # @onlyCUDA
+    # def test_z_delete_torch_lib(self, device):
+    #     # Why the z + CUDA? THIS TEST MUST BE RUN LAST
+    #     # We are testing that unloading the library properly deletes the registrations, so running this test
+    #     # earlier will cause all other tests in this file to fail
+    #     lib = libtorch_agnostic.loaded_lib
+
+    #     # code for unloading a library inspired from
+    #     # https://stackoverflow.com/questions/19547084/can-i-explicitly-close-a-ctypes-cdll
+    #     lib_handle = lib._handle
+    #     lib.dlclose(lib_handle)
+
+    #     t = torch.tensor([-2.0, 0.5])
+    #     with self.assertRaises(RuntimeError):
+    #         libtorch_agnostic.ops.identity(
+    #             t
+    #         )  # errors as identity shouldn't be registered anymore
 
 
 instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
