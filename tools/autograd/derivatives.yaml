@@ -1299,7 +1299,7 @@
 - name: nextafter(Tensor self, Tensor other) -> Tensor
   self: at::where(self != other, grad, 0)
   other: zeros_like(other)
-  result: torch.where(self_p != other_p, self_t, torch.zeros_like(self_t))
+  result: at::where(self_p != other_p, self_t, 0)
 
 - name: norm.Scalar(Tensor self, Scalar p=2) -> Tensor
   self: norm_backward(grad, self, p, result)
