@@ -4702,6 +4702,27 @@ c10::DeviceIndex ProcessGroupNCCL::guessDeviceId() const {
 }
 
 c10::intrusive_ptr<Work> ProcessGroupNCCL::barrier(const BarrierOptions& opts) {
+  // Device to use for barrier
+  c10::DeviceIndex barDevIdx = -1;
+  // 1st choice: Use user defined GPU device ids if provided
+  if (!opts.device_ids.empty()) {
+    // Use the first device id because PG NCCL is single-device now
+    barDevIdx = static_cast<c10::DeviceIndex>(opts.device_ids[0]);
+  } else {
+    // 2nd choice: Use the bound or used GPU device id if available.
+    barDevIdx = guessDeviceId();
+  }
+
+  TORCH_CHECK_WITH(
+      ValueError,
+      barDevIdx >= 0,
+      "Failed to infer a GPU device id to perform barrier. ");
+  auto barDevice = at::Device(at::DeviceType::CUDA, barDevIdx);
+
+  // Warning: `RECORD_PARAM_COMMS` requires GPU guard; otherwise, it will create
+  // a CUDA context on device 0. :(
+  at::cuda::OptionalCUDAGuard gpuGuard(barDevice);
+
   RECORD_PARAM_COMMS(
       std::make_tuple(
           static_cast<int64_t>(seqCollective_) + 1,
@@ -4717,25 +4738,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::barrier(const BarrierOptions& opts) {
       globalRankStart, // globalRankStart
       globalRankStride, // globalRankStride
       this->getSize()); // worldSize
-
-  // Device to use for barrier
-  c10::DeviceIndex barDevIdx = -1;
-
-  // Select device to use for barrier
-  // 1st choice: Use user defined GPU device ids if provided
-  if (!opts.device_ids.empty()) {
-    // Use the first device id because PG NCCL is single-device now
-    barDevIdx = static_cast<c10::DeviceIndex>(opts.device_ids[0]);
-  } else {
-    // 2nd choice: Use the bound or used GPU device id if available.
-    barDevIdx = guessDeviceId();
-  }
-
-  TORCH_CHECK_WITH(
-      ValueError,
-      barDevIdx >= 0,
-      "Failed to infer a GPU device id to perform barrier. ");
-  auto barDevice = at::Device(at::DeviceType::CUDA, barDevIdx);
 
   // Create a dummy tensor on the device
   // Note: we use zeros() instead of empty() to prevent barrier from triggering
