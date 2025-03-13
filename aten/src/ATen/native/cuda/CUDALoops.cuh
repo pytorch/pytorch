@@ -290,23 +290,6 @@ __global__ void elementwise_kernel_manual_unroll(int N, func_t f) {
     }
   }
 }
-
-template <int nt, int vt, typename func_t>
-C10_LAUNCH_BOUNDS_2(nt, 4)
-__global__ void elementwise_kernel_strided(int N, func_t f) {
-  int tid = threadIdx.x;
-  int idx = nt * vt * blockIdx.x + tid;
-  int step = nt * vt * gridDim.x;
-  while (idx < N) {
-#pragma unroll
-    for (int i = 0; i < vt; i++) {
-      if ((idx + nt * i) < N) {
-        f(idx + nt * i);
-      }
-    }
-    idx += step;
-  }
-}
 #endif
 
 template <int nt, int vt, typename func_t>
@@ -333,19 +316,6 @@ static void launch_legacy_kernel_manual_unroll(int64_t N, const func_t& f) {
   dim3 grid((N + block.x * vt - 1) / (block.x * vt));
   auto stream = at::cuda::getCurrentCUDAStream();
   elementwise_kernel_manual_unroll<nt, vt, func_t><<<grid, block, 0, stream>>>(N, f);
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
-}
-
-template <int nt, int vt, typename func_t>
-static void launch_legacy_kernel_strided(int64_t N, const func_t& f) {
-  TORCH_INTERNAL_ASSERT(N >= 0 && N <= std::numeric_limits<int32_t>::max());
-  if (N == 0) {
-    return;
-  }
-  dim3 block(nt);
-  dim3 grid(8192);
-  auto stream = at::cuda::getCurrentCUDAStream();
-  elementwise_kernel_strided<nt, vt, func_t><<<grid, block, 0, stream>>>(N, f);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 #endif
@@ -539,7 +509,7 @@ void gpu_kernel_impl(TensorIteratorBase& iter, const func_t& f) {
       dtypes[i] = iter.dtype(i);
       strides[i] = inner_strides[i];
     }
-    launch_legacy_kernel_strided<512, 4>(numel, [=]GPU_LAMBDA(int idx) {
+    launch_legacy_kernel<512, 1>(numel, [=]GPU_LAMBDA(int idx) {
       void* out = data[0] + strides[0] * idx;
       arg0_t result = invoke(f, &data[1], &strides[1], &dtypes[1], idx);
       c10::cast_and_store<arg0_t>(dtypes[0], out, result);
