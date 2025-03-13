@@ -176,9 +176,9 @@ def fully_shard(
         offload_policy (OffloadPolicy): This controls the offloading policy,
             which offers parameter/gradient/optimizer state offloading. See
             :class:`OffloadPolicy` and its subclasses for details.
-        ignored_params: Optional(Set[nn.Parameter]): The set of parameters that we
-            don't want to shard with FSDP. These parameters will not be moved to
-            the device by this function.
+        ignored_params: Optional(Set[nn.Parameter]): The set of parameters to be
+            ignored by FSDP. They will not be sharded, nor moved to the device
+            during init, nor have their gradients reduced in backward.
 
     Returns:
         FSDPModule: The module with FSDP applied (in-place).
