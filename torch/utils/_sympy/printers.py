@@ -274,6 +274,8 @@ class CppPrinter(ExprPrinter):
             raise OverflowError(f"{i} too big to convert to {INDEX_TYPE}")
         elif i == INDEX_TYPE_MIN:
             assert i == (-1) << 63
+            # Writing -9223372036854775808L makes the value overflow
+            # as it is parsed as -(9223372036854775808L) by the C/C++ compiler
             return f"(-1{suffix} << 63)"
         return f"{i}{suffix}"
 
