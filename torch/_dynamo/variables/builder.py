@@ -31,7 +31,6 @@ import itertools
 import logging
 import math
 import operator
-import pprint
 import random
 import re
 import sys
@@ -705,7 +704,6 @@ class VariableBuilder:
                 or
                 # Another commonly used frozenset of types.
                 x in torch.utils._pytree.BUILTIN_TYPES
-                or x in pprint._builtin_scalars
             )
             for x in value
         ):

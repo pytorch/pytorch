@@ -1656,7 +1656,10 @@ class BuiltinVariable(VariableTracker):
         )
 
     def call_len(self, tx: "InstructionTranslator", *args, **kwargs):
-        return args[0].call_method(tx, "__len__", args[1:], kwargs)
+        try:
+            return args[0].call_method(tx, "__len__", args[1:], kwargs)
+        except Exception as e:
+            raise_observed_exception(type(e), tx, args=e.args)
 
     def call_getitem(self, tx: "InstructionTranslator", *args, **kwargs):
         return args[0].call_method(tx, "__getitem__", args[1:], kwargs)
@@ -1876,7 +1879,9 @@ class BuiltinVariable(VariableTracker):
                     "assertRaisesRegex",
                     "assertNotWarns",
                     "assertWarnsRegex",
-                    "assertMultiLineEqual",
+                    # "assertMultiLineEqual",
+                    "assertDictEqual",
+                    "assertSequenceEqual",
                     "assertWarns",
                 )
                 and isinstance(obj, variables.UserDefinedObjectVariable)
@@ -2134,10 +2139,6 @@ class BuiltinVariable(VariableTracker):
             return variables.ConstantVariable.create(id(args[0].value))
         elif istype(args[0], variables.FunctoolsPartialVariable):
             return variables.ConstantVariable.create(id(args[0].fake_value))
-        elif istype(args[0], variables.ConstDictVariable):
-            return variables.ConstantVariable.create(id(args[0].items))
-        elif istype(args[0], variables.ListVariable):
-            return variables.ConstantVariable.create(id(args[0].items))
         else:
             unimplemented(f"call_id with args {args}")
 
