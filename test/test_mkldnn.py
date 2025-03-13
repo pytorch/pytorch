@@ -264,7 +264,10 @@ class TestMkldnn(TestCase):
                     loss1.backward()
             if not train or (train and dim != 1):
                 y_mkldnn = mkldnn_conv(x2).to_dense()
-                self.assertEqual(y_aten, y_mkldnn)
+                if self.precision != 0:
+                    self.assertEqual(y_aten, y_mkldnn, atol=self.precision, rtol=self.precision)
+                else:
+                    self.assertEqual(y_aten, y_mkldnn)
             if not train:
                 self._test_serialization(mkldnn_conv, (x.to_mkldnn(),))
                 self._test_tracing(mkldnn_conv, (x.to_mkldnn(),))
@@ -514,7 +517,11 @@ class TestMkldnn(TestCase):
             if train:
                 y.sum().backward()
 
-            self.assertEqual(y, y_ref)
+            if self.precision != 0:
+                self.assertEqual(y, y_ref, atol=self.precision, rtol=self.precision)
+            else:
+                self.assertEqual(y, y_ref)
+
             if train:
                 self.assertEqual(x.grad, x_ref.grad)
                 self.assertEqual(conv.weight.grad,

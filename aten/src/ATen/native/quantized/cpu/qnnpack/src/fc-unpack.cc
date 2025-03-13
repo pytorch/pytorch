@@ -41,7 +41,7 @@ void PackBMatrix::unpackWeights(
           kernel[(nr_block_start + nr_block_offset) * input_channels_ +
           (kr_block_start + kr_block_offset)] = *(packed.as_uint8_ptr++);
         }
-        if (kernel_zero_points != 0) {
+        if (kernel_zero_points != nullptr) {
           for (size_t kr_block_offset = 0; kr_block_offset < (kr - kr_block_size);
                kr_block_offset++) {
             packed.as_uint8_ptr++;
@@ -50,7 +50,7 @@ void PackBMatrix::unpackWeights(
           packed.as_uint8_ptr += (kr - kr_block_size);
         }
       }
-      if (kernel_zero_points != 0) {
+      if (kernel_zero_points != nullptr) {
         size_t remaining_nr_blocks = ((nr - nr_block_size) & (nr - 1));
         for (size_t nr_block_offset = 0; nr_block_offset < remaining_nr_blocks;
              nr_block_offset++) {

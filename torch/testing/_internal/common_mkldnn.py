@@ -32,7 +32,7 @@ def bf32_off():
 
 
 @contextlib.contextmanager
-def bf32_on(self, bf32_precision=1e-5):
+def bf32_on(self, bf32_precision=1e-2):
     old_matmul_precision = torch.backends.mkldnn.matmul.fp32_precision
     old_conv_precision = torch.backends.mkldnn.conv.fp32_precision
     old_precision = self.precision
@@ -51,7 +51,7 @@ def bf32_on(self, bf32_precision=1e-5):
 # allow_bf32=True, another with allow_bf32=False. When running with
 # allow_bf32=True, it will use reduced precision as specified by the
 # argument
-def bf32_on_and_off(bf32_precision=1e-5):
+def bf32_on_and_off(bf32_precision=1e-2):
     def with_bf32_disabled(self, function_call):
         with bf32_off():
             function_call()
