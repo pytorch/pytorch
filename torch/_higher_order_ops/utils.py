@@ -206,6 +206,16 @@ def potential_input_alias_or_mutation(gm, inputs, pre_dispatch=False):
     return (inp_inp_alias_map, inp_out_alias_map, out_out_alias_map), inp_mutation
 
 
+def _has_potential_branch_input_mutation(gm, inputs, pre_dispatch=False):
+    (
+        inp_inp_alias_map,
+        inp_out_alias_map,
+        out_out_alias_map,
+    ), inp_mutation = potential_input_alias_or_mutation(gm, inputs, pre_dispatch)
+
+    return len(inp_mutation) > 0
+
+
 def has_potential_input_alias_or_mutation(gm, inputs, pre_dispatch=False):
     (
         inp_inp_alias_map,
@@ -552,7 +562,7 @@ def validate_subgraph_args_types(lifted_args: Union[tuple[Any, ...], list[Any]])
 def check_input_alias_and_mutation(
     gm: torch.fx.GraphModule,
     fake_args: list[FakeTensor],
-) -> tuple[list[int], dict[int, int], dict[int, int], dict[int, int]]:
+) -> tuple[dict[int, int], dict[int, int], dict[int, int], list[int]]:
     with disable_proxy_modes_tracing():
         """This function returns mutated inputs, inp-inp alias, inp-out alias, out-out alias
         in the graph module gm. It checks whether input tensor versions have

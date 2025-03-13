@@ -9,6 +9,7 @@ import torch._subclasses.functional_tensor
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import (
+    _maybe_compile_and_run_fn,
     _maybe_run_with_interpreter,
     autograd_not_implemented,
     first_slice_copy,
