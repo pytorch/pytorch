@@ -36,6 +36,44 @@ def register_op(table: Dict[Any, Any], aten_ops: List[str]):
 register_padded_op = functools.partial(register_op, PADDED_OP_TABLE)
 
 
+class Dimension(int):
+    """
+    A class representing a dimension with padding information. This allows
+    propagating the padding information of dimensions across the ops.
+    """
+
+    is_padded = None
+
+    def __new__(cls, value: int, is_padded: bool | None = None, *args, **kwargs):
+        ret = super(cls, cls).__new__(cls, value)
+        ret.is_padded = is_padded
+        return ret
+
+    def __is_padded(self, other):
+        is_padded = self.is_padded
+        if isinstance(other, Dimension):
+            is_padded = is_padded or other.is_padded
+        return is_padded
+
+    def __add__(self, other):
+        res = super(Dimension, self).__add__(other)
+        return self.__class__(res, self.__is_padded(other))
+
+    def __sub__(self, other):
+        res = super(Dimension, self).__sub__(other)
+        return self.__class__(res, self.__is_padded(other))
+
+    def __mul__(self, other):
+        res = super(Dimension, self).__mul__(other)
+        return self.__class__(res, self.__is_padded(other))
+
+    def __repr__(self) -> str:
+        if self.is_padded:
+            return super().__repr__() + "(P)"
+        else:
+            return super().__repr__()
+
+
 def convert_to_padded_tensor(arg: torch.Tensor) -> object:
     multipliers = [1] * len(arg.shape)
     padded_arg = PaddedTensor(arg, multipliers)
