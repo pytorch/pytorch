@@ -270,4 +270,11 @@ print(ep)
 onnx_program = torch.onnx.export(ep)
 print(onnx_program)
 
-onnx_program.save("example.onnx")
+# onnx_program.save("example.onnx")
+
+# Not supported since jit doesn't support list[str]
+# torch.onnx.export(
+#     TestModule(),
+#     (torch.ones(2, 1),),
+#     "example_jit.onnx",
+# )
