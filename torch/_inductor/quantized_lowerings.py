@@ -8,6 +8,7 @@ from . import config as inductor_config, lowering
 from .codegen.cpp_gemm_template import CppGemmTemplate, CppWoqInt4GemmTemplate
 from .codegen.cpp_utils import create_epilogue_with_attr
 from .lowering import expand, register_lowering
+from .mkldnn_ir import WeightInt4PackMatmul
 from .select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
@@ -27,6 +28,7 @@ aten__weight_int4pack_mm_cpu = ExternKernelChoice(
     torch.ops.quantized.int4mm_packed_weight_cpu,
     "at::native::_weight_int4pack_mm_cpu_tensor",
     has_out_variant=False,
+    kernel_creator=WeightInt4PackMatmul.create,
 )
 
 quantized = torch.ops.quantized
