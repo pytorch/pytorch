@@ -4511,7 +4511,7 @@
     CPU, CUDA: _pdist_backward
   autogen: _pdist_backward.out
 
-- func: cosine_similarity(Tensor x1, Tensor x2, int dim=1, float eps=1e-08) -> Tensor
+- func: cosine_similarity(Tensor x1, Tensor x2, int dim=1, float eps=1e-08, bool keepdim=False) -> Tensor
   variants: function
 
 - func: permute(Tensor(a) self, int[] dims) -> Tensor(a)

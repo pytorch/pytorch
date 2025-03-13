@@ -17,6 +17,8 @@ struct TORCH_API CosineSimilarityOptions {
   TORCH_ARG(int64_t, dim) = 1;
   /// Small value to avoid division by zero. Default: 1e-8
   TORCH_ARG(double, eps) = 1e-8;
+  /// Determines whether or not to keep the vector dimension. Default: false
+  TORCH_ARG(bool, keepdim) = false;
 };
 
 namespace functional {

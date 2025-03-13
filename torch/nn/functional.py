@@ -5255,7 +5255,7 @@ Args:
 cosine_similarity = _add_docstr(
     torch.cosine_similarity,
     r"""
-cosine_similarity(x1, x2, dim=1, eps=1e-8) -> Tensor
+cosine_similarity(x1, x2, dim=1, eps=1e-8, keepdim=False) -> Tensor
 
 Returns cosine similarity between ``x1`` and ``x2``, computed along dim. ``x1`` and ``x2`` must be broadcastable
 to a common shape. ``dim`` refers to the dimension in this common shape. Dimension ``dim`` of the output is
@@ -5273,6 +5273,8 @@ Args:
     dim (int, optional): Dimension along which cosine similarity is computed. Default: 1
     eps (float, optional): Small value to avoid division by zero.
         Default: 1e-8
+    keepdim (bool, optional): If set to `True`, the reduced dimensions are retained
+        in the result as dimensions with size one. Default: `False`
 
 Example::
 

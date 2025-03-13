@@ -544,7 +544,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.cos: lambda input, out=None: -1,
         torch.cosine_embedding_loss: lambda input1, input2, target, margin=0, size_average=None, reduce=None, reduction="mean": -1,
         torch.cosh: lambda input, out=None: -1,
-        torch.cosine_similarity: lambda x1, x2, dim=1, eps=1e-8: -1,
+        torch.cosine_similarity: lambda x1, x2, dim=1, eps=1e-8, keepdim=False: -1,
         torch.count_nonzero: lambda input: -1,
         torch.cross: lambda input, other, dim=None, out=None: -1,
         torch.linalg.cross: lambda input, other, dim=-1, out=None: -1,

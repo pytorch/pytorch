@@ -10,8 +10,9 @@ inline Tensor cosine_similarity(
     const Tensor& x1,
     const Tensor& x2,
     int64_t dim,
-    double eps) {
-  return torch::cosine_similarity(x1, x2, dim, eps);
+    double eps,
+    bool keepdim) {
+  return torch::cosine_similarity(x1, x2, dim, eps, keepdim);
 }
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
@@ -34,7 +35,8 @@ inline Tensor cosine_similarity(
     const Tensor& x1,
     const Tensor& x2,
     const CosineSimilarityFuncOptions& options = {}) {
-  return detail::cosine_similarity(x1, x2, options.dim(), options.eps());
+  return detail::cosine_similarity(
+      x1, x2, options.dim(), options.eps(), options.keepdim());
 }
 
 // ============================================================================

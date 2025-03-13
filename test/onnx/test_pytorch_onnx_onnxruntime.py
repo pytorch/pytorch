@@ -8902,7 +8902,10 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     def test_cosine_similarity(self):
         x = torch.randn(5, 3, 2)
         y = torch.randn(5, 3, 2)
-        self.run_test(torch.nn.CosineSimilarity(dim=2), input_args=(x, y))
+        self.run_test(
+            torch.nn.CosineSimilarity(dim=2, keepdim=False), input_args=(x, y)
+        )
+        self.run_test(torch.nn.CosineSimilarity(dim=2, keepdim=True), input_args=(x, y))
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_pairwise_distance(self):
