@@ -3,7 +3,6 @@ from __future__ import annotations
 import collections
 import dataclasses
 import functools
-import inspect
 import itertools
 import logging
 import math
@@ -31,14 +30,12 @@ from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.symbol import free_symbol_is_type, SymT
-from torch.utils._triton import has_triton
 
 from . import comms, config, dependencies, ir, metrics
 from .analyze_preserves_zero_mask import can_codegen_without_upcasts
 from .codegen.common import BackendFeature, get_scheduling_for_device, Kernel
 from .comm_analysis import estimate_nccl_collective_runtime
 from .dependencies import Dep, MemoryDep, StarDep, WeakDep
-from .exc import GPUTooOldForTriton, TritonMissing
 from .ir import (
     ComputedBuffer,
     get_device_type,
@@ -2018,7 +2015,9 @@ class Scheduler:
         self.compute_ancestors()
 
         metrics.ir_nodes_pre_fusion += len(self.nodes)
-        V.debug.ir_pre_fusion(self.nodes)
+        from torch._inductor.debug import log_ir_post_fusion, log_ir_pre_fusion
+
+        log_ir_pre_fusion(self.nodes)
         self.num_orig_nodes = len(self.nodes)
         self.create_foreach_nodes()
         self.nodes = self.topological_sort_schedule(self.nodes)
@@ -2047,7 +2046,7 @@ class Scheduler:
             self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
         self.process_grouped_nodes()
         self.compute_last_usage()
-        V.debug.ir_post_fusion(self.nodes)
+        log_ir_post_fusion(self.nodes)
         V.debug.graph_diagram(self.nodes)
         self.debug_draw_graph()
 
@@ -3908,20 +3907,14 @@ class Scheduler:
         )
         V.graph.add_device_info(device)
 
-        device_scheduling = get_scheduling_for_device(device.type)
-        if device_scheduling is None:
+        device_scheduling_type = get_scheduling_for_device(device.type)
+        if device_scheduling_type is None:
             raise RuntimeError(f"Unsupported device type: {device.type}")
 
-        if not has_triton():
-            if (
-                device.type == "cuda"
-                and (device_props := torch.cuda.get_device_properties(device)).major < 7
-            ):
-                raise GPUTooOldForTriton(device_props, inspect.currentframe())
-            elif is_gpu(device.type) and not device.type == "mps":
-                raise TritonMissing(inspect.currentframe())
+        scheduling = device_scheduling_type(self)
+        scheduling.raise_if_unavailable(device)
 
-        return device_scheduling(self)
+        return scheduling
 
     def get_backend(self, device: Optional[torch.device]) -> BaseScheduling:
         assert device is not None
@@ -4119,7 +4112,7 @@ class Scheduler:
             self._codegen(partition)
             partition_code, _ = V.graph.wrapper_code.generate(V.graph.is_inference)
 
-        V.graph.wrapper_code.define_subgraph_launcher_fn(partition_code)
+        V.graph.wrapper_code.define_subgraph_launcher_fn(partition_code.value)
 
         V.graph.wrapper_code.codegen_partition_call(graph_partition_id, signature)
         V.graph.wrapper_code.allocated.update(
@@ -4369,6 +4362,17 @@ class BaseScheduling:
     def get_backend_features(self, device: torch.device) -> OrderedSet[BackendFeature]:
         """Return a set of .codegen.common.BackendFeature()"""
         return OrderedSet()
+
+    @classmethod
+    def raise_if_unavailable(
+        cls, device: Union[str, torch.device, None] = None
+    ) -> None:
+        """
+        Raises a RuntimeError if the given device does not support this codegen or required
+        prerequisites are not available with a useful description for the user. If None is given,
+        the default device is checked.
+        """
+        return None
 
     def can_fuse_vertical(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode

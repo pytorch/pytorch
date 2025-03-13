@@ -89,8 +89,8 @@ _register_custom_builtin("fx_pytree", "import torch.fx._pytree as fx_pytree", fx
 _register_custom_builtin("pytree", "import torch.utils._pytree as pytree", pytree)
 
 
-# __add__ => add
-_strip_magic_method = functools.partial(re.compile(r"^__|__$").sub, "")
+def _is_magic(x: str) -> bool:
+    return x.startswith("__") and x.endswith("__")
 
 
 def _snake_case(s: str) -> str:
@@ -127,7 +127,7 @@ _torch_but_not_dynamo = re.compile(
 def _is_from_torch(obj: Any) -> bool:
     module_name = getattr(obj, "__module__", None)
     if module_name is not None:
-        return bool(_torch_but_not_dynamo(module_name))
+        return _torch_but_not_dynamo(module_name) is not None
 
     name = getattr(obj, "__name__", None)
     # exclude torch because torch.torch.torch.torch works. idk mang
@@ -221,6 +221,7 @@ dtype_abbrs = {
     torch.float8_e5m2: "f8e5m2",
     torch.float8_e4m3fnuz: "f8e4m3fnuz",
     torch.float8_e5m2fnuz: "f8e5m2fnuz",
+    torch.float8_e8m0fnu: "f8e8m0fnu",
     torch.complex32: "c32",
     torch.complex64: "c64",
     torch.complex128: "c128",
@@ -585,7 +586,7 @@ class CodeGen:
             """
             nonlocal prev_stacktrace
 
-            if node.op not in ("placeholder", "output"):
+            if node.op not in {"placeholder", "output"}:
                 stack_trace = node.stack_trace
                 if stack_trace:
                     if stack_trace != prev_stacktrace:
@@ -1533,9 +1534,12 @@ class Graph:
         if callable(target):
             op = target.__name__
         else:
-            # target must be a str, regex will error if it's not
-            op = _strip_magic_method(target)
-        return _snake_case(op)
+            assert isinstance(target, str)
+            op = target
+            if _is_magic(op):
+                op = op[2:-2]
+        op = _snake_case(op)
+        return op
 
     @compatibility(is_backward_compatible=True)
     def python_code(
