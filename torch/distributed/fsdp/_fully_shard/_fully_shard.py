@@ -177,8 +177,8 @@ def fully_shard(
             which offers parameter/gradient/optimizer state offloading. See
             :class:`OffloadPolicy` and its subclasses for details.
         ignored_params: Optional(Set[nn.Parameter]): The set of parameters that we
-            don't want to shard with FSDP, but will still be moved to the device if
-            necessary.
+            don't want to shard with FSDP. These parameters will not be moved to
+            the device by this function.
 
     Returns:
         FSDPModule: The module with FSDP applied (in-place).
@@ -213,7 +213,7 @@ def fully_shard(
     managed_modules = _get_managed_modules(modules, ignored_params)
     params, buffers = _get_managed_states(managed_modules, ignored_params)
 
-    _move_states_to_device(params, buffers, ignored_params, device)
+    _move_states_to_device(params, buffers, device)
     if params:
         state._fsdp_param_group = FSDPParamGroup(
             params,
