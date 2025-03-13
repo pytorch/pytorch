@@ -1070,7 +1070,16 @@ class _InProcessFxCompile(FxCompile):
                 const_kernel_code = None
 
                 if aot_mode and config.aot_inductor.use_runtime_constant_folding:
-                    const_gm, const_output_index = split_const_gm(gm)
+                    # torchbind objects have name that starts with _torchbind_obj
+                    # See caffe2/torch/fx/_symbolic_trace.py?lines=406
+                    # We don't use node.meta["val"] because we don't typically
+                    # attach meta["val"] for get_attr nodes.
+                    const_gm, const_output_index = split_const_gm(
+                        gm,
+                        skip_folding_node_fn=lambda node: node.op == "get_attr"
+                        and isinstance(node.target, str)
+                        and node.target.startswith("_torchbind_obj"),
+                    )
 
                     const_graph = GraphLowering(
                         const_gm,
@@ -1177,8 +1186,6 @@ class _InProcessFxCompile(FxCompile):
                                     serialized_extern_kernel_nodes,
                                 )
 
-                            additional_files = graph.wrapper_code.additional_files
-
                             with dynamo_timed(
                                 "AotCodeCompiler.compile", log_pt2_compile_event=True
                             ):
@@ -1189,7 +1196,11 @@ class _InProcessFxCompile(FxCompile):
                                     kernel_code.value,
                                     serialized_extern_kernel_nodes,
                                     device_type=graph.device_type,
-                                    additional_files=additional_files,
+                                    additional_files=[
+                                        *dict.fromkeys(
+                                            graph.wrapper_code.additional_files
+                                        )
+                                    ],
                                 )
                         else:
                             compiled_fn = graph.compile_to_module().call
