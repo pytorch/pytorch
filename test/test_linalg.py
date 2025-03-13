@@ -5524,8 +5524,39 @@ class TestLinalg(TestCase):
 
             # The results must NOT be from rocBLAS
             # result can be either Default or Hipblaslt
+            # Additionally, the Op Signature must be tf32
             last_result = torch.cuda.tunable.get_results()
-            self.assertTrue('Rocblas' not in last_result[-1][2])
+            found_result = find_tunableop_result(last_result,
+                                          'GemmTunableOp_tf32_NN',
+                                          'nn_37_37_37_ld_37_37_37')
+            self.assertTrue(found_result is not None)
+            self.assertTrue('Rocblas' not in found_result)
+
+
+            # Now disable TF32
+            torch.backends.cuda.matmul.allow_tf32 = False
+
+            # Update the number of reference results
+            ref_num_results = total_num_results
+
+            # Tune the same GEMM again
+            N = M = K = 37
+            A = torch.randn(N, K, device=device, dtype=dtype)
+            B = torch.randn(K, M, device=device, dtype=dtype)
+            C = torch.matmul(A, B)
+
+            # This stores total number of cumulative results
+            total_num_results = len(torch.cuda.tunable.get_results())
+
+            # There must be a new tuning result
+            self.assertEqual((total_num_results - ref_num_results), 1)
+
+            # The new tuning result must be of type float
+            last_result = torch.cuda.tunable.get_results()
+            found_result = find_tunableop_result(last_result,
+                                          'GemmTunableOp_float_NN',
+                                          'nn_37_37_37_ld_37_37_37')
+            self.assertTrue(found_result is not None)
 
             # disable TunableOp
             torch.cuda.tunable.enable(False)
