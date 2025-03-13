@@ -1517,8 +1517,9 @@ op_db: list[OpInfo] = [
         "linalg.lstsq",
         aten_name="linalg_lstsq",
         variant_test_name="grad_oriented",
-        # gradchecks for forward AD fails with multi-Tensor outputs
-        op=lambda a, b, driver: torch.linalg.lstsq(a, b, driver=driver)[0],
+        # gradchecks for forward AD fails with full output tuple
+        # works when taking [:2], which is (solution, residuals)
+        op=lambda a, b, driver: torch.linalg.lstsq(a, b, driver=driver)[:2],
         supports_out=False,
         dtypes=floating_and_complex_types(),
         sample_inputs_func=sample_inputs_linalg_lstsq,

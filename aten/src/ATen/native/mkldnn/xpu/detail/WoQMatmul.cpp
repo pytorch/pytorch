@@ -132,6 +132,12 @@ sycl::event woq_matmul_int4(
 
   dnnl::primitive_attr pattr;
   pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
+#if ONEDNN_SUPPORT_DETERMINISTIC
+  if (at::globalContext().deterministicAlgorithms() ||
+      at::globalContext().deterministicMkldnn()) {
+    pattr.set_deterministic(true);
+  }
+#endif
 
   // Set scales with multiple scales along K dimension and with groups along  K.
   pattr.set_scales(
