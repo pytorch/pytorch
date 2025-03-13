@@ -26,6 +26,7 @@ namespace at::native {
 
 Scalar _local_scalar_dense_cuda(const Tensor& self) {
   Scalar r;
+  TORCH_CHECK(self.numel() > 0, "_local_scalar_dense: Empty tensor not supported");
 #if defined(USE_ROCM)
   if (!use_sync_mode()){
 #endif
