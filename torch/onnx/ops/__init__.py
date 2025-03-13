@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import torch
-from torch.onnx.ops import _impl
+from torch.onnx.ops import _symbolic_impl
 
 
 if TYPE_CHECKING:
@@ -114,9 +114,9 @@ def symbolic(
             raise ValueError(f"Unsupported dtype: {dtype}")
         dtype = _TORCH_DTYPE_TO_ONNX_DTYPE[dtype]
     domain, op_type = _parse_domain_op_type(domain_op)
-    encoded_attrs = _impl.EncodedAttrs.from_dict(attrs)
+    encoded_attrs = _symbolic_impl.EncodedAttrs.from_dict(attrs)
     # TODO: Parse domain
-    return _impl._symbolic(
+    return _symbolic_impl._symbolic(
         inputs,
         op_type,
         dtype,
@@ -205,9 +205,9 @@ def symbolic_multi_out(
         else:
             onnx_dtypes.append(dtype)
     domain, op_type = _parse_domain_op_type(domain_op)
-    encoded_attrs = _impl.EncodedAttrs.from_dict(attrs)
+    encoded_attrs = _symbolic_impl.EncodedAttrs.from_dict(attrs)
     # Use the size of dtypes to determine the number of outputs
-    return _impl._symbolic_multi_out(
+    return _symbolic_impl._symbolic_multi_out(
         inputs,
         op_type,
         onnx_dtypes,

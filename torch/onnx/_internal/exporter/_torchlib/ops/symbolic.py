@@ -10,7 +10,7 @@ import torch
 from torch.onnx._internal._lazy_import import onnxscript_ir as ir
 from torch.onnx._internal.exporter import _core
 from torch.onnx._internal.exporter._torchlib._torchlib_registry import onnx_impl
-from torch.onnx.ops import _impl as onnx_ops_impl
+from torch.onnx.ops import _symbolic_impl
 
 
 if TYPE_CHECKING:
@@ -103,7 +103,7 @@ def onnx_symbolic_symbolic(
     domain: str = "",
     version: int | None = None,
 ) -> ir.Value:
-    encoded = onnx_ops_impl.EncodedAttrs(
+    encoded = _symbolic_impl.EncodedAttrs(
         attr_keys=list(attr_keys),
         attr_types=list(attr_types),
         attr_pos=list(attr_pos),
@@ -144,7 +144,7 @@ def onnx_symbolic_symbolic_multi_out(
     domain: str = "",
     version: int | None = None,
 ) -> Sequence[torch.Tensor]:
-    encoded = onnx_ops_impl.EncodedAttrs(
+    encoded = _symbolic_impl.EncodedAttrs(
         attr_keys=list(attr_keys),
         attr_types=list(attr_types),
         attr_pos=list(attr_pos),
