@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - main
+    tags:
+      - ciflow/inductor-rocm/*
   workflow_dispatch:
 
 concurrency:
