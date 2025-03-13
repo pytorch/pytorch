@@ -30,7 +30,7 @@ import itertools
 import sys
 import types
 from collections.abc import Sequence
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, TypeVar
+from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar
 from typing_extensions import Never
 from unittest.mock import patch
 
@@ -41,7 +41,6 @@ from ..bytecode_transformation import create_call_function, create_rot_n, is_gen
 from ..exc import (
     get_dynamo_observed_exception,
     handle_observed_exception,
-    IncorrectUsage,
     InfiniteGeneratorError,
     ObservedException,
     ObservedGeneratorExit,
@@ -49,6 +48,7 @@ from ..exc import (
     raise_observed_exception,
     SkipFrame,
     unimplemented,
+    unimplemented_v2,
     Unsupported,
 )
 from ..guards import GuardBuilder, install_guard
@@ -225,9 +225,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         else:
             self.is_constant = False
 
-        assert isinstance(
-            fn, (types.FunctionType, torch.jit.ScriptFunction)
-        ), f"expected FunctionType found {typestr(fn)} {fn}"
+        assert isinstance(fn, (types.FunctionType, torch.jit.ScriptFunction)), (
+            f"expected FunctionType found {typestr(fn)} {fn}"
+        )
         # TODO(anijain2305) - Replace directly calling UserFunctionVariable with
         # VariableBuilder, which handles the wrapping of _torchdynamo_inline.
         # unpack @torch._dynamo.optimize()(fn) wrapped function
@@ -362,6 +362,27 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        # Handle a `nonstrict_trace(fn)` call
+        if self.fn is torch._dynamo.nonstrict_trace:
+            bound = inspect.signature(self.fn).bind(*args, **kwargs)
+            fn_var = bound.args[0]
+            if not isinstance(fn_var, BaseUserFunctionVariable):
+                typ = fn_var.python_type()
+                unimplemented(
+                    f"`nonstrict_trace` expects a callable, but got value of type <{typ.__name__}>"
+                )
+
+            if not isinstance(fn_var, UserFunctionVariable):
+                fn_name = fn_var.get_name()
+                unimplemented(
+                    f"""
+Applying `nonstrict_trace` to function <{fn_name}>; however, `nonstrict_trace` currently requires the function to be defined outside `torch.compile` region.
+"""  # NOQA: B950
+                )
+
+            fn = fn_var.fn
+            return variables.TorchInGraphFunctionVariable(fn, nonstrict_traceable=True)
+
         if self.is_constant:
             return invoke_and_store_as_constant(
                 tx, self.fn, self.get_name(), args, kwargs
@@ -390,7 +411,6 @@ class BuiltinMethodVariable(BaseUserFunctionVariable):
         self.fn = fn
 
     @staticmethod
-    @functools.lru_cache(None)
     def is_supported_builtin_method(obj):
         method_self = obj.__self__
         method_name = obj.__name__
@@ -500,13 +520,12 @@ class LocalGeneratorObjectVariable(VariableTracker):
             with patch.dict(counters, {"unimplemented": counters["inline_call"]}):
                 return tracer.inline_call_()
         except ObservedException as e:
-            tx.exn_vt_stack.extend(tracer.exn_vt_stack)
             raise e
         except InfiniteGeneratorError:
             # test/dynamo/test_misc.py::test_iterator_limit
             raise
         except Unsupported as e:
-            torch._C._dynamo.eval_frame.skip_code(self.get_code())
+            torch._dynamo.eval_frame.skip_code(self.get_code())
             raise SkipFrame from e
         finally:
             counters["unimplemented"] |= counters["inline_call"]
@@ -517,7 +536,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
     def has_force_unpack_var_sequence(self, tx) -> builtins.bool:
         return True
 
-    def force_unpack_var_sequence(self, tx) -> List[VariableTracker]:
+    def force_unpack_var_sequence(self, tx) -> list[VariableTracker]:
         result = []
         while True:
             try:
@@ -529,9 +548,8 @@ class LocalGeneratorObjectVariable(VariableTracker):
 
     def _setup_exception(self, tx, exc):
         tracer = self._get_inline_tracer(tx)
-        tracer.push(exc)
         try:
-            tracer._raise_exception_variable(None)
+            tracer._raise_exception_variable(exc)
         except ObservedException as e:
             # if no handler is available (i.e. user code doesn't catch it), the
             # exception is raised again.
@@ -547,8 +565,8 @@ class LocalGeneratorObjectVariable(VariableTracker):
         self,
         tx: "InstructionTranslator",
         name: str,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "__next__":
             return self.next_variable(tx)
@@ -643,19 +661,16 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # * If the generator function does not catch the passed-in exception,
             # or raises a different exception, then that exception propagates to the caller.
 
-            if len(args) > 1:
-                raise IncorrectUsage(
-                    "the (type, exc, tb) signature of throw() is deprecated, "
-                    "use the single-arg signature instead."
-                )
-
             # Setup the exception table and jump target in case of try...finally
             tracer = self._get_inline_tracer(tx)
             try:
-                self._setup_exception(tx, args[0])
-            except ObservedException:
+                # In Python 3.9, the exception is represented as a triple (typ, val, tb)
+                # In such cases, we re-raise the exception object given to avoid
+                # creating a new object, so that IS_OP works.
+                # See: https://github.com/pytorch/pytorch/pull/146496
+                self._setup_exception(tx, args[1] if len(args) == 3 else args[0])
+            except ObservedException:  # noqa: TRY203
                 # propagate the exception back to the parent caller
-                tx.exn_vt_stack.extend(tracer.exn_vt_stack)
                 raise
 
             retval = self.next_variable(tx)
@@ -728,9 +743,6 @@ class LocalGeneratorObjectVariable(VariableTracker):
             except get_dynamo_observed_exception(exc_type):
                 # We should get back the exception raised before.
                 pass
-            except ObservedException:
-                # Propagate anything else back to the parent caller
-                tx.exn_vt_stack.extend(tracer.exn_vt_stack)
             else:
                 raise_observed_exception(RuntimeError, tracer)
             return retval
@@ -858,6 +870,23 @@ class UserMethodVariable(UserFunctionVariable):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        # NOTE this is to handle methods annotated by `nonstrict_trace`. Usually
+        # a `nonstrict_trace`-ed function will be wrapped by
+        # `VariableTracker.build` and route to `TorchInGraphFunctionVariable`,
+        # but in the case of method, we manually wrap it with `UserMethodVariable`
+        # inside `UserDefinedObjectVariable.var_getattr`.
+        #
+        # We might be able to simplify this away by canonicalizing the
+        # function/method wrapping code paths.
+        from ..trace_rules import is_nonstrict_trace_callable
+
+        if is_nonstrict_trace_callable(self.fn):
+            call_args = [*self.self_args(), *args]
+            var = variables.TorchInGraphFunctionVariable(
+                self.fn, nonstrict_traceable=True
+            )
+            return var.call_function(tx, call_args, kwargs)
+
         # For nn.Module methods, redirecting to NNModuleVariable.call_method for optimized solution
         # rather than simple inlining. E.g, putting `call_method` op in FX graph for `forward` method
         # since we ensure `forward` of allowed modules can be traced by AOT safely.
@@ -1003,6 +1032,9 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
     def get_code(self):
         return self.code.as_python_constant()
 
+    def python_type(self):
+        return types.FunctionType
+
     def get_function(self):
         if self.closure:
             raise NotImplementedError
@@ -1137,7 +1169,26 @@ class SkipFunctionVariable(VariableTracker):
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
-            unimplemented(f"call torch._dynamo.disable() wrapped function {self.value}")
+            unimplemented_v2(
+                gb_type="Skip calling `torch.compiler.disable()`d function",
+                context=str(self.value),
+                explanation=f"Skip calling function `{self.value}` since it was wrapped with `torch.compiler.disable`",
+                hints=[
+                    "Remove the `torch.compiler.disable` call",
+                ],
+            )
+        elif self.value is torch._dynamo.graph_break:
+            graph_break_msg = kwargs.get("msg", None)
+            if graph_break_msg:
+                graph_break_msg = graph_break_msg.as_python_constant()
+            unimplemented_v2(
+                gb_type="Call to `torch._dynamo.graph_break()`",
+                context=f"Called `torch._dynamo.graph_break()` with args `{args}`, kwargs `{kwargs}`",
+                explanation=f"User-inserted graph break. Message: {graph_break_msg}",
+                hints=[
+                    "Remove the `torch._dynamo.graph_break()` call.",
+                ],
+            )
         elif isinstance(self.value, types.WrapperDescriptorType):
             msg = (
                 f"Graph break due to unsupported wrapper descriptor {self.value}. "
@@ -1147,51 +1198,82 @@ class SkipFunctionVariable(VariableTracker):
             torch._dynamo.utils.warn_once(msg)
             unimplemented(msg)
         else:
+            qualname = getattr(self.value, "__qualname__", "<unknown qualname>")
             try:
                 path = inspect.getfile(self.value)
-                msg = f"'skip function {self.value.__qualname__} in file {path}'"
+                explanation = (
+                    f"Dynamo developers have intentionally marked that the function `{qualname}` "
+                    f"in file `{path}` should not be traced."
+                )
+                hints = [
+                    f"Avoid calling the function `{qualname}`.",
+                ]
+                # TODO improve trace_rules reasoning to provide better hints.
+                # How do we tell that a function/file should NOT be removed from skip files?
+                # Do a very basic check for now.
+                if "_dynamo" not in path:
+                    hints += [
+                        f"Remove the function `{qualname}` or the file `{path}` "
+                        "from torch/_dynamo/trace_rules.py. More graph breaks may occur as a result of "
+                        "attempting to trace into the function.",
+                        "Please file an issue to PyTorch.",
+                        # TODO suggest mark_force_inline when implemented
+                    ]
             except TypeError:
                 known_python_builtin_modules = {"_abc", "_warnings"}
                 if self.value.__module__ in known_python_builtin_modules:
-                    msg = (
-                        f"Graph break due to unsupported Python builtin {self.value.__module__}.{self.value.__qualname__}. "
-                        f"Please file an issue on GitHub "
-                        f"so the PyTorch team can add support for it. "
+                    explanation = (
+                        f"Dynamo does not know how to trace the Python builtin "
+                        f"`{self.value.__module__}.{qualname}`."
                     )
+                    hints = [
+                        "If you are attempting to call a logging function (e.g. `_warnings.warn`), "
+                        "you can try adding it to `torch._dynamo.config.reorderable_logging_functions`.",
+                        "Please file an issue on GitHub "
+                        "so the PyTorch team can add support for it. ",
+                    ]
                 elif (
                     self.value.__module__ is not None
                     and self.value.__module__.startswith("optree")
                 ):
-                    msg = (
-                        f"Graph break for an optree C/C++ function {self.value.__module__}.{self.value.__qualname__}."
-                        f" Consider using torch.utils._pytree - "
-                        f"https://github.com/pytorch/pytorch/blob/main/torch/utils/_pytree.py"
-                    )
+                    explanation = f"Dynamo cannot trace optree C/C++ function {self.value.__module__}.{qualname}."
+                    hints = [
+                        " Consider using torch.utils._pytree - "
+                        "https://github.com/pytorch/pytorch/blob/main/torch/utils/_pytree.py"
+                    ]
                     # also warn on it because most users won't see the graph break message
-                    torch._dynamo.utils.warn_once(msg)
+                    torch._dynamo.utils.warn_once(explanation + "\n" + "\n".join(hints))
                 else:
-                    msg = (
-                        f"Graph break due to unsupported builtin {self.value.__module__}.{self.value.__qualname__}. "
+                    explanation = (
+                        f"Dynamo does not know how to trace the builtin `{self.value.__module__}.{qualname}.` "
                         f"This function is either a Python builtin (e.g. _warnings.warn) "
-                        f"or a third-party C/C++ Python extension (perhaps created with pybind). "
-                        f"If it is a Python builtin, please file an issue on GitHub "
-                        f"so the PyTorch team can add support for it and see the next case for a workaround. "
-                        f"If it is a third-party C/C++ Python extension, please "
-                        f"either wrap it into a PyTorch-understood custom operator "
-                        f"(see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html "
-                        f"for more details) or, if it is traceable, use "
-                        f"torch.compiler.allow_in_graph."
+                        f"or a third-party C/C++ Python extension (perhaps created with pybind)."
                     )
+                    hints = [
+                        "If it is a Python builtin, please file an issue on GitHub "
+                        "so the PyTorch team can add support for it and see the next case for a workaround.",
+                        "If it is a third-party C/C++ Python extension, please "
+                        "either wrap it into a PyTorch-understood custom operator "
+                        "(see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html "
+                        "for more details) or, if it is traceable, use "
+                        "`torch.compiler.allow_in_graph`.",
+                    ]
                     # also warn on it because most users won't see the graph break message
-                    torch._dynamo.utils.warn_once(msg)
-            if self.value.__qualname__ == "allow_in_graph":
-                msg = (
+                    torch._dynamo.utils.warn_once(explanation + "\n" + "\n".join(hints))
+            if qualname == "allow_in_graph":
+                explanation = (
                     "Found an allow_in_graph decorator to a function which "
                     "is created inside the parent function that is getting "
                     "compiled. This is not supported for now."
                 )
-            msg += f"', {self.reason}'" if self.reason else ""
-            unimplemented(msg)
+                hints = []
+            reason = self.reason if self.reason else "<missing reason>"
+            unimplemented_v2(
+                gb_type="Attempted to call function marked as skipped",
+                context=f"module: {self.value.__module__}, qualname: {qualname}, skip reason: {reason}",
+                explanation=explanation,
+                hints=hints,
+            )
 
     def call_obj_hasattr(self, tx: "InstructionTranslator", name):
         return variables.ConstantVariable.create(hasattr(self.value, name))
@@ -1583,6 +1665,46 @@ class PolyfilledFunctionVariable(VariableTracker):
 
     def as_python_constant(self):
         return self.fn
+
+
+class TracebackVariable(VariableTracker):
+    # We don't track traceback. A call to any function in this module is a no-op
+    def call_function(self, tx, args, kwargs): ...
+
+
+class SysFunctionVariable(VariableTracker):
+    def __init__(self, value, **kwargs):
+        super().__init__(**kwargs)
+        self.value = value
+
+    def exc_info(self, tx):
+        if len(tx.exn_vt_stack):
+            exn = tx.exn_vt_stack[-1]
+            typ = exn.exc_type
+            tb = None
+            items = [
+                VariableTracker.build(tx, typ),
+                exn,
+                VariableTracker.build(tx, tb),
+            ]
+        else:
+            items = [
+                variables.ConstantVariable(None),
+                variables.ConstantVariable(None),
+                variables.ConstantVariable(None),
+            ]
+        return variables.TupleVariable(items)
+
+    def exception(self, tx):
+        return self.exc_info(tx).items[1]
+
+    def call_function(self, tx, args, kwargs):
+        if self.value is sys.exc_info:
+            return self.exc_info(tx)
+        elif self.value is sys.exception:
+            return self.exception(tx)
+        else:
+            unimplemented(f"sys.{self.value.__name__}")
 
 
 from torch._higher_order_ops.triton_kernel_wrap import (

@@ -74,8 +74,12 @@ CPU_TEST_FAILURES = {
     "test_cond_unbacked_symint_closure_dynamic_True": fail_minimal_arrayref_interface(),
     "test_while_loop_with_unbacked_symint_closure_dynamic_True": fail_minimal_arrayref_interface(),
     "test_while_loop_with_unbacked_symint_closure_dynamic_False": fail_minimal_arrayref_interface(),
+    "test_while_loop_with_mixed_device_dynamic_True": fail_stack_allocation(),
+    "test_while_loop_with_mixed_device_dynamic_False": fail_stack_allocation(),
     "test_while_loop_with_sym_expr_cond_dynamic_True": fail_minimal_arrayref_interface(),
     "test_while_loop_with_sym_expr_cond_dynamic_False": fail_minimal_arrayref_interface(),
+    "test_while_loop_with_conv_dynamic_True": fail_minimal_arrayref_interface(),
+    "test_while_loop_with_conv_dynamic_False": fail_minimal_arrayref_interface(),
     "test_while_loop_with_parameters": fail_minimal_arrayref_interface(),
     "test_while_loop_with_pytree_inputs": fail_stack_allocation(),
     # FIXME: failed with Segfault while exiting the Python runtime
@@ -141,6 +145,12 @@ CPU_TEST_FAILURES = {
     ),
     # same issue as https://github.com/pytorch/pytorch/issues/122990
     "test_cond_non_tensor_predicates_dynamic_True": fail_stack_allocation(is_skip=True),
+    "test_cond_mismatched_branch_output_dynamic_True": fail_stack_allocation(
+        is_skip=True
+    ),
+    "test_cond_mismatched_branch_output_dynamic_False": fail_stack_allocation(
+        is_skip=True
+    ),
     # https://github.com/pytorch/pytorch/issues/122991
     "test_runtime_checks_complex": fail_stack_allocation(is_skip=True),
     "test_runtime_checks_fp8": fail_stack_allocation(is_skip=True),

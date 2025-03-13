@@ -575,9 +575,9 @@ def register_onednn_fusion_ops():
             algorithm,
             layout=None,
         ):
-            assert (
-                packed_weight.get_dtype() is torch.int8
-            ), "Only int8 weights are supported by oneDNN qlinear."
+            assert packed_weight.get_dtype() is torch.int8, (
+                "Only int8 weights are supported by oneDNN qlinear."
+            )
             x_size = x.get_size()
             if len(x_size) > 2:
                 # GEMM template needs 2D input, normalize input shape here
@@ -589,6 +589,12 @@ def register_onednn_fusion_ops():
                 )
             else:
                 x_scale.realize()
+                if all(dim == 1 for dim in x_scale.get_size()):
+                    # Corner-case discovered with LLaMA series.
+                    # If all outer dims of x_scale are 1, make it a 0D tensor.
+                    # Otherwise, epilogue creator will run into indexing issues.
+                    x_scale = view(x_scale, [])
+                assert len(x_scale.get_size()) in [0, 1], "x_scale must be 0D or 1D"
 
             if x_zp is None:
                 # If x_zp is None, x is int8 quantized per-tensor and its scale is not reshaped,
@@ -662,6 +668,7 @@ def register_onednn_fusion_ops():
                             torch.float32,
                             torch.bfloat16,
                             torch.uint8,
+                            torch.int8,
                         ]
                         input_loader = input_buffer.make_loader()
                         weight_compens_loader = weight_compens.make_loader()
@@ -753,7 +760,7 @@ def register_onednn_fusion_ops():
                                 inner_fn=inner_fn_cast_output_to_bf16,
                                 ranges=output_buf.get_size(),
                             )
-                        elif output_dtype == torch.uint8:
+                        elif output_dtype in [torch.uint8, torch.int8]:
                             from .lowering import _create_constants
 
                             requant_input_loader = output_buf.make_loader()
@@ -764,11 +771,16 @@ def register_onednn_fusion_ops():
                                     1.0 / scale, zero_point, dtype=torch.float32
                                 )
                                 val = ops.round(input * inv_scale) + zero_point
-                                qmin, qmax = _create_constants(
-                                    0, 255, dtype=torch.float32
-                                )
+                                if output_dtype == torch.uint8:
+                                    qmin, qmax = _create_constants(
+                                        0, 255, dtype=torch.float32
+                                    )
+                                else:
+                                    qmin, qmax = _create_constants(
+                                        -128, 127, dtype=torch.float32
+                                    )
                                 clamped = ops.minimum(ops.maximum(val, qmin), qmax)
-                                return ops.to_dtype(clamped, torch.uint8)
+                                return ops.to_dtype(clamped, output_dtype)
 
                             output_buf = ir.Pointwise(
                                 device=output_buf.get_device_or_error(),
@@ -889,6 +901,23 @@ def register_onednn_fusion_ops():
                 )
             else:
                 x_scale.realize()
+                if all(dim == 1 for dim in x_scale.get_size()):
+                    # Corner-case discovered with LLaMA series.
+                    # If all outer dims of x_scale are 1, make it a 0D tensor.
+                    # Otherwise, epilogue creator will run into indexing issues.
+                    x_scale = view(x_scale, [])
+                assert len(x_scale.get_size()) in [0, 1], "x_scale must be 0D or 1D"
+
+            if x_zp is None:
+                x_zp = V.graph.add_tensor_constant(
+                    torch.tensor(0, dtype=torch.int32), name="x_zp"
+                )
+
+            if w_zp is None:
+                w_zp = V.graph.add_tensor_constant(
+                    torch.tensor(0, dtype=torch.int32), name="w_zp"
+                )
+
             if not isinstance(x_zp, ir.TensorBox):
                 assert type(x_zp) == int
                 x_zp = V.graph.add_tensor_constant(
@@ -922,9 +951,9 @@ def register_onednn_fusion_ops():
                         # we will do accum dtype convertion here.
                         x2 = to_dtype(x2, output_dtype)
                 else:
-                    assert (
-                        x2.get_dtype() == output_dtype
-                    ), "dtype of accum for qlinear post op sum should be the same as output"
+                    assert x2.get_dtype() == output_dtype, (
+                        "dtype of accum for qlinear post op sum should be the same as output"
+                    )
             x2_dtype = x2.get_dtype()
             bias_dtype = bias.get_dtype() if bias is not None else None
             choices: list[ChoiceCaller] = []
@@ -964,6 +993,7 @@ def register_onednn_fusion_ops():
                             torch.float32,
                             torch.bfloat16,
                             torch.uint8,
+                            torch.int8,
                         ]
 
                         input_loader = input_buffer.make_loader()
@@ -1062,7 +1092,7 @@ def register_onednn_fusion_ops():
                                 inner_fn=inner_fn_cast_output_to_bf16,
                                 ranges=output_buf.get_size(),
                             )
-                        elif output_dtype == torch.uint8:
+                        elif output_dtype in [torch.uint8, torch.int8]:
                             from .lowering import _create_constants
 
                             requant_input_loader = output_buf.make_loader()
@@ -1073,9 +1103,14 @@ def register_onednn_fusion_ops():
                                     1.0 / scale, zero_point, dtype=torch.float32
                                 )
                                 val = ops.round(input * inv_scale) + zero_point
-                                qmin, qmax = _create_constants(
-                                    0, 255, dtype=torch.float32
-                                )
+                                if output_dtype == torch.uint8:
+                                    qmin, qmax = _create_constants(
+                                        0, 255, dtype=torch.float32
+                                    )
+                                else:
+                                    qmin, qmax = _create_constants(
+                                        -128, 127, dtype=torch.float32
+                                    )
                                 clamped = ops.minimum(ops.maximum(val, qmin), qmax)
                                 return ops.to_dtype(clamped, torch.uint8)
 

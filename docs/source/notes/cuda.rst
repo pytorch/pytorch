@@ -635,6 +635,207 @@ of the alloc/free functions that match the signatures specified above.
 
 .. cublas-workspaces:
 
+Mixing different CUDA system allocators in the same program
+-----------------------------------------------------------
+Depending on your use case, :meth:`~torch.cuda.change_current_allocator` may not be what you
+want to use, since it swaps the CUDA allocator for the entire program (similar to
+``PYTORCH_CUDA_ALLOC_CONF=backend:cudaMallocAsync``). For instance, if the swapped allocator doesn't
+have caching mechanism, you will lose all the benefits of PyTorch's CUDACachingAllocator. Instead,
+you can selectively mark a region of PyTorch code to use a custom allocator using
+:class:`torch.cuda.MemPool`. This will let you use multiple CUDA system allocators in the same
+PyTorch program, along with most of the benefits of the CUDACachingAllocator (e.g. caching).
+Using :class:`torch.cuda.MemPool`, you can utilize custom allocators that enable several features,
+such as:
+
+* Allocating output buffers for an all-reduce using ``ncclMemAlloc`` allocator can enable NVLink
+  Switch Reductions (NVLS). This can reduce contention between overlapping compute and communication
+  kernels on GPU resources (SMs, and Copy Engines), especially on tensor-parallel workloads.
+* For Grace CPU based systems, allocating host outputs buffers for an all-gather using ``cuMemCreate``
+  and specifying ``CU_MEM_LOCATION_TYPE_HOST_NUMA`` can enable Extended GPU Memory (EGM) based memory transfers
+  from source GPUs to the destination CPU. This accelerates the all-gather since the transfer
+  happens over NVLinks, which otherwise would have happened over bandwidth-limited, Network Interface
+  Card (NIC) links. Such an accelerated all-gather can in turn speed up model checkpointing.
+* If you are crafting a model and don't want to think about the optimal memory placements of a memory
+  intensive module at first (e.g. an embedding table), or perhaps you have a module which is not
+  performance sensitive and doesn't fit in the GPU, then you could just allocate that module with
+  ``cudaMallocManaged`` with preferred CPU location and get your model working first.
+
+.. note::
+
+    While ``cudaMallocManaged`` offers convenient automatic memory management using CUDA Unified Virtual Memory (UVM),
+    it is not recommended for DL workloads. For DL workloads that fit in GPU memory, explicit placement consistently
+    outperforms UVM, since there are no page faults and access patterns remain predictable. When GPU memory gets
+    saturated, UVM has to perform costly double transfers, evicting pages to CPU before bringing in new ones.
+
+The code below shows ``ncclMemAlloc`` wrapped in a :class:`torch.cuda.memory.CUDAPluggableAllocator`.
+
+.. code:: python
+
+   import os
+
+   import torch
+   import torch.distributed as dist
+   from torch.cuda.memory import CUDAPluggableAllocator
+   from torch.distributed.distributed_c10d import _get_default_group
+   from torch.utils import cpp_extension
+
+
+   # create allocator
+   nccl_allocator_source = """
+   #include <nccl.h>
+   #include <iostream>
+   extern "C" {
+
+   void* nccl_alloc_plug(size_t size, int device, void* stream) {
+     std::cout << "Using ncclMemAlloc" << std::endl;
+     void* ptr;
+     ncclResult_t err = ncclMemAlloc(&ptr, size);
+     return ptr;
+
+   }
+
+   void nccl_free_plug(void* ptr, size_t size, int device, void* stream) {
+     std::cout << "Using ncclMemFree" << std::endl;
+     ncclResult_t err = ncclMemFree(ptr);
+   }
+
+   }
+   """
+   nccl_allocator_libname = "nccl_allocator"
+   nccl_allocator = torch.utils.cpp_extension.load_inline(
+       name=nccl_allocator_libname,
+       cpp_sources=nccl_allocator_source,
+       with_cuda=True,
+       extra_ldflags=["-lnccl"],
+       verbose=True,
+       is_python_module=False,
+       build_directory="./",
+   )
+
+   allocator = CUDAPluggableAllocator(
+       f"./{nccl_allocator_libname}.so", "nccl_alloc_plug", "nccl_free_plug"
+   ).allocator()
+
+   # setup distributed
+   rank = int(os.getenv("RANK"))
+   local_rank = int(os.getenv("LOCAL_RANK"))
+   world_size = int(os.getenv("WORLD_SIZE"))
+   torch.cuda.set_device(local_rank)
+   dist.init_process_group(backend="nccl")
+   device = torch.device(f"cuda:{local_rank}")
+   default_pg = _get_default_group()
+   backend = default_pg._get_backend(device)
+
+   # Note: for convenience, ProcessGroupNCCL backend provides
+   # the ncclMemAlloc allocator as backend.mem_allocator
+   allocator = backend.mem_allocator
+
+
+You can now define a new memory pool by passing this allocator to :class:`torch.cuda.MemPool`:
+
+.. code:: python
+
+   pool = torch.cuda.MemPool(allocator)
+
+
+The pool can then be used with the :class:`torch.cuda.use_mem_pool` context manager to
+allocate tensors into that pool:
+
+.. code:: python
+
+   with torch.cuda.use_mem_pool(pool):
+       # tensor gets allocated with ncclMemAlloc passed in the pool
+       tensor = torch.arange(1024 * 1024 * 2, device=device)
+       print(f"tensor ptr on rank {rank} is {hex(tensor.data_ptr())}")
+
+   # register user buffers using ncclCommRegister (called under the hood)
+   backend.register_mem_pool(pool)
+
+   # Collective uses Zero Copy NVLS
+   dist.all_reduce(tensor[0:4])
+   torch.cuda.synchronize()
+   print(tensor[0:4])
+
+
+Note the usage of ``register_mem_pool`` in the above example. This is an extra step for
+NVLS reductions, where the user buffers need to be registered with NCCL. A user can
+de-register the buffers with a similar ``deregister_mem_pool`` call.
+
+To reclaim memory, users will first need to ensure nothing is using the pool. When none
+of the tensors are holding a reference to the pool, :meth:`~torch.cuda.empty_cache` will
+be called internally on deletion of the pool, hence returning all the memory to the system.
+
+.. code:: python
+
+   del tensor, del pool
+
+
+The following :meth:`torch.cuda.MemPool.use_count` and :meth:`torch.cuda.MemPool.snapshot`
+APIs can be used for debugging purposes:
+
+.. code:: python
+
+   pool = torch.cuda.MemPool(allocator)
+
+   # pool's use count should be 1 at this point as MemPool object
+   # holds a reference
+   assert pool.use_count() == 1
+
+   nelem_1mb = 1024 * 1024 // 4
+
+   with torch.cuda.use_mem_pool(pool):
+       out_0 = torch.randn(nelem_1mb, device="cuda")
+
+       # pool's use count should be 2 at this point as use_mem_pool
+       # holds a reference
+       assert pool.use_count() == 2
+
+   # pool's use count should be back to 1 at this point as use_mem_pool
+   # released its reference
+   assert pool.use_count() == 1
+
+   with torch.cuda.use_mem_pool(pool):
+       # pool should have 1 segment since we made a small allocation (1 MB)
+       # above and so the CUDACachingAllocator packed it into a 2 MB buffer
+       assert len(pool.snapshot()) == 1
+
+       out_1 = torch.randn(nelem_1mb, device="cuda")
+
+       # pool should still have 1 segment since we made another small allocation
+       # (1 MB) that got packed into the existing 2 MB buffer
+       assert len(pool.snapshot()) == 1
+
+       out_2 = torch.randn(nelem_1mb, device="cuda")
+
+       # pool now should have 2 segments since the CUDACachingAllocator had
+       # to make a new 2 MB buffer to accomodate out_2
+       assert len(pool.snapshot()) == 2
+
+
+.. note::
+
+   * :class:`torch.cuda.MemPool` holds a reference to the pool. When you use the
+     :class:`torch.cuda.use_mem_pool` context manager, it will also acquire another reference
+     to the pool. On exit of the context manager, it will release its reference. After that,
+     ideally it should only be tensors holding references to the pool. Once the tensors release
+     their references, the use count of the pool will be 1, reflecting that only the
+     :class:`torch.cuda.MemPool` object is holding a reference. Only at that point, can the memory
+     held by the pool be returned to the system when the pool's destructor is called using
+     ``del``.
+   * :class:`torch.cuda.MemPool` doesn't currently support ``expandable_segments`` mode of
+     CUDACachingAllocator.
+   * `NCCL has specific requirements`_ for a buffer to be compatible with NVLS reductions.
+     These requirements can be broken in a dynamic workload, for instance, the buffer being
+     sent to NCCL by the CUDACachingAllocator might be split and hence, not correctly aligned.
+     In those cases, NCCL can use a fallback algorithm instead of NVLS.
+   * Allocators like ``ncclMemAlloc`` can use more memory than requested, due to alignment
+     requirements (``CU_MULTICAST_GRANULARITY_RECOMMENDED``, ``CU_MULTICAST_GRANULARITY_MINIMUM``),
+     and can cause your workload to run out of memory.
+
+.. _NCCL has specific requirements:
+    https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/usage/bufferreg.html#memory-allocator
+
+
 cuBLAS workspaces
 -----------------
 
@@ -929,10 +1130,6 @@ and you suspect its runtime is at least somewhat CPU-limited.
     https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#creating-a-graph-using-stream-capture
 .. _cudaGraphLaunch:
     https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__GRAPH.html#group__CUDART__GRAPH_1g1accfe1da0c605a577c22d9751a09597
-.. _issue 144787:
-    https://github.com/pytorch/pytorch/issues/144787#issuecomment-2606480564
-.. _conditional nodes:
-    https://developer.nvidia.com/blog/dynamic-control-flow-in-cuda-graphs-with-conditional-nodes/
 
 PyTorch API
 ^^^^^^^^^^^
@@ -1021,9 +1218,6 @@ Violating any of these will likely cause a runtime error:
   Avoid using :meth:`Generator.get_state<torch.get_state>` and :meth:`Generator.set_state<torch.set_state>` during capture;
   instead, utilize :meth:`Generator.graphsafe_set_state<torch.Generator.graphsafe_set_state>` and :meth:`Generator.graphsafe_get_state<torch.Generator.graphsafe_get_state>`
   for managing generator states safely within the graph context. This ensures proper RNG operation and generator management within CUDA graphs.
-* Dynamic control flow (based on CPU or GPU data) is prohibited, unless it is based on GPU data and implemented via higher order operators
-  torch.cond() and torch.while_loop(). See :ref:`Data Dependent Control Flow<graph-data-dependent-control-flow>`.
-
 
 
 Violating any of these will likely cause silent numerical errors or undefined behavior:
@@ -1032,6 +1226,7 @@ Violating any of these will likely cause silent numerical errors or undefined be
 * No non-captured CUDA work may run in this process (on any thread) while capture is underway.
 * CPU work is not captured. If the captured ops include CPU work, that work will be elided during replay.
 * Every replay reads from and writes to the same (virtual) memory addresses.
+* Dynamic control flow (based on CPU or GPU data) is prohibited.
 * Dynamic shapes are prohibited. The graph assumes every tensor in the captured op sequence
   has the same size and layout in every replay.
 * Using multiple streams in a capture is allowed, but there are :ref:`restrictions<multistream-capture>`.
@@ -1340,45 +1535,3 @@ If, in the live workload, your callables will run in an order that occasionally 
 or if they'll run concurrently, passing them as a tuple to a single invocation of
 :func:`~torch.cuda.make_graphed_callables` is not allowed. Instead, you must call
 :func:`~torch.cuda.make_graphed_callables` separately for each one.
-
-.. _graph-data-dependent-control-flow:
-
-Data Dependent Control Flow
-^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-Data-dependent control flow can with cuda graphs in limited cases if
-the control flow is implemented using torch.cond() or
-torch.while_loop(). If your function uses these functions, compiling
-it with the "cudagraphs" backend will enable control flow in the
-resulting cuda graph via `conditional nodes`_.
-
-Unfortunately, eager mode execution does not work due to reasons
-described in `issue 144787`_.
-Support for inductor backend to torch.compile is not available yet, but there is no fundamental blocker.
-
-An example of using the cudagraphs backend to torch.compile on code
-using torch.cond is demonstrated below::
-
-    import torch
-
-    def true_fn(x):
-        return x.sin()
-
-    def false_fn(x):
-        return x.cos()
-
-    x = torch.randn(4, device="cuda", requires_grad=False)
-    pred = torch.tensor(False, device="cuda", requires_grad=False)
-    def foo(pred, x):
-        with torch.inference_mode():
-            return torch.cond(pred, true_fn, false_fn, [x])
-
-    # First call will run eager for warmup, second call will do graph
-    # capture followed by graph replay, third call and beyond will do
-    # just graph replay.
-    compiled_foo = torch.compile(foo, backend="cudagraphs")
-    for i in range(3):
-        y = compiled_foo(pred, x)
-
-    # will output x.sin()
-    y = compiled_foo(~pred, x)

@@ -1,7 +1,6 @@
 import math
 import os
 import sys
-import warnings
 from collections import OrderedDict
 from dataclasses import astuple, dataclass
 from typing import Any, NamedTuple, Optional
@@ -11,6 +10,7 @@ import torch
 from torch import nan, nn, UntypedStorage
 from torch._guards import active_fake_mode
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.distributed._tools.common_utils import get_untyped_storages
 from torch.distributed._tools.mod_tracker import ModTracker
 from torch.distributed._tools.runtime_estimator import RuntimeEstimator
 from torch.testing._internal.composite_compliance import (
@@ -18,10 +18,7 @@ from torch.testing._internal.composite_compliance import (
     is_inplace_view_fn,
     is_view_fn,
 )
-from torch.utils._python_dispatch import (
-    is_traceable_wrapper_subclass,
-    TorchDispatchMode,
-)
+from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten
 from torch.utils.checkpoint import SAC_IGNORED_OPS
 
@@ -40,38 +37,6 @@ OPS_TO_ALWAYS_SKIP = SAC_IGNORED_OPS | _ADDITIONAL_IGNORED_OPS
 _PYTORCH_MIN_ALLOCATE = (
     2**9 if int(os.environ.get("PYTORCH_NO_CUDA_MEMORY_CACHING", 0)) == 0 else 1
 )
-
-
-def _get_untyped_storages(t: torch.Tensor) -> set[torch.UntypedStorage]:
-    """
-    Retrieves untyped storages from a `torch.Tensor` or one of its traceable wrapper-subclass.
-
-    Args:
-       t (torch.Tensor): Input `torch.Tensor` or traceable wrapper-subclass of `torch.Tensor`.
-
-    Returns:
-        Set[torch.UntypedStorage]: Set of untyped storages.
-
-    Warns:
-        UserWarning: If the flattened input is not a tensor or traceable wrapper-subclass.
-    """
-    unflattened_tensors = [t]
-    flattened_tensor_storages = set()
-    while len(unflattened_tensors) > 0:
-        obj = unflattened_tensors.pop()
-        if is_traceable_wrapper_subclass(obj):
-            attrs, _ = obj.__tensor_flatten__()  # type: ignore[attr-defined]
-            unflattened_tensors.extend([getattr(obj, attr) for attr in attrs])
-        else:
-            if not hasattr(obj, "untyped_storage"):
-                warnings.warn(
-                    f"Expected a tensor or a traceable wrapper-subclass of tensor, but got {type(obj)}",
-                    category=UserWarning,
-                    stacklevel=2,
-                )
-            else:
-                flattened_tensor_storages.add(obj.untyped_storage())
-    return flattened_tensor_storages
 
 
 def _display_stats_tabular(headers: list[str], table_data: list[list[Any]]) -> None:
@@ -159,7 +124,7 @@ class MSPS(NamedTuple):
     Represents Memory and Runtime Statistics for an operator/operator group.
 
     Attributes:
-        func_names (Set[str]): Set of operator/operator group names.
+        func_names (set[str]): Set of operator/operator group names.
         op_idx (int): Operator index (group head index incase of operator groups).
         memory (int): Memory usage in bytes.
         runtime (float): Runtime in milliseconds.
@@ -203,11 +168,11 @@ class SACGreedyOrderMeta:
     Stores metadata for Greedy-order SAC.
 
     Attributes:
-        recomputed_ops (Set[int]): Set of operator indices to be recomputed.
-        stored_ops (Set[int]): Set of operator indices to be stored.
-        inplace_op_groups (Dict[int, Set[int]]): Dictionary of inplace operator groups from group-head to operators.
-        random_ops_group (Dict[int, Set[int]]): Dictionary of random op group head to random ops.
-        msps_meta (List[MSPS]): List of Memory and Runtime Statistics for operators.
+        recomputed_ops (set[int]): Set of operator indices to be recomputed.
+        stored_ops (set[int]): Set of operator indices to be stored.
+        inplace_op_groups (dict[int, set[int]]): Dictionary of inplace operator groups from group-head to operators.
+        random_ops_group (dict[int, set[int]]): Dictionary of random op group head to random ops.
+        msps_meta (list[MSPS]): List of Memory and Runtime Statistics for operators.
     """
 
     recomputed_ops: set[int]
@@ -245,7 +210,7 @@ class SACEstimator(TorchDispatchMode):
             with FakeTensorMode():
                 module = ...
                 inp = ...
-                with sac_estimator('operator-level-cost-model'):
+                with sac_estimator("operator-level-cost-model"):
                     output = module(inp)
                 sac_estimator.display_modulewise_sac_stats(depth=4, print_tabular=True)
     """
@@ -268,7 +233,7 @@ class SACEstimator(TorchDispatchMode):
         # Hook function to track underlying storage IDs of tensors
         # Updates the _saved_tensor_ids set with the IDs of the tensor's storages
         # Used in conjunction with torch.autograd.graph.saved_tensors_hooks
-        untyped_storages = _get_untyped_storages(x)
+        untyped_storages = get_untyped_storages(x)
         storage_ids = (hash(st) for st in untyped_storages)
         self._saved_tensor_ids.update(storage_ids)
         return x
@@ -436,15 +401,15 @@ class SACEstimator(TorchDispatchMode):
         for o in flat_outs:
             if isinstance(o, torch.Tensor):
                 if o.device.type == "cuda":
-                    out_storages_cuda.update(_get_untyped_storages(o))
+                    out_storages_cuda.update(get_untyped_storages(o))
                     cuda_devices.add(o.device)
                 else:
-                    out_storages_cpu.update(_get_untyped_storages(o))
+                    out_storages_cpu.update(get_untyped_storages(o))
 
         # Check if there's more than 1 CUDA device
-        assert (
-            len(cuda_devices) <= 1
-        ), f"{func.__name__}'s output has more than 1 CUDA devices {cuda_devices}"
+        assert len(cuda_devices) <= 1, (
+            f"{func.__name__}'s output has more than 1 CUDA devices {cuda_devices}"
+        )
 
         # 2. Get the memory consumed by output
         nbytes_cuda = sum(
@@ -484,9 +449,9 @@ class SACEstimator(TorchDispatchMode):
             if acm_stats := self._sac_mod_metadata.get(mod_fqn, None):
                 acm_stats.sac_metadata.append(acm)
             else:
-                assert (
-                    mod_fqn == "Global"
-                ), f"Module {mod_fqn} not found in AC Mod Stats"
+                assert mod_fqn == "Global", (
+                    f"Module {mod_fqn} not found in AC Mod Stats"
+                )
                 self._sac_metadata.append(acm)
 
         return out
@@ -979,9 +944,9 @@ class SACEstimator(TorchDispatchMode):
 
     def __enter__(self) -> Self:  # type: ignore[no-untyped-def]
         fake_mode = active_fake_mode()
-        assert isinstance(
-            fake_mode, FakeTensorMode
-        ), "SAC Estimator should be called in FakeTensorMode"
+        assert isinstance(fake_mode, FakeTensorMode), (
+            "SAC Estimator should be called in FakeTensorMode"
+        )
         RuntimeEstimator.fake_mode = fake_mode
         self._mod_tracker.register_user_hooks(
             pre_fw_hook=self._pre_fw_hook,

@@ -180,11 +180,14 @@ endif()
 
 set(CPU_AARCH64 OFF)
 set(CPU_INTEL OFF)
+set(CPU_POWER OFF)
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "(AMD64|x86_64)")
   set(CPU_INTEL ON)
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)")
   set(CPU_AARCH64 ON)
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(ppc64le)")
+  set(CPU_POWER ON)
 endif()
 
 # For non-supported platforms, turn USE_DISTRIBUTED off by default. It is not
@@ -315,8 +318,8 @@ cmake_dependent_option(USE_ITT "Use Intel(R) VTune Profiler ITT functionality"
 # Ensure that an MKLDNN build is the default for x86 CPUs but optional for
 # AArch64 (dependent on -DUSE_MKLDNN).
 cmake_dependent_option(
-  USE_MKLDNN "Use MKLDNN. Only available on x86, x86_64, and AArch64."
-  "${CPU_INTEL}" "CPU_INTEL OR CPU_AARCH64" OFF)
+  USE_MKLDNN "Use MKLDNN. Only available on x86, x86_64, AArch64, and ppc64le."
+  "${CPU_INTEL}" "CPU_INTEL OR CPU_AARCH64 OR CPU_POWER" OFF)
 cmake_dependent_option(
   USE_MKLDNN_ACL "Use Compute Library for the Arm architecture." OFF
   "USE_MKLDNN AND CPU_AARCH64" OFF)
@@ -460,7 +463,7 @@ option(USE_SYSTEM_FXDIV "Use system-provided fxdiv." OFF)
 option(USE_SYSTEM_BENCHMARK "Use system-provided google benchmark." OFF)
 option(USE_SYSTEM_ONNX "Use system-provided onnx." OFF)
 option(USE_SYSTEM_XNNPACK "Use system-provided xnnpack." OFF)
-OPTION(USE_SYSTEM_NVTX "Use system-provided nvtx." OFF)
+option(USE_SYSTEM_NVTX "Use system-provided nvtx." OFF)
 option(USE_GOLD_LINKER "Use ld.gold to link" OFF)
 if(USE_SYSTEM_LIBS)
   set(USE_SYSTEM_CPUINFO ON)
@@ -697,6 +700,13 @@ if(ANDROID
   endif()
 endif()
 
+if(USE_KLEIDIAI AND CMAKE_C_COMPILER_VERSION)
+    if(CMAKE_C_COMPILER_VERSION VERSION_LESS 11)
+      set(USE_KLEIDIAI OFF)
+      message(WARNING "Disabling KleidiAI: Requires atleast GCC 11 or Clang 11")
+    endif()
+endif()
+
 # INTERN_BUILD_ATEN_OPS is used to control whether to build ATen/TH operators.
 set(INTERN_BUILD_ATEN_OPS ON)
 
@@ -864,11 +874,6 @@ cmake_dependent_option(
   ON
   "USE_CUDA OR USE_ROCM;NOT MSVC"
   OFF)
-
-# We are currenlty not using alibi attention for Flash So we disable this
-# feature by default We dont currently document this feature because we don't
-# Suspect users building from source will need this
-add_definitions(-DFLASHATTENTION_DISABLE_ALIBI)
 
 # CAVEAT: Again, Flash Attention2 will error while building for sm52 while Mem
 # Eff Attention won't
