@@ -215,7 +215,7 @@ jobs:
   test_run_test:
     name: Test `run_test.py` is usable without boto3
     if: ${{ github.repository == 'pytorch/pytorch' }}
-    runs-on: linux.20_04.4x
+    runs-on: linux.24_04.4x
     steps:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
@@ -241,7 +241,7 @@ jobs:
   test_collect_env:
     if: ${{ github.repository == 'pytorch/pytorch' }}
     name: Test collect_env
-    runs-on: linux.20_04.4x
+    runs-on: linux.24_04.4x
     strategy:
       matrix:
         test_type: [with_torch, without_torch, older_python_version]
