@@ -129,7 +129,7 @@ jobs:
 
       - name: Get workflow job id
         id: get-job-id
-        uses: ./.github/actions/get-workflow-job-id
+        uses: ./pytorch/.github/actions/get-workflow-job-id
         if: always()
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
