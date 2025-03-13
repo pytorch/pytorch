@@ -2149,6 +2149,69 @@ class FakeTensorDispatchCache(TestCase):
                     extract_tensor_metadata(b),
                 )
 
+    def test_invoke_subgraph(self):
+        """
+        Tests invoke subgraph
+        """
+        invoke_subgraph = torch._higher_order_ops.invoke_subgraph
+
+        def fn(x, y):
+            return (x + y * 2,)
+
+        # Ensure there is no caching for non-Fx graph module inputs
+        with FakeTensorMode():
+            x = torch.randn(6, 4)
+            y = torch.randn(6, 4)
+
+            FakeTensorMode.cache_clear()
+            self.assertHitsMisses(0, 0)
+
+            ref = invoke_subgraph(fn, "subgraph", (x, y))
+            self.assertHitsMisses(0, 2)
+
+            res = invoke_subgraph(fn, "subgraph", (x, y))
+            # The hits are from the ops inside fn
+            self.assertHitsMisses(2, 2)
+
+            res = invoke_subgraph(fn, "subgraph", (x, y))
+            # The hits are from the ops inside fn
+            self.assertHitsMisses(4, 2)
+
+        # Get the mod as if its going through torch.compile
+        backend = torch._dynamo.testing.AotEagerAndRecordGraphs()
+        x = torch.randn(6, 4)
+        y = torch.randn(6, 4)
+        torch.compile(fn, backend=backend, fullgraph=True)(x, y)
+        self.assertEqual(len(backend.fw_graphs), 1)
+        mod = backend.fw_graphs[0]
+
+        # Ensure that we see hits everytime
+        with FakeTensorMode():
+            x = torch.randn(6, 4)
+            y = torch.randn(6, 4)
+
+            FakeTensorMode.cache_clear()
+            self.assertHitsMisses(0, 0)
+
+            ref = invoke_subgraph(mod, "subgraph", (x, y))
+            self.assertHitsMisses(0, 3)
+
+            res = invoke_subgraph(mod, "subgraph", (x, y))
+            # The hits are from re-running the subgraph
+            self.assertHitsMisses(1, 3)
+
+            res = invoke_subgraph(mod, "subgraph", (x, y))
+            # The hits are from re-running the subgraph
+            self.assertHitsMisses(2, 3)
+
+            self.assertEqual(len(ref), len(res))
+            self.assertEqual(len(ref), len(res))
+            for a, b in zip(ref, res):
+                self.assertEqual(
+                    extract_tensor_metadata(a),
+                    extract_tensor_metadata(b),
+                )
+
 
 if __name__ == "__main__":
     run_tests()
