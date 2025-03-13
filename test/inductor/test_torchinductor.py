@@ -127,6 +127,8 @@ from torch.testing._internal.inductor_utils import (
     HAS_GPU,
     HAS_MULTIGPU,
     requires_gpu,
+    RUN_CPU,
+    RUN_GPU,
     skipCPUIf,
     skipCUDAIf,
 )
@@ -12866,7 +12868,7 @@ def copy_tests(
         other_cls.is_dtype_supported = my_cls.is_dtype_supported
 
 
-if HAS_CPU:
+if RUN_CPU:
 
     class SweepInputsCpuTest(SweepInputs2, TestCase):
         gen = InputGen(10, "cpu")
@@ -12879,7 +12881,7 @@ if HAS_CPU:
 
     copy_tests(CommonTemplate, CpuTests, "cpu")
 
-if HAS_GPU:
+if RUN_GPU:
 
     class SweepInputsGPUTest(SweepInputs2, TestCase):
         gen = InputGen(10, GPU_TYPE)
@@ -14281,7 +14283,7 @@ if HAS_GPU:
                 torch.compile(f)(x)
 
 
-if HAS_CPU:
+if RUN_CPU:
 
     class TestFull(TestCase):
         def test_full_dtype(self):
@@ -14345,5 +14347,5 @@ def _run_and_get_stripped_kernels(
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CPU or HAS_GPU:
+    if RUN_CPU or RUN_GPU:
         run_tests(needs="filelock")
