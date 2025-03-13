@@ -3262,7 +3262,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     def test_captured_wrong_device_error_message(self):
         means = torch.randn(64, 3, device=self.device)
-        length_scales = torch.logspace(0.001, 0.1, 8, device=self.device)
+        length_scales = torch.logspace(0.001, 0.1, 8, device='cpu')
 
         def euclidean_dist_pos_embed(score, b, h, q_idx, k_idx):
             q_pos = means[q_idx]
@@ -3389,7 +3389,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                     H=None,
                     Q_LEN=max_time,
                     KV_LEN=max_time,
-                    device=self.device,
+                    device=GPU_TYPE,
                 )
 
                 x = torch.compile(
@@ -3457,7 +3457,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         make_tensor = functools.partial(
             torch.ones,
             (8, 8, 0, 64),  # Zero in sequence dimension
-            device="cuda",
+            device=self.device,
             dtype=torch.bfloat16,
         )
         query, key, value = make_tensor(), make_tensor(), make_tensor()
@@ -3784,15 +3784,15 @@ class GraphModule(torch.nn.Module):
     @supported_platform
     def test_validate_small_embedding_size_error_message(self):
         # eager support for small embedding size
-        q, k, v = [torch.randn(2, 2, 128, 8, device="cuda") for _ in range(3)]
+        q, k, v = [torch.randn(2, 2, 128, 8, device=self.device) for _ in range(3)]
         flex_attention(q, k, v)
 
         # compiled cpu support for small embedding size
-        q, k, v = [torch.randn(2, 2, 128, 8, device="cpu") for _ in range(3)]
+        q, k, v = [torch.randn(2, 2, 128, 8, device=self.device) for _ in range(3)]
         flex_attention(q, k, v)
 
         # compiled gpu kernel does not support small embedding size
-        q, k, v = [torch.randn(2, 2, 128, 8, device="cuda") for _ in range(3)]
+        q, k, v = [torch.randn(2, 2, 128, 8, device=self.device) for _ in range(3)]
         compiled_fa = torch.compile(flex_attention)
 
         with self.assertRaisesRegex(
@@ -3803,7 +3803,7 @@ class GraphModule(torch.nn.Module):
             compiled_fa(q, k, v)
 
         # compiled gpu kernel supports large embedding size
-        q, k, v = [torch.randn(2, 2, 128, 16, device="cuda") for _ in range(3)]
+        q, k, v = [torch.randn(2, 2, 128, 16, device=self.device) for _ in range(3)]
         compiled_fa = torch.compile(flex_attention)
 
 

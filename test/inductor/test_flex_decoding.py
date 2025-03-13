@@ -991,7 +991,7 @@ class TestFlexDecoding(InductorTestCase):
             head_type = torch.tensor(
                 [False if i % kv_head_num == 0 else True for i in range(kv_head_num)],
                 dtype=torch.bool,
-                device="cuda",
+                device=self.device,
             )
 
             def mask_mod(b, h, q_idx, kv_idx):
@@ -1003,7 +1003,7 @@ class TestFlexDecoding(InductorTestCase):
             return mask_mod
 
         mask_mod = head_attention_mod(Hq)
-        mask = create_block_mask(mask_mod, 1, Hq, 1, S, device="cuda")
+        mask = create_block_mask(mask_mod, 1, Hq, 1, S, device=self.device)
         self.run_test(score_mod, dtype, Q_H=Hq, KV_H=Hkv, block_mask=mask)
         self.run_test_with_paged_attention(score_mod, dtype, Q_H=Hq, KV_H=Hkv)
 
