@@ -61,7 +61,7 @@ from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import SymT
 
 from . import config, dependencies
-from .codegen.common import BackendFeature, index_prevent_reordering
+from .codegen.common import BackendFeature
 from .dependencies import (
     Dep,
     extract_free_unbacked_symbols,
@@ -4131,7 +4131,7 @@ class ComputedBuffer(OperationBuffer):
                 sizes, reindex2, _prune = V.graph.sizevars._simplify_loops(
                     x_vars,
                     sizes,
-                    index_prevent_reordering(index_formulas, x_vars, sizes),
+                    index_formulas,
                 )
                 reindex = fuse_reindexing(reindex1, reindex2)
             else:

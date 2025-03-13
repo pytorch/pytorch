@@ -1860,19 +1860,21 @@ def pick_loop_order(
             sl_a == 0 or sl_b < sl_a for sl_a, sl_b in zip(stride_len_a, stride_len_b)
         )
         if a_first > b_first:
-            return -1
-        if b_first > a_first:
             return 1
+        if b_first > a_first:
+            return -1
 
         # otherwise contiguous
         return cmp(b, a)
 
-    order = list(reversed(range(len(stride_lengths[0]))))
+    order = list(range(len(stride_lengths[0])))
     if len(priority_idx) > 0:
         # if we have priority node, only use that node's order
         stride_lengths = [stride_lengths[pi] for pi in priority_idx]
+
     if config.pick_loop_orders:
         order.sort(key=index_cmp)
+
     return order
 
 
