@@ -185,22 +185,38 @@ class TestModule(torch.nn.Module):
         #     domain="com.microsoft",
         #     version=1,
         # )
-        torch.onnx.ops.symbolic(
-            "com.microsoft::Add",
+        return torch.onnx.ops.symbolic(
+            "com.microsoft::QuantLinear",
             (x,),
             dict(
-                key=1,
-                attr="attr",
-                attr_ints=[1],
-                attr_floats=[1.0],
+                bits=4,
+                block_size=4,
+                K=3,
+                N=42,
             ),
             dtype=x.dtype,
-            shape=x.shape,
-            version=1,
+            shape=(*x.shape[:-1], 100),
             metadata_props={
                 "meta_key": "meta_value",
             },
+            version=1,
         )
+        # return torch.onnx.ops.symbolic(
+        #     "com.microsoft::Add",
+        #     (x,),
+        #     dict(
+        #         key=1,
+        #         attr="attr",
+        #         attr_ints=[1],
+        #         attr_floats=[1.0],
+        #     ),
+        #     dtype=x.dtype,
+        #     shape=x.shape,
+        #     version=1,
+        #     metadata_props={
+        #         "meta_key": "meta_value",
+        #     },
+        # )
 
 
 batch = torch.export.Dim("batch")
@@ -221,3 +237,8 @@ print(ep)
 
 # Graph signature: ExportGraphSignature(input_specs=[InputSpec(kind=<InputKind.USER_INPUT: 1>, arg=TensorArgument(name='x'), target=None, persistent=None)], output_specs=[OutputSpec(kind=<OutputKind.USER_OUTPUT: 1>, arg=ConstantArgument(name='', value=None), target=None)])
 # Range constraints: {s0: VR[0, int_oo]}
+
+onnx_program = torch.onnx.export(ep)
+print(onnx_program)
+
+onnx_program.save("example.onnx")
