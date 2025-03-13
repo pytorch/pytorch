@@ -73,14 +73,26 @@ fi
 # Check GCC ABI
 ###############################################################################
 
-# NOTE: As of https://github.com/pytorch/pytorch/issues/126551 we only produce
-#       wheels with cxx11-abi
+# NOTE [ Building libtorch with old vs. new gcc ABI ]
+#
+# Packages built with one version of ABI could not be linked against by client
+# C++ libraries that were compiled using the other version of ABI. Since both
+# gcc ABIs are still common in the wild, we need to support both ABIs. Currently:
+#
+# - All the nightlies built on CentOS 7 + devtoolset7 use the old gcc ABI.
+# - All the nightlies built on Ubuntu 16.04 + gcc 5.4 use the new gcc ABI.
 
 echo "Checking that the gcc ABI is what we expect"
 if [[ "$(uname)" != 'Darwin' ]]; then
   function is_expected() {
-    if [[ "$1" -gt 0 || "$1" == "ON " ]]; then
-      echo 1
+    if [[ "$DESIRED_DEVTOOLSET" == *"cxx11-abi"* || "$DESIRED_CUDA" == *"rocm"* ]]; then
+      if [[ "$1" -gt 0 || "$1" == "ON " ]]; then
+        echo 1
+      fi
+    else
+      if [[ -z "$1" || "$1" == 0 || "$1" == "OFF" ]]; then
+        echo 1
+      fi
     fi
   }
 
