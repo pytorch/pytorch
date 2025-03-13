@@ -620,10 +620,9 @@ size_t PyTorchStreamReader::getRecordOffsetNoRead(
     std::string filename,
     size_t size,
     uint64_t alignment) {
-  std::string full_name = archive_name_plus_slash_ + filename;
+  std::string full_name = archive_name_plus_slash_ + std::move(filename);
   size_t full_name_size = full_name.size();
-  auto [offset, _] =
-      detail::getOffset(cursor, full_name_size, size, alignment);
+  auto [offset, _] = detail::getOffset(cursor, full_name_size, size, alignment);
   return offset;
 }
 
@@ -698,7 +697,7 @@ void PyTorchStreamWriter::setup(const string& file_name) {
 
     const std::string dir_name = parentdir(file_name);
     if (!dir_name.empty()) {
-      struct stat st {};
+      struct stat st{};
       bool dir_exists =
           (stat(dir_name.c_str(), &st) == 0 && (st.st_mode & S_IFDIR));
       TORCH_CHECK(
@@ -747,11 +746,7 @@ void PyTorchStreamWriter::writeRecord(
   }
   std::string full_name = archive_name_plus_slash_ + name;
   size_t padding_size = detail::getPadding(
-      ar_->m_archive_size,
-      full_name.size(),
-      size,
-      padding_,
-      alignment_);
+      ar_->m_archive_size, full_name.size(), size, padding_, alignment_);
   uint32_t flags = compress ? MZ_BEST_COMPRESSION : 0;
   if (!compute_crc32_) {
 #if (!defined(FBCODE_CAFFE2))

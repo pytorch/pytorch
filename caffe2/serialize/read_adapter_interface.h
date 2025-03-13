@@ -3,7 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "c10/macros/Macros.h"
+#include "c10/macros/Export.h"
 
 namespace caffe2::serialize {
 

@@ -17,6 +17,7 @@
 #include <c10/core/Allocator.h>
 #include <c10/macros/Export.h>
 
+#include "caffe2/serialize/istream_adapter.h"
 #include "caffe2/serialize/read_adapter_interface.h"
 #include "caffe2/serialize/versions.h"
 
