@@ -22,7 +22,7 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-parameter")
 
 #if defined(BUILD_ROWWISE_FP8_KERNEL)
 
-#include <ATen/native/cuda/cutlass_utils.hpp>
+#include <ATen/native/cuda/cutlass_utils.cuh>
 
 #include <cute/tensor.hpp>
 #include <cutlass/core_io.h>
