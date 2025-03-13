@@ -31,6 +31,7 @@ import numpy as np
 
 import torch
 import torch._dynamo.testing
+import torch._inductor.config
 import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils._pytree as python_pytree
@@ -10625,6 +10626,10 @@ ShapeEnv not equal: field values don't match:
 
     @skipIfWindows(
         msg="AssertionError: False is not true : Encountered an unexpected fallback to 'aten pow' in dynamo compiled code"
+    )
+    @unittest.skipIf(
+        torch._inductor.config.cpu_backend != "cpp",
+        "Skip for non cpp backend CPU as comments contain 'aten.pow' ",
     )
     def test_torch_dynamo_codegen_pow(self):
         def pow(x):
