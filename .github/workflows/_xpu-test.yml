@@ -92,7 +92,7 @@ jobs:
         run: |
           tag=${ECR_DOCKER_IMAGE##*/}
           echo "docker pull ghcr.io/pytorch/ci-image:${tag/:/-}"
-      
+
       - name: Pull docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
@@ -257,7 +257,7 @@ jobs:
         if: ${{ always() && steps.test.conclusion }}
         run: |
           docker exec -t "${{ env.CONTAINER_NAME }}" sh -c "sudo chown -R 1001:1001 test"
-      
+
       - name: Print remaining test logs
         shell: bash
         if: always() && steps.test.conclusion
