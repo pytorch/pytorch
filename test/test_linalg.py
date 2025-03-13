@@ -5498,7 +5498,6 @@ class TestLinalg(TestCase):
         # Test TunableOp with TF32. Supported by hipblasLT on MI300+.
         # for HIP/AMDGPU, tf32 is behind a flag because the TF32 support is new
         # and only for MI300+. Eventually this flag will go away.
-        # This test is not 100% foolproof, a stricter test would be to enable
         tf32_ctx = self._hip_allow_tf32 if torch.version.hip else contextlib.nullcontext
 
         with tf32_ctx():
@@ -5527,8 +5526,8 @@ class TestLinalg(TestCase):
             # Additionally, the Op Signature must be tf32
             last_result = torch.cuda.tunable.get_results()
             found_result = find_tunableop_result(last_result,
-                                          'GemmTunableOp_tf32_NN',
-                                          'nn_37_37_37_ld_37_37_37')
+                                                 'GemmTunableOp_tf32_NN',
+                                                 'nn_37_37_37_ld_37_37_37')
             self.assertTrue(found_result is not None)
             self.assertTrue('Rocblas' not in found_result)
 
@@ -5540,9 +5539,6 @@ class TestLinalg(TestCase):
             ref_num_results = total_num_results
 
             # Tune the same GEMM again
-            N = M = K = 37
-            A = torch.randn(N, K, device=device, dtype=dtype)
-            B = torch.randn(K, M, device=device, dtype=dtype)
             C = torch.matmul(A, B)
 
             # This stores total number of cumulative results
@@ -5554,8 +5550,8 @@ class TestLinalg(TestCase):
             # The new tuning result must be of type float
             last_result = torch.cuda.tunable.get_results()
             found_result = find_tunableop_result(last_result,
-                                          'GemmTunableOp_float_NN',
-                                          'nn_37_37_37_ld_37_37_37')
+                                                 'GemmTunableOp_float_NN',
+                                                 'nn_37_37_37_ld_37_37_37')
             self.assertTrue(found_result is not None)
 
             # disable TunableOp
