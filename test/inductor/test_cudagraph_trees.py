@@ -1994,6 +1994,23 @@ if HAS_CUDA:
             ).run(captured_output[0])
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
+        @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
+        @torch._inductor.config.patch("cpp_wrapper", True)
+        def test_skip_cpp_wrapper(self):
+            def foo(x):
+                return x + 1
+
+            foo_c = torch.compile(mode="reduce-overhead")(foo)
+
+            with capture_stderr() as captured_output:
+                t = torch.rand([32], device="cuda")
+                self.assertEqual(foo(t), foo_c(t))
+
+            FileCheck().check("skipping cudagraphs due to cpp wrapper enabled").run(
+                captured_output[0]
+            )
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+
         def test_storage_access_error(self):
             x = torch.rand([4], device="cuda")
             torch._C._set_storage_access_error_msg(x, "custom error msg")
