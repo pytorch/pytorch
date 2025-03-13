@@ -15,10 +15,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
 )
 
-import depyf
-depyf.install()
-print('hi depyf install')
-
 
 class GeneratorTestsBase(torch._dynamo.test_case.TestCase):
     def setUp(self):
@@ -545,30 +541,6 @@ class GraphModule(torch.nn.Module):
     
         t = torch.randn(2)
         self.assertEqual(fn(t), [t+1, t+2])
-
-    def test_temp(self):
-        def inner(t):
-            yield t + 1
-            return t + 2
-
-        def middle(t):
-            value = yield from inner(t)
-            yield value
-            yield t + 3
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(t):
-            g = middle(t)
-            ans = []
-            ans.append(next(g))
-            ans.append(next(g))
-            ans.append(next(g))
-            return ans
-    
-        t = torch.randn(3)
-        actual = fn(t)
-        print(f'hi {actual=}')
-        self.assertEqual(actual, [t+1, t+2,t+3])
 
     @parametrize("container", [list, tuple, dict, OrderedDict])
     def test_dict_tuple_list_generator(self, container):
