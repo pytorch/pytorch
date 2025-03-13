@@ -4677,10 +4677,10 @@ def barrier(
         opts.device_ids = device_ids
         # use only the first device id
         opts.device = torch.device(device.type, device_ids[0])
-    elif group.bound_device_id is not None:
+    elif getattr(group, "bound_device_id", None) is not None:
         # Use device id from `init_process_group(device_id=...)`
-        opts.device = group.bound_device_id
-    elif device.type == "cpu" or get_backend(group) == Backend.GLOO:
+        opts.device = group.bound_device_id  # type: ignore[assignment]
+    elif device.type == "cpu" or _get_object_coll_device(group) == "cpu":
         opts.device = torch.device("cpu")
     else:
         # Use the current device set by the user. If user did not set any, this
