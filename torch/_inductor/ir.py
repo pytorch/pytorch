@@ -188,10 +188,14 @@ class GraphPartitionSignature:
     # we cannot get name from Expr.
     input_nodes: dict[str, Union[IRNode, sympy.Expr, TorchBindObject]]
     output_nodes: list[IRNode]
+
     # mapping from partition input name to a boolean for whether deallocating it
     # in the partition function
     input_deallocation: dict[str, bool]
     skip_cudagraph: bool
+
+    # name of constants read/written by the graph partition
+    constant_names: list[str]
 
 
 def validate_ir(node_or_nodes: Optional[_NodeOrNodes]) -> None:
