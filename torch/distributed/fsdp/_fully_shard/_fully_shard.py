@@ -361,7 +361,7 @@ class FSDPModule:
 
         Args:
             reshard_after_forward (bool): Whether to reshard parameters after
-                backward.
+                forward.
             recurse (bool): Whether to set for all FSDP submodules or just the
                 passed-in module.
         """
