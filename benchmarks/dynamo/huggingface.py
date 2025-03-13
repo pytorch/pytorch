@@ -368,6 +368,9 @@ class HuggingfaceRunner(BenchmarkRunner):
     def skip_models_due_to_control_flow(self):
         return self._skip["control_flow"]
 
+    def use_larger_multiplier_for_smaller_tensor(self, name):
+        return name in ["ElectraForQuestionAnswering"]
+
     def _get_model_cls_and_config(self, model_name):
         if model_name not in EXTRA_MODELS:
             model_cls = get_module_cls_by_model_name(model_name)

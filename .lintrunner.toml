@@ -147,7 +147,7 @@ init_command = [
     'numpy==1.26.4 ; python_version >= "3.9" and python_version <= "3.11"',
     'numpy==2.1.0 ; python_version >= "3.12"',
     'expecttest==0.3.0',
-    'mypy==1.13.0',
+    'mypy==1.14.0',
     'sympy==1.13.3',
     'types-requests==2.27.25',
     'types-PyYAML==6.0.7',

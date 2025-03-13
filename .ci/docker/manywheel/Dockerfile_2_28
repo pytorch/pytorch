@@ -60,7 +60,6 @@ FROM base as libpng
 ADD ./common/install_libpng.sh install_libpng.sh
 RUN bash ./install_libpng.sh && rm install_libpng.sh
 
-# Inherit from openssl since build relies on openssl
 FROM base as cache
 # Install sccache
 ADD ./common/install_cache.sh install_cache.sh
