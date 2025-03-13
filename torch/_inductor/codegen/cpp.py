@@ -1881,14 +1881,10 @@ class CppKernel(Kernel):
         self.local_reduction_stores = IndentedBuffer()
         self.is_reduction = False
         self.non_parallel_reduction_prefix = IndentedBuffer()
-        self.welford_reduction_stores = IndentedBuffer()
-        self.local_welford_reduction_stores = IndentedBuffer()
+        self.non_parallel_reduction_suffix = IndentedBuffer()
         self.reduction_cse = CSE(self.newvar_prefix, self.suffix, name_prefix="tmp_acc")
         self.welford_helper_cse = CSE(
             self.newvar_prefix, self.suffix, name_prefix="welford_helper"
-        )
-        self.masked_welford_helper_cse = CSE(
-            self.newvar_prefix, self.suffix, name_prefix="masked_welford_helper"
         )
         self.preloads = IndentedBuffer()
         self.poststores = IndentedBuffer()
@@ -2220,6 +2216,8 @@ class CppKernel(Kernel):
                     suffix = kernel.reduction_suffix
                     if parallel:
                         suffix = kernel.parallel_reduction_suffix + suffix
+                    else:
+                        suffix = kernel.non_parallel_reduction_suffix + suffix
                     return suffix
                 else:
                     prefix = kernel.reduction_prefix
@@ -2250,14 +2248,6 @@ class CppKernel(Kernel):
                             code.splice(kernel.local_reduction_init)
 
                     gen_loop_at(_loop_nest, depth)
-
-                    if loop.is_reduction and not in_reduction:
-                        if loop.parallel:
-                            if kernel.local_welford_reduction_stores:
-                                code.splice(kernel.local_welford_reduction_stores)
-                        else:
-                            if kernel.welford_reduction_stores:
-                                code.splice(kernel.welford_reduction_stores)
 
                     if is_reduction_loop and loop.parallel:
                         if kernel.local_reduction_stores:
@@ -2815,11 +2805,6 @@ class CppVecKernel(CppKernel):
             )
         )
         if reduction_type == "welford_reduce":
-            reduction_size = functools.reduce(
-                lambda x, y: x * y, self.ranges[self.reduction_depth :]
-            )
-            # save the reciprocal of weights for welford reduce
-            assert self.reduction_depth is not None
             # use masked acc_vec for tail vec kernel
             self.reduction_prefix_generators.append(
                 self._gen_reduction_prefix(
@@ -2830,8 +2815,17 @@ class CppVecKernel(CppKernel):
                     self.reduction_init_vec,
                 )
             )
-            # generate welford_helper for main vec kernel
-            self.welford_helper_vec_range = (
+
+            # use welford_helper for vec kernel
+            assert self.reduction_depth is not None
+            reduction_size = functools.reduce(
+                lambda x, y: x * y, self.ranges[self.reduction_depth :]
+            )
+            welford_helper_val = self.welford_helper_cse.generate(
+                self.compute, f"reduction {reduction_key}", write=False
+            )
+            masked_welford_helper_val = f"masked_{welford_helper_val}"
+            welford_helper_vec_range = (
                 (
                     FloorDiv(reduction_size, self.ranges[self.tiling_idx])
                     * FloorDiv(self.ranges[self.tiling_idx], self.tiling_factor)
@@ -2841,33 +2835,7 @@ class CppVecKernel(CppKernel):
                 if FloorDiv(self.ranges[self.tiling_idx], self.tiling_factor)
                 else sympy.Integer(0)
             )
-            self.welford_helper_val = self.welford_helper_cse.generate(
-                self.compute, f"reduction {reduction_key}", write=False
-            )
-            self.non_parallel_reduction_prefix.writeline(
-                self.welford_weight_reciprocal_vec(
-                    dtype, self.welford_helper_vec_range, self.welford_helper_val
-                )
-            )
-            num_threads = (
-                "max_threads" if config.cpp.dynamic_threads else parallel_num_threads()
-            )
-            self.local_reduction_init.writeline(
-                self.welford_weight_reciprocal_vec(
-                    dtype,
-                    self.welford_helper_vec_range,
-                    self.welford_helper_val,
-                    num_threads,
-                )
-            )
-            self.welford_reduction_stores.writeline(
-                f"{acc_vec} = welford_combine({acc_vec}, &{self.welford_helper_val});"
-            )
-            self.local_welford_reduction_stores.writeline(
-                f"{acc_vec}_local = welford_combine({acc_vec}_local, &{self.welford_helper_val});"
-            )
-            # generate welford_helper for tail vec kernel
-            self.masked_welford_helper_vec_range = (
+            masked_welford_helper_vec_range = (
                 (
                     FloorDiv(reduction_size, self.ranges[self.tiling_idx])
                     if self.tiling_idx >= self.reduction_depth
@@ -2876,34 +2844,23 @@ class CppVecKernel(CppKernel):
                 if self.ranges[self.tiling_idx] % self.tiling_factor
                 else sympy.Integer(0)
             )
-            self.masked_welford_helper_val = self.masked_welford_helper_cse.generate(
-                self.compute, f"reduction {reduction_key}", write=False
+            self._use_welford_helper(
+                acc_vec, welford_helper_val, welford_helper_vec_range, dtype
             )
-            self.non_parallel_reduction_prefix.writeline(
-                self.welford_weight_reciprocal_vec(
-                    dtype,
-                    self.masked_welford_helper_vec_range,
-                    self.masked_welford_helper_val,
-                )
+            self._use_welford_helper(
+                masked_acc_vec,
+                masked_welford_helper_val,
+                masked_welford_helper_vec_range,
+                dtype,
             )
-            self.local_reduction_init.writeline(
-                self.welford_weight_reciprocal_vec(
-                    dtype,
-                    self.masked_welford_helper_vec_range,
-                    self.masked_welford_helper_val,
-                    num_threads,
-                )
-            )
-            self.welford_reduction_stores.writeline(
-                f"{masked_acc_vec} = welford_combine({masked_acc_vec}, &{self.masked_welford_helper_val});"
-            )
-            self.local_welford_reduction_stores.writeline(
-                f"{masked_acc_vec}_local = welford_combine({masked_acc_vec}_local, &{self.masked_welford_helper_val});"
-            )
+
             # use masked acc_vec for tail vec kernel
             acc_vec_ = masked_acc_vec if self.tail_size else acc_vec
+            welford_helper_val_ = (
+                masked_welford_helper_val if self.tail_size else welford_helper_val
+            )
             self.stores.writeline(
-                f"{acc_vec_} = {self.reduction_combine_vec(reduction_type, acc_vec_, value, True)};"
+                f"{acc_vec_} = {self.reduction_combine_vec(reduction_type, acc_vec_, value, welford_helper_val_)};"
             )
         else:
             assert self.reduction_depth is not None
@@ -3118,7 +3075,7 @@ class CppVecKernel(CppKernel):
             return f"{self._get_mask_type()}"
         return vec_type
 
-    def welford_weight_reciprocal_vec(
+    def _welford_helper_init(
         self, dtype, welford_helper_vec_range, welford_helper_val, num_threads=None
     ):
         vec_num_range_thread = (
@@ -3144,12 +3101,38 @@ class CppVecKernel(CppKernel):
                 f");"
             )
 
+    def _use_welford_helper(
+        self, acc_vec, welford_helper_val, welford_helper_vec_range, dtype
+    ):
+        num_threads = (
+            "max_threads" if config.cpp.dynamic_threads else parallel_num_threads()
+        )
+        self.non_parallel_reduction_prefix.writeline(
+            self._welford_helper_init(
+                dtype, welford_helper_vec_range, welford_helper_val
+            )
+        )
+        self.local_reduction_init.writeline(
+            self._welford_helper_init(
+                dtype,
+                welford_helper_vec_range,
+                welford_helper_val,
+                num_threads,
+            )
+        )
+        self.non_parallel_reduction_suffix.writeline(
+            f"{acc_vec} = welford_combine({acc_vec}, &{welford_helper_val});"
+        )
+        self.local_reduction_stores.writeline(
+            f"{acc_vec}_local = welford_combine({acc_vec}_local, &{welford_helper_val});"
+        )
+
     def reduction_combine_vec(
         self,
         reduction_type,
         var,
         next_value,
-        use_welford_helper=False,
+        welford_helper_val=None,
         index: Optional[sympy.Symbol] = None,
         horizontal_reduction: Optional[bool] = None,
         src_dtype: Optional[torch.dtype] = torch.float32,
@@ -3190,11 +3173,13 @@ class CppVecKernel(CppKernel):
             else:
                 return f"{var} ^ {next_value}"
         elif reduction_type == "welford_reduce":
-            if use_welford_helper:
+            if welford_helper_val:
                 if self.tail_size:
-                    return f"welford_combine({var}, {next_value}, {cexpr_index(self.tail_size)}, &{self.masked_welford_helper_val})"
+                    return f"welford_combine({var}, {next_value}, {cexpr_index(self.tail_size)}, &{welford_helper_val})"
                 else:
-                    return f"welford_combine({var}, {next_value}, &{self.welford_helper_val})"
+                    return (
+                        f"welford_combine({var}, {next_value}, &{welford_helper_val})"
+                    )
             else:
                 if self.tail_size:
                     return f"welford_combine({var}, {next_value}, {cexpr_index(self.tail_size)})"
@@ -4387,9 +4372,8 @@ class CppKernelProxy(CppKernel):
         self.non_parallel_reduction_prefix.splice(
             main_kernel.non_parallel_reduction_prefix
         )
-        self.welford_reduction_stores.splice(main_kernel.welford_reduction_stores)
-        self.local_welford_reduction_stores.splice(
-            main_kernel.local_welford_reduction_stores
+        self.non_parallel_reduction_suffix.splice(
+            main_kernel.non_parallel_reduction_suffix
         )
 
 
@@ -5276,7 +5260,7 @@ class KernelGroup:
     def call_kernel(self, wrapper, kernel_name):
         _, call_args, arg_types = self.args.cpp_argdefs()
         wrapper.generate_kernel_call(
-            kernel_name, call_args, gpu=False, triton=False, arg_types=arg_types
+            kernel_name, call_args, triton=False, arg_types=arg_types
         )
 
 
