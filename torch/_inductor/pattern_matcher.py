@@ -1514,7 +1514,9 @@ def _serialize_pattern(
         for name in dir(torch._inductor.pattern_matcher):
             attr = getattr(torch._inductor.pattern_matcher, name)
             try:
-                if isinstance(attr, type) and issubclass(attr, (PatternExpr, _TargetExpr)):
+                if isinstance(attr, type) and issubclass(
+                    attr, (PatternExpr, _TargetExpr)
+                ):
                     pattern_matcher_imports.append(name)
             except TypeError:
                 pass
