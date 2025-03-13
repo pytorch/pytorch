@@ -21,6 +21,7 @@ from torch._dynamo.utils import (
     dynamo_timed,
     get_metrics_context,
     set_feature_use,
+    CompileEventLogger
 )
 from torch._inductor import config
 from torch._inductor.codecache import (
@@ -41,7 +42,7 @@ from torch._inductor.runtime.compile_tasks import (
     _set_triton_ptxas_path,
     _worker_compile_triton,
 )
-from torch._inductor.runtime.triton_heuristics import CachingAutotuner
+from torch._inductor.runtime.triton_heuristics import CachingAutotuner, StaticTritonCompileResult, TritonCompileResult
 from torch._inductor.utils import clear_on_fresh_inductor_cache
 from torch.hub import _Faketqdm, tqdm
 from torch.utils._ordered_set import OrderedSet
@@ -205,7 +206,10 @@ class CompiledTritonKernels:
         result = {}
         for key, kernel in CompiledTritonKernels._cache.items():
             if isinstance(kernel, CachingAutotuner):
-                result[key] = kernel
+                statically_compiled = all(isinstance(x, StaticTritonCompileResult) for x in kernel.compile_results)
+                if statically_compiled:
+                    # Only store in cache if it's all statically compiled kernels
+                    result[key] = kernel
         return result
 
 
@@ -467,12 +471,21 @@ class AsyncCompile:
             disable=config.disable_progress,
             delay=0,
         )
+        static = []
+        triton = []
 
         for key, result in kernels.items():
             if config.verbose_progress and not isinstance(pbar, _Faketqdm):
                 pbar.set_postfix_str(key)
             try:
-                scope[key] = result.result()
+                kernels = result.result()
+                if isinstance(kernels, CachingAutotuner):
+                    for compiled_kernel in kernels.compile_results:
+                        if isinstance(compiled_kernel, StaticTritonCompileResult):
+                            static.append(compiled_kernel.kernel.name)
+                        else:
+                            triton.append(compiled_kernel.kernel.src.fn.__name__)
+                scope[key] = kernels
             except BrokenProcessPool as e:
                 raise RuntimeError(
                     "A compilation subprocess exited unexpectedly. This "
@@ -481,6 +494,7 @@ class AsyncCompile:
                     "to cause compilation to occur in the main process."
                 ) from e
             pbar.update(1)
+        CompileEventLogger.chromium("async_compile.wait", static_kernel_names=static, triton_kernel_names=triton)
 
 
 if (
