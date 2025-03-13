@@ -371,7 +371,11 @@ class FSDPModule:
             if isinstance(module, FSDPModule):
                 state = module._get_fsdp_state()
                 if fsdp_param_group := state._fsdp_param_group:
-                    fsdp_param_group.reshard_after_forward = reshard_after_forward
+                    fsdp_param_group.post_forward_mesh_info = (
+                        fsdp_param_group.fsdp_params[0].post_forward_mesh_info
+                        if reshard_after_forward
+                        else None
+                    )
 
     def set_reshard_after_backward(
         self, reshard_after_backward: bool, *, recurse: bool = True
@@ -394,11 +398,7 @@ class FSDPModule:
             if isinstance(module, FSDPModule):
                 state = module._get_fsdp_state()
                 if fsdp_param_group := state._fsdp_param_group:
-                    fsdp_param_group.post_forward_mesh_info = (
-                        fsdp_param_group.fsdp_params[0].post_forward_mesh_info
-                        if reshard_after_backward
-                        else None
-                    )
+                    fsdp_param_group.reshard_after_backward = reshard_after_backward
 
     def set_modules_to_forward_prefetch(self, modules: list[FSDPModule]) -> None:
         """
