@@ -11,7 +11,7 @@ from torch._higher_order_ops.utils import (
     _from_fun,
     _maybe_reenter_make_fx,
     clone_outputs_aliasing_inputs,
-    FunctionalizeWrapper,
+    FunctionalizeCtxWrapper,
     get_dummy_aot_autograd_config,
     prepare_fw_with_masks,
     reenter_make_fx,
@@ -268,12 +268,12 @@ def _(ctx, subgraph, identifier, operands):
         # NB: There is an assumption that subgraph does not mutate inputs and
         # there is no aliasing. Its Dynamo responsibility to prevent formation
         # of invoke_subgraph ops if input aliasing/mutation is detected.
-        # functionalized_subgraph = ctx.functionalize(subgraph)
-        functionalized_subgraph = FunctionalizeWrapper(ctx, subgraph)
+        functionalized_subgraph = FunctionalizeCtxWrapper(ctx, subgraph)
         out = invoke_subgraph(functionalized_subgraph, identifier, unwrapped_operands)
     return ctx.wrap_tensors(out)
 
 
+# Register the hop fake fn. This will be called in the fake_tensor _dispatch_impl.
 @register_hop_fake(invoke_subgraph)
 def _(subgraph, identifier, operands):
     return subgraph(*operands)

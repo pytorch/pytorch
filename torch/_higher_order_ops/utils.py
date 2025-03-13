@@ -656,20 +656,23 @@ def check_input_alias_and_mutation(
 registered_hop_fake_fns: dict[torch._ops.OpOverload, Callable] = {}
 
 
-def register_hop_fake(op, fn=None):
+def register_hop_fake(hop, fn=None):
     """
-    Register a fake function for a HOP.
+    Register a fake function for a HOP. This is conceptually equivalent of the
+    register_fake utility for the custom ops. The registered function is called
+    inside the fake_tensor _dispatch_impl.
     """
-    assert op not in registered_hop_fake_fns
+    assert hop not in registered_hop_fake_fns
 
     def register(func):
         from torch._subclasses.fake_tensor import FakeTensorMode
 
-        @op.py_impl(FakeTensorMode)
+        # Redirect the hop to the fake tensor mode implementation.
+        @hop.py_impl(FakeTensorMode)
         def _(mode, *args, **kwargs):
-            return mode.__torch_dispatch__(op, [], args, kwargs)
+            return mode.__torch_dispatch__(hop, [], args, kwargs)
 
-        registered_hop_fake_fns[op] = func
+        registered_hop_fake_fns[hop] = func
         return func
 
     if fn is None:
@@ -677,7 +680,19 @@ def register_hop_fake(op, fn=None):
     return register(fn)
 
 
-class FunctionalizeWrapper:
+class FunctionalizeCtxWrapper:
+    """
+    This is a dummy wrapper to facilitate fake tensor caching.
+
+    For AOT Dispatcher metadata collection pass, HOPs go from functionalization
+    key to fake tensor key. The functionalization key wraps the subgraphs in a
+    function, which changes from call to call even though the subgraph might
+    still be same.
+
+    To enable fake tensor caching, we just wrap the ctx and subgraph in this
+    class and then use the subgraph as the hash.
+    """
+
     def __init__(self, ctx, subgraph):
         self.ctx = ctx
         self.subgraph = subgraph

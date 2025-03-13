@@ -1453,7 +1453,12 @@ class FakeTensorMode(TorchDispatchMode):
         # Avoid caching for any ops that would require a more sophisticated
         # caching implementation, e.g., data dependent ops or ops that modify
         # the inputs.
-        if isinstance(func, torch._ops.HigherOrderOperator):
+        from torch._higher_order_ops.utils import registered_hop_fake_fns
+
+        if (
+            isinstance(func, torch._ops.HigherOrderOperator)
+            and func in registered_hop_fake_fns
+        ):
             return
 
         if torch.Tag.data_dependent_output in func.tags:
@@ -1497,7 +1502,7 @@ class FakeTensorMode(TorchDispatchMode):
         convert FakeTensors into metadata. Raises _BypassDispatchCache to signal
         unsupported cases that should bypass caching.
         """
-        from torch._higher_order_ops.utils import FunctionalizeWrapper
+        from torch._higher_order_ops.utils import FunctionalizeCtxWrapper
 
         if isinstance(args, dict):
             self._prep_args_for_hash(result, args.keys(), state)
@@ -1533,7 +1538,7 @@ class FakeTensorMode(TorchDispatchMode):
                 # us to cache fake outputs
                 result.append(type(arg))
                 result.append(id(arg))
-            elif isinstance(arg, FunctionalizeWrapper):
+            elif isinstance(arg, FunctionalizeCtxWrapper):
                 result.append(hash(arg))
             else:
                 # It's important to capture the type of the arg since, e.g., 1 and 1.0
@@ -2184,6 +2189,7 @@ class FakeTensorMode(TorchDispatchMode):
             isinstance(func, torch._ops.HigherOrderOperator)
             and func in registered_hop_fake_fns
         ):
+            # Reenable the fake tensor mode for the registered fake function
             with self:
                 return registered_hop_fake_fns[func](*args, **kwargs)
 
