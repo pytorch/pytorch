@@ -7,7 +7,7 @@ self-hosted-runner:
     - linux.20_04.4x
     - linux.20_04.16x
     - linux.24_04.4x
-    - linux.20_04.16x
+    - linux.24_04.16x
     # Organization-wide AWS Linux Runners
     - linux.large
     - linux.2xlarge
