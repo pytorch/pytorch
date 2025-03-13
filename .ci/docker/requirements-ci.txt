@@ -90,10 +90,10 @@ librosa>=0.6.2 ; python_version < "3.11"
 #Pinned versions:
 #test that import:
 
-mypy==1.13.0
+mypy==1.14.0
 # Pin MyPy version because new errors are likely to appear with each release
 #Description: linter
-#Pinned versions: 1.10.0
+#Pinned versions: 1.14.0
 #test that import: test_typing.py, test_type_hints.py
 
 networkx==2.8.8
@@ -294,7 +294,7 @@ ghstack==0.8.0
 #Pinned versions: 0.8.0
 #test that import:
 
-jinja2==3.1.5
+jinja2==3.1.6
 #Description: jinja2 template engine
 #Pinned versions: 3.1.4
 #test that import:
@@ -339,7 +339,7 @@ onnx==1.17.0
 #Pinned versions:
 #test that import:
 
-onnxscript==0.1.0
+onnxscript==0.2.2
 #Description: Required by mypy and test_public_bindings.py when checking torch.onnx._internal
 #Pinned versions:
 #test that import:

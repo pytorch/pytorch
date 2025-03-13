@@ -2018,7 +2018,9 @@ class Scheduler:
         self.compute_ancestors()
 
         metrics.ir_nodes_pre_fusion += len(self.nodes)
-        V.debug.ir_pre_fusion(self.nodes)
+        from torch._inductor.debug import log_ir_post_fusion, log_ir_pre_fusion
+
+        log_ir_pre_fusion(self.nodes)
         self.num_orig_nodes = len(self.nodes)
         self.create_foreach_nodes()
         self.nodes = self.topological_sort_schedule(self.nodes)
@@ -2047,7 +2049,7 @@ class Scheduler:
             self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
         self.process_grouped_nodes()
         self.compute_last_usage()
-        V.debug.ir_post_fusion(self.nodes)
+        log_ir_post_fusion(self.nodes)
         V.debug.graph_diagram(self.nodes)
         self.debug_draw_graph()
 
@@ -3863,7 +3865,7 @@ class Scheduler:
         for name in sorted(
             self.buffer_names_to_free
             - V.graph.removed_buffers
-            - V.graph.wrapper_code.freed
+            - V.graph.wrapper_code.freed  # type: ignore[has-type]
         ):
             if name in self.name_to_buf:
                 buf = self.name_to_buf[name]
@@ -4119,10 +4121,10 @@ class Scheduler:
             self._codegen(partition)
             partition_code, _ = V.graph.wrapper_code.generate(V.graph.is_inference)
 
-        V.graph.wrapper_code.define_subgraph_launcher_fn(partition_code)
+        V.graph.wrapper_code.define_subgraph_launcher_fn(partition_code.value)
 
         V.graph.wrapper_code.codegen_partition_call(graph_partition_id, signature)
-        V.graph.wrapper_code.allocated.update(
+        V.graph.wrapper_code.allocated.update(  # type: ignore[has-type]
             [node.get_name() for node in signature.output_nodes]
         )
 
