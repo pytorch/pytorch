@@ -98,7 +98,6 @@ DEFAULT_STATIC_QUANT_MODULE_MAPPINGS: dict[Callable, Any] = {
     nn.modules.linear.NonDynamicallyQuantizableLinear: nnq.Linear,
     nn.Linear: nnq.Linear,
     nn.ReLU6: nnq.ReLU6,
-    nn.Dropout: nnq.Dropout,
     nn.PReLU: nnq.PReLU,
     # Wrapper Modules:
     nnq.FloatFunctional: nnq.QFunctional,
