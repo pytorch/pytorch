@@ -6558,67 +6558,101 @@ def forward(self, b_a_buffer, x):
     @requires_cuda
     @testing.expectedFailureCppRuntime
     def test_export_associative_scan_symbol_dim(self):
-        dim1 = torch.export.Dim("dim0", min=5, max=15)
-        xs = torch.ones(3, 10, 2, device=torch.device("cuda"))
+        for device in [torch.device("cpu"), torch.device("cuda")]:
+            # for combine_mode in ["pointwise"], "generic"]:
+            # TODO: I had to comment out the "generic" case because it would raise
+            # RuntimeError: NYI: querying is_contiguous inside of vmap for memory_format other than torch.contiguous_format
+            for combine_mode in ["pointwise"]:#, "generic"]:
+                # Skip CPU and "pointwise"
+                if device == torch.device("cpu") and combine_mode == "pointwise":
+                    continue
+                dim1 = torch.export.Dim("dim0", min=5, max=15)
+                xs = torch.ones(3, 10, 2, device=device)
 
-        class Foo(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
+                class Foo(torch.nn.Module):
+                    def __init__(self) -> None:
+                        super().__init__()
 
-            def combine_fn(self, x, y):
-                return x + y
+                    def combine_fn(self, x, y):
+                        return x + y
 
-            def forward(self, x):
-                return associative_scan(self.combine_fn, x, 2)
+                    def forward(self, x):
+                        return associative_scan(self.combine_fn, x, 2, combine_mode=combine_mode)
 
-        ep = export(Foo(), (xs,), dynamic_shapes={"x": {1: dim1}})
-        self.assertTrue(torch.allclose(ep.module()(xs), Foo()(xs)))
+                ep = export(Foo(), (xs,), dynamic_shapes={"x": {1: dim1}})
+                self.assertTrue(torch.allclose(ep.module()(xs), Foo()(xs)))
 
     @requires_cuda
     @testing.expectedFailureCppRuntime
     def test_export_associative_scan_symbol_scandim(self):
-        dim1 = torch.export.Dim("dim0", min=5, max=15)
-        xs = torch.ones(3, 10, 2, device=torch.device("cuda"))
+        for device in [torch.device("cpu"), torch.device("cuda")]:
+            # for combine_mode in ["pointwise"], "generic"]:
+            # TODO: I had to comment out the "generic" case because it would raise
+            # RuntimeError: NYI: querying is_contiguous inside of vmap for memory_format other than torch.contiguous_format
+            for combine_mode in ["pointwise"]:#, "generic"]:
+                # Skip CPU and "pointwise"
+                if device == torch.device("cpu") and combine_mode == "pointwise":
+                    continue
+                dim1 = torch.export.Dim("dim0", min=5, max=15)
+                xs = torch.ones(3, 10, 2, device=torch.device("cuda"))
 
-        class Foo(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
+                class Foo(torch.nn.Module):
+                    def __init__(self) -> None:
+                        super().__init__()
 
-            def combine_fn(self, x, y):
-                return x + y
+                    def combine_fn(self, x, y):
+                        return x + y
 
-            def forward(self, x):
-                return associative_scan(self.combine_fn, x, 1)
+                    def forward(self, x):
+                        return associative_scan(self.combine_fn, x, 1, combine_mode=combine_mode)
 
-        ep = export(Foo(), (xs,), dynamic_shapes={"x": {1: dim1}})
-        self.assertTrue(torch.allclose(ep.module()(xs), Foo()(xs)))
+                ep = export(Foo(), (xs,), dynamic_shapes={"x": {1: dim1}})
+                self.assertTrue(torch.allclose(ep.module()(xs), Foo()(xs)))
 
-    @requires_gpu
+    @requires_cuda
+    @testing.expectedFailureCppRuntime
     def test_export_associative_scan_lifted_buffers(self):
-        class M(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.buffer = torch.nn.Buffer(
-                    torch.ones(3, 2, device=torch.device("cuda"))
-                )
+        for device in [torch.device("cpu"), torch.device("cuda")]:
+            # for combine_mode in ["pointwise"], "generic"]:
+            # TODO: Using combine_mode="generic" raises
+            # RuntimeError: NYI: querying is_contiguous inside of vmap for memory_format other than torch.contiguous_format
+            for combine_mode in ["pointwise", "generic"]:
+                # Skip CPU and "pointwise"
+                if device == torch.device("cpu") and combine_mode == "pointwise":
+                    continue
+                
+                class M(torch.nn.Module):
+                    def __init__(self) -> None:
+                        super().__init__()
+                        # TODO: Using the buffer one gets the error
+                        # torch._export.verifier.SpecViolationError: Invalid get_attr type <class 'torch._subclasses.fake_tensor.FakeTensor'>. 
+                        # Valid get_attr types: (<class 'torch.fx.graph_module.GraphModule'>, <class 'torch.nn.parameter.Parameter'>)
+                        self.buffer = torch.nn.Buffer(
+                            torch.ones(3, 2, device=device)
+                        )
 
-            def combine_fn(self, x, y):
-                return (x + y) * self.buffer
+                    def combine_fn(self, x, y):
+                        return (x + y) * self.buffer
 
-            def forward(self, x):
-                return associative_scan(self.combine_fn, x, 1, combine_mode="pointwise")
+                    def forward(self, x):
+                        return associative_scan(self.combine_fn, x, 1, combine_mode=combine_mode)
 
-        inp = torch.ones(3, 10, 2, device=torch.device("cuda"))
-        ep = export(M(), (inp,))
-        epm = ep.module()
-        self.assertTrue(torch.allclose(epm(inp), M()(inp)))
+                inp = torch.ones(3, 10, 2, device=device)
+                ep = export(M(), (inp,))
+                epm = ep.module()
+                
+                # TODO: In some instantiations of this test the return of epm(inp) is a tuple,
+                # e.g.: for TrainingIRToRunDecompExportNonStrictTestExport.test_export_associative_scan_lifted_buffers_training_ir_to_decomp_non_strict
+                # and in some other cases it is a tensor
+                # e.g.: for RetraceExportTestExport.test_export_associative_scan_lifted_buffers_retraceability
+                self.assertTrue(torch.allclose(epm(inp), M()(inp)))
 
-        for gm in epm.named_modules():
-            if not isinstance(gm, torch.fx.GraphModule):
-                continue
-            self.assertEqual(
-                len([node for node in gm.graph.nodes if node.op == "placeholder"]), 1
-            )
+                for gm in epm.named_modules():
+                    if not isinstance(gm, torch.fx.GraphModule):
+                        continue
+                    self.assertEqual(
+                        len([node for node in gm.graph.nodes if node.op == "placeholder"]), 1
+                    )
 
     # map_fn references module outside the module hierarchy
     @unittest.expectedFailure

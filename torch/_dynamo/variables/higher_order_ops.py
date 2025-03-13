@@ -1309,22 +1309,12 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             _check_supported_callable_arg(
                 tx, combine_fn.keywords["combine_fn"], "combine_fn"
             )
-            out_treespec = xs_treespec
         else:
             # This case is hit during re-tracing, for example in export tests
             # In this case, the combine_fn is a callable and not a functools.partial
-            # Moreover, the xs are a tuple of the original inputs, i.e. (xs,)
-            # Therefore, the outputs are also expected to be of the same form
-            # and thus we must return the original input treestructure and not
-            # directly the treestructure of the combine_fn.
-            # For the treestructure checks between the combine_fn and the inputs,
-            # we need though the unpacked treestructure
-            xs_treespec = _make_inlined(tx, pytree.tree_structure)(
-                *xs.unpack_var_sequence(tx)
-            )
+            xs_treespec = _make_inlined(tx, pytree.tree_structure)(xs)
 
             _check_supported_callable_arg(tx, combine_fn, "combine_fn")
-            out_treespec = _make_inlined(tx, pytree.tree_structure)(xs)
 
         # xs input check
         if not isinstance(xs, (ListVariable, TupleVariable)):
@@ -1494,7 +1484,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             p_args,
             {},
             out_meta,
-            out_treespec,
+            xs_treespec,
         )
 
 
