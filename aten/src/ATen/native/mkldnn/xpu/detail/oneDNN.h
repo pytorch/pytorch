@@ -16,6 +16,16 @@ TORCH_API sycl::event matmul(
     Attr attr,
     const std::vector<sycl::event>& deps = {});
 
+sycl::event scaled_matmul(
+    at::Tensor& result,
+    const at::Tensor& mat1,
+    const at::Tensor& mat2,
+    const c10::optional<at::Tensor>& bias,
+    const at::Tensor& scale_a,
+    const at::Tensor& scale_b,
+    Attr attr,
+    const std::vector<sycl::event>& deps = {});
+
 TORCH_API sycl::event convolution(
     at::Tensor& dst,
     const at::Tensor& src,
