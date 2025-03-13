@@ -28,7 +28,6 @@ import dataclasses
 import enum
 import functools
 import inspect
-import io
 import random
 import sys
 import threading
@@ -184,7 +183,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             dict.__new__,
             tuple.__new__,
             list.__new__,
-            io.StringIO.__new__,
         }.union(exceptions)
 
     @staticmethod
