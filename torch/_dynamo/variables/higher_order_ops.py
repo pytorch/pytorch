@@ -1628,7 +1628,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         additional_inputs_proxy = list(additional_inputs.as_proxy()) + list(
             combine_freevars_proxy
         )
-        y_proxies = [y_var.as_proxy() for y_var in y_vars]
+        y_proxies = [y_var.as_proxy() for y_var in out_vars]
         proxy_vars = init_proxy, xs_proxy, additional_inputs_proxy
         proxy_vars_inputcheck = tuple(sarg.as_proxy() for sarg in sub_args) + tuple(
             additional_inputs_proxy
