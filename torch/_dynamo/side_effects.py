@@ -3,7 +3,6 @@
 import collections
 import contextlib
 import inspect
-import io
 import warnings
 import weakref
 from collections.abc import MutableMapping
@@ -350,10 +349,7 @@ class SideEffects:
     def get_variable_cls(self, user_cls):
         from torch.overrides import TorchFunctionMode
 
-        from .variables.ctx_manager import (
-            GenericContextWrappingVariable,
-            StringIOVariable,
-        )
+        from .variables.ctx_manager import GenericContextWrappingVariable
         from .variables.torch_function import TorchFunctionModeVariable
         from .variables.user_defined import is_forbidden_context_manager
 
@@ -364,8 +360,6 @@ class SideEffects:
             user_cls, TorchFunctionMode
         ) and TorchFunctionModeVariable.is_supported_torch_function_mode(user_cls):
             variable_cls = TorchFunctionModeVariable
-        elif issubclass(user_cls, io.StringIO):
-            variable_cls = StringIOVariable
         elif (
             hasattr(user_cls, "__enter__")
             and hasattr(user_cls, "__exit__")
