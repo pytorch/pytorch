@@ -32,163 +32,6 @@ _ONNX_DTYPE_TO_TORCH_DTYPE = {
 }
 
 
-@torch.library.custom_op(
-    "onnx_symbolic::_symbolic",
-    mutates_args=(),
-    schema="(Tensor[] inputs, str op_type, int onnx_dtype, Tensor[] attr_tensors, *, SymInt[] shape, str[] attr_keys, str[] attr_types, int[][] attr_pos, int[] attr_ints, float[] attr_floats, str[] attr_strs, str[] metadata_props_keys, str[] metadata_props_values, str domain='', int? version=None) -> Tensor",
-)
-def _symbolic(
-    inputs: Sequence[torch.Tensor],
-    op_type: str,
-    onnx_dtype: int,
-    attr_tensors: Sequence[torch.Tensor],
-    *,
-    shape: Sequence[Union[int, torch.SymInt]],
-    attr_keys: Sequence[str],
-    attr_types: Sequence[str],
-    attr_pos: Sequence[tuple[int, int]],
-    attr_ints: Sequence[int],
-    attr_floats: Sequence[float],
-    attr_strs: Sequence[str],
-    metadata_props_keys: Sequence[str] = [],
-    metadata_props_values: Sequence[str] = [],
-    domain: str = "",
-    version: Optional[int] = None,
-) -> torch.Tensor:
-    # TODO: Verify that shape supports SymInt
-    torch._check(
-        onnx_dtype in _ONNX_DTYPE_TO_TORCH_DTYPE,
-        f"{onnx_dtype} is invalid as an ONNX data type. Valid values are {list(_ONNX_DTYPE_TO_TORCH_DTYPE.keys())}",
-    )
-    return torch.zeros(shape, dtype=_ONNX_DTYPE_TO_TORCH_DTYPE[onnx_dtype])
-
-
-@_symbolic.register_fake
-def _(
-    inputs: Sequence[torch.Tensor],
-    op_type: str,
-    onnx_dtype: int,
-    attr_tensors: Sequence[torch.Tensor] = (),
-    *,
-    shape: Sequence[Union[int, torch.SymInt]],
-    attr_keys: Sequence[str],
-    attr_types: Sequence[str],
-    attr_pos: Sequence[tuple[int, int]],
-    attr_ints: Sequence[int],
-    attr_floats: Sequence[float],
-    attr_strs: Sequence[str],
-    metadata_props_keys: Sequence[str] = [],
-    metadata_props_values: Sequence[str] = [],
-    domain: str = "",
-    version: Optional[int] = None,
-) -> torch.Tensor:
-    torch._check(
-        onnx_dtype in _ONNX_DTYPE_TO_TORCH_DTYPE,
-        f"{onnx_dtype} is invalid as an ONNX data type. Valid values are {list(_ONNX_DTYPE_TO_TORCH_DTYPE.keys())}",
-    )
-    return torch.zeros(shape, dtype=_ONNX_DTYPE_TO_TORCH_DTYPE[onnx_dtype])
-
-
-torch.library.opcheck(
-    _symbolic,
-    ([torch.tensor(1)], "Add", 1, [torch.tensor(42)]),
-    dict(
-        shape=[
-            1,
-        ],
-        attr_keys=["key"],
-        attr_types=["i"],
-        attr_pos=[(0, 1)],
-        attr_ints=[1],
-        attr_floats=[1.0],
-        attr_strs=["attr"],
-        metadata_props_keys=["meta_key"],
-        metadata_props_values=["meta_value"],
-        domain="",
-        version=1,
-    ),
-)
-
-
-@torch.library.custom_op(
-    "onnx_symbolic::_symbolic_multi_out",
-    mutates_args=(),
-    schema="(Tensor[] inputs, str op_type, int[] onnx_dtypes, Tensor[] attr_tensors, *, SymInt[][] shapes, str[] attr_keys, int[] attr_ints, float[] attr_floats, str[] attr_strs, str[] metadata_props_keys, str[] metadata_props_values, str domain='', int? version=None) -> Tensor[]",
-)
-def _symbolic_multi_out(
-    inputs: Sequence[torch.Tensor],
-    op_type: str,
-    onnx_dtypes: Sequence[int],
-    attr_tensors: Sequence[torch.Tensor],
-    *,
-    shapes: Sequence[Sequence[Union[int, torch.SymInt]]],
-    attr_keys: Sequence[str],
-    attr_ints: Sequence[int],
-    attr_floats: Sequence[float],
-    attr_strs: Sequence[str],
-    metadata_props_keys: Sequence[str] = [],
-    metadata_props_values: Sequence[str] = [],
-    domain: str = "",
-    version: Optional[int] = None,
-) -> list[torch.Tensor]:
-    outputs = []
-    for shape, onnx_dtype in zip(shapes, onnx_dtypes):
-        torch._check(
-            onnx_dtype in _ONNX_DTYPE_TO_TORCH_DTYPE,
-            f"{onnx_dtype} is invalid as an ONNX data type. Valid values are {list(_ONNX_DTYPE_TO_TORCH_DTYPE.keys())}",
-        )
-        outputs.append(torch.zeros(shape, dtype=_ONNX_DTYPE_TO_TORCH_DTYPE[onnx_dtype]))
-    return outputs
-
-
-@_symbolic_multi_out.register_fake
-def _(
-    inputs: Sequence[torch.Tensor],
-    op_type: str,
-    onnx_dtypes: Sequence[int],
-    attr_tensors: Sequence[torch.Tensor],
-    *,
-    shapes: Sequence[Sequence[Union[int, torch.SymInt]]],
-    attr_keys: Sequence[str],
-    attr_ints: Sequence[int],
-    attr_floats: Sequence[float],
-    attr_strs: Sequence[str],
-    metadata_props_keys: Sequence[str] = [],
-    metadata_props_values: Sequence[str] = [],
-    domain: str = "",
-    version: Optional[int] = None,
-) -> list[torch.Tensor]:
-    outputs = []
-    for shape, onnx_dtype in zip(shapes, onnx_dtypes):
-        torch._check(
-            onnx_dtype in _ONNX_DTYPE_TO_TORCH_DTYPE,
-            f"{onnx_dtype} is invalid as an ONNX data type. Valid values are {list(_ONNX_DTYPE_TO_TORCH_DTYPE.keys())}",
-        )
-        outputs.append(torch.zeros(shape, dtype=_ONNX_DTYPE_TO_TORCH_DTYPE[onnx_dtype]))
-    return outputs
-
-
-torch.library.opcheck(
-    _symbolic_multi_out,
-    ([torch.tensor(1)], "Add", [1], [torch.tensor(42)]),
-    dict(
-        shapes=[
-            [
-                1,
-            ]
-        ],
-        attr_keys=["key"],
-        attr_ints=[1],
-        attr_floats=[1.0],
-        attr_strs=["attr"],
-        metadata_props_keys=["meta_key"],
-        metadata_props_values=["meta_value"],
-        domain="",
-        version=1,
-    ),
-)
-
-
 @dataclasses.dataclass
 class EncodedAttrs:
     attr_keys: list[str]
@@ -284,35 +127,189 @@ class EncodedAttrs:
         )
         return encoded
 
-    @classmethod
-    def to_dict(cls, encoded: "EncodedAttrs") -> dict[str, Union[int, float, str]]:
+    def to_dict(self) -> dict[str, Union[int, float, str]]:
         attrs = {}
-        for i, key in enumerate(encoded.attr_keys):
-            attr_type = encoded.attr_types[i]
+        for i, key in enumerate(self.attr_keys):
+            attr_type = self.attr_types[i]
             if attr_type == "i":
-                attrs[key] = encoded.attr_ints[encoded.attr_pos[i][0]]
+                attrs[key] = self.attr_ints[self.attr_pos[i][0]]
             elif attr_type == "f":
-                attrs[key] = encoded.attr_floats[encoded.attr_pos[i][0]]
+                attrs[key] = self.attr_floats[self.attr_pos[i][0]]
             elif attr_type == "s":
-                attrs[key] = encoded.attr_strs[encoded.attr_pos[i][0]]
+                attrs[key] = self.attr_strs[self.attr_pos[i][0]]
             elif attr_type == "t":
-                attrs[key] = encoded.attr_tensors[encoded.attr_pos[i][0]]
+                attrs[key] = self.attr_tensors[self.attr_pos[i][0]]
             elif attr_type == "fs":
-                attrs[key] = encoded.attr_floats[
-                    encoded.attr_pos[i][0] : encoded.attr_pos[i][1]
-                ]
+                attrs[key] = self.attr_floats[self.attr_pos[i][0] : self.attr_pos[i][1]]
             elif attr_type == "is":
-                attrs[key] = encoded.attr_ints[
-                    encoded.attr_pos[i][0] : encoded.attr_pos[i][1]
-                ]
+                attrs[key] = self.attr_ints[self.attr_pos[i][0] : self.attr_pos[i][1]]
             elif attr_type == "ss":
-                attrs[key] = encoded.attr_strs[
-                    encoded.attr_pos[i][0] : encoded.attr_pos[i][1]
-                ]
+                attrs[key] = self.attr_strs[self.attr_pos[i][0] : self.attr_pos[i][1]]
             elif attr_type == "ts":
-                attrs[key] = encoded.attr_tensors[
-                    encoded.attr_pos[i][0] : encoded.attr_pos[i][1]
+                attrs[key] = self.attr_tensors[
+                    self.attr_pos[i][0] : self.attr_pos[i][1]
                 ]
             else:
                 raise ValueError(f"Unsupported attribute type: {attr_type}")
         return attrs
+
+
+@torch.library.custom_op(
+    "onnx_symbolic::_symbolic",
+    mutates_args=(),
+    schema="(Tensor[] inputs, str op_type, int onnx_dtype, Tensor[] attr_tensors, *, SymInt[] shape, str[] attr_keys, str[] attr_types, int[][] attr_pos, int[] attr_ints, float[] attr_floats, str[] attr_strs, str[] metadata_props_keys, str[] metadata_props_values, str domain='', int? version=None) -> Tensor",
+)
+def _symbolic(
+    inputs: Sequence[torch.Tensor],
+    op_type: str,
+    onnx_dtype: int,
+    attr_tensors: Sequence[torch.Tensor],
+    *,
+    shape: Sequence[Union[int, torch.SymInt]],
+    attr_keys: Sequence[str],
+    attr_types: Sequence[str],
+    attr_pos: Sequence[tuple[int, int]],
+    attr_ints: Sequence[int],
+    attr_floats: Sequence[float],
+    attr_strs: Sequence[str],
+    metadata_props_keys: Sequence[str] = (),
+    metadata_props_values: Sequence[str] = (),
+    domain: str = "",
+    version: Optional[int] = None,
+) -> torch.Tensor:
+    # TODO: Verify that shape supports SymInt
+    torch._check(
+        onnx_dtype in _ONNX_DTYPE_TO_TORCH_DTYPE,
+        f"{onnx_dtype} is invalid as an ONNX data type. Valid values are {list(_ONNX_DTYPE_TO_TORCH_DTYPE.keys())}",
+    )
+    return torch.zeros(shape, dtype=_ONNX_DTYPE_TO_TORCH_DTYPE[onnx_dtype])
+
+
+@_symbolic.register_fake
+def _(
+    inputs: Sequence[torch.Tensor],
+    op_type: str,
+    onnx_dtype: int,
+    attr_tensors: Sequence[torch.Tensor] = (),
+    *,
+    shape: Sequence[Union[int, torch.SymInt]],
+    attr_keys: Sequence[str],
+    attr_types: Sequence[str],
+    attr_pos: Sequence[tuple[int, int]],
+    attr_ints: Sequence[int],
+    attr_floats: Sequence[float],
+    attr_strs: Sequence[str],
+    metadata_props_keys: Sequence[str] = (),
+    metadata_props_values: Sequence[str] = (),
+    domain: str = "",
+    version: Optional[int] = None,
+) -> torch.Tensor:
+    torch._check(
+        onnx_dtype in _ONNX_DTYPE_TO_TORCH_DTYPE,
+        f"{onnx_dtype} is invalid as an ONNX data type. Valid values are {list(_ONNX_DTYPE_TO_TORCH_DTYPE.keys())}",
+    )
+    return torch.zeros(shape, dtype=_ONNX_DTYPE_TO_TORCH_DTYPE[onnx_dtype])
+
+
+torch.library.opcheck(
+    _symbolic,
+    ([torch.tensor(1)], "Add", 1, [torch.tensor(42)]),
+    dict(
+        shape=[
+            1,
+        ],
+        attr_keys=["key"],
+        attr_types=["i"],
+        attr_pos=[(0, 1)],
+        attr_ints=[1],
+        attr_floats=[1.0],
+        attr_strs=["attr"],
+        metadata_props_keys=["meta_key"],
+        metadata_props_values=["meta_value"],
+        domain="",
+        version=1,
+    ),
+)
+
+
+@torch.library.custom_op(
+    "onnx_symbolic::_symbolic_multi_out",
+    mutates_args=(),
+    schema="(Tensor[] inputs, str op_type, int[] onnx_dtypes, Tensor[] attr_tensors, *, SymInt[][] shapes, str[] attr_keys, int[] attr_ints, float[] attr_floats, str[] attr_strs, str[] metadata_props_keys, str[] metadata_props_values, str domain='', int? version=None) -> Tensor[]",
+)
+def _symbolic_multi_out(
+    inputs: Sequence[torch.Tensor],
+    op_type: str,
+    onnx_dtypes: Sequence[int],
+    attr_tensors: Sequence[torch.Tensor],
+    *,
+    shapes: Sequence[Sequence[Union[int, torch.SymInt]]],
+    attr_keys: Sequence[str],
+    attr_types: Sequence[str],
+    attr_pos: Sequence[tuple[int, int]],
+    attr_ints: Sequence[int],
+    attr_floats: Sequence[float],
+    attr_strs: Sequence[str],
+    metadata_props_keys: Sequence[str] = (),
+    metadata_props_values: Sequence[str] = (),
+    domain: str = "",
+    version: Optional[int] = None,
+) -> list[torch.Tensor]:
+    outputs = []
+    for shape, onnx_dtype in zip(shapes, onnx_dtypes):
+        torch._check(
+            onnx_dtype in _ONNX_DTYPE_TO_TORCH_DTYPE,
+            f"{onnx_dtype} is invalid as an ONNX data type. Valid values are {list(_ONNX_DTYPE_TO_TORCH_DTYPE.keys())}",
+        )
+        outputs.append(torch.zeros(shape, dtype=_ONNX_DTYPE_TO_TORCH_DTYPE[onnx_dtype]))
+    return outputs
+
+
+@_symbolic_multi_out.register_fake
+def _(
+    inputs: Sequence[torch.Tensor],
+    op_type: str,
+    onnx_dtypes: Sequence[int],
+    attr_tensors: Sequence[torch.Tensor],
+    *,
+    shapes: Sequence[Sequence[Union[int, torch.SymInt]]],
+    attr_keys: Sequence[str],
+    attr_types: Sequence[str],
+    attr_pos: Sequence[tuple[int, int]],
+    attr_ints: Sequence[int],
+    attr_floats: Sequence[float],
+    attr_strs: Sequence[str],
+    metadata_props_keys: Sequence[str] = (),
+    metadata_props_values: Sequence[str] = (),
+    domain: str = "",
+    version: Optional[int] = None,
+) -> list[torch.Tensor]:
+    outputs = []
+    for shape, onnx_dtype in zip(shapes, onnx_dtypes):
+        torch._check(
+            onnx_dtype in _ONNX_DTYPE_TO_TORCH_DTYPE,
+            f"{onnx_dtype} is invalid as an ONNX data type. Valid values are {list(_ONNX_DTYPE_TO_TORCH_DTYPE.keys())}",
+        )
+        outputs.append(torch.zeros(shape, dtype=_ONNX_DTYPE_TO_TORCH_DTYPE[onnx_dtype]))
+    return outputs
+
+
+torch.library.opcheck(
+    _symbolic_multi_out,
+    ([torch.tensor(1)], "Add", [1], [torch.tensor(42)]),
+    dict(
+        shapes=[
+            [
+                1,
+            ]
+        ],
+        attr_keys=["key"],
+        attr_ints=[1],
+        attr_floats=[1.0],
+        attr_strs=["attr"],
+        metadata_props_keys=["meta_key"],
+        metadata_props_values=["meta_value"],
+        domain="",
+        version=1,
+    ),
+)
