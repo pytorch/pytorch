@@ -1,3 +1,4 @@
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <filesystem>
 #include <string>
@@ -128,9 +129,13 @@ void test_aoti_constants_update(
   ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
 
   // Update with missing map which should throw.
-  EXPECT_THROW(
-      runner->update_constant_buffer(missing_map, false, true),
-      std::runtime_error);
+  // Somehow EXPECT_THROW doesn't work here when running tests in a row, but
+  // works when running AotInductorTest.RuntimeUpdateConstantsCuda individually.
+  try {
+    runner->update_constant_buffer(missing_map, false, true);
+  } catch (const std::runtime_error& e) {
+    EXPECT_THAT(e.what(), ::testing::HasSubstr("API call failed at"));
+  }
 
   // Update random weight to buffer #1.
   runner->update_constant_buffer(missing_map, false, false);
