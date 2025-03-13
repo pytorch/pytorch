@@ -316,7 +316,8 @@ class FSDPModule:
         """
         Sets if the module should sync gradients. This can be used to implement
         gradient accumulation *without communication*. For HSDP, this controls
-        both reduce-scatter and all-reduce together.
+        both reduce-scatter and all-reduce together. This is the equivalence of
+        `no_sync` in FSDP1.
 
         Args:
             requires_gradient_sync (bool): Whether to reduce gradients for the
