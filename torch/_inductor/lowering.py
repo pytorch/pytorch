@@ -1940,8 +1940,8 @@ def unsupported_input_tensor(t: torch.Tensor, parent=None, node=None):
         # allow bitcast, views, memory movement, but not arithmetic
         # TODO: delete once triton adds native support
         return not (
-            isinstance(parent.target, torch._ops.OpOverload) and
-            parent.target
+            isinstance(parent.target, torch._ops.OpOverload)
+            and parent.target
             in (
                 aten.view.dtype,
                 aten.cat.default,
