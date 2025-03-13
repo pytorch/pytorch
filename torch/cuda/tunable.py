@@ -444,6 +444,7 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
 
     dtype_dict = {
         "float": torch.float32,
+        "tf32" : torch.float32,
         "double": torch.float64,
         "BFloat16": torch.bfloat16,
         "Half": torch.half,
@@ -470,6 +471,12 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
         transA = layout[0] == "T"
         transB = layout[1] == "T"
         dtype = dtype_dict.get(data_type)
+        if data_type == "tf32":
+            # User must still set HIPBLASLT_ALLOW_TF32=1
+            torch.backends.cuda.matmul.allow_tf32 = True
+        else:
+            torch.backends.cuda.matmul.allow_tf32 = False
+
     else:  # ScaledGEMM
         untuned_gemm_temp = untuned_gemm[0].split("_")
         # dtypeC = might not be FP8 type, keep track
