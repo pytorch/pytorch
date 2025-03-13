@@ -542,10 +542,11 @@ def _get_optimization_cflags(
     if _IS_WINDOWS:
         return ["O1" if min_optimize else "O2"]
     else:
+        wrapper_opt_level = config.aot_inductor.compile_wrapper_opt_level
         cflags = (
             ["O0", "g"]
             if config.aot_inductor.debug_compile
-            else ["O1" if min_optimize else "O3", "DNDEBUG"]
+            else [wrapper_opt_level if min_optimize else "O3", "DNDEBUG"]
         )
         cflags += _get_ffast_math_flags()
         cflags.append("fno-finite-math-only")
