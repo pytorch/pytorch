@@ -6562,7 +6562,7 @@ def forward(self, b_a_buffer, x):
             # for combine_mode in ["pointwise"], "generic"]:
             # TODO: I had to comment out the "generic" case because it would raise
             # RuntimeError: NYI: querying is_contiguous inside of vmap for memory_format other than torch.contiguous_format
-            for combine_mode in ["pointwise"]:#, "generic"]:
+            for combine_mode in ["pointwise"]:  # , "generic"]:
                 # Skip CPU and "pointwise"
                 if device == torch.device("cpu") and combine_mode == "pointwise":
                     continue
@@ -6577,7 +6577,9 @@ def forward(self, b_a_buffer, x):
                         return x + y
 
                     def forward(self, x):
-                        return associative_scan(self.combine_fn, x, 2, combine_mode=combine_mode)
+                        return associative_scan(
+                            self.combine_fn, x, 2, combine_mode=combine_mode
+                        )
 
                 ep = export(Foo(), (xs,), dynamic_shapes={"x": {1: dim1}})
                 self.assertTrue(torch.allclose(ep.module()(xs), Foo()(xs)))
@@ -6589,7 +6591,7 @@ def forward(self, b_a_buffer, x):
             # for combine_mode in ["pointwise"], "generic"]:
             # TODO: I had to comment out the "generic" case because it would raise
             # RuntimeError: NYI: querying is_contiguous inside of vmap for memory_format other than torch.contiguous_format
-            for combine_mode in ["pointwise"]:#, "generic"]:
+            for combine_mode in ["pointwise"]:  # , "generic"]:
                 # Skip CPU and "pointwise"
                 if device == torch.device("cpu") and combine_mode == "pointwise":
                     continue
@@ -6604,7 +6606,9 @@ def forward(self, b_a_buffer, x):
                         return x + y
 
                     def forward(self, x):
-                        return associative_scan(self.combine_fn, x, 1, combine_mode=combine_mode)
+                        return associative_scan(
+                            self.combine_fn, x, 1, combine_mode=combine_mode
+                        )
 
                 ep = export(Foo(), (xs,), dynamic_shapes={"x": {1: dim1}})
                 self.assertTrue(torch.allclose(ep.module()(xs), Foo()(xs)))
@@ -6620,27 +6624,27 @@ def forward(self, b_a_buffer, x):
                 # Skip CPU and "pointwise"
                 if device == torch.device("cpu") and combine_mode == "pointwise":
                     continue
-                
+
                 class M(torch.nn.Module):
                     def __init__(self) -> None:
                         super().__init__()
                         # TODO: Using the buffer one gets the error
-                        # torch._export.verifier.SpecViolationError: Invalid get_attr type <class 'torch._subclasses.fake_tensor.FakeTensor'>. 
+                        # torch._export.verifier.SpecViolationError: Invalid get_attr type <class 'torch._subclasses.fake_tensor.FakeTensor'>.
                         # Valid get_attr types: (<class 'torch.fx.graph_module.GraphModule'>, <class 'torch.nn.parameter.Parameter'>)
-                        self.buffer = torch.nn.Buffer(
-                            torch.ones(3, 2, device=device)
-                        )
+                        self.buffer = torch.nn.Buffer(torch.ones(3, 2, device=device))
 
                     def combine_fn(self, x, y):
                         return (x + y) * self.buffer
 
                     def forward(self, x):
-                        return associative_scan(self.combine_fn, x, 1, combine_mode=combine_mode)
+                        return associative_scan(
+                            self.combine_fn, x, 1, combine_mode=combine_mode
+                        )
 
                 inp = torch.ones(3, 10, 2, device=device)
                 ep = export(M(), (inp,))
                 epm = ep.module()
-                
+
                 # TODO: In some instantiations of this test the return of epm(inp) is a tuple,
                 # e.g.: for TrainingIRToRunDecompExportNonStrictTestExport.test_export_associative_scan_lifted_buffers_training_ir_to_decomp_non_strict
                 # and in some other cases it is a tensor
@@ -6651,7 +6655,14 @@ def forward(self, b_a_buffer, x):
                     if not isinstance(gm, torch.fx.GraphModule):
                         continue
                     self.assertEqual(
-                        len([node for node in gm.graph.nodes if node.op == "placeholder"]), 1
+                        len(
+                            [
+                                node
+                                for node in gm.graph.nodes
+                                if node.op == "placeholder"
+                            ]
+                        ),
+                        1,
                     )
 
     # map_fn references module outside the module hierarchy
