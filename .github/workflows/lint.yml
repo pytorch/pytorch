@@ -241,7 +241,7 @@ jobs:
   test_collect_env:
     if: ${{ github.repository == 'pytorch/pytorch' }}
     name: Test collect_env
-    runs-on: linux.24_04.4x
+    runs-on: ${{ matrix.runner }}
     strategy:
       include:
         - test_type: with_torch
