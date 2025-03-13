@@ -89,11 +89,11 @@ COPY fs/ /
 RUN chmod +x /usr/bin/actions-runner /usr/bin/entrypoint
 
 # install podman
-# RUN apt -y install podman podman-docker
+# RUN apt-get update && apt -y install podman podman-docker
 
 # install patched podman
 COPY --from=podman /tmp/podman /tmp/podman
-RUN apt -y install /tmp/podman/*.deb && /bin/rm -rfv /tmp/podman
+RUN apt-get update && apt -y install /tmp/podman/*.deb && /bin/rm -rfv /tmp/podman
 
 # amd64 Github Actions Runner.
 RUN useradd -m actions-runner
