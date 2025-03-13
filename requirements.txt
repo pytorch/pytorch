@@ -2,18 +2,20 @@
 astunparse==1.6.3
 expecttest==0.2.1
 hypothesis==5.35.1
-numpy==1.22.4 ; python_version <=
+numpy==1.22.4; python_version == "3.9" or python_version == "3.10"
+numpy==1.26.2; python_version == "3.11" or python_version == "3.12"
+numpy==2.1.2; python_version >= "3.13"
 psutil==7.0.0
-pyyaml====6.0.2
+pyyaml==6.0.2
 requests==2.32.3
-setuptools ?
+setuptools==75.8.0
 types-dataclasses?
 typing_extensions==4.12.2
 sympy==1.13.1 ; python_version >= "3.9"
 filelock==3.17.0
 networkx==2.8.8
 Jinja2==3.1.4
-fsspec==2025.2.0
+fsspec==2025.3.0
 lintrunner==0.12.5
 ninja ?
 packaging==24.2
