@@ -591,6 +591,7 @@ def check_input_alias_and_mutation(
             ]
             before = [_tensor_version(arg) for arg in cloned]
             outputs = _maybe_fake_prop_ignore_unbacked(gm, cloned)
+            outputs = pytree.tree_leaves(outputs)
             outputs = [outputs] if not isinstance(outputs, (list, tuple)) else outputs
             after = [_tensor_version(arg) for arg in cloned]
             mutated_inputs = [

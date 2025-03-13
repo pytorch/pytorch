@@ -2072,14 +2072,14 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
         def fct_wrong_pytree(x, y):
             return (
                 {
-                    "i": x["i"] * y["j"][0][0],
-                    "k": torch.tensor(0.0),
-                    "j": ([x["j"][1][0]["o"]], [{"o": torch.sin(x["i"])}]),
+                    "i": x["i"] * y["j"][0][0] + 1,
+                    "k": torch.tensor(0.0) + 1,
+                    "j": ([x["j"][1][0]["o"] + 1], [{"o": torch.sin(x["i"]) + 1}]),
                 },
                 {
                     "i": x["i"] * y["j"][0][0],
                     "k": torch.tensor(0.0),
-                    "j": ([x["j"][1][0]["o"]], [{"o": torch.sin(x["i"])}]),
+                    "j": ([x["j"][1][0]["o"] + 2], [{"o": torch.sin(x["i"])}]),
                 },
             )
 
@@ -2564,8 +2564,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
         init = torch._ops.ops.aten.slice(x, dim, 0, 1, 1)
 
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Expected init and carry to have same metadata.*",
+            torch._dynamo.exc.InternalTorchDynamoError,
+            "Combine_fn might be aliasing the input or the output.*",
         ):
             scan_fct(wrong_carry_shape, init, x, dim=dim)
 
