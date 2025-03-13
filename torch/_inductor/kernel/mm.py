@@ -3,6 +3,7 @@ import functools
 import logging
 import re
 from typing import Optional
+
 import torch
 from torch._dynamo.utils import counters
 from torch._inductor.autoheuristic.autoheuristic import AutoHeuristicSelectAlgorithm
@@ -52,7 +53,6 @@ from .mm_common import (
     should_fallback_to_aten,
     triton_config,
 )
-
 
 
 def parse_version(version_string: str) -> Optional[tuple[int, ...]]:
