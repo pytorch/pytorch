@@ -5,6 +5,7 @@
 
 #include <ATen/native/mkldnn/xpu/detail/Attr.h>
 #include <ATen/native/mkldnn/xpu/detail/Utils.h>
+#include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNNContext.h>
 
 #include <oneapi/dnnl/dnnl.hpp>
