@@ -1266,7 +1266,7 @@ in_compiled_autograd_region = False
 
 
 @contextlib.contextmanager
-def _enable(compiler_fn, dynamic=False):
+def _enable(compiler_fn, dynamic=True):
     if dynamic:
         assert type(dynamic) is bool
 

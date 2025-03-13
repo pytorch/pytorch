@@ -1064,12 +1064,7 @@ def forward(self, x_1: "f32[2][1]cpu"):
             '{"chromium_event": {}, "compiled_autograd_id": 0, "attempt": 0, "has_payload": "HASH"}',
             '{"chromium_event": {}, "compiled_autograd_id": 0, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, '
             '"has_payload": "HASH"}',
-            '{"chromium_event": {}, "compiled_autograd_id": 1, "frame_id": 1, "frame_compile_id": 1, "attempt": 0, '
-            '"has_payload": "HASH"}',
-            '{"chromium_event": {}, "compiled_autograd_id": 1, "attempt": 0, "has_payload": "HASH"}',
-            '{"chromium_event": {}, "compiled_autograd_id": 1, "frame_id": 1, "frame_compile_id": 0, "attempt": 0, '
-            '"has_payload": "HASH"}',
-            '{"chromium_event": {}, "compiled_autograd_id": 1, "frame_id": 1, "frame_compile_id": 1, "attempt": 0, '
+            '{"chromium_event": {}, "compiled_autograd_id": 0, "frame_id": 0, "frame_compile_id": 1, "attempt": 0, '
             '"has_payload": "HASH"}',
         ]
         logs = self.buffer.getvalue()
