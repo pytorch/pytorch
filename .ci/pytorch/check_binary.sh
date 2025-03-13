@@ -74,7 +74,7 @@ fi
 ###############################################################################
 
 # NOTE: As of https://github.com/pytorch/pytorch/issues/126551 we only produce
-#       wheels wheels cxx11-abi
+#       wheels with cxx11-abi
 
 echo "Checking that the gcc ABI is what we expect"
 if [[ "$(uname)" != 'Darwin' ]]; then
