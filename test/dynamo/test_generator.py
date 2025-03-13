@@ -15,6 +15,10 @@ from torch.testing._internal.common_utils import (
     parametrize,
 )
 
+import depyf
+depyf.install()
+print('hi depyf install')
+
 
 class GeneratorTestsBase(torch._dynamo.test_case.TestCase):
     def setUp(self):
@@ -503,6 +507,68 @@ class GraphModule(torch.nn.Module):
         y = fn(t)
         expected = list(zip(range(3), whoo(t)))
         self.assertEqual(expected, y)
+
+    def test_subgenerator_with_return(self):
+        def subgen(t):
+            yield t + 1
+            return t + 2
+
+        def whoo(t):
+            value = yield from subgen(t)
+            yield value
+            yield t + 3
+
+        def fn(t):
+            return zip(range(3), whoo(t)), t.sin()
+
+        t = torch.randn(2)
+        z, _ = self._compile_check(fn, args=(t,))
+        self.assertEqual(list(z), list(zip(range(3), whoo(t))))
+
+    @parametrize("fullgraph", [True, False])
+    def test_generator_with_return(self, fullgraph):
+        def inner(t):
+            yield t + 1
+            return t + 2
+
+        @torch.compile(backend="eager", fullgraph=fullgraph)
+        def fn(t):
+            g = inner(t)
+            ans = []
+            while True:
+                try:
+                    ans.append(next(g))
+                except StopIteration as e:
+                    ans.append(e.value)
+                    break
+            return ans
+    
+        t = torch.randn(2)
+        self.assertEqual(fn(t), [t+1, t+2])
+
+    def test_temp(self):
+        def inner(t):
+            yield t + 1
+            return t + 2
+
+        def middle(t):
+            value = yield from inner(t)
+            yield value
+            yield t + 3
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            g = middle(t)
+            ans = []
+            ans.append(next(g))
+            ans.append(next(g))
+            ans.append(next(g))
+            return ans
+    
+        t = torch.randn(3)
+        actual = fn(t)
+        print(f'hi {actual=}')
+        self.assertEqual(actual, [t+1, t+2,t+3])
 
     @parametrize("container", [list, tuple, dict, OrderedDict])
     def test_dict_tuple_list_generator(self, container):
