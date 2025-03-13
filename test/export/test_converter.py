@@ -24,6 +24,32 @@ class TestConverter(TestCase):
     def setUp(self):
         init_torchbind_implementations()
 
+        @torch._library.register_fake_class("_TorchScriptTesting::_TensorQueue")
+        class _FakeTensorQueue:
+            def __init__(self, queue):
+                self.queue = queue
+
+            @classmethod
+            def __obj_unflatten__(cls, flattened_ctx):
+                return cls(**dict(flattened_ctx))
+
+            def push(self, x):
+                self.queue.append(x)
+
+            def pop(self):
+                if self.is_empty():
+                    return torch.empty([])
+                return self.queue.pop(0)
+
+            def size(self):
+                return len(self.queue)
+
+            def is_empty(self):
+                return len(self.queue) == 0
+
+            def float_size(self):
+                return float(len(self.queue))
+
         self.torch_bind_ops = [
             torch.ops._TorchScriptTesting.queue_pop,
             torch.ops._TorchScriptTesting.queue_push,
@@ -31,7 +57,9 @@ class TestConverter(TestCase):
         ]
 
     def tearDown(self):
-        return
+        torch._library.fake_class_registry.deregister_fake_class(
+            "_TorchScriptTesting::_TensorQueue"
+        )
 
     def _check_equal_ts_ep_converter(
         self,
