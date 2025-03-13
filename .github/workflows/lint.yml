@@ -26,7 +26,7 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
 
   lintrunner-clang:
-    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
     needs: get-label-type
     with:
       timeout: 120
@@ -43,7 +43,7 @@ jobs:
         .github/scripts/lintrunner.sh
 
   lintrunner-noclang:
-    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
     needs: get-label-type
     with:
       timeout: 120
@@ -59,7 +59,7 @@ jobs:
         .github/scripts/lintrunner.sh
 
   quick-checks:
-    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
     needs: get-label-type
     with:
       timeout: 120
@@ -116,7 +116,7 @@ jobs:
           bash .github/scripts/pr-sanity-check.sh
 
   workflow-checks:
-    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
     needs: get-label-type
     with:
       timeout: 120
@@ -154,7 +154,7 @@ jobs:
         exit $RC
 
   toc:
-    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
     needs: get-label-type
     with:
       timeout: 120
@@ -194,7 +194,7 @@ jobs:
   test-tools:
     name: Test tools
     if: ${{ github.repository == 'pytorch/pytorch' }}
-    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
     needs: get-label-type
     with:
       timeout: 120
