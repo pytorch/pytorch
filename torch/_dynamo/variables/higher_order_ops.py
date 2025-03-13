@@ -1596,6 +1596,13 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         combine_gm = torch.fx.GraphModule(dict(tx.output.nn_modules), combine_graph)
         combine_freevars_proxy = tuple(combine_lifted_freevars.keys())
 
+        # Ensure that the output of scan is a flattened list of elements,
+        # because downstream operations assume that the output of HOPs
+        # is flattened
+        output_node = combine_graph.find_nodes(op="output")[0]
+        output_node.args = (pytree.tree_leaves(output_node.args),)
+        combine_graph.lint()
+
         # Collect the results from the comnbine_fn
         results = combine_result.unpack_var_sequence(tx)
         _combine_treespec = _make_inlined(tx, pytree.tree_structure)(combine_result)
