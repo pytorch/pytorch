@@ -6466,7 +6466,6 @@ else:
         t = torch.ones((), device=device, dtype=dtype)
         self.assertEqual(1, t.item())
 
-    @onlyCPU
     def test__local_scalar_dense_with_empty_tensor(self, device):
         input = torch.randn(0, device=device)
         with self.assertRaisesRegex(RuntimeError, "Empty tensor not supported"):
