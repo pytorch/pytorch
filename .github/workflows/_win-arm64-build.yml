@@ -110,11 +110,12 @@ jobs:
         shell: cmd
         run: |
           rmdir /s /q "%PYTORCH_ROOT%"
-          
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+
+      - name: Git checkout PyTorch
+        uses: actions/checkout@v4
         with:
-          no-sudo: true
+          path: pytorch
+          submodules: recursive
 
       - name: Bootstrap Python
         shell: cmd
