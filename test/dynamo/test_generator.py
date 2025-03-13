@@ -538,9 +538,9 @@ class GraphModule(torch.nn.Module):
                     ans.append(e.value)
                     break
             return ans
-    
+
         t = torch.randn(2)
-        self.assertEqual(fn(t), [t+1, t+2])
+        self.assertEqual(fn(t), [t + 1, t + 2])
 
     @parametrize("container", [list, tuple, dict, OrderedDict])
     def test_dict_tuple_list_generator(self, container):
