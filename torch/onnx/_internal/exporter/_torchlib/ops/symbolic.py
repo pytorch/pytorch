@@ -6,20 +6,36 @@ from typing import TYPE_CHECKING
 
 import torch
 from torch.onnx._internal._lazy_import import onnxscript_ir as ir
+from onnxscript.ir import convenience as ir_convenience
 from torch.onnx._internal.exporter import _core
 from torch.onnx._internal.exporter._torchlib._torchlib_registry import onnx_impl
+from torch.onnx.ops import _impl as onnx_ops_impl
 
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
 
-def call_op(
+def _call_symbolic_op(
     op_type: str,
-    *args: ir.Value,
-    _num_outputs: int = 1,
-    _domain: str = "",
-    **kwargs: int | float | str | bool | ir.Graph | ir.TensorProtocol,
+    domain: str,
+    args: Sequence[ir.Value | None],
+    kwargs: dict[
+        str,
+        int
+        | float
+        | str
+        | bool
+        | torch.Tensor
+        | Sequence[int]
+        | Sequence[float]
+        | Sequence[str]
+        | Sequence[bool]
+        | Sequence[torch.Tensor],
+    ],
+    shapes: Sequence[Sequence[int | torch.SymInt]],
+    dtypes: Sequence[int],
+    metadata_props: dict[str, str] | None = None,
 ) -> Sequence[ir.Value]:
     """Call an operator with the given arguments and keyword arguments.
 
@@ -28,7 +44,6 @@ def call_op(
     # This is a wrapper around the IR node creation that hooks into the _builder.OpRecorder
     # tracer so that all nodes created are recorded the same way as if we were to use
     # onnxscript ops directly.
-    from onnxscript.ir import convenience as ir_convenience
 
     assert _core.current_tracer is not None
     tracer = _core.current_tracer
@@ -49,19 +64,104 @@ def call_op(
     ]
     tracer.nodes.append(
         node := ir.Node(
-            _domain,
+            domain,
             op_type,
             inputs=inputs,
             attributes=attributes,
-            num_outputs=_num_outputs,
+            num_outputs=len(dtypes),
             version=tracer.opset.version,
+            metadata_props=metadata_props,
         )
     )
+    # Set the shapes and dtypes for the outputs
+    for i, (dtype, shape) in enumerate(zip(dtypes, shapes)):
+        node.outputs[i].dtype = ir.DataType(dtype)
+        node.outputs[i].shape = _get_onnx_shape(shape)
     return node.outputs
 
 
-@onnx_impl(torch.ops.onnx_symbolic._symbolic.default, no_compile=True)
-def higher_order_cond(
-    ...
+def _get_onnx_shape(
+    shape: Sequence[int | torch.SymInt],
 ) -> Sequence[ir.Value]:
-    ...
+    """Convert a shape to a sequence of ir.Value."""
+    ir.Shape([str(dim) if isinstance(dim, torch.SymInt) else dim for dim in shape])
+
+
+@onnx_impl(torch.ops.onnx_symbolic._symbolic.default, no_compile=True)
+def onnx_symbolic_symbolic(
+    inputs: Sequence[torch.Tensor],
+    op_type: str,
+    onnx_dtype: int,
+    attr_tensors: Sequence[torch.Tensor] = (),
+    *,
+    shape: Sequence[int | torch.SymInt],
+    attr_keys: Sequence[str],
+    attr_types: Sequence[str],
+    attr_pos: Sequence[tuple[int, int]],
+    attr_ints: Sequence[int],
+    attr_floats: Sequence[float],
+    attr_strs: Sequence[str],
+    metadata_props_keys: Sequence[str] = (),
+    metadata_props_values: Sequence[str] = (),
+    domain: str = "",
+    version: int | None = None,
+) -> ir.Value:
+    encoded = onnx_ops_impl.EncodedAttrs(
+        attr_keys=list(attr_keys),
+        attr_types=list(attr_types),
+        attr_pos=list(attr_pos),
+        attr_ints=list(attr_ints),
+        attr_floats=list(attr_floats),
+        attr_strs=list(attr_strs),
+        attr_tensors=list(attr_tensors),
+    )
+    attrs = encoded.to_dict()
+    return _call_symbolic_op(
+        op_type,
+        domain,
+        inputs,
+        attrs,
+        shapes=[shape],
+        dtypes=[onnx_dtype],
+        metadata_props=dict(zip(metadata_props_keys, metadata_props_values)),
+    )[0]
+
+
+@onnx_impl(torch.ops.onnx_symbolic._symbolic_multi_out.default, no_compile=True)
+def onnx_symbolic_symbolic_multi_out(
+    inputs: Sequence[torch.Tensor],
+    op_type: str,
+    onnx_dtypes: Sequence[int],
+    attr_tensors: Sequence[torch.Tensor],
+    *,
+    shapes: Sequence[Sequence[int | torch.SymInt]],
+    attr_keys: Sequence[str],
+    attr_types: Sequence[str],
+    attr_pos: Sequence[tuple[int, int]],
+    attr_ints: Sequence[int],
+    attr_floats: Sequence[float],
+    attr_strs: Sequence[str],
+    metadata_props_keys: Sequence[str] = (),
+    metadata_props_values: Sequence[str] = (),
+    domain: str = "",
+    version: int | None = None,
+) -> Sequence[torch.Tensor]:
+    encoded = onnx_ops_impl.EncodedAttrs(
+        attr_keys=list(attr_keys),
+        attr_types=list(attr_types),
+        attr_pos=list(attr_pos),
+        attr_ints=list(attr_ints),
+        attr_floats=list(attr_floats),
+        attr_strs=list(attr_strs),
+        attr_tensors=list(attr_tensors),
+    )
+    attrs = encoded.to_dict()
+    return _call_symbolic_op(
+        op_type,
+        domain,
+        inputs,
+        attrs,
+        shapes=shapes,
+        dtypes=onnx_dtypes,
+        metadata_props=dict(zip(metadata_props_keys, metadata_props_values)),
+    )
