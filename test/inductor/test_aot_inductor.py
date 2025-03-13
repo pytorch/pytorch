@@ -483,7 +483,9 @@ class AOTInductorTestsTemplate:
 
         example_inputs = (torch.randn(2, 8, device=self.device),)
         counters.clear()
-        self.check_model(Model(self.device), example_inputs)
+        model = Model().to(device=self.device)
+        actual = AOTIRunnerUtil.legacy_run(self.device, model, example_inputs)
+        self.assertTrue(same(model(*example_inputs), actual))
         self.assertEqual(counters["inductor"]["scmerge_split_removed"], 1)
         self.assertEqual(counters["inductor"]["scmerge_cat_removed"], 1)
         self.assertEqual(counters["inductor"]["scmerge_split_sections_removed"], 1)
