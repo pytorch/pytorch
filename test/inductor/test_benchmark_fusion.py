@@ -9,7 +9,7 @@ from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.test_operators import realize
 from torch._inductor.utils import fresh_inductor_cache, is_big_gpu, run_and_get_code
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import slowTest, TEST_WITH_ASAN
+from torch.testing._internal.common_utils import slowTest
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 
@@ -181,7 +181,7 @@ class BenchmarkFusionTestTemplate:
         self.common(f, (x,))
 
 
-if HAS_CUDA and not TEST_WITH_ASAN:
+if HAS_CUDA:
 
     class BenchmarkFusionCudaTest(TestCase):
         common = check_model_cuda
