@@ -1024,20 +1024,23 @@ class CompileResult(Generic[_T]):
     def make_launcher(self) -> LauncherType: ...
 
     def _gen_launcher_code(self, scope, def_args, runner_args) -> LauncherType:
-        if "extra_launcher_args" in self.inductor_meta:
-            def_args = [*def_args, *self.inductor_meta["extra_launcher_args"]]
+        if not hasattr(self, "launcher_code"):
+            if "extra_launcher_args" in self.inductor_meta:
+                def_args = [*def_args, *self.inductor_meta["extra_launcher_args"]]
 
-        grid = GridExpr.from_meta(self.inductor_meta, self.config)
-        # grid.prefix is usually empty, grid.x_grid is something like `-(xnumel//-1024)`
-        lines = [
-            f"def launcher({', '.join(def_args)}, stream):",
-            *[f"    {line}" for line in grid.prefix],
-            f"    grid_0 = {grid.x_grid}",
-            f"    grid_1 = {grid.y_grid}",
-            f"    grid_2 = {grid.z_grid}",
-            f"    runner({', '.join(runner_args)})",
-        ]
-        exec("\n".join(lines), scope)
+            grid = GridExpr.from_meta(self.inductor_meta, self.config)
+            # grid.prefix is usually empty, grid.x_grid is something like `-(xnumel//-1024)`
+            lines = [
+                f"def launcher({', '.join(def_args)}, stream):",
+                *[f"    {line}" for line in grid.prefix],
+                f"    grid_0 = {grid.x_grid}",
+                f"    grid_1 = {grid.y_grid}",
+                f"    grid_2 = {grid.z_grid}",
+                f"    runner({', '.join(runner_args)})",
+            ]
+            self.launcher_code = "\n".join(lines)
+
+        exec(self.launcher_code, scope)
         return scope["launcher"]
 
     def _get_arg_lists(
@@ -1148,8 +1151,26 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
 
         return static_kernel
 
+    def reload_cubin_path(self):
+        """
+        When loading from cache on disk, we want to reload cubin
+        files from their appropriate location on disc.
+        """
+        cubin_location = os.path.join(
+            triton_cache_dir(self.compile_meta.get("device", 0)),
+            triton_hash_to_path_key(self.kernel.hash),
+            f"{self.kernel.name}.cubin",
+        )
+        if not os.path.exists(cubin_location):
+            raise RuntimeError(
+                "Cubin file saved by TritonBundler not found at %s", cubin_location
+            )
+        self.kernel.cubin_path = cubin_location
+
     def make_launcher(self) -> LauncherType:
         # Load the binary on the parent
+        if not self.kernel.cubin_path:
+            self.reload_cubin_path()
         self.kernel.load_kernel()
         scope = {
             "runner": self.kernel.run,

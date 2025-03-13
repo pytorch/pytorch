@@ -749,6 +749,11 @@ def _compile_fx_inner(
                 mb_compiled_graph._time_taken_ns = time.time_ns() - start_time
                 cache_key = key_info[0]
                 mb_compiled_graph._fx_graph_cache_key = cache_key
+                with dynamo_timed("save_compiled_kernels"):
+                    compiled_kernels = torch._inductor.async_compile.CompiledTritonKernels.get_compiled_kernels()
+                    log.warn("Saving %d compiled triton kernels", len(compiled_kernels))
+                    if isinstance(mb_compiled_graph, CompiledFxGraph):
+                        mb_compiled_graph.compiled_triton_kernels = compiled_kernels
                 (
                     triton_bundle,
                     triton_bundler_meta,

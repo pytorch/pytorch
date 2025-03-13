@@ -39,6 +39,8 @@ from torch._inductor.cudagraph_utils import (
     log_cudagraph_skip_and_bump_counter,
 )
 from torch._inductor.freezing_utils import has_frozen_params, is_frozen_param
+from torch._inductor.runtime.triton_heuristics import CachingAutotuner
+import torch._inductor.async_compile
 from torch._inductor.utils import (
     align_inputs_from_check_idxs,
     BoxedBool,
@@ -319,6 +321,8 @@ class CompiledFxGraph(OutputCode):
     fx_kwargs: _CompileFxKwargs
     inputs_to_check: Sequence[int]
     boxed_forward_device_index: Optional[BoxedDeviceIndex]
+    compiled_triton_kernels: Optional[dict[str, CachingAutotuner]]
+
 
     _boxed_call: Optional[bool] = None
     _triton_bundle: Optional[list[TritonKernelArtifacts]] = None
@@ -525,6 +529,12 @@ class CompiledFxGraph(OutputCode):
             PyCodeCache,
             write_atomic,
         )
+
+        with dynamo_timed("load_compiled_kernels"):
+            if self.compiled_triton_kernels is not None:
+                log.warn("Loading %d triton kernels", len(self.compiled_triton_kernels))
+                torch._inductor.async_compile.CompiledTritonKernels._cache.update(self.compiled_triton_kernels)
+
 
         # See _save_graph(); we don't store the callable in the cache entry so
         # recreate it here from the PyCodeCache disk cache.
