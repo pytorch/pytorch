@@ -119,12 +119,12 @@ jobs:
       - name: Bootstrap Python
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_python.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_python.bat"
 
       - name: Parse ref
         id: parse-ref
         shell: bash
-        run: python pytorch/.github/scripts/parse_ref.py
+        run: python .github/scripts/parse_ref.py
 
       - name: Get workflow job id
         id: get-job-id
