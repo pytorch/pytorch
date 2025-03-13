@@ -10,7 +10,7 @@ boto3==1.35.42
 #Pinned versions: 1.19.12, 1.16.34
 #test that import:
 
-click==8.1.7
+click==8.1.8
 #Description: Command Line Interface Creation Kit
 #Pinned versions:
 #test that import:
