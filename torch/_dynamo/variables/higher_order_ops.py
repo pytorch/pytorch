@@ -1637,11 +1637,6 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             tx, combine_gm, pytree.tree_leaves(proxy_vars_inputcheck), "Combine_fn"
         )
 
-        if combine_result.python_type() != list:
-            unimplemented(
-                f"Expected combine_fn to return a list if tensor but got {combine_result.python_type()}",
-            )
-
         # Check whether the carries produced by combine_fn has the same treespec as the init
         # We need to have this check this way, because in case init is a TreeSpec and carry
         # but carry is only a LeafSpec, these two cannot be compared correctly.
