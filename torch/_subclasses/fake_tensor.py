@@ -158,7 +158,7 @@ def unset_fake_temporarily() -> Generator[Optional[TorchDispatchMode], None, Non
 
 @contextlib.contextmanager
 def disable_fake_tensor_cache(fake_mode: FakeTensorMode) -> Generator[None, None, None]:
-    old_value = fake_mode.cache_enabled
+    old_value: bool = fake_mode.cache_enabled
     try:
         fake_mode.cache_enabled = False
         yield
@@ -1497,6 +1497,8 @@ class FakeTensorMode(TorchDispatchMode):
         convert FakeTensors into metadata. Raises _BypassDispatchCache to signal
         unsupported cases that should bypass caching.
         """
+        from torch._higher_order_ops.utils import FunctionalizeWrapper
+
         if isinstance(args, dict):
             self._prep_args_for_hash(result, args.keys(), state)
             self._prep_args_for_hash(result, args.values(), state)
@@ -1531,6 +1533,8 @@ class FakeTensorMode(TorchDispatchMode):
                 # us to cache fake outputs
                 result.append(type(arg))
                 result.append(id(arg))
+            elif isinstance(arg, FunctionalizeWrapper):
+                result.append(hash(arg))
             else:
                 # It's important to capture the type of the arg since, e.g., 1 and 1.0
                 # hash to the same value, but can produce different dtypes for the
@@ -2180,7 +2184,8 @@ class FakeTensorMode(TorchDispatchMode):
             isinstance(func, torch._ops.HigherOrderOperator)
             and func in registered_hop_fake_fns
         ):
-            return registered_hop_fake_fns[func](*args, **kwargs)
+            with self:
+                return registered_hop_fake_fns[func](*args, **kwargs)
 
         self.invalidate_written_to_constants(func, flat_arg_fake_tensors, args, kwargs)
 

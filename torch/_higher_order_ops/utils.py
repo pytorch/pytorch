@@ -675,3 +675,15 @@ def register_hop_fake(op, fn=None):
     if fn is None:
         return register
     return register(fn)
+
+
+class FunctionalizeWrapper:
+    def __init__(self, ctx, subgraph):
+        self.ctx = ctx
+        self.subgraph = subgraph
+
+    def __hash__(self):
+        return id(self.subgraph)
+
+    def __call__(self, *args, **kwargs):
+        return self.ctx.functionalize(self.subgraph)(*args, **kwargs)
