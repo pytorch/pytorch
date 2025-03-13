@@ -4654,7 +4654,7 @@ def barrier(
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op
-        device_ids ([int], optional): List of device/GPU ids.
+        device_ids ([int], optional): List of device/GPU ids. Only one id is expected.
 
     Returns:
         Async work handle, if async_op is set to True.
@@ -4662,22 +4662,35 @@ def barrier(
 
     .. note:: `ProcessGroupNCCL` now blocks the cpu thread till the completion of the barrier collective.
     """
+    group = group or _get_default_group()
+
     if _rank_not_in_group(group):
         _warn_not_in_group("barrier")
         return
 
     opts = BarrierOptions()
-    opts.device = torch.device(_get_object_coll_device(group))
     opts.asyncOp = async_op
-    if device_ids is not None:
-        if isinstance(device_ids, list):
-            opts.device_ids = device_ids
-        else:
-            raise TypeError(
-                "Invalid function argument: device_ids type should be List[int]"
-            )
+    # Detect the accelerator on the machine. If no accelerator is available, it
+    # returns CPU.
+    device = torch._C._get_accelerator()
+    if isinstance(device_ids, list):
+        opts.device_ids = device_ids
+        # use only the first device id
+        opts.device = torch.device(device.type, device_ids[0])
+    elif group.bound_device_id is not None:
+        # Use device id from `init_process_group(device_id=...)`
+        opts.device = group.bound_device_id
+    elif device.type == "cpu" or get_backend(group) == Backend.GLOO:
+        opts.device = torch.device("cpu")
+    else:
+        # Use the current device set by the user. If user did not set any, this
+        # may use default device 0, causing issues like hang or all processes
+        # creating context on device 0.
+        opts.device = device
+        warnings.warn(  # warn only once
+            "No device id is provided via `init_process_group` or `barrier `. Using the current device set by the user. "
+        )
 
-    group = group or _get_default_group()
     work = group.barrier(opts=opts)
 
     if async_op:
