@@ -62,6 +62,7 @@ class BinaryBuildWorkflow:
     cross_compile_arm64: bool = False
     macos_runner: str = "macos-14-xlarge"
     use_split_build: bool = False
+    use_sequential: bool = False
 
     def __post_init__(self) -> None:
         if self.abi_version:
@@ -155,6 +156,7 @@ LINUX_BINARY_SMOKE_WORKFLOWS = [
             arches=["11.8", "12.6", "12.8"],
             python_versions=["3.9"],
         ),
+        use_sequential=True,
         branches="main",
     ),
     # See https://github.com/pytorch/pytorch/issues/138750
