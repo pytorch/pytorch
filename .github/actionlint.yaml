@@ -1,5 +1,7 @@
 self-hosted-runner:
   labels:
+    # GitHub hosted runner that actionlint doesn't recognize because actionlint version (1.6.21) is too old
+    - ubuntu-24.04
     # GitHub hosted x86 Linux runners
     - linux.20_04.4x
     - linux.20_04.16x
@@ -10,7 +12,6 @@ self-hosted-runner:
     - linux.9xlarge.ephemeral
     - am2.linux.9xlarge.ephemeral
     - linux.12xlarge
-    - linux.12xlarge.ephemeral
     - linux.24xlarge
     - linux.24xlarge.ephemeral
     - linux.arm64.2xlarge
@@ -42,6 +43,8 @@ self-hosted-runner:
     - windows.8xlarge.nvidia.gpu
     - windows.8xlarge.nvidia.gpu.nonephemeral
     - windows.g5.4xlarge.nvidia.gpu
+    # Windows ARM64 runners
+    - windows-11-arm64
     # Organization-wide AMD hosted runners
     - linux.rocm.gpu
     - linux.rocm.gpu.2

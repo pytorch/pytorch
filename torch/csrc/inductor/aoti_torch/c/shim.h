@@ -143,6 +143,9 @@ AOTI_TORCH_EXPORT int32_t aoti_torch_memory_format_channels_last();
 AOTI_TORCH_EXPORT int32_t aoti_torch_memory_format_channels_last_3d();
 AOTI_TORCH_EXPORT int32_t aoti_torch_memory_format_preserve_format();
 
+// Get TORCH_ABI_VERSION of the built libtorch.so
+AOTI_TORCH_EXPORT uint64_t aoti_torch_abi_version();
+
 // Functions for converting a single-element tensor to a scalar value
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_item_float16(AtenTensorHandle tensor, c10::Half* ret_value);
@@ -268,6 +271,10 @@ aoti_torch_get_device_index(AtenTensorHandle tensor, int32_t* ret_device_index);
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_storage_offset(
     AtenTensorHandle tensor,
     int64_t* ret_storage_offset);
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_new_tensor_handle(
+    AtenTensorHandle orig_handle,
+    AtenTensorHandle* new_handle);
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch__alloc_from_pool(
     AtenTensorHandle self,
@@ -619,6 +626,66 @@ AOTI_TORCH_EXPORT void aoti_torch_save_tensor_handle(
     const char* launch_prefix,
     const char* kernel_name);
 
+// helpers for converting between StableIValue and actual IValues
+using StableIValue = uint64_t;
+
+class TorchLibraryOpaque;
+using TorchLibraryHandle = TorchLibraryOpaque*;
+
+// stable corollary to torch::Library constructor with Kind::IMPL
+// will create a new torch::Library object on the heap
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_library_init_impl(
+    const char* ns,
+    const char* k,
+    const char* file,
+    uint32_t line,
+    TorchLibraryHandle* ret_new_torch_lib);
+
+// stable corollary to torch::Library constructor with Kind::DEF
+// will create a new torch::Library object on the heap
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_library_init_def(
+    const char* ns,
+    const char* file,
+    uint32_t line,
+    TorchLibraryHandle* ret_new_torch_lib);
+
+// stable corollary to torch::Library constructor with Kind::FRAGMENT
+// will create a new torch::Library object on the heap
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_library_init_fragment(
+    const char* ns,
+    const char* file,
+    uint32_t line,
+    TorchLibraryHandle* ret_new_torch_lib);
+
+// stable corollary to torch::Library method m.impl(), should be
+// called from StableLibrary
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_library_impl(
+    TorchLibraryHandle self,
+    const char* name,
+    void (*fn)(StableIValue*, uint64_t, uint64_t));
+
+// stable corollary to torch::Library method m.def(), should be
+// called from StableLibrary
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_library_def(TorchLibraryHandle self, const char* schema);
+
+// the above stable constructors for torch::Library add Library objects
+// to the heap. if you are calling those functions directly, please use
+// this function to free the Library's memory. The more user friendly
+// alternative is to use StableLibrary, which will free its handle upon
+// destruction
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_delete_library_object(TorchLibraryHandle tlh);
+
+// calls the op overload defined by a given opName, overloadName, and a
+// stack of StableIValues. This call will populate any return values of the
+// op into the stack in their StableIValue form, with ret0 at index 0, ret1
+// at index 1, and so on.
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_call_dispatcher(
+    const char* opName,
+    const char* overloadName,
+    StableIValue* stack);
+
 #ifdef USE_CUDA
 
 struct CUDAGuardOpaque;
@@ -734,5 +801,4 @@ DEFINE_DTYPE_SPECIALIZATION(int64_t, int64)
 DEFINE_DTYPE_SPECIALIZATION(bool, bool)
 
 #endif
-
 #endif // AOTI_TORCH_SHIM

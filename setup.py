@@ -219,7 +219,7 @@
 #      Builds libtorch.so and its dependencies as a wheel
 #
 #   BUILD_PYTHON_ONLY
-#      Builds pytorch as a wheel using libtorch.so from a seperate wheel
+#      Builds pytorch as a wheel using libtorch.so from a separate wheel
 
 import os
 import sys
@@ -419,16 +419,16 @@ def check_submodules():
     # If none of the submodule folders exists, try to initialize them
     if all(not_exists_or_empty(folder) for folder in folders):
         try:
-            print(" --- Trying to initialize submodules")
+            report(" --- Trying to initialize submodules")
             start = time.time()
             subprocess.check_call(
                 ["git", "submodule", "update", "--init", "--recursive"], cwd=cwd
             )
             end = time.time()
-            print(f" --- Submodule initialization took {end - start:.2f} sec")
+            report(f" --- Submodule initialization took {end - start:.2f} sec")
         except Exception:
-            print(" --- Submodule initalization failed")
-            print("Please run:\n\tgit submodule update --init --recursive")
+            report(" --- Submodule initalization failed")
+            report("Please run:\n\tgit submodule update --init --recursive")
             sys.exit(1)
     for folder in folders:
         check_for_files(
@@ -484,7 +484,6 @@ def mirror_files_into_torchgen():
 # all the work we need to do _before_ setup runs
 def build_deps():
     report("-- Building version " + version)
-
     check_submodules()
     check_pydep("yaml", "pyyaml")
     build_python = not BUILD_LIBTORCH_WHL
@@ -1121,7 +1120,7 @@ def main():
         "filelock",
         "typing-extensions>=4.10.0",
         'setuptools ; python_version >= "3.12"',
-        'sympy==1.13.1 ; python_version >= "3.9"',
+        "sympy>=1.13.3",
         "networkx",
         "jinja2",
         "fsspec",
@@ -1275,6 +1274,7 @@ def main():
         "include/c10/xpu/impl/*.h",
         "include/torch/*.h",
         "include/torch/csrc/*.h",
+        "include/torch/csrc/stable/*.h",
         "include/torch/csrc/api/include/torch/*.h",
         "include/torch/csrc/api/include/torch/data/*.h",
         "include/torch/csrc/api/include/torch/data/dataloader/*.h",
@@ -1364,6 +1364,7 @@ def main():
         "include/sleef.h",
         "_inductor/codegen/*.h",
         "_inductor/codegen/aoti_runtime/*.cpp",
+        "_inductor/script.ld",
         "_export/serde/*.yaml",
         "_export/serde/*.thrift",
         "share/cmake/ATen/*.cmake",
@@ -1455,8 +1456,7 @@ def main():
         name=package_name,
         version=version,
         description=(
-            "Tensors and Dynamic neural networks in "
-            "Python with strong GPU acceleration"
+            "Tensors and Dynamic neural networks in Python with strong GPU acceleration"
         ),
         long_description=long_description,
         long_description_content_type="text/markdown",

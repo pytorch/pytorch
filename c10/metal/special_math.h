@@ -1,5 +1,6 @@
 // Implementation of specal math functions for Metal
 #pragma once
+#include <c10/metal/utils.h>
 #include <metal_stdlib>
 
 namespace c10 {
@@ -452,18 +453,18 @@ inline float digamma(T0 x) {
 }
 
 template <typename T>
-inline T sinc(T a) {
+inline ::metal::enable_if_t<is_scalar_floating_point_v<T>, T> sinc(T a) {
   if (a == static_cast<T>(0)) {
     return static_cast<T>(1);
   }
-  constexpr T pi = static_cast<T>(M_PI_F);
-  T product = pi * a;
-  return static_cast<T>(::metal::sin(product) / product);
+  auto product = M_PI_F * static_cast<float>(a);
+  return static_cast<T>(::metal::precise::sin(product) / product);
 }
 
 // Complex sinc2 implementation
-inline float2 sinc(float2 inp) {
-  float2 a = inp * M_PI_F;
+template <typename T>
+inline ::metal::enable_if_t<is_complex_v<T>, T> sinc(T inp) {
+  auto a = static_cast<float2>(inp) * M_PI_F;
   const float a2 = a.x * a.x + a.y * a.y;
   if (a2 == 0) {
     return 0;
@@ -474,7 +475,77 @@ inline float2 sinc(float2 inp) {
   float coshy = ::metal::cosh(a.y);
   auto re = sinx * coshy * a.x + cosx * sinhy * a.y;
   auto im = cosx * sinhy * a.x - sinx * coshy * a.y;
-  return float2(re, im) / a2;
+  return T(re, im) / a2;
+}
+
+template <typename T>
+inline T spherical_bessel_j0(T x) {
+  if (::metal::isinf(x))
+    return T(0.0);
+  T x2 = x * x;
+  T k1 = static_cast<T>(-1.0);
+  T k2 = static_cast<T>(1.0);
+
+  if (::metal::fabs(static_cast<T>(x)) < T(0.5)) {
+    return T(1.0) +
+        x2 *
+        (k1 / T(6.0) +
+         x2 *
+             (k2 / T(120.0) +
+              x2 *
+                  (k1 / T(5040.0) +
+                   x2 *
+                       (k2 / T(362880.0) +
+                        x2 *
+                            (k1 / T(39916800.0) +
+                             x2 * (k2 / T(6227020800.0)))))));
+  }
+
+  return static_cast<T>(::metal::sin(x) / x);
+}
+
+// Compute log(1+x) without losing precision for small values of x
+// Adapted from https://www.johndcook.com/blog/cpp_log_one_plus_x/
+template <typename T>
+inline float log1p(T x) {
+  // x is large enough that the obvious evaluation is OK
+  if (::metal::fabs(x) > 1E-4) {
+    return ::metal::log(1. + x);
+  }
+
+  // Use Taylor approx. log(1 + x) = x - x^2/2 with error roughly x^3/3
+  // Since |x| < 10^-4, |x|^3 < 10^-12, relative error less than 10^-8
+  return (-0.5 * x + 1.0) * x;
+}
+
+template <typename T>
+inline float xlog1py(T x, T y) {
+  if (::metal::isnan(y)) {
+    return NAN;
+  }
+
+  if (x == 0) {
+    return x;
+  }
+
+  return x * log1p(y);
+}
+
+template <typename T>
+inline T entr(T a) {
+  if (a != a) {
+    return a;
+  }
+
+  if (a > 0) {
+    return static_cast<T>(-a * ::metal::log(a));
+  }
+
+  if (a == 0) {
+    return 0;
+  }
+
+  return static_cast<T>(-INFINITY);
 }
 
 } // namespace metal

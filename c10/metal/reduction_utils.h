@@ -30,6 +30,18 @@ opmath_t<T> threadgroup_prod(threadgroup T* data, unsigned size) {
 }
 
 template <typename T>
+float2 threadgroup_welford_reduce(threadgroup T* data, unsigned size) {
+  float m = data[0];
+  float m2 = 0;
+  for (unsigned idx = 1; idx < size; ++idx) {
+    float delta = data[idx] - m;
+    m += delta / (idx + 1);
+    m2 += delta * (data[idx] - m);
+  }
+  return float2(m, m2);
+}
+
+template <typename T>
 T threadgroup_max(threadgroup T* data, unsigned size) {
   // TODO: This should be moved to the callee
   ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
@@ -52,11 +64,11 @@ T threadgroup_min(threadgroup T* data, unsigned size) {
 }
 
 template <typename T>
-long threadgroup_argmax(threadgroup T* data, unsigned size) {
+int threadgroup_argmax(threadgroup T* data, unsigned size) {
   // TODO: This should be moved to the callee
   ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
-  long rc = 0;
-  for (unsigned idx = 1; idx < size; ++idx) {
+  int rc = 0;
+  for (int idx = 1; idx < size; ++idx) {
     if (data[idx] > data[rc]) {
       rc = idx;
     }
@@ -65,11 +77,11 @@ long threadgroup_argmax(threadgroup T* data, unsigned size) {
 }
 
 template <typename T>
-T threadgroup_argmin(threadgroup T* data, unsigned size) {
+int threadgroup_argmin(threadgroup T* data, unsigned size) {
   // TODO: This should be moved to the callee
   ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
-  long rc = 0;
-  for (unsigned idx = 1; idx < size; ++idx) {
+  int rc = 0;
+  for (int idx = 1; idx < size; ++idx) {
     if (data[idx] < data[rc]) {
       rc = idx;
     }

@@ -7,11 +7,12 @@ import itertools
 import logging
 import math
 import operator
+import sys
 import types
 import typing
 from collections import defaultdict, OrderedDict
-from collections.abc import KeysView
-from typing import Callable, Sequence, TYPE_CHECKING, Union
+from collections.abc import KeysView, Sequence
+from typing import Callable, TYPE_CHECKING, Union
 
 import torch
 from torch import sym_float, sym_int
@@ -21,7 +22,9 @@ from .. import config, polyfills, variables
 from ..exc import (
     AttributeMutationError,
     ObservedAttributeError,
+    raise_observed_exception,
     unimplemented,
+    unimplemented_v2,
     Unsupported,
     UserError,
     UserErrorType,
@@ -49,6 +52,7 @@ from ..utils import (
     istype,
     numpy_operator_wrapper,
     proxy_args_kwargs,
+    str_methods,
     tensortype_to_dtype,
 )
 from .base import ValueMutationNew, VariableTracker
@@ -120,8 +124,13 @@ polyfill_fn_mapping = {
 
 class BuiltinVariable(VariableTracker):
     """
-    A VariableTracker that represents a built-in value. A lot of the code
-    here assumes it will be a function object.
+    A VariableTracker that represents a built-in value (functions and operators).
+    A lot of the code here assumes it will be a function object.
+
+    The BuiltinVariable class wraps Python built-in functions (like len, isinstance, etc.)
+    and operators (like +, -, *, etc.) to enable symbolic execution during tracing. This allows
+    Dynamo to properly handle these operations when converting Python code to FX graphs while
+    maintaining correct semantics and enabling optimizations.
     """
 
     _SENTINEL = object()
@@ -253,9 +262,9 @@ class BuiltinVariable(VariableTracker):
 
     @staticmethod
     @functools.lru_cache(None)
-    def _binops() -> (
-        dict[Callable[..., object], tuple[list[str], Callable[..., object]]]
-    ):
+    def _binops() -> dict[
+        Callable[..., object], tuple[list[str], Callable[..., object]]
+    ]:
         # function -> ([forward name, reverse name, in-place name], in-place op)
         fns: dict[Callable[..., object], tuple[list[str], Callable[..., object]]] = {
             operator.add: (["__add__", "__radd__", "__iadd__"], operator.iadd),
@@ -660,6 +669,14 @@ class BuiltinVariable(VariableTracker):
                     # and True for `is` and `is not`, respectively
                     if type(left) is not type(right):
                         return ConstantVariable.create(op.__name__ != "is_")
+                    if left is right:
+                        return ConstantVariable.create(op(left, right))
+                    if (
+                        istype(left, variables.ExceptionVariable)
+                        and istype(right, variables.ExceptionVariable)
+                        and left.exc_type is not right.exc_type
+                    ):
+                        return ConstantVariable.create(op(left, right))
 
                 result.append(((VariableTracker, VariableTracker), handle_is))
 
@@ -773,7 +790,13 @@ class BuiltinVariable(VariableTracker):
                 tx, [v.realize() for v in args], kwargs
             )
 
-        if inspect.isclass(fn) and issubclass(fn, Exception):
+        if inspect.isclass(fn) and (
+            issubclass(fn, Exception)
+            # GeneratorExit doens't inherit from Exception
+            # >>> issubclass(GeneratorExit, Exception)
+            # False
+            or fn is GeneratorExit
+        ):
 
             def create_exception_class_object(
                 tx: "InstructionTranslator", args, kwargs
@@ -888,9 +911,24 @@ class BuiltinVariable(VariableTracker):
 
             handlers.append(constant_fold_handler)
 
-        error_msg = f"builtin: {fn.__name__} {arg_types} {has_kwargs}"
+        def call_unimplemented_v2(args):
+            real_arg_types = [arg.python_type_name() for arg in args]
+            unimplemented_v2(
+                gb_type="Failed to trace builtin operator",
+                context=f"builtin {fn.__name__} {arg_types} {has_kwargs}",
+                explanation=f"Dynamo does not know how to trace builtin operator `{fn.__name__}` "
+                f"with argument types {real_arg_types} (has_kwargs {has_kwargs})",
+                hints=[
+                    f"Avoid calling builtin `{fn.__name__}` with argument types {real_arg_types}. "
+                    f"Consider using an equivalent alternative function/method to `{fn.__name__}`.",
+                    "If you are attempting to call a logging function (e.g. `print`), "
+                    "you can try adding it to `torch._dynamo.config.reorderable_logging_functions`.",
+                    "Please report an issue to PyTorch.",
+                ],
+            )
+
         if len(handlers) == 0:
-            return lambda *args: unimplemented(error_msg)
+            return lambda tx, args, kwargs: call_unimplemented_v2(args)
         elif len(handlers) == 1:
             (handler,) = handlers
 
@@ -898,7 +936,7 @@ class BuiltinVariable(VariableTracker):
                 rv = handler(tx, args, kwargs)
                 if rv:
                     return rv
-                unimplemented(error_msg)
+                call_unimplemented_v2(args)
 
         else:
 
@@ -907,7 +945,7 @@ class BuiltinVariable(VariableTracker):
                     rv = fn(tx, args, kwargs)
                     if rv:
                         return rv
-                unimplemented(error_msg)
+                call_unimplemented_v2(args)
 
         return builtin_dispatch
 
@@ -976,11 +1014,14 @@ class BuiltinVariable(VariableTracker):
                 # Standard indexing will force specialization due to
                 # __index__.  Rewrite as a regular torch op which will
                 # trace fine
-                fn, args = torch.select, [
-                    args[0],
-                    variables.ConstantVariable.create(0),
-                    args[1],
-                ]
+                fn, args = (
+                    torch.select,
+                    [
+                        args[0],
+                        variables.ConstantVariable.create(0),
+                        args[1],
+                    ],
+                )
 
             # Interaction between ndarray and tensors:
             #   We prefer the tensor op whenever there are tensors involved
@@ -1087,42 +1128,30 @@ class BuiltinVariable(VariableTracker):
                 and name_var.is_python_constant()
             ):
                 return obj.method_setattr_standard(tx, name_var, val)
-        if self.fn is object and name == "__new__":
-            assert len(args) == 1
-            assert len(kwargs) == 0
-            return tx.output.side_effects.track_object_new_from_user_defined_class(
-                args[0]
-            )
-        if self.fn is object and name == "__init__":
-            # object.__init__ is a no-op
-            return variables.ConstantVariable(None)
-        if self.fn is dict and name == "__new__":
-            assert len(args) == 1
-            assert len(kwargs) == 0
-            dict_vt = ConstDictVariable({}, dict, mutation_type=ValueMutationNew())
-            if isinstance(args[0], BuiltinVariable) and args[0].fn is dict:
-                return dict_vt
-            # We don't have to set the underlying dict_vt in
-            # UserDefinedDictVariable because it will be set to empty
-            # ConstDictVariableTracker in the constructor.
-            return tx.output.side_effects.track_object_new_from_user_defined_class(
-                args[0]
-            )
-        if self.fn is dict and name == "fromkeys":
-            return BuiltinVariable.call_custom_dict_fromkeys(tx, dict, *args, **kwargs)
 
-        if self.fn is dict:
-            resolved_fn = getattr(self.fn, name)
-            if resolved_fn in dict_methods:
-                if isinstance(args[0], variables.UserDefinedDictVariable):
-                    return args[0]._dict_vt.call_method(tx, name, args[1:], kwargs)
-                elif isinstance(args[0], variables.ConstDictVariable):
-                    return args[0].call_method(tx, name, args[1:], kwargs)
+        if name == "__new__":
+            # Supported __new__ methods
+            if self.fn is object and len(args) == 1:
+                assert len(kwargs) == 0
+                return tx.output.side_effects.track_new_user_defined_object(
+                    self, args[0], args[1:]
+                )
 
-        if self.fn is tuple:
-            resolved_fn = getattr(self.fn, name)
+            if self.fn is dict and len(args) == 1 and not kwargs:
+                dict_vt = ConstDictVariable({}, dict, mutation_type=ValueMutationNew())
+                if isinstance(args[0], BuiltinVariable) and args[0].fn is dict:
+                    return dict_vt
+                # We don't have to set the underlying dict_vt in
+                # UserDefinedDictVariable because it will be set to empty
+                # ConstDictVariableTracker in the constructor.
+                return tx.output.side_effects.track_new_user_defined_object(
+                    self,
+                    args[0],
+                    args[1:],
+                )
+
             if (
-                resolved_fn is tuple.__new__
+                self.fn is tuple
                 and len(args) == 2
                 and args[1].has_unpack_var_sequence(tx)
                 and not kwargs
@@ -1134,19 +1163,44 @@ class BuiltinVariable(VariableTracker):
                 if isinstance(args[0], BuiltinVariable) and args[0].fn is tuple:
                     return tuple_vt
 
-                result = (
-                    tx.output.side_effects.track_object_new_from_user_defined_class(
-                        args[0]
-                    )
+                result = tx.output.side_effects.track_new_user_defined_object(
+                    self,
+                    args[0],
+                    args[1:],
                 )
-                # side_effects data structure does not support methods like
-                # tuple.__new__ that uses *args parameters for the __new__
-                # method. Therefore, we manage the *args related functionality
-                # here. For other datastructures, this is done in the __init__
-                # method.
-                result.set_new_args(args[1])
                 result.set_underlying_tuple_vt(tuple_vt)
                 return result
+
+            if self.fn is list:
+                list_vt = ListVariable([], mutation_type=ValueMutationNew())
+                if isinstance(args[0], BuiltinVariable) and args[0].fn is list:
+                    return list_vt
+                return tx.output.side_effects.track_new_user_defined_object(
+                    self,
+                    args[0],
+                    args[1:],
+                )
+
+        if self.fn is object and name == "__init__":
+            # object.__init__ is a no-op
+            return variables.ConstantVariable(None)
+
+        if self.fn is dict and name == "fromkeys":
+            return BuiltinVariable.call_custom_dict_fromkeys(tx, dict, *args, **kwargs)
+
+        if self.fn is dict:
+            resolved_fn = getattr(self.fn, name)
+            if resolved_fn in dict_methods:
+                if isinstance(args[0], variables.UserDefinedDictVariable):
+                    return args[0]._dict_vt.call_method(tx, name, args[1:], kwargs)
+                elif isinstance(args[0], variables.ConstDictVariable):
+                    return args[0].call_method(tx, name, args[1:], kwargs)
+
+        if self.fn is str and len(args) >= 1:
+            resolved_fn = getattr(self.fn, name)
+            if resolved_fn in str_methods:
+                if isinstance(args[0], ConstantVariable):
+                    return args[0].call_method(tx, name, args[1:], kwargs)
 
         return super().call_method(tx, name, args, kwargs)
 
@@ -1425,6 +1479,13 @@ class BuiltinVariable(VariableTracker):
                 mutation_type=ValueMutationNew(),
             )
 
+    def _call_iter_tuple_generator(self, tx, obj, *args, **kwargs):
+        cls = variables.BaseListVariable.cls_for(self.fn)
+        return cls(
+            list(obj.force_unpack_var_sequence(tx)),  # exhaust generator
+            mutation_type=ValueMutationNew(),
+        )
+
     def _call_tuple_list(self, tx, obj=None, *args, **kwargs):
         if isinstance(obj, variables.IteratorVariable):
             cls = variables.BaseListVariable.cls_for(self.fn)
@@ -1432,6 +1493,8 @@ class BuiltinVariable(VariableTracker):
                 list(obj.force_unpack_var_sequence(tx)),
                 mutation_type=ValueMutationNew(),
             )
+        elif isinstance(obj, variables.LocalGeneratorObjectVariable):
+            return self._call_iter_tuple_generator(tx, obj, *args, **kwargs)
         else:
             return self._call_iter_tuple_list(tx, obj, *args, **kwargs)
 
@@ -1646,10 +1709,41 @@ class BuiltinVariable(VariableTracker):
                 isinstance_type.__class__.__instancecheck__(isinstance_type, arg.value)
             )
 
+        isinstance_type_tuple: tuple[type, ...]
+        if isinstance(isinstance_type, type) or callable(
+            # E.g. isinstance(obj, typing.Sequence)
+            getattr(isinstance_type, "__instancecheck__", None)
+        ):
+            isinstance_type_tuple = (isinstance_type,)
+        elif sys.version_info >= (3, 10) and isinstance(
+            isinstance_type, types.UnionType
+        ):
+            isinstance_type_tuple = isinstance_type.__args__
+        elif isinstance(isinstance_type, tuple) and all(
+            isinstance(tp, type) or callable(getattr(tp, "__instancecheck__", None))
+            for tp in isinstance_type
+        ):
+            isinstance_type_tuple = isinstance_type
+        else:
+            raise_observed_exception(
+                TypeError,
+                tx,
+                args=[
+                    "isinstance() arg 2 must be a type, a tuple of types, or a union"
+                ],
+            )
+
         try:
-            val = issubclass(arg_type, isinstance_type)
+            # NB: `isinstance()` does not call `__subclasscheck__` but use `__instancecheck__`.
+            # But usually `isinstance(obj, type_info)` and `issubclass(type(obj), type_info)` gives
+            # the same result.
+            # WARNING: This might run arbitrary user code `__subclasscheck__` and we did not trace
+            # through it. This is a limitation of the current implementation.
+            # Usually `__subclasscheck__` and `__instancecheck__` can be constant fold through, it
+            # might not be a big issue and we trade off it for performance.
+            val = issubclass(arg_type, isinstance_type_tuple)
         except TypeError:
-            val = arg_type is isinstance_type
+            val = arg_type in isinstance_type_tuple
         return variables.ConstantVariable.create(val)
 
     def call_issubclass(self, tx: "InstructionTranslator", left_ty, right_ty):
@@ -1662,6 +1756,8 @@ class BuiltinVariable(VariableTracker):
                 f"call_issubclass args not constant left_ty: {left_ty}, right_ty: {right_ty}"
             )
 
+        # WARNING: This might run arbitrary user code `__subclasscheck__`.
+        # See the comment in call_isinstance above.
         return variables.ConstantVariable(issubclass(left_ty_py, right_ty_py))
 
     def call_super(self, tx: "InstructionTranslator", a, b):
@@ -1815,6 +1911,7 @@ class BuiltinVariable(VariableTracker):
                 variables.PlacementVariable,
                 variables.NamedTupleVariable,
                 variables.UserDefinedObjectVariable,
+                variables.ExceptionVariable,
             ),
         ):
             return obj.call_method(tx, "__setattr__", [name_var, val], {})
@@ -2061,6 +2158,10 @@ class BuiltinVariable(VariableTracker):
 
         if op not in supported_tensor_comparison_op_values:
             unimplemented(f"{op.__name__}({left}, {right})")
+
+        # This is seen in inspect signature where we check if the value is a default value
+        if isinstance(right, variables.UserDefinedClassVariable):
+            return variables.ConstantVariable(op(object(), None))
 
         proxy = tx.output.create_proxy(
             "call_function", op, (left.as_proxy(), right.as_proxy()), {}

@@ -67,7 +67,7 @@ def _all_gather_sharded_tensor(
 
 
 class CompanionMismatch(Exception):
-    ...
+    pass
 
 
 def _iterate_state_dict(
@@ -182,8 +182,13 @@ def _iterate_state_dict(
                 ret = ret.to(cpu_device)
 
             if companion_obj is not None:
-                # TODO: support DTensor
-                companion_obj.copy_(ret, non_blocking=non_blocking)
+                if isinstance(companion_obj, DTensor):
+                    assert isinstance(ret, DTensor)
+                    companion_obj._local_tensor.copy_(
+                        ret._local_tensor, non_blocking=non_blocking
+                    )
+                else:
+                    companion_obj.copy_(ret, non_blocking=non_blocking)
                 ret = companion_obj
     else:
         ret = {} if isinstance(ret, dict) else None
@@ -319,6 +324,7 @@ def _offload_state_dict_to_cpu(
     return ret
 
 
+@torch.no_grad()
 def _copy_state_dict(
     state_dict: dict[str, Any],
     copy_state_dict: dict[str, Any],
@@ -368,6 +374,7 @@ def _copy_state_dict(
     )
 
 
+@torch.no_grad()
 def _create_cpu_state_dict(
     state_dict: dict[str, Any], pin_memory: bool = False, share_memory: bool = False
 ) -> dict[str, Any]:
@@ -402,9 +409,9 @@ def _create_cpu_state_dict(
 
                 def unpin_memory(t):
                     succ = int(torch.cuda.cudart().cudaHostUnregister(t.data_ptr()))
-                    assert (
-                        succ == 0
-                    ), f"Unpinning shared memory failed with error-code: {succ}"
+                    assert succ == 0, (
+                        f"Unpinning shared memory failed with error-code: {succ}"
+                    )
 
                 weakref.finalize(t, unpin_memory, t)
                 succ = int(
@@ -414,19 +421,35 @@ def _create_cpu_state_dict(
                         1,  # lines up with 'cudaHostRegisterPortable'
                     )
                 )
-                assert (
-                    succ == 0
-                ), f"Pinning shared memory failed with error-code: {succ}"
+                assert succ == 0, (
+                    f"Pinning shared memory failed with error-code: {succ}"
+                )
             return t
         elif pin_memory:
             return torch.empty(*tuple(obj.size()), dtype=obj.dtype).pin_memory()
         else:
             return torch.empty(*tuple(obj.size()), dtype=obj.dtype)
 
+    def dtensor_func(
+        obj: DTensor,
+        pg: Optional[dist.ProcessGroup],
+        device: Optional[torch.device],
+        _: Any,
+    ) -> DTensor:
+        if len(obj.size()) == 0:
+            return obj
+
+        if obj.device != torch.device("cpu"):
+            ret = cast(DTensor, obj.to(device="cpu"))
+        else:
+            ret = copy.deepcopy(obj)
+        ret._local_tensor = tensor_func(ret._local_tensor, pg, device, None)
+        return ret
+
     ret = _iterate_state_dict(
         state_dict,
         _identity_func,
-        _identity_func,
+        dtensor_func,
         tensor_func,
         pg=None,
         device=None,
@@ -491,35 +514,55 @@ def _broadcast_tensors(
     device: torch.device,
     pg: Optional[dist.ProcessGroup] = None,
 ) -> None:
-    tensors = []
+    if pg is None:
+        pg = dist.distributed_c10d._get_default_group()
+    pg_device = (
+        device
+        if device.type in {pg_device.type for pg_device in pg._device_types}
+        else pg._device_types[0]
+    )
+
+    tensors: list[torch.Tensor] = []
     for key in keys:
         if dist.get_rank() == 0:
             full_state = full_state_dict[key]
             assert isinstance(full_state, torch.Tensor)
-            full_tensor = full_state.detach().to(device)
+            full_tensor = full_state.detach().to(pg_device)
         else:
             tensor_info = full_state_dict[key]
             full_tensor = torch.empty(
                 size=tensor_info.size,
-                device=device,
+                device=pg_device,
                 dtype=tensor_info.dtype,
             )
-        tensors.append(full_tensor)
-        local_state = local_state_dict.get(key, None)
-        if local_state is None:
-            continue
-        elif isinstance(local_state, DTensor):
-            local_state_dict[key] = (local_state, full_tensor)
-        else:
-            local_state_dict[key] = full_tensor
 
-    if pg is None:
-        pg = dist.distributed_c10d._get_default_group()
+        tensors.append(full_tensor)
+
+        if (local_state := local_state_dict.get(key)) is None:
+            continue
+
+        local_state_dict[key] = (
+            (local_state, full_tensor)
+            if isinstance(local_state, DTensor)
+            else full_tensor
+        )
 
     if len(tensors) > 1:
         dist._broadcast_coalesced(pg, tensors, 500, 0)
     else:
         dist.broadcast(tensors[0], src=0, group=pg)
+
+    if pg_device != device:
+        for key, full_tensor in zip(keys, tensors):
+            if (local_state := local_state_dict.get(key)) is not None:
+                local_state_dict[key] = (
+                    (local_state[0], full_tensor.to(device))
+                    if (
+                        isinstance(local_state, tuple)
+                        and isinstance(local_state[0], DTensor)
+                    )
+                    else full_tensor.to(device)
+                )
 
     _distribute_tensors(local_state_dict, keys, device, pg)
 

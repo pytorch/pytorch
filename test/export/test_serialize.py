@@ -21,10 +21,12 @@ import torch.utils._pytree as pytree
 from torch._export.db.case import ExportCase, SupportLevel
 from torch._export.db.examples import all_examples
 from torch._export.serde.serialize import (
+    _to_json_bytes,
     canonicalize,
     deserialize,
     ExportedProgramDeserializer,
     ExportedProgramSerializer,
+    GraphModuleSerializer,
     serialize,
     SerializeError,
 )
@@ -419,6 +421,17 @@ def forward(self, x):
         for v in serialized.exported_program.range_constraints.values():
             self.assertEqual(v.max_val, None)
 
+    def test_symint_list(self):
+        # This reflects the behavior from inductor's ExternFallbackNode
+        shape_env = torch.fx.experimental.symbolic_shapes.ShapeEnv()
+        symint = shape_env.create_unbacked_symint()
+        serializer = GraphModuleSerializer(None, None)  # type: ignore[arg-type]
+        res = serializer.serialize_inputs(
+            torch.ops.aten.ones.default, ([1, symint, 3],), {}
+        )
+        self.assertEqual(len(res), 1)
+        self.assertEqual(res[0].arg._type, "as_sym_ints")
+
     def test_serialize_list_returns(self) -> None:
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -455,6 +468,26 @@ def forward(self, x):
             name = output.name
             self.assertNotIn(name, seen)
             seen.add(name)
+
+    def test_infinity_inputs(self) -> None:
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.aten.add.Scalar(x, math.inf)
+
+        fn = Module()
+        ep = torch.export.export(
+            fn,
+            (torch.randn(3, 2),),
+        )
+        json_bytes = _to_json_bytes(
+            ExportedProgramSerializer().serialize(ep).exported_program
+        )
+        import json
+
+        def parse_constant(x):
+            raise RuntimeError(f"Invalid JSON float: {x}")
+
+        json.loads(json_bytes, parse_constant=parse_constant)
 
     def test_multi_return_some_unused(self) -> None:
         """
@@ -752,6 +785,46 @@ class TestDeserialize(TestCase):
                     return torch.ops.mylib.foo(a, b, c)
 
             self.check_graph(M(), (torch.randn(3), torch.randn(3), torch.randn(3)))
+
+    def test_unbacked_bindings_serialize(self):
+        from torch._export.utils import _get_shape_env_from_gm
+        from torch.utils._sympy.symbol import prefix_str, symbol_is_type, SymT
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                x += 2
+                n = x.item()
+                n = n * 2 + y.item()
+                return n + 2
+
+        inps = (
+            torch.tensor(4),
+            torch.tensor(5),
+        )
+        for _strict in [True, False]:
+            ep = torch.export.export(M(), inps, strict=_strict).run_decompositions()
+
+            # check bindings after deserialization
+            buffer = io.BytesIO()
+            save(ep, buffer)
+            buffer.seek(0)
+            loaded_ep = load(buffer)
+            bound = set()
+            for old_node, new_node in zip(ep.graph.nodes, loaded_ep.graph.nodes):
+                self.assertEqual(
+                    "unbacked_bindings" in old_node.meta,
+                    "unbacked_bindings" in new_node.meta,
+                )
+                bound.update(new_node.meta.get("unbacked_bindings", {}))
+
+            # check ShapeEnv counters
+            shape_env = _get_shape_env_from_gm(loaded_ep.graph_module)
+            next_index = next(shape_env.unbacked_symint_counter)
+            for symbol in bound:
+                self.assertTrue(symbol_is_type(symbol, SymT.UNBACKED_INT))
+                self.assertTrue(
+                    int(str(symbol)[len(prefix_str[SymT.UNBACKED_INT]) :]) < next_index
+                )
 
     def test_sym_bool_dynamic_shapes(self) -> None:
         class MyModule(torch.nn.Module):
@@ -1548,6 +1621,46 @@ class TestSerializeCustomClass(TestCase):
         serialized_vals = serialize(ep)
         ep = deserialize(serialized_vals)
         self.assertTrue(isinstance(ep.constants["custom_obj"].get(), FakeTensor))
+
+    def test_custom_class_input_to_function(self):
+        class Foo(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
+
+            def forward(self, x):
+                return x + torch.ops._TorchScriptTesting.takes_foo(self.attr, x)
+
+        with FakeTensorMode():
+            f = Foo()
+
+        inputs = (torch.zeros(2, 3),)
+        with enable_torchbind_tracing():
+            ep = export_for_training(f, inputs, strict=False)
+
+        serialized_vals = serialize(ep)
+        ep = deserialize(serialized_vals)
+        self.assertExpectedInline(
+            str(ep.graph_module.code).strip(),
+            """\
+def forward(self, obj_attr, x):
+    takes_foo = torch.ops._TorchScriptTesting.takes_foo.default(obj_attr, x);  obj_attr = None
+    add = torch.ops.aten.add.Tensor(x, takes_foo);  x = takes_foo = None
+    return (add,)""",
+        )
+        self.assertTrue(isinstance(ep.constants["attr"], torch.ScriptObject))
+        gm = ep.module()
+        self.assertExpectedInline(
+            str(gm.code).strip(),
+            """\
+def forward(self, x):
+    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    attr = self.attr
+    takes_foo = torch.ops._TorchScriptTesting.takes_foo.default(attr, x);  attr = None
+    add = torch.ops.aten.add.Tensor(x, takes_foo);  x = takes_foo = None
+    return pytree.tree_unflatten((add,), self._out_spec)""",
+        )
+        self.assertTrue(isinstance(gm.attr, torch.ScriptObject))
 
     def test_custom_tag_metadata_serialization(self):
         class Foo(torch.nn.Module):

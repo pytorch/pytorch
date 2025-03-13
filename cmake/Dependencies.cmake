@@ -540,7 +540,7 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
     set(__caffe2_CMAKE_POSITION_INDEPENDENT_CODE_FLAG ${CMAKE_POSITION_INDEPENDENT_CODE})
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-    if(Win32)
+    if(WIN32)
       # Disable libm dependency explicitly to avoid symbol conflict for XNNPACK as
       # Windows runtime has provided the math functions - #134989
       set(XNNPACK_BUILD_WITH_LIBM OFF CACHE BOOL "")
@@ -864,9 +864,9 @@ if(NOT Python_Interpreter_FOUND)
   message(FATAL_ERROR "Python3 could not be found.")
 endif()
 
-if(${Python_VERSION} VERSION_LESS 3.8)
+if(${Python_VERSION} VERSION_LESS 3.9)
   message(FATAL_ERROR
-    "Found Python libraries version ${Python_VERSION}. Python < 3.8 is no longer supported by PyTorch.")
+    "Found Python libraries version ${Python_VERSION}. Python < 3.9 is no longer supported by PyTorch.")
 endif()
 
 # ---[ Python + Numpy
@@ -1047,9 +1047,6 @@ if(USE_ROCM)
       list(APPEND HIP_CXX_FLAGS -DHIPBLASLT_VEC_EXT)
     endif()
     list(APPEND HIP_HIPCC_FLAGS --offload-compress)
-    if(HIP_NEW_TYPE_ENUMS)
-      list(APPEND HIP_CXX_FLAGS -DHIP_NEW_TYPE_ENUMS)
-    endif()
     if(WIN32)
       add_definitions(-DROCM_ON_WINDOWS)
     endif()
@@ -1081,12 +1078,10 @@ if(USE_ROCM)
 
     set(Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
       hip::amdhip64 MIOpen hiprtc::hiprtc) # libroctx will be linked in with MIOpen
-    if(UNIX)
-      list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS roc::hipblaslt)
-    endif(UNIX)
 
+    # Math libraries
     list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
-      roc::hipblas hip::hipfft hip::hiprand roc::hipsparse roc::hipsolver)
+      roc::hipblas roc::rocblas hip::hipfft hip::hiprand roc::hipsparse roc::hipsolver roc::hipblaslt)
 
     # ---[ Kernel asserts
     # Kernel asserts is disabled for ROCm by default.

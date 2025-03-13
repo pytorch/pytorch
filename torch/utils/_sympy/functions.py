@@ -291,6 +291,11 @@ class FloorDiv(sympy.Function):
 
         return None
 
+    def _ccode(self, printer):
+        base = printer.parenthesize(self.base, PRECEDENCE["Atom"] - 0.5)
+        divisor = printer.parenthesize(self.divisor, PRECEDENCE["Atom"] - 0.5)
+        return f"floor({base}/{divisor})"
+
 
 class ModularIndexing(sympy.Function):
     """
@@ -1285,6 +1290,10 @@ class Identity(sympy.Function):
 
     def _eval_is_integer(self):
         return self.args[0].is_integer  # type: ignore[attr-defined]
+
+    def _eval_expand_identity(self, **hints):
+        # Removes the identity op.
+        return self.args[0]
 
 
 def make_opaque_unary_fn(name):

@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+from collections.abc import Sequence
 from typing import Any, Optional
 
 import sympy
@@ -31,12 +32,12 @@ def _prepare_convolution_fusion_create(
     x: "TensorBox",
     weight: "TensorBox",
     bias: "TensorBox",
-    padding: list[int],
-    stride: list[int],
-    dilation: list[int],
+    padding: Sequence[int],
+    stride: Sequence[int],
+    dilation: Sequence[int],
     groups: int,
     transposed: bool = False,
-    output_padding: Optional[list[int]] = None,
+    output_padding: Optional[Sequence[int]] = None,
     quantize_args: Optional[list["TensorBox"]] = None,
     other: Optional["TensorBox"] = None,
 ):
@@ -227,7 +228,8 @@ def _prepare_linear_fusion_create(
     req_stride_order = list(reversed(range(len(x.get_size()))))
 
     x = cls.require_stride_order(x, req_stride_order)
-    assert get_device_type(x) == "cpu" and get_device_type(weight) == "cpu"
+    assert get_device_type(x) == get_device_type(weight)
+    assert get_device_type(x) in ["cpu", "xpu"]
     inputs = [x]
 
     if quantize_args is not None:
@@ -749,9 +751,9 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             unary_algorithm,
         ]
 
-        assert (
-            binary_attr == "sum"
-        ), "For now, only post op sum is supported in QConvPointWiseBinaryPT2E."
+        assert binary_attr == "sum", (
+            "For now, only post op sum is supported in QConvPointWiseBinaryPT2E."
+        )
 
         V.graph.mark_buffer_mutated(qaccum.get_name())
         packed = QConvPointWiseBinaryPT2E(

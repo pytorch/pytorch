@@ -35,9 +35,9 @@ class MemoryPlanningInfoForBuffer:
 class MemoryPlanningInfoForNode:
     index: int = 0
     size: int = 0
-    pred_buffers: OrderedSet[
-        Union[SchedulerBuffer, FreeableInputBuffer]
-    ] = dataclasses.field(default_factory=OrderedSet)
+    pred_buffers: OrderedSet[Union[SchedulerBuffer, FreeableInputBuffer]] = (
+        dataclasses.field(default_factory=OrderedSet)
+    )
     pred_nodes: OrderedSet[BaseSchedulerNode] = dataclasses.field(
         default_factory=OrderedSet
     )
@@ -87,9 +87,9 @@ def get_freeable_input_buf(
 
     # get freeable input buffers' successor nodes and their sizes
     # note that different deps can have the same name, so we use name as keys
-    dep_name_to_succ_nodes: dict[
-        str, OrderedSet[BaseSchedulerNode]
-    ] = collections.defaultdict(OrderedSet)
+    dep_name_to_succ_nodes: dict[str, OrderedSet[BaseSchedulerNode]] = (
+        collections.defaultdict(OrderedSet)
+    )
     dep_name_to_size: dict[str, int] = dict()
     for node in nodes:
         for dep in node.read_writes.reads:
@@ -112,7 +112,7 @@ def get_freeable_input_buf(
 
 
 def compute_size_for_scheduler_buffer(
-    name_to_buf: dict[str, SchedulerBuffer]
+    name_to_buf: dict[str, SchedulerBuffer],
 ) -> dict[str, tuple[int, int]]:
     """
     Compute the size of each scheduler buffer, including (1) memory allocated when
@@ -187,9 +187,9 @@ def assign_memory_planning_info_for_scheduler_buffers(
 
     # get buffer's successor nodes
     # note that different deps can have the same name, so we use name as keys
-    dep_name_to_succ_nodes: dict[
-        str, OrderedSet[BaseSchedulerNode]
-    ] = collections.defaultdict(OrderedSet)
+    dep_name_to_succ_nodes: dict[str, OrderedSet[BaseSchedulerNode]] = (
+        collections.defaultdict(OrderedSet)
+    )
     for node in nodes:
         for dep in node.unmet_dependencies:
             dep_name_to_succ_nodes[dep.name].add(node)
