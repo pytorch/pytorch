@@ -322,9 +322,7 @@ void gemm(
    const float beta,
    at::BFloat16 *c, int64_t ldc) {
    internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
-#if (defined(__aarch64__) && !AT_MKLDNN_ENABLED()) \
-     && AT_BUILD_WITH_BLAS() && defined(BLAS_HAS_SBGEMM)
-
+#if AT_BUILD_WITH_BLAS() && defined(BLAS_HAS_SBGEMM)
    if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
       int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
       char transa_ = to_blas(transa), transb_ = to_blas(transb);
