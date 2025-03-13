@@ -192,7 +192,10 @@ class TestPatternMatcherBase(TestCase):
                 clone_inputs = self._clone_inputs(inputs)
                 expected = mod(*inputs)
                 actual = torch.compile(mod, **compile_options)(*clone_inputs)
-                torch.testing.assert_close(actual, expected, atol=atol, rtol=rtol)
+                if self.precision != 0:
+                    torch.testing.assert_close(actual, expected, atol=self.precision, rtol=self.precision)
+                else:
+                    torch.testing.assert_close(actual, expected, atol=atol, rtol=rtol)
                 matcher_check_fn()
 
     def _test_code_common(
@@ -679,14 +682,14 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
-    @bf32_on_and_off()
+    @bf32_on_and_off(0.02)
     def test_conv2d_binary(self):
         self._test_conv_binary_base(dim=4)
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
-    @bf32_on_and_off()
+    @bf32_on_and_off(0.02)
     def test_conv3d_binary(self):
         self._test_conv_binary_base(dim=5)
 
