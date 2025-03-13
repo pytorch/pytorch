@@ -71,7 +71,7 @@ try:
     triton_version = TorchVersion(triton.__version__)
     has_triton = True
 except ImportError:
-    triton_version = None
+    triton_version = TorchVersion("0.0.0")
     has_triton = False
 
 log = logging.getLogger(__name__)
