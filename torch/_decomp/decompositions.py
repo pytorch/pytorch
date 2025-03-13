@@ -748,7 +748,7 @@ def slice_forward(
 
     storage_offset = self.storage_offset() + start_val * strides[dim]
     len = end_val - start_val
-    sizes[dim] = -(len // -step)  # round-up, avoiding overflow
+    sizes[dim] = (len + step - 1) // step
     strides[dim] *= step
 
     if self.is_quantized:
@@ -757,23 +757,6 @@ def slice_forward(
         )
     else:
         return self.as_strided(sizes, strides, storage_offset)
-
-
-@register_decomposition([aten.slice_copy.Tensor, aten.slice_copy.Tensor_out])
-def slice_copy(
-    self: Tensor,
-    dim: int = 0,
-    start: Optional[int] = None,
-    end: Optional[int] = None,
-    step: int = 1,
-    out: Optional[Tensor] = None,
-):
-    _slice = slice_forward(self, dim, start, end, step)
-    slice_clone = _slice.clone(memory_format=torch.contiguous_format)
-    if out is None:
-        return slice_clone
-    else:
-        return _safe_copy_out(copy_from=slice_clone, copy_to=out, exact_dtype=True)
 
 
 def _normalize_start_end(
@@ -1508,6 +1491,8 @@ def addmv(self: Tensor, mat1: Tensor, vec: Tensor, beta: int = 1, alpha: int = 1
     out = alpha * torch.mv(mat1, vec)
     if beta == 0:
         return out
+    if out.numel() == 0:  # handle empty matrix
+        return beta * self
     return out + beta * self
 
 

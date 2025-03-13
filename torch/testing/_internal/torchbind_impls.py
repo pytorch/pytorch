@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
+from pathlib import Path
 from typing import Optional
 
 import torch
@@ -113,15 +114,15 @@ def load_torchbind_test_lib():
         IS_WINDOWS,
     )
 
-    if IS_SANDCASTLE or IS_FBCODE:
-        torch.ops.load_library("//caffe2/test/cpp/jit:test_custom_class_registrations")
-    elif IS_MACOS:
+    if IS_MACOS:
         raise unittest.SkipTest("non-portable load_library call used in test")
+    elif IS_SANDCASTLE or IS_FBCODE:
+        lib_file_path = Path("//caffe2/test/cpp/jit:test_custom_class_registrations")
+    elif IS_WINDOWS:
+        lib_file_path = find_library_location("torchbind_test.dll")
     else:
         lib_file_path = find_library_location("libtorchbind_test.so")
-        if IS_WINDOWS:
-            lib_file_path = find_library_location("torchbind_test.dll")
-        torch.ops.load_library(str(lib_file_path))
+    torch.ops.load_library(str(lib_file_path))
 
 
 @contextlib.contextmanager

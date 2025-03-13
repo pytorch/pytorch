@@ -3,7 +3,10 @@ import functools
 import logging
 from typing import Optional
 
+from packaging.version import Version
+
 import torch
+from torch._dynamo.utils import counters
 from torch._inductor.autoheuristic.autoheuristic import AutoHeuristicSelectAlgorithm
 from torch._inductor.autoheuristic.autoheuristic_utils import (
     AHContext,
@@ -23,7 +26,6 @@ from ..lowering import register_lowering
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
-    NoValidChoicesError,
     TritonTemplate,
 )
 from ..utils import (
@@ -54,13 +56,23 @@ from .mm_common import (
 )
 
 
+try:
+    import triton
+
+    triton_version = triton.__version__
+    has_triton = True
+except ImportError:
+    triton_version = None
+    has_triton = False
+
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
 
 mm_template = TritonTemplate(
     name="mm",
     grid=mm_grid,
-    source=r"""
+    source=(
+        r"""
 {{def_kernel("A", "B")}}
     M = {{size("A", 0)}}
     N = {{size("B", 1)}}
@@ -125,11 +137,12 @@ mm_template = TritonTemplate(
     # inductor generates a suffix
     {{store_output(("idx_m", "idx_n"), "acc", "mask")}}
 """
-    if torch.version.hip is None
-    # FIXME: To get around rocm failures like https://github.com/pytorch/pytorch/actions/runs/13123783322/job/36617154943
-    # The only difference between the two templates is M >= BLOCK_M and N >= BLOCK_N checking.
-    # See more details in https://github.com/pytorch/pytorch/pull/146293
-    else r"""
+        if (torch.version.hip is None)
+        or (has_triton and Version(triton_version) >= Version("3.3.0"))
+        # FIXME: To get around rocm failures like https://github.com/pytorch/pytorch/actions/runs/13123783322/job/36617154943
+        # The only difference between the two templates is M >= BLOCK_M and N >= BLOCK_N checking.
+        # See more details in https://github.com/pytorch/pytorch/pull/146293
+        else r"""
 {{def_kernel("A", "B")}}
     M = {{size("A", 0)}}
     N = {{size("B", 1)}}
@@ -193,7 +206,8 @@ mm_template = TritonTemplate(
 
     # inductor generates a suffix
     {{store_output(("idx_m", "idx_n"), "acc", "mask")}}
-""",
+"""
+    ),
 )
 
 persistent_tma_mm_template = TritonTemplate(
@@ -357,6 +371,18 @@ def tuned_mm(mat1, mat2, *, layout=None):
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
     name = "mm"
 
+    # below is for getting an overview logging info of inductor mms
+    counters["aten_mm_info"][f"aten.mm_{m}_{n}_{k}"] += 1
+    log.info(
+        "Tuned aten.mm: m=%s, n=%s, k=%s, mat1_dtype=%s, mat2_dtype=%s, output_layout=%s",
+        m,
+        n,
+        k,
+        mat1.get_dtype(),
+        mat2.get_dtype(),
+        layout,
+    )
+
     aten_layout = layout
     if not use_max_autotune():
         aten_layout = FlexibleLayout(
@@ -452,19 +478,13 @@ def tuned_mm(mat1, mat2, *, layout=None):
             else:
                 choices = choices[:num_choices_before_extra_configs]
 
-    if should_fallback_to_aten(choices):
-        return aten_mm.bind((mat1, mat2), aten_layout).output_node()
-
     for k in inductor_config.external_matmul:
         choices.append(lazy_register_extern_choice(k).bind((mat1, mat2), layout))
 
-    try:
-        return autotune_select_algorithm(name, choices, [mat1, mat2], layout)
-    except NoValidChoicesError:
-        if not inductor_config.autotune_fallback_to_aten:
-            raise
-        log.warning("All choices for GEMM were invalid, using ATen backend as fallback")
+    if should_fallback_to_aten(choices):
         return aten_mm.bind((mat1, mat2), aten_layout).output_node()
+
+    return autotune_select_algorithm(name, choices, [mat1, mat2], layout)
 
 
 @register_lowering(aten._int_mm, type_promotion_kind=None)
@@ -472,16 +492,25 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
     m, n, k, layout, mat1, mat2 = mm_args(
         mat1, mat2, layout=layout, out_dtype=torch.int32
     )
+
+    # below is for getting an overview logging info of inductor mms
+    counters["aten_mm_info"][f"aten._int_mm_{m}_{n}_{k}"] += 1
+    log.info(
+        "Tuned aten._int_mm: m=%s, n=%s, k=%s, mat1_dtype=%s, mat2_dtype=%s, output_layout=%s",
+        m,
+        n,
+        k,
+        mat1.get_dtype(),
+        mat2.get_dtype(),
+        layout,
+    )
+
     static_shape, is_nonzero = _is_static_problem(layout)
     use_cutlass = static_shape and is_nonzero and use_cutlass_template(layout, m, n, k)
 
     choices = (
         [aten__int_mm.bind((mat1, mat2), layout)] if use_aten_gemm_kernels() else []
     )
-
-    # TODO: Re-enable eager mode implementation once cuBLAS is fixed
-    if use_cutlass or use_triton_template(layout, enable_int32=True):
-        choices = []
 
     if use_cutlass:
         CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
@@ -499,16 +528,9 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
             )
 
     if should_fallback_to_aten(choices):
-        choices = [aten__int_mm.bind((mat1, mat2), layout)]
+        return aten__int_mm.bind((mat1, mat2), layout).output_node()
 
-    try:
-        return autotune_select_algorithm("int_mm", choices, [mat1, mat2], layout)
-    except NoValidChoicesError:
-        if not inductor_config.autotune_fallback_to_aten:
-            raise
-        log.warning("All choices for GEMM were invalid, using ATen backend as fallback")
-        choices = [aten__int_mm.bind((mat1, mat2), layout)]
-        return autotune_select_algorithm("int_mm", choices, [mat1, mat2], layout)
+    return autotune_select_algorithm("int_mm", choices, [mat1, mat2], layout)
 
 
 @register_lowering(aten.addmm, type_promotion_kind=None)
@@ -516,6 +538,19 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     ordered_kwargs_for_cpp_kernel = ("beta", "alpha")
     m, n, k, layout, mat1, mat2, inp_expanded = mm_args(mat1, mat2, inp, layout=layout)
     static_shape, is_nonzero = _is_static_problem(layout)
+
+    # below is for getting an overview logging info of inductor mms
+    counters["aten_mm_info"][f"aten.addmm_{m}_{n}_{k}"] += 1
+    log.info(
+        "Tuned aten.addmm: m=%s, n=%s, k=%s, mat1_dtype=%s, mat2_dtype=%s, output_layout=%s",
+        m,
+        n,
+        k,
+        mat1.get_dtype(),
+        mat2.get_dtype(),
+        layout,
+    )
+
     if (not is_nonzero) or (not use_max_autotune()):
         # Use a FlexibleLayout if we are not autotuning.
         # This allows padding strides for the output.
@@ -657,22 +692,10 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                     (inp_expanded, mat1, mat2), layout, alpha=alpha, beta=beta
                 ),
             )
-    try:
-        return autotune_select_algorithm(
-            "addmm", choices, [inp_expanded, mat1, mat2], layout
-        )
-    except NoValidChoicesError:
-        if not inductor_config.autotune_fallback_to_aten:
-            raise
-        log.warning("All choices for GEMM were invalid, using ATen backend as fallback")
-        fallback_choice = aten_addmm.bind(
-            (inp, mat1, mat2),
-            layout,
-            ordered_kwargs_for_cpp_kernel,
-            alpha=alpha,
-            beta=beta,
-        )
-        return fallback_choice.output_node()
+
+    return autotune_select_algorithm(
+        "addmm", choices, [inp_expanded, mat1, mat2], layout
+    )
 
 
 @register_lowering(aten._sparse_semi_structured_mm, type_promotion_kind=None)

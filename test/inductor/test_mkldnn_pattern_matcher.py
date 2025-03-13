@@ -23,6 +23,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
     IS_LINUX,
+    IS_X86,
     MI300_ARCH,
     parametrize,
     skipIfNoXPU,
@@ -987,9 +988,12 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 super().__init__()
                 self.conv = torch.nn.Conv2d(3, 128, kernel_size=3, stride=1)
                 self.conv2 = torch.nn.Conv2d(128, 128, kernel_size=3, stride=1)
+                self.conv3 = torch.nn.Conv2d(
+                    128, 128, kernel_size=3, stride=1, groups=4
+                )
 
             def forward(self, x):
-                return self.conv2(self.conv(x))
+                return self.conv3(self.conv2(self.conv(x)))
 
         mod = M().eval().to(device=device)
         v = (
@@ -1004,14 +1008,14 @@ class TestPatternMatcher(TestPatternMatcherBase):
             #    int8_mixed_bf16: [dequant_node, optional(convert_element_type_4),
             #     dequantize_per_channel, optional(convert_element_type_3), clone, convolution]
             self.assertEqual(
-                counters["inductor"]["qconv2d_weight_prepack_matcher_count"], 2
+                counters["inductor"]["qconv2d_weight_prepack_matcher_count"], 3
             )
             self.assertEqual(
                 counters["inductor"]["qconv2d_weight_prepack_matcher_nodes"],
-                12 if int8_mixed_bf16 else 8,
+                18 if int8_mixed_bf16 else 12,
             )
             self.assertEqual(
-                counters["inductor"]["qconv2d_unary_lower_count"], 0 if TEST_ACL else 2
+                counters["inductor"]["qconv2d_unary_lower_count"], 0 if TEST_ACL else 3
             )
 
         self._test_common(
@@ -2654,11 +2658,12 @@ class TestPatternMatcher(TestPatternMatcherBase):
             lambda x, y: y.add_(x),
         ]
         fake_quant_x2_list = [False, True] if int8_mixed_bf16 else [False]
-        cases = itertools.product(add_fn_list, fake_quant_x2_list)
-        for add_fn, fq_x2 in cases:
+        shape_list = [(4, 4), [4, 4, 4]]
+        cases = itertools.product(add_fn_list, fake_quant_x2_list, shape_list)
+        for add_fn, fq_x2, shape in cases:
             mod = M(add_fn, use_relu, fq_x2).eval().to(device=device)
             v = torch.randn(
-                (4, 4), dtype=torch.float32, requires_grad=False, device=device
+                shape, dtype=torch.float32, requires_grad=False, device=device
             ).add(1)
 
             def matcher_check_fn():
@@ -2668,6 +2673,10 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 )
                 # pattern = [dequant_per_tensor, (convert_dtype), dequant_per_channel, (convert_dtype), permute, addmm]
                 nodes_per_match = 6 if int8_mixed_bf16 else 4
+                if len(shape) == 3:
+                    # pattern = [dequant_per_tensor, (convert_dtype), (view), \
+                    #   dequant_per_channel, (convert_dtype), (view), permute, addmm]
+                    nodes_per_match += 2
                 self.assertEqual(
                     counters["inductor"]["qlinear_weight_prepack_matcher_nodes"],
                     4 * nodes_per_match,
@@ -4014,8 +4023,17 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @parametrize("dtype", [torch.float, torch.bfloat16])
     @parametrize("dynamic", [True, False])
     @parametrize("reshape_a", [True, False])
+    @parametrize(
+        "M",
+        [
+            1,
+            32,
+        ],
+    )
+    @parametrize("inplace_add", [True, False])
+    @parametrize("expand_a_scale", [True, False])
     def test_da8w8_sym_act_sym_wgt_with_int_mm(
-        self, has_bias, dtype, dynamic, reshape_a
+        self, has_bias, dtype, dynamic, reshape_a, M, inplace_add, expand_a_scale
     ):
         r"""
         This testcase check if we can match the int8_dynamic_activation_int8_weight int8 linear pattern from torchao,
@@ -4030,10 +4048,21 @@ class TestPatternMatcher(TestPatternMatcherBase):
         """
         if dtype == torch.bfloat16 and not torch.ops.mkldnn._is_mkldnn_bf16_supported():
             return
-        M = 32
         in_feature = 32
         out_feature = 64
         q_min, q_max = -32, 31
+        # we only test for qlinear_binary in this case
+        test_for_pointwise_binary = (
+            True
+            if M == 1
+            and inplace_add
+            and not expand_a_scale
+            and not dynamic
+            and not has_bias
+            else False
+        )
+        if test_for_pointwise_binary and not IS_X86:
+            self.skipTest("Some UTs are only supported on x86_64 CPUs")
 
         class Mod(torch.nn.Module):
             def __init__(self, dtype: torch.dtype, has_bias: bool):
@@ -4047,6 +4076,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 self.b_scale = torch.rand([out_feature]) * 0.01 + 0.01
                 self.b_scale = self.b_scale.to(dtype)
                 self.bias = torch.rand([out_feature], dtype=dtype) if has_bias else None
+                self.additive = torch.rand([M, out_feature], dtype=dtype)
 
             def forward(self, a):
                 if reshape_a:
@@ -4055,11 +4085,19 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     a_reshaped = a
                 c = torch._int_mm(a_reshaped, self.b)
                 c = c.to(self.dtype)
-                a_scale = self.a_scale.expand(c.shape)
+                if expand_a_scale:
+                    a_scale = self.a_scale.expand(c.shape)
+                else:
+                    a_scale = self.a_scale
                 c = c * a_scale
                 c = c * self.b_scale
                 if self.has_bias:
                     c = c + self.bias
+                elif inplace_add and test_for_pointwise_binary:
+                    # When M is 1, dynamic shapes are enabled with torch.compile, has_bias is False,
+                    # expand_a_scale is False and inplace_add is true,
+                    # the output's outermost dim's stride can't be determined due to some Inductor bug.
+                    c.add_(self.additive)
                 return c
 
         mod = Mod(dtype, has_bias).eval()
@@ -4073,10 +4111,12 @@ class TestPatternMatcher(TestPatternMatcherBase):
         self._test_common(
             mod,
             (a,),
-            matcher_check_fn=matcher_check_fn,
+            matcher_check_fn,
             check_autocast=dtype,
             compile_options={"dynamic": dynamic},
         )
+        if test_for_pointwise_binary:
+            self.assertEqual(counters["inductor"]["qlinear_binary_matcher_count"], 1)
 
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
