@@ -841,6 +841,16 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         # Set epilogue.
         # TODO: update epilogue functor according to epilogues.
         op.element_epilogue = op.accumulator_type()
+
+        # Set bias layout and alignment.
+        status = self._set_bias_layout_and_alignment(op)
+        if not status:
+            log.debug(
+                "Skipping due to bias layout and alignment setting failure. op: %s", op
+            )
+            return None
+
+        # Apply regex filters at the end when configuration name doesn't change anymore
         if inductor_cuda_config.cutlass_op_allowlist_regex is not None:
             if not re.search(
                 inductor_cuda_config.cutlass_op_allowlist_regex, op.configuration_name()
@@ -851,14 +861,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                 inductor_cuda_config.cutlass_op_denylist_regex, op.configuration_name()
             ):
                 return None
-
-        # Set bias layout and alignment.
-        status = self._set_bias_layout_and_alignment(op)
-        if not status:
-            log.debug(
-                "Skipping due to bias layout and alignment setting failure. op: %s", op
-            )
-            return None
 
         return op
 
@@ -1212,46 +1214,29 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         self,
         op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
     ) -> bool:
+        import cutlass_library.library as cutlass_lib
+
         has_bias = len(self.input_nodes) >= 3 and self.input_nodes[2] is not None
         if has_bias:
-            bias = self.input_nodes[2]
-            bias_layout = CUTLASSGemmTemplate.cutlass_layout(bias.get_layout())
+            Bias = self.input_nodes[2]
+            # bias dtype
+            op.C.element = cutlass_utils.torch_dtype_to_cutlass_type(
+                Bias.get_layout().dtype
+            )
+            assert op.C.element == op.D.element, (
+                f"Expect C and D to have the same dtype, found {op.C.element} and {op.D.element}"
+            )
+
+            # Bias layout
+            bias_layout = CUTLASSGemmTemplate.cutlass_layout(Bias.get_layout())
             op.C.layout = bias_layout
-            status = self.set_alignment(bias.get_layout(), op.C)
+
+            # Bias alignment
+            status = self.set_alignment(Bias.get_layout(), op.C)
             if not status:
                 return False
-        return True
-
-    def _dtype_match(
-        self,
-        op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
-    ) -> bool:
-        """
-        Checking dtypes of C (i.e. bias) here, since that is the one not checked in the base class.
-        """
-
-        if not super()._dtype_match(op):
-            return False
-
-        assert cutlass_utils.try_import_cutlass()
-        from cutlass_library.library import DataType  # type: ignore[import]
-
-        has_bias = len(self.input_nodes) >= 3 and self.input_nodes[2] is not None
-
-        if op.C.element == DataType.void:
-            if has_bias:
-                # op expects no bias, but bias exists
-                return False
         else:
-            # op expects bias. Needs to check if bias exists and is of the right dtype
-            if not (
-                has_bias
-                and cutlass_utils.dtype_match(
-                    self.input_nodes[2].get_dtype(), op.C.element
-                )
-            ):
-                return False
-
+            op.C.element = cutlass_lib.DataType.void
         return True
 
     def _define_gemm_instance(
