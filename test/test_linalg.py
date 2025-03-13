@@ -97,6 +97,14 @@ def get_tunableop_validators():
         validators[key] = value
     return validators
 
+def find_tunableop_result(results, OpSig, ParamSig):
+    assert isinstance(results, tuple)
+    for inner_tuple in results:
+        if OpSig in inner_tuple:
+            if ParamSig in inner_tuple:
+                return inner_tuple
+    return None
+
 class TestLinalg(TestCase):
     @contextlib.contextmanager
     def _hip_allow_tf32(self):
