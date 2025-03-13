@@ -540,17 +540,32 @@ class AOTInductorModelContainer {
   // make sure no one is executing the model.
   std::shared_mutex model_exec_mutex_;
 
+  RAIIDataPtr allocate_constant_blob() {
+#if defined(USE_CUDA) || defined(USE_XPU)
+    return RAII_gpuMalloc(blob_size_);
+#else
+    return RAII_cpuMalloc(blob_size_);
+#endif // USE_CUDA
+  }
+
+  void free_inactive_buffer() {
+    if (use_secondary_) {
+      constant_blob_.reset();
+    } else {
+      constant_blob_secondary_.reset();
+    }
+  }
+
   void* get_constant_blob_ptr(bool get_inactive) {
     if ((get_inactive && use_secondary_) ||
         (!get_inactive && !use_secondary_)) {
+      if (!constant_blob_) {
+        constant_blob_ = allocate_constant_blob();
+      }
       return constant_blob_.get();
     } else {
       if (!constant_blob_secondary_) {
-#if defined(USE_CUDA) || defined(USE_XPU)
-        constant_blob_secondary_ = RAII_gpuMalloc(blob_size_);
-#else
-        constant_blob_secondary_ = RAII_cpuMalloc(blob_size_);
-#endif // USE_CUDA
+        constant_blob_secondary_ = allocate_constant_blob();
       }
       return constant_blob_secondary_.get();
     }
