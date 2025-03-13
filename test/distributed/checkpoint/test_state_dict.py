@@ -913,6 +913,30 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
 
     @with_comms
     @skip_if_lt_x_gpu(2)
+    def test_set_cpu_model_state_dict_broadcast_from_rank0(self) -> None:
+        torch.manual_seed(42)
+        model = nn.Linear(2, 2)
+        expected_state_dict = {
+            k: v.detach().clone() for k, v in model.state_dict().items()
+        }
+        state_dict = expected_state_dict if torch.distributed.get_rank() == 0 else {}
+        model._apply(lambda t: torch.zeros_like(t))
+
+        set_model_state_dict(
+            model,
+            state_dict,
+            options=StateDictOptions(full_state_dict=True, broadcast_from_rank0=True),
+        )
+
+        for (actual_name, tensor), (expected_name, expected_tensor) in zip(
+            model.state_dict().items(),
+            expected_state_dict.items(),
+        ):
+            assert actual_name == expected_name
+            torch.testing.assert_close(tensor, expected_tensor, msg=expected_name)
+
+    @with_comms
+    @skip_if_lt_x_gpu(2)
     def test_multi_device_load_model_state_dict(self) -> None:
         torch.manual_seed(0)
         with torch.device("meta"):
