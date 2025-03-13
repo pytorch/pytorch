@@ -4027,7 +4027,6 @@ class Scheduler:
         }
 
         V.graph.partition_maps = []
-
         for partition_id, signature in enumerate(signatures):
             if signature.skip_cudagraph:
                 # Note: [Graph Partition Map for CUDAGraph]
