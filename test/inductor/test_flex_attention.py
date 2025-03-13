@@ -3262,7 +3262,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     def test_captured_wrong_device_error_message(self):
         means = torch.randn(64, 3, device=self.device)
-        length_scales = torch.logspace(0.001, 0.1, 8, device='cpu')
+        length_scales = torch.logspace(0.001, 0.1, 8, device="cpu")
 
         def euclidean_dist_pos_embed(score, b, h, q_idx, k_idx):
             q_pos = means[q_idx]
