@@ -6865,6 +6865,7 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
         V.graph.disable_cudagraphs_reason = msg
 
     result = ir.WhileLoop.create(cond_fn, body_fn, carried_inputs, additional_inputs)
+    assert isinstance(result, Sequence), type(result)
     return list(map(TensorBox.create, result))
 
 
