@@ -356,7 +356,6 @@ def raise_observed_exception(
     *,
     args: Optional[list[Any]] = None,
     kwargs: Optional[dict[str, Any]] = None,
-    observed_exception_args: Optional[list[Any]] = None,
 ) -> NoReturn:
     from .variables import BuiltinVariable
 

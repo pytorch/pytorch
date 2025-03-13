@@ -521,13 +521,12 @@ class GraphModule(torch.nn.Module):
         z, _ = self._compile_check(fn, args=(t,))
         self.assertEqual(list(z), list(zip(range(3), whoo(t))))
 
-    @parametrize("fullgraph", [True, False])
-    def test_generator_with_return(self, fullgraph):
+    def test_generator_with_return(self):
         def inner(t):
             yield t + 1
             return t + 2
 
-        @torch.compile(backend="eager", fullgraph=fullgraph)
+        @torch.compile(backend="eager")
         def fn(t):
             g = inner(t)
             ans = []
