@@ -737,52 +737,35 @@ def prop_index(op_schema: OpSchema) -> OutputSharding:
         return result
 
 
-@register_prop_rule(
+@register_op_strategy(
     [
         aten.split.Tensor,
         aten.split_with_sizes.default,
         aten.split_with_sizes_copy.default,
     ],
-    schema_info=RuntimeSchemaInfo(1),
+    RuntimeSchemaInfo(1, needs_pytree=True),
 )
-def split_rule(op_schema: OpSchema) -> OutputSharding:
-    output_spec_list: list[DTensorSpec] = []
-    input_spec = cast(DTensorSpec, op_schema.args_schema[0])
-    ndim = input_spec.ndim
+def split_strategy(op_schema: OpSchema) -> StrategyType:
+    input_strategy = op_schema.args_schema[0]
     split_size_or_sections = op_schema.args_schema[1]
-    dim = cast(int, op_schema.args_schema[2]) if len(op_schema.args_schema) > 2 else 0
-    dim = normalize_dim(dim, ndim)
+    assert isinstance(input_strategy, OpStrategy)
+    input_ndim = input_strategy.ndim
+    split_dim = (
+        cast(int, op_schema.args_schema[2]) if len(op_schema.args_schema) > 2 else 0
+    )
+    dim = normalize_dim(split_dim, input_ndim)
 
-    # TODO: tensor to split cannot have Partial
-    # in its placements for now. Will need to
-    # support in future.
-    if input_spec.sums:
-        raise NotImplementedError(
-            f"splitting distributed tensor with "
-            f"Partial placement is not implemented!\n"
-            f"DTensorSpec={input_spec}"
-        )
+    split_strategy = []
 
-    # TODO: just like slice op, split replicates before
-    # splitting on a sharded dimension
-    need_reshard = False
-    if is_tensor_dim_sharded(input_spec, dim=dim):
-        need_reshard = True
-        input_spec = DTensorSpec(
-            mesh=input_spec.mesh,
-            placements=unshard_tensor_dim(input_spec.placements, dim=dim),
-            tensor_meta=input_spec.tensor_meta,
-        )
-
-    if need_reshard:
-        return OutputSharding(
-            None,
-            redistribute_schema=OpSchema(
-                op=op_schema.op,
-                args_schema=(input_spec,) + op_schema.args_schema[1:],
-                kwargs_schema=op_schema.kwargs_schema,
-            ),
-        )
+    # tensor to split cannot have Partial for now
+    for arg_strategy in input_strategy.strategies:
+        arg_spec = arg_strategy.output_spec
+        if is_tensor_partial(arg_spec):
+            raise NotImplementedError(
+                f"splitting distributed tensor with "
+                f"Partial placement is not implemented!\n"
+                f"DTensorSpec={arg_strategy}"
+            )
 
     def size_split(N, i) -> list:
         # Last chunk will be smaller if the tensor size N
@@ -791,16 +774,30 @@ def split_rule(op_schema: OpSchema) -> OutputSharding:
         return [i] * (N // i) + ([N % i] if N % i != 0 else [])
 
     output_size_list = (
-        size_split(input_spec.shape[dim], split_size_or_sections)
+        size_split(input_strategy.shape[dim], split_size_or_sections)
         if isinstance(split_size_or_sections, int)
         else split_size_or_sections
     )
     assert isinstance(output_size_list, Sized)
-    output_spec_list = [
-        DTensorSpec(
-            mesh=input_spec.mesh,
-            placements=input_spec.placements,
+
+    if is_tensor_dim_sharded(input_strategy.strategies[0].output_spec, dim=dim):
+        placement = unshard_tensor_dim(
+            input_strategy.strategies[0].output_spec.placements, dim=dim
         )
-        for _ in range(len(output_size_list))
-    ]
-    return OutputSharding(output_spec_list)
+    else:
+        placement = input_strategy.strategies[0].output_spec.placements
+    spec = DTensorSpec(input_strategy.strategies[0].output_spec.mesh, placement)
+
+    for _ in range(len(output_size_list)):
+        split_strategy.append(
+            OpStrategy(
+                strategies=[
+                    PlacementStrategy(
+                        output_specs=spec,
+                        input_specs=([spec]),
+                    )
+                ]
+            )
+        )
+
+    return TupleStrategy(split_strategy)
