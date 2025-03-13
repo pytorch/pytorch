@@ -2138,10 +2138,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
             @staticmethod
             def _backward_impl(ctx, all_args):
-                assert (
-                    not ctx._is_compiled_autograd_tracing()
-                ), "compiled autograd reimplements this function at proxy_call_aot_backward"
-
+                # compiled autograd reimplements this function at proxy_call_aot_backward
                 assert (
                     not backward_state_indices
                 ), "BackwardState requires CompiledAutograd"
@@ -2192,6 +2189,9 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         )
                         # Maybe save cache entry
                         if try_save_cache_entry is not None:
+                            # CompiledFunction.metadata
+                            # CompiledFunction.maybe_subclass_metadata
+                            # bw_module
                             try_save_cache_entry(
                                 CompiledFunction.compiled_bw,
                                 fw_metadata,
