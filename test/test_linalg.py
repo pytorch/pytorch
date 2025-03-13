@@ -5499,9 +5499,6 @@ class TestLinalg(TestCase):
         # for HIP/AMDGPU, tf32 is behind a flag because the TF32 support is new
         # and only for MI300+. Eventually this flag will go away.
         # This test is not 100% foolproof, a stricter test would be to enable
-        # HIPBLASLT logging and verify that the compute type is xf32_r.
-        # This test only checks that the solution found by TunableOp is
-        # not from ROCBLAS.
         tf32_ctx = self._hip_allow_tf32 if torch.version.hip else contextlib.nullcontext
 
         with tf32_ctx():
