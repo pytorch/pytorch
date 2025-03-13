@@ -463,23 +463,19 @@ bool StaticCudaLauncher_init(PyObject* module) {
   }
   // Add our static methods to the type's dictionary.
   PyObject* dict = StaticCudaLauncherType.tp_dict;
-
-  for (auto def = StaticCudaLauncherMethods.begin();
-       def != StaticCudaLauncherMethods.end();
-       def++) {
-    PyObject* func = PyCFunction_New(def, nullptr); // &*
+  for (auto& def : StaticCudaLauncherMethods) {
+    PyObject* func = PyCFunction_New(&def, nullptr);
     if (!func) {
       return false;
     }
     PyObject* static_method = PyStaticMethod_New(func);
     Py_DECREF(func);
-    if (PyDict_SetItemString(dict, def->ml_name, static_method) < 0) {
+    if (PyDict_SetItemString(dict, def.ml_name, static_method) < 0) {
       Py_DECREF(static_method);
       return false;
     }
     Py_DECREF(static_method);
   }
-
   Py_INCREF(&StaticCudaLauncherType);
   if (PyModule_AddObject(
           module, "_StaticCudaLauncher", (PyObject*)&StaticCudaLauncherType) <

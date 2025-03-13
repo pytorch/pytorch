@@ -1,5 +1,4 @@
 import functools
-
 from typing import Any, Optional
 from typing_extensions import Unpack
 
@@ -67,7 +66,8 @@ class StaticallyLaunchedCudaKernel:
             )
 
         # Newer triton versions pass an extra global scratch parameter to the compiled cuda kernel.
-        # Inductor never uses this field or enables it, but we still have to pass an extra None into the set of params if its enabled
+        # Inductor never uses this field or enables it, but we still have to pass an extra None
+        # into the set of params if its enabled
         if hasattr(kernel.metadata, "global_scratch_size"):
             if kernel.metadata.global_scratch_size > 0:
                 raise NotImplementedError("Global scratch not yet supported")
