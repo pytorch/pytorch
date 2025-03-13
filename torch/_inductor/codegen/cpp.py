@@ -3076,7 +3076,7 @@ class CppVecKernel(CppKernel):
         return vec_type
 
     def _welford_helper_init(
-        self, dtype, welford_helper_vec_range, welford_helper_val, num_threads=None
+        self, welford_helper_val, welford_helper_vec_range, dtype, num_threads=None
     ):
         vec_num_range_thread = (
             CeilDiv(welford_helper_vec_range, num_threads)
@@ -3109,15 +3109,12 @@ class CppVecKernel(CppKernel):
         )
         self.non_parallel_reduction_prefix.writeline(
             self._welford_helper_init(
-                dtype, welford_helper_vec_range, welford_helper_val
+                welford_helper_val, welford_helper_vec_range, dtype
             )
         )
         self.local_reduction_init.writeline(
             self._welford_helper_init(
-                dtype,
-                welford_helper_vec_range,
-                welford_helper_val,
-                num_threads,
+                welford_helper_val, welford_helper_vec_range, dtype, num_threads
             )
         )
         self.non_parallel_reduction_suffix.writeline(
