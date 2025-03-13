@@ -3647,8 +3647,9 @@ def fork_and_check_is_pinned():
     def worker(conn):
         try:
             x = torch.randn(10)
-            x.is_pinned(device="cuda")
-            x = torch.ones(10, device="cuda")[0].item()
+            x.is_pinned()
+            dev = torch.accelerator.current_accelerator()
+            x = torch.ones(10, device=dev)[0].item()
             conn.send(x)
         except Exception as e:
             conn.send(str(e))
@@ -3668,7 +3669,7 @@ def fork_and_check_is_pinned():
 
 x = torch.randn(10)
 # check that is_pinned won't poison future fork
-x.is_pinned(device="cuda")
+x.is_pinned()
 ret = fork_and_check_is_pinned()
 print(ret)
 
