@@ -3,8 +3,6 @@ import functools
 import logging
 import re
 from typing import Optional
-
-
 import torch
 from torch._dynamo.utils import counters
 from torch._inductor.autoheuristic.autoheuristic import AutoHeuristicSelectAlgorithm
@@ -55,6 +53,8 @@ from .mm_common import (
     triton_config,
 )
 
+
+
 def parse_version(version_string: str) -> Optional[tuple[int, ...]]:
     pattern = r"(\d+)\.(\d+)?"
     match = re.match(pattern, version_string)
@@ -64,10 +64,11 @@ def parse_version(version_string: str) -> Optional[tuple[int, ...]]:
     else:
         return None
 
+
 try:
     import triton
 
-    triton_version = parse_version(triton.__version__) 
+    triton_version = parse_version(triton.__version__)
     has_triton = True
     if triton_version is not None:
         triton_major, triton_minor = triton_version
@@ -77,6 +78,8 @@ try:
 except ImportError:
     triton_version = None
     has_triton = False
+    triton_major = 0
+    triton_minor = 0
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
