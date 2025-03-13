@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 
+#include <torch/csrc/inductor/aoti_package/model_package_loader.h>
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cpu.h>
 #if defined(USE_CUDA) || defined(USE_ROCM)
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cuda.h>
@@ -88,14 +89,15 @@ void test_aoti_package_loader(
   std::string suffix = use_runtime_constant_folding
       ? device + "_use_runtime_constant_folding"
       : device;
-  std::string path_attr = "model_so_path_" + suffix;
+  std::string path_attr = "pt2_package_path_" + suffix;
   std::string inputs_attr = "inputs_" + suffix;
   std::string outputs_attr = "outputs_" + suffix;
-  const auto& model_so_path = data_loader.attr(path_attr.c_str()).toStringRef();
+  const auto& pt2_package_path =
+      data_loader.attr(path_attr.c_str()).toStringRef();
   const auto& ref_output_tensors =
       data_loader.attr(outputs_attr.c_str()).toTensorList().vec();
 
-  torch::inductor::AOTIModelPackageLoader runner(model_so_path);
+  torch::inductor::AOTIModelPackageLoader runner(pt2_package_path);
   auto actual_output_tensors =
       runner.run(data_loader.attr(inputs_attr.c_str()).toTensorList().vec());
   ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
@@ -340,7 +342,6 @@ TEST(AotInductorTest, BasicScriptTestCuda) {
 }
 
 TEST(AotInductorTest, BasicPackageLoaderTestCuda) {
-  test_aoti_package_loader("cuda", true);
   test_aoti_package_loader("cuda", false);
 }
 

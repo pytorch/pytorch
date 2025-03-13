@@ -9,10 +9,7 @@ class TORCH_API AOTIModelPackageLoader {
  public:
   AOTIModelPackageLoader(
       const std::string& model_package_path,
-      const bool run_single_threaded = false);
-  AOTIModelPackageLoader(
-      const std::string& model_package_path,
-      const std::string& model_name,
+      const std::string& model_name = "model",
       const bool run_single_threaded = false);
   ~AOTIModelPackageLoader();
 
