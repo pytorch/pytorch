@@ -132,7 +132,7 @@ class AllReduce(torch.nn.Module):
 #         raise NotImplementedError("QuantLinearTorchFunction forward is only implemented for onnx export")
 
 
-class QuantLinearTorchFunction(torch.nn.Module):
+class QuantLinearModule(torch.nn.Module):
     def forward(
         self,
         x: torch.Tensor,
@@ -166,8 +166,35 @@ class QuantLinearTorchFunction(torch.nn.Module):
         )
 
 
+class QuantLinearTorchFunction(torch.autograd.Function):
+    @staticmethod
+    def forward(
+        ctx,
+        x: torch.Tensor,
+    ):
+        return torch.onnx.ops.symbolic(
+            "com.microsoft::QuantLinear",
+            (x,),
+            dict(
+                bits=4,
+                block_size=4,
+                K=3,
+                N=42,
+            ),
+            dtype=x.dtype,
+            shape=(*x.shape[:-1], 100),
+            metadata_props={
+                "meta_key": "meta_value",
+            },
+            version=1,
+        )
+
+
 class TestModule(torch.nn.Module):
     def forward(self, x):
+        # Supports torch.autograd.Function so compatible with existing symbolic() usages
+        # https://github.com/microsoft/Olive/blob/7df3c0353b3b754dec23faee2d73f22af9526155/olive/common/hf/quant.py#L127
+        return QuantLinearTorchFunction.apply(x)
         # return _symbolic(
         #     [x],
         #     "Add",
@@ -185,22 +212,24 @@ class TestModule(torch.nn.Module):
         #     domain="com.microsoft",
         #     version=1,
         # )
-        return torch.onnx.ops.symbolic(
-            "com.microsoft::QuantLinear",
-            (x,),
-            dict(
-                bits=4,
-                block_size=4,
-                K=3,
-                N=42,
-            ),
-            dtype=x.dtype,
-            shape=(*x.shape[:-1], 100),
-            metadata_props={
-                "meta_key": "meta_value",
-            },
-            version=1,
-        )
+
+        # return torch.onnx.ops.symbolic(
+        #     "com.microsoft::QuantLinear",
+        #     (x,),
+        #     dict(
+        #         bits=4,
+        #         block_size=4,
+        #         K=3,
+        #         N=42,
+        #     ),
+        #     dtype=x.dtype,
+        #     shape=(*x.shape[:-1], 100),
+        #     metadata_props={
+        #         "meta_key": "meta_value",
+        #     },
+        #     version=1,
+        # )
+
         # return torch.onnx.ops.symbolic(
         #     "com.microsoft::Add",
         #     (x,),
