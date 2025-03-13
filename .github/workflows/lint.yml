@@ -243,8 +243,15 @@ jobs:
     name: Test collect_env
     runs-on: linux.24_04.4x
     strategy:
-      matrix:
-        test_type: [with_torch, without_torch, older_python_version]
+      include:
+        - test_type: with_torch
+          runner: linux.24_04.4x
+        - test_type: without_torch
+          runner: linux.24_04.4x
+        # NOTE: The oldest supported version of python for 24.04 is 3.8
+        #       so this cannot be updated if we want to keep this test at 3.6
+        - test_type: older_python_version
+          runner: linux.20_04.4x
     steps:
       # [see note: pytorch repo ref]
       # deep clone (fetch-depth 0) required, to allow us to use git log
@@ -264,7 +271,7 @@ jobs:
         if: matrix.test_type == 'older_python_version'
         uses: actions/setup-python@v4
         with:
-          python-version: 3.6.15
+          python-version: 3.6
           architecture: x64
           check-latest: false
           cache: pip
