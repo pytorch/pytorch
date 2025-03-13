@@ -129,15 +129,15 @@ PIP_SOURCES = {
         supported_platforms={"Linux", "Windows"},
         accelerator="cuda",
     ),
-    "cuda-12.4": PipSource(
-        name="cuda-12.4",
-        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/cu124",
-        supported_platforms={"Linux", "Windows"},
-        accelerator="cuda",
-    ),
     "cuda-12.6": PipSource(
         name="cuda-12.6",
         index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/cu126",
+        supported_platforms={"Linux", "Windows"},
+        accelerator="cuda",
+    ),
+    "cuda-12.8": PipSource(
+        name="cuda-12.8",
+        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/cu128",
         supported_platforms={"Linux", "Windows"},
         accelerator="cuda",
     ),
