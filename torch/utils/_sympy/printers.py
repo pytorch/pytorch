@@ -7,6 +7,8 @@ from sympy.printing.str import StrPrinter
 
 
 INDEX_TYPE = "int64_t"
+INDEX_TYPE_MAX = (1 << 63) - 1
+INDEX_TYPE_MIN = -1 << 63
 
 
 # This printer contains rules that are supposed to be generic for both C/C++ and
@@ -266,9 +268,14 @@ class PythonPrinter(ExprPrinter):
 
 class CppPrinter(ExprPrinter):
     def _print_Integer(self, expr: sympy.Expr) -> str:
-        return (
-            f"{int(expr)}LL" if sys.platform in ["darwin", "win32"] else f"{int(expr)}L"
-        )
+        suffix = "LL" if sys.platform in ["darwin", "win32"] else "L"
+        i = int(expr)
+        if i > INDEX_TYPE_MAX or i < INDEX_TYPE_MIN:
+            raise OverflowError(f"{i} too big to convert to {INDEX_TYPE}")
+        elif i == INDEX_TYPE_MIN:
+            assert i == (-1) << 63
+            return f"(-1{suffix} << 63)"
+        return f"{i}{suffix}"
 
     def _print_Where(self, expr: sympy.Expr) -> str:
         c, p, q = (
