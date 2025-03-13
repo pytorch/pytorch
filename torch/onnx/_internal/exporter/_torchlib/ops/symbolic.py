@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from onnxscript.ir import convenience as ir_convenience
+
 import torch
 from torch.onnx._internal._lazy_import import onnxscript_ir as ir
-from onnxscript.ir import convenience as ir_convenience
 from torch.onnx._internal.exporter import _core
 from torch.onnx._internal.exporter._torchlib._torchlib_registry import onnx_impl
 from torch.onnx.ops import _impl as onnx_ops_impl
@@ -33,9 +34,10 @@ def _call_symbolic_op(
         | Sequence[bool]
         | Sequence[torch.Tensor],
     ],
-    shapes: Sequence[Sequence[int | torch.SymInt]],
+    shapes: Sequence[Sequence[int | ir.Value]],
     dtypes: Sequence[int],
-    metadata_props: dict[str, str] | None = None,
+    version: int | None,
+    metadata_props: dict[str, str] | None,
 ) -> Sequence[ir.Value]:
     """Call an operator with the given arguments and keyword arguments.
 
@@ -69,7 +71,7 @@ def _call_symbolic_op(
             inputs=inputs,
             attributes=attributes,
             num_outputs=len(dtypes),
-            version=tracer.opset.version,
+            version=version,
             metadata_props=metadata_props,
         )
     )
@@ -81,10 +83,10 @@ def _call_symbolic_op(
 
 
 def _get_onnx_shape(
-    shape: Sequence[int | torch.SymInt],
+    shape: Sequence[int | ir.Value],
 ) -> Sequence[ir.Value]:
     """Convert a shape to a sequence of ir.Value."""
-    ir.Shape([str(dim) if isinstance(dim, torch.SymInt) else dim for dim in shape])
+    ir.Shape([dim.name if isinstance(dim, ir.Value) else dim for dim in shape])
 
 
 @onnx_impl(torch.ops.onnx_symbolic._symbolic.default, no_compile=True)
@@ -94,7 +96,7 @@ def onnx_symbolic_symbolic(
     onnx_dtype: int,
     attr_tensors: Sequence[torch.Tensor] = (),
     *,
-    shape: Sequence[int | torch.SymInt],
+    shape: Sequence[int | ir.Value],
     attr_keys: Sequence[str],
     attr_types: Sequence[str],
     attr_pos: Sequence[tuple[int, int]],
@@ -123,6 +125,7 @@ def onnx_symbolic_symbolic(
         attrs,
         shapes=[shape],
         dtypes=[onnx_dtype],
+        version=version,
         metadata_props=dict(zip(metadata_props_keys, metadata_props_values)),
     )[0]
 
@@ -134,7 +137,7 @@ def onnx_symbolic_symbolic_multi_out(
     onnx_dtypes: Sequence[int],
     attr_tensors: Sequence[torch.Tensor],
     *,
-    shapes: Sequence[Sequence[int | torch.SymInt]],
+    shapes: Sequence[Sequence[int | ir.Value]],
     attr_keys: Sequence[str],
     attr_types: Sequence[str],
     attr_pos: Sequence[tuple[int, int]],
@@ -163,5 +166,6 @@ def onnx_symbolic_symbolic_multi_out(
         attrs,
         shapes=shapes,
         dtypes=onnx_dtypes,
+        version=version,
         metadata_props=dict(zip(metadata_props_keys, metadata_props_values)),
     )

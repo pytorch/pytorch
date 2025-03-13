@@ -235,7 +235,7 @@ torch.library.opcheck(
 @torch.library.custom_op(
     "onnx_symbolic::_symbolic_multi_out",
     mutates_args=(),
-    schema="(Tensor[] inputs, str op_type, int[] onnx_dtypes, Tensor[] attr_tensors, *, SymInt[][] shapes, str[] attr_keys, int[] attr_ints, float[] attr_floats, str[] attr_strs, str[] metadata_props_keys, str[] metadata_props_values, str domain='', int? version=None) -> Tensor[]",
+    schema="(Tensor[] inputs, str op_type, int[] onnx_dtypes, Tensor[] attr_tensors, *, SymInt[][] shapes, str[] attr_keys, str[] attr_types, int[][] attr_pos, int[] attr_ints, float[] attr_floats, str[] attr_strs, str[] metadata_props_keys, str[] metadata_props_values, str domain='', int? version=None) -> Tensor[]",
 )
 def _symbolic_multi_out(
     inputs: Sequence[torch.Tensor],
@@ -304,6 +304,8 @@ torch.library.opcheck(
             ]
         ],
         attr_keys=["key"],
+        attr_types=["i"],
+        attr_pos=[(0, 1)],
         attr_ints=[1],
         attr_floats=[1.0],
         attr_strs=["attr"],
