@@ -75,18 +75,13 @@ def _call_symbolic_op(
             metadata_props=metadata_props,
         )
     )
-    # Set the shapes and dtypes for the outputs
-    for i, (dtype, shape) in enumerate(zip(dtypes, shapes)):
-        node.outputs[i].dtype = ir.DataType(dtype)
-        node.outputs[i].shape = _get_onnx_shape(shape)
+    # Set the dtypes for the outputs. We set them here because the graph builder
+    # Uses PyTorch types which are sometimes inaccurate when they are ONNX only
+    # types like float4e2m1.
+    for value, dtype in zip(node.outputs, dtypes):
+        value.dtype = ir.DataType(dtype)
+        # The shape is set by the graph builder. We don't need to set it here.
     return node.outputs
-
-
-def _get_onnx_shape(
-    shape: Sequence[int | ir.Value],
-) -> Sequence[ir.Value]:
-    """Convert a shape to a sequence of ir.Value."""
-    ir.Shape([dim.name if isinstance(dim, ir.Value) else dim for dim in shape])
 
 
 @onnx_impl(torch.ops.onnx_symbolic._symbolic.default, no_compile=True)
