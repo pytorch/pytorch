@@ -168,7 +168,11 @@ struct TORCH_CUDA_CPP_API CUDAPluggableAllocator
       cudaStream_t stream,
       bool p2p_enabled) override;
   std::string name() override;
-  void copy_data(void* dest, const void* src, std::size_t count) const final;
+  void copy_data(
+      void* dest,
+      const void* src,
+      std::size_t count,
+      bool sync = false) const final;
 
  protected:
   std::function<MallocFuncType> alloc_fn_;

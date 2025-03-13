@@ -339,7 +339,7 @@ struct CachingHostAllocatorImpl {
     return false;
   }
 
-  virtual void copy_data(void* dest [[maybe_unused]], const void* src [[maybe_unused]], std::size_t count [[maybe_unused]]) const {
+  virtual void copy_data(void* dest [[maybe_unused]], const void* src [[maybe_unused]], std::size_t count [[maybe_unused]], bool sync [[maybe_unused]] = false) const {
     TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for copy_data");
   }
 
@@ -641,9 +641,9 @@ struct CachingHostAllocatorInterface : public at::Allocator {
     impl_->empty_cache();
   }
 
-  void copy_data(void* dest, const void* src, std::size_t count)
+  void copy_data(void* dest, const void* src, std::size_t count, bool sync=false)
       const override {
-    impl_->copy_data(dest, src, count);
+    impl_->copy_data(dest, src, count, sync);
   }
 
   HostStats getStats() {
