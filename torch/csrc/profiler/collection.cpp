@@ -326,6 +326,9 @@ uint64_t ThreadLocalSubqueue::TorchOpStorage::EventBlock<T, ChunkSize>::
 // ---------------------------------
 std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
     const at::RecordFunction& fn) {
+  auto overload_name = config_.experimental_config.capture_overload_names
+      ? fn.overload_name()
+      : "";
   auto [event, corr_id] = torch_ops_.op_events_.emplace_back(
       torch::profiler::impl::TorchOpBasicFields{
           fn.seqNr(),
@@ -334,7 +337,8 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
           fn.isAsync(),
           fn.handle(),
           fn.debugHandle(),
-          fn.name()});
+          fn.name(),
+          overload_name});
   if (config_.report_input_shapes) {
     torch_ops_.inputs_outputs_.push(fn.inputs());
     torch_ops_.kwinputs_.emplace_back(fn.kwinputs());
@@ -609,6 +613,12 @@ std::string Result::name() const {
       ATTRIBUTE(PyCall, toString(e)),
       ATTRIBUTE(PyCCall, std::string(e.function_name_.str())),
       [](const auto& e) -> std::string { return e.name_; }));
+}
+
+std::string Result::overload_name() const {
+  return visit(c10::overloaded(
+      ATTRIBUTE(TorchOp, std::string(e.overload_name_)),
+      [](const auto& e) -> std::string { return ""; }));
 }
 
 libkineto::ActivityType Result::kinetoType() const {
