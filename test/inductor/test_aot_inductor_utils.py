@@ -17,6 +17,7 @@ from torch._inductor import config
 from torch._inductor.test_case import TestCase
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import IS_FBCODE
+from torch.testing._internal.inductor_utils import clone_preserve_strides_offset
 from torch.utils import _pytree as pytree
 
 
@@ -213,6 +214,18 @@ def check_model(
         torch.manual_seed(0)
         if not isinstance(model, types.FunctionType):
             model = model.to(self.device)
+
+        # For non mixed device inputs with default "cpu",set the device manully.
+        if all(
+            t.device.type == "cpu"
+            for t in example_inputs
+            if isinstance(t, torch.Tensor)
+        ):
+            example_inputs = tuple(
+                clone_preserve_strides_offset(x, device=self.device)
+                for x in example_inputs
+            )
+
         ref_model = copy.deepcopy(model)
         ref_inputs = copy.deepcopy(example_inputs)
         expected = ref_model(*ref_inputs)

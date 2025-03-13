@@ -123,6 +123,7 @@ def prof(fn=None, group: str = "torchelastic"):
      def x():
          pass
 
+
      @metrics.prof(group="agent")
      def y():
          pass

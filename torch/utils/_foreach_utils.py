@@ -11,7 +11,7 @@ def _get_foreach_kernels_supported_devices() -> list[str]:
 
 def _get_fused_kernels_supported_devices() -> list[str]:
     r"""Return the device type list that supports fused kernels in optimizer."""
-    return ["mps", "cuda", "xpu", "cpu", torch._C._get_privateuse1_backend_name()]
+    return ["mps", "cuda", "xpu", "hpu", "cpu", torch._C._get_privateuse1_backend_name()]
 
 TensorListList: TypeAlias = list[list[Optional[Tensor]]]
 Indices: TypeAlias = list[int]

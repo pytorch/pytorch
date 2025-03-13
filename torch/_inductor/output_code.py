@@ -27,7 +27,7 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 from typing_extensions import TypeAlias
 
 import torch
@@ -277,7 +277,7 @@ class CompiledFxGraphConstantsWithGm(CompiledFxGraphConstants):
     def __init__(self, gm: torch.fx.GraphModule) -> None:
         self.gm = gm
 
-    def unwrap(self, g: CompiledFxGraph) -> Dict[str, torch.Tensor]:
+    def unwrap(self, g: CompiledFxGraph) -> dict[str, torch.Tensor]:
         frozen_params = {
             name: getattr(self.gm, orig_name)
             for name, orig_name in g.frozen_param_names.items()
@@ -301,10 +301,10 @@ class CompiledFxGraph(OutputCode):
     device_idxs: OrderedSet[int]
     mutated_inputs: OrderedSet[str]
     mutated_input_idxs: OrderedSet[int]
-    constants: Optional[Dict[str, torch.Tensor]]
-    frozen_param_names: Dict[str, str]
-    torchbind_constants: Dict[str, torch._C.ScriptObject]
-    output_strides: Optional[List[Optional[tuple[_StrideExprStr, ...]]]]
+    constants: Optional[dict[str, torch.Tensor]]
+    frozen_param_names: dict[str, str]
+    torchbind_constants: dict[str, torch._C.ScriptObject]
+    output_strides: Optional[list[Optional[tuple[_StrideExprStr, ...]]]]
     disabled_cudagraphs_reason: Optional[str]
     metrics_deltas: metrics.CachedMetricsDeltas
     counter_deltas: Counter[str]
@@ -426,7 +426,7 @@ class CompiledFxGraph(OutputCode):
                     (not complex_memory_overlap_inputs, "complex memory overlap"),
                     (
                         all(
-                            isinstance(t, (torch.Tensor, torch.SymInt))
+                            isinstance(t, (torch.Tensor, torch.SymInt, torch.Generator))
                             for t in example_inputs
                         ),
                         "non-Tensor inputs",
@@ -437,7 +437,7 @@ class CompiledFxGraph(OutputCode):
                 assert len(output.args) == 1
                 stack_traces = [
                     (arg.stack_trace if isinstance(arg, torch.fx.node.Node) else None)
-                    for arg in output.args[0]
+                    for arg in output.args[0]  # type: ignore[union-attr]
                 ]
                 cudagraph_fail_reasons = [s for b, s in cudagraph_tests if not b]
                 placeholders = tuple(get_placeholder_info(gm.graph))

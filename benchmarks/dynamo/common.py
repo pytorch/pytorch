@@ -916,10 +916,13 @@ def latency_experiment(args, model_iter_fn, model, example_inputs, mark, **kwarg
             # inputs will incur high penalty then the next one.
             maybe_mark_step(args)
 
-            with maybe_mark_profile(p=p, mark=mark), maybe_enable_compiled_autograd(
-                args.compiled_autograd,
-                fullgraph=args.nopython,
-                dynamic=args.dynamic_shapes,
+            with (
+                maybe_mark_profile(p=p, mark=mark),
+                maybe_enable_compiled_autograd(
+                    args.compiled_autograd,
+                    fullgraph=args.nopython,
+                    dynamic=args.dynamic_shapes,
+                ),
             ):
                 timings[rep], actual_output = timed(
                     model,
@@ -1003,9 +1006,9 @@ def latency_experiment_summary(suite_name, args, model, timings, **kwargs):
         row,
     )
     c_headers, c_data = torch._dynamo.utils.compile_times(repr="csv", aggregate=True)
-    assert (
-        output_filename.find(".csv") > 0
-    ), f"expected output_filename to be a .csv, but got {output_filename}"
+    assert output_filename.find(".csv") > 0, (
+        f"expected output_filename to be a .csv, but got {output_filename}"
+    )
     write_outputs(
         output_filename[:-4] + "_compilation_metrics.csv",
         first_headers + c_headers,
@@ -1090,10 +1093,13 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
             # call mark_step between the 2 calls to make the comparison fair.
             maybe_mark_step(args)
 
-            with maybe_mark_profile(p=p, mark="actual"), maybe_enable_compiled_autograd(
-                args.compiled_autograd,
-                fullgraph=args.nopython,
-                dynamic=args.dynamic_shapes,
+            with (
+                maybe_mark_profile(p=p, mark="actual"),
+                maybe_enable_compiled_autograd(
+                    args.compiled_autograd,
+                    fullgraph=args.nopython,
+                    dynamic=args.dynamic_shapes,
+                ),
             ):
                 timings[rep, 1], actual_output = timed(
                     model,
@@ -1176,9 +1182,9 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         row,
     )
     c_headers, c_data = torch._dynamo.utils.compile_times(repr="csv", aggregate=True)
-    assert (
-        output_filename.find(".csv") > 0
-    ), f"expected output_filename to be a .csv, but got {output_filename}"
+    assert output_filename.find(".csv") > 0, (
+        f"expected output_filename to be a .csv, but got {output_filename}"
+    )
     write_outputs(
         output_filename[:-4] + "_compilation_metrics.csv",
         first_headers + c_headers,
@@ -1819,6 +1825,14 @@ class BenchmarkRunner:
         return set()
 
     @property
+    def skip_models_due_to_export_not_supported(self):
+        return set()
+
+    @property
+    def disable_cudagraph_models(self):
+        return set()
+
+    @property
     def guard_on_nn_module_models(self):
         return set()
 
@@ -1991,16 +2005,16 @@ class BenchmarkRunner:
     def deepcopy_and_maybe_parallelize(self, model):
         model = self.deepcopy_model(model)
         if self.args.ddp:
-            assert (
-                torch.distributed.is_available()
-            ), "Can't use DDP without a distributed enabled build"
+            assert torch.distributed.is_available(), (
+                "Can't use DDP without a distributed enabled build"
+            )
             from torch.nn.parallel import DistributedDataParallel as DDP
 
             model = DDP(model, find_unused_parameters=True)
         elif self.args.fsdp:
-            assert (
-                torch.distributed.is_available()
-            ), "Can't use FSDP without a distributed enabled build"
+            assert torch.distributed.is_available(), (
+                "Can't use FSDP without a distributed enabled build"
+            )
             from torch.distributed.fsdp import (
                 FullyShardedDataParallel as FSDP,
                 MixedPrecision,
@@ -2369,9 +2383,9 @@ class BenchmarkRunner:
         self, name, model, example_inputs, optimize_ctx, experiment, tag=None
     ):
         "Run performance test in non-alternately."
-        assert (
-            experiment.func is latency_experiment
-        ), "Must run with latency_experiment."
+        assert experiment.func is latency_experiment, (
+            "Must run with latency_experiment."
+        )
 
         def warmup(fn, model, example_inputs, mode, niters=10):
             peak_mem = 0
@@ -2380,6 +2394,8 @@ class BenchmarkRunner:
                 if current_device == "cuda":
                     torch.cuda.reset_peak_memory_stats()
                     empty_gpu_cache(current_device)
+                elif current_device == "hpu":
+                    torch.hpu.reset_peak_memory_stats()
                 t0 = time.perf_counter()
                 for _ in range(niters):
                     fn(model, example_inputs)
@@ -2387,6 +2403,8 @@ class BenchmarkRunner:
                 latency = t1 - t0
                 if current_device == "cuda":
                     peak_mem = get_peak_memory()
+                elif current_device == "hpu":
+                    peak_mem = torch.hpu.max_memory_allocated() / 10**9
                 elif current_device == "cpu":
                     total = psutil.virtual_memory().total
                     percentage = psutil.Process(os.getpid()).memory_percent()
@@ -2445,12 +2463,15 @@ class BenchmarkRunner:
             else:
                 optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
 
-            with maybe_enable_compiled_autograd(
-                self.args.compiled_autograd,
-                fullgraph=self.args.nopython,
-                dynamic=self.args.dynamic_shapes,
-            ), maybe_snapshot_memory(
-                self.args.snapshot_memory, f"compiled_{self.args.only}"
+            with (
+                maybe_enable_compiled_autograd(
+                    self.args.compiled_autograd,
+                    fullgraph=self.args.nopython,
+                    dynamic=self.args.dynamic_shapes,
+                ),
+                maybe_snapshot_memory(
+                    self.args.snapshot_memory, f"compiled_{self.args.only}"
+                ),
             ):
                 dynamo_latency, dynamo_peak_mem, dynamo_stats = warmup(
                     optimized_model_iter_fn, model, example_inputs, "dynamo"
@@ -2534,6 +2555,8 @@ class BenchmarkRunner:
                 if current_device == "cuda":
                     torch.cuda.reset_peak_memory_stats()
                     empty_gpu_cache(current_device)
+                elif current_device == "hpu":
+                    torch.hpu.reset_peak_memory_stats()
                 t0 = time.perf_counter()
                 for _ in range(niters):
                     fn(model, example_inputs)
@@ -2541,6 +2564,8 @@ class BenchmarkRunner:
                 latency = t1 - t0
                 if current_device == "cuda":
                     peak_mem = get_peak_memory()
+                elif current_device == "hpu":
+                    peak_mem = torch.hpu.max_memory_allocated() / 10**9
                 elif current_device == "cpu":
                     total = psutil.virtual_memory().total
                     percentage = psutil.Process(os.getpid()).memory_percent()
@@ -2598,12 +2623,15 @@ class BenchmarkRunner:
             else:
                 optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
 
-            with maybe_enable_compiled_autograd(
-                self.args.compiled_autograd,
-                fullgraph=self.args.nopython,
-                dynamic=self.args.dynamic_shapes,
-            ), maybe_snapshot_memory(
-                self.args.snapshot_memory, f"compiled_{self.args.only}"
+            with (
+                maybe_enable_compiled_autograd(
+                    self.args.compiled_autograd,
+                    fullgraph=self.args.nopython,
+                    dynamic=self.args.dynamic_shapes,
+                ),
+                maybe_snapshot_memory(
+                    self.args.snapshot_memory, f"compiled_{self.args.only}"
+                ),
             ):
                 dynamo_latency, dynamo_peak_mem, dynamo_stats = warmup(
                     optimized_model_iter_fn, model, example_inputs, "dynamo"
@@ -2858,7 +2886,7 @@ def parse_args(args=None):
         help="ID of the benchmark suite partition to be run. Used to divide CI tasks",
     )
     parser.add_argument(
-        "--devices", "--device", "-d", action="append", help="cpu or cuda"
+        "--devices", "--device", "-d", action="append", help="cpu, cuda or hpu"
     )
     parser.add_argument("--device-index", help="CUDA device index")
     parser.add_argument(
@@ -3485,6 +3513,7 @@ def write_csv_when_exception(args, name: str, status: str, device=None):
 
 def run(runner, args, original_dir=None):
     # Pass the parsed args object to benchmark runner object
+    torch._dynamo.reset()
     runner.args = args
 
     args.filter = args.filter or [r"."]
@@ -3752,6 +3781,7 @@ def run(runner, args, original_dir=None):
 
             # AOTInductor doesn't support control flow yet
             runner.skip_models.update(runner.skip_models_due_to_control_flow)
+            runner.skip_models.update(runner.skip_models_due_to_export_not_supported)
         elif args.backend == "torchao":
             assert "cuda" in args.devices, "Quantization requires CUDA device."
             assert args.bfloat16, "Quantization requires dtype bfloat16."
@@ -3803,6 +3833,9 @@ def run(runner, args, original_dir=None):
         )
         experiment = coverage_experiment
         output_filename = "coverage.csv"
+
+    if args.only in runner.disable_cudagraph_models:
+        args.disable_cudagraphs = True
 
     if args.inductor or args.backend == "inductor" or args.export_aot_inductor:
         inductor_config.triton.cudagraphs = not args.disable_cudagraphs

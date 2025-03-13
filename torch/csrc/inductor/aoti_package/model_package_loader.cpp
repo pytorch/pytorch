@@ -70,7 +70,7 @@ namespace torch::inductor {
 namespace {
 const nlohmann::json& load_json_file(std::string json_path) {
   if (!file_exists(json_path)) {
-    throw std::runtime_error("File found: " + json_path);
+    throw std::runtime_error("File not found: " + json_path);
   }
 
   std::ifstream json_file(json_path);
@@ -98,6 +98,11 @@ std::tuple<std::string, std::string> get_cpp_compile_command(
 
   std::string file_ext = compile_only ? ".o" : ".so";
   std::string target_file = output_dir + filename + file_ext;
+  std::string target_dir = output_dir;
+  if (target_dir.empty()) {
+    size_t parent_path_idx = filename.find_last_of(k_separator);
+    target_dir = filename.substr(0, parent_path_idx);
+  }
 
   std::string cflags_args;
   for (auto& arg : compile_options["cflags"]) {
@@ -131,7 +136,15 @@ std::tuple<std::string, std::string> get_cpp_compile_command(
 
   std::string passthrough_parameters_args;
   for (auto& arg : compile_options["passthrough_args"]) {
-    passthrough_parameters_args += arg.get<std::string>() + " ";
+    std::string arg_str = arg.get<std::string>();
+    std::string target = "script.ld";
+    std::string replacement = target_dir;
+    replacement.append(k_separator).append(target);
+    size_t pos = arg_str.find(target);
+    if (pos != std::string::npos) {
+      arg_str.replace(pos, target.length(), replacement);
+    }
+    passthrough_parameters_args += arg_str + " ";
   }
 
   std::string compile_only_arg = compile_only ? "-c" : "";
@@ -326,12 +339,15 @@ void AOTIModelPackageLoader::load_metadata(const std::string& cpp_filename) {
 }
 
 AOTIModelPackageLoader::AOTIModelPackageLoader(
-    const std::string& model_package_path)
-    : AOTIModelPackageLoader(model_package_path, "model") {}
+    const std::string& model_package_path,
+    const bool run_single_threaded = false)
+    : AOTIModelPackageLoader(model_package_path, "model", run_single_threaded) {
+}
 
 AOTIModelPackageLoader::AOTIModelPackageLoader(
     const std::string& model_package_path,
-    const std::string& model_name = "model") {
+    const std::string& model_name = "model",
+    const bool run_single_threaded = false) {
   // Extract all files within the zipfile to a temporary directory
   mz_zip_archive zip_archive;
   memset(&zip_archive, 0, sizeof(zip_archive));
@@ -444,7 +460,8 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
   }
 
   std::string cubin_dir = temp_dir_ + k_separator + model_directory;
-  runner_ = registered_aoti_runner[device](so_path, 1, device, cubin_dir);
+  runner_ = registered_aoti_runner[device](
+      so_path, 1, device, cubin_dir, run_single_threaded);
 }
 
 AOTIModelPackageLoader::~AOTIModelPackageLoader() {
@@ -514,5 +531,12 @@ std::vector<std::string> AOTIModelPackageLoader::get_constant_fqns() {
   return constant_fqns;
 }
 
+void AOTIModelPackageLoader::update_constant_buffer(
+    std::unordered_map<std::string, at::Tensor>& tensor_map,
+    bool use_inactive,
+    bool validate_full_updates) {
+  runner_->update_constant_buffer(
+      tensor_map, use_inactive, validate_full_updates);
+}
 } // namespace torch::inductor
 #endif

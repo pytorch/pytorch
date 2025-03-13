@@ -276,9 +276,9 @@ class BenchmarkRunner:
                 if c in open_to_close.keys():
                     curr_brackets.append(c)
                 elif c in open_to_close.values():
-                    assert (
-                        curr_brackets and open_to_close[curr_brackets[-1]] == c
-                    ), "ERROR: not able to parse the string!"
+                    assert curr_brackets and open_to_close[curr_brackets[-1]] == c, (
+                        "ERROR: not able to parse the string!"
+                    )
                     curr_brackets.pop()
                 elif c == "," and (not curr_brackets):
                     break_idxs.append(i)

@@ -10,6 +10,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import unittest
 from copy import deepcopy
 from importlib.machinery import SourceFileLoader
@@ -48,11 +49,17 @@ from torch.testing._internal.logging_utils import logs_to_string
 # note: these tests are not run on windows due to inductor_utils.HAS_CPU
 
 
-def make_compiler_fn(fullgraph=True, dynamic=True, backend="inductor"):
-    assert backend in ["inductor", "aot_eager"]
+def make_compiler_fn(
+    fullgraph=True, dynamic=True, backend="inductor", gm_hook=lambda gm: None
+):
+    assert backend in ["inductor", "aot_eager", "ca_eager"]
 
     def _compiler_fn(gm):
         """Same as torch.compile() but counts number of compiles"""
+        gm_hook(gm)
+
+        if backend == "ca_eager":
+            return gm
 
         def _inner_compiler(gm_, example_inputs_):
             counters["compiled_autograd"]["compiles"] += 1
@@ -112,7 +119,10 @@ class TestCompiledAutograd(TestCase):
             torch.manual_seed(123)
             expected = list(fn())
             torch.manual_seed(123)
-            with compiled_autograd._enable(compiler_fn):
+            with compiled_autograd._enable(compiler_fn), mock.patch(
+                "torch._functorch.aot_autograd.AOT_COUNTER",
+                new_callable=itertools.count,
+            ):
                 opt_fn = torch.compile(fn) if compile_fn else fn
                 actual = list(opt_fn())
             self.assertEqual(expected, actual)
@@ -915,7 +925,8 @@ main()
                 inputs=[param, activ],
                 sizes=(),
                 scalars=(),
-                hooks=(),
+                hooks=[],
+                packed_inputs=[],
             )
         finally:
             handle.remove()
@@ -3322,7 +3333,10 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
                 graphs.append(gm)
                 return inner_compiler_fn(gm)
 
-            with compiled_autograd._enable(compiler_fn):
+            with compiled_autograd._enable(compiler_fn), mock.patch(
+                "torch._functorch.aot_autograd.AOT_COUNTER",
+                new_callable=itertools.count,
+            ):
                 res = fn(x)
                 res.sum().backward()
 
@@ -3336,7 +3350,7 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
                 graph_code,
                 """\
 class CompiledAutograd0(torch.nn.Module):
-    def forward(self, inputs, sizes, scalars, hooks):
+    def forward(self, inputs, sizes, scalars, hooks, packed_data):
         getitem = inputs[0]
         getitem_1 = inputs[1]
         getitem_2 = inputs[2]
@@ -3511,9 +3525,7 @@ class CompiledAutograd0(torch.nn.Module):
             fn, count=2, compiler_fn=make_compiler_fn(backend="aot_eager")
         )
 
-    @unittest.expectedFailure
     def test_saved_tensor_unpack_hook_ordering(self):
-        # not the correct behaviour, I'm just preventing this from changing silently
         def f(x, y):
             return x * y
 
@@ -3531,8 +3543,6 @@ class CompiledAutograd0(torch.nn.Module):
             return x
 
         def tensor_hook(_):
-            # in eager, tensor_hook is fired before unpack_hook
-            # but in compiled autograd, tensor_hook is lifted whereas unpack_hook is not
             self.assertEqual(unpack_count, 0)
 
         x = torch.ones(4, requires_grad=True)
@@ -3544,21 +3554,252 @@ class CompiledAutograd0(torch.nn.Module):
             self.assertEqual(pack_count, 1)
             self.assertEqual(unpack_count, 0)
             loss = out_test.sum()
-            loss.register_hook(tensor_hook)
+            loss.register_hook(
+                tensor_hook
+            )  # scheduled to fire before any saved activations
             loss.backward()
             self.assertEqual(pack_count, 1)
             self.assertEqual(unpack_count, 1)
 
-    def test_reentrant_checkpointing(self):
-        def fn(x):
-            y = x.sin()
-            z = y.cos()
-            return (y * z).sum()
+    @parametrize("reentrant", (True, False))
+    def test_checkpointing_simple(self, reentrant):
+        def fn():
+            def _fn(x):
+                y = x.sin()
+                z = y.cos()
+                return (y * z).sum()
 
-        inp = torch.rand(10, 10, requires_grad=True)
-        out = torch.utils.checkpoint.checkpoint(fn, inp, use_reentrant=True)
-        with torch._dynamo.compiled_autograd._enable(torch.compile):
+            inp = torch.rand(10, 10, requires_grad=True)
+            out = torch.utils.checkpoint.checkpoint(_fn, inp, use_reentrant=reentrant)
             out.backward()
+            yield inp.grad
+
+        if reentrant:
+            self.check_output_and_recompiles(
+                fn, count=[1, 3], compiler_fn=make_compiler_fn(fullgraph=False)
+            )
+        else:
+            # dynamo issues, just run the CA graph directly for now
+            def check(gm):
+                graph_code = normalize_gm(gm.print_readable(print_output=False))
+                self.assertExpectedInline(
+                    graph_code,
+                    """\
+class CompiledAutograd0(torch.nn.Module):
+    def forward(self, inputs, sizes, scalars, hooks, packed_data):
+        getitem = inputs[0]
+        getitem_1 = inputs[1];  inputs = None
+
+        validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type='cpu'), 6, 0, None), [], False)]);  getitem = None
+        getitem_2 = validate_outputs[0];  validate_outputs = None
+
+        sum_backward0 = torch__dynamo_compiled_autograd_ops_SumBackward0([getitem_2], [True], [10, 10]);  getitem_2 = None
+        getitem_3 = sum_backward0[0];  sum_backward0 = None
+        validate_outputs_1 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_3], [((None, None, device(type='cpu'), 6, 0, None), [10, 10], False)]);  getitem_3 = None
+        getitem_4 = validate_outputs_1[0];  validate_outputs_1 = None
+
+        getitem_5 = hooks[0]
+        getitem_6 = packed_data[0]
+        getitem_7 = hooks[1]
+        getitem_8 = packed_data[1]
+        call_hook = torch__dynamo_external_utils_call_hook(getitem_5, getitem_6, hook_type = 'unpack_hook');  getitem_5 = getitem_6 = None
+        call_hook_1 = torch__dynamo_external_utils_call_hook(getitem_7, getitem_8, hook_type = 'unpack_hook');  getitem_7 = getitem_8 = None
+        mul_backward0 = torch__dynamo_compiled_autograd_ops_MulBackward0([getitem_4], [True, True], call_hook, 6, call_hook_1, 6);  getitem_4 = call_hook = call_hook_1 = None
+        getitem_9 = mul_backward0[0]
+        getitem_10 = mul_backward0[1];  mul_backward0 = None
+        validate_outputs_2 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_9, getitem_10], [((None, None, device(type='cpu'), 6, 0, None), [10, 10], False), ((None, None, device(type='cpu'), 6, 0, None), [10, 10], False)]);  getitem_9 = getitem_10 = None
+        getitem_11 = validate_outputs_2[0]
+        getitem_12 = validate_outputs_2[1];  validate_outputs_2 = None
+
+        getitem_13 = hooks[2]
+        getitem_14 = packed_data[2]
+        call_hook_2 = torch__dynamo_external_utils_call_hook(getitem_13, getitem_14, hook_type = 'unpack_hook');  getitem_13 = getitem_14 = None
+        cos_backward0 = torch__dynamo_compiled_autograd_ops_CosBackward0([getitem_12], [True], call_hook_2);  getitem_12 = call_hook_2 = None
+        getitem_15 = cos_backward0[0];  cos_backward0 = None
+        validate_outputs_3 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_15], [((None, None, device(type='cpu'), 6, 0, None), [10, 10], False)]);  getitem_15 = None
+        getitem_16 = validate_outputs_3[0];  validate_outputs_3 = None
+        add = torch.add(getitem_11, getitem_16);  getitem_11 = getitem_16 = None
+
+        getitem_17 = hooks[3];  hooks = None
+        getitem_18 = packed_data[3];  packed_data = None
+        call_hook_3 = torch__dynamo_external_utils_call_hook(getitem_17, getitem_18, hook_type = 'unpack_hook');  getitem_17 = getitem_18 = None
+        sin_backward0 = torch__dynamo_compiled_autograd_ops_SinBackward0([add], [True], call_hook_3);  add = call_hook_3 = None
+        getitem_19 = sin_backward0[0];  sin_backward0 = None
+        validate_outputs_4 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_19], [((None, None, device(type='cpu'), 6, 0, None), [10, 10], False)]);  getitem_19 = None
+        getitem_20 = validate_outputs_4[0];  validate_outputs_4 = None
+
+        accumulate_grad_ = torch.ops.inductor.accumulate_grad_.default(getitem_1, getitem_20);  getitem_1 = getitem_20 = accumulate_grad_ = None
+        _exec_final_callbacks_stub = torch__dynamo_external_utils__exec_final_callbacks_stub();  _exec_final_callbacks_stub = None
+        return []
+""",  # noqa: B950
+                )
+
+            self.check_output_and_recompiles(
+                fn,
+                count=[1, 0],
+                compiler_fn=make_compiler_fn(backend="ca_eager", gm_hook=check),
+            )
+
+    @unittest.skipIf(not HAS_CUDA, "requires cuda")
+    def test_cpu_offloading(self):
+        def fn():
+            def pack(x):
+                return x.cpu()
+
+            def unpack(x):
+                return x.cuda()
+
+            class MyMatMul(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    ctx.save_for_backward(x)
+                    return torch.matmul(x, x)
+
+                @staticmethod
+                def backward(ctx, grad_out):
+                    (x,) = ctx.saved_tensors
+                    return grad_out * x
+
+            with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
+                for i in [10, 100, 10, 20, 30]:
+                    x = torch.randn(i, requires_grad=True).cuda()
+                    MyMatMul.apply(x).sum().backward()
+                    yield x.grad
+
+        i = 0
+
+        def check(gm):
+            nonlocal i
+            if i == 0:
+                i += 1
+                return
+
+            graph_code = normalize_gm(gm.print_readable(print_output=False))
+            self.assertExpectedInline(
+                graph_code,
+                """\
+class CompiledAutograd1(torch.nn.Module):
+    def forward(self, inputs, sizes, scalars, hooks, packed_data):
+        getitem = inputs[0]
+        getitem_1 = inputs[1];  inputs = None
+        getitem_2 = sizes[0];  getitem_2 = None
+        getitem_3 = sizes[1]
+        getitem_4 = sizes[2];  sizes = None
+
+        validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type='cuda', index=0), 6, 0, None), [], False)]);  getitem = None
+        getitem_5 = validate_outputs[0];  validate_outputs = None
+
+        sum_backward0 = torch__dynamo_compiled_autograd_ops_SumBackward0([getitem_5], [True], []);  getitem_5 = None
+        getitem_6 = sum_backward0[0];  sum_backward0 = None
+        validate_outputs_1 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_6], [((None, None, device(type='cuda', index=0), 6, 0, None), [], False)]);  getitem_6 = None
+        getitem_7 = validate_outputs_1[0];  validate_outputs_1 = None
+
+        getitem_8 = hooks[0]
+        getitem_9 = packed_data[0];  packed_data = None
+        getitem_10 = hooks[1];  hooks = None
+        call_hook = torch__dynamo_external_utils_call_hook(getitem_8, getitem_9, hook_type = 'unpack_hook');  getitem_8 = getitem_9 = None
+        call_backward = torch__dynamo_external_utils_call_backward(getitem_10, (call_hook,), getitem_7);  getitem_10 = call_hook = getitem_7 = None
+        getitem_12 = call_backward[0];  call_backward = None
+        validate_outputs_2 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_12], [((None, None, device(type='cuda', index=0), 6, 0, None), [getitem_3], False)]);  getitem_12 = getitem_3 = None
+        getitem_13 = validate_outputs_2[0];  validate_outputs_2 = None
+
+        to_copy_backward0 = torch__dynamo_compiled_autograd_ops_ToCopyBackward0([getitem_13], [True], (None, None, device(type='cpu'), 6, 0, None));  getitem_13 = None
+        getitem_14 = to_copy_backward0[0];  to_copy_backward0 = None
+        validate_outputs_3 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_14], [((None, None, device(type='cpu'), 6, 0, None), [getitem_4], False)]);  getitem_14 = getitem_4 = None
+        getitem_15 = validate_outputs_3[0];  validate_outputs_3 = None
+
+        accumulate_grad_ = torch.ops.inductor.accumulate_grad_.default(getitem_1, getitem_15);  getitem_1 = getitem_15 = accumulate_grad_ = None
+        _exec_final_callbacks_stub = torch__dynamo_external_utils__exec_final_callbacks_stub();  _exec_final_callbacks_stub = None
+        return []
+""",  # noqa: B950
+            )
+
+        self.check_output_and_recompiles(
+            fn, count=2, compiler_fn=make_compiler_fn(gm_hook=check)
+        )
+
+    @skipIfWindows(msg="temp dir not compatible")
+    def test_disk_offloading(self):
+        with tempfile.TemporaryDirectory() as d:
+
+            def fn():
+                pack_count = 0
+
+                def pack(x):
+                    nonlocal pack_count
+                    path = f"{d}/{pack_count}.pt"
+                    torch.save(x, path)
+                    return path
+
+                def unpack(path):
+                    x = torch.load(path)
+                    return x
+
+                class MyMatMul(torch.autograd.Function):
+                    @staticmethod
+                    def forward(ctx, x):
+                        ctx.save_for_backward(x)
+                        return torch.matmul(x, x)
+
+                    @staticmethod
+                    def backward(ctx, grad_out):
+                        (x,) = ctx.saved_tensors
+                        return grad_out * x
+
+                with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
+                    for i in [10, 100, 10, 20, 30]:
+                        x = torch.randn(i, requires_grad=True)
+                        MyMatMul.apply(x).sum().backward()
+                        yield x.grad
+
+            i = 0
+
+            def check(gm):
+                nonlocal i
+                if i == 0:
+                    i += 1
+                    return
+
+                graph_code = normalize_gm(gm.print_readable(print_output=False))
+                self.assertExpectedInline(
+                    graph_code,
+                    """\
+class CompiledAutograd1(torch.nn.Module):
+    def forward(self, inputs, sizes, scalars, hooks, packed_data):
+        getitem = inputs[0]
+        getitem_1 = inputs[1];  inputs = None
+        getitem_2 = sizes[0];  getitem_2 = None
+        getitem_3 = sizes[1];  sizes = None
+
+        validate_outputs = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem], [((None, None, device(type='cpu'), 6, 0, None), [], False)]);  getitem = None
+        getitem_4 = validate_outputs[0];  validate_outputs = None
+
+        sum_backward0 = torch__dynamo_compiled_autograd_ops_SumBackward0([getitem_4], [True], []);  getitem_4 = None
+        getitem_5 = sum_backward0[0];  sum_backward0 = None
+        validate_outputs_1 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_5], [((None, None, device(type='cpu'), 6, 0, None), [], False)]);  getitem_5 = None
+        getitem_6 = validate_outputs_1[0];  validate_outputs_1 = None
+
+        getitem_7 = hooks[0]
+        getitem_8 = packed_data[0];  packed_data = None
+        getitem_9 = hooks[1];  hooks = None
+        call_hook = torch__dynamo_external_utils_call_hook(getitem_7, getitem_8, hook_type = 'unpack_hook');  getitem_7 = getitem_8 = None
+        call_backward = torch__dynamo_external_utils_call_backward(getitem_9, (call_hook,), getitem_6);  getitem_9 = call_hook = getitem_6 = None
+        getitem_11 = call_backward[0];  call_backward = None
+        validate_outputs_2 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_11], [((None, None, device(type='cpu'), 6, 0, None), [getitem_3], False)]);  getitem_11 = getitem_3 = None
+        getitem_12 = validate_outputs_2[0];  validate_outputs_2 = None
+
+        accumulate_grad_ = torch.ops.inductor.accumulate_grad_.default(getitem_1, getitem_12);  getitem_1 = getitem_12 = accumulate_grad_ = None
+        _exec_final_callbacks_stub = torch__dynamo_external_utils__exec_final_callbacks_stub();  _exec_final_callbacks_stub = None
+        return []
+""",  # noqa: B950
+                )
+
+            # 1 graph break on torch.load -> 2 dynamo graphs
+            self.check_output_and_recompiles(
+                fn,
+                count=[2, 4],
+                compiler_fn=make_compiler_fn(fullgraph=False, gm_hook=check),
+            )
 
     @skipIfWindows(msg="node name demangling inconsistent on windows")
     def test_backward_hook_relative_ordering_partial(self):
@@ -3617,7 +3858,7 @@ class CompiledAutograd0(torch.nn.Module):
 
         self.check_output_and_recompiles(fn)
 
-    def test_sac(self):
+    def test_checkpointing_sac(self):
         # circular import
         from torch.utils.checkpoint import (
             checkpoint,
@@ -3666,7 +3907,9 @@ class CompiledAutograd0(torch.nn.Module):
             yield model.layer4.weight.grad
             yield model.layer4.bias.grad
 
-        self.check_output_and_recompiles(fn)
+        self.check_output_and_recompiles(
+            fn, count=[1, 5], compiler_fn=make_compiler_fn(fullgraph=False)
+        )
 
 
 def load_test_module(name):
@@ -3754,6 +3997,26 @@ known_graph_breaks_tests = {
     "test_deep_reentrant",  # reentrant .backward
     "test_reentrant_priority",  # reentrant .backward
     "test_simple_reentrant",  # reentrant .backward
+    "test_checkpoint_detects_non_determinism",  # unpack hook in skip files
+    "test_checkpoint_valid_reset_on_error",  # unpack hook in skip files
+    "test_checkpointing_non_reentrant_autocast_cpu",  # unpack hook in skip files
+    "test_checkpointing_non_reentrant_autocast_gpu",  # unpack hook in skip files
+    "test_checkpointing_without_reentrant_arbitrary_input_output",  # unpack hook in skip files
+    "test_checkpointing_without_reentrant_correct_grad",  # unpack hook in skip files
+    "test_checkpointing_without_reentrant_custom_function_works",  # unpack hook in skip files
+    "test_checkpointing_without_reentrant_dataparallel",  # _get_device_index in skip files
+    "test_checkpointing_without_reentrant_detached_tensor_use_reentrant_True",  # reentrant .backward
+    "test_checkpointing_without_reentrant_parameter_used_in_an_out",  # unpack hook in skip files
+    "test_checkpointing_without_reentrant_with_context_fn",  # unpack hook in skip files
+    "test_save_on_cpu_and_checkpoint",  # unpack hook in skip files
+    "test_saved_tensor_hooks_custom_error_propagation",  # CustomError
+    "test_access_saved_tensor_twice_without_recomputation_works",  # unpack hook in skip files
+    "test_saved_tensor_hooks_extra_enter_during_bw_no_leak",  # ctx in skip files
+    "test_saved_tensor_hooks_extra_exit_during_bw_no_crash",  # ctx in skip files
+    "test_checkpointing",  # reentrant .backward
+    "test_checkpointing_without_reentrant_input_requires_grad_False",  # reentrant .backward
+    "test_checkpointing_without_reentrant_input_requires_grad_True",  # reentrant .backward
+    "test_checkpointing_without_reentrant_memory_savings",  # reentrant .backward
 }
 
 test_contexts = {
@@ -3764,9 +4027,7 @@ test_contexts = {
 }
 
 # These groups of tests aren't supported yet
-known_failures_re = re.compile(
-    r"^test_(sparse|profiler|gradcheck|checkpoint|named_tensor)"
-)
+known_failures_re = re.compile(r"^test_(sparse|profiler|gradcheck|named_tensor)")
 
 # Bugs needing investigation:
 skipped_tests = {
@@ -3837,7 +4098,7 @@ known_failing_tests = {
     # IndexError: list index out of range (NB: x.grad = y where both x and y are input tensors)
     "test_grad_nonleaf_register_hook",
     "test_backward_twice_without_saved_values",  # https://github.com/pytorch/pytorch/issues/129938
-    # Category: Dynamo
+    # Category: Dynamo (pass when directly running CA graph)
     "test_accumulate_grad_tensor_reference",  # Out of bounds: frame_state_entry.stride[i] is None
     "test_custom_function_exception",  # torch.no_grad(), torch._dynamo.exc.Unsupported: missing: WITH_EXCEPT_START
     "test_to_sparse_backward",  # Out of bounds: frame_state_entry.stride[i] is None
@@ -3849,7 +4110,20 @@ known_failing_tests = {
     "test_return_duplicate",  # gradient batching rule not implemented for aten::sym_size.int
     "test_return_duplicate_inplace",  # gradient batching rule not implemented for aten::sym_size.int
     "test_setitem",  # CopySlices accuracy error
-    # Category: Inductor
+    "test_save_on_cpu_and_checkpoint",  # https://github.com/pytorch/pytorch/issues/147565
+    "test_checkpoint_detects_non_determinism",  # different error
+    "test_checkpointing_non_reentrant_autocast_cpu",  # saved != recompute
+    "test_checkpointing_non_reentrant_autocast_gpu",  # saved != recompute
+    "test_checkpointing_without_reentrant_saved_object_identity",  # same as https://github.com/pytorch/pytorch/issues/136193
+    "test_saved_variable_packing_unpacking_did_not_save_original_with_hooks",  # register_hooks multiple times
+    "test_saved_variable_saved_original_inplace_detach",  # RuntimeError not raised
+    "test_access_saved_tensor_twice_without_recomputation_works",  # saved != recompute
+    "test_checkpointing_without_reentrant_dataparallel",  # https://github.com/pytorch/pytorch/issues/127115
+    "test_checkpointing",  # takes very very long
+    "test_checkpointing_without_reentrant_input_requires_grad_False",  # takes very very long
+    "test_checkpointing_without_reentrant_input_requires_grad_True",  # takes very very long
+    "test_checkpointing_without_reentrant_memory_savings",  # takes very very long
+    # Category: Inductor (pass on backend="aot_eager")
     "test_input_buffer_accum",  # does not support sparse_grad=True: https://github.com/pytorch/pytorch/issues/120267
     "test_graph_save_on_cpu",  # does not support pin_memory: https://github.com/pytorch/pytorch/issues/134173
     # Category: FakeTensor
@@ -3861,6 +4135,7 @@ known_failing_tests = {
     "test_invalid_gradients",  # can't give autograd error due to inaccurate output metadata of lifted backward
     "test_autograd_node_isinstance",  # backward ctx is a fake cls and not directly a Node instance
     "test_backward_hook_relative_ordering",  # compiled autograd collects breadth first, and module backward hook not supported
+    "test_checkpointing_without_reentrant_custom_function_works",  # ctx.saved_tensors are cached by CA
     # Category: Subclasses
     "test_dtensor_basic",
     "test_dtensor_contiguous_dtensor_noncontiguous_local_as_tangent",

@@ -5,11 +5,6 @@ from typing import Callable, Union
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
-from torch._higher_order_ops.cudagraph_conditional_nodes import (
-    ControlFlowOpWarmupDispatchMode,
-    CUDAGraphCaptureControlFlowOpDispatchMode,
-    while_loop_node,
-)
 from torch._higher_order_ops.utils import (
     _has_potential_branch_input_alias,
     _has_potential_branch_input_mutation,
@@ -23,7 +18,6 @@ from torch._higher_order_ops.utils import (
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch.cuda.graphs import _graph_no_gc
 from torch.fx.experimental.proxy_tensor import (
     _temp_remove_metadata_torch_function_mode,
     ProxyTorchDispatchMode,
@@ -222,37 +216,6 @@ def while_loop_dense(cond_fn, body_fn, carried_inputs, additional_inputs):
     return carried_vals
 
 
-# WAR for https://github.com/pytorch/pytorch/issues/140322
-@while_loop_op.py_impl(CUDAGraphCaptureControlFlowOpDispatchMode)
-def while_loop_cudagraph(mode, cond_fn, body_fn, carried_inputs, additional_inputs):
-    assert torch.cuda.is_available() and torch.cuda.is_current_stream_capturing()
-    # Re-enter this mode because addition torch.cond() and
-    # torch.while_loop() calls may be nested inside cond_fn or body_fn
-    with mode:
-        return while_loop_node(cond_fn, body_fn, carried_inputs, additional_inputs)
-
-
-# WAR for https://github.com/pytorch/pytorch/issues/140322
-@while_loop_op.py_impl(ControlFlowOpWarmupDispatchMode)
-def while_loop_warmup(mode, cond_fn, body_fn, carried_inputs, additional_inputs):
-    if torch.cuda.is_current_stream_capturing():
-        # This is a call to torch.while_loop() nested within either
-        # torch.while_loop() or another torch.cond() function.
-        with mode:
-            return while_loop_node(cond_fn, body_fn, carried_inputs, additional_inputs)
-    else:
-        with _graph_no_gc(
-            torch.cuda.CUDAGraph(),
-            pool=None,
-            stream=mode.capture_stream,
-            capture_error_mode="relaxed",
-        ), mode:
-            while_loop_node(cond_fn, body_fn, carried_inputs, additional_inputs)
-    # Since ControlFlowOpWarmupDispatchMode has been popped, this call
-    # will fall back to while_loop_dense
-    return while_loop_dense(cond_fn, body_fn, carried_inputs, additional_inputs)
-
-
 while_loop_op.py_impl(DispatchKey.Autograd)(
     autograd_not_implemented(while_loop_op, deferred_error=True)
 )
@@ -421,6 +384,21 @@ def check_meta_consistency(
 
             return ""
 
+        # Manually check the device of lhs and rhs as this field is currently not part of TensorMetadata
+        def diff_device(
+            lhs: Union[torch.Tensor, torch.SymInt, int],
+            rhs: Union[torch.Tensor, torch.SymInt, int],
+        ) -> str:
+            if isinstance(lhs, torch.Tensor) and isinstance(rhs, torch.Tensor):
+                if (
+                    rhs.device.type == lhs.device.type
+                    and rhs.device.index == lhs.device.index
+                ):
+                    return ""
+                else:
+                    return "device"
+            return ""
+
         if len(lhs_list) != len(rhs_list):
             raise torch._dynamo.exc.UncapturedHigherOrderOpError(
                 f"Expected {lhs_name} and {rhs_name} to have same number of outputs but got lhs:{lhs_list} and rhs:{rhs_list}"
@@ -428,6 +406,10 @@ def check_meta_consistency(
         all_diffs = []
         for i, (lhs, rhs) in enumerate(zip(lhs_list, rhs_list)):
             if diff := diff_meta(lhs, rhs):
+                all_diffs.append(
+                    f"pair[{i}] differ in {diff}, where lhs is {lhs} and rhs is {rhs}"
+                )
+            if diff := diff_device(lhs, rhs):
                 all_diffs.append(
                     f"pair[{i}] differ in {diff}, where lhs is {lhs} and rhs is {rhs}"
                 )

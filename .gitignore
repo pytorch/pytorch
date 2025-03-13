@@ -64,7 +64,10 @@ test/generated_type_hints_smoketest.py
 test/htmlcov
 test/cpp_extensions/install/
 test/cpp_extensions/open_registration_extension/install
+test/cpp_extensions/libtorch_agnostic_extension/install
+test/kernel.errors.txt
 third_party/build/
+third_party/nccl/
 tools/coverage_plugins_package/pip-wheel-metadata/
 tools/shared/_utils_internal.py
 tools/fast_nvcc/wrap_nvcc.sh
@@ -124,6 +127,13 @@ torch/utils/benchmark/utils/valgrind_wrapper/callgrind.h
 torch/utils/benchmark/utils/valgrind_wrapper/valgrind.h
 torch/version.py
 minifier_launcher.py
+aten/src/ATen/native/transformers/hip/flash_attn/ck/fmha_fwd_d*
+aten/src/ATen/native/transformers/hip/flash_attn/ck/fmha_bwd_d*
+aten/src/ATen/native/transformers/hip/flash_attn/ck/fmha_bwd_convert*
+aten/src/ATen/native/transformers/hip/flash_attn/ck/fwd_blob*
+aten/src/ATen/native/transformers/hip/flash_attn/ck/bwd_blob*
+aten/src/ATen/native/transformers/hip/flash_attn/ck/fmha_fwd_api*
+aten/src/ATen/native/transformers/hip/flash_attn/ck/fmha_bwd_api*
 # Root level file used in CI to specify certain env configs.
 # E.g., see .circleci/config.yaml
 env
