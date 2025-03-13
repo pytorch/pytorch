@@ -351,6 +351,28 @@ class FSDPModule:
                 if fsdp_param_group := state._fsdp_param_group:
                     fsdp_param_group.all_reduce_grads = requires_all_reduce
 
+    def set_reshard_after_forward(
+        self, reshard_after_forward: bool, *, recurse: bool = True
+    ) -> None:
+        """
+        Sets if the module should reshard parameters after forward. This can
+        be used to save computation time for since the unsharded parameter fo not
+        need to be re-all-gathered before setting to True in training.
+
+        Args:
+            reshard_after_forward (bool): Whether to reshard parameters after
+                backward.
+            recurse (bool): Whether to set for all FSDP submodules or just the
+                passed-in module.
+        """
+        self_module = cast(nn.Module, self)
+        modules = list(self_module.modules()) if recurse else [self_module]
+        for module in modules:
+            if isinstance(module, FSDPModule):
+                state = module._get_fsdp_state()
+                if fsdp_param_group := state._fsdp_param_group:
+                    fsdp_param_group.reshard_after_forward = reshard_after_forward
+
     def set_reshard_after_backward(
         self, reshard_after_backward: bool, *, recurse: bool = True
     ) -> None:
