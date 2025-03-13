@@ -14,7 +14,8 @@ struct PyFunctionTensorPreHook : public FunctionPreHook {
   PyFunctionTensorPreHook(PyObject* dict, size_t value_idx);
   ~PyFunctionTensorPreHook() override;
   variable_list operator()(const variable_list& values) override;
-  void compiled_args(torch::dynamo::autograd::CompiledNodeArgs& args) override;
+  void compiled_args(
+      torch::dynamo::autograd::CompiledNodeArgs& args) const override;
   PyObject* dict;
   size_t value_idx;
 };
@@ -23,7 +24,8 @@ struct PyFunctionPreHook : public FunctionPreHook {
   PyFunctionPreHook(PyObject* dict);
   ~PyFunctionPreHook() override;
   variable_list operator()(const variable_list& values) override;
-  void compiled_args(torch::dynamo::autograd::CompiledNodeArgs& args) override;
+  void compiled_args(
+      torch::dynamo::autograd::CompiledNodeArgs& args) const override;
   PyObject* dict;
 };
 
@@ -33,7 +35,8 @@ struct PyFunctionPostHook : public FunctionPostHook {
   variable_list operator()(
       const variable_list& outputs,
       const variable_list& inputs) override;
-  void compiled_args(torch::dynamo::autograd::CompiledNodeArgs& args) override;
+  void compiled_args(
+      torch::dynamo::autograd::CompiledNodeArgs& args) const override;
   PyObject* dict;
 };
 
@@ -45,7 +48,8 @@ struct PyFunctionTensorPostAccGradHooks : public PostAccumulateGradHook {
   PyFunctionTensorPostAccGradHooks(PyObject* dict);
   ~PyFunctionTensorPostAccGradHooks() override;
   void operator()(const Variable& tensor) override;
-  void compiled_args(torch::dynamo::autograd::CompiledNodeArgs& args) override;
+  void compiled_args(
+      torch::dynamo::autograd::CompiledNodeArgs& args) const override;
   void apply_with_saved(
       Variable& tensor,
       torch::dynamo::autograd::SwapSavedVariables& saved) override;
