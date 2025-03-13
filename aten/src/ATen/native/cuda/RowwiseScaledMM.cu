@@ -253,7 +253,7 @@ void f8f8bf16_rowwise_impl(
        reinterpret_cast<DtypeOutput*>(out.data_ptr()),
        stride_output,
        reinterpret_cast<DtypeOutput*>(out.data_ptr()),
-       stride_output}};
+       stride_output},{}};
 
   Gemm gemm;
 
@@ -434,7 +434,7 @@ void f8f8bf16_rowwise_impl_sm100(
        reinterpret_cast<DtypeOutput*>(out.data_ptr()),
        stride_output,
        reinterpret_cast<DtypeOutput*>(out.data_ptr()),
-       stride_output}};
+       stride_output},{}};
 
   Gemm gemm;
 
@@ -661,7 +661,8 @@ void f8f8bf16_rowwise_impl_sm89(
     problem_size.k(),             // stride A
     problem_size.k(),             // stride B
     0,                            // stride C (unused)
-    0);                           // stride D (unused)
+    0,                            // stride D (unused)
+    {});
 
   Gemm gemm;
 

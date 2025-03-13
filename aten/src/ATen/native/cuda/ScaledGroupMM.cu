@@ -482,7 +482,8 @@ void f8f8bf16_grouped_gemm_impl_sm90(
        (const DtypeOutput**)output_ptrs,
        stride_output,
        output_ptrs,
-       stride_output}};
+       stride_output,{},{}},
+      };
 
   int sm_count = at::cuda::getDeviceProperties(out.device().index())->multiProcessorCount;
   if (at::globalContext()._SMCarveout_EXPERIMENTAL().has_value()) {
