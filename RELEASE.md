@@ -91,10 +91,10 @@ Releasing a new version of PyTorch generally entails 3 major steps:
 
 ### Frequently Asked Questions
 
-* Q: What is release branch cut  ?
+* Q: What is a release branch cut  ?
   * A: When bulk of the tracked features merged into the main branch, the primary release engineer starts the release process of cutting the release branch by creating a new git branch based off of the current `main` development branch of PyTorch. This allows PyTorch development flow on `main` to continue uninterrupted, while the release engineering team focuses on stabilizing the release branch in order to release a series of release candidates (RC). The activities in the release branch include both regression and performance testing as well as polishing new features and fixing release-specific bugs. In general, new features *are not* added to the release branch after it was created.
 
-* Q: What is cherry-pick ?
+* Q: What is a cherry-pick ?
   * A: A cherry pick is a process of propagating commits from the main into the release branch, utilizing git's built in [cherry-pick feature](https://git-scm.com/docs/git-cherry-pick). These commits are typically limited to small fixes or documentation updates to ensure that the release engineering team has sufficient time to complete a thorough round of testing on the release branch. To nominate a fix for cherry-picking, a separate pull request must be created against the respective release branch and then mentioned in the Release Tracker issue (example: https://github.com/pytorch/pytorch/issues/94937) following the template from the issue description. The comment nominating a particular cherry-pick for inclusion in the release should include the committed PR against main branch, the newly created cherry-pick PR, as well as the acceptance criteria for why the cherry-pick is needed in the first place.
 
 ## Cutting a release branch preparations
@@ -291,7 +291,7 @@ The following requirements need to be met prior to creating the final Release Ca
 
 * Perform [Release Candidate health validation](#release-candidate-health-validation). CI should have the green signal.
 
-After the final RC is created. The following tasks should be performed :
+After the final RC is created, the following tasks should be performed:
 
 * Perform [Release Candidate health validation](#release-candidate-health-validation). CI should have the green signal.
 
@@ -323,25 +323,25 @@ Promotion should occur in two steps:
 
 ## Additional Steps to prepare for release day
 
-The following should be prepared for the release day
+The following should be prepared for the release day:
 
 ### Modify release matrix
 
-Need to modify release matrix for get started page. See following [PR](https://github.com/pytorch/test-infra/pull/4611) as reference.
+Modify the release matrix for the get started page. See the following [PR](https://github.com/pytorch/test-infra/pull/4611) as reference.
 
-The PR to update published_versions.json and quick-start-module.js is auto generated. See following [PR](https://github.com/pytorch/pytorch.github.io/pull/1467) as reference.
+The PR to update published_versions.json and quick-start-module.js is auto generated. See the following [PR](https://github.com/pytorch/pytorch.github.io/pull/1467) as reference.
 
-Please note: This PR needs to be merged on the release day and hence it should be absolutely free of any failures. To test this PR, open another test PR but pointing to the Release candidate location as above [Release Candidate Storage](RELEASE.md#release-candidate-storage)
+Please note: This PR needs to be merged on the release day and hence it should be absolutely free of any failures. To test this PR, open another test PR pointing to the Release Candidate location as described in the [Release Candidate Storage](#release-candidate-storage) section.
 
 ### Open Google Colab issue
 
-This is normally done right after the release is completed. We would need to create Google Colab Issue see following [PR](https://github.com/googlecolab/colabtools/issues/2372)
+This is normally done right after the release is completed. We need to create a Google Colab issue. See the following example [issue](https://github.com/googlecolab/colabtools/issues/2372)
 
 # Patch Releases
 
 A patch release is a maintenance release of PyTorch that includes fixes for regressions found in a previous minor release. Patch releases typically will bump the `patch` version from semver (i.e. `[major].[minor].[patch]`).
 
-Please note: Starting from 2.1 one can expect up to 2 patch releases after every minor ones. Patch releases would only be published for latest minor release.
+Please note: Starting from 2.1, one can expect up to 2 patch releases after every minor release. Patch releases are only published for the latest minor release.
 
 ## Patch Release Criteria
 
@@ -363,11 +363,11 @@ Patch releases should be considered if a regression meets the following criteria
 > Main POC: Patch Release Managers, Triage Reviewers
 
 Patch releases should follow these high-level phases. This process starts immediately after the previous release has completed.
-Patch release process takes around 4-5 weeks to complete.
+The patch release process takes around 4-5 weeks to complete.
 
-1. Triage, is a process where issues are identified, graded, compared to Patch Release Criteria and added to Patch Release milestone. This process normally takes 2 weeks after the release completion.
+1. Triage is a process where issues are identified, graded, compared to Patch Release Criteria and added to Patch Release milestone. This process normally takes 2 weeks after the release completion.
 2. Go/No Go meeting between PyTorch Releng, PyTorch Core and Project Managers where potential issues triggering a release in milestones are reviewed, and following decisions are made:
-  * Should the new patch Release be created ?
+  * Should the new patch release be created?
   * Timeline execution for the patch release
 3. Cherry picking phase starts after the decision is made to create patch release. At this point a new release tracker for the patch release is created, and an announcement will be made on official channels [example announcement](https://dev-discuss.pytorch.org/t/pytorch-release-2-0-1-important-information/1176). The authors of the fixes to regressions will be asked to create their own cherry picks. This process normally takes 2 weeks.
 4. Building Binaries, Promotion to Stable and testing. After all cherry picks have been merged, Release Managers trigger new build and produce new release candidate. Announcement is made on the official channel about the RC availability at this point. This process normally takes 2 weeks.
