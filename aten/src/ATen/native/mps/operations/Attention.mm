@@ -38,13 +38,13 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
                                                                   double dropout_p,
                                                                   bool is_causal,
                                                                   const std::optional<Tensor>& dropout_mask,
-                                                                  std::optional<double> scale) {
+                                                                  std::optional<double> scale,
+                                                                  std::optional<bool> enable_gqa) {
   const auto macOS15_0_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
   if (is_causal) {
     TORCH_CHECK(!attn_mask.has_value(),
                 "_scaled_dot_product_attention: Explicit attn_mask should not be set when is_causal=True");
   }
-
   TORCH_CHECK(dropout_p == 0.0, "_scaled_dot_product_attention_math_for_mps: dropout_p != 0.0 is not supported");
   TORCH_CHECK(macOS15_0_plus || (query.is_contiguous() && key.is_contiguous() && value.is_contiguous()),
               "_scaled_dot_product_attention_math_for_mps: query, key, and value must be contiguous");
@@ -55,6 +55,20 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
   auto [q_, sq] = ensure_4d(query);
   auto [k_, sk] = ensure_4d(key);
   auto [v_, sv] = ensure_4d(value);
+
+  if (enable_gqa) {
+    int64_t q_heads = q_.size(1);
+    int64_t k_heads = k_.size(1);
+    TORCH_CHECK(q_heads % k_heads == 0,
+                "For GQA, the query tensor's head dimension (" + std::to_string(q_heads) +
+                    ") must be divisible by the key tensor's head dimension (" + std::to_string(k_heads) + ").");
+    int64_t repeat_factor = q_heads / k_heads;
+
+    if (repeat_factor > 1) {
+      k_ = k_.repeat_interleave(repeat_factor, /*dim=*/1);
+      v_ = v_.repeat_interleave(repeat_factor, /*dim=*/1);
+    }
+  }
   std::optional<Tensor> mask_;
   if (attn_mask) {
     auto maskExpandedDims = query.sizes().vec();

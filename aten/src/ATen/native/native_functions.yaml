@@ -14854,7 +14854,7 @@
   variants: function
   tags: nondeterministic_seeded
 
-- func: _scaled_dot_product_attention_math_for_mps(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool is_causal=False, Tensor? dropout_mask=None, *, float? scale=None) -> (Tensor, Tensor)
+- func: _scaled_dot_product_attention_math_for_mps(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool is_causal=False, Tensor? dropout_mask=None, *, float? scale=None, bool? enable_gpa=False) -> (Tensor, Tensor)
   dispatch:
     MPS: _scaled_dot_product_attention_math_mps
   tags: nondeterministic_seeded

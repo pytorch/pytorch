@@ -9909,6 +9909,29 @@ class TestSDPA(TestCaseMPS):
         y_ref = F.scaled_dot_product_attention(q.cpu(), k.cpu(), v.cpu(), attn_mask=mask.cpu(), dropout_p=0.0, is_causal=False)
         self._compare_tensors(y.cpu(), y_ref)
 
+    @parametrize("dtype", [torch.float16, torch.float32])
+    @parametrize("is_causal", [True, False])
+    def test_sdpa_enable_gqa(self, dtype, is_causal):
+        q_heads = 32
+        key_heads = 16
+        L = 7
+        S = 17
+        HS = 23
+
+        q = torch.randn([2, q_heads, L, HS], dtype=dtype, device="mps")
+        k = torch.randn([2, key_heads, S, HS], dtype=dtype, device="mps")
+        v = torch.randn([2, key_heads, S, HS], dtype=dtype, device="mps")
+
+        y_ref = F.scaled_dot_product_attention(
+            q.cpu(), k.cpu(), v.cpu(), dropout_p=0.0, is_causal=is_causal, enable_gqa=True,
+        )
+
+        with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
+            y = F.scaled_dot_product_attention(
+                q, k, v, dropout_p=0.0, is_causal=is_causal, enable_gqa=True,
+            )
+        self._compare_tensors(y.cpu(), y_ref)
+
 
 class TestGatherScatter(TestCaseMPS):
     def test_slicing_with_step(self):

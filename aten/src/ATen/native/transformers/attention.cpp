@@ -767,7 +767,8 @@ Tensor scaled_dot_product_attention(
             dropout_p,
             is_causal,
             std::nullopt, /*dropout_mask*/
-            scale));
+            scale,
+            enable_gqa));
       }
 #endif
       return std::get<0>(at::_scaled_dot_product_attention_math(
