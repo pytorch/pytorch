@@ -1273,7 +1273,7 @@ class WeightInt4PackMatmul(ExternKernelAlloc):
         output_size = list(m) + [n]
         output_stride = FlexibleLayout.contiguous_strides(output_size)
         kernel_layout = FixedLayout(
-            x.get_device(),
+            x.get_device(),  # type: ignore[arg-type]
             x.get_dtype(),
             output_size,
             output_stride,
