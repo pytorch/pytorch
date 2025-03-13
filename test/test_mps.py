@@ -1497,8 +1497,6 @@ class TestMPS(TestCaseMPS):
     # both CUDA and MPS, but I'm not sure where is a good place to put it so
     # that both test_torch and test_mps can have access to it. I guess
     # probably somewhere in `torch.testing`
-    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
-    @skipXLA
     @parametrize('device', ['mps'])
     @parametrize('src,dest', [
         ('cpu', None),
