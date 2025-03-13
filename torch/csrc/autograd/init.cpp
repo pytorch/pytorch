@@ -19,6 +19,7 @@
 #include <torch/csrc/autograd/input_metadata.h>
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/profiler_python.h>
+#include <torch/csrc/autograd/python_autograd.h>
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/autograd/python_saved_variable_hooks.h>
 #include <torch/csrc/autograd/python_variable.h>
@@ -1292,7 +1293,7 @@ static PyObject* len_torch_dispatch_stack(PyObject* _unused, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPModule_increment_version(
+static PyObject* THPModule_increment_version(
     PyObject* _unused,
     PyObject* tensor_list) {
   HANDLE_TH_ERRORS
