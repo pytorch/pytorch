@@ -2009,7 +2009,43 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
                 )
             ]
         )
+        result = scan(
+            get_scan_combine_fn("s5_operator", False),
+            init,
+            elements,
+            dim=0,
+            reverse=reverse,
+        )
+        expected_result = _fake_scan(
+            get_scan_combine_fn("s5_operator", False),
+            init=init,
+            xs=elements,
+            dim=0,
+            reverse=reverse,
+        )
+        self.assertEqual(result, expected_result)
 
+    @requires_cuda
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    def test_scan_binary_operator_complex(self, reverse, device):
+        A = torch.randn(10, 3, 10, dtype=torch.complex64, device=device)
+        projected_inputs = torch.ones_like(A) * 0.98j + torch.ones_like(A) * 0.98j
+        elements = (A, projected_inputs)
+        init = tuple(
+            [
+                torch.ones_like(
+                    torch._ops.ops.aten.slice(elements[0], 0, 0, 1, 1),
+                    requires_grad=True,
+                )
+            ]
+            + [
+                torch.zeros_like(
+                    torch._ops.ops.aten.slice(projected_inputs, 0, 0, 1, 1),
+                    requires_grad=True,
+                )
+            ]
+        )
         result = scan(
             get_scan_combine_fn("s5_operator", False),
             init,
