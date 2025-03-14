@@ -544,6 +544,34 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref[1], res[1])
 
     @make_dynamo_test
+    def test_raise_from_None_2(self):
+        def fn():
+            try:
+                raise ValueError
+            except Exception:
+                raise TypeError from None
+
+        try:
+            fn()
+        except TypeError as e:
+            assert e.__cause__ is None
+            assert e.__suppress_context__ is True
+
+    @make_dynamo_test
+    def test_raise_from_other(self):
+        def fn():
+            try:
+                raise ValueError
+            except Exception as e:
+                raise TypeError from e
+
+        try:
+            fn()
+        except TypeError as e:
+            assert isinstance(e.__cause__, ValueError)
+            assert e.__suppress_context__ is True
+
+    @make_dynamo_test
     def test_reraise_first_exc(self):
         def fn():
             try:
