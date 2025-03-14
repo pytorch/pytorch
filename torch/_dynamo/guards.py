@@ -1952,10 +1952,11 @@ class GuardBuilder(GuardBuilderBase):
             except OverflowError:
                 # Cannot use int64_t
                 python_fallback = True
+                python_code_parts, verbose_code_parts = _get_code_parts(
+                    ("python", "verbose_python")
+                )
         else:
             python_fallback = True
-
-        if python_fallback:
             python_code_parts, verbose_code_parts = _get_code_parts(
                 ("python", "verbose_python")
             )
