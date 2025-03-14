@@ -454,7 +454,8 @@ def is_non_overlapping_and_dense(a: Tensor) -> bool:
 def compute_elementwise_output_logical_to_physical_perm(
     *tensors, _skip_checks=False
 ) -> list[int]:
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import guard_semantics, guard_size_oblivious
+    from torch.utils._sympy.functions import FloorDiv
 
     if not _skip_checks and len(tensors) == 0:
         msg = "Can't compute elementwise output strides for zero tensors!"
@@ -504,23 +505,30 @@ def compute_elementwise_output_logical_to_physical_perm(
     shape = tensors[0].shape
 
     def should_swap(idx_a, idx_b):
+        def gt(a, b):
+            # semantics for a > b, assuming a != b, a >= 0, b >= 0
+            symint = a // b
+            if isinstance(symint, int):
+                return symint >= 1
+            expr = symint.node.expr
+            return not (expr.has(FloorDiv) or guard_semantics(expr == 0))
+
         for tensor in tensors:
             stride_a = tensor.stride()[idx_a]
             stride_b = tensor.stride()[idx_b]
 
-            if guard_size_oblivious(stride_a == 0) or guard_size_oblivious(
-                stride_b == 0
-            ):
+            if guard_semantics(stride_a == 0) or guard_semantics(stride_b == 0):
                 continue
 
-            if guard_size_oblivious(stride_a < stride_b):
+            if guard_semantics(stride_a == stride_b):
+                if guard_semantics(shape[idx_a] >= shape[idx_b]):
+                    return 1
+                continue
+
+            if gt(stride_b, stride_a):
                 return -1
 
-            if guard_size_oblivious(stride_a > stride_b):
-                return 1
-
-            # stride_a == stride_b
-            if guard_size_oblivious(shape[idx_a] > shape[idx_b]):
+            if gt(stride_a, stride_b):
                 return 1
 
         # Note: this case is hit if all strides are zero,
