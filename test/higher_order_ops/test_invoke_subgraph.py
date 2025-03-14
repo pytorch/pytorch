@@ -475,7 +475,8 @@ class GraphModule(torch.nn.Module):
 
         opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, "NYI: invoke_subgraph with aliasing"
+            torch._dynamo.exc.InternalTorchDynamoError,
+            "invoke_subgraph where the inputs are mutated.*",
         ):
             opt_fn(x, y)
 
@@ -532,7 +533,8 @@ class GraphModule(torch.nn.Module):
 
         opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, "NYI: invoke_subgraph with aliasing"
+            torch._dynamo.exc.InternalTorchDynamoError,
+            "invoke_subgraph where aliases appear.*",
         ):
             opt_fn(x, y)
 

@@ -722,14 +722,8 @@ def auto_functionalized_proxy(
 
 @auto_functionalized.py_functionalize_impl
 def auto_functionalized_func(ctx, _mutable_op, **kwargs):
-    from torch._dynamo.variables.higher_order_ops import _check_mutation_and_alias
-
     unwrapped_kwargs = ctx.unwrap_tensors(kwargs)
     with ctx.redispatch_to_next():
-        pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
-        _check_mutation_and_alias(
-            _mutable_op, unwrapped_kwargs, "auto_functionalized", pre_dispatch
-        )
         result = auto_functionalized(_mutable_op, **unwrapped_kwargs)
     return ctx.wrap_tensors(result)
 

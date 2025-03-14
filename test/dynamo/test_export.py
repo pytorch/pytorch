@@ -3303,7 +3303,12 @@ def forward(self, x):
 
     def test_cond_raise_user_error_on_branch_return_multiple_tensors(self):
         def f_branch_return_multiple_tensors(pred, x, y):
-            return cond(pred, lambda x: (x, x.clone()), lambda x: (x, x.clone()), [y])
+            return cond(
+                pred,
+                lambda x: (x.clone(), x.clone()),
+                lambda x: (x.clone(), x.clone()),
+                [y],
+            )
 
         example_inputs = (torch.tensor(True), torch.randn(4), torch.randn(2))
         gm, _ = torch._dynamo.export(
@@ -3328,7 +3333,7 @@ def forward(self, x):
             return x.clone()
 
         def false_fn(x):
-            return (x, x.clone())
+            return (x.clone(), x.clone())
 
         def f_mismatch_return_length(x):
             return cond(torch.tensor(100), true_fn, false_fn, [x])

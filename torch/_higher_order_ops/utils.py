@@ -208,9 +208,9 @@ def potential_input_alias_or_mutation(gm, inputs, pre_dispatch=False):
 
 def _has_potential_branch_input_mutation(gm, inputs, pre_dispatch=False):
     (
-        inp_inp_alias_map,
-        inp_out_alias_map,
-        out_out_alias_map,
+        _,
+        _,
+        _,
     ), inp_mutation = potential_input_alias_or_mutation(gm, inputs, pre_dispatch)
 
     return len(inp_mutation) > 0

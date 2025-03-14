@@ -6994,8 +6994,6 @@ def forward(self, s0 : torch.SymInt, L_a_ : torch.Tensor, L_b_ : torch.Tensor, L
             functional_f(example_init, example_inputs), f(example_init, example_inputs)
         )
 
-    # https://github.com/pytorch/pytorch/issues/126988
-    @xfailIfTorchDynamo
     def test_scan_functionalized_elem_mutation(self):
         def add1(x, y):
             x.add_(4)
@@ -7027,8 +7025,6 @@ def forward(self, s0 : torch.SymInt, L_a_ : torch.Tensor, L_b_ : torch.Tensor, L
         ):
             functional_f(example_init, example_inputs)
 
-    # https://github.com/pytorch/pytorch/issues/126988
-    @xfailIfTorchDynamo
     def test_scan_functionalized_elem_alias(self):
         def add(x, y):
             return x, x

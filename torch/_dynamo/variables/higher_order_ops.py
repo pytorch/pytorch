@@ -3178,23 +3178,25 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
 
         # TODO(anijain2305) - This might be too big of a limitation. Consider
         # supporting mutation/aliasing in HOP itself to remove this restriction.
-        from torch._higher_order_ops.utils import has_potential_input_alias_or_mutation
+        from torch._higher_order_ops.utils import potential_input_alias_or_mutation
 
-        aliases, input_mutations = has_potential_input_alias_or_mutation(
+        aliases, input_mutations = potential_input_alias_or_mutation(
             body_gmod, fake_inputs
         )
-        if aliases:
+        if any(len(a) > 0 for a in aliases):
             # TODO: Investigate here further which node is exactly aliasing
             raise RuntimeError(
-                f"{self.value._name} where aliases appear."
-                + f"In particular, these nodes are aliasing the inputs {[el for el in aliases]}."  # noqa: C416
-                + "Please ensure that this doesn't happen."
+                f"{self.value._name} where aliases appear. "
+                + f"In particular, these inputs \
+                {set(el for el_map in aliases if len(el_map.keys()) > 0 for el in el_map.keys())} "  # noqa: C401
+                + "get aliased. Please ensure that this doesn't happen."
             )
-        if input_mutations:
+        if len(input_mutations):
             # TODO: Investigate here further which node is exactly mutating the inputs
             raise RuntimeError(
-                f"{self.value._name} where the inputs are mutated."
-                + f"In particular, these nodes are mutating the inputs {[el for el in input_mutations]}."  # noqa: C416
+                f"{self.value._name} where the inputs are mutated. "
+                + f"In particular, these nodes are mutating the inputs \
+                {set(el for el in input_mutations)}."  # noqa: C401
                 + "Please ensure that this doesn't happen."
             )
 
