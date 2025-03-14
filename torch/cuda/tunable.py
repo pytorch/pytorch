@@ -444,7 +444,7 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
 
     dtype_dict = {
         "float": torch.float32,
-        "tf32" : torch.float32,
+        "tf32": torch.float32,
         "double": torch.float64,
         "BFloat16": torch.bfloat16,
         "Half": torch.half,
