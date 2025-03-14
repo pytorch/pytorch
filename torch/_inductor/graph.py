@@ -97,6 +97,7 @@ from .utils import (
     get_cloned_parameter_buffer_name,
     get_donated_idxs,
     get_sympy_Expr_dtype,
+    GraphPartitionMap,
     is_same_tensor,
     maybe_get_suppress_shape_guards_ctx,
     normalize_name,
@@ -320,6 +321,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_input_names: list[str] = []
         self.graph_inputs: dict[str, Union[TensorBox, TorchBindObject, sympy.Expr]] = {}
         self.graph_inputs_original: dict[str, InputBuffer] = {}
+        self.partition_maps: Optional[list[GraphPartitionMap]] = None
         self.zero_dim_cpu_tensor_list = OrderedSet[str]()
         self.device_types: OrderedSet[str] = (
             const_module.device_types if const_module else OrderedSet()
