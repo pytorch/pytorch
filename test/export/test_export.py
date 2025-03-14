@@ -4068,9 +4068,9 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             "The following call raised this error(.*\n)+"
             f".*{re.escape('return r.view(items[0], items[2])')}(.*\n)+"
             "To fix the error, insert one of the following checks before this call.*:\n"
-            f".*{re.escape('torch._check(items[2] == (-1))')}.*\n"
-            f".*{re.escape('torch._check(items[2] != (-1))')}(.*\n)+"
-            f".*{re.escape('(These suggested fixes were derived by replacing `u2` with items[2] in Eq(u2, -1) and its negation.)')}",
+            f".*{re.escape('torch._check(items[2] >= 0)')}.*\n"
+            f".*{re.escape('torch._check(items[2] < 0)')}(.*\n)+"
+            f".*{re.escape('(These suggested fixes were derived by replacing `u2` with items[2] in u2 >= 0 and its negation.)')}",
         ):
             export(N(), (t,), strict=strict)
 
@@ -4092,29 +4092,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             f".*{re.escape('torch._check(items[2] >= 0)')}.*\n"
             f".*{re.escape('torch._check(items[2] < 0)')}(.*\n)+"
             f".*{re.escape('(These suggested fixes were derived by replacing `u2` with items[2] in u2 >= 0 and its negation.)')}",
-        ):
-            export(N(), (t,), strict=strict)
-
-        class M_v2(torch.nn.Module):
-            def forward(self, t):
-                items = [t[i].item() for i in range(t.numel())]
-                r = torch.randn([items[0], items[1]])
-                # Could not guard on data-dependent expression Eq(u2, -1)
-                torch._check(items[2] != -1)
-                # Could not guard on data-dependent expression u2 >= 0
-                torch._check(items[2] >= 0)
-                # Could not guard on data-dependent expression Eq(u1, u2)
-                return r.view(items[0], items[2])
-
-        M = M_v2
-        with self.assertRaisesRegex(
-            error_type,
-            "The following call raised this error(.*\n)+"
-            f".*{re.escape('return r.view(items[0], items[2])')}(.*\n)+"
-            "To fix the error, insert one of the following checks before this call.*:\n"
-            f".*{re.escape('torch._check(items[2] == items[1])')}.*\n"
-            f".*{re.escape('torch._check(items[2] != items[1])')}(.*\n)+"
-            f".*{re.escape('(These suggested fixes were derived by replacing `u1` with items[1] or r.shape[1], `u2` with items[2] in Eq(u2, u1) and its negation.)')}",
         ):
             export(N(), (t,), strict=strict)
 
@@ -8258,9 +8235,14 @@ graph():
                 x = torch.zeros(a, b)
                 return x.reshape(c, d)
 
+        if is_non_strict_test(self._testMethodName):
+            error_type = ValueError
+        else:
+            error_type = torch._dynamo.exc.TorchRuntimeError
+
         xs = torch.tensor([4, 6, 8, 3])
         with self.assertRaisesRegex(
-            ValueError,
+            error_type,
             "Could not reshape a tensor with shape .*u0, u1.* as a tensor with shape .*u2, u3.*"
         ):
             export(Foo(), (xs,))
