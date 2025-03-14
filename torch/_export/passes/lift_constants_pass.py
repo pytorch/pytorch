@@ -148,11 +148,13 @@ def lift_constants_pass(
     )
 
     first_user_input_loc, first_user_input = 0, next(iter(gm.graph.nodes))
+    used_target_names = set()
     for node in gm.graph.nodes:
         if node.op == "placeholder":
             if node.name in graph_signature.user_inputs:
                 first_user_input = node
                 break
+            used_target_names.add(inputs[first_user_input_loc].target)
             first_user_input_loc += 1
         # If we ever hit here, it means that
         # there was no user input so the constants
@@ -194,6 +196,10 @@ def lift_constants_pass(
                 else:
                     constant_name = f"lifted_custom_{num_custom_obj}"
                     constant_fqn = get_constant_fqn(node, constant_name)
+                    while constant_fqn in used_target_names:
+                        num_custom_obj += 1
+                        constant_name = f"lifted_custom_{num_custom_obj}"
+                        constant_fqn = get_constant_fqn(node, constant_name)
                     num_custom_obj += 1
             elif isinstance(constant_val, torch.Tensor):
                 # Remove the parameterness of constant_val
@@ -212,6 +218,10 @@ def lift_constants_pass(
                 else:
                     constant_name = f"lifted_tensor_{num_tensor_constants}"
                     constant_fqn = get_constant_fqn(node, constant_name)
+                    while constant_fqn in used_target_names:
+                        num_tensor_constants += 1
+                        constant_name = f"lifted_tensor_{num_tensor_constants}"
+                        constant_fqn = get_constant_fqn(node, constant_name)
                     num_tensor_constants += 1
             elif isinstance(constant_val, torch.fx.GraphModule):
                 continue
