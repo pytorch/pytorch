@@ -289,7 +289,6 @@ class MetalOverrides(OpOverrides):
     def atan2(x: CSEVariable, y: CSEVariable) -> str:
         return f"::metal::atan2({x}, {y})"
 
-
     @staticmethod
     def sqrt(x: CSEVariable) -> str:
         return f"metal::sqrt({x})"
@@ -718,7 +717,8 @@ class MetalKernel(SIMDKernel):
         # See https://github.com/pytorch/pytorch/issues/144634
         expr_str = self.index_to_str(expr)
         lower_expr = f"{expr_str} < 0" if lower else ""
-        upper_expr = f"{expr_str} >= {self.index_to_str(size)}" if upper else ""
+        # TODO(malfet): Is upper bound inclusive or exclusive?
+        upper_expr = f"{expr_str} > {self.index_to_str(size)}" if upper else ""
         if lower and upper:
             line = f"if (({lower_expr}) && ({upper_expr})) return"
         else:

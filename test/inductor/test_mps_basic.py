@@ -86,7 +86,7 @@ class MPSBasicTests(TestCase):
         self.common(torch.special.i0, (torch.rand(128, 128),), check_lowp=False)
 
     def test_pointwise_i0e(self):
-        self.common(torch.special.i0, (torch.rand(128, 128),), check_lowp=False)
+        self.common(torch.special.i0e, (torch.rand(128, 128),), check_lowp=False)
 
     def test_pointwise_i1(self):
         self.common(torch.special.i1, (torch.rand(128, 128),), check_lowp=False)
@@ -227,6 +227,7 @@ for test_name in [
     "test_sum_int",
     "test_sum_keepdims",
     "test_tanh",
+    "test_vectorized_ops_masked",
     "test_view_as_complex",
     "test_view_on_aliased",
     "test_views3",

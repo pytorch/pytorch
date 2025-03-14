@@ -1426,6 +1426,10 @@ class CommonTemplate:
         )
         real_input = torch.tensor([-1.0, 0.0, 1.0, float("nan")])
         interger_real_input = torch.tensor([-1, 0, 1])
+        # Complex are not supported on MacOS-13
+        if self.device == "mps" and MACOS_VERSION < 14.0:
+            self.common(fn, (real_input, interger_real_input))
+            return
         self.common(fn, (complex_input, real_input, interger_real_input))
 
     def test_sgn(self):
