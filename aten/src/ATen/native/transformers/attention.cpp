@@ -759,6 +759,28 @@ Tensor scaled_dot_product_attention(
           && !(GradMode::is_enabled() && any_inputs_require_grad)
           && (all_contiguous || mps::is_macos_13_or_newer(mps::MacOSVersion::MACOS_VER_15_0_PLUS))
           && !any_nested) {
+        if (enable_gqa) {
+          int64_t q_heads = query_.size(-3);
+          int64_t k_heads = key.size(-3);
+          int64_t repeat_factor = q_heads / k_heads;
+
+          if (repeat_factor > 1) {
+            TORCH_CHECK(q_heads % k_heads == 0,
+                          "For GQA, the query tensor's head dimension (" + std::to_string(q_heads) +
+                                    ") must be divisible by the key tensor's head dimension (" + std::to_string(k_heads) + ").");
+            auto repeated_key = key.repeat_interleave(repeat_factor, /*dim=*/-3);
+            auto repeated_value = value.repeat_interleave(repeat_factor, /*dim=*/-3);
+            return std::get<0>(at::_scaled_dot_product_attention_math_for_mps(
+              query_,
+              repeated_key,
+              repeated_value,
+              attn_mask,
+              dropout_p,
+              is_causal,
+              std::nullopt, /*dropout_mask*/
+              scale));
+          }
+        }
         return std::get<0>(at::_scaled_dot_product_attention_math_for_mps(
             query_,
             key,
@@ -767,8 +789,7 @@ Tensor scaled_dot_product_attention(
             dropout_p,
             is_causal,
             std::nullopt, /*dropout_mask*/
-            scale,
-            enable_gqa));
+            scale));
       }
 #endif
       return std::get<0>(at::_scaled_dot_product_attention_math(
