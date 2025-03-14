@@ -216,6 +216,7 @@ jobs:
         run: |
           echo $(pwd)
           ls ./*.txt
+          ls ./*.json
 
       - name: Build
         if: steps.filter.outputs.is-test-matrix-empty == 'False' || inputs.test-matrix == ''
@@ -244,6 +245,7 @@ jobs:
         run: |
           echo $(pwd)
           ls ./*.txt
+          ls ./*.json
           START_TIME=$(date +%s)
           if [[ ${BUILD_ENVIRONMENT} == *"s390x"* ]]; then
             JENKINS_USER=
@@ -315,12 +317,14 @@ jobs:
           echo "build_time=$((END_TIME - START_TIME))" >> "$GITHUB_OUTPUT"
           echo $(pwd)
           ls ./*.txt
+          ls ./*.json
 
       - name: Check all txt
         shell: bash
         run: |
           echo $(pwd)
           ls ./*.txt
+          ls ./*.json
 
       - name: Archive artifacts into zip
         if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped'
@@ -332,6 +336,7 @@ jobs:
         run: |
           echo $(pwd)
           ls ./*.txt
+          ls ./*.json
 
       - name: Store PyTorch Build Artifacts on S3
         uses: seemethere/upload-artifact-s3@v5
