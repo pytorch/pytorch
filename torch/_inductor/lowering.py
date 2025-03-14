@@ -9,6 +9,7 @@ import logging
 import math
 import operator
 import os
+import textwrap
 import warnings
 from collections import defaultdict
 from collections.abc import Iterable, Sequence
@@ -57,6 +58,7 @@ from .ir import (
     IndexingConstant,
     IRNode,
     is_triton,
+    OnlineSoftmaxReduction,
     ops_wrapper,
     PermuteView,
     Pointwise,
@@ -72,6 +74,7 @@ from .utils import (
     is_dynamic,
     is_gpu,
     is_pointwise_use,
+    is_view,
     needs_fallback_due_to_atomic_add_limitations,
     pad_listlike,
     register_op_dtype_propagation_rules,
@@ -1918,7 +1921,7 @@ def _warn_complex_not_supported():
 
 # There are some types (CPU) which we accept as input but not as
 # output.
-def unsupported_input_tensor(t: torch.Tensor, parent=None):
+def unsupported_input_tensor(t: torch.Tensor, parent=None, node=None):
     "Do not support reading or writing to this tensor"
     if t.is_complex():
         # Complex views are supported with IR ComplexView
@@ -1929,10 +1932,26 @@ def unsupported_input_tensor(t: torch.Tensor, parent=None):
             return False
         _warn_complex_not_supported()
         return True
+
+    if t.dtype == torch.float8_e8m0fnu:
+        if not node:
+            return True
+
+        # allow bitcast, views, memory movement, but not arithmetic
+        # TODO: delete once triton adds native support
+        return not (
+            node.target
+            in (
+                aten.view.dtype,
+                aten.cat.default,
+            )
+            or is_view(node.target)
+        )
+
     return False
 
 
-def unsupported_output_tensor(t: torch.Tensor, parent=None):
+def unsupported_output_tensor(t: torch.Tensor, parent=None, node=None):
     "Do not support writing tensor but can read from it"
     if unsupported_input_tensor(t, parent):
         return True
@@ -1960,10 +1979,10 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
                 continue
 
             if is_output:
-                if unsupported_output_tensor(meta, parent):
+                if unsupported_output_tensor(meta, parent, node):
                     return True
             else:
-                if unsupported_input_tensor(meta, parent):
+                if unsupported_input_tensor(meta, parent, node):
                     return True
 
         return False
@@ -6945,6 +6964,61 @@ from .comm_lowering import register_comm_lowerings
 
 
 register_comm_lowerings()
+
+
+@register_lowering(inductor_prims.prepare_softmax_online, type_promotion_kind=None)
+def prepare_softmax_online(x, dim):
+    """
+    Lowering inductor_prims.prepare_softmax_online to compute max/sum in one pass if no split is needed.
+    """
+    kwargs = _make_reduction_inner(
+        x, axis=dim, keepdims=True, dtype=None, override_return_dtype=None
+    )
+
+    reduction_ranges = kwargs["reduction_ranges"]
+    rnumel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
+    hint, num_split = ir.Reduction.num_splits(
+        **kwargs,
+        reduction_type="online_softmax_reduce",  # type: ignore[arg-type]
+        reduction_numel=rnumel,
+    )
+
+    if (
+        num_split == 1
+        and V.graph.sizevars.size_hint(rnumel) >= config.unroll_reductions_threshold
+    ):
+        max_tensor, sum_tensor = OnlineSoftmaxReduction.create(
+            input_node=x, num_output=2, reduction_hint=hint, **kwargs
+        )
+        return max_tensor, sum_tensor
+    else:
+        # Note: [Split online_softmax_reduce]
+        # We don't split reduction for online_softmax_reduce for now.
+        # On one hand, supporting split reduction makes things complex since
+        # the splitted out reuctions requires 2 inputs rather than one.
+        # On the other hand, during training the online_softmax_reduce should
+        # usually don't requires a split due to large batch size
+        # (more specifically batch size times sequence length).
+        # We should support split reduction if we find legit use cases to
+        # motivate the work.
+        #
+        # TODO: does inference need split online_softmax_reduce?
+
+        warnings.warn(
+            textwrap.dedent(
+                """
+            Online softmax is disabled on the fly since Inductor decides to
+            split the reduction. Cut an issue to PyTorch if this is an
+            important use case and you want to speed it up with online
+            softmax.
+            """
+            )
+        )
+        amax = reduce_amax(x, dim, keepdims=True)
+        exp = lowerings[aten.exp](sub(x, amax))
+        xsum = sum_(exp, dim, keepdims=True)
+        return amax, xsum
+
 
 # populate lowerings defined in kernel/*
 from . import kernel
