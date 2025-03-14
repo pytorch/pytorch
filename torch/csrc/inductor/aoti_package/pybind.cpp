@@ -15,11 +15,6 @@ class AOTIModelPackageLoaderPybind : public AOTIModelPackageLoader {
  public:
   AOTIModelPackageLoaderPybind(
       const std::string& model_package_path,
-      const bool run_single_threaded)
-      : AOTIModelPackageLoader(model_package_path, run_single_threaded) {}
-
-  AOTIModelPackageLoaderPybind(
-      const std::string& model_package_path,
       const std::string& model_name,
       const bool run_single_threaded)
       : AOTIModelPackageLoader(
@@ -54,7 +49,6 @@ void initAOTIPackageBindings(PyObject* module) {
 
   py::class_<AOTIModelPackageLoaderPybind>(m, "AOTIModelPackageLoader")
       .def(py::init<const std::string&, const std::string&, const bool>())
-      .def(py::init<const std::string&, const bool>())
       .def("get_metadata", &AOTIModelPackageLoaderPybind::get_metadata)
       .def(
           "run",
