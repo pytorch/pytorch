@@ -1185,7 +1185,6 @@ def get_state_dict(
 
     :rtype: typing.Tuple[typing.Dict[str, ValueType], OptimizerStateType]
     """
-
     with _gc_context():
         optimizers = (
             (optimizers,)
