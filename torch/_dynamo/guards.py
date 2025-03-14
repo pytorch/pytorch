@@ -286,8 +286,6 @@ class GuardManagerWrapper:
     def get_guard_lines(self, guard):
         guard_name = guard.__class__.__name__
         parts = guard.verbose_code_parts()
-        # if "==" in parts[0]:
-        #     breakpoint()
         parts = [guard_name + ": " + part for part in parts]
         return parts
 
