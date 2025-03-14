@@ -241,6 +241,54 @@ inline T i1(T _x) {
   return static_cast<T>(_x < T(0.) ? -out : out);
 }
 
+template <typename T>
+T i1e(T _x) {
+  const auto x = ::metal::fabs(_x);
+  if (x <= 8.0) {
+    // Chebyshev double coefficients for exp(-x) i1(x) in the interval [0,8].
+    // Note: lim(x->0){ exp(-x) i1(x) / x } = 1/2.
+    constexpr float coefficients[] = {
+        9.38153738649577178388E-9f,
+        -4.44505912879632808065E-8f,
+        2.00329475355213526229E-7f,
+        -8.56872026469545474066E-7f,
+        3.47025130813767847674E-6f,
+        -1.32731636560394358279E-5f,
+        4.78156510755005422638E-5f,
+        -1.61760815825896745588E-4f,
+        5.12285956168575772895E-4f,
+        -1.51357245063125314899E-3f,
+        4.15642294431288815669E-3f,
+        -1.05640848946261981558E-2f,
+        2.47264490306265168283E-2f,
+        -5.29459812080949914269E-2f,
+        1.02643658689847095384E-1f,
+        -1.76416518357834055153E-1f,
+        2.52587186443633654823E-1f};
+    const auto y = x / 2.0 - 2.0;
+    const auto out = chbevl(y, coefficients, 17) * x;
+    return static_cast<T>(_x < 0. ? -out : out);
+  }
+
+  // Chebyshev coefficients for exp(-x) sqrt(x) i1(x)
+  //   in the inverted interval (8, infinity].
+  // Note: lim(x->inf){ exp(-x) sqrt(x) i1(x) } = 1/sqrt(2pi).
+  // TODO: what's an "inverted interval"? Open on the left
+  //   and closed on the right?
+  constexpr float coefficients[] = {
+      -3.83538038596423702205E-9f,
+      -2.63146884688951950684E-8f,
+      -2.51223623787020892529E-7f,
+      -3.88256480887769039346E-6f,
+      -1.10588938762623716291E-4f,
+      -9.76109749136146840777E-3f,
+      7.78576235018280120474E-1f};
+
+  const auto out =
+      chbevl(32. / x - 2., coefficients, 7) / ::metal::precise::sqrt(x);
+  return static_cast<T>(_x < 0. ? -out : out);
+}
+
 // gamma, lgamma
 template <typename T>
 inline float log_gamma(const T);
