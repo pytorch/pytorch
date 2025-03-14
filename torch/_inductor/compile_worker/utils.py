@@ -5,6 +5,14 @@ from time import sleep
 from typing import Optional
 
 
+_IN_TOPLEVEL_PROCESS = True
+
+
+def in_toplevel_process() -> bool:
+    global _IN_TOPLEVEL_PROCESS
+    return _IN_TOPLEVEL_PROCESS
+
+
 # If this process dies abnormally (e.g. segfault)
 # it will not shut down the workers. Instead,
 # the workers will have their parent reassigned to the
@@ -27,6 +35,10 @@ def _async_compile_initializer(orig_ppid: int) -> None:
     _watchdog_thread.start()
     # Ignore Ctrl-C (i.e. SIGINT) sent to pool workers to avoid meaningless log spam.
     signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+    # Set a bit to distinguish async_compile subprocesses from the toplevel process.
+    global _IN_TOPLEVEL_PROCESS
+    _IN_TOPLEVEL_PROCESS = False
 
 
 _watchdog_thread: Optional[Thread] = None
