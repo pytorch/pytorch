@@ -1658,8 +1658,8 @@ class BuiltinVariable(VariableTracker):
     def call_len(self, tx: "InstructionTranslator", *args, **kwargs):
         try:
             return args[0].call_method(tx, "__len__", args[1:], kwargs)
-        except Exception as e:
-            raise_observed_exception(type(e), tx, args=e.args)
+        except AttributeError as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
 
     def call_getitem(self, tx: "InstructionTranslator", *args, **kwargs):
         return args[0].call_method(tx, "__getitem__", args[1:], kwargs)
