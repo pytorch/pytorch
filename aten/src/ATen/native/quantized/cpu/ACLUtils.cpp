@@ -52,7 +52,7 @@ QuantMatmul::~QuantMatmul() {
   // using the pointer
   wei_q_tensor_.allocator()->free();
   if (bia_tensor_.has_value()) {
-    bia_tensor_.value().allocator()->free();
+    bia_tensor_->allocator()->free();
   }
 }
 
