@@ -147,7 +147,7 @@ void DynamicQuantMatmul::configure() {
       &dst_tensor,
       gemm_info_);
   if (relu.has_value()) {
-    relu.value().configure(&dst_tensor, &dst_tensor, relu_info_.value());
+    relu->configure(&dst_tensor, &dst_tensor, relu_info_.value());
   }
 }
 
