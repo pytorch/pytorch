@@ -3,12 +3,14 @@
 using namespace c10::metal;
 
 DEFINE_UNARY_FLOATING_FUNCTOR(i0);
+DEFINE_UNARY_FLOATING_FUNCTOR(i0e);
 DEFINE_UNARY_FLOATING_FUNCTOR(i1);
 DEFINE_UNARY_FLOATING_FUNCTOR(spherical_bessel_j0);
 DEFINE_UNARY_FLOATING_FUNCTOR(entr);
 
 #define REGISTER_SPECIAL(DTI, DTO)                  \
   REGISTER_UNARY_OP(i0, DTI, DTO);                  \
+  REGISTER_UNARY_OP(i0e, DTI, DTO);                 \
   REGISTER_UNARY_OP(i1, DTI, DTO);                  \
   REGISTER_UNARY_OP(spherical_bessel_j0, DTI, DTO); \
   REGISTER_UNARY_OP(entr, DTI, DTO)
