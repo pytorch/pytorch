@@ -1,7 +1,9 @@
 #pragma once
 
-#include <ATen/cpu/vec/intrinsics.h>
+#include <cstdint>
+#include <c10/macros/Macros.h>
 
+#include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec_base.h>
 
 #if defined(CPU_CAPABILITY_SVE)

@@ -384,16 +384,22 @@ if(INTERN_BUILD_ATEN_OPS)
   endif(CXX_ZVECTOR_FOUND)
 
   if(CXX_SVE_FOUND)
-    if(CXX_SVE256_FOUND)
-      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DHAVE_SVE_CPU_DEFINITION -DHAVE_SVE256_CPU_DEFINITION")
-      list(APPEND CPU_CAPABILITY_NAMES "SVE256")
-      if("${CMAKE_C_COMPILER_ID}" MATCHES "Clang")
-        list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -O2 -march=armv8.2-a+sve -DCPU_CAPABILITY_SVE -msve-vector-bits=256")
-      else()
-        list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -march=armv8.2-a+sve -DCPU_CAPABILITY_SVE -msve-vector-bits=256")
-      endif()
-    endif(CXX_SVE256_FOUND)
-  endif(CXX_SVE_FOUND)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DHAVE_SVE_CPU_DEFINITION")
+
+    # Define all vector lengths since SVE is detected
+    list(APPEND CPU_CAPABILITY_NAMES "SVE128" "SVE256" "SVE512")
+
+    foreach(VLEN IN ITEMS 128 256 512)
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DHAVE_SVE${VLEN}_CPU_DEFINITION")
+        if("${CMAKE_C_COMPILER_ID}" MATCHES "Clang")
+            list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -O2 -march=armv8-a+sve -DCPU_CAPABILITY_SVE -msve-vector-bits=${VLEN}")
+        else()
+            list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -march=armv8-a+sve -DCPU_CAPABILITY_SVE -msve-vector-bits=${VLEN}")
+        endif()
+    endforeach()
+
+    message(STATUS "SVE support enabled for 128, 256, and 512 vector lengths.")
+  endif()
 
   list(LENGTH CPU_CAPABILITY_NAMES NUM_CPU_CAPABILITY_NAMES)
   math(EXPR NUM_CPU_CAPABILITY_NAMES "${NUM_CPU_CAPABILITY_NAMES}-1")
