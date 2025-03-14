@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from collections.abc import Sequence
-from typing import Any, Optional
+from typing import Any, cast, Optional
 
 import sympy
 
@@ -678,7 +678,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             self.codegen_size_asserts(wrapper)
 
     def get_mutation_names(self):
-        return [self.inputs[self.idx_for_inplace_sum].get_name()]
+        return [self.inputs_as_nodes[self.idx_for_inplace_sum].get_name()]
 
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
         return OrderedSet()
@@ -800,10 +800,10 @@ class MKLPackedLinear(ExternKernelAlloc):
         else:
             constant_args.insert(0, None)
 
+        device = x.get_device()
+        assert device is not None
         return MKLPackedLinear(
-            layout=FixedLayout(
-                x.get_device(), x.get_dtype(), output_size, output_stride
-            ),
+            layout=FixedLayout(device, x.get_dtype(), output_size, output_stride),
             inputs=inputs,
             constant_args=constant_args,
         )
@@ -845,9 +845,11 @@ class LinearUnary(ExternKernelAlloc):
         else:
             constant_args.insert(0, None)
 
+        device = x.get_device()
+        assert device is not None
         packed = LinearUnary(
             layout=FixedLayout(
-                device=x.get_device(),
+                device=device,
                 dtype=x.get_dtype(),
                 size=output_size,
             ),
@@ -899,9 +901,11 @@ class LinearBinary(ExternKernelAlloc):
         else:
             constant_args.insert(0, B)
 
+        device = x.get_device()
+        assert device is not None
         packed = LinearBinary(
             layout=FixedLayout(
-                device=x.get_device(),
+                device=device,
                 dtype=x.get_dtype(),
                 size=output_size,
             ),
@@ -1035,7 +1039,7 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
     def get_mutation_names(self):
         binary_post_op = self.constant_args[-5]
         if binary_post_op == "sum":
-            return [self.inputs[self.idx_for_inplace_sum].get_name()]
+            return [self.inputs_as_nodes[self.idx_for_inplace_sum].get_name()]
         else:
             return []
 
@@ -1186,8 +1190,10 @@ class MkldnnRnnLayer(ExternKernelAlloc):
             train,
         ]
 
+        device = x.get_device()
+        assert device is not None
         packed = MkldnnRnnLayer(
-            MultiOutputLayout(device=x.get_device()),
+            MultiOutputLayout(device=device),
             inputs=inputs,
             constant_args=constant_args,
         )
@@ -1205,10 +1211,11 @@ class MkldnnRnnLayer(ExternKernelAlloc):
             FlexibleLayout.contiguous_strides(cy_shape),
             [1],
         ]
+
         output_ir = [
             MultiOutput(
                 FixedLayout(
-                    x.get_device(),
+                    cast(torch.device, x.get_device()),
                     x.get_dtype(),
                     output_size,
                     output_stride,

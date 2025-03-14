@@ -4575,7 +4575,8 @@ class CppScheduling(BaseScheduling):
                 isinstance(template_buf.layout, ir.MultiOutputLayout)
                 and isinstance(node2.node, ir.MultiOutput)
                 and len(node2.node.inputs) == 1
-                and node2.node.inputs[0].get_name() == template_buf.name
+                and isinstance((inp := node2.node.inputs[0]), ir.IRNode)
+                and inp.get_name() == template_buf.name
             )
         return False
 
@@ -5050,6 +5051,7 @@ class CppScheduling(BaseScheduling):
         flag_template_buffer_has_other_users = template_buffer_has_other_users(
             ctb, template_node.outputs_by_name, epilogue_ir_nodes
         )
+        assert ctb.make_kernel_render is not None
         kernel, render = ctb.make_kernel_render(
             ctb,
             flag_template_buffer_has_other_users=flag_template_buffer_has_other_users,

@@ -959,9 +959,13 @@ class CppFlexAttentionTemplate(CppTemplate):
         self.input_dtype = query.layout.dtype
 
         num_threads = parallel_num_threads()
-        buf_out = TensorBox.create(self.output_node)
+
+        node = self.output_node
+        assert isinstance(node, ir.IRNode)
+        buf_out: ir.IRNode = TensorBox.create(node)
         if template_buffer_node is not None:
             buf_out = template_buffer_node
+
         options = dict(
             query=query,
             key=key,

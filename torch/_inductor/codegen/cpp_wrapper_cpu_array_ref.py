@@ -390,9 +390,10 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             output_buffer = V.graph.graph_outputs[idx]
             if isinstance(output_buffer, ir.BaseView):
                 output_storage = output_buffer.unwrap_view()
-                if isinstance(output_storage.data, ir.ConstantBuffer):
+                if isinstance(
+                    output_storage, (ir.BaseView, ir.MutableBox)
+                ) and isinstance(output_storage.data, ir.ConstantBuffer):
                     is_constant_buffer = True
-
             if isinstance(output_buffer, ir.ShapeAsConstantBuffer):
                 # Need to wrap scalar into tensor as the main function returns a vector of tensors
                 output_tensor = self.codegen_scalar_to_tensor(output)
