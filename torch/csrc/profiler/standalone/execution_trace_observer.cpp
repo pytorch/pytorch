@@ -606,6 +606,9 @@ static void handleKernelBackendInfo(
             fc.kernelFile.substr(fc.kernelFile.find_last_of('/') + 1);
       }
 
+      // get grid information
+      TORCH_INTERNAL_ASSERT(false, "This is a test");
+
       // get stream information
       TORCH_INTERNAL_ASSERT(
           kwinputs.find("stream") != kwinputs.end(),
