@@ -36,7 +36,7 @@ from unittest.mock import patch
 
 import torch
 
-from .. import polyfills, variables
+from .. import external_utils, graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_rot_n, is_generator
 from ..exc import (
     get_dynamo_observed_exception,
@@ -362,6 +362,8 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        import torch._dynamo
+
         # Handle a `nonstrict_trace(fn)` call
         if self.fn is torch._dynamo.nonstrict_trace:
             bound = inspect.signature(self.fn).bind(*args, **kwargs)
@@ -382,6 +384,18 @@ Applying `nonstrict_trace` to function <{fn_name}>; however, `nonstrict_trace` c
 
             fn = fn_var.fn
             return variables.TorchInGraphFunctionVariable(fn, nonstrict_traceable=True)
+
+        # Handle torch._dynamo.external_utils._set_ignore_skip_function_variable
+        if self.fn is external_utils._set_ignore_skip_function_variable:
+            if len(args) != 1 or kwargs:
+                unimplemented_v2(
+                    gb_type="Bad torch._dynamo.external_utils._set_ignore_skip_function_variable call",
+                    context=f"called UserFunctionVariable {self} with args {args}, kwargs {kwargs}",
+                    explanation="Expected 1 arg and 0 kwargs for call to private Dynamo function "
+                    "torch._dynamo.external_utils._set_ignore_skip_function_variable.",
+                    hints=[*graph_break_hints.DYNAMO_BUG],
+                )
+            external_utils._ignore_skip_function_variable = args[0].as_python_constant()
 
         if self.is_constant:
             return invoke_and_store_as_constant(
@@ -1198,6 +1212,14 @@ class SkipFunctionVariable(VariableTracker):
             torch._dynamo.utils.warn_once(msg)
             unimplemented(msg)
         else:
+            if external_utils._ignore_skip_function_variable:
+                from .builder import SourcelessBuilder
+
+                # re-build the function, attempting to not skip
+                rebuilt_fn = SourcelessBuilder.create(tx, self.value)
+                # if we still get SkipFunctionVariable, then we *really* should skip this function
+                if not isinstance(rebuilt_fn, SkipFunctionVariable):
+                    return rebuilt_fn.call_function(tx, args, kwargs)
             qualname = getattr(self.value, "__qualname__", "<unknown qualname>")
             try:
                 path = inspect.getfile(self.value)
@@ -1213,11 +1235,12 @@ class SkipFunctionVariable(VariableTracker):
                 # Do a very basic check for now.
                 if "_dynamo" not in path:
                     hints += [
-                        f"Remove the function `{qualname}` or the file `{path}` "
-                        "from torch/_dynamo/trace_rules.py. More graph breaks may occur as a result of "
-                        "attempting to trace into the function.",
+                        f"Apply `@torch._dynamo.dont_skip_tracing` to the function `{qualname}` "
+                        "to force tracing into the function. "
+                        "More graph breaks may occur as a result of attempting to trace into the function.",
+                        f"Remove the file`{path}` from torch/_dynamo/trace_rules.py. "
+                        "More graph breaks may occur as a result of attempting to trace into the function.",
                         "Please file an issue to PyTorch.",
-                        # TODO suggest mark_force_inline when implemented
                     ]
             except TypeError:
                 known_python_builtin_modules = {"_abc", "_warnings"}

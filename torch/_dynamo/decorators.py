@@ -30,7 +30,7 @@ from .eval_frame import (
     skip_code,
 )
 from .exc import IncorrectUsage
-from .external_utils import is_compiling
+from .external_utils import dont_skip_tracing_wrapper, is_compiling
 from .utils import is_function
 
 
@@ -713,3 +713,20 @@ def _allow_in_graph_einops():
 
 
 trace_rules.add_module_init_func("einops", _allow_in_graph_einops)
+
+
+def dont_skip_tracing(fn=None, recursive=True):
+    """
+    Decorator to trace into functions intentionally marked by developers to be skipped
+    when tracing.
+
+    This decorator has lower precedence than disallow_in_graph.
+
+    If recursive=True, this decorator will also apply to recursively invoked functions.
+    """
+
+    wrapper = dont_skip_tracing_wrapper(recursive)
+
+    if fn is None:
+        return wrapper
+    return wrapper(fn)
