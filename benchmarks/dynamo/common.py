@@ -1825,6 +1825,10 @@ class BenchmarkRunner:
         return set()
 
     @property
+    def skip_models_due_to_export_not_supported(self):
+        return set()
+
+    @property
     def disable_cudagraph_models(self):
         return set()
 
@@ -3588,15 +3592,6 @@ def run(runner, args, original_dir=None):
             # some of the models do not support use_deterministic_algorithms
             torch.use_deterministic_algorithms(True)
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
-        if args.only is not None and args.only in {
-            "DebertaForQuestionAnswering",
-            "RobertaForQuestionAnswering",
-            "nvidia_deeprecommender",
-            "volo_d1_224",
-        }:
-            # These seem unhappy with numerics of larger cuBLASLt workspace
-            # sizes following #145130 (due to enabling split-k?)
-            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.allow_tf32 = False
         torch.backends.cudnn.benchmark = False
@@ -3786,6 +3781,7 @@ def run(runner, args, original_dir=None):
 
             # AOTInductor doesn't support control flow yet
             runner.skip_models.update(runner.skip_models_due_to_control_flow)
+            runner.skip_models.update(runner.skip_models_due_to_export_not_supported)
         elif args.backend == "torchao":
             assert "cuda" in args.devices, "Quantization requires CUDA device."
             assert args.bfloat16, "Quantization requires dtype bfloat16."

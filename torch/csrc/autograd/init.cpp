@@ -19,6 +19,7 @@
 #include <torch/csrc/autograd/input_metadata.h>
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/profiler_python.h>
+#include <torch/csrc/autograd/python_autograd.h>
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/autograd/python_saved_variable_hooks.h>
 #include <torch/csrc/autograd/python_variable.h>
@@ -63,6 +64,12 @@ struct EnableTorchFunction {
     at::impl::PythonTorchFunctionTLS::set_disabled_state(
         at::impl::TorchFunctionDisabledState::ENABLED);
   }
+
+  EnableTorchFunction(const EnableTorchFunction& other) = delete;
+  EnableTorchFunction(EnableTorchFunction&& other) = delete;
+  EnableTorchFunction& operator=(const EnableTorchFunction& other) = delete;
+  EnableTorchFunction& operator=(EnableTorchFunction&& other) = delete;
+
   ~EnableTorchFunction() {
     at::impl::PythonTorchFunctionTLS::set_disabled_state(old_);
   }
@@ -73,6 +80,12 @@ struct EnablePythonDispatcher {
   EnablePythonDispatcher() : old_(c10::impl::PythonDispatcherTLS::get_state()) {
     c10::impl::PythonDispatcherTLS::set_state(getPyInterpreter());
   }
+  EnablePythonDispatcher(const EnablePythonDispatcher& other) = delete;
+  EnablePythonDispatcher(EnablePythonDispatcher&& other) = delete;
+  EnablePythonDispatcher& operator=(const EnablePythonDispatcher& other) =
+      delete;
+  EnablePythonDispatcher& operator=(EnablePythonDispatcher&& other) = delete;
+
   ~EnablePythonDispatcher() {
     c10::impl::PythonDispatcherTLS::set_state(old_);
   }
@@ -210,6 +223,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   py::class_<KinetoEvent>(m, "_KinetoEvent")
       // name of the event
       .def("name", [](const KinetoEvent& e) { return e.name(); })
+      .def(
+          "overload_name",
+          [](const KinetoEvent& e) { return e.overload_name(); })
       // PyTorch thread id of the start callback
       .def(
           "start_thread_id",
@@ -371,12 +387,18 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
     if (at::hasMTIA()) {
       activities.insert(torch::profiler::impl::ActivityType::MTIA);
     }
+    if (at::hasHPU()) {
+      activities.insert(torch::profiler::impl::ActivityType::HPU);
+    }
     if (at::getNumGPUs() > 0) {
       activities.insert(torch::profiler::impl::ActivityType::CUDA);
     }
 #elif defined(USE_KINETO)
     if (at::hasXPU()) {
       activities.insert(torch::profiler::impl::ActivityType::XPU);
+    }
+    if (at::hasHPU()) {
+      activities.insert(torch::profiler::impl::ActivityType::HPU);
     }
     if (at::hasMTIA()) {
       activities.insert(torch::profiler::impl::ActivityType::MTIA);
@@ -933,30 +955,47 @@ static PyObject* is_fwd_grad_enabled(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
+template <bool skip_tensors_in_non_tensorlist = false>
+static void visit(
+    PyObject* o,
+    const std::function<bool(at::Tensor&)>& visit_tensor) {
+  if (THPVariable_Check(o)) {
+    auto t = THPVariable_Unpack(o);
+    if (visit_tensor(t)) {
+      return;
+    }
+  } else if (PyList_Check(o)) {
+    // Check that this List is TensorList
+    if constexpr (skip_tensors_in_non_tensorlist) {
+      for (const auto i : c10::irange(PyList_GET_SIZE(o))) {
+        if (!THPVariable_Check(PyList_GET_ITEM(o, i))) {
+          return;
+        }
+      }
+    }
+    for (const auto i : c10::irange(PyList_GET_SIZE(o))) {
+      visit(PyList_GET_ITEM(o, i), visit_tensor);
+    }
+  }
+}
+
+template <bool skip_tensors_in_non_tensorlist = false>
 static void visit_tensors(
     PyObject* args,
     PyObject* kwargs,
-    std::function<bool(at::Tensor&)> tensor_visit_fn) {
-  static std::function<void(PyObject*)> visit_fn =
-      [&tensor_visit_fn](PyObject* o) {
-        if (THPVariable_Check(o)) {
-          at::Tensor t = THPVariable_Unpack(o);
-          if (tensor_visit_fn(t)) {
-            return;
-          }
-        } else if (PyList_Check(o)) {
-          for (const auto i : c10::irange(PyList_GET_SIZE(o))) {
-            visit_fn(PyList_GET_ITEM(o, i));
-          }
-        }
-      };
-  if (args) {
+    const std::function<bool(at::Tensor&)>& visit_tensor) {
+  if (args && PyTuple_Check(args)) {
     for (const auto i : c10::irange(PyTuple_GET_SIZE(args))) {
-      visit_fn(PyTuple_GET_ITEM(args, i));
+      visit<skip_tensors_in_non_tensorlist>(
+          PyTuple_GET_ITEM(args, i), visit_tensor);
     }
   }
-  if (kwargs) {
-    visit_fn(PyDict_Values(kwargs));
+  if (kwargs && PyDict_Check(kwargs)) {
+    auto vals = PyDict_Values(kwargs);
+    for (const auto i : c10::irange(PyList_GET_SIZE(vals))) {
+      visit<skip_tensors_in_non_tensorlist>(
+          PyList_GET_ITEM(vals, i), visit_tensor);
+    }
   }
 }
 
@@ -983,21 +1022,40 @@ static PyObject* any_requires_grad(
   END_HANDLE_TH_ERRORS
 }
 
-// Returns true if any leaf tensor is aliased
-static PyObject* any_is_aliased_tensor(
-    PyObject* _unused,
-    PyObject* args,
-    PyObject* kwargs) {
+// Checks aliasing constraint for custom ops:
+// Returns true if any of outputs is alias to any of inputs or another output
+// Args:
+// args[0] - inputs args
+// args[1] - inputs kwargs
+// args[2] - outputs
+static PyObject* any_is_aliased_tensor(PyObject* _unused, PyObject* args) {
   HANDLE_TH_ERRORS
-  bool has_aliased_tensor = false;
-  visit_tensors(args, kwargs, [&has_aliased_tensor](at::Tensor& t) {
-    if (t.storage().use_count() > 1) {
-      has_aliased_tensor = true;
-      return true;
+  PyObject* inps = PyTuple_GET_ITEM(args, 0);
+  PyObject* inps_kwargs = PyTuple_GET_ITEM(args, 1);
+  PyObject* outs = PyTuple_GET_ITEM(args, 2);
+  // TODO: Use stack allocated set?
+  std::unordered_set<void*> s;
+  visit_tensors<false>(inps, inps_kwargs, [&s](at::Tensor& t) {
+    if (!t.storage()) {
+      return false;
     }
+    s.insert(t.storage().data_ptr().get_context());
     return false;
   });
-  if (has_aliased_tensor) {
+  bool ret = false;
+  visit_tensors<false>(outs, nullptr, [&s, &ret](at::Tensor& t) {
+    if (!t.storage()) {
+      return false;
+    }
+    void* cp = t.storage().data_ptr().get_context();
+    if (s.find(cp) != s.end()) {
+      ret = true;
+      return true;
+    }
+    s.insert(cp);
+    return false;
+  });
+  if (ret) {
     Py_RETURN_TRUE;
   }
   Py_RETURN_FALSE;
@@ -1345,7 +1403,7 @@ static PyObject* len_torch_dispatch_stack(PyObject* _unused, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPModule_increment_version(
+static PyObject* THPModule_increment_version(
     PyObject* _unused,
     PyObject* tensor_list) {
   HANDLE_TH_ERRORS
@@ -1379,10 +1437,7 @@ static PyMethodDef methods[] = {
      castPyCFunctionWithKeywords(any_requires_grad),
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
-    {"_any_is_aliased_tensor",
-     castPyCFunctionWithKeywords(any_is_aliased_tensor),
-     METH_VARARGS | METH_KEYWORDS,
-     nullptr},
+    {"_any_is_aliased_tensor", any_is_aliased_tensor, METH_VARARGS, nullptr},
     {"_is_fwd_grad_enabled", is_fwd_grad_enabled, METH_NOARGS, nullptr},
     {"is_inference_mode_enabled",
      is_inference_mode_enabled,

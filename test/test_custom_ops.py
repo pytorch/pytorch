@@ -3933,13 +3933,36 @@ Please use `add.register_fake` to add an fake impl.""",
 
         x = torch.randn(2, 2)
         y = torch.randn(2, 2)
-        self.assertTrue(test_fn(y, x.t()))
-        x = torch.randn(2, 2)
-        self.assertFalse(test_fn(2 * x))
-        self.assertTrue(test_fn(x, a=x.view(-1)))
-        self.assertTrue(test_fn(y, x[1:]))
-        x = torch.randn(2, 2)
-        self.assertFalse(test_fn(a=x))
+        self.assertTrue(
+            test_fn(
+                (x,),
+                {},
+                (x.t(),),
+            )
+        )
+        self.assertFalse(test_fn((x,), None, (2 * x,)))
+        self.assertTrue(
+            test_fn(
+                (),
+                {"a": x.view(-1)},
+                (x,),
+            )
+        )
+        self.assertTrue(
+            test_fn(
+                (),
+                {"a": x.view(-1)},
+                (x.t(),),
+            )
+        )
+        self.assertTrue(test_fn((y,), {}, (y[1:],)))
+        self.assertFalse(
+            test_fn(
+                (x,),
+                {"a": x},
+                (),
+            )
+        )
 
 
 class MiniOpTestOther(CustomOpTestCaseBase):

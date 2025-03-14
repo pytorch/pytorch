@@ -105,7 +105,7 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
     # The dispatcher passes any keyword-only-args as kwargs and the
     # rest of the args (even if specified as kwargs) as args.
     def autograd_impl(keyset, *args, **keyword_only_args):
-        if _C.is_grad_enabled() and _C._any_requires_grad(args):
+        if _C.is_grad_enabled() and _C._any_requires_grad(*args):
             result = Generated.apply(*args, Metadata(keyset, keyword_only_args))  # type: ignore[attr-defined]
         else:
             result = forward_no_grad(*args, Metadata(keyset, keyword_only_args))
