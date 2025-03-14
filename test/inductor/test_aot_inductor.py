@@ -139,24 +139,6 @@ class AOTInductorTestsTemplate:
                 model, example_inputs, "AOTInductorModelRunMinimalArrayrefInterface(", 1
             )
 
-    def test_compile_wrapper_with_O0(self):
-        class Model(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.linear = torch.nn.Linear(10, 10)
-
-            def forward(self, x, y):
-                return x + self.linear(y)
-
-        example_inputs = (
-            torch.randn(10, 10, device=self.device),
-            torch.randn(10, 10, device=self.device),
-        )
-        model = Model()
-        with config.patch("aot_inductor.compile_wrapper_with_O0", True):
-            self.check_model(model, example_inputs)
-            self.code_check_count(model, example_inputs, "__attribute__((", 2)
-
     def test_small_constant(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -1596,6 +1578,22 @@ class AOTInductorTestsTemplate:
             }
         self.check_model_with_multiple_inputs(
             WhileLoopModels.SymExprCond(),
+            prepend_counters(inputs),
+            dynamic_shapes=dynamic_shapes,
+        )
+
+    @common_utils.parametrize("dynamic", [False, True])
+    def test_while_loop_with_conv(self, dynamic):
+        inputs = (torch.randn(2, 4, 4, 4, device=self.device, dtype=torch.float64),)
+        dim0_ab = Dim("s0", min=2, max=1024)
+        dynamic_shapes = None
+        if dynamic:
+            dynamic_shapes = {
+                "c": {},
+                "x": {0: dim0_ab, 1: None},
+            }
+        self.check_model_with_multiple_inputs(
+            WhileLoopModels.Conv(self.device),
             prepend_counters(inputs),
             dynamic_shapes=dynamic_shapes,
         )
@@ -4086,10 +4084,9 @@ class AOTInductorTestsTemplate:
         # input u0 was defined as int32_t initially, verify for every kernel var args downstream,
         # it gets explicitly declared using its data types in the cpp wrapper codegen code.
         expected_scalar_args = [
-            "int64_t var_1 = u0;",
-            "int64_t var_4 = u0;",
-            "int64_t var_7 = u0;",
-            "int64_t var_12 = u0;",
+            "buf3, u0",
+            "buf4, u0",
+            "buf3, buf4, buf2, u0",
         ]
         # check the new behavior of codegen is expected
         result, code = run_and_get_cpp_code(
@@ -4366,6 +4363,60 @@ class AOTInductorTestsTemplate:
         )
         self.assertEqual(new_expected, new_output)
 
+    def test_update_inactive_constant_buffer(self):
+        class Model(torch.nn.Module):
+            def __init__(self, n, k, device):
+                super().__init__()
+                self.weight = torch.randn(n, k, device=device)
+                self.bias = torch.randn(n, device=device)
+
+            def forward(self, a):
+                return torch.nn.functional.linear(a, self.weight, self.bias)
+
+        M, N, K = 8, 6, 16
+        model = Model(N, K, self.device)
+        a = torch.randn(M, K, device=self.device)
+        example_inputs = (a,)
+        with torch.no_grad(), config.patch({"always_keep_tensor_constants": True}):
+            so_path = AOTIRunnerUtil.compile(
+                model=model,
+                example_inputs=example_inputs,
+            )
+
+        runner = AOTIRunnerUtil.load_runner(self.device, so_path)
+
+        def runner_call(*args, **kwargs):
+            import torch.fx._pytree as fx_pytree
+
+            call_spec = runner.get_call_spec()
+            in_spec = pytree.treespec_loads(call_spec[0])
+            out_spec = pytree.treespec_loads(call_spec[1])
+            flat_inputs = fx_pytree.tree_flatten_spec((args, kwargs), in_spec)
+            flat_inputs = [x for x in flat_inputs if isinstance(x, torch.Tensor)]
+            flat_outputs = runner.run(flat_inputs)
+            return pytree.tree_unflatten(flat_outputs, out_spec)
+
+        test_inputs = torch.randn(M, K, device=self.device)
+        expected = model(test_inputs)
+        output = runner_call(test_inputs)
+        self.assertEqual(expected, output)
+
+        new_weights = {
+            "L__self___weight": torch.randn(N, K, device=self.device),
+            "L__self___bias": torch.randn(N, device=self.device),
+        }
+        new_expected = torch.nn.functional.linear(
+            test_inputs, new_weights["L__self___weight"], new_weights["L__self___bias"]
+        )
+
+        runner.update_constant_buffer(new_weights, True, False)
+        output_before_swap = runner_call(test_inputs)
+        runner.swap_constant_buffer()
+        output_after_swap = runner_call(test_inputs)
+
+        self.assertEqual(expected, output_before_swap)
+        self.assertEqual(new_expected, output_after_swap)
+
     def test_cond_share_predicte(self):
         class Model(torch.nn.Module):
             def forward(self, predicate, x):
@@ -4618,7 +4669,7 @@ class AOTInductorTestsTemplate:
         model_kwargs = {
             "input": torch.randn(3, 10, device=self.device),
         }
-        ep = torch.export.export(model, args=(), kwargs=model_kwargs)
+        ep = torch.export.export(model, args=(), kwargs=model_kwargs, strict=True)
 
         optimized = torch._inductor.aoti_load_package(
             torch._inductor.aoti_compile_and_package(
@@ -4680,8 +4731,6 @@ def fail_gpu(suffixes: tuple[str, ...], is_skip=False):
 CPU_TEST_FAILURES = {
     # TODO: failed internally
     "test_multiple_output_alias": fail_cpu(is_skip=True),
-    "test_update_constant_buffer": fail_cpu(is_skip=True),
-    "test_so_without_weight": fail_cpu(is_skip=True),
 }
 
 # test_failures, xfail by default, set is_skip=True to skip
