@@ -5644,6 +5644,9 @@ class TestLinalg(TestCase):
                 self.assertTrue(found_result is not None)
 
         finally:
+            # Disable TF32
+            torch.backends.cuda.matmul.allow_tf32 = False
+
             # disable TunableOp
             torch.cuda.tunable.enable(False)
 
