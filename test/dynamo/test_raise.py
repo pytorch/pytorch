@@ -103,6 +103,7 @@ class TestRaise(torch._dynamo.test_case.TestCase):
                 except KeyError:
                     pass
                 raise
+
         self.assertRaises(TypeError, reraise)
 
     @make_dynamo_test
@@ -115,17 +116,20 @@ class TestRaise(torch._dynamo.test_case.TestCase):
                     raise KeyError("caught")
                 finally:
                     raise
+
         self.assertRaises(KeyError, reraise)
 
     @make_dynamo_test
     def test_nested_reraise(self):
         def nested_reraise():
             raise
+
         def reraise():
             try:
                 raise TypeError("foo")
             except:
                 nested_reraise()
+
         self.assertRaises(TypeError, reraise)
 
     @make_dynamo_test
@@ -148,6 +152,7 @@ class TestRaise(torch._dynamo.test_case.TestCase):
                 with Context():
                     pass
                 raise
+
         self.assertRaises(TypeError, reraise)
 
     @make_dynamo_test
@@ -159,6 +164,7 @@ class TestRaise(torch._dynamo.test_case.TestCase):
                 with Context():
                     raise KeyError("caught")
                 raise
+
         self.assertRaises(TypeError, reraise)
 
     @make_dynamo_test
@@ -169,6 +175,7 @@ class TestRaise(torch._dynamo.test_case.TestCase):
             except:
                 yield 1
                 raise
+
         g = reraise()
         next(g)
         self.assertRaises(TypeError, lambda: next(g))
