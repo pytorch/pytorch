@@ -552,8 +552,16 @@ def check_forward_ad_formula(op: Callable, args, kwargs, gradcheck_wrapper=None,
 
         expected = compute_expected_grad(args, tangent_args, kwargs, tangent_kwargs)
         expected = tree_map(fwAD.unpack_dual, expected)
-        expected_primals = tree_map(lambda x: x.primal, expected)
-        expected_tangents = tree_map(lambda x: x.tangent, expected)
+        expected_primals = tree_map(
+            lambda x: x.primal,
+            expected,
+            is_leaf=lambda x: type(x) is fwAD.UnpackedDualTensor,
+        )
+        expected_tangents = tree_map(
+            lambda x: x.tangent,
+            expected,
+            is_leaf=lambda x: type(x) is fwAD.UnpackedDualTensor,
+        )
 
         # Permutations of arg and kwargs in CCT.
         for choice in generate_subclass_choices_args_kwargs(args, kwargs, CCT, cct_mode):
@@ -586,7 +594,15 @@ def check_forward_ad_formula(op: Callable, args, kwargs, gradcheck_wrapper=None,
                     return e.elem if isinstance(e, CCT) else e
 
                 actual = tree_map(fwAD.unpack_dual, actual)
-                actual_primals = tree_map(lambda x: unwrap(x.primal), actual)
-                actual_tangents = tree_map(lambda x: unwrap(x.tangent), actual)
+                actual_primals = tree_map(
+                    lambda x: unwrap(x.primal),
+                    actual,
+                    is_leaf=lambda x: type(x) is fwAD.UnpackedDualTensor,
+                )
+                actual_tangents = tree_map(
+                    lambda x: unwrap(x.tangent),
+                    actual,
+                    is_leaf=lambda x: type(x) is fwAD.UnpackedDualTensor,
+                )
                 assert_equal_fn(actual_primals, expected_primals, equal_nan=True)
                 assert_equal_fn(actual_tangents, expected_tangents, equal_nan=True)
