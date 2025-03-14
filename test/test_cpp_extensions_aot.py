@@ -299,6 +299,16 @@ class TestCppExtensionAOT(common.TestCase):
             curr_mem = torch.cuda.memory_allocated(device)
             self.assertEqual(curr_mem, init_mem)
 
+        # (4) test multiple returns
+        t1 = torch.rand(2, 3, device="cuda")
+        t2 = torch.rand(3, 2, device="cpu")
+        t3 = torch.rand(2, device="cpu")
+
+        exp, neg, is_leaf = libtorch_agnostic.ops.exp_neg_is_leaf(t1, t2, t3)
+        self.assertEqual(exp, torch.exp(t1))
+        self.assertEqual(neg, torch.neg(t2))
+        self.assertEqual(is_leaf, t3.is_leaf)
+
 
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestPybindTypeCasters(common.TestCase):
