@@ -111,8 +111,9 @@ def symbolic(
         The output tensor of the operator.
     """
     if not isinstance(dtype, int):
-        if dtype not in _TORCH_DTYPE_TO_ONNX_DTYPE:
-            raise ValueError(f"Unsupported dtype: {dtype}")
+        torch._check(
+            dtype in _TORCH_DTYPE_TO_ONNX_DTYPE, lambda: f"Unsupported dtype: {dtype}"
+        )
         dtype = _TORCH_DTYPE_TO_ONNX_DTYPE[dtype]
     domain, op_type = _parse_domain_op_type(domain_op)
     encoded_attrs = _symbolic_impl.EncodedAttrs.from_dict(attrs)
@@ -198,11 +199,17 @@ def symbolic_multi_out(
     Returns:
         A list of output tensors of the operator.
     """
+    torch._check(
+        len(shapes) == len(dtypes),
+        lambda: f"Number of shapes ({len(shapes)}) must match number of dtypes ({len(dtypes)})",
+    )
     onnx_dtypes = []
     for dtype in dtypes:
         if not isinstance(dtype, int):
-            if dtype not in _TORCH_DTYPE_TO_ONNX_DTYPE:
-                raise ValueError(f"Unsupported dtype: {dtype}")
+            torch._check(
+                dtype in _TORCH_DTYPE_TO_ONNX_DTYPE,
+                lambda: f"Unsupported dtype: {dtype}",
+            )
             onnx_dtypes.append(_TORCH_DTYPE_TO_ONNX_DTYPE[dtype])
         else:
             onnx_dtypes.append(dtype)
@@ -214,8 +221,10 @@ def symbolic_multi_out(
         op_type,
         onnx_dtypes,
         encoded_attrs.attr_tensors,
-        shape=shapes,
+        shapes=shapes,
         attr_keys=encoded_attrs.attr_keys,
+        attr_types=encoded_attrs.attr_types,
+        attr_pos=encoded_attrs.attr_pos,
         attr_ints=encoded_attrs.attr_ints,
         attr_floats=encoded_attrs.attr_floats,
         attr_strs=encoded_attrs.attr_strs,
