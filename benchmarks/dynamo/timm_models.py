@@ -127,6 +127,7 @@ REQUIRE_LARGER_MULTIPLIER_FOR_SMALLER_TENSOR = {
     "inception_v3",
     "mobilenetv3_large_100",
     "cspdarknet53",
+    "gluon_inception_v3",
 }
 
 

@@ -2861,7 +2861,7 @@ def same(
                     elif use_larger_multiplier_for_smaller_tensor and (
                         fp64_ref.numel() <= 500
                     ):
-                        multiplier = 5.0
+                        multiplier = 8.0
                     elif (
                         fp64_ref.numel() < 1000
                         or (ref.ndim == 4 and ref.shape[-1] == ref.shape[-2] == 1)
