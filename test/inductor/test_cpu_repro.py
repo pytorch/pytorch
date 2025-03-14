@@ -4160,6 +4160,26 @@ class CPUReproTests(TestCase):
                 # check for parallel reduction.
                 self.assertEqual(metrics.parallel_reduction_count, 1)
 
+    def test_group_norm_large_size(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.gn = torch.nn.GroupNorm(32, 32)
+
+            def forward(self, x):
+                return self.gn(x)
+
+        for dynamic in [True, False]:
+            torch._dynamo.reset()
+            metrics.reset()
+            mod = M().eval()
+            x = torch.randn(1, 32, 128, 128, 128)
+            with torch.no_grad():
+                expected = mod(x)
+                compiled_m = torch.compile(mod, dynamic=dynamic)
+                actual = compiled_m(x)
+                self.assertEqual(expected, actual)
+
     def test_int_div_vec(self):
         def fn(x, y, mode):
             return torch.div(x, y, rounding_mode=mode)
