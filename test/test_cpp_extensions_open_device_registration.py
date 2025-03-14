@@ -17,7 +17,6 @@ import torch.testing._internal.common_utils as common
 import torch.utils.cpp_extension
 from torch.serialization import safe_globals
 from torch.testing._internal.common_utils import (
-    IS_ARM64,
     skipIfTorchDynamo,
     TemporaryFileName,
     TEST_CUDA,
@@ -67,7 +66,6 @@ def generate_faked_module_methods():
     torch.openreg.is_initialized = lambda: True
 
 
-@unittest.skipIf(IS_ARM64, "Does not work on arm")
 @unittest.skipIf(TEST_XPU, "XPU does not support cppextension currently")
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCppExtensionOpenRgistration(common.TestCase):
