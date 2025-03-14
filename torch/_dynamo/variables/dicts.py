@@ -23,6 +23,7 @@ None values for efficiency and code reuse.
 import collections
 import functools
 import types
+from collections.abc import Hashable as t_Hashable
 from typing import Optional, TYPE_CHECKING
 
 from torch._subclasses.fake_tensor import is_fake
@@ -65,6 +66,8 @@ def is_hashable(x):
         return x.as_proxy().node.meta.get("example_value") is not None
     elif isinstance(x, variables.TupleVariable):
         return all(is_hashable(e) for e in x.items)
+    elif isinstance(x, variables.UserDefinedObjectVariable):
+        return isinstance(x.value, t_Hashable)
     else:
         return isinstance(
             x,
@@ -73,9 +76,8 @@ def is_hashable(x):
                 variables.SymNodeVariable,
                 variables.ConstantVariable,
                 variables.EnumVariable,
-                variables.user_defined.UserDefinedClassVariable,
+                variables.UserDefinedClassVariable,
                 variables.UserFunctionVariable,
-                variables.UserDefinedObjectVariable,
                 variables.SkipFunctionVariable,
                 variables.misc.NumpyVariable,
                 variables.NNModuleVariable,
@@ -134,7 +136,12 @@ class ConstDictVariable(VariableTracker):
                 # Access the underlying value inside the referent_vt for the key representation
                 Hashable = ConstDictVariable._HashableTracker
                 return Hashable(self.vt.referent_vt).underlying_value
-            elif isinstance(self.vt, variables.UserDefinedObjectVariable):
+            elif isinstance(
+                self.vt, variables.UserDefinedObjectVariable
+            ) and isinstance(self.vt.value, t_Hashable):
+                # The re module in Python 3.13+ has a dictionary (_cache2) with
+                # an object as key (_ZeroSentinel):
+                # python test/dynamo/test_unittest.py CPythonTestLongMessage.test_baseAssertEqual
                 return self.vt.value
             else:
                 x = self.vt.as_python_constant()
