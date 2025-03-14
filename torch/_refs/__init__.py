@@ -3696,7 +3696,7 @@ def repeat(a: Tensor, *repeat_shape) -> Tensor:
 
 
 def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorLikeType:
-    from torch.fx.experimental.symbolic_shapes import sym_eq, statically_known_true
+    from torch.fx.experimental.symbolic_shapes import sym_eq, guard_semantics
 
     # Creates a valid shape
     shape = utils.extract_shape_from_varargs(shape, validate=False)
@@ -3705,7 +3705,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
     shape = utils.infer_size(shape, a.numel())
 
     # Special-cases tensors with no elements
-    if statically_known_true(a.numel() == 0):
+    if guard_semantics(a.numel() == 0):
         return as_strided(a, shape, utils.make_contiguous_strides_for(shape))
 
     # Special-cases reshaping zero dim tensors
@@ -3773,7 +3773,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
             continue
 
         # Skips dimensions that are already the correct length
-        if statically_known_true(length == a_.shape[idx]):
+        if guard_semantics(length == a_.shape[idx]):
             idx = idx + 1
             continue
 
@@ -3782,7 +3782,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
         # specify the same number of elements above
         accum = a_.shape[idx]
         end = idx
-        while not statically_known_true(accum % length == 0):
+        while not guard_semantics(accum % length == 0):
             if end == a_.ndim - 1:
                 msg = f"Could not reshape a tensor with shape {a.shape} as a tensor with shape {shape}!"
                 raise ValueError(msg)
@@ -3805,7 +3805,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
             a_ = flatten(a_, idx, end)
 
         # Splits the (possibly flattened) dimension to create the desired dim length
-        if not statically_known_true(accum == length):
+        if not guard_semantics(accum == length):
             a_ = prims.split_dim(a_, idx, length)
 
         idx = idx + 1

@@ -8260,7 +8260,6 @@ graph():
 
         xs = torch.tensor([4, 6, 8, 3])
         ep = export(Foo(), (xs,))
-        print(ep)
 
     def test_unflatten_random_dag_mutating_buf_4(self):
         class N3(torch.nn.Module):
