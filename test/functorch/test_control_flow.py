@@ -2030,7 +2030,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     def test_scan_binary_operator_complex(self, reverse, device):
         A = torch.randn(10, 3, 10, dtype=torch.complex64, device=device)
-        projected_inputs = torch.ones_like(A) * 0.98j + torch.ones_like(A) * 0.98j
+        projected_inputs = torch.ones_like(A) * 0.9 + torch.ones_like(A) * 0.08j
         elements = (A, projected_inputs)
         init = tuple(
             [
@@ -3820,7 +3820,7 @@ class AssociativeScanTests(TestCase):
         self, compile_mode, combine_mode, reverse, device
     ):
         A = torch.randn(10, 3, 10, dtype=torch.complex64, device=device)
-        projected_inputs = torch.ones_like(A) * 0.98j + torch.ones_like(A) * 0.98j
+        projected_inputs = torch.ones_like(A) * 0.9 + torch.ones_like(A) * 0.08j
         elements = (A, projected_inputs)
 
         kwargs = {
