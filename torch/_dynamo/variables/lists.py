@@ -484,41 +484,23 @@ class ListVariable(CommonListMethodsVariable):
             else:
                 keys = [key_fn_var.call_function(tx, [x], {}) for x in self.items]
 
-            if all(k.is_python_constant() for k in keys):
-                tx.output.side_effects.mutation(self)
-                sorted_items_with_keys = sorted(
-                    (
-                        (
-                            x,
-                            k.as_python_constant(),
-                            -i if reverse else i,  # extra key to ensure stable sort
-                        )
-                        for i, (k, x) in enumerate(zip(keys, self.items))
-                    ),
-                    key=operator.itemgetter(1, 2),
-                    reverse=reverse,
-                )
-                self.items[:] = [x for x, *_ in sorted_items_with_keys]
-            elif all(k.call_obj_hasattr(tx, "__lt__").value for k in keys):
-                tx.output.side_effects.mutation(self)
-
-                class Wrapper:
-                    def __init__(self, x, k):
-                        self.x = x
-                        self.k = k
-
-                    def __lt__(self, other):
-                        return self.k.call_method(tx, "__lt__", [other.k], {}).value
-
-                sorted_items_with_keys = sorted(
-                    (Wrapper(x, k) for (k, x) in zip(keys, self.items)),
-                    reverse=reverse,
-                )
-                self.items[:] = [w.x for w in sorted_items_with_keys]
-            else:
-                # TODO: update this error message
+            if not all(k.is_python_constant() for k in keys):
                 unimplemented("sort with non-constant keys")
 
+            tx.output.side_effects.mutation(self)
+            sorted_items_with_keys = sorted(
+                (
+                    (
+                        x,
+                        k.as_python_constant(),
+                        -i if reverse else i,  # extra key to ensure stable sort
+                    )
+                    for i, (k, x) in enumerate(zip(keys, self.items))
+                ),
+                key=operator.itemgetter(1, 2),
+                reverse=reverse,
+            )
+            self.items[:] = [x for x, *_ in sorted_items_with_keys]
             return ConstantVariable.create(None)
 
         if name == "__init__" and self.is_mutable():
