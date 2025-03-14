@@ -1184,8 +1184,11 @@ def aot_dispatch_autograd(
             compiled_bw_func = None
             if num_symints_saved_for_bw > 0:
                 try:
+                    # backends may mutate the bw_module and leave
+                    # it in an non-runnable state, so we lower it
+                    # with a copy
                     compiled_bw_func = aot_config.bw_compiler(
-                        bw_module, placeholder_list
+                        copy.deepcopy(bw_module), placeholder_list
                     )
                 except Exception as e:
                     exc = e
