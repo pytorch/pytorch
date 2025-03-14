@@ -1,9 +1,8 @@
 # mypy: allow-untyped-defs
 import functools
 import logging
+import re
 from typing import Optional
-
-from packaging.version import Version
 
 import torch
 from torch._dynamo.utils import counters
@@ -56,14 +55,31 @@ from .mm_common import (
 )
 
 
+def parse_version(version_string: str) -> Optional[tuple[int, ...]]:
+    pattern = r"(\d+)\.(\d+)?"
+    match = re.match(pattern, version_string)
+
+    if match:
+        return tuple(int(group) for group in match.groups())
+    else:
+        return None
+
+
 try:
     import triton
 
-    triton_version = triton.__version__
+    triton_version = parse_version(triton.__version__)
     has_triton = True
+    if triton_version is not None:
+        triton_major, triton_minor = triton_version
+    else:
+        triton_major = 0
+        triton_minor = 0
 except ImportError:
     triton_version = None
     has_triton = False
+    triton_major = 0
+    triton_minor = 0
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -138,7 +154,7 @@ mm_template = TritonTemplate(
     {{store_output(("idx_m", "idx_n"), "acc", "mask")}}
 """
         if (torch.version.hip is None)
-        or (has_triton and Version(triton_version) >= Version("3.3.0"))
+        or (has_triton and triton_major >= 3 and triton_minor >= 3)
         # FIXME: To get around rocm failures like https://github.com/pytorch/pytorch/actions/runs/13123783322/job/36617154943
         # The only difference between the two templates is M >= BLOCK_M and N >= BLOCK_N checking.
         # See more details in https://github.com/pytorch/pytorch/pull/146293
