@@ -1,6 +1,8 @@
 [build-system]
 requires = [
-    "setuptools",
+    # After 75.8.2 dropped dep disttools API. Please fix
+    # min version for recursive glob package data support
+    "setuptools>=62.3.0,<75.9",
     "wheel",
     "astunparse",
     "numpy",
