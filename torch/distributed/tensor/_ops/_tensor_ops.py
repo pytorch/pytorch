@@ -33,6 +33,7 @@ from torch.distributed.tensor.placement_types import (
     Replicate,
     Shard,
 )
+from torch.functional import split
 
 
 aten = torch.ops.aten
@@ -743,9 +744,9 @@ def prop_index(op_schema: OpSchema) -> OutputSharding:
         aten.split_with_sizes.default,
         aten.split_with_sizes_copy.default,
     ],
-    RuntimeSchemaInfo(1, needs_pytree=True),
+    RuntimeSchemaInfo(1),
 )
-def split_strategy(op_schema: OpSchema) -> StrategyType:
+def split_strategy(op_schema: OpSchema) -> TupleStrategy:
     input_strategy = op_schema.args_schema[0]
     split_size_or_sections = op_schema.args_schema[1]
     assert isinstance(input_strategy, OpStrategy)
@@ -780,24 +781,22 @@ def split_strategy(op_schema: OpSchema) -> StrategyType:
     )
     assert isinstance(output_size_list, Sized)
 
-    if is_tensor_dim_sharded(input_strategy.strategies[0].output_spec, dim=dim):
-        placement = unshard_tensor_dim(
-            input_strategy.strategies[0].output_spec.placements, dim=dim
-        )
-    else:
-        placement = input_strategy.strategies[0].output_spec.placements
-    spec = DTensorSpec(input_strategy.strategies[0].output_spec.mesh, placement)
-
     for _ in range(len(output_size_list)):
-        split_strategy.append(
-            OpStrategy(
-                strategies=[
-                    PlacementStrategy(
-                        output_specs=spec,
-                        input_specs=([spec]),
-                    )
-                ]
+        split_strategy.append(OpStrategy(strategies=[]))
+
+        for strategy in input_strategy.strategies:
+            spec = strategy.output_spec
+            placements = spec.placements
+            if is_tensor_dim_sharded(spec, dim=dim):
+                # if the input is sharded on the split dim, we need to unshard it
+                placements = unshard_tensor_dim(spec.placements, dim=dim)
+            else:
+                placements = spec.placements
+
+            spec = DTensorSpec(spec.mesh, placements)
+
+            split_strategy[-1].strategies.append(
+                PlacementStrategy(output_specs=spec, input_specs=([spec]))
             )
-        )
 
     return TupleStrategy(split_strategy)
