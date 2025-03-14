@@ -89,7 +89,7 @@ inline void checkInBoundsForStorage(
   T storage_size_bytes =
       at::detail::computeStorageNbytes(size, stride, data_type.itemsize());
   int64_t storage_offset_bytes;
-  bool storage_offset_bytes_overflow = c10::mul_overflows(maybe_convert_symint<int64_t>(storage_offset), data_type.itemsize(), &storage_offset_bytes);
+  const auto storage_offset_bytes_overflow = c10::mul_overflows(maybe_convert_symint<int64_t>(storage_offset), data_type.itemsize(), &storage_offset_bytes);
 
   TORCH_CHECK(!storage_offset_bytes_overflow,
               "Storage offset byte calculation overflowed with offset=", storage_offset);
