@@ -1233,11 +1233,12 @@ def aot_dispatch_autograd(
     assert len(backward_state_indices) <= 1
 
     lazy_backward_info = AutogradLazyBackwardCompileInfo(
-        bw_module,
+        copy.deepcopy(bw_module),
         placeholder_list,
         saved_context,
         saved_compile_context,
     )
+    assert bw_module.graph is not lazy_backward_info.bw_module.graph
 
     make_runtime_safe(fw_metadata, maybe_subclass_meta)
 
