@@ -97,6 +97,7 @@ def mps_ops_grad_modifier(ops):
         'logdet': [torch.float16, torch.float32],  # missing aten::lu_solve.out
         'aminmax': [torch.float32, torch.float16],
         'special.i1': [torch.float16],  # "i1_backward" not implemented for 'Half'
+        'special.i1e': [torch.float16],  # "i1e_backward" not implemented for 'Half'
 
         # Correctness issues
         'atanh': [torch.float32],
@@ -645,17 +646,11 @@ def mps_ops_modifier(ops):
         'sparse.mm': None,
         'sparse.mmreduce': None,
         'special.airy_ai': None,
-        'special.bessel_j0': None,
-        'special.bessel_j1': None,
-        'special.bessel_y0': None,
-        'special.bessel_y1': None,
         'special.chebyshev_polynomial_t': None,
         'special.chebyshev_polynomial_u': None,
         'special.erfcx': None,
         'special.hermite_polynomial_h': None,
         'special.hermite_polynomial_he': None,
-        'special.i0e': None,
-        'special.i1e': None,
         'special.laguerre_polynomial_l': None,
         'special.log_ndtr': None,
         'special.modified_bessel_i0': None,
@@ -4130,8 +4125,6 @@ class TestMPS(TestCaseMPS):
         y_cpu = torch.full((2, 2), 247, device='cpu', dtype=torch.uint8)
         self.assertEqual(y_mps, y_cpu)
 
-    @unittest.skipIf(MACOS_VERSION < 13.0, "Skipped on macOS 12")
-    # See https://github.com/pytorch/pytorch/issues/84995
     def test_div_bugs(self):
         for (dtype, mode) in itertools.product(integral_types(), ['trunc', 'floor']):
             if dtype != torch.int64:
@@ -5134,7 +5127,6 @@ class TestMPS(TestCaseMPS):
 
         self.assertEqual(result_cpu, result_mps.to('cpu'))
 
-    @unittest.skipIf(MACOS_VERSION < 13.0, "Skipped on macOS 12")
     def test_signed_vs_unsigned_comparison(self):
         cpu_x = torch.tensor((-1, 2, 3), device='cpu', dtype=torch.uint8)
         mps_x = torch.tensor((-1, 2, 3), device='mps', dtype=torch.uint8)
@@ -11454,9 +11446,6 @@ class TestAdvancedIndexing(TestCaseMPS):
 
             self.assertEqual(res_cpu, res_mps, str(dtype))
         for dtype in self.supported_dtypes:
-            # MPS support binary op with uint8 natively starting from macOS 13.0
-            if MACOS_VERSION < 13.0 and dtype == torch.uint8:
-                continue
             helper(dtype)
 
     def test_advanced_indexing_3D_get(self):
@@ -11615,7 +11604,6 @@ class TestAdvancedIndexing(TestCaseMPS):
             self.assertEqual(v[boolIndices], torch.tensor([True], dtype=torch.bool, device=device))
             self.assertEqual(len(w), 2)
 
-    @unittest.skipIf(MACOS_VERSION < 13.0, "Skipped on macOS 12")
     def test_bool_indices_accumulate(self, device="mps"):
         mask = torch.zeros(size=(10, ), dtype=torch.uint8, device=device)
         mask = mask > 0
@@ -11833,7 +11821,6 @@ class TestAdvancedIndexing(TestCaseMPS):
             self.assertEqual(res.shape, src.shape)
         [helper(device="mps", dtype=dtype) for dtype in [torch.float, torch.int32]]
 
-    @unittest.skipIf(MACOS_VERSION < 13.0, "Skipped on macOS 12")
     def test_index_src_datatype(self):
         def helper(device, dtype):
             orig_dtype = dtype
