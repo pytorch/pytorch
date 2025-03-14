@@ -242,6 +242,9 @@ def generate_opcheck_tests(
         new_method_name = prefix + "__" + attr
 
         @functools.wraps(method)
+        @torch.testing._internal.common_utils.skipIfTorchDynamo(
+            "Generated opcheck tests don't support Dynamo"
+        )
         def new_method(*args, **kwargs):
             with OpCheckMode(
                 namespaces,
@@ -282,6 +285,7 @@ def generate_opcheck_tests(
                     new_pytestmark.append(mark)
                 new_method.__dict__["pytestmark"] = new_pytestmark
 
+        print(f"creating new_method: {new_method_name}")
         if new_method_name in additional_decorators:
             for dec in additional_decorators[new_method_name]:
                 new_method = dec(new_method)
@@ -552,14 +556,11 @@ class OpCheckMode(TorchFunctionMode):
 
     def __enter__(self, *args, **kwargs):
         self.prev_is_opcheck_mode = _is_inside_opcheck_mode.value
-        self.prev_dynamo_disable = os.environ.get("TORCHDYNAMO_DISABLE", "")
         _is_inside_opcheck_mode.value = True
-        os.environ["TORCHDYNAMO_DISABLE"] = "1"
         return super().__enter__(*args, **kwargs)
 
     def __exit__(self, *args, **kwargs):
         _is_inside_opcheck_mode.value = self.prev_is_opcheck_mode
-        os.environ["TORCHDYNAMO_DISABLE"] = self.prev_dynamo_disable
         try:
             self.maybe_raise_errors_on_exit()
             if should_update_failures_dict():
