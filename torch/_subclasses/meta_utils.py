@@ -104,7 +104,7 @@ tls.disable_inference_mode = False
 
 @contextmanager
 def disable_inference_mode_for_fake_prop() -> Generator[None, None, None]:
-    prior = tls.disable_inference_mode
+    prior = getattr(tls, "disable_inference_mode", False)
     tls.disable_inference_mode = True
     try:
         yield
