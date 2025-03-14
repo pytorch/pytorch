@@ -353,7 +353,7 @@ jobs:
 
           python3 -m pip install psutil==5.9.1 dataclasses_json==0.6.7
           python3 -m tools.stats.monitor > "usage_log_build_test.txt" 2>&1 &
-          echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
+          echo "monitor-script-pid2=${!}" >> "${GITHUB_OUTPUT}"
 
       - name: Archive artifacts into zip
         if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped'
@@ -398,7 +398,7 @@ jobs:
         shell: bash
         continue-on-error: true
         env:
-          MONITOR_SCRIPT_PID: ${{ steps.monitor-script.outputs.monitor-script-pid }}
+          MONITOR_SCRIPT_PID: ${{ steps.monitor-script.outputs.monitor-script-pid2 }}
         run: |
           kill "$MONITOR_SCRIPT_PID"
 
