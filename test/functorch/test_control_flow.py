@@ -942,10 +942,10 @@ def forward(self, pred_1):
     @skipIfTorchDynamo("Skip due to graph break when run with dynamo")
     def test_cond_autograd_same_pytree_output(self):
         def true_fn(x):
-            return {"res": [x["t"][0] + 1.0, (x["t"][2][0] + 2.0,)]}
+            return {"res": [x["t"][0].clone(), (x["t"][2][0].clone(),)]}
 
         def false_fn(x):
-            return {"res": [x["t"][1]["b"] + 1.0, (x["t"][2][0] + 2.0,)]}
+            return {"res": [x["t"][1]["b"].clone(), (x["t"][2][0].clone(),)]}
 
         a = torch.randn(4, requires_grad=True)
         b = torch.randn(4, requires_grad=True)
@@ -2072,14 +2072,17 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
         def fct_wrong_pytree(x, y):
             return (
                 {
-                    "i": x["i"] * y["j"][0][0] + 1,
-                    "k": torch.tensor(0.0) + 1,
-                    "j": ([x["j"][1][0]["o"] + 1], [{"o": torch.sin(x["i"]) + 1}]),
+                    "i": x["i"] * y["j"][0][0].clone(),
+                    "k": torch.tensor(0.0).clone(),
+                    "j": (
+                        [x["j"][1][0]["o"].clone()],
+                        [{"o": torch.sin(x["i"]).clone()}],
+                    ),
                 },
                 {
                     "i": x["i"] * y["j"][0][0],
                     "k": torch.tensor(0.0),
-                    "j": ([x["j"][1][0]["o"] + 2], [{"o": torch.sin(x["i"])}]),
+                    "j": ([x["j"][1][0]["o"].clone()], [{"o": torch.sin(x["i"])}]),
                 },
             )
 
@@ -2745,7 +2748,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
                     ),
                 },
                 (
-                    y["i"] + 1,
+                    y["i"].clone(),
                     {
                         "o": x["i"] * y["i"],
                         "j": (
@@ -2761,13 +2764,13 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
                 {
                     "i": x["i"] * y["i"],
                     "j": (
-                        x["i"] + 1,
+                        x["i"].clone(),
                         [x["j"][1][0] * y["j"][0][0]],
                         [{"o": x["j"][2][0]["o"] + y["j"][1][0]["o"]}],
                     ),
                 },
                 (
-                    y["i"] + 1,
+                    y["i"].clone(),
                     {
                         "o": x["i"] * y["i"] + x["j"][0][0],
                         "j": (
