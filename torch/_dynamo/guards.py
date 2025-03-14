@@ -286,6 +286,8 @@ class GuardManagerWrapper:
     def get_guard_lines(self, guard):
         guard_name = guard.__class__.__name__
         parts = guard.verbose_code_parts()
+        # if "==" in parts[0]:
+        #     breakpoint()
         parts = [guard_name + ": " + part for part in parts]
         return parts
 
@@ -1464,6 +1466,35 @@ class GuardBuilder(GuardBuilderBase):
             not invert, key, get_verbose_code_parts(code, guard)
         )
 
+    def BOOL_MATCH(self, guard: Guard):
+        # checks val == True or val == False
+        ref = self.arg_ref(guard)
+        val = self.get(guard.name)
+        assert istype(val, bool)
+        code = [f"{ref} == {val!r}"]
+        self._set_guard_export_info(guard, code)
+
+        if val:
+            self.get_guard_manager(guard).add_true_match_guard(
+                get_verbose_code_parts(code, guard)
+            )
+        else:
+            self.get_guard_manager(guard).add_false_match_guard(
+                get_verbose_code_parts(code, guard)
+            )
+
+    def NONE_MATCH(self, guard: Guard):
+        # checks `val is None`
+        ref = self.arg_ref(guard)
+        val = self.get(guard.name)
+        assert val is None
+        code = [f"{ref} is None"]
+        self._set_guard_export_info(guard, code)
+
+        self.get_guard_manager(guard).add_none_match_guard(
+            get_verbose_code_parts(code, guard)
+        )
+
     def ID_MATCH(self, guard: Guard):
         # ___check_obj_id is same as `id(x) == y`
         if isinstance(guard.originating_source, TypeSource):
@@ -1682,7 +1713,11 @@ class GuardBuilder(GuardBuilderBase):
 
     def CONSTANT_MATCH(self, guard: Guard):
         val = self.get(guard.name)
-        if istype(val, (bool, type(None), types.CodeType)):
+        if istype(val, bool):
+            self.BOOL_MATCH(guard)
+        elif val is None:
+            self.NONE_MATCH(guard)
+        elif istype(val, types.CodeType):
             self.ID_MATCH(guard)
         else:
             self.EQUALS_MATCH(guard)
