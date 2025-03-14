@@ -25,17 +25,16 @@ NO_TOKEN = -1
 FSTRING_START: int = getattr(token, "FSTRING_START", NO_TOKEN)
 FSTRING_END: int = getattr(token, "FSTRING_END", NO_TOKEN)
 
-START_OF_LINE_TOKENS = {token.DEDENT, token.INDENT, token.NEWLINE}
-IGNORED_TOKENS = {token.COMMENT, token.ENDMARKER, token.ENCODING, token.NL}
+START_OF_LINE_TOKENS = dict.fromkeys((token.DEDENT, token.INDENT, token.NEWLINE))
+IGNORED_TOKENS = dict.fromkeys(
+    (token.COMMENT, token.ENDMARKER, token.ENCODING, token.NL)
+)
 EMPTY_TOKENS = START_OF_LINE_TOKENS | IGNORED_TOKENS
 
 BRACKETS = {"{": "}", "(": ")", "[": "]"}
 BRACKETS_INV = {j: i for i, j in BRACKETS.items()}
 
 ROOT = Path(__file__).absolute().parents[3]
-assert ROOT.name == "pytorch", (
-    f"{sys.argv[0]} must be called from the root directory of pytorch"
-)
 
 
 def is_name(t: TokenInfo, *names: str) -> bool:
