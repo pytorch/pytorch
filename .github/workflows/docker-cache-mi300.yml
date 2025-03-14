@@ -1,8 +1,6 @@
 name: docker-cache-mi300
 
 on:
-  # TEMPORARY TO TRIGGER WORKFLOW ON PR
-  pull_request:
   # run every 6 hours
   schedule:
     - cron: 0 0,6,12,18 * * *
