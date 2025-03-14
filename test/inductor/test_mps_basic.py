@@ -91,6 +91,9 @@ class MPSBasicTests(TestCase):
     def test_pointwise_i1(self):
         self.common(torch.special.i1, (torch.rand(128, 128),), check_lowp=False)
 
+    def test_pointwise_i1e(self):
+        self.common(torch.special.i1e, (torch.rand(128, 128),), check_lowp=False)
+
     def test_pointwise_erf(self):
         self.common(torch.special.erf, (torch.rand(128, 128),), check_lowp=False)
 
