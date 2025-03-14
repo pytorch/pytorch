@@ -1,6 +1,8 @@
 torch.onnx.ops
 ==============
 
+.. automodule:: torch.onnx.ops
+
 Operators
 ---------
 
