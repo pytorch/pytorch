@@ -1102,12 +1102,13 @@ class SDPAKernelVariable(ContextWrappingVariable):
     """represents torch.nn.attention.sdpa_kernel"""
 
     @staticmethod
-    def create(tx: "InstructionTranslator", backends, **kwargs):
+    def create(tx: "InstructionTranslator", backends, set_priority=False, **kwargs):
         if isinstance(backends, torch.nn.attention.SDPBackend):
             backends = [backends]
         var = SDPAKernelVariable(
             target_values=backends,
             initial_values=None,
+            set_priority=set_priority,
             **kwargs,
         )
         return var
@@ -1116,11 +1117,13 @@ class SDPAKernelVariable(ContextWrappingVariable):
         self,
         target_values: list[torch.nn.attention.SDPBackend],
         initial_values=None,
+        set_priority: bool = False,
         **kwargs,
     ) -> None:
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
+        self.set_priority = set_priority
 
     @staticmethod
     def _backends_to_nodes(tx, backends):
@@ -1137,16 +1140,23 @@ class SDPAKernelVariable(ContextWrappingVariable):
         return nodes
 
     def enter(self, tx):
-        self.prev_backends = torch.nn.attention._cur_sdpa_kernel_backends()
-        self.set_cleanup_hook(
-            tx, lambda: torch.nn.attention._sdpa_kernel(self.prev_backends)
+        self.prev_backends = torch.nn.attention._cur_sdpa_kernel_backends(
+            with_priority=self.set_priority
         )
-        torch.nn.attention._sdpa_kernel(self.target_values)
+        self.set_cleanup_hook(
+            tx,
+            lambda: torch.nn.attention._sdpa_kernel(
+                self.prev_backends, set_priority=self.set_priority
+            ),
+        )
+        torch.nn.attention._sdpa_kernel(
+            self.target_values, set_priority=self.set_priority
+        )
         arg = self._backends_to_nodes(tx, self.target_values)
         tx.output.create_node(
             "call_function",
             torch.nn.attention._sdpa_kernel,
-            (arg,),
+            (arg, bool(self.set_priority)),
             {},
         )
         return variables.ConstantVariable.create(None)
@@ -1157,7 +1167,7 @@ class SDPAKernelVariable(ContextWrappingVariable):
         tx.output.create_node(
             "call_function",
             torch.nn.attention._sdpa_kernel,
-            (arg,),
+            (arg, bool(self.set_priority)),
             {},
         )
         return variables.ConstantVariable.create(None)
