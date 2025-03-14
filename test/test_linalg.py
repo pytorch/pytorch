@@ -5498,6 +5498,8 @@ class TestLinalg(TestCase):
         # Test TunableOp with TF32. Supported by hipblasLT on MI300+.
         # for HIP/AMDGPU, tf32 is behind a flag because the TF32 support is new
         # and only for MI300+. Eventually this flag will go away.
+        import os
+
         tf32_ctx = self._hip_allow_tf32 if torch.version.hip else contextlib.nullcontext
 
         with tf32_ctx():
