@@ -1,8 +1,8 @@
 #pragma once
 #include <caffe2/serialize/read_adapter_interface.h>
+#include <sys/types.h>
 #include <cstdint>
 #include <cstring>
-#include <sys/types.h>
 
 namespace caffe2::serialize {
 

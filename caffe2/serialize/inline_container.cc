@@ -400,7 +400,8 @@ size_t PyTorchStreamReader::getRecordMultiReaders(
         }
         readSizes[i] = size;
         LOG(INFO) << "Thread " << i << " read [" << startPos << "-" << endPos
-                  << "] " << "from " << name << " of size " << n;
+                  << "] "
+<< "from " << name << " of size " << n;
         TORCH_CHECK(
             threadReadSize == size,
             "record size ",
@@ -697,7 +698,7 @@ void PyTorchStreamWriter::setup(const string& file_name) {
 
     const std::string dir_name = parentdir(file_name);
     if (!dir_name.empty()) {
-      struct stat st{};
+      struct stat st {};
       bool dir_exists =
           (stat(dir_name.c_str(), &st) == 0 && (st.st_mode & S_IFDIR));
       TORCH_CHECK(
