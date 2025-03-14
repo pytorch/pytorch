@@ -1549,6 +1549,7 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
                     name_to_constant[spec.target], torch.Tensor
                 ), f"{type(name_to_constant[spec.target])} has been erroneously marked as buffer"
                 spec.kind = InputKind.CONSTANT_TENSOR
+                spec.persistent = None
         ep.verifier().check(ep)
 
         return ep
