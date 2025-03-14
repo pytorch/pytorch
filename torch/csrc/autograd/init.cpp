@@ -955,6 +955,120 @@ static PyObject* is_fwd_grad_enabled(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
+template <bool skip_tensors_in_non_tensorlist = false>
+static void visit(
+    PyObject* o,
+    const std::function<bool(at::Tensor&)>& visit_tensor) {
+  if (THPVariable_Check(o)) {
+    auto t = THPVariable_Unpack(o);
+    if (visit_tensor(t)) {
+      return;
+    }
+  } else if (PyList_Check(o)) {
+    // Check that this List is TensorList
+    if constexpr (skip_tensors_in_non_tensorlist) {
+      for (const auto i : c10::irange(PyList_GET_SIZE(o))) {
+        if (!THPVariable_Check(PyList_GET_ITEM(o, i))) {
+          return;
+        }
+      }
+    }
+    for (const auto i : c10::irange(PyList_GET_SIZE(o))) {
+      visit(PyList_GET_ITEM(o, i), visit_tensor);
+    }
+  }
+}
+
+template <bool skip_tensors_in_non_tensorlist = false>
+static void visit_tensors(
+    PyObject* args,
+    PyObject* kwargs,
+    const std::function<bool(at::Tensor&)>& visit_tensor) {
+  if (args && PyTuple_Check(args)) {
+    for (const auto i : c10::irange(PyTuple_GET_SIZE(args))) {
+      visit<skip_tensors_in_non_tensorlist>(
+          PyTuple_GET_ITEM(args, i), visit_tensor);
+    }
+  }
+  if (kwargs && PyDict_Check(kwargs)) {
+    auto vals = PyDict_Values(kwargs);
+    for (const auto i : c10::irange(PyList_GET_SIZE(vals))) {
+      visit<skip_tensors_in_non_tensorlist>(
+          PyList_GET_ITEM(vals, i), visit_tensor);
+    }
+  }
+}
+
+// Returns true if any of the args, kwargs tensor leaves have requires_grad
+// Only List container is supported.
+// Introduced for perf of custom ops.
+static PyObject* any_requires_grad(
+    PyObject* _unused,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  bool has_requires_grad = false;
+  visit_tensors(args, kwargs, [&has_requires_grad](at::Tensor& t) {
+    if (t.requires_grad()) {
+      has_requires_grad = true;
+      return true;
+    }
+    return false;
+  });
+  if (has_requires_grad) {
+    Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
+  END_HANDLE_TH_ERRORS
+}
+
+// Checks aliasing constraint for custom ops:
+// Returns true if any of outputs is alias to any of inputs or another output
+// Args:
+// args[0] - inputs args
+// args[1] - inputs kwargs
+// args[2] - outputs
+static PyObject* any_output_is_alias_to_input_or_output(
+    PyObject* _unused,
+    PyObject* args) {
+  HANDLE_TH_ERRORS
+  PyObject* inps = PyTuple_GET_ITEM(args, 0);
+  PyObject* inps_kwargs = PyTuple_GET_ITEM(args, 1);
+  PyObject* outs = PyTuple_GET_ITEM(args, 2);
+  std::unordered_set<void*> s;
+  visit_tensors<false>(inps, inps_kwargs, [&s](at::Tensor& t) {
+    if (!t.storage()) {
+      return false;
+    }
+    auto* cp = t.storage().data_ptr().get_context();
+    if (cp) {
+      s.insert(cp);
+    }
+    return false;
+  });
+  bool ret = false;
+  visit_tensors<false>(outs, nullptr, [&s, &ret](at::Tensor& t) {
+    if (!t.storage()) {
+      return false;
+    }
+    auto* cp = t.storage().data_ptr().get_context();
+    if (!cp) {
+      return false;
+    }
+    if (s.find(cp) != s.end()) {
+      ret = true;
+      return true;
+    }
+    s.insert(cp);
+    return false;
+  });
+  if (ret) {
+    Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* set_multithreading_enabled(
     PyObject* self,
     PyObject* args,
@@ -1326,6 +1440,14 @@ static PyMethodDef methods[] = {
      nullptr},
     {"is_grad_enabled", is_grad_enabled, METH_NOARGS, nullptr},
     {"_set_fwd_grad_enabled", set_fwd_grad_enabled, METH_O, nullptr},
+    {"_any_requires_grad",
+     castPyCFunctionWithKeywords(any_requires_grad),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
+    {"_any_output_is_alias_to_input_or_output",
+     any_output_is_alias_to_input_or_output,
+     METH_VARARGS,
+     nullptr},
     {"_is_fwd_grad_enabled", is_fwd_grad_enabled, METH_NOARGS, nullptr},
     {"is_inference_mode_enabled",
      is_inference_mode_enabled,
