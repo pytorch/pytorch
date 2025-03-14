@@ -145,10 +145,10 @@ inline const char* TypeName(T v) {
 
 template <>
 inline const char* TypeName(float v) {
-  if (!at::globalContext().allowTF32CuBLAS()) {
-    return "float";
-  } else {
+  if (at::globalContext().allowTF32CuBLAS()) {
     return "tf32";
+  } else {
+    return "float";
   }
 }
 
