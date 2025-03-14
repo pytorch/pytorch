@@ -193,11 +193,11 @@ struct C10_API AutogradMetaFactory {
 C10_API void SetAutogradMetaFactory(AutogradMetaFactory* factory);
 C10_API AutogradMetaFactory* GetAutogradMetaFactory();
 
-struct C10_API AutogradMetaFactoryRegisterer {
-  explicit AutogradMetaFactoryRegisterer(AutogradMetaFactory* factory) {
-    SetAutogradMetaFactory(factory);
-  }
-};
+struct C10_API AutogradMetaFactoryRegisterer{
+    explicit AutogradMetaFactoryRegisterer(AutogradMetaFactory * factory){
+        SetAutogradMetaFactory(factory);
+} // namespace impl
+}; // namespace c10
 
 } // namespace impl
 

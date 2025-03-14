@@ -116,8 +116,8 @@ class C10_API Error : public std::exception {
 
 class C10_API Warning {
  public:
-  class C10_API UserWarning {};
-  class C10_API DeprecationWarning {};
+  class C10_API UserWarning{};
+  class C10_API DeprecationWarning{};
 
   using warning_variant_t = std::variant<UserWarning, DeprecationWarning>;
 
