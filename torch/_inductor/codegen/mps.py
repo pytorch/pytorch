@@ -250,6 +250,10 @@ class MetalOverrides(OpOverrides):
         return f"c10::metal::i1({x})"
 
     @staticmethod
+    def i1e(x: CSEVariable) -> str:
+        return f"c10::metal::i1e({x})"
+
+    @staticmethod
     def erf(x: CSEVariable) -> str:
         return f"c10::metal::erf({x})"
 
