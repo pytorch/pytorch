@@ -190,6 +190,7 @@ for test_name in [
     "test_cumsum_inf",
     "test_custom_op_2",
     "test_div1",
+    "test_div2",
     "test_div3",
     "test_erfinv",
     "test_floordiv",
