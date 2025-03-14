@@ -136,7 +136,7 @@ def assert_metadata_eq(
         # MetaTensorDesc doesn't store grad_fn; inferred from leaf
         # assert_eq(m1.grad_fn is None, m2.grad_fn is None)
         assert_eq(m1.is_sparse, m2.is_sparse)
-        if not tls.disable_inference_mode:
+        if not getattr(tls, "disable_inference_mode", False):
             assert_eq(m1.is_inference, m2.is_inference())
         else:
             assert_eq(m1.is_inference, False)
@@ -378,10 +378,11 @@ class MetaTensorDescriber:
 
         # TODO: Is it important to enable torch.inference_mode before querying
         # these values?
+        is_inference_mode_disabled = getattr(tls, "disable_inference_mode", False)
         r: MetaTensorDesc = MetaTensorDesc(
             id=self.get_tensor_id(t),
             storage=storage,
-            is_inference=False if tls.disable_inference_mode else t.is_inference(),
+            is_inference=False if is_inference_mode_disabled else t.is_inference(),
             is_leaf=is_leaf,
             requires_grad=t.requires_grad,
             # NB: ndim should be OK too but there is a disaster at
