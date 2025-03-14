@@ -1339,8 +1339,9 @@ static StableIValue from_ivalue(
       // return from<std::optional<inner_type::t>>(ivalue.toInnerTypeT()));
       //
       // BUT we do NOT have that type inner_type::t readily available, so we
-      // will manually unwrap and recursively call, similar to the
-      // from<std::optional<T>> function in torch/csrc/stable/library.h
+      // will manually unwrap and recursively call. This implementation MUST
+      // be kept in sync with from<std::optional<T>> function in
+      // torch/csrc/stable/library.h
       if (ivalue.isNone()) {
         return from(std::nullopt);
       }
@@ -1361,7 +1362,6 @@ static c10::IValue to_ivalue(
     const StableIValue stable_ivalue) {
   switch (type->kind()) {
     case c10::TypeKind::TensorType: {
-      // stable_ivalue must be an ATH
       auto ret_raiiath = torch::aot_inductor::RAIIAtenTensorHandle(
           to<AtenTensorHandle>(stable_ivalue));
       at::Tensor arg = *torch::aot_inductor::tensor_handle_to_tensor_pointer(
@@ -1400,8 +1400,9 @@ static c10::IValue to_ivalue(
       // return c10::IValue(to<std::optional<inner_type::t>>(stable_ivalue));
       //
       // BUT we do NOT have that type inner_type::t readily available, so we
-      // will manually unwrap and recursively call, similar to the to<T>
-      // function in torch/csrc/stable/library.h
+      // will manually unwrap and recursively call. This implementation MUST
+      // be kept in sync with the to<T> function in
+      // torch/csrc/stable/library.h
       if (stable_ivalue == from(std::nullopt)) {
         return c10::IValue();
       }
