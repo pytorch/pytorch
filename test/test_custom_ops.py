@@ -3928,8 +3928,8 @@ Please use `add.register_fake` to add an fake impl.""",
         self.assertTrue(test_fn(torch.zeros(1), a=torch.ones(1, requires_grad=True)))
         self.assertFalse(test_fn(torch.zeros(1), a=torch.ones(1)))
 
-    def test_any_is_aliased_tensor(self):
-        test_fn = torch._C._any_is_aliased_tensor
+    def test_any_output_is_alias_to_input_or_output(self):
+        test_fn = torch._C._any_output_is_alias_to_input_or_output
 
         x = torch.randn(2, 2)
         y = torch.randn(2, 2)
@@ -3961,6 +3961,13 @@ Please use `add.register_fake` to add an fake impl.""",
                 (x,),
                 {"a": x},
                 (),
+            )
+        )
+        self.assertFalse(
+            test_fn(
+                (torch.tensor([]),),
+                {},
+                (torch.tensor([]),),
             )
         )
 

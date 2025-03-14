@@ -1028,18 +1028,22 @@ static PyObject* any_requires_grad(
 // args[0] - inputs args
 // args[1] - inputs kwargs
 // args[2] - outputs
-static PyObject* any_is_aliased_tensor(PyObject* _unused, PyObject* args) {
+static PyObject* any_output_is_alias_to_input_or_output(
+    PyObject* _unused,
+    PyObject* args) {
   HANDLE_TH_ERRORS
   PyObject* inps = PyTuple_GET_ITEM(args, 0);
   PyObject* inps_kwargs = PyTuple_GET_ITEM(args, 1);
   PyObject* outs = PyTuple_GET_ITEM(args, 2);
-  // TODO: Use stack allocated set?
   std::unordered_set<void*> s;
   visit_tensors<false>(inps, inps_kwargs, [&s](at::Tensor& t) {
     if (!t.storage()) {
       return false;
     }
-    s.insert(t.storage().data_ptr().get_context());
+    auto* cp = t.storage().data_ptr().get_context();
+    if (cp) {
+      s.insert(cp);
+    }
     return false;
   });
   bool ret = false;
@@ -1047,7 +1051,10 @@ static PyObject* any_is_aliased_tensor(PyObject* _unused, PyObject* args) {
     if (!t.storage()) {
       return false;
     }
-    void* cp = t.storage().data_ptr().get_context();
+    auto* cp = t.storage().data_ptr().get_context();
+    if (!cp) {
+      return false;
+    }
     if (s.find(cp) != s.end()) {
       ret = true;
       return true;
@@ -1437,7 +1444,10 @@ static PyMethodDef methods[] = {
      castPyCFunctionWithKeywords(any_requires_grad),
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
-    {"_any_is_aliased_tensor", any_is_aliased_tensor, METH_VARARGS, nullptr},
+    {"_any_output_is_alias_to_input_or_output",
+     any_output_is_alias_to_input_or_output,
+     METH_VARARGS,
+     nullptr},
     {"_is_fwd_grad_enabled", is_fwd_grad_enabled, METH_NOARGS, nullptr},
     {"is_inference_mode_enabled",
      is_inference_mode_enabled,

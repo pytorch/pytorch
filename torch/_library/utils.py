@@ -380,7 +380,7 @@ def _c_check_aliasing_constraint(name, args, kwargs, result, get_module=lambda: 
     tuple_result = result
     if not isinstance(result, tuple):
         tuple_result = (result,)
-    if _C._any_is_aliased_tensor(args, kwargs, tuple_result):
+    if _C._any_output_is_alias_to_input_or_output(args, kwargs, tuple_result):
         raise RuntimeError(
             f"{name} (with implementation in {get_module()}): "
             f"The output of this custom operator (1) must not "
