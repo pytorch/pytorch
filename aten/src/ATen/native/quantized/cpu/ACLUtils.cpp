@@ -143,7 +143,7 @@ void DynamicQuantMatmul::configure() {
   gemm.configure(
       &src_q_tensor,
       &wei_q_tensor_,
-      bia_tensor_.has_value() ? &bia_tensor_.value() : nullptr,
+      bia_tensor_.value_or(nullptr),
       &dst_tensor,
       gemm_info_);
   if (relu.has_value()) {
