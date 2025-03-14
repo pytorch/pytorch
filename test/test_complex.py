@@ -6,7 +6,7 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
     onlyCPU,
-    skipIf
+    skipIf,
 )
 from torch.testing._internal.common_dtype import complex_types
 from torch.testing._internal.common_utils import (
