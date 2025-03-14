@@ -507,6 +507,7 @@ def speculate_subgraph(
     should_flatten_outputs=False,
     under_activation_checkpoint=False,
     supports_input_mutation=True,
+    supports_aliasing=True,
     # Pass in an originating tracer - this is needed for preserving context
     # across fwd-bwd for autograd.Function
     tracer=None,
@@ -697,6 +698,9 @@ def speculate_subgraph(
 
                 if not supports_input_mutation and subtracer.has_input_mutation():
                     unimplemented("NYI: invoke_subgraph with mutated inputs")
+
+                if not supports_aliasing and subtracer.has_aliasing():
+                    unimplemented("NYI: invoke_subgraph with aliasing")
 
                 return (
                     (output, treespec),
@@ -1787,6 +1791,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.supports_input_mutation = True
+        self.supports_aliasing = True
 
     def install_subgraph_in_output_graph(
         self, tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name="wrap_body"
@@ -1823,6 +1828,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             should_flatten_outputs=True,
             under_activation_checkpoint=under_activation_checkpoint,
             supports_input_mutation=self.supports_input_mutation,
+            supports_aliasing=self.supports_aliasing,
         )
 
         body_gmod = torch.fx.GraphModule(tx.output.nn_modules, body_graph)
@@ -3084,6 +3090,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.supports_input_mutation = False
+        self.supports_aliasing = False
 
     def install_subgraph_in_output_graph(
         self, tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name
@@ -3092,18 +3099,11 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         # inputs have already been seen before. If yes, the subgraph is already
         # installed in the output graph and we can just access the subgraph
         # using the saved attr name.
-        from torch._higher_order_ops.utils import _has_potential_branch_input_alias
-
         fake_inputs = [
             node.meta["example_value"]
             for node in body_gmod.graph.nodes
             if node.op == "placeholder"
         ]
-
-        # TODO(anijain2305) - This might be too big of a limitation. Consider
-        # supporting mutation/aliasing in HOP itself to remove this restriction.
-        if _has_potential_branch_input_alias(body_gmod, fake_inputs):
-            unimplemented("NYI: invoke_subgraph with aliasing/mutation")
 
         key = hash_graph_and_inputs(tx, body_gmod, fake_inputs)
 
