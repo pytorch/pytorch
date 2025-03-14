@@ -4031,7 +4031,7 @@ known_graph_breaks_tests = {
     "test_checkpointing_without_reentrant_input_requires_grad_True",  # reentrant .backward
     "test_checkpointing_without_reentrant_memory_savings",  # reentrant .backward
     "test_dtensor_basic",  # torch._dynamo.exc.Unsupported: Failed to convert args/kwargs to proxy
-    "test_dtensor_contiguous_dtensor_noncontiguous_local_as_tangent",  # torch._dynamo.exc.Unsupported: Failed to convert args/kwargs to proxy
+    "test_dtensor_contiguous_dtensor_noncontiguous_local_as_tangent",  # subclass constructor
 }
 
 test_contexts = {
@@ -4138,9 +4138,9 @@ known_failing_tests = {
     "test_checkpointing_without_reentrant_input_requires_grad_False",  # takes very very long
     "test_checkpointing_without_reentrant_input_requires_grad_True",  # takes very very long
     "test_checkpointing_without_reentrant_memory_savings",  # takes very very long
-    "test_dtensor_different_gradient_placement",  # torch._dynamo.exc.TorchRuntimeError: Dynamo failed to run FX node with fake tensors
-    "test_dtensor_noncontiguous_output",  # torch._dynamo.exc.TorchRuntimeError: Dynamo failed to run FX node with fake tensors
-    "test_dtensor_partial_placement_graph_output",  # torch._dynamo.exc.TorchRuntimeError: Dynamo failed to run FX node with fake tensors
+    "test_dtensor_different_gradient_placement",  # Dynamo failed to run FX node with fake tensors
+    "test_dtensor_noncontiguous_output",  # Dynamo failed to run FX node with fake tensors
+    "test_dtensor_partial_placement_graph_output",  # Dynamo failed to run FX node with fake tensors
     "test_unwrap_async_collective_tensor_tangent",  # AttributeError: 'PlainTensorMeta' object has no attribute 'attrs'
     # Category: Inductor (pass on backend="aot_eager")
     "test_input_buffer_accum",  # does not support sparse_grad=True: https://github.com/pytorch/pytorch/issues/120267
