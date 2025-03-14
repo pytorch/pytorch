@@ -97,7 +97,7 @@ def mps_ops_grad_modifier(ops):
         'logdet': [torch.float16, torch.float32],  # missing aten::lu_solve.out
         'aminmax': [torch.float32, torch.float16],
         'special.i1': [torch.float16],  # "i1_backward" not implemented for 'Half'
-        'special.i0e': None,  # "special_i1e" not implemented
+        'special.i1e': [torch.float16],  # "i1e_backward" not implemented for 'Half'
 
         # Correctness issues
         'atanh': [torch.float32],
@@ -651,7 +651,6 @@ def mps_ops_modifier(ops):
         'special.erfcx': None,
         'special.hermite_polynomial_h': None,
         'special.hermite_polynomial_he': None,
-        'special.i1e': None,
         'special.laguerre_polynomial_l': None,
         'special.log_ndtr': None,
         'special.modified_bessel_i0': None,
