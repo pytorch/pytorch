@@ -1067,6 +1067,36 @@ class TestCompileTorchbind(TestCase):
     def setUp(self):
         init_torchbind_implementations()
 
+        @torch._library.register_fake_class("_TorchScriptTesting::_TensorQueue")
+        class FakeTensorQueue:
+            def __init__(self, queue):
+                self.queue = queue
+
+            @classmethod
+            def __obj_unflatten__(cls, flattened_ctx):
+                return cls(**dict(flattened_ctx))
+
+            def push(self, x):
+                self.queue.append(x)
+
+            def pop(self):
+                return self.queue.pop(0)
+
+            def size(self):
+                return len(self.queue)
+
+        @torch._library.register_fake_class("_TorchScriptTesting::_FlattenWithTensorOp")
+        class FakeFlatten:
+            def __init__(self, t):
+                self.t = t
+
+            def get(self):
+                return self.t
+
+            @classmethod
+            def __obj_unflatten__(cls, flattened_ctx):
+                return cls(**dict(flattened_ctx))
+
         torch._dynamo.reset()
 
     def tearDown(self):
