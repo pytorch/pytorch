@@ -279,31 +279,25 @@ bool check_mem_efficient_hardware_support(sdp_params const& params, bool debug) 
   using sm120 = SMVersion<12, 0>;
 #if USE_ROCM
 #if USE_ROCM_ATTENTION
-  if(at::globalContext().getROCmFAPreferredBackend() == at::ROCmFABackend::Ck) {
-    // User explicitly set CK as the flash attention backend. Return true for now
-    // TODO: Flesh out sanity checks
-    return true;
-  } else {
-    auto stream = at::cuda::getCurrentCUDAStream().stream();
-    if (hipSuccess != aotriton::v2::flash::check_gpu(stream)) {
-        auto dprops = at::cuda::getCurrentDeviceProperties();
-        if (debug) {
-            TORCH_WARN(
-                    "Mem Efficient attention was not compiled for current AMD GPU architecture. Attempting to run on architecture ", dprops->gcnArchName);
-        }
-        return false;
-    }
-#if AOTRITON_VERSION_MINOR >= 9
-    if (aotriton::isArchExperimentallySupported(stream)) {
-      static const bool enable_experimental = c10::utils::check_env("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL") == true;
-      if (!enable_experimental) {
-        TORCH_WARN_ONCE("Mem Efficient attention on Current AMD GPU is still experimental."
-            " Enable it with TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1.");
-        return false;
+  auto stream = at::cuda::getCurrentCUDAStream().stream();
+  if (hipSuccess != aotriton::v2::flash::check_gpu(stream)) {
+      auto dprops = at::cuda::getCurrentDeviceProperties();
+      if (debug) {
+          TORCH_WARN(
+                  "Mem Efficient attention was not compiled for current AMD GPU architecture. Attempting to run on architecture ", dprops->gcnArchName);
       }
-    }
-#endif
+      return false;
   }
+#if AOTRITON_VERSION_MINOR >= 9
+  if (aotriton::isArchExperimentallySupported(stream)) {
+    static const bool enable_experimental = c10::utils::check_env("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL") == true;
+    if (!enable_experimental) {
+      TORCH_WARN_ONCE("Mem Efficient attention on Current AMD GPU is still experimental."
+          " Enable it with TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1.");
+      return false;
+    }
+  }
+#endif
 #else
   return false;
 #endif

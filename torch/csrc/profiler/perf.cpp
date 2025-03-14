@@ -17,7 +17,7 @@ namespace torch::profiler::impl::linux_perf {
 /*
  * Syscall wrapper for perf_event_open(2)
  */
-inline static long perf_event_open(
+inline long perf_event_open(
     struct perf_event_attr* hw_event,
     pid_t pid,
     int cpu,

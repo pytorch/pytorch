@@ -32,8 +32,7 @@ struct ITTThreadLocalState : ProfilerStateBase {
 };
 
 template <bool report_input_shapes>
-static std::unique_ptr<at::ObserverContext> enterITT(
-    const at::RecordFunction& fn) {
+std::unique_ptr<at::ObserverContext> enterITT(const at::RecordFunction& fn) {
   if (ITTThreadLocalState::getTLS() != nullptr) {
     torch::profiler::impl::ittStubs()->rangePush(fn.name());
   }

@@ -17,7 +17,6 @@
 
 namespace torch::instruction_counter {
 
-// NOLINTNEXTLINE(misc-use-internal-linkage)
 long start() {
 #if !defined(__linux__)
   throw std::runtime_error("This systems seems not to be Linux");
@@ -49,7 +48,6 @@ long start() {
 #endif
 }
 
-// NOLINTNEXTLINE(misc-use-internal-linkage)
 uint64_t end(int fd) {
 #if !defined(__linux__)
   throw std::runtime_error("This systems seems not to be Linux");

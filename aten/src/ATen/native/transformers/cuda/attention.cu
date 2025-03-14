@@ -85,11 +85,9 @@
 #include <ATen/native/transformers/cuda/mem_eff_attention/pytorch_utils.h>
 #else
 // MemoryEfficient Attention Specific Imports for ROCM
-#ifndef DISABLE_AOTRITON
 #include <ATen/native/transformers/hip/aotriton_adapter.h>
 #include <aotriton/flash.h>
 #include <aotriton/runtime.h>
-#endif
 #include <ATen/native/transformers/hip/flash_attn/ck/me_ck_api.h>
 #endif
 #endif
@@ -1289,7 +1287,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     TORCH_CHECK(false, "Attempting to use CK mem_eff_forward backend in a build that has not built CK");
 #endif
   } else { // use aotriton
-#ifndef DISABLE_AOTRITON
     auto ret = aotriton::v2::flash::check_gpu(stream);
     if (hipSuccess != ret) {
         TORCH_CHECK(false,
@@ -1386,9 +1383,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
                      persistent_counter,
                      stream);
     }
-#else
-    TORCH_CHECK(false, "Attempting to use AOTriton mem_eff_forward backend in a build that has not built AOTriton");
-#endif
   } // CK BACKEND
 #else
   // CUDA Implementation
@@ -1651,7 +1645,6 @@ at::Tensor& _fill_mem_eff_dropout_mask_(
 #if defined(USE_MEM_EFF_ATTENTION)
 
 #ifdef USE_ROCM
-#ifndef DISABLE_AOTRITON
   using aotriton::v2::flash::debug_simulate_encoded_softmax;
   using sdp::aotriton_adapter::mk_aotensor;
   using sdp::aotriton_adapter::mk_aoscalartensor;
@@ -1670,9 +1663,6 @@ at::Tensor& _fill_mem_eff_dropout_mask_(
                                        mk_aoscalartensor(offset_t),
                                        0,
                                        stream);
-#else
-  TORCH_CHECK(false, "_fill_mem_eff_dropout_mask_ is only enabled with aotriton");
-#endif
 #else
   at::PhiloxCudaState rng_engine_inputs;
   rng_engine_inputs = at::PhiloxCudaState(seed, offset);
