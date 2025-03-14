@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
 
 
-GRANDFATHER_LIST = Path(str(_FILE / "_linter").replace(".py", "-grandfather.json"))
+GRANDFATHER_LIST = _linter.LINTER / "docstring_linter.py-grandfather.json"
 
 # We tolerate a 10% increase in block size before demanding a docstring
 TOLERANCE_PERCENT = 10
@@ -34,6 +34,82 @@ ERROR_FMT = "Every {type} with more than {length} lines needs a docstring"
 DESCRIPTION = """`docstring_linter` reports on long functions, methods or classes
 without docstrings"""
 
+
+class DocstringFile(_linter.PythonFile):
+    def __getitem__(self, i: int | slice) -> TokenInfo | Sequence[TokenInfo]:
+        return self.tokens[i]
+
+    def next_token(self, start: int, token_type: int, error: str) -> int:
+        for i in range(start, len(self.tokens)):
+            if self.tokens[i].type == token_type:
+                return i
+        raise _linter.ParseError(self.tokens[-1], error)
+
+    def docstring(self, start: int) -> str:
+        for i in range(start + 1, len(self.tokens)):
+            tk = self.tokens[i]
+            if tk.type == token.STRING:
+                return tk.string
+            if tk.type not in _linter.EMPTY_TOKENS:
+                return ""
+        return ""
+
+    @cached_property
+    def indent_to_dedent(self) -> dict[int, int]:
+        dedents = dict[int, int]()
+        stack = list[int]()
+
+        for i, t in enumerate(self.tokens):
+            if t.type == token.INDENT:
+                stack.append(i)
+            elif t.type == token.DEDENT:
+                dedents[stack.pop()] = i
+
+        return dedents
+
+    @cached_property
+    def errors(self) -> dict[str, str]:
+        return {}
+
+    @cached_property
+    def blocks(self) -> list[Block]:
+        blocks: list[Block] = []
+
+        for i in range(len(self.tokens)):
+            try:
+                if (b := self.block(i)) is not None:
+                    blocks.append(b)
+            except _linter.ParseError as e:
+                self.errors[e.token.line] = " ".join(e.args)
+
+        for i, parent in enumerate(blocks):
+            for j in range(i + 1, len(blocks)):
+                if parent.contains(child := blocks[j]):
+                    child.parent = i
+                    parent.children.append(j)
+                else:
+                    break
+
+        for i, b in enumerate(blocks):
+            b.index = i
+
+            parents = [b]
+            while (p := parents[-1].parent) is not None:
+                parents.append(blocks[p])
+            parents = parents[1:]
+
+            b.is_local = not all(p.is_class for p in parents)
+            b.is_method = not b.is_class and bool(parents) and parents[0].is_class
+
+        def add_full_names(children: Sequence[Block], prefix: str = "") -> None:
+            dupes: dict[str, list[Block]] = {}
+            for b in children:
+                dupes.setdefault(b.name, []).append(b)
+
+            for dl in dupes.values():
+                for i, b in enumerate(dl):
+                    suffix = f"[{i + 1}]" if len(dl) > 1 else ""
+                    b.full_name = prefix + b.name + suffix
 
 class DocstringLinter(_linter.FileLinter):
     linter_name = "docstring_linter"

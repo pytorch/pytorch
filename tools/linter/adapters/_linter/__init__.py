@@ -36,15 +36,14 @@ __all__ = (
 # Python 3.12 and up have two new token types, FSTRING_START and FSTRING_END
 NO_TOKEN = -1
 
-START_OF_LINE_TOKENS = {token.DEDENT, token.INDENT, token.NEWLINE}
-IGNORED_TOKENS = {token.COMMENT, token.ENDMARKER, token.ENCODING, token.NL}
+START_OF_LINE_TOKENS = dict.fromkeys((token.DEDENT, token.INDENT, token.NEWLINE))
+IGNORED_TOKENS = dict.fromkeys(
+    (token.COMMENT, token.ENDMARKER, token.ENCODING, token.NL)
+)
 EMPTY_TOKENS = START_OF_LINE_TOKENS | IGNORED_TOKENS
 
-
-ROOT = Path(__file__).absolute().parents[4]
-assert ROOT.name == "pytorch", (
-    f"{sys.argv[0]} must be called from the root directory of pytorch"
-)
+LINTER = Path(__file__).absolute().parents[0]
+ROOT = LINTER.parents[3]
 
 
 class ParseError(ValueError):
