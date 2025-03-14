@@ -187,3 +187,35 @@ def call_module_hooks_from_backward_state(
         if new_result is not None:
             result = new_result
     return result
+
+
+# used by dont_skip_tracing decorator to ignore trace rules recursively
+_ignore_skip_function_variable = False
+
+
+def _set_ignore_skip_function_variable(value: bool) -> None:
+    global _ignore_skip_function_variable
+    _ignore_skip_function_variable = value
+
+
+def dont_skip_tracing_wrapper(recursive: bool) -> Any:
+    def decorator_wrapper(fn: Callable[..., _R]) -> Callable[..., _R]:
+        if recursive:
+
+            def wrap(*args: Any, **kwargs: Any) -> _R:
+                # TODO consider turning this into a context variable
+                # in order to support nested graph breaks better.
+                prev = _ignore_skip_function_variable
+                _set_ignore_skip_function_variable(True)
+                try:
+                    return fn(*args, **kwargs)
+                finally:
+                    _set_ignore_skip_function_variable(prev)
+
+            return wrap
+        else:
+            raise NotImplementedError(
+                "dont_skip_tracing(recursive=False) not yet implemented"
+            )
+
+    return decorator_wrapper

@@ -72,7 +72,7 @@ from torch.utils._python_dispatch import (
 )
 from torch.utils._traceback import CapturedTraceback, format_traceback_short
 
-from . import config, exc, graph_break_hints, trace_rules
+from . import config, exc, external_utils, graph_break_hints, trace_rules
 from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
 from .bytecode_transformation import (
     check_inst_exn_tab_entries_valid,
@@ -253,6 +253,9 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                 torch.fx._symbolic_trace._maybe_revert_all_patches()
             )
             exit_stack.enter_context(torch_function_mode_stack_state_mgr)
+            prev_ignore_skip_function_variable = (
+                external_utils._ignore_skip_function_variable
+            )
             try:
                 return fn(*args, **kwargs)
             finally:
@@ -280,6 +283,9 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                 torch.fx.graph_module._forward_from_src = prior_fwd_from_src
                 assert guards.check(), (
                     f"Global {guards.reason()}state changed while dynamo tracing, please report a bug"
+                )
+                external_utils._ignore_skip_function_variable = (
+                    prev_ignore_skip_function_variable
                 )
 
     _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
@@ -1208,6 +1214,7 @@ class ConvertFrame:
         frame_state: dict[str, Union[int, FrameStateSizeEntry]],
         skip: int = 0,
     ) -> ConvertFrameReturn:
+        input_codes.add(frame.f_code)
         counters["frames"]["total"] += 1
         try:
             result = self._inner_convert(
@@ -1367,6 +1374,8 @@ class CatchErrorsWrapper:
     ) -> ConvertFrameReturn:
         assert frame_state is not None
 
+        input_codes.add(frame.f_code)
+
         is_skipfile = trace_rules.check(frame.f_code)
         if sys.version_info >= (3, 13):
             has_started_execution = frame.f_lasti > first_real_inst_idx(frame.f_code)
@@ -1398,6 +1407,7 @@ class CatchErrorsWrapper:
                     skip_reason,
                     frame.f_code.co_filename,
                 )
+
             return ConvertFrameReturn()
 
         if frame.f_code.co_filename == "<string>" and frame.f_code.co_name == "__new__":
