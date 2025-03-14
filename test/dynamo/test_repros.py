@@ -6223,7 +6223,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         from torch.distributions import Categorical
 
         class SubCateg(Categorical):
-            ...
+            pass
 
         @torch.compile(backend="eager", fullgraph=True)
         def make_dist_and_execute(t, d):
@@ -6347,6 +6347,42 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         opt_fn = torch.compile(fn, backend="eager", dynamic=True, fullgraph=True)
         inp = torch.randn(3, 3)
         self.assertEqual(fn(inp), opt_fn(inp))
+
+    def test_ones_out_dynamic(self):
+        def ones_fn(size, out):
+            return torch.ones(size, out=out)
+
+        opt_model = torch.compile(ones_fn)
+
+        out1 = torch.empty(2, 3)
+        opt_model((2, 3), out1)
+
+        out2 = torch.empty(3, 4)
+        opt_model((3, 4), out2)
+
+    def test_zeros_out_dynamic(self):
+        def zeros_fn(size, out):
+            return torch.zeros(size, out=out)
+
+        opt_model = torch.compile(zeros_fn)
+
+        out1 = torch.empty(2, 3)
+        opt_model((2, 3), out1)
+
+        out2 = torch.empty(3, 4)
+        opt_model((3, 4), out2)
+
+    def test_empty_out_dynamic(self):
+        def empty_fn(size, out):
+            return torch.empty(size, out=out)
+
+        opt_model = torch.compile(empty_fn)
+
+        out1 = torch.empty(2, 3)
+        opt_model((2, 3), out1)
+
+        out2 = torch.empty(3, 4)
+        opt_model((3, 4), out2)
 
     def test_dataclass_in_module(self):
         @dataclasses.dataclass
