@@ -168,6 +168,7 @@ for test_name in [
     "test_add_const_int",
     "test_add_inplace_permuted",
     "test_addmm",
+    "test_angle",
     "test_any",
     "test_arange5",
     "test_argmax_min_int32",
