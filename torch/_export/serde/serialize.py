@@ -1243,7 +1243,7 @@ class GraphModuleSerializer(metaclass=Final):
         def store_namedtuple_fields(ts):
             if ts.type is None:
                 return
-            if ts.type == namedtuple:
+            if ts.type is namedtuple or pytree.is_namedtuple_class(ts.type):
                 serialized_type_name = pytree.SUPPORTED_SERIALIZED_TYPES[ts.context].serialized_type_name
                 if serialized_type_name in self.treespec_namedtuple_fields:
                     field_names = self.treespec_namedtuple_fields[serialized_type_name].field_names
