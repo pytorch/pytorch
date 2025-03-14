@@ -128,6 +128,8 @@ from torch.testing._internal.inductor_utils import (
     HAS_GPU,
     HAS_MULTIGPU,
     requires_gpu,
+    RUN_CPU,
+    RUN_GPU,
     skipCPUIf,
     skipCUDAIf,
 )
@@ -4001,7 +4003,7 @@ class CommonTemplate:
             _, code = run_and_get_code(foo, grouped_conv, input_tensor)
             # no to channels last permuting before kernel
             if config.cpp_wrapper:
-                FileCheck().check_not("launchKernel(triton").check("_convolution(").run(
+                FileCheck().check_not("  call_triton").check("_convolution(").run(
                     code[0]
                 )
             else:
@@ -4429,7 +4431,7 @@ class CommonTemplate:
         gemm_opt(x1, y1)
         self.assertTrue(failed_guard is not None)
         self.assertTrue(
-            "tensor 'L['x']' Tensor device index mismatch. Expected device index to be"
+            "tensor 'x' Tensor device index mismatch. Expected device index to be"
             in failed_guard.reason
         )
 
@@ -12870,7 +12872,7 @@ def copy_tests(
         other_cls.is_dtype_supported = my_cls.is_dtype_supported
 
 
-if HAS_CPU:
+if RUN_CPU:
 
     class SweepInputsCpuTest(SweepInputs2, TestCase):
         gen = InputGen(10, "cpu")
@@ -12883,7 +12885,7 @@ if HAS_CPU:
 
     copy_tests(CommonTemplate, CpuTests, "cpu")
 
-if HAS_GPU:
+if RUN_GPU:
 
     class SweepInputsGPUTest(SweepInputs2, TestCase):
         gen = InputGen(10, GPU_TYPE)
@@ -14285,7 +14287,7 @@ if HAS_GPU:
                 torch.compile(f)(x)
 
 
-if HAS_CPU:
+if RUN_CPU:
 
     class TestFull(TestCase):
         def test_full_dtype(self):
@@ -14349,5 +14351,5 @@ def _run_and_get_stripped_kernels(
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CPU or HAS_GPU:
+    if RUN_CPU or RUN_GPU:
         run_tests(needs="filelock")

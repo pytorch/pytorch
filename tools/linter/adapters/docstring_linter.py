@@ -51,7 +51,8 @@ class Block:
 
     category: Category
 
-    # The tokens being scanned
+    # The sequence of tokens that contains this Block.
+    # Tokens are represented in `Block` as indexes into `self.tokens`
     tokens: Sequence[TokenInfo] = dc.field(repr=False)
 
     # The name of the function or class being defined
@@ -60,30 +61,32 @@ class Block:
     # The index of the very first token in the block (the "class" or "def" keyword)
     begin: int
 
-    # The token index of the first INDENT for this block
+    # The index of the first INDENT token for this block
     indent: int
 
-    # The token index of the DEDENT for this end of this block
+    # The index of the DEDENT token for this end of this block
     dedent: int
 
     # The docstring for the block
     docstring: str
 
-    # These next values get filled in later as we figure out family ties.
+    # These next members only get filled in after all blocks have been constructed
+    # and figure out family ties
 
-    # The full qualified name of the block within the file
+    # The full qualified name of the block within the file.
+    # This is the name of this block and all its parents, joined with `.`.
     full_name: str = ""
 
-    # The index of this block within the full list of blocks
+    # The index of this block within the full list of blocks in the file
     index: int = 0
 
-    # Is this definition contained within a function definition?
+    # Is this block contained within a function definition?
     is_local: bool = dc.field(default=False, repr=False)
 
     # Is this block a function definition in a class definition?
     is_method: bool = dc.field(default=False, repr=False)
 
-    # A block indent to the parent for this block, or None if this is top-level.
+    # A block index to the parent of this block, or None for a top-level block.
     parent: int | None = None
 
     # A list of block indexes for the children
@@ -107,7 +110,7 @@ class Block:
 
     @property
     def display_name(self) -> str:
-        """A user-friendly name. Examples: 'class One:', 'def One.method()'"""
+        """A user-friendly name like 'class One' or 'def One.method()'"""
         ending = "" if self.is_class else "()"
         return f"{self.category.value} {self.full_name}{ending}"
 

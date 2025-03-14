@@ -235,6 +235,7 @@ dtype_abbrs = {
     torch.uint32: "u32",
     torch.uint64: "u64",
     torch.bits16: "b16",
+    torch.bits1x8: "b1x8",
 }
 
 
@@ -619,8 +620,10 @@ class CodeGen:
                     node.meta.get("tensor_meta", node.meta.get("example_value", None)),
                 )
                 # use string as annotation, to make it valid python code
-
-                if isinstance(meta_val, torch.Tensor):
+                if isinstance(meta_val, torch.Tensor) and meta_val.layout not in (
+                    torch.sparse_csc,
+                    torch.sparse_csr,
+                ):
                     stride_annotation = (
                         f"{stringify_shape(meta_val.stride())}"
                         if include_stride
@@ -1723,8 +1726,6 @@ class Graph:
 
         # Check targets are legit
         if self.owning_module:
-            num_warnings = 0
-            MAX_WARNINGS = 5
             for node in self.nodes:
                 if node.op == "call_function":
                     if not callable(node.target):
@@ -1756,29 +1757,8 @@ class Graph:
                                 f"Node {node} target {node.target} {atom} of {seen_qualname} does "
                                 "not reference an nn.Module"
                             )
-                        elif (
-                            node.op == "get_attr"
-                            and not isinstance(new_m_itr, torch.nn.Module)
-                            and not isinstance(new_m_itr, torch.nn.Parameter)
-                            and atom not in m_itr._buffers
-                        ):
-                            if num_warnings < MAX_WARNINGS:
-                                # Don't emit this warning too frequently,
-                                # for very large graphs this can become very expensive
-                                # from a performance perspective.
-                                warnings.warn(
-                                    f"Node {node} target {node.target} {atom} of {seen_qualname} does "
-                                    "not reference an nn.Module, nn.Parameter, or buffer, which is "
-                                    "what 'get_attr' Nodes typically target"
-                                )
-                            num_warnings += 1
-                        else:
-                            m_itr = new_m_itr
-            if num_warnings > MAX_WARNINGS:
-                warnings.warn(
-                    f"Additional {num_warnings - MAX_WARNINGS} warnings "
-                    "suppressed about get_attr references"
-                )
+
+                        m_itr = new_m_itr
 
     @compatibility(is_backward_compatible=True)
     def eliminate_dead_code(
