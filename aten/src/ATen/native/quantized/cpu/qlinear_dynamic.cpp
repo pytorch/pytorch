@@ -774,7 +774,7 @@ at::Tensor PackedLinearWeightsACL::apply_dynamic_impl(
     acl_gemm->quant.run();
 
     // allocation for fp32 out tensor
-    at::Tensor output = at::empty({m, n_}, input.options().dtype(at::kFloat));
+    auto output = at::empty({m, n_}, input.options().dtype(at::kFloat));
     if (output.numel() == 0)
       return output;
 
