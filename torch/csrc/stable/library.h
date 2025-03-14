@@ -10,15 +10,17 @@
 // versions of this file that may be included by different sources
 namespace {
 
-// helpers for converting between StableIValue and actual IValues
-
+namespace detail {
 // utility functions to detect optional
 template <typename V>
 struct is_optional : std::false_type {};
 template <typename V>
 struct is_optional<std::optional<V>> : std::true_type {};
+} // namespace detail
 
-template <typename T, std::enable_if_t<!is_optional<T>::value, bool> = true>
+template <
+    typename T,
+    std::enable_if_t<!detail::is_optional<T>::value, bool> = true>
 StableIValue from(T val) {
   static_assert(
       sizeof(T) <= sizeof(StableIValue),
@@ -26,7 +28,8 @@ StableIValue from(T val) {
   return *reinterpret_cast<StableIValue*>(&val);
 }
 
-template<>
+// Specialization for std::nullopt_t
+template <>
 StableIValue from(std::nullopt_t val) {
   return from(nullptr);
 }
@@ -41,19 +44,25 @@ StableIValue from(std::optional<T> val) {
   return from(heap_val);
 }
 
-template <typename T, std::enable_if_t<!is_optional<T>::value, bool> = true>
+template <
+    typename T,
+    std::enable_if_t<!detail::is_optional<T>::value, bool> = true>
 T to(StableIValue val) {
   return *reinterpret_cast<T*>(&val);
 }
 
-template <typename T, std::enable_if_t<std::is_same_v<T, std::nullopt_t>, bool> = true>
+template <
+    typename T,
+    std::enable_if_t<std::is_same_v<T, std::nullopt_t>, bool> = true>
 T to(StableIValue val) {
   // val should be equivalent to from(nullptr)
   return std::nullopt;
 }
 
 // Specialization for std::optional
-template <typename T, std::enable_if_t<is_optional<T>::value, bool> = true>
+template <
+    typename T,
+    std::enable_if_t<detail::is_optional<T>::value, bool> = true>
 T to(StableIValue val) {
   using V = typename T::value_type;
   auto sivp = to<StableIValue*>(val);
@@ -64,9 +73,9 @@ T to(StableIValue val) {
   }
   auto inner_val = to<V>(*sivp);
 
-  // free the memory associated with StableIValue* val
-  delete val;
-  
+  // free the memory associated with StableIValue* sivp
+  delete sivp;
+
   return std::make_optional(inner_val);
 }
 // end to helpers for converting between StableIValue and actual IValues

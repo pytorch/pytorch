@@ -1298,11 +1298,13 @@ AOTITorchError aoti_torch_zero_(AtenTensorHandle tensor) {
   });
 }
 
-static StableIValue from_ivalue(const c10::TypePtr& type, const c10::IValue& ivalue) {
+static StableIValue from_ivalue(
+    const c10::TypePtr& type,
+    const c10::IValue& ivalue) {
   switch (type->kind()) {
     case c10::TypeKind::TensorType: {
       AtenTensorHandle ath = torch::aot_inductor::new_tensor_handle(
-        std::move(const_cast<at::Tensor&>(ivalue.toTensor())));
+          std::move(const_cast<at::Tensor&>(ivalue.toTensor())));
       return from(ath);
     }
     case c10::TypeKind::IntType: {
@@ -1329,15 +1331,16 @@ static StableIValue from_ivalue(const c10::TypePtr& type, const c10::IValue& iva
     case c10::TypeKind::OptionalType: {
       auto inner_type = type->castRaw<at::OptionalType>()->getElementType();
 
-      // ideally, if we had the C++ type corresponding to inner_type, which we will
-      // denote as inner_type::t (does not actually exist), we would be able to follow
-      // the patterned semantic of every other case here in one line:
-      // 
+      // ideally, if we had the C++ type corresponding to inner_type, which we
+      // will denote as inner_type::t (does not actually exist), we would be
+      // able to follow the patterned semantic of every other case here in one
+      // line:
+      //
       // return from<std::optional<inner_type::t>>(ivalue.toInnerTypeT()));
-      // 
-      // BUT we do NOT have that type inner_type::t readily available, so we will
-      // manually unwrap and recursively call, similar to the from<std::optional<T>> function in
-      // torch/csrc/stable/library.h
+      //
+      // BUT we do NOT have that type inner_type::t readily available, so we
+      // will manually unwrap and recursively call, similar to the
+      // from<std::optional<T>> function in torch/csrc/stable/library.h
       if (ivalue.isNone()) {
         return from(std::nullopt);
       }
@@ -1345,7 +1348,10 @@ static StableIValue from_ivalue(const c10::TypePtr& type, const c10::IValue& iva
       return from(sivp);
     }
     default: {
-      TORCH_CHECK(false, "Not yet supported conversion from IValue to StableIValue for schema type: ", type->str());
+      TORCH_CHECK(
+          false,
+          "Not yet supported conversion from IValue to StableIValue for schema type: ",
+          type->str());
     }
   }
 }
@@ -1355,7 +1361,6 @@ static c10::IValue to_ivalue(
     const StableIValue stable_ivalue) {
   switch (type->kind()) {
     case c10::TypeKind::TensorType: {
-      TORCH_WARN("Tensor");
       // stable_ivalue must be an ATH
       auto ret_raiiath = torch::aot_inductor::RAIIAtenTensorHandle(
           to<AtenTensorHandle>(stable_ivalue));
@@ -1364,48 +1369,39 @@ static c10::IValue to_ivalue(
       return (c10::IValue(arg));
     }
     case c10::TypeKind::IntType: {
-      TORCH_WARN("Int");
       return c10::IValue(to<int64_t>(stable_ivalue));
     }
     case c10::TypeKind::FloatType: {
-      TORCH_WARN("Float");
       return c10::IValue(to<double>(stable_ivalue));
     }
     case c10::TypeKind::BoolType: {
-      TORCH_WARN("Bool");
       return c10::IValue(to<bool>(stable_ivalue));
     }
     case c10::TypeKind::ScalarTypeType: {
-      TORCH_WARN("DType");
       return c10::IValue(to<c10::ScalarType>(stable_ivalue));
     }
     case c10::TypeKind::DeviceObjType: {
-      TORCH_WARN("Device")
       return c10::IValue(to<c10::Device>(stable_ivalue));
     }
     case c10::TypeKind::LayoutType: {
-      TORCH_WARN("Layout")
       return c10::IValue(to<c10::Layout>(stable_ivalue));
     }
     case c10::TypeKind::MemoryFormatType: {
-      TORCH_WARN("MemoryFormat");
       return c10::IValue(to<c10::MemoryFormat>(stable_ivalue));
     }
     case c10::TypeKind::OptionalType: {
-      TORCH_WARN("Optional");
       auto inner_type = type->castRaw<at::OptionalType>()->getElementType();
 
-      // ideally, if we had the C++ type corresponding to inner_type, which we will
-      // denote as inner_type::t (does not actually exist), we would be able to follow
-      // the patterned semantic of every other case here in one line:
-      // 
+      // ideally, if we had the C++ type corresponding to inner_type, which we
+      // will denote as inner_type::t (does not actually exist), we would be
+      // able to follow the patterned semantic of every other case here in one
+      // line:
+      //
       // return c10::IValue(to<std::optional<inner_type::t>>(stable_ivalue));
-      // 
-      // BUT we do NOT have that type inner_type::t readily available, so we will
-      // manually unwrap and recursively call, similar to the to<T> function in
-      // torch/csrc/stable/library.h
-      // StableIValue fromnullptr = from(std::nullopt);
-      // TORCH_WARN("so is stable_ivalue the same as fromnullptr? ", stable_ivalue == fromnullptr, " ", stable_ivalue, " ", fromnullptr);
+      //
+      // BUT we do NOT have that type inner_type::t readily available, so we
+      // will manually unwrap and recursively call, similar to the to<T>
+      // function in torch/csrc/stable/library.h
       if (stable_ivalue == from(std::nullopt)) {
         return c10::IValue();
       }
@@ -1415,7 +1411,10 @@ static c10::IValue to_ivalue(
       return ival;
     }
     default: {
-      TORCH_CHECK(false, "Not yet supported conversion from StableIValue to IValue for schema type: ", type->str());
+      TORCH_CHECK(
+          false,
+          "Not yet supported conversion from StableIValue to IValue for schema type: ",
+          type->str());
     }
   }
 }
@@ -1535,9 +1534,8 @@ AOTITorchError aoti_torch_call_dispatcher(
     const char* overloadName,
     StableIValue* stack) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    static auto op =
+    const auto op =
         c10::Dispatcher::singleton().findSchemaOrThrow(opName, overloadName);
-
     const auto& schema = op.schema();
     const auto num_returns = schema.returns().size();
     const auto num_arguments = schema.arguments().size();

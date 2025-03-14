@@ -270,22 +270,34 @@ class TestCppExtensionAOT(common.TestCase):
             curr_mem = torch.cuda.memory_allocated(device)
             self.assertEqual(curr_mem, init_mem)
 
-        # (3) test calling our dispatcher on ones_like
-        t = torch.rand(32, 16, device=device)
-        cpu_t = libtorch_agnostic.ops.my_abs(t)
-        self.assertEqual(cpu_t, torch.abs(t))
+        # (3a) test calling our dispatcher on easy API like abs
+        t = torch.rand(32, 16, device=device) - 0.5
 
         def _make_cuda_tensors(prior_mem):
             cuda_t = libtorch_agnostic.ops.my_abs(t)
             self.assertGreater(torch.cuda.memory_allocated(device), prior_mem)
             self.assertEqual(cuda_t, torch.abs(t))
 
-        if t.is_cuda:
-            init_mem = torch.cuda.memory_allocated(device)
-            for _ in range(3):
-                _make_cuda_tensors(init_mem)
-                curr_mem = torch.cuda.memory_allocated(device)
-                self.assertEqual(curr_mem, init_mem)
+        init_mem = torch.cuda.memory_allocated(device)
+        for _ in range(3):
+            _make_cuda_tensors(init_mem)
+            curr_mem = torch.cuda.memory_allocated(device)
+            self.assertEqual(curr_mem, init_mem)
+
+        # (3b) and on factory API like ones_like
+        cpu_t = libtorch_agnostic.ops.my_ones_like(t, "cpu")
+        self.assertEqual(cpu_t, torch.ones_like(t, device="cpu"))
+
+        def _make_cuda_tensors(prior_mem):
+            cuda_t = libtorch_agnostic.ops.my_ones_like(t, t.device)
+            self.assertGreater(torch.cuda.memory_allocated(device), prior_mem)
+            self.assertEqual(cuda_t, torch.ones_like(t, device=t.device))
+
+        init_mem = torch.cuda.memory_allocated(device)
+        for _ in range(3):
+            _make_cuda_tensors(init_mem)
+            curr_mem = torch.cuda.memory_allocated(device)
+            self.assertEqual(curr_mem, init_mem)
 
 
 @torch.testing._internal.common_utils.markDynamoStrictTest

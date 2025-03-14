@@ -161,7 +161,7 @@ function prune_126 {
 }
 
 function install_128 {
-  CUDNN_VERSION=9.7.1.26
+  CUDNN_VERSION=9.8.0.87
   echo "Installing CUDA 12.8.0 and cuDNN ${CUDNN_VERSION} and NCCL ${NCCL_VERSION} and cuSparseLt-0.6.3"
   rm -rf /usr/local/cuda-12.8 /usr/local/cuda
   # install CUDA 12.8.0 in the same container

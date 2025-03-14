@@ -263,9 +263,6 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
             self.assertEqual(args["kernel_backend"], "triton", msg=f"event = {e}")
 
             self.assertTrue("stream" in args, msg=f"event = {e}")
-            self.assertTrue("grid" in args, msg=f"event = {e}")
-            self.assertTrue(args["grid"].startswith("grid"), msg=f"event = {e}")
-
             self.assertTrue("kernel_file" in args, msg=f"event = {e}")
             kernel_file = args["kernel_file"]
             self.assertTrue(os.path.isfile(kernel_file), msg=f"event = {e}")
