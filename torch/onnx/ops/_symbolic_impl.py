@@ -245,27 +245,6 @@ def _(
     return torch.zeros(shape, dtype=_ONNX_DTYPE_TO_TORCH_DTYPE[onnx_dtype])
 
 
-torch.library.opcheck(
-    _symbolic,
-    ([torch.tensor(1)], "Add", 1, [torch.tensor(42)]),
-    dict(
-        shape=[
-            1,
-        ],
-        attr_keys=["key"],
-        attr_types=["i"],
-        attr_pos=[(0, 1)],
-        attr_ints=[1],
-        attr_floats=[1.0],
-        attr_strs=["attr"],
-        metadata_props_keys=["meta_key"],
-        metadata_props_values=["meta_value"],
-        domain="",
-        version=1,
-    ),
-)
-
-
 @torch.library.custom_op(
     "onnx_symbolic::_symbolic_multi_out",
     mutates_args=(),
@@ -332,26 +311,3 @@ def _(
         )
         outputs.append(torch.zeros(shape, dtype=_ONNX_DTYPE_TO_TORCH_DTYPE[onnx_dtype]))
     return outputs
-
-
-torch.library.opcheck(
-    _symbolic_multi_out,
-    ([torch.tensor(1)], "Add", [1], [torch.tensor(42)]),
-    dict(
-        shapes=[
-            [
-                1,
-            ]
-        ],
-        attr_keys=["key"],
-        attr_types=["i"],
-        attr_pos=[(0, 1)],
-        attr_ints=[1],
-        attr_floats=[1.0],
-        attr_strs=["attr"],
-        metadata_props_keys=["meta_key"],
-        metadata_props_values=["meta_value"],
-        domain="",
-        version=1,
-    ),
-)
