@@ -2982,6 +2982,7 @@ class ReinterpretView(BaseView):
         if isinstance(self.data, BaseView):
             object.__setattr__(self, "data", self.data.unwrap_view())
 
+
     def __str__(self) -> str:
         return self.str_helper(
             [
