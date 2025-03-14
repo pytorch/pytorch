@@ -9169,6 +9169,18 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertIsNotNone(torch.tensor([]).clone().storage())
         self.assertIsNotNone(torch.tensor([0, 0, 0]).nonzero().storage())
         self.assertIsNotNone(torch.tensor([]).new().storage())
+        
+    def test_large_storage_offset_not_allowed(self):
+        """Test that large storage offsets that would cause overflow are caught and raise exceptions."""
+        t = torch.arange(10)
+        
+        # Test very large positive storage_offset that would overflow
+        with self.assertRaisesRegex(RuntimeError, "Storage offset byte calculation overflowed"):
+            torch.as_strided(t, size=(5,), stride=(2,), storage_offset=8170450533120000000)
+        
+        # Test very large negative storage_offset that would lead to wrong tensor
+        with self.assertRaisesRegex(RuntimeError, "Storage offset byte calculation overflowed"):
+            torch.as_strided(t, size=(5,), stride=(2,), storage_offset=2**63-10000)
 
     # FIXME: Extend this test and put in a TensorProperties test class
     def test_numel(self):

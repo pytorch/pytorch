@@ -36,7 +36,7 @@ C10_ALWAYS_INLINE bool add_overflows(int64_t a, int64_t b, int64_t* out) {
   return __builtin_add_overflow(a, b, out);
 #else
   *out = a + b;
-  return *out < a;
+  return b >= 0 ? *out < a : *out > a;
 #endif
 }
 

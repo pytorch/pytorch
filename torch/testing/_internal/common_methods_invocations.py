@@ -3000,6 +3000,18 @@ def error_inputs_aminmax_amax_amin(op_info, device, is_ref=False, **kwargs):
         yield ErrorInput(SampleInput(torch.rand(shape, device=device)), error_regex=err_msg_amax_amin)
     elif op_info.name in ['aminmax']:
         yield ErrorInput(SampleInput(torch.rand(shape, device=device)), error_regex=err_msg_aminmax)
+        
+    # Test large storage offsets for as_strided
+    if op_info.name == 'as_strided':
+        # Test very large positive storage_offset (would overflow)
+        t = torch.arange(10, device=device)
+        size = (5,)
+        stride = (2,)
+        yield ErrorInput(SampleInput(t, args=(size, stride), kwargs={'storage_offset': 8170450533120000000}),
+                        error_regex="Storage offset byte calculation overflowed")
+        # Test very large negative storage_offset (would lead to wrong tensor)
+        yield ErrorInput(SampleInput(t, args=(size, stride), kwargs={'storage_offset': 2**63-10000}),
+                        error_regex="Storage offset byte calculation overflowed")
 
     # Error Inputs for tensors with more than 64 dimension
     sizes = [1] * 65
