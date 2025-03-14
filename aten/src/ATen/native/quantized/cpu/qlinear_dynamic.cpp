@@ -713,7 +713,7 @@ at::Tensor PackedLinearWeightsACL::apply_dynamic_impl(
       "The dimension of input tensor should be larger than or equal to 2");
   TORCH_CHECK(
       input.scalar_type() == c10::ScalarType::Float,
-      "qlinear_dynamic (ONEDNN): data type of input should be float.");
+      "qlinear_dynamic (ACL): data type of input should be float.");
 
   auto input_contig = input.contiguous();
   const int64_t dim = input.dim();
