@@ -3533,7 +3533,7 @@ class GraphModule(torch.nn.Module):
             """\
 G['bulbous_bouffant'], accessed at:
   File "test_export.py", line N, in f
-    def f(y):
+    return bulbous_bouffant + y
 """,
         )
 
@@ -3559,9 +3559,9 @@ G['bulbous_bouffant'], accessed at:
             """\
 G['macademia'], accessed at:
   File "test_export.py", line N, in f
-    global macademia
+    y = g(y)
   File "test_export.py", line N, in g
-    global macademia
+    y = macademia + y
 """,
         )
 
