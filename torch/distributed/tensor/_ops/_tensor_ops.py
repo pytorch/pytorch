@@ -789,8 +789,6 @@ def split_strategy(op_schema: OpSchema) -> TupleStrategy:
             if is_tensor_dim_sharded(spec, dim=dim):
                 # if the input is sharded on the split dim, we need to unshard it
                 placements = unshard_tensor_dim(spec.placements, dim=dim)
-            else:
-                placements = spec.placements
 
             spec = DTensorSpec(spec.mesh, placements)
 
