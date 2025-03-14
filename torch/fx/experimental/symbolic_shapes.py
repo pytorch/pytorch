@@ -1247,7 +1247,7 @@ def statically_known_true(x: Union[bool, SymBool]) -> bool:
     return x
 
 
-def guard_semantics(x: Union[bool, SymBool]) -> bool:
+def _guard_semantics(x: Union[bool, SymBool]) -> bool:
     if has_free_unbacked_symbols(x):
         return statically_known_true(x)
     return guard_bool(x)
