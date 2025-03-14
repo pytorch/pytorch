@@ -10,10 +10,12 @@ from torch._inductor.runtime.static_cuda_launcher import StaticallyLaunchedCudaK
 from torch._inductor.runtime.triton_compat import tl, triton
 from torch._inductor.runtime.triton_helpers import libdevice
 from torch._inductor.test_case import TestCase
+from torch.testing._internal.common_utils import skipIfRocm
 from torch.testing._internal.triton_utils import requires_cuda
 
 
 @requires_cuda
+@skipIfRocm
 class TestStaticCudaLauncher(TestCase):
     def setUp(self):
         # Create a temporary file to store the cubin.
