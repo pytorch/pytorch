@@ -6,10 +6,14 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
     onlyCPU,
-    onlyCUDA,
 )
 from torch.testing._internal.common_dtype import complex_types
-from torch.testing._internal.common_utils import run_tests, set_default_dtype, TestCase
+from torch.testing._internal.common_utils import (
+    parametrize,
+    run_tests,
+    set_default_dtype,
+    TestCase,
+)
 
 
 devices = (torch.device("cpu"), torch.device("cuda:0"))
@@ -45,14 +49,51 @@ class TestComplexTensor(TestCase):
         x1.copy_(xc1)
         self.assertEqual(x1, torch.tensor([5 - 1j, 2 - 2j], device=device, dtype=dtype))
 
-    @onlyCUDA
     @dtypes(*complex_types())
-    def test_conj_copy_async_h2d(self, device, dtype):
+    @parametrize(
+        "src_conj,dst_conj",
+        [(True, True), (False, True), (True, False), (False, False)],
+    )
+    def test_conj_copy_async(self, device, dtype, src_conj, dst_conj):
         # issue: https://github.com/pytorch/pytorch/issues/146286
-        x1 = torch.tensor([5 + 1j, 2 + 2j], device=device, dtype=dtype).conj()
-        x2 = torch.zeros_like(x1, device="cpu").pin_memory()
-        x2.copy_(x1, non_blocking=True)
-        self.assertEqual(x1, x2)
+        def pin(d):
+            return d == "cpu"
+
+        src = torch.tensor(
+            [5 + 1j, 2 + 2j], device=device, dtype=dtype, pin_memory=pin(device)
+        )
+        src_block = src.clone()
+        if src_conj:
+            src = src.conj()
+            src_block = src_block.conj()
+
+        src_ref = src.clone()
+
+        src_i = src.imag
+        src_block_i = src_block.imag
+
+        # The copy is cross device so parameterize on the source device and make sure the dst is the other one
+        dst_device = "cuda:0" if device == "cpu" else "cpu"
+        dst = torch.zeros_like(src, device=dst_device, pin_memory=pin(dst_device))
+        dst_block = torch.zeros_like(src, device=dst_device, pin_memory=pin(dst_device))
+        if dst_conj:
+            dst = dst.conj()
+            dst_block = dst_block.conj()
+
+        dst_i = dst.imag
+        dst_block_i = dst_block.imag
+
+        dst.copy_(src, non_blocking=True)
+        dst_block.copy_(src_block, non_blocking=False)
+        dst_i.copy_(src_i, non_blocking=True)
+        dst_block_i.copy_(src_block_i, non_blocking=False)
+
+        self.assertTrue(dst.is_conj() == dst_conj)
+        self.assertTrue(dst_i.is_neg() == dst_conj)
+        self.assertEqual(dst_block, dst)
+        self.assertEqual(dst_block_i, dst_i)
+        self.assertEqual(src, src_ref)
+        self.assertEqual(src_i, src_ref.imag)
 
     @dtypes(*complex_types())
     def test_all(self, device, dtype):

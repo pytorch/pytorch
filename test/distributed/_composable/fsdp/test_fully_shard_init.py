@@ -1024,8 +1024,6 @@ class TestHSDPWithCustomHook(FSDPTestMultiThread):
     def perThreadSetUp(self) -> None:
         super().perThreadSetUp()
         torch.set_default_device("cuda")
-        rank = dist.get_rank()
-        torch.cuda.set_device(rank)
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_custom_hook_custom_stream(self):
@@ -1089,8 +1087,7 @@ class TestHSDPWithCustomHook(FSDPTestMultiThread):
         torch.nn.init.constant_(model.in_proj.weight, 1.0 * rank_group)
         torch.nn.init.constant_(model.out_proj.weight, 2.0 * rank_group)
 
-        fully_shard(model, mesh=mesh)
-        model = cast(FSDPModule, model)
+        model = fully_shard(model, mesh=mesh)
 
         hook_called: bool = False
 

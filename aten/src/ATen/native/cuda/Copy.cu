@@ -144,6 +144,28 @@ void float8_copy_kernel_cuda(TensorIteratorBase &iter) {
          gpu_kernel(iter, [] GPU_LAMBDA(Float8_e5m2fnuz x) { return x; });
          break;
     }
+  } else if (dtype == kFloat8_e8m0fnu) {
+    // TODO(#146647): clean this up, too much copy-pasta
+    switch (other_dtype) {
+      case kFloat:
+         gpu_kernel_nocast(iter, [] GPU_LAMBDA(float value) {
+             return Float8_e8m0fnu(value);
+         });
+         break;
+      case kHalf:
+         gpu_kernel_nocast(iter, [] GPU_LAMBDA(Half value) {
+             return Float8_e8m0fnu(value);
+         });
+         break;
+      case kBFloat16:
+         gpu_kernel_nocast(iter, [] GPU_LAMBDA(BFloat16 value) {
+             return Float8_e8m0fnu(value);
+         });
+         break;
+      default:
+         gpu_kernel(iter, [] GPU_LAMBDA(Float8_e8m0fnu x) { return x; });
+         break;
+    }
   } else {
     TORCH_CHECK(false, "This supposed ot be called only for Float8 types");
   }
@@ -157,7 +179,7 @@ void direct_copy_kernel_cuda(TensorIteratorBase &iter) {
     AT_DISPATCH_QINT_TYPES(dtype, "copy_", [&] {
       gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
     });
-  } else if (dtype == kFloat8_e5m2 || dtype == kFloat8_e4m3fn || dtype == kFloat8_e5m2fnuz || dtype == kFloat8_e4m3fnuz) {
+  } else if (isFloat8Type(dtype)) {
      float8_copy_kernel_cuda(iter);
   } else if (iter.dtype(1) == kFloat && (dtype == kBFloat16 || dtype == kHalf)) {
      if (dtype == kBFloat16) {
@@ -298,22 +320,24 @@ static bool copy_requires_temporaries(TensorIterator& iter, bool p2p_enabled, bo
     TORCH_INTERNAL_ASSERT(dst_device.is_cuda() && src_device.is_cuda());
     return false;
   }
+  bool different_conj_neg = iter.tensor(0).is_conj() != iter.tensor(1).is_conj() || iter.tensor(0).is_neg() != iter.tensor(1).is_neg();
+  if(!different_conj_neg || !non_blocking){
+    //We require a temporary when the src tensor has a conj/neg flag set, but
+    //the destination does not, and the copy is async.  Otherwise, the
+    //conj_physical applied to dst may execute before the copy has completed.
 
-  bool same_dtype = iter.dtype(0) == iter.dtype(1);
-  bool same_conj_neg = iter.tensor(0).is_conj() == iter.tensor(1).is_conj() && iter.tensor(0).is_neg() == iter.tensor(0).is_neg();
-  if (same_dtype && iter.is_contiguous() && same_conj_neg) {
-    // Contiguous same-dtype copies can always use cudaMemcpyAsync if we don't have a conjugate flag to handle first
-    return false;
-  } else if (dst_device.is_cuda() && src_device.is_cuda()) {
-    // Copies between GPUs can use the copy kernel if P2P is supported
-    return !p2p_enabled;
-  }
+    bool same_dtype = iter.dtype(0) == iter.dtype(1);
+    if (same_dtype && iter.is_contiguous()) {
+      // Contiguous same-dtype copies can always use cudaMemcpyAsync if we don't have a conjugate flag to handle first
+      return false;
+    } else if (dst_device.is_cuda() && src_device.is_cuda()) {
+      // Copies between GPUs can use the copy kernel if P2P is supported
+      return !p2p_enabled;
+    }
 
-  //for cross-device copies we can use memcpy2d if conditions are satisfied
-  if (dst_device.is_cuda() != src_device.is_cuda() && same_dtype && iter.ndim() <= 2) {
-    //We can do an async copy if there is not a conjugate bit to resolve
-    if(same_conj_neg || !non_blocking){
-      // TensorIterator reorders strides so that the first one is the smallest
+    //for cross-device copies we can use memcpy2d if conditions are satisfied
+    if (dst_device.is_cuda() != src_device.is_cuda() && same_dtype && iter.ndim() <= 2) {
+        // TensorIterator reorders strides so that the first one is the smallest
 
       if (iter.ndim() == 1 || iter.has_contiguous_first_dim()) {
         auto [width_in_bytes, src_pitch, dst_pitch, height] = getCopyParameters(iter);
@@ -344,7 +368,6 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
 
   // Enable p2p access between devices. (No-op if it involves the CPU)
   bool p2p_enabled = maybe_enable_p2p_access(dst_device, src_device);
-  bool temp_needed = copy_requires_temporaries(iter, p2p_enabled, non_blocking);
   if (copy_requires_temporaries(iter, p2p_enabled, non_blocking)) {
     // NB: this involves recursive calls to copy. Be careful that those copies
     // don't require temporaries or you will cause an infinite recursion!
@@ -359,21 +382,38 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
     auto conversion_device = non_blocking ? kCUDA : kCPU;
     if (iter.device_type(1) == conversion_device) {
       dst_contig = dst.is_contiguous() ? dst : at::empty_like(dst, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-      src_contig = iter.tensor(1).to(iter.dtype(0)).expand_as(dst).contiguous().resolve_conj();
+      src_contig = iter.tensor(1).to(iter.dtype(0)).expand_as(dst).contiguous();
     } else {
       bool same_type = iter.dtype(0) == iter.dtype(1);
       dst_contig = (dst.is_contiguous() && same_type) ? dst : at::empty_like(dst, iter.dtype(1), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-      src_contig = iter.tensor(1).expand_as(dst).contiguous().resolve_conj();
+      src_contig = iter.tensor(1).expand_as(dst).contiguous();
     }
 
-    // propagate the correct conjugate bit to dst, src is resolved above
-    dst_contig._set_conj(dst.is_conj());
+    if (non_blocking){
+      const bool need_conj = dst.is_conj() != src_contig.is_conj();
+      const bool need_neg = dst.is_neg() != src_contig.is_neg();
+        // Doing these inplace may lead to modification on the src if none of
+        // the above materialized a clone.
+        if(need_conj){
+          src_contig = src_contig.conj_physical();
+        }
+        if(need_neg){
+          src_contig = src_contig.neg();
+        }
+      src_contig._set_conj(dst.is_conj());
+      src_contig._set_neg(dst.is_neg());
+    }
 
+
+    // propagate the correct conjugate bit to dst
+    dst_contig._set_conj(dst.is_conj());
     dst_contig._set_neg(dst.is_neg());
 
     // perform a same-dtype copy on contiguous tensors
     TORCH_INTERNAL_ASSERT(dst_contig.sizes().equals(src_contig.sizes()));
     TORCH_INTERNAL_ASSERT(dst_contig.scalar_type() == src_contig.scalar_type());
+    TORCH_INTERNAL_ASSERT(dst_contig.is_conj() == src_contig.is_conj());
+    TORCH_INTERNAL_ASSERT(dst_contig.is_neg() == src_contig.is_neg());
     dst_contig.copy_(src_contig, non_blocking);
 
     // if necessary, copy back into dst
@@ -405,28 +445,11 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
 
   void* dst = iter.data_ptr(0);
   void* src = iter.data_ptr(1);
+  int64_t nbytes = iter.numel() * iter.element_size(0);
   CUDAStream stream = getCurrentCUDAStream();
 
-  int64_t nbytes = 0;
-  int64_t width_in_bytes = -1;
-  int64_t src_pitch = -1;
-  int64_t dst_pitch = -1;
-  int64_t height = -1;
-  if (iter.is_contiguous()) {
-    nbytes = iter.numel() * iter.element_size(0);
-  } else {
-    // the only non-contiguous iter situation that can happen here is
-    // acceptable for 2d copy, this has been vetted in requires_temporaries
-    std::tie(width_in_bytes, src_pitch, dst_pitch, height) = getCopyParameters(iter);
-  }
-
   if (non_blocking) {
-    if (width_in_bytes == -1) {
-      AT_CUDA_CHECK(cudaMemcpyAsync(dst, src, nbytes, kind, stream));
-    } else {
-      AT_CUDA_CHECK(cudaMemcpy2DAsync(dst, dst_pitch, src, src_pitch, width_in_bytes, height, kind, stream));
-    }
-
+    AT_CUDA_CHECK(cudaMemcpyAsync(dst, src, nbytes, kind, stream));
     // we use both the storage context and the tensor data pointer as the key
     // for the caching host allocator. This allows us to better attribute the
     // events to the original tensor allocation correctly. The cases we seek to
@@ -447,14 +470,16 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
     CachingHostAllocator_recordEvent(ptr, ctx, stream);
 
   } else {
-    at::cuda::memcpy_and_sync(dst, src, nbytes, kind, stream, width_in_bytes, src_pitch, dst_pitch, height);
+    at::cuda::memcpy_and_sync(dst, src, nbytes, kind, stream);
   }
 
-  if (iter.tensor(0).is_conj() != iter.tensor(1).is_conj()) {
-     iter.tensor(0).conj_physical_();
-  }
-  if (iter.tensor(0).is_neg() != iter.tensor(1).is_neg()) {
-     iter.tensor(0).neg_();
+  if(!non_blocking){
+    if (iter.tensor(0).is_conj() != iter.tensor(1).is_conj()) {
+      iter.tensor(0).conj_physical_();
+    }
+    if (iter.tensor(0).is_neg() != iter.tensor(1).is_neg()) {
+      iter.tensor(0).neg_();
+    }
   }
 }
 

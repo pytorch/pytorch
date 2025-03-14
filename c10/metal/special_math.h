@@ -1,5 +1,6 @@
 // Implementation of specal math functions for Metal
 #pragma once
+#include <c10/metal/utils.h>
 #include <metal_stdlib>
 
 namespace c10 {
@@ -452,18 +453,18 @@ inline float digamma(T0 x) {
 }
 
 template <typename T>
-inline T sinc(T a) {
+inline ::metal::enable_if_t<is_scalar_floating_point_v<T>, T> sinc(T a) {
   if (a == static_cast<T>(0)) {
     return static_cast<T>(1);
   }
-  constexpr T pi = static_cast<T>(M_PI_F);
-  T product = pi * a;
-  return static_cast<T>(::metal::sin(product) / product);
+  auto product = M_PI_F * static_cast<float>(a);
+  return static_cast<T>(::metal::precise::sin(product) / product);
 }
 
 // Complex sinc2 implementation
-inline float2 sinc(float2 inp) {
-  float2 a = inp * M_PI_F;
+template <typename T>
+inline ::metal::enable_if_t<is_complex_v<T>, T> sinc(T inp) {
+  auto a = static_cast<float2>(inp) * M_PI_F;
   const float a2 = a.x * a.x + a.y * a.y;
   if (a2 == 0) {
     return 0;
@@ -474,7 +475,7 @@ inline float2 sinc(float2 inp) {
   float coshy = ::metal::cosh(a.y);
   auto re = sinx * coshy * a.x + cosx * sinhy * a.y;
   auto im = cosx * sinhy * a.x - sinx * coshy * a.y;
-  return float2(re, im) / a2;
+  return T(re, im) / a2;
 }
 
 template <typename T>
@@ -503,5 +504,528 @@ inline T spherical_bessel_j0(T x) {
   return static_cast<T>(::metal::sin(x) / x);
 }
 
+// Compute log(1+x) without losing precision for small values of x
+// Adapted from https://www.johndcook.com/blog/cpp_log_one_plus_x/
+template <typename T>
+inline float log1p(T x) {
+  // x is large enough that the obvious evaluation is OK
+  if (::metal::fabs(x) > 1E-4) {
+    return ::metal::log(1. + x);
+  }
+
+  // Use Taylor approx. log(1 + x) = x - x^2/2 with error roughly x^3/3
+  // Since |x| < 10^-4, |x|^3 < 10^-12, relative error less than 10^-8
+  return (-0.5 * x + 1.0) * x;
+}
+
+template <typename T>
+inline float xlog1py(T x, T y) {
+  if (::metal::isnan(y)) {
+    return NAN;
+  }
+
+  if (x == 0) {
+    return x;
+  }
+
+  return x * log1p(y);
+}
+
+template <typename T>
+inline T entr(T a) {
+  if (a != a) {
+    return a;
+  }
+
+  if (a > 0) {
+    return static_cast<T>(-a * ::metal::log(a));
+  }
+
+  if (a == 0) {
+    return 0;
+  }
+
+  return static_cast<T>(-INFINITY);
+}
+
+// Copy-n-paste from aten/src/ATen/native/cuda/Math.cuh lines 1463-1915
+template <typename T>
+float bessel_j0_forward(T x) {
+  constexpr float PP[] = {
+      +7.96936729297347051624e-04,
+      +8.28352392107440799803e-02,
+      +1.23953371646414299388e+00,
+      +5.44725003058768775090e+00,
+      +8.74716500199817011941e+00,
+      +5.30324038235394892183e+00,
+      +9.99999999999999997821e-01,
+  };
+
+  constexpr float PQ[] = {
+      +9.24408810558863637013e-04,
+      +8.56288474354474431428e-02,
+      +1.25352743901058953537e+00,
+      +5.47097740330417105182e+00,
+      +8.76190883237069594232e+00,
+      +5.30605288235394617618e+00,
+      +1.00000000000000000218e+00,
+  };
+
+  constexpr float QP[] = {
+      -1.13663838898469149931e-02,
+      -1.28252718670509318512e+00,
+      -1.95539544257735972385e+01,
+      -9.32060152123768231369e+01,
+      -1.77681167980488050595e+02,
+      -1.47077505154951170175e+02,
+      -5.14105326766599330220e+01,
+      -6.05014350600728481186e+00,
+  };
+
+  constexpr float QQ[] = {
+      +6.43178256118178023184e+01,
+      +8.56430025976980587198e+02,
+      +3.88240183605401609683e+03,
+      +7.24046774195652478189e+03,
+      +5.93072701187316984827e+03,
+      +2.06209331660327847417e+03,
+      +2.42005740240291393179e+02,
+  };
+
+  constexpr float RP[] = {
+      -4.79443220978201773821e+09,
+      +1.95617491946556577543e+12,
+      -2.49248344360967716204e+14,
+      +9.70862251047306323952e+15,
+  };
+
+  constexpr float RQ[] = {
+      +4.99563147152651017219e+02,
+      +1.73785401676374683123e+05,
+      +4.84409658339962045305e+07,
+      +1.11855537045356834862e+10,
+      +2.11277520115489217587e+12,
+      +3.10518229857422583814e+14,
+      +3.18121955943204943306e+16,
+      +1.71086294081043136091e+18,
+  };
+
+  if (x < T(0)) {
+    x = -x;
+  }
+
+  if (x <= T(5.0)) {
+    if (x < T(0.00001)) {
+      return 1.0 - x * x / 4.0;
+    }
+
+    float rp = 0.0;
+
+    for (auto index = 0; index <= 3; index++) {
+      rp = rp * (x * x) + RP[index];
+    }
+
+    float rq = 0.0;
+
+    for (auto index = 0; index <= 7; index++) {
+      rq = rq * (x * x) + RQ[index];
+    }
+
+    return (x * x - 5.78318596294678452118e+00) *
+        (x * x - T(3.04712623436620863991e+01)) * rp / rq;
+  }
+
+  float pp = 0.0;
+
+  for (auto index = 0; index <= 6; index++) {
+    pp = pp * (25.0 / (x * x)) + PP[index];
+  }
+
+  float pq = 0.0;
+
+  for (auto index = 0; index <= 6; index++) {
+    pq = pq * (25.0 / (x * x)) + PQ[index];
+  }
+
+  float qp = 0.0;
+
+  for (auto index = 0; index <= 7; index++) {
+    qp = qp * (25.0 / (x * x)) + QP[index];
+  }
+
+  float qq = 0.0;
+
+  for (auto index = 0; index <= 6; index++) {
+    qq = qq * (25.0 / (x * x)) + QQ[index];
+  }
+
+  return (pp / pq *
+              ::metal::precise::cos(
+                  x - T(0.785398163397448309615660845819875721)) -
+          5.0 / x * (qp / qq) *
+              ::metal::precise::sin(
+                  x - 0.785398163397448309615660845819875721)) *
+      0.797884560802865355879892119868763737 / ::metal::precise::sqrt(x);
+} // bessel_j0_forward(T x)
+
+template <typename T>
+float bessel_y0_forward(T x) {
+  constexpr float PP[] = {
+      +7.96936729297347051624e-04,
+      +8.28352392107440799803e-02,
+      +1.23953371646414299388e+00,
+      +5.44725003058768775090e+00,
+      +8.74716500199817011941e+00,
+      +5.30324038235394892183e+00,
+      +9.99999999999999997821e-01,
+  };
+
+  constexpr float PQ[] = {
+      +9.24408810558863637013e-04,
+      +8.56288474354474431428e-02,
+      +1.25352743901058953537e+00,
+      +5.47097740330417105182e+00,
+      +8.76190883237069594232e+00,
+      +5.30605288235394617618e+00,
+      +1.00000000000000000218e+00,
+  };
+
+  constexpr float QP[] = {
+      -1.13663838898469149931e-02,
+      -1.28252718670509318512e+00,
+      -1.95539544257735972385e+01,
+      -9.32060152123768231369e+01,
+      -1.77681167980488050595e+02,
+      -1.47077505154951170175e+02,
+      -5.14105326766599330220e+01,
+      -6.05014350600728481186e+00,
+  };
+
+  constexpr float QQ[] = {
+      +6.43178256118178023184e+01,
+      +8.56430025976980587198e+02,
+      +3.88240183605401609683e+03,
+      +7.24046774195652478189e+03,
+      +5.93072701187316984827e+03,
+      +2.06209331660327847417e+03,
+      +2.42005740240291393179e+02,
+  };
+
+  constexpr float YP[] = {
+      +1.55924367855235737965e+04,
+      -1.46639295903971606143e+07,
+      +5.43526477051876500413e+09,
+      -9.82136065717911466409e+11,
+      +8.75906394395366999549e+13,
+      -3.46628303384729719441e+15,
+      +4.42733268572569800351e+16,
+      -1.84950800436986690637e+16,
+  };
+
+  constexpr float YQ[] = {
+      +1.04128353664259848412e+03,
+      +6.26107330137134956842e+05,
+      +2.68919633393814121987e+08,
+      +8.64002487103935000337e+10,
+      +2.02979612750105546709e+13,
+      +3.17157752842975028269e+15,
+      +2.50596256172653059228e+17,
+  };
+
+  if (x <= T(5.0)) {
+    if (x == T(0.0)) {
+      return -INFINITY;
+    }
+
+    if (x < T(0.0)) {
+      return NAN;
+    }
+
+    float yp = 0.0;
+
+    for (auto index = 0; index <= 7; index++) {
+      yp = yp * (x * x) + YP[index];
+    }
+
+    float yq = 0.0;
+
+    for (auto index = 0; index <= 6; index++) {
+      yq = yq * (x * x) + YQ[index];
+    }
+
+    return yp / yq +
+        (0.636619772367581343075535053490057448 * ::metal::precise::log(x) *
+         bessel_j0_forward(x));
+  }
+
+  float pp = 0.0;
+
+  for (auto index = 0; index <= 6; index++) {
+    pp = pp * (25.0 / (x * x)) + PP[index];
+  }
+
+  float pq = 0.0;
+
+  for (auto index = 0; index <= 6; index++) {
+    pq = pq * (25.0 / (x * x)) + PQ[index];
+  }
+
+  float qp = 0.0;
+
+  for (auto index = 0; index <= 7; index++) {
+    qp = qp * (25.0 / (x * x)) + QP[index];
+  }
+
+  float qq = 0.0;
+
+  for (auto index = 0; index <= 6; index++) {
+    qq = qq * (25.0 / (x * x)) + QQ[index];
+  }
+
+  return (pp / pq *
+              ::metal::precise::sin(
+                  x - 0.785398163397448309615660845819875721) +
+          5.0 / x * (qp / qq) *
+              ::metal::precise::cos(
+                  x - 0.785398163397448309615660845819875721)) *
+      0.797884560802865355879892119868763737 / ::metal::precise::sqrt(x);
+} // bessel_y0_forward(T x)
+
+template <typename T>
+float bessel_j1_forward(T x) {
+  constexpr float PP[] = {
+      +7.62125616208173112003e-04,
+      +7.31397056940917570436e-02,
+      +1.12719608129684925192e+00,
+      +5.11207951146807644818e+00,
+      +8.42404590141772420927e+00,
+      +5.21451598682361504063e+00,
+      +1.00000000000000000254e+00,
+  };
+
+  constexpr float PQ[] = {
+      +5.71323128072548699714e-04,
+      +6.88455908754495404082e-02,
+      +1.10514232634061696926e+00,
+      +5.07386386128601488557e+00,
+      +8.39985554327604159757e+00,
+      +5.20982848682361821619e+00,
+      +9.99999999999999997461e-01,
+  };
+
+  constexpr float QP[] = {
+      +5.10862594750176621635e-02,
+      +4.98213872951233449420e+00,
+      +7.58238284132545283818e+01,
+      +3.66779609360150777800e+02,
+      +7.10856304998926107277e+02,
+      +5.97489612400613639965e+02,
+      +2.11688757100572135698e+02,
+      +2.52070205858023719784e+01,
+  };
+
+  constexpr float QQ[] = {
+      +7.42373277035675149943e+01,
+      +1.05644886038262816351e+03,
+      +4.98641058337653607651e+03,
+      +9.56231892404756170795e+03,
+      +7.99704160447350683650e+03,
+      +2.82619278517639096600e+03,
+      +3.36093607810698293419e+02,
+  };
+
+  constexpr float RP[] = {
+      -8.99971225705559398224e+08,
+      +4.52228297998194034323e+11,
+      -7.27494245221818276015e+13,
+      +3.68295732863852883286e+15,
+  };
+
+  constexpr float RQ[] = {
+      +6.20836478118054335476e+02,
+      +2.56987256757748830383e+05,
+      +8.35146791431949253037e+07,
+      +2.21511595479792499675e+10,
+      +4.74914122079991414898e+12,
+      +7.84369607876235854894e+14,
+      +8.95222336184627338078e+16,
+      +5.32278620332680085395e+18,
+  };
+
+  if (x < T(0.0)) {
+    return -bessel_j1_forward(-x);
+  }
+
+  if (x <= T(5.0)) {
+    float rp = 0.0;
+
+    for (auto index = 0; index <= 3; index++) {
+      rp = rp * (x * x) + RP[index];
+    }
+
+    float rq = 0.0;
+
+    for (auto index = 0; index <= 7; index++) {
+      rq = rq * (x * x) + RQ[index];
+    }
+
+    return rp / rq * x * (x * x - 1.46819706421238932572e+01) *
+        (x * x - 4.92184563216946036703e+01);
+  }
+
+  float pp = 0.0;
+
+  for (auto index = 0; index <= 6; index++) {
+    pp = pp * (5.0 / x * (5.0 / x)) + PP[index];
+  }
+
+  float pq = 0.0;
+
+  for (auto index = 0; index <= 6; index++) {
+    pq = pq * (5.0 / x * (5.0 / x)) + PQ[index];
+  }
+
+  float qp = 0.0;
+
+  for (auto index = 0; index <= 7; index++) {
+    qp = qp * (5.0 / x * (5.0 / x)) + QP[index];
+  }
+
+  float qq = 0.0;
+
+  for (auto index = 0; index <= 6; index++) {
+    qq = qq * (5.0 / x * (5.0 / x)) + QQ[index];
+  }
+
+  return (pp / pq *
+              ::metal::precise::cos(
+                  x - 2.356194490192344928846982537459627163) -
+          5.0 / x * (qp / qq) *
+              ::metal::precise::sin(
+                  x - 2.356194490192344928846982537459627163)) *
+      0.797884560802865355879892119868763737 / ::metal::precise::sqrt(x);
+} // bessel_j1_forward(T x)
+
+template <typename T>
+float bessel_y1_forward(T x) {
+  constexpr float PP[] = {
+      +7.62125616208173112003e-04,
+      +7.31397056940917570436e-02,
+      +1.12719608129684925192e+00,
+      +5.11207951146807644818e+00,
+      +8.42404590141772420927e+00,
+      +5.21451598682361504063e+00,
+      +1.00000000000000000254e+00,
+  };
+
+  constexpr float PQ[] = {
+      +5.71323128072548699714e-04,
+      +6.88455908754495404082e-02,
+      +1.10514232634061696926e+00,
+      +5.07386386128601488557e+00,
+      +8.39985554327604159757e+00,
+      +5.20982848682361821619e+00,
+      +9.99999999999999997461e-01,
+  };
+
+  constexpr float QP[] = {
+      +5.10862594750176621635e-02,
+      +4.98213872951233449420e+00,
+      +7.58238284132545283818e+01,
+      +3.66779609360150777800e+02,
+      +7.10856304998926107277e+02,
+      +5.97489612400613639965e+02,
+      +2.11688757100572135698e+02,
+      +2.52070205858023719784e+01,
+  };
+
+  constexpr float QQ[] = {
+      +7.42373277035675149943e+01,
+      +1.05644886038262816351e+03,
+      +4.98641058337653607651e+03,
+      +9.56231892404756170795e+03,
+      +7.99704160447350683650e+03,
+      +2.82619278517639096600e+03,
+      +3.36093607810698293419e+02,
+  };
+
+  constexpr float YP[] = {
+      +1.26320474790178026440e+09,
+      -6.47355876379160291031e+11,
+      +1.14509511541823727583e+14,
+      -8.12770255501325109621e+15,
+      +2.02439475713594898196e+17,
+      -7.78877196265950026825e+17,
+  };
+
+  constexpr float YQ[] = {
+      +5.94301592346128195359e+02,
+      +2.35564092943068577943e+05,
+      +7.34811944459721705660e+07,
+      +1.87601316108706159478e+10,
+      +3.88231277496238566008e+12,
+      +6.20557727146953693363e+14,
+      +6.87141087355300489866e+16,
+      +3.97270608116560655612e+18,
+  };
+
+  if (x <= T(5.0)) {
+    if (x == T(0.0)) {
+      return -INFINITY;
+    }
+
+    if (x <= T(0.0)) {
+      return NAN;
+    }
+
+    float yp = 0.0;
+
+    for (auto index = 0; index <= 5; index++) {
+      yp = yp * (x * x) + YP[index];
+    }
+
+    float yq = 0.0;
+
+    for (auto index = 0; index <= 7; index++) {
+      yq = yq * (x * x) + YQ[index];
+    }
+
+    return x * (yp / yq) +
+        (0.636619772367581343075535053490057448 *
+         (bessel_j1_forward(x) * ::metal::precise::log(x) - 1.0 / x));
+  }
+
+  float pp = 0.0;
+
+  for (auto index = 0; index <= 6; index++) {
+    pp = pp * (5.0 / x * (5.0 / x)) + PP[index];
+  }
+
+  float pq = 0.0;
+
+  for (auto index = 0; index <= 6; index++) {
+    pq = pq * (5.0 / x * (5.0 / x)) + PQ[index];
+  }
+
+  float qp = 0.0;
+
+  for (auto index = 0; index <= 7; index++) {
+    qp = qp * (5.0 / x * (5.0 / x)) + QP[index];
+  }
+
+  float qq = 0.0;
+
+  for (auto index = 0; index <= 6; index++) {
+    qq = qq * (5.0 / x * (5.0 / x)) + QQ[index];
+  }
+
+  return (pp / pq *
+              ::metal::precise::sin(
+                  x - 2.356194490192344928846982537459627163) +
+          5.0 / x * (qp / qq) *
+              ::metal::precise::cos(
+                  x - 2.356194490192344928846982537459627163)) *
+      0.797884560802865355879892119868763737 / ::metal::precise::sqrt(x);
+} // bessel_y1_forward(T x)
 } // namespace metal
 } // namespace c10
