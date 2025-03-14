@@ -475,7 +475,8 @@ class GraphModule(torch.nn.Module):
 
         opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, "NYI: invoke_subgraph with mutated inputs"
+            torch._dynamo.exc.Unsupported,
+            "Encountered input mutation during higher order op tracing",
         ):
             opt_fn(x, y)
 
@@ -496,7 +497,7 @@ class GraphModule(torch.nn.Module):
 
             with self.assertRaisesRegex(
                 torch._dynamo.exc.Unsupported,
-                "NYI: invoke_subgraph with mutated inputs",
+                "Encountered input mutation during higher order op tracing",
             ):
                 opt_fn(x, y)
 
@@ -553,7 +554,8 @@ class GraphModule(torch.nn.Module):
 
         opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, "NYI: invoke_subgraph with aliasing"
+            torch._dynamo.exc.Unsupported,
+            "Encountered aliasing during higher order op tracing",
         ):
             opt_fn(x, y)
 
@@ -569,7 +571,8 @@ class GraphModule(torch.nn.Module):
 
         opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, "NYI: invoke_subgraph with aliasing"
+            torch._dynamo.exc.Unsupported,
+            "Encountered aliasing during higher order op tracing",
         ):
             opt_fn(x)
 
@@ -586,7 +589,8 @@ class GraphModule(torch.nn.Module):
 
         opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, "NYI: invoke_subgraph with aliasing"
+            torch._dynamo.exc.Unsupported,
+            "Encountered aliasing during higher order op tracing",
         ):
             opt_fn(x)
 

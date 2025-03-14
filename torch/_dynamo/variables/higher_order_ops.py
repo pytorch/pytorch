@@ -50,6 +50,7 @@ from ..exc import (
     IncorrectUsage,
     UncapturedHigherOrderOpError,
     unimplemented,
+    unimplemented_v2,
     Unsupported,
 )
 from ..source import AttrSource, DictGetItemSource
@@ -696,11 +697,33 @@ def speculate_subgraph(
                 if len(lifted_freevars) > 0:
                     move_lifted_freevars_phs_to_end(graph, lifted_freevars)
 
-                if not supports_input_mutation and subtracer.has_input_mutation():
-                    unimplemented("NYI: invoke_subgraph with mutated inputs")
+                if not supports_input_mutation:
+                    mutation_info = subtracer.has_input_mutation()
+                    if mutation_info.has_mutation:
+                        context = f"{mutation_info.msg} in\n {graph}"
+                        unimplemented_v2(
+                            gb_type="Encountered input mutation during higher order op tracing",
+                            context=context,
+                            explanation="Higher order ops do not support input mutation",
+                            hints=[
+                                "Consider using the debug context to change user code to avoid mutation.",
+                                "Please open an issue.",
+                            ],
+                        )
 
-                if not supports_aliasing and subtracer.has_aliasing():
-                    unimplemented("NYI: invoke_subgraph with aliasing")
+                if not supports_aliasing:
+                    aliasing_info = subtracer.has_aliasing()
+                    if aliasing_info.has_aliasing:
+                        context = f"{aliasing_info.msg} in\n {graph}"
+                        unimplemented_v2(
+                            gb_type="Encountered aliasing during higher order op tracing",
+                            context=context,
+                            explanation="Higher order ops do not support aliasing",
+                            hints=[
+                                "Consider using the debug context to change user code to avoid aliasing.",
+                                "Please open an issue.",
+                            ],
+                        )
 
                 return (
                     (output, treespec),

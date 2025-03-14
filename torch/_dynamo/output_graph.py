@@ -165,6 +165,18 @@ class VariableTrackerCacheKey:
     source: Source
 
 
+@dataclass(frozen=True)
+class AliasingInfo:
+    has_aliasing: bool
+    msg: str
+
+
+@dataclass(frozen=True)
+class MutationInfo:
+    has_mutation: bool
+    msg: str
+
+
 class VariableTrackerCache:
     def __init__(self):
         self.cache = {}
@@ -2686,6 +2698,7 @@ class SubgraphTracer(fx.Tracer):
 
     def has_input_mutation(self):
         input_versions_at_beginning = self._input_versions_at_beginning
+        input_nodes = []
 
         input_versions_at_end = []
         for node in self.graph.nodes:
@@ -2693,6 +2706,7 @@ class SubgraphTracer(fx.Tracer):
                 example_value = node.meta["example_value"]
                 if isinstance(example_value, torch.Tensor):
                     input_versions_at_end.append(example_value._version)
+                    input_nodes.append(node)
             else:
                 break
 
@@ -2704,10 +2718,16 @@ class SubgraphTracer(fx.Tracer):
             if v1 != v2
         ]
 
-        return len(mutated_inputs) > 0
+        if len(mutated_inputs):
+            mutated_nodes = [input_nodes[i] for i in mutated_inputs]
+            msg = f"Input mutation detected at {mutated_nodes}"
+            return MutationInfo(True, msg)
+
+        return MutationInfo(False, "")
 
     def has_aliasing(self):
-        input_storages = set()
+        input_storages: dict[StorageWeakRef, torch.fx.Node] = dict()
+
         for node in self.graph.nodes:
             if node.op == "placeholder":
                 example_value = node.meta["example_value"]
@@ -2715,12 +2735,13 @@ class SubgraphTracer(fx.Tracer):
                     storage = StorageWeakRef(example_value._typed_storage())
                     if storage in input_storages:
                         # input-input aliasing
-                        return True
-                    input_storages.add(storage)
+                        msg = f"Input-to-input aliasing detected at nodes {input_storages[storage]} and {node}"
+                        return AliasingInfo(True, msg)
+                    input_storages[storage] = node
             else:
                 break
 
-        output_storages = set()
+        output_storages: dict[StorageWeakRef, torch.fx.Node] = dict()
         out_nodes = self.graph.find_nodes(op="output")[0]
         for out_node in out_nodes.args[0]:
             example_value = out_node.meta["example_value"]
@@ -2728,13 +2749,21 @@ class SubgraphTracer(fx.Tracer):
                 storage = StorageWeakRef(example_value._typed_storage())
                 if storage in output_storages:
                     # output-output aliasing
-                    return True
-                output_storages.add(storage)
+                    msg = f"Output-to-output aliasing detected at nodes {output_storages[storage]} and {out_node}"
+                    return AliasingInfo(True, msg)
+                output_storages[storage] = out_node
 
-        if input_storages.intersection(output_storages):
-            # Input-output aliasing
-            return True
-        return False
+        intersected_storages = input_storages.keys() & output_storages.keys()
+        if len(intersected_storages) > 0:
+            # input-output aliasing
+            aliased = [
+                (input_storages[s], output_storages[s]) for s in intersected_storages
+            ]
+            aliased = ", ".join([f"{i} and {o}" for i, o in aliased])
+            msg = f"Input-to-output aliasing detected at nodes {aliased}"
+            return AliasingInfo(True, msg)
+
+        return AliasingInfo(False, "")
 
 
 # NOTE: [HigherOrderOperator tracing design]
