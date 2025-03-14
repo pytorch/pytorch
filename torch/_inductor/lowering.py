@@ -2528,11 +2528,15 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         if len(arg.get_size()) not in (3, 4):
             return arg
 
-        def realize() -> Union[ir.TensorBox, ir.BaseView]:
+        def realize() -> Union[ir.TensorBox, ir.BaseView, ir.StorageBox]:
             ir_node = ir.ExternKernel.realize_input(arg)
-            assert isinstance(ir_node, (ir.TensorBox, ir.BaseView)), type(ir_node)
+            assert isinstance(ir_node, (ir.TensorBox, ir.BaseView, ir.StorageBox)), (
+                type(ir_node)
+            )
             ret = ir.try_match_insignificant_strides(ir_node, meta_stride_expr)
-            assert isinstance(ret, (ir.TensorBox, ir.BaseView)), type(ret)
+            assert isinstance(ret, (ir.TensorBox, ir.BaseView, ir.StorageBox)), type(
+                ret
+            )
             return ret
 
         if ir.is_aligned_realized_tensor(arg, ALIGNMENT):

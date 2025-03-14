@@ -26,7 +26,7 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
 
   lintrunner-clang:
-    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
     needs: get-label-type
     with:
       timeout: 120
@@ -43,7 +43,7 @@ jobs:
         .github/scripts/lintrunner.sh
 
   lintrunner-noclang:
-    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
     needs: get-label-type
     with:
       timeout: 120
@@ -59,7 +59,7 @@ jobs:
         .github/scripts/lintrunner.sh
 
   quick-checks:
-    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
     needs: get-label-type
     with:
       timeout: 120
@@ -116,7 +116,7 @@ jobs:
           bash .github/scripts/pr-sanity-check.sh
 
   workflow-checks:
-    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
     needs: get-label-type
     with:
       timeout: 120
@@ -154,7 +154,7 @@ jobs:
         exit $RC
 
   toc:
-    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
     needs: get-label-type
     with:
       timeout: 120
@@ -194,7 +194,7 @@ jobs:
   test-tools:
     name: Test tools
     if: ${{ github.repository == 'pytorch/pytorch' }}
-    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
     needs: get-label-type
     with:
       timeout: 120
@@ -215,7 +215,7 @@ jobs:
   test_run_test:
     name: Test `run_test.py` is usable without boto3
     if: ${{ github.repository == 'pytorch/pytorch' }}
-    runs-on: linux.20_04.4x
+    runs-on: linux.24_04.4x
     steps:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
@@ -241,10 +241,18 @@ jobs:
   test_collect_env:
     if: ${{ github.repository == 'pytorch/pytorch' }}
     name: Test collect_env
-    runs-on: linux.20_04.4x
+    runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
-        test_type: [with_torch, without_torch, older_python_version]
+        include:
+          - test_type: with_torch
+            runner: linux.24_04.4x
+          - test_type: without_torch
+            runner: linux.24_04.4x
+          # NOTE: The oldest supported version of python for 24.04 is 3.8
+          #       so this cannot be updated if we want to keep this test at 3.6
+          - test_type: older_python_version
+            runner: linux.20_04.4x
     steps:
       # [see note: pytorch repo ref]
       # deep clone (fetch-depth 0) required, to allow us to use git log

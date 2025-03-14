@@ -196,10 +196,14 @@ class GraphPartitionSignature:
     # we cannot get name from Expr.
     input_nodes: dict[str, Union[IRNode, sympy.Expr, TorchBindObject]]
     output_nodes: list[IRNode]
+
     # mapping from partition input name to a boolean for whether deallocating it
     # in the partition function
     input_deallocation: dict[str, bool]
     skip_cudagraph: bool
+
+    # name of constants read/written by the graph partition
+    constant_names: list[str]
 
 
 def validate_ir(node_or_nodes: Optional[_NodeOrNodes]) -> None:
@@ -6501,15 +6505,13 @@ class IndexPutFallback(ExternKernel):
 
 class DeviceCopy(ExternKernelOut):
     @classmethod
-    def create(cls, x: IRNode, device: torch.device, non_blocking: bool) -> DeviceCopy:
+    def create(cls, x: IRNode, device: torch.device, non_blocking: bool) -> IRNode:
         if (
             not x.is_extern()
             and all(r in V.graph.constants for r in x.get_read_names())
             and not config.aot_inductor.use_runtime_constant_folding
         ):
-            dev = x.constant_to_device(device)
-            assert isinstance(dev, DeviceCopy), type(dev)
-            return dev
+            return x.constant_to_device(device)
 
         V.graph.add_device_info(device)
         x_device = x.get_device()
@@ -7820,7 +7822,8 @@ class WhileLoop(ExternKernel):
         assert device is not None  # to make linter happy
         # make sure carried_inputs_ and body outputs are structurally equivalent
         assert len(carried_inputs_) == len(body_outputs), (
-            carried_inputs_, body_outputs
+            carried_inputs_,
+            body_outputs,
         )
         for i, (op, bo) in enumerate(zip(carried_inputs_, body_outputs)):
 
