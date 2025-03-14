@@ -3190,6 +3190,7 @@ def parse_args(args=None):
         "--compiled-autograd",
         action="store_true",
         help="Enables compiled autograd on compiled benchmark",
+        default=True,
     )
 
     parser.add_argument(
@@ -3469,6 +3470,7 @@ def run(runner, args, original_dir=None):
     args.exclude = args.exclude or [r"^$"]
     args.exclude_exact = args.exclude_exact or []
 
+    torch._functorch.config.enable_autograd_cache = False
     if args.inductor:
         assert args.backend is None
         args.backend = "inductor"
