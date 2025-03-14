@@ -214,7 +214,7 @@ def _symbolic(
     # TODO: Verify that shape supports SymInt
     torch._check(
         onnx_dtype in _ONNX_DTYPE_TO_TORCH_DTYPE,
-        f"{onnx_dtype} is invalid as an ONNX data type. Valid values are {list(_ONNX_DTYPE_TO_TORCH_DTYPE.keys())}",
+        lambda: f"{onnx_dtype} is invalid as an ONNX data type. Valid values are {list(_ONNX_DTYPE_TO_TORCH_DTYPE.keys())}",
     )
     return torch.zeros(shape, dtype=_ONNX_DTYPE_TO_TORCH_DTYPE[onnx_dtype])
 
@@ -240,7 +240,7 @@ def _(
 ) -> torch.Tensor:
     torch._check(
         onnx_dtype in _ONNX_DTYPE_TO_TORCH_DTYPE,
-        f"{onnx_dtype} is invalid as an ONNX data type. Valid values are {list(_ONNX_DTYPE_TO_TORCH_DTYPE.keys())}",
+        lambda: f"{onnx_dtype} is invalid as an ONNX data type. Valid values are {list(_ONNX_DTYPE_TO_TORCH_DTYPE.keys())}",
     )
     return torch.zeros(shape, dtype=_ONNX_DTYPE_TO_TORCH_DTYPE[onnx_dtype])
 
@@ -275,10 +275,14 @@ def _symbolic_multi_out(
     version: Optional[int] = None,
 ) -> list[torch.Tensor]:
     outputs = []
+    torch._check(
+        len(shapes) == len(onnx_dtypes),
+        lambda: f"Number of shapes ({len(shapes)}) must match number of ONNX dtypes ({len(onnx_dtypes)})",
+    )
     for shape, onnx_dtype in zip(shapes, onnx_dtypes):
         torch._check(
             onnx_dtype in _ONNX_DTYPE_TO_TORCH_DTYPE,
-            f"{onnx_dtype} is invalid as an ONNX data type. Valid values are {list(_ONNX_DTYPE_TO_TORCH_DTYPE.keys())}",
+            lambda: f"{onnx_dtype} is invalid as an ONNX data type. Valid values are {list(_ONNX_DTYPE_TO_TORCH_DTYPE.keys())}",
         )
         outputs.append(torch.zeros(shape, dtype=_ONNX_DTYPE_TO_TORCH_DTYPE[onnx_dtype]))
     return outputs
@@ -304,10 +308,14 @@ def _(
     version: Optional[int] = None,
 ) -> list[torch.Tensor]:
     outputs = []
+    torch._check(
+        len(shapes) == len(onnx_dtypes),
+        lambda: f"Number of shapes ({len(shapes)}) must match number of ONNX dtypes ({len(onnx_dtypes)})",
+    )
     for shape, onnx_dtype in zip(shapes, onnx_dtypes):
         torch._check(
             onnx_dtype in _ONNX_DTYPE_TO_TORCH_DTYPE,
-            f"{onnx_dtype} is invalid as an ONNX data type. Valid values are {list(_ONNX_DTYPE_TO_TORCH_DTYPE.keys())}",
+            lambda: f"{onnx_dtype} is invalid as an ONNX data type. Valid values are {list(_ONNX_DTYPE_TO_TORCH_DTYPE.keys())}",
         )
         outputs.append(torch.zeros(shape, dtype=_ONNX_DTYPE_TO_TORCH_DTYPE[onnx_dtype]))
     return outputs
