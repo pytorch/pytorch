@@ -3,6 +3,7 @@
 #include <c10/core/Stream.h>
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/Stream.h>
+#include <torch/csrc/mtia/Module.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/device_lazy_init.h>
 #include <torch/csrc/utils/pybind.h>
