@@ -194,6 +194,8 @@ jobs:
           WORKFLOW_RUN_ID: ${{ github.run_id }}
         run: |
           echo "usage_log_build_${JOB_ID}.txt"
+          echo $(pwd)
+
           python3 -m pip install psutil==5.9.1 dataclasses_json==0.6.7
           python3 -m tools.stats.monitor > "usage_log_build_${JOB_ID}.txt" 2>&1 &
           echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
@@ -210,7 +212,8 @@ jobs:
       - name: Check all txt
         shell: bash
         run: |
-          ls ./*.txt
+          echo $(pwd)
+          ls ./tools/*.txt
 
       - name: Build
         if: steps.filter.outputs.is-test-matrix-empty == 'False' || inputs.test-matrix == ''
@@ -237,6 +240,7 @@ jobs:
           SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
           MAX_JOBS_OVERRIDE: ${{ inputs.max-jobs }}
         run: |
+          echo $(pwd)
           START_TIME=$(date +%s)
           if [[ ${BUILD_ENVIRONMENT} == *"s390x"* ]]; then
             JENKINS_USER=
@@ -306,6 +310,7 @@ jobs:
 
           END_TIME=$(date +%s)
           echo "build_time=$((END_TIME - START_TIME))" >> "$GITHUB_OUTPUT"
+          echo $(pwd)
 
       - name: Check all txt
         shell: bash
@@ -320,6 +325,7 @@ jobs:
       - name: Check all txt
         shell: bash
         run: |
+          echo $(pwd)
           ls ./*.txt
 
       - name: Store PyTorch Build Artifacts on S3
@@ -331,10 +337,11 @@ jobs:
           if-no-files-found: error
           path: artifacts.zip
           s3-bucket: ${{ inputs.s3-bucket }}
-          
+
       - name: Check all txt
         shell: bash
         run: |
+          echo $(pwd)
           ls ./*.txt
 
       - name: Store PyTorch Build Artifacts for s390x
