@@ -36,8 +36,8 @@ QuantMatmul::QuantMatmul(
         arm_compute::DataType::F32);
     bia_tensor_ = arm_compute::Tensor();
 
-    bia_tensor_.value().allocator()->init(bia_tensor_info);
-    bia_tensor_.value().allocator()->import_memory(bias_ptr.value());
+    bia_tensor_->allocator()->init(bia_tensor_info);
+    bia_tensor_->allocator()->import_memory(bias_ptr.value());
   }
   const bool fuse_relu =
       std::get<static_cast<int>(QuantMatmulCacheKeyIndex::FUSE_RELU)>(key);
