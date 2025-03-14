@@ -75,6 +75,7 @@ def is_hashable(x):
                 variables.EnumVariable,
                 variables.user_defined.UserDefinedClassVariable,
                 variables.UserFunctionVariable,
+                variables.UserDefinedObjectVariable,
                 variables.SkipFunctionVariable,
                 variables.misc.NumpyVariable,
                 variables.NNModuleVariable,
@@ -133,6 +134,8 @@ class ConstDictVariable(VariableTracker):
                 # Access the underlying value inside the referent_vt for the key representation
                 Hashable = ConstDictVariable._HashableTracker
                 return Hashable(self.vt.referent_vt).underlying_value
+            elif isinstance(self.vt, variables.UserDefinedObjectVariable):
+                return self.vt.value
             else:
                 x = self.vt.as_python_constant()
             return x
