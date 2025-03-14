@@ -1,7 +1,7 @@
 # ${generated_comment}
 # mypy: disable-error-code="type-arg"
 
-from typing import Literal, Optional, overload, Sequence, Union
+from typing import Literal, overload, Sequence
 
 from torch import memory_format, Tensor
 from torch.types import _bool, _device, _dtype, _int, _size
@@ -11,7 +11,7 @@ from torch.types import _bool, _device, _dtype, _int, _size
 ${c_nn_function_hints}
 
 # Defined in aten/src/ATen/native/mkldnn/Linear.cpp
-def mkldnn_linear(input: Tensor, weight: Tensor, bias: Optional[Tensor]) -> Tensor: ...
+def mkldnn_linear(input: Tensor, weight: Tensor, bias: Tensor | None) -> Tensor: ...
 
 # Defined at aten/src/ATen/native/mkldnn/MKLDNNConversions.cpp
 def mkldnn_reorder_conv2d_weight(
@@ -61,10 +61,10 @@ def _parse_to(
 
 # Defined in aten/src/ATen/native/PackedSequence.cpp
 def pad_sequence(
-    sequences: Union[list[Tensor], tuple[Tensor, ...]],
+    sequences: list[Tensor] | tuple[Tensor, ...],
     batch_first: bool = False,
     padding_value: float = 0.0,
-    padding_side: Union[Literal["left", "right"], str] = "right",
+    padding_side: Literal["left", "right"] = "right",
 ) -> Tensor: ...
 def flatten_dense_tensors(tensors: list[Tensor]) -> Tensor: ...
 def unflatten_dense_tensors(flat: Tensor, tensors: list[Tensor]) -> list[Tensor]: ...
