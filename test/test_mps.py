@@ -93,6 +93,8 @@ def mps_ops_grad_modifier(ops):
         'linalg.solve_ex': [torch.float16, torch.float32],  # missing `aten::lu_solve`.
         'linalg.tensorsolve': [torch.float16, torch.float32],  # missing `aten::lu_solve`.
         'linalg.det': [torch.float16, torch.float32],  # missing aten::lu_solve.out
+        'linalg.slogdet': [torch.float16, torch.float32],  # missing aten::lu_solve.out
+        'logdet': [torch.float16, torch.float32],  # missing aten::lu_solve.out
         'aminmax': [torch.float32, torch.float16],
         'special.i1': [torch.float16],  # "i1_backward" not implemented for 'Half'
 
@@ -593,11 +595,9 @@ def mps_ops_modifier(ops):
         'linalg.norm': [torch.float32],
         'linalg.normsubgradients_at_zero': [torch.float32],
         'linalg.qr': None,
-        'linalg.slogdet': None,
         'linalg.svdvals': None,
         'linalg.vecdot': None,
         'logcumsumexp': None,
-        'logdet': None,
         'lu_solve': None,
         'masked.median': None,
         'matrix_exp': None,
@@ -710,8 +710,6 @@ def mps_ops_modifier(ops):
         'index_add': [torch.int64],
         'log1p': [torch.int64],
         'sigmoid': [torch.int64],
-        'atan2': [torch.int64],
-        'angle': [torch.int64],
 
         # Operations not supported for integral types
         'special.xlog1py': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
@@ -4865,6 +4863,9 @@ class TestMPS(TestCaseMPS):
         # verify if changes in shape would cause cached graph lookup problems
         helper([7, 5, 2, 4, 6], 'sum')
         helper([8, 4, 5, 7, 6], 'mean')
+        helper((3, 3, 0), 'sum')
+        helper((3, 3, 0), 'mean')
+        helper((3, 3, 0), 'none')
 
     def test_mse_loss_strided_output(self):
         # https://github.com/pytorch/pytorch/issues/124621
@@ -8514,12 +8515,26 @@ class TestMPS(TestCaseMPS):
                 op(mps_x, out=mps_y)
                 self.assertEqual(mps_y, cpu_y)
 
+                # test for non contiguous but dense input/output with similar strides
+                cpu_x = torch.randn(shape, device='cpu', dtype=dtype).mT
+                mps_x = cpu_x.to('mps')
+                cpu_y = torch.empty_like(cpu_x)
+                mps_y = cpu_y.to('mps')
+                op(cpu_x, out=cpu_y)
+                op(mps_x, out=mps_y)
+                self.assertEqual(mps_y, cpu_y)
+                # test for sliced inputs and outputs with similar strides
+                mps_x, mps_y = torch.randn((2, shape[0] * 2, shape[1] * 2), device='mps', dtype=dtype).unbind(0)
+                op(mps_x[::2, ::2], out=mps_y[::2, ::2])
+                self.assertEqual(mps_y[::2, ::2], op(mps_x[::2, ::2].contiguous()))
+
 
         helper((5, 5), torch.exp, False)
         helper((5, 5), torch.cos, False)
         helper((5, 5), torch.neg, False)
         helper((5, 5), torch.tanh, False)
         helper((5, 5), torch.tanh_, True)
+        helper((5, 5), lambda x, **kwargs: torch.round(x, decimals=2, **kwargs), False)
 
     def test_atan2(self):
         def helper(shape):
@@ -8775,6 +8790,11 @@ class TestLogical(TestCaseMPS):
         x_cpu = x.cpu()
         self.assertEqual((x >> 3).cpu(), x_cpu >> 3)
         self.assertEqual((x << 1).cpu(), x_cpu << 1)
+        # Regression test for https://github.com/pytorch/pytorch/issues/147889
+        x = x.clamp(0, 8)
+        x_cpu = x.cpu()
+        self.assertEqual((4095 >> x).cpu(), 4095 >> x_cpu)
+        self.assertEqual((257 << x).cpu(), 257 << x_cpu)
 
 
 class TestSmoothL1Loss(TestCaseMPS):
@@ -12773,7 +12793,7 @@ class TestCommon(TestCase):
 class TestMetalLibrary(TestCaseMPS):
     def test_metal_arange(self):
         x = torch.zeros(12, device="mps", dtype=torch.half)
-        lib = torch.mps._compile_shader("""
+        lib = torch.mps.compile_shader("""
             kernel void arange(device half* x, uint idx [[thread_position_in_grid]]) {
               x[idx] = idx;
             }
@@ -12785,7 +12805,7 @@ class TestMetalLibrary(TestCaseMPS):
         x = torch.empty(12, device="mps")
         y = torch.empty_like(x)
         z = torch.empty_like(x)
-        lib = torch.mps._compile_shader("""
+        lib = torch.mps.compile_shader("""
             kernel void arange_x(device float* x, uint3 idx [[thread_position_in_grid]]) {
               x[idx.x + idx.y + idx.z] = idx.x;
             }
@@ -12812,7 +12832,7 @@ class TestMetalLibrary(TestCaseMPS):
 
     def test_metal_arange_with_arg(self, start=3.14, step=.5):
         x = torch.zeros(12, device="mps")
-        lib = torch.mps._compile_shader("""
+        lib = torch.mps.compile_shader("""
             kernel void arange(device float* x, constant float& start, constant float& step,
                                uint idx [[thread_position_in_grid]]) {
               x[idx] = start + idx * step;
@@ -12827,7 +12847,7 @@ class TestMetalLibrary(TestCaseMPS):
     def test_metal_arange_with_arg_and_cast(self):
         x = torch.zeros(12, device="mps", dtype=torch.half)
         y = torch.zeros(12, device="mps", dtype=torch.half)
-        lib = torch.mps._compile_shader("""
+        lib = torch.mps.compile_shader("""
             kernel void arange_all_half(device half* x, constant half2& start_step,
                                uint idx [[thread_position_in_grid]]) {
               x[idx] = start_step.x + idx * start_step.y;
@@ -12845,10 +12865,10 @@ class TestMetalLibrary(TestCaseMPS):
 
     def test_metal_error_checking(self):
         # Syntax error asserts
-        self.assertRaises(SyntaxError, lambda: torch.mps._compile_shader("Syntax error"))
+        self.assertRaises(SyntaxError, lambda: torch.mps.compile_shader("Syntax error"))
         cpu_tensor = torch.rand(3)
         mps_tensor = torch.rand(3, device="mps")
-        lib = torch.mps._compile_shader("kernel void full(device half* x) { x[0] = 1.0; }")
+        lib = torch.mps.compile_shader("kernel void full(device half* x) { x[0] = 1.0; }")
         # Passing CPU tensor asserts
         self.assertRaises(RuntimeError, lambda: lib.full(cpu_tensor))
         # Passing invalid shader name asserts
@@ -12863,12 +12883,12 @@ class TestMetalLibrary(TestCaseMPS):
 
     def test_metal_include(self):
         # Checks that includes embedding works
-        lib = torch.mps._compile_shader("#include <c10/metal/special_math.h>")
+        lib = torch.mps.compile_shader("#include <c10/metal/special_math.h>")
         self.assertIsNotNone(lib)
 
     @unittest.skipIf(not torch.mps.profiler.is_metal_capture_enabled(), "Set MTL_CAPTURE_ENABLED and try again")
     def test_metal_capture(self):
-        lib = torch.mps._compile_shader("kernel void full(device float* x, uint idx [[thread_position_in_grid]]) { x[idx] = 1.0; }")
+        lib = torch.mps.compile_shader("kernel void full(device float* x, uint idx [[thread_position_in_grid]]) { x[idx] = 1.0; }")
         mps_tensor = torch.rand(32, device="mps")
         capture_name = f"lib_full{''.join(random.choice('0123456789') for i in range(5))}"
         capture_dirname = f"0000-{capture_name}.gputrace"
