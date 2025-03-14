@@ -2982,7 +2982,14 @@ class TestSDPACudaOnly(NNTestCase):
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Platform does not support fused SDPA")
-    def test_fused_sdp_priority_order(self, device):
+    @parametrize("use_compile", [True, False])
+    def test_fused_sdp_priority_order(self, device, use_compile):
+        @torch.compile
+        def compiled_func(order):
+            with sdpa_kernel(order, set_priority=True):
+                out = scaled_dot_product_attention(q, q, q)
+            return out
+
         q = torch.randn(64, 8, 1024, 64, dtype=torch.half, device='cuda')
         default_order = torch._C._get_sdp_priority_order()
         orders = [[SDPBackend.CUDNN_ATTENTION, SDPBackend.MATH, SDPBackend.EFFICIENT_ATTENTION],
@@ -2992,18 +2999,25 @@ class TestSDPACudaOnly(NNTestCase):
         import time
         times = list()
         for order in orders:
-            with sdpa_kernel(order, set_priority=True):
-                scaled_dot_product_attention(q, q, q)
+            if use_compile:
+                compiled_func(order)
+            else:
+                with sdpa_kernel(order, set_priority=True):
+                    scaled_dot_product_attention(q, q, q)
             torch.cuda.synchronize()
             t0 = time.perf_counter()
-            with sdpa_kernel(order, set_priority=True):
-                scaled_dot_product_attention(q, q, q)
+            if use_compile:
+                compiled_func(order)
+            else:
+                with sdpa_kernel(order, set_priority=True):
+                    scaled_dot_product_attention(q, q, q)
             torch.cuda.synchronize()
             t1 = time.perf_counter()
             times.append(t1 - t0)
         self.assertTrue(times[0] < times[1], "expected cuDNN SDPA to be faster than Math backend.")
         self.assertTrue(times[1] > times[2], "expected Eff Attn backend to faster than Math backend.")
         self.assertTrue(times[3] < times[2], "expected Flash Attn backend to faster than Math backend.")
+        self.assertTrue(times[0] < times[2], "expected cuDNN Attn backend to faster than Eff Attn backend.")
         reset_order = torch._C._get_sdp_priority_order()
         self.assertEqual(default_order, reset_order, "expected SDPA context manager to reset priority order.")
 
