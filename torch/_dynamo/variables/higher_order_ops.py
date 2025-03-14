@@ -3125,30 +3125,22 @@ class BaseHOPVariable(WrapHigherOrderVariable):
         )
         assert len(p_kwargs) == 0
 
-        from torch._higher_order_ops.utils import potential_input_alias_or_mutation
+        from torch._higher_order_ops.utils import (
+            analyze_potential_input_alias_or_mutation,
+            potential_input_alias_or_mutation,
+        )
 
         fake_inputs = [
             node.meta["example_value"]
             for node in body_gmod.graph.nodes
             if node.op == "placeholder"
         ]
-        input_mutations, aliases = potential_input_alias_or_mutation(
+        aliases, input_mutations = potential_input_alias_or_mutation(
             body_gmod, fake_inputs
         )
-        if len(input_mutations) > 0:
-            # TODO: Investigate here further which node is exactly mutating the inputs
-            raise RuntimeError(
-                f"{self.value._name} where the inputs are mutated."
-                + f"In particular, these nodes are mutating the inputs {[el for el in input_mutations]}."  # noqa: C416
-                + "Please ensure that this doesn't happen."
-            )
-        if len(aliases) > 0:
-            # TODO: Investigate here further which node is exactly aliasing
-            raise RuntimeError(
-                f"{self.value._name} where aliases appear."
-                + f"In particular, these nodes are aliasing the inputs {[el for el in aliases]}."  # noqa: C416
-                + "Please ensure that this doesn't happen."
-            )
+        analyze_potential_input_alias_or_mutation(
+            self.value._name, aliases, input_mutations
+        )
 
         flat_example_value = pytree.tree_map_only(
             torch.fx.Proxy,
@@ -3178,27 +3170,17 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
 
         # TODO(anijain2305) - This might be too big of a limitation. Consider
         # supporting mutation/aliasing in HOP itself to remove this restriction.
-        from torch._higher_order_ops.utils import potential_input_alias_or_mutation
+        from torch._higher_order_ops.utils import (
+            analyze_potential_input_alias_or_mutation,
+            potential_input_alias_or_mutation,
+        )
 
         aliases, input_mutations = potential_input_alias_or_mutation(
             body_gmod, fake_inputs
         )
-        if any(len(a) > 0 for a in aliases):
-            # TODO: Investigate here further which node is exactly aliasing
-            raise RuntimeError(
-                f"{self.value._name} where aliases appear. "
-                + f"In particular, these inputs \
-                {set(el for el_map in aliases if len(el_map.keys()) > 0 for el in el_map.keys())} "  # noqa: C401
-                + "get aliased. Please ensure that this doesn't happen."
-            )
-        if len(input_mutations):
-            # TODO: Investigate here further which node is exactly mutating the inputs
-            raise RuntimeError(
-                f"{self.value._name} where the inputs are mutated. "
-                + f"In particular, these nodes are mutating the inputs \
-                {set(el for el in input_mutations)}."  # noqa: C401
-                + "Please ensure that this doesn't happen."
-            )
+        analyze_potential_input_alias_or_mutation(
+            self.value._name, aliases, input_mutations
+        )
 
         key = hash_graph_and_inputs(tx, body_gmod, fake_inputs)
 
