@@ -384,7 +384,7 @@ def create_graph_signature(
                 i + len(params_and_buffers_flat)
             ]
             for i, user_input in enumerate(user_args_flat)
-            if user_input.requires_grad
+            if isinstance(user_input, torch.Tensor) and user_input.requires_grad
         }
 
         assert len(gradients_to_parameters) + len(gradients_to_user_inputs) == len(
