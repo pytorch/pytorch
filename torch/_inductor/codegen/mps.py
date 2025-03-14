@@ -286,6 +286,10 @@ class MetalOverrides(OpOverrides):
         return f"metal::atan({x})"
 
     @staticmethod
+    def atan2(x: CSEVariable, y: CSEVariable) -> str:
+        return f"::metal::atan2({x}, {y})"
+
+    @staticmethod
     def sqrt(x: CSEVariable) -> str:
         return f"metal::sqrt({x})"
 
