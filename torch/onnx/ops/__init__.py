@@ -76,6 +76,7 @@ def symbolic(
     To create an operator with multiple outputs, use :func:`symbolic_multi_out`.
 
     Example::
+
         class CustomOp(torch.nn.Module):
             def forward(self, x: torch.Tensor):
                 return torch.onnx.ops.symbolic(
@@ -162,6 +163,7 @@ def symbolic_multi_out(
     """Create a symbolic ONNX operator with multiple outputs.
 
     Example::
+
         class CustomOp(torch.nn.Module):
             def forward(self, x: torch.Tensor):
                 return torch.onnx.ops.symbolic(
