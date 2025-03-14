@@ -4126,8 +4126,6 @@ class TestMPS(TestCaseMPS):
         y_cpu = torch.full((2, 2), 247, device='cpu', dtype=torch.uint8)
         self.assertEqual(y_mps, y_cpu)
 
-    @unittest.skipIf(MACOS_VERSION < 13.0, "Skipped on macOS 12")
-    # See https://github.com/pytorch/pytorch/issues/84995
     def test_div_bugs(self):
         for (dtype, mode) in itertools.product(integral_types(), ['trunc', 'floor']):
             if dtype != torch.int64:
@@ -5130,7 +5128,6 @@ class TestMPS(TestCaseMPS):
 
         self.assertEqual(result_cpu, result_mps.to('cpu'))
 
-    @unittest.skipIf(MACOS_VERSION < 13.0, "Skipped on macOS 12")
     def test_signed_vs_unsigned_comparison(self):
         cpu_x = torch.tensor((-1, 2, 3), device='cpu', dtype=torch.uint8)
         mps_x = torch.tensor((-1, 2, 3), device='mps', dtype=torch.uint8)
@@ -11450,9 +11447,6 @@ class TestAdvancedIndexing(TestCaseMPS):
 
             self.assertEqual(res_cpu, res_mps, str(dtype))
         for dtype in self.supported_dtypes:
-            # MPS support binary op with uint8 natively starting from macOS 13.0
-            if MACOS_VERSION < 13.0 and dtype == torch.uint8:
-                continue
             helper(dtype)
 
     def test_advanced_indexing_3D_get(self):
@@ -11611,7 +11605,6 @@ class TestAdvancedIndexing(TestCaseMPS):
             self.assertEqual(v[boolIndices], torch.tensor([True], dtype=torch.bool, device=device))
             self.assertEqual(len(w), 2)
 
-    @unittest.skipIf(MACOS_VERSION < 13.0, "Skipped on macOS 12")
     def test_bool_indices_accumulate(self, device="mps"):
         mask = torch.zeros(size=(10, ), dtype=torch.uint8, device=device)
         mask = mask > 0
@@ -11829,7 +11822,6 @@ class TestAdvancedIndexing(TestCaseMPS):
             self.assertEqual(res.shape, src.shape)
         [helper(device="mps", dtype=dtype) for dtype in [torch.float, torch.int32]]
 
-    @unittest.skipIf(MACOS_VERSION < 13.0, "Skipped on macOS 12")
     def test_index_src_datatype(self):
         def helper(device, dtype):
             orig_dtype = dtype
