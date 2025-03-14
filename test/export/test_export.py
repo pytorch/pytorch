@@ -8259,7 +8259,11 @@ graph():
                 return x.reshape(c, d)
 
         xs = torch.tensor([4, 6, 8, 3])
-        ep = export(Foo(), (xs,))
+        with self.assertRaisesRegex(
+            ValueError,
+            "Could not reshape a tensor with shape .*u0, u1.* as a tensor with shape .*u2, u3.*"
+        ):
+            export(Foo(), (xs,))
 
     def test_unflatten_random_dag_mutating_buf_4(self):
         class N3(torch.nn.Module):
