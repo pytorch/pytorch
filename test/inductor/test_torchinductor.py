@@ -20,6 +20,8 @@ import unittest
 import unittest.mock
 import weakref
 from pathlib import Path
+from typing import Callable, TypeVar
+from typing_extensions import ParamSpec
 from unittest.mock import patch
 
 import numpy as np
@@ -126,10 +128,16 @@ from torch.testing._internal.inductor_utils import (
     HAS_GPU,
     HAS_MULTIGPU,
     requires_gpu,
+    RUN_CPU,
+    RUN_GPU,
     skipCPUIf,
     skipCUDAIf,
 )
 from torch.testing._internal.triton_utils import requires_cuda
+
+
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
 
 
 HAS_AVX2 = "fbgemm" in torch.backends.quantized.supported_engines
@@ -3995,7 +4003,7 @@ class CommonTemplate:
             _, code = run_and_get_code(foo, grouped_conv, input_tensor)
             # no to channels last permuting before kernel
             if config.cpp_wrapper:
-                FileCheck().check_not("launchKernel(triton").check("_convolution(").run(
+                FileCheck().check_not("  call_triton").check("_convolution(").run(
                     code[0]
                 )
             else:
@@ -4423,7 +4431,7 @@ class CommonTemplate:
         gemm_opt(x1, y1)
         self.assertTrue(failed_guard is not None)
         self.assertTrue(
-            "tensor 'L['x']' Tensor device index mismatch. Expected device index to be"
+            "tensor 'x' Tensor device index mismatch. Expected device index to be"
             in failed_guard.reason
         )
 
@@ -4597,7 +4605,11 @@ class CommonTemplate:
             check_lowp=False,
         )
 
-    def test_conv3d_channels_last(self):
+    @parametrize(
+        "use_block_ptr",
+        [subtest(False), subtest(True, decorators=[skip_if_not_triton])],
+    )
+    def test_conv3d_channels_last(self, use_block_ptr: bool):
         if self.device == GPU_TYPE:
             raise unittest.SkipTest("only support cpu conv3d channels_last")
 
@@ -4605,21 +4617,30 @@ class CommonTemplate:
             torch.nn.Conv3d(3, 3, 1, 1),
             ToTuple(),
         )
-        # only weight is channels_last
-        self.common(
-            m.to(memory_format=torch.channels_last_3d),
-            (torch.randn([2, 3, 16, 16, 16]),),
-        )
-        # only activation is channels_last
-        self.common(
-            m,
-            (torch.randn([2, 3, 16, 16, 16]).to(memory_format=torch.channels_last_3d),),
-        )
-        # activation and weight are all channels_last
-        self.common(
-            m.to(memory_format=torch.channels_last_3d),
-            (torch.randn([2, 3, 16, 16, 16]).to(memory_format=torch.channels_last_3d),),
-        )
+        with config.patch({"triton.use_block_ptr": use_block_ptr}):
+            # only weight is channels_last
+            self.common(
+                m.to(memory_format=torch.channels_last_3d),
+                (torch.randn([2, 3, 16, 16, 16]),),
+            )
+            # only activation is channels_last
+            self.common(
+                m,
+                (
+                    torch.randn([2, 3, 16, 16, 16]).to(
+                        memory_format=torch.channels_last_3d
+                    ),
+                ),
+            )
+            # activation and weight are all channels_last
+            self.common(
+                m.to(memory_format=torch.channels_last_3d),
+                (
+                    torch.randn([2, 3, 16, 16, 16]).to(
+                        memory_format=torch.channels_last_3d
+                    ),
+                ),
+            )
 
     @skip_if_gpu_halide  # slow
     @xfail_if_mps  # Non-divisible input sizes are not implemented on MPS device
@@ -6404,16 +6425,16 @@ class CommonTemplate:
             return x.cos().sin().softmax(-1)
 
         x = torch.randn(16, 256, device=self.device)
-        _, (coda_a0,) = run_and_get_kernels(a, x)
-        _, (coda_b0,) = run_and_get_kernels(b, x)
-        _, (coda_c0,) = run_and_get_kernels(c, x)
+        _, (coda_a0,) = _run_and_get_stripped_kernels(a, x)
+        _, (coda_b0,) = _run_and_get_stripped_kernels(b, x)
+        _, (coda_c0,) = _run_and_get_stripped_kernels(c, x)
         self.assertEqual(coda_a0, coda_c0)
 
         # compile in a different order
         torch.compiler.reset()
-        _, (coda_c1,) = run_and_get_kernels(c, x)
-        _, (coda_a1,) = run_and_get_kernels(a, x)
-        _, (coda_b1,) = run_and_get_kernels(b, x)
+        _, (coda_c1,) = _run_and_get_stripped_kernels(c, x)
+        _, (coda_a1,) = _run_and_get_stripped_kernels(a, x)
+        _, (coda_b1,) = _run_and_get_stripped_kernels(b, x)
         self.assertEqual(coda_a0, coda_a1)
         self.assertEqual(coda_b0, coda_b1)
         self.assertEqual(coda_c0, coda_c1)
@@ -6426,9 +6447,9 @@ class CommonTemplate:
             "__init__",
             lambda self, _: CompileContext_init(self, CompileId(999, 999)),
         ):
-            _, (coda_a2,) = run_and_get_kernels(a, x)
-            _, (coda_c2,) = run_and_get_kernels(c, x)
-            _, (coda_b2,) = run_and_get_kernels(b, x)
+            _, (coda_a2,) = _run_and_get_stripped_kernels(a, x)
+            _, (coda_c2,) = _run_and_get_stripped_kernels(c, x)
+            _, (coda_b2,) = _run_and_get_stripped_kernels(b, x)
         self.assertEqual(coda_a0, coda_a2)
         self.assertEqual(coda_b0, coda_b2)
         self.assertEqual(coda_c0, coda_c2)
@@ -6451,7 +6472,7 @@ class CommonTemplate:
             return x
 
         x = torch.randn(16, 256, device=self.device)
-        _, (code0, code1) = run_and_get_kernels(b, x)
+        _, (code0, code1) = _run_and_get_stripped_kernels(b, x)
         self.assertEqual(code0, code1)
 
     @patch.object(cpp_prefix_path, "cache_clear", lambda: None)
@@ -6473,8 +6494,8 @@ class CommonTemplate:
 
         x = torch.randn(16, 256, device=self.device)
         y = torch.randn(256, 256, device=self.device)
-        _, (code0,) = run_and_get_kernels(a, x)
-        _, (code1,) = run_and_get_kernels(b, x, y)
+        _, (code0,) = _run_and_get_stripped_kernels(a, x)
+        _, (code1,) = _run_and_get_stripped_kernels(b, x, y)
         self.assertEqual(code0, code1)
 
     def test_flip(self):
@@ -10191,6 +10212,13 @@ class CommonTemplate:
         # Constant must not get matched as constant
         self.common(fn, [torch.randn(3, 1, 1, 1, 1), 9132])
 
+    def test_float_repr_dynamic_shapes(self):
+        @torch.compile(dynamic=True)
+        def fn(x):
+            return F.interpolate(x, scale_factor=1 / 300, mode="linear")
+
+        self.common(fn, [torch.randn(1, 8, 396 * 300)])
+
     def test_sqrt_dynamic_shapes(self):
         # TIMM convit_base model: https://github.com/pytorch/pytorch/issues/97877.
         # TODO: support cuda path.
@@ -12851,7 +12879,7 @@ def copy_tests(
         other_cls.is_dtype_supported = my_cls.is_dtype_supported
 
 
-if HAS_CPU:
+if RUN_CPU:
 
     class SweepInputsCpuTest(SweepInputs2, TestCase):
         gen = InputGen(10, "cpu")
@@ -12864,7 +12892,7 @@ if HAS_CPU:
 
     copy_tests(CommonTemplate, CpuTests, "cpu")
 
-if HAS_GPU:
+if RUN_GPU:
 
     class SweepInputsGPUTest(SweepInputs2, TestCase):
         gen = InputGen(10, GPU_TYPE)
@@ -14107,7 +14135,7 @@ if HAS_GPU:
 
             if not config.cpp_wrapper:
                 FileCheck().check("def partition_0(args):").check(
-                    "(buf0, buf1) = self.partitions[0](partition0_args)"
+                    "(buf0, buf1, arg0_1, arg1_1) = self.partitions[0](partition0_args)"
                 ).check("recursively_apply_fns = runner.recursively_apply_fns").run(
                     code[0]
                 )
@@ -14216,6 +14244,26 @@ if HAS_GPU:
 
             self.assertEqual(eager_out, compiled_out)
 
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_fused_scheduler_node(self):
+            def foo(x):
+                x = x * 20
+                x_alias = x[0]
+                y = x * 10
+                y_alias = y[0]
+                torch._dynamo.graph_break()
+                ind = torch.tensor(4, device=GPU_TYPE)
+                x_alias2 = x[ind:]
+                y_alias2 = y[ind:]
+                return x, x_alias, x_alias2, y_alias, y_alias2
+
+            foo = torch.compile(foo)
+            x = torch.rand([20, 20], device=GPU_TYPE)
+            _, code = run_and_get_code(foo, x)
+
+            if not config.cpp_wrapper:
+                FileCheck().check("def partition_0(args):").run(code[0])
+
     class RNNTest(TestCase):
         device_type = GPU_TYPE
 
@@ -14266,7 +14314,7 @@ if HAS_GPU:
                 torch.compile(f)(x)
 
 
-if HAS_CPU:
+if RUN_CPU:
 
     class TestFull(TestCase):
         def test_full_dtype(self):
@@ -14313,8 +14361,22 @@ if HAS_CPU:
                 self.assertEqual(ret_opt, fn(pytype, dtype))
 
 
+def _strip_tmp_path(code: str) -> str:
+    """
+    Canonicalize things that look like a tmp path so they can be compared.
+    """
+    return re.sub('#include ".*?"', '#include "<tmppath>"', code)
+
+
+def _run_and_get_stripped_kernels(
+    fn: Callable[_P, _T], *args: _P.args, **kwargs: _P.kwargs
+) -> tuple[_T, list[str]]:
+    result, codes = run_and_get_kernels(fn, *args, **kwargs)
+    return result, [_strip_tmp_path(code) for code in codes]
+
+
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CPU or HAS_GPU:
+    if RUN_CPU or RUN_GPU:
         run_tests(needs="filelock")
