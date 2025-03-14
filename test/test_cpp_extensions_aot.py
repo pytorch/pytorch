@@ -217,15 +217,6 @@ class TestCppExtensionAOT(common.TestCase):
         missing_symbols = subprocess.check_output(["nm", "-u", so_file]).decode("utf-8")
         self.assertFalse("Py" in missing_symbols)
 
-        # finally, clean up the folder
-        cmd = [sys.executable, "setup.py", "clean"]
-        return_code = shell(
-            cmd,
-            cwd=os.path.join("cpp_extensions", "python_agnostic_extension"),
-            env=os.environ.copy(),
-        )
-        if return_code != 0:
-            return return_code
 
     @unittest.skipIf(not TEST_CUDA, "some aspects of this test require CUDA")
     def test_libtorch_agnostic(self):
