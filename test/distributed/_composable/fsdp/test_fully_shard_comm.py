@@ -426,17 +426,18 @@ class TestFullyShardCommunication(FSDPTest):
     def test_set_reshard_after_forward(self):
         """
         Tests that FSDP issues the expected number of all-gathers and
-        reduce-scatters during forward by setting reshard_after_forward.
+        reduce-scatters during a train step when setting reshard_after_forward.
         comm_count should perform same as test_fully_shard_communication_count.
         """
         self.run_subtests(
-            {"set_reshard_after_forward": [True, False]},
+            {"set_reshard_after_forward": [True, False], "recurse": [True, False]},
             self._test_set_reshard_after_forward_by_communication_count,
         )
 
     def _test_set_reshard_after_forward_by_communication_count(
         self,
         set_reshard_after_forward: bool,
+        recurse: bool,
     ):
         torch.manual_seed(42)
         model_args = ModelArgs()
@@ -453,7 +454,9 @@ class TestFullyShardCommunication(FSDPTest):
         num_fsdp_modules = sum(
             isinstance(module, FSDPModule) for module in model.modules()
         )
-        model.set_reshard_after_forward(set_reshard_after_forward)
+        model.set_reshard_after_forward(
+            reshard_after_forward=set_reshard_after_forward, recurse=recurse
+        )
 
         torch.manual_seed(42 + self.rank)
         inp = torch.randint(0, model_args.vocab_size, (2, 16), device="cuda")
@@ -466,11 +469,13 @@ class TestFullyShardCommunication(FSDPTest):
         with CommDebugMode() as bwd_comm_mode:
             loss.sum().backward()
         bwd_comm_counts = bwd_comm_mode.get_comm_counts()
-        if set_reshard_after_forward is False:
-            self.assertEqual(len(bwd_comm_counts), 1)
-        else:
+        # If recurse is False, set_reshard_after_forward only affects the root module,
+        # resulting in comm_counts identical to those without set_reshard_after_forward.
+        if recurse == set_reshard_after_forward:
             self.assertEqual(len(bwd_comm_counts), 2)
             self.assertEqual(bwd_comm_counts[c10d_ops._allgather_base_], num_blocks)
+        else:
+            self.assertEqual(len(bwd_comm_counts), 1)
         self.assertEqual(
             bwd_comm_counts[c10d_ops._reduce_scatter_base_], num_blocks + 1
         )

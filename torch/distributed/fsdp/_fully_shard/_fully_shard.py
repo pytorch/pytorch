@@ -355,10 +355,12 @@ class FSDPModule:
         self, reshard_after_forward: bool, recurse: bool = True
     ) -> None:
         """
-        Sets if the module should reshard parameters after forward. Setting
-        this to False can save computation time, as unsharded parameters do
-        not need to be re-all-gathered before setting it back to True during
-        training.
+        Sets if the module should reshard parameters after forward. This can be
+        used to change the ``_reshard_after_forward`` FSDP arg at runtime. For
+        example, this can be used to set the FSDP root module's value to
+        ``True`` (since it is otherwise specially set to ``False``), or it can
+        set an FSDP module's value to ``False`` for running evals and set back
+        to ``True`` for training.
 
         Args:
             reshard_after_forward (bool): Whether to reshard parameters after
