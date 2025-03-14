@@ -8,7 +8,7 @@
 
 namespace c10::impl {
 
-thread_local static TorchDispatchModeTLS torchDispatchModeState;
+thread_local TorchDispatchModeTLS torchDispatchModeState;
 
 bool TorchDispatchModeTLS::any_modes_set(bool skip_infra_modes) {
   if (!torchDispatchModeState.stack_.empty())

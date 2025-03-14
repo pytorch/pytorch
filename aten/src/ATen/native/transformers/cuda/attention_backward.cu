@@ -44,11 +44,9 @@
 #include <ATen/native/transformers/cuda/mem_eff_attention/pytorch_utils.h>
 #else
 // MemoryEfficient Attention Specific Imports for ROCM
-#ifndef DISABLE_AOTRITON
 #include <ATen/native/transformers/hip/aotriton_adapter.h>
 #include <aotriton/flash.h>
 #include <aotriton/runtime.h>
-#endif
 #include <ATen/native/transformers/hip/flash_attn/ck/me_ck_api.h>
 #endif
 #endif
@@ -455,7 +453,6 @@ _efficient_attention_backward(
     TORCH_CHECK(false, "Attempting to use CK mem_eff_backward backend in a build that has not built CK");
 #endif
   } else {
-#ifndef DISABLE_AOTRITON
     TORCH_CHECK(!num_splits_key.has_value(),
               "ROCM does not support num_split_keys in _efficient_attention_forward");
     TORCH_CHECK(!window_size.has_value(),
@@ -563,9 +560,6 @@ _efficient_attention_backward(
                      stream);
       } //used_fused_bwd
     } // cuseqlen.has_value
-#else  // DISABLE_AOTRITON
-    TORCH_CHECK(false, "Attempting to use aotriton mem_eff_backward backend in a build that has not built AOTriton");
-#endif
   } // Use CK
 #else // USE_CUDA
   at::Tensor workspace;

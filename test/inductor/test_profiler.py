@@ -42,12 +42,14 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
         self.assertTrue("traceEvents" in trace_json)
         events = trace_json["traceEvents"]
 
-        valid_names = {
-            "hipModuleLaunchKernel",
-            "cuLaunchKernel",
-            "triton_poi_fused_add_cos_sin_0",
-        }
-        self.assertTrue(any((event.get("name") in valid_names) for event in events))
+        kernel_name = "hipModuleLaunchKernel" if torch.version.hip else "cuLaunchKernel"
+
+        def nameMatchesLaunchKernel(event_name):  # noqa: F841
+            return kernel_name in event_name
+
+        self.assertTrue(
+            any(("name" in event and kernel_name == event["name"]) for event in events)
+        )
 
     def _test_profiling_kernel_names(
         self, fn, args, kernel_name_str: str, check_fn: Optional[Callable] = None
@@ -137,7 +139,7 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
             for event in events:
                 if event.name == "triton_tem_fused_mm_0":
                     event_found = True
-                    self.assertEqual(event.input_shapes[:3], [[4, 4], [4, 4], [4, 4]])
+                    self.assertTrue(event.input_shapes == [[4, 4], [4, 4], [4, 4]])
             self.assertTrue(event_found)
 
     @unittest.skipIf(not HAS_TRITON, "requires cuda & triton")

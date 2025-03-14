@@ -258,7 +258,7 @@ def export(
     kwargs: Optional[dict[str, Any]] = None,
     *,
     dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
-    strict: bool = False,
+    strict: bool = True,
     preserve_module_call_signature: tuple[str, ...] = (),
 ) -> ExportedProgram:
     """

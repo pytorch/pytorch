@@ -3590,24 +3590,6 @@ class CPUReproTests(TestCase):
         x = torch.randn(1, 384, 20, 20).to(memory_format=torch.channels_last)
         self.common(fn, (x,))
 
-    def test_issue_148058(self):
-        # Fix issue https://github.com/pytorch/pytorch/issues/148058
-        def fn(x):
-            x = F.gumbel_softmax(x, tau=1.0, hard=True)
-            x = torch.where(x > 0.5, x, torch.zeros_like(x))
-            x = torch.scatter(
-                x,
-                dim=1,
-                index=torch.ones(1, 2, dtype=torch.long),
-                src=torch.ones_like(x),
-            )
-            return x
-
-        metrics.reset()
-        x = torch.randn(1, 2)
-        # Only test for functionality since the output of gumbel_softmax has randomness
-        torch.compile(fn, backend="inductor")(x)
-
     def test_non_contiguous_index_with_constant_stride(self):
         def fn(x):
             x1 = x[:, :, :, ::2]

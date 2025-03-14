@@ -5,28 +5,6 @@
 #include <ATen/core/Tensor.h>
 #include <c10/util/Exception.h>
 
-#define CHECK_NOSPARSE_CONTIGUOUS_CUDA(TENSOR)                            \
-  TORCH_CHECK(TENSOR.is_cuda(), #TENSOR " must be a CUDA tensor");     \
-  TORCH_CHECK(!TENSOR.is_sparse(), #TENSOR " must be a dense tensor"); \
-  TORCH_CHECK(TENSOR.is_contiguous());
-
-#define CHECK_NOSPARSE_LASTCONTIGUOUS_CUDA(TENSOR)                        \
-  TORCH_CHECK(TENSOR.is_cuda(), #TENSOR " must be a CUDA tensor");     \
-  TORCH_CHECK(!TENSOR.is_sparse(), #TENSOR " must be a dense tensor"); \
-  TORCH_CHECK(                                                         \
-      TENSOR.stride(-1) == 1, #TENSOR ": last dimension must be contiguous");
-
-#define CHECK_ALIGNED_PTR(PTR, ALIGNMENT) \
-  TORCH_CHECK(                         \
-      uint64_t(PTR) % ALIGNMENT == 0, #PTR " is not correctly aligned")
-
-#define ASSIGN_CHECK_OVERFLOW(A, B)                                    \
-  {                                                                    \
-    A = B;                                                             \
-    TORCH_CHECK(                                                    \
-        B < std::numeric_limits<decltype(A)>::max(), #B " overflows"); \
-  }
-
 namespace pytorch_flash {
 
 // AOTriton Implementation
