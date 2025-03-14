@@ -64,3 +64,19 @@ def my_ones_like(tensor, device) -> Tensor:
         like the input tensor
     """
     return torch.ops.libtorch_agnostic.my_ones_like.default(tensor, device)
+
+
+def exp_neg_is_leaf(t1, t2, t3) -> tuple[Tensor, Tensor, bool]:
+    """
+    Returns a Tensor, Tensor, bool tuple corresponding to the respective inputs
+    t1, t2, and t3.
+
+    Args:
+        t1: Tensor
+        t2: Tensor
+        t3: Tensor
+
+    Returns:
+        (exp(t1), neg(t2), is_leaf(t3))
+    """
+    return torch.ops.libtorch_agnostic.exp_neg_is_leaf.default(t1, t2, t3)

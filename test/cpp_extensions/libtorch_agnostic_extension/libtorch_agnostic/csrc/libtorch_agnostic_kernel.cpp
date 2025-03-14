@@ -185,3 +185,40 @@ STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
   m.impl("my_ones_like", &boxed_my_ones_like);
 }
+
+std::tuple<RAIIATH, RAIIATH, bool> exp_neg_is_leaf(RAIIATH t1, RAIIATH t2, RAIIATH t3) {
+  StableIValue stack1[1];
+  stack1[0] = from(t1.release());
+  aoti_torch_call_dispatcher("aten::exp", "", stack1);
+
+  StableIValue stack2[1];
+  stack2[0] = from(t2.release());
+  aoti_torch_call_dispatcher("aten::neg", "", stack2);
+
+  StableIValue stack3[1];
+  stack3[0] = from(t3.release());
+  aoti_torch_call_dispatcher("aten::is_leaf", "", stack3);
+
+  return std::make_tuple(
+    RAIIATH(to<AtenTensorHandle>(stack1[0])),
+    RAIIATH(to<AtenTensorHandle>(stack2[0])),
+    to<bool>(stack3[0]));
+}
+
+void boxed_exp_neg_is_leaf(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
+  RAIIATH t1(to<AtenTensorHandle>(stack[0]));
+  RAIIATH t2(to<AtenTensorHandle>(stack[1]));
+  RAIIATH t3(to<AtenTensorHandle>(stack[2]));
+  auto tuple = exp_neg_is_leaf(std::move(t1), std::move(t2), std::move(t3));
+  stack[0] = from(std::get<0>(tuple).release());
+  stack[1] = from(std::get<1>(tuple).release());
+  stack[2] = from(std::get<2>(tuple));
+}
+
+STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
+  m.def("exp_neg_is_leaf(Tensor t1, Tensor t2, Tensor t3) -> (Tensor, Tensor, bool)");
+}
+
+STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
+  m.impl("exp_neg_is_leaf", &boxed_exp_neg_is_leaf);
+}
