@@ -4392,7 +4392,8 @@ class TestMPS(TestCaseMPS):
 
     # See https://github.com/pytorch/pytorch/pull/84742
     # and https://github.com/pytorch/pytorch/pull/78319
-    def test_binops_dtype_precedence(self):
+    @parametrize("binop", ['add', 'sub', 'mul', 'div'])
+    def test_binops_dtype_precedence(self, binop):
         # Test dtype precedence (casting order) in binary operations by comparing to CPU result
         # Example values for all dtypes supported on the MPS backend
         sample_vals = {
@@ -4404,8 +4405,7 @@ class TestMPS(TestCaseMPS):
             torch.float32: [-1.0, 0.0, 0.1, 111.99],
         }
         # Test all combinations of dtypes, operations, dimensionality
-        for dtype1, dtype2, binop in itertools.product(
-                sample_vals.keys(), sample_vals.keys(), ['add', 'sub', 'mul', 'div']):
+        for dtype1, dtype2 in itertools.product(sample_vals, repeat=2):
             # bool minus bool is generally unsupported, so skip
             if binop == 'sub' and (dtype1 == torch.bool or dtype2 == torch.bool):
                 continue
