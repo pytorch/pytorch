@@ -72,7 +72,7 @@ from torch.utils._python_dispatch import (
 )
 from torch.utils._traceback import CapturedTraceback, format_traceback_short
 
-from . import config, exc, graph_break_hints, trace_rules
+from . import config, decorators, exc, graph_break_hints, trace_rules
 from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
 from .bytecode_transformation import (
     check_inst_exn_tab_entries_valid,
@@ -552,6 +552,17 @@ class ConvertFrameAssert:
 
         if not has_tensor_in_frame(frame):
             return ConvertFrameReturn()
+
+        # skip tracing non-recursive disabled functions
+        # detect if this frame is torch._dynamo.decorators.disable_wrapper
+        # by looking for a torch._dynamo.decorators._disable_wrapper_object freevar
+        if frame.f_code.co_name == "nonrecursive_disable_wrapper":
+            for name in frame.f_code.co_freevars:
+                if (
+                    name in frame.f_locals
+                    and frame.f_locals[name] is decorators._disable_wrapper_object
+                ):
+                    return ConvertFrameReturn(skip_next_frame=True)
 
         global initial_global_state
         initial_global_state = GlobalStateGuard()
