@@ -61,7 +61,7 @@ def _call_symbolic_op(
     # Construct and filter out None attributes
     attributes = [
         attr
-        for attr in ir_convenience.convert_attributes(kwargs)
+        for attr in ir_convenience.convert_attributes(kwargs)  # type: ignore[arg-type]
         if attr.value is not None  # type: ignore[union-attr]
     ]
     tracer.nodes.append(
@@ -86,10 +86,10 @@ def _call_symbolic_op(
 
 @onnx_impl(torch.ops.onnx_symbolic._symbolic.default, no_compile=True)
 def onnx_symbolic_symbolic(
-    inputs: Sequence[torch.Tensor],
+    inputs: Sequence[ir.Value | None],
     op_type: str,
     onnx_dtype: int,
-    attr_tensors: Sequence[torch.Tensor] = (),
+    attr_tensors: Sequence[ir.TensorProtocol] = (),
     *,
     shape: Sequence[int | ir.Value],
     attr_keys: Sequence[str],
@@ -103,6 +103,7 @@ def onnx_symbolic_symbolic(
     domain: str = "",
     version: int | None = None,
 ) -> ir.Value:
+    # TODO(justinchuby): Ensure the type of attr_tensors is consistent
     encoded = _symbolic_impl.EncodedAttrs(
         attr_keys=list(attr_keys),
         attr_types=list(attr_types),
@@ -127,10 +128,10 @@ def onnx_symbolic_symbolic(
 
 @onnx_impl(torch.ops.onnx_symbolic._symbolic_multi_out.default, no_compile=True)
 def onnx_symbolic_symbolic_multi_out(
-    inputs: Sequence[torch.Tensor],
+    inputs: Sequence[ir.Value | None],
     op_type: str,
     onnx_dtypes: Sequence[int],
-    attr_tensors: Sequence[torch.Tensor],
+    attr_tensors: Sequence[ir.TensorProtocol],
     *,
     shapes: Sequence[Sequence[int | ir.Value]],
     attr_keys: Sequence[str],
@@ -143,7 +144,7 @@ def onnx_symbolic_symbolic_multi_out(
     metadata_props_values: Sequence[str] = (),
     domain: str = "",
     version: int | None = None,
-) -> Sequence[torch.Tensor]:
+) -> Sequence[ir.Value]:
     encoded = _symbolic_impl.EncodedAttrs(
         attr_keys=list(attr_keys),
         attr_types=list(attr_types),

@@ -5,7 +5,7 @@ from typing import Optional, Union
 import torch
 
 
-_ONNX_DTYPE_TO_TORCH_DTYPE = {
+_ONNX_DTYPE_TO_TORCH_DTYPE: dict[int, torch.dtype] = {
     1: torch.float32,  # FLOAT
     2: torch.uint8,  # UINT8
     3: torch.int8,  # INT8
@@ -13,7 +13,6 @@ _ONNX_DTYPE_TO_TORCH_DTYPE = {
     5: torch.int16,  # INT16
     6: torch.int32,  # INT32
     7: torch.int64,  # INT64
-    8: str,  # STRING
     9: torch.bool,  # BOOL
     10: torch.float16,  # FLOAT16
     11: torch.double,  # DOUBLE
@@ -34,6 +33,8 @@ _ONNX_DTYPE_TO_TORCH_DTYPE = {
 
 @dataclasses.dataclass
 class EncodedAttrs:
+    """Class to encode attributes from dictionary into lists of FX compatible attributes."""
+
     attr_keys: list[str]
     attr_types: list[str]
     attr_pos: list[tuple[int, int]]
@@ -127,8 +128,35 @@ class EncodedAttrs:
         )
         return encoded
 
-    def to_dict(self) -> dict[str, Union[int, float, str]]:
-        attrs = {}
+    def to_dict(
+        self,
+    ) -> dict[
+        str,
+        Union[
+            int,
+            float,
+            str,
+            torch.Tensor,
+            list[int],
+            list[float],
+            list[str],
+            list[torch.Tensor],
+        ],
+    ]:
+        """Convert the encoded attributes back to a dictionary for creating an ONNX node."""
+        attrs: dict[
+            str,
+            Union[
+                int,
+                float,
+                str,
+                torch.Tensor,
+                list[int],
+                list[float],
+                list[str],
+                list[torch.Tensor],
+            ],
+        ] = {}
         for i, key in enumerate(self.attr_keys):
             attr_type = self.attr_types[i]
             if attr_type == "i":
@@ -158,7 +186,7 @@ class EncodedAttrs:
     "onnx_symbolic::_symbolic",
     mutates_args=(),
     schema=(
-        "(Tensor[] inputs, str op_type, int onnx_dtype, Tensor[] attr_tensors, *,"
+        "(Tensor?[] inputs, str op_type, int onnx_dtype, Tensor[] attr_tensors, *,"
         " SymInt[] shape, str[] attr_keys, str[] attr_types, int[][] attr_pos,"
         " int[] attr_ints, float[] attr_floats, str[] attr_strs, str[] metadata_props_keys,"
         " str[] metadata_props_values, str domain='', int? version=None"
@@ -166,7 +194,7 @@ class EncodedAttrs:
     ),
 )
 def _symbolic(
-    inputs: Sequence[torch.Tensor],
+    inputs: Sequence[Optional[torch.Tensor]],
     op_type: str,
     onnx_dtype: int,
     attr_tensors: Sequence[torch.Tensor],
@@ -242,7 +270,7 @@ torch.library.opcheck(
     "onnx_symbolic::_symbolic_multi_out",
     mutates_args=(),
     schema=(
-        "(Tensor[] inputs, str op_type, int[] onnx_dtypes, Tensor[] attr_tensors, *,"
+        "(Tensor?[] inputs, str op_type, int[] onnx_dtypes, Tensor[] attr_tensors, *,"
         " SymInt[][] shapes, str[] attr_keys, str[] attr_types, int[][] attr_pos,"
         " int[] attr_ints, float[] attr_floats, str[] attr_strs, str[] metadata_props_keys,"
         " str[] metadata_props_values, str domain='', int? version=None"
@@ -250,7 +278,7 @@ torch.library.opcheck(
     ),
 )
 def _symbolic_multi_out(
-    inputs: Sequence[torch.Tensor],
+    inputs: Sequence[Optional[torch.Tensor]],
     op_type: str,
     onnx_dtypes: Sequence[int],
     attr_tensors: Sequence[torch.Tensor],
