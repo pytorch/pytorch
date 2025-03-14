@@ -26,7 +26,7 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
 
   lintrunner-clang:
-    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
     needs: get-label-type
     with:
       timeout: 120
@@ -43,7 +43,7 @@ jobs:
         .github/scripts/lintrunner.sh
 
   lintrunner-noclang:
-    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
     needs: get-label-type
     with:
       timeout: 120
@@ -59,7 +59,7 @@ jobs:
         .github/scripts/lintrunner.sh
 
   quick-checks:
-    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
     needs: get-label-type
     with:
       timeout: 120
@@ -116,7 +116,7 @@ jobs:
           bash .github/scripts/pr-sanity-check.sh
 
   workflow-checks:
-    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
     needs: get-label-type
     with:
       timeout: 120
@@ -154,7 +154,7 @@ jobs:
         exit $RC
 
   toc:
-    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
     needs: get-label-type
     with:
       timeout: 120
@@ -194,7 +194,7 @@ jobs:
   test-tools:
     name: Test tools
     if: ${{ github.repository == 'pytorch/pytorch' }}
-    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
     needs: get-label-type
     with:
       timeout: 120
@@ -253,21 +253,28 @@ jobs:
         with:
           submodules: false
           fetch-depth: 1
-      - name: Setup Python 3.6
+      - name: Get min python version
+        id: get-min-python-version
+        if: matrix.test_type == 'older_python_version'
+        run: |
+          set -eou pipefail
+          # Generate PyTorch version to use
+          echo "MIN_PYTHON_VERSION=$(python3 .github/scripts/get_ci_variable.py --min-python-version)" >> "${GITHUB_OUTPUT}"
+      - name: Setup Old Python version
         if: matrix.test_type == 'older_python_version'
         uses: actions/setup-python@v4
         with:
-          python-version: '3.6'
+          python-version: 3.6
           architecture: x64
           check-latest: false
           cache: pip
           cache-dependency-path: |
             **/requirements.txt
-      - name: Setup Python 3.9
+      - name: Setup Min Python version
         if: matrix.test_type != 'older_python_version'
         uses: actions/setup-python@v4
         with:
-          python-version: '3.9'
+          python-version: ${{ steps.get-min-python-version.outputs.MIN_PYTHON_VERSION }}
           architecture: x64
           check-latest: false
           cache: pip
