@@ -5528,8 +5528,8 @@ class TestLinalg(TestCase):
                 # Additionally, the Op Signature must be tf32
                 last_result = torch.cuda.tunable.get_results()
                 found_result = find_tunableop_result(last_result,
-                                                    'GemmTunableOp_tf32_NN',
-                                                    'nn_37_37_37_ld_37_37_37')
+                                                     'GemmTunableOp_tf32_NN',
+                                                     'nn_37_37_37_ld_37_37_37')
                 self.assertTrue(found_result is not None)
                 self.assertTrue('Rocblas' not in found_result)
 
@@ -5552,8 +5552,8 @@ class TestLinalg(TestCase):
                 # The new tuning result must be of type float
                 last_result = torch.cuda.tunable.get_results()
                 found_result = find_tunableop_result(last_result,
-                                                    'GemmTunableOp_float_NN',
-                                                    'nn_37_37_37_ld_37_37_37')
+                                                     'GemmTunableOp_float_NN',
+                                                     'nn_37_37_37_ld_37_37_37')
                 self.assertTrue(found_result is not None)
 
         finally:
