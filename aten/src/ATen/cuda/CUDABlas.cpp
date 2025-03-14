@@ -228,7 +228,7 @@ void* _getWorkspaceWithoutHandle() {
   cudaStream_t _stream = stream;
   auto key = std::make_tuple(static_cast<void *>(handle), static_cast<void *>(_stream));
   auto workspace_it = at::cuda::cublas_handle_stream_to_workspace().find(key);
-  TORCH_CHECK(workspace_it != at::cuda::cublas_handle_stream_to_workspace().end());
+  TORCH_INTERNAL_ASSERT(workspace_it != at::cuda::cublas_handle_stream_to_workspace().end());
   return workspace_it->second.mutable_get();
 }
 
@@ -238,11 +238,11 @@ void* _getWorkspace(size_t& workspaceSize) {
   auto cublasWorkspaceSize = at::cuda::getChosenWorkspaceSize();
   if (cublasWorkspaceSize < workspaceSize) {
     TORCH_WARN_ONCE("Requested CUBLASLT workspace size of ", workspaceSize,
-		    " bytes exceeds CUBLAS workspace size of ", cublasWorkspaceSize,
-		    " bytes. Please increase CUBLAS workspace size",
-		    " via CUBLAS_WORKSPACE_CONFIG or decrease requested"
+                    " bytes exceeds CUBLAS workspace size of ", cublasWorkspaceSize,
+                    " bytes. Please increase CUBLAS workspace size",
+                    " via CUBLAS_WORKSPACE_CONFIG or decrease requested"
                     " CUBLASLT_WORKSPACE_SIZE. Otherwise CUBLASLT workspace"
-		    " size will be limited to the CUBLAS workspace size.");
+                    " size will be limited to the CUBLAS workspace size.");
     workspaceSize = cublasWorkspaceSize;
   }
 // #else
