@@ -33,7 +33,6 @@ from torch.distributed.tensor.placement_types import (
     Replicate,
     Shard,
 )
-from torch.functional import split
 
 
 aten = torch.ops.aten
