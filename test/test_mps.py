@@ -1,4 +1,4 @@
-# Owner(s): ["module: mps"]
+    # Owner(s): ["module: mps"]
 # ruff: noqa: F841
 import io
 import sys
@@ -97,6 +97,7 @@ def mps_ops_grad_modifier(ops):
         'logdet': [torch.float16, torch.float32],  # missing aten::lu_solve.out
         'aminmax': [torch.float32, torch.float16],
         'special.i1': [torch.float16],  # "i1_backward" not implemented for 'Half'
+        'special.i0e': None,  # "special_i1e" not implemented
 
         # Correctness issues
         'atanh': [torch.float32],
