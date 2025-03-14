@@ -543,9 +543,9 @@ class MetalKernel(SIMDKernel):
                 dtype=dtype,
             )
         if reduction_type == "welford_reduce":
-            assert (
-                not self.multistage_reduction
-            ), f"Multistage reduction not yet supported for {reduction_type}"
+            assert not self.multistage_reduction, (
+                f"Multistage reduction not yet supported for {reduction_type}"
+            )
             acc_buf = self._new_accvar(src_dtype, acc_buf_size)
             self.compute.splice(f"{acc_buf}[{reduction_dim.name}] = {value};")
             wf_res = self.cse.generate(

@@ -122,6 +122,15 @@ class MPSBasicTests(TestCase):
     def test_pointwise_bessel_j0(self):
         self.common(torch.special.bessel_j0, (torch.rand(128, 128),), check_lowp=True)
 
+    def test_pointwise_bessel_j1(self):
+        self.common(torch.special.bessel_j1, (torch.rand(128, 128),), check_lowp=True)
+
+    def test_pointwise_bessel_y0(self):
+        self.common(torch.special.bessel_y0, (torch.rand(128, 128),), check_lowp=False)
+
+    def test_pointwise_bessel_y1(self):
+        self.common(torch.special.bessel_y1, (torch.rand(128, 128),), check_lowp=True)
+
     def test_pointwise_xlog1py(self):
         self.common(
             torch.special.xlog1py,
