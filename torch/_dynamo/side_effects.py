@@ -412,10 +412,6 @@ class SideEffects:
             # obj = base_cls.__new__(user_cls, *init_args)
 
             obj = base_cls.__new__(user_cls)
-            if isinstance(obj, base_cls) and all(
-                arg.is_python_constant() for arg in init_args
-            ):
-                obj.__init__(*[arg.as_python_constant() for arg in init_args])
         return obj
 
     def track_new_user_defined_object(

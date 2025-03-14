@@ -148,7 +148,13 @@ class ConstDictVariable(VariableTracker):
             return x
 
         def __hash__(self):
-            return hash(self.underlying_value)
+            try:
+                return hash(self.underlying_value)
+            except Exception:
+                # In some cases we cannot compute the hash because the UserDefinedObjectValue
+                # wasn't property initialized
+                # pytest test/quantization/pt2e/test_x86inductor_quantizer.py -k test_flatten_recipe2
+                unimplemented(f"Cannot compute hash({self.vt})")
 
         @staticmethod
         def _eq_impl(a, b):
