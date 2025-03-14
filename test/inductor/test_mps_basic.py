@@ -85,6 +85,9 @@ class MPSBasicTests(TestCase):
     def test_pointwise_i0(self):
         self.common(torch.special.i0, (torch.rand(128, 128),), check_lowp=False)
 
+    def test_pointwise_i0e(self):
+        self.common(torch.special.i0e, (torch.rand(128, 128),), check_lowp=False)
+
     def test_pointwise_i1(self):
         self.common(torch.special.i1, (torch.rand(128, 128),), check_lowp=False)
 
@@ -118,6 +121,18 @@ class MPSBasicTests(TestCase):
         self.common(
             torch.special.spherical_bessel_j0, (torch.rand(128, 128),), check_lowp=False
         )
+
+    def test_pointwise_bessel_j0(self):
+        self.common(torch.special.bessel_j0, (torch.rand(128, 128),), check_lowp=True)
+
+    def test_pointwise_bessel_j1(self):
+        self.common(torch.special.bessel_j1, (torch.rand(128, 128),), check_lowp=True)
+
+    def test_pointwise_bessel_y0(self):
+        self.common(torch.special.bessel_y0, (torch.rand(128, 128),), check_lowp=False)
+
+    def test_pointwise_bessel_y1(self):
+        self.common(torch.special.bessel_y1, (torch.rand(128, 128),), check_lowp=True)
 
     def test_pointwise_xlog1py(self):
         self.common(
@@ -156,9 +171,11 @@ for test_name in [
     "test_any",
     "test_arange5",
     "test_argmax_min_int32",
+    "test_argmax_argmin1",
     "test_argmax_argmin2",
     "test_avg_pool2d5",
     "test_avg_pool2d8",
+    "test_bernoulli1",
     "test_builtins_round",
     "test_builtins_round_float_ndigits_neg",
     "test_cat_empty",
@@ -186,9 +203,11 @@ for test_name in [
     "test_low_memory_max_pool",
     "test_max_min",
     "test_max_pool2d2",
+    "test_multilayer_prime_size",
     "test_min_max_reduction_nan",
     "test_nan_to_num",
     "test_pow2",
+    "test_prod",
     "test_randint_int64_mod",
     "test_randn_generator",
     "test_remainder",
@@ -207,6 +226,7 @@ for test_name in [
     "test_sum_int",
     "test_sum_keepdims",
     "test_tanh",
+    "test_vectorized_ops_masked",
     "test_view_as_complex",
     "test_view_on_aliased",
     "test_views3",

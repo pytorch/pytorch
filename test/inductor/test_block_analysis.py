@@ -4,6 +4,7 @@ import sympy
 
 import torch
 from torch._inductor.codegen.block_analysis import BlockPatternMatcher
+from torch._inductor.utils import sympy_dot
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -96,6 +97,40 @@ class BlockAnalysisTest(TestCase):
     ):
         matched_subexpr = BlockPatternMatcher.get_subexpr_involving_symbol(expr, symbol)
         self.assertEqual(matched_subexpr, subexpr)
+
+    def test_index_with_dynamic_shapes(self):
+        s0 = sympy.var("s0", integer=True)
+        s1 = sympy.var("s1", integer=True)
+
+        dims = [s1, sympy.Integer(3)]
+        num_dims = len(dims)
+        numel = dims[0] * dims[1]
+        strides = [sympy.Integer(3) * s0, sympy.Integer(1)]
+        block_index_exprs = [
+            FloorDiv(y, sympy.Integer(3)),
+            ModularIndexing(y, sympy.Integer(1), sympy.Integer(3)),
+        ]
+        index = sympy_dot(strides, block_index_exprs)
+
+        with V.set_graph_handler(self.graph):
+            match = BlockPatternMatcher.match_mod_div_block_expr(
+                index, y, numel, num_dims
+            )
+            sizevars = V.graph.sizevars
+            for expected, actual in zip((dims, strides, block_index_exprs), match):
+                assert isinstance(expected, (list, tuple)) and isinstance(
+                    actual, (list, tuple)
+                )
+                for expected_expr, actual_expr in zip(expected, actual):
+                    assert isinstance(expected_expr, sympy.Expr) and isinstance(
+                        actual_expr, sympy.Expr
+                    )
+                    self.assertTrue(
+                        sizevars.statically_known_equals(
+                            sizevars.remove_precomputed_replacements(expected_expr),
+                            sizevars.remove_precomputed_replacements(actual_expr),
+                        )
+                    )
 
 
 if __name__ == "__main__":
