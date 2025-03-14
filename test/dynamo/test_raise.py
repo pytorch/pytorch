@@ -1,3 +1,8 @@
+# Owner(s): ["module: dynamo"]
+
+# ruff: noqa
+# flake8: noqa
+
 import sys
 import types
 import unittest
@@ -8,9 +13,7 @@ import torch._dynamo.test_case
 import torch._functorch.config
 import torch.nn
 import torch.utils.checkpoint
-from torch.testing._internal.common_utils import (
-    make_dynamo_test,
-)
+from torch.testing._internal.common_utils import make_dynamo_test
 
 
 def get_tb():
@@ -23,6 +26,7 @@ def get_tb():
 class Context:
     def __enter__(self):
         return self
+
     def __exit__(self, exc_type, exc_value, exc_tb):
         return True
 
@@ -35,6 +39,7 @@ class MyException(Exception):
 class ContextManager:
     def __enter__(self):
         pass
+
     def __exit__(self, t, v, tb):
         raise NameError
 
@@ -56,7 +61,7 @@ class TestRaise(torch._dynamo.test_case.TestCase):
     def test_reraise(self):
         try:
             try:
-                raise IndexError()
+                raise IndexError
             except IndexError as e:
                 exc1 = e
                 raise
@@ -76,6 +81,7 @@ class TestRaise(torch._dynamo.test_case.TestCase):
                 except KeyError:
                     pass
                 raise
+
         self.assertRaises(TypeError, reraise)
 
     @make_dynamo_test
@@ -88,17 +94,20 @@ class TestRaise(torch._dynamo.test_case.TestCase):
                     raise KeyError("caught")
                 finally:
                     raise
+
         self.assertRaises(KeyError, reraise)
 
     @make_dynamo_test
     def test_nested_reraise(self):
         def nested_reraise():
             raise
+
         def reraise():
             try:
                 raise TypeError("foo")
             except:
                 nested_reraise()
+
         self.assertRaises(TypeError, reraise)
 
     @make_dynamo_test
@@ -121,6 +130,7 @@ class TestRaise(torch._dynamo.test_case.TestCase):
                 with Context():
                     pass
                 raise
+
         self.assertRaises(TypeError, reraise)
 
     @make_dynamo_test
@@ -132,6 +142,7 @@ class TestRaise(torch._dynamo.test_case.TestCase):
                 with Context():
                     raise KeyError("caught")
                 raise
+
         self.assertRaises(TypeError, reraise)
 
     @make_dynamo_test
@@ -142,6 +153,7 @@ class TestRaise(torch._dynamo.test_case.TestCase):
             except:
                 yield 1
                 raise
+
         g = reraise()
         next(g)
         self.assertRaises(TypeError, lambda: next(g))
@@ -520,3 +532,9 @@ class TestContext(torch._dynamo.test_case.TestCase):
             f()
 
             self.assertEqual(ZeroDivisionError, cm.unraisable.exc_type)
+
+
+if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
+    run_tests()
