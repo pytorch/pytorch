@@ -17,7 +17,7 @@ networkx==2.8.8
 Jinja2==3.1.4
 fsspec==2025.3.0
 lintrunner==0.12.5
-ninja ?
+ninja==1.11.1.3
 packaging==24.2
 optree==0.13.0
-cmake?
+cmake==3.31.4
