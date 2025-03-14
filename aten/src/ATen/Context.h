@@ -110,6 +110,11 @@ class TORCH_API Context {
 
   Allocator* getPinnedMemoryAllocator(
       std::optional<c10::DeviceType> device_type = std::nullopt) {
+    auto opt_device_type =
+        device_type.has_value() ? device_type : at::getAccelerator();
+    if (opt_device_type) {
+      lazyInitDevice(opt_device_type.value());
+    }
     return getAcceleratorHooksInterface(device_type).getPinnedMemoryAllocator();
   }
 
