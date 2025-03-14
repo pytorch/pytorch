@@ -13500,7 +13500,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: special_i0e_out
+    CPU, CUDA, MPS: special_i0e_out
   tags: pointwise
 
 - func: special_i1(Tensor self) -> Tensor
@@ -13528,7 +13528,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: special_i1e_out
+    CPU, CUDA, MPS: special_i1e_out
   tags: pointwise
 
 - func: special_logit(Tensor self, float? eps=None) -> Tensor
@@ -14990,7 +14990,7 @@
 
 - func: special_bessel_j0.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA: special_bessel_j0_out
+    CPU, CUDA, MPS: special_bessel_j0_out
   python_module: special
   structured_inherits: TensorIteratorBase
   structured: True
@@ -15005,7 +15005,7 @@
 
 - func: special_bessel_j1.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA: special_bessel_j1_out
+    CPU, CUDA, MPS: special_bessel_j1_out
   python_module: special
   structured_inherits: TensorIteratorBase
   structured: True
@@ -15020,7 +15020,7 @@
 
 - func: special_bessel_y0.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA: special_bessel_y0_out
+    CPU, CUDA, MPS: special_bessel_y0_out
   python_module: special
   structured_inherits: TensorIteratorBase
   structured: True
@@ -15035,7 +15035,7 @@
 
 - func: special_bessel_y1.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA: special_bessel_y1_out
+    CPU, CUDA, MPS: special_bessel_y1_out
   python_module: special
   structured_inherits: TensorIteratorBase
   structured: True
