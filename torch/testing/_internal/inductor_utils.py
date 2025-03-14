@@ -9,8 +9,10 @@ import contextlib
 import os
 from subprocess import CalledProcessError
 import sys
+from typing import Any
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._inductor.graph import GraphLowering
 from torch._inductor.compile_fx import shape_env_from_inputs
 from torch._inductor.codecache import CppCodeCache
@@ -23,8 +25,6 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     LazyVal,
     IS_FBCODE,
-)
-from torch.testing._internal.common_utils import (
     TestCase,
     IS_CI,
     IS_WINDOWS,
@@ -228,3 +228,28 @@ def clone_preserve_strides_offset(x, device=None):
         buffer = buffer.to(device, copy=True)
     out = torch.as_strided(buffer, x.size(), x.stride(), x.storage_offset())
     return out
+
+def backend_for_device(device: str) -> str | None:
+    """ Get the Inductor codegen backend used for the device ``device``. """
+    if dev_int := get_interface_for_device(device):
+        return dev_int.inductor_backend()
+    return None
+
+def try_patch_inductor_backend_config(device: str, key: str,
+                                      value: Any) -> contextlib.ContextDecorator:
+    """
+    Try to patch the backend-specific Inductor options, for the codegen backend
+    corresponding to the given ``device``. If that config can't be found to
+    patch, skip the test.
+    """
+    device_backend = backend_for_device(device)
+
+    if (
+            device_backend is None
+            or not hasattr(torch._inductor.config, f"{device_backend}")
+            or not hasattr(torch._inductor.config, f"{device_backend}.{key}")
+    ):
+        return unittest.skip(
+            f"Can't patch Inductor config {key} for device {device}")
+
+    return torch._inductor.config.patch(f"{device_backend}.{key}", value)

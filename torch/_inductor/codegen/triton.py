@@ -1240,7 +1240,21 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     @maybe_upcast_float32()
     def log1p(x):
-        return f"libdevice.log1p({x})"
+        bug = config.triton.inject_log1p_bug_TESTING_ONLY
+        if bug == "compile_error":
+            return "compile error!"
+        elif bug == "runtime_error":
+            # NB: this only triggers runtime error as long as input
+            # is not all zero
+            return f'triton_helpers.device_assert_then({x} == 0, "injected assert fail", {x})'
+        elif bug == "accuracy":
+            return f"{x} + 1"
+        elif bug is None:
+            return f"libdevice.log1p({x})"
+        else:
+            raise AssertionError(
+                f"unrecognized config triton.inject_log1p_bug_TESTING_ONLY = {bug!r}"
+            )
 
     @staticmethod
     @maybe_upcast_float32()
@@ -2094,9 +2108,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     continue
 
                 advancements = self.pointer_advancements[symt]
-                assert block_ptr not in advancements, (
-                    "duplicate advancement for pointer '{block_ptr}' at type '{symt}'"
-                )
+                assert (
+                    block_ptr not in advancements
+                ), "duplicate advancement for pointer '{block_ptr}' at type '{symt}'"
                 advancements[block_ptr] = advance_offsets
         else:
             block_ptr = indexing.format(var)
@@ -3176,9 +3190,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.filter_masks(masks)
         masks = sorted(masks)
         assert not self._load_mask, "ops.sort not supported inside ops.masked"
-        assert self.persistent_reduction, (
-            "ops.sort is only supported in persistent reductions"
-        )
+        assert (
+            self.persistent_reduction
+        ), "ops.sort is only supported in persistent reductions"
 
         cse_compute = functools.partial(self.cse.generate, self.compute)
         dim = self.triton_tensor_ndim() - self.num_reduction_dims
@@ -4462,9 +4476,9 @@ def debug_triton_code(node: BaseSchedulerNode) -> list[str]:
         device = node.get_device()
         assert device is not None
         backend = node.scheduler.get_backend(device)
-        assert isinstance(backend, (SIMDScheduling, CUDACombinedScheduling)), (
-            f"Scheduling backend should be SIMD or CUDACombined when generating debug Triton strings, got: {type(backend)}"
-        )
+        assert isinstance(
+            backend, (SIMDScheduling, CUDACombinedScheduling)
+        ), f"Scheduling backend should be SIMD or CUDACombined when generating debug Triton strings, got: {type(backend)}"
 
         with V.graph.set_current_device(device):
             # Don't increment kernel count when generating debug string.

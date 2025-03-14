@@ -2725,9 +2725,9 @@ def same(
     if isinstance(
         ref, (list, tuple, collections.deque, torch.nn.ParameterList, torch.Size)
     ):
-        assert isinstance(res, (list, tuple, collections.deque)), (
-            f"type mismatch {type(ref)} {type(res)}"
-        )
+        assert isinstance(
+            res, (list, tuple, collections.deque)
+        ), f"type mismatch {type(ref)} {type(res)}"
         if len(ref) != len(res):
             log_error("Length mismatch")
             return False
@@ -2768,9 +2768,9 @@ def same(
         )
     elif isinstance(ref, dict):
         assert isinstance(res, dict)
-        assert set(ref.keys()) == set(res.keys()), (
-            f"keys mismatch {set(ref.keys())} == {set(res.keys())}"
-        )
+        assert set(ref.keys()) == set(
+            res.keys()
+        ), f"keys mismatch {set(ref.keys())} == {set(res.keys())}"
         for k in sorted(ref.keys()):
             if not (
                 same(
@@ -2923,7 +2923,14 @@ def same(
                     and math.isnan(res_error)
                     # Some unit test for the accuracy minifier relies on
                     # returning false in this case.
-                    and not torch._inductor.config.cpp.inject_relu_bug_TESTING_ONLY
+                    and not any(
+                        (
+                            torch._inductor.config.cpp.inject_relu_bug_TESTING_ONLY,
+                            torch._inductor.config.cpp.inject_log1p_bug_TESTING_ONLY,
+                            torch._inductor.config.triton.inject_relu_bug_TESTING_ONLY,
+                            torch._inductor.config.triton.inject_log1p_bug_TESTING_ONLY,
+                        )
+                    )
                 ):
                     passes_test = True
                 if not passes_test:
@@ -3420,13 +3427,13 @@ def assert_no_fake_params_or_buffers(gm):
             return "Enable TORCH_FAKE_TENSOR_DEBUG=1 to get creation stack traces on fake tensors."
 
     for name, buffer in gm.named_buffers():
-        assert not is_fake(buffer), (
-            f"Unexpected fake buffer {name} {stack_or_hint(buffer)}"
-        )
+        assert not is_fake(
+            buffer
+        ), f"Unexpected fake buffer {name} {stack_or_hint(buffer)}"
     for name, param in gm.named_parameters():
-        assert not is_fake(param), (
-            f"Unexpected fake param {name} {stack_or_hint(param)}"
-        )
+        assert not is_fake(
+            param
+        ), f"Unexpected fake param {name} {stack_or_hint(param)}"
 
 
 def fqn(obj: Any):
@@ -4528,9 +4535,9 @@ def get_optimize_ddp_mode():
             f"Invalid dynamo config optimize_ddp type {type(optimize_ddp)=}"
         )
 
-    assert mode in _ddp_optimization_mode, (
-        f"Invalid dynamo config optimize_ddp value {mode=}"
-    )
+    assert (
+        mode in _ddp_optimization_mode
+    ), f"Invalid dynamo config optimize_ddp value {mode=}"
     return mode
 
 
