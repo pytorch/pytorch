@@ -285,7 +285,6 @@ def generate_opcheck_tests(
                     new_pytestmark.append(mark)
                 new_method.__dict__["pytestmark"] = new_pytestmark
 
-        print(f"creating new_method: {new_method_name}")
         if new_method_name in additional_decorators:
             for dec in additional_decorators[new_method_name]:
                 new_method = dec(new_method)
