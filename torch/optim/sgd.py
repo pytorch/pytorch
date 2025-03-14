@@ -348,7 +348,7 @@ def _single_tensor_sgd(
             buf = momentum_buffer_list[i]
 
             if buf is None:
-                buf = torch.clone(grad).detach()
+                buf = torch.clone(grad.detach())
                 momentum_buffer_list[i] = buf
             else:
                 buf.mul_(momentum).add_(grad, alpha=1 - dampening)
@@ -436,7 +436,7 @@ def _multi_tensor_sgd(
                     if device_momentum_buffer_list[i] is None:
                         buf = device_momentum_buffer_list[i] = momentum_buffer_list[
                             indices[i]
-                        ] = torch.clone(device_grads[i]).detach()
+                        ] = torch.clone(device_grads[i].detach())
                     else:
                         buf = cast(Tensor, device_momentum_buffer_list[i])
                         buf.mul_(momentum).add_(device_grads[i], alpha=1 - dampening)
