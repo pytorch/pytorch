@@ -2881,6 +2881,19 @@ def recompilation_reason_for_no_tensor_aliasing_guard(guard_manager, scope):
     return [f"Duplicate tensors found: {reason}"]
 
 
+def strip_local_scope(s: str) -> str:
+    """
+    Replace occurrences of L[...] with just the inner content.
+    Handles both single and double quotes.
+
+    This is to generate user friendly recompilation messages.
+    """
+    import re
+
+    pattern = r"L\[\s*['\"](.*?)['\"]\s*\]"
+    return re.sub(pattern, r"\1", s)
+
+
 def get_guard_fail_reason_helper(
     guard_manager: GuardFn,
     f_locals: dict[str, object],
@@ -2945,7 +2958,7 @@ def get_guard_fail_reason_helper(
                     break
 
     reason_str = f"{compile_id}: " + "; ".join(reasons)
-    return reason_str
+    return strip_local_scope(reason_str)
 
 
 def get_guard_fail_reason(
