@@ -402,6 +402,11 @@ class AutogradCompilerInstance:
                     result = self.fx_tracer.create_node("get_attr", qualname, (), {})
                     value_remap[node] = result
                 elif node.op == "call_function":
+                    if node.target == torch.ops.aten.view.default:
+                        # this aot bwd graph is being lazily compiled
+                        # we must manually apply the view_to_reshape post grad pass
+                        # since it was already applied to the aot fwd, and baked into the gradients
+                        node.target = torch.ops.aten.reshape.default
                     result = self.fx_tracer.graph.node_copy(
                         node, lambda n: value_remap[n]
                     )
@@ -502,15 +507,24 @@ class AutogradCompilerInstance:
             self.bind_objects_to_proxies(grad_ins, proxies)
         return tuple(grad_ins)
 
-    def call_copy_slices_prologue(self, inputs, base, view):
+    def call_copy_slices_prologue(
+        self,
+        inputs,
+        base_sizes,
+        base_strides,
+        base_storage_offset,
+        view_sizes,
+        view_strides,
+        view_storage_offset,
+    ):
         args = (
             inputs,
-            base.sizes(),
-            base.strides(),
-            base.storage_offset(),
-            view.sizes(),
-            view.strides(),
-            view.storage_offset(),
+            self.to_proxy(base_sizes),
+            self.to_proxy(base_strides),
+            self.to_proxy(base_storage_offset),
+            self.to_proxy(view_sizes),
+            self.to_proxy(view_strides),
+            self.to_proxy(view_storage_offset),
         )
         return self.proxy_call(copy_slices_prologue, args, [None] * 3)
 
@@ -1252,7 +1266,7 @@ in_compiled_autograd_region = False
 
 
 @contextlib.contextmanager
-def _enable(compiler_fn, dynamic=False):
+def _enable(compiler_fn, dynamic=True):
     if dynamic:
         assert type(dynamic) is bool
 
