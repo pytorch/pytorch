@@ -387,7 +387,7 @@ class TestMAIATensor(common.TestCase):
         w = torch.empty((4, 2), dtype=torch.float, device="maia")
         with torch.autocast(device_type="maia"):
             self.assertTrue(torch._C._dispatch_tls_is_dispatch_key_excluded(
-                torch._C.DispatchKey.MAIA
+                torch._C.DispatchKey.AutocastMAIA
             ))
             self.assertTrue(torch.is_autocast_enabled("maia"))
             y = torch.ops.aten.matmul(x, w)
@@ -400,7 +400,7 @@ class TestMAIATensor(common.TestCase):
         w = torch.empty((4, 2), dtype=torch.float, device="maia")
         with torch.autocast(device_type="maia", dtype=torch.float16):
             self.assertTrue(torch._C._dispatch_tls_is_dispatch_key_excluded(
-                torch._C.DispatchKey.MAIA
+                torch._C.DispatchKey.AutocastMAIA
             ))
             self.assertTrue(torch.is_autocast_enabled("maia"))
             y = torch.ops.aten.matmul(x, w)
