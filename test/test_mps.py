@@ -650,6 +650,7 @@ def mps_ops_modifier(ops):
         'special.erfcx': None,
         'special.hermite_polynomial_h': None,
         'special.hermite_polynomial_he': None,
+        'special.i0e': None,
         'special.i1e': None,
         'special.laguerre_polynomial_l': None,
         'special.log_ndtr': None,

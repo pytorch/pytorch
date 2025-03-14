@@ -16,10 +16,6 @@ static void i0_kernel_mps(TensorIteratorBase& iter) {
   lib.exec_unary_kernel(iter, "i0");
 }
 
-static void i0e_kernel_mps(TensorIteratorBase& iter) {
-  lib.exec_unary_kernel(iter, "i0e");
-}
-
 static void i1_kernel_mps(TensorIteratorBase& iter) {
   lib.exec_unary_kernel(iter, "i1");
 }
@@ -49,7 +45,6 @@ static void bessel_y1_kernel_mps(TensorIteratorBase& iter) {
 }
 
 REGISTER_DISPATCH(i0_stub, &i0_kernel_mps)
-REGISTER_DISPATCH(special_i0e_stub, &i0e_kernel_mps)
 REGISTER_DISPATCH(special_i1_stub, &i1_kernel_mps)
 REGISTER_DISPATCH(special_bessel_j0_stub, &bessel_j0_kernel_mps)
 REGISTER_DISPATCH(special_bessel_j1_stub, &bessel_j1_kernel_mps)
