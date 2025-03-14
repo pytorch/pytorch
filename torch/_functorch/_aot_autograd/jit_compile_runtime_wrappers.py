@@ -1184,8 +1184,11 @@ def aot_dispatch_autograd(
             compiled_bw_func = None
             if num_symints_saved_for_bw > 0:
                 try:
+                    # backends may mutate the bw_module and leave
+                    # it in an non-runnable state, so we lower it
+                    # with a copy
                     compiled_bw_func = aot_config.bw_compiler(
-                        bw_module, placeholder_list
+                        copy.deepcopy(bw_module), placeholder_list
                     )
                 except Exception as e:
                     exc = e
@@ -1233,12 +1236,11 @@ def aot_dispatch_autograd(
     assert len(backward_state_indices) <= 1
 
     lazy_backward_info = AutogradLazyBackwardCompileInfo(
-        copy.deepcopy(bw_module),
+        bw_module,
         placeholder_list,
         saved_context,
         saved_compile_context,
     )
-    assert bw_module.graph is not lazy_backward_info.bw_module.graph
 
     make_runtime_safe(fw_metadata, maybe_subclass_meta)
 
