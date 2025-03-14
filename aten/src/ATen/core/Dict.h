@@ -6,7 +6,6 @@
 #include <c10/util/TypeList.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/order_preserving_flat_hash_map.h>
-#include <optional>
 #include <ATen/core/TensorBody.h>
 #include <ATen/core/jit_type_base.h>
 
@@ -116,10 +115,7 @@ public:
 
   DictIterator(const DictIterator& rhs): entryRef_(rhs.entryRef_) {}
   DictIterator(DictIterator&& rhs) noexcept: entryRef_(std::move(rhs.entryRef_)) {}
-  DictIterator& operator=(const DictIterator& rhs) {
-    entryRef_ = rhs.entryRef_;
-    return *this;
-  }
+  DictIterator& operator=(const DictIterator& rhs) = default;
   DictIterator& operator=(DictIterator&& rhs) noexcept {
     entryRef_ = std::move(rhs.entryRef_);
     return *this;
