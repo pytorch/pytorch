@@ -488,7 +488,7 @@ class GraphModule(torch.nn.Module):
             return torch.mul(x, y)
 
         def fn(x, y):
-            return gn(x, y)
+            return gn(torch.cos(x), y)
 
         opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
         with torch.inference_mode():
