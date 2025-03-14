@@ -233,16 +233,22 @@ void* _getWorkspaceWithoutHandle() {
 }
 
 void* _getWorkspace(size_t& workspaceSize) {
-#ifdef (defined(USE_ROCM) || defined(FBCODE_CAFFE2))
+// #ifdef (defined(USE_ROCM) || defined(FBCODE_CAFFE2))
   workspaceSize = _getWorkspaceSize();
-  auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
-  auto workspace = allocator.allocate(workspaceSize);
-  auto workspace_ptr = workspace.mutable_get();
-  TORCH_CHECK(workspace_ptr != nullptr, "OOM trying to allocate workspace for cublaslt");
-#else
-  workspaceSize = at::cuda::getChosenWorkspaceSize();
+  auto cublasWorkspaceSize = at::cuda::getChosenWorkspaceSize();
+  if (cublasWorkspaceSize < workspaceSize) {
+    TORCH_WARN_ONCE("Requested CUBLASLT workspace size of ", workspaceSize,
+		    " bytes exceeds CUBLAS workspace size of ", cublasWorkspaceSize,
+		    " bytes. Please increase CUBLAS workspace size",
+		    " via CUBLAS_WORKSPACE_CONFIG or decrease requested"
+                    " CUBLASLT_WORKSPACE_SIZE. Otherwise CUBLASLT workspace"
+		    " size will be limited to the CUBLAS workspace size.");
+    workspaceSize = cublasWorkspaceSize;
+  }
+// #else
+//   workspaceSize = at::cuda::getChosenWorkspaceSize();
+// #endif
   auto workspace_ptr = _getWorkspaceWithoutHandle();
-#endif
   return workspace_ptr;
 }
 
