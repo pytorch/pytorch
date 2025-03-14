@@ -1,4 +1,4 @@
-    # Owner(s): ["module: mps"]
+# Owner(s): ["module: mps"]
 # ruff: noqa: F841
 import io
 import sys
