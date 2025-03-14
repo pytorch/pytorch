@@ -38,7 +38,7 @@ std::unordered_map<int, ClientSession> client_sessions;
 std::set<std::string> used_objects;
 
 void register_fd(int fd) {
-  struct pollfd pfd = {0};
+  struct pollfd pfd = {};
   pfd.fd = fd;
   pfd.events = POLLIN;
   pollfds.push_back(pfd);

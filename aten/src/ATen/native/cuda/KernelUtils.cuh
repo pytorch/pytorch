@@ -11,7 +11,7 @@
 #include <hip/hip_bf16.h>
 
 __device__ inline __hip_bfloat162 preview_unsafeAtomicAdd(__hip_bfloat162* address, __hip_bfloat162 value) {
-#if (defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__)) && \
+#if (defined(__gfx942__)) && \
   __has_builtin(__builtin_amdgcn_flat_atomic_fadd_v2bf16)
   typedef unsigned short __attribute__((ext_vector_type(2))) vec_short2;
   static_assert(sizeof(vec_short2) == sizeof(__hip_bfloat162_raw));
@@ -39,7 +39,7 @@ __device__ inline __hip_bfloat162 preview_unsafeAtomicAdd(__hip_bfloat162* addre
 }
 
 __device__ inline __half2 preview_unsafeAtomicAdd(__half2* address, __half2 value) {
-#if (defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__)) && \
+#if (defined(__gfx942__)) && \
   __has_builtin(__builtin_amdgcn_flat_atomic_fadd_v2f16)
   // The api expects an ext_vector_type of half
   typedef _Float16 __attribute__((ext_vector_type(2))) vec_fp162;

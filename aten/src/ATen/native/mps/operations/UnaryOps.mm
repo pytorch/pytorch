@@ -203,7 +203,6 @@ REGISTER_MPS_UNARY_STUB(trunc, truncate);
 
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(exp2_out_mps, exponentBase2)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(reciprocal_out_mps, reciprocal)
-CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(sqrt_out_mps, squareRoot)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(neg_out_mps, negative)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(log_out_mps, logarithm)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(log10_out_mps, logarithmBase10)
@@ -273,7 +272,6 @@ Tensor& logical_not_out_mps(const Tensor& self, Tensor& output) {
 }
 
 Tensor& angle_out_mps(const Tensor& self, Tensor& output) {
-  TORCH_CHECK(self.scalar_type() != ScalarType::Long, "MPS does not support angle op with int64 input");
   if (mps::supportsComplex()) {
     mps::unary_op(self, output, "angle_out_mps", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
       auto realPart = [mpsGraph realPartOfTensor:inputTensor name:nil];

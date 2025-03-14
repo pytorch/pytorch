@@ -467,6 +467,7 @@ S390X_TESTLIST = [
     "test_tensorexpr_pybind",
     "test_torch",
     "test_transformers",
+    "test_transformers_privateuse1",
     "test_type_hints",
     "test_type_info",
     "test_type_promotion",
@@ -616,25 +617,21 @@ if dist.is_available():
     if not TEST_WITH_ROCM and dist.is_mpi_available():
         DISTRIBUTED_TESTS_CONFIG["mpi"] = {
             "WORLD_SIZE": "3",
-            "TEST_REPORT_SOURCE_OVERRIDE": "dist-mpi",
         }
     if dist.is_nccl_available():
         DISTRIBUTED_TESTS_CONFIG["nccl"] = {
             "WORLD_SIZE": f"{torch.cuda.device_count()}",
-            "TEST_REPORT_SOURCE_OVERRIDE": "dist-nccl",
         }
     if dist.is_gloo_available():
         DISTRIBUTED_TESTS_CONFIG["gloo"] = {
             # TODO: retire testing gloo with CUDA
             "WORLD_SIZE": f"{torch.cuda.device_count()}",
-            "TEST_REPORT_SOURCE_OVERRIDE": "dist-gloo",
         }
     # Test with UCC backend is deprecated.
     # See https://github.com/pytorch/pytorch/pull/137161
     # if dist.is_ucc_available():
     #     DISTRIBUTED_TESTS_CONFIG["ucc"] = {
     #         "WORLD_SIZE": f"{torch.cuda.device_count()}",
-    #         "TEST_REPORT_SOURCE_OVERRIDE": "dist-ucc",
     #         "UCX_TLS": "tcp,cuda",
     #         "UCC_TLS": "nccl,ucp,cuda",
     #         "UCC_TL_UCP_TUNE": "cuda:0",  # don't use UCP TL on CUDA as it is not well supported
@@ -759,7 +756,7 @@ def run_test(
         stepcurrent_key = f"{test_file}_{test_module.shard}_{os.urandom(8).hex()}"
 
     if options.verbose:
-        unittest_args.append(f'-{"v" * options.verbose}')  # in case of pytest
+        unittest_args.append(f"-{'v' * options.verbose}")  # in case of pytest
 
     if test_file in RUN_PARALLEL_BLOCKLIST:
         unittest_args = [
@@ -934,10 +931,10 @@ def install_cpp_extensions(cpp_extensions_test_dir, env=os.environ):
 
 
 @contextlib.contextmanager
-def extend_python_path(install_directory):
+def extend_python_path(install_directories):
     python_path = os.environ.get("PYTHONPATH", "")
     try:
-        os.environ["PYTHONPATH"] = os.pathsep.join([install_directory, python_path])
+        os.environ["PYTHONPATH"] = os.pathsep.join(install_directories + [python_path])
         yield
     finally:
         os.environ["PYTHONPATH"] = python_path
@@ -1077,9 +1074,12 @@ def _test_cpp_extensions_aot(test_directory, options, use_ninja):
     if return_code != 0:
         return return_code
     if sys.platform != "win32":
-        exts_to_build = [(install_cmd, "no_python_abi_suffix_test")]
+        exts_to_build = [
+            (install_cmd, "no_python_abi_suffix_test"),
+        ]
         if TEST_CUDA:
             exts_to_build.append((wheel_cmd, "python_agnostic_extension"))
+            exts_to_build.append((install_cmd, "libtorch_agnostic_extension"))
         for cmd, extension_dir in exts_to_build:
             return_code = shell(
                 cmd,
@@ -1097,17 +1097,24 @@ def _test_cpp_extensions_aot(test_directory, options, use_ninja):
         test_directory + "/test_cpp_extensions_aot.py",
         test_directory + "/" + test_module + ".py",
     )
+
     try:
         cpp_extensions = os.path.join(test_directory, "cpp_extensions")
-        install_directory = ""
+        install_directories = []
         # install directory is the one that is named site-packages
         for root, directories, _ in os.walk(os.path.join(cpp_extensions, "install")):
             for directory in directories:
                 if "-packages" in directory:
-                    install_directory = os.path.join(root, directory)
+                    install_directories.append(os.path.join(root, directory))
 
-        assert install_directory, "install_directory must not be empty"
-        with extend_python_path(install_directory):
+        for root, directories, _ in os.walk(
+            os.path.join(cpp_extensions, "libtorch_agnostic_extension", "install")
+        ):
+            for directory in directories:
+                if "-packages" in directory:
+                    install_directories.append(os.path.join(root, directory))
+
+        with extend_python_path(install_directories):
             return run_test(ShardedTest(test_module, 1, 1), test_directory, options)
     finally:
         if os.path.exists(test_directory + "/" + test_module + ".py"):
@@ -1139,7 +1146,7 @@ def _test_autoload(test_directory, options, enable=True):
 
     try:
         os.environ["TORCH_DEVICE_BACKEND_AUTOLOAD"] = str(int(enable))
-        with extend_python_path(install_directory):
+        with extend_python_path([install_directory]):
             cmd = [sys.executable, "test_autoload.py"]
             return_code = shell(cmd, cwd=test_directory, env=os.environ)
             return return_code
@@ -1155,7 +1162,7 @@ def run_test_with_openreg(test_module, test_directory, options):
     if return_code != 0:
         return return_code
 
-    with extend_python_path(install_dir):
+    with extend_python_path([install_dir]):
         return run_test(test_module, test_directory, options)
 
 
@@ -1177,9 +1184,9 @@ def test_distributed(test_module, test_directory, options):
             if sys.platform == "win32" and not with_init_file:
                 continue
             tmp_dir = tempfile.mkdtemp()
+            init_method = "file" if with_init_file else "env"
             if options.verbose:
-                init_str = "with {} init_method"
-                with_init = init_str.format("file" if with_init_file else "env")
+                with_init = f"with {init_method} init_method"
                 print_to_stderr(
                     f"Running distributed tests for the {backend} backend {with_init}"
                 )
@@ -1187,6 +1194,9 @@ def test_distributed(test_module, test_directory, options):
             os.environ["TEMP_DIR"] = tmp_dir
             os.environ["BACKEND"] = backend
             os.environ.update(env_vars)
+            report_tag = f"dist-{backend}" if backend != "test" else ""
+            report_tag += f"-init-{init_method}"
+            os.environ["TEST_REPORT_SOURCE_OVERRIDE"] = report_tag
             try:
                 os.mkdir(os.path.join(tmp_dir, "barrier"))
                 os.mkdir(os.path.join(tmp_dir, "test_dir"))
@@ -1441,9 +1451,9 @@ def get_pytest_args(options, is_cpp_test=False, is_distributed_test=False):
 
 
 def run_ci_sanity_check(test: ShardedTest, test_directory, options):
-    assert (
-        test.name == "test_ci_sanity_check_fail"
-    ), f"This handler only works for test_ci_sanity_check_fail, got {test.name}"
+    assert test.name == "test_ci_sanity_check_fail", (
+        f"This handler only works for test_ci_sanity_check_fail, got {test.name}"
+    )
     ret_code = run_test(test, test_directory, options, print_log=False)
     # This test should fail
     if ret_code != 1:
@@ -1483,7 +1493,7 @@ CUSTOM_HANDLERS = {
     "test_autoload_enable": test_autoload_enable,
     "test_autoload_disable": test_autoload_disable,
     "test_cpp_extensions_open_device_registration": run_test_with_openreg,
-    "test_transformers": run_test_with_openreg,
+    "test_transformers_privateuse1": run_test_with_openreg,
 }
 
 
@@ -1895,8 +1905,7 @@ def get_selected_tests(options) -> list[str]:
         selected_tests = exclude_tests(
             TESTS_NOT_USING_GRADCHECK,
             selected_tests,
-            "Running in slow gradcheck mode, skipping tests "
-            "that don't use gradcheck.",
+            "Running in slow gradcheck mode, skipping tests that don't use gradcheck.",
             exact_match=True,
         )
 
@@ -1957,9 +1966,9 @@ def get_sharding_opts(options) -> tuple[int, int]:
         assert len(options.shard) == 2, "Unexpected shard format"
         assert min(options.shard) > 0, "Shards must be positive numbers"
         which_shard, num_shards = options.shard
-        assert (
-            which_shard <= num_shards
-        ), "Selected shard must be less than or equal to total number of shards"
+        assert which_shard <= num_shards, (
+            "Selected shard must be less than or equal to total number of shards"
+        )
 
     return (which_shard, num_shards)
 
@@ -2002,9 +2011,9 @@ def run_test_module(
         print_to_stderr(f"Running {str(test)} ... [{datetime.now()}]")
         handler = CUSTOM_HANDLERS.get(test_name, run_test)
         return_code = handler(test, test_directory, options)
-        assert isinstance(return_code, int) and not isinstance(
-            return_code, bool
-        ), f"While running {str(test)} got non integer return code {return_code}"
+        assert isinstance(return_code, int) and not isinstance(return_code, bool), (
+            f"While running {str(test)} got non integer return code {return_code}"
+        )
         if return_code == 0:
             return None
 

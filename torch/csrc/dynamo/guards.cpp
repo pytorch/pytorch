@@ -1868,13 +1868,6 @@ class NO_TENSOR_ALIASING : public RelationalGuard {
   }
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
-    // Typically we don't have to increment the ref count here because the
-    // tensors are held in f_locals. But there is a special case for
-    // `from_numpy` source. `from_numpy` converts integers and such into tensors
-    // and these tensors are ephemeral. If we don't incref, those tensors can be
-    // garbage collected, and the next time from_numpy can reuse the memory
-    // address. Therefore, we incref here. They are decref'd in reset_state.
-    Py_INCREF(value);
     auto insertion = _unique_tensors.insert({value, nullptr});
     if (!insertion.second) {
       // No need to clear _unique_tensors, reset_state will do
@@ -1895,9 +1888,6 @@ class NO_TENSOR_ALIASING : public RelationalGuard {
   }
 
   void reset_state() final {
-    for (auto item : _unique_tensors) {
-      Py_DECREF(item.first);
-    }
     _unique_tensors.clear();
   }
 
@@ -2154,14 +2144,7 @@ class GuardAccessor {
       py::object accessor_key,
       std::string source,
       py::handle example_value,
-      py::handle guard_manager_enum)
-      : _guard_manager(make_guard_manager(
-            root,
-            source,
-            example_value,
-            guard_manager_enum)),
-        _accessor_key(std::move(accessor_key)),
-        _source(std::move(source)) {}
+      py::handle guard_manager_enum);
 
   // Return by reference as GuardAccessor owns the GuardManager.
   std::unique_ptr<GuardManager>& get_guard_manager() {
@@ -2189,11 +2172,8 @@ class GuardAccessor {
 
   virtual ~GuardAccessor() = default;
 
- public: // Cloning related functions
-  GuardAccessor(GuardManager* guard_manager, GuardAccessor* from)
-      : _guard_manager(std::unique_ptr<GuardManager>(guard_manager)) {
-    from->clone_visitor(this);
-  }
+  // Cloning related functions
+  GuardAccessor(GuardManager* guard_manager, GuardAccessor* from);
 
   virtual GuardAccessor* clone(
       RootGuardManager* cloned_root,
@@ -2535,6 +2515,10 @@ class GuardManager {
     return GuardDebugInfo(true, num_guards_executed);
   }
 
+  bool has_no_accessors() {
+    return _accessors.empty();
+  }
+
   int64_t fail_count() const {
     return _fail_count;
   }
@@ -2626,6 +2610,23 @@ class GuardManager {
   bool _is_dict;
   uint64_t _dict_tag{0};
 };
+
+GuardAccessor::GuardAccessor(
+    RootGuardManager* root,
+    py::object accessor_key,
+    std::string source,
+    py::handle example_value,
+    py::handle guard_manager_enum)
+    : _guard_manager(
+          make_guard_manager(root, source, example_value, guard_manager_enum)),
+      _accessor_key(std::move(accessor_key)),
+      _source(std::move(source)) {}
+
+// Cloning related functions
+GuardAccessor::GuardAccessor(GuardManager* guard_manager, GuardAccessor* from)
+    : _guard_manager(std::unique_ptr<GuardManager>(guard_manager)) {
+  from->clone_visitor(this);
+}
 
 /**
  Note on [Ownership with cloning] - GuardManagers have the facility to clone
@@ -3780,8 +3781,12 @@ class DictGetItemGuardAccessor : public GuardAccessor {
   // NB: Intentional duplication between check_nopybind and
   // check_verbose_nopybind.
   bool check_nopybind(PyObject* obj, bool matches_dict_tag = false) override {
-    if (matches_dict_tag && _is_immutable_object) {
+    if (matches_dict_tag && _is_immutable_object &&
+        _guard_manager->has_no_accessors()) {
       // immutable object and dict tag matches, we can skip the guard subtree.
+      // NB: We only skip the subtree if there are no accessors in the subtree.
+      // This is specificallly for tensors which are used in symbolic shape C++
+      // guards, and therefore have accessors on the tensor GuardManager itself.
       return true;
     }
 

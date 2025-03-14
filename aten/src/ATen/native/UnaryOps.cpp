@@ -617,10 +617,8 @@ Tensor& conj_physical_out(const Tensor& self, Tensor& result) {
 }
 
 Tensor _conj_physical(const Tensor& self) {
-  if (self.is_conj()) {
-    return self.conj().clone();
-  }
   auto result = at::empty_like(self);
+  result._set_conj(self.is_conj());
   return at::conj_physical_out(result, self);
 }
 

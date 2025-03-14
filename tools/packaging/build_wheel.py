@@ -105,7 +105,7 @@ def parse_args() -> argparse.Namespace:
         "--destination",
         default="dist/",
         type=str,
-        help=("Destination to put the compailed binaries"),
+        help="Destination to put the compiled binaries",
     )
     return parser.parse_args()
 
