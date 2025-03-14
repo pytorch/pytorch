@@ -352,7 +352,7 @@ class FSDPModule:
                     fsdp_param_group.all_reduce_grads = requires_all_reduce
 
     def set_reshard_after_forward(
-        self, reshard_after_forward: bool, *, recurse: bool = True
+        self, reshard_after_forward: bool, recurse: bool = True
     ) -> None:
         """
         Sets if the module should reshard parameters after forward. Setting
@@ -373,9 +373,9 @@ class FSDPModule:
                 state = module._get_fsdp_state()
                 if fsdp_param_group := state._fsdp_param_group:
                     fsdp_param_group.post_forward_mesh_info = (
-                        fsdp_param_group.fsdp_params[0].post_forward_mesh_info
-                        if reshard_after_forward
-                        else None
+                        _get_post_forward_mesh_info(
+                            reshard_after_forward, fsdp_param_group.mesh_info
+                        )
                     )
 
     def set_reshard_after_backward(
