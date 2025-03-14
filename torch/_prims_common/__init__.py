@@ -505,8 +505,8 @@ def compute_elementwise_output_logical_to_physical_perm(
     shape = tensors[0].shape
 
     def should_swap(idx_a, idx_b):
-        def gt(a, b):
-            # semantics for a > b, assuming a != b, a >= 0, b >= 0
+        def gte(a, b):
+            # semantics for a >= b, assuming a != b, a >= 0, b >= 0
             expr = (a.node.expr if isinstance(a, torch.SymInt) else a) // (b.node.expr if isinstance(b, torch.SymInt) else b)
             if isinstance(expr, int):
                 return expr >= 1
@@ -520,14 +520,14 @@ def compute_elementwise_output_logical_to_physical_perm(
                 continue
 
             if _guard_semantics(stride_a == stride_b):
-                if _guard_semantics(shape[idx_a] >= shape[idx_b]):
-                    return 1
-                continue
+                if gte(shape[idx_b], shape[idx_a]):
+                    continue
+                return 1
 
-            if gt(stride_b, stride_a):
+            if gte(stride_b, stride_a):
                 return -1
 
-            if gt(stride_a, stride_b):
+            if gte(stride_a, stride_b):
                 return 1
 
         # Note: this case is hit if all strides are zero,
