@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import dataclasses
 import functools
+import threading
 import typing
 import warnings
 import weakref
@@ -94,18 +95,21 @@ def assert_eq(a: _T, b: _T) -> None:
     assert a == b, f"{a} != {b}"
 
 
-DISABLE_INFERENCE_MODE = False
+tls = threading.local()
+# Turns off inference mode for fake tensor propagation. This is turned to True
+# only for `torch.compile`. Also look at
+# _dynamo.config.fake_tensor_disable_inference_mode
+tls.disable_inference_mode = False
 
 
 @contextmanager
 def disable_inference_mode_for_fake_prop() -> Generator[None, None, None]:
-    global DISABLE_INFERENCE_MODE
-    old_value = DISABLE_INFERENCE_MODE
+    prior = tls.disable_inference_mode
+    tls.disable_inference_mode = True
     try:
-        DISABLE_INFERENCE_MODE = True
         yield
     finally:
-        DISABLE_INFERENCE_MODE = old_value
+        tls.disable_inference_mode = prior
 
 
 def assert_metadata_eq(
@@ -123,7 +127,6 @@ def assert_metadata_eq(
     )
 
     def go(m1: MetaTensorDesc, m2: torch.Tensor) -> None:
-        global DISABLE_INFERENCE_MODE
         assert_eq(m1.dtype, m2.dtype)
         if not skip_symbolic:
             assert_eq(m1.shape, m2.shape)
@@ -133,7 +136,7 @@ def assert_metadata_eq(
         # MetaTensorDesc doesn't store grad_fn; inferred from leaf
         # assert_eq(m1.grad_fn is None, m2.grad_fn is None)
         assert_eq(m1.is_sparse, m2.is_sparse)
-        if not DISABLE_INFERENCE_MODE:
+        if not tls.disable_inference_mode:
             assert_eq(m1.is_inference, m2.is_inference())
         else:
             assert_eq(m1.is_inference, False)
@@ -375,11 +378,10 @@ class MetaTensorDescriber:
 
         # TODO: Is it important to enable torch.inference_mode before querying
         # these values?
-        global DISABLE_INFERENCE_MODE
         r: MetaTensorDesc = MetaTensorDesc(
             id=self.get_tensor_id(t),
             storage=storage,
-            is_inference=False if DISABLE_INFERENCE_MODE else t.is_inference(),
+            is_inference=False if tls.disable_inference_mode else t.is_inference(),
             is_leaf=is_leaf,
             requires_grad=t.requires_grad,
             # NB: ndim should be OK too but there is a disaster at
