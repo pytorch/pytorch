@@ -645,10 +645,6 @@ def mps_ops_modifier(ops):
         'sparse.mm': None,
         'sparse.mmreduce': None,
         'special.airy_ai': None,
-        'special.bessel_j0': None,
-        'special.bessel_j1': None,
-        'special.bessel_y0': None,
-        'special.bessel_y1': None,
         'special.chebyshev_polynomial_t': None,
         'special.chebyshev_polynomial_u': None,
         'special.erfcx': None,
@@ -710,8 +706,6 @@ def mps_ops_modifier(ops):
         'index_add': [torch.int64],
         'log1p': [torch.int64],
         'sigmoid': [torch.int64],
-        'atan2': [torch.int64],
-        'angle': [torch.int64],
 
         # Operations not supported for integral types
         'special.xlog1py': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],

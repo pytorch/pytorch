@@ -483,6 +483,8 @@ elif [[ "${TEST_CONFIG}" == *aot_eager* ]]; then
   DYNAMO_BENCHMARK_FLAGS+=(--backend aot_eager)
 elif [[ "${TEST_CONFIG}" == *aot_inductor* ]]; then
   DYNAMO_BENCHMARK_FLAGS+=(--export-aot-inductor)
+elif [[ "${TEST_CONFIG}" == *max_autotune_inductor* ]]; then
+  DYNAMO_BENCHMARK_FLAGS+=(--inductor --inductor-compile-mode max-autotune)
 elif [[ "${TEST_CONFIG}" == *inductor* && "${TEST_CONFIG}" != *perf* ]]; then
   DYNAMO_BENCHMARK_FLAGS+=(--inductor)
 fi
@@ -759,6 +761,8 @@ test_dynamo_benchmark() {
         test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --"$dt" "$@"
       fi
     elif [[ "${TEST_CONFIG}" == *aot_inductor* ]]; then
+      test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --bfloat16 "$@"
+    elif [[ "${TEST_CONFIG}" == *max_autotune_inductor* ]]; then
       test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --bfloat16 "$@"
     else
       test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --bfloat16 "$@"
@@ -1615,6 +1619,7 @@ elif [[ "${TEST_CONFIG}" == *inductor_cpp_wrapper* ]]; then
   install_torchvision
   checkout_install_torchbench hf_T5 llama moco
   PYTHONPATH=$(pwd)/torchbench test_inductor_cpp_wrapper_shard "$SHARD_NUMBER"
+  test_inductor_aoti
 elif [[ "${TEST_CONFIG}" == *inductor* ]]; then
   install_torchvision
   test_inductor_shard "${SHARD_NUMBER}"
