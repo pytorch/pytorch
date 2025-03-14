@@ -13500,7 +13500,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: special_i0e_out
+    CPU, CUDA, MPS: special_i0e_out
   tags: pointwise
 
 - func: special_i1(Tensor self) -> Tensor
@@ -13528,7 +13528,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: special_i1e_out
+    CPU, CUDA, MPS: special_i1e_out
   tags: pointwise
 
 - func: special_logit(Tensor self, float? eps=None) -> Tensor
