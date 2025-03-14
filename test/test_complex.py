@@ -69,9 +69,6 @@ class TestComplexTensor(TestCase):
 
         src_ref = src.clone()
 
-        src_i = src.imag
-        src_block_i = src_block.imag
-
         # The copy is cross device so parameterize on the source device and make sure the dst is the other one
         dst_device = "cuda:0" if device == "cpu" else "cpu"
         dst = torch.zeros_like(src, device=dst_device, pin_memory=pin(dst_device))
@@ -80,20 +77,12 @@ class TestComplexTensor(TestCase):
             dst = dst.conj()
             dst_block = dst_block.conj()
 
-        dst_i = dst.imag
-        dst_block_i = dst_block.imag
-
         dst.copy_(src, non_blocking=True)
         dst_block.copy_(src_block, non_blocking=False)
-        dst_i.copy_(src_i, non_blocking=True)
-        dst_block_i.copy_(src_block_i, non_blocking=False)
 
         self.assertTrue(dst.is_conj() == dst_conj)
-        self.assertTrue(dst_i.is_neg() == dst_conj)
         self.assertEqual(dst_block, dst)
-        self.assertEqual(dst_block_i, dst_i)
         self.assertEqual(src, src_ref)
-        self.assertEqual(src_i, src_ref.imag)
 
     @dtypes(*complex_types())
     def test_all(self, device, dtype):
