@@ -1,3 +1,8 @@
+# Owner(s): ["module: dynamo"]
+
+# ruff: noqa
+# flake8: noqa
+
 import sys
 import types
 import unittest
@@ -8,9 +13,7 @@ import torch._dynamo.test_case
 import torch._functorch.config
 import torch.nn
 import torch.utils.checkpoint
-from torch.testing._internal.common_utils import (
-    make_dynamo_test,
-)
+from torch.testing._internal.common_utils import make_dynamo_test
 
 
 def get_tb():
@@ -23,6 +26,7 @@ def get_tb():
 class Context:
     def __enter__(self):
         return self
+
     def __exit__(self, exc_type, exc_value, exc_tb):
         return True
 
@@ -35,6 +39,7 @@ class MyException(Exception):
 class ContextManager:
     def __enter__(self):
         pass
+
     def __exit__(self, t, v, tb):
         raise NameError
 
@@ -42,6 +47,28 @@ class ContextManager:
 class TestRaise(torch._dynamo.test_case.TestCase):
     # Tests taken from CPython source code in cpython/Lib/test/test_raise.py
     # https://github.com/python/cpython/blob/v3.13.1/Lib/test/test_raise.py
+
+    def assertIn(self, member, container, msg=None):
+        assert member in container, msg
+
+    def assertIs(self, expr1, expr2, msg=None):
+        assert expr1 is expr2, msg
+
+    def assertRaises(self, expected_exception, *args, **kwargs):
+        z = 0
+        try:
+            yield
+        except expected_exception:
+            z = 1
+        except Exception:
+            z = 2
+        assert z == 1
+
+    def assertIsInstance(self, obj, cls, msg=None):
+        assert isinstance(obj, cls), msg
+
+    def assertIsNone(self, obj, msg=None):
+        assert obj is None, msg
 
     @make_dynamo_test
     def test_invalid_reraise(self):
@@ -56,7 +83,7 @@ class TestRaise(torch._dynamo.test_case.TestCase):
     def test_reraise(self):
         try:
             try:
-                raise IndexError()
+                raise IndexError
             except IndexError as e:
                 exc1 = e
                 raise
@@ -179,6 +206,34 @@ class TestRaise(torch._dynamo.test_case.TestCase):
 class TestCause(torch._dynamo.test_case.TestCase):
     # Tests taken from CPython source code in cpython/Lib/test/test_raise.py
     # https://github.com/python/cpython/blob/v3.13.1/Lib/test/test_raise.py
+
+    def assertIn(self, member, container, msg=None):
+        assert member in container, msg
+
+    def assertIs(self, expr1, expr2, msg=None):
+        assert expr1 is expr2, msg
+
+    def assertRaises(self, expected_exception, *args, **kwargs):
+        z = 0
+        try:
+            yield
+        except expected_exception:
+            z = 1
+        except Exception:
+            z = 2
+        assert z == 1
+
+    def assertIsInstance(self, obj, cls, msg=None):
+        assert isinstance(obj, cls), msg
+
+    def assertIsNone(self, obj, msg=None):
+        assert obj is None, msg
+
+    def assertTrue(self, expr, msg=None):
+        assert bool(expr) is True, msg
+
+    def assertFalse(self, expr, msg=None):
+        assert bool(expr) is False, msg
 
     @make_dynamo_test
     def testCauseSyntax(self):
@@ -340,6 +395,28 @@ class TestTracebackType(torch._dynamo.test_case.TestCase):
 class TestContext(torch._dynamo.test_case.TestCase):
     # Tests taken from CPython source code in cpython/Lib/test/test_raise.py
     # https://github.com/python/cpython/blob/v3.13.1/Lib/test/test_raise.py
+
+    def assertIn(self, member, container, msg=None):
+        assert member in container, msg
+
+    def assertIs(self, expr1, expr2, msg=None):
+        assert expr1 is expr2, msg
+
+    def assertRaises(self, expected_exception, *args, **kwargs):
+        z = 0
+        try:
+            yield
+        except expected_exception:
+            z = 1
+        except Exception:
+            z = 2
+        assert z == 1
+
+    def assertIsInstance(self, obj, cls, msg=None):
+        assert isinstance(obj, cls), msg
+
+    def assertIsNone(self, obj, msg=None):
+        assert obj is None, msg
 
     @unittest.expectedFailure  # missing Exception.__eq__
     @make_dynamo_test
@@ -520,3 +597,9 @@ class TestContext(torch._dynamo.test_case.TestCase):
             f()
 
             self.assertEqual(ZeroDivisionError, cm.unraisable.exc_type)
+
+
+if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
+    run_tests()
