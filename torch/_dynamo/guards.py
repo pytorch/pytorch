@@ -2007,6 +2007,12 @@ class GuardBuilder(GuardBuilderBase):
 
             from torch._inductor.codecache import CppCodeCache
 
+            assert cpp_code_parts  # type: ignore[possibly-undefined]
+            code_parts, source_to_symbol = (
+                cpp_code_parts.exprs,
+                cpp_code_parts.source_to_symbol,
+            )
+
             source_to_symbol = dict(int_source_to_symbol + float_source_to_symbol)
             try:
                 guard_managers = [
