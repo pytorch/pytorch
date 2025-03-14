@@ -319,12 +319,41 @@ jobs:
           ls ./*.txt
           ls ./*.json
 
+      - name: Stop monitoring script
+        if: ${{ always() && steps.monitor-script.outputs.monitor-script-pid }}
+        shell: bash
+        continue-on-error: true
+        env:
+          MONITOR_SCRIPT_PID: ${{ steps.monitor-script.outputs.monitor-script-pid }}
+        run: |
+          kill "$MONITOR_SCRIPT_PID"
+
       - name: Check all txt
         shell: bash
         run: |
           echo $(pwd)
           ls ./*.txt
           ls ./*.json
+
+      - name: Start monitoring script
+        id: monitor-script
+        if: ${{ !inputs.disable-monitor }}
+        shell: bash
+        continue-on-error: true
+        env:
+          JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
+          JOB_NAME: ${{ steps.get-job-id.outputs.job-name }}
+          WORKFLOW_NAME: ${{ github.workflow }}
+          WORKFLOW_RUN_ID: ${{ github.run_id }}
+        run: |
+          echo "test" > usage_log_test.txt
+          echo "test" > usage_log.json
+          echo "usage_log_build_${JOB_ID}.txt"
+          echo $(pwd)
+
+          python3 -m pip install psutil==5.9.1 dataclasses_json==0.6.7
+          python3 -m tools.stats.monitor > "usage_log_build_test.txt" 2>&1 &
+          echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
       - name: Archive artifacts into zip
         if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped'
@@ -337,6 +366,7 @@ jobs:
           echo $(pwd)
           ls ./*.txt
           ls ./*.json
+
 
       - name: Store PyTorch Build Artifacts on S3
         uses: seemethere/upload-artifact-s3@v5
