@@ -213,7 +213,7 @@ jobs:
         shell: bash
         run: |
           echo $(pwd)
-          ls ./tools/*.txt
+          ls ./*.txt
 
       - name: Build
         if: steps.filter.outputs.is-test-matrix-empty == 'False' || inputs.test-matrix == ''
@@ -241,6 +241,7 @@ jobs:
           MAX_JOBS_OVERRIDE: ${{ inputs.max-jobs }}
         run: |
           echo $(pwd)
+          ls ./*.txt
           START_TIME=$(date +%s)
           if [[ ${BUILD_ENVIRONMENT} == *"s390x"* ]]; then
             JENKINS_USER=
@@ -311,10 +312,12 @@ jobs:
           END_TIME=$(date +%s)
           echo "build_time=$((END_TIME - START_TIME))" >> "$GITHUB_OUTPUT"
           echo $(pwd)
+          ls ./*.txt
 
       - name: Check all txt
         shell: bash
         run: |
+          echo $(pwd)
           ls ./*.txt
 
       - name: Archive artifacts into zip
