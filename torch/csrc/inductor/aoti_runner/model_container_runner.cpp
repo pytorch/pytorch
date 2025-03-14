@@ -64,6 +64,10 @@ AOTIModelContainerRunner::AOTIModelContainerRunner(
   swap_constant_buffer_func_ =
       reinterpret_cast<decltype(swap_constant_buffer_func_)>(
           model_so_->sym("AOTInductorModelContainerSwapConstantBuffer"));
+  free_inactive_constant_buffer_func_ =
+      reinterpret_cast<decltype(free_inactive_constant_buffer_func_)>(
+          model_so_->sym(
+              "AOTInductorModelContainerFreeInactiveConstantBuffer"));
   get_call_spec_func_ = reinterpret_cast<decltype(get_call_spec_func_)>(
       model_so_->sym("AOTInductorModelContainerGetCallSpec"));
 
@@ -213,6 +217,11 @@ void AOTIModelContainerRunner::run_const_fold(
 
 void AOTIModelContainerRunner::swap_constant_buffer() {
   AOTI_RUNTIME_ERROR_CODE_CHECK(swap_constant_buffer_func_(container_handle_));
+}
+
+void AOTIModelContainerRunner::free_inactive_constant_buffer() {
+  AOTI_RUNTIME_ERROR_CODE_CHECK(
+      free_inactive_constant_buffer_func_(container_handle_));
 }
 
 std::vector<std::string> AOTIModelContainerRunner::get_call_spec() {

@@ -445,6 +445,14 @@ class AOTInductorModelContainer {
     use_secondary_ = !use_secondary_;
   }
 
+  void free_inactive_constant_buffer() {
+    if (use_secondary_ && constant_blob_) {
+      constant_blob_.reset();
+    } else if (constant_blob_secondary_) {
+      constant_blob_secondary_.reset();
+    }
+  }
+
   size_t num_inputs() const {
     return input_names_.size();
   }
@@ -546,14 +554,6 @@ class AOTInductorModelContainer {
 #else
     return RAII_cpuMalloc(blob_size_);
 #endif // USE_CUDA
-  }
-
-  void free_inactive_buffer() {
-    if (use_secondary_) {
-      constant_blob_.reset();
-    } else {
-      constant_blob_secondary_.reset();
-    }
   }
 
   void* get_constant_blob_ptr(bool get_inactive) {
