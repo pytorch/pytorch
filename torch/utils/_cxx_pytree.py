@@ -77,6 +77,9 @@ __all__ = [
 ]
 
 
+__name__ = "torch.utils.pytree.cxx"  # sets the __module__ attribute of all functions in this module
+
+
 __TORCH_DICT_SESSION = optree.dict_insertion_ordered(True, namespace="torch")
 __TORCH_DICT_SESSION.__enter__()  # enable globally and permanently
 
