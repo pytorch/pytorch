@@ -6,6 +6,7 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
     onlyCPU,
+    skipIf
 )
 from torch.testing._internal.common_dtype import complex_types
 from torch.testing._internal.common_utils import (
@@ -49,6 +50,7 @@ class TestComplexTensor(TestCase):
         x1.copy_(xc1)
         self.assertEqual(x1, torch.tensor([5 - 1j, 2 - 2j], device=device, dtype=dtype))
 
+    @skipIf(not torch.cuda.is_available(), "Test only applies to CUDA enabled builds")
     @dtypes(*complex_types())
     @parametrize(
         "src_conj,dst_conj",
