@@ -3214,6 +3214,7 @@ class TestCase(expecttest.TestCase):
             torch._dynamo.reset()
 
         torch.compiler.set_stance("default")
+        self.assertFalse(torch._dynamo.external_utils._ignore_skip_function_variable)
 
         # TODO: Remove this; this is grandfathered in because we suppressed errors
         # on test suite previously
