@@ -151,6 +151,24 @@ class align(sympy.Function):
             return value
 
 
+@dataclasses.dataclass(frozen=True)
+class GraphPartitionMap:
+    """
+    Mapping from the partition info (e.g., input/output) to the graph info
+    """
+
+    # a unique id of graph partition
+    id: int
+
+    # map partition input/output indices to graph input/output indices. None indicates
+    # a partition input/output is not a graph input/output.
+    input_index_mapping: list[Optional[int]]
+    output_index_mapping: list[Optional[int]]
+
+    # name of constants read/written by the graph partition
+    constant_names: list[str]
+
+
 def do_bench_using_profiling(
     fn: Callable[[], Any], warmup: int = 25, rep: int = 100
 ) -> float:
@@ -1337,7 +1355,7 @@ def use_triton_template(
 
 
 def use_triton_tma_template(*matrices: IRNode) -> bool:
-    from torch.utils._triton import has_triton_tma
+    from torch.utils._triton import has_triton_tma_device
 
     from .virtualized import V
 
@@ -1362,7 +1380,7 @@ def use_triton_tma_template(*matrices: IRNode) -> bool:
 
     return (
         config.triton.enable_persistent_tma_matmul
-        and has_triton_tma()
+        and has_triton_tma_device()
         and all(_is_tma_compatible(m) for m in matrices)
     )
 
