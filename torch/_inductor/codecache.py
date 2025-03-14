@@ -53,6 +53,7 @@ from torch._inductor.codegen.rocm.compile_command import (
     rocm_compile_command,
     rocm_compiler,
 )
+from torch._inductor.compile_worker.utils import in_toplevel_process
 from torch._inductor.cpp_builder import (
     _LINKER_SCRIPT,
     _set_gpu_runtime_env,
@@ -68,10 +69,7 @@ from torch._inductor.cpp_builder import (
 from torch._inductor.cpu_vec_isa import pick_vec_isa
 from torch._inductor.custom_graph_pass import CustomGraphPass, CustomGraphPassType
 from torch._inductor.freezing_utils import has_frozen_params, is_frozen_param
-from torch._inductor.runtime.compile_tasks import (
-    _reload_python_module,
-    _reload_python_module_in_subproc,
-)
+from torch._inductor.runtime.compile_tasks import _reload_python_module
 from torch._inductor.runtime.runtime_utils import cache_dir, default_cache_dir
 from torch._inductor.utils import (
     ALIGN_BYTES,
@@ -2744,21 +2742,19 @@ class PyCodeCache:
         if linemap is None:
             linemap = []
 
-        mod = _reload_python_module(key, path)
+        in_toplevel = in_toplevel_process()
+        mod = _reload_python_module(key, path, set_sys_modules=in_toplevel)
 
         # unzip into separate lines/nodes lists
-        cls.linemaps[path] = list(zip(*linemap))
+        if in_toplevel:
+            cls.linemaps[path] = list(zip(*linemap))
 
         if attrs is not None:
             for k, v in attrs.items():
                 setattr(mod, k, v)
 
-        if not (linemap or attrs):
-            mod._reload_in_subproc = functools.partial(  # type: ignore[attr-defined]
-                _reload_python_module_in_subproc, key, path
-            )
-
-        cls.modules.append(mod)
+        if in_toplevel:
+            cls.modules.append(mod)
         return mod
 
     @classmethod
