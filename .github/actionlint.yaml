@@ -3,8 +3,11 @@ self-hosted-runner:
     # GitHub hosted runner that actionlint doesn't recognize because actionlint version (1.6.21) is too old
     - ubuntu-24.04
     # GitHub hosted x86 Linux runners
+    # TODO: Cleanup mentions of linux.20_04 when upgrade to linux.24_04 is complete
     - linux.20_04.4x
     - linux.20_04.16x
+    - linux.24_04.4x
+    - linux.24_04.16x
     # Organization-wide AWS Linux Runners
     - linux.large
     - linux.2xlarge
