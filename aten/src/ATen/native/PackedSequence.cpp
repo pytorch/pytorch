@@ -122,14 +122,22 @@ Tensor _pack_padded_sequence_backward_symint(const Tensor& grad, c10::SymIntArra
   auto batch_sizes_t = _batch_sizes.contiguous();
   checkLongTensor(batch_sizes_t);
 
+  const int64_t max_seq_len = batch_sizes_t.size(0);
+  int64_t* batch_sizes = batch_sizes_t.data_ptr<int64_t>();
+
+  // Precompute offsets for each timestep
+  std::vector<int64_t> offsets(max_seq_len);
   int64_t offset = 0;
-  // NOTE: this op advertises as CompositeImplicitAutograd, but uses data_ptr().
-  // we should fix this.
-  auto max_seq_len = batch_sizes_t.size(0);
-  int64_t * batch_sizes = batch_sizes_t.data_ptr<int64_t>();
-  for (const auto i : c10::irange(max_seq_len)) {
-    grad_input[i].slice(0, 0, batch_sizes[i]).copy_(grad.slice(0, offset, offset + batch_sizes[i]));
+  for (int64_t i = 0; i < max_seq_len; ++i) {
+    offsets[i] = offset;
     offset += batch_sizes[i];
+  }
+
+  // Parallelize the loop since each iteration is independent.
+  #pragma omp parallel for
+  for (int64_t i = 0; i < max_seq_len; ++i) {
+    auto grad_slice = grad.slice(0, offsets[i], offsets[i] + batch_sizes[i]);
+    grad_input[i].slice(0, 0, batch_sizes[i]).copy_(grad_slice);
   }
 
   if (batch_first) {
@@ -138,6 +146,7 @@ Tensor _pack_padded_sequence_backward_symint(const Tensor& grad, c10::SymIntArra
 
   return grad_input;
 }
+
 
 std::tuple<Tensor, Tensor> _pad_packed_sequence(const Tensor& data, const Tensor& _batch_sizes, bool batch_first, const Scalar& padding_value, int64_t total_length) {
   auto batch_sizes_t = _batch_sizes.contiguous();
