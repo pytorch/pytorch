@@ -755,8 +755,6 @@ def split_strategy(op_schema: OpSchema) -> TupleStrategy:
     )
     dim = normalize_dim(split_dim, input_ndim)
 
-    split_strategy = []
-
     # tensor to split cannot have Partial for now
     for arg_strategy in input_strategy.strategies:
         arg_spec = arg_strategy.output_spec
@@ -780,8 +778,10 @@ def split_strategy(op_schema: OpSchema) -> TupleStrategy:
     )
     assert isinstance(output_size_list, Sized)
 
+    split_strategies = []
+
     for _ in range(len(output_size_list)):
-        split_strategy.append(OpStrategy(strategies=[]))
+        op_strategy = OpStrategy([])
 
         for strategy in input_strategy.strategies:
             spec = strategy.output_spec
@@ -794,8 +794,9 @@ def split_strategy(op_schema: OpSchema) -> TupleStrategy:
 
             spec = DTensorSpec(spec.mesh, placements)
 
-            split_strategy[-1].strategies.append(
+            op_strategy.strategies.append(
                 PlacementStrategy(output_specs=spec, input_specs=([spec]))
             )
+        split_strategies.append(op_strategy)
 
-    return TupleStrategy(split_strategy)
+    return TupleStrategy(split_strategies)
