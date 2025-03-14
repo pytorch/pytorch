@@ -3086,20 +3086,18 @@ class CppVecKernel(CppKernel):
         vec_num_range_thread_expr = cexpr_index(vec_num_range_thread)
         chunk_size = 4096
         num_chunks = CeilDiv(vec_num_range_thread, chunk_size)
+        welford_helper_init_line = (
+            f"WelfordHelper<{self._get_vec_type(dtype)}> {welford_helper_val}"
+            f"("
+            f"{vec_num_range_thread_expr}"
+            f");"
+        )
         if isinstance(num_chunks, sympy.Integer) and num_chunks <= 1:
-            return (
-                f"static WelfordHelper<{self._get_vec_type(dtype)}> {welford_helper_val}"
-                f"("
-                f"{vec_num_range_thread_expr}"
-                f");"
-            )
+            # When the number of chunks <= 1, there is no need to use cascade summation to improve
+            # reduction accuracy. We can initialize a static WelfordHelper to improve performance.
+            return f"static {welford_helper_init_line}"
         else:
-            return (
-                f"WelfordHelper<{self._get_vec_type(dtype)}> {welford_helper_val}"
-                f"("
-                f"{vec_num_range_thread_expr}"
-                f");"
-            )
+            return welford_helper_init_line
 
     def _use_welford_helper(
         self, acc_vec, welford_helper_val, welford_helper_vec_range, dtype
