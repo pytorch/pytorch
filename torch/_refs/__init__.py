@@ -3696,7 +3696,6 @@ def repeat(a: Tensor, *repeat_shape) -> Tensor:
 
 
 def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorLikeType:
-    print("_reshape", a, shape)
     from torch.fx.experimental.symbolic_shapes import sym_eq, _guard_semantics
 
     # Creates a valid shape
