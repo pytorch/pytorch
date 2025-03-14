@@ -548,6 +548,7 @@ inline T entr(T a) {
   return static_cast<T>(-INFINITY);
 }
 
+// Copy-n-paste from aten/src/ATen/native/cuda/Math.cuh lines 1463-1915
 template <typename T>
 float bessel_j0_forward(T x) {
   constexpr float PP[] = {
