@@ -333,7 +333,7 @@ void initLogging() {
   UpdateLoggingLevelsFromFlags();
 }
 
-bool InitCaffeLogging(int* argc, char** argv) {
+bool InitCaffeLogging(const int* argc, char** argv) {
   if (*argc == 0) {
     return true;
   }
@@ -386,7 +386,7 @@ void initLogging() {
   detail::setLogLevelFlagFromEnv();
 }
 
-bool InitCaffeLogging(int* argc, char** argv) {
+bool InitCaffeLogging(const int* argc, char** argv) {
   // When doing InitCaffeLogging, we will assume that caffe's flag parser has
   // already finished.
   if (*argc == 0)
