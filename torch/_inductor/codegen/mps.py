@@ -374,6 +374,22 @@ class MetalOverrides(OpOverrides):
     def entr(x: CSEVariable) -> str:
         return f"c10::metal::entr({x})"
 
+    @staticmethod
+    def bessel_j0(x: CSEVariable) -> str:
+        return f"c10::metal::bessel_j0_forward({x})"
+
+    @staticmethod
+    def bessel_j1(x: CSEVariable) -> str:
+        return f"c10::metal::bessel_j1_forward({x})"
+
+    @staticmethod
+    def bessel_y0(x: CSEVariable) -> str:
+        return f"c10::metal::bessel_y0_forward({x})"
+
+    @staticmethod
+    def bessel_y1(x: CSEVariable) -> str:
+        return f"c10::metal::bessel_y1_forward({x})"
+
 
 MetalOverrides._initialize_pointwise_overrides("mps")
 
