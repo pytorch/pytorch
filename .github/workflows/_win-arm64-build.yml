@@ -120,7 +120,7 @@ jobs:
       - name: Bootstrap Python
         shell: cmd
         run: |
-          ".ci/pytorch/windows/arm64/bootstrap_python.bat"
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_python.bat"
 
       - name: Parse ref
         id: parse-ref
