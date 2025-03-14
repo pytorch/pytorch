@@ -193,6 +193,8 @@ jobs:
           WORKFLOW_NAME: ${{ github.workflow }}
           WORKFLOW_RUN_ID: ${{ github.run_id }}
         run: |
+          echo "test" > test_file1.txt
+          echo "test" > test_file1.json
           echo "usage_log_build_${JOB_ID}.txt"
           echo $(pwd)
 
