@@ -34,10 +34,7 @@ void initAOTIRunnerBindings(PyObject* module) {
           "update_constant_buffer",
           static_cast<void (AOTIModelContainerRunnerCpu::*)(
               std::unordered_map<std::string, at::Tensor>&, bool, bool)>(
-              &AOTIModelContainerRunnerCpu::update_constant_buffer))
-      .def(
-          "swap_constant_buffer",
-          &AOTIModelContainerRunnerCpu::swap_constant_buffer);
+              &AOTIModelContainerRunnerCpu::update_constant_buffer));
 
 #ifdef USE_CUDA
   py::class_<AOTIModelContainerRunnerCuda>(m, "AOTIModelContainerRunnerCuda")
@@ -64,10 +61,7 @@ void initAOTIRunnerBindings(PyObject* module) {
           "update_constant_buffer",
           static_cast<void (AOTIModelContainerRunnerCuda::*)(
               std::unordered_map<std::string, at::Tensor>&, bool, bool)>(
-              &AOTIModelContainerRunnerCuda::update_constant_buffer))
-      .def(
-          "swap_constant_buffer",
-          &AOTIModelContainerRunnerCuda::swap_constant_buffer);
+              &AOTIModelContainerRunnerCuda::update_constant_buffer));
 #endif
 #ifdef USE_XPU
   py::class_<AOTIModelContainerRunnerXpu>(m, "AOTIModelContainerRunnerXpu")
@@ -94,10 +88,7 @@ void initAOTIRunnerBindings(PyObject* module) {
           "update_constant_buffer",
           static_cast<void (AOTIModelContainerRunnerXpu::*)(
               std::unordered_map<std::string, at::Tensor>&, bool, bool)>(
-              &AOTIModelContainerRunnerXpu::update_constant_buffer))
-      .def(
-          "swap_constant_buffer",
-          &AOTIModelContainerRunnerXpu::swap_constant_buffer);
+              &AOTIModelContainerRunnerXpu::update_constant_buffer));
 
 #endif
 
