@@ -1019,7 +1019,6 @@ torch.cuda.synchronize()
         helper(10, 512, 31, 31, 3, stride=2)
         helper(1, 129, 8, 8, 3, stride=2)
 
-    @onlyCPU
     @dtypes(torch.float, torch.double)
     def test_max_pool1d_corner_cases(self, device, dtype):
         def check(x, args, expected):
@@ -1253,7 +1252,6 @@ torch.cuda.synchronize()
         helper(1, 79, 4, 4, 4, 3, stride=2)
         helper(0, 79, 4, 4, 4, 3, stride=2)
 
-    @onlyCPU
     @dtypes(torch.half, torch.bfloat16)
     def test_max_pool_bfloat16_half(self, device, dtype):
         def helper(shape, kernel_size, stride, memory_format, dtype):
@@ -1347,7 +1345,6 @@ torch.cuda.synchronize()
                 indices,
             )
 
-    @onlyCPU
     @dtypes(torch.half, torch.bfloat16)
     def test_avg_pool2d_reduced_floating(self, device, dtype):
         def helper(n, c, h, w, kernel_size, stride, memory_format):
