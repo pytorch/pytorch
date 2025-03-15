@@ -828,7 +828,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
         vec_amx = VecAMX()
         # Currently brgemm config is only added for half
-        if dtype == torch.half:
+        if dtype == torch.half and not vec_amx.is_amx_fp16_supported():
             self._check_brgemm_counter(vec_amx)
         else:
             self._check_amx_counter(vec_amx)
