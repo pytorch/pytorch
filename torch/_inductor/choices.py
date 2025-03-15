@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import typing
 from typing import Any, TYPE_CHECKING
 
@@ -10,10 +11,13 @@ from .codecache import write_text
 from .metrics import get_metric_table, is_metric_table_enabled
 from .runtime.hints import DeviceProperties, ReductionHint
 from .scheduler import BaseSchedulerNode, Scheduler, WhyNoFuse
+from .utils import cmp
 from .virtualized import V
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     import torch
     from torch.utils._ordered_set import OrderedSet
 
@@ -324,3 +328,253 @@ class InductorChoices:
             memory_score,
             proximity_score,
         )
+
+    @staticmethod
+    def estimate_runtime(
+        counted_flops: int,
+        counted_bytes: int,
+        gpu_flops: int,
+        gpu_memory_bandwidth: int,
+    ) -> float:
+        """
+        Return estimated runtime in nanoseconds.
+        This is used for metrics logging, and in comms.py for scheduling compiler collectives. Improvements
+        in accuracy will help that scheduling algorithm.
+
+        TODO(gabe): unify this with the inductor.config.estimate_op_runtime method of passing this function.
+        """
+        # TODO(xmfan): find a better heuristic to model FLOPS/latency relationship
+        factor = 1.0
+        compute_time = (factor * counted_flops / gpu_flops) * 1e9
+        transfer_time = counted_bytes / gpu_memory_bandwidth
+
+        # Return estimated runtime in nanoseconds
+        return max(compute_time, transfer_time)
+
+    @staticmethod
+    def pick_loop_order(
+        stride_lengths: list[list[int]],
+        sizes: Sequence[sympy.Expr],
+        priority_idx: tuple[int, ...] = (),
+    ) -> list[int]:
+        """
+        A heuristic to decide loop iteration orders.  This has not been well
+        tuned and may be something we should autotune.
+
+        This heuristic:
+         - Moves dimensions of size 1 to the end.
+         - Sorts dimensions based on their stride sizes.
+         - Prefers dimensions with smaller strides first (memory locality.)
+         - Breaks ties based on the dimension index.
+
+        Example:
+        stride_lengths = [
+            [256, 16, 1],
+            [512, 32, 1],
+        ]
+        sizes = [4, 16, 32]
+        priority_idx = ()
+
+        Starting order: [2, 1, 0]
+        """
+
+        @functools.cmp_to_key
+        def index_cmp(a: int, b: int) -> int:
+            if sizes[a] == 1 or sizes[b] == 1:
+                # 1-sizes don't matter, just move them to the end
+                return cmp(sizes[a] == 1, sizes[b] == 1)
+
+            # Take abs, otherwise flipped dimensions are treated as smaller
+            # strides than contiguous dims
+            stride_len_a = [abs(sl[a]) for sl in stride_lengths]
+            stride_len_b = [abs(sl[b]) for sl in stride_lengths]
+
+            # equivalent to
+            # np.logical_or(stride_lengths[:, b] == 0, stride_lengths[:, a] < stride_lengths[:, b]).all()
+            a_first = sum(
+                sl_b == 0 or sl_a < sl_b
+                for sl_a, sl_b in zip(stride_len_a, stride_len_b)
+            )
+            b_first = sum(
+                sl_a == 0 or sl_b < sl_a
+                for sl_a, sl_b in zip(stride_len_a, stride_len_b)
+            )
+            if a_first > b_first:
+                return -1
+            if b_first > a_first:
+                return 1
+
+            # otherwise contiguous
+            return cmp(b, a)
+
+        order = list(reversed(range(len(stride_lengths[0]))))
+        if len(priority_idx) > 0:
+            # if we have priority node, only use that node's order
+            stride_lengths = [stride_lengths[pi] for pi in priority_idx]
+        if config.pick_loop_orders:
+            order.sort(key=index_cmp)
+        return order
+
+    @staticmethod
+    def decide_layout_opt(gm: GraphModule, *, is_inference: bool) -> bool:
+        """
+        Decide if we should enable layout optimization for this graph based on
+        heuristics.
+        """
+        if not config.layout_optimization:
+            return False
+
+        if config.force_layout_optimization:
+            return True
+
+        conv_nodes = [
+            n for n in gm.graph.nodes if n.target == torch.ops.aten.convolution.default
+        ]
+        nconv = len(conv_nodes)
+
+        if nconv == 0:
+            return False
+
+        # For cpu backend and mkldnn enabled, we always use channels_last for better performance.
+        if (
+            torch.backends.mkldnn.enabled
+            and torch.backends.mkldnn.is_available()
+            and all(
+                n.args[idx].meta["val"].device == torch.device("cpu")
+                for n in conv_nodes
+                for idx in [0, 1]
+            )
+        ):
+            return True
+
+        # Following models are skipped due to this:
+        # jx_nest_base
+        # volo_d1_224
+        if len(list(gm.graph.nodes)) >= 300 * nconv:
+            log.debug("Skipped layout opt because only a few conv")
+            return False
+
+        if any(
+            has_free_symbols(n.args[idx].meta["val"])
+            for n in conv_nodes
+            for idx in [0, 1]
+        ):
+            log.debug(
+                "See perf regression with dynamic shape. Follow up in https://github.com/pytorch/pytorch/issues/102670"
+            )
+            return False
+
+        def is_grouped(n: Any) -> bool:
+            meta_val = n.args[1].meta["val"]  # type: ignore[union-attr, operator]
+            assert isinstance(meta_val, torch.Tensor)
+            return n.args[-1] > 1 and meta_val.size(1) > 1  # type: ignore[union-attr, operator]
+
+        def is_in_out_channel(n: torch.fx.Node) -> bool:
+            return (
+                n.args[1].meta["val"].size(0) * 2 <= n.args[1].meta["val"].size(1)  # type: ignore[union-attr, operator]
+                and n.args[1].meta["val"].size(2) > 1  # type: ignore[union-attr, operator]
+            )
+
+        def is_small_channel(n: torch.fx.Node) -> bool:
+            return (
+                n.args[1].meta["val"].size(0) <= 64  # type: ignore[union-attr, operator]
+                and n.args[1].meta["val"].size(1) <= 64  # type: ignore[union-attr, operator]
+            )
+
+        # only grouped convolutions benchmarked as slower in conv samples for inference only
+        if is_inference:
+            from torch.utils.flop_counter import FlopCounterMode
+
+            flop_counts: dict[str, float] = defaultdict(float)
+            for node in conv_nodes:
+                success, args, kwargs = torch._inductor.fx_utils.get_fake_args_kwargs(
+                    node
+                )
+
+                if success:
+                    with FlopCounterMode(display=False) as flop_counter_mode:
+                        with V.fake_mode:
+                            node.target(*args, **kwargs)
+
+                    counted_flops = flop_counter_mode.get_total_flops()
+                    if is_grouped(node):
+                        node_type = "grouped"
+                    elif is_small_channel(node):
+                        node_type = "small"
+                    elif is_in_out_channel(node):
+                        node_type = "in_out"
+                    else:
+                        node_type = "default"
+
+                    flop_counts[node_type] += counted_flops
+                else:
+                    log.debug("Conv inputs meta not found")
+
+            # average benchmarked channels last speedup / slowdown, < 1 is speedup.
+            # taken from the set of convolution inputs in benchmarks/dynamo/microbenchmarks/operator_inp_logs/torchbench_train/
+            # To regenerate these numbers follow https://gist.github.com/eellison/55d7a6ed6f39829d68ac56f95f4df5bb
+            GROUPED_MULTIPLIER = 1.358
+            DEFAULT_MULTIPLIER = 0.823
+            IN_OUT_MULTIPLIER = 0.725
+            SMALL_MULTIPLIER = 0.783
+
+            total_flops = sum(flop_counts.values())
+            # TODO - get different values per hardware
+            weighted_flops = (
+                flop_counts["grouped"] * GROUPED_MULTIPLIER
+                + flop_counts["small"] * SMALL_MULTIPLIER
+                + flop_counts["in_out"] * IN_OUT_MULTIPLIER
+                + flop_counts["default"] * DEFAULT_MULTIPLIER
+            )
+            do_layout_opt = weighted_flops <= total_flops
+            if not do_layout_opt:
+                log.debug(
+                    "Skipped layout opt in inference because weighted flops indicate slowdown, default: %d, channels last: %d",
+                    total_flops,
+                    weighted_flops,
+                )
+            return do_layout_opt
+
+        # Channels last layout can dramatically hurt grouped conv perf. E.g.
+        # Conv with arguments like
+        #   {"input_shape": [32, 224, 112, 112], "weight_shape": [224, 112, 3, 3],
+        #    "stride": [2, 2], "padding": [1, 1], "groups": 2}
+        # slows down 31x using channels last..
+
+        # But a lot of timm models use depthwise separable convolution which will
+        # result in grouped convolution with in-channel size == 1.
+        # For those grouped convolution, channels last still helps a lot.
+        # E.g.
+        # Conv with arguments
+        #   {"input_shape": [128, 58, 56, 56], "weight_shape": [58, 1, 3, 3],
+        #    "stride": [2, 2], "padding": [1, 1], "groups": 58}
+        # get 1.86x speedup with channels last layout.
+        #
+        # The following heuristics skip using channels-last if the model contains
+        # grouped convolution with in-channels > 1.
+        if any(map(is_grouped, conv_nodes)):
+            log.debug(
+                "Skip layout opt because found grouped convolution with >1 in_channels!"
+            )
+            return False
+
+        # For some models that contain convolution with larger in-channel than out-channel, applying
+        # channels last hurts performance.
+        # Following models are skipped due to this:
+        # - pytorch_unet
+        # - phlippe_densenet (slightly worse)
+        # - Background_Matting (1.22x -> 0.821x)
+        # - pytorch_CycleGAN_and_pix2pix (1.597x -> 1.294x)
+        if any(map(is_in_out_channel, conv_nodes)):
+            log.debug(
+                "Skip layout opt because some convolutions have smaller out_channel"
+            )
+            return False
+
+        # Following models are skipped due to this:
+        # - functorch_maml_omniglot
+        if all(map(is_small_channel, conv_nodes)):
+            log.debug("Skip layout opt because all convolution channels are too small")
+            return False
+
+        return True
