@@ -648,7 +648,7 @@ def foreach_copy_run_and_map_input_device(fake_mode, func, *args, **kwargs):
     try:
         with in_kernel_invocation_manager(fake_mode):
             out_meta = func(*args, **kwargs)
-    except NotImplementedError as not_implemented_error:
+    except NotImplementedError:
         return NotImplemented
 
     if not out_meta:
@@ -659,7 +659,7 @@ def foreach_copy_run_and_map_input_device(fake_mode, func, *args, **kwargs):
     for i, meta_t in enumerate(out_meta):
         new_list = tuple([tl[i] for tl in tensor_lists] + [args[-1]])
         _, new_kwargs = normalize_function(
-        func, args=new_list, kwargs=kwargs, normalize_to_only_use_kwargs=True
+            func, args=new_list, kwargs=kwargs, normalize_to_only_use_kwargs=True
         )
         device = new_kwargs["input"][0].device
         out_fake.append(
