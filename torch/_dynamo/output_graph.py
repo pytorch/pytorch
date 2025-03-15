@@ -63,6 +63,7 @@ from torch.fx.experimental.symbolic_shapes import (
     ShapeEnv,
 )
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
+from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from . import config, exc, graph_break_hints, logging as torchdynamo_logging, variables
@@ -162,6 +163,18 @@ class VariableTrackerCacheKey:
     # globals and local source differently when it comes to guards and possibly
     # some other parts as well. So, cache also relies on the source.
     source: Source
+
+
+@dataclass(frozen=True)
+class AliasingInfo:
+    has_aliasing: bool
+    msg: str
+
+
+@dataclass(frozen=True)
+class MutationInfo:
+    has_mutation: bool
+    msg: str
 
 
 class VariableTrackerCache:
@@ -2020,6 +2033,10 @@ class SubgraphTracer(fx.Tracer):
                 (self.graph._target_to_str(source_target), source_target)
             ]
 
+        # Stores the versions of the input tensors at the time they are inserted
+        # as placeholders in the graph. This is used to track input mutation.
+        self._input_versions_at_beginning: list[int] = []
+
     # preserve original meta if it is available
     def _maybe_preserve_original_meta(self, tx, node):
         if (
@@ -2268,6 +2285,8 @@ class SubgraphTracer(fx.Tracer):
     def create_graph_input(
         self, name, type_expr, example_value, before=False, source=None
     ):
+        if isinstance(example_value, torch.Tensor):
+            self._input_versions_at_beginning.append(example_value._version)
         log.debug(
             "create_graph_input %s %s %s at debug_level %s before=%s",
             name,
@@ -2676,6 +2695,75 @@ class SubgraphTracer(fx.Tracer):
             )
         # Sort the symbols so that we can have a deterministic lifting order
         return sorted(to_be_bound, key=lambda s: s.name)
+
+    def has_input_mutation(self):
+        input_versions_at_beginning = self._input_versions_at_beginning
+        input_nodes = []
+
+        input_versions_at_end = []
+        for node in self.graph.nodes:
+            if node.op == "placeholder":
+                example_value = node.meta["example_value"]
+                if isinstance(example_value, torch.Tensor):
+                    input_versions_at_end.append(example_value._version)
+                    input_nodes.append(node)
+            else:
+                break
+
+        mutated_inputs = [
+            i
+            for i, (v1, v2) in enumerate(
+                zip(input_versions_at_beginning, input_versions_at_end)
+            )
+            if v1 != v2
+        ]
+
+        if len(mutated_inputs):
+            mutated_nodes = [input_nodes[i] for i in mutated_inputs]
+            msg = f"Input mutation detected at {mutated_nodes}"
+            return MutationInfo(True, msg)
+
+        return MutationInfo(False, "")
+
+    def has_aliasing(self):
+        input_storages: dict[StorageWeakRef, torch.fx.Node] = dict()
+
+        for node in self.graph.nodes:
+            if node.op == "placeholder":
+                example_value = node.meta["example_value"]
+                if isinstance(example_value, torch.Tensor):
+                    storage = StorageWeakRef(example_value._typed_storage())
+                    if storage in input_storages:
+                        # input-input aliasing
+                        msg = f"Input-to-input aliasing detected at nodes {input_storages[storage]} and {node}"
+                        return AliasingInfo(True, msg)
+                    input_storages[storage] = node
+            else:
+                break
+
+        output_storages: dict[StorageWeakRef, torch.fx.Node] = dict()
+        out_nodes = self.graph.find_nodes(op="output")[0]
+        for out_node in out_nodes.args[0]:
+            example_value = out_node.meta["example_value"]
+            if isinstance(example_value, torch.Tensor):
+                storage = StorageWeakRef(example_value._typed_storage())
+                if storage in output_storages:
+                    # output-output aliasing
+                    msg = f"Output-to-output aliasing detected at nodes {output_storages[storage]} and {out_node}"
+                    return AliasingInfo(True, msg)
+                output_storages[storage] = out_node
+
+        intersected_storages = input_storages.keys() & output_storages.keys()
+        if len(intersected_storages) > 0:
+            # input-output aliasing
+            aliased = [
+                (input_storages[s], output_storages[s]) for s in intersected_storages
+            ]
+            aliased = ", ".join([f"{i} and {o}" for i, o in aliased])
+            msg = f"Input-to-output aliasing detected at nodes {aliased}"
+            return AliasingInfo(True, msg)
+
+        return AliasingInfo(False, "")
 
 
 # NOTE: [HigherOrderOperator tracing design]
