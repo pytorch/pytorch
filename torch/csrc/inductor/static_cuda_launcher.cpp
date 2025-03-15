@@ -157,13 +157,11 @@ void parseKernelArgs(
     uint64_t* argStorage,
     void** kernelArgs) {
   int numKernelArgs = static_cast<int>(std::strlen(argTypes));
-  if (!PyTuple_Check(varArgs)) {
-    throw std::runtime_error("Kernel arguments must be provided as a tuple");
-  }
-  if (PyTuple_Size(varArgs) != static_cast<Py_ssize_t>(numKernelArgs)) {
-    throw std::runtime_error(
-        "Mismatch between number of argument types and provided arguments");
-  }
+  TORCH_CHECK(
+      PyTuple_Check(varArgs), "Kernel arguments must be provided as a tuple");
+  TORCH_CHECK(
+      PyTuple_Size(varArgs) == static_cast<Py_ssize_t>(numKernelArgs),
+      "Mismatch between number of argument types and provided arguments");
 
   for (int i = 0; i < numKernelArgs; ++i) {
     // Get pointer to the ith 8-byte slot.
@@ -231,18 +229,13 @@ PyObject* load_kernel(PyObject* self, PyObject* args) {
     return nullptr;
   }
   CUfunction func = nullptr;
-  try {
-    func = loadKernel(filePath, funcName, sharedMemBytes);
-    // Taken from triton/nvidia/backend/driver.c
-    AT_CUDA_DRIVER_CHECK(
-        nvrtc().cuFuncGetAttribute(&n_regs, CU_FUNC_ATTRIBUTE_NUM_REGS, func));
-    AT_CUDA_DRIVER_CHECK(nvrtc().cuFuncGetAttribute(
-        &n_spills, CU_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES, func));
-    n_spills /= 4;
-  } catch (const std::runtime_error& e) {
-    PyErr_SetString(PyExc_RuntimeError, e.what());
-    return nullptr;
-  }
+  func = loadKernel(filePath, funcName, sharedMemBytes);
+  // Taken from triton/nvidia/backend/driver.c
+  AT_CUDA_DRIVER_CHECK(
+      nvrtc().cuFuncGetAttribute(&n_regs, CU_FUNC_ATTRIBUTE_NUM_REGS, func));
+  AT_CUDA_DRIVER_CHECK(nvrtc().cuFuncGetAttribute(
+      &n_spills, CU_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES, func));
+  n_spills /= 4;
   // Return a tuple of CUFunction, n_regs, n_spills
   return Py_BuildValue(
       "(Kii)", reinterpret_cast<uint64_t>(func), n_regs, n_spills);
