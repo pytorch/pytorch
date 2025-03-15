@@ -377,7 +377,7 @@ def _get_flattened_qconfig_dict(
         "": qconfig_mapping.global_qconfig
     }
     flattened.update(qconfig_mapping.object_type_qconfigs)
-    flattened.update(qconfig_mapping.module_name_qconfigs)
+    flattened.update(qconfig_mapping.module_name_qconfigs)  # type: ignore[arg-type]
     return flattened
 
 
