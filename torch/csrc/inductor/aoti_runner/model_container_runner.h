@@ -50,6 +50,7 @@ class TORCH_API AOTIModelContainerRunner {
       bool use_inactive,
       AOTInductorStreamHandle cuda_stream_handle = nullptr);
   void swap_constant_buffer();
+  void free_inactive_constant_buffer();
 
   std::vector<std::string> get_call_spec();
 
@@ -87,6 +88,8 @@ class TORCH_API AOTIModelContainerRunner {
       nullptr};
   decltype(&AOTInductorModelContainerSwapConstantBuffer)
       swap_constant_buffer_func_{nullptr};
+  decltype(&AOTInductorModelContainerFreeInactiveConstantBuffer)
+      free_inactive_constant_buffer_func_{nullptr};
   decltype(&AOTInductorModelContainerGetCallSpec) get_call_spec_func_{nullptr};
 
   AOTInductorModelContainerHandle container_handle_ = nullptr;

@@ -37,7 +37,10 @@ void initAOTIRunnerBindings(PyObject* module) {
               &AOTIModelContainerRunnerCpu::update_constant_buffer))
       .def(
           "swap_constant_buffer",
-          &AOTIModelContainerRunnerCpu::swap_constant_buffer);
+          &AOTIModelContainerRunnerCpu::swap_constant_buffer)
+      .def(
+          "free_inactive_constant_buffer",
+          &AOTIModelContainerRunnerCpu::free_inactive_constant_buffer);
 
 #ifdef USE_CUDA
   py::class_<AOTIModelContainerRunnerCuda>(m, "AOTIModelContainerRunnerCuda")
@@ -67,7 +70,10 @@ void initAOTIRunnerBindings(PyObject* module) {
               &AOTIModelContainerRunnerCuda::update_constant_buffer))
       .def(
           "swap_constant_buffer",
-          &AOTIModelContainerRunnerCuda::swap_constant_buffer);
+          &AOTIModelContainerRunnerCuda::swap_constant_buffer)
+      .def(
+          "free_inactive_constant_buffer",
+          &AOTIModelContainerRunnerCuda::free_inactive_constant_buffer);
 #endif
 #ifdef USE_XPU
   py::class_<AOTIModelContainerRunnerXpu>(m, "AOTIModelContainerRunnerXpu")
@@ -97,7 +103,10 @@ void initAOTIRunnerBindings(PyObject* module) {
               &AOTIModelContainerRunnerXpu::update_constant_buffer))
       .def(
           "swap_constant_buffer",
-          &AOTIModelContainerRunnerXpu::swap_constant_buffer);
+          &AOTIModelContainerRunnerXpu::swap_constant_buffer)
+      .def(
+          "free_inactive_constant_buffer",
+          &AOTIModelContainerRunnerXpu::free_inactive_constant_buffer);
 
 #endif
 
