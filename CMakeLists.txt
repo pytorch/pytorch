@@ -271,6 +271,10 @@ option(USE_NATIVE_ARCH "Use -march=native" OFF)
 cmake_dependent_option(USE_MPS "Use MPS for macOS build" ON "MPS_FOUND" OFF)
 cmake_dependent_option(USE_NCCL "Use NCCL" ON
                        "USE_CUDA OR USE_ROCM;UNIX;NOT APPLE" OFF)
+# If USE_NCCL env var is set, override the default value
+if(DEFINED ENV{USE_NCCL})
+  set(USE_NCCL $ENV{USE_NCCL} CACHE STRING "Override USE_NCCL with environment variable" FORCE)
+endif()
 cmake_dependent_option(USE_RCCL "Use RCCL" ON USE_NCCL OFF)
 cmake_dependent_option(USE_STATIC_NCCL "Use static NCCL" OFF "USE_NCCL" OFF)
 cmake_dependent_option(USE_SYSTEM_NCCL "Use system-wide NCCL" OFF "USE_NCCL"
@@ -389,6 +393,7 @@ if(WIN32)
   # https://github.com/pytorch/pytorch/pull/138996
   # set(USE_MIMALLOC_ON_MKL ON)
 endif()
+# set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE "${CMAKE_COMMAND} -E time")
 
 if(USE_CCACHE)
   find_program(CCACHE_PROGRAM ccache)
