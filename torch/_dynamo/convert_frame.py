@@ -47,6 +47,7 @@ from weakref import ReferenceType
 
 import torch
 import torch._logging
+import torch._subclasses.meta_utils
 from torch._C._dynamo.guards import GlobalStateGuard
 from torch._dynamo.distributed import get_compile_pg
 from torch._dynamo.symbolic_convert import TensorifyState
@@ -226,11 +227,20 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     def _fn(*args: _P.args, **kwargs: _P.kwargs) -> _T:
         guards = GlobalStateGuard()
         prior_grad_mode = torch.is_grad_enabled()
+
+        disable_inference_mode_ctx_mgr: contextlib.AbstractContextManager[None] = (
+            contextlib.nullcontext()
+        )
+        if config.fake_tensor_disable_inference_mode:
+            disable_inference_mode_ctx_mgr = (
+                torch._subclasses.meta_utils.disable_inference_mode_for_fake_prop()
+            )
+
         # Just in case we get left in a bad dispatch state we want to restore
         # it. This can happen because the dispatch bits aren't a true
         # stack/counter - so we can't just increment/decrement them as we enter
         # and leave.
-        with torch._C._PreserveDispatchKeyGuard():
+        with torch._C._PreserveDispatchKeyGuard(), disable_inference_mode_ctx_mgr:
             prior_inference_mode = torch.is_inference_mode_enabled()
             prior_deterministic = torch.are_deterministic_algorithms_enabled()
             prior_warn_only = torch.is_deterministic_algorithms_warn_only_enabled()

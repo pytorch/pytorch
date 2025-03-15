@@ -296,7 +296,14 @@ def foreach_all_gather_copy_out(
         out = [t.view(world_size, -1) for t in split_with_sizes_out]
 
     # only avoid VC bump if we are not in inference mode
-    non_inference_outs = [o for o in out if not o.is_inference()]
+    if torch._dynamo.is_compiling():
+        # For torch.compile, we turn off inference_mode for fake tensor
+        # propagation, and therefore graph break on is_inference. For `compile`,
+        # we don't care about VCs, so just skip the optimization.
+        non_inference_outs = []
+    else:
+        non_inference_outs = [o for o in out if not o.is_inference()]
+
     if len(non_inference_outs) > 0:
         with torch.autograd._unsafe_preserve_version_counter(tuple(non_inference_outs)):
             torch.ops.fsdp.split_with_sizes_copy(
