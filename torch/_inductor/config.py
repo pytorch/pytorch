@@ -719,6 +719,16 @@ def decide_compile_threads() -> int:
 # TODO: Set directly after internal rollout.
 compile_threads: Optional[int] = None if is_fbcode() else decide_compile_threads()
 
+# TODO: Default to on while I test code
+use_static_cuda_launcher: bool = (
+    os.environ.get("TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER", "1") == "1"
+)
+
+# Raise error if we bypass the launcher
+strict_static_cuda_launcher: bool = (
+    os.environ.get("TORCHINDUCTOR_STRICT_STATIC_CUDA_LAUNCHER", "0") == "1"
+)
+
 # gemm autotuning global cache dir
 global_cache_dir: Optional[str]
 if is_fbcode():
