@@ -81,9 +81,9 @@ class TestDebugTrace(test_torchinductor.TestCase):
             """\
 BEFORE FUSION
 op0: SchedulerNode(ComputedBuffer)
-op0.writes = [MemoryDep('buf0', c0, {c0: 256})]
+op0.writes = [   MemoryDep('buf0', c0, {c0: 256}, replacement=((d0, c0),), indirect_broadcast=())]
 op0.unmet_dependencies = []
-op0.met_dependencies = [MemoryDep('arg0_1', c0, {c0: 256})]
+op0.met_dependencies = [   MemoryDep('arg0_1', c0, {c0: 256}, replacement=((d0, c0),), indirect_broadcast=())]
 op0.outputs = [
     buf0: ComputedBuffer
     buf0.layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
@@ -108,8 +108,8 @@ class op0_loop_body:
 
 
 op1: SchedulerNode(ComputedBuffer)
-op1.writes = [MemoryDep('buf1', c0, {c0: 256})]
-op1.unmet_dependencies = [MemoryDep('buf0', c0, {c0: 256})]
+op1.writes = [   MemoryDep('buf1', c0, {c0: 256}, replacement=((d0, c0),), indirect_broadcast=())]
+op1.unmet_dependencies = [   MemoryDep('buf0', c0, {c0: 256}, replacement=((d0, c0),), indirect_broadcast=())]
 op1.met_dependencies = []
 op1.outputs = [
     buf1: ComputedBuffer
@@ -152,9 +152,11 @@ op2.node.kernel = extern_kernels.mm""",
             """\
 AFTER FUSION
 op0_op1: FusedSchedulerNode(SchedulerNode,SchedulerNode)
-op0_op1.writes = [MemoryDep('buf0', c0, {c0: 256}), MemoryDep('buf1', c0, {c0: 256})]
+op0_op1.writes = 
+    [   MemoryDep('buf0', c0, {c0: 256}, replacement=((d0, c0),), indirect_broadcast=()),
+        MemoryDep('buf1', c0, {c0: 256}, replacement=((d0, c0),), indirect_broadcast=())]
 op0_op1.unmet_dependencies = []
-op0_op1.met_dependencies = [MemoryDep('arg0_1', c0, {c0: 256})]
+op0_op1.met_dependencies = [   MemoryDep('arg0_1', c0, {c0: 256}, replacement=((d0, c0),), indirect_broadcast=())]
 op0_op1.outputs = [
     buf0: ComputedBuffer
     buf0.layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
@@ -165,9 +167,9 @@ op0_op1.outputs = [
 ]
 op0_op1.snodes[0] =
 op0: SchedulerNode(ComputedBuffer)
-op0.writes = [MemoryDep('buf0', c0, {c0: 256})]
+op0.writes = [   MemoryDep('buf0', c0, {c0: 256}, replacement=((d0, c0),), indirect_broadcast=())]
 op0.unmet_dependencies = []
-op0.met_dependencies = [MemoryDep('arg0_1', c0, {c0: 256})]
+op0.met_dependencies = [   MemoryDep('arg0_1', c0, {c0: 256}, replacement=((d0, c0),), indirect_broadcast=())]
 op0.outputs = [
     buf0: ComputedBuffer
     buf0.layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
@@ -191,8 +193,8 @@ class op0_loop_body:
         return store
 op0_op1.snodes[1] =
 op1: SchedulerNode(ComputedBuffer)
-op1.writes = [MemoryDep('buf1', c0, {c0: 256})]
-op1.unmet_dependencies = [MemoryDep('buf0', c0, {c0: 256})]
+op1.writes = [   MemoryDep('buf1', c0, {c0: 256}, replacement=((d0, c0),), indirect_broadcast=())]
+op1.unmet_dependencies = [   MemoryDep('buf0', c0, {c0: 256}, replacement=((d0, c0),), indirect_broadcast=())]
 op1.met_dependencies = []
 op1.outputs = [
     buf1: ComputedBuffer
