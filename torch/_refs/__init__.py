@@ -3405,6 +3405,7 @@ def stft(
         input = aten.pad(input.view(extended_shape), [pad_amount, pad_amount], pad_mode)
         input = input.view(input.size()[extra_dims:])
 
+    batch = input.size(0)
     length = input.size(1)
     torch._check(
         0 < n_fft <= length,
@@ -3436,6 +3437,11 @@ def stft(
     if not center and align_to_window:
         input_pad_amount = (n_fft - win_length_) // 2
         input = aten.pad(input, [input_pad_amount, input_pad_amount], pad_mode)
+        n_frames = 1 + (length - win_length_) // hop_length_
+        input = input.as_strided(
+            (batch, n_frames, n_fft),
+            (input.stride(0), hop_length_ * input.stride(1), input.stride(1))
+        )
     if window is not None:
         input = input * window
 
