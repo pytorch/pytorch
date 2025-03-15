@@ -215,8 +215,7 @@ def tf32_on_and_off(tf32_precision=1e-5):
 
         @functools.wraps(f)
         def wrapped(*args, **kwargs):
-            for k, v in zip(arg_names, args):
-                kwargs[k] = v
+            kwargs.update({k: v for k, v in zip(arg_names, args)})
             cond = torch.cuda.is_tf32_supported()
             if 'device' in kwargs:
                 cond = cond and (torch.device(kwargs['device']).type == 'cuda')

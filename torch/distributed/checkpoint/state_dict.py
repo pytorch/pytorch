@@ -596,8 +596,9 @@ def _load_model_state_dict(
             )
         elif info.full_state_dict:
             _distribute_state_dict(state_dict, local_state_dict, device=devices.pop())
-        for fqn, local_state in local_state_dict.items():
-            state_dict[fqn] = local_state
+        state_dict.update(
+            {fqn: local_state for fqn, local_state in local_state_dict.items()}
+        )
 
     with info.fsdp_context():
         return cast(

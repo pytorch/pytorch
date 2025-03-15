@@ -398,12 +398,12 @@ class TuningProcessPool:
         assert self.processes is not None, "Tuning process pool is not initialized"
         assert self.executor is not None
 
-        results = {}
-
         # Use a ThreadExecutorPool to spread the work across the subprocesses and
         # to grab subprocesses as soon as they're free.
-        for choice, result in zip(choices, self.executor.map(self.target, choices)):
-            results[choice] = result
+        results = {
+            choice: result
+            for choice, result in zip(choices, self.executor.map(self.target, choices))
+        }
 
         return results
 
