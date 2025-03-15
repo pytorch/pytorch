@@ -496,6 +496,8 @@ def _run_onnx_session_with_ortvaluevector(
         _nvtx_range_pop()
         return pth_outputs
     else:
+        import onnxruntime.training
+
         # Profile the two ORT-to-PyTorch type casts below
         _nvtx_range_push("after run_with_ortvaluevector")
         # Map ORTValue to torch.Tensor.
