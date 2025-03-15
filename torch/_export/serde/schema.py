@@ -8,7 +8,7 @@ from typing import Annotated, Optional
 from torch._export.serde.union import _Union
 
 # NOTE: Please update this value if any modifications are made to the schema
-SCHEMA_VERSION = (8, 7)
+SCHEMA_VERSION = (8, 8)
 TREESPEC_VERSION = 1
 
 
@@ -474,6 +474,9 @@ class AOTInductorModelPickleData:
 
     # Whether AOTInductor runtime is for CPU.
     aot_inductor_model_is_cpu: Annotated[Optional[bool], 6] = None
+    
+    # The name of the lowered module
+    lowered_module_name: Annotated[Optional[str], 7] = None
 
 @dataclass
 class ExternKernelNode:
