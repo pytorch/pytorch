@@ -1,8 +1,8 @@
+#include <c10/metal/indexing.h>
 #include <c10/metal/special_math.h>
 #include <c10/metal/utils.h>
 #include <metal_stdlib>
 using namespace metal;
-using namespace c10::metal;
 
 struct fmax_functor {
   template <typename T>
@@ -92,54 +92,6 @@ struct polar_functor {
   }
 };
 
-template <typename T, typename F>
-kernel void binary_indexing(
-    constant void* input_ [[buffer(0)]],
-    constant void* other_ [[buffer(1)]],
-    device void* out_ [[buffer(2)]],
-    constant uint3* offsets [[buffer(3)]],
-    uint tid [[thread_position_in_grid]]) {
-  auto out =
-      (device result_of<F, T, T>*)((device uint8_t*)out_ + offsets[tid].x);
-  auto input = (constant T*)((constant uint8_t*)input_ + offsets[tid].y);
-  auto other = (constant T*)((constant uint8_t*)other_ + offsets[tid].z);
-  F f;
-  *out = f(*input, *other);
-}
-
-template <typename T, typename F>
-kernel void binary_dense(
-    constant T* input [[buffer(0)]],
-    constant T* other [[buffer(1)]],
-    device result_of<F, T, T>* out [[buffer(2)]],
-    uint tid [[thread_position_in_grid]]) {
-  F f;
-  out[tid] = f(input[tid], other[tid]);
-}
-
-#define REGISTER_BINARY_INDEXING_OP(NAME, DTYPE)             \
-  template [[host_name(#NAME "_" #DTYPE)]] kernel void       \
-  binary_indexing<DTYPE, NAME##_functor>(                    \
-      constant void* input_,                                 \
-      constant void* other_,                                 \
-      device void* out_,                                     \
-      constant uint3* offsets,                               \
-      uint tid);                                             \
-  template [[host_name(#NAME "_dense_" #DTYPE)]] kernel void \
-  binary_dense<DTYPE, NAME##_functor>(                       \
-      constant DTYPE * input_,                               \
-      constant DTYPE * other_,                               \
-      device result_of<NAME##_functor, DTYPE, DTYPE> * out_, \
-      uint tid)
-
-#define REGISTER_BINARY_OP(NAME, DTYPE)                             \
-  template [[host_name(#NAME "_" #DTYPE)]] kernel void NAME<DTYPE>( \
-      constant void* input_,                                        \
-      constant void* other_,                                        \
-      device void* out_,                                            \
-      constant uint3* offsets,                                      \
-      uint tid)
-
 REGISTER_BINARY_INDEXING_OP(copysign, long);
 REGISTER_BINARY_INDEXING_OP(copysign, int);
 REGISTER_BINARY_INDEXING_OP(copysign, float);
@@ -186,9 +138,7 @@ kernel void complex_mul(
   out[1] = input[0] * other[1] + input[1] * other[0];
 }
 
-REGISTER_BINARY_OP(complex_mul, float);
-REGISTER_BINARY_OP(complex_mul, half);
-
+// Constructs complex tensor from real and imaginary planes
 template <typename T>
 kernel void complex_kernel(
     constant void* real_ [[buffer(0)]],
@@ -203,5 +153,15 @@ kernel void complex_kernel(
   out[1] = imag[0];
 }
 
+#define REGISTER_BINARY_OP(NAME, DTYPE)                             \
+  template [[host_name(#NAME "_" #DTYPE)]] kernel void NAME<DTYPE>( \
+      constant void* input_,                                        \
+      constant void* other_,                                        \
+      device void* out_,                                            \
+      constant uint3* offsets,                                      \
+      uint tid)
+
+REGISTER_BINARY_OP(complex_mul, float);
+REGISTER_BINARY_OP(complex_mul, half);
 REGISTER_BINARY_OP(complex_kernel, float);
 REGISTER_BINARY_OP(complex_kernel, half);
