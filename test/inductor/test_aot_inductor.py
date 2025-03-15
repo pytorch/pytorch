@@ -4805,8 +4805,6 @@ def fail_gpu(suffixes: tuple[str, ...], is_skip=False):
 CPU_TEST_FAILURES = {
     # TODO: failed internally
     "test_multiple_output_alias": fail_cpu(is_skip=True),
-    "test_update_constant_buffer": fail_cpu(is_skip=True),
-    "test_so_without_weight": fail_cpu(is_skip=True),
 }
 
 # test_failures, xfail by default, set is_skip=True to skip
