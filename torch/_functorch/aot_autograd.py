@@ -771,11 +771,16 @@ fw_metadata={str(fw_metadata)}"""
                 != 0
             ):
                 raise RuntimeError(
-                    f"""\
+                    """\
 Found a graph input that requires gradients, and received a mutation.
-This is currently banned in the aot_export workflow. If you need this functionality, please file a github issue.
+This is currently banned in the aot_export workflow. If you need this functionality,
+please file a github issue and submit the trace log.
 
-fw_metadata={str(fw_metadata)}"""
+Get trace log by running with `TORCH_TRACE`:
+
+    TORCH_TRACE="/tmp/tracedir" python foo.py
+
+or following the insturction https://pytorch.org/docs/stable/torch.compiler_troubleshooting.html#tlparse-torch-trace"""
                 )
             if req_subclass_dispatch:
                 raise RuntimeError(
