@@ -15,6 +15,7 @@ import ctypes
 import glob
 import importlib
 import inspect
+import functools
 import math
 import os
 import platform
@@ -2689,7 +2690,7 @@ else:
 
         raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
-
+@functools.cache
 def get_device_module(device: _Optional[_Union[torch.device, str]] = None):
     """
     Returns the module associated with a given device(e.g., torch.device('cuda'), "mtia:0", "xpu", ...).
