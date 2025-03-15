@@ -69,7 +69,7 @@ AOTIModelContainerRunner::AOTIModelContainerRunner(
   try {                                                              \
     var = reinterpret_cast<decltype(var)>(model_so_->sym(name_str)); \
   } catch (const at::DynamicLibraryError& e) {                       \
-    std::cerr << "Could not dlsym " << name_str;                     \
+    std::cerr << "Could not dlsym " << name_str << std::endl;        \
   }
 
   TRY_LOAD_SYMBOL(
