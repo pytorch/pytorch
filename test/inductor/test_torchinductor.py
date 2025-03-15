@@ -11770,6 +11770,60 @@ class CommonTemplate:
         self.assertEqual(rot.grad, rot_e.grad)
         self.assertEqual(trans.grad, trans_e.grad)
 
+    def test_padded_tensor(self):
+        from torch._inductor.experimental.padded_tensor import PaddedTensor
+
+        @torch.compile(fullgraph=True)
+        def f(x):
+            x1 = x + 1
+            return x1 * 2
+
+        def run(shape):
+            x = torch.randn(*shape, device="cuda")
+            pad_x = PaddedTensor.from_tensor(x, multipliers={0: 4, 1: 4})
+            out = f(pad_x)
+            return out
+
+        out = run((2, 3))
+        assert out.shape == (2, 3)
+        assert out.tensor.shape == (4, 4)
+
+        out = run((3, 4))
+        assert out.shape == (3, 4)
+        assert out.tensor.shape == (4, 4)
+
+        out = run((5, 6))
+        assert out.shape == (5, 6)
+        assert out.tensor.shape == (8, 8)
+
+    def test_padded_tensor1(self):
+        from torch._inductor.experimental.padded_tensor import PaddedTensor
+
+        @torch.compile(fullgraph=True)
+        def f(x, y):
+            x1 = x + 1
+            return x1 @ y
+
+        def run(shape):
+            x = torch.randn(*shape, device="cuda")
+            y = torch.randn(*shape[::-1], device="cuda")
+            pad_x = PaddedTensor.from_tensor(x, multipliers={0: 4, 1: 4})
+            pad_y = PaddedTensor.from_tensor(y, multipliers={0: 4, 1: 4})
+            out = f(pad_x, pad_y)
+            return out
+
+        out = run((2, 3))
+        assert out.shape == (2, 2)
+        assert out.tensor.shape == (4, 4)
+
+        out = run((3, 4))
+        assert out.shape == (3, 3)
+        assert out.tensor.shape == (4, 4)
+
+        out = run((5, 6))
+        assert out.shape == (5, 5)
+        assert out.tensor.shape == (8, 8)
+
     # If we serve from the cache, the init hook isn't called
     @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
     @skipIfWindows(msg="torch._dynamo.exc.Unsupported")
