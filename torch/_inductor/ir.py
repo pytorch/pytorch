@@ -94,6 +94,7 @@ from .utils import (
     sympy_subs,
 )
 from .virtualized import ops, OpsValue, V
+from torch import SymInt
 
 
 if TYPE_CHECKING:
@@ -3276,7 +3277,7 @@ class Layout(OutputSpec):
         self.device = device
         self.dtype = dtype
         assert len(size) == len(stride), f"size={size}, stride={stride}"
-        assert all(isinstance(s, (Expr, int)) for s in size)
+        assert all(isinstance(s, (Expr, int, SymInt)) for s in size)
         self.size: list[Expr] = size
         self.stride: list[Expr] = stride
         self.offset: Expr = offset
