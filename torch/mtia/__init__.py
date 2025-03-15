@@ -29,6 +29,8 @@ _tls = threading.local()
 _initialization_lock = threading.Lock()
 _lazy_seed_tracker = _LazySeedTracker()
 
+rng_supported_mesh = True
+
 
 def init():
     _lazy_init()
