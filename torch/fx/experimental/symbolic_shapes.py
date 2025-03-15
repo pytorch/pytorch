@@ -25,7 +25,7 @@ import sys
 import threading
 import traceback
 from collections import Counter, defaultdict
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Generator, Iterator, Mapping, Sequence
 from contextlib import _GeneratorContextManager, contextmanager
 from dataclasses import asdict, dataclass, field
 from enum import Enum
@@ -7292,3 +7292,20 @@ def _suggest_fixes_for_data_dependent_error_non_strict(
         # add suggested torch.check()s based on `src_map` to the error message
         # replacing unbacked symints in the unresolved condition in the error
         _suggest_torch_checks(e, src_map)
+
+
+@contextmanager
+def _remove_effect_token_unbacked_bindings(
+    node: torch.fx.Node,
+) -> Generator[None, None, None]:
+    old_bindings = node.meta.get("unbacked_bindings", {})
+
+    # Remove the extra layer for effect token
+    new_bindings = {k: path[1:] if path else path for k, path in old_bindings.items()}
+
+    node.meta["unbacked_bindings"] = new_bindings
+
+    try:
+        yield
+    finally:
+        node.meta["unbacked_bindings"] = old_bindings
