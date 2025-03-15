@@ -16,7 +16,6 @@ from torch.testing._internal.common_device_type import (
     largeTensorTest,
     onlyCPU,
     onlyCUDA,
-    onlyNativeDeviceTypes,
 )
 from torch.testing._internal.common_dtype import (
     all_types,
@@ -887,7 +886,6 @@ class TestSortAndSelect(TestCase):
             self.assertEqual(val, expected_val, atol=0, rtol=0)
             self.assertEqual(ind, expected_ind, atol=0, rtol=0)
 
-    @onlyNativeDeviceTypes
     @dtypesIfCUDA(*all_types_and(torch.bfloat16))
     @dtypes(*all_types_and(torch.bfloat16, torch.half))
     def test_topk_zero(self, device, dtype):
@@ -1142,7 +1140,7 @@ class TestSortAndSelect(TestCase):
             self.assertEqual(res1ind[:, :], res2ind[:, :, k - 1], atol=0, rtol=0)
 
     @dtypes(torch.float)
-    @onlyNativeDeviceTypes  # Fails on XLA
+    # Fails on XLA
     def test_kthvalue_scalar(self, device, dtype):
         # Test scalar input (test case from https://github.com/pytorch/pytorch/issues/30818)
         # Tests that passing a scalar tensor or 1D tensor with 1 element work either way
