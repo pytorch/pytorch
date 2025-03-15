@@ -3124,7 +3124,10 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
     disable_inference_mode_ctx_mgr: contextlib.AbstractContextManager[None] = (
         contextlib.nullcontext()
     )
-    if torch._dynamo.config.fake_tensor_disable_inference_mode:
+    if (
+        torch._dynamo.config.fake_tensor_disable_inference_mode
+        and torch.is_inference_mode_enabled()
+    ):
         disable_inference_mode_ctx_mgr = torch.inference_mode(False)
 
     try:
