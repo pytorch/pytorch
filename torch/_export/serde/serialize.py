@@ -452,7 +452,7 @@ class Final(type):
 class GraphModuleSerializer(metaclass=Final):
     def __init__(
         self,
-        graph_signature: ep.ExportGraphSignature,
+        graph_signature: Optional[ep.ExportGraphSignature],
         module_call_graph: list[ep.ModuleCallEntry],
     ):
         self.graph_state = GraphState()
@@ -864,7 +864,7 @@ class GraphModuleSerializer(metaclass=Final):
             arg_name = arg.get_name()
             assert arg_name is not None, "Buffer must have valid name"
             arg_val = arg.get_real_obj()
-            class_fqn = arg_val._type().qualified_name()
+            class_fqn = arg_val._type().qualified_name()  # type: ignore[attr-defined]
             self.custom_objs[arg_name] = arg_val
             return Argument.create(
                 as_custom_obj=CustomObjArgument(arg_name, class_fqn)
@@ -1525,6 +1525,7 @@ class GraphModuleSerializer(metaclass=Final):
     def serialize(self, graph_module: torch.fx.GraphModule) -> GraphModule:
         log.debug("\n[serialize]")
         graph = self.serialize_graph(graph_module)
+        assert self.graph_signature is not None
 
         return GraphModule(
             graph=graph,

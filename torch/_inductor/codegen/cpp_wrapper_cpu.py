@@ -956,6 +956,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             output_buffer = V.graph.graph_outputs[idx]
             if isinstance(output_buffer, ir.BaseView):
                 output_storage = output_buffer.unwrap_view()
+                assert isinstance(output_storage, (ir.BaseView, ir.StorageBox))
                 if isinstance(output_storage.data, ir.ConstantBuffer):
                     is_constant_buffer = True
 
@@ -1804,7 +1805,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         else:
             schema = op_overload._schema
         assert schema is not None
-        arg_types = [x.real_type for x in schema.arguments]
+        arg_types = [x.real_type for x in schema.arguments]  # type: ignore[attr-defined]
         return_types = [x.type for x in schema.returns]
 
         new_tensor_args = []
