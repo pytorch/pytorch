@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import collections
 import dataclasses
-import functools
 import inspect
 import itertools
 import logging
@@ -52,7 +51,6 @@ from .runtime.runtime_utils import green_text, red_text
 from .sizevars import SimplifyIndexing
 from .utils import (
     cache_on_self,
-    cmp,
     device_need_guard,
     get_device_tflops,
     get_dtype_size,
@@ -810,15 +808,13 @@ class BaseSchedulerNode:
                     cls = self.node.__class__
                     cls.process_kernel(op, *fake_inputs, **self.node.kwargs)
 
-                    # TODO(xmfan): find a better heuristic to model FLOPS/latency relationship
-                    factor = 1.0
                     counted_flops = flop_counter_mode.get_total_flops()
                     counted_bytes = self.get_read_write_buffers_sizes()
-                    compute_time = (factor * counted_flops / gpu_flops) * 1e9
-                    transfer_time = counted_bytes / gpu_memory_bandwidth
 
                     # Return estimated runtime in nanoseconds
-                    return max(compute_time, transfer_time)
+                    return V.choices.estimate_runtime(
+                        counted_flops, counted_bytes, gpu_flops, gpu_memory_bandwidth
+                    )
 
         elif isinstance(self, FusedSchedulerNode) or isinstance(
             self.node, ComputedBuffer
@@ -1864,52 +1860,6 @@ class GroupedSchedulerNode(BaseSchedulerNode):
         return False
 
 
-def pick_loop_order(
-    stride_lengths: list[list[int]],
-    sizes: Sequence[sympy.Expr],
-    priority_idx: tuple[int, ...] = (),
-) -> list[int]:
-    """
-    A heuristic to decide loop iteration orders.  This has not been well
-    tuned and may be something we should autotune.
-    """
-
-    @functools.cmp_to_key
-    def index_cmp(a: int, b: int) -> int:
-        if sizes[a] == 1 or sizes[b] == 1:
-            # 1-sizes don't matter, just move them to the end
-            return cmp(sizes[a] == 1, sizes[b] == 1)
-
-        # Take abs, otherwise flipped dimensions are treated as smaller
-        # strides than contiguous dims
-        stride_len_a = [abs(sl[a]) for sl in stride_lengths]
-        stride_len_b = [abs(sl[b]) for sl in stride_lengths]
-
-        # equivalent to
-        # np.logical_or(stride_lengths[:, b] == 0, stride_lengths[:, a] < stride_lengths[:, b]).all()
-        a_first = sum(
-            sl_b == 0 or sl_a < sl_b for sl_a, sl_b in zip(stride_len_a, stride_len_b)
-        )
-        b_first = sum(
-            sl_a == 0 or sl_b < sl_a for sl_a, sl_b in zip(stride_len_a, stride_len_b)
-        )
-        if a_first > b_first:
-            return -1
-        if b_first > a_first:
-            return 1
-
-        # otherwise contiguous
-        return cmp(b, a)
-
-    order = list(reversed(range(len(stride_lengths[0]))))
-    if len(priority_idx) > 0:
-        # if we have priority node, only use that node's order
-        stride_lengths = [stride_lengths[pi] for pi in priority_idx]
-    if config.pick_loop_orders:
-        order.sort(key=index_cmp)
-    return order
-
-
 @dataclasses.dataclass
 class NodeUser:
     node: Union[BaseSchedulerNode, OutputNode]
@@ -2037,9 +1987,7 @@ class Scheduler:
         # Peak memory pass and overlap pass must run last, otherwise
         # other reordering passes could undo their effects.
         if config.reorder_for_peak_memory:
-            from .memory import reorder_for_peak_memory
-
-            self.nodes = reorder_for_peak_memory(
+            self.nodes = V.choices.reorder_for_peak_memory(
                 self.nodes,
                 self.name_to_buf,
                 self.name_to_fused_node,
@@ -3203,90 +3151,6 @@ class Scheduler:
             WhyNoFuse(node1, node2)("will create cycle")
         return cycle
 
-    def can_fusion_increase_peak_memory(
-        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
-    ) -> bool:
-        """
-        Return true if fusing the two nodes can potentially increasing peak memory.
-
-        The implementation is more like a heuristic since we don't really know if we are at peak
-        or not when trying to fuse these two ndoes. The order of nodes may change later which makes the
-        peak memory estimation hard.
-
-        Here is how we decide the LOWER BOUND of extra memory allocation if we fuse these 2 nodes:
-        1. find all buffers read by each node with a single user. These buffers are supposed to
-           be reused if we don't fuses these 2 nodes
-        2. find the intersection of these buffers for the two node and sum the total buffer size.
-           If we don't fuse these two nodes, we can at lease avoid this much memory allocation.
-           Note that the extra memory allocation is not necessarily causing peak memory increase.
-           This is just a heuristic.
-
-        We return true only if the saving for fusion can not trade off the extra memory allocation.
-        """
-
-        from .codegen.wrapper import buffer_reuse_key
-
-        def _find_single_user_inputs(
-            node: BaseSchedulerNode,
-        ) -> list[ir.Buffer]:
-            output = []
-            for rd in node.read_writes.reads:
-                buf = self.name_to_buf.get(rd.name)
-                if buf and len(buf.users) == 1 and buf.node.has_tensor_output():
-                    output.append(buf.node)
-            return output
-
-        # Check inputs that can be potentially reused
-        lhs_dep_nodes = _find_single_user_inputs(node1)
-        rhs_dep_nodes = _find_single_user_inputs(node2)
-
-        lhs_reuse_keys = OrderedSet(buffer_reuse_key(buf) for buf in lhs_dep_nodes)
-        rhs_reuse_keys = OrderedSet(buffer_reuse_key(buf) for buf in rhs_dep_nodes)
-
-        common_reuse_keys = lhs_reuse_keys.intersection(rhs_reuse_keys)
-
-        memory_overhead = 0
-        for key in common_reuse_keys:
-            try:
-                memory_overhead += int(key[2])
-            except ValueError:
-                # not an interger. Fallback is to fuse
-                return False
-
-        bw_saving = self.score_fusion_memory(node1, node2)
-
-        # The factor 32 here is quite arbitrary.
-        if V.graph.sizevars.statically_known_gt(memory_overhead, 32 * bw_saving):
-            return True
-        return False
-
-    def are_long_distant_nodes(
-        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
-    ) -> bool:
-        """
-        This function prevents fusion for nodes that can increase memory
-        footprint. This problem is more common in horizontal fusion, where nodes
-        that are far apart in the original order get fused, lengthening the live
-        intervals of tensors. This is very evident in models with activation
-        checkpointing, where the recomputed nodes from different checkpointed
-        regions get fused and significantly increase the memory footprint.
-
-        The current attempt is a quick, possibly hacky, heuristic to prevent the
-        fusion of nodes that are far away in the original order.
-
-        A better but difficult to implement heurisitic would be to use live
-        intervals of the buffers, find region of peak pressure in the original
-        program and prevent fusion that crosses that peak region. We might need
-        special care or good approximation in this implementation, as fusion of
-        node changes live intervals, and re-computing live intervals and peak
-        memory after each fusion can introduce large compilation overhead.
-        """
-        proximity_score = max(
-            abs(node1.min_order - node2.max_order),
-            abs(node2.min_order - node1.max_order),
-        )
-        return proximity_score > 64
-
     def decide_fusion_fail_reason(
         self,
         node1: BaseSchedulerNode,
@@ -3434,65 +3298,6 @@ class Scheduler:
             and not is_output_of_multi_outputs_template(node.node)
         )
 
-    def check_prologue_fusion_heuristics_fusable(
-        self,
-        prologue_node: BaseSchedulerNode,
-        template_node: BaseSchedulerNode,
-        why: WhyNoFuse,
-    ) -> bool:
-        """
-        Heuristics to avoid benchmarking predictably slow prologue fusions
-        """
-        # user opt into more aggressive prologue fusion, dont use heuristics
-        if prologue_node.get_operation_names() <= V.graph.invoke_quant_ops:
-            return True
-
-        read_bytes = prologue_node.get_read_buffer_sizes()
-        write_bytes = prologue_node.get_write_buffer_sizes()
-
-        # Initially, only do fusions which will result in fewer memory accesses inside of the template to avoid
-        # potential bad cache behavior and shared memory use.
-        # we also want to avoid benchmarking reliably unprofitable fusions like downcasts from fp32 -> fp16 inside kernel.
-        # allowing gathers by allowing increasing write_bytes by small factor
-        # TODO - make configurable per input, for insance, bias can fuse fp32 -> fp16 profitably
-
-        BYTES_THRESHOLD_MULTIPLIER = 1.1
-        if read_bytes > (write_bytes * BYTES_THRESHOLD_MULTIPLIER):
-            why("prologue fusion will not increase amount of bytes read in kernel")
-            return False
-
-        # we want to avoid attempting to fuse predictably unprofitable prologues
-        # such as increasing the unaligned reads or writes.
-        # TODO - would be nice to generalize this, however, we would need more explicit
-        # knowledge of memory access patterns in the TritonTemplate in order to know
-        # the stride order to check alignment.
-        origins = tuple(
-            e.target
-            for n in prologue_node.get_nodes()
-            if n.node is not None
-            for e in n.node.get_origins()
-            if e.op == "call_function"
-        )
-        if origins == (torch.ops.aten.constant_pad_nd.default,):
-            why(
-                "prologue fusion will not increase attempt to fuse in padding bc it increases unaligned reads"
-            )
-            return False
-
-        def low_prec_fp(dtype: torch.dtype) -> bool:
-            return dtype.itemsize <= 2 and dtype.is_floating_point
-
-        if (
-            low_prec_fp(template_node.get_template_node_or_throw().dtype)
-            and not prologue_node.can_codegen_in_low_precision()
-        ):
-            why(
-                "prologue fusion that must be upcast to fp32 not profitable for low precision templates"
-            )
-            return False
-
-        return True
-
     def can_fuse(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> bool:
         """
         Determine if it is possible to combine node1 and node2 into a
@@ -3586,7 +3391,9 @@ class Scheduler:
                 )
                 return False
 
-            if not self.check_prologue_fusion_heuristics_fusable(node1, node2, why):
+            if not V.choices.check_prologue_fusion_heuristics_fusable(
+                node1, node2, why
+            ):
                 return False
 
         if node1.is_template() and (

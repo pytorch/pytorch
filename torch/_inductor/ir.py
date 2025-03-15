@@ -4120,9 +4120,8 @@ class ComputedBuffer(OperationBuffer):
                 stride_lengths = [
                     V.graph.sizevars.stride_hints(expr, indices) for expr in reads
                 ]
-                from .scheduler import pick_loop_order
 
-                return pick_loop_order(stride_lengths, self.get_size())
+                return V.choices.pick_loop_order(stride_lengths, self.get_size())
 
         return None
 
@@ -4293,7 +4292,6 @@ class ComputedBuffer(OperationBuffer):
         """
         Shuffle the order of loops around to hopefully improve performance.
         """
-        from .scheduler import pick_loop_order
 
         if priority_idx is None:
             priority_idx = []
@@ -4306,7 +4304,9 @@ class ComputedBuffer(OperationBuffer):
             assert len(strides) == len(memory_addrs) and len(strides[0]) == len(
                 index_vars
             )
-            order = list(reversed(pick_loop_order(strides, sizes, priority_idx)))
+            order = list(
+                reversed(V.choices.pick_loop_order(strides, sizes, priority_idx))
+            )
         except Exception:
             if config.debug:
                 log.warning(
@@ -7178,18 +7178,7 @@ class StorageBox(MutableBox):
         A heuristic to decide if we should realize a tensor
         that is used multiple times.
         """
-        if users > 1 and isinstance(self.data, (Pointwise, Reduction)):
-            if is_cpu(self.data):
-                # Heuristic for realizing reused result of heavy ops on cpu
-                opcount = self.data.inner_fn_opcount()
-                heavy_ops = ["exp", "sigmoid"]  # a list of heavy ops
-                if any(x in opcount.used_ops for x in heavy_ops):
-                    return True
-            return (
-                self.num_reads() > config.realize_reads_threshold
-                or self.has_large_inner_fn()
-            )
-        return False
+        return V.choices.should_realize_on_reuse(self, users)
 
     def mark_reuse(self, users: int) -> None:
         if self.should_realize_on_reuse(users):
