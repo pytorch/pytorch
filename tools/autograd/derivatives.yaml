@@ -2744,6 +2744,9 @@
   reserveSpace: not_implemented("cudnn_batch_norm_backward reserveSpace")
   input, weight, grad_output: batchnorm_double_backward(input, weight, grads[0], grads[1], grads[2], grad_output, running_mean, running_var, true, epsilon, save_mean, save_var, grad_input_mask)
 
+- name: cudnn_rms_norm(Tensor input, SymInt[] normalized_shape, Tensor? weight, float? epsilon=None) -> (Tensor, Tensor)
+  input, weight: "cudnn_rms_norm_backward_symint(input, normalized_shape, grad, result1, weight)"
+
 # nnpack
 
 - name: _nnpack_spatial_convolution(Tensor input, Tensor weight, Tensor? bias, SymInt[2] padding, SymInt[2] stride=1) -> Tensor
