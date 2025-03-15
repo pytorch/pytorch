@@ -6,7 +6,7 @@ from .triton_compat import ASTSource, CompiledKernel
 
 
 MAX_SHARED_MEMORY = 49152
-
+MAX_ARGS = 50
 
 class StaticallyLaunchedCudaKernel:
     """
@@ -93,7 +93,7 @@ class StaticallyLaunchedCudaKernel:
                 "Static cuda launcher only supports num_ctas == 1"
             )
 
-        if num_args > 25 or num_args == 0:
+        if num_args > MAX_ARGS or num_args == 0:
             raise NotImplementedError(
                 "No static cuda launcher available for %d arguments", num_args
             )
