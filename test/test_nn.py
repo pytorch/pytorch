@@ -8185,6 +8185,36 @@ class TestNNDeviceType(NNTestCase):
 
         self.assertEqual(scipy_ary, gridsample_ary.reshape_as(scipy_ary))
 
+    def test_avg_pool_large_arguments(self, device):
+        x = torch.randn(8, 2, 1, 1, device=device, dtype=torch.float32)
+        # Negative stride as in your repro snippet
+        with self.assertRaisesRegex(RuntimeError, r"integer out of range"):
+            size = (8, 2, 1, 1)
+            t = torch.randn(size=size, dtype=torch.float32, device=device)
+            al = torch.ops.aten.alias(t)
+            mx_t = torch.argmax(al, dim=0, keepdim=True)
+
+            torch.nn.functional.avg_pool2d(mx_t, 
+                                           kernel_size=(9223372036854775807, 5868783964474102731), 
+                                           stride= (-1, 3010182406857593769), 
+                                           padding=(0,), 
+                                           ceil_mode=True, 
+                                           count_include_pad=True)
+
+        with self.assertRaisesRegex(RuntimeError, r"integer out of range"):
+            size = (8, 2, 1, 1)
+            t = torch.randn(size=size, dtype=torch.float32, device=device)
+            al = torch.ops.aten.alias(t)
+            mx_t = torch.argmax(al, dim=0, keepdim=True)
+
+            torch.nn.functional.avg_pool2d(mx_t, 
+                                           kernel_size=(2, 2), 
+                                           stride= (-1, 3010182406857593769), 
+                                           padding=(0,), 
+                                           ceil_mode=True, 
+                                           count_include_pad=True)
+
+
     @onlyCUDA
     @largeTensorTest("60GB", "cpu")
     @largeTensorTest("16GB", "cuda")
