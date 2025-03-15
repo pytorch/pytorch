@@ -65,6 +65,18 @@ AOTIModelContainerRunner::AOTIModelContainerRunner(
   LOAD_SYMBOL(get_call_spec_func_, "AOTInductorModelContainerGetCallSpec")
 #undef LOAD_SYMBOL
 
+#define TRY_LOAD_SYMBOL(var, name_str)                               \
+  try {                                                              \
+    var = reinterpret_cast<decltype(var)>(model_so_->sym(name_str)); \
+  } catch (const at::DynamicLibraryError& e) {                       \
+    std::cerr << "Could not dlsym " << name_str << std::endl;        \
+  }
+
+  TRY_LOAD_SYMBOL(
+      free_inactive_constant_buffer_func_,
+      "AOTInductorModelContainerFreeInactiveConstantBuffer")
+#undef TRY_LOAD_SYMBOL
+
   // Hack to find the json file name from the model so file
   size_t lastindex = model_so_path.find_last_of('.');
   std::string json_filename = model_so_path.substr(0, lastindex) + ".json";
@@ -211,6 +223,15 @@ void AOTIModelContainerRunner::run_const_fold(
 
 void AOTIModelContainerRunner::swap_constant_buffer() {
   AOTI_RUNTIME_ERROR_CODE_CHECK(swap_constant_buffer_func_(container_handle_));
+}
+
+void AOTIModelContainerRunner::free_inactive_constant_buffer() {
+  if (!free_inactive_constant_buffer_func_) {
+    throw std::runtime_error(
+        "No free_inactive_constant_buffer in .so! Consider rebuild .so with latest package.");
+  }
+  AOTI_RUNTIME_ERROR_CODE_CHECK(
+      free_inactive_constant_buffer_func_(container_handle_));
 }
 
 std::vector<std::string> AOTIModelContainerRunner::get_call_spec() {
