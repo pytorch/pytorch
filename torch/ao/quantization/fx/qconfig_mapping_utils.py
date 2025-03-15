@@ -376,12 +376,8 @@ def _get_flattened_qconfig_dict(
     flattened: dict[Union[Callable, str], QConfigAny] = {
         "": qconfig_mapping.global_qconfig
     }
-    flattened.update(
-        dict(qconfig_mapping.object_type_qconfigs.items())
-    )
-    flattened.update(
-        dict(qconfig_mapping.module_name_qconfigs.items())
-    )
+    flattened.update(qconfig_mapping.object_type_qconfigs)
+    flattened.update(qconfig_mapping.module_name_qconfigs)
     return flattened
 
 

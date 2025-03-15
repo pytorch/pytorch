@@ -296,7 +296,7 @@ class BenchmarkRunner:
             (key.strip(), value.strip())
             for key, value in map(lambda str: str.split(":"), key_vals)  # noqa: C417
         ]  # ['M: (32, 16)', 'ZPB: 2'] -> [('M', '(32, 16)'), ('ZPB', '2')]
-        out.update({key: value for key, value in key_vals})
+        out.update(key_vals)
 
         return out
 
