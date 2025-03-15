@@ -19,8 +19,9 @@ if TYPE_CHECKING:
 
 
 class CodeTemplate:
-    substitution_str = r"(^[^\n\S]*)?\$([^\d\W]\w*|\{,?[^\d\W]\w*\,?})"
-    substitution = re.compile(substitution_str, re.MULTILINE)
+    substitution = re.compile(
+        r"(^[^\n\S]*)?\$([^\d\W]\w*|\{,?[^\d\W]\w*\,?})", re.MULTILINE
+    )
 
     pattern: str
     filename: str
