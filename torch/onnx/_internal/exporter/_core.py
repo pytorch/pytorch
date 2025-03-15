@@ -200,27 +200,33 @@ def _set_shape_type(
     | tuple[torch.Tensor],
     complex_to_float: bool,
 ) -> None:
-    # TODO: Consider using meta["tensor_meta"] for this? Would it be faster?
     if isinstance(meta_val, tuple):
         logger.warning("Setting shape and type of tensors is not supported yet")
     if isinstance(meta_val, torch.Tensor):
-        # FIXME: Consider shape for complex values
         dims = []
         for dim in meta_val.shape:
             if isinstance(dim, int):
                 dims.append(dim)
             else:
                 dims.append(str(dim.node))
-        value.dtype = _torch_dtype_to_onnx_dtype(meta_val.dtype)
-        if complex_to_float:
-            if meta_val.dtype == torch.complex64:
-                value.dtype = ir.DataType.FLOAT
-                # Add 2 as the last dimension if the tensor is complex to hold the real/imag parts
-                dims.append(2)
-            elif meta_val.dtype == torch.complex128:
-                value.dtype = ir.DataType.DOUBLE
-                # Add 2 as the last dimension if the tensor is complex to hold the real/imag parts
-                dims.append(2)
+
+        # If the dtype is set already (e.g. by the onnx_symbolic ops),
+        # we don't need to set it again.
+        #
+        # When a user specifies complex in onnx_symbolic, we consider that to
+        # be the intention even though non of the ONNX ops deals with complex values.
+        # In this case, we don't change the dtype or the shape of the tensor.
+        if value.dtype is None:
+            value.dtype = _torch_dtype_to_onnx_dtype(meta_val.dtype)
+            if complex_to_float:
+                if meta_val.dtype == torch.complex64:
+                    value.dtype = ir.DataType.FLOAT
+                    # Add 2 as the last dimension if the tensor is complex to hold the real/imag parts
+                    dims.append(2)
+                elif meta_val.dtype == torch.complex128:
+                    value.dtype = ir.DataType.DOUBLE
+                    # Add 2 as the last dimension if the tensor is complex to hold the real/imag parts
+                    dims.append(2)
 
         value.shape = ir.Shape(dims)
     elif isinstance(meta_val, (int, torch.SymInt)):
