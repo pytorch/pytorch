@@ -99,7 +99,8 @@ kernel void binary_indexing(
     device void* out_ [[buffer(2)]],
     constant uint3* offsets [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {
-  auto out = (device result_of<F, T, T>*)((device uint8_t*)out_ + offsets[tid].x);
+  auto out =
+      (device result_of<F, T, T>*)((device uint8_t*)out_ + offsets[tid].x);
   auto input = (constant T*)((constant uint8_t*)input_ + offsets[tid].y);
   auto other = (constant T*)((constant uint8_t*)other_ + offsets[tid].z);
   F f;
