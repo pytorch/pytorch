@@ -540,111 +540,13 @@ __global__ void GammaBetaBackwardSimpleCUDAKernel(
   }
 }
 
-// This implementation gets called if M and N divide with 32. This case should
-// be the most common. We can then make better use of warp level intrinsics
-// to improve performance.
-
-template <typename T, typename T_ACC>
-__global__ void GammaBetaBackwardCUDAKernel_32x32(
-    int64_t M,
-    int64_t N,
-    const T* dY,
-    const T* X,
-    const T_ACC* mean,
-    const T_ACC* rstd,
-    T* dg,
-    T* db) {
-  alignas(sizeof(double)) extern __shared__ char s_data1[];
-  T_ACC* s_data_typed = reinterpret_cast<T_ACC*>(&s_data1);
-  T_ACC* s_dg;
-  T_ACC* s_db;
-
-  T_ACC dg_sum = 0;
-  T_ACC db_sum = 0;
-
-  const int64_t j = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
-
-  if (j < N) {
-    constexpr int unroll_factor = 8;
-    int laneId = threadIdx.x & (C10_WARP_SIZE - 1);
-
-    T_ACC mean_reg, mean_reg_tmp;
-    T_ACC rstd_reg, rstd_reg_tmp;
-    T dY_reg;
-    T X_reg;
-
-    // Main loop
-    int bcounter;
-    for (bcounter = 0; bcounter < M / (blockDim.y * unroll_factor);
-         bcounter++) {
-      int offset = (bcounter * blockDim.y + threadIdx.y) * unroll_factor;
-
-      if (laneId < unroll_factor) {
-        mean_reg_tmp = mean[offset + laneId];
-        rstd_reg_tmp = rstd[offset + laneId];
-      }
-      WARP_SYNC();
-
-      #pragma unroll
-      for (int ii = 0; ii < unroll_factor; ++ii) {
-        dY_reg = dY[(offset + ii) * N + j];
-        X_reg = X[(offset + ii) * N + j];
-        mean_reg = WARP_SHFL(mean_reg_tmp, ii, kWarpSize);
-        rstd_reg = WARP_SHFL(rstd_reg_tmp, ii, kWarpSize);
-        dg_sum += dY_reg * (X_reg - mean_reg) * rstd_reg;
-        db_sum += dY_reg;
-      }
-    }
-
-    // Remainder loop
-    int offset = (bcounter * blockDim.y + threadIdx.y) * unroll_factor;
-    for (int ii = 0; ii < unroll_factor; ii++) {
-      if ((offset + ii) < M) {
-        mean_reg = mean[offset + ii];
-        rstd_reg = rstd[offset + ii];
-        dY_reg = dY[(offset + ii) * N + j];
-        X_reg = X[(offset + ii) * N + j];
-        dg_sum += dY_reg * (X_reg - mean_reg) * rstd_reg;
-        db_sum += dY_reg;
-      }
-    }
-
-    // This kernel uses a block of (C10_WARP_SIZE x C10_WARP_SIZE) and
-    // gets called when M; N divide by 32. We can use warp shuffles
-    // for the final reduction step. This removes 4 shmem loads and
-    // stores with their corresponding __syncthreads()
-
-    // This greatly reduces bank conflicts at the expense of a little
-    // extra shared memory. It does not impact occupancy
-    int padded_bx = (1 + blockDim.x);
-
-    s_dg = s_data_typed;
-    s_db = s_data_typed + (padded_bx * blockDim.y);
-    s_dg[threadIdx.y * padded_bx + threadIdx.x] = dg_sum;
-    s_db[threadIdx.y * padded_bx + threadIdx.x] = db_sum;
-    __syncthreads();
-
-    // Load transposed so that a warp holds an entire column
-    T_ACC reg_dg = s_dg[threadIdx.x * padded_bx + threadIdx.y];
-    T_ACC reg_db = s_db[threadIdx.x * padded_bx + threadIdx.y];
-    for (unsigned delta = C10_WARP_SIZE >> 1; delta >= 1; delta >>= 1) {
-      reg_dg += WARP_SHFL_XOR(reg_dg, delta, kWarpSize);
-      reg_db += WARP_SHFL_XOR(reg_db, delta, kWarpSize);
-    }
-
-    if (threadIdx.x == 0) {
-      const int64_t j = blockIdx.x * blockDim.x + threadIdx.y;
-      if (dg) {
-        dg[j] = reg_dg;
-      }
-      if (db) {
-        db[j] = reg_db;
-      }
-    }
-  }
-}
-
-template <typename T, typename T_ACC>
+// We use template parameters here because the compiler can then constant-propagate these
+// constants and optimize loops, etc.. In particular, there is a shared memory
+// reduction loop that can be completely optimized away if block_dim_y == 32 (which does
+// happen at one callsite). After the shared memory reduction there is a warp shuffle phase
+// that reduces without calling __syncthreads().
+template <typename T, typename T_ACC,
+          int block_dim_x, int block_dim_y>
 __global__ void GammaBetaBackwardCUDAKernel(
     int64_t M,
     int64_t N,
@@ -700,30 +602,60 @@ __global__ void GammaBetaBackwardCUDAKernel(
         db_sum += dY_reg;
       }
     }
+    // When using warp shuffles we load from a column in shared memory so we pad
+    // to reduce bank conflicts.
+    int padded_bx = (block_dim_x + 1);
 
-    // Do the final reduction in shared memory
-    s_dg = s_data_typed;
-    s_db = s_data_typed + blockDim.x * blockDim.y;
-    s_dg[threadIdx.y * blockDim.x + threadIdx.x] = dg_sum;
-    s_db[threadIdx.y * blockDim.x + threadIdx.x] = db_sum;
-    __syncthreads();
-
-    for (int offset = blockDim.y / 2; offset >= 1; offset /= 2) {
+    // Note that this loop should be optimized away by the compiler if block_dim_y=32
+    // (which we do have at one callsite). Note that the template variable is
+    // block_dim_y as opposed to blockDim.y which is a CUDA reserved variable.
+    for (int offset = block_dim_y / 2; offset >= kWarpSize; offset /= 2) {
       if (threadIdx.y < offset) {
-        s_dg[threadIdx.y * blockDim.x + threadIdx.x] +=
-            s_dg[(threadIdx.y + offset) * blockDim.x + threadIdx.x];
-        s_db[threadIdx.y * blockDim.x + threadIdx.x] +=
-            s_db[(threadIdx.y + offset) * blockDim.x + threadIdx.x];
-        }
+        s_dg[threadIdx.y * padded_bx + threadIdx.x] +=
+            s_dg[(threadIdx.y + offset) * padded_bx + threadIdx.x];
+        s_db[threadIdx.y * padded_bx + threadIdx.x] +=
+            s_db[(threadIdx.y + offset) * padded_bx + threadIdx.x];
+      }
       __syncthreads();
     }
+    // These asserts are static and do not cause any runtime cost.
+    static_assert(block_dim_x * block_dim_y % kWarpSize == 0);
+    static_assert(block_dim_x * block_dim_y >= kWarpSize);
 
-    if (threadIdx.y == 0) {
-      if (dg) {
-        dg[j] = s_dg[threadIdx.x];
+    s_dg = s_data_typed;
+    s_db = s_data_typed + padded_bx * block_dim_y;
+    s_dg[threadIdx.y * padded_bx + threadIdx.x] = dg_sum;
+    s_db[threadIdx.y * padded_bx + threadIdx.x] = db_sum;
+    __syncthreads();
+
+    int total_warps_needed = block_dim_x;
+    int active_reduce_warps = (block_dim_x * block_dim_y) / kWarpSize;
+
+    int thread_id = (threadIdx.x + threadIdx.y * block_dim_x);
+    int warp_id = thread_id / kWarpSize;
+    int lid = (thread_id) & (kWarpSize - 1);
+
+    // Now use warp shuffles to do the last 32 rows of the reduction.
+    for (int i = 0; i < total_warps_needed / active_reduce_warps; ++i) {
+      int shared_x = i * active_reduce_warps + warp_id;
+      int shared_y = lid;
+      T_ACC reg_dg = s_dg[shared_y * padded_bx + shared_x];
+      T_ACC reg_db = s_db[shared_y * padded_bx + shared_x];
+
+      for (unsigned delta = kWarpSize >> 1; delta >= 1; delta >>= 1) {
+        reg_dg += WARP_SHFL_XOR(reg_dg, delta, kWarpSize);
+        reg_db += WARP_SHFL_XOR(reg_db, delta, kWarpSize);
       }
-      if (db) {
-        db[j] = s_db[threadIdx.x];
+      if (lid == 0) {
+        int64_t store_index = blockIdx.x * block_dim_x;
+        store_index += i * active_reduce_warps;
+        store_index += warp_id;
+        if (dg) {
+          dg[store_index] = reg_dg;
+        }
+        if (db) {
+          db[store_index] = reg_db;
+        }
       }
     }
   }
@@ -1166,6 +1098,33 @@ void cuComputeGradInput(
   }
 }
 
+template<typename T, typename T_ACC, int block_dim_x, int block_dim_y>
+void LaunchGammaBetaBackwardCUDAKernel(
+  int64_t M, int64_t N, const T* dY_data, const T* X_data,
+  const T_ACC* mean_data, const T_ACC* rstd_data,
+  T* dgamma_data, T* dbeta_data, cudaStream_t cuda_stream) {
+  dim3 threads{block_dim_x, block_dim_y};
+  int blocks = (N + threads.x - 1) / threads.x;
+
+  // If M and N divide by warp_size, we can use warp shuffles for all of the
+  // final reduction (otherwise we use warp shuffles only for the final 32 values).
+  // That requires transposing values in shared memory, so we apply a padding to
+  // reduce bank conflicts.
+
+  size_t shmem_sz = 2 * sizeof(T_ACC) * (block_dim_x + 1) * block_dim_y;
+  GammaBetaBackwardCUDAKernel<T, T_ACC, block_dim_x, block_dim_y>
+      <<<blocks, threads, shmem_sz, cuda_stream>>>(
+          M,
+          N,
+          dY_data,
+          X_data,
+          mean_data,
+          rstd_data,
+          dgamma_data,
+          dbeta_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
 template <typename T>
 void LayerNormBackwardKernelImplInternal(
     const Tensor& dY,
@@ -1304,40 +1263,9 @@ void LayerNormBackwardKernelImplInternal(
       if ((M % kWarpSize == 0) && (N % kWarpSize == 0)) {
         // This implementation relies on warp primitives and requires that M and N divide
         // exactly to warp size.
-        dim3 threads{kWarpSize, kWarpSize};
-        int blocks = (N + threads.x - 1) / threads.x;
-
-        // If M and N divide by warp_size, we can use warp shuffles for the final reduction.
-        // That requires transposing values in shared memory, so we apply a padding to
-        // reduce bank conflicts.
-
-        size_t shmem_sz = 2 * sizeof(T_ACC) * (threads.x + 1) * threads.y;
-        GammaBetaBackwardCUDAKernel_32x32<T, T_ACC>
-            <<<blocks, threads, shmem_sz, cuda_stream>>>(
-                M,
-                N,
-                dY_data,
-                X_data,
-                mean_data,
-                rstd_data,
-                dgamma_data,
-                dbeta_data);
-          C10_CUDA_KERNEL_LAUNCH_CHECK();
+        LaunchGammaBetaBackwardCUDAKernel<T, T_ACC, kWarpSize, kWarpSize>(M, N, dY_data, X_data, mean_data, rstd_data, dgamma_data, dbeta_data, cuda_stream);
       } else {
-        dim3 threads{16, 32};
-        int blocks = (N + threads.x - 1) / threads.x;
-        size_t shmem_sz = 2 * sizeof(T_ACC) * threads.x * threads.y;
-        GammaBetaBackwardCUDAKernel<T, T_ACC>
-            <<<blocks, threads, shmem_sz, cuda_stream>>>(
-                M,
-                N,
-                dY_data,
-                X_data,
-                mean_data,
-                rstd_data,
-                dgamma_data,
-                dbeta_data);
-        C10_CUDA_KERNEL_LAUNCH_CHECK();
+        LaunchGammaBetaBackwardCUDAKernel<T, T_ACC, 16, 32>(M, N, dY_data, X_data, mean_data, rstd_data, dgamma_data, dbeta_data, cuda_stream);
       }
 #endif
     }
