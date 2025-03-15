@@ -115,6 +115,8 @@ target_compile_definitions(test_jit PRIVATE USE_GTEST)
 
 if(USE_SYSTEM_ONNX)
   target_link_libraries(test_jit PRIVATE onnx_proto onnx)
+else()
+  target_link_libraries(test_jit PRIVATE onnx_library)
 endif()
 
 if(USE_MKLDNN)
