@@ -160,7 +160,7 @@ init_command = [
     'junitparser==2.1.1',
     'rich==10.9.0',
     'pyyaml==6.0.1',
-    'optree==0.13.0',
+    'git+https://github.com/metaopt/optree.git#egg=optree',
     'dataclasses_json==0.6.7',
     'pandas==2.2.3',
 ]
