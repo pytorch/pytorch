@@ -1,11 +1,13 @@
 # Owner(s): ["module: inductor"]
 
 import sys
+import os
 import unittest
-
+from unittest.mock import MagicMock, patch
 import torch
 from torch._dynamo.testing import rand_strided
 from torch._inductor.utils import clone_preserve_strides
+from torch._inductor.runtime.triton_compat import Config
 from torch.testing._internal.common_utils import IS_LINUX, skipIfXpu
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -35,6 +37,8 @@ from torch._inductor.runtime.triton_heuristics import (
     autotune_hints_to_configs,
     CachingAutotuner,
     triton_config,
+    _dump_launch_params,
+    template,
 )
 from torch._inductor.test_case import run_tests, TestCase
 
@@ -184,6 +188,54 @@ class TestTritonHeuristics(TestCase):
             _ = autotune_hints_to_configs(hints, size_hints, block_size, device_props)
 
         self.assertTrue(8 in seen_num_elements_per_warp)
+
+    def test_dump_launch_params_ws(self):
+        
+        
+        args = [1, True]
+        kwargs = {"arg1": 2, "arg2": False}
+        launcher = MagicMock()
+        launcher.config = Config(
+            {},
+            num_warps=4,
+            num_stages=2,
+            num_consumer_groups=3,
+            num_buffers_warp_spec=5,
+        )
+        kernel_name = "test_kernel"
+
+        with patch("builtins.open", unittest.mock.mock_open()) as mock_file:
+            _dump_launch_params(args, kwargs, launcher, kernel_name)
+            mock_file.assert_called_once_with(
+                f"{os.path.abspath(sys.argv[0])}.launch_params", "a"
+            )
+            handle = mock_file()
+            handle.write.assert_called_once()
+            written_content = handle.write.call_args[0][0]
+            self.assertIn("num_consumer_groups=3", written_content)
+            self.assertIn("num_buffers_warp_spec=5", written_content)
+
+    def test_template_function_ws(self):
+        triton_meta = {"device": MagicMock()}
+        num_stages = 2
+        num_warps = 4
+        num_consumer_groups = 3
+        num_buffers_warp_spec = 5
+
+        with patch(
+            "torch._inductor.runtime.triton_heuristics.cached_autotune"
+        ) as mock_cached_autotune:
+            template(
+                num_stages=num_stages,
+                num_warps=num_warps,
+                triton_meta=triton_meta,
+                num_consumer_groups=num_consumer_groups,
+                num_buffers_warp_spec=num_buffers_warp_spec,
+            )
+            mock_cached_autotune.assert_called_once()
+            configs = mock_cached_autotune.call_args[0][1]
+            self.assertEqual(configs[0].num_consumer_groups, num_consumer_groups)
+            self.assertEqual(configs[0].num_buffers_warp_spec, num_buffers_warp_spec)
 
 
 class TestArgumentCloneAndRestore(TestCase):

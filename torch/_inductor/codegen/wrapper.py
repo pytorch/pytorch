@@ -1878,6 +1878,18 @@ class PythonWrapperCodegen(CodeGen):
         inductor_meta.update(TritonKernel.inductor_meta_common())
 
         compile_wrapper.splice(gen_common_triton_imports())
+
+        configs = [
+            {
+                "kwargs": config.kwargs,
+                "num_warps": config.num_warps,
+                "num_stages": config.num_stages,
+                "num_consumer_groups": getattr(config, 'num_consumer_groups', 0),
+                "num_buffers_warp_spec": getattr(config, 'num_buffers_warp_spec', 0),
+            }
+            for config in configs
+        ]
+
         compile_wrapper.splice(
             f"""
             @triton_heuristics.user_autotune(
