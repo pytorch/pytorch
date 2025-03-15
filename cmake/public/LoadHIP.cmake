@@ -166,6 +166,7 @@ if(HIP_FOUND)
 
     # roctx is part of roctracer
     find_library(ROCM_ROCTX_LIB roctx64 HINTS ${ROCM_PATH}/lib)
+  endif()
 
     set(PROJECT_RANDOM_BINARY_DIR "${PROJECT_BINARY_DIR}")
 
