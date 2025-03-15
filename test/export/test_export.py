@@ -224,6 +224,12 @@ def is_non_strict_legacy_test(test_name):
     return test_name.endswith(LEGACY_EXPORT_NONSTRICT_SUFFIX)
 
 
+def is_legacy_test(test_name):
+    return test_name.endswith(LEGACY_EXPORT_NONSTRICT_SUFFIX) or test_name.endswith(
+        LEGACY_EXPORT_STRICT_SUFFIX
+    )
+
+
 def is_retracebility_test(test_name):
     return test_name.endswith(RETRACEABILITY_STRICT_SUFFIX) or test_name.endswith(
         RETRACEABILITY_NON_STRICT_SUFFIX
@@ -5530,14 +5536,22 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             def forward(self, x):
                 return x.to("cpu")
 
-        ep = export(Module(), (torch.tensor(1, device="cpu"),)).run_decompositions({})
+        ep = export(Module(), (torch.tensor(1, device="cpu"),))
+        if not (is_legacy_test(self._testMethodName) or is_training_ir_test(self._testMethodName)):
+            ops = []
+            for node in ep.graph.nodes:
+                if node.op == "call_function":
+                    ops.append(node.target)
+            self.assertGreater(len(ops), 0)
+            for op in ops:
+                self.assertEqual(op, torch.ops.aten.to.dtype_layout,)
+
+        ep = ep.run_decompositions({})
         ops = []
         for node in ep.graph.nodes:
             if node.op == "call_function":
                 ops.append(node.target)
-        self.assertGreater(len(ops), 0)
-        for op in ops:
-            self.assertIn(op, (torch.ops.aten._to_copy.default,))
+        self.assertEqual(len(ops), 0)
 
     def test_device_to_dynamic(self):
         class Module(torch.nn.Module):
@@ -5548,14 +5562,22 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             Module(),
             (torch.tensor([1, 2], device="cpu"),),
             dynamic_shapes={"x": {0: Dim("i")}},
-        ).run_decompositions({})
+        )
+        if not (is_legacy_test(self._testMethodName) or is_training_ir_test(self._testMethodName)):
+            ops = []
+            for node in ep.graph.nodes:
+                if node.op == "call_function":
+                    ops.append(node.target)
+            self.assertGreater(len(ops), 0)
+            for op in ops:
+                self.assertEqual(op, torch.ops.aten.to.dtype_layout)
+
+        ep = ep.run_decompositions({})
         ops = []
         for node in ep.graph.nodes:
             if node.op == "call_function":
                 ops.append(node.target)
-        self.assertGreater(len(ops), 0)
-        for op in ops:
-            self.assertIn(op, (torch.ops.aten._to_copy.default,))
+        self.assertEqual(len(ops), 0)
 
     def test_device_to_mutation(self):
         class Module(torch.nn.Module):
@@ -5564,10 +5586,29 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 y.add_(1)
                 return y, x
 
-        with self.assertRaisesRegex(
-            RuntimeError, "cannot mutate tensors with frozen storage"
-        ):
-            export(Module(), (torch.tensor(1, device="cpu"),)).run_decompositions({})
+        ep = export(Module(), (torch.tensor(1, device="cpu"),))
+        if not (is_legacy_test(self._testMethodName) or is_training_ir_test(self._testMethodName)):
+            ops = []
+            for node in ep.graph.nodes:
+                if node.op == "call_function":
+                    ops.append(node.target)
+            self.assertGreater(len(ops), 0)
+            self.assertEqual(ops[0], torch.ops.aten.to.dtype_layout)
+
+        # test mutation
+        x = torch.tensor(2, device="cpu")
+        y, _ = ep.module()(x)
+        self.assertEqual(x.item(), 3)
+        self.assertEqual(id(y), id(x))
+
+        # test decomp ep
+        ep = ep.run_decompositions({})
+        for node in ep.graph.nodes:
+            if node.op == "call_function":
+                self.assertNotEqual(node.target, torch.ops.aten.to.dtype_layout)
+        y, _ = ep.module()(x)
+        self.assertEqual(x.item(), 4)
+        self.assertEqual(id(y), id(x))
 
     def test_tensor_constant_aten_to(self):
         class Module(torch.nn.Module):
@@ -5595,25 +5636,44 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             def forward(self, x):
                 return x.float()
 
-        ep = export(Module(), (torch.tensor(1, dtype=torch.float),)).run_decompositions(
-            {}
-        )
+        ep = export(Module(), (torch.tensor(1, dtype=torch.float),))
+        if not (is_legacy_test(self._testMethodName) or is_training_ir_test(self._testMethodName)):
+            ops = []
+            for node in ep.graph.nodes:
+                if node.op == "call_function":
+                    ops.append(node.target)
+            self.assertGreater(len(ops), 0)
+            for op in ops:
+                self.assertEqual(op, torch.ops.aten.to.dtype)
+
+        ep = ep.run_decompositions({})
         ops = []
         for node in ep.graph.nodes:
             if node.op == "call_function":
                 ops.append(node.target)
-        self.assertGreater(len(ops), 0)
-        for op in ops:
-            self.assertIn(op, (torch.ops.aten._to_copy.default,))
+        self.assertEqual(len(ops), 0)
+
+        # test aliasing
+        x = torch.tensor(1, dtype=torch.float)
+        out = ep.module()(x)
+        self.assertEqual(id(x), id(out))
 
     def test_float_conversion_from_int(self):
         class Module(torch.nn.Module):
             def forward(self, x):
                 return x.float()
 
-        ep = export(Module(), (torch.tensor(1, dtype=torch.int32),)).run_decompositions(
-            {}
-        )
+        ep = export(Module(), (torch.tensor(1, dtype=torch.int32),))
+        if not (is_legacy_test(self._testMethodName) or is_training_ir_test(self._testMethodName)):
+            ops = []
+            for node in ep.graph.nodes:
+                if node.op == "call_function":
+                    ops.append(node.target)
+            self.assertGreater(len(ops), 0)
+            for op in ops:
+                self.assertEqual(op, torch.ops.aten.to.dtype)
+        
+        ep = ep.run_decompositions({})
         ops = []
         for node in ep.graph.nodes:
             if node.op == "call_function":
@@ -5636,12 +5696,29 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 y.add_(1)
                 return y, x
 
-        with self.assertRaisesRegex(
-            RuntimeError, "cannot mutate tensors with frozen storage"
-        ):
-            export(Module(), (torch.tensor(1, dtype=torch.float),)).run_decompositions(
-                {}
-            )
+        ep = export(Module(), (torch.tensor(1, dtype=torch.float),))
+        if not (is_legacy_test(self._testMethodName) or is_training_ir_test(self._testMethodName)):
+            ops = []
+            for node in ep.graph.nodes:
+                if node.op == "call_function":
+                    ops.append(node.target)
+            self.assertGreater(len(ops), 0)
+            self.assertEqual(ops[0], torch.ops.aten.to.dtype)
+
+        # test mutation
+        x = torch.tensor(2, dtype=torch.float)
+        y, _ = ep.module()(x)
+        self.assertEqual(x.item(), 3.0)
+        self.assertEqual(id(y), id(x))
+
+        # test decomp ep
+        ep = ep.run_decompositions({})
+        for node in ep.graph.nodes:
+            if node.op == "call_function":
+                self.assertNotEqual(node.target, torch.ops.aten.to.dtype)
+        y, _ = ep.module()(x)
+        self.assertEqual(x.item(), 4.0)
+        self.assertEqual(id(y), id(x))
 
     def test_module(self):
         class MyLinear(torch.nn.Module):

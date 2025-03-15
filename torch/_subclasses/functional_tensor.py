@@ -258,13 +258,6 @@ class FunctionalTensor(torch.Tensor):
         else:
             return [elem.tolist() for elem in self.elem]
 
-    def to(self, *args, **kwargs):
-        if _detect_infra_mode(torch._C._TorchDispatchModeKey.FUNCTIONAL).export:
-            # If copy is specified as pos arg, it's always the second one.
-            if len([arg for arg in args if isinstance(arg, bool)]) <= 1:
-                return super().to(*args, **{**kwargs, "copy": True})
-        return super().to(*args, **kwargs)
-
     def cuda(self, device=None, *args, **kwargs):
         device = device or torch.cuda.current_device()
         if len(args) > 0:
@@ -353,23 +346,6 @@ class FunctionalTensorMode(TorchDispatchMode):
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
-
-        if self.export:
-            # We need to make sure that we don't decompose to() as usual in export mode,
-            # because it can get optimized away. Instead we always replace it with _to_copy().
-            if func == torch.ops.aten.to.dtype_layout:
-                kwargs.pop("copy", None)
-                return self.__torch_dispatch__(
-                    torch.ops.aten._to_copy.default, types, args, kwargs
-                )
-            if func == torch.ops.aten.to.dtype:
-                schema = tuple(arg.name for arg in func._schema.arguments)
-                for arg, name in zip(args[1:], schema[1:]):
-                    kwargs[name] = arg
-                kwargs.pop("copy", None)
-                return self.__torch_dispatch__(
-                    torch.ops.aten._to_copy.default, types, args[:1], kwargs
-                )
 
         unrecognized_types = [
             t
@@ -527,7 +503,7 @@ class FunctionalTensorMode(TorchDispatchMode):
                         *args_unwrapped,
                         **kwargs_unwrapped,
                     )
-                    # We don't allow any mutation on result of dropout or _to_copy
+
                     if self.export:
                         if func in (
                             torch.ops.aten.dropout.default,
@@ -556,7 +532,9 @@ class FunctionalTensorMode(TorchDispatchMode):
                                     dtype=args_unwrapped[0].dtype,
                                 )
                             else:
-                                torch._freeze_functional_tensor(outs_unwrapped)  # type: ignore[attr-defined]
+                                # We don't allow any mutation on result of dropout
+                                if func == torch.ops.aten.dropout.default:
+                                    torch._freeze_functional_tensor(outs_unwrapped)  # type: ignore[attr-defined]
                     outs_wrapped = pytree.tree_map_only(
                         torch.Tensor, wrap, outs_unwrapped
                     )
