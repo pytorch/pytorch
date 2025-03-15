@@ -1765,12 +1765,13 @@ class AotCodeCompiler:
                 write_atomic(custom_obj_path, custom_obj_bytes, True)
                 generated_files.append(custom_obj_path)
 
-            constants_config_json = os.path.join(
-                wrapper_path_operator.parent, "custom_objs_config.json"
-            )
-            with open(constants_config_json, "w") as f:
-                f.write(json.dumps(qual_name_to_id))
-            generated_files.append(constants_config_json)
+            if qual_name_to_id:
+                constants_config_json = os.path.join(
+                    wrapper_path_operator.parent, "custom_objs_config.json"
+                )
+                with open(constants_config_json, "w") as f:
+                    f.write(json.dumps(qual_name_to_id))
+                generated_files.append(constants_config_json)
 
             gpu_codecache: Union[ROCmCodeCache, CUDACodeCache] = (
                 ROCmCodeCache() if torch.version.hip else CUDACodeCache()
