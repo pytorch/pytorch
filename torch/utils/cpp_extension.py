@@ -625,6 +625,9 @@ class BuildExtension(build_ext):
 
             self._add_compile_flag(extension, '-DTORCH_API_INCLUDE_EXTENSION_H')
 
+            if IS_HIP_EXTENSION:
+                self._hipify_compile_flags(extension)
+
             if extension.py_limited_api:
                 # compile any extension that has passed in py_limited_api to the
                 # Extension constructor with the Py_LIMITED_API flag set to our
@@ -1044,6 +1047,12 @@ class BuildExtension(build_ext):
                 args.append(flag)
         else:
             extension.extra_compile_args.append(flag)
+
+    def _hipify_compile_flags(self, extension):
+        # Simple hipify, map CUDA->HIP
+        if isinstance(extension.extra_compile_args, dict):
+            extension.extra_compile_args['nvcc'] = [
+                flag.replace("CUDA", "HIP") for flag in extension.extra_compile_args['nvcc']]
 
     def _define_torch_extension_name(self, extension):
         # pybind11 doesn't support dots in the names
