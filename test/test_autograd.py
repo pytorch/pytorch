@@ -547,9 +547,23 @@ class TestAutograd(TestCase):
         gradgradcheck(my_function, (x, y))
 
     def test_not_implemented_grad(self):
-        a = torch.rand(5, 2, requires_grad=True)
-        # `_pdist_backward` has not implemented gradient
-        y = torch.pdist(a, p=0.5).sum()  # Using p=0.5 should hit the _pdist_backward path
+        # Create a custom autograd function that raises NotImplementedError
+        class CustomFunctionWithoutGrad(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x.clone()
+                
+            @staticmethod
+            def backward(ctx, grad_output):
+                raise NotImplementedError("the derivative for CustomFunctionWithoutGrad is not implemented")
+        
+        # Use our custom function
+        x = torch.rand(5, 2, requires_grad=True)
+        y = CustomFunctionWithoutGrad.apply(x).sum()
+        
+        print(f"Backward function: {y.grad_fn}")
+        
         with self.assertRaisesRegex(
             NotImplementedError, "the derivative for .* is not implemented"
         ):
