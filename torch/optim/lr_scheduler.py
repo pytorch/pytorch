@@ -131,6 +131,9 @@ class LRScheduler:
         patch_track_step_called(self.optimizer)
         self._initial_step()
 
+    def _get_name(self) -> str:
+        return self.__class__.__name__
+
     def _initial_step(self):
         """Initialize step counts and perform a step."""
         self._step_count = 0
@@ -264,6 +267,8 @@ class LambdaLR(LRScheduler):
         >>>     train(...)
         >>>     validate(...)
         >>>     scheduler.step()
+
+    .. image:: ../scripts/lr_scheduler_images/LambdaLR.png
     """
 
     def __init__(
@@ -357,6 +362,8 @@ class MultiplicativeLR(LRScheduler):
         >>>     train(...)
         >>>     validate(...)
         >>>     scheduler.step()
+
+    .. image:: ../scripts/lr_scheduler_images/MultiplicativeLR.png
     """
 
     def __init__(
@@ -454,6 +461,8 @@ class StepLR(LRScheduler):
         >>>     train(...)
         >>>     validate(...)
         >>>     scheduler.step()
+
+    .. image:: ../scripts/lr_scheduler_images/StepLR.png
     """
 
     def __init__(
@@ -506,6 +515,8 @@ class MultiStepLR(LRScheduler):
         >>>     train(...)
         >>>     validate(...)
         >>>     scheduler.step()
+
+    .. image:: ../scripts/lr_scheduler_images/MultiStepLR.png
     """
 
     def __init__(
@@ -566,6 +577,8 @@ class ConstantLR(LRScheduler):
         >>>     train(...)
         >>>     validate(...)
         >>>     scheduler.step()
+
+    .. image:: ../scripts/lr_scheduler_images/ConstantLR.png
     """
 
     def __init__(
@@ -637,6 +650,8 @@ class LinearLR(LRScheduler):
         >>>     train(...)
         >>>     validate(...)
         >>>     scheduler.step()
+
+    .. image:: ../scripts/lr_scheduler_images/LinearLR.png
     """
 
     def __init__(
@@ -709,6 +724,8 @@ class ExponentialLR(LRScheduler):
         optimizer (Optimizer): Wrapped optimizer.
         gamma (float): Multiplicative factor of learning rate decay.
         last_epoch (int): The index of last epoch. Default: -1.
+
+    .. image:: ../scripts/lr_scheduler_images/ExponentialLR.png
     """
 
     def __init__(
@@ -759,6 +776,8 @@ class SequentialLR(LRScheduler):
         >>>     train(...)
         >>>     validate(...)
         >>>     scheduler.step()
+
+    .. image:: ../scripts/lr_scheduler_images/SequentialLR.png
     """
 
     def __init__(
@@ -898,6 +917,8 @@ class PolynomialLR(LRScheduler):
         >>>     train(...)
         >>>     validate(...)
         >>>     scheduler.step()
+
+    .. image:: ../scripts/lr_scheduler_images/PolynomialLR.png
     """
 
     def __init__(
@@ -972,6 +993,8 @@ class CosineAnnealingLR(LRScheduler):
 
     .. _SGDR\: Stochastic Gradient Descent with Warm Restarts:
         https://arxiv.org/abs/1608.03983
+
+    .. image:: ../scripts/lr_scheduler_images/CosineAnnealingLR.png
     """
 
     def __init__(
@@ -1048,6 +1071,8 @@ class ChainedScheduler(LRScheduler):
         >>>     train(...)
         >>>     validate(...)
         >>>     scheduler.step()
+
+    .. image:: ../scripts/lr_scheduler_images/ChainedScheduler.png
     """
 
     def __init__(
@@ -1179,6 +1204,8 @@ class ReduceLROnPlateau(LRScheduler):
         >>>     val_loss = validate(...)
         >>>     # Note that step should be called after validate()
         >>>     scheduler.step(val_loss)
+
+    .. image:: ../scripts/lr_scheduler_images/ReduceLROnPlateau.png
     """
 
     def __init__(
@@ -1420,6 +1447,7 @@ class CyclicLR(LRScheduler):
         >>>         train_batch(...)
         >>>         scheduler.step()
 
+    .. image:: ../scripts/lr_scheduler_images/CyclicLR.png
 
     .. _Cyclical Learning Rates for Training Neural Networks: https://arxiv.org/abs/1506.01186
     .. _bckenstler/CLR: https://github.com/bckenstler/CLR
@@ -1632,6 +1660,8 @@ class CosineAnnealingWarmRestarts(LRScheduler):
 
     .. _SGDR\: Stochastic Gradient Descent with Warm Restarts:
         https://arxiv.org/abs/1608.03983
+
+    .. image:: ../scripts/lr_scheduler_images/CosineAnnealingWarmRestarts.png
     """
 
     def __init__(
@@ -1837,6 +1867,7 @@ class OneCycleLR(LRScheduler):
         >>>         optimizer.step()
         >>>         scheduler.step()
 
+    .. image:: ../scripts/lr_scheduler_images/OneCycleLR.png
 
     .. _Super-Convergence\: Very Fast Training of Neural Networks Using Large Learning Rates:
         https://arxiv.org/abs/1708.07120
