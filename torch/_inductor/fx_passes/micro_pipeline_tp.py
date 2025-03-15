@@ -2,7 +2,7 @@
 import operator
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, cast, Optional
+from typing import Any, cast, Optional, Tuple
 
 import torch
 from torch.utils._ordered_set import OrderedSet
@@ -367,6 +367,7 @@ class _ScaledMatmul(_Matmul):
     out_dtype: Optional[torch.dtype]
     use_fast_accum: bool
 
+
     def __post_init__(self):
         super().__post_init__()
         self.arg_ancestor_nodes |= _find_ancestors(self.A_scale_node)
@@ -386,97 +387,13 @@ class _ScaledMatmul(_Matmul):
                 return default
             return node.args[idx]
 
-        def insert_reshape_op(node: torch.fx.Node):
-            """
-            Given a reciprocal node with a parent reshape node,
-            insert a reshape node after the reciprocal node which reshapes
-            the reciprocal output back to the original shape before the first reshape.
-
-            Before:
-                reshape (a,bc,) to (a*b,c) -> reciprocal
-
-            After:
-                reshape (a,bc,) to (a*b,c) -> reciprocal -> reshape (a*b,c) to (a,b,c)
-
-            Returns the new reshape node.
-            """
-            # ensure the given node matches the pattern described in the docstring
-            assert node.target == aten.reciprocal.default, (
-                "Node must be a aten.reciprocal.default op"
-            )
-            assert len(node.all_input_nodes) == 1, "Node must have exactly one parent"
-
-            parent_node = node.all_input_nodes[0]
-            assert parent_node.target == aten.reshape.default, (
-                "Parent node must be a aten.reshape.default op"
-            )
-            assert len(parent_node.all_input_nodes) == 1, (
-                "Parent node must have exactly one input node"
-            )
-
-            parent_input_node = parent_node.all_input_nodes[0]
-            parent_input_shape = list(_get_tensor(parent_input_node).shape)
-
-            # insert reshape back to shape from before the parent reshape op
-            graph = node.graph
-            with graph.inserting_after(node):
-                reshape_node = graph.call_function(
-                    aten.reshape.default, (node, parent_input_shape)
-                )
-
-            # ensure all users of original node (except the reshape node) now use the reshaped node instead
-            node_users = list(node.users)
-            for user in node_users:
-                if user != reshape_node:
-                    user.replace_input_with(node, reshape_node)
-
-            return reshape_node
-
         is_reshape_mm_reshape_pattern = match[0].target == aten.reshape.default
         mm_node = match[1] if is_reshape_mm_reshape_pattern else match[0]
 
-        # `A_node` is pulled directly from match rather than `mm_node` because it needs to handle
-        # both of the following cases:
-        #
-        # Case 1: single node match (mm):
-        # - match[0].args[0] will be the "A tensor" node of scaled_mm
-        # - Has 2D shape
-        #
-        # Case 2: 3 node match (reshape -> mm -> reshape)
-        # - match[0].args[0] will be the "A tensor" input to the reshape op
-        # - Has 3D+ shape
-        A_node = cast(torch.fx.Node, match[0].args[0])
+        A_node = cast(torch.fx.Node, mm_node.args[0])
         B_node = cast(torch.fx.Node, mm_node.args[1])
         A_scale_node = cast(torch.fx.Node, mm_node.args[2])
         B_scale_node = cast(torch.fx.Node, mm_node.args[3])
-
-        A_ndim = _get_tensor(A_node).ndim
-        A_scale_ndim = _get_tensor(A_scale_node).ndim
-        is_reciprocal_with_reshape_parent = (
-            A_scale_node.target == aten.reciprocal.default
-            and len(A_scale_node.all_input_nodes) == 1
-            and A_scale_node.all_input_nodes[0].target == aten.reshape.default
-        )
-        is_tensorwise_scaling = A_scale_ndim <= 1
-
-        # This is a temporary workaround to handle the reshape -> scaled_mm -> reshape
-        # pattern when scales are row-wise, and have been reshaped along with the target
-        # tensor. See https://github.com/pytorch/pytorch/pull/148001 for details.
-        #
-        # If tensor dim does not match scale dim, check if the scale node follows
-        # the "reshape -> reciprocal" pattern. If so, we can insert a reshape op after
-        # the reciprocal, to reshape the reciprocal back to the original shape before
-        # the first reshape op.
-        #
-        # TODO: remove this workaround once torch._scaled_matmul exists and can be used
-        # to implement a more robust long-term support for 3D+ scaled matmuls.
-        if (
-            is_reshape_mm_reshape_pattern
-            and A_ndim != A_scale_ndim
-            and not is_tensorwise_scaling
-            and is_reciprocal_with_reshape_parent
-        ):
-            A_scale_node = insert_reshape_op(A_scale_node)
 
         return _ScaledMatmul(
             nodes=match,
@@ -707,32 +624,51 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
             fused_node.prepend(node)
 
 
-def _find_producer_matmul(node: torch.fx.Node) -> Optional[_Matmul]:
+def _scatter_dim_delta_after_reshape(reshape_node: torch.fx.Node) -> int:
+    """
+    Returns the delta of scatter dim after reshape.
+
+    For example, for tensor shape (1, 8192, 4096) with scatter dim 1,
+    if we reshape (1, 8192, 4096) -> (8192, 4096), the new scatter dim should be 0,
+    so the scatter dim "delta" is -1.
+    """
+    assert len(reshape_node.all_input_nodes) == 1, "rehshape node must have one parent"
+    reshape_input = reshape_node.all_input_nodes[0]
+    orig_tensor_ndim = _get_tensor(reshape_input).ndim
+    reshaped_tensor_ndim = _get_tensor(reshape_node).ndim
+    assert orig_tensor_ndim >= reshaped_tensor_ndim, "reshape must reduce ndim"
+    return orig_tensor_ndim - reshaped_tensor_ndim
+
+
+def _find_producer_matmul(node: torch.fx.Node) -> Tuple[Optional[_Matmul], int]:
+    """Returns producer matmul node and scatter dim delta (if reshape -> mm -> reshape)"""
+    scatter_dim_delta = 0
     if node.target == aten.mm.default:
-        return _Matmul.from_match(match=[node])
+        return _Matmul.from_match(match=[node]), scatter_dim_delta
     elif node.target == aten._scaled_mm.default:
-        return _ScaledMatmul.from_match(match=[node])
+        return _ScaledMatmul.from_match(match=[node]), scatter_dim_delta
     elif node.target == aten.reshape.default:
         reshape_node_1 = node
 
         mm_node = reshape_node_1.args[0]
         assert isinstance(mm_node, torch.fx.Node)
         if mm_node.target not in (aten.mm.default, aten._scaled_mm.default):
-            return None
+            return None, scatter_dim_delta
 
         reshape_node_0 = mm_node.args[0]
         assert isinstance(reshape_node_0, torch.fx.Node)
         if reshape_node_0.target != aten.reshape.default:
-            return None
+            return None, scatter_dim_delta
 
         if mm_node.target == aten.mm.default:
-            return _Matmul.from_match(match=[reshape_node_0, mm_node, reshape_node_1])
+            return _Matmul.from_match(match=[reshape_node_0, mm_node, reshape_node_1]), 0
         elif mm_node.target == aten._scaled_mm.default:
-            return _ScaledMatmul.from_match(
+            mm = _ScaledMatmul.from_match(
                 match=[reshape_node_0, mm_node, reshape_node_1]
             )
-    return None
-
+            scatter_dim_delta = _scatter_dim_delta_after_reshape(reshape_node_0)
+            return mm, scatter_dim_delta
+    return None, 0
 
 def _insert_fused_matmul_reduce_scatter(
     graph: torch.fx.Graph,
@@ -809,7 +745,12 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
     if len(input_node.users) != 1:
         return
 
-    matmul = _find_producer_matmul(input_node)
+    # Find producer matmul. If the producer matmul is a reshape -> mm -> reshape,
+    # the scatter dim needs to be adjusted accordingly, since the scatter dim
+    # was assigned using the original 3D+ tensor, and fused_matmul_reduce_scatter
+    # will be performed on a 2D tensor.
+    matmul, scatter_dim_delta = _find_producer_matmul(input_node)
+    scatter_dim = max(0, scatter_dim - scatter_dim_delta)
     if matmul is None:
         return
 
