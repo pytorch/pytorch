@@ -1825,10 +1825,11 @@ def _convert_state_with_flat_params(
             )
             if to_save:
                 assert len(unflat_state) == len(optim_state_key.unflat_param_names)
-                fsdp_osd_state.update(zip(
-                            optim_state_key.unflat_param_names,
-                            unflat_state,
-                        )
+                fsdp_osd_state.update(
+                    zip(
+                        optim_state_key.unflat_param_names,
+                        unflat_state,
+                    )
                 )
         elif to_save:
             assert len(optim_state_key.unflat_param_names) == 1
