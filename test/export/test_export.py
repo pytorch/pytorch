@@ -6887,7 +6887,11 @@ def forward(self, b_a_buffer, x):
         decomp_table[torch.ops.aten.linear.default] = _custom_decomp_for_linear
         del decomp_table[torch.ops.aten.sum.default]
         ep = torch.export.export_for_inference(
-            m, inp, decomp_table=decomp_table, dynamic_shapes={"x": {0: Dim("batch")}}
+            m,
+            inp,
+            decomp_table=decomp_table,
+            dynamic_shapes={"x": {0: Dim("batch")}},
+            strict=True,
         )
 
         self.assertExpectedInline(
