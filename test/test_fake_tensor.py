@@ -2149,6 +2149,42 @@ class FakeTensorDispatchCache(TestCase):
                     extract_tensor_metadata(b),
                 )
 
+    def test_cpp_symbolic_tensor_print(self):
+        shape_env = ShapeEnv()
+        mode1 = FakeTensorMode(shape_env=shape_env)
+        t1 = mode1.from_tensor(
+            torch.randn(10),
+            symbolic_context=StatelessSymbolicContext(
+                dynamic_sizes=[DimDynamic.DYNAMIC], constraint_sizes=[None]
+            ),
+        )
+        t2 = mode1.from_tensor(
+            torch.randn(10, 10),
+            symbolic_context=StatelessSymbolicContext(
+                dynamic_sizes=[DimDynamic.DYNAMIC, DimDynamic.DYNAMIC], constraint_sizes=[None, None]
+            ),
+        )
+
+        printcpp = '''
+        std::string dur_print(const at::Tensor &t) {
+            std::ostringstream oss;
+            oss << t << std::endl;
+            return oss.str();
+        }
+        '''
+        bohb = torch.utils.cpp_extension.load_inline(
+            name="dur_extension",
+            cpp_sources=printcpp,
+            functions=["dur_print"],
+        )
+        s1 = bohb.dur_print(t1)
+        s2 = bohb.dur_print(t2)
+        self.assertTrue('FakeTensor' in s1)
+        self.assertTrue('(s0)' in s1)
+
+        self.assertTrue('FakeTensor' in s2)
+        self.assertTrue('s1' in s2)
+        self.assertTrue('s2' in s2)
 
 if __name__ == "__main__":
     run_tests()
