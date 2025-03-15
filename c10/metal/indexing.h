@@ -103,5 +103,44 @@ kernel void unary_strided(
     }                                                                           \
   }
 
+template <typename T, typename F>
+kernel void binary_indexing(
+    constant void* input_ [[buffer(0)]],
+    constant void* other_ [[buffer(1)]],
+    device void* out_ [[buffer(2)]],
+    constant uint3* offsets [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  auto out =
+      (device result_of<F, T, T>*)((device uint8_t*)out_ + offsets[tid].x);
+  auto input = (constant T*)((constant uint8_t*)input_ + offsets[tid].y);
+  auto other = (constant T*)((constant uint8_t*)other_ + offsets[tid].z);
+  F f;
+  *out = f(*input, *other);
+}
+
+template <typename T, typename F>
+kernel void binary_dense(
+    constant T* input [[buffer(0)]],
+    constant T* other [[buffer(1)]],
+    device result_of<F, T, T>* out [[buffer(2)]],
+    uint tid [[thread_position_in_grid]]) {
+  F f;
+  out[tid] = f(input[tid], other[tid]);
+}
+
+#define REGISTER_BINARY_INDEXING_OP(NAME, DTYPE)                               \
+  template [[host_name(#NAME "_" #DTYPE)]] kernel void ::c10::metal::          \
+      binary_indexing<DTYPE, NAME##_functor>(                                  \
+          constant void* input_,                                               \
+          constant void* other_,                                               \
+          device void* out_,                                                   \
+          constant uint3* offsets,                                             \
+          uint tid);                                                           \
+  template [[host_name(#NAME "_dense_" #DTYPE)]] kernel void ::c10::metal::    \
+      binary_dense<DTYPE, NAME##_functor>(                                     \
+          constant DTYPE * input_,                                             \
+          constant DTYPE * other_,                                             \
+          device ::c10::metal::result_of<NAME##_functor, DTYPE, DTYPE> * out_, \
+          uint tid)
 } // namespace metal
 } // namespace c10
