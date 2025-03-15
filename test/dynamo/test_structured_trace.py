@@ -185,11 +185,21 @@ class StructuredTraceTest(TestCase):
         self.raw_handler.setFormatter(TorchLogsFormatter(trace=True))
         trace_log.addHandler(self.raw_handler)
 
+        self.asan_options = os.environ.get("ASAN_OPTIONS", "")
+        if "detect_leaks=1" in self.asan_options:
+            os.environ["ASAN_OPTIONS"] = self.asan_options.replace(
+                "detect_leaks=1", "detect_leaks=0"
+            )
+        else:
+            self.asan_options = ""
+
     def tearDown(self):
         trace_log.removeHandler(self.handler)
         trace_log.removeHandler(self.raw_handler)
         self.raw_file.close()
         trace_log.setLevel(self.old_level)
+        if self.asan_options:
+            os.environ["ASAN_OPTIONS"] = self.asan_options
 
     def assertParses(self):
         out = tempfile.mkdtemp()

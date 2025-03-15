@@ -139,6 +139,8 @@ class IpcChannel {
     return fds;
   }
 
+#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED) && \
+    defined(CUDART_SUPPORTS_MULTICAST)
   int broadcast_fds(
       int rank,
       int src_rank,
@@ -157,6 +159,7 @@ class IpcChannel {
     }
     return recv_fd();
   }
+#endif
 
  private:
   static std::string get_socket_name(int pid) {
