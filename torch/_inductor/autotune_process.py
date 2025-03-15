@@ -400,10 +400,7 @@ class TuningProcessPool:
 
         # Use a ThreadExecutorPool to spread the work across the subprocesses and
         # to grab subprocesses as soon as they're free.
-        results = {
-            choice: result
-            for choice, result in zip(choices, self.executor.map(self.target, choices))
-        }
+        results = dict(zip(choices, self.executor.map(self.target, choices)))
 
         return results
 

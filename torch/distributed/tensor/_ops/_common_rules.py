@@ -265,7 +265,6 @@ def pointwise_rule(op_schema: OpSchema, linearity: bool = False) -> OutputShardi
     # check if we replace the all inputs dim char with singleton dimension,
     # if we replace all inputs, we also need to replace the output dimension.
     for output_dim_idx in range(len(out_dimchars)):
-        out_dimchar = out_dimchars[output_dim_idx]
         if singleton_counter[output_dim_idx] == len(input_specs):
             out_dimchars = _replace_char_in_str(out_dimchars, "1", output_dim_idx)
 
@@ -274,20 +273,10 @@ def pointwise_rule(op_schema: OpSchema, linearity: bool = False) -> OutputShardi
     enforce_sharding: dict[str, int] = {}
     if _is_inplace_op(op_schema.op):
         # inplace op should keep the input sharding it writes to
-        enforce_sharding.update(
-            {
-                out_dimchar: mesh_dim
-                for out_dimchar, mesh_dim in zip(out_dimchars, input_specs[0].dim_map)
-            }
-        )
+        enforce_sharding.update(zip(out_dimchars, input_specs[0].dim_map))
     elif _is_out_variant_op(op_schema.op):
         out_spec = cast(DTensorSpec, op_schema.kwargs_schema["out"])
-        enforce_sharding.update(
-            {
-                out_dimchar: mesh_dim
-                for out_dimchar, mesh_dim in zip(out_dimchars, out_spec.dim_map)
-            }
-        )
+        enforce_sharding.update(zip(out_dimchars, out_spec.dim_map))
 
     return einop_rule(
         fmt,

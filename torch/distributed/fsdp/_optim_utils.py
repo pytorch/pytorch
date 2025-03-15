@@ -314,19 +314,9 @@ def _unflatten_communicated_optim_state(
             unflat_state_param[state_name] = optim_state
 
         # Add zero-dimension tensor state: take the target rank's value
-        unflat_state_param.update(
-            {
-                state_name: zero_dim_tensor
-                for state_name, zero_dim_tensor in sorted_items(zero_dim_tensor_state)
-            }
-        )
+        unflat_state_param.update(sorted_items(zero_dim_tensor_state))
         # Add non-tensor state: take the target rank's value
-        unflat_state_param.update(
-            {
-                state_name: non_tensor
-                for state_name, non_tensor in sorted_items(non_tensor_state)
-            }
-        )
+        unflat_state_param.update(sorted_items(non_tensor_state))
         unflat_param_state.append(unflat_state_param)
     return unflat_param_state
 
@@ -1835,14 +1825,10 @@ def _convert_state_with_flat_params(
             )
             if to_save:
                 assert len(unflat_state) == len(optim_state_key.unflat_param_names)
-                fsdp_osd_state.update(
-                    {
-                        unflat_param_name: unflat_param_state
-                        for unflat_param_name, unflat_param_state in zip(
+                fsdp_osd_state.update(zip(
                             optim_state_key.unflat_param_names,
                             unflat_state,
                         )
-                    }
                 )
         elif to_save:
             assert len(optim_state_key.unflat_param_names) == 1

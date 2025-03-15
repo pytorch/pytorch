@@ -377,10 +377,10 @@ def _get_flattened_qconfig_dict(
         "": qconfig_mapping.global_qconfig
     }
     flattened.update(
-        {obj: qconfig for obj, qconfig in qconfig_mapping.object_type_qconfigs.items()}
+        dict(qconfig_mapping.object_type_qconfigs.items())
     )
     flattened.update(
-        {obj: qconfig for obj, qconfig in qconfig_mapping.module_name_qconfigs.items()}
+        dict(qconfig_mapping.module_name_qconfigs.items())
     )
     return flattened
 
