@@ -8380,6 +8380,23 @@ graph():
         assert torch.allclose(epm(*inp), eager)
         assert torch.allclose(ufm(*inp), eager)
 
+    @torch.fx.experimental._config.patch(no_data_dependent_graph_break=True)
+    def test_dim_order(self):
+        @torch.compile
+        def f1(x):
+            x = x.permute(2, 0, 1, 3)
+            return x.dim_order()
+
+        x0 = torch.randn(4, 1, 5, 2)
+        torch._dynamo.decorators.mark_unbacked(x0, 1)
+        torch._dynamo.decorators.mark_unbacked(x0, 3)
+        assert f1(x0) == (1, 2, 0, 3)
+
+        x1 = torch.randn(4, 8, 3, 1)
+        for i in range(x1.ndim):
+            torch._dynamo.decorators.mark_unbacked(x1, i)
+        assert f1(x1) == (1, 2, 0, 3)
+
     def test_unflatten_random_dag_mutating_buf_9(self):
         class N8(torch.nn.Module):
             def __init__(self):

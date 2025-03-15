@@ -1247,6 +1247,12 @@ def statically_known_true(x: Union[bool, SymBool]) -> bool:
     return x
 
 
+def _guard_semantics(x: Union[bool, SymBool]) -> bool:
+    if has_free_unbacked_symbols(x):
+        return statically_known_true(x)
+    return guard_bool(x)
+
+
 def sym_eq(x: _T, y: _T) -> Union[bool, SymBool]:
     """
     Like ==, but when run on list/tuple, it will recursively test equality
