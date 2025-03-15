@@ -2943,8 +2943,11 @@ class View(GenericView):
 
     @classmethod
     def dynamic_reshape_indexer(
-        cls, old_size, new_size, dense_dim: Optional[int] = None
-    ):  # type: ignore[no-untyped-def]
+        cls,
+        old_size: Sequence[_IntLike],
+        new_size: Sequence[_IntLike],
+        dense_dim: Optional[int] = None,  # type: ignore[no-untyped-def]
+    ) -> Callable[[Sequence[_T]], Sequence[_V]]:
         try:
             reindex = cls._dynamic_reshape_indexer(old_size, new_size, dense_dim)
         except (AssertionError, IndexError):
