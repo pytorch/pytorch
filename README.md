@@ -240,6 +240,13 @@ conda install cmake ninja
 pip install -r requirements.txt
 ```
 
+*Note:* We need to set correct `USE_STATIC_MKL` environment variable according to installed `MKL` version.
+
+| MKL version |USE_STATIC_MKL value| Install Command |
+|---|---|---|
+|MKL static (Default) | USE_STATIC_MKL=ON | pip install mkl-include mkl-static|
+|MKL shared | USE_STATIC_MKL=OFF | pip install mkl mkl-devel mkl-include |
+
 **On Linux**
 
 ```bash
