@@ -49,7 +49,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    name: linux-focal-rocm6.3-py3.10
+    name: linux-focal-rocm6.3-py3.10-test
     uses: ./.github/workflows/_rocm-test.yml
     needs:
       - linux-focal-rocm6_3-py3_10-build
@@ -59,3 +59,27 @@ jobs:
       docker-image: ${{ needs.linux-focal-rocm6_3-py3_10-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-rocm6_3-py3_10-build.outputs.test-matrix }}
     secrets: inherit
+    
+  linux-focal-rocm6_3-py3_10-gfx1100-test:
+    permissions:
+      id-token: write
+      contents: read
+    name: linux-focal-rocm6.3-py3.10-gfx1100-test
+    uses: ./.github/workflows/_rocm-test.yml
+    needs:
+      - linux-focal-rocm6_3-py3_10-build
+      - target-determination
+    with:
+      build-environment: linux-focal-rocm6.3-py3.10
+      docker-image: ${{ needs.linux-focal-rocm6_3-py3_10-build.outputs.docker-image }}
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 6, runner: "linux.rocm.gpu.sandbox" },
+          { config: "default", shard: 2, num_shards: 6, runner: "linux.rocm.gpu.sandbox" },
+          { config: "default", shard: 3, num_shards: 6, runner: "linux.rocm.gpu.sandbox" },
+          { config: "default", shard: 4, num_shards: 6, runner: "linux.rocm.gpu.sandbox" },
+          { config: "default", shard: 5, num_shards: 6, runner: "linux.rocm.gpu.sandbox" },
+          { config: "default", shard: 6, num_shards: 6, runner: "linux.rocm.gpu.sandbox" },
+        ]}
+    secrets: inherit
+
