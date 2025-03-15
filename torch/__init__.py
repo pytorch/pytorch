@@ -1650,16 +1650,19 @@ def _check(cond, message=None):  # noqa: F811
 
     Error type: ``RuntimeError``
 
-    C++ equivalent: ``TORCH_CHECK``
+    C++ equivalent: ``TORCH_CHECK`` for bool, ``TORCH_CHECK_TENSOR_ALL`` for BoolTensor
 
     Args:
-        cond (:class:`bool`): If False, throw error
+        cond (bool or Tensor): If False, throw error
 
         message (Callable, optional): Callable that returns either a string or
             an object that has a ``__str__()`` method to be used as the error
             message. Default: ``None``
     """
-    _check_with(RuntimeError, cond, message)
+    if is_tensor(cond):
+        _check_tensor_all_with(RuntimeError, cond, message)
+    else:
+        _check_with(RuntimeError, cond, message)
 
 
 def _check_is_size(i, message=None, *, max=None):
