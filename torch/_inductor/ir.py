@@ -2942,7 +2942,9 @@ class View(GenericView):
         return old_size, new_size
 
     @classmethod
-    def dynamic_reshape_indexer(cls, old_size, new_size, dense_dim: Optional[int] = None):  # type: ignore[no-untyped-def]
+    def dynamic_reshape_indexer(
+        cls, old_size, new_size, dense_dim: Optional[int] = None
+    ):  # type: ignore[no-untyped-def]
         try:
             reindex = cls._dynamic_reshape_indexer(old_size, new_size, dense_dim)
         except (AssertionError, IndexError):
