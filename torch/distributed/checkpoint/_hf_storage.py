@@ -7,6 +7,7 @@ from typing import Optional
 import fsspec  # type: ignore[import-untyped]
 
 from torch.distributed.checkpoint._fsspec_filesystem import FsspecReader, FsspecWriter
+from torch.distributed.checkpoint._hf_planner import _FqnToFileMapping
 from torch.distributed.checkpoint.metadata import (
     BytesStorageMetadata,
     Metadata,
@@ -64,11 +65,12 @@ class _HuggingFaceStorageWriter(FsspecWriter):
         self._fqn_to_index_mapping: dict[str, int] = fqn_to_index_mapping
 
     def prepare_local_plan(self, plan: SavePlan) -> SavePlan:
-        super().prepare_local_plan(plan)
-        return dataclasses.replace(plan, storage_data=self._fqn_to_index_mapping)
+        plan = super().prepare_local_plan(plan)
+        return dataclasses.replace(
+            plan, storage_data=_FqnToFileMapping(self._fqn_to_index_mapping)
+        )
 
     def prepare_global_plan(self, plans: list[SavePlan]) -> list[SavePlan]:
-        assert len(plans) == 1, "distributed checkpointing is not yet supported"
         return plans
 
     def write_data(
@@ -76,8 +78,13 @@ class _HuggingFaceStorageWriter(FsspecWriter):
         plan: SavePlan,
         planner: SavePlanner,
     ) -> Future[list[WriteResult]]:
+        if len(plan.items) == 0:
+            fut: Future = Future()
+            fut.set_result([])
+            return fut
+
         # storage_plan is a map from key to file index
-        storage_plan: dict[str, int] = plan.storage_data
+        storage_plan: dict[str, int] = plan.storage_data.fqn_to_file_index_mapping
 
         buckets = self._split_by_storage_plan(storage_plan, plan.items)
         highest_index = max(buckets.keys())
@@ -172,7 +179,7 @@ class _HuggingFaceStorageReader(FsspecReader):
                 for req in reqs:
                     tensor = loaded_tensors[req.dest_index.fqn]
 
-                    target_tensor = planner.resolve_tensor(req).detach()
+                    target_tensor = planner.resolve_tensor(req)
                     target_tensor.resize_(tensor.size())
                     target_tensor.copy_(tensor)
                     planner.commit_tensor(req, target_tensor)
