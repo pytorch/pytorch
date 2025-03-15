@@ -277,7 +277,7 @@ class ObservedException(TorchDynamoException):
 
 
 class ObservedUserStopIteration(ObservedException):
-    # An UserStopIteraion exception observed during the Dynamo tracing (e.g Dynamo tracing __next__)
+    # An UserStopIteration exception observed during the Dynamo tracing (e.g Dynamo tracing __next__)
     value: Optional[Any]
 
     # Reference `StopIteration_init` in CPython
