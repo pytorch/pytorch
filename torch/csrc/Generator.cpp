@@ -256,7 +256,9 @@ static PyObject* THPGenerator_reduce(PyObject* _self, PyObject* noargs) {
       1,
       device_type != at::kCPU ? THPGenerator_getOffset(_self, nullptr)
                               : Py_None);
-  PyTuple_SET_ITEM(state.get(), 2, THPGenerator_getState(_self, nullptr));
+  PyObject* state_tensor = THPGenerator_getState(_self, nullptr);
+  Py_INCREF(state_tensor);
+  PyTuple_SET_ITEM(state.get(), 2, state_tensor);
   PyTuple_SET_ITEM(ret.get(), 2, state.release());
 
   return ret.release();
