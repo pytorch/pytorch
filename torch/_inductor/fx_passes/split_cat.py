@@ -71,6 +71,7 @@ post_grad_pass_names = [
     "pad_aten_mm_pass",
     "split_cat_aten_pass",
     "select_cat_aten_pass",
+    "activation_quantization_aten_pass",
 ]
 
 for pass_name in pre_grad_pass_names:

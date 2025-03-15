@@ -2043,6 +2043,14 @@ def min_cut_rematerialization_partition(
                 joint_module, fw_module, bw_module, len(saved_sym_nodes)
             )
     bw_module = reordering_to_mimic_autograd_engine(bw_module)
+    # tag all activation nodes as quantized nodes, we can customized this later
+    for output in fw_module.graph.find_nodes(op="output"):
+        for node in output.args[0]:
+            if node.target in [torch.ops.aten.relu.default, torch.ops.aten.tanh.default]:
+                node.meta["saved_for_quantization"] = True
+    for placeholder in bw_module.graph.find_nodes(op="placeholder"):
+        if any(name in str(placeholder.target) for name in ["relu", "tanh", "sigmoid", "gelu"]):
+            placeholder.meta["saved_for_quantization"] = True
 
     if AOT_PARTITIONER_DEBUG:
         # Calculate sorted sizes of saved values

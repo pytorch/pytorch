@@ -778,6 +778,10 @@ class CallModuleVarArgs(_TargetExprVarArgs):
     op = "call_module"
 
 
+class Placeholder(_TargetExprVarArgs):
+    op = "placeholder"
+
+
 class ListOf(PatternExpr):
     """
     Matches a repeated pattern
@@ -1794,12 +1798,14 @@ class PatternMatcherPass:
     def __init__(
         self,
         pass_name: Optional[str] = None,
+        is_backward: Optional[bool] = None,
     ) -> None:
         super().__init__()
         self.patterns: defaultdict[
             tuple[str, torch.fx.node.Target], list[PatternEntry]
         ] = defaultdict(list)
         self.pass_name = pass_name
+        self.is_backward = is_backward
 
         # For a particular generated pattern repr, store all of the str representations
         # of the graph used to generate them. Because we ignore certain patterns
@@ -2127,6 +2133,16 @@ def config_flag(name: str) -> Callable[[Match], Any]:
         return getattr(config, name)
 
     return flag_check
+
+
+def is_backward_pattern(pattern: PatternMatcherPass, backward: bool = True) -> Callable[[Match], Any]:
+    """Function for extra_check to check if it is a pattern for backward only"""
+    def backward_check(match: Match) -> Any:
+        if backward:
+            return pattern.is_backward
+        else:
+            return not pattern.is_backward
+    return backward_check
 
 
 def clone_graph(input_graph: torch.fx.GraphModule) -> torch.fx.GraphModule:

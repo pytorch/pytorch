@@ -9,14 +9,29 @@ from typing import Any
 
 import torch
 from torch._dynamo.utils import counters
+from torch._subclasses.fake_tensor import extract_tensor_metadata
 from torch.fx.experimental.symbolic_shapes import has_free_symbols
 from torch.fx.node import map_arg
 
 from ..lowering import lowerings as L, require_channels_last
-from ..pattern_matcher import Arg, CallFunction, filter_nodes, KeywordArg, ListOf, Match
+from ..pattern_matcher import (
+    Arg,
+    CallFunction,
+    CallFunctionVarArgs,
+    filter_nodes,
+    is_backward_pattern,
+    KeywordArg,
+    ListOf,
+    Match,
+    MULTIPLE,
+    Placeholder,
+    register_graph_pattern,
+)
 from ..utils import pad_listlike
 from .freezing_patterns import register_freezing_graph_pattern
+from .group_batch_fusion import is_node_meta_valid
 from .post_grad import register_lowering_pattern
+from .split_cat import construct_pattern_matcher_pass
 
 
 aten = torch.ops.aten
@@ -3592,3 +3607,203 @@ def quant_lift_up(graph_module: torch.fx.GraphModule):
 
     graph_module.graph.lint()
     graph_module.recompile()
+
+
+def calculate_quantization_scaling(
+    graph: torch.fx.Graph, node: torch.fx.Node, max: float = 57344.0, min: float = 1e-12
+):
+    with graph.inserting_after(node):
+        abs_node = graph.call_function(
+            torch.ops.aten.abs.default,
+            args=(node,),
+        )
+        abs_node.meta["val"] = torch.ops.aten.abs.default(node.meta["val"])
+        abs_node.meta["tensor_meta"] = extract_tensor_metadata(abs_node.meta["val"])
+        amax_node = graph.call_function(
+            torch.ops.aten.amax.default,
+            args=(abs_node, [-1], True),
+        )
+        amax_node.meta["val"] = torch.ops.aten.amax.default(abs_node.meta["val"], [-1], True)
+        amax_node.meta["tensor_meta"] = extract_tensor_metadata(amax_node.meta["val"])      
+        amax_64_node = graph.call_function(
+            torch.ops.prims.convert_element_type.default,
+            args=(amax_node, torch.float64),
+        )
+        amax_64_node.meta["val"] = torch.ops.prims.convert_element_type.default(amax_node.meta["val"], torch.float64)
+        amax_64_node.meta["tensor_meta"] = extract_tensor_metadata(amax_64_node.meta["val"]) 
+        clamp_min_node = graph.call_function(
+            torch.ops.aten.clamp_min.default,
+            args=(amax_64_node, min),
+        )
+        clamp_min_node.meta["val"] = torch.ops.aten.clamp_min.default(amax_64_node.meta["val"], 1e-12)
+        clamp_min_node.meta["tensor_meta"] = extract_tensor_metadata(clamp_min_node.meta["val"])        
+        reciprocal_node = graph.call_function(
+            torch.ops.aten.reciprocal.default,
+            args=(clamp_min_node,),
+        )
+        reciprocal_node.meta["val"] = torch.ops.aten.reciprocal.default(clamp_min_node.meta["val"])
+        reciprocal_node.meta["tensor_meta"] = extract_tensor_metadata(reciprocal_node.meta["val"])
+        mul_node = graph.call_function(
+            torch.ops.aten.mul.Tensor,
+            args=(reciprocal_node, max),
+        )
+        mul_node.meta["val"] = torch.ops.aten.mul.Tensor(reciprocal_node.meta["val"], 57344.0)
+        mul_node.meta["tensor_meta"] = extract_tensor_metadata(mul_node.meta["val"])
+        scale_node = graph.call_function(
+            torch.ops.prims.convert_element_type.default,
+            args=(mul_node, torch.float32),
+        )
+        scale_node.meta["val"] = torch.ops.prims.convert_element_type.default(mul_node.meta["val"], torch.float32)
+        scale_node.meta["tensor_meta"] = extract_tensor_metadata(scale_node.meta["val"])
+    return scale_node
+
+
+def perform_quantization(
+    graph: torch.fx.Graph,
+    node: torch.fx.Node,
+    scale_node: torch.fx.Node,
+    quant_type: torch.dtype,
+    clamp_min: float,
+    clamp_max: float,
+) -> torch.fx.Node:
+    with graph.inserting_after(node):
+        target_node_32 = graph.call_function(
+            torch.ops.prims.convert_element_type.default,
+            args=(node, torch.float32),
+        )
+        target_node_32.meta["val"] = torch.ops.prims.convert_element_type.default(node.meta["val"], torch.float32)
+        target_node_32.meta["tensor_meta"] = extract_tensor_metadata(target_node_32.meta["val"])
+        scaled_target_node = graph.call_function(
+            torch.ops.aten.mul.Tensor,
+            args=(target_node_32, scale_node),
+        )
+        scaled_target_node.meta["val"] = torch.ops.aten.mul.Tensor(target_node_32.meta["val"], scale_node.meta["val"])
+        scaled_target_node.meta["tensor_meta"] = extract_tensor_metadata(scaled_target_node.meta["val"])
+        clamp_min_scaled_node = graph.call_function(
+            torch.ops.aten.clamp_min.default,
+            args=(scaled_target_node, clamp_min),
+        )
+        clamp_min_scaled_node.meta["val"] = torch.ops.aten.clamp_min.default(scaled_target_node.meta["val"], -57344.0)
+        clamp_min_scaled_node.meta["tensor_meta"] = extract_tensor_metadata(clamp_min_scaled_node.meta["val"])
+        clamp_max_scaled_node = graph.call_function(
+            torch.ops.aten.clamp_max.default,
+            args=(clamp_min_scaled_node, clamp_max),
+        )
+        clamp_max_scaled_node.meta["val"] = torch.ops.aten.clamp_max.default(clamp_min_scaled_node.meta["val"], 57344.0)
+        clamp_max_scaled_node.meta["tensor_meta"] = extract_tensor_metadata(clamp_max_scaled_node.meta["val"])
+        quant_activation_node = graph.call_function(
+            torch.ops.prims.convert_element_type.default,
+            args=(clamp_max_scaled_node, quant_type),
+        )
+        quant_activation_node.meta["val"] = torch.ops.prims.convert_element_type.default(clamp_max_scaled_node.meta["val"], quant_type)
+        quant_activation_node.meta["tensor_meta"] = extract_tensor_metadata(quant_activation_node.meta["val"])
+    return quant_activation_node
+
+
+activation_quantization_aten_pass = construct_pattern_matcher_pass(
+    "activation_quantization_aten_pass"
+)
+@register_graph_pattern(
+    CallFunctionVarArgs(
+        [
+            torch.ops.aten.relu.default,
+            torch.ops.aten.tanh.default,
+            torch.ops.aten.sigmoid.default,
+            torch.ops.aten.gelu.default,
+        ],
+        users=MULTIPLE,
+    ),
+    pass_dict=activation_quantization_aten_pass,
+    extra_check=is_backward_pattern(activation_quantization_aten_pass, False),
+)
+def quantize_activation_fw(match: Match, *args, **kwargs):
+    graph = match.graph
+    activation_nodes = match.nodes
+    quant_type = torch._inductor.config.post_grad_fusion_options[
+        "activation_quantization_aten_pass"
+    ].get("quant_type", torch.float8_e5m2)
+    clamp_max = torch._inductor.config.post_grad_fusion_options[
+        "activation_quantization_aten_pass"
+    ].get("clamp_max", 57344.0)
+    clamp_min = torch._inductor.config.post_grad_fusion_options[
+        "activation_quantization_aten_pass"
+    ].get("clamp_min", -57344.0)
+    for activation_node in activation_nodes:
+        # check if the activation node is the node saved for quantization
+        if activation_node.meta.get("saved_for_quantization", None):
+            if not is_node_meta_valid(activation_node):
+                continue
+            for user in activation_node.users.keys():
+                if user.op == "output":
+                    output = user
+                    break
+            # calculating the scale
+            scale_node = calculate_quantization_scaling(graph, activation_node, clamp_max, 1e-12)
+            # converting to fp8
+            quant_activation_node = perform_quantization(graph, activation_node, scale_node, quant_type, clamp_min, clamp_max)
+            # only update the return node args, and remain all other users unchanged
+            output_updated_args = tuple(
+                quant_activation_node if node == activation_node else node for node in output.args[0]  # type: ignore[union-attr]
+            )
+            output.update_arg(0, output_updated_args)          
+    counters["inductor"]["activation_quantization_aten_pass"] += 1
+
+
+@register_graph_pattern(
+    Placeholder(["tanh", "relu", "sigmoid", "gelu"], users=MULTIPLE),
+    pass_dict=activation_quantization_aten_pass,
+    extra_check=is_backward_pattern(activation_quantization_aten_pass, True),
+)
+def quantize_activation_bw(match: Match, *args, **kwargs):
+    graph = match.graph
+    quant_type = torch._inductor.config.post_grad_fusion_options[
+        "activation_quantization_aten_pass"
+    ].get("quant_type", torch.float8_e5m2)
+    clamp_min = torch._inductor.config.post_grad_fusion_options[
+        "activation_quantization_aten_pass"
+    ].get("clamp_min", -57344.0)
+    clamp_max = torch._inductor.config.post_grad_fusion_options[
+        "activation_quantization_aten_pass"
+    ].get("clamp_max", 57344.0)
+    graph_inputs = [node for node in graph.nodes if node.op == "placeholder"]
+    for node in graph_inputs:
+        if node.meta.get("saved_for_quantization", None):
+            node.meta.pop("saved_for_quantization")
+            if not is_node_meta_valid(node):
+                continue
+            dequant_type = copy.deepcopy(node.meta["val"].dtype)
+            # keep a copy of node users before we recompute the scale
+            users = list(node.users.keys())
+            # calculating the scale
+            scale_node = calculate_quantization_scaling(graph, node)
+            # converting to fp8
+            quant_activation_node = perform_quantization(graph, node, scale_node, quant_type, clamp_min, clamp_max)
+            # override the dtype of the node to keep it consistent with forward graph
+            node.meta["val"] = quant_activation_node.meta["val"]
+            node.meta["tensor_meta"] = quant_activation_node.meta["tensor_meta"]
+            # dequantize the node
+            with graph.inserting_after(quant_activation_node):
+                dequant_activation_node = graph.call_function(
+                    torch.ops.prims.convert_element_type.default,
+                    args=(quant_activation_node, dequant_type),
+                )
+                dequant_activation_node.meta["val"] = torch.ops.prims.convert_element_type.default(
+                    quant_activation_node.meta["val"], dequant_type
+                )
+                dequant_activation_node.meta["tensor_meta"] = extract_tensor_metadata(dequant_activation_node.meta["val"])            
+                divided_target_node_32 = graph.call_function(
+                    torch.ops.aten.div.Tensor,
+                    args=(dequant_activation_node, scale_node),
+                )
+                divided_target_node_32.meta["val"] = torch.ops.aten.div.Tensor(dequant_activation_node.meta["val"], scale_node.meta["val"])
+                divided_target_node_32.meta["tensor_meta"] = extract_tensor_metadata(divided_target_node_32.meta["val"])
+                new_node = graph.call_function(
+                    torch.ops.prims.convert_element_type.default,
+                    args=(divided_target_node_32, dequant_type),
+                )
+                new_node.meta["val"] = torch.ops.prims.convert_element_type.default(divided_target_node_32.meta["val"], dequant_type)
+                new_node.meta["tensor_meta"] = extract_tensor_metadata(new_node.meta["val"])
+                # find the users of the node and replace them with the new node
+                for user in users:
+                    user.replace_input_with(node, new_node)
+    counters["inductor"]["activation_quantization_aten_pass"] += 1
