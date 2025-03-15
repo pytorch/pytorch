@@ -6895,7 +6895,7 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
 
         def test(pred, x):
             def true_fn(x):
-                return x
+                return x.clone()
 
             def false_fn(x):
                 return -x
@@ -6919,7 +6919,7 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
 
         def test(pred, mode, x):
             def true_fn(x):
-                return x
+                return x.clone()
 
             def false_fn(x):
                 return -x
