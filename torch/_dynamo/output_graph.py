@@ -351,7 +351,16 @@ class OutputGraph:
                 allow_non_fake_inputs=True if self.export else False,
                 export=self.export,
             )
-        self.tracing_context: TracingContext = TracingContext(fake_mode)
+        if compiler_fn:
+            compiler_name = (
+                compiler_fn.__name__
+                if hasattr(compiler_fn, "__name__")
+                else "<unknown compiler_fn>"
+            )
+        else:
+            compiler_name = "<compiler_fn None>"
+
+        self.tracing_context: TracingContext = TracingContext(fake_mode, compiler_name)
         self.dynamo_compile_id: Optional[CompileId] = (
             CompileContext.current_compile_id()
         )

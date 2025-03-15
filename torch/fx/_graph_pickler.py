@@ -103,19 +103,20 @@ class GraphPickler(pickle.Pickler):
             return stream.getvalue()
 
     @staticmethod
-    def loads(data: bytes, fake_mode: FakeTensorMode) -> object:
+    def loads(data: bytes, fake_mode: FakeTensorMode, compiler_name: str) -> object:
         """
         Unpickle an object.
         """
-        state = _UnpickleState(fake_mode)
+        state = _UnpickleState(fake_mode, compiler_name)
         with io.BytesIO(data) as stream:
             unpickler = _GraphUnpickler(stream, state)
             return unpickler.load()
 
 
 class _UnpickleState:
-    def __init__(self, fake_mode: FakeTensorMode) -> None:
+    def __init__(self, fake_mode: FakeTensorMode, compiler_name: str) -> None:
         self.fake_mode = fake_mode
+        self.compiler_name = compiler_name
         self.meta_converter: MetaConverter[FakeTensor] = MetaConverter()
 
 
@@ -567,7 +568,7 @@ class _TracingContextPickleData:
         #   self.tensor_to_context = context.tensor_to_context
 
     def unpickle(self, unpickle_state: _UnpickleState) -> TracingContext:
-        context = TracingContext(unpickle_state.fake_mode)
+        context = TracingContext(unpickle_state.fake_mode, unpickle_state.compiler_name)
         context.module_context = self.module_context
         context.frame_summary_stack = self.frame_summary_stack
         context.loc_in_frame = self.loc_in_frame
