@@ -45,7 +45,9 @@ from ..runtime import triton_heuristics
 from ..runtime.hints import DeviceProperties
 from ..utils import (
     cache_on_self,
+    DelayReplaceLine,
     get_benchmark_name,
+    IndentedBuffer,
     LineContext,
     sympy_product,
     sympy_str,
@@ -57,7 +59,6 @@ from .common import (
     ArgName,
     CodeGen,
     DeferredLine,
-    IndentedBuffer,
     PythonPrinter,
     WorkspaceArg,
     WorkspaceZeroMode,
@@ -667,6 +668,8 @@ class PythonWrapperCodegen(CodeGen):
         self.kernel_autotune_calls = IndentedBuffer()
         self.subgraph_definitions = IndentedBuffer()
         self.kernel_autotune_names = OrderedSet[str]()
+        # Map key is the kernel argument name; value is a tuple of the resulting example
+        # tensor name with the kernel where that tensor was most recently used.
         self.kernel_autotune_example_args: dict[str, tuple[str, str]] = {}
         # If the generated source code is exactly the same, reuse the
         # pre-existing kernel for it
@@ -1282,26 +1285,6 @@ class PythonWrapperCodegen(CodeGen):
             self.kernel_declarations.getvaluewithlinemap(),
         )
 
-    def _finalize_autotune_calls(self):
-        """Delete all autotune-generated tensors after the last use."""
-        to_delete: dict[str, list[str]] = {n: [] for n in self.kernel_autotune_names}
-        for tensor_arg, kernel_name in self.kernel_autotune_example_args.values():
-            to_delete[kernel_name].append(tensor_arg)
-
-        for kernel_name, tensors_to_delete in to_delete.items():
-            if not tensors_to_delete:
-                continue
-
-            for i, line in enumerate(self.kernel_autotune_calls._lines):
-                if isinstance(line, str) and (
-                    m := re.match(rf"( +){kernel_name}.run\(", line)
-                ):
-                    # the m.group(1) call ensures that the indentation is consistent
-                    self.kernel_autotune_calls._lines.insert(
-                        i + 1, f"{m.group(1)}del {', '.join(tensors_to_delete)}"
-                    )
-                    break
-
     def generate_and_run_autotune_block(self):
         """
         Compose self.kernel_autotune_defs and self.kernel_autotune_calls into a single block of
@@ -1314,7 +1297,6 @@ class PythonWrapperCodegen(CodeGen):
         """
         )
         scope = {}  # type: ignore[var-annotated]
-        self._finalize_autotune_calls()
         tuning_code = (
             self.kernel_autotune_defs.getvalue()
             + "\n"
@@ -2191,6 +2173,20 @@ class PythonWrapperCodegen(CodeGen):
                 "call_args and arg_types do not match"
             )
 
+            def get_autotune_deletion_call() -> str:
+                """After all the autotune kernel calls have been written (i.e.
+                self.kernel_autotune_example_args is complete), returns a deletion call
+                for all autotune example tensors that are unnecessary after kernel_name
+                is called."""
+                tensors_to_delete = [
+                    tensor
+                    for tensor, kn in self.kernel_autotune_example_args.values()
+                    if kn == kernel_name
+                ]
+                if tensors_to_delete:
+                    return f"del {', '.join(tensors_to_delete)}\n"
+                return ""
+
             all_args = []
             if raw_args is None:
                 # create a dummy raw_args for uniform behavior in the following loop
@@ -2219,9 +2215,6 @@ class PythonWrapperCodegen(CodeGen):
                         )
                     else:
                         arg_str = self.kernel_autotune_example_args[arg][0]
-                    # Update our record of the generated example arg with the name of
-                    # this kernel.  We use this to delete after the kernel which last
-                    # uses it.
                     self.kernel_autotune_example_args[arg] = (arg_str, kernel_name)
                 else:
                     arg_str = self.generate_example_arg_value(arg, arg_type, raw_arg, i)
@@ -2229,6 +2222,9 @@ class PythonWrapperCodegen(CodeGen):
 
             self.kernel_autotune_calls.writeline(
                 f"{kernel_name}.run({', '.join(all_args)}, stream={stream_name})"
+            )
+            self.kernel_autotune_calls.writeline(
+                DelayReplaceLine("<del_call>", get_autotune_deletion_call, "<del_call>")
             )
             self.kernel_autotune_names.add(kernel_name)
             if V.graph.cpp_wrapper:
