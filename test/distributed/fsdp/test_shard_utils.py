@@ -1,18 +1,26 @@
 # Owner(s): ["oncall: distributed"]
 
+import unittest
+
 import torch
+from torch._utils import _get_device_module
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.fsdp._shard_utils import (
     _create_chunk_dtensor,
     _create_chunk_sharded_tensor,
 )
-from torch.testing._internal.common_fsdp import FSDPTest
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_fsdp import FSDPTest, get_devtype
+from torch.testing._internal.common_utils import run_tests, TEST_HPU
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     skip_if_lt_x_gpu,
     with_comms,
 )
+
+
+device_type = torch.device(get_devtype())
+
+DEVICE_COUNT = _get_device_module(device_type.type).device_count()
 
 
 class TestShardUtilsDistributed(FSDPTest):
@@ -23,7 +31,7 @@ class TestShardUtilsDistributed(FSDPTest):
     def _create_tensor(self, *size):
         # Keep everything deterministic.
         torch.manual_seed(0)
-        return torch.rand(*size).cuda()
+        return torch.rand(*size).to(device_type)
 
     @skip_if_lt_x_gpu(2)
     def test_create_chunk_sharded_tensor(self):
@@ -34,10 +42,10 @@ class TestShardUtilsDistributed(FSDPTest):
                 tensor,
                 self.rank,
                 self.world_size,
-                torch.cuda.device_count(),
+                DEVICE_COUNT,
                 _get_default_group(),
             )
-            output = torch.empty(*size).cuda() if self.rank == 0 else None
+            output = torch.empty(*size).to(device_type) if self.rank == 0 else None
             sharded_tensor.gather(0, output)
             if self.rank == 0:
                 self.assertEqual(tensor, output)
@@ -51,8 +59,9 @@ class TestShardUtilsDistributedDTensor(DTensorTestBase):
     def _create_tensor(self, *size):
         # Keep everything deterministic.
         torch.manual_seed(0)
-        return torch.rand(*size).cuda()
+        return torch.rand(*size).to(device_type)
 
+    @unittest.skipIf(TEST_HPU, "Not supported config on HPU")
     @with_comms
     @skip_if_lt_x_gpu(2)
     def test_create_chunk_dtensor(self):
