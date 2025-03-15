@@ -296,6 +296,24 @@ def scaled_dot_product_flash_attention_strategy(op_schema: OpSchema) -> OpStrate
     ]
     single_mesh_dim_strategies.append(num_heads_dim_sharding)
 
+    # Shard on the batch dimension
+    single_mesh_dim_strategies.append(
+        [
+            Shard(0),  # output
+            Shard(0),  # logsumexp
+            None,  # cum_seq_q
+            None,  # cum_seq_k
+            None,  # max_q
+            None,  # max_k
+            Replicate(),  # rng_state
+            None,  # unused
+            Shard(0),  # debugattn
+            Shard(0),  # q
+            Shard(0),  # k
+            Shard(0),  # v
+        ]
+    )
+
     # Context Parallelism: shards on the sequence dim
     single_mesh_dim_strategies.append(
         [
@@ -369,6 +387,24 @@ def scaled_dot_product_flash_attention_backward_strategy(
     # at indices 6, 7, 12, 13, respectively
     num_heads_dim_sharding.extend([Replicate()] * (num_tensor_inputs - 6))
     single_mesh_dim_strategies.append(num_heads_dim_sharding)
+
+    # Batch sharding
+    batch_dim_sharding: PlacementList = [
+        Shard(0),  # grad_q
+        Shard(0),  # grad_k
+        Shard(0),  # grad_v
+        Shard(0),  # grad_output
+        Shard(0),  # q
+        Shard(0),  # k
+        Shard(0),  # v
+        Shard(0),  # output
+        Shard(0),  # logsumexp
+    ]
+    # accept replicate on the rest tensor inputs, potentially
+    # cum_seq_q, cum_seq_k, philox_seed, philox_offset
+    # at indices 6, 7, 12, 13, respectively
+    batch_dim_sharding.extend([Replicate()] * (num_tensor_inputs - 6))
+    single_mesh_dim_strategies.append(batch_dim_sharding)
 
     # Context Parallelism: shards on the sequence dim
     seq_dim_sharding: PlacementList = [
@@ -481,6 +517,25 @@ def scaled_dot_product_efficient_attention_strategy(op_schema: OpSchema) -> OpSt
         num_heads_dim_sharding.append(Shard(1))
     single_mesh_dim_strategies.append(num_heads_dim_sharding)
 
+    if compute_log_sumexp:
+        logsumexp_sharding: Placement = Shard(0)
+    else:
+        # empty logsumexp, replicated
+        logsumexp_sharding = Replicate()
+    batch_sharding = [
+        Shard(0),  # output
+        logsumexp_sharding,  # logsumexp
+        None,  # philox_seed
+        None,  # philox_offset
+        Shard(0),  # q
+        Shard(0),  # k
+        Shard(0),  # v
+    ]
+    if has_attn_bias:
+        batch_sharding.append(Shard(0))
+
+    single_mesh_dim_strategies.append(batch_sharding)
+
     return expand_to_full_mesh_op_strategy(
         mesh,
         op_schema,
@@ -544,6 +599,27 @@ def scaled_dot_product_efficient_attention_backward_strategy(
     # namely philox_seed and philox_offset
     num_heads_dim_sharding.extend([Replicate(), Replicate()])
     single_mesh_dim_strategies.append(num_heads_dim_sharding)
+
+    # Shards on batch dim
+    batch_dim_sharding: PlacementList = [
+        Shard(0),  # grad_q
+        Shard(0),  # grad_k
+        Shard(0),  # grad_v
+        Shard(0) if has_attn_bias else None,  # grad_bias
+        Shard(0),  # grad_output
+        Shard(0),  # q
+        Shard(0),  # k
+        Shard(0),  # v
+        Shard(0),  # output
+        Shard(0),  # logsumexp
+    ]
+    # accept replicate on the rest tensor inputs, potentially
+    # cum_seq_q, cum_seq_k, philox_seed, philox_offset
+    # at indices 6, 7, 12, 13, respectively
+    if has_attn_bias:
+        batch_dim_sharding.insert(8, Shard(0))
+    batch_dim_sharding.extend([Replicate(), Replicate()])
+    single_mesh_dim_strategies.append(batch_dim_sharding)
 
     # Context Parallelism: shards on the sequence dim
     seq_dim_sharding: PlacementList = [
@@ -647,6 +723,25 @@ def scaled_dot_product_cudnn_attention_strategy(op_schema: OpSchema) -> OpStrate
         qkv_sharding,
     ]
     single_mesh_dim_strategies.append(num_heads_dim_sharding)
+
+    # batch parallelism
+    logsumexp_sharding = Shard(0) if compute_log_sumexp else Replicate()
+    debug_attn_mask_sharding = Shard(0) if return_debug_mask else None
+    batch_dim_sharding: PlacementList = [
+        Shard(0),  # output
+        logsumexp_sharding,
+        None,      # cum_seq_q
+        None,      # cum_seq_k
+        None,      # max_q
+        None,      # max_k
+        None,      # philox_seed
+        None,      # philox_offset
+        debug_attn_mask_sharding,
+        Shard(0),  # q
+        Shard(0),  # k
+        Shard(0),  # v
+    ]
+    single_mesh_dim_strategies.append(batch_dim_sharding)
 
     # Context Parallelism: shards on the sequence dim
     cp_sharding = Shard(2)  # seq dim
@@ -766,6 +861,27 @@ def scaled_scaled_dot_product_cudnn_attention_backward_strategy(
         context_parallel_sharding_out + context_parallel_sharding_inp
     )
     single_mesh_dim_strategies.append(context_parallel_sharding)
+
+    # case 4: we can accept the sharding pattern of batch parallelism, which
+    #   shards on the batch dimension
+    qkv_sharding = Shard(0)
+    output_sharding = Shard(0)
+    logsumexp_sharding = Shard(0)
+
+    batch_dim_sharding_out: PlacementList = [qkv_sharding] * 3
+    batch_dim_sharding_inp: PlacementList = [qkv_sharding] * 4
+    batch_dim_sharding_inp += [output_sharding]
+    batch_dim_sharding_inp += [logsumexp_sharding]
+    batch_dim_sharding_inp += [
+        Replicate()
+    ] * 2  # philox_seed, philox_offset is casted to Replicate() in DTensor
+    batch_dim_sharding_inp += [Shard(0) if has_attn_bias else None]
+    batch_dim_sharding_inp += [None] * 6
+    if has_scale:
+        batch_dim_sharding_inp.append(None)
+
+    batch_sharding = batch_dim_sharding_out + batch_dim_sharding_inp
+    single_mesh_dim_strategies.append(batch_dim_sharding)
 
     return expand_to_full_mesh_op_strategy(
         mesh, op_schema, single_mesh_dim_strategies, input_index=3
