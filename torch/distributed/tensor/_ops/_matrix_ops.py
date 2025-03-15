@@ -517,14 +517,15 @@ def scaled_dot_product_efficient_attention_strategy(op_schema: OpSchema) -> OpSt
         num_heads_dim_sharding.append(Shard(1))
     single_mesh_dim_strategies.append(num_heads_dim_sharding)
 
+    # batch sharding
     if compute_log_sumexp:
-        logsumexp_sharding: Placement = Shard(0)
+        logsumexp_sharding_dp: Placement = Shard(0)
     else:
         # empty logsumexp, replicated
-        logsumexp_sharding = Replicate()
+        logsumexp_sharding_dp = Replicate()
     batch_sharding = [
         Shard(0),  # output
-        logsumexp_sharding,  # logsumexp
+        logsumexp_sharding_dp,  # logsumexp
         None,  # philox_seed
         None,  # philox_offset
         Shard(0),  # q
@@ -880,7 +881,7 @@ def scaled_scaled_dot_product_cudnn_attention_backward_strategy(
     if has_scale:
         batch_dim_sharding_inp.append(None)
 
-    batch_sharding = batch_dim_sharding_out + batch_dim_sharding_inp
+    batch_dim_sharding = batch_dim_sharding_out + batch_dim_sharding_inp
     single_mesh_dim_strategies.append(batch_dim_sharding)
 
     return expand_to_full_mesh_op_strategy(
