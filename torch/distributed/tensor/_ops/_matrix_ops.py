@@ -731,12 +731,12 @@ def scaled_dot_product_cudnn_attention_strategy(op_schema: OpSchema) -> OpStrate
     batch_dim_sharding: PlacementList = [
         Shard(0),  # output
         logsumexp_sharding,
-        None,      # cum_seq_q
-        None,      # cum_seq_k
-        None,      # max_q
-        None,      # max_k
-        None,      # philox_seed
-        None,      # philox_offset
+        None,  # cum_seq_q
+        None,  # cum_seq_k
+        None,  # max_q
+        None,  # max_k
+        None,  # philox_seed
+        None,  # philox_offset
         debug_attn_mask_sharding,
         Shard(0),  # q
         Shard(0),  # k
