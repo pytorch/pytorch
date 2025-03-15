@@ -6,7 +6,6 @@ import warnings
 from concurrent.futures import Future
 from enum import Enum
 from typing import cast, Optional, Union
-from typing_extensions import deprecated
 
 import torch
 import torch.distributed as dist
@@ -27,8 +26,10 @@ from torch.distributed.checkpoint.metadata import Metadata, STATE_DICT_TYPE
 from torch.distributed.checkpoint.planner import SavePlan, SavePlanner
 from torch.distributed.checkpoint.staging import AsyncStager
 from torch.distributed.checkpoint.stateful import Stateful
-from torch.distributed.checkpoint.storage import StorageWriter
+from torch.distributed.checkpoint.storage import StorageWriter, WriteResult
+from torch.distributed.checkpoint.utils import DistributedCheckpointingType, _get_distributed_checkpointing_type
 from torch.distributed.distributed_c10d import _get_default_group
+from typing_extensions import deprecated
 
 from .utils import _api_bc_check, _DistWrapper, _profile
 
@@ -160,19 +161,13 @@ def save(
         and it is the user's responsibility to ensure that this is set so that
         each rank has an individual GPU, via ``torch.cuda.set_device()``.
     """
-    torch._C._log_api_usage_once("torch.distributed.checkpoint.save")
-
-    no_dist = no_dist or (not dist.is_available()) or (not dist.is_initialized())
-    if no_dist:
-        warnings.warn(
-            "torch.distributed is disabled, unavailable or uninitialized, assuming the intent is to save in a single process."
-        )
+    torch._C._log_api_usage_once("torch.distributed.checkpoint.save")        
 
     with _profile():
         storage_writer = cast(
             StorageWriter, _storage_setup(storage_writer, checkpoint_id, reader=False)
         )
-
+    
         return _save_state_dict(
             state_dict=_stateful_to_state_dict(state_dict),
             storage_writer=storage_writer,
@@ -292,7 +287,6 @@ def _stateful_to_state_dict(state_dict: STATE_DICT_TYPE) -> STATE_DICT_TYPE:
         )
     return stateful_state_dict
 
-
 def _save_state_dict(
     state_dict: STATE_DICT_TYPE,
     storage_writer: StorageWriter,
@@ -303,7 +297,12 @@ def _save_state_dict(
 ) -> Metadata:
     torch._C._log_api_usage_once("torch.distributed.checkpoint.save_state_dict")
 
-    distW = _DistWrapper(process_group, not no_dist, coordinator_rank)
+    distributed_checkpointing_type = _get_distributed_checkpointing_type(no_dist)
+    use_dist = distributed_checkpointing_type == DistributedCheckpointingType.DISTRIBUTED_CHECKPOINTING
+    use_rank_coordination = not (distributed_checkpointing_type == DistributedCheckpointingType.NO_COORDINATION_CHECKPOINTING)
+
+    distW = _DistWrapper(process_group, use_dist, coordinator_rank)
+
     if planner is None:
         planner = DefaultSavePlanner()
     assert planner is not None
@@ -332,7 +331,7 @@ def _save_state_dict(
                 storage_meta=storage_meta,
                 is_coordinator=distW.is_coordinator,
             )
-        storage_writer.set_up_storage_writer(distW.is_coordinator)
+        storage_writer.set_up_storage_writer(distW.is_coordinator, distW.rank)
 
         local_plan = planner.create_local_plan()
         local_plan = storage_writer.prepare_local_plan(local_plan)
@@ -347,7 +346,13 @@ def _save_state_dict(
         all_local_plans = storage_writer.prepare_global_plan(all_local_plans)
         return all_local_plans
 
-    central_plan: SavePlan = distW.reduce_scatter("plan", local_step, global_step)
+    if use_rank_coordination:
+        central_plan: SavePlan = distW.reduce_scatter("plan", local_step, global_step)
+    else:
+        local_plan: SavePlan = local_step()
+        global_plan: SavePlan = global_step([local_plan])
+        central_plan: SavePlan = global_plan[0]
+        torch.distributed.barrier()
 
     @_dcp_method_logger(**ckpt_kwargs)
     def write_data():
@@ -364,4 +369,11 @@ def _save_state_dict(
         storage_writer.finish(metadata=global_metadata, results=all_results)
         return global_metadata
 
-    return distW.all_reduce("write", write_data, finish_checkpoint)
+    if use_rank_coordination:
+        return distW.all_reduce("write", write_data, finish_checkpoint)
+
+    write_results: list[WriteResult] = write_data()
+    metadata = finish_checkpoint([write_results])
+    torch.distributed.barrier()   
+
+    return metadata

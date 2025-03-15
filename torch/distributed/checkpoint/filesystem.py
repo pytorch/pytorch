@@ -576,14 +576,19 @@ class _FileSystemWriter(StorageWriter):
         self.save_id = _generate_uuid()
         self.overwrite = overwrite
         self.transforms = _StorageWriterTransforms(_extensions)
+        self.rank: Optional[int] = None
+        self.checkpoint_id: Union[str, os.PathLike, None] = None
 
     def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
-        if checkpoint_id:
-            self.path = self.fs.init_path(checkpoint_id)
+        self.checkpoint_id = checkpoint_id
         self.save_id = _generate_uuid()
 
-    def set_up_storage_writer(self, is_coordinator: bool) -> None:
-        pass
+    def set_up_storage_writer(self, is_coordinator: bool, rank: Optional[int] = None) -> None:
+        self.rank = rank
+
+        if self.checkpoint_id:
+            path = f"{self.checkpoint_id}/{self.rank}"
+            self.path = self.fs.init_path(path)
 
     def prepare_local_plan(self, plan: SavePlan) -> SavePlan:
         self.fs.mkdir(self.path)
@@ -765,14 +770,19 @@ class FileSystemReader(StorageReader):
         self.storage_data: dict[Any, Any] = {}
         self.load_id = _generate_uuid()
         self.transforms = _StorageReaderTransforms(_extension_registry)
+        self.rank: Optional[int] = None
+        self.checkpoint_id: Union[str, os.PathLike, None] = None
 
     def _slice_file(self, file, sinfo: _StorageInfo) -> IO[bytes]:
         return cast(IO[bytes], _create_file_view(file, sinfo.offset, sinfo.length))
 
     def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
         self.storage_data = {}
-        if checkpoint_id:
-            self.path = self.fs.init_path(checkpoint_id)
+        self.checkpoint_id = checkpoint_id
+
+        if self.checkpoint_id:
+            path = f"{self.checkpoint_id}/{self.rank}"
+            self.path = self.fs.init_path(path)
         self.load_id = _generate_uuid()
 
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
