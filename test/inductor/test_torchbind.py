@@ -96,6 +96,24 @@ class TestTorchbind(TestCase):
             "call_torchbind(__torch__.torch.classes._TorchScriptTesting._Foo obj, str method, int _1) -> int _0",
         )
 
+    def test_torchbind_hop_schema_no_input(self):
+        q = _empty_tensor_queue()
+        q_ir = ir.TorchBindObject(name="q", value=q)
+        schema = CallTorchBind.schema(q_ir, "pop")
+        self.assertEqual(
+            str(schema),
+            "call_torchbind(__torch__.torch.classes._TorchScriptTesting._TensorQueue obj, str method) -> Tensor _0",
+        )
+
+    def test_torchbind_hop_schema_no_output(self):
+        q = _empty_tensor_queue()
+        q_ir = ir.TorchBindObject(name="q", value=q)
+        schema = CallTorchBind.schema(q_ir, "push")
+        self.assertEqual(
+            str(schema),
+            "call_torchbind(__torch__.torch.classes._TorchScriptTesting._TensorQueue obj, str method, Tensor _1) -> NoneType _0",
+        )
+
     def test_torchbind_aot_compile(self):
         ep, inputs, _, _ = self.get_exported_model()
         aoti_files = aot_compile(
