@@ -554,6 +554,7 @@ class GraphLowering(torch.fx.Interpreter):
         Decide if we should enable layout optimization for this graph based on
         heuristics.
         """
+
         if not config.layout_optimization:
             return False
 
@@ -567,6 +568,22 @@ class GraphLowering(torch.fx.Interpreter):
 
         if nconv == 0:
             return False
+
+        # If RDNA arch on ROCm do not force NHWC convolutions as this
+        # is still experimental
+        if torch.version.hip:
+            gcn_arch = torch.cuda.get_device_properties(0).gcnArchName.split(":", 1)[0]
+
+            if (
+                float(".".join(torch.version.hip.split(".")[:2])) >= 6.3
+                and any(arch not in gcn_arch for arch in ["gfx11", "gfx12"])
+                and all(
+                    n.args[idx].meta["val"].device == torch.device("cuda")
+                    for n in conv_nodes
+                    for idx in [0, 1]
+                )
+            ):
+                return False
 
         # For cpu backend and mkldnn enabled, we always use channels_last for better performance.
         if (
