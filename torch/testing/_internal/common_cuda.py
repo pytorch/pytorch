@@ -55,6 +55,8 @@ def evaluate_gfx_arch_exact(matching_arch):
 GFX90A_Exact = LazyVal(lambda: evaluate_gfx_arch_exact('gfx90a:sramecc+:xnack-'))
 GFX942_Exact = LazyVal(lambda: evaluate_gfx_arch_exact('gfx942:sramecc+:xnack-'))
 
+IS_GFX12 = LazyVal(lambda: torch.cuda.is_available() and torch.version.hip and 'gfx12' in torch.cuda.get_device_properties(0).gcnArchName)
+
 def evaluate_platform_supports_flash_attention():
     if TEST_WITH_ROCM:
         return evaluate_gfx_arch_exact('gfx90a:sramecc+:xnack-') or evaluate_gfx_arch_exact('gfx942:sramecc+:xnack-')

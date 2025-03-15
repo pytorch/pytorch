@@ -24,7 +24,8 @@ from torch.testing._internal.common_cuda import (
     SM90OrLater,
     _get_torch_cuda_version,
     PLATFORM_SUPPORTS_FP8,
-    PLATFORM_SUPPORTS_MX_GEMM
+    PLATFORM_SUPPORTS_MX_GEMM,
+    IS_GFX12
 )
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -467,8 +468,9 @@ class TestFP8MatmulCuda(TestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_float8_basics(self, device) -> None:
         self._test_tautological_mm(device, e4m3_type, e4m3_type, size=16)
-        # According to https://docs.nvidia.com/cuda/cublas/#id99 8F_E5M2 MM is unsupported
-        # supported on ROCm but fails on CUDA
+        if IS_GFX12:
+            self.skipTest("Gfx12 enablement in progress")
+
         ctx = self.assertRaises(RuntimeError) if torch.version.hip is None else contextlib.nullcontext()
         with ctx:
             self._test_tautological_mm(device, e5m2_type, e5m2_type)
@@ -683,6 +685,7 @@ class TestFP8MatmulCuda(TestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
     @unittest.skipIf(not SM89OrLater, "rowwise implementation is currently sm89+ specific")
     @parametrize("use_fast_accum", [True, False])
+    @unittest.skipIf(IS_GFX12, "Gfx12 enablement in progress")
     def test_float8_rowwise_scaling_sanity(self, device, use_fast_accum: bool) -> None:
         M, K, N = (1024, 512, 2048)
         fill_value = 0.5
@@ -788,6 +791,7 @@ class TestFP8MatmulCuda(TestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
     @unittest.skipIf(not SM89OrLater, "rowwise implementation is currently sm89+ specific")
     @parametrize("base_dtype", [torch.bfloat16])
+    @unittest.skipIf(IS_GFX12, "Gfx12 enablement in progress")
     def test_scaled_mm_vs_emulated_row_wise(self, base_dtype):
         torch.manual_seed(42)
         input_dtype = e4m3_type
