@@ -2,6 +2,7 @@
 import operator
 from collections import defaultdict
 from dataclasses import dataclass, field
+from math import prod
 from typing import Any, cast, Optional, Tuple
 
 import torch
@@ -380,7 +381,6 @@ class _ScaledMatmul(_Matmul):
             aten._scaled_mm.default,
             aten.reshape.default,
         )
-        mm_node = match[0] if len(match) == 1 else match[1]
 
         def get_arg(node: torch.fx.Node, idx: int, default: Any) -> Any:
             if idx >= len(node.args):
@@ -624,7 +624,7 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
             fused_node.prepend(node)
 
 
-def _scatter_dim_delta_after_reshape(reshape_node: torch.fx.Node) -> int:
+def _scatter_dim_after_reshape(reshape_node: torch.fx.Node, orig_scatter_dim: int) -> int:
     """
     Returns the delta of scatter dim after reshape.
 
@@ -633,32 +633,53 @@ def _scatter_dim_delta_after_reshape(reshape_node: torch.fx.Node) -> int:
     so the scatter dim "delta" is -1.
     """
     assert len(reshape_node.all_input_nodes) == 1, "rehshape node must have one parent"
-    reshape_input = reshape_node.all_input_nodes[0]
-    orig_tensor_ndim = _get_tensor(reshape_input).ndim
-    reshaped_tensor_ndim = _get_tensor(reshape_node).ndim
-    assert orig_tensor_ndim >= reshaped_tensor_ndim, "reshape must reduce ndim"
-    return orig_tensor_ndim - reshaped_tensor_ndim
+    reshape_op_input_tensor = _get_tensor(reshape_node.all_input_nodes[0])
+    reshaped_tensor = _get_tensor(reshape_node)
+    assert reshaped_tensor.ndim == 2, "reshape must produce 2D tensor for scaled_mm"
+
+    # case 1: scatter dim 0 always maps to 0 after any reshape.
+    if orig_scatter_dim == 0:
+        return 0
+
+    # case 2: scatter dim ndim-1 always maps to 1 after any reshape.
+    if orig_scatter_dim == reshape_op_input_tensor.ndim - 1:
+        return 1
+
+    # case 3: scatter dim between 0 and ndim-1.
+    # for a N-D tensor to be reshaped into 2D, either the leading dims or ending dims must
+    # be collapsed to a single dim. first determine which of these happened.
+    old_shape = reshape_op_input_tensor.shape
+    new_shape = reshaped_tensor.shape
+    leading_dims_collapsed = new_shape[0] == prod(old_shape[:-1])
+
+    # if the original scatter dim was in the middle dims and the leading dims were collapsed,
+    # the new scatter dim will be 0. 
+    # if the original scatter_dim was in the middle dims and the ending dims were collapsed,
+    # the new scatter dim will be 1.
+    return 0 if leading_dims_collapsed else 1
 
 
-def _find_producer_matmul(node: torch.fx.Node) -> Tuple[Optional[_Matmul], int]:
-    """Returns producer matmul node and scatter dim delta (if reshape -> mm -> reshape)"""
-    scatter_dim_delta = 0
+
+def _find_producer_matmul(node: torch.fx.Node, orig_scatter_dim: int) -> Tuple[Optional[_Matmul], int]:
+    """Returns producer matmul node and scatter dim. Scatter dim is returned because
+    in the case of the "reshape -> mm -> reshape" pattern, the original scatter dim was
+    assigned before the resahpe, and we need to update it."""
     if node.target == aten.mm.default:
-        return _Matmul.from_match(match=[node]), scatter_dim_delta
+        return _Matmul.from_match(match=[node]), orig_scatter_dim
     elif node.target == aten._scaled_mm.default:
-        return _ScaledMatmul.from_match(match=[node]), scatter_dim_delta
+        return _ScaledMatmul.from_match(match=[node]), orig_scatter_dim
     elif node.target == aten.reshape.default:
         reshape_node_1 = node
 
         mm_node = reshape_node_1.args[0]
         assert isinstance(mm_node, torch.fx.Node)
         if mm_node.target not in (aten.mm.default, aten._scaled_mm.default):
-            return None, scatter_dim_delta
+            return None, orig_scatter_dim
 
         reshape_node_0 = mm_node.args[0]
         assert isinstance(reshape_node_0, torch.fx.Node)
         if reshape_node_0.target != aten.reshape.default:
-            return None, scatter_dim_delta
+            return None, orig_scatter_dim
 
         if mm_node.target == aten.mm.default:
             return _Matmul.from_match(match=[reshape_node_0, mm_node, reshape_node_1]), 0
@@ -666,9 +687,9 @@ def _find_producer_matmul(node: torch.fx.Node) -> Tuple[Optional[_Matmul], int]:
             mm = _ScaledMatmul.from_match(
                 match=[reshape_node_0, mm_node, reshape_node_1]
             )
-            scatter_dim_delta = _scatter_dim_delta_after_reshape(reshape_node_0)
-            return mm, scatter_dim_delta
-    return None, 0
+            new_scatter_dim = _scatter_dim_after_reshape(reshape_node_0, orig_scatter_dim)
+            return mm, new_scatter_dim 
+    return None, orig_scatter_dim
 
 def _insert_fused_matmul_reduce_scatter(
     graph: torch.fx.Graph,
@@ -726,7 +747,7 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
         restride_A_for_fused_matmul_reduce_scatter,
     )
 
-    input_node, _rs_node, rs_res_node, reduce_op, scatter_dim, group_name = (
+    input_node, _rs_node, rs_res_node, reduce_op, orig_scatter_dim, group_name = (
         reduce_scatter.input_node,
         reduce_scatter.rs_node,
         reduce_scatter.res_node,
@@ -749,8 +770,7 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
     # the scatter dim needs to be adjusted accordingly, since the scatter dim
     # was assigned using the original 3D+ tensor, and fused_matmul_reduce_scatter
     # will be performed on a 2D tensor.
-    matmul, scatter_dim_delta = _find_producer_matmul(input_node)
-    scatter_dim = max(0, scatter_dim - scatter_dim_delta)
+    matmul, scatter_dim = _find_producer_matmul(input_node, orig_scatter_dim)
     if matmul is None:
         return
 
