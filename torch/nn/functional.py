@@ -6420,3 +6420,48 @@ def multi_head_attention_forward(
             # squeeze the output if input was unbatched
             attn_output = attn_output.squeeze(1)
         return attn_output, None
+
+def periodic(input: Tensor, mode: str = "sin", omega_0: float = 1.0, inplace: bool = False):
+    r"""Periodic activation function.
+
+    .. math::
+        sin:
+        \text{periodic}(x) = \sin(omega_0 x)
+        cos:
+        \text{periodic}(x) = \cos(omega_0 x)
+
+
+    where :math:`t` is the index along the specified dimension and :math:`d` is the remaining dimension.
+
+    Args:
+        input (Tensor): the input tensor.
+        mode (str, optional): the type of periodic signal to be added (``'sin'`` or ``'cos'``). Default: ``'sin'``
+        omega_0 (float, optional): the frequency of the periodic signal. Default: ``1.0``
+        inplace (bool, optional): whether to modify the input tensor in-place. Default: ``False``
+
+    Returns:
+        Tensor: the output tensor.
+
+    Example::
+
+        >>> input = torch.randn(2, 3, 4)
+        >>> output = F.periodic(input, mode='sin', omega_0=1.0)
+    """
+    if has_torch_function((input,)):
+        return handle_torch_function(periodic, (input,), input, mode=mode, omega_0=omega_0, inplace=inplace)
+    if mode == "sin":
+        if inplace:
+            input.mul_(omega_0)
+            torch.sin_(input)
+            return input
+        else:
+            return torch.sin(input * omega_0)
+    elif mode == "cos":
+        if inplace:
+            torch.mul_(omega_0)
+            torch.cos_(input)
+            return input
+        else:
+            return torch.cos(input * omega_0)
+    else:
+        raise ValueError(f"mode must be 'sin' or 'cos', but got {mode}")
