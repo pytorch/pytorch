@@ -4,7 +4,7 @@ import operator
 from collections import defaultdict
 from dataclasses import dataclass, field
 from math import prod
-from typing import Any, cast, Optional, Tuple
+from typing import Any, cast, Optional
 
 import torch
 from torch.utils._ordered_set import OrderedSet
@@ -357,12 +357,12 @@ class _Matmul:
         mm_node = match[0] if len(match) == 1 else match[1]
         return _Matmul(
             nodes=match,
-            A_node=cast(torch.fx.Node, match[0].args[0]),
-            B_node=cast(torch.fx.Node, mm_node.args[1]),
+            A_node=cast("torch.fx.Node", match[0].args[0]),
+            B_node=cast("torch.fx.Node", mm_node.args[1]),
             # _Matmul handles reshapes via custom graph manipulation logic, see `replace_with()` method.
             # TOOO: explore unifying the _Matmul and _ScaledMatmul approaches to handling reshapes.
             pre_mm_reshape=None,
-            post_mm_reshape=None, 
+            post_mm_reshape=None,
         )
 
 
@@ -402,10 +402,10 @@ class _ScaledMatmul(_Matmul):
         mm_node = match[1] if is_reshape_mm_reshape_pattern else match[0]
         pre_mm_reshape = match[0] if is_reshape_mm_reshape_pattern else None
         post_mm_reshape = match[-1] if is_reshape_mm_reshape_pattern else None
-        A_node = cast(torch.fx.Node, mm_node.args[0])
-        B_node = cast(torch.fx.Node, mm_node.args[1])
-        A_scale_node = cast(torch.fx.Node, mm_node.args[2])
-        B_scale_node = cast(torch.fx.Node, mm_node.args[3])
+        A_node = cast("torch.fx.Node", mm_node.args[0])
+        B_node = cast("torch.fx.Node", mm_node.args[1])
+        A_scale_node = cast("torch.fx.Node", mm_node.args[2])
+        B_scale_node = cast("torch.fx.Node", mm_node.args[3])
 
         return _ScaledMatmul(
             nodes=match,
@@ -437,8 +437,8 @@ def _find_reshape_mm_reshape(node: torch.fx.Node) -> list[_Matmul]:
             # Since the reshape -> mm -> reshape pattern would be subsumed into
             # the fused op, we only match the patterns where the shape of the
             # second reshape is matches the mm result produced by the fused op.
-            matmul_input_node = cast(torch.fx.Node, node.args[0])
-            B_node = cast(torch.fx.Node, mm_node.args[1])
+            matmul_input_node = cast("torch.fx.Node", node.args[0])
+            B_node = cast("torch.fx.Node", mm_node.args[1])
             matmul_out_shape = torch.Size(
                 [
                     *_get_tensor(matmul_input_node).shape[:-1],
@@ -507,7 +507,7 @@ def _insert_fused_all_gather_matmul(
             kwargs={"return_A": True},
         )
     elif mm_type == _ScaledMatmul:
-        scaled_matmuls = cast(list[_ScaledMatmul], matmuls)
+        scaled_matmuls = cast("list[_ScaledMatmul]", matmuls)
         return graph.call_function(
             torch.ops.symm_mem.fused_all_gather_scaled_matmul.default,
             args=(
@@ -778,7 +778,7 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> bool:
     )
 
     if not is_symm_mem_enabled_for_group(group_name):
-        log.debug(f"symmetric memory is neot enabeld for process group {group_name}, skipping fuse_matmul_reduce_scatter fusion")
+        log.debug(f"symmetric memory is not enabled for process group {group_name}, skipping fuse_matmul_reduce_scatter fusion")
         return False
 
     # Currently fused_matmul_reduce_scatter doesn't return the matmul result,
@@ -786,7 +786,7 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> bool:
     # users. This is not a fundamental limitation of the fused op and can be
     # addressed if needed.
     if len(input_node.users) != 1:
-        log.debug(f"matmul result has more than one user, skipping fused_matmul_reduce_scatter fusion.")
+        log.debug("matmul result has more than one user, skipping fused_matmul_reduce_scatter fusion.")
         return False
 
     matmul = _find_producer_matmul(input_node)
@@ -804,16 +804,16 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> bool:
     #   3. Store expected potentially 3D+ mm output shape, since the mm node itself only contains 2D input args,
     #      and the fused matmul reduce scatter implementation needs to reshape the output to the expected
     #      potentially 3D+ shape before applying reduce-scatter, and to prevent shape erros with subsequent ops.
-    
+
     # If 'A' was reshaped from 3D+ -> 2D for the mm, we need to determine the new scattter dim after the reshape
-    # for the fused matmul reduce scatter implementation to use. 
+    # for the fused matmul reduce scatter implementation to use.
     if matmul.pre_mm_reshape:
         scatter_dim_after_maybe_reshape = _scatter_dim_after_reshape(matmul.pre_mm_reshape, orig_scatter_dim)
     else:
         scatter_dim_after_maybe_reshape = orig_scatter_dim
 
     # If the 2D mm output was reshaped from 2D -> 3D+, we need to store the intended output shape for the
-    # fused matmul reduce scatter implementation to use. 
+    # fused matmul reduce scatter implementation to use.
     if matmul.post_mm_reshape:
         output_shape = list(_get_tensor(matmul.post_mm_reshape).shape)
     else:
@@ -962,6 +962,7 @@ def micro_pipeline_tp_pass(graph: torch.fx.Graph):
     if not all_gathers and not reduce_scatters:
         raise AssertionError("async TP found no matching all-gather/reduce-scatter patterns for fusion")
 
+    # TODO: raise an exception if we're using async TP but failed to fuse any all-gather-matmuls
     for all_gather in all_gathers:
         fuse_all_gather_matmul(all_gather)
 
