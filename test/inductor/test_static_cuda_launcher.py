@@ -360,6 +360,8 @@ class TestStaticTritonCompileResult(TestCase):
         self.assertEqual(foo(x, y), x + y)
 
     @skipIfRocm
+    # The error gets raised on a worker, so we want to not use a separate process
+    @torch._inductor.config.patch("compile_threads", 1)
     def test_incompatible_code(self):
         # User defined triton kernel
         @triton.jit
