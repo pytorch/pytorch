@@ -3094,16 +3094,16 @@ class TestCase(expecttest.TestCase):
 
     # Munges exceptions that internally contain stack traces, using munge_exc
     def assertExpectedInlineMunged(
-        self, exc_type, callable, expect, *, suppress_suffix=True, post_munge=None,
+        self, exc_type, callable, expect, *, skip=0, suppress_suffix=True, post_munge=None,
     ):
         try:
             callable()
         except exc_type as e:
-            munged = munge_exc(e, suppress_suffix=suppress_suffix, skip=1)
+            munged = munge_exc(e, suppress_suffix=suppress_suffix, skip=skip + 1)
             if post_munge:
                 munged = post_munge(munged)
             self.assertExpectedInline(
-                munged, expect, skip=1
+                munged, expect, skip=skip + 1
             )
             return
         self.fail(msg="Did not raise when expected to")
@@ -5560,6 +5560,7 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
     if suppress_suffix:
         s = re.sub(r"\n*Set TORCH_LOGS.+", "", s, flags=re.DOTALL)
         s = re.sub(r"\n*You can suppress this exception.+", "", s, flags=re.DOTALL)
+        s = re.sub(r"\n*Set TORCHDYNAMO_VERBOSE=1.+", "", s, flags=re.DOTALL)
     if suppress_prefix:
         s = re.sub(r"Cannot export model.+\n\n", "", s)
     s = re.sub(r" +$", "", s, flags=re.MULTILINE)

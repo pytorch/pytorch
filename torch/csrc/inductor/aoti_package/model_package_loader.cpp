@@ -70,7 +70,7 @@ namespace torch::inductor {
 namespace {
 const nlohmann::json& load_json_file(std::string json_path) {
   if (!file_exists(json_path)) {
-    throw std::runtime_error("File found: " + json_path);
+    throw std::runtime_error("File not found: " + json_path);
   }
 
   std::ifstream json_file(json_path);
@@ -98,6 +98,11 @@ std::tuple<std::string, std::string> get_cpp_compile_command(
 
   std::string file_ext = compile_only ? ".o" : ".so";
   std::string target_file = output_dir + filename + file_ext;
+  std::string target_dir = output_dir;
+  if (target_dir.empty()) {
+    size_t parent_path_idx = filename.find_last_of(k_separator);
+    target_dir = filename.substr(0, parent_path_idx);
+  }
 
   std::string cflags_args;
   for (auto& arg : compile_options["cflags"]) {
@@ -131,7 +136,15 @@ std::tuple<std::string, std::string> get_cpp_compile_command(
 
   std::string passthrough_parameters_args;
   for (auto& arg : compile_options["passthrough_args"]) {
-    passthrough_parameters_args += arg.get<std::string>() + " ";
+    std::string arg_str = arg.get<std::string>();
+    std::string target = "script.ld";
+    std::string replacement = target_dir;
+    replacement.append(k_separator).append(target);
+    size_t pos = arg_str.find(target);
+    if (pos != std::string::npos) {
+      arg_str.replace(pos, target.length(), replacement);
+    }
+    passthrough_parameters_args += arg_str + " ";
   }
 
   std::string compile_only_arg = compile_only ? "-c" : "";
