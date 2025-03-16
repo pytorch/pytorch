@@ -4893,6 +4893,19 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(ref, res)
         self.assertEqual(cnt.frame_count, 2)
 
+    def test_return_weakref(self):
+        def f(t):
+            t = t * 2
+            wr = weakref.ref(t)
+            return wr, t
+
+        ref_t = torch.randn(2, 2, requires_grad=True)
+        ref_y = f(ref_t)
+
+        t = ref_t.detach().clone().requires_grad_()
+        y = torch.compile(f, backend="eager", fullgraph=True)(t)
+        self.assertEqual(ref_y[0](), y[0]())
+
     def test_weakref_del(self):
         def fn(x_weak, y):
             x = x_weak()

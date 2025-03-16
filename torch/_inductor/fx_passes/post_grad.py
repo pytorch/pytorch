@@ -31,6 +31,7 @@ from ..pattern_matcher import (
     CallFunction,
     CallFunctionVarArgs,
     filter_nodes,
+    fwd_only,
     get_arg_value,
     get_mutation_region_id,
     Ignored,
@@ -42,6 +43,7 @@ from ..pattern_matcher import (
     MULTIPLE,
     PatternMatcherPass,
     register_graph_pattern,
+    register_replacement,
     stable_topological_sort,
 )
 from ..utils import decode_device, get_gpu_type, is_gpu, is_pointwise_use
@@ -188,6 +190,38 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     gm.graph.lint()
 
 
+def prepare_softmax_pattern(x, dim):
+    xmax = x.amax(dim=dim, keepdim=True)
+    xsub = x - xmax
+    xexp = xsub.exp()
+    xsum = xexp.sum(dim=dim, keepdim=True)
+    return xmax, xsum, xsub, xexp
+
+
+def prepare_softmax_replacement(x, dim):
+    """
+    Return xsub since otherwise log-softmax can not be matched
+    due to a use of this intermediate node. Same reason to return
+    xsub.exp() for softmax.
+    """
+    from torch._inductor.inductor_prims import prepare_softmax_online
+
+    xmax, xsum = prepare_softmax_online(x, dim)
+    xsub = x - xmax
+    return xmax, xsum, xsub, xsub.exp()
+
+
+def prepare_softmax_extra_check(match):
+    """
+    We only have triton online softmax kernels currently.
+    """
+    return (
+        config.online_softmax
+        and match.kwargs["x"].meta["val"].device.type == "cuda"
+        and config.cuda_backend == "triton"
+    )
+
+
 @init_once_fakemode
 def lazy_init():
     if torch._C._has_mkldnn:
@@ -195,6 +229,19 @@ def lazy_init():
         from .mkldnn_fusion import _mkldnn_fusion_init
 
         _mkldnn_fusion_init()
+
+    # Put this patterns in post-grad pass rather than joint-graph
+    # pass since otherwise there will be perf/peak-memory regression:
+    # https://github.com/pytorch/pytorch/issues/148141
+    register_replacement(
+        prepare_softmax_pattern,
+        prepare_softmax_replacement,
+        [torch.empty(4, 8)],
+        scalar_workaround=dict(dim=-1),
+        trace_fn=fwd_only,
+        pass_dicts=pass_patterns[1],
+        extra_check=prepare_softmax_extra_check,
+    )
 
 
 def reorder_for_locality(graph: torch.fx.Graph):
