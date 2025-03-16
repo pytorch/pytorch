@@ -1099,9 +1099,9 @@ def _fused_matmul_reduce_scatter_impl(
     # in a single reduction kernel.
     reduced_out = reduce_fn(
         stacked_partials
-        .movedim(0, scatter_dim_after_maybe_reshape)    # Swap back the scatter dim for the 2d shape to where it was
-        .view(*stacked_partials_3D_leading_dims, -1),   # View
-        dim=0,
+        .view(*stacked_partials_3D_leading_dims, -1)    # View 2D stacked partials as 3D+ tensor of shape (`group_size`, ...)
+        .movedim(0, orig_scatter_dim),                  # Swap back the scatter dim (which we moved to 0, and now is of size `group_size`)
+        dim=orig_scatter_dim,                           # Reduce along the `group_size` dim
     )
 
     # Final 3D+ output shape must be scattered along original scatter dim as well.
