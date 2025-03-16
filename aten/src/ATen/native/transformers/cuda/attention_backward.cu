@@ -26,6 +26,8 @@
 #else
 #include <ATen/ops/zeros_like.h>
 #include <ATen/ops/empty_strided.h>
+#include <ATen/ops/_cudnn_attention_backward.h>
+#include <ATen/ops/_cudnn_attention_backward_native.h>
 #include <ATen/ops/_flash_attention_backward.h>
 #include <ATen/ops/_flash_attention_backward_native.h>
 #include <ATen/ops/_efficient_attention_backward.h>
@@ -184,7 +186,7 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
   return std::make_tuple(Tensor(), Tensor(), Tensor());
 }
 
-std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_backward_cuda(
+std::tuple<Tensor, Tensor, Tensor> _cudnn_attention_backward(
     const Tensor& grad_out,
     const Tensor& query,
     const Tensor& key,
@@ -1061,6 +1063,42 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
     }
     return process_chunk(grad_out_t, query_t, key_t, value_t, attn_bias_opt, out_t, logsumexp);
   }
+}
+
+std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_backward_cuda(
+    const Tensor& grad_out,
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    const Tensor& out,
+    const Tensor& logsumexp,
+    const Tensor& philox_seed,
+    const Tensor& philox_offset,
+    const Tensor& attn_bias,
+    const Tensor& cum_seq_q,
+    const Tensor& cum_seq_k,
+    const int64_t max_q,
+    const int64_t max_k,
+    double dropout_p,
+    bool is_causal,
+    std::optional<double> scale) {
+	return at::_cudnn_attention_backward(
+		    grad_out,
+		    query,
+		    key,
+		    value,
+		    out,
+		    logsumexp,
+		    philox_seed,
+		    philox_offset,
+		    attn_bias,
+		    cum_seq_q,
+		    cum_seq_k,
+		    max_q,
+		    max_k,
+		    dropout_p,
+		    is_causal,
+		    scale);
 }
 
 } // namespace at::native
