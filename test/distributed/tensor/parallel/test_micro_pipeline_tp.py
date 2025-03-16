@@ -366,7 +366,7 @@ class MicroPipelineTPTest(TestCase):
         ) -> torch.Tensor:
             if len(A.shape) > 2:
                 C = torch._scaled_mm(
-                    A.flatten(0,-2), B, A_scale, B_scale, out_dtype=out_dtype
+                    A.flatten(0, -2), B, A_scale, B_scale, out_dtype=out_dtype
                 )
                 C = C.view(*A.shape[:-1], B.shape[1])
             else:

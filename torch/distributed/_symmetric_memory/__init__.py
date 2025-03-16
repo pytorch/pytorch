@@ -1103,9 +1103,9 @@ def _fused_matmul_reduce_scatter_impl(
     # in a single reduction kernel.
     reduced_out = reduce_fn(
         stacked_partials
-        .view(*stacked_partials_3D_leading_dims, -1)    # View 2D stacked partials as 3D+ tensor of shape (`group_size`, ...)
-        .movedim(0, orig_scatter_dim),                  # Swap back the scatter dim (which we moved to 0, and now is of size `group_size`)
-        dim=orig_scatter_dim,                           # Reduce along the origal scatter dim (`group_size`)
+        .view(*stacked_partials_3D_leading_dims, -1) # View 2D stacked partials as 3D+ tensor of shape (`group_size`, ...)
+        .movedim(0, orig_scatter_dim),               # Swap back the scatter dim (which we moved to 0, and now is `group_size`)
+        dim=orig_scatter_dim,                        # Reduce along the origal scatter dim (`group_size`)
     )
 
     # Final 3D+ output shape must be scattered along original scatter dim as well.
@@ -1156,12 +1156,14 @@ def _fused_matmul_reduce_scatter(
             mm_out_op=torch.ops.aten.mm.out,
             A=A,
             B=B,
+            A_scale=None,
             kwargs={},
             out_dtype=A.dtype,
             reduce_op=reduce_op,
             scatter_dim=scatter_dim,
             group_name=group_name,
         )
+
 
 @torch.library.impl(lib, "fused_scaled_matmul_reduce_scatter", "Meta")
 def _fused_scaled_matmul_reduce_scatter_fallback(
