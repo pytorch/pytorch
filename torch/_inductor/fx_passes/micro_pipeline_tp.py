@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import logging
 import operator
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -20,7 +21,7 @@ from ..pattern_matcher import (
     PatternMatcherPass,
 )
 
-
+log = logging.getLogger(__name__)
 aten = torch.ops.aten
 patterns = PatternMatcherPass()
 
@@ -703,7 +704,7 @@ def _insert_fused_matmul_reduce_scatter(
     orig_scatter_dim: int,
     group_name: str,
     scatter_dim_after_reshape: int, # only used for reshape -> scaled_mm -> reshape pattern
-    A_orig_shape: list[int],        # only used for reshape -> scaled_mm -> reshape pattern
+    output_shape: list[int],        # only used for reshape -> scaled_mm -> reshape pattern
 ) -> torch.fx.Node:
     if type(matmul) == _Matmul:
         return graph.call_function(
@@ -722,7 +723,7 @@ def _insert_fused_matmul_reduce_scatter(
                 orig_scatter_dim,
                 scatter_dim_after_reshape,
                 group_name,
-                A_orig_shape,
+                output_shape,
                 matmul.bias_node,
                 matmul.result_scale_node,
                 matmul.out_dtype,
@@ -733,7 +734,7 @@ def _insert_fused_matmul_reduce_scatter(
         raise AssertionError(f"Unexpected matmul match type: {type(matmul)}")
 
 
-def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
+def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> bool:
     """
     Fused the pattern
 
@@ -744,12 +745,15 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
         torch.ops.symm_mem.fused_matmul_reduce_scatter(
             A, B, scatter_dim, group_name,
         )
+
+    Returns boolean indicating if fusion was successful or not.
     """
     if (
         not torch.distributed.is_available()
         or not torch.distributed.is_nccl_available()
     ):
-        return
+        log.debug("torch.distributed is not available, skipping fuse_matmul_reduce_scatter fusion")
+        return False
 
     from torch.distributed._symmetric_memory import (
         is_symm_mem_enabled_for_group,
@@ -766,39 +770,52 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
     )
 
     if not is_symm_mem_enabled_for_group(group_name):
-        return
+        log.debug(f"symmetric memory is neot enabeld for process group {group_name}, skipping fuse_matmul_reduce_scatter fusion")
+        return False
 
     # Currently fused_matmul_reduce_scatter doesn't return the matmul result,
     # so we can't apply the fusion if the matmul result is used by multiple
     # users. This is not a fundamental limitation of the fused op and can be
     # addressed if needed.
     if len(input_node.users) != 1:
-        return
+        log.debug(f"matmul result has more than one user, skipping fused_matmul_reduce_scatter fusion.")
+        return False
 
     matmul, reshape_node = _find_producer_matmul(input_node)
-    if matmul is None or rs_res_node in matmul.arg_ancestor_nodes:
-        return
+    if matmul is None:
+        log.debug("no producer matmul found for reduce scatter, skipping fuse_matmul_reduce_scatter fusion")
+        return False
+
+    if rs_res_node in matmul.arg_ancestor_nodes:
+        log.debug("reduce-scatter result node is an ancestor of matmul, skipping fuse_matmul_reduce_scatter fusion")
+        return False
 
     # We need to track 3 values for the fused scaled mm reduce scatter implementation:
-    #   1. The original shape of the A tensor before the reshape.
+    #   1. Store expected potentially 3D+ mm output shape, since the mm node itself only contains 2D input args,
+    #      and the fused matmul reduce scatter implementation needs to reshape the output to the expected 
+    #      potentialy 3D+ shape.
     #   2. The scatter dim before the reshape, which was assigned using the original (a,b,c) @ (c,d) = (a,b,d) dims.
     #   3. The scatter dim after the reshape, to use when we are doing the 2D (a*b,c) @ (c,d) = (a,b,d) scaled mm op.
 
-    # Case 2: if the producer matmul is a reshape -> mm -> reshape pattern, store:
-    #   1. The new scatter dim after the reshape from 3D+ -> 2D, and store the original shape for later.
-    #   2. The orignal A tensor 3D+ shape.
+    # Case 1: if the producer matmul is a reshape -> mm -> reshape pattern, store the new scatter dim
+    # after the reshape from 3D+ -> 2D, and store the original A shape for storing the expected matmul output shape.
     if reshape_node:
         scatter_dim_after_maybe_reshape = _scatter_dim_after_reshape(reshape_node, orig_scatter_dim)
         A_orig_shape = list(_get_tensor(reshape_node.args[0]).shape)
 
-    # Case 2: if producer is doing a simply mm with 2D tensors, there's nothing extra to track, so use the original values.
+    # Case 2: if producer is doing a simply mm with 2D tensors, there's nothing extra to track,
+    # so use the original values.
     else:
-        A_orig_shape = list(_get_tensor(matmul.A_node).shape)
         scatter_dim_after_maybe_reshape = orig_scatter_dim
+        A_orig_shape = list(_get_tensor(matmul.A_node).shape)
 
+    # Store the expected output shape for the fused scaled mm reduce scatter implementation.
+    B_shape = _get_tensor(matmul.B_node).shape
+    output_shape = [*A_orig_shape[:-1], B_shape[-1]]
 
     graph = rs_res_node.graph
     with graph.inserting_before(rs_res_node):
+        # restride A tensor for optimal perf in fused matmul reduce scatter
         if "val" in matmul.A_node.meta:
             restrided = restride_A_for_fused_matmul_reduce_scatter(
                 _get_tensor(matmul.A_node),
@@ -809,6 +826,7 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
                 args=(matmul.A_node, restrided.stride()),
             )
 
+        # replace matched subgraph with fused matmul reduce scatter node
         fused_node = _insert_fused_matmul_reduce_scatter(
             graph,
             matmul,
@@ -816,7 +834,7 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
             orig_scatter_dim,
             group_name,
             scatter_dim_after_maybe_reshape,
-            A_orig_shape,
+            output_shape,
         )
         reduce_scatter.replace_with(fused_node)
         reduce_scatter.erase()
@@ -830,7 +848,9 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
     for node in nodes_to_raise:
         if order[node] > order[fused_node]:
             fused_node.prepend(node)
-
+    
+    logging.debug("successfully fused matmul reduce scatter")
+    return True
 
 def _get_node_to_ancestors(
     graph: torch.fx.Graph,
@@ -931,11 +951,16 @@ def micro_pipeline_tp_pass(graph: torch.fx.Graph):
             x for x in reduce_scatters if x.rs_node not in unexposed_collectives
         ]
 
-    if not (all_gathers or reduce_scatters):
-        raise AssertionError("async TP found no matching all-gather-matul patterns and no matmul-reduce-scatter patterns")
+    if not all_gathers and not reduce_scatters:
+        raise AssertionError("async TP found no matching all-gather/reduce-scatter patterns for fusion")
 
     for all_gather in all_gathers:
         fuse_all_gather_matmul(all_gather)
 
+    fused_reduce_scatters = False
     for reduce_scatter in reduce_scatters:
-        fuse_matmul_reduce_scatter(reduce_scatter)
+        if fuse_matmul_reduce_scatter(reduce_scatter):
+            fused_reduce_scatters = True
+
+    if reduce_scatters and not fused_reduce_scatters:
+        raise AssertionError("no successful fusions of matul-reduce-scatters")

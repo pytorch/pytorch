@@ -461,7 +461,7 @@ lib.define(
 lib.define(
     "fused_scaled_matmul_reduce_scatter("
     "Tensor A, Tensor B, Tensor A_scale, Tensor B_scale, "
-    "str reduce_op, int orig_scatter_dim, int scatter_dim_after_maybe_reshape, str group_name, int[]? A_orig_shape, "
+    "str reduce_op, int orig_scatter_dim, int scatter_dim_after_maybe_reshape, str group_name, int[]? output_shape, "
     "Tensor? bias = None, "
     "Tensor? result_scale = None, "
     "ScalarType? out_dtype = None, "
@@ -1016,13 +1016,13 @@ def _fused_matmul_reduce_scatter_impl(
     orig_scatter_dim: int,
     scatter_dim_after_maybe_reshape: int,
     group_name: str,
-    A_orig_shape: list[int],
+    output_shape: list[int],
 ) -> torch.Tensor:
     if A.dim() < 2:
         raise ValueError("A_shard must be a matrix")
     if scatter_dim_after_maybe_reshape < 0 or scatter_dim_after_maybe_reshape >= A.dim():
         raise ValueError("Invalid scatter dim for 2D tensor input to scaled_mm")
-    if orig_scatter_dim < 0 or orig_scatter_dim >= len(A_orig_shape):
+    if orig_scatter_dim < 0 or orig_scatter_dim >= len(output_shape):
         raise ValueError("Invalid scatter dim for 3D+ output tensor")
     if B.dim() != 2:
         raise ValueError("B must be a matrix")
@@ -1101,11 +1101,11 @@ def _fused_matmul_reduce_scatter_impl(
         stacked_partials
         .view(*stacked_partials_3D_leading_dims, -1)    # View 2D stacked partials as 3D+ tensor of shape (`group_size`, ...)
         .movedim(0, orig_scatter_dim),                  # Swap back the scatter dim (which we moved to 0, and now is of size `group_size`)
-        dim=orig_scatter_dim,                           # Reduce along the `group_size` dim
+        dim=orig_scatter_dim,                           # Reduce along the origal scatter dim (`group_size`)
     )
 
     # Final 3D+ output shape must be scattered along original scatter dim as well.
-    final_out_shape = [*A_orig_shape[:-1], B.shape[-1]] 
+    final_out_shape = [*output_shape[:-1], B.shape[-1]] 
     final_out_shape[orig_scatter_dim] //= group.size()
     out = reduced_out.view(*final_out_shape)
     return out
@@ -1152,14 +1152,12 @@ def _fused_matmul_reduce_scatter(
             mm_out_op=torch.ops.aten.mm.out,
             A=A,
             B=B,
-            A_scale=None,
             kwargs={},
             out_dtype=A.dtype,
             reduce_op=reduce_op,
             scatter_dim=scatter_dim,
             group_name=group_name,
         )
-
 
 @torch.library.impl(lib, "fused_scaled_matmul_reduce_scatter", "Meta")
 def _fused_scaled_matmul_reduce_scatter_fallback(
@@ -1171,7 +1169,7 @@ def _fused_scaled_matmul_reduce_scatter_fallback(
     orig_scatter_dim: int,
     scatter_dim_after_maybe_reshape: int,
     group_name: str,
-    A_orig_shape: list[int],
+    output_shape: list[int],
     bias: Optional[torch.Tensor] = None,
     result_scale: Optional[torch.Tensor] = None,
     out_dtype: Optional[torch.dtype] = None,
@@ -1201,7 +1199,7 @@ def _fused_scaled_matmul_reduce_scatter_fallback(
         out_dtype,
         use_fast_accum,
     )
-    C = C.view(*A_orig_shape[:-1], B.shape[1])
+    C = C.view(*output_shape[:-1], B.shape[1])
     res = funcol.reduce_scatter_tensor(
         C,
         reduce_op,
@@ -1222,7 +1220,7 @@ def _fused_scaled_matmul_reduce_scatter(
     orig_scatter_dim: int,
     scatter_dim_after_maybe_reshape: int,
     group_name: str,
-    A_orig_shape: list[int],
+    output_shape: list[int],
     bias: Optional[torch.Tensor] = None,
     result_scale: Optional[torch.Tensor] = None,
     out_dtype: Optional[torch.dtype] = None,
@@ -1238,7 +1236,7 @@ def _fused_scaled_matmul_reduce_scatter(
             orig_scatter_dim,
             scatter_dim_after_maybe_reshape,
             group_name,
-            A_orig_shape,
+            output_shape,
             bias,
             result_scale,
             out_dtype,
@@ -1262,7 +1260,7 @@ def _fused_scaled_matmul_reduce_scatter(
             orig_scatter_dim=orig_scatter_dim,
             scatter_dim_after_maybe_reshape=scatter_dim_after_maybe_reshape,
             group_name=group_name,
-            A_orig_shape=A_orig_shape,
+            output_shape=output_shape,
         )
 
 
