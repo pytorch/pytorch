@@ -49,9 +49,9 @@ MODULES_TO_SKIP: set[type] = {
 }
 
 # List of all module classes to test.
-MODULE_CLASSES: list[type] = list(chain(*[
+MODULE_CLASSES: list[type] = [*chain.from_iterable([
     [getattr(namespace, module_name) for module_name in namespace.__all__]  # type: ignore[attr-defined]
-    for namespace in MODULE_NAMESPACES]))
+    for namespace in MODULE_NAMESPACES])]
 MODULE_CLASSES = [cls for cls in MODULE_CLASSES if cls not in MODULES_TO_SKIP]
 
 # Dict of module class -> common name. Useful for making test names more intuitive.
