@@ -79,6 +79,7 @@ if HAS_TABULATE:
         mode: Optional[str] = "default",
         optimizer: Optional[torch.optim.Optimizer] = None,
         loss_fn : Union[torch.nn.Module, Callable, None] = None,
+        **compile_kwargs: Any,
     ):
         """
         Use this utility to benchmark torch.compile
@@ -86,8 +87,8 @@ if HAS_TABULATE:
         if backend:
             try:
                 torch._dynamo.reset()
-                compile_counter_with_backend = CompileCounterWithBackend(backend)
-                opt_model = torch.compile(model, backend=compile_counter_with_backend, mode=mode)
+                compile_counter_with_backend = CompileCounterWithBackend(backend, mode=mode, **compile_kwargs)
+                opt_model = torch.compile(model, backend=compile_counter_with_backend)
 
                 # Compilation only happens after the first inference
                 compilation_time = bench_loop(opt_model, sample_input, 1, optimizer, loss_fn)
