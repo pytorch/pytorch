@@ -857,7 +857,9 @@ auto build_graph_backward(
 
 auto build_graph_backward_nestedtensor(
     int64_t b,
-    int64_t h,
+    int64_t h_q,
+    int64_t h_k,
+    int64_t h_v,
     int64_t s_q,
     int64_t s_kv,
     int64_t d_qk,
@@ -934,6 +936,92 @@ auto build_graph_backward_nestedtensor(
             .set_seq_len_q(SEQ_LEN_Q_)
             .set_seq_len_kv(SEQ_LEN_KV_)
             .set_padding_mask(true);
+    auto q_strides = q.strides();
+    auto k_strides = k.strides();
+    auto v_strides = v.strides();
+    constexpr int strideidx0 = 1;
+    constexpr int strideidx1 = 0;
+    constexpr int strideidx2 = 2;
+    auto Q_ = mha_graph->tensor(fe::graph::Tensor_attributes()
+          	                 .set_uid(Q)
+                                   .set_name("Q")
+                                   .set_dim({b, h_q, s_q, d_qk})
+                                   .set_stride(
+                                       {INT_MAX,
+                                        q_strides[strideidx0],
+                                        q_strides[strideidx1],
+                                        q_strides[strideidx2]}));
+    auto K_ = mha_graph->tensor(fe::graph::Tensor_attributes()
+          	                 .set_uid(K)
+                                   .set_name("K")
+                                   .set_dim({b, h_k, s_kv, d_qk})
+                                   .set_stride(
+                                       {INT_MAX,
+                                        k_strides[strideidx0],
+                                        k_strides[strideidx1],
+                                        k_strides[strideidx2]}));
+    auto V_ = mha_graph->tensor(fe::graph::Tensor_attributes()
+          	                 .set_uid(V)
+                                   .set_name("V")
+                                   .set_dim({b, h_v, s_kv, d_v})
+                                   .set_stride(
+                                       {INT_MAX,
+                                        v_strides[strideidx0],
+                                        v_strides[strideidx1],
+                                        v_strides[strideidx2]}));
+    std::optional<std::shared_ptr<fe::graph::Tensor_attributes>> bias;
+    if (attn_bias.has_value()) {
+      TORCH_CHECK(
+          false,
+          "attn_bias not yet supportd with cuDNN Attention and NestedTensor");
+      bias =
+          mha_graph->tensor(fe::graph::Tensor_attributes()
+          		      .set_uid(BIAS)
+                                .set_name("bias")
+                                .set_dim(attn_bias.value().sizes().vec())
+                                .set_stride(attn_bias.value().strides().vec()));
+      scaled_dot_product_flash_attention_backward_options.set_bias(bias.value());
+    }
+    auto RAG_Q_OFF_ = mha_graph->tensor(fe::graph::Tensor_attributes()
+          	                         .set_uid(RAG_Q_OFF)
+                                           .set_name("cum_seq_q")
+                                           .set_dim({b + 1, 1, 1, 1})
+                                           .set_stride({1, 1, 1, 1})
+                                           .set_data_type(fe::DataType_t::INT32));
+    auto RAG_K_OFF_ = mha_graph->tensor(fe::graph::Tensor_attributes()
+          	                         .set_uid(RAG_K_OFF)
+                                           .set_name("cum_seq_k")
+                                           .set_dim({b + 1, 1, 1, 1})
+                                           .set_stride({1, 1, 1, 1})
+                                           .set_data_type(fe::DataType_t::INT32));
+    auto RAG_V_OFF_ = mha_graph->tensor(fe::graph::Tensor_attributes()
+          	                         .set_uid(RAG_V_OFF)
+                                           .set_name("cum_seq_v")
+                                           .set_dim({b + 1, 1, 1, 1})
+                                           .set_stride({1, 1, 1, 1})
+                                           .set_data_type(fe::DataType_t::INT32));
+    auto RAG_O_OFF_ = mha_graph->tensor(fe::graph::Tensor_attributes()
+          	                         .set_uid(RAG_O_OFF)
+                                           .set_name("cum_seq_o")
+                                           .set_dim({b + 1, 1, 1, 1})
+                                           .set_stride({1, 1, 1, 1})
+                                           .set_data_type(fe::DataType_t::INT32));
+    auto RAG_STATS_OFF_ = mha_graph->tensor(fe::graph::Tensor_attributes()
+          	                           .set_uid(RAG_LSE_OFF)
+                                           .set_name("cum_seq_stats")
+                                           .set_dim({b + 1, 1, 1, 1})
+                                           .set_stride({1, 1, 1, 1})
+                                           .set_data_type(fe::DataType_t::INT32));
+
+    Q_->set_ragged_offset(RAG_Q_OFF_);
+    K_->set_ragged_offset(RAG_K_OFF_);
+    V_->set_ragged_offset(RAG_V_OFF_);
+    auto STATS = mha_graph->tensor(fe::graph::Tensor_attributes()
+		                   .set_uid(LSE)
+				   .set_name("stats")
+				   .set_dim({b, h_q, s_q, 1})
+				   .set_stride({s_q * h_q, 1, h_q, 1})
+				   .set_data_type(fe::DataType_t::FLOAT));
 }
 
 
@@ -1299,7 +1387,7 @@ void run_cudnn_SDP_bprop_nestedtensor(
   if (!q.numel() || !k.numel() || !v.numel()) {
     return;
   }
-
+  
 }
 
 
