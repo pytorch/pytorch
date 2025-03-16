@@ -139,24 +139,6 @@ class AOTInductorTestsTemplate:
                 model, example_inputs, "AOTInductorModelRunMinimalArrayrefInterface(", 1
             )
 
-    def test_compile_wrapper_with_O0(self):
-        class Model(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.linear = torch.nn.Linear(10, 10)
-
-            def forward(self, x, y):
-                return x + self.linear(y)
-
-        example_inputs = (
-            torch.randn(10, 10, device=self.device),
-            torch.randn(10, 10, device=self.device),
-        )
-        model = Model()
-        with config.patch("aot_inductor.compile_wrapper_with_O0", True):
-            self.check_model(model, example_inputs)
-            self.code_check_count(model, example_inputs, "__attribute__((", 2)
-
     def test_small_constant(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -1596,6 +1578,22 @@ class AOTInductorTestsTemplate:
             }
         self.check_model_with_multiple_inputs(
             WhileLoopModels.SymExprCond(),
+            prepend_counters(inputs),
+            dynamic_shapes=dynamic_shapes,
+        )
+
+    @common_utils.parametrize("dynamic", [False, True])
+    def test_while_loop_with_conv(self, dynamic):
+        inputs = (torch.randn(2, 4, 4, 4, device=self.device, dtype=torch.float64),)
+        dim0_ab = Dim("s0", min=2, max=1024)
+        dynamic_shapes = None
+        if dynamic:
+            dynamic_shapes = {
+                "c": {},
+                "x": {0: dim0_ab, 1: None},
+            }
+        self.check_model_with_multiple_inputs(
+            WhileLoopModels.Conv(self.device),
             prepend_counters(inputs),
             dynamic_shapes=dynamic_shapes,
         )
@@ -4679,8 +4677,6 @@ def fail_gpu(suffixes: tuple[str, ...], is_skip=False):
 CPU_TEST_FAILURES = {
     # TODO: failed internally
     "test_multiple_output_alias": fail_cpu(is_skip=True),
-    "test_update_constant_buffer": fail_cpu(is_skip=True),
-    "test_so_without_weight": fail_cpu(is_skip=True),
 }
 
 # test_failures, xfail by default, set is_skip=True to skip

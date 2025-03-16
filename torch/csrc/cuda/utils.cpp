@@ -24,7 +24,7 @@ THPUtils_PySequence_to_CUDAStreamList(PyObject* obj) {
   for (Py_ssize_t i = 0; i < length; i++) {
     PyObject* stream = PySequence_Fast_GET_ITEM(seq.get(), i);
 
-    if (PyObject_IsInstance(stream, THPStreamClass)) {
+    if (PyObject_IsInstance(stream, (PyObject*)THPStreamClass)) {
       // Spicy hot reinterpret cast!!
       streams.emplace_back(at::cuda::CUDAStream::unpack3(
           (reinterpret_cast<THPStream*>(stream))->stream_id,

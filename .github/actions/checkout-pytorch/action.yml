@@ -23,9 +23,44 @@ runs:
       id: check_container_runner
       run: echo "IN_CONTAINER_RUNNER=$(if [ -f /.inarc ] || [ -f /.incontainer ]; then echo true ; else echo false; fi)" >> "$GITHUB_OUTPUT"
 
-    - name: Clean workspace
+    - name: Set up parallel fetch and clean workspace
+      id: first-clean
+      continue-on-error: true
       shell: bash
       if: ${{ steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' }}
+      env:
+        NO_SUDO: ${{ inputs.no-sudo }}
+      run: |
+        # Use all available CPUs for fetching
+        cd "${GITHUB_WORKSPACE}"
+        git config --global fetch.parallel 0
+        git config --global submodule.fetchJobs 0
+
+        # Clean workspace. The default checkout action should also do this, but
+        # do it here as well just in case
+        if [[ -d .git ]]; then
+          if [ -z "${NO_SUDO}" ]; then
+            sudo git clean -ffdx
+          else
+            git clean -ffdx
+          fi
+        fi
+
+    - name: Checkout PyTorch
+      id: first-checkout-attempt
+      continue-on-error: true
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        # --depth=1 for speed, manually fetch history and other refs as necessary
+        fetch-depth: ${{ inputs.fetch-depth }}
+        submodules: ${{ inputs.submodules }}
+        show-progress: false
+
+    - name: Clean workspace (try again)
+      if: ${{ steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' &&
+        (steps.first-clean.outcome != 'success' || steps.first-checkout-attempt.outcome != 'success') }}
+      shell: bash
       env:
         NO_SUDO: ${{ inputs.no-sudo }}
       run: |
@@ -40,16 +75,11 @@ runs:
         fi
         mkdir "${GITHUB_WORKSPACE}"
 
-        # Use all available CPUs for fetching
-        cd "${GITHUB_WORKSPACE}"
-        git config --global fetch.parallel 0
-        git config --global submodule.fetchJobs 0
-
-    - name: Checkout PyTorch
+    - name: Checkout PyTorch (try again)
       uses: actions/checkout@v4
+      if: ${{ steps.first-clean.outcome != 'success' || steps.first-checkout-attempt.outcome != 'success' }}
       with:
         ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-        # --depth=1 for speed, manually fetch history and other refs as necessary
         fetch-depth: ${{ inputs.fetch-depth }}
         submodules: ${{ inputs.submodules }}
         show-progress: false
