@@ -1,15 +1,58 @@
 #include <c10/metal/indexing.h>
 #include <c10/metal/special_math.h>
 using namespace c10::metal;
+using namespace metal;
 
+DEFINE_UNARY_FLOATING_FUNCTOR(bessel_j0_forward);
+DEFINE_UNARY_FLOATING_FUNCTOR(bessel_j1_forward);
 DEFINE_UNARY_FLOATING_FUNCTOR(i0);
+DEFINE_UNARY_FLOATING_FUNCTOR(i0e);
 DEFINE_UNARY_FLOATING_FUNCTOR(i1);
+DEFINE_UNARY_FLOATING_FUNCTOR(i1e);
 DEFINE_UNARY_FLOATING_FUNCTOR(spherical_bessel_j0);
 DEFINE_UNARY_FLOATING_FUNCTOR(entr);
 
+// TODO: Replaceme with DEFINE_UNARY_FLOATING_FUNCTOR
+// But for some reason instantinating bessel_y[01] on M1/M2 results in
+// Failed to created pipeline state object, error: Error Domain=AGXMetalG14X
+// Code=3 "Compiler encountered an internal error"
+struct bessel_y0_forward_functor {
+  template <typename T>
+  inline enable_if_t<is_floating_point_v<T>, T> operator()(const T x) {
+    return static_cast<T>(bessel_y0_forward(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_integral_v<T>, float> operator()(const T x) {
+    return bessel_y0_forward(static_cast<float>(x));
+  }
+  inline float operator()(const bool x) {
+    return x ? 0.08825694769620895 : -INFINITY;
+  }
+};
+
+struct bessel_y1_forward_functor {
+  template <typename T>
+  inline enable_if_t<is_floating_point_v<T>, T> operator()(const T x) {
+    return static_cast<T>(bessel_y1_forward(x));
+  }
+  template <typename T>
+  inline enable_if_t<is_integral_v<T>, float> operator()(const T x) {
+    return bessel_y1_forward(static_cast<float>(x));
+  }
+  inline float operator()(const bool x) {
+    return x ? -0.7812128067016602 : -INFINITY;
+  }
+};
+
 #define REGISTER_SPECIAL(DTI, DTO)                  \
+  REGISTER_UNARY_OP(bessel_j0_forward, DTI, DTO);   \
+  REGISTER_UNARY_OP(bessel_j1_forward, DTI, DTO);   \
+  REGISTER_UNARY_OP(bessel_y0_forward, DTI, DTO);   \
+  REGISTER_UNARY_OP(bessel_y1_forward, DTI, DTO);   \
   REGISTER_UNARY_OP(i0, DTI, DTO);                  \
+  REGISTER_UNARY_OP(i0e, DTI, DTO);                 \
   REGISTER_UNARY_OP(i1, DTI, DTO);                  \
+  REGISTER_UNARY_OP(i1e, DTI, DTO);                 \
   REGISTER_UNARY_OP(spherical_bessel_j0, DTI, DTO); \
   REGISTER_UNARY_OP(entr, DTI, DTO)
 
