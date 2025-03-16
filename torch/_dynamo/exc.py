@@ -129,11 +129,7 @@ class ShortenTraceback(TorchDynamoException):
 
     def remove_dynamo_frames(self) -> typing.Self:
         tb = self.__traceback__
-        if (
-            self.first_useful_frame is None
-            or tb is None
-            or os.environ.get("TORCHDYNAMO_VERBOSE") == "1"
-        ):
+        if self.first_useful_frame is None or tb is None or config.verbose:
             return self
         while tb.tb_frame is not self.first_useful_frame:
             tb = tb.tb_next
@@ -554,7 +550,11 @@ def augment_exc_message(exc: Exception, msg: str = "\n", export: bool = False) -
         )
 
     if not config.verbose and hasattr(exc, "real_stack"):
-        msg += '\nSet TORCH_LOGS="+dynamo" and TORCHDYNAMO_VERBOSE=1 for more information\n'
+        msg += (
+            "\nSet TORCHDYNAMO_VERBOSE=1 for the internal stack trace "
+            "(please do this especially if you're reporting a bug to PyTorch). "
+            'For even more developer context, set TORCH_LOGS="+dynamo"\n'
+        )
 
     if hasattr(exc, "inner_exception") and hasattr(
         exc.inner_exception, "minifier_path"

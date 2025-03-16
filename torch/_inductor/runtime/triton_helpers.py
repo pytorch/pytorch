@@ -1,5 +1,6 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
+import math as pymath
 import warnings
 from typing import Any, TypeVar
 
@@ -7,6 +8,7 @@ from .triton_compat import _log2, libdevice, math, tl, triton  # noqa: F401
 
 
 _T = TypeVar("_T")
+_LOG_2_E: tl.constexpr = pymath.log2(pymath.e)
 
 
 def set_driver_to_cpu():
@@ -153,6 +155,47 @@ def min_with_index(value, index, dim):
 @triton.jit
 def max_with_index(value, index, dim):
     return tl.reduce((value, index), dim, maximum_with_index)
+
+
+@triton.jit
+def exp(x, use_fast_math: tl.constexpr):
+    if use_fast_math:
+        return libdevice.exp2(x * _LOG_2_E)
+    else:
+        return math.exp(x)
+
+
+@triton.jit
+def online_softmax_reduce(lhs_max, lhs_sum, dim, use_fast_math: tl.constexpr):
+    out_max = max2(lhs_max, dim)
+    out_max_keepdim = out_max[:, None]
+    delta = tl.where(out_max_keepdim == float("-inf"), 0, lhs_max - out_max_keepdim)
+    out_sum = tl.sum(lhs_sum * exp(delta, use_fast_math), dim)
+    return out_max, out_sum
+
+
+@triton.jit
+def online_softmax_combine(lhs_max, lhs_sum, rhs_max, use_fast_math: tl.constexpr):
+    """
+    When we do combine, we assume lhs is the accumulator and rhs is the next
+    block of data.
+    Then rhs_sum is always 1. With that assumption, we can save some registers
+    and computation.
+    """
+    out_max = maximum(lhs_max, rhs_max)
+
+    lhs_scale = tl.where(
+        out_max == float("-inf"), 1.0, exp(lhs_max - out_max, use_fast_math)
+    )
+    rhs_scale = tl.where(
+        out_max == float("-inf"), 1.0, exp(rhs_max - out_max, use_fast_math)
+    )
+
+    # Should be
+    #   out_sum = lhs_sum * lhs_scale + rhs_sum * rhs_scale
+    # but since rhs_sum is all 1, we can simpliy it.
+    out_sum = lhs_sum * lhs_scale + rhs_scale
+    return out_max, out_sum
 
 
 @triton.jit
