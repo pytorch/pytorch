@@ -216,7 +216,6 @@ class DispatchKey(Enum):
     AutogradHIP = auto()
     AutogradXLA = auto()
     AutogradMTIA = auto()
-    AutogradMAIA = auto()
     AutogradMPS = auto()
     AutogradIPU = auto()
     AutogradXPU = auto()
