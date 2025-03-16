@@ -49,10 +49,14 @@ jobs:
       matrix:
         runner: [linux.12xlarge]
         docker-image-name: [
-          pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9,
+          pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc9,
           pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9-inductor-benchmarks,
           pytorch-linux-focal-cuda12.4-cudnn9-py3.12-gcc9-inductor-benchmarks,
           pytorch-linux-focal-cuda12.4-cudnn9-py3.13-gcc9-inductor-benchmarks,
+          pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc9,
+          pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc9-inductor-benchmarks,
+          pytorch-linux-focal-cuda12.6-cudnn9-py3.12-gcc9-inductor-benchmarks,
+          pytorch-linux-focal-cuda12.6-cudnn9-py3.13-gcc9-inductor-benchmarks,
           pytorch-linux-focal-cuda11.8-cudnn9-py3-gcc9,
           pytorch-linux-focal-py3.9-clang10,
           pytorch-linux-focal-py3.11-clang10,
