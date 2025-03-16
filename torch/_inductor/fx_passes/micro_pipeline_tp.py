@@ -21,6 +21,7 @@ from ..pattern_matcher import (
     PatternMatcherPass,
 )
 
+
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
 patterns = PatternMatcherPass()
@@ -638,21 +639,28 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
             fused_node.prepend(node)
 
 
-def _scatter_dim_after_reshape(reshape_node: torch.fx.Node, orig_scatter_dim: int) -> int:
+def _scatter_dim_after_reshape(
+    reshape_node: torch.fx.Node, orig_scatter_dim: int
+) -> int:
     """
     Given a reshape node and the original scatter dim for the target tensor,
     returns the new scatter dim for the reshaped tensor.
     """
     # if there was no pre-mm reshape, scatter dim will not change.
-    if not reshape_node: return orig_scatter_dim
+    if not reshape_node:
+        return orig_scatter_dim
 
-    assert len(reshape_node.all_input_nodes) == 1, "rehshape node must have exactly one parent"
+    assert len(reshape_node.all_input_nodes) == 1, (
+        "rehshape node must have exactly one parent"
+    )
 
     reshaped_tensor = _get_tensor(reshape_node)
     assert reshaped_tensor.ndim == 2, "reshape must produce 2D tensor for scaled_mm"
 
     reshape_op_input_tensor = _get_tensor(reshape_node.all_input_nodes[0])
-    assert reshape_op_input_tensor.ndim > reshaped_tensor.ndim, "reshape must be from 3D+ to 2D"
+    assert reshape_op_input_tensor.ndim > reshaped_tensor.ndim, (
+        "reshape must be from 3D+ to 2D"
+    )
 
     # Note: for a N-D tensor to be reshaped into 2D, either the leading dims or ending dims must
     # be collapsed to a single dim. First determine which of these happened.
@@ -705,19 +713,26 @@ def _find_producer_matmul(node: torch.fx.Node) -> Optional[_Matmul]:
             )
     return None
 
+
 def _insert_fused_matmul_reduce_scatter(
     graph: torch.fx.Graph,
     matmul: _Matmul,
     reduce_op: str,
     orig_scatter_dim: int,
     group_name: str,
-    scatter_dim_after_reshape: int, # only used for reshape -> scaled_mm -> reshape pattern
-    output_shape: list[int],        # only used for reshape -> scaled_mm -> reshape pattern
+    scatter_dim_after_reshape: int,  # only used for reshape -> scaled_mm -> reshape pattern
+    output_shape: list[int],  # only used for reshape -> scaled_mm -> reshape pattern
 ) -> torch.fx.Node:
     if type(matmul) == _Matmul:
         return graph.call_function(
             torch.ops.symm_mem.fused_matmul_reduce_scatter.default,
-            args=(matmul.A_node, matmul.B_node, reduce_op, orig_scatter_dim, group_name),
+            args=(
+                matmul.A_node,
+                matmul.B_node,
+                reduce_op,
+                orig_scatter_dim,
+                group_name,
+            ),
         )
     elif type(matmul) == _ScaledMatmul:
         return graph.call_function(
@@ -760,7 +775,9 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> bool:
         not torch.distributed.is_available()
         or not torch.distributed.is_nccl_available()
     ):
-        log.debug("torch.distributed is not available, skipping fuse_matmul_reduce_scatter fusion")
+        log.debug(
+            "torch.distributed is not available, skipping fuse_matmul_reduce_scatter fusion"
+        )
         return False
 
     from torch.distributed._symmetric_memory import (
@@ -778,7 +795,9 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> bool:
     )
 
     if not is_symm_mem_enabled_for_group(group_name):
-        log.debug(f"symmetric memory is not enabled for process group {group_name}, skipping fuse_matmul_reduce_scatter fusion")
+        log.debug(
+            f"symmetric memory is not enabled for process group {group_name}, skipping fuse_matmul_reduce_scatter fusion"
+        )
         return False
 
     # Currently fused_matmul_reduce_scatter doesn't return the matmul result,
@@ -786,16 +805,22 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> bool:
     # users. This is not a fundamental limitation of the fused op and can be
     # addressed if needed.
     if len(input_node.users) != 1:
-        log.debug("matmul result has more than one user, skipping fused_matmul_reduce_scatter fusion.")
+        log.debug(
+            "matmul result has more than one user, skipping fused_matmul_reduce_scatter fusion."
+        )
         return False
 
     matmul = _find_producer_matmul(input_node)
     if matmul is None:
-        log.debug("no producer matmul found for reduce scatter, skipping fuse_matmul_reduce_scatter fusion")
+        log.debug(
+            "no producer matmul found for reduce scatter, skipping fuse_matmul_reduce_scatter fusion"
+        )
         return False
 
     if rs_res_node in matmul.arg_ancestor_nodes:
-        log.debug("reduce-scatter result node is an ancestor of matmul, skipping fuse_matmul_reduce_scatter fusion")
+        log.debug(
+            "reduce-scatter result node is an ancestor of matmul, skipping fuse_matmul_reduce_scatter fusion"
+        )
         return False
 
     # We need to track 3 values for the fused scaled mm reduce scatter implementation:
@@ -808,7 +833,9 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> bool:
     # If 'A' was reshaped from 3D+ -> 2D for the mm, we need to determine the new scattter dim after the reshape
     # for the fused matmul reduce scatter implementation to use.
     if matmul.pre_mm_reshape:
-        scatter_dim_after_maybe_reshape = _scatter_dim_after_reshape(matmul.pre_mm_reshape, orig_scatter_dim)
+        scatter_dim_after_maybe_reshape = _scatter_dim_after_reshape(
+            matmul.pre_mm_reshape, orig_scatter_dim
+        )
     else:
         scatter_dim_after_maybe_reshape = orig_scatter_dim
 
@@ -859,6 +886,7 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> bool:
 
     log.debug("successfully fused matmul reduce scatter")
     return True
+
 
 def _get_node_to_ancestors(
     graph: torch.fx.Graph,
@@ -960,7 +988,9 @@ def micro_pipeline_tp_pass(graph: torch.fx.Graph):
         ]
 
     if not all_gathers and not reduce_scatters:
-        raise AssertionError("async TP found no matching all-gather/reduce-scatter patterns for fusion")
+        raise AssertionError(
+            "async TP found no matching all-gather/reduce-scatter patterns for fusion"
+        )
 
     # TODO: raise an exception if we're using async TP but failed to fuse any all-gather-matmuls
     for all_gather in all_gathers:
