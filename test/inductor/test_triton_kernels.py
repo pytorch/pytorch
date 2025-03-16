@@ -71,9 +71,9 @@ if HAS_GPU:
             return f"equal_to_1={params}"
 
     # Define shared triton constants here.
-    CONSTANT_C: tl.constexpr = 4
-    STRING_CONSTANT_C: tl.constexpr = "CONSTANT_C"
-    BOOL_CONSTANT_C: tl.constexpr = True
+    CONSTANT_C: tl.constexpr = tl.constexpr(4)
+    STRING_CONSTANT_C: tl.constexpr = tl.constexpr("CONSTANT_C")
+    BOOL_CONSTANT_C: tl.constexpr = tl.constexpr(True)
     FLOAT_CONSTANT_C = tl.constexpr(3.14)  # intentionally un-annotated
 
 
@@ -735,7 +735,7 @@ def forward(self, x_1, output_1):
         global CONSTANT_C
         prev_c = CONSTANT_C
         # If the behavior of triton kernels change, this test will fail
-        CONSTANT_C = 10
+        CONSTANT_C = tl.constexpr(10)
         assert CONSTANT_C != prev_c
 
         t = torch.randn(5, device=GPU_TYPE)
