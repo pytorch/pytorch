@@ -442,7 +442,9 @@ class TestMAIATensor(common.TestCase):
         self.assertEqual(fast_dtype, torch.bfloat16)
         self.assertTrue(torch._C._is_autocast_available("maia"))
 
-    @skipIfTorchDynamo("dynamo cannot handle maia device. Output tensor may have wrong dtype.")
+    @skipIfTorchDynamo(
+        "dynamo cannot handle maia device. Output tensor may have wrong dtype."
+    )
     def test_matmul_autocast_float16_precision(self):
         # Ensure we can change low precision dtype.
         x = torch.empty((2, 4), dtype=torch.float, device="maia")
@@ -453,7 +455,9 @@ class TestMAIATensor(common.TestCase):
             self.assertEqual(y.dtype, torch.float16)
             self.assertEqual(y.shape, (2, 2))
 
-    @skipIfTorchDynamo("dynamo cannot handle maia device. Output tensor may have wrong dtype.")
+    @skipIfTorchDynamo(
+        "dynamo cannot handle maia device. Output tensor may have wrong dtype."
+    )
     def test_matmul_autocast_default_precision(self):
         # Use default lower precision dtype, bfloat16.
         x = torch.empty((2, 4), dtype=torch.float, device="maia")
