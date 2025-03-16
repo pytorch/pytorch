@@ -30,6 +30,7 @@ from ..exc import raise_observed_exception, unimplemented, unimplemented_v2
 from ..source import AttrSource
 from ..utils import (
     cmp_name_to_op_mapping,
+    cmp_name_to_op_str_mapping,
     get_fake_value,
     guard_if_dyn,
     iter_contains,
@@ -153,10 +154,28 @@ class BaseListVariable(VariableTracker):
         elif name in cmp_name_to_op_mapping:
             left = self
             right = args[0]
-            if not isinstance(left, BaseListVariable) and not isinstance(
+            # TODO this type check logic mirrors the following
+            # https://github.com/python/cpython/blob/a1c52d1265c65bcf0d9edf87e143843ad54f9b8f/Objects/object.c#L991-L1007
+            # But we should probably move it up the stack to so that we don't
+            # need to duplicate it for different VTs.
+            if not isinstance(left, BaseListVariable) or not isinstance(
                 right, BaseListVariable
             ):
-                return variables.ConstantVariable.create(NotImplemented)
+                if name == "__eq__":
+                    return variables.BuiltinVariable(operator.is_).call_function(
+                        tx, (left, right), {}
+                    )
+                elif name == "__ne__":
+                    return variables.BuiltinVariable(operator.is_not).call_function(
+                        tx, (left, right), {}
+                    )
+                else:
+                    op_str = cmp_name_to_op_str_mapping[name]
+                    left_ty = left.python_type_name()
+                    right_ty = right.python_type_name()
+                    msg = f"{op_str} not supported between instances of '{left_ty}' and '{right_ty}'"
+                    raise_observed_exception(TypeError, tx, args=[msg])
+
             return variables.UserFunctionVariable(polyfills.list_cmp).call_function(
                 tx,
                 [variables.BuiltinVariable(cmp_name_to_op_mapping[name]), left, right],
@@ -164,12 +183,6 @@ class BaseListVariable(VariableTracker):
             )
 
         return super().call_method(tx, name, args, kwargs)
-
-    @staticmethod
-    def list_compare(tx: "InstructionTranslator", op, left, right):
-        return variables.UserFunctionVariable(polyfills.list_cmp).call_function(
-            tx, [variables.BuiltinVariable(op), left, right], {}
-        )
 
 
 class RangeVariable(BaseListVariable):
@@ -550,7 +563,6 @@ class DequeVariable(CommonListMethodsVariable):
         )
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        assert "deque" not in codegen.tx.f_globals
         codegen.add_push_null(
             lambda: codegen.append_output(
                 codegen.create_load_python_module(collections.deque)
