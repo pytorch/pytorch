@@ -1,5 +1,6 @@
 #include <c10/core/Stream.h>
 #include <c10/core/impl/VirtualGuardImpl.h>
+#include <ostream>
 
 namespace c10 {
 
