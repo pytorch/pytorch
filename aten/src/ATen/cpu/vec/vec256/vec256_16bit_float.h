@@ -15,9 +15,6 @@
 #include <sleef.h>
 #endif
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wignored-qualifiers"
-
 namespace at::vec {
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
@@ -136,7 +133,7 @@ template <typename T, typename std::enable_if_t<is_reduced_floating_point_v<T>, 
 inline void cvt_to_fp32(const __m128i& a, __m256& o);
 template <> inline void cvt_to_fp32<BFloat16>(const __m128i& a, __m256& o) {
   cvtbf16_fp32(a, o);
-};
+}
 template <> inline void cvt_to_fp32<Half>(const __m128i& a, __m256& o) {
   cvtfp16_fp32(a, o);
 }
@@ -315,6 +312,9 @@ public:
     return b;
   }
 
+// 'const' type qualifier on return type has no effect, but sleef defines this this way
+// For example `Sleef_exp2f8_u10` signature is `const __m256 (__m256)`
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wignored-qualifiers")
   Vectorized<T> map(SLEEF_CONST __m256 (*SLEEF_CONST_OLD vop)(__m256)) const {
     __m256 lo, hi;
     cvt_to_fp32<T>(values, lo, hi);
@@ -322,6 +322,7 @@ public:
     const auto o2 = vop(hi);
     return cvt_from_fp32<T>(o1, o2);
   }
+C10_DIAGNOSTIC_POP()
   Vectorized<T> isnan() const {
     __m256 lo, hi;
     cvt_to_fp32<T>(values, lo, hi);
