@@ -246,9 +246,9 @@ class CompileCounter:
 class CompileCounterWithBackend:
     def __init__(
         self,
-        backend,
+        backend: str | Callable[..., Any],
         mode: str | None = None,
-        options: dict | None = None,
+        options: dict[str, Union[str, int, bool]] | None = None,
         dynamic: bool | None = None,
     ) -> None:
         from torch import _TorchCompileInductorWrapper, _TorchCompileWrapper
@@ -275,7 +275,7 @@ class CompileCounterWithBackend:
         self,
         gm: torch.fx.GraphModule,
         example_inputs: list[torch.Tensor],
-        **kwargs,
+        **kwargs: Any,
     ) -> Callable[..., Any]:
         self.frame_count += 1
         for node in gm.graph.nodes:
