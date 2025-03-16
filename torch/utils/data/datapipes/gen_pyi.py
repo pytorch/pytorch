@@ -23,7 +23,8 @@ except ImportError:
     )
     from torchgen.utils import FileManager as _FileManager
 
-    sys.path.remove(str(REPO_ROOT))
+    if len(sys.path) > 0 and sys.path[0] == str(REPO_ROOT):
+        del sys.path[0]
 
 
 @deprecated(
