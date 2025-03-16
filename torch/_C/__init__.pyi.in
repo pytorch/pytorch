@@ -2664,7 +2664,6 @@ class _NodeIter(Iterator[FxNode]):
     def __iter__(self) -> Self: ...
     def __next__(self) -> FxNode: ...
 
-
 # Defined in torch/csrc/inductor/static_cuda_launcher.cpp
 class _StaticCudaLauncher:
     @staticmethod
@@ -2672,9 +2671,7 @@ class _StaticCudaLauncher:
         cubin_file: str,
         func_name: str,
         shared_mem_bytes: _int,
-    ) -> Tuple[_int, _int, _int]:
-        ...
-
+    ) -> tuple[_int, _int, _int]: ...
     @staticmethod
     def _launch_kernel(
         func: _int,
@@ -2684,7 +2681,7 @@ class _StaticCudaLauncher:
         num_warps: _int,
         shared_mem_bytes: _int,
         arg_types: str,
-        args: Tuple[Any, ...],
+        args: tuple[Any, ...],
         stream: _int,
-    ) ->  None:
-        ...
+    ) -> None: ...
+
