@@ -365,7 +365,7 @@ class MicroPipelineTPTest(TestCase):
         ) -> torch.Tensor:
             if len(A.shape) > 2:
                 C = torch._scaled_mm(
-                    A.flatten(0, -2), B, A_scale, B_scale, out_dtype=out_dtype
+                    A.flatten(0,-2), B, A_scale, B_scale, out_dtype=out_dtype
                 )
                 C = C.view(*A.shape[:-1], B.shape[1])
             else:
@@ -401,7 +401,7 @@ class MicroPipelineTPTest(TestCase):
 
     @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @parametrize("scatter_dim", [2])
+    @parametrize("scatter_dim", [0,1,2])
     @fresh_inductor_cache()
     def test_fuse_scaled_matmul_reduce_scatter_rowwise_scales_reshape_mm_reshape(
         self, scatter_dim
@@ -432,11 +432,11 @@ class MicroPipelineTPTest(TestCase):
             C = C.view(*orig_shape[:-1], C.shape[-1])
             return reduce_scatter_tensor(C, "sum", scatter_dim, group)
 
-        A = torch.rand(1, 16, 32, device="cuda").to(torch.float8_e4m3fn)
+        A = torch.rand(2, 16, 32, device="cuda").to(torch.float8_e4m3fn)
         B = torch.rand(64, 32, device="cuda").to(torch.float8_e4m3fn).T
 
         # A_scale = rowwise scales
-        A_scale = torch.full((1, 16, 1), 0.1, device="cuda")
+        A_scale = torch.full((2, 16, 1), 0.1, device="cuda")
 
         # B_scale = rowwise scales transposed for A @ B^T
         B_scale = torch.full((1, 64), 0.1, device="cuda")

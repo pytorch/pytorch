@@ -461,7 +461,7 @@ lib.define(
 lib.define(
     "fused_scaled_matmul_reduce_scatter("
     "Tensor A, Tensor B, Tensor A_scale, Tensor B_scale, "
-    "str reduce_op, int scatter_dim, str group_name, "
+    "str reduce_op, int orig_scatter_dim, int scatter_dim_after_maybe_reshape, str group_name, int[]? A_orig_shape, "
     "Tensor? bias = None, "
     "Tensor? result_scale = None, "
     "ScalarType? out_dtype = None, "
@@ -1013,13 +1013,17 @@ def _fused_matmul_reduce_scatter_impl(
     kwargs: dict[str, Any],
     out_dtype: Optional[torch.dtype],
     reduce_op: str,
-    scatter_dim: int,
+    orig_scatter_dim: int,
+    scatter_dim_after_maybe_reshape: int,
     group_name: str,
+    A_orig_shape: list[int],
 ) -> torch.Tensor:
     if A.dim() < 2:
         raise ValueError("A_shard must be a matrix")
-    if scatter_dim < 0 or scatter_dim >= A.dim():
-        raise ValueError("Invalid gather_dim")
+    if scatter_dim_after_maybe_reshape < 0 or scatter_dim_after_maybe_reshape >= A.dim():
+        raise ValueError("Invalid scatter dim for 2D tensor input to scaled_mm")
+    if orig_scatter_dim < 0 or orig_scatter_dim >= len(A_orig_shape):
+        raise ValueError("Invalid scatter dim for 3D+ output tensor")
     if B.dim() != 2:
         raise ValueError("B must be a matrix")
     if reduce_op == "sum":
@@ -1030,30 +1034,38 @@ def _fused_matmul_reduce_scatter_impl(
         raise ValueError("reduce_op must be sum or avg")
 
     group = c10d._resolve_process_group(group_name)
-    out_shape = [*A.shape[:-1], B.shape[1]]
-    out_shape[scatter_dim] //= group.size()
 
-    # Move the scatter_dim to the front and flatten the tensor into a 2D matrix
-    x = A.movedim(scatter_dim, 0)
-    leading_dims = [group.size()] + list(x.shape[:-1])
-    leading_dims[1] //= group.size()
-    x = x.flatten(0, -2)
-    A_shards = x.chunk(group.size())
+    # 'A' is a matrix which may have potentially been reshaped from 3D+ to 2D for the scaled mm.
+    # - Reshape to 2D, to handle case where A is 3D+. This is the case for plain matmul, but 
+    #   for scaled matmul A will be 2D.
+    # - Move scatter to first dim, then shard the tensor along the first dim, so the chunk producer
+    #   can perform matmuls along the first dim.
+    A_with_scatter_dim_0 = A.movedim(scatter_dim_after_maybe_reshape, 0)
+    A_with_scatter_dim_0 = A.flatten(0, -2)
+    A_shards = A_with_scatter_dim_0.chunk(group.size())
 
-    A_scale_shards = None
-    if A_scale is None:
-        pass
-    elif A_scale.numel() == 1:
+    # Now that 'A' is sharded along the first dim, we need to update its scale(s) accordingly.
+    tensorwise_scaling = A_scale is not None and A_scale.numel() == 1
+    rowwise_scaling = A_scale is not None and A_scale.numel() > 1
+
+    # For tensorwise scaling, the scale should be replicated so each shard has a copy.
+    if tensorwise_scaling:
         A_scale_shards = [A_scale] * group.size()
-    else:
+    
+    # For rowwise scaling, we need to move the scatter dim to the first dim to match the
+    # dim swap of the 'A' tensor. Then we can shard the scales along the first dim, just like
+    # the 'A' tensor.
+    elif rowwise_scaling:
         if A_scale.shape[:-1] != A.shape[:-1]:
             raise ValueError(
                 "For row-wise scaling, the leading dims of A_scale "
                 "must match the leading dims of A "
                 f"(A shape: {A.shape}, A_scale shape: {A_scale.shape})"
             )
-        A_scale = A_scale.movedim(scatter_dim, 0).contiguous().flatten(0, -2)
+        A_scale = A_scale.movedim(scatter_dim_after_maybe_reshape, 0).contiguous().flatten(0, -2)
         A_scale_shards = list(A_scale.chunk(group.size()))
+    else:
+        A_scale_shards = None
 
     # Computing block-wise matmul along the first dim of A
     def chunk_producer(rank: int, out: torch.Tensor) -> None:
@@ -1064,21 +1076,39 @@ def _fused_matmul_reduce_scatter_impl(
         else:
             mm_out_op(A_shards[rank], B, **kwargs, out=out)
 
-    stacked_partials = x.new_empty(x.shape[0], B.shape[1], dtype=out_dtype or A.dtype)
+    # Stacked partials will be the 2D outputs of the the pipelined scaled mm, and will
+    # have the shape (A_with_scatter_dim_0_tensor.shape[0], B.shape[1]) to align with the formula:
+    # (a*b,c) @ (c,d) = (a*b,d)
+    stacked_partials = A_with_scatter_dim_0.new_empty(A_with_scatter_dim_0.shape[0], B.shape[1], dtype=out_dtype or A.dtype) 
 
+    # Execute the pipelined scaled mm.
     _pipelined_produce_and_all2all(
         chunk_producer,
         stacked_partials,
         group_name,
     )
+
+    # We now need to calculate the final output, which is a 3D+ tensor.
+    # We will "view" the 2D stacked partials as 3D+ tensors; we can think about this
+    # as a big tensor composed of `group_size` tensors, each of which are sharded along
+    # the original scatter dim assigned for the 3D output tensor.
+    stacked_partials_3D_leading_dims = [group.size()] + list(A_with_scatter_dim_0.shape[:-1])
+    stacked_partials_3D_leading_dims[orig_scatter_dim] //= group.size()
+
     # Ensures that the transpose and reduction produce contiguous result
     # in a single reduction kernel.
-    return reduce_fn(
-        stacked_partials.view(*leading_dims, -1)
-        .movedim(1, scatter_dim + 1)
-        .movedim(0, scatter_dim),
-        dim=scatter_dim,
+    reduced_out = reduce_fn(
+        stacked_partials.view(*stacked_partials_3D_leading_dims, -1)
+        .movedim(1, orig_scatter_dim + 1)       # Swap dim 1 with original scatter dim + 1
+        .movedim(0, orig_scatter_dim),          # Swap back dim 0 and the scatter dim
+        dim=orig_scatter_dim,                   # Reduce along the scatter dim.
     )
+
+    # Final 3D+ output shape must be scattered along original scatter dim as well.
+    final_out_shape = [*A_orig_shape[:-1], B.shape[-1]] 
+    final_out_shape[orig_scatter_dim] //= group.size()
+    out = reduced_out.view(*final_out_shape)
+    return out
 
 
 @torch.library.impl(lib, "fused_matmul_reduce_scatter", "Meta")
@@ -1138,8 +1168,10 @@ def _fused_scaled_matmul_reduce_scatter_fallback(
     A_scale: torch.Tensor,
     B_scale: torch.Tensor,
     reduce_op: str,
-    scatter_dim: int,
+    orig_scatter_dim: int,
+    scatter_dim_after_maybe_reshape: int,
     group_name: str,
+    A_orig_shape: list[int],
     bias: Optional[torch.Tensor] = None,
     result_scale: Optional[torch.Tensor] = None,
     out_dtype: Optional[torch.dtype] = None,
@@ -1169,11 +1201,11 @@ def _fused_scaled_matmul_reduce_scatter_fallback(
         out_dtype,
         use_fast_accum,
     )
-    C = C.view(*A.shape[:-1], B.shape[1])
+    C = C.view(*A_orig_shape[:-1], B.shape[1])
     res = funcol.reduce_scatter_tensor(
         C,
         reduce_op,
-        scatter_dim,
+        orig_scatter_dim, # need original 3D+ scatter dim here
         group_name,
     )
     res = funcol.wait_tensor(res)
@@ -1187,8 +1219,10 @@ def _fused_scaled_matmul_reduce_scatter(
     A_scale: torch.Tensor,
     B_scale: torch.Tensor,
     reduce_op: str,
-    scatter_dim: int,
+    orig_scatter_dim: int,
+    scatter_dim_after_maybe_reshape: int,
     group_name: str,
+    A_orig_shape: list[int],
     bias: Optional[torch.Tensor] = None,
     result_scale: Optional[torch.Tensor] = None,
     out_dtype: Optional[torch.dtype] = None,
@@ -1201,8 +1235,10 @@ def _fused_scaled_matmul_reduce_scatter(
             A_scale,
             B_scale,
             reduce_op,
-            scatter_dim,
+            orig_scatter_dim,
+            scatter_dim_after_maybe_reshape,
             group_name,
+            A_orig_shape,
             bias,
             result_scale,
             out_dtype,
@@ -1223,8 +1259,10 @@ def _fused_scaled_matmul_reduce_scatter(
             },
             out_dtype=out_dtype,
             reduce_op=reduce_op,
-            scatter_dim=scatter_dim,
+            orig_scatter_dim=orig_scatter_dim,
+            scatter_dim_after_maybe_reshape=scatter_dim_after_maybe_reshape,
             group_name=group_name,
+            A_orig_shape=A_orig_shape,
         )
 
 
