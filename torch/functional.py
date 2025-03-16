@@ -414,7 +414,7 @@ def einsum(*args: Any) -> Tensor:
             equation, *operands, optimize=opt_einsum.strategy
         )[0]
         # flatten path for dispatching to C++
-        path = [item for pair in tupled_path for item in pair]
+        path = [*itertools.chain.from_iterable(tupled_path)]
     return _VF.einsum(equation, operands, path=path)  # type: ignore[attr-defined]
 
 
