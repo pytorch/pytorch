@@ -5212,9 +5212,11 @@ Here are the ways to call ``to``:
 
     Returns a Tensor with the specified :attr:`device` and (optional)
     :attr:`dtype`. If :attr:`dtype` is ``None`` it is inferred to be ``self.dtype``.
-    When :attr:`non_blocking`, tries to convert asynchronously with respect to
-    the host if possible, e.g., converting a CPU Tensor with pinned memory to a
-    CUDA Tensor.
+    When :attr:`non_blocking` is set to ``True``, the function attempts to perform
+    the conversion asynchronously with respect to the host, if possible. This
+    asynchronous behavior applies to both pinned and pageable memory. However,
+    caution is advised when using this feature. For more information, refer to the
+    `tutorial on good usage of non_blocking and pin_memory <https://pytorch.org/tutorials/intermediate/pinmem_nonblock.html>`__.
     When :attr:`copy` is set, a new Tensor is created even when the Tensor
     already matches the desired conversion.
 
@@ -5225,9 +5227,12 @@ Here are the ways to call ``to``:
    :noindex:
 
     Returns a Tensor with same :class:`torch.dtype` and :class:`torch.device` as
-    the Tensor :attr:`other`. When :attr:`non_blocking`, tries to convert
-    asynchronously with respect to the host if possible, e.g., converting a CPU
-    Tensor with pinned memory to a CUDA Tensor.
+    the Tensor :attr:`other`.
+    When :attr:`non_blocking` is set to ``True``, the function attempts to perform
+    the conversion asynchronously with respect to the host, if possible. This
+    asynchronous behavior applies to both pinned and pageable memory. However,
+    caution is advised when using this feature. For more information, refer to the
+    `tutorial on good usage of non_blocking and pin_memory <https://pytorch.org/tutorials/intermediate/pinmem_nonblock.html>`__.
     When :attr:`copy` is set, a new Tensor is created even when the Tensor
     already matches the desired conversion.
 
@@ -6398,7 +6403,8 @@ See :func:`torch.dsplit`
 add_docstr_all(
     "stft",
     r"""
-stft(frame_length, hop, fft_size=None, return_onesided=True, window=None, pad_end=0) -> Tensor
+stft(frame_length, hop, fft_size=None, return_onesided=True, window=None,
+ pad_end=0, align_to_window=None) -> Tensor
 
 See :func:`torch.stft`
 """,

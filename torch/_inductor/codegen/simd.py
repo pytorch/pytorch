@@ -11,15 +11,8 @@ import math
 import operator
 import textwrap
 from collections import Counter
-from typing import (
-    Any,
-    Callable,
-    Iterator,
-    no_type_check,
-    Optional,
-    TYPE_CHECKING,
-    Union,
-)
+from typing import Any, Callable, Generic, no_type_check, Optional, TYPE_CHECKING, Union
+from typing_extensions import TypeVar
 
 import sympy
 
@@ -37,10 +30,7 @@ from torch.utils._sympy.symbol import (
 
 from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
-from ..analyze_preserves_zero_mask import (
-    can_codegen_without_upcasts,
-    prologue_preserves_zero_mask,
-)
+from ..analyze_preserves_zero_mask import prologue_preserves_zero_mask
 from ..codecache import code_hash
 from ..dependencies import MemoryDep, StarDep, WeakDep
 from ..ir import IRNode, TritonTemplateBuffer
@@ -73,7 +63,7 @@ from .simd_kernel_features import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Iterable, Iterator, Sequence
 
 
 log = logging.getLogger(__name__)
@@ -339,7 +329,10 @@ def constant_repr(value: Union[int, float]) -> str:
     return repr(value)
 
 
-class SIMDKernel(Kernel):
+CSEVariableType = TypeVar("CSEVariableType", bound=CSEVariable, default=CSEVariable)
+
+
+class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
     """
     Common base class for Triton/Halide codegen which both use flattened indexing rather than loop nests.
     """
@@ -456,7 +449,7 @@ class SIMDKernel(Kernel):
                     numels[prefix],
                     prefix,
                     index,
-                    self,
+                    self,  # type: ignore[arg-type]
                     pid_cache=pid_cache,
                     is_loop=is_reduction and not self.persistent_reduction,
                     tensor_dim=tensor_dim,
@@ -645,7 +638,8 @@ class SIMDKernel(Kernel):
                     continue
 
                 while current_group < len(remaining) and sv.statically_known_equals(
-                    remaining[current_group], 1  # type: ignore[arg-type]
+                    remaining[current_group],
+                    1,  # type: ignore[arg-type]
                 ):
                     # scroll to next group with remaining elements
                     current_group += 1
@@ -673,9 +667,9 @@ class SIMDKernel(Kernel):
                     )
             return_getters_groups.append(return_getters)
 
-        assert all(
-            V.graph.sizevars.size_hint(s) == 1 for s in remaining
-        ), f"failed to set ranges {remaining} {lengths}"
+        assert all(V.graph.sizevars.size_hint(s) == 1 for s in remaining), (
+            f"failed to set ranges {remaining} {lengths}"
+        )
 
         return new_ranges, return_getters_groups
 
@@ -843,7 +837,8 @@ class SIMDKernel(Kernel):
                     replacements[ps] = V.graph.sizevars.lookup_precomputed_size(ps)
                 if len(replacements) > 0:
                     self.range_tree_nodes[sym].expr = sympy_subs(  # type: ignore[index]
-                        self.range_tree_nodes[sym].expr, replacements  # type: ignore[index]
+                        self.range_tree_nodes[sym].expr,
+                        replacements,  # type: ignore[index]
                     )
                 self.range_tree_nodes[sym].codegen()  # type: ignore[index]
         return expr
@@ -1049,6 +1044,13 @@ class SIMDKernel(Kernel):
         dx2 = ops.mul(dx, dx)
         m2 = ops.reduction(dtype, dtype, "sum", dx2)
         return OpsWrapper._unwrap((mean, m2, rnumel))
+
+    def prepare_softmax_twopass_fallback(self, dtype, value):
+        vmax = ops.reduction(dtype, dtype, "max", value)
+        sub = ops.sub(value, vmax)
+        exp = ops.exp(sub)
+        vsum = ops.reduction(dtype, dtype, "sum", exp)
+        return OpsWrapper._unwrap((vmax, vsum))
 
     def codegen_kernel(self):
         raise NotImplementedError
@@ -1321,7 +1323,8 @@ class SIMDScheduling(BaseScheduling):
 
     @staticmethod
     def can_use_32bit_indexing(
-        numel: sympy.Expr, buffers: Iterable[Union[ir.Buffer, ir.TensorBox]]
+        numel: sympy.Expr,
+        buffers: Iterable[Union[ir.Buffer, ir.TensorBox, ir.TorchBindObject]],
     ) -> bool:
         int_max = torch.iinfo(torch.int32).max
 
@@ -1362,7 +1365,10 @@ class SIMDScheduling(BaseScheduling):
                 src_code = kernel.codegen_kernel()
             kernel_name = self.define_kernel(src_code, node_schedule, kernel)
             if config.trace.enabled:
-                set_kernel_post_grad_provenance_tracing(node_schedule, kernel_name)
+                set_kernel_post_grad_provenance_tracing(
+                    node_schedule,  # type: ignore[arg-type]
+                    kernel_name,
+                )
             log.debug("Generating kernel code with kernel_name: %s", kernel_name)
             kernel.kernel_name = kernel_name
             kernel.code_hash = code_hash(src_code)
@@ -1502,7 +1508,7 @@ class SIMDScheduling(BaseScheduling):
                     buffer.get_name(), []
                 ):
                     can_codegen_without_upcast = all(
-                        can_codegen_without_upcasts(p_n) for p_n in prologue_group
+                        p_n.can_codegen_without_upcasts() for p_n in prologue_group
                     )
 
                     # TODO - this doesnt work with libdevice calls, potentially other bugs
@@ -1550,13 +1556,10 @@ class SIMDScheduling(BaseScheduling):
 
             if config.benchmark_kernel:
                 num_gb = kernel.estimate_kernel_num_bytes() / 1e9
-                grid_args = V.graph.sizevars.size_hints(kernel.call_sizes)
-                assert kernel.meta is not None, "meta is None"
-                grid = kernel.grid_fn(*grid_args, kernel.meta)
                 src_code = (
                     f"{kernel.imports_for_benchmark_kernel()}\n"
                     f"{src_code}\n"
-                    f"{kernel.codegen_kernel_benchmark(num_gb, grid).getvalue()}"
+                    f"{kernel.codegen_kernel_benchmark(num_gb).getvalue()}"
                 )
 
             if only_gen_src_code:
@@ -2006,8 +2009,8 @@ class SIMDScheduling(BaseScheduling):
             def convert_tiling_to_3d(
                 tiling0: dict[str, sympy.Expr], tiling1: dict[str, sympy.Expr]
             ) -> Optional[dict[str, sympy.Expr]]:
-                a0, a1 = tiling0["x"], tiling0["y"]
-                b0, b1 = tiling1["x"], tiling1["y"]
+                a0, a1 = tiling0["x"], tiling0.get("y", 1)
+                b0, b1 = tiling1["x"], tiling1.get("y", 1)
                 if V.graph.sizevars.size_hint(a1 - b1) == 0:
                     return None
                 if V.graph.sizevars.size_hint(a1 - b1) < 0:
@@ -2074,9 +2077,10 @@ class SIMDScheduling(BaseScheduling):
                 features=SIMDKernelFeatures(node_schedule, numel, rnumel),
             )
             self.codegen_node_schedule_with_kernel(node_schedule, kernel)
-            with config.patch(
-                "benchmark_kernel", benchmark_kernel
-            ), V.set_kernel_handler(kernel):
+            with (
+                config.patch("benchmark_kernel", benchmark_kernel),
+                V.set_kernel_handler(kernel),
+            ):
                 src_code = kernel.codegen_kernel()
         else:
             prologue, template, epilogue = nodes[0].get_prologue_template_epilogue(

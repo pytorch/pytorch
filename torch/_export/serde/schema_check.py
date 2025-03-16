@@ -23,7 +23,7 @@ def _check(x, msg):
 _CPP_TYPE_MAP = {
     str: "std::string",
     int: "int64_t",
-    float: "double",
+    float: "F64",
     bool: "bool",
 }
 
@@ -179,6 +179,19 @@ def _staged_schema():
 enum class {name} {{
 {chr(10).join([f"  {x.name} = {x.value}," for x in ty])}
 }};
+
+inline std::string_view printEnum(const {name}& e) {{
+  switch (e) {{
+{chr(10).join([f"    case {name}::{x.name}: return {chr(34)}{x.name}{chr(34)};" for x in ty])}
+    default:
+      throw std::runtime_error("Unknown enum value");
+  }}
+}}
+
+inline void parseEnum(std::string_view s, {name}& t) {{
+{chr(10).join([f"  if (s == {chr(34)}{x.name}{chr(34)}) {{ t = {name}::{x.name}; return; }}" for x in ty])}
+  throw std::runtime_error("Unknown enum value: " + std::string{{s}});
+}}
 """
         thrift_enum_defs.append(
             f"""
@@ -268,6 +281,7 @@ struct {name} {{
 
   void set_{name}({ty} def) {{
     variant_.emplace<{idx + 1}>(std::move(def));
+    tag_ = Tag::{name.upper()};
   }}
 """
 
@@ -321,6 +335,20 @@ class {name} {{
 {from_json_branches}
   }}
 }};
+
+inline std::string_view printEnum(const {name}::Tag& e) {{
+  switch (e) {{
+{chr(10).join([f"    case {name}::Tag::{x.upper()}: return {chr(34)}{x.upper()}{chr(34)};" for x in cpp_fields])}
+    default:
+      throw std::runtime_error("Unknown enum value");
+  }}
+}}
+
+inline void parseEnum(std::string_view s, {name}::Tag& t) {{
+{chr(10).join([f"  if (s == {chr(34)}{x.upper()}{chr(34)}) {{ t = {name}::Tag::{x.upper()}; return; }}" for x in cpp_fields])}
+  throw std::runtime_error("Unknown enum value: " + std::string{{s}});
+}}
+
 """
         cpp_type_decls.append(f"class {name};")
 
@@ -369,6 +397,7 @@ union {name} {{
 #pragma once
 
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <variant>
@@ -417,11 +446,12 @@ class ForwardRef {{
 
  public:
   ForwardRef(): ptr_(std::make_unique<T>()) {{}}
-  ForwardRef(ForwardRef<T>&&) = default;
+  ForwardRef(ForwardRef<T>&&);
   ForwardRef(const ForwardRef<T>& other): ptr_(std::make_unique<T>(*other.ptr_)) {{}}
-  ForwardRef<T>& operator=(ForwardRef<T>&&) = default;
+  ForwardRef<T>& operator=(ForwardRef<T>&&);
   ForwardRef<T>& operator=(const ForwardRef<T>& other) {{
     ptr_ = std::make_unique<T>(*other.ptr_);
+    return *this;
   }}
   const T& operator*() const {{
     return *ptr_;
@@ -449,10 +479,51 @@ void from_json(const nlohmann::json& j, ForwardRef<T>& p) {{
   p.emplace(j.template get<T>());
 }}
 
+class F64 {{
+ public:
+  double get() const {{
+    return value_;
+  }}
+
+  void set(double value) {{
+    value_ = value;
+  }}
+
+ private:
+  double value_;
+}};
+
+inline void to_json(nlohmann::json& j, const F64& f) {{
+  if (std::isinf(f.get())) {{
+    j = "Infinity";
+  }} else if (std::isinf(-f.get())) {{
+    j = "-Infinity";
+  }} else if (std::isnan(f.get())) {{
+    j = "NaN";
+  }} else {{
+    j = f.get();
+  }}
+}}
+
+inline void from_json(const nlohmann::json& j, F64& f) {{
+  if (j == "Infinity") {{
+    f.set(std::numeric_limits<double>::infinity());
+  }} else if (j == "-Infinity") {{
+    f.set(-std::numeric_limits<double>::infinity());
+  }} else if (j == "NaN") {{
+    f.set(std::numeric_limits<double>::quiet_NaN());
+  }} else {{
+    f.set(j.get<double>());
+  }}
+}}
+
 {chr(10).join(cpp_type_decls)}
 {"".join(cpp_enum_defs.values())}
 {"".join(dict(sorted(cpp_class_defs.items(), key=lambda x: class_ordering[x[0]])).values())}
 {chr(10).join(cpp_json_defs)}
+
+template <typename T> ForwardRef<T>::ForwardRef(ForwardRef<T>&&) = default;
+template <typename T> ForwardRef<T>& ForwardRef<T>::operator=(ForwardRef<T>&&) = default;
 }} // namespace _export
 }} // namespace torch
 """

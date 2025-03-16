@@ -266,6 +266,8 @@ class EqualizationQConfig(
                                     weight=_WeightEqualizationObserver.with_args(dtype=torch.qint8))
     """
 
+    __slots__ = ()
+
     def __new__(cls, input_activation=torch.nn.Identity, weight=torch.nn.Identity):
         if isinstance(input_activation, nn.Module) or isinstance(weight, nn.Module):
             raise ValueError(

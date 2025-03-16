@@ -853,8 +853,13 @@ class TestSparseSemiStructuredCUTLASS(TestCase):
          - torch._sparse_semi_structured_linear
     """
     def setUp(self):
+        SparseSemiStructuredTensor._FORCE_CUTLASS = True
         if "cutlass" not in SEMI_STRUCTURED_SUPPORTED_BACKENDS:
             self.skipTest('CUTLASS not enabled')
+
+    def tearDown(self):
+        SparseSemiStructuredTensor._FORCE_CUTLASS = False
+        super(self.__class__, self).tearDown()
 
     @unittest.skipIf(TEST_WITH_ROCM or IS_WINDOWS, "ROCm and Windows doesn't support CUTLASS")
     @inference_dtypes
@@ -1047,7 +1052,10 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         if "cusparselt" not in SEMI_STRUCTURED_SUPPORTED_BACKENDS:
             self.skipTest('cuSPARSELt not enabled')
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "FP8 is only supported on H100+ and sm_89 and MI300+ devices")
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FP8,
+        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
+    )
     @xfailIfSM89
     @parametrize("dense_input_shape", [(256, 128)])
     def test_sparse_fp8fp8_mm(self, dense_input_shape, device):
@@ -1067,7 +1075,10 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         ):
             dense_result = torch.mm(A_fp8_sparse, B_fp8)
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "FP8 is only supported on H100+ and sm_89 and MI300+ devices")
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FP8,
+        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
+    )
     @xfailIfSM89
     def test_sparse_semi_structured_scaled_mm_fp8(self, device) -> None:
         (k, l, m) = (32, 64, 32)
@@ -1084,7 +1095,10 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         out_fp32_sparse = out_fp8_sparse.to(torch.float32)
         torch.testing.assert_close(out_fp32, out_fp32_sparse, rtol=1e-1, atol=1e-1)
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "FP8 is only supported on H100+ and sm_89 and MI300+ devices")
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FP8,
+        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
+    )
     @xfailIfSM89
     @parametrize("out_dtype", [torch.float16, torch.bfloat16, torch.float32])
     @parametrize("dense_input_shape", [(256, 128)])
@@ -1209,12 +1223,9 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         # CUDA 11.8 has cuSPARSELt v0.4.0 support
         if version == (11, 8):
             assert torch.backends.cusparselt.version() == 400
-        # PyTorch CUDA 12.4 using cuSPARSELt v0.6.2
+        # PyTorch CUDA 12.4+ using cuSPARSELt v0.6.2+
         elif version >= (12, 4):
-            assert torch.backends.cusparselt.version() == 602
-        # PyTorch CUDA 12.6+ using cuSPARSELt v0.6.3
-        elif version >= (12, 6):
-            assert torch.backends.cusparselt.version() == 603
+            assert torch.backends.cusparselt.version() >= 602
         else:
             assert torch.backends.cusparselt.version() is None
 

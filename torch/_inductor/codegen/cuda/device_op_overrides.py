@@ -1,38 +1,42 @@
-# mypy: allow-untyped-defs
+from __future__ import annotations
+
+from typing import Optional
+
 import torch
 
+from ...utils import triton_version_uses_attrs_dict
 from ..common import DeviceOpOverrides, register_device_op_overrides
 
 
 class CUDADeviceOpOverrides(DeviceOpOverrides):
-    def import_get_raw_stream_as(self, name):
+    def import_get_raw_stream_as(self, name: str) -> str:
         return f"from torch._C import _cuda_getCurrentRawStream as {name}"
 
-    def set_device(self, device_idx):
+    def set_device(self, device_idx: int) -> str:
         return f"torch.cuda.set_device({device_idx})"
 
-    def synchronize(self):
+    def synchronize(self) -> str:
         return "torch.cuda.synchronize()"
 
-    def device_guard(self, device_idx):
+    def device_guard(self, device_idx: int) -> str:
         return f"torch.cuda._DeviceGuard({device_idx})"
 
-    def cpp_device_guard(self):
+    def cpp_device_guard(self) -> str:
         return "at::cuda::CUDAGuard"
 
-    def cpp_aoti_device_guard(self):
+    def cpp_aoti_device_guard(self) -> str:
         return "AOTICudaGuard"
 
-    def cpp_stream_guard(self):
+    def cpp_stream_guard(self) -> str:
         return "at::cuda::CUDAStreamGuard"
 
-    def cpp_aoti_stream_guard(self):
+    def cpp_aoti_stream_guard(self) -> str:
         return "AOTICudaStreamGuard"
 
-    def cpp_getStreamFromExternal(self):
+    def cpp_getStreamFromExternal(self) -> str:
         return "at::cuda::getStreamFromExternal"
 
-    def kernel_header(self):
+    def kernel_header(self) -> str:
         source_codes = """
         #include <c10/cuda/CUDAGuard.h>
         #include <c10/cuda/CUDAStream.h>
@@ -40,7 +44,7 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
         """
         return source_codes
 
-    def kernel_driver(self):
+    def kernel_driver(self) -> str:
         source_codes = """
             #define CUDA_DRIVER_CHECK(EXPR)                    \\
             do {                                               \\
@@ -58,22 +62,6 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
                         std::string(msg));                     \\
                 }                                              \\
             } while (0);
-
-            namespace {
-
-            struct Grid {
-                Grid(uint32_t x, uint32_t y, uint32_t z)
-                  : grid_x(x), grid_y(y), grid_z(z) {}
-                uint32_t grid_x;
-                uint32_t grid_y;
-                uint32_t grid_z;
-
-                bool is_non_zero() {
-                    return grid_x > 0 && grid_y > 0 && grid_z > 0;
-                }
-            };
-
-            }  // anonymous namespace
 
             static inline CUfunction loadKernel(
                     std::string filePath,
@@ -122,7 +110,7 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
             )
         return source_codes
 
-    def tma_descriptor_helpers(self):
+    def tma_descriptor_helpers(self) -> str:
         if torch.version.hip is not None:
             raise RuntimeError("Host-side TMA descriptors not supported on HIP.")
 
@@ -225,17 +213,22 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
             #endif
         """
 
-    def cpp_stream_type(self):
+    def cpp_stream_type(self) -> str:
         return "cudaStream_t"
 
-    def aoti_get_stream(self):
+    def aoti_get_stream(self) -> str:
         return "aoti_torch_get_current_cuda_stream"
 
-    def cpp_kernel_type(self):
+    def cpp_kernel_type(self) -> str:
         return "CUfunction"
 
-    def cpp_device_ptr(self):
+    def cpp_device_ptr(self) -> str:
         return "CUdeviceptr"
+
+    def cpp_global_scratch(self, idx: int) -> Optional[tuple[str, str]]:
+        if triton_version_uses_attrs_dict():
+            return f"CUdeviceptr global_scratch_{idx} = 0;", f"global_scratch_{idx}"
+        return None
 
 
 register_device_op_overrides("cuda", CUDADeviceOpOverrides())
