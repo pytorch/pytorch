@@ -1052,6 +1052,7 @@ def _fused_matmul_reduce_scatter_impl(
 
     # For tensorwise scaling, the scale should be replicated so each shard has a copy.
     if tensorwise_scaling:
+        A_scale_shards = [A_scale] * group.size()
     
     # For rowwise scaling, we need to move the scatter dim to the first dim to match the
     # dim swap of the 'A' tensor. Then we can shard the scales along the first dim, just like
