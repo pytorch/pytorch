@@ -4,6 +4,7 @@ import math
 from copy import copy
 from dataclasses import dataclass
 from functools import partial
+from itertools import chain
 from typing import Optional
 
 import torch
@@ -284,7 +285,7 @@ def _describe_dim(njt, dim):
 
 
 # Helper function for generating a comprehensive set of NJT sample inputs.
-def _sample_njts(device, dtype, requires_grad=False, dims=None):
+def _sample_njts(device, dtype, requires_grad=False, dims=None, jagged_dim=1):
     if dims is None:
         dims = [2, 3, 4]
     if not isinstance(dims, (list, tuple)):
@@ -293,7 +294,8 @@ def _sample_njts(device, dtype, requires_grad=False, dims=None):
     # contiguous NJTs
     for dim in dims:
         # with min / max seqlen cached
-        shape = (_rnd(), None, *[_rnd() for _ in range(dim - 2)])
+        shape = [_rnd() for _ in range(dim)]
+        shape[jagged_dim] = None
         nt = random_nt_from_dims(
             shape,
             device=device,
@@ -306,13 +308,13 @@ def _sample_njts(device, dtype, requires_grad=False, dims=None):
         # without min / max seqlen cached
         values = _clone(nt.values())
         offsets = _clone(nt.offsets())
-        yield torch.nested.nested_tensor_from_jagged(values, offsets).requires_grad_(
+        yield torch.nested.nested_tensor_from_jagged(values, offsets, jagged_dim=jagged_dim).requires_grad_(
             requires_grad
         )
 
         # non-contiguous transposed NJT (not possible for 2D)
-        if dim > 2:
-            yield nt.transpose(-1, nt._ragged_idx)
+        if dim > 2 and jagged_dim != dim - 1:  # if jagged_dim is already the last dim, this transpose is a no-op
+            yield nt.transpose(-1, jagged_dim)
 
         # non-contiguous with holes NJT
         values = _clone(nt.values())
@@ -323,6 +325,7 @@ def _sample_njts(device, dtype, requires_grad=False, dims=None):
             values=values,
             offsets=offsets,
             lengths=lengths,
+            jagged_dim=jagged_dim,
         ).requires_grad_(requires_grad)
 
 
@@ -345,6 +348,8 @@ def unbind_reference(op, sample, wrap_output_as_njt=True):
             # any NJT with the same ragged structure as the input should
             # be sliced to pass to the reference
             if isinstance(t, torch.Tensor) and _raggedness_matches(t, inp):
+                return t[i]
+            elif isinstance(t, torch.Tensor) and t.is_nested and t.size(t._ragged_idx) == inp.size(inp._ragged_idx):
                 return t[i]
             # allow the SampleInput to tell us how to slice it for ref calculation
             elif isinstance(t, torch.Tensor) and hasattr(t, "_batch_dim"):
@@ -404,6 +409,9 @@ def unbind_reference(op, sample, wrap_output_as_njt=True):
         out_ref_components.append(out_ref_component)
 
     if wrap_output_as_njt:
+        # handle case where output is no longer ragged (e.g. matmul NJT x NJT -> Dense)
+        if all(tuple(o.shape) == tuple(out_ref_components[0].shape) for o in out_ref_components):
+            return torch.stack(out_ref_components)
         # handle list / tuple of outputs
         if len(out_ref_components) > 0 and isinstance(
             out_ref_components[0], (list, tuple)
@@ -1054,7 +1062,7 @@ def sample_inputs_matmul(
         # (B, E, j1) x (B, j1, F) => (B, E, F)
         if njt_3d._ragged_idx == 2 and njt_3d.is_contiguous():
             B, E, _ = njt_3d.shape
-            sum_j1 = len(njt_3d.values())
+            sum_j1 = njt_3d.offsets()[-1].item()
             other_cont = torch.randn(
                 sum_j1, E + 2, device=device, dtype=dtype, requires_grad=requires_grad
             )
@@ -1070,6 +1078,29 @@ def sample_inputs_matmul(
 
         # TODO (need factory functions):
         # (B, j1, D, E) x (B, j1, E, F) => (B, j1, D, F)
+
+    # NJT x NJT => Dense reduction N-dimensional case
+    for njt_nd in chain(*[_sample_njts(
+        device=device,
+        dtype=dtype,
+        requires_grad=requires_grad,
+        dims=[dim],
+        jagged_dim=dim - 1,
+    ) for dim in [4, 5, 6, 7]]):
+        B, *D, E, j1 = njt_nd.shape
+        sum_j1 = njt_nd.offsets()[-1].item()
+        other_cont = torch.randn(
+            *D, sum_j1, E + 2, device=device, dtype=dtype, requires_grad=requires_grad
+        )
+        other_njt = torch.nested.nested_tensor_from_jagged(
+            other_cont, njt_nd.offsets(), lengths=njt_nd._lengths, jagged_dim=njt_nd.dim() - 2
+        )
+        njt_desc = _describe_njt(njt_nd)
+        yield SampleInput(
+            _clone(njt_nd),
+            kwargs={"other": _clone(other_njt)},
+            name=f"{njt_desc}: (..., E, j1) x (..., j1, F)",
+        )
 
 
 def sample_inputs_masked_select(
