@@ -390,6 +390,8 @@ class _ScaledMatmul(_Matmul):
         is_reshape_mm_reshape_pattern = match[0].target == aten.reshape.default
         mm_node = match[1] if is_reshape_mm_reshape_pattern else match[0]
 
+        # mm_node will have 2D args for both A and B, even if this is a "reshape -> mm -> reshape" pattern
+        # used for using scaled_mm when A is 3D+.
         A_node = cast(torch.fx.Node, mm_node.args[0])
         B_node = cast(torch.fx.Node, mm_node.args[1])
         A_scale_node = cast(torch.fx.Node, mm_node.args[2])
@@ -626,38 +628,39 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
 
 def _scatter_dim_after_reshape(reshape_node: torch.fx.Node, orig_scatter_dim: int) -> int:
     """
-    Returns the delta of scatter dim after reshape.
-
-    For example, for tensor shape (1, 8192, 4096) with scatter dim 1,
-    if we reshape (1, 8192, 4096) -> (8192, 4096), the new scatter dim should be 0,
-    so the scatter dim "delta" is -1.
+    Given a reshape node and the original scatter dim for the target tensor,
+    returns the new scatter dim for the reshaped tensor.
     """
-    assert len(reshape_node.all_input_nodes) == 1, "rehshape node must have one parent"
-    reshape_op_input_tensor = _get_tensor(reshape_node.all_input_nodes[0])
+    assert len(reshape_node.all_input_nodes) == 1, "rehshape node must have exactly one parent"
+
     reshaped_tensor = _get_tensor(reshape_node)
     assert reshaped_tensor.ndim == 2, "reshape must produce 2D tensor for scaled_mm"
 
-    # case 1: scatter dim 0 always maps to 0 after any reshape from 3D+ to 2D.
-    if orig_scatter_dim == 0:
-        return 0
+    reshape_op_input_tensor = _get_tensor(reshape_node.all_input_nodes[0])
+    assert reshape_op_input_tensor.ndim > reshaped_tensor.ndim, "reshape must be from 3D+ to 2D"
 
-    # case 2: scatter dim ndim-1 always maps to 1 after any reshape from 3D+ to 2D.
-    if orig_scatter_dim == reshape_op_input_tensor.ndim - 1:
-        return 1
-
-    # case 3: scatter dim between 0 and ndim-1.
-    # for a N-D tensor to be reshaped into 2D, either the leading dims or ending dims must
-    # be collapsed to a single dim. first determine which of these happened.
+    # Note: for a N-D tensor to be reshaped into 2D, either the leading dims or ending dims must
+    # be collapsed to a single dim. First determine which of these happened.
     old_shape = reshape_op_input_tensor.shape
     new_shape = reshaped_tensor.shape
     leading_dims_collapsed = new_shape[0] == prod(old_shape[:-1])
 
+    # case 1: scatter dim 0 always maps to 0 after any reshape from 3D+ to 2D, regardless if
+    # leading dims or ending dims were collapsed.
+    if orig_scatter_dim == 0:
+        return 0
+
+    # case 2: scatter dim "ndim-1" always maps to 1 after any reshape from 3D+ to 2D, regardless if
+    # leading dims or ending dims were collapsed.
+    if orig_scatter_dim == reshape_op_input_tensor.ndim - 1:
+        return 1
+
+    # case 3: scatter dim was one of the middle dims (between 0 and ndim-1).
     # if the original scatter dim was in the middle dims and the leading dims were collapsed,
     # the new scatter dim will be 0. 
     # if the original scatter_dim was in the middle dims and the ending dims were collapsed,
     # the new scatter dim will be 1.
     return 0 if leading_dims_collapsed else 1
-
 
 
 def _find_producer_matmul(node: torch.fx.Node) -> Tuple[Optional[_Matmul], Optional[torch.fx.Node]]:

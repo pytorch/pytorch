@@ -1098,10 +1098,10 @@ def _fused_matmul_reduce_scatter_impl(
     # Ensures that the transpose and reduction produce contiguous result
     # in a single reduction kernel.
     reduced_out = reduce_fn(
-        stacked_partials.view(*stacked_partials_3D_leading_dims, -1)
-        .movedim(1, orig_scatter_dim + 1)       # Swap dim 1 with original scatter dim + 1
-        .movedim(0, orig_scatter_dim),          # Swap back dim 0 and the scatter dim
-        dim=orig_scatter_dim,                   # Reduce along the scatter dim.
+        stacked_partials
+        .movedim(0, scatter_dim_after_maybe_reshape)    # Swap back the scatter dim for the 2d shape to where it was
+        .view(*stacked_partials_3D_leading_dims, -1),   # View
+        dim=0,
     )
 
     # Final 3D+ output shape must be scattered along original scatter dim as well.
