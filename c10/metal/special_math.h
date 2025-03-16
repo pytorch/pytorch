@@ -242,7 +242,7 @@ inline T i1(T _x) {
 }
 
 template <typename T>
-T i1e(T _x) {
+inline T i1e(T _x) {
   const auto x = ::metal::fabs(_x);
   if (x <= 8.0) {
     // Chebyshev double coefficients for exp(-x) i1(x) in the interval [0,8].
@@ -644,7 +644,7 @@ inline T entr(T a) {
 
 // Copy-n-paste from aten/src/ATen/native/cuda/Math.cuh lines 1463-1915
 template <typename T>
-float bessel_j0_forward(T x) {
+inline float bessel_j0_forward(T x) {
   constexpr float PP[] = {
       +7.96936729297347051624e-04,
       +8.28352392107440799803e-02,
@@ -763,7 +763,7 @@ float bessel_j0_forward(T x) {
 } // bessel_j0_forward(T x)
 
 template <typename T>
-float bessel_y0_forward(T x) {
+inline float bessel_y0_forward(T x) {
   constexpr float PP[] = {
       +7.96936729297347051624e-04,
       +8.28352392107440799803e-02,
@@ -886,7 +886,7 @@ float bessel_y0_forward(T x) {
 } // bessel_y0_forward(T x)
 
 template <typename T>
-float bessel_j1_forward(T x) {
+inline float bessel_j1_forward(T x) {
   constexpr float PP[] = {
       +7.62125616208173112003e-04,
       +7.31397056940917570436e-02,
@@ -1001,7 +1001,7 @@ float bessel_j1_forward(T x) {
 } // bessel_j1_forward(T x)
 
 template <typename T>
-float bessel_y1_forward(T x) {
+inline float bessel_y1_forward(T x) {
   constexpr float PP[] = {
       +7.62125616208173112003e-04,
       +7.31397056940917570436e-02,
