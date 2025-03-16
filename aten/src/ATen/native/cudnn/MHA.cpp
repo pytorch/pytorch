@@ -84,31 +84,33 @@ void run_cudnn_SDP_bprop(
       false, "PyTorch was not compiled with cuDNN Flash Attention enabled!");
 }
 
-//void run_cudnn_SDP_bprop_nestedtensor(
-//    int64_t b,
-//    int64_t h,
-//    int64_t s_q,
-//    int64_t s_kv,
-//    int64_t d_qk,
-//    int64_t d_v,
-//    float scaling_factor,
-//    bool is_causal,
-//    float dropout_probability,
-//    const Tensor& q,
-//    const Tensor& k,
-//    const Tensor& v,
-//    const std::optional<Tensor>& attn_bias,
-//    const Tensor& o,
-//    const Tensor& dO,
-//    const Tensor& softmaxstats,
-//    Tensor& dQ,
-//    Tensor& dK,
-//    Tensor& dV,
-//    const Tensor& dropoutseed,
-//    const Tensor& dropoutoffset) {
-//  TORCH_CHECK(
-//      false, "PyTorch was not compiled with cuDNN Flash Attention enabled!");
-//}
+void run_cudnn_SDP_bprop_nestedtensor(
+    int64_t b,
+    int64_t h,
+    int64_t s_q,
+    int64_t s_kv,
+    int64_t d_qk,
+    int64_t d_v,
+    float scaling_factor,
+    bool is_causal,
+    float dropout_probability,
+    const Tensor& cum_seqlen_q,
+    const Tensor& cum_seqlen_kv,
+    const Tensor& q,
+    const Tensor& k,
+    const Tensor& v,
+    const std::optional<Tensor>& attn_bias,
+    const Tensor& o,
+    const Tensor& dO,
+    const Tensor& softmaxstats,
+    Tensor& dQ,
+    Tensor& dK,
+    Tensor& dV,
+    const Tensor& dropoutseed,
+    const Tensor& dropoutoffset) {
+  TORCH_CHECK(
+      false, "PyTorch was not compiled with cuDNN Flash Attention enabled!");
+}
 
 
 } // namespace native
@@ -853,6 +855,88 @@ auto build_graph_backward(
   return std::move(mha_graph);
 }
 
+auto build_graph_backward_nestedtensor(
+    int64_t b,
+    int64_t h,
+    int64_t s_q,
+    int64_t s_kv,
+    int64_t d_qk,
+    int64_t d_v,
+    float scaling_factor,
+    bool is_causal,
+    float dropout_probability,
+    const Tensor& cum_seqlen_q,
+    const Tensor& cum_seqlen_kv,
+    const Tensor& q,
+    const Tensor& k,
+    const Tensor& v,
+    const std::optional<Tensor>& attn_bias,
+    const Tensor& o,
+    const Tensor& dO,
+    const Tensor& softmaxstats,
+    Tensor& dQ,
+    Tensor& dK,
+    Tensor& dV,
+    const Tensor& dropoutseed,
+    const Tensor& dropoutoffset,
+    cudnnHandle_t& handle) {
+
+    auto dtype = fe::DataType_t::HALF;
+    if (q.scalar_type() == kBFloat16) {
+      dtype = fe::DataType_t::BFLOAT16;
+    }
+    auto mha_graph = std::make_shared<fe::graph::Graph>();
+    // We're baking in float accumulation and scale types
+    // in theory the graph may support other types, but they
+    // have not been tested
+    mha_graph->set_io_data_type(dtype)
+        .set_intermediate_data_type(fe::DataType_t::FLOAT)
+        .set_compute_data_type(fe::DataType_t::FLOAT);
+    auto attn_scale =
+        mha_graph->tensor(fe::graph::Tensor_attributes()
+          	            .set_uid(SCALE)
+                              .set_name("Attn_scale")
+                              .set_dim({1, 1, 1, 1})
+                              .set_stride({1, 1, 1, 1})
+                              .set_is_pass_by_value(true)
+                              .set_data_type(fe::DataType_t::FLOAT));
+    auto seed = mha_graph->tensor(fe::graph::Tensor_attributes()
+          	                    .set_uid(SEED)
+                                      .set_name("Seed")
+                                      .set_dim({1, 1, 1, 1})
+                                      .set_stride({1, 1, 1, 1})
+                                      .set_data_type(fe::DataType_t::INT32));
+    auto offset = mha_graph->tensor(fe::graph::Tensor_attributes()
+          	                      .set_uid(OFFSET)
+                                        .set_name("Offset")
+                                        .set_dim({1, 1, 1, 1})
+                                        .set_stride({1, 1, 1, 1})
+                                        .set_data_type(fe::DataType_t::INT32));
+    auto SEQ_LEN_Q_ = mha_graph->tensor(fe::graph::Tensor_attributes()
+          	                         .set_uid(SEQ_LEN_Q)
+                                           .set_name("Seq_q")
+                                           .set_dim({b, 1, 1, 1})
+                                           .set_stride({1, 1, 1, 1})
+                                           .set_data_type(fe::DataType_t::INT32));
+    auto SEQ_LEN_KV_ =
+        mha_graph->tensor(fe::graph::Tensor_attributes()
+          	            .set_uid(SEQ_LEN_KV)
+                              .set_name("Seq_kv")
+                              .set_dim({b, 1, 1, 1})
+                              .set_stride({1, 1, 1, 1})
+                              .set_data_type(fe::DataType_t::INT32));
+    auto scaled_dot_product_flash_attention_backward_options =
+        fe::graph::SDPA_backward_attributes()
+            .set_name("CUDNN_SDPA_NESTEDTENSOR_BACKWARD")
+            .set_causal_mask(is_causal)
+            .set_attn_scale(attn_scale)
+            .set_dropout(dropout_probability, seed, offset)
+            .set_seq_len_q(SEQ_LEN_Q_)
+            .set_seq_len_kv(SEQ_LEN_KV_)
+            .set_padding_mask(true);
+}
+
+
 void run_cudnn_SDP_fprop(
     int64_t b,
     int64_t h,
@@ -1157,21 +1241,6 @@ void run_cudnn_SDP_bprop(
         _dropoutoffset,
         handle);
   }
-  //auto
-  //    [mha_graph,
-  //     Q,
-  //     K,
-  //     V,
-  //     bias,
-  //     attn_scale,
-  //     Seed,
-  //     Offset,
-  //     O,
-  //     Do,
-  //     Stats,
-  //     Dq,
-  //     Dk,
-  //     Dv] = graph_and_tensors_backward_values;
   std::unordered_map<int64_t, void*>
       variant_pack = {// inputs
                       {Q, q.data_ptr()},
@@ -1184,7 +1253,6 @@ void run_cudnn_SDP_bprop(
                       {DQ, dQ.data_ptr()},
                       {DK, dK.data_ptr()},
                       {DV, dV.data_ptr()},
-                      // pass by value
                       {SCALE, &scaling_factor}};
   if (dropout_probability != 0.0f) {
     variant_pack[SEED] = _dropoutseed.data_ptr();
@@ -1201,6 +1269,39 @@ void run_cudnn_SDP_bprop(
       mha_graph->execute(handle, variant_pack, workspace_ptr.get()).is_good());
   mhagraphbackwardcache.update(key, mha_graph);
 }
+
+void run_cudnn_SDP_bprop_nestedtensor(
+    int64_t b,
+    int64_t h,
+    int64_t s_q,
+    int64_t s_kv,
+    int64_t d_qk,
+    int64_t d_v,
+    float scaling_factor,
+    bool is_causal,
+    float dropout_probability,
+    const Tensor& cum_seqlen_q,
+    const Tensor& cum_seqlen_kv,
+    const Tensor& q,
+    const Tensor& k,
+    const Tensor& v,
+    const std::optional<Tensor>& attn_bias,
+    const Tensor& o,
+    const Tensor& dO,
+    const Tensor& softmaxstats,
+    Tensor& dQ,
+    Tensor& dK,
+    Tensor& dV,
+    const Tensor& dropoutseed,
+    const Tensor& dropoutoffset) {
+  cudnnHandle_t handle = getCudnnHandle();
+  // do nothing if we got 0-element tensors
+  if (!q.numel() || !k.numel() || !v.numel()) {
+    return;
+  }
+
+}
+
 
 } // namespace native
 } // namespace at
