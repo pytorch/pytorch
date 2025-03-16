@@ -145,11 +145,29 @@ void addcmul_cuda_scalar_tensor2_kernel(TensorIteratorBase& iter, const Scalar& 
   }
 }
 
+void addcdiv_cuda_scalar_denominator_kernel(
+  TensorIteratorBase& iter,
+  const Scalar& scalar_denominator,
+  const Scalar& value
+);
+
 #if AT_USE_JITERATOR() && CUDA_VERSION >= 11050
 // return a + alpha * (b / static_cast<accscalar_t>(c));
 constexpr char addcdiv_name[] = "addcdiv";
 #endif
 void addcdiv_cuda_kernel(TensorIteratorBase& iter, const Scalar& value) {
+  TORCH_CHECK_VALUE(
+    !iter.is_cpu_scalar(1),
+    "CPU Scalar support for self argument is not supported when "
+    "calling addcdiv on CUDA tensors."
+  );
+
+  TORCH_CHECK_VALUE(
+    !iter.is_cpu_scalar(2),
+    "CPU Scalar support for numerator argument is not supported when "
+    "calling addcdiv on CUDA tensors. "
+  );
+
   auto dtype = iter.common_dtype();
   if (at::isComplexType(dtype)) {
     // When using Jiterator, addcmul and addcdiv kernels get stuck during a
@@ -161,6 +179,11 @@ void addcdiv_cuda_kernel(TensorIteratorBase& iter, const Scalar& value) {
         static const auto addcdiv_string =
             jiterator_stringify(template <typename T> T addcdiv(
                 T a, T b, T c, T alpha) { return a + alpha * (b / c); });
+        if (iter.is_cpu_scalar(3)) {
+          auto denominator_val = iter.scalar_value<scalar_t>(3);
+          iter.remove_operand(3);
+          return addcdiv_cuda_scalar_denominator_kernel(iter, denominator_val, value);
+        }
         jitted_gpu_kernel<
             /*name=*/addcdiv_name,
             /*return_dtype=*/scalar_t,
@@ -174,8 +197,71 @@ void addcdiv_cuda_kernel(TensorIteratorBase& iter, const Scalar& value) {
       });
     #else
       AT_DISPATCH_COMPLEX_TYPES(dtype, "addcdiv_cuda", [&]() {
+        if (iter.is_cpu_scalar(3)) {
+          auto denominator_val = iter.scalar_value<scalar_t>(3);
+          iter.remove_operand(3);
+          return addcdiv_cuda_scalar_denominator_kernel(iter, denominator_val, value);
+        }
+
         auto alpha = value.to<scalar_t>();
         gpu_kernel(iter, [alpha]GPU_LAMBDA(scalar_t a, scalar_t b, scalar_t c) -> scalar_t {
+          return a + alpha * (b / c);
+        });
+      });
+    #endif
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, dtype, "addcdiv_cuda", [&]() {
+      if (iter.is_cpu_scalar(3)) {
+        auto denominator_val = iter.scalar_value<scalar_t>(3);
+        iter.remove_operand(3);
+        return addcdiv_cuda_scalar_denominator_kernel(iter, denominator_val, value);
+      }
+      // note(mkozuki): If scalar_t is fp16 or bfloat16, cast scalar to float
+      // and do math in fp32 for better accuracy.
+      using accscalar_t = at::acc_type<scalar_t, true>;
+      auto alpha = value.to<accscalar_t>();
+      gpu_kernel(iter, [alpha]GPU_LAMBDA(scalar_t a, scalar_t b, scalar_t c) -> scalar_t {
+        return a + alpha * (b / static_cast<accscalar_t>(c));
+      });
+    });
+  }
+}
+
+
+#if AT_USE_JITERATOR() && CUDA_VERSION >= 11050
+// return a + alpha * (b / static_cast<accscalar_t>(c));
+constexpr char addcdiv_scalar_denominator_name[] = "addcdiv_scalar_denominator";
+#endif
+void addcdiv_cuda_scalar_denominator_kernel(TensorIteratorBase& iter, const Scalar& scalar_denominator, const Scalar& value) {
+  auto dtype = iter.common_dtype();
+
+  if (at::isComplexType(dtype)) {
+    // When using Jiterator, addcmul and addcdiv kernels get stuck during a
+    // promotion test on CUDA 11.3, so only enable that from CUDA 11.5:
+    // https://github.com/pytorch/pytorch/pull/74234#issuecomment-1100932209
+    #if AT_USE_JITERATOR() && CUDA_VERSION >= 11050
+      AT_DISPATCH_COMPLEX_TYPES(dtype, "addcdiv_cuda", [&]() {
+        auto c = scalar_denominator.to<scalar_t>();
+        auto alpha = value.to<scalar_t>();
+        static const auto addcdiv_scalar_denominator_string =
+            jiterator_stringify(template <typename T> T addcdiv_scalar_denominator(
+                T a, T b, T c, T alpha) { return a + alpha * (b / c); });
+        jitted_gpu_kernel<
+            /*name=*/addcdiv_scalar_denominator_name,
+            /*return_dtype=*/scalar_t,
+            /*common_dtype=*/scalar_t,
+            /*arity=*/2>(
+            iter,
+            addcdiv_scalar_denominator_string,
+            /*scalar_pos=*/at::cuda::jit::BinaryFuncVariant::NoScalar,
+            /*scalar_val=*/0,
+            /*extra_args=*/std::make_tuple(c, alpha));
+      });
+    #else
+      AT_DISPATCH_COMPLEX_TYPES(dtype, "addcdiv_cuda", [&]() {
+        auto c = scalar_denominator.to<scalar_t>();
+        auto alpha = value.to<scalar_t>();
+        gpu_kernel(iter, [alpha, c]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
           return a + alpha * (b / c);
         });
       });
@@ -185,8 +271,9 @@ void addcdiv_cuda_kernel(TensorIteratorBase& iter, const Scalar& value) {
       // note(mkozuki): If scalar_t is fp16 or bfloat16, cast scalar to float
       // and do math in fp32 for better accuracy.
       using accscalar_t = at::acc_type<scalar_t, true>;
+      auto c = scalar_denominator.to<accscalar_t>();
       auto alpha = value.to<accscalar_t>();
-      gpu_kernel(iter, [alpha]GPU_LAMBDA(scalar_t a, scalar_t b, scalar_t c) -> scalar_t {
+      gpu_kernel(iter, [alpha, c]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
         return a + alpha * (b / static_cast<accscalar_t>(c));
       });
     });
