@@ -658,7 +658,7 @@ def _scatter_dim_after_reshape(reshape_node: torch.fx.Node, orig_scatter_dim: in
 
     # case 3: scatter dim was one of the middle dims (between 0 and ndim-1).
     # if the original scatter dim was in the middle dims and the leading dims were collapsed,
-    # the new scatter dim will be 0. 
+    # the new scatter dim will be 0.
     # if the original scatter_dim was in the middle dims and the ending dims were collapsed,
     # the new scatter dim will be 1.
     return 0 if leading_dims_collapsed else 1
@@ -667,12 +667,12 @@ def _scatter_dim_after_reshape(reshape_node: torch.fx.Node, orig_scatter_dim: in
 def _find_producer_matmul(node: torch.fx.Node) -> Tuple[Optional[_Matmul], Optional[torch.fx.Node]]:
     """
     Returns producer matmul node and reshape node if the producer matmul is a reshape -> mm -> reshape pattern.
-    We return the resehape node so we can:
+    We return the reshape node so we can:
         1) Derive new scatter dim after the reshape, since the original scatter dim was assigned before the reshape.
         2) Store the original shape for later, so the fused_scaled_mm_reduce_scatter implementation can reshape back
            from 2D -> original shape before returning the result."""
     if node.target == aten.mm.default:
-        return _Matmul.from_match(match=[node]), None 
+        return _Matmul.from_match(match=[node]), None
     elif node.target == aten._scaled_mm.default:
         return _ScaledMatmul.from_match(match=[node]), None
     elif node.target == aten.reshape.default:
@@ -694,7 +694,7 @@ def _find_producer_matmul(node: torch.fx.Node) -> Tuple[Optional[_Matmul], Optio
             mm = _ScaledMatmul.from_match(
                 match=[reshape_node_0, mm_node, reshape_node_1]
             )
-            return mm, reshape_node_0 
+            return mm, reshape_node_0
     return None, None
 
 def _insert_fused_matmul_reduce_scatter(
@@ -792,13 +792,14 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> bool:
 
     # We need to track 3 values for the fused scaled mm reduce scatter implementation:
     #   1. Store expected potentially 3D+ mm output shape, since the mm node itself only contains 2D input args,
-    #      and the fused matmul reduce scatter implementation needs to reshape the output to the expected 
-    #      potentialy 3D+ shape.
+    #      and the fused matmul reduce scatter implementation needs to reshape the output to the expected
+    #      potentially 3D+ shape.
     #   2. The scatter dim before the reshape, which was assigned using the original (a,b,c) @ (c,d) = (a,b,d) dims.
     #   3. The scatter dim after the reshape, to use when we are doing the 2D (a*b,c) @ (c,d) = (a,b,d) scaled mm op.
 
-    # Case 1: if the producer matmul is a reshape -> mm -> reshape pattern, store the new scatter dim
-    # after the reshape from 3D+ -> 2D, and store the original A shape for storing the expected matmul output shape.
+    # Case 1: if the producer matmul is a reshape -> mm -> reshape pattern:
+    # - store the new scatter dim after the reshape from 3D+ -> 2D
+    # - get the original A shape for storing the expected matmul output shape.
     if reshape_node:
         scatter_dim_after_maybe_reshape = _scatter_dim_after_reshape(reshape_node, orig_scatter_dim)
         A_orig_shape = list(_get_tensor(reshape_node.args[0]).shape)
@@ -815,7 +816,7 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> bool:
 
     graph = rs_res_node.graph
     with graph.inserting_before(rs_res_node):
-        # restride A tensor for optimal perf in fused matmul reduce scatter
+        # Restride A tensor before fused op, for optimal perf in fused matmul reduce scatter
         if "val" in matmul.A_node.meta:
             restrided = restride_A_for_fused_matmul_reduce_scatter(
                 _get_tensor(matmul.A_node),
@@ -826,7 +827,7 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> bool:
                 args=(matmul.A_node, restrided.stride()),
             )
 
-        # replace matched subgraph with fused matmul reduce scatter node
+        # Replace matched subgraph with fused matmul reduce scatter node
         fused_node = _insert_fused_matmul_reduce_scatter(
             graph,
             matmul,
@@ -848,7 +849,7 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> bool:
     for node in nodes_to_raise:
         if order[node] > order[fused_node]:
             fused_node.prepend(node)
-    
+
     log.debug("successfully fused matmul reduce scatter")
     return True
 

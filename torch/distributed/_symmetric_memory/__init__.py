@@ -1052,7 +1052,6 @@ def _fused_matmul_reduce_scatter_impl(
 
     # For tensorwise scaling, the scale should be replicated so each shard has a copy.
     if tensorwise_scaling:
-        A_scale_shards = [A_scale] * group.size()
     
     # For rowwise scaling, we need to move the scatter dim to the first dim to match the
     # dim swap of the 'A' tensor. Then we can shard the scales along the first dim, just like
@@ -1090,11 +1089,13 @@ def _fused_matmul_reduce_scatter_impl(
         group_name,
     )
 
-    # We now need to transform the 2D raw mm outputs to a reduce-scattered 3D+ output.
-    # First we determine the leading dims of the 3D+ output after reduce-scatter, 
-    # to be composed with a final dim of -1 which will autopopulate the rest.
-    # We can think about the unreduced 3D+ as a big tensor composed of `group_size` smaller tensors,
-    # each of which are sharded along the original scatter dim that was assigned to the 3D output tensor.
+    # We now need to transform the *unreduced* stacked 2D partial mm outputs to an *unreduced* 3D+ output,
+    # then reduce-scatter. To do this, we first need to determine the shape of the unreduced 3D+ output, 
+    # to reshape our stacked partials so we can apply the reduce-scatter.
+    #
+    # The *unreduced* 3D+ tensor will have dim 0 = `group_size`, as we have `group_size` instances of
+    # stacked partial outputs. The next dims will be A's leading dims (sharded along the original scatter dim),
+    # as it was the left operand of the mm op. We can use -1 as the final dim of the view to populate the rest.
     stacked_partials_3D_leading_dims = [group.size()] + list(A_with_scatter_dim_0.shape[:-1])
     stacked_partials_3D_leading_dims[orig_scatter_dim] //= group.size()
 
