@@ -57,6 +57,8 @@
 namespace sdp {
 namespace {
 
+bool priority_order_init_ = false;
+
 // TODO(eqy): more benchmarking to determine whether this should include sm86/89
 // Needs to be kept in-sync with test_fused_chocie in test_transformers.py
 bool check_prefer_cudnn_attention() {
@@ -79,6 +81,16 @@ bool check_prefer_cudnn_attention() {
 
 // flash_attention V2 is universally faster than efficient_attention and Math
 std::array<SDPBackend, num_backends> priority_order(sdp_params const& params) {
+  if (!priority_order_init_) {
+    priority_order_init_ = true;
+    if (check_prefer_cudnn_attention()) {
+        const std::vector<int64_t> cudnn_order = {static_cast<int64_t>(at::SDPBackend::cudnn_attention),
+                                                  static_cast<int64_t>(at::SDPBackend::flash_attention),
+                                                  static_cast<int64_t>(at::SDPBackend::efficient_attention),
+                                                  static_cast<int64_t>(at::SDPBackend::math)};
+        at::globalContext().setSDPPriorityOrder(cudnn_order);
+    }
+  }
   return at::globalContext().sDPPriorityOrder();
 }
 
@@ -563,7 +575,7 @@ bool check_for_nested_inputs(sdp_params const& params, bool debug) {
 
   const auto dprop = at::cuda::getCurrentDeviceProperties();
   // Check that the input is nested
-  if (dprop->major != 9 && has_for_nested_inputs(params)) {
+  if (dprop->major < 9 && has_for_nested_inputs(params)) {
     if (debug) {
       TORCH_WARN("CuDNN SDPA supports nested tensors on SM 9.0.");
     }
