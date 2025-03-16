@@ -1025,9 +1025,6 @@ class CompileResult(Generic[_T]):
     def make_launcher(self) -> LauncherType: ...
 
     def _gen_launcher_code(self, scope, def_args, runner_args) -> LauncherType:
-        if "extra_launcher_args" in self.inductor_meta:
-            def_args = [*def_args, *self.inductor_meta["extra_launcher_args"]]
-
         grid = GridExpr.from_meta(self.inductor_meta, self.config)
         # grid.prefix is usually empty, grid.x_grid is something like `-(xnumel//-1024)`
         lines = [
@@ -1104,6 +1101,10 @@ class CompileResult(Generic[_T]):
                 for name in arg_names
                 if name not in cfg_dict and name not in none_args
             ]
+
+        if "extra_launcher_args" in self.inductor_meta:
+            def_args = [*def_args, *self.inductor_meta["extra_launcher_args"]]
+
         return call_args, def_args, none_args
 
 

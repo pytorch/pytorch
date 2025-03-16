@@ -379,7 +379,7 @@ class TestStaticTritonCompileResult(TestCase):
         self.assertRaisesRegex(
             torch._inductor.exc.InductorError,
             "CannotStaticallyLaunchKernel: User defined triton kernel",
-            lambda: foo(x)
+            lambda: foo(x),
         )
 
     @skipIfRocm

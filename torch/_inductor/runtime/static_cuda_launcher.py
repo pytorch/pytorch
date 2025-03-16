@@ -8,6 +8,7 @@ from .triton_compat import ASTSource, CompiledKernel
 MAX_SHARED_MEMORY = 49152
 MAX_ARGS = 50
 
+
 class StaticallyLaunchedCudaKernel:
     """
     Parses the metadata of a CompiledKernel from Triton into a structure that can
