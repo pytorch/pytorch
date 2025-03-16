@@ -438,7 +438,7 @@ class TestMAIATensor(common.TestCase):
 
     def test_autocast_apis_for_maia_device(self):
         # Default low-precision type in MAIA's autocast.
-        fast_dtype torch.get_autocast_dtype("maia")
+        fast_dtype = torch.get_autocast_dtype("maia")
         self.assertEqual(fast_dtype, torch.bfloat16)
         self.assertTrue(torch._C._is_autocast_available("maia"))
 
