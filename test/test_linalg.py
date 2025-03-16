@@ -91,9 +91,7 @@ def tunableop_matmul(device, dtype):
 
 def get_tunableop_validators():
     assert len(torch.cuda.tunable.get_validators()) > 0
-    validators = {}
-    for key, value in torch.cuda.tunable.get_validators():
-        validators[key] = value
+    validators = dict(torch.cuda.tunable.get_validators())
     return validators
 
 class TestLinalg(TestCase):
