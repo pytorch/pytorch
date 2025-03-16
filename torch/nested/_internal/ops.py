@@ -1238,12 +1238,10 @@ def matmul_default(func, *args, **kwargs):
         if inp.dim() > 3 and other.dim() > 3 and raggedness_matches(inp, other._size):
             return NestedTensor(func(inp._values, other._values), **extract_kwargs(inp))
         # Support reducing over ragged with dense output:
-        # (B, D, j1) x (B, j1, E) => (B, D, E)
+        # (..., D, j1) x (..., j1, E) => (..., D, E)
         elif (
-            inp.dim() == 3
-            and other.dim() == 3
-            and inp._ragged_idx == 2
-            and other._ragged_idx == 1
+            inp._ragged_idx == inp.dim() - 1
+            and other._ragged_idx == inp.dim() - 2
             and inp.size(inp._ragged_idx) == other.size(other._ragged_idx)
         ):
             # do unbind for this; can't use padded conversion due to j1 in last dim
