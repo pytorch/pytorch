@@ -6466,6 +6466,11 @@ else:
         t = torch.ones((), device=device, dtype=dtype)
         self.assertEqual(1, t.item())
 
+    def test__local_scalar_dense_with_empty_tensor(self, device):
+        input = torch.randn(0, device=device)
+        with self.assertRaisesRegex(RuntimeError, "Empty tensor not supported"):
+            torch.ops.aten._local_scalar_dense(input)
+
     @onlyNativeDeviceTypes
     def test_masked_scatter_inplace_noncontiguous(self, device):
         t = torch.zeros(5, 2, dtype=torch.long, device=device)

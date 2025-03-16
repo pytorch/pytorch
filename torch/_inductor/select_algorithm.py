@@ -16,7 +16,7 @@ import textwrap
 import time
 from concurrent.futures import as_completed, ThreadPoolExecutor
 from io import StringIO
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union, Tuple
 from typing_extensions import Self
 from unittest.mock import patch
 
@@ -433,9 +433,15 @@ class TritonTemplateKernel(TritonKernel):
         triton_meta["configs"] = [config_of(signature)]
         for arg_num in equal_1_arg_indices(signature):  # type: ignore[index]
             triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
-        matrix_instr_nonkdim = self.meta.get("matrix_instr_nonkdim", 0)
-        if matrix_instr_nonkdim != 0:
+        matrix_instr_nonkdim = self.meta.get("matrix_instr_nonkdim", None)
+        waves_per_eu = self.meta.get("waves_per_eu", None)
+        kpack = self.meta.get("kpack", None)
+        if matrix_instr_nonkdim:
             triton_meta["matrix_instr_nonkdim"] = matrix_instr_nonkdim
+        if waves_per_eu:
+            triton_meta["waves_per_eu"] = waves_per_eu
+        if kpack:
+            triton_meta["kpack"] = kpack
 
         self.triton_meta = triton_meta
 
@@ -1044,6 +1050,8 @@ def _jinja2_env():
 class TritonTemplate(KernelTemplate):
     index_counter = itertools.count()
     all_templates: dict[str, "TritonTemplate"] = {}
+    
+    _cached_generated_module : dict[str, Tuple[Any, str]] ={}
 
     def __init__(self, name: str, grid: Any, source: str, debug=False) -> None:
         super().__init__(name)
@@ -1084,6 +1092,25 @@ class TritonTemplate(KernelTemplate):
                 if you need to return multiple outputs. You can pass them as inputs and mark them as
                 being mutated by the kernel.
         """
+        # cache key used to avoid regenerating the same code and loading it multiple times. For example, will be trigger when max_auto_tune 
+        # is enabled on the following program where layout(x)==layout(z) and layout(y) ==layout(m). For each configuration we only need to codegen and load
+        # the module once.  
+        #     a= torch.ops.aten.mm.default(x, y)
+        #     b= torch.ops.aten.mm.default(z, m)
+        generated_module_cache_key = None 
+
+        
+        # For simplicity for we only cache under simple conditions following this is sufficient to cover mm and addmm.
+        if epilogue_fn ==identity and subgraphs==None and mutated_inputs==None and call_sizes==None and workspace_arg==None:
+            generated_module_cache_key= repr(
+                {"input_nodes":create_inputs_key(input_nodes),
+                "layout":layout,
+                "num_stages":num_stages,
+                "num_warps":num_warps,
+                "prefix_args": prefix_args,
+                "suffix_args":suffix_args,
+                "kwargs":kwargs})
+        
         assert self.template, "requires jinja2"
         defines = StringIO()
 
@@ -1125,6 +1152,8 @@ class TritonTemplate(KernelTemplate):
             "subgraphs": subgraphs,
         }
 
+        input_call_args = None
+        expected_input_args = None
         with (
             patch.object(V.graph, "get_dtype", self._fake_get_dtype(fake_out)),
             V.graph.set_current_device(layout.device),
@@ -1136,34 +1165,45 @@ class TritonTemplate(KernelTemplate):
                 **kernel_options,
             ) as kernel,
         ):
-            try:
-                template = kernel.render(self.template, kwargs)
-                with kernel.set_subgraph_body("<STORE_OUTPUT>"):
-                    code = template.finalize_all()
-            except ZeroDivisionError:
-                # TODO(nmacchioni): fix sympy division by zero
-                return None
-            if self.debug:
-                print("Generated Code:\n", code)
-            extra = (
-                "-".join(
-                    [
-                        *[
-                            f"{kwarg}={repr(kwargs[kwarg])}"
-                            for kwarg in sorted(kwargs.keys())
-                        ],
-                        f"num_stages={num_stages}",
-                        f"num_warps={num_warps}",
-                    ]
+            if generated_module_cache_key is not None and (entry := self._cached_generated_module.get(generated_module_cache_key, None)):
+                (mod, extra) = entry
+                expected_input_args = tuple(unique(x.get_name() for x in input_nodes))
+                input_call_args = expected_input_args
+                # print("hit")
+            else:
+                try:
+                    template = kernel.render(self.template, kwargs)
+                    with kernel.set_subgraph_body("<STORE_OUTPUT>"):
+                        code = template.finalize_all()
+                except ZeroDivisionError:
+                    # TODO(nmacchioni): fix sympy division by zero
+                    return None
+                if self.debug:
+                    print("Generated Code:\n", code)
+                extra = (
+                    "-".join(
+                        [
+                            *[
+                                f"{kwarg}={repr(kwargs[kwarg])}"
+                                for kwarg in sorted(kwargs.keys())
+                            ],
+                            f"num_stages={num_stages}",
+                            f"num_warps={num_warps}",
+                        ]
+                    )
+                    + "-"
                 )
-                + "-"
-            )
-            mod = PyCodeCache.load(code, extra)
 
-        input_call_args = tuple(kernel.args.input_buffers.keys())
+                mod = PyCodeCache.load(code, extra)
 
+                input_call_args = tuple(kernel.args.input_buffers.keys())
+                expected_input_args = tuple(unique(x.get_name() for x in input_nodes))
+                # we only cache when len(input_call_args) == len(expected_input_args)
+                if generated_module_cache_key and len(input_call_args) == len(expected_input_args):
+                    self._cached_generated_module[generated_module_cache_key]= (mod, extra)
+      
+        
         # We expect the input_buffer order to be [*input_nodes, *captured_buffers]
-        expected_input_args = tuple(unique(x.get_name() for x in input_nodes))
         assert input_call_args[: len(expected_input_args)] == expected_input_args, (
             input_call_args,
             expected_input_args,
@@ -1215,6 +1255,8 @@ class TritonTemplate(KernelTemplate):
             num_stages=num_stages,
             num_warps=num_warps,
             matrix_instr_nonkdim=kwargs.get("matrix_instr_nonkdim", 0),
+            waves_per_eu=kwargs.get("waves_per_eu", 0),
+            kpack=kwargs.get("kpack", 2),
             input_tensor_meta=TensorMeta.from_irnodes(full_input_nodes),  # type: ignore[arg-type]
             output_tensor_meta=TensorMeta.from_irnodes(layout),
             workspace_arg=workspace_arg,
