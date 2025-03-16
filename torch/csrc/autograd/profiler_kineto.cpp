@@ -333,6 +333,19 @@ struct AddGenericMetadata : public MetadataBase {
   const torch::profiler::impl::ProfilerConfig* config_;
 };
 
+struct AddGILFields : public MetadataBase {
+  AddGILFields(
+      const std::shared_ptr<Result>& result)
+      : MetadataBase(result) {
+    result->visit_if_base<ExtraFields<EventType::PyCCall>>(
+        [&, this](const auto& i) -> void {
+          if (!std::string(i.function_name_.str()).compare("<built-in function GIL_RELEASE>")) {
+            this->addMetadata("GIL Wait us", std::to_string(i.gil_wait_us_));
+          }
+        });
+    }
+};
+
 struct KinetoThreadLocalState : public ProfilerStateBase {
   explicit KinetoThreadLocalState(
       const ProfilerConfig& config,
@@ -456,6 +469,7 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
         kinetoEvents.emplace_back(e, config_.experimental_config.verbose);
         AddTensorboardFields add_tb(e, kinetoEvents.back());
         AddGenericMetadata add_generic(e, &config_);
+        AddGILFields add_gil_fields(e);
 
         // It is not safe to use the activity after post processing.
         e->kineto_activity_ = nullptr;

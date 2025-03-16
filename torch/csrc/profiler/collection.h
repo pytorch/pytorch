@@ -291,14 +291,17 @@ struct PyExtraFieldsBase {
   PyExtraFieldsBase(
       c10::time_t end_time_ns,
       size_t python_tid,
-      PyFrameState caller)
+      PyFrameState caller,
+      int64_t gil_wait_us)
       : end_time_ns_{end_time_ns},
         python_tid_{python_tid},
-        caller_{std::move(caller)} {}
+        caller_{std::move(caller)},
+        gil_wait_us_{gil_wait_us} {}
 
   c10::time_t end_time_ns_;
   size_t python_tid_;
   PyFrameState caller_;
+  int64_t gil_wait_us_;
 
   // kth python event observed. (Used by TensorBoard)
   size_t id_{std::numeric_limits<size_t>::max()};
@@ -316,8 +319,9 @@ struct ExtraFields<EventType::PyCall> : public PyExtraFieldsBase {
       c10::time_t end_time_ns,
       size_t python_tid,
       PyFrameState caller,
-      args_t args)
-      : PyExtraFieldsBase(end_time_ns, python_tid, std::move(caller)),
+      args_t args,
+      int64_t gil_wait_us)
+      : PyExtraFieldsBase(end_time_ns, python_tid, std::move(caller), gil_wait_us),
         callsite_{std::move(args.frame_state_)},
         module_{std::move(args.module_info_)},
         optimizer_{std::move(args.optimizer_info_)} {}
@@ -335,8 +339,9 @@ struct ExtraFields<EventType::PyCCall> : public PyExtraFieldsBase {
       c10::time_t end_time_ns,
       size_t python_tid,
       PyFrameState caller,
-      args_t args)
-      : PyExtraFieldsBase(end_time_ns, python_tid, std::move(caller)),
+      args_t args,
+      int64_t gil_wait_us)
+      : PyExtraFieldsBase(end_time_ns, python_tid, std::move(caller), gil_wait_us),
         function_name_{std::move(args)} {}
 
   at::StringView function_name_;
