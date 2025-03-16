@@ -211,6 +211,20 @@ def get_default_mmap_options() -> Optional[int]:
     return config.load.mmap_flags
 
 
+def _get_storage_alignment() -> int:
+    """
+    Gets alignment for storages in torch.save files/
+
+    Defaults to 64.
+
+    Returns:
+        storage_alginment: int
+    """
+    from torch.utils.serialization import config
+
+    return config.save.storage_alignment
+
+
 class set_default_mmap_options:
     """
     Context manager or function to set default mmap options for :func:`torch.load` with ``mmap=True`` to flags.
@@ -369,16 +383,18 @@ def get_unsafe_globals_in_checkpoint(f: FileLike) -> list[str]:
 
 class skip_data:
     """
-    Context-manager that skips writing storage bytes for ``torch.save`` calls.
+    Context-manager that skips writing/reading storage bytes for ``torch.save`` / ``torch.load`` calls.
 
-    Storages will still be saved, but the space that their bytes would usually be written to
+    For the save path, storages will still be saved, but the space that their bytes would usually be written to
     will be empty space. The storage bytes can then be populated in a separate pass.
+
+    For the load path, tensors will be loaded per the checkpoint but their storages will not be populated with data.
 
     .. warning::
         The ``skip_data`` context manager is an early prototype and is subject to change.
 
     Args:
-        materialize_fake_tensors: Whether to materialize FakeTensors.
+        materialize_fake_tensors: Whether to materialize FakeTensors during save. This is a no-op for the load path.
 
     Example:
         >>> # xdoctest: +SKIP("NamedTemporaryFile on Windows")
@@ -767,10 +783,16 @@ class _open_zipfile_writer_file(_opener[torch._C.PyTorchFileWriter]):
             # for writing out the file.
             self.file_stream = io.FileIO(self.name, mode="w")
             super().__init__(
-                torch._C.PyTorchFileWriter(self.file_stream, get_crc32_options())
+                torch._C.PyTorchFileWriter(
+                    self.file_stream, get_crc32_options(), _get_storage_alignment()
+                )
             )
         else:
-            super().__init__(torch._C.PyTorchFileWriter(self.name, get_crc32_options()))
+            super().__init__(
+                torch._C.PyTorchFileWriter(
+                    self.name, get_crc32_options(), _get_storage_alignment()
+                )
+            )
 
     def __exit__(self, *args) -> None:
         self.file_like.write_end_of_file()
@@ -786,7 +808,11 @@ class _open_zipfile_writer_buffer(_opener[torch._C.PyTorchFileWriter]):
                 raise AttributeError(msg)
             raise TypeError(msg)
         self.buffer = buffer
-        super().__init__(torch._C.PyTorchFileWriter(buffer, get_crc32_options()))
+        super().__init__(
+            torch._C.PyTorchFileWriter(
+                buffer, get_crc32_options(), _get_storage_alignment()
+            )
+        )
 
     def __exit__(self, *args) -> None:
         self.file_like.write_end_of_file()
@@ -1188,7 +1214,13 @@ def _save(
     # .format_version is used to track
     #     1. version 1 represents the order of storages being changed from
     #        lexicographical based on keys to numerically ordered based on keys
+    #     2. version 2 represents including storage_alignment as a record
+    #        within the zipfile
     zip_file.write_record(".format_version", "1", len("1"))
+    storage_alignment = str(_get_storage_alignment())
+    zip_file.write_record(
+        ".storage_alignment", storage_alignment, len(storage_alignment)
+    )
 
     # Write byte order marker
     if not _disable_byteorder_record:
@@ -1387,14 +1419,6 @@ def load(
                     )
             updated_message += message
         return updated_message + DOCS_MESSAGE
-
-    global _serialization_tls
-    skip_data = _serialization_tls.skip_data
-    if skip_data:
-        raise RuntimeError(
-            "`torch.load` called within a torch.serialization.skip_data context manager "
-            "is not supported yet. Please call torch.load outside the skip_data context manager."
-        )
 
     weights_only_not_set = weights_only is None
 
@@ -1705,6 +1729,9 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
             if root_key not in deserialized_objects:
                 if torch._guards.active_fake_mode() is not None:
                     obj = cast(Storage, torch.UntypedStorage(nbytes, device="meta"))
+                elif _serialization_tls.skip_data:
+                    obj = cast(Storage, torch.UntypedStorage(nbytes))
+                    obj = restore_location(obj, location)
                 else:
                     obj = cast(Storage, torch.UntypedStorage(nbytes))
                     obj._torch_load_uninitialized = True
@@ -1777,7 +1804,7 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
 
     deserialized_storage_keys = pickle_module.load(f, **pickle_load_args)
 
-    if torch._guards.active_fake_mode() is None:
+    if torch._guards.active_fake_mode() is None and not _serialization_tls.skip_data:
         offset = f.tell() if f_should_read_directly else None
         for key in deserialized_storage_keys:
             assert key in deserialized_objects
@@ -1886,6 +1913,10 @@ def _load(
     else:
         raise ValueError("Invalid load endianness type")
 
+    storage_alignment = 64
+    if zip_file.has_record(".storage_alignment"):
+        storage_alignment = int(zip_file.get_record(".storage_alignment"))
+
     if (
         not zip_file.has_record(byteordername)
         and get_default_load_endianness() is None
@@ -1939,7 +1970,7 @@ def _load(
             storage_offset = current_offset
         else:
             storage_offset = zip_file.get_record_offset_no_read(
-                current_offset, name, numel
+                current_offset, name, numel, storage_alignment
             )
             local_header_offset = current_offset
 
@@ -1964,6 +1995,10 @@ def _load(
         if torch._guards.detect_fake_mode(None) is not None:
             nbytes = numel * torch._utils._element_size(dtype)
             storage = torch.UntypedStorage(nbytes, device="meta")
+            storage._checkpoint_offset = zip_file.get_record_offset(name)
+        elif _serialization_tls.skip_data:
+            nbytes = numel * torch._utils._element_size(dtype)
+            storage = torch.UntypedStorage(nbytes)
         elif overall_storage is not None:
             if can_calculate_storage_offsets and calculate_storage_offsets:
                 storage_offset = _get_offset(key, name, numel)
@@ -2000,8 +2035,15 @@ def _load(
 
         # TODO: Once we decide to break serialization FC, we can
         # stop wrapping with TypedStorage
+
+        if torch._guards.detect_fake_mode(None) is None:
+            wrap_storage = restore_location(storage, location)
+        else:
+            storage._fake_device = location
+            wrap_storage = storage
+
         typed_storage = torch.storage.TypedStorage(
-            wrap_storage=restore_location(storage, location),
+            wrap_storage=wrap_storage,
             dtype=dtype,
             _internal=True,
         )

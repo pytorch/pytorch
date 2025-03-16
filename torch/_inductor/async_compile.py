@@ -181,6 +181,12 @@ class CompiledTritonKernels:
     def cache_clear():
         CompiledTritonKernels._cache = {}
 
+    @staticmethod
+    def remove_future(kernel_src: str) -> None:
+        key = CompiledTritonKernels.key(kernel_src)
+        if key in CompiledTritonKernels._cache:
+            del CompiledTritonKernels._cache[key]
+
 
 class AsyncCompile:
     def __init__(self) -> None:
@@ -313,6 +319,9 @@ class AsyncCompile:
 
             def get_result() -> tuple[CachingAutotuner, int]:
                 kernel, elapsed_us = task.result()
+                # Now that we've compiled, we should clear the future
+                # so it can't be used again
+                CompiledTritonKernels.remove_future(source_code)
                 kernel.precompile(
                     warm_cache_only=False, reload_kernel=reload_kernel_in_parent
                 )
