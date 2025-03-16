@@ -57,6 +57,17 @@ def generate_basic_tests():
                         "aot_inductor.use_runtime_constant_folding": use_runtime_constant_folding
                     },
                 )
+                # Also store a .pt2 file using the aoti_compile_and_package API
+                pt2_package_path = torch._inductor.aoti_compile_and_package(
+                    torch.export.export(
+                        model,
+                        (x,),
+                        dynamic_shapes=dynamic_shapes,
+                    ),
+                    inductor_configs={
+                        "aot_inductor.use_runtime_constant_folding": use_runtime_constant_folding
+                    },
+                )
 
             suffix = f"{device}"
             if use_runtime_constant_folding:
@@ -64,6 +75,7 @@ def generate_basic_tests():
             data.update(
                 {
                     f"model_so_path_{suffix}": model_so_path,
+                    f"pt2_package_path_{suffix}": pt2_package_path,
                     f"inputs_{suffix}": [x],
                     f"outputs_{suffix}": [ref_output],
                     f"w_pre_{suffix}": model.w_pre,
@@ -86,10 +98,15 @@ def generate_test_with_additional_tensors():
     torch._dynamo.reset()
     with torch.no_grad():
         model_so_path = aot_compile(model, (x, y))
+        # Also store a .pt2 file using the aoti_compile_and_package API
+        pt2_package_path = torch._inductor.aoti_compile_and_package(
+            torch.export.export(model, (x, y))
+        )
 
     data_with_tensor_constants.update(
         {
             "model_so_path": model_so_path,
+            "pt2_package_path": pt2_package_path,
             "inputs": [x, y],
             "outputs": [ref_output],
             "w": model.w,
