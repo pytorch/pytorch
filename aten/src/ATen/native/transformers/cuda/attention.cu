@@ -26,6 +26,8 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_cudnn_attention_forward.h>
+#include <ATen/ops/_cudnn_attention_forward_native.h>
 #include <ATen/ops/_efficient_attention_forward.h>
 #include <ATen/ops/_efficient_attention_forward_native.h>
 #include <ATen/ops/_fill_mem_eff_dropout_mask_native.h>
@@ -63,6 +65,7 @@
 
 #include <ATen/native/transformers/attention.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
+#include <ATen/native/nested/NestedTensorTransformerUtils.h>
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
 #include <ATen/native/transformers/cuda/sdp_utils.h>
 #include <ATen/native/transformers/sdp_utils_cpp.h>
@@ -89,6 +92,25 @@
 #endif
 
 namespace at {
+
+namespace cuda::philox {
+
+__global__ void unpack_cudnn(at::PhiloxCudaState arg, int64_t* seed_ptr, int64_t* offset_ptr) {
+  if (arg.captured_) {
+    *seed_ptr = static_cast<int64_t>(*arg.seed_.ptr);
+    *offset_ptr = static_cast<int64_t>(
+                    *(arg.offset_.ptr) + static_cast<int64_t>(arg.offset_intragraph_));
+  } else {
+    *seed_ptr = static_cast<int64_t>(arg.seed_.val);
+    *offset_ptr = static_cast<int64_t>(arg.offset_.val);
+  }
+}
+
+void unpack_cudnn_wrapper(at::PhiloxCudaState arg, int64_t* seed_ptr, int64_t* offset_ptr, cudaStream_t stream) {
+at::cuda::philox::unpack_cudnn<<<1, 1, 0, stream>>>(arg, seed_ptr, offset_ptr);
+}
+
+} // namespace cuda::philox
 
 namespace native {
 
@@ -735,16 +757,177 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
   return std::make_tuple(attention, logsumexp, Tensor(), Tensor(), max_seqlen_batch_q, max_seqlen_batch_k, philox_seed, philox_offset, debug_attn_mask);
 }
 
-// Adapted from TE
-// extract seed and offset from PhiloxCudaState
-__global__ void unpack_cudnn(at::PhiloxCudaState arg, int64_t* seed_ptr, int64_t* offset_ptr) {
-  if (arg.captured_) {
-    *seed_ptr = static_cast<int64_t>(*arg.seed_.ptr);
-    *offset_ptr = static_cast<int64_t>(
-                    *(arg.offset_.ptr) + static_cast<int64_t>(arg.offset_intragraph_));
+std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Tensor, Tensor> _cudnn_attention_forward(
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    const std::optional<Tensor>& attn_bias,
+    const std::optional<Tensor>& cumulative_sequence_length_q,
+    const std::optional<Tensor>& cumulative_sequence_length_kv,
+    int64_t max_seqlen_batch_q,
+    int64_t max_seqlen_batch_kv,
+    bool compute_logsumexp,
+    double dropout_p,
+    bool is_causal,
+    bool return_debug_mask,
+    std::optional<double> scale) {
+  // TODO(eqy): debug mask support
+  // Query (Batch x Num_heads x Q_seq_len  x Dim_per_head)
+  // Key   (Batch x Num_heads x KV_seq_len x Dim_per_head)
+  // Value (Batch x Num_heads x KV_seq_len x Dim_per_head)
+  const bool is_nested = cumulative_sequence_length_q.has_value();
+  if (!is_nested) {
+    const int64_t batch_size = query.size(0);
+    const int64_t num_heads = query.size(1);
+    const int64_t head_dim_qk = query.size(3);
+    const int64_t head_dim_v = value.size(3);
+    auto attn_bias_ = attn_bias;
+    if (attn_bias_.has_value()) {
+      const auto bias_dim = attn_bias_.value().dim();
+      if (bias_dim == 2) {
+        attn_bias_ = attn_bias_.value().expand({batch_size, 1, max_seqlen_batch_q, max_seqlen_batch_kv});
+      } else if (bias_dim == 3) {
+        attn_bias_ = attn_bias_.value().expand({batch_size, 1, max_seqlen_batch_q, max_seqlen_batch_kv});
+      } else {
+        TORCH_CHECK(bias_dim == 4, "cuDNN SDPA expects either a 2D, 3D, or 4D attn_bias but got ", attn_bias_.value().dim(), "D");
+        attn_bias_ = attn_bias_.value().expand({batch_size, attn_bias_.value().size(1), max_seqlen_batch_q, max_seqlen_batch_kv});
+      }
+    }
+
+    Tensor attention, log_sumexp;
+    at::Tensor cudnn_seed, cudnn_offset;
+    cudnn_seed = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
+    cudnn_offset = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
+
+    const bool use_dropout = std::fpclassify(dropout_p) != FP_ZERO;
+
+    // See Note [Seed and Offset Device] in _efficient_attention_forward
+    at::PhiloxCudaState philox_state;
+    const bool in_capture_stream =
+        at::cuda::currentStreamCaptureStatus() != at::cuda::CaptureStatus::None;
+    if (use_dropout) {
+      // Device
+      auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(
+          std::nullopt, at::cuda::detail::getDefaultCUDAGenerator());
+
+      // See Note [Acquire lock when using random generators]
+      std::lock_guard<std::mutex> lock(gen->mutex_);
+      // if using dropout, we produce 1 random number for each element of the
+      // attention tensor
+      // TODO(eqy): should state be advanced per thread (local) amount or per call/launch (global) amount
+      philox_state = gen->philox_cuda_state(batch_size * num_heads * max_seqlen_batch_q * max_seqlen_batch_kv);
+      at::cuda::philox::unpack_cudnn_wrapper(
+                                        philox_state, static_cast<int64_t*>(cudnn_seed.data_ptr()), static_cast<int64_t*>(cudnn_offset.data_ptr()), at::cuda::getCurrentCUDAStream());
+    }
+
+    const auto softmax_scale = sdp::calculate_scale(query, scale).expect_float();
+    Tensor debugmask;
+
+    run_cudnn_SDP_fprop(batch_size/*int64_t b*/,
+                        num_heads/*int64_t h*/,
+                        max_seqlen_batch_q/*int64_t s_q*/,
+                        max_seqlen_batch_kv/*int64_t s_kv*/,
+                        head_dim_qk/*int64_t d_qk*/,
+                        head_dim_v/*int64_t d_v*/,
+                        softmax_scale/*float scaling_factor*/,
+                        compute_logsumexp/* bool */,
+                        is_causal/* bool */,
+                        dropout_p/*double dropout_probability*/,
+                        query/* Tensor q*/,
+                        key/* Tensor k*/,
+                        value/* Tensor v*/,
+                        attn_bias_ /* std::optional<Tensor> */,
+                        log_sumexp/*Tensor softmaxstats*/,
+                        attention/*Tensor o*/,
+                        cudnn_seed/*Tensor dropoutseed*/,
+                        cudnn_offset/*Tensor dropoutoffset*/);
+
+    // TODO(eqy): support debug_attn_mask
+    return std::make_tuple(std::move(attention), std::move(log_sumexp), Tensor(), Tensor(), max_seqlen_batch_q, max_seqlen_batch_kv, std::move(cudnn_seed), std::move(cudnn_offset), Tensor());
   } else {
-    *seed_ptr = static_cast<int64_t>(arg.seed_.val);
-    *offset_ptr = static_cast<int64_t>(arg.offset_.val);
+    //auto [
+    //    query_buffer_reshaped,
+    //    key_buffer_reshaped,
+    //    value_buffer_reshaped,
+    //    cumulative_sequence_length_q,
+    //    cumulative_sequence_length_kv,
+    //    max_seqlen_batch_q,
+    //    max_seqlen_batch_kv,
+    //    output_shape] = preprocessing::sdpa_nested_preprocessing(query, key, value);
+    // C10_LOG_API_USAGE_ONCE("torch.sdpa.flash_attention_cudnn");
+    // TODO(eqy): debug mask support
+    // BHSD ...
+    const int64_t batch_size = cumulative_sequence_length_q.value().size(0) - 1;
+    const int64_t num_heads_q = query.size(-2);
+    const int64_t num_heads_k = key.size(-2);
+    const int64_t num_heads_v = value.size(-2);
+    const int64_t head_dim_qk = query.size(-1);
+    const int64_t head_dim_v = value.size(-1);
+    auto attn_bias_ = attn_bias;
+    if (attn_bias_.has_value()) {
+      const auto bias_dim = attn_bias_.value().dim();
+      if (bias_dim == 2) {
+        attn_bias_ = attn_bias_.value().expand({batch_size, 1, max_seqlen_batch_q, max_seqlen_batch_kv});
+      } else if (bias_dim == 3) {
+        attn_bias_ = attn_bias_.value().expand({batch_size, 1, max_seqlen_batch_q, max_seqlen_batch_kv});
+      } else {
+        attn_bias_ = attn_bias_.value().expand({batch_size, attn_bias_.value().size(1), max_seqlen_batch_q, max_seqlen_batch_kv});
+        TORCH_CHECK(bias_dim == 4, "cuDNN SDPA expects either a 2D, 3D, or 4D attn_bias but got ", attn_bias_.value().dim(), "D");
+      }
+    }
+
+    Tensor attention, log_sumexp;
+
+    at::Tensor cudnn_seed, cudnn_offset;
+    cudnn_seed = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
+    cudnn_offset = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
+
+    const bool use_dropout = std::fpclassify(dropout_p) != FP_ZERO;
+
+    // See Note [Seed and Offset Device] in _efficient_attention_forward
+    at::PhiloxCudaState philox_state;
+    const bool in_capture_stream =
+        at::cuda::currentStreamCaptureStatus() != at::cuda::CaptureStatus::None;
+    if (use_dropout) {
+      // Device
+      auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(
+          std::nullopt, at::cuda::detail::getDefaultCUDAGenerator());
+
+      // See Note [Acquire lock when using random generators]
+      std::lock_guard<std::mutex> lock(gen->mutex_);
+      // if using dropout, we produce 1 random number for each element of the
+      // attention tensor
+      // TODO(eqy): should state be advanced per thread (local) amount or per call/launch (global) amount
+      philox_state = gen->philox_cuda_state(batch_size * num_heads_q * max_seqlen_batch_q * max_seqlen_batch_kv);
+      at::cuda::philox::unpack_cudnn_wrapper(philox_state, static_cast<int64_t*>(cudnn_seed.data_ptr()), static_cast<int64_t*>(cudnn_offset.data_ptr()), at::cuda::getCurrentCUDAStream());
+    }
+
+    const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
+
+    run_cudnn_SDP_fprop_nestedtensor(batch_size/*int64_t b*/,
+                                     num_heads_q/*int64_t h*/,
+                                     num_heads_k,
+                                     num_heads_v,
+                                     max_seqlen_batch_q/*int64_t s_q*/,
+                                     max_seqlen_batch_kv/*int64_t s_kv*/,
+                                     head_dim_qk/*int64_t d_qk*/,
+                                     head_dim_v/*int64_t d_v*/,
+                                     softmax_scale/*float scaling_factor*/,
+                                     compute_logsumexp/* bool */,
+                                     is_causal/* bool */,
+                                     dropout_p/*double dropout_probability*/,
+                                     cumulative_sequence_length_q.value(),
+                                     cumulative_sequence_length_kv.value(),
+                                     query/* Tensor q*/,
+                                     key/* Tensor k*/,
+                                     value/* Tensor v*/,
+                                     attn_bias_ /* std::optional<Tensor> */,
+                                     log_sumexp/*Tensor softmaxstats*/,
+                                     attention/*Tensor o*/,
+                                     cudnn_seed/*Tensor dropoutseed*/,
+                                     cudnn_offset/*Tensor dropoutoffset*/);
+    //attention = wrap_buffer(attention.view(-1), output_shape).transpose(1, 2);
+    return std::make_tuple(std::move(attention), std::move(log_sumexp), cumulative_sequence_length_q.value(), cumulative_sequence_length_kv.value(), max_seqlen_batch_q, max_seqlen_batch_kv, std::move(cudnn_seed), std::move(cudnn_offset), Tensor());
   }
 }
 
@@ -760,84 +943,10 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
     std::optional<double> scale) {
   // Used for tracking usage statistics
   C10_LOG_API_USAGE_ONCE("torch.sdpa.flash_attention_cudnn");
-  // TODO(eqy): debug mask support
-  // Query (Batch x Num_heads x Q_seq_len  x Dim_per_head)
-  // Key   (Batch x Num_heads x KV_seq_len x Dim_per_head)
-  // Value (Batch x Num_heads x KV_seq_len x Dim_per_head)
-  const int64_t batch_size = query.size(0);
-  const int64_t num_heads = query.size(1);
   const int64_t max_seqlen_batch_q = query.size(2);
-  const int64_t head_dim_qk = query.size(3);
-  const int64_t head_dim_v = value.size(3);
   const int64_t max_seqlen_batch_k = key.size(2);
-  const int64_t max_seqlen_batch_v = value.size(2);
-  TORCH_CHECK(
-      max_seqlen_batch_k == max_seqlen_batch_v,
-      "Key and Value must have the same sequence length");
-  auto attn_bias_ = attn_bias;
-  if (attn_bias_.has_value()) {
-    const auto bias_dim = attn_bias_.value().dim();
-    if (bias_dim == 2) {
-      attn_bias_ = attn_bias_.value().expand({batch_size, 1, max_seqlen_batch_q, max_seqlen_batch_k});
-    } else if (bias_dim == 3) {
-      attn_bias_ = attn_bias_.value().expand({batch_size, 1, max_seqlen_batch_q, max_seqlen_batch_k});
-    } else {
-      TORCH_CHECK(bias_dim == 4, "cuDNN SDPA expects either a 2D, 3D, or 4D attn_bias but got ", attn_bias_.value().dim(), "D");
-      attn_bias_ = attn_bias_.value().expand({batch_size, attn_bias_.value().size(1), max_seqlen_batch_q, max_seqlen_batch_k});
-    }
-  }
 
-  Tensor attention, log_sumexp;
-
-  at::Tensor cudnn_seed, cudnn_offset;
-  cudnn_seed = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
-  cudnn_offset = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
-
-  const bool use_dropout = std::fpclassify(dropout_p) != FP_ZERO;
-
-  // See Note [Seed and Offset Device] in _efficient_attention_forward
-  at::PhiloxCudaState philox_state;
-  const bool in_capture_stream =
-      at::cuda::currentStreamCaptureStatus() != at::cuda::CaptureStatus::None;
-  if (use_dropout) {
-    // Device
-    auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(
-        std::nullopt, at::cuda::detail::getDefaultCUDAGenerator());
-
-    // See Note [Acquire lock when using random generators]
-    std::lock_guard<std::mutex> lock(gen->mutex_);
-    // if using dropout, we produce 1 random number for each element of the
-    // attention tensor
-    // TODO(eqy): should state be advanced per thread (local) amount or per call/launch (global) amount
-    philox_state = gen->philox_cuda_state(batch_size * num_heads * max_seqlen_batch_q * max_seqlen_batch_k);
-    unpack_cudnn<<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
-                                      philox_state, static_cast<int64_t*>(cudnn_seed.data_ptr()), static_cast<int64_t*>(cudnn_offset.data_ptr()));
-  }
-
-  const auto softmax_scale = sdp::calculate_scale(query, scale).expect_float();
-  Tensor debugmask;
-
-  run_cudnn_SDP_fprop(batch_size/*int64_t b*/,
-                      num_heads/*int64_t h*/,
-                      max_seqlen_batch_q/*int64_t s_q*/,
-                      max_seqlen_batch_k/*int64_t s_kv*/,
-                      head_dim_qk/*int64_t d_qk*/,
-                      head_dim_v/*int64_t d_v*/,
-                      softmax_scale/*float scaling_factor*/,
-                      compute_logsumexp/* bool */,
-                      is_causal/* bool */,
-                      dropout_p/*double dropout_probability*/,
-                      query/* Tensor q*/,
-                      key/* Tensor k*/,
-                      value/* Tensor v*/,
-                      attn_bias_ /* std::optional<Tensor> */,
-                      log_sumexp/*Tensor softmaxstats*/,
-                      attention/*Tensor o*/,
-                      cudnn_seed/*Tensor dropoutseed*/,
-                      cudnn_offset/*Tensor dropoutoffset*/);
-
-  // TODO(eqy): support debug_attn_mask
-  return std::make_tuple(std::move(attention), std::move(log_sumexp), Tensor(), Tensor(), max_seqlen_batch_q, max_seqlen_batch_k, std::move(cudnn_seed), std::move(cudnn_offset), Tensor());
+  return at::_cudnn_attention_forward(query, key, value, attn_bias, std::nullopt, std::nullopt, max_seqlen_batch_q, max_seqlen_batch_k, compute_logsumexp, dropout_p, is_causal, return_debug_mask, scale);
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attention_cuda(

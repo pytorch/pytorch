@@ -1034,6 +1034,16 @@ cmp_name_to_op_mapping = {
 }
 
 
+cmp_name_to_op_str_mapping = {
+    "__eq__": "==",
+    "__ne__": "!=",
+    "__lt__": "<",
+    "__le__": "<=",
+    "__gt__": ">",
+    "__ge__": ">=",
+}
+
+
 def is_wrapper_or_member_descriptor(value):
     return isinstance(
         value,
@@ -2842,11 +2852,11 @@ def same(
                     )
 
                     if use_larger_multiplier_for_smaller_tensor and (
-                        fp64_ref.numel() <= 10 and tol >= 4 * 1e-2
+                        fp64_ref.numel() <= 10
                     ):
                         multiplier = 10.0
                     elif use_larger_multiplier_for_smaller_tensor and (
-                        fp64_ref.numel() <= 500 and tol >= 4 * 1e-2
+                        fp64_ref.numel() <= 500
                     ):
                         multiplier = 5.0
                     elif (

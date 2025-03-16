@@ -134,7 +134,11 @@ def maybe_realize(args: list[Optional[IRNode]]):
 
 
 def get_float32_precision():
-    if torch.get_float32_matmul_precision() == "highest" or torch.version.hip:
+    if (
+        torch.get_float32_matmul_precision() == "highest"
+        or torch.version.hip
+        or torch.mtia.is_available()
+    ):
         return "'ieee'"
     else:
         return "'tf32'"
@@ -1444,6 +1448,10 @@ def flex_attention(
     # Mark SPARSE_KV_BLOCK_SIZE & SPARSE_Q_BLOCK_SIZE as static shapes and add guards.
     SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_KV_BLOCK_SIZE)
     SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_Q_BLOCK_SIZE)
+
+    # ROCm specific considerations
+    if torch.version.hip:
+        kernel_options["kpack"] = 2
 
     # Note, we don't need to pass in the captured buffers explicitly
     # because they're implicitly added by the score_mod function
