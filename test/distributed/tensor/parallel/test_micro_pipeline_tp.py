@@ -487,7 +487,7 @@ class MicroPipelineTPTest(TestCase):
         with _test_mode():
             self.assertRaisesRegex(
                 AssertionError,
-                "async TP found no matching all-gather/reduce-scatter patterns for fusion", 
+                "async TP found no matching all-gather/reduce-scatter patterns for fusion",
                 micro_pipeline_tp_pass,
                 gm.graph
             )
@@ -504,7 +504,7 @@ class MicroPipelineTPTest(TestCase):
             B: torch.Tensor,
         ) -> torch.Tensor:
             """
-            Performs 'reshape -> reciprocal -> mm -> reshape -> reduce scatter' pattern, 
+            Performs 'reshape -> reciprocal -> mm -> reshape -> reduce scatter' pattern,
             so the extra 'reciprocal' op in the middle should cause pattern matching to fail.
             """
             out_shape = [*A.shape[:-1], B.shape[-1]]
@@ -525,7 +525,7 @@ class MicroPipelineTPTest(TestCase):
         with _test_mode():
             self.assertRaisesRegex(
                 AssertionError,
-                "no successful fusions of matul-reduce-scatters", 
+                "no successful fusions of matul-reduce-scatters",
                 micro_pipeline_tp_pass,
                 gm.graph
             )

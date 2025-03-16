@@ -1035,16 +1035,18 @@ def _fused_matmul_reduce_scatter_impl(
 
     group = c10d._resolve_process_group(group_name)
 
-    # 'A' is a matrix which may have potentially been reshaped from 3D+ to 2D for the scaled mm.
-    # - Reshape to 2D, to handle case where A is 3D+. This is the case for plain matmul, but 
-    #   for scaled matmul A will be 2D.
-    # - Move scatter to first dim, then shard the tensor along the first dim, so the chunk producer
-    #   can perform matmuls along the first dim.
+    # Move scatter to first dim, then shard the tensor along the first dim, so the chunk producer
+    # can perform matmuls along the first dim.
     A_with_scatter_dim_0 = A.movedim(scatter_dim_after_maybe_reshape, 0)
+
+    # To handle case where A is 3D+, reshape to 2D to prepare for mm which requires 2D inputs.
     A_with_scatter_dim_0 = A.flatten(0, -2)
+
+    # Parition A along the first dim to prepare for sharding across TP process group.
     A_shards = A_with_scatter_dim_0.chunk(group.size())
 
     # Now that 'A' is sharded along the first dim, we need to update its scale(s) accordingly.
+    # How we do this depends on if we are using tensorwise scaling, rowwise scaling, or no scaling. 
     tensorwise_scaling = A_scale is not None and A_scale.numel() == 1
     rowwise_scaling = A_scale is not None and A_scale.numel() > 1
 
@@ -1081,17 +1083,18 @@ def _fused_matmul_reduce_scatter_impl(
     # (a*b,c) @ (c,d) = (a*b,d)
     stacked_partials = A_with_scatter_dim_0.new_empty(A_with_scatter_dim_0.shape[0], B.shape[1], dtype=out_dtype or A.dtype) 
 
-    # Execute the pipelined scaled mm.
+    # Execute the pipelined mm/scaled_mm.
     _pipelined_produce_and_all2all(
         chunk_producer,
         stacked_partials,
         group_name,
     )
 
-    # We now need to calculate the final output, which is a 3D+ tensor.
-    # We will "view" the 2D stacked partials as 3D+ tensors; we can think about this
-    # as a big tensor composed of `group_size` tensors, each of which are sharded along
-    # the original scatter dim assigned for the 3D output tensor.
+    # We now need to transform the 2D raw mm outputs to a reduce-scattered 3D+ output.
+    # First we determine the leading dims of the 3D+ output after reduce-scatter, 
+    # to be composed with a final dim of -1 which will autopopulate the rest.
+    # We can think about the unreduced 3D+ as a big tensor composed of `group_size` smaller tensors,
+    # each of which are sharded along the original scatter dim that was assigned to the 3D output tensor.
     stacked_partials_3D_leading_dims = [group.size()] + list(A_with_scatter_dim_0.shape[:-1])
     stacked_partials_3D_leading_dims[orig_scatter_dim] //= group.size()
 

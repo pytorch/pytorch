@@ -849,7 +849,7 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> bool:
         if order[node] > order[fused_node]:
             fused_node.prepend(node)
     
-    logging.debug("successfully fused matmul reduce scatter")
+    log.debug("successfully fused matmul reduce scatter")
     return True
 
 def _get_node_to_ancestors(
