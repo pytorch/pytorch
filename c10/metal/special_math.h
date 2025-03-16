@@ -1167,7 +1167,7 @@ inline float modified_bessel_i0_forward(T x) {
     for (uint8_t index = 1; index < 30; index++) {
       p = q;
       q = a;
-      a = (.5 * ::metal::fabs(x)  - 2.0) * q - p + A[index];
+      a = (.5 * ::metal::fabs(x) - 2.0) * q - p + A[index];
     }
 
     return ::metal::exp(::metal::fabs(x)) * (T(0.5) * (a - p));
