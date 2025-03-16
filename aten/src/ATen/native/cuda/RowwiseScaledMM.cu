@@ -107,7 +107,7 @@ int round_up_to_nearest_multiple(int a, int b) {
   return ceildiv(a, b) * b;
 }
 
-// Cutlass rowwise kernel
+// Cutlass rowwise kernel for sm90
 template <
     typename TileShape,
     typename ClusterShape,
@@ -220,6 +220,187 @@ void f8f8bf16_rowwise_impl(
               sizeof(typename CollectiveEpilogue::SharedStorage))>,
           typename Schedule<large_tile, FastAccum::value>::type>::
           CollectiveOp;
+
+  using GemmKernel = cutlass::gemm::kernel::GemmUniversal<
+      cute::Shape<int, int, int>,
+      CollectiveMainloop,
+      CollectiveEpilogue>;
+
+  using Gemm = cutlass::gemm::device::GemmUniversalAdapter<GemmKernel>;
+
+  using StrideInputA = typename Gemm::GemmKernel::StrideA;
+  using StrideInputB = typename Gemm::GemmKernel::StrideB;
+  using StrideOutput = typename Gemm::GemmKernel::StrideC;
+
+  StrideInputA stride_a = cutlass::make_cute_packed_stride(
+      StrideInputA{}, cute::make_shape(M, static_cast<int>(XQ.stride(0)), 1));
+  StrideInputB stride_b = cutlass::make_cute_packed_stride(
+      StrideInputB{}, cute::make_shape(N, static_cast<int>(WQ.stride(1)), 1));
+  StrideOutput stride_output = cutlass::make_cute_packed_stride(
+      StrideOutput{}, cute::make_shape(M, static_cast<int>(out.stride(0)), 1));
+
+  typename Gemm::Arguments arguments{
+      cutlass::gemm::GemmUniversalMode::kGemm,
+      {M, N, K},
+      {reinterpret_cast<DtypeA*>(XQ.data_ptr()),
+       stride_a,
+       reinterpret_cast<DtypeB*>(WQ.data_ptr()),
+       stride_b},
+      {{{{bias.has_value() ? reinterpret_cast<DtypeBias*>(bias->data_ptr())
+                           : nullptr},
+         {{reinterpret_cast<DtypeScale*>(w_scale.data_ptr())},
+          {{reinterpret_cast<DtypeScale*>(x_scale.data_ptr())}}}}},
+       reinterpret_cast<DtypeOutput*>(out.data_ptr()),
+       stride_output,
+       reinterpret_cast<DtypeOutput*>(out.data_ptr()),
+       stride_output}};
+
+  Gemm gemm;
+
+  // Using the arguments, query for extra workspace required for matrix
+  // multiplication computation
+  size_t workspace_size = Gemm::get_workspace_size(arguments);
+
+  // Ensure persistent kernels leave enough free SMs for NCCL background ops.
+  if (at::globalContext()._SMCarveout_EXPERIMENTAL().has_value()) {
+    arguments.hw_info.sm_count =
+        at::cuda::getDeviceProperties(out.device().index())->multiProcessorCount -
+        at::globalContext()._SMCarveout_EXPERIMENTAL().value();
+  }
+
+  // Set the swizzle size
+  arguments.scheduler.max_swizzle_size = swizzle;
+
+  // Allocate workspace memory
+  auto workspace = XQ.new_empty(
+      {static_cast<int64_t>(workspace_size)},
+      at::TensorOptions().dtype(at::kByte));
+
+  // Check the problem size is supported or not
+  cutlass::Status status = gemm.can_implement(arguments);
+  if (status != cutlass::Status::kSuccess) {
+    throw std::runtime_error("cutlass cannot implement");
+  }
+
+  // Initialize CUTLASS kernel with arguments and workspace pointer
+  status = gemm.initialize(arguments, workspace.data_ptr());
+  if (status != cutlass::Status::kSuccess) {
+    throw std::runtime_error("cutlass cannot initialize");
+  }
+
+  status = gemm(at::cuda::getCurrentCUDAStream());
+  if (status != cutlass::Status::kSuccess) {
+    throw std::runtime_error(
+        std::string("cutlass cannot run") +
+        cutlass::cutlassGetStatusString(status));
+  }
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
+
+// Cutlass rowwise kernel for SM100
+template <
+    typename TileShape,
+    typename ClusterShape,
+    typename Transposed,
+    typename FastAccum,
+    typename DtypeA,
+    typename DtypeB,
+    typename DtypeBias>
+void f8f8bf16_rowwise_impl_sm100(
+    at::Tensor XQ, // FP8
+    at::Tensor WQ, // FP8
+    at::Tensor x_scale,
+    at::Tensor w_scale,
+    std::optional<at::Tensor> bias,
+    at::Tensor out,
+    const int swizzle) {
+  int M = XQ.size(0);
+  int N = WQ.size(1);
+  int K = XQ.size(1);
+
+  // Workaround for https://github.com/pytorch/pytorch/issues/133334.
+  if (M % 256 > 0) {
+    int padded_M = ((M - 1) / 256 + 1) * 256;
+    at::Tensor padded_x_scale = x_scale.new_empty({padded_M, 1});
+    padded_x_scale.slice(/*dim=*/0, /*start=*/0, /*end=*/M)
+        .copy_(std::move(x_scale));
+    x_scale = std::move(padded_x_scale);
+  }
+
+  using LayoutInputA = cutlass::layout::RowMajor;
+  constexpr int AlignmentInputA = 16 / sizeof(DtypeA);
+
+  using LayoutInputB = cutlass::layout::ColumnMajor;
+  constexpr int AlignmentInputB = 16 / sizeof(DtypeB);
+
+  using LayoutOutput = std::conditional_t<
+      Transposed::value,
+      cutlass::layout::ColumnMajor,
+      cutlass::layout::RowMajor>;
+  constexpr int AlignmentOutput = 16 / sizeof(DtypeOutput);
+
+  // Tag indicating the minimum SM that supports the intended feature
+  using ArchTag = cutlass::arch::Sm100;
+  using OperatorClass = cutlass::arch::OpClassTensorOp;
+
+  // Implement rowwise scaling epilogue.
+  constexpr int ColBroadcastStages = 0;
+  constexpr int RowBroadcastStages = 0;
+
+  using XScale = cutlass::epilogue::fusion::
+      Sm90ColBroadcast<ColBroadcastStages, TileShape, DtypeScale>;
+
+  using WScale = cutlass::epilogue::fusion::
+      Sm90RowBroadcast<RowBroadcastStages, TileShape, DtypeScale>;
+
+  using Bias = std::conditional_t<
+      Transposed::value,
+      cutlass::epilogue::fusion::
+          Sm90ColBroadcast<ColBroadcastStages, TileShape, DtypeBias>,
+      cutlass::epilogue::fusion::
+          Sm90RowBroadcast<RowBroadcastStages, TileShape, DtypeBias>>;
+
+  using Accum = cutlass::epilogue::fusion::Sm90AccFetch;
+  using AccumScale = cutlass::epilogue::fusion::Sm90EVT<
+      Multiply,
+      WScale,
+      cutlass::epilogue::fusion::Sm90EVT<Multiply, XScale, Accum>>;
+
+  using EpilogueEVT = cutlass::epilogue::fusion::Sm90EVT<
+      Cast,
+      cutlass::epilogue::fusion::Sm90EVT<
+          Add,
+          Bias,
+          AccumScale>>;
+
+  using EpilogueScheduleType = cutlass::epilogue::collective::EpilogueScheduleAuto;
+  using CollectiveEpilogue = typename cutlass::epilogue::collective::CollectiveBuilder<
+      cutlass::arch::Sm100, OperatorClass,
+      TileShape, ClusterShape,
+      cutlass::epilogue::collective::EpilogueTileAuto,
+      DtypeAccum, DtypeEpilogue,
+      DtypeOutput, LayoutOutput, AlignmentOutput,
+      DtypeOutput, LayoutOutput, AlignmentOutput,
+      EpilogueScheduleType,
+      EpilogueEVT>::CollectiveOp;
+
+  using MainloopScheduleType = cutlass::gemm::collective::KernelScheduleAuto;
+  using CollectiveMainloop =
+      typename cutlass::gemm::collective::CollectiveBuilder<
+          ArchTag,
+          OperatorClass,
+          DtypeA,
+          LayoutInputA,
+          AlignmentInputA,
+          DtypeB,
+          LayoutInputB,
+          AlignmentInputB,
+          DtypeAccum,
+          TileShape,
+          ClusterShape,
+          cutlass::gemm::collective::StageCountAutoCarveout<static_cast<int>(sizeof(typename CollectiveEpilogue::SharedStorage))>,
+          MainloopScheduleType>::CollectiveOp;
 
   using GemmKernel = cutlass::gemm::kernel::GemmUniversal<
       cute::Shape<int, int, int>,
@@ -531,17 +712,34 @@ void dispatch_fp8_rowwise_kernel_on_tile_size(
     smTarget -= at::globalContext()._SMCarveout_EXPERIMENTAL().value();
   }
 
+  cudaDeviceProp* properties = at::cuda::getCurrentDeviceProperties();
+  const bool sm10x = properties != nullptr && properties->major == 10;
+
   // We prefer to use smaller tiles (less wasted compute in case of padding),
   // but if this causes us to have more CUDA blocks than there are SMs on the
   // GPU then we'll hit wave quantization, hence we'll switch to larger tiles.
-  if (ceildiv(M, 64 * cute::get<0>(ClusterShape{})) *
+  const bool use_smaller_tiles = ceildiv(M, 64 * cute::get<0>(ClusterShape{})) *
           ceildiv(N, 128 * cute::get<1>(ClusterShape{})) <=
-      smTarget / cute::size(ClusterShape{})) {
+      smTarget / cute::size(ClusterShape{});
+
+  if (use_smaller_tiles) {
+    if (sm10x) {
+      return f8f8bf16_rowwise_impl_sm100<
+        /*TileShape=*/cute::Shape<cute::_64, cute::_128, cute::_128>,
+        ClusterShape,
+        Types...>(XQ, WQ, x_scale, w_scale, bias, out, swizzle);
+    }
     return f8f8bf16_rowwise_impl<
         /*TileShape=*/cute::Shape<cute::_64, cute::_128, cute::_128>,
         ClusterShape,
         Types...>(XQ, WQ, x_scale, w_scale, bias, out, swizzle);
   } else {
+    if (sm10x) {
+      return f8f8bf16_rowwise_impl_sm100<
+        /*TileShape=*/cute::Shape<cute::_128, cute::_128, cute::_128>,
+        ClusterShape,
+        Types...>(XQ, WQ, x_scale, w_scale, bias, out, swizzle);
+    }
     return f8f8bf16_rowwise_impl<
         /*TileShape=*/cute::Shape<cute::_128, cute::_128, cute::_128>,
         ClusterShape,
@@ -699,7 +897,7 @@ void dispatch_fp8_rowwise_kernel_on_sm(
         false, "Rowwise scaling is not currently supported on your device");
   }
 
-  if (sm9x) {
+  if (sm9x || sm10x) {
     dispatch_fp8_rowwise_kernel_on_cluster_size_and_transpose<Types...>(XQ, WQ, x_scale, w_scale, bias, out);
   } else {
     f8f8bf16_rowwise_impl_sm89<Types...>(XQ, WQ, x_scale, w_scale, bias, out);
