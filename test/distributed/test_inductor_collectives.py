@@ -2,6 +2,7 @@
 import datetime
 import functools
 import unittest
+from collections import defaultdict
 from unittest.mock import patch
 
 import torch
@@ -32,6 +33,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
 )
 from torch.testing._internal.inductor_utils import HAS_GPU
+from torch.utils._python_dispatch import TorchDispatchMode
 
 
 def _tolist_with_constrain_as_size(tensor):
@@ -42,6 +44,7 @@ def _tolist_with_constrain_as_size(tensor):
 
 
 @requires_nccl()
+@instantiate_parametrized_tests
 class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     """
     Run correctness checks in multi-proc runner, mark with minimum # GPUs to run under
@@ -549,6 +552,192 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             eager_out = example(*inputs, **trs)
             inductor_out = compiled_fn(*inputs, **trs)
             self.assertTrue(same(eager_out, inductor_out, tol=0.001))
+
+    # The goal of this test is that when `unsafe_allow_recompute_of_collectives=False`,
+    # The partitioner will *never* recompute collectives in the backward, even
+    # if the activation_memory_budget partitioner is being used,
+    # unless there is a manual user checkpoint() region (which we know makes it safe
+    # to recompute the collective, since we assume that the user applied the AC
+    # region consistently across all ranks)
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
+    @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
+    @patch.object(torch._functorch.config, "activation_memory_budget", 0.01)
+    @parametrize("override_with_ac", [False, True])
+    def test_all_to_all_recompute_is_always_banned(self, override_with_ac):
+        @torch.library.custom_op("custom_ns::foo", mutates_args=())
+        def foo(x: torch.Tensor) -> torch.Tensor:
+            return x + 1
+
+        @foo.register_fake
+        def _(x):
+            return torch.empty_like(x)
+
+        def setup_context(ctx, inputs, output):
+            ctx.save_for_backward(inputs[0])
+            return
+
+        def backward(ctx, grad):
+            (x,) = ctx.saved_tensors
+            return grad * x
+
+        foo.register_autograd(backward, setup_context=setup_context)
+
+        class AllToAllSingle(torch.autograd.Function):
+            @staticmethod
+            def forward(
+                ctx,
+                input: torch.Tensor,
+                output_split_sizes,
+                input_split_sizes,
+                tag,
+                ranks,
+                group_size: int,
+            ) -> torch.Tensor:
+                ctx.output_split_sizes = input_split_sizes
+                ctx.input_split_sizes = output_split_sizes
+                ctx.group_size = group_size
+                a2a = torch.ops._c10d_functional.all_to_all_single.default(
+                    input,
+                    output_split_sizes,
+                    input_split_sizes,
+                    "0",
+                )
+                a2a = torch.ops.c10d_functional.wait_tensor(a2a)
+                return a2a
+
+            @staticmethod
+            def backward(ctx, grad):
+                grad = torch.ops._c10d_functional.all_to_all_single.default(
+                    grad,
+                    ctx.output_split_sizes,
+                    ctx.input_split_sizes,
+                    "0",
+                )
+
+                return (
+                    torch.ops.c10d_functional.wait_tensor(grad),
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+
+        def alltoall_autograd(
+            inp,
+            output_split_sizes,
+            input_split_sizes,
+            tag,
+            ranks,
+            group_size,
+        ):
+            out = AllToAllSingle.apply(
+                inp, output_split_sizes, input_split_sizes, tag, ranks, group_size
+            )
+            return out
+
+        # simple mode to track how many collective ops we saw in the backward
+        class TrackingMode(TorchDispatchMode):
+            def __init__(self):
+                super().__init__()
+                self.ops_counter = defaultdict(int)
+
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                rs = func(*args, **kwargs)
+                self.ops_counter[func] += 1
+                return rs
+
+        def example(
+            inp,
+            input_split_sizes_tensor,
+            output_split_sizes_tensor,
+            *,
+            tag,
+            ranks,
+            group_size,
+        ):
+            input_split_sizes = _tolist_with_constrain_as_size(input_split_sizes_tensor)
+            output_split_sizes = _tolist_with_constrain_as_size(
+                output_split_sizes_tensor
+            )
+            a2a = torch.ops.custom_ns.alltoall_autograd.default(
+                inp,
+                output_split_sizes,
+                input_split_sizes,
+                tag,
+                ranks,
+                group_size,
+            )
+
+            return torch.ops.custom_ns.foo(a2a)
+
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size
+        ), torch._dynamo.config.patch(
+            dynamic_shapes=True,
+            capture_dynamic_output_shape_ops=True,
+            capture_scalar_outputs=True,
+        ), torch.library._scoped_library(
+            "custom_ns", "FRAGMENT"
+        ) as lib:
+            lib.define(
+                "alltoall_autograd(Tensor input, SymInt[]? output_split_sizes, SymInt[]? input_split_sizes, str tag, int[] ranks, int group_size) -> Tensor"  # noqa: B950
+            )
+            lib.impl("alltoall_autograd", alltoall_autograd, "Autograd")
+            lib.impl("alltoall_autograd", alltoall_autograd, "Meta")
+
+            row = self.world_size * (self.rank + 1) * (self.world_size + 1) / 2
+            input_split_sizes_tensor = torch.tensor(
+                [(i + 1) * (self.rank + 1) for i in range(self.world_size)],
+                dtype=torch.int64,
+            )
+            output_split_sizes_tensor = torch.tensor(
+                [(i + 1) * (self.rank + 1) for i in range(self.world_size)],
+                dtype=torch.int64,
+            )
+            inputs = (
+                torch.ones(int(row), 5, device="cuda", requires_grad=True)
+                * (self.rank + 1),
+                input_split_sizes_tensor,
+                output_split_sizes_tensor,
+            )
+            trs = self.get_world_trs()
+
+            compiled_fn = torch.compile(example, fullgraph=True, dynamic=True)
+
+            if override_with_ac:
+
+                def compiled_fn_wrapper(*args):
+                    return example(*inputs, **trs)
+
+                out = torch.utils.checkpoint.checkpoint(
+                    compiled_fn_wrapper, *inputs, use_reentrant=False
+                )
+            else:
+                out = compiled_fn(*inputs, **trs)
+
+            # track how many all_to_alls we saw in the backward
+            with TrackingMode() as m:
+                out.sum().backward()
+            if override_with_ac:
+                # We wrapped our test in AC, which overrides the partitioner decision
+                # of never recomputing collectives.
+                # So we should properly see the all2all be recomputed in the backward
+                self.assertEqual(
+                    m.ops_counter[torch.ops._c10d_functional.all_to_all_single.default],
+                    2,
+                )
+            else:
+                # there is 1 all2all in the fw, and 1 all2all in the backward.
+                # notably: even though activation_memory_budget == 0 ("recompute_everything"),
+                # we are still choosing *not* to recompute the all2all from the fw
+                self.assertEqual(
+                    m.ops_counter[torch.ops._c10d_functional.all_to_all_single.default],
+                    1,
+                )
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
