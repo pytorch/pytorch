@@ -126,7 +126,7 @@ Welford<T> welford_combine(const Welford<T>& a, const Welford<T>& b, bool use_in
   return result;
 }
 
-template <typename T, uint64_t kChunkSize>
+template <typename T, uint64_t kChunkSize = 0>
 Welford<T> welford_combine(Welford<T>& acc, T& data, WelfordHelper<T, kChunkSize>* w=nullptr) {
   // Combine welford reduction with cascade summation to improve numerical stability.
   // https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance
@@ -171,7 +171,7 @@ Welford<T> welford_combine(Welford<T>& acc, T& data, WelfordHelper<T, kChunkSize
   return result;
 }
 
-template <typename T, uint64_t kChunkSize>
+template <typename T, uint64_t kChunkSize = 0>
 Welford<T> welford_combine(Welford<T>& acc, WelfordHelper<T, kChunkSize>* w) {
   for (const auto i : c10::irange(w->depth)) {
     acc = welford_combine(acc, w->welford_stk[i]);
