@@ -128,12 +128,10 @@ def check_meta_consistency_vt(
     return check_meta_consistency(unwrapped1, unwrapped2, lhs_name, rhs_name)
 
 
-def _collect_fake_inputs(tx, inputs):
+def _collect_fake_inputs(inputs):
     from torch._subclasses.fake_tensor import FakeTensor
 
-    # with tx.fake_mode:
-    # Get the example values of the tensors.
-    # In case a BatchedTensor is detected, get the unwrapped tensor
+    # Get the example values of the inputs.
     inputs_fake = []
     for inp in inputs:
         if hasattr(inp, "node"):
@@ -143,6 +141,7 @@ def _collect_fake_inputs(tx, inputs):
                     val
                 ) or torch._C._functorch.is_functionaltensor(val):
                     # This case is for batched or functional tensors
+                    # Unwrap the tensors
                     while torch._C._functorch.is_batchedtensor(
                         val
                     ) or torch._C._functorch.is_functionaltensor(val):
@@ -155,6 +154,7 @@ def _collect_fake_inputs(tx, inputs):
                     inputs_fake.append(val)
             else:
                 # This case is for SymInts and other non-Tensor elements
+                assert not isinstance(val, torch.Tensor)
                 inputs_fake.append(val)
         else:
             # This case is for ints
@@ -179,7 +179,7 @@ def _check_mutation_and_alias(graph_module, inputs_fake, name, pre_dispatch):
 def check_mutation_and_alias(tx, graph_module, inputs, name, pre_dispatch=False):
     with tx.fake_mode:
         # Collect the fake inputs from the input proxies
-        inputs_fake = _collect_fake_inputs(tx, inputs)
+        inputs_fake = _collect_fake_inputs(inputs)
 
         # Check for mutations and alias and raise Exceptions when needed
         _check_mutation_and_alias(graph_module, inputs_fake, name, pre_dispatch)

@@ -937,8 +937,6 @@ def forward(self, pred_1):
             ):
                 cond(pred, true_fn, false_fn, ({"t": [a, {"b": b}, (c,)]},))
 
-    # TODO: There is an error that the output-output alias is also detected across branches
-    # It is correct to check for output-output alias within a branch, but not across branches
     @skipIfTorchDynamo("Skip due to graph break when run with dynamo")
     def test_cond_autograd_same_pytree_output(self):
         def true_fn(x):
@@ -2072,11 +2070,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
         def fct_wrong_pytree(x, y):
             return (
                 {
-                    "i": x["i"] * y["j"][0][0].clone(),
-                    "k": torch.tensor(0.0).clone(),
+                    "i": x["i"] * y["j"][0][0],
+                    "k": torch.tensor(0.0),
                     "j": (
                         [x["j"][1][0]["o"].clone()],
-                        [{"o": torch.sin(x["i"]).clone()}],
+                        [{"o": torch.sin(x["i"])}],
                     ),
                 },
                 {
@@ -4359,7 +4357,7 @@ class AssociativeScanTests(TestCase):
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
-    def test_associative_scan_non_pointwise1111(self):
+    def test_associative_scan_non_pointwise(self):
         device = torch.device("cuda")
         x = torch.randn(3, 10, 2, device=device)
         with self.assertRaisesRegex(
