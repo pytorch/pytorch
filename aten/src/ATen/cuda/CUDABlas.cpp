@@ -110,16 +110,16 @@ static cublasOperation_t _cublasOpFromChar(char op) {
   // NOLINTNEXTLINE(bugprone-switch-missing-default-case)
   switch (op) {
     case 'n':
-    case 'N':
       [[fallthrough]];
+    case 'N':
       return CUBLAS_OP_N;
     case 't':
-    case 'T':
       [[fallthrough]];
+    case 'T':
       return CUBLAS_OP_T;
     case 'c':
-    case 'C':
       [[fallthrough]];
+    case 'C':
       return CUBLAS_OP_C;
   }
   TORCH_CHECK(false,
