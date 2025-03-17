@@ -3121,17 +3121,8 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
             for arg in args
         )
 
-    disable_inference_mode_ctx_mgr: contextlib.AbstractContextManager[None] = (
-        contextlib.nullcontext()
-    )
-    if (
-        torch._dynamo.config.fake_tensor_disable_inference_mode
-        and torch.is_inference_mode_enabled()
-    ):
-        disable_inference_mode_ctx_mgr = torch.inference_mode(False)
-
     try:
-        with tx.fake_mode, enable_python_dispatcher(), disable_inference_mode_ctx_mgr:
+        with tx.fake_mode, enable_python_dispatcher():
             ret_val = wrap_fake_exception(
                 lambda: run_node(tx.output, node, args, kwargs, nnmodule)
             )
@@ -4474,3 +4465,16 @@ def get_optimize_ddp_mode():
         f"Invalid dynamo config optimize_ddp value {mode=}"
     )
     return mode
+
+
+@contextmanager
+def maybe_disable_inference_mode() -> Generator[None, None, None]:
+    is_inference_mode_on = (
+        config.fake_tensor_disable_inference_mode and torch.is_inference_mode_enabled()
+    )
+    if is_inference_mode_on:
+        with torch.inference_mode(False), torch.no_grad():
+            yield
+    else:
+        with contextlib.nullcontext():
+            yield

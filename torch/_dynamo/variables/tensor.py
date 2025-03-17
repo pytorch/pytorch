@@ -709,12 +709,16 @@ class TensorVariable(VariableTracker):
             return ConstantVariable.create(self.dtype.is_floating_point)
 
     def method_is_inference(self):
-        unimplemented_v2(
-            gb_type="Encountered tensor.is_inference() during tracing",
-            context="",
-            explanation="tensor.is_inference() is not supported",
-            hints=[*graph_break_hints.FUNDAMENTAL, *graph_break_hints.INFERENCE_MODE],
-        )
+        if config.fake_tensor_disable_inference_mode:
+            unimplemented_v2(
+                gb_type="Encountered tensor.is_inference() during tracing",
+                context="",
+                explanation="tensor.is_inference() is not supported",
+                hints=[
+                    *graph_break_hints.FUNDAMENTAL,
+                    *graph_break_hints.INFERENCE_MODE,
+                ],
+            )
         if (fake := self.proxy.node.meta.get("example_value")) is not None:
             return ConstantVariable.create(fake.is_inference())
 

@@ -1015,7 +1015,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts, fullgraph=False)
-
         x = torch.randn(2, 2)
 
         self.assertEqual(fn(x), opt_fn(x))
@@ -1034,16 +1033,10 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts, fullgraph=False)
 
-        with torch.inference_mode():
-            x_inference = torch.randn(2, 2)
-
         x = torch.randn(2, 2)
 
         self.assertEqual(fn(x), opt_fn(x))
         self.assertEqual(cnts.frame_count, 1)
-
-        self.assertEqual(fn(x_inference), opt_fn(x_inference))
-        self.assertEqual(cnts.frame_count, 2)  # Recompiles
 
     @make_test
     def test_get_privateuse1_name(x):
