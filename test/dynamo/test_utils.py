@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 import dataclasses
 import pprint
+import sys
 from unittest import mock
 
 import torch
@@ -277,6 +278,7 @@ class TestDynamoTimed(TestCase):
         # much easier.
         raw = dataclasses.asdict(compilation_events[0])
         del raw["feature_usage"]
+        del raw["ir_count"]
         # guard_latency_us is not deterministic
         del raw["guard_latency_us"]
         self.assertExpectedInline(
@@ -298,6 +300,7 @@ class TestDynamoTimed(TestCase):
  'config_suppress_errors': False,
  'cuda_synchronize_time_us': None,
  'cuda_version': None,
+ 'cudagraph_skip_reason': None,
  'distributed_ephemeral_timeout_us': None,
  'duration_us': 0,
  'dynamo_compile_time_before_restart_us': 0,
@@ -362,6 +365,7 @@ class TestDynamoTimed(TestCase):
         # Second event is for the backward
         raw = dataclasses.asdict(compilation_events[1])
         del raw["feature_usage"]
+        del raw["ir_count"]
         del raw["guard_latency_us"]
         self.assertExpectedInline(
             pprint.pformat(raw),
@@ -382,6 +386,7 @@ class TestDynamoTimed(TestCase):
  'config_suppress_errors': None,
  'cuda_synchronize_time_us': None,
  'cuda_version': None,
+ 'cudagraph_skip_reason': None,
  'distributed_ephemeral_timeout_us': None,
  'duration_us': 0,
  'dynamo_compile_time_before_restart_us': None,
@@ -442,6 +447,44 @@ class TestDynamoTimed(TestCase):
  'triton_kernel_compile_times_us': None,
  'triton_version': None}""",  # noqa: B950
         )
+
+    @dynamo_config.patch(
+        {
+            "log_compilation_metrics": True,
+        }
+    )
+    def test_ir_count(self):
+        # Different python versions have different potential IR counts.
+        version = (sys.version_info[0], sys.version_info[1])
+        self.assertIn(version, ((3, 9), (3, 10), (3, 11), (3, 12), (3, 13)))
+        first, second = {
+            (3, 9): (10, 6),
+            (3, 10): (10, 6),
+            (3, 11): (10, 6),
+            (3, 12): (10, 6),
+            (3, 13): (11, 7),
+        }[version]
+
+        def test1(x):
+            y = x + x
+            z = y * y
+            return z
+
+        compilation_events = []
+        with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
+            torch.compile(test1)(torch.randn(10, 10))
+            compilation_events = [arg[0][0] for arg in log_event.call_args_list]
+        self.assertEqual(compilation_events[0].ir_count, first)
+
+        def test2(x):
+            y = x + x
+            return y
+
+        compilation_events = []
+        with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
+            torch.compile(test2)(torch.randn(10, 10))
+            compilation_events = [arg[0][0] for arg in log_event.call_args_list]
+        self.assertEqual(compilation_events[0].ir_count, second)
 
 
 class TestInductorConfigParsingForLogging(TestCase):
