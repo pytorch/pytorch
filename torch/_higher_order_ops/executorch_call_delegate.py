@@ -142,7 +142,10 @@ def call_delegate_functionalize(ctx, lowered_module, *args):
     with ctx.redispatch_to_next():
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
         _check_mutation_and_alias(
-            lowered_module, unwrapped_args, "call_delegate", pre_dispatch
+            lowered_module,
+            pytree.tree_leaves(unwrapped_args),
+            "call_delegate",
+            pre_dispatch,
         )
         res = executorch_call_delegate(lowered_module, *unwrapped_args)
         return ctx.wrap_tensors(res)
