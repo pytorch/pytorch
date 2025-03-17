@@ -111,12 +111,15 @@ static cublasOperation_t _cublasOpFromChar(char op) {
   switch (op) {
     case 'n':
     case 'N':
+      [[fallthrough]];
       return CUBLAS_OP_N;
     case 't':
     case 'T':
+      [[fallthrough]];
       return CUBLAS_OP_T;
     case 'c':
     case 'C':
+      [[fallthrough]];
       return CUBLAS_OP_C;
   }
   TORCH_CHECK(false,

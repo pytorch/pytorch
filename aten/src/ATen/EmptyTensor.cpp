@@ -29,7 +29,7 @@ c10::Allocator* GetCPUAllocatorMaybePinned(bool pin_memory) {
     }
     if (opt_device_type.has_value()) {
       return at::globalContext().getPinnedMemoryAllocator(
-          opt_device_type.value());
+          opt_device_type);
     } else {
       TORCH_CHECK(
           false, "Need to provide pin_memory allocator to use pin memory.")
