@@ -13,11 +13,11 @@ import torch._inductor as inductor
 import torch.utils._pytree as pytree
 from torch import fx
 from torch._decomp import register_decomposition
-from torch._dynamo.utils import counters, optimus_scuba_log
+from torch._dynamo.utils import counters
 from torch._inductor import comms
 from torch._inductor.virtualized import ops
+from torch._logging import trace_structured
 from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
-from torch._utils_internal import upload_graph
 from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 from torch.utils._ordered_set import OrderedSet
 
@@ -31,6 +31,7 @@ from ..pattern_matcher import (
     CallFunction,
     CallFunctionVarArgs,
     filter_nodes,
+    fwd_only,
     get_arg_value,
     get_mutation_region_id,
     Ignored,
@@ -42,9 +43,10 @@ from ..pattern_matcher import (
     MULTIPLE,
     PatternMatcherPass,
     register_graph_pattern,
+    register_replacement,
     stable_topological_sort,
 )
-from ..utils import decode_device, get_gpu_type, is_pointwise_use
+from ..utils import decode_device, get_gpu_type, is_gpu, is_pointwise_use
 from ..virtualized import V
 from .b2b_gemm import B2B_GEMM_PASS
 from .ddp_fusion import fuse_ddp_communication
@@ -113,7 +115,16 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     if config.pattern_matcher:
         lazy_init()
-        optimus_scuba_log["before_recompile_post_grad"] = upload_graph(gm.graph)
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "before_recompile_post_grad",
+                "encoding": "string",
+            },
+            payload_fn=lambda: gm.print_readable(
+                print_output=False, include_stride=True, include_device=True
+            ),
+        )
         GraphTransformObserver(gm, "post_grad_custom_pre_pass").apply_graph_pass(
             functools.partial(group_batch_fusion_passes, pre_grad=False)
         )
@@ -137,9 +148,16 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
                 pattern_matcher_pass.apply
             )
             if not is_same_dict(counters["inductor"], inductor_before_change):
-                optimus_scuba_log[
-                    f"{pattern_matcher_pass.pass_name}_post_grad"
-                ] = upload_graph(gm.graph)
+                trace_structured(
+                    "artifact",
+                    metadata_fn=lambda: {
+                        "name": f"{pattern_matcher_pass.pass_name}_post_grad",
+                        "encoding": "string",
+                    },
+                    payload_fn=lambda: gm.print_readable(
+                        print_output=False, include_stride=True, include_device=True
+                    ),
+                )
         if config.b2b_gemm_pass:
             B2B_GEMM_PASS.apply(gm.graph)  # type: ignore[arg-type]
 
@@ -184,8 +202,49 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     )
 
     gm.recompile()
-    optimus_scuba_log["after_recompile_post_grad"] = upload_graph(gm.graph)
+    trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "after_recompile_post_grad",
+            "encoding": "string",
+        },
+        payload_fn=lambda: gm.print_readable(
+            print_output=False, include_stride=True, include_device=True
+        ),
+    )
     gm.graph.lint()
+
+
+def prepare_softmax_pattern(x, dim):
+    xmax = x.amax(dim=dim, keepdim=True)
+    xsub = x - xmax
+    xexp = xsub.exp()
+    xsum = xexp.sum(dim=dim, keepdim=True)
+    return xmax, xsum, xsub, xexp
+
+
+def prepare_softmax_replacement(x, dim):
+    """
+    Return xsub since otherwise log-softmax can not be matched
+    due to a use of this intermediate node. Same reason to return
+    xsub.exp() for softmax.
+    """
+    from torch._inductor.inductor_prims import prepare_softmax_online
+
+    xmax, xsum = prepare_softmax_online(x, dim)
+    xsub = x - xmax
+    return xmax, xsum, xsub, xsub.exp()
+
+
+def prepare_softmax_extra_check(match):
+    """
+    We only have triton online softmax kernels currently.
+    """
+    return (
+        config.online_softmax
+        and match.kwargs["x"].meta["val"].device.type == "cuda"
+        and config.cuda_backend == "triton"
+    )
 
 
 @init_once_fakemode
@@ -195,6 +254,19 @@ def lazy_init():
         from .mkldnn_fusion import _mkldnn_fusion_init
 
         _mkldnn_fusion_init()
+
+    # Put this patterns in post-grad pass rather than joint-graph
+    # pass since otherwise there will be perf/peak-memory regression:
+    # https://github.com/pytorch/pytorch/issues/148141
+    register_replacement(
+        prepare_softmax_pattern,
+        prepare_softmax_replacement,
+        [torch.empty(4, 8)],
+        scalar_workaround=dict(dim=-1),
+        trace_fn=fwd_only,
+        pass_dicts=pass_patterns[1],
+        extra_check=prepare_softmax_extra_check,
+    )
 
 
 def reorder_for_locality(graph: torch.fx.Graph):
@@ -888,7 +960,7 @@ def view_to_reshape(gm):
 
 def should_prefer_unfused_addmm(match):
     inp = match.kwargs["inp"]
-    if not inp.meta["val"].is_cuda:
+    if not is_gpu(inp.meta["val"].device.type):
         return False
 
     output = match.output_node()

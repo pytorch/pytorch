@@ -37,7 +37,6 @@ from torch.testing._internal.common_utils import (
     IS_CI,
     IS_MACOS,
     IS_WINDOWS,
-    NO_MULTIPROCESSING_SPAWN,
     run_tests,
     skip_but_pass_in_sandcastle_if,
     skip_if_pytest,
@@ -509,11 +508,6 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                 mpc._poll()
                 self.assertEqual(4, mock_join.call_count)
 
-        @skip_but_pass_in_sandcastle_if(
-            NO_MULTIPROCESSING_SPAWN,
-            "Disabled for environments that \
-                        don't support multiprocessing with spawn start method",
-        )
         def test_multiprocessing_context_poll_raises_exception(self):
             mp_context = MultiprocessContext(
                 name="test_mp",

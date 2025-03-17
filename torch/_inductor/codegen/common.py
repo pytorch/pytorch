@@ -341,7 +341,7 @@ class BackendFeature(Enum):
 
 
 def get_backend_features(
-    device: Union[torch.device, str, None]
+    device: Union[torch.device, str, None],
 ) -> OrderedSet[BackendFeature]:
     if device is None:
         return OrderedSet()
@@ -986,9 +986,9 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
                 if cls._is_unimplemented(funcname):
                     setattr(cls, funcname, cls._unimplemented(funcname))
             else:
-                assert (
-                    funcname not in cls.__dict__
-                ), f"multiple definitions of {funcname} on {cls.__name__}"
+                assert funcname not in cls.__dict__, (
+                    f"multiple definitions of {funcname} on {cls.__name__}"
+                )
                 impl.__name__ = funcname
                 setattr(cls, funcname, staticmethod(impl))
 
@@ -1550,7 +1550,7 @@ class KernelArgs:
 
     def python_argdefs(
         self,
-    ) -> tuple[list[ArgName], list[str], list[KernelArgType], list[torch.dtype]]:
+    ) -> tuple[list[ArgName], list[str], list[KernelArgType], list[Any]]:
         arg_defs: list[ArgName] = []
         call_args: list[str] = []
         arg_types: list[torch.dtype] = []
@@ -2229,7 +2229,7 @@ class KernelTemplate:
 
     @staticmethod
     def _fake_get_dtype(
-        fake_outs: Union[list[Buffer], Buffer]
+        fake_outs: Union[list[Buffer], Buffer],
     ) -> Callable[[str], torch.dtype]:
         _get_dtype_real = V.graph.get_dtype
         if isinstance(fake_outs, (list, tuple)):
