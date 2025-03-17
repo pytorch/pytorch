@@ -76,10 +76,13 @@ def read_release_matrix():
 
 
 def test_numpy():
-    import numpy as np
+    try:
+        import numpy as np
 
-    x = np.arange(5)
-    torch.tensor(x)
+        x = np.arange(5)
+        torch.tensor(x)
+    except ImportError:
+        print("Numpy check skipped. Numpy is not installed.")
 
 
 def check_version(package: str) -> None:
@@ -395,13 +398,6 @@ def parse_args():
         choices=["enabled", "disabled"],
         default="enabled",
     )
-    parser.add_argument(
-        "--numpy-check",
-        help="Check numpy",
-        type=str,
-        choices=["enabled", "disabled"],
-        default="enabled",
-    )
     return parser.parse_args()
 
 
@@ -416,9 +412,7 @@ def main() -> None:
     check_version(options.package)
     smoke_test_conv2d()
     test_linalg()
-
-    if options.numpy_check == "enabled":
-        test_numpy()
+    test_numpy()
 
     if is_cuda_system:
         test_linalg("cuda")
