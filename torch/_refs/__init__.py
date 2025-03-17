@@ -3222,11 +3222,11 @@ def native_group_norm(
         out = out.view(input.shape)
         broadcast_dims = [0] + list(range(2, input.ndim))
         if weight is not None:
-            weight = _unsqueeze_multiple(weight, broadcast_dims)
-            out = out * weight
+            unsqueeze_weight = _unsqueeze_multiple(weight, broadcast_dims)
+            out = out * unsqueeze_weight
         if bias is not None:
-            bias = _unsqueeze_multiple(bias, broadcast_dims)
-            out = out + bias
+            unsqueeze_bias = _unsqueeze_multiple(bias, broadcast_dims)
+            out = out + unsqueeze_bias
 
     out = _maybe_convert_to_dtype(out, input.dtype)  # type: ignore[assignment]
     mean = _maybe_convert_to_dtype(mean, input.dtype)  # type: ignore[assignment]
