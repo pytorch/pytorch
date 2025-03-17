@@ -616,9 +616,9 @@ def load_deprecated_signatures(
         }
         schema_args_by_name = {a.name: a for a in schema.arguments.flat_all}
         for name in call_args:
-            assert (
-                name in schema_args_by_name or name in known_constants
-            ), f"deprecation definiton: Unrecognized value {name}"
+            assert name in schema_args_by_name or name in known_constants, (
+                f"deprecation definiton: Unrecognized value {name}"
+            )
 
         # Map deprecated signature arguments to their aten signature and test
         # if the types and alias annotation match.
@@ -683,7 +683,9 @@ def load_deprecated_signatures(
                     function=pair.function,
                 )
             )
-        assert any_schema_found, f"No native function with name {aten_name} matched signature:\n  {str(schema)}"
+        assert any_schema_found, (
+            f"No native function with name {aten_name} matched signature:\n  {str(schema)}"
+        )
 
     return results
 

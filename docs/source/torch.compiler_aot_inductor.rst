@@ -100,6 +100,7 @@ and running the artifact, as shown in the following example:
     model = torch._inductor.aoti_load_package(os.path.join(os.getcwd(), "model.pt2"))
     print(model(torch.randn(8, 10, device=device)))
 
+The input at inference time should have the same size, dtype, and stride as the input at export time.
 
 Inference in C++
 ---------------------------
@@ -210,6 +211,7 @@ Below are some useful tools for debugging AOT Inductor.
    logging
    torch.compiler_aot_inductor_minifier
 
+To enable runtime checks on inputs, set the environment variable `AOTI_RUNTIME_CHECK_INPUTS` to 1. This will raise a `RuntimeError` if the inputs to the compiled model differ in size, data type, or strides from those used during export.
 
 API Reference
 -------------

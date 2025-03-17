@@ -39,7 +39,7 @@ struct TORCH_API PyCompilerInterface {
       // NOLINTNEXTLINE(performance-unnecessary-value-param)
       std::vector<at::TypePtr> packed_args_schema,
       bool is_custom_function = false,
-      bool is_traceable = true) {
+      bool is_traceable = true) const {
     TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
   }
 
@@ -51,14 +51,14 @@ struct TORCH_API PyCompilerInterface {
       const std::string& fn_name,
       const variable_list& inputs,
       const ivalue_list& packed_args,
-      const c10::IValue& output_metadata) {
+      const c10::IValue& output_metadata) const {
     TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
   }
   virtual variable_list call_copy_slices_prologue(
       PyObject* py_compiler,
       const variable_list& inputs,
       const at::TensorGeometry& base,
-      const at::TensorGeometry& view) {
+      const at::TensorGeometry& view) const {
     TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
   }
   virtual variable_list call_copy_slices_epilogue(
@@ -66,13 +66,19 @@ struct TORCH_API PyCompilerInterface {
       const std::vector<bool>& needs_input_grad,
       const at::Tensor& result,
       const variable_list& res,
-      const at::Tensor& grad_slice) {
+      const at::Tensor& grad_slice) const {
     TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
   }
   virtual at::Tensor call_unpack(
       PyObject* py_compiler,
       std::optional<size_t> hook_id,
-      size_t hook_input_id) {
+      size_t hook_input_id) const {
+    TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
+  }
+  virtual void call_accumulate_grad(
+      PyObject* py_compiler,
+      const at::Tensor& variable,
+      const at::Tensor& grad) const {
     TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
   }
 };
@@ -538,7 +544,7 @@ class CompiledNodeArgs {
     // Note: this is only capturing the ID of the node not everything
     // contained inside it.  This is used for tracking connections between
     // nodes and the actual details of the node itself must be handled by
-    // a seperate call to `node->compiled_args()`.
+    // a separate call to `node->compiled_args()`.
     if (cond((bool)t)) {
       collect(_compiler.node_calls.lookup(t));
     }
@@ -1072,6 +1078,13 @@ struct IValuePacker {
   // That's what the TypePtr is for: it contains the information to do the
   // parsing. See torch::jit::toIValue for more information.
   static at::TypePtr packed_type() {
+#ifdef _WIN32
+    // NB: the if-constexpr usage triggers compilation errors on Windows
+    // with certain compiler settings
+    // (see https://github.com/pytorch/pytorch/pull/144707 for examples).
+    // It's not clear what the problem is, so we're going to ignore it for now.
+    TORCH_INTERNAL_ASSERT(false, "torch.compile not supported on Windows");
+#else
     if constexpr (::std::is_same_v<T, at::Tensor>) {
       return at::TensorType::get();
     } else if constexpr (::std::is_same_v<T, int64_t>) {
@@ -1110,6 +1123,7 @@ struct IValuePacker {
       TORCH_INTERNAL_ASSERT(false, "IValuePacker not implemented for type");
       return at::NoneType::get();
     }
+#endif
   }
 };
 

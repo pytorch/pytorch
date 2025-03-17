@@ -57,6 +57,7 @@ from .utils import (
     get_device_tflops,
     get_dtype_size,
     get_gpu_dram_gbps,
+    GraphPartitionMap,
     IndentedBuffer,
     is_collective,
     is_gpu,
@@ -200,9 +201,9 @@ class BaseSchedulerNode:
 
     def __init__(self, scheduler: Scheduler) -> None:
         self.scheduler: Scheduler = scheduler
-        self.debug_device_str: Callable[
-            [BaseSchedulerNode], list[str]
-        ] = lambda *args, **kwargs: []
+        self.debug_device_str: Callable[[BaseSchedulerNode], list[str]] = (
+            lambda *args, **kwargs: []
+        )
 
     def _init_from_node(self, node: ir.Operation) -> None:
         self.node: Optional[ir.Operation] = node
@@ -232,7 +233,7 @@ class BaseSchedulerNode:
         buf = IndentedBuffer()
         buf.splice(
             f"""\
-{name}: {type(self).__name__}({type(getattr(self, 'node', None)).__name__})
+{name}: {type(self).__name__}({type(getattr(self, "node", None)).__name__})
 {name}.writes = {pformat(self.read_writes.writes)}
 {name}.unmet_dependencies = {pformat(self.unmet_dependencies)}
 {name}.met_dependencies = {pformat(self.read_writes.reads - self.unmet_dependencies)}
@@ -525,9 +526,9 @@ class BaseSchedulerNode:
                             V.kernel.mutations.add(input_buf.get_name())
                             V.kernel.mutations.add(buf.get_name())
 
-                        V.kernel.inplace_update_buffers[
-                            buf.get_name()
-                        ] = input_buf.get_name()
+                        V.kernel.inplace_update_buffers[buf.get_name()] = (
+                            input_buf.get_name()
+                        )
                         break
 
     def codegen_originating_info(
@@ -693,7 +694,7 @@ class BaseSchedulerNode:
                 continue
 
             def get_buf_bytes(
-                buf: Optional[Union[ir.Buffer, ir.TensorBox, ir.TorchBindObject]]
+                buf: Optional[Union[ir.Buffer, ir.TensorBox, ir.TorchBindObject]],
             ) -> int:
                 if not buf:
                     return 0
@@ -794,12 +795,11 @@ class BaseSchedulerNode:
                     # runtime for that today
                     return 0
 
-                with FakeTensorMode() as fake_mode, FlopCounterMode(
-                    display=False
-                ) as flop_counter_mode, V.set_current_node(
-                    self.node.fx_node
-                ), V.set_fake_mode(
-                    fake_mode
+                with (
+                    FakeTensorMode() as fake_mode,
+                    FlopCounterMode(display=False) as flop_counter_mode,
+                    V.set_current_node(self.node.fx_node),
+                    V.set_fake_mode(fake_mode),
                 ):
                     from .ir import ir_node_to_tensor
 
@@ -1123,15 +1123,15 @@ class SchedulerNode(BaseSchedulerNode):
         return self._sizes
 
     def is_reduction(self) -> bool:
-        assert isinstance(
-            self.node, (ir.ComputedBuffer, ir.TemplateBuffer)
-        ), f"{type(self.node)=}"
+        assert isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer)), (
+            f"{type(self.node)=}"
+        )
         return bool(self.node.get_reduction_type())
 
     def is_split_scan(self) -> bool:
-        assert isinstance(
-            self.node, (ir.ComputedBuffer, ir.TemplateBuffer)
-        ), f"{type(self.node)=}"
+        assert isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer)), (
+            f"{type(self.node)=}"
+        )
         return isinstance(self.node, ir.ComputedBuffer) and isinstance(
             self.node.data, ir.SplitScan
         )
@@ -1163,9 +1163,10 @@ class SchedulerNode(BaseSchedulerNode):
     def codegen(self, index_vars: Sequence[Sequence[sympy.Expr]]) -> None:
         var_ranges = self.ranges_from_index_vars(index_vars)
         try:
-            with V.set_ops_handler(
-                SimplifyIndexing(V.get_ops_handler(), var_ranges)
-            ), V.kernel.set_current_node(self):
+            with (
+                V.set_ops_handler(SimplifyIndexing(V.get_ops_handler(), var_ranges)),
+                V.kernel.set_current_node(self),
+            ):
                 self._body(*index_vars)
         except Exception:
             log.fatal("Error in codegen for %s", self.node)
@@ -1231,7 +1232,7 @@ class SchedulerNode(BaseSchedulerNode):
 
 
 def refresh_group_node_dependencies(
-    group_snode: Union[FusedSchedulerNode, GroupedSchedulerNode]
+    group_snode: Union[FusedSchedulerNode, GroupedSchedulerNode],
 ) -> None:
     snodes = group_snode.snodes
     group_snode.set_read_writes(
@@ -1754,7 +1755,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
 
     @staticmethod
     def set_group_algorithm_for_combo_kernels(
-        custom_group_algorithm: Callable[[Scheduler], list[list[BaseSchedulerNode]]]
+        custom_group_algorithm: Callable[[Scheduler], list[list[BaseSchedulerNode]]],
     ) -> None:
         ForeachKernelSchedulerNode.group_algorithm_for_combo_kernels = (
             custom_group_algorithm
@@ -1975,9 +1976,9 @@ class Scheduler:
         for node in self.nodes:
             node.prune_deps()
 
-        self.name_to_donated_buffer: dict[
-            str, SchedulerDonatedBuffer
-        ] = self.get_donated_buffers()
+        self.name_to_donated_buffer: dict[str, SchedulerDonatedBuffer] = (
+            self.get_donated_buffers()
+        )
         self.name_to_node: dict[str, BaseSchedulerNode] = {
             n.get_name(): n for n in self.nodes
         }
@@ -2018,7 +2019,9 @@ class Scheduler:
         self.compute_ancestors()
 
         metrics.ir_nodes_pre_fusion += len(self.nodes)
-        V.debug.ir_pre_fusion(self.nodes)
+        from torch._inductor.debug import log_ir_post_fusion, log_ir_pre_fusion
+
+        log_ir_pre_fusion(self.nodes)
         self.num_orig_nodes = len(self.nodes)
         self.create_foreach_nodes()
         self.nodes = self.topological_sort_schedule(self.nodes)
@@ -2047,7 +2050,7 @@ class Scheduler:
             self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
         self.process_grouped_nodes()
         self.compute_last_usage()
-        V.debug.ir_post_fusion(self.nodes)
+        log_ir_post_fusion(self.nodes)
         V.debug.graph_diagram(self.nodes)
         self.debug_draw_graph()
 
@@ -2099,9 +2102,9 @@ class Scheduler:
                 node.log_details()
 
     def create_scheduler_node(self, node: ir.Operation) -> BaseSchedulerNode:
-        assert (
-            node.get_origins() is not None
-        ), "All nodes passed to scheduling must have an origin"
+        assert node.get_origins() is not None, (
+            "All nodes passed to scheduling must have an origin"
+        )
         if node.is_no_op():
             return NopKernelSchedulerNode(self, node)
         elif isinstance(node, (ir.ComputedBuffer, ir.TemplateBuffer)):
@@ -2260,9 +2263,9 @@ class Scheduler:
             )
             # if a kernel takes unbacked symints, register dependencies
             for s in unbacked_symbol_uses:
-                assert (
-                    s in unbacked_symbol_to_origin_node
-                ), f"{s} not in {unbacked_symbol_to_origin_node}"
+                assert s in unbacked_symbol_to_origin_node, (
+                    f"{s} not in {unbacked_symbol_to_origin_node}"
+                )
                 if (r := unbacked_symbol_to_origin_node[s]) is not None:
                     for buf in self.name_to_node[r].get_outputs():
                         node.add_fake_dep(StarDep(buf.get_name()))
@@ -2310,9 +2313,9 @@ class Scheduler:
                 for alt_name in buf.get_mutations():
                     self.mutation_renames[rename(alt_name)] = buf.get_name()
                     self.mutation_renames[alt_name] = buf.get_name()
-                    self.mutation_real_name[
-                        buf.get_name()
-                    ] = self.mutation_real_name.get(alt_name, alt_name)
+                    self.mutation_real_name[buf.get_name()] = (
+                        self.mutation_real_name.get(alt_name, alt_name)
+                    )
 
         # make sure outputs aren't dead-code-eliminated
         for buf_name in V.graph.get_output_names():
@@ -2322,9 +2325,9 @@ class Scheduler:
         # make sure unbacked symints aren't dead-code-eliminated
         for out in V.graph.graph_outputs:
             for s in out.get_unbacked_symbol_uses():
-                assert (
-                    s in unbacked_symbol_to_origin_node
-                ), f"{s} not in {unbacked_symbol_to_origin_node.keys()}"
+                assert s in unbacked_symbol_to_origin_node, (
+                    f"{s} not in {unbacked_symbol_to_origin_node.keys()}"
+                )
                 if r := unbacked_symbol_to_origin_node[s]:
                     for buf_name in self.name_to_node[r].get_buffer_names():
                         log.debug(
@@ -3304,15 +3307,15 @@ class Scheduler:
             rhs_dep = node2_name2dep[buf_name]
 
             if not isinstance(lhs_dep, MemoryDep) or not isinstance(rhs_dep, MemoryDep):
-                reasons[
-                    buf_name
-                ] = f"not MemoryDep: {type(lhs_dep)} v.s. {type(rhs_dep)}"
+                reasons[buf_name] = (
+                    f"not MemoryDep: {type(lhs_dep)} v.s. {type(rhs_dep)}"
+                )
                 continue
 
             if lhs_dep.get_numel() != rhs_dep.get_numel():
-                reasons[
-                    buf_name
-                ] = f"different numel: {lhs_dep.get_numel()} v.s. {rhs_dep.get_numel()}"
+                reasons[buf_name] = (
+                    f"different numel: {lhs_dep.get_numel()} v.s. {rhs_dep.get_numel()}"
+                )
                 continue
 
             # same numel but different MemoryDep.size. Should be broadcasting
@@ -3340,9 +3343,9 @@ class Scheduler:
             layout_str = ""
             if not isinstance(buf, ir.TorchBindObject):
                 layout_str = f"Layout: {buf.layout}"
-            reasons[
-                buf_name
-            ] = f"Unknown reason: {lhs_dep} v.s. {rhs_dep}. {layout_str}"
+            reasons[buf_name] = (
+                f"Unknown reason: {lhs_dep} v.s. {rhs_dep}. {layout_str}"
+            )
 
         return str(reasons)
 
@@ -3863,7 +3866,7 @@ class Scheduler:
         for name in sorted(
             self.buffer_names_to_free
             - V.graph.removed_buffers
-            - V.graph.wrapper_code.freed
+            - V.graph.wrapper_code.freed  # type: ignore[has-type]
         ):
             if name in self.name_to_buf:
                 buf = self.name_to_buf[name]
@@ -3903,9 +3906,9 @@ class Scheduler:
         self.free_buffers()
 
     def create_backend(self, device: torch.device) -> BaseScheduling:
-        assert (
-            not is_gpu(device.type) or device.index is not None
-        ), f"{device} should have been normalized in lowering"
+        assert not is_gpu(device.type) or device.index is not None, (
+            f"{device} should have been normalized in lowering"
+        )
         V.graph.add_device_info(device)
 
         device_scheduling = get_scheduling_for_device(device.type)
@@ -3962,6 +3965,9 @@ class Scheduler:
 
     def should_partition(self, node: BaseSchedulerNode) -> bool:
         """Return True if we should partition the inductor graph on this node"""
+        if isinstance(node, FusedSchedulerNode):
+            return any(self.should_partition(snode) for snode in node.snodes)
+
         if not node.is_gpu():
             return True
 
@@ -3977,9 +3983,13 @@ class Scheduler:
         if getattr(node.node, "unbacked_bindings", None):
             return True
 
-        if hasattr(node.node, "layout") and any(
-            isinstance(expr, sympy.Expr) and expr.free_symbols
-            for expr in node.node.layout.size
+        if (
+            hasattr(node.node, "layout")
+            and hasattr(node.node.layout, "size")
+            and any(
+                isinstance(expr, sympy.Expr) and expr.free_symbols
+                for expr in node.node.layout.size
+            )
         ):
             return True
 
@@ -4000,6 +4010,47 @@ class Scheduler:
                 name_to_node[name] = scheduler_buffer.node
 
         return name_to_node
+
+    def compute_graph_partition_maps(
+        self,
+        signatures: list[GraphPartitionSignature],
+    ) -> None:
+        """
+        computes a mapping from partition input/output indices to graph input/output
+        indices for each partition.
+        """
+        name_to_graph_input_index = {
+            name: idx for idx, name in enumerate(V.graph.graph_inputs)
+        }
+        name_to_graph_output_index = {
+            name: idx for idx, name in enumerate(V.graph.get_output_names())
+        }
+
+        V.graph.partition_maps = []
+        for partition_id, signature in enumerate(signatures):
+            if signature.skip_cudagraph:
+                # Note: [Graph Partition Map for CUDAGraph]
+                # number of partition map should be the same as the number of generated
+                # partition functions. This assumption will be used when cudagraphify
+                # each partition function.
+                continue
+
+            input_mapping = []
+            for name in signature.input_nodes:
+                input_mapping.append(name_to_graph_input_index.get(name))
+
+            output_mapping = []
+            for node in signature.output_nodes:
+                output_mapping.append(name_to_graph_output_index.get(node.get_name()))
+
+            V.graph.partition_maps.append(
+                GraphPartitionMap(
+                    partition_id,
+                    input_mapping,
+                    output_mapping,
+                    signature.constant_names,
+                )
+            )
 
     def get_graph_partition_signature(
         self, partitions: list[PartitionType], skip_cudagraphs: list[bool]
@@ -4024,7 +4075,7 @@ class Scheduler:
             returned_output_names = output_names.intersection(unmet_output_names)
 
             # all reads/writes are partition inputs except those generated
-            # within the partition
+            # within the partition and tensor constants
             read_writes = dependencies.ReadWrites.merge_list(
                 [node.read_writes for node in partition]
             )
@@ -4047,15 +4098,35 @@ class Scheduler:
                 for name in partition_input_names
                 if name in name_to_node
             }
+
+            # if an input tensor is not freed in the partition function, it should
+            # also be returned as an output. This brings benefits to cudagraph
+            # since the returned output tensor is a cudagraph managed tensor with
+            # a static tensor address.
+            extra_output_names = [
+                name
+                for name in partition_input_names
+                if name in name_to_node and name not in buffer_names_to_free
+            ]
+
+            returned_output_names.update(extra_output_names)
+
             output_nodes = [name_to_node[name] for name in returned_output_names]
-            signatures.append(
-                GraphPartitionSignature(
-                    input_nodes,
-                    output_nodes,
-                    input_deallocation,
-                    skip_cudagraph,
-                )
+
+            constant_names = [
+                name for name in partition_input_names if name in V.graph.constants
+            ]
+
+            partition_signature = GraphPartitionSignature(
+                input_nodes,
+                output_nodes,
+                input_deallocation,
+                skip_cudagraph,
+                constant_names,
             )
+
+            signatures.append(partition_signature)
+
             unmet_output_names = partition_input_names.union(
                 unmet_output_names - returned_output_names
             )
@@ -4088,9 +4159,12 @@ class Scheduler:
             partitions.append(cur_partition)
             skip_cudagraphs.append(skip_cudagraph)
 
-        return partitions, self.get_graph_partition_signature(
+        signatures = self.get_graph_partition_signature(
             partitions=partitions, skip_cudagraphs=skip_cudagraphs
         )
+        self.compute_graph_partition_maps(signatures)
+
+        return partitions, signatures
 
     def codegen(self) -> None:
         with dynamo_timed("Scheduler.codegen"):
@@ -4119,10 +4193,10 @@ class Scheduler:
             self._codegen(partition)
             partition_code, _ = V.graph.wrapper_code.generate(V.graph.is_inference)
 
-        V.graph.wrapper_code.define_subgraph_launcher_fn(partition_code)
+        V.graph.wrapper_code.define_subgraph_launcher_fn(partition_code.value)
 
         V.graph.wrapper_code.codegen_partition_call(graph_partition_id, signature)
-        V.graph.wrapper_code.allocated.update(
+        V.graph.wrapper_code.allocated.update(  # type: ignore[has-type]
             [node.get_name() for node in signature.output_nodes]
         )
 
@@ -4135,9 +4209,9 @@ class Scheduler:
         partitions, signatures = self.graph_partition()
 
         for partition, signature in zip(partitions, signatures):
-            assert (
-                len(partition) >= 1
-            ), f"Each partition must have at least one node but found {len(partition)}"
+            assert len(partition) >= 1, (
+                f"Each partition must have at least one node but found {len(partition)}"
+            )
 
             if signature.skip_cudagraph:
                 self._codegen(partition)
@@ -4146,6 +4220,13 @@ class Scheduler:
 
         num_partitions = next(self._graph_partition_counter)
         V.graph.wrapper_code.set_all_partition_names(num_partitions)
+
+        # See [Note: Graph Partition Map for CUDAGraph]
+        if num_partitions > 0:
+            assert V.graph.partition_maps is not None
+            assert num_partitions == len(V.graph.partition_maps), (
+                f"Expect {num_partitions} partition maps but got {len(V.graph.partition_maps)}"
+            )
 
     def _codegen(self, nodes: list[BaseSchedulerNode]) -> None:
         if config.check_stack_no_cycles_TESTING_ONLY:
