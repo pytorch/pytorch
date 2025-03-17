@@ -3031,16 +3031,6 @@ def wrap_to_fake_tensor_and_record(
             type(e),
         )
 
-        # If the input tensor is coming from inference_mode, make a clone to to
-        # remove the inference-ness.
-        if (
-            config.fake_tensor_disable_inference_mode
-            and isinstance(e, torch.Tensor)
-            and e.is_inference()
-        ):
-            with torch.inference_mode(False):
-                e = torch.clone(e)
-
         fake_e = wrap_fake_exception(
             lambda: tx.fake_mode.from_tensor(
                 e,
