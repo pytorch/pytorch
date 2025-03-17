@@ -10,7 +10,6 @@ __all__ = [
     "verify",
     "check_export_model_diff",
     "VerificationInfo",
-    "VerificationInterpreter",
     "verify_onnx_program",
     "GraphInfo",
     "GraphInfoPrettyPrinter",
@@ -46,7 +45,6 @@ from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import onnx_proto_utils
 from torch.onnx._internal.exporter._verification import (
     VerificationInfo,
-    VerificationInterpreter,
     verify_onnx_program,
 )
 from torch.types import Number
@@ -55,7 +53,6 @@ from torch.types import Number
 # TODO: Update deprecation messages to recommend the new classes
 
 VerificationInfo.__module__ = "torch.onnx.verification"
-VerificationInterpreter.__module__ = "torch.onnx.verification"
 verify_onnx_program.__module__ = "torch.onnx.verification"
 
 # Everything below are deprecated ##############################################
