@@ -429,7 +429,7 @@ class DistMathOpsTest(DTensorTestBase):
     @with_comms
     def test_layer_norm_bwd_req_grad(self):
         device_mesh = self.build_device_mesh()
-        batch, seq_len, embedding_dim, vocab_size = 8, 8, 10, 32
+        batch, seq_len, embedding_dim, vocab_size = 8, 2 * self.world_size, 10, 32
 
         # build our subtest configurations and filter out invalid ones
         class SubTest(NamedTuple):
