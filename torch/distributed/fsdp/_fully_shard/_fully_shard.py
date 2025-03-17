@@ -60,8 +60,7 @@ def fully_shard(
     mp_policy: MixedPrecisionPolicy = ...,
     offload_policy: OffloadPolicy = ...,
     ignored_params: Optional[set[nn.Parameter]] = ...,
-) -> FSDPModule:
-    ...
+) -> FSDPModule: ...
 
 
 @overload
@@ -74,8 +73,7 @@ def fully_shard(
     mp_policy: MixedPrecisionPolicy = ...,
     offload_policy: OffloadPolicy = ...,
     ignored_params: Optional[set[nn.Parameter]] = ...,
-) -> list[FSDPModule]:
-    ...
+) -> list[FSDPModule]: ...
 
 
 # The decorator adds a state object to `module` that can be accessed via
@@ -178,8 +176,9 @@ def fully_shard(
         offload_policy (OffloadPolicy): This controls the offloading policy,
             which offers parameter/gradient/optimizer state offloading. See
             :class:`OffloadPolicy` and its subclasses for details.
-        ignored_params: Optional(Set[nn.Parameter]): The set of parameters that we
-            don't want to shard with FSDP.
+        ignored_params: Optional(Set[nn.Parameter]): The set of parameters to be
+            ignored by FSDP. They will not be sharded, nor moved to the device
+            during init, nor have their gradients reduced in backward.
 
     Returns:
         FSDPModule: The module with FSDP applied (in-place).
@@ -318,7 +317,8 @@ class FSDPModule:
         """
         Sets if the module should sync gradients. This can be used to implement
         gradient accumulation *without communication*. For HSDP, this controls
-        both reduce-scatter and all-reduce together.
+        both reduce-scatter and all-reduce together. This is the equivalence of
+        `no_sync` in FSDP1.
 
         Args:
             requires_gradient_sync (bool): Whether to reduce gradients for the

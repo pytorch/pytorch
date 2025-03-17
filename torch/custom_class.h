@@ -306,7 +306,6 @@ class class_ : public ::torch::detail::class_base {
   ///               std::vector<std::string>{"i", "was", "deserialized"});
   ///         })
   template <typename GetStateFn, typename SetStateFn>
-  // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
   class_& def_pickle(GetStateFn&& get_state, SetStateFn&& set_state) {
     static_assert(
         c10::guts::is_stateless_lambda<std::decay_t<GetStateFn>>::value &&

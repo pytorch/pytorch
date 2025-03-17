@@ -24,32 +24,6 @@ class TestConverter(TestCase):
     def setUp(self):
         init_torchbind_implementations()
 
-        @torch._library.register_fake_class("_TorchScriptTesting::_TensorQueue")
-        class _FakeTensorQueue:
-            def __init__(self, queue):
-                self.queue = queue
-
-            @classmethod
-            def __obj_unflatten__(cls, flattened_ctx):
-                return cls(**dict(flattened_ctx))
-
-            def push(self, x):
-                self.queue.append(x)
-
-            def pop(self):
-                if self.is_empty():
-                    return torch.empty([])
-                return self.queue.pop(0)
-
-            def size(self):
-                return len(self.queue)
-
-            def is_empty(self):
-                return len(self.queue) == 0
-
-            def float_size(self):
-                return float(len(self.queue))
-
         self.torch_bind_ops = [
             torch.ops._TorchScriptTesting.queue_pop,
             torch.ops._TorchScriptTesting.queue_push,
@@ -57,9 +31,7 @@ class TestConverter(TestCase):
         ]
 
     def tearDown(self):
-        torch._library.fake_class_registry.deregister_fake_class(
-            "_TorchScriptTesting::_TensorQueue"
-        )
+        return
 
     def _check_equal_ts_ep_converter(
         self,
@@ -1487,6 +1459,26 @@ class TestConverter(TestCase):
         linear_op = torch.ops.prepacked.linear_clamp_prepack(
             torch.randn(10, 10), torch.randn(10)
         )
+        m = M(linear_op)
+        inp = (torch.randn(1, 10),)
+        self._check_equal_ts_ep_converter(m, inp, ["script"])
+
+    def test_ts2ep_convert_quantized_model_with_opcontext_and_constant(self):
+        class M(torch.nn.Module):
+            def __init__(self, linear_op):
+                super().__init__()
+                self.linear_op = linear_op
+
+            def forward(self, x):
+                x = torch.ops.prepacked.linear_clamp_run(
+                    x + torch.ones(1), self.linear_op
+                )
+                return x
+
+        linear_op = torch.ops.prepacked.linear_clamp_prepack(
+            torch.randn(10, 10), torch.randn(10)
+        )
+
         m = M(linear_op)
         inp = (torch.randn(1, 10),)
         self._check_equal_ts_ep_converter(m, inp, ["script"])
