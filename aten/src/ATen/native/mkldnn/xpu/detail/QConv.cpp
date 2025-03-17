@@ -5,6 +5,7 @@
 
 #include <ATen/native/mkldnn/xpu/detail/Attr.h>
 #include <ATen/native/mkldnn/xpu/detail/Utils.h>
+#include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNNContext.h>
 
 #include <oneapi/dnnl/dnnl.hpp>
@@ -106,9 +107,8 @@ at::Tensor quantized_convolution(
       output.defined(),
       "A valid output is required for quantized convolution.");
 
-  auto engine = GpuEngineManager::Instance().get_engine(
-      {c10::kXPU, c10::xpu::current_device()});
-  auto stream = GpuStreamManager::Instance().get_stream();
+  auto& engine = GpuEngineManager::Instance().get_engine();
+  auto& stream = GpuStreamManager::Instance().get_stream();
 
   // input tensors config
   dnnl::memory::dims src_dims = act.sizes().vec();
