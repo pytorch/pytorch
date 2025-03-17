@@ -411,6 +411,9 @@ enable_cpp_symbolic_shape_guards = False
 # Enable tracing through contextlib.contextmanager
 enable_trace_contextlib = True
 
+# Enable tracing through unittest
+enable_trace_unittest = False
+
 # Enable tracing generator functions lazily. If False, Dynamo will exhaust
 # generators upon first execution. And if True, the generator will be accessed lazily
 enable_faithful_generator_behavior = True

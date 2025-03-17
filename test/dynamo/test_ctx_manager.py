@@ -1751,10 +1751,13 @@ class GraphModule(torch.nn.Module):
 class ContextlibContextManagerTests(torch._dynamo.test_case.TestCase):
     def setUp(self):
         self._prev = torch._dynamo.config.enable_trace_contextlib
+        self._u_prev = torch._dynamo.config.enable_trace_unittest
         torch._dynamo.config.enable_trace_contextlib = True
+        torch._dynamo.config.enable_trace_unittest = True
 
     def tearDown(self):
         torch._dynamo.config.enable_trace_contextlib = self._prev
+        torch._dynamo.config.enable_trace_unittest = self._u_prev
 
     def test_ctx_basic0(self):
         @contextlib.contextmanager
@@ -2701,6 +2704,12 @@ class GraphModule(torch.nn.Module):
 class CPythonContextManagerTestCase(torch._dynamo.test_case.TestCase):
     # Tests taken from CPython source code in cpython/Lib/test/test_contextlib.py
     # https://github.com/python/cpython/blob/v3.13.1/Lib/test/test_contextlib.py
+    def setUp(self):
+        self._prev = torch._dynamo.config.enable_trace_unittest
+        torch._dynamo.config.enable_trace_unittest = True
+
+    def tearDown(self):
+        torch._dynamo.config.enable_trace_unittest = self._prev
 
     @make_dynamo_test
     def test_contextmanager_plain(self):
