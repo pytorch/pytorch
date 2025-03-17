@@ -43,6 +43,7 @@ namespace at::cuda {
   _(nvrtcGetProgramLogSize)                      \
   _(nvrtcGetProgramLog)                          \
   _(nvrtcGetLoweredName)                         \
+  _(cuModuleLoad)                                \
   _(cuModuleLoadData)                            \
   _(cuModuleLoadDataEx)                          \
   _(cuModuleGetFunction)                         \
@@ -60,6 +61,7 @@ namespace at::cuda {
   _(cuLinkComplete)                              \
   _(cuFuncSetAttribute)                          \
   _(cuFuncGetAttribute)                          \
+  _(cuPointerGetAttribute)                       \
 
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 12000
 #define AT_FORALL_NVRTC_EXTENDED(_)              \
