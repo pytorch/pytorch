@@ -35,6 +35,34 @@ StableIValue from(std::nullopt_t val) {
 }
 
 // Specialization for std::optional
+// [Handling std::optional]
+// When the schema is represented by an optional type, say int?, then we
+// expect the custom extension representation to be a std::optional<int>
+// (critically NOT int!). In order for all parameters to be stably parsed and
+// handled by our dispatcher, we liaison custom extension parameters through
+// boxed kernels, meaning that every value will make its way to be an IValue:
+//
+// custom extension value --(from)-> StableIValue --(to_ivalue)-> IValue
+//
+// When the custom extension value is a literal that can be trivially
+// casted to StableIValue, e.g., an int, a float, a pointer, this route is
+// ...trivial. The below specialization is for a case when the custom
+// extension value would NOT fit within a StableIValue: a std::optional.
+//
+// If the std::optional has no value, it is treated as std::nullopt,
+// whose StableIValue representation is from(nullptr). Otherwise, we:
+// 1. unwrap the std::optional<T>
+// 2. recursively convert its value of type T to a StableIValue
+// 3. allocate heap space for said StableIValue
+// 4. convert the resulting StableIValue* into a StableIValue
+//
+// note that this allocates heap memory! which we expect to be cleaned
+// up in the to_ivalue() function defined in shim_common.cpp. We
+// purposefully hide this implementation detail from the user so that
+// all the user needs to know is:
+//
+// The schema requests an optional (T?) so I must call `from` on a
+// std::optional<T> or a std::nullopt.
 template <typename T>
 StableIValue from(std::optional<T> val) {
   if (!val.has_value()) {
@@ -59,7 +87,9 @@ T to(StableIValue val) {
   return std::nullopt;
 }
 
-// Specialization for std::optional
+// Specialization for std::optional, see [Handling std::optional] above
+// as the semantic is the same but in reverse direction as we go from
+// IValue --(from_ivalue)-> StableIValue --(to<T>)-> T in custom extension
 template <
     typename T,
     std::enable_if_t<detail::is_optional<T>::value, bool> = true>

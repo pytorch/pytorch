@@ -1463,6 +1463,26 @@ class TestConverter(TestCase):
         inp = (torch.randn(1, 10),)
         self._check_equal_ts_ep_converter(m, inp, ["script"])
 
+    def test_ts2ep_convert_quantized_model_with_opcontext_and_constant(self):
+        class M(torch.nn.Module):
+            def __init__(self, linear_op):
+                super().__init__()
+                self.linear_op = linear_op
+
+            def forward(self, x):
+                x = torch.ops.prepacked.linear_clamp_run(
+                    x + torch.ones(1), self.linear_op
+                )
+                return x
+
+        linear_op = torch.ops.prepacked.linear_clamp_prepack(
+            torch.randn(10, 10), torch.randn(10)
+        )
+
+        m = M(linear_op)
+        inp = (torch.randn(1, 10),)
+        self._check_equal_ts_ep_converter(m, inp, ["script"])
+
 
 if __name__ == "__main__":
     run_tests()
