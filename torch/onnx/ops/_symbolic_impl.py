@@ -41,7 +41,6 @@ class EncodedAttrs:
     attr_ints: list[int]
     attr_floats: list[float]
     attr_strs: list[str]
-    attr_tensors: list[torch.Tensor]
 
     @classmethod
     def from_dict(
@@ -53,12 +52,10 @@ class EncodedAttrs:
                 float,
                 str,
                 bool,
-                torch.Tensor,
                 Sequence[int],
                 Sequence[float],
                 Sequence[str],
                 Sequence[bool],
-                Sequence[torch.Tensor],
             ],
         ],
     ) -> "EncodedAttrs":
@@ -69,7 +66,6 @@ class EncodedAttrs:
             attr_ints=[],
             attr_floats=[],
             attr_strs=[],
-            attr_tensors=[],
         )
         for i, (k, v) in enumerate(attrs.items()):
             encoded.attr_keys.append(k)
@@ -88,11 +84,6 @@ class EncodedAttrs:
                 encoded.attr_strs.append(v)
                 encoded.attr_pos.append((start_pos, start_pos + 1))
                 encoded.attr_types.append("s")
-            elif isinstance(v, torch.Tensor):
-                start_pos = len(encoded.attr_tensors)
-                encoded.attr_tensors.append(v)
-                encoded.attr_pos.append((start_pos, start_pos + 1))
-                encoded.attr_types.append("t")
             elif isinstance(v, Sequence):
                 if len(v) == 0:
                     raise ValueError(f"Empty sequence for attribute {k}")
@@ -111,11 +102,6 @@ class EncodedAttrs:
                     encoded.attr_strs.extend([str(elem) for elem in v])
                     encoded.attr_pos.append((start_pos, start_pos + len(v)))
                     encoded.attr_types.append("ss")
-                elif isinstance(v[0], torch.Tensor):
-                    start_pos = len(encoded.attr_tensors)
-                    encoded.attr_tensors.extend([torch.tensor(elem) for elem in v])
-                    encoded.attr_pos.append((start_pos, start_pos + len(v)))
-                    encoded.attr_types.append("ts")
                 else:
                     raise ValueError(f"Unsupported sequence type for attribute {k}")
             else:
@@ -136,11 +122,9 @@ class EncodedAttrs:
             int,
             float,
             str,
-            torch.Tensor,
             list[int],
             list[float],
             list[str],
-            list[torch.Tensor],
         ],
     ]:
         """Convert the encoded attributes back to a dictionary for creating an ONNX node."""
@@ -150,11 +134,9 @@ class EncodedAttrs:
                 int,
                 float,
                 str,
-                torch.Tensor,
                 list[int],
                 list[float],
                 list[str],
-                list[torch.Tensor],
             ],
         ] = {}
         for i, key in enumerate(self.attr_keys):
@@ -165,18 +147,12 @@ class EncodedAttrs:
                 attrs[key] = self.attr_floats[self.attr_pos[i][0]]
             elif attr_type == "s":
                 attrs[key] = self.attr_strs[self.attr_pos[i][0]]
-            elif attr_type == "t":
-                attrs[key] = self.attr_tensors[self.attr_pos[i][0]]
             elif attr_type == "fs":
                 attrs[key] = self.attr_floats[self.attr_pos[i][0] : self.attr_pos[i][1]]
             elif attr_type == "is":
                 attrs[key] = self.attr_ints[self.attr_pos[i][0] : self.attr_pos[i][1]]
             elif attr_type == "ss":
                 attrs[key] = self.attr_strs[self.attr_pos[i][0] : self.attr_pos[i][1]]
-            elif attr_type == "ts":
-                attrs[key] = self.attr_tensors[
-                    self.attr_pos[i][0] : self.attr_pos[i][1]
-                ]
             else:
                 raise ValueError(f"Unsupported attribute type: {attr_type}")
         return attrs
@@ -186,7 +162,7 @@ class EncodedAttrs:
     "onnx_symbolic::_symbolic",
     mutates_args=(),
     schema=(
-        "(Tensor?[] inputs, str op_type, int onnx_dtype, Tensor[] attr_tensors, *,"
+        "(Tensor?[] inputs, str op_type, int onnx_dtype, *,"
         " SymInt[] shape, str[] attr_keys, str[] attr_types, int[][] attr_pos,"
         " int[] attr_ints, float[] attr_floats, str[] attr_strs, str[] metadata_props_keys,"
         " str[] metadata_props_values, str domain='', int? version=None"
@@ -197,7 +173,6 @@ def _symbolic(
     inputs: Sequence[Optional[torch.Tensor]],
     op_type: str,
     onnx_dtype: int,
-    attr_tensors: Sequence[torch.Tensor],
     *,
     shape: Sequence[Union[int, torch.SymInt]],
     attr_keys: Sequence[str],
@@ -224,7 +199,6 @@ def _(
     inputs: Sequence[torch.Tensor],
     op_type: str,
     onnx_dtype: int,
-    attr_tensors: Sequence[torch.Tensor] = (),
     *,
     shape: Sequence[Union[int, torch.SymInt]],
     attr_keys: Sequence[str],
@@ -249,7 +223,7 @@ def _(
     "onnx_symbolic::_symbolic_multi_out",
     mutates_args=(),
     schema=(
-        "(Tensor?[] inputs, str op_type, int[] onnx_dtypes, Tensor[] attr_tensors, *,"
+        "(Tensor?[] inputs, str op_type, int[] onnx_dtypes, *,"
         " SymInt[][] shapes, str[] attr_keys, str[] attr_types, int[][] attr_pos,"
         " int[] attr_ints, float[] attr_floats, str[] attr_strs, str[] metadata_props_keys,"
         " str[] metadata_props_values, str domain='', int? version=None"
@@ -260,7 +234,6 @@ def _symbolic_multi_out(
     inputs: Sequence[Optional[torch.Tensor]],
     op_type: str,
     onnx_dtypes: Sequence[int],
-    attr_tensors: Sequence[torch.Tensor],
     *,
     shapes: Sequence[Sequence[Union[int, torch.SymInt]]],
     attr_keys: Sequence[str],
@@ -293,7 +266,6 @@ def _(
     inputs: Sequence[torch.Tensor],
     op_type: str,
     onnx_dtypes: Sequence[int],
-    attr_tensors: Sequence[torch.Tensor],
     *,
     shapes: Sequence[Sequence[Union[int, torch.SymInt]]],
     attr_keys: Sequence[str],

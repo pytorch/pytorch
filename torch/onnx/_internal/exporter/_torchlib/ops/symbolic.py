@@ -27,12 +27,10 @@ def _call_symbolic_op(
         | float
         | str
         | bool
-        | torch.Tensor
         | Sequence[int]
         | Sequence[float]
         | Sequence[str]
-        | Sequence[bool]
-        | Sequence[torch.Tensor],
+        | Sequence[bool],
     ],
     shapes: Sequence[Sequence[int | ir.Value]],
     dtypes: Sequence[int],
@@ -89,7 +87,6 @@ def onnx_symbolic_symbolic(
     inputs: Sequence[ir.Value | None],
     op_type: str,
     onnx_dtype: int,
-    attr_tensors: Sequence[ir.TensorProtocol] = (),
     *,
     shape: Sequence[int | ir.Value],
     attr_keys: Sequence[str],
@@ -103,7 +100,6 @@ def onnx_symbolic_symbolic(
     domain: str = "",
     version: int | None = None,
 ) -> ir.Value:
-    # TODO(justinchuby): Ensure the type of attr_tensors is consistent
     encoded = _symbolic_impl.EncodedAttrs(
         attr_keys=list(attr_keys),
         attr_types=list(attr_types),
@@ -111,7 +107,6 @@ def onnx_symbolic_symbolic(
         attr_ints=list(attr_ints),
         attr_floats=list(attr_floats),
         attr_strs=list(attr_strs),
-        attr_tensors=list(attr_tensors),
     )
     attrs = encoded.to_dict()
     return _call_symbolic_op(
@@ -131,7 +126,6 @@ def onnx_symbolic_symbolic_multi_out(
     inputs: Sequence[ir.Value | None],
     op_type: str,
     onnx_dtypes: Sequence[int],
-    attr_tensors: Sequence[ir.TensorProtocol],
     *,
     shapes: Sequence[Sequence[int | ir.Value]],
     attr_keys: Sequence[str],
@@ -152,7 +146,6 @@ def onnx_symbolic_symbolic_multi_out(
         attr_ints=list(attr_ints),
         attr_floats=list(attr_floats),
         attr_strs=list(attr_strs),
-        attr_tensors=list(attr_tensors),
     )
     attrs = encoded.to_dict()
     return _call_symbolic_op(

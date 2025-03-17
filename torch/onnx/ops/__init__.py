@@ -56,12 +56,10 @@ def symbolic(
         | float
         | str
         | bool
-        | torch.Tensor
         | Sequence[int]
         | Sequence[float]
         | Sequence[str]
-        | Sequence[bool]
-        | Sequence[torch.Tensor],
+        | Sequence[bool],
     ]
     | None = None,
     *,
@@ -98,7 +96,9 @@ def symbolic(
             "custom_domain::CustomOp".
         inputs: The input tensors to the operator.
         attrs: The attributes of the operator. The keys are attribute names and
-            the values are attribute values.
+            the values are attribute values. Valid attribute types are int, float,
+            str, bool, and lists of int, float, str, and bool. Tensor attributes
+            are unsupported.
         dtype: The data type of the output tensor.This can be either a torch.dtype
             or an integer representing the ONNX data type.
         shape: The shape of the output tensor. This can be a list of integers or
@@ -116,13 +116,14 @@ def symbolic(
         )
         dtype = _TORCH_DTYPE_TO_ONNX_DTYPE[dtype]
     domain, op_type = _parse_domain_op_type(domain_op)
+    if attrs is None:
+        attrs = {}
     encoded_attrs = _symbolic_impl.EncodedAttrs.from_dict(attrs)
     # TODO: Parse domain
     return _symbolic_impl._symbolic(
         inputs,
         op_type,
         dtype,
-        encoded_attrs.attr_tensors,
         shape=shape,
         attr_keys=encoded_attrs.attr_keys,
         attr_types=encoded_attrs.attr_types,
@@ -147,12 +148,10 @@ def symbolic_multi_out(
         | float
         | str
         | bool
-        | torch.Tensor
         | Sequence[int]
         | Sequence[float]
         | Sequence[str]
-        | Sequence[bool]
-        | Sequence[torch.Tensor],
+        | Sequence[bool],
     ]
     | None = None,
     *,
@@ -186,7 +185,9 @@ def symbolic_multi_out(
             "custom_domain::CustomOp".
         inputs: The input tensors to the operator.
         attrs: The attributes of the operator. The keys are attribute names and
-            the values are attribute values.
+            the values are attribute values. Valid attribute types are int, float,
+            str, bool, and lists of int, float, str, and bool. Tensor attributes
+            are unsupported.
         dtypes: The data types of the output tensors. This can be a list of
             torch.dtype or integers representing the ONNX data types. The length
             of this list must be the number of outputs.
@@ -214,13 +215,14 @@ def symbolic_multi_out(
         else:
             onnx_dtypes.append(dtype)
     domain, op_type = _parse_domain_op_type(domain_op)
+    if attrs is None:
+        attrs = {}
     encoded_attrs = _symbolic_impl.EncodedAttrs.from_dict(attrs)
     # Use the size of dtypes to determine the number of outputs
     return _symbolic_impl._symbolic_multi_out(
         inputs,
         op_type,
         onnx_dtypes,
-        encoded_attrs.attr_tensors,
         shapes=shapes,
         attr_keys=encoded_attrs.attr_keys,
         attr_types=encoded_attrs.attr_types,
