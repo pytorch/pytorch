@@ -319,6 +319,8 @@ class TORCH_API Context {
   void setFloat32MatmulPrecision(const std::string& s);
   bool allowTF32CuDNN() const;
   void setAllowTF32CuDNN(bool);
+  bool allowTF32OneDNN() const;
+  void setAllowTF32OneDNN(bool);
   bool allowTF32CuBLAS() const;
   void setAllowTF32CuBLAS(bool);
   Float32MatmulPrecision float32MatmulPrecision() const;
@@ -329,6 +331,19 @@ class TORCH_API Context {
   void setAllowBF16ReductionCuBLAS(bool);
   bool allowFP16AccumulationCuBLAS() const;
   void setAllowFP16AccumulationCuBLAS(bool);
+
+  // Matmuls can use a so-called "persistent" kernel which launches one CUDA
+  // block for each SM on the GPU, and each block then iterates over multiple
+  // output tiles. This allows to use software pipelining to hide the begin/end
+  // latencies (e.g., epilogue), especially when only one tile fits per SM.
+  // However, if some SMs are busy (e.g., with a background NCCL kernel), the
+  // matmul's blocks will be scheduled in two waves and, in the absence of some
+  // smart load balancing, the kernel will take twice as long. This flag allows
+  // to make matmuls target only a subset of the SMs, so they can fully schedule
+  // even next to a comms kernel, and only be a few percent slower.
+  std::optional<int32_t> _SMCarveout_EXPERIMENTAL() const;
+  void _setSMCarveout_EXPERIMENTAL(std::optional<int32_t>);
+
   at::QEngine qEngine() const;
   void setQEngine(at::QEngine e);
   static const std::vector<at::QEngine>& supportedQEngines();
@@ -409,7 +424,12 @@ class TORCH_API Context {
       "Please use getAcceleratorHooksInterface(device_type).getPinnedMemoryAllocator() instead")]] Allocator*
   getPinnedMemoryAllocator(
       std::optional<c10::DeviceType> device_type = std::nullopt) {
-    return getAcceleratorHooksInterface(device_type).getPinnedMemoryAllocator();
+    auto opt_device_type =
+        device_type.has_value() ? device_type : at::getAccelerator();
+    if (opt_device_type) {
+      lazyInitDevice(opt_device_type.value());
+    }
+    return getAcceleratorHooksInterface(opt_device_type).getPinnedMemoryAllocator();
   }
 
  private:
@@ -442,7 +462,9 @@ class TORCH_API Context {
   bool allow_fp16_reduction_cublas = true;
   bool allow_bf16_reduction_cublas = true;
   bool allow_fp16_accumulation_cublas = false;
+  std::optional<int32_t> sm_carveout = std::nullopt;
   bool enabled_mkldnn = true;
+  bool allow_tf32_onednn = false;
   bool enabled_nnpack = true;
   at::LinalgBackend linalg_preferred_backend =
       c10::utils::check_env("TORCH_LINALG_PREFER_CUSOLVER") == true

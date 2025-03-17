@@ -136,7 +136,7 @@ class NodeDef(NamedTuple):
     flatten_with_keys_fn: Optional[FlattenWithKeysFunc]
 
 
-_NODE_REGISTRY_LOCK = threading.Lock()
+_NODE_REGISTRY_LOCK = threading.RLock()
 SUPPORTED_NODES: dict[type[Any], NodeDef] = {}
 
 
@@ -290,18 +290,36 @@ def register_dataclass(cls: type[Any]) -> None:
     torch.export.register_dataclass(cls)
 
 
+CONSTANT_NODES: set[type] = set()
+
+
 def register_constant(cls: type[Any]) -> None:
     """Registers a type as a pytree node with no leaves.
 
-    Instances of these types are treated as a constant (sometimes referred to as
-    "static") by :func:`torch.compile`. When used in a function compiled by
-    :func:`torch.compile`, :func:`torch.compile` guards on the instance
-    object's hash: if :func:`torch.compile` sees a new hash then
+    In a :func:`torch.compile` region, if instances of these types get passed to
+    :func:`torch._dynamo.nonstrict_trace`-ed function, they treated as a
+    constant (sometimes referred to as "static"):
+
+    1. if the instance object existed before the :func:`torch.compile` region,
+    we _assume_ no mutation will happen to it inside the :func:`torch.compile`
+    region, require that it has non-default `__eq__` and `__hash__` methods, and
+    we guard on the instance based on its `__eq__` method, i.e., if a new
+    instance fails to match any instances from the previous compilations,
     :func:`torch.compile` will recompile the function using the new instance.
+
+    2. else if the instance object is created inside the :func:`torch.compile`
+    region, we currently don't support using it in a
+    :func:`torch._dynamo.nonstrict_trace`-ed function.
 
     In general, if your class holds Tensors or dynamic int/float/bool (values that
     may change from run-to-run of a function being compiled), then you probably
     do not want to register it as a constant.
+
+    Otherwise if you want to pass instance of a class to a
+    :func:`torch._dynamo.nonstrict_trace`-ed function, but you either can't use
+    :func:`register_pytree_node` on the class, or the class is "constant" enough
+    that you don't want to bother using :func:`register_pytree_node`, you should
+    consider using this function.
 
     Args:
         cls: the type to register as a constant. This type must be hashable.
@@ -311,7 +329,7 @@ def register_constant(cls: type[Any]) -> None:
         >>> from dataclasses import dataclass
         >>> import torch.utils._pytree as pytree
         >>>
-        >>> @dataclass
+        >>> @dataclass(frozen=True)
         >>> class Config:
         >>>     norm: str
         >>>
@@ -322,6 +340,17 @@ def register_constant(cls: type[Any]) -> None:
         >>> assert len(values) == 0
 
     """
+    if cls.__eq__ is object.__eq__:  # type: ignore[comparison-overlap]
+        raise TypeError(
+            "register_constant(cls) expects `cls` to have a non-default `__eq__` implementation."
+        )
+
+    # Class with a custom `__eq__` without `__hash__` won't inherit the default
+    # `__hash__` from object; see https://stackoverflow.com/a/1608907.
+    if cls.__hash__ is None:  # type: ignore[comparison-overlap]
+        raise TypeError(
+            "register_constant(cls) expects `cls` to have a non-default `__hash__` implementation."
+        )
 
     def _flatten(x):  # type: ignore[no-untyped-def]
         return [], ConstantNode(x)
@@ -329,14 +358,24 @@ def register_constant(cls: type[Any]) -> None:
     def _unflatten(_, context):  # type: ignore[no-untyped-def]
         return context.value
 
-    _private_register_pytree_node(
-        cls,
-        _flatten,
-        _unflatten,
-    )
+    def _flatten_with_keys(x):  # type: ignore[no-untyped-def]
+        return [], ConstantNode(x)
+
+    with _NODE_REGISTRY_LOCK:
+        _private_register_pytree_node(
+            cls,
+            _flatten,
+            _unflatten,
+            flatten_with_keys_fn=_flatten_with_keys,
+        )
+        CONSTANT_NODES.add(cls)
 
 
-@dataclasses.dataclass
+def is_constant_class(cls: type[Any]) -> bool:
+    return isinstance(cls, type) and cls in CONSTANT_NODES
+
+
+@dataclasses.dataclass(frozen=True)
 class ConstantNode:
     value: Any
 
@@ -451,6 +490,7 @@ def _deregister_pytree_node(
         node_def = SUPPORTED_SERIALIZED_TYPES[cls]
         del SERIALIZED_TYPE_TO_PYTHON_TYPE[node_def.serialized_type_name]
         del SUPPORTED_SERIALIZED_TYPES[cls]
+        CONSTANT_NODES.discard(cls)
 
 
 def _private_register_pytree_node(
@@ -839,6 +879,19 @@ class TreeSpec:
         repr_suffix: str = f"{children_specs_str}])"
         return repr_prefix + repr_suffix
 
+    def __eq__(self, other: PyTree) -> bool:
+        if self is other:
+            return True
+        elif other.__class__ is self.__class__:
+            if str(self.type) != str(other.type):
+                return False
+            if self.context != other.context:
+                return False
+            elif self.children_specs != other.children_specs:
+                return False
+            return True
+        return NotImplemented
+
     def is_leaf(self) -> bool:
         return self.num_nodes == 1 and self.num_leaves == 1
 
@@ -951,11 +1004,20 @@ class TreeSpec:
         return unflatten_fn(child_pytrees, self.context)
 
 
+# NOTE: subclassing a dataclass is subtle. In order to enable reasoning about
+# this class with `dataclasses.fields`, etc., while having a simplified
+# constructor that takes no argument, we wrap with `dataclass(init=True, ...)`
+# again, with fields that have `init=False`.
+@dataclasses.dataclass(init=True, frozen=True, eq=False, repr=False)
 class LeafSpec(TreeSpec):
-    def __init__(self) -> None:
-        super().__init__(None, None, [])
+    type: Any = dataclasses.field(default=None, init=False)
+    context: Context = dataclasses.field(default=None, init=False)
+    children_specs: list["TreeSpec"] = dataclasses.field(
+        default_factory=list, init=False
+    )
 
     def __post_init__(self) -> None:
+        # Override `__post_init__` for `num_leaves` derivation.
         object.__setattr__(self, "num_nodes", 1)
         object.__setattr__(self, "num_leaves", 1)
         object.__setattr__(self, "num_children", 0)
@@ -1136,17 +1198,17 @@ MapOnlyFn = Callable[[T], Callable[[Any], Any]]
 # These specializations help with type inference on the lambda passed to this
 # function
 @overload
+def map_only(type_or_types_or_pred: type[T], /) -> MapOnlyFn[Fn[T, Any]]:
+    ...
+
+
+@overload
 def map_only(type_or_types_or_pred: Type2[T, S], /) -> MapOnlyFn[Fn2[T, S, Any]]:
     ...
 
 
 @overload
 def map_only(type_or_types_or_pred: Type3[T, S, U], /) -> MapOnlyFn[Fn3[T, S, U, Any]]:
-    ...
-
-
-@overload
-def map_only(type_or_types_or_pred: type[T], /) -> MapOnlyFn[Fn[T, Any]]:
     ...
 
 
@@ -1242,6 +1304,17 @@ def tree_map_only(
 
 @overload
 def tree_map_only(
+    type_or_types_or_pred: TypeAny,
+    /,
+    func: FnAny[Any],
+    tree: PyTree,
+    is_leaf: Optional[Callable[[PyTree], bool]] = None,
+) -> PyTree:
+    ...
+
+
+@overload
+def tree_map_only(
     type_or_types_or_pred: Callable[[Any], bool],
     /,
     func: FnAny[Any],
@@ -1288,6 +1361,17 @@ def tree_map_only_(
     type_or_types_or_pred: Type3[T, S, U],
     /,
     func: Fn3[T, S, U, Any],
+    tree: PyTree,
+    is_leaf: Optional[Callable[[PyTree], bool]] = None,
+) -> PyTree:
+    ...
+
+
+@overload
+def tree_map_only_(
+    type_or_types_or_pred: TypeAny,
+    /,
+    func: FnAny[Any],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> PyTree:

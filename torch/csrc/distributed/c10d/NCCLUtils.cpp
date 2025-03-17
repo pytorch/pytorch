@@ -340,19 +340,26 @@ ncclResult_t NCCLComm::checkForNcclError() {
 #endif
 }
 
-ncclResult_t NCCLComm::registerSegment(void* ptr, size_t size) {
+ncclResult_t NCCLComm::registerSegment(
+    void* ptr,
+    size_t size,
+    bool errorOnRereg /*=true*/) {
   LockType lock(mutex_);
 #ifdef NCCL_HAS_COMM_REGISTER
   // We register only segments from cache allocator
   // which are guaranteed to be with disjoint addr ranges. Thus, a ptr always
   // maps to a unique handle and should not be registered before the current
   // ptr is deregistered and freed.
-  TORCH_CHECK(
-      registeredSegmentHandles_.count(ptr) == 0,
-      "Segment with ptr ",
-      ptr,
-      " has already been registered on ncclComm_ ",
-      ncclComm_);
+  if (registeredSegmentHandles_.count(ptr) > 0) {
+    TORCH_CHECK(
+        !errorOnRereg,
+        "Segment with ptr ",
+        ptr,
+        " has already been registered on ncclComm_ ",
+        ncclComm_);
+    // Skip below
+    return ncclSuccess;
+  }
 
   void* handle = nullptr;
   // Use getNcclComm to make sure comm is ready before calling nccl APIs
@@ -460,7 +467,8 @@ size_t hashTensors(const std::vector<at::Tensor>& tensors) {
         std::vector<char> dst(data_size);
         // This is needed so that we trigger a device synchronization so we can
         // get the collective finished if launched on GPU and hash its output.
-        cudaMemcpy(dst.data(), src, data_size, cudaMemcpyDeviceToHost);
+        AT_CUDA_CHECK(
+            cudaMemcpy(dst.data(), src, data_size, cudaMemcpyDeviceToHost));
         for (size_t i = 0; i < data_size; ++i) {
           // Update the hash for each byte in the tensor
           hash = c10::hash_combine(hash, c10::get_hash(dst[i], data_size));
@@ -549,7 +557,7 @@ std::string getNcclErrorDetailStr(
 
 // Dump proxyTrace log to stdout
 void printNcclCommProxyTrace(
-    std::string& dumpReason,
+    const std::string& dumpReason,
     const std::unordered_map<std::string, std::string>& dumpMap) {
   LOG(INFO) << "Dumping nccl comm trace, reason: " << dumpReason;
   for (auto& [key, value] : dumpMap) {

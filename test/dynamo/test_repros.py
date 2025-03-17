@@ -1418,9 +1418,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.assertTrue(same(opt_model(a, b, c, d), correct))
 
         if torch._dynamo.config.assume_static_by_default:
-            self.assertExpectedInline(cnt.frame_count, """4""")
+            self.assertExpectedInline(cnt.frame_count, """2""")
         else:
-            self.assertExpectedInline(cnt.frame_count, """5""")
+            self.assertExpectedInline(cnt.frame_count, """3""")
 
     def test_hf_model_output(self):
         ex = ModelOutput(a=torch.randn(10), b=torch.randn(10), c=torch.randn(10))
@@ -3653,7 +3653,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 return t + res
 
             with self.assertRaisesRegex(
-                torch._dynamo.exc.UserError, "Dynamic control flow is not supported"
+                torch._dynamo.exc.Unsupported,
+                "Data-dependent branching",
             ):
                 torch.compile(f, backend="eager", fullgraph=True)(torch.zeros(1))
 
@@ -4892,6 +4893,19 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(ref, res)
         self.assertEqual(cnt.frame_count, 2)
 
+    def test_return_weakref(self):
+        def f(t):
+            t = t * 2
+            wr = weakref.ref(t)
+            return wr, t
+
+        ref_t = torch.randn(2, 2, requires_grad=True)
+        ref_y = f(ref_t)
+
+        t = ref_t.detach().clone().requires_grad_()
+        y = torch.compile(f, backend="eager", fullgraph=True)(t)
+        self.assertEqual(ref_y[0](), y[0]())
+
     def test_weakref_del(self):
         def fn(x_weak, y):
             x = x_weak()
@@ -5075,8 +5089,6 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertTrue(res)
 
     def test_stk_sdd_is_transposed(self):
-        trigger_graph_break = False
-
         def _is_transposed(x):
             return (
                 not x.is_contiguous()
@@ -5103,9 +5115,6 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
                 drhs = None
                 if ctx.needs_input_grad[1]:
                     drhs = torch.full_like(rhs, 1.0 if trans_b else 2.0)
-                if trigger_graph_break:
-                    if _is_transposed(dy):
-                        return dlhs + 1, drhs + 1, None, None
                 return dlhs, drhs, None, None
 
         x1 = torch.randn((8, 8), requires_grad=True)
@@ -5123,10 +5132,6 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
         self.assertEqual(x1.grad, x2.grad)
         self.assertEqual(y1.grad, y2.grad)
-
-        trigger_graph_break = True
-        with self.assertRaises(torch._dynamo.exc.Unsupported):
-            fn().sum().backward()
 
     def test_partially_initialized_module_property(self):
         class Matrix(torch.nn.Module):
@@ -5783,6 +5788,64 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         fn(torch.randn(4))
 
     @requires_cuda
+    # test involves custom ops that return unbacked symints
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    # test requires the activation memory budget code to think
+    # that j() is banned from recompute
+    @torch._functorch.config.patch(activation_memory_budget=0.5)
+    def test_partitioner_activation_memory_budget_with_unbacked_symints(self):
+        @torch.library.custom_op("test_partitioner::f", mutates_args=[])
+        def f(x: torch.Tensor) -> torch.Tensor:
+            return x.new_zeros(512, 1)
+
+        @f.register_fake
+        def _(x: torch.Tensor) -> torch.Tensor:
+            ctx = torch.library.get_ctx()
+            s = ctx.new_dynamic_size()
+            return torch.empty(s, 1, device=x.device, dtype=x.dtype)
+
+        @torch.library.custom_op("test_partitioner::g", mutates_args=[])
+        def g(x: torch.Tensor) -> torch.Tensor:
+            return torch.cat([x, x[0].unsqueeze(-1)])
+
+        @g.register_fake
+        def _(x: torch.Tensor) -> torch.Tensor:
+            return torch.cat([x, x[0].unsqueeze(-1)])
+
+        @torch.library.custom_op("test_partitioner::i", mutates_args=[])
+        def i(x: torch.Tensor, sz: int) -> torch.Tensor:
+            return torch.ones(sz, 1, dtype=x.dtype, device=x.device)
+
+        @i.register_fake
+        def _(x: torch.Tensor, sz: int) -> torch.Tensor:
+            return torch.empty(sz, 1, dtype=x.dtype, device=x.device)
+
+        @torch.library.custom_op("test_partitioner::j", mutates_args=[])
+        def j(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            return x + 1
+
+        @j.register_fake
+        def _(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            sz1 = x.shape[0] - 1
+            sz2 = y.numel()
+            torch._check(sz1 == sz2)
+            # make this a reduction so partitioner bans recompute of it
+            return x.sum()
+
+        def f(x, param):
+            y = torch.ops.test_partitioner.f(x)
+            z = torch.ops.test_partitioner.g(y)
+            z2 = torch.ops.test_partitioner.i(x, z.shape[0] - 1)
+            z2 = torch.ops.test_partitioner.j(z, z2)
+            return torch.matmul(x, param).sin() * z2.sum()
+
+        x = torch.randn(512, 512, device="cuda")
+        param = torch.randn(512, 512, device="cuda", requires_grad=True)
+        out_ref = f(x, param)
+        out_test = torch.compile(f, backend="aot_eager_decomp_partition")(x, param)
+        self.assertEqual(out_ref, out_test)
+
+    @requires_cuda
     # This test will fail as flip in combination with particular input lenghts
     # produces weird results.
     # This is under investigations in
@@ -6160,7 +6223,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         from torch.distributions import Categorical
 
         class SubCateg(Categorical):
-            ...
+            pass
 
         @torch.compile(backend="eager", fullgraph=True)
         def make_dist_and_execute(t, d):
@@ -6285,6 +6348,42 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         inp = torch.randn(3, 3)
         self.assertEqual(fn(inp), opt_fn(inp))
 
+    def test_ones_out_dynamic(self):
+        def ones_fn(size, out):
+            return torch.ones(size, out=out)
+
+        opt_model = torch.compile(ones_fn)
+
+        out1 = torch.empty(2, 3)
+        opt_model((2, 3), out1)
+
+        out2 = torch.empty(3, 4)
+        opt_model((3, 4), out2)
+
+    def test_zeros_out_dynamic(self):
+        def zeros_fn(size, out):
+            return torch.zeros(size, out=out)
+
+        opt_model = torch.compile(zeros_fn)
+
+        out1 = torch.empty(2, 3)
+        opt_model((2, 3), out1)
+
+        out2 = torch.empty(3, 4)
+        opt_model((3, 4), out2)
+
+    def test_empty_out_dynamic(self):
+        def empty_fn(size, out):
+            return torch.empty(size, out=out)
+
+        opt_model = torch.compile(empty_fn)
+
+        out1 = torch.empty(2, 3)
+        opt_model((2, 3), out1)
+
+        out2 = torch.empty(3, 4)
+        opt_model((3, 4), out2)
+
     def test_dataclass_in_module(self):
         @dataclasses.dataclass
         class MyData:
@@ -6377,6 +6476,10 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
     @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
     @unittest.skipIf(not dist.is_available(), "test requires distributed")
+    # TODO: Remoe this skip once nccl issue if fixed
+    @unittest.skip(
+        "Failing with ncc update 2.25.1 : https://github.com/pytorch/pytorch/issues/147141"
+    )
     def test_ddp_checkpoint(self):
         # https://github.com/pytorch/pytorch/issues/144035
         DIM = 256
@@ -6509,6 +6612,37 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
                 torch.randn((2, 12, 16, 32, 32))
             ).sum()
             self.assertEqual(actual, expected)
+
+    def test_incompatible_configs(self):
+        with torch._dynamo.config.patch(
+            suppress_errors=False, fail_on_recompile_limit_hit=False
+        ):
+            torch.compile(lambda: None)
+
+        with torch._dynamo.config.patch(
+            suppress_errors=True, fail_on_recompile_limit_hit=False
+        ):
+            torch.compile(lambda: None)
+
+        with torch._dynamo.config.patch(
+            suppress_errors=False, fail_on_recompile_limit_hit=True
+        ):
+            torch.compile(lambda: None)
+
+        with torch._dynamo.config.patch(
+            suppress_errors=True, fail_on_recompile_limit_hit=True
+        ), self.assertRaises(AssertionError):
+            torch.compile(lambda: None)
+
+    def test_str_isalnum(self):
+        def f(x, c):
+            str.isalnum(c)
+            return x.sin()
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        x = torch.randn(3)
+        c = "foobar"
+        self.assertEqual(f(x, c), opt_f(x, c))
 
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
@@ -6698,6 +6832,24 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.randn(4)
         self.assertEqual(fn(x), opt_fn(x))
+
+    def test_truthiness_of_symints_no_recompiles(self, device):
+        def f(x):
+            numel = x.numel()
+            if numel:
+                return x + 1
+            else:
+                return x + 2
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        f_compiled = torch.compile(f, backend=cnt, dynamic=True)
+
+        x1 = torch.randn(4)
+        _ = f_compiled(x1)
+        x2 = torch.randn(5)
+        _ = f_compiled(x2)
+
+        self.assertEqual(cnt.frame_count, 1)
 
     @requires_cuda
     def test_sdpa_dynamic_shapes(self, device):

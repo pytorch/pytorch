@@ -134,15 +134,18 @@ class StateDictOptions:
     strict: bool = True
     broadcast_from_rank0: bool = False
     flatten_optimizer_state_dict: bool = False
+    dsd_fqn_modifiers: str = "_fqn_modifiers"
 
 
 @dataclass
 class _StateDictInfo(StateDictOptions):
     fqn_param_mapping: dict[
-        Union[str, torch.Tensor], Union[FQNS_T, torch.Tensor]
+        Union[str, torch.Tensor],
+        Union[FQNS_T, torch.Tensor],
     ] = field(default_factory=dict)
     shared_params_mapping: dict[
-        Union[str, torch.Tensor], Union[FQNS_T, torch.Tensor]
+        Union[str, torch.Tensor],
+        Union[FQNS_T, torch.Tensor],
     ] = field(default_factory=dict)
     submodule_prefixes: set[str] = field(default_factory=set)
     handle_model: bool = True
@@ -155,6 +158,7 @@ class _StateDictInfo(StateDictOptions):
 def _get_fqns(
     model: nn.Module,
     name: str,
+    dsd_fqn_modifiers: str = "_fqn_modifiers",
     skip_ddp_prefix: bool = True,
     skip_compiler_prefix: bool = True,
 ) -> FQNS_T:
@@ -162,7 +166,7 @@ def _get_fqns(
     This API is used to convert the name of a parameter to the FQNs. For FSDP
     without `use_orig_params`, the name of FlatParameter can be mapped to
     multiple original parameters. As a result, the return type of this function
-    is `Set[str]`.
+    is `set[str]`.
 
     Args:
         module (nn.Module): the root model.
@@ -204,6 +208,14 @@ def _get_fqns(
             if not skip_compiler_prefix:
                 fqn_obj_names.append(curr_obj_name)
         else:
+            # In some modeuls, _fqn_modifiers would not shown in the state_dict keys,
+            # skip them in the fqn to ensure load stat dict successfully for them.
+            if hasattr(curr_obj, dsd_fqn_modifiers):
+                if removed_fqn := getattr(curr_obj, dsd_fqn_modifiers)().get(
+                    curr_obj_name
+                ):
+                    if hasattr(curr_obj, removed_fqn):
+                        curr_obj = getattr(curr_obj, removed_fqn)
             fqn_obj_names.append(curr_obj_name)
             if curr_obj_name == nn.modules.module._EXTRA_STATE_KEY_SUFFIX:
                 if i != len(obj_names) - 1:
@@ -218,7 +230,7 @@ class _EXTRA_STATE:
     pass
 
 
-def _iterate_valid_model_state(model):
+def _iterate_valid_model_state(model, dsd_fqn_modifiers="_fqn_modifiers"):
     visited_modules: set[nn.Module] = set()
 
     def recurse(module: nn.Module, curr_fqn: str) -> Generator:
@@ -228,7 +240,16 @@ def _iterate_valid_model_state(model):
         for name, submodule in module.named_children():
             if submodule in visited_modules:
                 continue
-            new_fqn = f"{curr_fqn}{name}"
+            # if user have state_dict_hooks in their model, they can add the state_dict key changes
+            # at dsd_fqn_modifiers in input to align with the function of state_dict_hook
+            if (
+                hasattr(module, dsd_fqn_modifiers)
+                and name in getattr(module, dsd_fqn_modifiers)().values()
+            ):
+                # skip _fqn_modifiers here thus remove the last `.` added
+                new_fqn = curr_fqn[:-1]
+            else:
+                new_fqn = f"{curr_fqn}{name}"
             yield from recurse(submodule, new_fqn)
 
         for name, obj in chain(
@@ -527,10 +548,14 @@ def _load_model_state_dict(
         return _IncompatibleKeys({}, {})
 
     local_state_dict = {}
-    for key, value in _iterate_valid_model_state(model):
-        fqns = _get_fqns(model, key)
+    for key, value in _iterate_valid_model_state(model, info.dsd_fqn_modifiers):
+        fqns = _get_fqns(model, key, info.dsd_fqn_modifiers)
         fqns_with_prefix = _get_fqns(
-            model, key, skip_ddp_prefix=False, skip_compiler_prefix=False
+            model,
+            key,
+            info.dsd_fqn_modifiers,
+            skip_ddp_prefix=False,
+            skip_compiler_prefix=False,
         )
 
         for fqn, fqn_with_prefix in zip(fqns, fqns_with_prefix):
@@ -571,8 +596,7 @@ def _load_model_state_dict(
             )
         elif info.full_state_dict:
             _distribute_state_dict(state_dict, local_state_dict, device=devices.pop())
-        for fqn, local_state in local_state_dict.items():
-            state_dict[fqn] = local_state
+        state_dict.update(local_state_dict)
 
     with info.fsdp_context():
         return cast(
@@ -706,6 +730,24 @@ def _unflatten_optim_state_dict(
         pg_state.append({_PARAMS: []})
         for param in param_group[_PARAMS]:
             for fqn in info.fqn_param_mapping[param]:
+                # If a parameter is shared, only one of the FQN will be used.
+                # So we need to verify which if this fqn is actually used in
+                # the state_dict.
+                if fqn in info.shared_params_mapping:
+                    in_params = False
+                    for k in param_group.keys():
+                        if k == _PARAMS:
+                            continue
+                        flatten_key = f"{_PG}.{fqn}.{k}"
+                        if flatten_key in state_dict:
+                            in_params = True
+                        break
+                else:
+                    in_params = True
+
+                if not in_params:
+                    continue
+
                 params = pg_state[-1][_PARAMS]
                 assert isinstance(params, list)  # typing
                 params.append(fqn)
@@ -857,15 +899,37 @@ def _split_optim_state_dict(
                     if fqn in cast(list[str], loaded_param_group[_PARAMS]):
                         pg_mapping[id(loaded_param_group)] = len(return_osd[_PG]) - 1
 
+        if len(param_group[_PARAMS]) == 0:
+            # Param_group with empty params.
+            ret = []
+            for loaded_param_group in cast(ListDictValueType, optim_state_dict[_PG]):
+                if len(cast(list[str], loaded_param_group[_PARAMS])) == 0:
+                    ret.append(loaded_param_group)
+            if len(ret) != 1:
+                raise ValueError(
+                    "There are param groups that have zero parameters. "
+                    "In such a case, DSD only support exactly one param group "
+                    "with zero parameters."
+                    "But the loaded state_dict has zero or more than one param groups "
+                    "that have zero parameters."
+                )
+            if len(optim_state_dict[_PG]) != len(optim.param_groups):
+                raise ValueError(
+                    "When there is a parameter group that has zero parameters, "
+                    "multiple optimizers are not supported."
+                )
+            pg_mapping[id(loaded_param_group)] = len(return_osd[_PG]) - 1
+
     for param_group in cast(ListDictValueType, optim_state_dict[_PG]):
-        idx = pg_mapping.get(id(param_group), -1)
-        if idx == -1:
+        pg_idx = pg_mapping.get(id(param_group), -1)
+        if pg_idx == -1:
             continue
+
         for key, value in param_group.items():
             if key == _PARAMS:
                 continue
             # TODO: check if value is the same if exists.
-            pg_state[idx][key] = value
+            pg_state[pg_idx][key] = value
 
     return return_osd
 
@@ -957,6 +1021,9 @@ def _load_optim_state_dict(
             optim_state_dict = _unflatten_state_dict(
                 flatten_local_osd, local_osd_mapping
             )
+            for pg in optim_state_dict[_PG]:
+                if _PARAMS not in pg:
+                    cast(dict[str, ValueType], pg)[_PARAMS] = []
 
         # Note that we do not have to convert the FQN back to param id here if
         # order in optim.param_groups[idx][_PARAMS] is the same as the one in
@@ -977,7 +1044,7 @@ def get_model_state_dict(
 
     Args:
         model (nn.Module): the nn.Module to the model.
-        submodules (deprecated): Optional[Set[nn.Module]]: only return the model parameters
+        submodules (deprecated): Optional[set[nn.Module]]: only return the model parameters
             that belong to the submodules.
         options (StateDictOptions): the options to control how
             model state_dict and optimizer state_dict should be returned. See
@@ -1017,7 +1084,7 @@ def get_optimizer_state_dict(
         model (nn.Module): the nn.Module to the model.
         optimizers (Union[None, Optimizer, Iterable[Optimizer]]):
             The optimizers that are used to optimize ``model``.
-        submodules (deprecated): Optional[Set[nn.Module]]: only return the model parameters
+        submodules (deprecated): Optional[set[nn.Module]]: only return the model parameters
             that belong to the submodules.
         options (StateDictOptions): the options to control how
             model state_dict and optimizer state_dict should be returned. See
@@ -1092,7 +1159,9 @@ def get_state_dict(
 
 
         >>> ddp_state_dict, ddp_optim_state_dict = get_state_dict(ddp_model, ddp_optim)
-        >>> fsdp_state_dict, fsdp_optim_state_dict = get_state_dict(fsdp_model, fsdp_optim)
+        >>> fsdp_state_dict, fsdp_optim_state_dict = get_state_dict(
+        ...     fsdp_model, fsdp_optim
+        ... )
 
         >>> # if we simply call ddp_model.state_dict() and fsdp_model.state_dict(),
         >>> # the asserts will fail.
@@ -1104,7 +1173,7 @@ def get_state_dict(
         model (nn.Module): the nn.Module to the model.
         optimizers (Union[None, Optimizer, Iterable[Optimizer]]):
             The optimizers that are used to optimize ``model``.
-        submodules (deprecated): Optional[Set[nn.Module]]: only return the model parameters
+        submodules (deprecated): Optional[set[nn.Module]]: only return the model parameters
             that belong to the submodules.
         options (StateDictOptions): the options to control how
             model state_dict and optimizer state_dict should be returned. See
@@ -1219,6 +1288,10 @@ def set_optimizer_state_dict(
     The counterpart of ``get_optimizer_state_dict`` to set the state_dict to the
     optimizers. See ``set_state_dict`` for the detail usage.
 
+    WARN: ``set_optimizer_state_dict`` can only be called before ``backward()`` or after
+        ``step()`` is called on the optimizers. Otherwise, the optimizer states won't be
+        initialized correctly.
+
     Args:
         model (nn.Module): the nn.Module to the model.
         optimizers (Union[Optimizer, Iterable[Optimizer]]):
@@ -1263,6 +1336,10 @@ def set_state_dict(
     2) if a tensor is sharded, it must be either a ShardedTensor or DTensor,
     3) optimizer state_dict cannot contain the parameter IDs; the keys should be
     the canonical FQNs.
+
+    WARN: ``set_state_dict`` can only be called before ``backward()`` or after ``step()``
+        is called on the optimizers. Otherwise, the optimizer states won't be initialized
+        correctly.
 
     Args:
         model (nn.Module): the nn.Module to the model.

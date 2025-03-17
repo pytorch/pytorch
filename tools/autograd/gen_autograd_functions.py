@@ -67,7 +67,7 @@ struct TORCH_API ${op} : public ${superclass} {
     ${release_variables}
   }
   ${will_release_variables}
-  void compiled_args(CompiledNodeArgs& args) override;
+  void compiled_args(CompiledNodeArgs& args) const override;
   variable_list apply_with_saved(const variable_list& inputs, SwapSavedVariables& saved) override;
   ${saved_variables}
   ${saved_list_sizes}
@@ -127,7 +127,7 @@ variable_list ${op}::apply(variable_list&& grads) {
   return ${op}_apply_functional(std::move(grads), needs_input_grad${,apply_functional_args});
 }
 
-void ${op}::compiled_args(CompiledNodeArgs& args) {
+void ${op}::compiled_args(CompiledNodeArgs& args) const {
     ${compiled_args}
 }
 variable_list ${op}::apply_with_saved(const variable_list& grads, SwapSavedVariables& saved) {
@@ -1033,16 +1033,13 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
     )
     unpack_ivalues = []
     for typ, name in zip(apply_functional_args_ref_types, apply_functional_args):
-        if typ.endswith("&"):
-            typ = typ[:-1]
+        typ = typ.removesuffix("&")
         unpack_ivalues.append(f"auto {name} = packed_args.unpack<{typ}>();")
 
     schema_args = [f"std::array<bool, {len(input_name_to_idx)}>"]
     for typ in apply_functional_args_ref_types:
-        if typ.endswith("&"):
-            typ = typ[:-1]
-        if typ.startswith("const"):
-            typ = typ[5:]
+        typ = typ.removesuffix("&")
+        typ = typ.removeprefix("const")
         schema_args.append(typ.strip())
     compute_schema = ["std::vector<at::TypePtr> schema = {"]
     for schema_arg in schema_args:

@@ -1,6 +1,9 @@
 # Owner(s): ["module: c10d"]
+import gc
 import threading
 import unittest
+from datetime import timedelta
+from typing import Optional
 
 import torch
 import torch.distributed as dist
@@ -17,6 +20,7 @@ from torch.distributed._functional_collectives import (
     reduce_scatter_tensor,
     reduce_scatter_tensor_coalesced,
 )
+from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     requires_nccl,
@@ -24,6 +28,7 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     run_tests,
+    skipIfRocm,
     TestCase,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
@@ -435,22 +440,6 @@ class TestWithNCCL(MultiProcessTestCase):
         )
         self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 1)
 
-    @skip_if_lt_x_gpu(2)
-    def test_py_work(self) -> None:
-        self._init_process_group()
-
-        wait_called = False
-
-        class MyWork(dist.Work):
-            def wait(self, _):
-                nonlocal wait_called
-                wait_called = True
-
-        tensor = torch.rand(2, 2)
-        torch._C._distributed_c10d._register_work(tensor, MyWork())
-        torch.ops._c10d_functional.wait_tensor(tensor)
-        self.assertTrue(wait_called)
-
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     @fresh_inductor_cache()
@@ -493,9 +482,218 @@ class TestWithNCCL(MultiProcessTestCase):
         t.start()
         t.join()
 
+    @skipIfRocm
+    @unittest.skipIf(
+        not SM90OrLater,
+        "_scaled_mm currently only supports sm>=90",
+    )
+    @skip_if_lt_x_gpu(2)
+    @fresh_inductor_cache()
+    def test_fixed_striding(self):
+        self._init_process_group()
+
+        def scale(t):
+            scale = (
+                torch.finfo(torch.float8_e4m3fn).max
+                / t.abs().amax(dim=-1, keepdim=True).float()
+            )
+            t = t.mul(scale).to(torch.float8_e4m3fn)
+            return t, scale
+
+        def fp8_rowwise_backward(in_, w, out_grad):
+            out_grad_fp8, scale_out_grad = scale(out_grad)
+            w_fp8, scale_w = scale(w.t().contiguous())
+            out_grad_fp8 = funcol.all_gather_tensor(
+                out_grad_fp8, gather_dim=0, group=torch.distributed.group.WORLD
+            )
+            scale_out_grad = funcol.all_gather_tensor(
+                scale_out_grad, gather_dim=0, group=torch.distributed.group.WORLD
+            )
+            in_grad = torch._scaled_mm(
+                out_grad_fp8,
+                w_fp8.t(),
+                scale_a=scale_out_grad,
+                scale_b=scale_w.t(),
+                out_dtype=torch.bfloat16,
+            )
+
+            out_grad = funcol.all_gather_tensor(
+                out_grad.t().contiguous(),
+                gather_dim=0,
+                group=torch.distributed.group.WORLD,
+            )
+            w_grad = out_grad @ in_
+
+            return in_grad, w_grad
+
+        m, n, k = 128, 256, 64
+        in_ = torch.randn((m, k), device="cuda", dtype=torch.bfloat16)
+        w = torch.randn((n, k), device="cuda", dtype=torch.bfloat16)
+        out_grad = torch.randn((m, n), device="cuda", dtype=torch.bfloat16)
+
+        eager_in_grad, eager_w_grad = fp8_rowwise_backward(in_, w, out_grad)
+        compile_in_grad, compile_w_grad = torch.compile(fp8_rowwise_backward)(
+            in_, w, out_grad
+        )
+
+        self.assertTrue(torch.allclose(compile_w_grad, eager_w_grad))
+
+
+def dummy_init_pg() -> None:
+    if not dist.is_initialized():
+        dist.init_process_group(
+            backend="gloo", rank=0, world_size=1, store=dist.HashStore()
+        )
+
+
+class _DummyWork(dist.Work):
+    def __init__(self, pg: "ProcessGroupDummy") -> None:
+        super().__init__()
+        self.pg = pg
+
+    def wait(self, timeout: Optional[timedelta] = None) -> bool:
+        self.pg.waits += 1
+        return True
+
+    def __del__(self):
+        self.pg.dels += 1
+
+
+class ProcessGroupDummy(dist.ProcessGroup):
+    """
+    This process group discards all data passed to it and returns success. This
+    is intended for rare cases where we want to discard certain operations
+    without modifying the underlying library.
+
+    This PG only supports world_size of 1.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(0, 1)
+
+        self._group_name = "dummy:dummy"
+
+        self.waits = 0
+        self.dels = 0
+
+    def broadcast(self, tensor_list: list[torch.Tensor], opts: object) -> dist.Work:
+        return _DummyWork(self)
+
+    def allgather_into_tensor_coalesced(
+        self,
+        output_lists: list[torch.Tensor],
+        input_list: list[torch.Tensor],
+        opts: object,
+    ) -> dist.Work:
+        return _DummyWork(self)
+
+    def allreduce(self, tensors: list[torch.Tensor], opts: object) -> dist.Work:
+        return _DummyWork(self)
+
+    def reduce_scatter_tensor_coalesced(
+        self,
+        outputTensors: list[torch.Tensor],
+        inputTensors: list[torch.Tensor],
+        opts: object,
+    ) -> dist.Work:
+        return _DummyWork(self)
+
+    @property
+    def group_name(self) -> str:
+        if self._group_name is None:
+            raise ValueError("ProcessGroup name not set")
+        return self._group_name
+
+    def _set_group_name(self, name: str) -> None:
+        self._group_name = name
+
+    def register(self) -> dist.ProcessGroup:
+        def create_pg(
+            prefix_store: dist.PrefixStore, rank: int, world_size: int, timeout: float
+        ) -> dist.ProcessGroup:
+            return self
+
+        dist.Backend.register_backend(self.group_name, create_pg, devices=["cpu"])
+
+        return dist.new_group(
+            ranks=[0],
+            backend=self.group_name,
+            group_desc=self.group_name,
+            timeout=timedelta(seconds=60.0),  # this timeout isn't used
+        )
+
+
+class PyWorkTest(TestCase):
+    """
+    Native functional collectives have some interesting interactions with
+    PyProcessGroup due to Python reference counting and pybind trampoline
+    classes with C++ types. This validates that PyProcessGroup and PyWork
+    aren't getting prematurely freed.
+    """
+
+    def test_wait_tensor(self) -> None:
+        wait_called = False
+
+        class MyWork(dist.Work):
+            def wait(self, _):
+                nonlocal wait_called
+                wait_called = True
+
+        # check registration and implicit unregistration
+
+        tensor = torch.rand(2, 2)
+        work = MyWork()
+        torch._C._distributed_c10d._register_work(tensor, work)
+
+        # Force GC collection of the MyWork object, if we're not doing correct
+        # reference counting we'll deadlock in wait_tensor.
+        del work
+        gc.collect()
+
+        torch.ops._c10d_functional.wait_tensor(tensor)
+        self.assertTrue(wait_called)
+
+    def test_collectives(self) -> None:
+        dummy_init_pg()
+
+        pg = ProcessGroupDummy().register()
+
+        x = torch.rand(2, 2)
+        x = funcol.all_reduce(x, "sum", group=pg)
+        gc.collect()
+        self.assertEqual(pg.dels, 0)
+        x.wait()
+        self.assertEqual(pg.waits, 1)
+        self.assertEqual(pg.dels, 1)
+
+        x = torch.rand(2, 2)
+        x = funcol.broadcast(x, 0, group=pg)
+        gc.collect()
+        self.assertEqual(pg.dels, 1)
+        x.wait()
+        self.assertEqual(pg.waits, 2)
+        self.assertEqual(pg.dels, 2)
+
+        x = torch.rand(2, 2)
+        x = funcol.all_gather_tensor(x, 0, group=pg)
+        gc.collect()
+        self.assertEqual(pg.dels, 2)
+        x.wait()
+        self.assertEqual(pg.waits, 3)
+        self.assertEqual(pg.dels, 3)
+
+        x = torch.rand(2, 2)
+        x = funcol.reduce_scatter_tensor(x, "sum", 0, group=pg)
+        gc.collect()
+        self.assertEqual(pg.dels, 3)
+        x.wait()
+        self.assertEqual(pg.waits, 4)
+        self.assertEqual(pg.dels, 4)
+
 
 class CompileTest(TestCase):
     def setUp(self):
+        super().setUp()
         # Allow testing aoti after torch.compile
         torch._inductor.config.triton.store_cubin = True
         torch._inductor.config.debug = True
@@ -896,15 +1094,16 @@ class CompileTest(TestCase):
         (
             FileCheck()
             .check("buf0 = empty")
-            .check("buf7 = empty")
+            .check("buf1 = buf0")
+            .check("buf8 = empty")
             # Expect in-place with inductor allocated buf
-            .check("torch.ops._c10d_functional.broadcast_.default(buf0")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf0")
+            .check("torch.ops._c10d_functional.broadcast_.default(buf1")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf1")
             # Expect no in-place with graph input (buf5 is a clone)
-            .check("torch.ops._c10d_functional.broadcast_.default(buf7")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf7")
+            .check("torch.ops._c10d_functional.broadcast_.default(buf8")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf8")
             # Expect no extra copy on return
-            .check("return (buf0, buf7, )")
+            .check("return (buf1, buf8, )")
             .run(code)
         )
 

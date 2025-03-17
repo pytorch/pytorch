@@ -1,9 +1,12 @@
+#include <ATen/native/quantized/cpu/qlinear.h>
 #include <c10/core/DeviceType.h>
+#include <c10/core/DispatchKey.h>
 #include <c10/core/GradMode.h>
 #include <c10/core/Layout.h>
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
+#include <torch/csrc/inductor/aoti_runtime/utils.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/inductor/aoti_torch/mkldnn_tensor.h>
 #include <torch/csrc/inductor/aoti_torch/oss_proxy_executor.h>
@@ -12,10 +15,14 @@
 #include <torch/csrc/inductor/aoti_torch/utils.h>
 #include <torch/csrc/inductor/inductor_ops.h>
 #include <torch/csrc/jit/serialization/pickle.h>
+#include <torch/csrc/stable/library.h>
+#include <torch/library.h>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <fstream>
 #include <iostream>
+#include <vector>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -230,6 +237,13 @@ AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(
     ComplexDouble)
 #undef AOTI_TORCH_SCALAR_TO_TENSOR_IMPL
 
+#ifndef C10_MOBILE
+#include <torch/version.h>
+uint64_t aoti_torch_abi_version() {
+  return TORCH_ABI_VERSION;
+}
+#endif // C10_MOBILE
+
 bool aoti_torch_grad_mode_is_enabled() {
   return c10::GradMode::is_enabled();
 }
@@ -370,6 +384,15 @@ AOTITorchError aoti_torch_get_storage_offset(
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
     *ret_storage_offset = t->storage_offset();
+  });
+}
+
+AOTITorchError aoti_torch_new_tensor_handle(
+    AtenTensorHandle orig_handle,
+    AtenTensorHandle* new_handle) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t = tensor_handle_to_tensor_pointer(orig_handle);
+    *new_handle = new_tensor_handle(at::Tensor(*t));
   });
 }
 
@@ -1154,7 +1177,19 @@ void aoti_torch_print_tensor_handle(AtenTensorHandle self, const char* msg) {
 
   // Print summary stats of the tensor
   std::cout << "Number of elements: " << numel << '\n';
-  std::cout << "Dtype: " << t->dtype() << '\n';
+
+  // Print dtypes and for float types, print exact precision
+  auto scalarType = t->scalar_type();
+  if (scalarType == at::ScalarType::Float) {
+    std::cout << "Dtype: float32" << std::endl;
+  } else if (scalarType == at::ScalarType::Half) {
+    std::cout << "Dtype: float16" << std::endl;
+  } else if (scalarType == at::ScalarType::BFloat16) {
+    std::cout << "Dtype: bfloat16" << std::endl;
+  } else {
+    std::cout << "Dtype: " << t->dtype() << '\n';
+  }
+
   if (numel > 0) {
     // torch/aten `mean()` function only supports float and complex dtypes
     // See:
@@ -1260,5 +1295,221 @@ AOTITorchError aoti_torch_zero_(AtenTensorHandle tensor) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
     t->zero_();
+  });
+}
+
+class StableIValueBoxedKernel : public c10::OperatorKernel {
+ public:
+  StableIValueBoxedKernel(void (*fn)(StableIValue*, uint64_t, uint64_t))
+      : fn_(fn) {}
+
+  void operator()(
+      const c10::OperatorHandle& op,
+      c10::DispatchKeySet keyset,
+      torch::jit::Stack* stack) {
+    const auto& schema = op.schema();
+    const auto num_returns = schema.returns().size();
+    const auto num_arguments = schema.arguments().size();
+
+    std::vector<StableIValue> ministack(std::max(num_arguments, num_returns));
+
+    for (const auto idx : c10::irange(num_arguments)) {
+      const c10::IValue& arg = torch::jit::pop(stack);
+      const auto ministack_idx = num_arguments - idx - 1;
+      if (arg.isInt()) {
+        ministack[ministack_idx] = from(arg.toInt());
+      } else if (arg.isDouble()) {
+        ministack[ministack_idx] = from(arg.toDouble());
+      } else if (arg.isBool()) {
+        ministack[ministack_idx] = from(arg.toBool());
+      } else if (arg.isNone()) {
+        ministack[ministack_idx] = from(nullptr);
+      } else if (arg.isTensor()) {
+        AtenTensorHandle ath = torch::aot_inductor::new_tensor_handle(
+            std::move(const_cast<at::Tensor&>(arg.toTensor())));
+        ministack[ministack_idx] = from(ath);
+      } else {
+        TORCH_CHECK(false, "Other types of IValues not yet handled!");
+      }
+    }
+
+    // boxed function is going to take a stack of StableIValues, cast them to
+    // our schema values, and run the function and modify the StableIValue stack
+    fn_(ministack.data(), num_arguments, num_returns);
+
+    // read the output from the end of the stack and wrap that back into
+    // IValue from StableIValue
+    for (size_t idx = 0; idx < num_returns; idx++) {
+      const c10::TypePtr& ret_type = schema.returns()[idx].type();
+      if (*ret_type == *c10::getTypePtr<at::Tensor>()) {
+        auto ret_raiiath = torch::aot_inductor::RAIIAtenTensorHandle(
+            to<AtenTensorHandle>(ministack[idx]));
+        at::Tensor out = *torch::aot_inductor::tensor_handle_to_tensor_pointer(
+            ret_raiiath.get());
+        torch::jit::push(stack, c10::IValue(out));
+      } else {
+        TORCH_CHECK(false, "Only Tensor return types are currently supported!");
+      }
+    }
+  }
+
+ private:
+  void (*fn_)(StableIValue*, uint64_t, uint64_t);
+};
+
+AOTITorchError aoti_torch_library_init_impl(
+    const char* ns,
+    const char* k,
+    const char* file,
+    uint32_t line,
+    TorchLibraryHandle* ret_new_torch_lib) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    *ret_new_torch_lib =
+        reinterpret_cast<TorchLibraryOpaque*>(new torch::Library(
+            torch::Library::Kind::IMPL,
+            std::string(ns),
+            c10::parseDispatchKey(std::string(k)),
+            file,
+            line));
+  });
+}
+
+AOTITorchError aoti_torch_library_init_def(
+    const char* ns,
+    const char* file,
+    uint32_t line,
+    TorchLibraryHandle* ret_new_torch_lib) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    *ret_new_torch_lib =
+        reinterpret_cast<TorchLibraryOpaque*>(new torch::Library(
+            torch::Library::Kind::DEF,
+            std::string(ns),
+            std::nullopt,
+            file,
+            line));
+  });
+}
+
+AOTITorchError aoti_torch_library_init_fragment(
+    const char* ns,
+    const char* file,
+    uint32_t line,
+    TorchLibraryHandle* ret_new_torch_lib) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    *ret_new_torch_lib =
+        reinterpret_cast<TorchLibraryOpaque*>(new torch::Library(
+            torch::Library::Kind::FRAGMENT,
+            std::string(ns),
+            std::nullopt,
+            file,
+            line));
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_library_impl(
+    TorchLibraryHandle self,
+    const char* name,
+    void (*fn)(StableIValue*, uint64_t, uint64_t)) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    reinterpret_cast<torch::Library*>(self)->impl(
+        name,
+        torch::CppFunction::makeFromBoxedFunctor(
+            std::make_unique<StableIValueBoxedKernel>(fn)));
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_library_def(TorchLibraryHandle self, const char* name) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { reinterpret_cast<torch::Library*>(self)->def(name); });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_delete_library_object(TorchLibraryHandle tlh) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { delete reinterpret_cast<torch::Library*>(tlh); });
+}
+
+static c10::IValue to_ivalue(
+    const c10::TypePtr& arg_type,
+    const StableIValue stable_ivalue) {
+  switch (arg_type->kind()) {
+    case c10::TypeKind::TensorType: {
+      // stable_ivalue must be an ATH
+      auto ret_raiiath = torch::aot_inductor::RAIIAtenTensorHandle(
+          to<AtenTensorHandle>(stable_ivalue));
+      at::Tensor arg = *torch::aot_inductor::tensor_handle_to_tensor_pointer(
+          ret_raiiath.get());
+      return (c10::IValue(arg));
+    }
+    case c10::TypeKind::IntType: {
+      return c10::IValue(to<int64_t>(stable_ivalue));
+    }
+    case c10::TypeKind::FloatType: {
+      return c10::IValue(to<double>(stable_ivalue));
+    }
+    case c10::TypeKind::BoolType: {
+      return c10::IValue(to<bool>(stable_ivalue));
+    }
+    case c10::TypeKind::ScalarTypeType: {
+      return c10::IValue(to<c10::ScalarType>(stable_ivalue));
+    }
+    case c10::TypeKind::LayoutType: {
+      return c10::IValue(to<c10::Layout>(stable_ivalue));
+    }
+    case c10::TypeKind::MemoryFormatType: {
+      return c10::IValue(to<c10::MemoryFormat>(stable_ivalue));
+    }
+    default: {
+      TORCH_CHECK(false, "Not yet supported argument type: ", arg_type->str());
+    }
+  }
+}
+
+AOTITorchError aoti_torch_call_dispatcher(
+    const char* opName,
+    const char* overloadName,
+    StableIValue* stack) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    const auto op =
+        c10::Dispatcher::singleton().findSchemaOrThrow(opName, overloadName);
+    const auto& schema = op.schema();
+    const auto num_returns = schema.returns().size();
+    const auto num_arguments = schema.arguments().size();
+
+    torch::jit::Stack ivalue_stack;
+    // we will only need max(num_args, num_returns)
+    ivalue_stack.reserve(std::max(num_arguments, num_returns));
+
+    // convert StableIValue stack to c10::IValue stack
+    for (const auto idx : c10::irange(num_arguments)) {
+      auto stable_ivalue = stack[idx];
+      auto arg_type = schema.arguments()[idx].type();
+      torch::jit::push(ivalue_stack, to_ivalue(arg_type, stable_ivalue));
+    }
+
+    op.callBoxed(ivalue_stack);
+
+    // there should then be num_returns IValues on the stack, which
+    // we will convert to StableIValue and repopulate user input stack
+    for (const auto idx : c10::irange(num_returns)) {
+      const c10::IValue& ret = torch::jit::pop(ivalue_stack);
+      const auto stack_idx = num_returns - idx - 1;
+      if (ret.isInt()) {
+        stack[stack_idx] = from(ret.toInt());
+      } else if (ret.isDouble()) {
+        stack[stack_idx] = from(ret.toDouble());
+      } else if (ret.isBool()) {
+        stack[stack_idx] = from(ret.toBool());
+      } else if (ret.isNone()) {
+        stack[stack_idx] = from(nullptr);
+      } else if (ret.isTensor()) {
+        AtenTensorHandle ath = torch::aot_inductor::new_tensor_handle(
+            std::move(const_cast<at::Tensor&>(ret.toTensor())));
+        stack[stack_idx] = from(ath);
+      } else {
+        TORCH_CHECK(false, "Other types of IValue returns not yet handled!");
+      }
+    }
   });
 }

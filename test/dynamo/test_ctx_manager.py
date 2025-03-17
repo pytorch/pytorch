@@ -1744,10 +1744,11 @@ class GraphModule(torch.nn.Module):
 
 class ContextlibContextManagerTests(torch._dynamo.test_case.TestCase):
     def setUp(self):
+        self._prev = torch._dynamo.config.enable_trace_contextlib
         torch._dynamo.config.enable_trace_contextlib = True
 
     def tearDown(self):
-        torch._dynamo.config.enable_trace_contextlib = False
+        torch._dynamo.config.enable_trace_contextlib = self._prev
 
     def test_ctx_basic0(self):
         @contextlib.contextmanager
@@ -2236,7 +2237,7 @@ class GraphModule(torch.nn.Module):
         eager = EagerAndRecordGraphs()
         out = torch.compile(backend=eager, fullgraph=False)(fn)(x)
         self.assertEqual(expected, out)
-        self.assertEqual(len(eager.graphs), 1)
+        self.assertEqual(len(eager.graphs), 0)
 
     def test_graph_break_before_and_after___enter__(self):
         @contextlib.contextmanager
@@ -2262,7 +2263,7 @@ class GraphModule(torch.nn.Module):
         eager = EagerAndRecordGraphs()
         out = torch.compile(backend=eager, fullgraph=False)(fn)(x)
         self.assertEqual(expected, out)
-        self.assertEqual(len(eager.graphs), 1)
+        self.assertEqual(len(eager.graphs), 0)
 
     def test_graph_break_before___enter___and_disable___exit__(self):
         @contextlib.contextmanager
@@ -2292,7 +2293,7 @@ class GraphModule(torch.nn.Module):
         eager = EagerAndRecordGraphs()
         out = torch.compile(backend=eager, fullgraph=False)(fn)(x)
         self.assertEqual(expected, out)
-        self.assertEqual(len(eager.graphs), 1)
+        self.assertEqual(len(eager.graphs), 0)
 
     def test_disable___enter__(self):
         def h(x):
@@ -2573,7 +2574,7 @@ class GraphModule(torch.nn.Module):
         eager = EagerAndRecordGraphs()
         out = torch.compile(backend=eager, fullgraph=False)(fn)(x)
         self.assertEqual(expected, out)
-        self.assertEqual(len(eager.graphs), 1)
+        self.assertEqual(len(eager.graphs), 0)
 
     def test_dynamo_disable_ctx(self):
         @contextlib.contextmanager
@@ -2623,7 +2624,7 @@ class GraphModule(torch.nn.Module):
         eager = EagerAndRecordGraphs()
         out = torch.compile(backend=eager, fullgraph=False, dynamic=False)(f)(x)
         self.assertEqual(expected, out)
-        self.assertEqual(len(eager.graphs), 3)
+        self.assertEqual(len(eager.graphs), 2)
 
     @parametrize("name", ("suppress", "stdout", "stderr"))
     def test_contextlib_suppress(self, name):
@@ -2669,12 +2670,32 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(len(counters["graph_break"]), 0)
         self.assertEqual(y, t.sin())
 
+    @unittest.skipIf(sys.version_info < (3, 11), "Python 3.11+")
+    def test_WITH_EXCEPT_START(self):
+        @contextmanager
+        def ctx():
+            try:
+                yield
+            finally:
+                pass
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            try:
+                with ctx():
+                    raise ValueError
+            except ValueError:
+                return t.sin()
+
+        t = torch.randn(2)
+        y = fn(t)
+        self.assertEqual(y, t.sin())
+
 
 class CPythonContextManagerTestCase(torch._dynamo.test_case.TestCase):
     # Tests taken from CPython source code in cpython/Lib/test/test_contextlib.py
     # https://github.com/python/cpython/blob/d48cc82ed25e26b02eb97c6263d95dcaa1e9111b/Lib/test/test_contextlib.py#L70
 
-    @unittest.expectedFailure
     def test_contextmanager_plain(self):
         state = []
 
@@ -2878,7 +2899,7 @@ class CPythonContextManagerTestCase(torch._dynamo.test_case.TestCase):
 
         f(torch.randn(2))
 
-    @unittest.expectedFailure
+    @unittest.skipIf(sys.version_info < (3, 11), "Python 3.11+")
     def test_contextmanager_except(self):
         state = []
 
@@ -2955,7 +2976,6 @@ class CPythonContextManagerTestCase(torch._dynamo.test_case.TestCase):
             with woohoo():
                 raise StopIteration
 
-    @unittest.expectedFailure
     def test_keywords(self):
         # Ensure no keyword arguments are inhibited
         @contextmanager
@@ -2969,7 +2989,6 @@ class CPythonContextManagerTestCase(torch._dynamo.test_case.TestCase):
 
         fn(torch.randn(2, 3))
 
-    @unittest.expectedFailure
     def test_recursive(self):
         depth = 0
         ncols = 0

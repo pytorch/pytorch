@@ -147,12 +147,10 @@ class _NamedOptimizer(optim.Optimizer):
         return self._post_state_dict({"state": ret_state, "param_groups": ret_groups})
 
     @overload
-    def step(self, closure: None = ...) -> None:
-        ...
+    def step(self, closure: None = ...) -> None: ...
 
     @overload
-    def step(self, closure: Callable[[], float]) -> float:
-        ...
+    def step(self, closure: Callable[[], float]) -> float: ...
 
     def step(self, closure: Optional[Callable[[], float]] = None) -> Optional[float]:
         """

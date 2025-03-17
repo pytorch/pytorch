@@ -1,9 +1,33 @@
 # mypy: ignore-errors
 
+"""
+Function-related variable tracking classes for Dynamo's symbolic execution.
+
+This module contains classes that track different types of functions during graph
+compilation, including:
+- User-defined functions and methods
+- Built-in functions and methods
+- Wrapped functions (e.g. from decorators)
+- Special function types (e.g. functools.partial)
+- Triton kernels and related function types
+
+These classes are responsible for:
+- Tracking function calls and their arguments
+- Managing function closures and cell variables
+- Handling function attributes and special methods
+- Maintaining guards for function identity and closure contents
+- Supporting function inlining and specialization
+- Enabling proper symbolic execution of different function types
+
+The variable trackers here work together with the rest of Dynamo to enable
+accurate graph capture while handling Python's various function-related behaviors.
+"""
+
 import builtins
 import functools
 import inspect
 import itertools
+import sys
 import types
 from collections.abc import Sequence
 from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar
@@ -13,8 +37,20 @@ from unittest.mock import patch
 import torch
 
 from .. import polyfills, variables
-from ..bytecode_transformation import create_call_function, create_rot_n
-from ..exc import raise_observed_exception, unimplemented, Unsupported
+from ..bytecode_transformation import create_call_function, create_rot_n, is_generator
+from ..exc import (
+    get_dynamo_observed_exception,
+    handle_observed_exception,
+    InfiniteGeneratorError,
+    ObservedException,
+    ObservedGeneratorExit,
+    ObservedUserStopIteration,
+    raise_observed_exception,
+    SkipFrame,
+    unimplemented,
+    unimplemented_v2,
+    Unsupported,
+)
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
 from ..utils import (
@@ -189,9 +225,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         else:
             self.is_constant = False
 
-        assert isinstance(
-            fn, (types.FunctionType, torch.jit.ScriptFunction)
-        ), f"expected FunctionType found {typestr(fn)} {fn}"
+        assert isinstance(fn, (types.FunctionType, torch.jit.ScriptFunction)), (
+            f"expected FunctionType found {typestr(fn)} {fn}"
+        )
         # TODO(anijain2305) - Replace directly calling UserFunctionVariable with
         # VariableBuilder, which handles the wrapping of _torchdynamo_inline.
         # unpack @torch._dynamo.optimize()(fn) wrapped function
@@ -326,6 +362,27 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        # Handle a `nonstrict_trace(fn)` call
+        if self.fn is torch._dynamo.nonstrict_trace:
+            bound = inspect.signature(self.fn).bind(*args, **kwargs)
+            fn_var = bound.args[0]
+            if not isinstance(fn_var, BaseUserFunctionVariable):
+                typ = fn_var.python_type()
+                unimplemented(
+                    f"`nonstrict_trace` expects a callable, but got value of type <{typ.__name__}>"
+                )
+
+            if not isinstance(fn_var, UserFunctionVariable):
+                fn_name = fn_var.get_name()
+                unimplemented(
+                    f"""
+Applying `nonstrict_trace` to function <{fn_name}>; however, `nonstrict_trace` currently requires the function to be defined outside `torch.compile` region.
+"""  # NOQA: B950
+                )
+
+            fn = fn_var.fn
+            return variables.TorchInGraphFunctionVariable(fn, nonstrict_traceable=True)
+
         if self.is_constant:
             return invoke_and_store_as_constant(
                 tx, self.fn, self.get_name(), args, kwargs
@@ -354,7 +411,6 @@ class BuiltinMethodVariable(BaseUserFunctionVariable):
         self.fn = fn
 
     @staticmethod
-    @functools.lru_cache(None)
     def is_supported_builtin_method(obj):
         method_self = obj.__self__
         method_name = obj.__name__
@@ -378,25 +434,368 @@ class BuiltinMethodVariable(BaseUserFunctionVariable):
         return obj_vt.call_method(tx, name, args, kwargs)
 
 
-class FunctionDecoratedByContextlibContextManagerVariable(BaseUserFunctionVariable):
-    # TODO(guilherme): replace this with a generic GeneratorFunctionVariable
+class LocalGeneratorObjectVariable(VariableTracker):
+    def __init__(
+        self,
+        code: types.CodeType,
+        f_globals,
+        inline_tracer: Optional["InstructionTranslator"],
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.code = code
+        self.f_globals = f_globals
+        self.inline_tracer = inline_tracer
 
+    def get_code(self):
+        return self.code
+
+    def get_filename(self):
+        return self.get_code().co_filename
+
+    def get_name(self):
+        return self.get_code().co_name
+
+    def get_function(self):
+        raise NotImplementedError
+
+    def has_self(self):
+        return False
+
+    def __name__(self):
+        return self.get_name()
+
+    def __str__(self):
+        return f"{self.__class__.__name__}({self.get_name()})"
+
+    __repr__ = __str__
+
+    def reconstruct(self, codegen):
+        from torch._dynamo.side_effects import disallow_side_effects_in_generator
+        from torch._dynamo.symbolic_convert import (
+            InstructionTranslator,
+            save_and_restart_speculation_log,
+            temporarely_allow_writes_to_output_graph,
+        )
+
+        tx = InstructionTranslator.current_tx()
+        save = save_and_restart_speculation_log(tx)
+        disallow = disallow_side_effects_in_generator(tx)
+        temp = temporarely_allow_writes_to_output_graph(tx)
+
+        with save, disallow, temp:
+            tracer = self._get_inline_tracer(tx)
+            if not tracer.generator_exhausted:
+                self.remaining_items = self.force_unpack_var_sequence(tx)
+            variables.ListIteratorVariable(self.remaining_items).reconstruct(codegen)
+
+    def bind_args(self, tx, args, kwargs):
+        return self.fn.bind_args(tx, args, kwargs)
+
+    def get_globals(self):
+        return self.f_globals
+
+    def python_type(self):
+        return types.GeneratorType
+
+    def _get_inline_tracer(self, tx):
+        from torch._dynamo.symbolic_convert import InliningInstructionTranslator
+
+        if self.inline_tracer is None:
+            self.inline_tracer = InliningInstructionTranslator.build_inline_tracer(
+                tx, self, [], {}
+            )
+        return self.inline_tracer
+
+    def next_variable(self, tx):
+        tracer = self._get_inline_tracer(tx)
+
+        if self._is_generator_exhausted():
+            raise_observed_exception(StopIteration, tx)
+
+        try:
+            # Hierarchically, tx can be seen as the parent of the inline tracer
+            # created on call_function. Any exception needs to be propagated to tx
+            # for Dynamo to behave correctly
+            with patch.dict(counters, {"unimplemented": counters["inline_call"]}):
+                return tracer.inline_call_()
+        except ObservedException as e:
+            raise e
+        except InfiniteGeneratorError:
+            # test/dynamo/test_misc.py::test_iterator_limit
+            raise
+        except Unsupported as e:
+            torch._dynamo.eval_frame.skip_code(self.get_code())
+            raise SkipFrame from e
+        finally:
+            counters["unimplemented"] |= counters["inline_call"]
+
+    def has_unpack_var_sequence(self, tx):
+        return False
+
+    def has_force_unpack_var_sequence(self, tx) -> builtins.bool:
+        return True
+
+    def force_unpack_var_sequence(self, tx) -> list[VariableTracker]:
+        result = []
+        while True:
+            try:
+                result.append(self.next_variable(tx))
+            except ObservedUserStopIteration:
+                handle_observed_exception(tx)
+                break
+        return result
+
+    def _setup_exception(self, tx, exc):
+        tracer = self._get_inline_tracer(tx)
+        try:
+            tracer._raise_exception_variable(exc)
+        except ObservedException as e:
+            # if no handler is available (i.e. user code doesn't catch it), the
+            # exception is raised again.
+            tracer.exception_handler(e)
+
+    def _is_generator_just_started(self):
+        return self.inline_tracer is None or self.inline_tracer.instruction_pointer == 0
+
+    def _is_generator_exhausted(self):
+        return getattr(self.inline_tracer, "generator_exhausted", False)
+
+    def call_method(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        if name == "__next__":
+            return self.next_variable(tx)
+        elif name == "__iter__":
+            # iter(gen) returns itself
+            return self
+        elif name == "send":
+            # Sends a value into the generator function. Returns the next value
+            # yielded by the generator, or raises StopIteration if the generator
+            # exits without yielding another value
+            if self._is_generator_just_started() and len(args):
+                # can't send non-None value to a just-started generator
+                # Test: GeneratorCPythonTests.test_send_non_none_to_new_gen
+                if not all(
+                    isinstance(arg, ConstantVariable) and arg.value is None
+                    for arg in args
+                ):
+                    raise_observed_exception(TypeError, tx)
+            tracer = self._get_inline_tracer(tx)
+            tracer.push_many(args)
+            return self.next_variable(tx)
+        elif name == "close":
+            # * Raises a GeneratorExit at the point where the generator function was paused.
+            # * If the generator function catches the exception and returns a
+            # value, this value is returned from close() - Python 3.13+
+            # * If the generator function is already closed, or raises GeneratorExit
+            # (by not catching the exception), close() returns None.
+            # * If the generator yields a value, a RuntimeError is raised.
+            # * If the generator raises any other exception, it is propagated to the caller.
+            # * If the generator has already exited due to an exception or normal
+            # exit, close() returns None and has no other effect.
+
+            # Return None if close is called on a just-started generator
+            # See test GeneratorCloseCpythonTests::test_close_not_started
+
+            tracer = self._get_inline_tracer(tx)
+            if self._is_generator_just_started() or self._is_generator_exhausted():
+                tracer.generator_exhausted = True
+                return variables.ConstantVariable(None)
+
+            # Raise GeneratorExit to see if user code catches it. Any other exception
+            # is propagated to the parent frame.
+            try:
+                self._setup_exception(
+                    tx, variables.ExceptionVariable(GeneratorExit, ())
+                )
+                # There's an extra block on Python 3.12+ to handle StopIteration
+                # see: https://github.com/python/cpython/blob/8f93dd8a8f237b277abad20d566df90c5cbd7f1e/Objects/genobject.c#L394-L397
+                #
+                #   1           0 RETURN_GENERATOR
+                #               2 POP_TOP
+                #               4 RESUME                   0
+
+                #   2           6 LOAD_CONST               1 (1)
+                #               8 YIELD_VALUE              1
+                #              10 RESUME                   1
+                #              12 POP_TOP
+                #              14 RETURN_CONST             0 (None)
+                #         >>   16 CALL_INTRINSIC_1         3 (INTRINSIC_STOPITERATION_ERROR)
+                #              18 RERAISE                  1
+                # ExceptionTable:
+                #   4 to 14 -> 16 [0] lasti
+                if (
+                    sys.version_info >= (3, 12)
+                    and tracer.next_instruction.opname == "CALL_INTRINSIC_1"
+                ):
+                    tracer.generator_exhausted = True
+                    return variables.ConstantVariable(None)
+            except ObservedGeneratorExit:
+                # If it doesn't catch, we just return None, as per the text above
+                tracer.generator_exhausted = True
+                return variables.ConstantVariable(None)
+
+            try:
+                # Raise RuntimeError if the generator yields any other value
+                if self.next_variable(tx):
+                    raise_observed_exception(RuntimeError, tx)
+            except ObservedGeneratorExit:
+                tracer.generator_exhausted = True
+                return variables.ConstantVariable(None)
+            except ObservedUserStopIteration:
+                # In Python 3.13+, one can capture GeneratorExit and return a value
+                # See test_generator.py::test_close_capture_GeneratorExit_return
+                # https://discuss.python.org/t/let-generator-close-return-stopiteration-value/24786/26
+                # https://github.com/python/cpython/pull/104771
+                assert tracer.symbolic_result is not None
+                return tracer.symbolic_result
+        elif name == "throw":
+            # * Raises an exception at the point where the generator was paused, and
+            # returns the next value yielded by the generator.
+            # * If the generator exits without yielding, raise StopIteration
+            # * If the generator function does not catch the passed-in exception,
+            # or raises a different exception, then that exception propagates to the caller.
+
+            # Setup the exception table and jump target in case of try...finally
+            tracer = self._get_inline_tracer(tx)
+            try:
+                # In Python 3.9, the exception is represented as a triple (typ, val, tb)
+                # In such cases, we re-raise the exception object given to avoid
+                # creating a new object, so that IS_OP works.
+                # See: https://github.com/pytorch/pytorch/pull/146496
+                self._setup_exception(tx, args[1] if len(args) == 3 else args[0])
+            except ObservedException:  # noqa: TRY203
+                # propagate the exception back to the parent caller
+                raise
+
+            retval = self.next_variable(tx)
+
+            # The exception raised before is still active. We need to check the exception
+            # table one more time to find the next target. But why? Let’s walk
+            # through an example and its generated bytecode: https://godbolt.org/z/ebdTbMv8M
+            #
+            #     z = 0
+            #     def whoo():
+            #         global z
+            #         z = 0
+            #         try:
+            #             yield 1
+            #         except ValueError:
+            #             yield 2
+            #         finally:
+            #             z += 1
+            #         z += 10
+            #
+            #     gen = whoo()
+            #     next(gen)
+            #     gen.throw(ValueError)
+            #     print('z', z)  -> z = 1
+            #
+            #              ...
+            #         >>   58 PUSH_EXC_INFO
+            #
+            #   8          60 LOAD_GLOBAL              2 (ValueError)
+            #              70 CHECK_EXC_MATCH
+            #              72 POP_JUMP_IF_FALSE        7 (to 88)
+            #              74 POP_TOP
+            #
+            #   9          76 LOAD_CONST               3 (2)
+            #              78 YIELD_VALUE              3      <------ ValueError is still active here
+            #              80 RESUME                   1
+            #              82 POP_TOP
+            #              84 POP_EXCEPT
+            #              86 jump_backward           34 (to 20)
+            #              ...
+            #
+            #     ExceptionTable:
+            #     4 to 8 -> 124 [0] lasti
+            #     12 to 18 -> 58 [0]
+            #     20 to 56 -> 124 [0] lasti
+            #     58 to 82 -> 90 [1] lasti     <------ move to 90
+            #     84 to 86 -> 96 [0]
+            #     88 to 88 -> 90 [1] lasti
+            #     90 to 94 -> 96 [0]
+            #     96 to 116 -> 118 [1] lasti
+            #     118 to 122 -> 124 [0] lasti
+            #
+            # In this scenario, a generator can yield after `throw()` is called. Even
+            # after the exception is raised a few lines above, it remains active
+            # within the `78 YIELD_VALUE` instruction. When the generator resumes
+            # after the second yield on instruction `80 RESUME`, we cannot simply
+            # return the control flow to the next instruction. Instead, one must
+            # check the exception table (or equivalent) to find the next target
+            # In this case, it says the instruction pointer must be moved to 90.
+            #
+            # Without this step, if we let the trace proceed to the next
+            # instruction, it would follow the control flow where the exception
+            # raised by `throw()` was handled and swallowed, potentially leading
+            # to incorrect behavior.
+            exc_type = type("__InternalThrowException", (Exception,), {})
+
+            try:
+                self._setup_exception(tx, variables.ExceptionVariable(exc_type, ()))
+                self.next_variable(tx)
+            except get_dynamo_observed_exception(exc_type):
+                # We should get back the exception raised before.
+                pass
+            else:
+                raise_observed_exception(RuntimeError, tracer)
+            return retval
+
+        super().call_method(tx, name, args, kwargs)
+
+
+class ContextlibContextManagerLocalGeneratorObjectVariable(
+    LocalGeneratorObjectVariable
+):
+    """
+    .. note::
+
+        This is only used when the function is annotated with @contextlib.contextmanager
+
+        It is a special case of a generator function as we do not allow return a context manager
+        from a torch.compile function.
+    """
+
+
+class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
     """functions that behaves like iterators
 
     .. note::
 
-        This is only used when the function is annotated with @contextlib.contextmanager
+        This is a wrapper around (Nested)UserFunctionVariable
     """
 
-    def __init__(self, vt: VariableTracker, **kwargs):
+    def __init__(
+        self,
+        vt: VariableTracker,
+        *,
+        generator_cls=LocalGeneratorObjectVariable,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
         self.vt = vt
-        self.inline_tracer = None
+        self.generator_cls = generator_cls
 
     def __getattr__(self, name):
         if name in self.__class__.__dict__.keys():
             return getattr(self, name)
         return getattr(self.vt, name)
+
+    def _build_inline_tracer(self, tx, args, kwargs):
+        from torch._dynamo.symbolic_convert import InliningInstructionTranslator
+
+        return InliningInstructionTranslator.build_inline_tracer(
+            tx,
+            self,
+            args,
+            kwargs,
+        )
 
     def call_function(
         self,
@@ -404,35 +803,49 @@ class FunctionDecoratedByContextlibContextManagerVariable(BaseUserFunctionVariab
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        from torch._dynamo.bytecode_transformation import is_generator
+        assert is_generator(self.vt.get_code())
 
-        assert is_generator(self.get_code())
-        from torch._dynamo.symbolic_convert import InliningInstructionTranslator
+        inline_tracer = self._build_inline_tracer(tx, args, kwargs)
+        code = self.vt.get_code()
+        f_globals = self.vt.get_globals()
 
-        self.inline_tracer = InliningInstructionTranslator.build_inline_tracer(
-            tx,
-            self,
-            [*self.self_args(), *args],
-            kwargs,
-            stop_generator_on_yield=True,
+        # calling a generator returns a generator object
+        return self.generator_cls(
+            code,
+            f_globals,
+            inline_tracer,
+            source=self.source,
         )
 
-        return self
 
-    def next_variable(self, tx):
-        from torch._dynamo import exc
+class FunctionDecoratedByContextlibContextManagerVariable(
+    LocalGeneratorFunctionVariable
+):
+    """
+    .. note::
 
-        tracer = self.inline_tracer
+        This is only used when the function is annotated with @contextlib.contextmanager
+    """
 
-        try:
-            # Hierarchically, tx can be seen as the parent of the inline tracer
-            # created on call_function. Any exception needs to be propagated to tx
-            # for Dynamo to behave correctly
-            with patch.dict(counters, {"unimplemented": counters["inline_call"]}):
-                return tracer.inline_call_().next_variable(tx)
-        except exc.ObservedException as e:
-            tx.exn_vt_stack.extend(tracer.exn_vt_stack)
-            raise e
+    def __init__(self, vt, **kwargs):
+        super().__init__(
+            vt,
+            generator_cls=ContextlibContextManagerLocalGeneratorObjectVariable,
+            **kwargs,
+        )
+
+    def _build_inline_tracer(self, tx, args, kwargs):
+        # NOTE: This only exists to not break support for context manager when
+        # config.enable_faithful_generator_behavior = False and
+        # config.enable_trace_contextlib = True. In case the former is false,
+        # Dynamo should still be able to trace through @contextmanager functions
+        tracer = super()._build_inline_tracer(tx, args, kwargs)
+        assert isinstance(
+            tracer,
+            torch._dynamo.symbolic_convert.InliningGeneratorInstructionTranslator,
+        )
+        tracer.is_generator_from_ctx_manager = True
+        return tracer
 
 
 class UserMethodVariable(UserFunctionVariable):
@@ -457,6 +870,23 @@ class UserMethodVariable(UserFunctionVariable):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        # NOTE this is to handle methods annotated by `nonstrict_trace`. Usually
+        # a `nonstrict_trace`-ed function will be wrapped by
+        # `VariableTracker.build` and route to `TorchInGraphFunctionVariable`,
+        # but in the case of method, we manually wrap it with `UserMethodVariable`
+        # inside `UserDefinedObjectVariable.var_getattr`.
+        #
+        # We might be able to simplify this away by canonicalizing the
+        # function/method wrapping code paths.
+        from ..trace_rules import is_nonstrict_trace_callable
+
+        if is_nonstrict_trace_callable(self.fn):
+            call_args = [*self.self_args(), *args]
+            var = variables.TorchInGraphFunctionVariable(
+                self.fn, nonstrict_traceable=True
+            )
+            return var.call_function(tx, call_args, kwargs)
+
         # For nn.Module methods, redirecting to NNModuleVariable.call_method for optimized solution
         # rather than simple inlining. E.g, putting `call_method` op in FX graph for `forward` method
         # since we ensure `forward` of allowed modules can be traced by AOT safely.
@@ -602,6 +1032,9 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
     def get_code(self):
         return self.code.as_python_constant()
 
+    def python_type(self):
+        return types.FunctionType
+
     def get_function(self):
         if self.closure:
             raise NotImplementedError
@@ -736,7 +1169,26 @@ class SkipFunctionVariable(VariableTracker):
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
-            unimplemented(f"call torch._dynamo.disable() wrapped function {self.value}")
+            unimplemented_v2(
+                gb_type="Skip calling `torch.compiler.disable()`d function",
+                context=str(self.value),
+                explanation=f"Skip calling function `{self.value}` since it was wrapped with `torch.compiler.disable`",
+                hints=[
+                    "Remove the `torch.compiler.disable` call",
+                ],
+            )
+        elif self.value is torch._dynamo.graph_break:
+            graph_break_msg = kwargs.get("msg", None)
+            if graph_break_msg:
+                graph_break_msg = graph_break_msg.as_python_constant()
+            unimplemented_v2(
+                gb_type="Call to `torch._dynamo.graph_break()`",
+                context=f"Called `torch._dynamo.graph_break()` with args `{args}`, kwargs `{kwargs}`",
+                explanation=f"User-inserted graph break. Message: {graph_break_msg}",
+                hints=[
+                    "Remove the `torch._dynamo.graph_break()` call.",
+                ],
+            )
         elif isinstance(self.value, types.WrapperDescriptorType):
             msg = (
                 f"Graph break due to unsupported wrapper descriptor {self.value}. "
@@ -746,51 +1198,82 @@ class SkipFunctionVariable(VariableTracker):
             torch._dynamo.utils.warn_once(msg)
             unimplemented(msg)
         else:
+            qualname = getattr(self.value, "__qualname__", "<unknown qualname>")
             try:
                 path = inspect.getfile(self.value)
-                msg = f"'skip function {self.value.__qualname__} in file {path}'"
+                explanation = (
+                    f"Dynamo developers have intentionally marked that the function `{qualname}` "
+                    f"in file `{path}` should not be traced."
+                )
+                hints = [
+                    f"Avoid calling the function `{qualname}`.",
+                ]
+                # TODO improve trace_rules reasoning to provide better hints.
+                # How do we tell that a function/file should NOT be removed from skip files?
+                # Do a very basic check for now.
+                if "_dynamo" not in path:
+                    hints += [
+                        f"Remove the function `{qualname}` or the file `{path}` "
+                        "from torch/_dynamo/trace_rules.py. More graph breaks may occur as a result of "
+                        "attempting to trace into the function.",
+                        "Please file an issue to PyTorch.",
+                        # TODO suggest mark_force_inline when implemented
+                    ]
             except TypeError:
                 known_python_builtin_modules = {"_abc", "_warnings"}
                 if self.value.__module__ in known_python_builtin_modules:
-                    msg = (
-                        f"Graph break due to unsupported Python builtin {self.value.__module__}.{self.value.__qualname__}. "
-                        f"Please file an issue on GitHub "
-                        f"so the PyTorch team can add support for it. "
+                    explanation = (
+                        f"Dynamo does not know how to trace the Python builtin "
+                        f"`{self.value.__module__}.{qualname}`."
                     )
+                    hints = [
+                        "If you are attempting to call a logging function (e.g. `_warnings.warn`), "
+                        "you can try adding it to `torch._dynamo.config.reorderable_logging_functions`.",
+                        "Please file an issue on GitHub "
+                        "so the PyTorch team can add support for it. ",
+                    ]
                 elif (
                     self.value.__module__ is not None
                     and self.value.__module__.startswith("optree")
                 ):
-                    msg = (
-                        f"Graph break for an optree C/C++ function {self.value.__module__}.{self.value.__qualname__}."
-                        f" Consider using torch.utils._pytree - "
-                        f"https://github.com/pytorch/pytorch/blob/main/torch/utils/_pytree.py"
-                    )
+                    explanation = f"Dynamo cannot trace optree C/C++ function {self.value.__module__}.{qualname}."
+                    hints = [
+                        " Consider using torch.utils._pytree - "
+                        "https://github.com/pytorch/pytorch/blob/main/torch/utils/_pytree.py"
+                    ]
                     # also warn on it because most users won't see the graph break message
-                    torch._dynamo.utils.warn_once(msg)
+                    torch._dynamo.utils.warn_once(explanation + "\n" + "\n".join(hints))
                 else:
-                    msg = (
-                        f"Graph break due to unsupported builtin {self.value.__module__}.{self.value.__qualname__}. "
+                    explanation = (
+                        f"Dynamo does not know how to trace the builtin `{self.value.__module__}.{qualname}.` "
                         f"This function is either a Python builtin (e.g. _warnings.warn) "
-                        f"or a third-party C/C++ Python extension (perhaps created with pybind). "
-                        f"If it is a Python builtin, please file an issue on GitHub "
-                        f"so the PyTorch team can add support for it and see the next case for a workaround. "
-                        f"If it is a third-party C/C++ Python extension, please "
-                        f"either wrap it into a PyTorch-understood custom operator "
-                        f"(see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html "
-                        f"for more details) or, if it is traceable, use "
-                        f"torch.compiler.allow_in_graph."
+                        f"or a third-party C/C++ Python extension (perhaps created with pybind)."
                     )
+                    hints = [
+                        "If it is a Python builtin, please file an issue on GitHub "
+                        "so the PyTorch team can add support for it and see the next case for a workaround.",
+                        "If it is a third-party C/C++ Python extension, please "
+                        "either wrap it into a PyTorch-understood custom operator "
+                        "(see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html "
+                        "for more details) or, if it is traceable, use "
+                        "`torch.compiler.allow_in_graph`.",
+                    ]
                     # also warn on it because most users won't see the graph break message
-                    torch._dynamo.utils.warn_once(msg)
-            if self.value.__qualname__ == "allow_in_graph":
-                msg = (
+                    torch._dynamo.utils.warn_once(explanation + "\n" + "\n".join(hints))
+            if qualname == "allow_in_graph":
+                explanation = (
                     "Found an allow_in_graph decorator to a function which "
                     "is created inside the parent function that is getting "
                     "compiled. This is not supported for now."
                 )
-            msg += f"', {self.reason}'" if self.reason else ""
-            unimplemented(msg)
+                hints = []
+            reason = self.reason if self.reason else "<missing reason>"
+            unimplemented_v2(
+                gb_type="Attempted to call function marked as skipped",
+                context=f"module: {self.value.__module__}, qualname: {qualname}, skip reason: {reason}",
+                explanation=explanation,
+                hints=hints,
+            )
 
     def call_obj_hasattr(self, tx: "InstructionTranslator", name):
         return variables.ConstantVariable.create(hasattr(self.value, name))
@@ -1182,6 +1665,46 @@ class PolyfilledFunctionVariable(VariableTracker):
 
     def as_python_constant(self):
         return self.fn
+
+
+class TracebackVariable(VariableTracker):
+    # We don't track traceback. A call to any function in this module is a no-op
+    def call_function(self, tx, args, kwargs): ...
+
+
+class SysFunctionVariable(VariableTracker):
+    def __init__(self, value, **kwargs):
+        super().__init__(**kwargs)
+        self.value = value
+
+    def exc_info(self, tx):
+        if len(tx.exn_vt_stack):
+            exn = tx.exn_vt_stack[-1]
+            typ = exn.exc_type
+            tb = None
+            items = [
+                VariableTracker.build(tx, typ),
+                exn,
+                VariableTracker.build(tx, tb),
+            ]
+        else:
+            items = [
+                variables.ConstantVariable(None),
+                variables.ConstantVariable(None),
+                variables.ConstantVariable(None),
+            ]
+        return variables.TupleVariable(items)
+
+    def exception(self, tx):
+        return self.exc_info(tx).items[1]
+
+    def call_function(self, tx, args, kwargs):
+        if self.value is sys.exc_info:
+            return self.exc_info(tx)
+        elif self.value is sys.exception:
+            return self.exception(tx)
+        else:
+            unimplemented(f"sys.{self.value.__name__}")
 
 
 from torch._higher_order_ops.triton_kernel_wrap import (

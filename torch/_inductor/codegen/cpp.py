@@ -4,6 +4,7 @@ import dataclasses
 import functools
 import itertools
 import math
+import operator
 import re
 import sys
 import warnings
@@ -83,6 +84,7 @@ from .cpp_utils import (
 _IS_WINDOWS = sys.platform == "win32"
 
 
+@functools.lru_cache(None)
 def get_export_declaration():
     return "__declspec(dllexport)" if _IS_WINDOWS else ""
 
@@ -440,6 +442,17 @@ def stride_at_vec_range(
     return stride_at(index, var)
 
 
+@dataclasses.dataclass
+class ParallelDepth:
+    """
+    A class representing parallel depth.
+    Includes the starting depth of parallelism and the depth of parallelism.
+    """
+
+    parallel_depth: int
+    start_depth: int
+
+
 class OuterLoopFusedSchedulerNode(FusedSchedulerNode):
     @classmethod
     def fuse(  # type: ignore[override]
@@ -483,9 +496,9 @@ class OuterLoopFusedSchedulerNode(FusedSchedulerNode):
         outer_fused_nodes: list[Union[FusedSchedulerNode, SchedulerNode]],
         outer_loop_fusion_depth,
     ):
-        self.outer_fused_nodes: list[
-            Union[FusedSchedulerNode, SchedulerNode]
-        ] = outer_fused_nodes
+        self.outer_fused_nodes: list[Union[FusedSchedulerNode, SchedulerNode]] = (
+            outer_fused_nodes
+        )
         self.outer_loop_fusion_depth = outer_loop_fusion_depth
         flatten_snodes = []
         for _node in self.outer_fused_nodes:
@@ -555,6 +568,28 @@ class OuterLoopFusedSchedulerNode(FusedSchedulerNode):
                 right_loop_nest,
                 outer_loop_fusion_depth,
                 0,
+            ):
+                return False
+
+        for cpp_kernel_proxy in cpp_kernel_proxy_list:
+            outer_ranges = functools.reduce(
+                operator.mul,
+                cpp_kernel_proxy.ranges[:outer_loop_fusion_depth],
+            )
+            # When the range of the first inner loop is much larger than the range of
+            # all outer loops, do not fuse outer loop and fallback to standard loop codegen,
+            # so that the inner loops with larger range have a chance to be parallelized.
+            # We set a conservative threshold here:
+            # First inner loop range / all outer loops range > 300.
+            if (
+                len(cpp_kernel_proxy.ranges) > outer_loop_fusion_depth
+                and isinstance(outer_ranges, sympy.Integer)
+                and isinstance(
+                    cpp_kernel_proxy.ranges[outer_loop_fusion_depth],
+                    sympy.Integer,
+                )
+                and outer_ranges * 300
+                < cpp_kernel_proxy.ranges[outer_loop_fusion_depth]
             ):
                 return False
 
@@ -634,7 +669,7 @@ class CppOverrides(OpOverrides):
         expr = V.kernel.get_to_dtype_expr(x, dtype, src_dtype)
         csevar = V.kernel.cse.generate(V.kernel.compute, expr)
         csevar.update_on_args("to_dtype", (x, dtype), {"src_dtype": src_dtype})
-        if dtype in [torch.bfloat16, torch.float16] and src_dtype == torch.float:
+        if dtype in DTYPE_LOWP_FP and src_dtype == torch.float:
             """
             https://github.com/pytorch/pytorch/issues/115260
             For FusedSchedulerNode[node1, node2], the node2 loads what node1 stores and the buffer is
@@ -672,18 +707,7 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def to_dtype_bitcast(x, dtype, src_dtype):
         assert dtype in DTYPE_TO_CPP, f"{dtype} missing from {__name__}.DTYPE_TO_CPP"
-        if src_dtype in (torch.float16, torch.bfloat16):
-            # c10::bit_cast requires the source and target have the bitwidth.
-            # Because the input tensor's dtype could be promoted, e.g. from float16 to
-            # float, we have to cast the tensor to its original source dtype before
-            # invoking bit_cast. We also need to convert the bit-casted tensor
-            # back to float to make sure we keep using higher precision values
-            # for the rest of the computation.
-            cast_x = f"c10::convert<{DTYPE_TO_CPP[src_dtype]}>({x})"
-            cast_x = f"c10::bit_cast<{DTYPE_TO_CPP[dtype]}>({cast_x})"
-            return f"c10::convert<{DTYPE_TO_CPP[torch.float32]}>({cast_x})"
-        else:
-            return f"c10::bit_cast<{DTYPE_TO_CPP[dtype]}>({x})"
+        return f"c10::bit_cast<{DTYPE_TO_CPP[dtype]}>({x})"
 
     @staticmethod
     def abs(x):
@@ -925,10 +949,6 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def constant(val, dtype):
-        if dtype in DTYPE_LOWP_FP:
-            # Since load promotes all half-precision inputs to float, constants
-            # must be promoted as well
-            dtype = torch.float32
         return value_to_cpp(val, DTYPE_TO_CPP[dtype])
 
     @staticmethod
@@ -1376,9 +1396,9 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def remainder(a, b):
-        assert (
-            a.dtype == b.dtype
-        ), "remainder vec implementation expect the same inputs' dtype."
+        assert a.dtype == b.dtype, (
+            "remainder vec implementation expect the same inputs' dtype."
+        )
         return f"{a} - ({CppVecOverrides.floordiv(a, b)}) * {b}"
 
     @staticmethod
@@ -1387,10 +1407,7 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def tanh(a):
-        vec_one = f"decltype({a})(1)"
-        vec_two = f"decltype({a})(2)"
-        vec_minus_two = f"decltype({a})(-2)"
-        return f"{vec_two} / ({vec_one} + ({vec_minus_two} * {a}).exp()) - {vec_one}"
+        return f"{a}.tanh()"
 
     @staticmethod
     def reciprocal(a):
@@ -1483,9 +1500,9 @@ class CppVecOverrides(CppOverrides):
     @staticmethod
     def floordiv(a, b):
         if is_float_dtype(a.dtype):
-            assert (
-                a.dtype == b.dtype
-            ), "div_floor_floating_vec implementation expect the same inputs' dtype."
+            assert a.dtype == b.dtype, (
+                "div_floor_floating_vec implementation expect the same inputs' dtype."
+            )
             return f"div_floor_floating_vec({a}, {b})"
         else:
             assert all(is_integer_dtype(item.dtype) for item in [a, b])
@@ -1575,7 +1592,7 @@ class CppVecOverrides(CppOverrides):
         expr = V.kernel.get_to_dtype_expr(x, dtype, src_dtype)
         csevar = V.kernel.cse.generate(V.kernel.compute, expr)
         csevar.update_on_args("to_dtype", (x, dtype), {"src_dtype": src_dtype})
-        if dtype in [torch.bfloat16, torch.float16] and src_dtype == torch.float:
+        if dtype in DTYPE_LOWP_FP and src_dtype == torch.float:
             V.kernel.cache_dtype_convert(x, src_dtype, csevar, dtype)
         return csevar
 
@@ -1644,9 +1661,9 @@ class CppVecOverrides(CppOverrides):
                     assert isinstance(other_vec_var, CppCSEVariable), other_vec_var
                     body_vec_var.dtype = dtype
                     other_vec_var.dtype = dtype
-                    overrides: type[
-                        Union[CppOverrides, CppVecOverrides]
-                    ] = V.kernel.overrides  # type: ignore[has-type]
+                    overrides: type[Union[CppOverrides, CppVecOverrides]] = (
+                        V.kernel.overrides
+                    )  # type: ignore[has-type]
                     code.writeline(
                         f"return {overrides.where(new_mask, body_vec_var, other_vec_var)};"
                     )
@@ -2123,9 +2140,9 @@ class CppKernel(Kernel):
 
     def set_ranges(self, lengths, reduction_lengths):
         if self.call_ranges:
-            assert self.call_ranges == tuple(lengths) + tuple(
-                reduction_lengths
-            ), f"{self.call_ranges} == {tuple(lengths)} + {tuple(reduction_lengths)}"
+            assert self.call_ranges == tuple(lengths) + tuple(reduction_lengths), (
+                f"{self.call_ranges} == {tuple(lengths)} + {tuple(reduction_lengths)}"
+            )
             assert self.reduction_depth == len(lengths)
         else:
             self.call_ranges = tuple(lengths) + tuple(reduction_lengths)
@@ -2159,10 +2176,13 @@ class CppKernel(Kernel):
                 loop_nest.max_parallel_depth(), threads
             )
 
-        is_reduction_only = loop_nest.is_reduction_only()
+        is_reduction_loop = (
+            loop_nest.loops is not None
+            and loop_nest.loops[par_depth.start_depth].is_reduction
+        )
         with contextlib.ExitStack() as stack:
-            if par_depth:
-                if loop_nest.is_reduction_only():
+            if par_depth.parallel_depth:
+                if is_reduction_loop:
                     # need to close the worksharing scope to define reduction vars outside it
                     worksharing.close()
                 else:
@@ -2175,7 +2195,7 @@ class CppKernel(Kernel):
             def gen_kernel(_loop_nest: LoopNest):
                 def is_parallel_reduction():
                     assert _loop_nest.loops
-                    root = _loop_nest.loops[0]
+                    root = _loop_nest.loops[par_depth.start_depth]
                     return root.is_reduction and root.parallel
 
                 kernel = _loop_nest.get_kernel()
@@ -2218,7 +2238,7 @@ class CppKernel(Kernel):
                         if reduction_prefix:
                             stack_outer.enter_context(code.indent())
                         code.splice(reduction_prefix)
-                    if is_reduction_only and loop.parallel:
+                    if is_reduction_loop and loop.parallel:
                         worksharing.parallel(threads)
                         if kernel.local_reduction_init:
                             assert kernel.local_reduction_stores
@@ -2226,7 +2246,7 @@ class CppKernel(Kernel):
 
                     gen_loop_at(_loop_nest, depth)
 
-                    if is_reduction_only and loop.parallel:
+                    if is_reduction_loop and loop.parallel:
                         if kernel.local_reduction_stores:
                             code.splice(kernel.local_reduction_stores)
                         worksharing.close()
@@ -2299,7 +2319,11 @@ class CppKernel(Kernel):
 
     def decide_parallel_depth(self, max_parallel_depth, threads):
         assert self.call_ranges is not None
-        ranges = self.call_ranges[:max_parallel_depth]
+        ranges = self.call_ranges[
+            max_parallel_depth.start_depth : (
+                max_parallel_depth.start_depth + max_parallel_depth.parallel_depth
+            )
+        ]
         seq = self.size_hint()
         par = 1
         depth = 0
@@ -2318,7 +2342,9 @@ class CppKernel(Kernel):
         # to manage the serial vs. parallel.
         if config.cpp.dynamic_threads and depth == 0 and len(ranges) > 0:
             depth = 1
-        return depth
+        return ParallelDepth(
+            parallel_depth=depth, start_depth=max_parallel_depth.start_depth
+        )
 
     @contextlib.contextmanager
     def write_to_suffix(self):
@@ -2680,6 +2706,13 @@ class CppVecKernel(CppKernel):
         stride = self._try_get_const_stride(index, tiling_var)
         code = IndentedBuffer()
         if stride == 1:
+            if accu_store:
+                load = (
+                    f"{self._get_vec_type(dtype)}::loadu({var_expr})"
+                    if dtype == torch.float and self.tail_size is None
+                    else f"{self._get_vec_type(dtype)}::loadu({var_expr}, {cexpr_index(self.num_elems)})"
+                )
+                value = f"({value} + {load})"
             if dtype == torch.float and self.tail_size is None:
                 code.writeline(f"{value}.store({var_expr});")
             else:
@@ -2795,9 +2828,9 @@ class CppVecKernel(CppKernel):
                 self.weight_recps_val = self.weight_recps_cse.generate(
                     self.compute, f"reduction {self.weight_recp_vec_range}", write=False
                 )
-                self.weight_recps_cse.reduction_cache[
-                    self.weight_recp_vec_range
-                ] = self.weight_recps_val
+                self.weight_recps_cse.reduction_cache[self.weight_recp_vec_range] = (
+                    self.weight_recps_val
+                )
                 self.non_parallel_reduction_prefix.writeline(
                     self.welford_weight_reciprocal_vec(dtype)
                 )
@@ -3134,6 +3167,9 @@ class CppVecKernel(CppKernel):
             else:
                 return f"{reduction_type}_combine_vec<{cdtype}, {n_src}, {n_idx}{t_extra}>({var}, {next_value}{arg_extra})"
         elif reduction_type == "any":
+            if isinstance(next_value, CppCSEVariable):
+                assert next_value.dtype == torch.bool
+                (next_value,) = unify_mask_base_type(V.kernel.compute, (next_value,))
             return f"{var} | {next_value}"
         else:
             raise NotImplementedError
@@ -3268,7 +3304,9 @@ class CppTile2DKernel(CppVecKernel):
             and not inner_stride.has(outer_var)
         )
 
-    def gen_transposed_tile_load_store(self, name, var, index, is_store):
+    def gen_transposed_tile_load_store(
+        self, name, var, index, is_store, store_mode=None
+    ):
         # transposed tile load/store outside the kernel inner loop
         dtype = V.graph.get_dtype(name)
         factor = self.tiling_factor
@@ -3288,16 +3326,17 @@ class CppTile2DKernel(CppVecKernel):
                 self.outer_num_elems,
                 self.inner_num_elems,
             )
+        atomic_add = "true" if (is_store and (store_mode == "atomic_add")) else "false"
         if (isinstance(M, sympy.Expr) and not M.is_number) or (
             isinstance(N, sympy.Expr) and not N.is_number
         ):
             load_or_store = (
-                f"at::vec::transpose_mxn<{DTYPE_TO_CPP[dtype]}>"
+                f"transpose_mxn<{DTYPE_TO_CPP[dtype]},{atomic_add}>"
                 f"({src}, {ld_src}, {dst}, {ld_dst}, {cexpr_index(M)}, {cexpr_index(N)});"
             )
         else:
             load_or_store = (
-                f"at::vec::transpose_mxn<{DTYPE_TO_CPP[dtype]},{cexpr_index(M)},{cexpr_index(N)}>"
+                f"transpose_mxn<{DTYPE_TO_CPP[dtype]},{cexpr_index(M)},{cexpr_index(N)},{atomic_add}>"
                 f"({src}, {ld_src}, {dst}, {ld_dst});"
             )
         if is_store:
@@ -3358,10 +3397,9 @@ class CppTile2DKernel(CppVecKernel):
 
         inner = self.inner_itervar()
         index = self.rename_indexing(index)
-        assert mode is None
         if self.need_vec_transpose(index):
             tile_var = self.gen_transposed_tile_load_store(
-                name, var, index, is_store=True
+                name, var, index, is_store=True, store_mode=mode
             )
             # vector store inside the kernel inner loop
             storebuf = f"{tile_var} + {cexpr_index(inner * self.num_elems)}"
@@ -3714,42 +3752,81 @@ class CppKernelProxy(CppKernel):
 
     def legalize_lowp_fp_dtype_loopbody(self, loop_body: LoopBody):
         def add_to_dtype(sub_graph: torch.fx.Graph):
-            def is_lowp_fp_load(node: torch.fx.Node):
-                if node.target not in ["load"]:
-                    return False
-                assert len(node.args) == 3
-                load_dtype = V.graph.get_dtype(node.args[1])  # type: ignore[arg-type]
-                return load_dtype in DTYPE_LOWP_FP
+            def get_input_dtype(node: torch.fx.Node) -> Optional[torch.dtype]:
+                """Get input dtype for nodes that may consumes lowp fp dt"""
+                if node.target == "store":
+                    return V.graph.get_dtype(node.args[1])  # type: ignore[arg-type]
+                elif node.target == "to_dtype_bitcast":
+                    return node.args[-1]  # type: ignore[return-value]
+                elif node.target == "to_dtype":
+                    if len(node.args) > 3:
+                        return node.args[3]  # type: ignore[return-value]
+                    else:
+                        return node.kwargs.get("src_dtype", None)  # type: ignore[return-value]
+                else:
+                    return None
 
-            def is_lowp_fp_store(node: torch.fx.Node):
-                if node.target != "store":
+            def get_output_dtype(node: torch.fx.Node) -> Optional[torch.dtype]:
+                """Get output dtype for nodes that may produce lowp fp dt"""
+                if node.target == "load":
+                    assert len(node.args) == 3
+                    return V.graph.get_dtype(node.args[1])  # type: ignore[arg-type]
+                elif node.target in ["to_dtype", "constant", "index_expr"]:
+                    return node.args[-1]  # type: ignore[return-value]
+                elif node.target == "to_dtype_bitcast":
+                    return node.args[2]  # type: ignore[return-value]
+                else:
+                    return None
+
+            def is_lowp_fp_source(node: torch.fx.Node, dt: torch.dtype):
+                """Check if the given node produces output with expected low precision floating point data type."""
+                assert dt in DTYPE_LOWP_FP
+                return get_output_dtype(node) == dt
+
+            def is_lowp_fp_sink(node: torch.fx.Node, dt: torch.dtype):
+                """Check if the given node accept input with expected low precision floating point data type."""
+                assert dt in DTYPE_LOWP_FP
+                if input_dtype := get_input_dtype(node):
+                    return input_dtype == dt
+                elif node.target == "to_dtype":
+                    # The `src_dtype` of a `to_dtype` node might miss, in which case the node accept any input dtype.
+                    return True
+                else:
                     return False
-                _, store_var, _, _, _ = node.args
-                store_dtype = V.graph.get_dtype(store_var)  # type: ignore[arg-type]
-                return store_dtype in DTYPE_LOWP_FP
+
+            def is_lowp_fp_source_no_promote(node: torch.fx.Node, dt: torch.dtype):
+                """Check if the node is a lowp fp sources which are all directly fed to ops that accepts lowp fp input
+                thus no need to promote to float
+                """
+                return is_lowp_fp_source(node, dt) and all(
+                    is_lowp_fp_sink(user, dt) for user in node.users
+                )
 
             sub_graph_nodes = list(sub_graph.nodes)
             to_lowp_fp_legalized_nodes = []
             for _node in sub_graph_nodes:
-                if is_lowp_fp_load(_node):
-                    # No need to promote to float if all users are direct stores
-                    if all(user.target == "store" for user in _node.users):
+                if (
+                    _node.target in ["load", "index_expr"]
+                    and (dt := get_output_dtype(_node)) in DTYPE_LOWP_FP
+                ):
+                    # No need to promote to float if all users are ops that accepts lowp fp input
+                    if all(is_lowp_fp_sink(user, dt) for user in _node.users):
                         continue
                     ops = _node.args[0]
                     with sub_graph.inserting_after(_node):
                         to_type_node = sub_graph.call_method(
                             "to_dtype", args=(ops, _node, torch.float)
                         )
-                        to_type_node_args = to_type_node.args
-                        _node.replace_all_uses_with(to_type_node)
-                        to_type_node.args = to_type_node_args
+                        _node.replace_all_uses_with(
+                            to_type_node, lambda n: n is not to_type_node
+                        )
                         metrics.cpp_to_dtype_count += 1
-                elif is_lowp_fp_store(_node):
+                elif (
+                    _node.target == "store"
+                    and (dt := get_input_dtype(_node)) in DTYPE_LOWP_FP
+                ):
                     ops, name, _, value_var, _ = _node.args
-                    # No need to promote to float if it is a user of a load which are all directly stored
-                    if value_var.target == "load" and all(
-                        user.target == "store" for user in value_var.users
-                    ):
+                    if is_lowp_fp_source_no_promote(value_var, dt):
                         continue
                     dtype = V.graph.get_dtype(name)
                     with sub_graph.inserting_before(_node):
@@ -3785,8 +3862,17 @@ class CppKernelProxy(CppKernel):
                             reduction_type,
                             value,
                         )
+                elif _node.target == "constant" and _node.args[-1] in DTYPE_LOWP_FP:
+                    # No need to promote to float if all users are ops that accepts lowp fp input
+                    (ops, value, dt) = _node.args
+                    if all(is_lowp_fp_sink(user, dt) for user in _node.users):  # type: ignore[arg-type]
+                        continue
+                    _node.args = (ops, value, torch.float)
                 elif _node.target == "to_dtype" and _node.args[-1] in DTYPE_LOWP_FP:
-                    (ops, x, _) = _node.args
+                    # No need to promote to float if all users are ops that accepts lowp fp input
+                    (ops, x, dt) = _node.args
+                    if all(is_lowp_fp_sink(user, dt) for user in _node.users):  # type: ignore[arg-type]
+                        continue
                     # The legalization always loads the BF16/FP16 tensor as FP32 for computation
                     # and converts back to BF16/FP16 after the computation.
                     # Hence, there should be no computation w/ BF16/FP16.
@@ -3801,6 +3887,41 @@ class CppKernelProxy(CppKernel):
                     # Hence, we remove the first to_type.
                     to_lowp_fp_legalized_nodes.append(_node)
                     _node.args = (ops, x, torch.float)
+                elif _node.target == "to_dtype_bitcast":
+                    (ops, value_var, dtype, src_dtype) = _node.args
+
+                    # to_dtype_bitcast act as a lowp fp sink:
+                    # c10::bit_cast requires the source and target have the same bitwidth. Because the input tensor's
+                    # dtype could be promoted, e.g. from float16 to float, we have to cast the tensor to its original
+                    # source dtype before invoking bit_cast.
+                    if src_dtype in DTYPE_LOWP_FP:
+                        # No need to promote to float if it is a user of a lowp fp sources
+                        # which are all directly fed to ops that accepts lowp fp input
+                        if not is_lowp_fp_source_no_promote(value_var, src_dtype):
+                            with sub_graph.inserting_before(_node):
+                                to_type_node = sub_graph.call_method(
+                                    "to_dtype", args=(ops, value_var, src_dtype)
+                                )
+                                _node.replace_input_with(value_var, to_type_node)
+                                metrics.cpp_to_dtype_count += 1
+
+                    # to_dtype_bitcast act as a lowp fp source:
+                    # We also need to convert the bit-casted tensor back to float to make sure we keep using higher
+                    # precision values for the rest of the computation.
+                    if dtype in DTYPE_LOWP_FP:
+                        # No need to promote to float if all users are ops that accepts lowp fp input
+                        if not (
+                            all(is_lowp_fp_sink(user, dtype) for user in _node.users)
+                        ):
+                            ops = _node.args[0]
+                            with sub_graph.inserting_after(_node):
+                                to_type_node = sub_graph.call_method(
+                                    "to_dtype", args=(ops, _node, torch.float)
+                                )
+                                _node.replace_all_uses_with(
+                                    to_type_node, lambda n: n is not to_type_node
+                                )
+                                metrics.cpp_to_dtype_count += 1
                 else:
                     pass
 
@@ -4208,22 +4329,33 @@ class OuterLoopFusedKernel(CppKernel):
         super().__init__(kernel_group.args, kernel_group.ws.num_threads)
         self.inner: list[LoopNest] = []
 
-    def decide_parallel_depth(self, max_parallel_depth, threads) -> int:
+    def decide_parallel_depth(self, max_parallel_depth, threads):
         kernels_parallel_depth = []
         nested_kernels: list[CppKernel] = [
             loop_nest.get_kernel() for loop_nest in self.inner
         ]
+        # TODO(leslie-fang-intel): only enable parallel within all outer loop levels.
         for kernel in nested_kernels:
             # For any ScalarKernel, VecKernel, or Tile2DKernel,
             # they should all have the same call_ranges
             call_ranges = kernel.call_ranges
             assert call_ranges is not None
             kernels_parallel_depth.append(
-                kernel.decide_parallel_depth(len(call_ranges), threads)
+                kernel.decide_parallel_depth(
+                    ParallelDepth(
+                        parallel_depth=(
+                            len(call_ranges) - max_parallel_depth.start_depth
+                        ),
+                        start_depth=max_parallel_depth.start_depth,
+                    ),
+                    threads,
+                ).parallel_depth
             )
-        return min(
-            max_parallel_depth,
-            max(kernels_parallel_depth),
+        return ParallelDepth(
+            parallel_depth=min(
+                max_parallel_depth.parallel_depth, max(kernels_parallel_depth)
+            ),
+            start_depth=max_parallel_depth.start_depth,
         )
 
 
@@ -4262,13 +4394,7 @@ class CppScheduling(BaseScheduling):
         return tuple(tuple(map(V.graph.sizevars.simplify, s)) for s in sizes)
 
     def reset_kernel_group(self):
-        from .cpp_wrapper_cpu import CppWrapperCpu
-
-        self.kernel_group: Union[CppWrapperKernelGroup, KernelGroup]
-        if isinstance(V.graph.wrapper_code, CppWrapperCpu):
-            self.kernel_group = CppWrapperKernelGroup()
-        else:
-            self.kernel_group = KernelGroup()
+        self.kernel_group = KernelGroup()
 
     def fuse(self, node1, node2):
         if node1.is_foreach() or node2.is_foreach():
@@ -4578,6 +4704,8 @@ class CppScheduling(BaseScheduling):
             assert isinstance(node.node, ir.ComputedBuffer)
             _, original_body, _ = node.node.get_default_sizes_body()
             for name, expr in original_body.indexing_exprs.items():
+                if not isinstance(expr, sympy.Expr):
+                    continue
                 for div_expr in expr.find(FloorDiv):
                     if (
                         any(div_expr.has(var) for var in original_body.iter_vars)
@@ -4822,7 +4950,7 @@ class CppScheduling(BaseScheduling):
                 )
                 kernel_group.finalize_kernel(
                     outer_fusion_cpp_kernel_proxy,
-                    [_node for _nodes in nodes_list for _node in _nodes],
+                    [*itertools.chain.from_iterable(nodes_list)],
                 )
 
             return True
@@ -4887,11 +5015,13 @@ class CppScheduling(BaseScheduling):
             for epilogue_node in epilogue_nodes
             if isinstance(epilogue_node, (SchedulerNode, FusedSchedulerNode))
         ]
-
+        # The counter cpp_templated_kernel_counter is used for verifying if a
+        # a templated kernel was successfully compiled in a UT
+        counters["inductor"]["cpp_templated_kernel_counter"] += 1
         counters["inductor"]["cpp_epilogue_fusion_counter"] += len(epilogue_nodes)
-        assert self.is_cpp_template(
-            template_node
-        ), "Template node passed to CppScheduler.codegen_template must be a SchedulerNode that wraps a CppTemplateBuffer"
+        assert self.is_cpp_template(template_node), (
+            "Template node passed to CppScheduler.codegen_template must be a SchedulerNode that wraps a CppTemplateBuffer"
+        )
         template_node = cast(SchedulerNode, template_node)
         _, (_, rnumel) = template_node.group
         assert rnumel == ()
@@ -4899,9 +5029,9 @@ class CppScheduling(BaseScheduling):
         epilogue_ir_nodes: list[Optional[ir.Operation]] = [
             n.node for n in epilogue_nodes
         ]
-        assert all(
-            isinstance(n, ir.ComputedBuffer) for n in epilogue_ir_nodes
-        ), "Epilogue nodes must all be instances of ir.ComputedBuffer"
+        assert all(isinstance(n, ir.ComputedBuffer) for n in epilogue_ir_nodes), (
+            "Epilogue nodes must all be instances of ir.ComputedBuffer"
+        )
 
         def template_buffer_has_other_users(
             template_buffer, outputs_by_name, epilogue_nodes
@@ -4939,16 +5069,16 @@ class CppScheduling(BaseScheduling):
         if is_multi_outputs_template(template_node.node):
             # For multi outputs template, allocate buffers for each output after the epilogue
             # codegen to which determines if the buffer has been removed.
-            assert (
-                len(template_node.outputs) == 1
-            ), "Multi outputs template should be with 1 output template buffer of MultiOutputLayout"
+            assert len(template_node.outputs) == 1, (
+                "Multi outputs template should be with 1 output template buffer of MultiOutputLayout"
+            )
             for user in template_node.outputs[0].users:
-                assert isinstance(
-                    user.node, ExternKernelSchedulerNode
-                ), "Multi outputs template should be with ExternKernelSchedulerNode"
-                assert isinstance(
-                    user.node.node, ir.MultiOutput
-                ), "Multi outputs template has multi users with MultiOutput"
+                assert isinstance(user.node, ExternKernelSchedulerNode), (
+                    "Multi outputs template should be with ExternKernelSchedulerNode"
+                )
+                assert isinstance(user.node.node, ir.MultiOutput), (
+                    "Multi outputs template has multi users with MultiOutput"
+                )
                 user.node.mark_run()
 
         kernel.call_kernel(kernel_name, ctb)
@@ -4979,6 +5109,12 @@ class CppScheduling(BaseScheduling):
         # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
         src_code = src_code.replace("#pragma CMT", "//")
 
+        # Get the lines in the source code representing the function definition,
+        # excluding the the first line including cpp_prefix.h.
+        first_char = src_code.rfind('extern "C"')
+        last_char = src_code.find(")", first_char)
+        kernel_definition = f"{src_code[first_char : last_char + 1]};\n"
+
         compile_wrapper = IndentedBuffer()
         args = self.kernel_group.args if kernel_args is None else kernel_args
         _, _, arg_types = args.cpp_argdefs()
@@ -4987,7 +5123,12 @@ class CppScheduling(BaseScheduling):
         compile_wrapper.splice(src_code, strip=True)
         if not V.graph.cpp_wrapper:
             compile_wrapper.writeline("''')")
-        wrapper.define_kernel(kernel_name, compile_wrapper.getvalue(), gpu=False)
+        wrapper.define_kernel(
+            kernel_name,
+            compile_wrapper.getvalue(),
+            gpu=False,
+            cpp_definition=kernel_definition,
+        )
         return kernel_name
 
     def flush(self):
@@ -5068,12 +5209,8 @@ class KernelGroup:
     def call_kernel(self, wrapper, kernel_name):
         _, call_args, arg_types = self.args.cpp_argdefs()
         wrapper.generate_kernel_call(
-            kernel_name, call_args, gpu=False, triton=False, arg_types=arg_types
+            kernel_name, call_args, triton=False, arg_types=arg_types
         )
-
-
-class CppWrapperKernelGroup(KernelGroup):
-    pass
 
 
 class WorkSharing:
@@ -5243,38 +5380,53 @@ class LoopNest:
     @cache_on_self
     def max_parallel_depth(self):
         """
-        Maximal allowed depth for parallelism:
-        1) Levels without splitting and
-        2) All reduction or non-reduction levels
-        When the loop is split at the top level, the max depth is 1.
+        Maximal allowed depth for parallelism: All reduction or non-reduction levels.
+        When the range of the first inner loop beyond the maximum parallel depth is much
+        larger than the range of all outer loops within the maximum parallel depth,
+        change the starting depth of parallelism to the first inner loop and recalculate
+        the maximum parallel depth.
         """
         if self.loops is None:
-            return 0
+            return ParallelDepth(parallel_depth=0, start_depth=0)
 
+        start_depth = 0
         max_depth = 0
         is_reduction = self.loops[0].is_reduction
+        loop_sizes = sympy.Integer(1)
         for loop in self.loops:
             if loop.is_reduction != is_reduction:
                 break
+            loop_sizes = loop_sizes * loop.size
             max_depth += 1
-        return max_depth
 
-    def is_reduction_only(self):
-        """
-        Whether all the loops are for reduction. Reduction loops
-        are always the inner most ones.
-        """
-        return self.loops is not None and self.loops[0].is_reduction
+        # When the range of the first inner loop is much larger than the range of all outer loops,
+        # change `start_depth` to the first inner loop and recalculate `max_depth`.
+        if (
+            max_depth < len(self.loops)
+            and isinstance(loop_sizes, sympy.Integer)
+            and isinstance(self.loops[max_depth].size, sympy.Integer)
+            and loop_sizes * 300 < self.loops[max_depth].size
+        ):
+            start_depth = max_depth
+            max_depth = 0
+            is_reduction = self.loops[start_depth].is_reduction
+            for i in range(start_depth, len(self.loops)):
+                if self.loops[i].is_reduction != is_reduction:
+                    break
+                max_depth += 1
+        return ParallelDepth(parallel_depth=max_depth, start_depth=start_depth)
 
     def mark_parallel(self, par_depth):
-        assert (
-            par_depth <= self.max_parallel_depth()
-        ), "Parallel depth cannot exceed the maximal allowed parallel depth"
+        assert par_depth.parallel_depth <= self.max_parallel_depth().parallel_depth, (
+            "Parallel depth cannot exceed the maximal allowed parallel depth"
+        )
         assert self.loops is not None
-        assert len(self.loops) >= par_depth
-        loop = self.loops[0]
-        loop.parallel = par_depth
-        for i in range(1, par_depth):
+        assert len(self.loops) >= par_depth.parallel_depth
+        loop = self.loops[par_depth.start_depth]
+        loop.parallel = par_depth.parallel_depth
+        if loop.is_reduction:
+            metrics.parallel_reduction_count += 1
+        for i in range(par_depth.start_depth + 1, par_depth.parallel_depth):
             self.loops[i].collapsed = True
 
     def tile(self, depth, factor):
