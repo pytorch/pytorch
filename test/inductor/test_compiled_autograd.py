@@ -141,6 +141,12 @@ class TestCompiledAutograd(TestCase):
         except subprocess.CalledProcessError as e:
             self.fail(f"Subprocess exited with return code: {e.returncode}")
 
+    def check_cudagraph_skips(self, num_skips: int):
+        self.assertEqual(
+            counters["inductor"]["cudagraph_skips"],
+            0 if inductor_config.cpp_wrapper else num_skips,
+        )
+
     def test_dynamo_flaky_segfault(self):
         script = """
 import torch
@@ -2811,7 +2817,7 @@ main()
             loss.backward()
             torch._inductor.config.triton.cudagraphs = False
 
-        self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+        self.check_cudagraph_skips(1)
 
     @unittest.skipIf(not HAS_CUDA, "requires cuda")
     def test_cudagraphs_sdpa(self):
@@ -2829,7 +2835,7 @@ main()
             opt_bwd()
 
         self.assertEqual(counters["compiled_autograd"]["captures"], 1)
-        self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
+        self.check_cudagraph_skips(0)
 
     @unittest.skipIf(not HAS_CUDA, "requires cuda")
     def test_cudagraphs_cpu_scalar_used_in_python_custom_op(self):
@@ -2858,7 +2864,7 @@ main()
         self.assertEqual(counters["compiled_autograd"]["captures"], 1)
         # Compiled autograd lifts custom autograd.Function bwd instead of tracing it.
         # Must skip since we do not know if the cpu scalar will be used only in ATen/prim ops.
-        self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+        self.check_cudagraph_skips(1)
 
     @scoped_load_inline
     @unittest.skipIf(not HAS_CUDA, "requires cuda")
@@ -2922,7 +2928,7 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         # into it. We must skip since we do not know if the cpu scalar will be used only in ATen/prim ops.
         # In the future, we can consider having a cpu scalar movement pass sometime after we trace
         # into the custom C++ autograd::Function (like in AOTDispatcher)
-        self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+        self.check_cudagraph_skips(1)
 
     def test_logs(self):
         logs, ctx = logs_to_string(
