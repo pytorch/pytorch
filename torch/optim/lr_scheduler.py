@@ -134,7 +134,7 @@ class LRScheduler:
     def _initial_step(self):
         """Initialize step counts and perform a step."""
         self._step_count = 0
-        self.step()
+        self._update_lr(self.last_epoch)
 
     def state_dict(self):
         """Return the state of the scheduler as a :class:`dict`.
@@ -188,6 +188,9 @@ class LRScheduler:
                     "https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate",
                     UserWarning,
                 )
+        self._update_lr(epoch)
+
+    def _update_lr(self, epoch: Optional[int] = None):
         self._step_count += 1
 
         with _enable_get_lr_call(self):
@@ -197,7 +200,7 @@ class LRScheduler:
             else:
                 warnings.warn(EPOCH_DEPRECATION_WARNING, UserWarning)
                 self.last_epoch = epoch
-                if hasattr(self, "_get_closed_form_lr"):
+                if self.last_epoch != -1 and hasattr(self, "_get_closed_form_lr"):
                     values = cast(list[float], self._get_closed_form_lr())
                 else:
                     values = self.get_lr()
