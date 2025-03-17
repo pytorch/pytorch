@@ -311,6 +311,10 @@ PyObject* launch_kernel(PyObject* self, PyObject* args) {
           &stream)) {
     return nullptr;
   }
+  if (gridX * gridY * gridZ <= 0) {
+    // No need to do any work if we're outside of grid bounds
+    Py_RETURN_NONE;
+  }
   CUfunction func = reinterpret_cast<CUfunction>(func_ptr); // NOLINT
   cudaStream_t cudaStream = reinterpret_cast<cudaStream_t>(stream); // NOLINT
   auto num_args = std::strlen(argTypes);
