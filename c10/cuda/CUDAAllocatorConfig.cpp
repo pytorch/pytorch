@@ -220,6 +220,40 @@ size_t CUDAAllocatorConfig::parseAllocatorConfig(
     const std::vector<std::string>& config,
     size_t i,
     bool& used_cudaMallocAsync) {
+  // For ease of maintenance and understanding, the CUDA and ROCm
+  // implementations of this function are separated. This avoids having many
+  // #ifdef's throughout.
+#ifdef USE_ROCM
+  // Ease burden on ROCm users by allowing either cuda or hip tokens.
+  // cuda token is broken up to prevent hipify matching it.
+#define PYTORCH_TOKEN1 \
+  "cud"                \
+  "aMallocAsync"
+#define PYTORCH_TOKEN2 "hipMallocAsync"
+  consumeToken(config, ++i, ':');
+  if (++i < config.size()) {
+    TORCH_CHECK(
+        ((config[i] == "native") || (config[i] == PYTORCH_TOKEN1) ||
+         (config[i] == PYTORCH_TOKEN2)),
+        "Unknown allocator backend, "
+        "options are native, " PYTORCH_TOKEN1 ", and " PYTORCH_TOKEN2);
+    used_cudaMallocAsync =
+        (config[i] == PYTORCH_TOKEN1 || config[i] == PYTORCH_TOKEN2);
+    TORCH_INTERNAL_ASSERT(
+        config[i] == get()->name() ||
+            (config[i] == PYTORCH_TOKEN1 && get()->name() == PYTORCH_TOKEN2),
+        "Allocator backend parsed at runtime != "
+        "allocator backend parsed at load time, ",
+        config[i],
+        " != ",
+        get()->name());
+  } else {
+    TORCH_CHECK(false, "Error parsing backend value", "");
+  }
+  return i;
+#undef PYTORCH_TOKEN1
+#undef PYTORCH_TOKEN2
+#else // USE_ROCM
   consumeToken(config, ++i, ':');
   if (++i < config.size()) {
     TORCH_CHECK(
@@ -227,8 +261,6 @@ size_t CUDAAllocatorConfig::parseAllocatorConfig(
         "Unknown allocator backend, "
         "options are native and cudaMallocAsync");
     used_cudaMallocAsync = (config[i] == "cudaMallocAsync");
-#ifndef USE_ROCM
-    // HIP supports hipMallocAsync and does not need to check versions
     if (used_cudaMallocAsync) {
 #if CUDA_VERSION >= 11040
       int version = 0;
@@ -246,7 +278,6 @@ size_t CUDAAllocatorConfig::parseAllocatorConfig(
           CUDA_VERSION);
 #endif
     }
-#endif
     TORCH_INTERNAL_ASSERT(
         config[i] == get()->name(),
         "Allocator backend parsed at runtime != "
@@ -255,6 +286,7 @@ size_t CUDAAllocatorConfig::parseAllocatorConfig(
     TORCH_CHECK(false, "Error parsing backend value", "");
   }
   return i;
+#endif // USE_ROCM
 }
 
 void CUDAAllocatorConfig::parseArgs(const char* env) {
