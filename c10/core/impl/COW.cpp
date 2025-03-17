@@ -49,6 +49,20 @@ bool is_cow_data_ptr(const c10::DataPtr& data_ptr) {
   return (void*)data_ptr.get_deleter() == (void*)&cow::cow_deleter;
 }
 
+static void check_clone_between_devices(
+    DeviceType src_device_type,
+    DeviceType dst_device_type) {
+  TORCH_CHECK(
+      src_device_type == dst_device_type || src_device_type == c10::kCPU ||
+          dst_device_type == c10::kCPU,
+      "Can only lazy clone or materialize between two different devices if they ",
+      "both have the same device type or one of them is CPU. Got source '",
+      src_device_type,
+      "' and destionation '",
+      dst_device_type,
+      "'.");
+}
+
 c10::intrusive_ptr<StorageImpl> lazy_clone_storage(
     StorageImpl& storage,
     c10::optional<c10::Device> device_opt,
@@ -92,7 +106,8 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(
     // Save this for the result.
     new_data_ptr_opt = make_data_ptr(
         data_ptr,
-        *new cow::COWDeleterContext(std::move(original_ctx), storage.device()));
+        *new cow::COWDeleterContext(
+            std::move(original_ctx), storage.device(), storage.allocator()));
 
     // Update this storage to the new copy on write context.
     storage.set_data_ptr_noswap(copy_data_ptr(*new_data_ptr_opt));
@@ -115,18 +130,20 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(
     allocator = allocator_opt.value();
 
     DeviceGuard device_guard(device_opt.value());
-    Device device = device_guard.current_device();
+    Device dst_device = device_guard.current_device();
 
     // If a different target device was given, then convert the data pointer to
     // that device.
-    if (device != storage.device()) {
+    if (dst_device != storage.device()) {
+      check_clone_between_devices(storage.device_type(), dst_device.type());
+
       DataPtr& new_data_ptr = new_data_ptr_opt.value();
       auto* ctx = new_data_ptr.cast_context<c10::impl::cow::COWDeleterContext>(
           c10::impl::cow::cow_deleter);
-      device_type = device.type();
+      device_type = dst_device.type();
       new_data_ptr.release_context();
       new_data_ptr_opt = c10::DataPtr(
-          new_data_ptr.get(), ctx, c10::impl::cow::cow_deleter, device);
+          new_data_ptr.get(), ctx, c10::impl::cow::cow_deleter, dst_device);
     }
   }
 
@@ -139,6 +156,26 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(
       device_type);
 }
 
+static c10::DataPtr clone_between_devices(
+    const void* data,
+    std::size_t n,
+    Device src_device,
+    Allocator* src_allocator,
+    Device dst_device,
+    Allocator* dst_allocator) {
+  DeviceType src_type = src_device.type();
+  DeviceType dst_type = dst_device.type();
+  check_clone_between_devices(src_type, dst_type);
+
+  if (src_type == dst_type) {
+    return dst_allocator->clone(data, n, /*sync=*/true);
+  } else if (src_type == c10::kCPU) {
+    return dst_allocator->clone_from_cpu(data, n);
+  } else {
+    return src_allocator->clone_to_cpu(data, n);
+  }
+}
+
 C10_API void materialize_cow_storage(StorageImpl& storage) {
   TORCH_INTERNAL_ASSERT(
       !c10::ParallelGuard::is_enabled(),
@@ -147,7 +184,9 @@ C10_API void materialize_cow_storage(StorageImpl& storage) {
 
   auto* ctx = data_ptr.cast_context<cow::COWDeleterContext>(cow::cow_deleter);
   TORCH_INTERNAL_ASSERT(ctx != nullptr);
-  bool devices_match = storage.device() == ctx->original_device();
+  Device src_device = ctx->original_device();
+  Device dst_device = storage.device();
+  bool devices_match = src_device == dst_device;
   auto result = ctx->decrement_refcount();
 
   // This must be set by each branch below.
@@ -165,8 +204,18 @@ C10_API void materialize_cow_storage(StorageImpl& storage) {
   } else {
     // We don't need to consume the result, it's just a shared lock ensuring
     // that the data will remain while we copy it.
-    new_data_ptr = storage.allocator()->clone(
-        data_ptr.get(), storage.nbytes(), /*sync=*/!devices_match);
+    if (devices_match) {
+      new_data_ptr =
+          storage.allocator()->clone(data_ptr.get(), storage.nbytes());
+    } else {
+      new_data_ptr = clone_between_devices(
+          data_ptr.get(),
+          storage.nbytes(),
+          src_device,
+          ctx->original_allocator(),
+          dst_device,
+          storage.allocator());
+    }
   }
 
   TORCH_INTERNAL_ASSERT(new_data_ptr.has_value());

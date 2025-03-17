@@ -173,6 +173,8 @@ struct TORCH_CUDA_CPP_API CUDAPluggableAllocator
       const void* src,
       std::size_t count,
       bool sync = false) const final;
+  c10::DataPtr clone_from_cpu(const void* data, std::size_t n) override;
+  c10::DataPtr clone_to_cpu(const void* data, std::size_t n) override;
 
  protected:
   std::function<MallocFuncType> alloc_fn_;

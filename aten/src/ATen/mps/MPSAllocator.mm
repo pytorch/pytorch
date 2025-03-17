@@ -5,6 +5,7 @@
 #include <ATen/detail/MPSHooksInterface.h>
 #include <ATen/mps/MPSAllocator.h>
 #include <c10/core/Allocator.h>
+#include <c10/core/CPUAllocator.h>
 #include <c10/core/Storage.h>
 
 #include <iostream>
@@ -826,6 +827,19 @@ struct TORCH_API MPSAllocator final : public IMPSAllocator {
     if (sync) {
       at::detail::getMPSHooks().deviceSynchronize();
     }
+  }
+
+  DataPtr clone_from_cpu(const void* data, std::size_t n) override {
+    DataPtr new_data = allocate(n);
+    default_copy_data(dest, src, count);
+    at::detail::getMPSHooks().deviceSynchronize();
+    return new_data;
+  }
+  DataPtr clone_to_cpu(const void* data, std::size_t n) override {
+    DataPtr new_data = c10::GetCPUAllocator()->allocate(n);
+    default_copy_data(dest, src, count);
+    at::detail::getMPSHooks().deviceSynchronize();
+    return new_data;
   }
 
  private:

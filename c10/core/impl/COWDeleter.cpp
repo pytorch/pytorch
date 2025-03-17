@@ -10,8 +10,11 @@ void cow::cow_deleter(void* ctx) {
 
 cow::COWDeleterContext::COWDeleterContext(
     std::unique_ptr<void, DeleterFnPtr> data,
-    c10::Device original_device)
-    : data_(std::move(data)), original_device_(original_device) {
+    c10::Device original_device,
+    c10::Allocator* original_allocator)
+    : data_(std::move(data)),
+      original_device_(original_device),
+      original_allocator_(original_allocator) {
   // We never wrap a COWDeleterContext.
   TORCH_INTERNAL_ASSERT(data_.get_deleter() != cow::cow_deleter);
 }
@@ -42,6 +45,10 @@ cow::COWDeleterContext::~COWDeleterContext() {
 
 c10::Device cow::COWDeleterContext::original_device() {
   return original_device_;
+}
+
+c10::Allocator* cow::COWDeleterContext::original_allocator() {
+  return original_allocator_;
 }
 
 } // namespace c10::impl

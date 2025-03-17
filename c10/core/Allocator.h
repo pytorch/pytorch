@@ -176,10 +176,12 @@ struct C10_API Allocator {
   // If `sync=true` is given, then the device will synchronize after the clone
   // happens, if the device is normally asynchronous.
   //
-  // Requires: Depending on the details of the allocator, input data may need to
-  // have been allocated by the same allocator. Some allocators do support
-  // cloning from a different device.
+  // Requires: input data was allocated by the same allocator.
   DataPtr clone(const void* data, std::size_t n, bool sync = false);
+
+  virtual DataPtr clone_from_cpu(const void* data, std::size_t n);
+
+  virtual DataPtr clone_to_cpu(const void* data, std::size_t n);
 
   // Checks if DataPtr has a simple context, not wrapped with any out of the
   // ordinary contexts.

@@ -84,7 +84,6 @@ def mps_ops_grad_modifier(ops):
         '_upsample_bilinear2d_aa': None,  # `_upsample_bilinear2d_aa_backward_out` not implemented for MPS
         'sparse.mmreduce': [torch.float32],  # csr not supported
         'unique_consecutive': [torch.float16, torch.float32],
-        'special_modified_bessel_i0': [torch.float16, torch.float32],
         'scalar_tensor': [torch.float16, torch.float32],
         'cdist': [torch.float32],
         'masked.scatter': [torch.float16, torch.float32],
@@ -97,6 +96,7 @@ def mps_ops_grad_modifier(ops):
         'logdet': [torch.float16, torch.float32],  # missing aten::lu_solve.out
         'aminmax': [torch.float32, torch.float16],
         'special.i1': [torch.float16],  # "i1_backward" not implemented for 'Half'
+        'special.i1e': [torch.float16],  # "i1e_backward" not implemented for 'Half'
 
         # Correctness issues
         'atanh': [torch.float32],
@@ -645,20 +645,13 @@ def mps_ops_modifier(ops):
         'sparse.mm': None,
         'sparse.mmreduce': None,
         'special.airy_ai': None,
-        'special.bessel_j0': None,
-        'special.bessel_j1': None,
-        'special.bessel_y0': None,
-        'special.bessel_y1': None,
         'special.chebyshev_polynomial_t': None,
         'special.chebyshev_polynomial_u': None,
         'special.erfcx': None,
         'special.hermite_polynomial_h': None,
         'special.hermite_polynomial_he': None,
-        'special.i0e': None,
-        'special.i1e': None,
         'special.laguerre_polynomial_l': None,
         'special.log_ndtr': None,
-        'special.modified_bessel_i0': None,
         'special.modified_bessel_i1': None,
         'special.modified_bessel_k0': None,
         'special.modified_bessel_k1': None,
@@ -1492,122 +1485,6 @@ class TestMPS(TestCaseMPS):
             b = torch.arange(18, dtype=dtype, device=device) / 3 * math.pi
             a = torch.tensor(v, dtype=dtype, device="mps") * b
             self.compare_with_numpy(torch.exp, np.exp, a)
-
-    # TODO: I would like to only have one copy of this test code and run it on
-    # both CUDA and MPS, but I'm not sure where is a good place to put it so
-    # that both test_torch and test_mps can have access to it. I guess
-    # probably somewhere in `torch.testing`
-    @parametrize('device', ['mps'])
-    @parametrize('src,dest', [
-        ('cpu', None),
-        (None, None),
-        ('cpu', 0),
-        ('cpu', 1),
-        (1, 0),
-        (0, 1),
-        (None, 'cpu'),
-    ])
-    @parametrize('materialize_first', ('src', 'dest'))
-    def test_lazy_clone_to_device(self, device, src, dest, materialize_first):
-        device_type = torch.device(device).type
-
-        def get_device_str(arg):
-            if isinstance(arg, str):
-                return arg
-            elif isinstance(arg, int):
-                if device_type == 'cuda':
-                    if arg >= torch.cuda.device_count():
-                        self.skipTest(f'CUDA index {arg} not found')
-                elif device_type == 'mps':
-                    if arg >= torch.mps.device_count():
-                        self.skipTest(f'MPS index {arg} not found')
-                else:
-                    self.skipTest(f'Index not supported for device type {device_type}')
-
-                return f'{device_type}:{arg}'
-            elif arg is None:
-                return device_type
-            else:
-                raise AssertionError(f'Test parameter not recognized: {arg}')
-
-        src_device = get_device_str(src)
-        dest_device = get_device_str(dest)
-
-        src_device_check = torch.empty(0, device=src_device).device
-        dest_device_check = torch.empty(0, device=dest_device).device
-
-        if src_device_check.type == 'cuda' and dest_device_check.type == 'cpu':
-            # NOTE: CUDA -> CPU does not work yet because upon materialization
-            # we always use the target device Allocator's `clone` function. The
-            # CPU allocator's `clone` function just calls memcopy, which does
-            # not understand CUDA data pointers. In order to get it to work, we
-            # would need to call cudaMemcpy with the appropriate args to copy
-            # data from CUDA to CPU. It is of course possible to make this work,
-            # but since CUDA-CPU is not the main reason for this feature
-            # (MPS-CPU is), we don't need to solve this problem at the moment.
-            self.skipTest('CUDA to CPU does not work yet')
-
-        a = torch.randn(10, device=src_device)
-        orig_data_ptr = a.data_ptr()
-        b = a._lazy_clone(device=dest_device)
-
-        self.assertEqual(a.device, src_device_check)
-        self.assertEqual(b.device, dest_device_check)
-        self.assertTrue(torch._C._is_cow_tensor(a))
-        self.assertEqual(torch._C._data_address(a), orig_data_ptr)
-        self.assertTrue(torch._C._is_cow_tensor(b))
-        self.assertEqual(torch._C._data_address(b), orig_data_ptr)
-
-        if materialize_first == 'src':
-            a[0] = 1
-
-            self.assertEqual(a.device, src_device_check)
-            self.assertEqual(b.device, dest_device_check)
-            self.assertFalse(torch._C._is_cow_tensor(a))
-            self.assertNotEqual(torch._C._data_address(a), orig_data_ptr)
-            self.assertTrue(torch._C._is_cow_tensor(b))
-            self.assertEqual(torch._C._data_address(b), orig_data_ptr)
-            self.assertEqual(a[0], 1)
-
-            b[0] = 2
-
-            self.assertEqual(a.device, src_device_check)
-            self.assertEqual(b.device, dest_device_check)
-            self.assertFalse(torch._C._is_cow_tensor(a))
-            self.assertNotEqual(torch._C._data_address(a), orig_data_ptr)
-            self.assertFalse(torch._C._is_cow_tensor(b))
-            if src_device_check == dest_device_check:
-                self.assertEqual(torch._C._data_address(b), orig_data_ptr)
-            else:
-                self.assertNotEqual(torch._C._data_address(b), orig_data_ptr)
-            self.assertEqual(a[0], 1)
-            self.assertEqual(b[0], 2)
-
-        elif materialize_first == 'dest':
-            b[0] = 2
-
-            self.assertEqual(a.device, src_device_check)
-            self.assertEqual(b.device, dest_device_check)
-            self.assertFalse(torch._C._is_cow_tensor(b))
-            self.assertNotEqual(torch._C._data_address(b), orig_data_ptr)
-            self.assertTrue(torch._C._is_cow_tensor(a))
-            self.assertEqual(torch._C._data_address(a), orig_data_ptr)
-            self.assertEqual(b[0], 2)
-
-            a[0] = 1
-
-            self.assertEqual(a.device, src_device_check)
-            self.assertEqual(b.device, dest_device_check)
-            self.assertFalse(torch._C._is_cow_tensor(b))
-            self.assertNotEqual(torch._C._data_address(b), orig_data_ptr)
-            self.assertFalse(torch._C._is_cow_tensor(a))
-            self.assertEqual(torch._C._data_address(a), orig_data_ptr)
-
-            self.assertEqual(a[0], 1)
-            self.assertEqual(b[0], 2)
-
-        else:
-            raise RuntimeError(f'Not recognized: materialize_first={materialize_first}')
 
     @xfailIf(MACOS_VERSION > 15.0)
     def test_conv_raises_error(self, device='mps', dtype=torch.float):
@@ -4246,8 +4123,6 @@ class TestMPS(TestCaseMPS):
         y_cpu = torch.full((2, 2), 247, device='cpu', dtype=torch.uint8)
         self.assertEqual(y_mps, y_cpu)
 
-    @unittest.skipIf(MACOS_VERSION < 13.0, "Skipped on macOS 12")
-    # See https://github.com/pytorch/pytorch/issues/84995
     def test_div_bugs(self):
         for (dtype, mode) in itertools.product(integral_types(), ['trunc', 'floor']):
             if dtype != torch.int64:
@@ -4515,7 +4390,8 @@ class TestMPS(TestCaseMPS):
 
     # See https://github.com/pytorch/pytorch/pull/84742
     # and https://github.com/pytorch/pytorch/pull/78319
-    def test_binops_dtype_precedence(self):
+    @parametrize("binop", ['add', 'sub', 'mul', 'div'])
+    def test_binops_dtype_precedence(self, binop):
         # Test dtype precedence (casting order) in binary operations by comparing to CPU result
         # Example values for all dtypes supported on the MPS backend
         sample_vals = {
@@ -4527,8 +4403,7 @@ class TestMPS(TestCaseMPS):
             torch.float32: [-1.0, 0.0, 0.1, 111.99],
         }
         # Test all combinations of dtypes, operations, dimensionality
-        for dtype1, dtype2, binop in itertools.product(
-                sample_vals.keys(), sample_vals.keys(), ['add', 'sub', 'mul', 'div']):
+        for dtype1, dtype2 in itertools.product(sample_vals, repeat=2):
             # bool minus bool is generally unsupported, so skip
             if binop == 'sub' and (dtype1 == torch.bool or dtype2 == torch.bool):
                 continue
@@ -5250,7 +5125,6 @@ class TestMPS(TestCaseMPS):
 
         self.assertEqual(result_cpu, result_mps.to('cpu'))
 
-    @unittest.skipIf(MACOS_VERSION < 13.0, "Skipped on macOS 12")
     def test_signed_vs_unsigned_comparison(self):
         cpu_x = torch.tensor((-1, 2, 3), device='cpu', dtype=torch.uint8)
         mps_x = torch.tensor((-1, 2, 3), device='mps', dtype=torch.uint8)
@@ -10025,6 +9899,29 @@ class TestSDPA(TestCaseMPS):
         y_ref = F.scaled_dot_product_attention(q.cpu(), k.cpu(), v.cpu(), attn_mask=mask.cpu(), dropout_p=0.0, is_causal=False)
         self._compare_tensors(y.cpu(), y_ref)
 
+    @parametrize("dtype", [torch.float16, torch.float32])
+    @parametrize("is_causal", [True, False])
+    def test_sdpa_enable_gqa(self, dtype, is_causal):
+        q_heads = 32
+        key_heads = 16
+        L = 7
+        S = 17
+        HS = 23
+
+        q = torch.randn([2, q_heads, L, HS], dtype=dtype, device="mps")
+        k = torch.randn([2, key_heads, S, HS], dtype=dtype, device="mps")
+        v = torch.randn([2, key_heads, S, HS], dtype=dtype, device="mps")
+
+        y_ref = F.scaled_dot_product_attention(
+            q.cpu(), k.cpu(), v.cpu(), dropout_p=0.0, is_causal=is_causal, enable_gqa=True,
+        )
+
+        with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
+            y = F.scaled_dot_product_attention(
+                q, k, v, dropout_p=0.0, is_causal=is_causal, enable_gqa=True,
+            )
+        self._compare_tensors(y.cpu(), y_ref)
+
 
 class TestGatherScatter(TestCaseMPS):
     def test_slicing_with_step(self):
@@ -11570,9 +11467,6 @@ class TestAdvancedIndexing(TestCaseMPS):
 
             self.assertEqual(res_cpu, res_mps, str(dtype))
         for dtype in self.supported_dtypes:
-            # MPS support binary op with uint8 natively starting from macOS 13.0
-            if MACOS_VERSION < 13.0 and dtype == torch.uint8:
-                continue
             helper(dtype)
 
     def test_advanced_indexing_3D_get(self):
@@ -11731,7 +11625,6 @@ class TestAdvancedIndexing(TestCaseMPS):
             self.assertEqual(v[boolIndices], torch.tensor([True], dtype=torch.bool, device=device))
             self.assertEqual(len(w), 2)
 
-    @unittest.skipIf(MACOS_VERSION < 13.0, "Skipped on macOS 12")
     def test_bool_indices_accumulate(self, device="mps"):
         mask = torch.zeros(size=(10, ), dtype=torch.uint8, device=device)
         mask = mask > 0
@@ -11949,7 +11842,6 @@ class TestAdvancedIndexing(TestCaseMPS):
             self.assertEqual(res.shape, src.shape)
         [helper(device="mps", dtype=dtype) for dtype in [torch.float, torch.int32]]
 
-    @unittest.skipIf(MACOS_VERSION < 13.0, "Skipped on macOS 12")
     def test_index_src_datatype(self):
         def helper(device, dtype):
             orig_dtype = dtype

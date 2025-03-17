@@ -46,7 +46,8 @@ class ContextTest : public testing::Test {
 
 TEST_F(ContextTest, Basic) {
   Device device(c10::kCPU);
-  auto& context = *new cow::COWDeleterContext(new_delete_tracker(), device);
+  auto& context = *new cow::COWDeleterContext(
+      new_delete_tracker(), device, GetCPUAllocator());
   ASSERT_THAT(delete_count(), testing::Eq(0));
 
   context.increment_refcount();
@@ -78,7 +79,8 @@ TEST_F(ContextTest, Basic) {
 TEST_F(ContextTest, cow_deleter) {
   // This is effectively the same thing as decrement_refcount() above.
   Device device(c10::kCPU);
-  auto& context = *new cow::COWDeleterContext(new_delete_tracker(), device);
+  auto& context = *new cow::COWDeleterContext(
+      new_delete_tracker(), device, GetCPUAllocator());
   ASSERT_THAT(delete_count(), testing::Eq(0));
 
   cow::cow_deleter(&context);
@@ -158,7 +160,9 @@ TEST(lazy_clone_storage_test, already_copy_on_write) {
       /*size_bytes=*/5,
       at::DataPtr(
           /*data=*/data_ptr,
-          /*ctx=*/new cow::COWDeleterContext(std::move(data), device),
+          /*ctx=*/
+          new cow::COWDeleterContext(
+              std::move(data), device, GetCPUAllocator()),
           cow::cow_deleter,
           device),
       /*allocator=*/nullptr,
@@ -202,7 +206,9 @@ TEST(materialize_test, copy_on_write_single_reference) {
       /*size_bytes=*/4,
       at::DataPtr(
           /*data=*/data_ptr,
-          /*ctx=*/new cow::COWDeleterContext(std::move(data), device),
+          /*ctx=*/
+          new cow::COWDeleterContext(
+              std::move(data), device, GetCPUAllocator()),
           cow::cow_deleter,
           device),
       /*allocator=*/nullptr,
