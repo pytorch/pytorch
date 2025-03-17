@@ -88,6 +88,7 @@ also be interested in reading our `development wiki <https://github.com/pytorch/
     :hidden:
 
     onnx_dynamo
+    onnx_verification
     onnx_dynamo_onnxruntime_backend
     onnx_torchscript
 
