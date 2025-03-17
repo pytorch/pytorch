@@ -30,6 +30,7 @@ from torch.fx.experimental.proxy_tensor import (
     track_tensor_tree,
 )
 from torch.fx.graph_module import GraphModule
+from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 
 
 invoke_subgraph_counter = 0
@@ -329,6 +330,18 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, operands):
 
     if graph is None:
         graph = reenter_make_fx(subgraph)(*operands)
+
+        from torch._guards import detect_fake_mode
+
+        fake_mode = detect_fake_mode(operands)
+        insert_deferred_runtime_asserts(
+            graph,
+            fake_mode.shape_env,
+            "invoke_subgraph_proxy_torch_dispatch_mode",
+            export=True,
+        )
+        graph.recompile()
+
         assert isinstance(proxy_mode.tracer, torch.fx.Tracer)
         qualname = proxy_mode.tracer.get_fresh_qualname("repeated_subgraph")
         proxy_mode.tracer.root.register_module(qualname, graph)

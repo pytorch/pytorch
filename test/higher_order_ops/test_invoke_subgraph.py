@@ -823,7 +823,6 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    @unittest.expectedFailure
     def test_unbacked(self):
         @mark_compile_region
         def gn(x, y):

@@ -15,6 +15,7 @@ from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     make_fx,
 )
+from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch.fx.passes.shape_prop import TensorMetadata
 from torch.multiprocessing.reductions import StorageWeakRef
 
@@ -211,9 +212,9 @@ def _maybe_fake_tracing(fn, inputs: list[Any], pre_dispatch):
             pre_dispatch=pre_dispatch,
             _error_on_data_dependent_ops=False,
         )(*inputs)
-        # insert_deferred_runtime_asserts(
-        #     gm, fake_mode.shape_env, "hoo_maybe_fake_tracing", export=True
-        # )
+        insert_deferred_runtime_asserts(
+            gm, fake_mode.shape_env, "hoo_maybe_fake_tracing", export=True
+        )
         return gm
 
 

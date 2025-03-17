@@ -3088,9 +3088,17 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         # installed in the output graph and we can just access the subgraph
         # using the saved attr name.
         from torch._higher_order_ops.utils import has_potential_input_alias_or_mutation
+        from torch._prims_common import clone_preserve_strides
 
+        def _maybe_clone_val(node):
+            example_value = node.meta["example_value"]
+            if isinstance(example_value, torch.Tensor):
+                # We need to clone so that when we retrace, we don't get the
+                # same unbacked symbols
+                return clone_preserve_strides(example_value)
+            return example_value
         fake_inputs = [
-            node.meta["example_value"]
+            _maybe_clone_val(node)
             for node in body_gmod.graph.nodes
             if node.op == "placeholder"
         ]
