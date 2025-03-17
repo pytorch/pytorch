@@ -635,40 +635,6 @@ def foreach_run_and_map_input_device(fake_mode, func, *args, **kwargs):
     return out_fake
 
 
-@register_op_impl(aten._foreach_copy.default)
-def foreach_copy_run_and_map_input_device(fake_mode, func, *args, **kwargs):
-    tensor_lists = [
-        arg
-        for arg in itertools.chain(args, kwargs.values())
-        if isinstance(arg, (list, tuple))
-        and len(arg)
-        and isinstance(arg[0], torch.Tensor)
-    ]
-
-    try:
-        with in_kernel_invocation_manager(fake_mode):
-            out_meta = func(*args, **kwargs)
-    except NotImplementedError:
-        return NotImplemented
-
-    if not out_meta:
-        return out_meta
-
-    assert tensor_lists
-    out_fake = []
-    for i, meta_t in enumerate(out_meta):
-        device = None
-        for arg in [tl[i] for tl in tensor_lists]:
-            device = arg.device
-            break
-        out_fake.append(
-            fake_mode.fake_tensor_converter.from_meta_and_device(
-                fake_mode, meta_t, device
-            )
-        )
-    return out_fake
-
-
 # Dont default to default device handling,
 # Since op can take in non-zero sized cpu
 # index tensors with cuda self

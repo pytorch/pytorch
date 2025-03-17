@@ -886,6 +886,12 @@ class FakeTensor(Tensor):
                 is_cpu_zero_dim = t_is_cpu_zero_dim
                 return
 
+            # if still device mismatches we will check ops which can work on
+            # different devices for ex. _foreach_copy, in this case we will
+            # return from here without throwing error
+            if "_foreach_copy" in func.name():
+                return
+
             # mismatching devices of non-zero dim tensors, throw
             # This might be valid behavior and need to be explicitly modeled, e.g. reshape_as
             raise RuntimeError(
