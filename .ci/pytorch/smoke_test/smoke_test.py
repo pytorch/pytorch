@@ -419,7 +419,7 @@ def main() -> None:
 
     if options.numpy_check == "enabled":
         test_numpy()
-        
+
     if is_cuda_system:
         test_linalg("cuda")
         test_cuda_gds_errors_captured()
