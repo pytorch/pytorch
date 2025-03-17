@@ -580,9 +580,7 @@ def reordering_to_mimic_autograd_engine(gm: fx.GraphModule) -> fx.GraphModule:
     for node in gm.graph.find_nodes(op="placeholder"):
         env[node] = new_graph.node_copy(node, lambda x: env[x])
 
-    order = {}
-    for idx, node in enumerate(gm.graph.nodes):
-        order[node] = idx
+    order = {node: idx for idx, node in enumerate(gm.graph.nodes)}
 
     def insert_node_in_graph(node):
         cur_nodes = [node]
@@ -920,6 +918,21 @@ def functionalize_rng_ops(
     return fw_module, bw_module
 
 
+def force_save_collectives(joint_module: fx.GraphModule) -> None:
+    """
+    By default, the partitioner is not allowed to recompute collectives
+    unless they come from a user-annotated AC region.
+    See Note [Recomputing collectives in the partitioner]
+    """
+    for node in joint_module.graph.nodes:
+        if (
+            isinstance(node.target, torch._ops.OpOverload)
+            and node.target.namespace == "_c10d_functional"
+            and not must_recompute(node)
+        ):
+            node.meta["recompute"] = CheckpointPolicy.MUST_SAVE
+
+
 def cleanup_recompute_tags(joint_module: fx.GraphModule) -> fx.GraphModule:
     """
     If there are two consecutive checkpointed blocks with no operator in
@@ -1134,7 +1147,14 @@ def solve_min_cut(
         if op_types.is_view(node):
             return False
         if node in dont_ban:
-            return False
+            # collectives are *always* banned from recompute, overriding `dont_ban`
+            # (in particular, the activation memory budget logic is not allowed to recompute collectives)
+            is_collective = (
+                isinstance(node.target, torch._ops.OpOverload)
+                and node.target.namespace == "_c10d_functional"
+            )
+            if config.unsafe_allow_optimization_of_collectives or not is_collective:
+                return False
         # This bans recomputation of the node unless we've been forced not to by
         # user annotation
         if must_recompute(node):
@@ -1142,7 +1162,6 @@ def solve_min_cut(
 
         if "val" in node.meta and isinstance(node.meta["val"], torch.SymFloat):
             return False
-
         banned_nodes.add(node)
         # A node will only ever be recomputed if there is a path from an
         # ancestor of this node to the backwards path through this node that
@@ -1592,11 +1611,11 @@ from torch.utils._mode_utils import no_dispatch
 
 
 # replace symbols in size and strides with their hints without guarding.
-def _remove_symbols_without_guarding(x: torch.Tensor) -> torch.Tensor:
+def _remove_symbols_without_guarding(x: torch.Tensor, fallback: int) -> torch.Tensor:
     shape = list(x.shape)
 
     def realize_symbol(d):
-        return hint_int(d, fallback=4096)
+        return hint_int(d, fallback=fallback)
 
     shape = [realize_symbol(s) for s in shape]
     stride = [realize_symbol(s) for s in x.stride()]
@@ -1608,7 +1627,7 @@ def estimate_runtime(node):
 
     def materialize_arg(x):
         if isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.Tensor):
-            return _remove_symbols_without_guarding(x.meta["val"])
+            return _remove_symbols_without_guarding(x.meta["val"], fallback=4096)
         elif isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.SymInt):
             return hint_int(x.meta["val"], fallback=4096)
         elif isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.SymFloat):
@@ -1926,6 +1945,8 @@ def min_cut_rematerialization_partition(
     graph_has_recomputable_rng_ops = has_recomputable_rng_ops(joint_module)
     if graph_has_recomputable_ops:
         joint_module = cleanup_recompute_tags(joint_module)
+    if not config.unsafe_allow_optimization_of_collectives:
+        force_save_collectives(joint_module)
 
     def classify_nodes(joint_module):
         name_to_node = get_name_to_node(joint_module.graph)

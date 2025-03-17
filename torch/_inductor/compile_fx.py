@@ -841,12 +841,21 @@ def _compile_fx_inner(
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
 
     # This message is for printing overview information of inductor mm counts, shapes,etc after lowering
-    log.info(
-        "Overview info of inductor aten mms: %s",
-        ", ".join(
-            f"({key}: {value})" for key, value in counters["aten_mm_info"].items()
-        ),
-    )
+    if log.isEnabledFor(logging.INFO):
+        mm_table_data = []
+        for key, value in counters["aten_mm_info"].items():
+            name, m, n, k = key.split("_")
+            mm_table_data.append([name, m, n, k, value])
+        log.info("Overview info of inductor aten mms: ")
+        log.info(
+            "{:<20} | {:<20} | {:<20} | {:<20} | {:<20}".format(  # noqa: G001
+                "Name", "M", "N", "K", "Count"
+            )
+        )
+        log.info("-" * 100)
+        for row in mm_table_data:
+            log.info("{:<20} | {:<20} | {:<20} | {:<20} | {:<20}".format(*row))  # noqa: G001
+            log.info("-" * 100)
 
     # Clear Compiled Triton Kernels per inductor compile, as the future objects
     # may not be valid for use after they are run/autotuned
@@ -1077,7 +1086,16 @@ class _InProcessFxCompile(FxCompile):
                 const_kernel_code = None
 
                 if aot_mode and config.aot_inductor.use_runtime_constant_folding:
-                    const_gm, const_output_index = split_const_gm(gm)
+                    # torchbind objects have name that starts with _torchbind_obj
+                    # See caffe2/torch/fx/_symbolic_trace.py?lines=406
+                    # We don't use node.meta["val"] because we don't typically
+                    # attach meta["val"] for get_attr nodes.
+                    const_gm, const_output_index = split_const_gm(
+                        gm,
+                        skip_folding_node_fn=lambda node: node.op == "get_attr"
+                        and isinstance(node.target, str)
+                        and node.target.startswith("_torchbind_obj"),
+                    )
 
                     const_graph = GraphLowering(
                         const_gm,
@@ -1149,7 +1167,7 @@ class _InProcessFxCompile(FxCompile):
                     # not going to touch it for now
 
                     compiled_fn: Any
-
+                    recursively_apply_fns = None
                     with dynamo_timed(
                         "GraphLowering.compile_to_fn", log_pt2_compile_event=True
                     ):
@@ -1184,8 +1202,6 @@ class _InProcessFxCompile(FxCompile):
                                     serialized_extern_kernel_nodes,
                                 )
 
-                            additional_files = graph.wrapper_code.additional_files
-
                             with dynamo_timed(
                                 "AotCodeCompiler.compile", log_pt2_compile_event=True
                             ):
@@ -1196,10 +1212,18 @@ class _InProcessFxCompile(FxCompile):
                                     kernel_code.value,
                                     serialized_extern_kernel_nodes,
                                     device_type=graph.device_type,
-                                    additional_files=additional_files,
+                                    additional_files=[
+                                        *dict.fromkeys(
+                                            graph.wrapper_code.additional_files
+                                        )
+                                    ],
                                 )
                         else:
-                            compiled_fn = graph.compile_to_module().call
+                            compiled_module = graph.compile_to_module()
+                            compiled_fn = compiled_module.call
+                            recursively_apply_fns = getattr(
+                                compiled_module, "recursively_apply_fns", None
+                            )
 
                     num_bytes, nodes_num_elem, node_runtimes = graph.count_bytes()
                     metrics.num_bytes_accessed += num_bytes
@@ -1273,6 +1297,7 @@ class _InProcessFxCompile(FxCompile):
                         graph_kwargs,
                         inputs_to_check,
                         boxed_forward_device_index,
+                        recursively_apply_fns,
                     )
 
 

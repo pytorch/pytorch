@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections import namedtuple
+from dataclasses import dataclass
 from typing import Any, Callable, Optional, TYPE_CHECKING
 from typing_extensions import final, override
 
@@ -21,9 +21,11 @@ if TYPE_CHECKING:
     from .compile_fx_ext import _OutOfProcessFxCompile, _WireProtocolPickledOutput
 
 
-_PostCompileData = namedtuple(
-    "_PostCompileData", ("example_inputs", "cudagraphs", "constants")
-)
+@dataclass
+class _PostCompileData:
+    example_inputs: Sequence[InputType]
+    cudagraphs: BoxedBool
+    constants: CompiledFxGraphConstants
 
 
 # _AsyncOutputCode handles the actual management of waiting for an
@@ -35,6 +37,7 @@ class _AsyncOutputCode(OutputCode):
     _future: Optional[Future[_WireProtocolPickledOutput]]
     _callback: Callable[[_WireProtocolPickledOutput], OutputCode]
     _post_compile_data: Optional[_PostCompileData] = None
+    _boxed_call: bool  # Copied from the forward/output_code
 
     def __init__(
         self,
@@ -47,34 +50,28 @@ class _AsyncOutputCode(OutputCode):
         callback: Callable[[_WireProtocolPickledOutput], OutputCode],
     ) -> None:
         self._eager_forward = eager_forward
+        self._boxed_call = getattr(eager_forward, "_boxed_call", False)
         self._output_code = None
 
         self._future = future
         self._callback = callback
 
-        # This tells callers to call us with `inputs` instead of `*inputs`.
-        self._boxed_call = True
-
     @override
-    def __call__(self, inputs: Sequence[Any]) -> Any:
+    def __call__(self, *args: Any) -> Any:
         if self._future is not None and self._future.done():
-            self._switch_to_compiled_forward()
+            args = self._switch_to_compiled_forward(args)
 
         if eager_forward := self._eager_forward:
             _AsyncFxCompile._stat_eager_runs += 1
-            # TODO: Is this correct? Should eager_forward() always be called as
-            # a boxed call?
-            return eager_forward(inputs)
+            return eager_forward(*args)
 
         else:
-            _AsyncFxCompile._stat_oop_runs += 1
+            _AsyncFxCompile._stat_compiled_runs += 1
             assert self._output_code is not None
-            if getattr(self._output_code, "_boxed_call", False):
-                return self._output_code.__call__(inputs)
-            else:
-                return self._output_code.__call__(*inputs)
+            return self._output_code.__call__(*args)
 
-    def _switch_to_compiled_forward(self) -> None:
+    # Takes and returns the args (converted to the "right" boxed mode)
+    def _switch_to_compiled_forward(self, args: tuple[Any, ...]) -> tuple[Any, ...]:
         assert self._future is not None
 
         # TODO: If the future ended in an exception do we want to continue
@@ -88,6 +85,18 @@ class _AsyncOutputCode(OutputCode):
 
         self._output_code = output_code
         self._eager_forward = None
+        boxed_call = getattr(output_code, "_boxed_call", False)
+
+        if self._boxed_call != boxed_call:
+            if self._boxed_call:
+                # Was boxed, now unboxed
+                args = args[0] if len(args) > 0 else ()
+            else:
+                # Was unboxed, now boxed
+                args = (args,)
+
+        self._boxed_call = boxed_call
+        return args
 
     @override
     def post_compile(
@@ -120,7 +129,7 @@ class _AsyncFxCompile(FxCompile):
     # Number of times we ran "eager"
     _stat_eager_runs: int = 0
     # Number of times we ran our compiled (out-of-process) artifact
-    _stat_oop_runs: int = 0
+    _stat_compiled_runs: int = 0
 
     def __init__(self, compile: _OutOfProcessFxCompile) -> None:
         self._compile = compile
@@ -130,7 +139,7 @@ class _AsyncFxCompile(FxCompile):
         cls._stat_bg_started = 0
         cls._stat_bg_finished = 0
         cls._stat_eager_runs = 0
-        cls._stat_oop_runs = 0
+        cls._stat_compiled_runs = 0
 
     @override
     def codegen_and_compile(

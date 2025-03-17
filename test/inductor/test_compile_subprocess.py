@@ -81,15 +81,16 @@ class TestSubprocess(TestCase):
 
         _AsyncFxCompile._reset_stats()
 
-        inductor_config = "torch._inductor.config"
-        func_config = "torch._functorch.config"
-
         with contextlib.ExitStack() as stack:
             # TODO: Turn off local caches - they don't play nice w/ async currently.
-            stack.enter_context(patch(f"{inductor_config}.autotune_local_cache", False))
-            stack.enter_context(patch(f"{inductor_config}.fx_graph_cache", False))
-            stack.enter_context(patch(f"{func_config}.enable_autograd_cache", False))
-            stack.enter_context(patch(f"{func_config}.strict_autograd_cache", True))
+            stack.enter_context(
+                torch._inductor.config.patch(
+                    autotune_local_cache=False, fx_graph_cache=False
+                )
+            )
+            stack.enter_context(
+                torch._functorch.config.patch(enable_autograd_cache=False)
+            )
 
             # How long to wait (in seconds) before giving up.
             TIMEOUT = 300
@@ -98,7 +99,7 @@ class TestSubprocess(TestCase):
 
             start = time.time()
             last_report = start
-            while _AsyncFxCompile._stat_oop_runs < 4:
+            while _AsyncFxCompile._stat_compiled_runs < 4:
                 # Sleep a bit so we don't drive the CPU unnecessarily.
                 time.sleep(0.25)
 
@@ -118,7 +119,7 @@ class TestSubprocess(TestCase):
                         "Test timed out before producing a compiled artifact."
                     )
 
-            self.assertEqual(_AsyncFxCompile._stat_oop_runs, 4)
+            self.assertEqual(_AsyncFxCompile._stat_compiled_runs, 4)
             # Make sure we ran eager at least once. Normally this will be
             # something like 80.
             self.assertGreater(_AsyncFxCompile._stat_eager_runs, 0)

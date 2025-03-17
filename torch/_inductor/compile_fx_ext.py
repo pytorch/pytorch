@@ -192,7 +192,7 @@ class _WireProtocolInput:
     tracing_context: Optional[torch._guards.TracingContext]
     config: dict[str, object]
     virtualized: _VirtualizedSerializer
-    deterministic_guard_for_testing: Optional[
+    deterministic_guard_for_testing: Optional[  # type: ignore[name-defined]  # mypy bug
         torch.testing._internal.common_utils.DeterministicGuard
     ]
     logger_state: _LoggerState
@@ -453,12 +453,12 @@ class _SerializedFxCompile(FxCompile):
 
         # If we're running tests then grab the DeterministicGuard (don't want to
         # import this if it isn't already imported because it has side-effects)
-        deterministic_guard_for_testing: Optional[
+        deterministic_guard_for_testing: Optional[  # type: ignore[name-defined]  # mypy bug
             torch.testing._internal.common_utils.DeterministicGuard
         ] = None
         try:
             deterministic_guard_for_testing = (
-                torch.testing._internal.common_utils.DeterministicGuard._current_state()
+                torch.testing._internal.common_utils.DeterministicGuard._current_state()  # type: ignore[attr-defined]  # mypy bug
             )
         except AttributeError:
             pass
