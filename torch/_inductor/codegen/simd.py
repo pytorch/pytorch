@@ -423,14 +423,15 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                 val: idx for idx, val in enumerate(val for val in seq if val in mask)
             }
 
-        grid_dims = ["z", "y", "x"]
+        grid_dims = ["x", "y", "z"]
+        pointwise_tensor_dims = list(reversed(grid_dims))
         reduction_dims = ["r0_", "r1_"]
         if no_x_dim:
             tensor_dims = reduction_dims
         elif no_r_dim:
-            tensor_dims = grid_dims
+            tensor_dims = pointwise_tensor_dims
         else:
-            tensor_dims = grid_dims + reduction_dims
+            tensor_dims = pointwise_tensor_dims + reduction_dims
 
         # Filter out unused tensor dims.
         # Convert to dicts for O(1) index lookup.
@@ -819,12 +820,16 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             t for t in self.range_trees if not t.is_reduction or self.inside_reduction
         ]
 
-        def tree_order(tree: IterationRangesRoot) -> int:
-            assert tree.tensor_dim is not None, f"Invalid tensor dim: {tree.tensor_dim}"
-            return tree.tensor_dim
+        # Put all trees with tensor_dim=None at the end, in their current order.
+        end_key = (
+            max(tree.tensor_dim for tree in trees if tree.tensor_dim is not None) + 1
+        )
+
+        def tree_key(tree: IterationRangesRoot) -> int:
+            return tree.tensor_dim if tree.tensor_dim is not None else end_key
 
         if reorder:
-            trees = sorted(trees, key=tree_order)
+            trees = sorted(trees, key=tree_key)
 
         return trees
 
