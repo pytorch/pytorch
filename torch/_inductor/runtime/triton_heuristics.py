@@ -154,7 +154,8 @@ def _dump_launch_params(args, kwargs, launcher, kernel_name, grid):
         else:
             call_kwargs[k] = v
     if not triton_version_uses_attrs_dict():
-        call_kwargs.update(launcher.config.kwargs)
+        for k, v in launcher.config.kwargs.items():
+            call_kwargs[k] = v
     call_kwargs["num_warps"] = launcher.config.num_warps
     call_kwargs["num_stages"] = launcher.config.num_stages
     args_str = [*call_args]

@@ -219,7 +219,9 @@ class TestPostGradCustomPrePostPass(TestCustomPassBase):
             for m in matmuls:
                 rhs_vals[m.args[1]].add(m)
 
-            order = {n: idx for idx, n in enumerate(graph.nodes)}
+            order = {}
+            for idx, n in enumerate(graph.nodes):
+                order[n] = idx
 
             for rhs, matmuls in rhs_vals.items():
                 if len(matmuls) == 1:

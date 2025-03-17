@@ -368,7 +368,9 @@ def prepare_model_with_stubs(
         "quantization_api._numeric_suite.prepare_model_with_stubs"
     )
 
-    float_module_children = dict(float_module.named_children())
+    float_module_children = {}
+    for name, mod in float_module.named_children():
+        float_module_children[name] = mod
 
     reassign = {}
     for name, mod in q_module.named_children():

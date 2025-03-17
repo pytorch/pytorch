@@ -60,7 +60,8 @@ def bf32_on_and_off(bf32_precision=1e-5):
 
         @functools.wraps(f)
         def wrapped(*args, **kwargs):
-            kwargs.update(zip(arg_names, args))
+            for k, v in zip(arg_names, args):
+                kwargs[k] = v
             cond = bf32_is_not_fp32()
             if "device" in kwargs:
                 cond = cond and (torch.device(kwargs["device"]).type == "cpu")
