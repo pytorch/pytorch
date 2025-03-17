@@ -203,7 +203,9 @@ class AOTInductorTestsTemplate:
 
         example_inputs = (torch.randn(4, 4, device=self.device),)
         with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
-            self.check_model(Model(self.device), example_inputs)
+            model = Model(device=self.device)
+            actual = AOTIRunnerUtil.legacy_run(self.device, model, example_inputs)
+            self.assertTrue(same(model(*example_inputs), actual))
 
     @requires_gpu
     def test_duplicate_constant_folding(self):
@@ -221,7 +223,9 @@ class AOTInductorTestsTemplate:
 
         example_inputs = (torch.randn(4, 4, device=self.device),)
         with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
-            self.check_model(Model(self.device), example_inputs)
+            model = Model(device=self.device)
+            actual = AOTIRunnerUtil.legacy_run(self.device, model, example_inputs)
+            self.assertTrue(same(model(*example_inputs), actual))
 
     @requires_gpu
     def test_multi_device(self):
@@ -4683,8 +4687,6 @@ def fail_gpu(suffixes: tuple[str, ...], is_skip=False):
 CPU_TEST_FAILURES = {
     # TODO: failed internally
     "test_multiple_output_alias": fail_cpu(is_skip=True),
-    "test_update_constant_buffer": fail_cpu(is_skip=True),
-    "test_so_without_weight": fail_cpu(is_skip=True),
 }
 
 # test_failures, xfail by default, set is_skip=True to skip
