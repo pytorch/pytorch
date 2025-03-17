@@ -1426,6 +1426,10 @@ class CommonTemplate:
         )
         real_input = torch.tensor([-1.0, 0.0, 1.0, float("nan")])
         interger_real_input = torch.tensor([-1, 0, 1])
+        # Complex are not supported on MacOS-13
+        if self.device == "mps" and MACOS_VERSION < 14.0:
+            self.common(fn, (complex_input.real, real_input, interger_real_input))
+            return
         self.common(fn, (complex_input, real_input, interger_real_input))
 
     def test_sgn(self):
@@ -10211,6 +10215,13 @@ class CommonTemplate:
 
         # Constant must not get matched as constant
         self.common(fn, [torch.randn(3, 1, 1, 1, 1), 9132])
+
+    def test_float_repr_dynamic_shapes(self):
+        @torch.compile(dynamic=True)
+        def fn(x):
+            return F.interpolate(x, scale_factor=1 / 300, mode="linear")
+
+        self.common(fn, [torch.randn(1, 8, 396 * 300)])
 
     def test_sqrt_dynamic_shapes(self):
         # TIMM convit_base model: https://github.com/pytorch/pytorch/issues/97877.
