@@ -7,10 +7,13 @@ torch.onnx.verification
 
 .. autoclass:: VerificationInfo
     :members:
-    :undoc-members:
-    :member-order: bysource
 
 .. autofunction:: verify
+
+Deprecated
+----------
+
+The following classes and functions are deprecated.
 
 .. Some deprecated members are not publicly shown
 .. py:class:: check_export_model_diff

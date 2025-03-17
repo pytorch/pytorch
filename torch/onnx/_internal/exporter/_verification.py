@@ -26,6 +26,27 @@ logger = logging.getLogger(__name__)
 
 @dataclasses.dataclass
 class VerificationInfo:
+    """Verification information for a value in the ONNX program.
+
+    This class contains the maximum absolute difference, maximum relative difference,
+    and histograms of absolute and relative differences between the expected and actual
+    values. It also includes the expected and actual data types.
+
+    The histograms are represented as tuples of tensors, where the first tensor is the
+    histogram counts and the second tensor is the bin edges.
+
+    Attributes:
+        name: The name of the value (output or intermediate).
+        max_abs_diff: The maximum absolute difference between the expected and actual values.
+        max_rel_diff: The maximum relative difference between the expected and actual values.
+        abs_diff_hist: A tuple of tensors representing the histogram of absolute differences.
+            The first tensor is the histogram counts and the second tensor is the bin edges.
+        rel_diff_hist: A tuple of tensors representing the histogram of relative differences.
+            The first tensor is the histogram counts and the second tensor is the bin edges.
+        expected_dtype: The data type of the expected value.
+        actual_dtype: The data type of the actual value.
+    """
+
     name: str
     max_abs_diff: float
     max_rel_diff: float
