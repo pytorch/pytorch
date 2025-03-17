@@ -41,7 +41,6 @@ from ..bytecode_transformation import create_call_function, create_rot_n, is_gen
 from ..exc import (
     get_dynamo_observed_exception,
     handle_observed_exception,
-    IncorrectUsage,
     InfiniteGeneratorError,
     ObservedException,
     ObservedGeneratorExit,
@@ -521,13 +520,12 @@ class LocalGeneratorObjectVariable(VariableTracker):
             with patch.dict(counters, {"unimplemented": counters["inline_call"]}):
                 return tracer.inline_call_()
         except ObservedException as e:
-            tx.exn_vt_stack.extend(tracer.exn_vt_stack)
             raise e
         except InfiniteGeneratorError:
             # test/dynamo/test_misc.py::test_iterator_limit
             raise
         except Unsupported as e:
-            torch._C._dynamo.eval_frame.skip_code(self.get_code())
+            torch._dynamo.eval_frame.skip_code(self.get_code())
             raise SkipFrame from e
         finally:
             counters["unimplemented"] |= counters["inline_call"]
@@ -550,9 +548,8 @@ class LocalGeneratorObjectVariable(VariableTracker):
 
     def _setup_exception(self, tx, exc):
         tracer = self._get_inline_tracer(tx)
-        tracer.push(exc)
         try:
-            tracer._raise_exception_variable(None)
+            tracer._raise_exception_variable(exc)
         except ObservedException as e:
             # if no handler is available (i.e. user code doesn't catch it), the
             # exception is raised again.
@@ -664,19 +661,16 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # * If the generator function does not catch the passed-in exception,
             # or raises a different exception, then that exception propagates to the caller.
 
-            if len(args) > 1:
-                raise IncorrectUsage(
-                    "the (type, exc, tb) signature of throw() is deprecated, "
-                    "use the single-arg signature instead."
-                )
-
             # Setup the exception table and jump target in case of try...finally
             tracer = self._get_inline_tracer(tx)
             try:
-                self._setup_exception(tx, args[0])
-            except ObservedException:
+                # In Python 3.9, the exception is represented as a triple (typ, val, tb)
+                # In such cases, we re-raise the exception object given to avoid
+                # creating a new object, so that IS_OP works.
+                # See: https://github.com/pytorch/pytorch/pull/146496
+                self._setup_exception(tx, args[1] if len(args) == 3 else args[0])
+            except ObservedException:  # noqa: TRY203
                 # propagate the exception back to the parent caller
-                tx.exn_vt_stack.extend(tracer.exn_vt_stack)
                 raise
 
             retval = self.next_variable(tx)
@@ -749,9 +743,6 @@ class LocalGeneratorObjectVariable(VariableTracker):
             except get_dynamo_observed_exception(exc_type):
                 # We should get back the exception raised before.
                 pass
-            except ObservedException:
-                # Propagate anything else back to the parent caller
-                tx.exn_vt_stack.extend(tracer.exn_vt_stack)
             else:
                 raise_observed_exception(RuntimeError, tracer)
             return retval
@@ -1207,21 +1198,22 @@ class SkipFunctionVariable(VariableTracker):
             torch._dynamo.utils.warn_once(msg)
             unimplemented(msg)
         else:
+            qualname = getattr(self.value, "__qualname__", "<unknown qualname>")
             try:
                 path = inspect.getfile(self.value)
                 explanation = (
-                    f"Dynamo developers have intentionally marked that the function `{self.value.__qualname__}` "
+                    f"Dynamo developers have intentionally marked that the function `{qualname}` "
                     f"in file `{path}` should not be traced."
                 )
                 hints = [
-                    f"Avoid calling the function `{self.value.__qualname__}`.",
+                    f"Avoid calling the function `{qualname}`.",
                 ]
                 # TODO improve trace_rules reasoning to provide better hints.
                 # How do we tell that a function/file should NOT be removed from skip files?
                 # Do a very basic check for now.
                 if "_dynamo" not in path:
                     hints += [
-                        f"Remove the function `{self.value.__qualname__}` or the file `{path}` "
+                        f"Remove the function `{qualname}` or the file `{path}` "
                         "from torch/_dynamo/trace_rules.py. More graph breaks may occur as a result of "
                         "attempting to trace into the function.",
                         "Please file an issue to PyTorch.",
@@ -1232,7 +1224,7 @@ class SkipFunctionVariable(VariableTracker):
                 if self.value.__module__ in known_python_builtin_modules:
                     explanation = (
                         f"Dynamo does not know how to trace the Python builtin "
-                        f"`{self.value.__module__}.{self.value.__qualname__}`."
+                        f"`{self.value.__module__}.{qualname}`."
                     )
                     hints = [
                         "If you are attempting to call a logging function (e.g. `_warnings.warn`), "
@@ -1244,7 +1236,7 @@ class SkipFunctionVariable(VariableTracker):
                     self.value.__module__ is not None
                     and self.value.__module__.startswith("optree")
                 ):
-                    explanation = f"Dynamo cannot trace optree C/C++ function {self.value.__module__}.{self.value.__qualname__}."
+                    explanation = f"Dynamo cannot trace optree C/C++ function {self.value.__module__}.{qualname}."
                     hints = [
                         " Consider using torch.utils._pytree - "
                         "https://github.com/pytorch/pytorch/blob/main/torch/utils/_pytree.py"
@@ -1253,7 +1245,7 @@ class SkipFunctionVariable(VariableTracker):
                     torch._dynamo.utils.warn_once(explanation + "\n" + "\n".join(hints))
                 else:
                     explanation = (
-                        f"Dynamo does not know how to trace the builtin `{self.value.__module__}.{self.value.__qualname__}.` "
+                        f"Dynamo does not know how to trace the builtin `{self.value.__module__}.{qualname}.` "
                         f"This function is either a Python builtin (e.g. _warnings.warn) "
                         f"or a third-party C/C++ Python extension (perhaps created with pybind)."
                     )
@@ -1268,7 +1260,7 @@ class SkipFunctionVariable(VariableTracker):
                     ]
                     # also warn on it because most users won't see the graph break message
                     torch._dynamo.utils.warn_once(explanation + "\n" + "\n".join(hints))
-            if self.value.__qualname__ == "allow_in_graph":
+            if qualname == "allow_in_graph":
                 explanation = (
                     "Found an allow_in_graph decorator to a function which "
                     "is created inside the parent function that is getting "
@@ -1278,7 +1270,7 @@ class SkipFunctionVariable(VariableTracker):
             reason = self.reason if self.reason else "<missing reason>"
             unimplemented_v2(
                 gb_type="Attempted to call function marked as skipped",
-                context=f"module: {self.value.__module__}, qualname: {self.value.__qualname__}, skip reason: {reason}",
+                context=f"module: {self.value.__module__}, qualname: {qualname}, skip reason: {reason}",
                 explanation=explanation,
                 hints=hints,
             )

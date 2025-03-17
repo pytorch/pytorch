@@ -57,6 +57,7 @@ from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mo
 from torch._subclasses.meta_utils import is_sparse_any, safe_grad
 from torch._utils_internal import justknobs_check
 from torch.fx.experimental._backward_state import BackwardState
+from torch.fx.experimental._dynamism import normalize_source_name
 from torch.fx.experimental.symbolic_shapes import (
     _constrain_range_for_size,
     _nested_int_aware_sort,
@@ -87,6 +88,7 @@ from ..source import (
     AttrProxySource,
     AttrSource,
     CallMethodItemSource,
+    ChainedSource,
     ConstDictKeySource,
     ConvertIntSource,
     DictGetItemSource,
@@ -255,6 +257,7 @@ from .user_defined import (
     SourcelessGraphModuleVariable,
     UserDefinedClassVariable,
     UserDefinedDictVariable,
+    UserDefinedExceptionClassVariable,
     UserDefinedListVariable,
     UserDefinedObjectVariable,
     UserDefinedTupleVariable,
@@ -1160,6 +1163,10 @@ class VariableBuilder:
             # insert a FUNCTION_MATCH guard here. method-wrappers are very
             # unlikely to change, so its ok to skip the guard here.
             return MethodWrapperVariable(value)
+        elif issubclass(type(value), type) and issubclass(value, BaseException):
+            # match user defined exceptions
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return UserDefinedExceptionClassVariable(value)
         elif issubclass(type(value), type):
             if value in (
                 torch.utils.hooks.BackwardHook,
@@ -1973,12 +1980,26 @@ class VariableBuilder:
             # know if bare integers are actually going to be sizevars
             # and it is inappropriate to eagerly duck size them with
             # real sizevars
-            if (
+            normalized_source_name = normalize_source_name(self.source.name())
+            base_source = self.source
+            if isinstance(base_source, ChainedSource):
+                base_source = base_source.get_base()
+
+            if self.source.name() in get_dynamic_sources():
+                log.debug("%s marked dynamic via source whitelist", self.source.name())
+                dynamic_dim = DimDynamic.DYNAMIC
+            elif (
                 config.automatic_dynamic_shapes
                 and frame_state_entry.scalar is auto_dynamic
             ):
                 dynamic_dim = get_automatic_dynamic_shapes_mark_as()
-            elif not config.assume_static_by_default:
+            elif (
+                isinstance(base_source, LocalSource)
+                and base_source.dynamism is not None
+                and dict(base_source.dynamism).get(normalized_source_name, {0: False})[
+                    0
+                ]
+            ) or not config.assume_static_by_default:
                 dynamic_dim = DimDynamic.DYNAMIC
             else:  # assume_static_by_default
                 # TODO: dynamic_dim = DimDynamic.STATIC should work but
@@ -2664,6 +2685,21 @@ def get_automatic_dynamic_shapes_mark_as():
         )
 
 
+_DYNAMIC_SOURCES: Optional[set[str]] = None
+
+
+def get_dynamic_sources() -> set[str]:
+    global _DYNAMIC_SOURCES
+    if _DYNAMIC_SOURCES is not None:
+        return _DYNAMIC_SOURCES
+
+    _DYNAMIC_SOURCES = set(
+        torch.compiler.config.dynamic_sources.replace(" ", "").split(",")
+    )
+
+    return _DYNAMIC_SOURCES
+
+
 # Tracks the sources of all fake tensors we wrap in Dynamo.
 # Used by shape guard computation.
 @dataclasses.dataclass
@@ -2694,6 +2730,7 @@ def _automatic_dynamic(
         unimplemented("torch.compile does not support strided NestedTensor")
 
     name = source.name()
+    dynamic_sources = get_dynamic_sources()
     prior_policy = tx.output.tracing_context.tensor_to_context.get(e, None)
     shape_env_to_source_to_symbol_cache = (
         prior_policy.shape_env_to_source_to_symbol_cache if prior_policy else None
@@ -2732,7 +2769,7 @@ def _automatic_dynamic(
             inner_contexts=inner_contexts,
         )
 
-    if static_shapes:
+    if static_shapes and name not in dynamic_sources:
         return StatefulSymbolicContext(
             dynamic_sizes=[DimDynamic.STATIC] * e.dim(),
             dynamic_strides=[DimDynamic.INFER_STRIDE] * e.dim(),
@@ -2832,7 +2869,17 @@ def _automatic_dynamic(
 
         # Reflect the user directive in the frame_state
         # For dynamic, apply None always
-        if marked_dynamic:
+
+        normalized_source_name = normalize_source_name(source.name())
+        base_source = source
+        if isinstance(base_source, ChainedSource):
+            base_source = base_source.get_base()
+
+        if marked_dynamic or (
+            isinstance(base_source, LocalSource)
+            and base_source.dynamism is not None
+            and dict(base_source.dynamism).get(normalized_source_name, {i: False})[i]
+        ):
             # TODO: This can be batched
             # TODO: Doing this here is kind of sus, maybe better to set this
             # up when we initially created the FrameStateSizeEntry to bong
@@ -2852,6 +2899,11 @@ def _automatic_dynamic(
         automatic_dynamic_stride = (
             config.automatic_dynamic_shapes and frame_state_entry.is_stride_dynamic(i)
         )
+
+        if name in dynamic_sources:
+            log.debug("%s marked dynamic via source whitelist", name)
+            automatic_dynamic_size = True
+            automatic_dynamic_stride = True
 
         automatic_dynamic = automatic_dynamic_size or automatic_dynamic_stride
 

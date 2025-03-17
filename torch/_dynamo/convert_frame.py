@@ -118,6 +118,7 @@ from .replay_record import ExecutionRecord
 from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
 from .symbolic_convert import (
     DistributedState,
+    ExceptionStack,
     InstructionTranslator,
     LocalState,
     SpeculationLog,
@@ -474,7 +475,10 @@ class ConvertFrameAssert:
     @property
     def _clone_with_backend(self) -> Callable[[CompilerFn], ConvertFrameAssert]:
         return lambda backend: convert_frame_assert(
-            backend, self._one_graph, self._export, self._export_constraints
+            backend,
+            self._one_graph,
+            self._export,
+            self._export_constraints,
         )
 
     def __call__(
@@ -686,6 +690,7 @@ def _compile(
         nonlocal output
         nonlocal tracer
         speculation_log.restart()
+        exn_vt_stack = ExceptionStack()
         tracer = InstructionTranslator(
             instructions,
             code,
@@ -701,6 +706,7 @@ def _compile(
             export_constraints,
             frame_state=frame_state,
             speculation_log=speculation_log,
+            exn_vt_stack=exn_vt_stack,
             distributed_state=distributed_state,
         )
 
@@ -945,7 +951,7 @@ def _compile(
         if is_recompilation(cache_size) and frame:
             reasons = get_and_maybe_log_recompilation_reasons(cache_entry, frame)
             recompile_reason = (
-                "Unable to find recompilation reasons" if not reasons else reasons[-1]
+                "Unable to find recompilation reasons" if not reasons else reasons[0]
             )
         metrics_context.update_outer({"recompile_reason": recompile_reason})
 
@@ -1181,7 +1187,11 @@ def _compile(
 
 
 class ConvertFrame:
-    def __init__(self, compiler_fn: CompilerFn, hooks: Hooks) -> None:
+    def __init__(
+        self,
+        compiler_fn: CompilerFn,
+        hooks: Hooks,
+    ) -> None:
         self._torchdynamo_orig_callable = compiler_fn
         self._inner_convert = convert_frame_assert(compiler_fn, one_graph=False)
         self._hooks = hooks
@@ -1278,7 +1288,7 @@ class ConvertFrame:
             elif isinstance(e, RecompileLimitExceeded):
                 return ConvertFrameReturn(
                     frame_exec_strategy=FrameExecStrategy(
-                        FrameAction.RUN_ONLY, FrameAction.SKIP
+                        FrameAction.RUN_ONLY, FrameAction.RUN_ONLY
                     )
                 )
 

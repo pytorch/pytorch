@@ -20,30 +20,6 @@ class TestDraftExport(TestCase):
         super().setUp()
         init_torchbind_implementations()
 
-        @torch._library.register_fake_class("_TorchScriptTesting::_TensorQueue")
-        class FakeTensorQueue:
-            def __init__(self, queue):
-                self.queue = queue
-
-            @classmethod
-            def __obj_unflatten__(cls, flattened_ctx):
-                return cls(**dict(flattened_ctx))
-
-            def push(self, x):
-                self.queue.append(x)
-
-            def pop(self):
-                return self.queue.pop(0)
-
-            def size(self):
-                return len(self.queue)
-
-            def is_empty(self):
-                return len(self.queue) == 0
-
-            def float_size(self):
-                return float(len(self.queue))
-
         self.torch_bind_ops = [
             torch.ops._TorchScriptTesting.queue_pop,
             torch.ops._TorchScriptTesting.queue_push,
@@ -51,9 +27,7 @@ class TestDraftExport(TestCase):
         ]
 
     def tearDown(self):
-        torch._library.fake_class_registry.deregister_fake_class(
-            "_TorchScriptTesting::_TensorQueue"
-        )
+        return
 
     def test_missing_meta_kernel_custom_op(self):
         with torch.library._scoped_library("mylib", "FRAGMENT"):
@@ -385,6 +359,21 @@ class TestDraftExport(TestCase):
         report = ep._report
         self.assertTrue(report.successful())
         self.assertEqual(inp[0], torch.ones(3, 3))
+
+    def test_masked_linear(self):
+        class M(torch.nn.Module):
+            def forward(self, x, mask, weight, bias):
+                masked = x[mask != 0, :, :]
+                return torch.nn.functional.linear(masked, weight, bias)
+
+        x = torch.zeros(10)
+        inp = (torch.randn(10, 8, 7), x, torch.randn(25, 7), torch.randn(25))
+        draft_ep = draft_export(M(), inp)
+        ep = export(M(), inp)
+        self.assertEqual(draft_ep.module()(*inp), ep.module()(*inp))
+        x[2] += 1
+        x[3] += 1
+        self.assertEqual(draft_ep.module()(*inp), ep.module()(*inp))
 
     def test_torchbind(self):
         class Model(torch.nn.Module):
