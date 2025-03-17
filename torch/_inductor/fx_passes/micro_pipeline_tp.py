@@ -796,7 +796,8 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> bool:
 
     if not is_symm_mem_enabled_for_group(group_name):
         log.debug(
-            f"symmetric memory is not enabled for process group {group_name}, skipping fuse_matmul_reduce_scatter fusion"
+            "symmetric memory is not enabled for process group %s, skipping fuse_matmul_reduce_scatter fusion",
+            group_name,
         )
         return False
 
