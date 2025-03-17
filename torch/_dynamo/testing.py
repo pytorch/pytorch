@@ -243,10 +243,14 @@ class CompileCounter:
         self.op_count = 0
 
 
+_CP = ParamSpec("_CP")
+_CT = TypeVar("_CT")
+
+
 class CompileCounterWithBackend:
     def __init__(
         self,
-        backend: Union[str | Callable[..., Any]],
+        backend: Union[str | Callable[_CP, _CT]],
         mode: Optional[str] = None,
         options: Optional[dict[str, Union[str, int, bool]]] = None,
         dynamic: Optional[bool] = None,
@@ -276,7 +280,7 @@ class CompileCounterWithBackend:
         gm: torch.fx.GraphModule,
         example_inputs: list[torch.Tensor],
         **kwargs: Any,
-    ) -> Callable[..., Any]:
+    ) -> Any:
         self.frame_count += 1
         for node in gm.graph.nodes:
             if "call" in node.op:
