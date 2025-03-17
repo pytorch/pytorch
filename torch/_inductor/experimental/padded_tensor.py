@@ -122,7 +122,7 @@ class PaddedTensor(torch.Tensor):
             fake_args = transform(
                 args,
                 lambda t: (
-                    torch.empty_strided(t.shape, t.stride())
+                    torch.empty_strided(t.shape, t.stride(), dtype=t.dtype)
                     if isinstance(t, torch.Tensor)
                     else t
                 ),
@@ -130,7 +130,7 @@ class PaddedTensor(torch.Tensor):
             fake_kwargs = transform(
                 kwargs,
                 lambda t: (
-                    torch.empty_strided(t.shape, t.stride())
+                    torch.empty_strided(t.shape, t.stride(), dtype=t.dtype)
                     if isinstance(t, torch.Tensor)
                     else t
                 ),
