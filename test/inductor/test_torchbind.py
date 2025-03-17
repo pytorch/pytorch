@@ -24,6 +24,24 @@ class TestTorchbind(TestCase):
         super().setUp()
         init_torchbind_implementations()
 
+    def get_dummy_exported_model(self):
+        """
+        Returns the ExportedProgram, example inputs, and result from calling the
+        eager model with those inputs
+        """
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        m = M()
+        inputs = (torch.ones(2, 3),)
+        orig_res = m(*inputs)
+
+        ep = torch.export.export(m, inputs, strict=False)
+
+        return ep, inputs, orig_res, m
+
     def get_exported_model(self):
         """
         Returns the ExportedProgram, example inputs, and result from calling the
@@ -95,6 +113,15 @@ class TestTorchbind(TestCase):
             str(schema),
             "call_torchbind(__torch__.torch.classes._TorchScriptTesting._Foo obj, str method, int _1) -> int _0",
         )
+
+    def test_torchbind_config_not_generated(self):
+        # custom_objs_config.json should not be generated when its empty
+        ep, inputs, _, _ = self.get_dummy_exported_model()
+        aoti_files = aot_compile(
+            ep.module(), inputs, options={"aot_inductor.package": True}
+        )
+        for file in aoti_files:
+            self.assertTrue(not file.endswith("/custom_objs_config.json"))
 
     def test_torchbind_aot_compile(self):
         ep, inputs, _, _ = self.get_exported_model()
