@@ -118,6 +118,12 @@ std::shared_ptr<NCCLComm> NCCLComm::create_scalable(
 #endif // NCCL_HAS_INIT_RANK_SCALABLE
 #endif // NCCL_HAS_CONFIG
 
+#ifdef NCCL_SIM_INFO_INITIALIZER
+ncclResult_t NCCLComm::ncclCollectiveEstimateEnd(ncclSimInfo_t* simInfo) {
+  return ncclGroupSimulateEnd(simInfo);
+}
+#endif // NCCL_SIM_INFO_INITIALIZER
+
 ncclComm_t NCCLComm::getNcclComm() {
   LockType lock(mutex_);
   if (aborted_) {

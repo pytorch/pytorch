@@ -234,6 +234,10 @@ class NCCLComm {
       std::vector<uint64_t>& ranks_ull);
 #endif // NCCL_HAS_COMM_SPLIT
 
+#ifdef NCCL_SIM_INFO_INITIALIZER
+  static ncclResult_t ncclCollectiveEstimateEnd(ncclSimInfo_t* simInfo);
+#endif // NCCL_SIM_INFO_INITIALIZER
+
 #if (defined(IS_NCCLX) || defined(USE_ROCM)) && defined(NCCL_COMM_DUMP)
   std::unordered_map<std::string, std::string> ncclCommDump();
 #endif
