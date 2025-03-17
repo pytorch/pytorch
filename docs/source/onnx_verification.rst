@@ -19,5 +19,5 @@ torch.onnx.verification
 .. py:class:: OnnxBackend
 .. py:class:: OnnxTestCaseRepro
 .. py:class:: VerificationOptions
-.. py:func:: find_mismatch
-.. py:func:: verify_aten_graph
+.. py:function:: find_mismatch
+.. py:function:: verify_aten_graph
