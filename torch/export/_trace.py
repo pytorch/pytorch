@@ -1899,11 +1899,17 @@ def _non_strict_export(
         )
 
     tx = TracingContext(fake_mode)
+
     # We also need to attach dynamo configs as these will be used in HOOs that
     # use torch.compile, like cond
+    dynamo_config = dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)
+    dynamo_config[
+        "do_not_emit_runtime_asserts"
+    ] = False  # We want to emit runtime asserts
+
     with fake_mode, _NonStrictTorchFunctionHandler(), tracing(
         tx
-    ), torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):
+    ), torch._dynamo.config.patch(dynamo_config):
         with _fakify_script_objects(mod, fake_args, fake_kwargs, fake_mode) as (
             patched_mod,
             new_fake_args,
