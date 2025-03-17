@@ -2366,7 +2366,7 @@ Call this whenever a new thread is created in order to propagate values from
         auto acc = at::getAccelerator(check.value_or(false));
         if (acc.has_value()) {
           bool is_available = at::globalContext()
-                                  .getAcceleratorHooksInterface(acc.value())
+                                  .getAcceleratorHooksInterface(acc)
                                   .isAvailable();
 
           if (!is_available) {
