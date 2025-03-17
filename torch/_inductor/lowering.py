@@ -2528,26 +2528,20 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         if len(arg.get_size()) not in (3, 4):
             return arg
 
-        def realize() -> Union[ir.TensorBox, ir.BaseView, ir.StorageBox]:
-            ir_node = ir.ExternKernel.realize_input(arg)
-            assert isinstance(ir_node, (ir.TensorBox, ir.BaseView, ir.StorageBox)), (
-                type(ir_node)
-            )
-            ret = ir.try_match_insignificant_strides(ir_node, meta_stride_expr)
-            assert isinstance(ret, (ir.TensorBox, ir.BaseView, ir.StorageBox)), type(
-                ret
-            )
-            return ret
-
         if ir.is_aligned_realized_tensor(arg, ALIGNMENT):
-            return realize()
+            return ir.try_match_insignificant_strides(
+                ir.ExternKernel.realize_input(arg), meta_stride_expr
+            )
 
         if (
             isinstance(arg, IRNode)
             and arg.maybe_get_stride() is not None
             and ir.is_aligned_realized_tensor(arg, ALIGNMENT)
         ):
-            return realize()
+            return ir.try_match_insignificant_strides(
+                ir.ExternKernel.realize_input(arg), meta_stride_expr
+            )
+
         if effn_attn_fwd_bias:
             out_size = list(arg.get_size())
 
@@ -2587,21 +2581,28 @@ def sdpa_constraint(fx_node, *args, **kwargs):
             return ir.ExternKernel.require_exact_strides(arg, out_strides)
 
         if ir.is_aligned_realized_tensor(arg, ALIGNMENT):
-            return realize()
+            return ir.try_match_insignificant_strides(
+                ir.ExternKernel.realize_input(arg), meta_stride_expr
+            )
 
         if (
             isinstance(arg, IRNode)
             and arg.maybe_get_stride() is not None
             and ir.is_aligned_realized_tensor(arg, ALIGNMENT)
         ):
-            return realize()
+            return ir.try_match_insignificant_strides(
+                ir.ExternKernel.realize_input(arg), meta_stride_expr
+            )
 
         def is_aligned(x):
             return (V.graph.sizevars.size_hint(x.get_size()[-1]) % ALIGNMENT) == 0
 
         if isinstance(arg.data, ir.BaseView):
-            if not is_aligned(arg) and is_aligned(arg.unwrap_view()):
-                return realize()
+            if not is_aligned(arg):
+                if is_aligned(arg.unwrap_view()):
+                    return ir.try_match_insignificant_strides(
+                        ir.ExternKernel.realize_input(arg), meta_stride_expr
+                    )
 
         return ir.ExternKernel.require_stride_order(arg, stride_order)
 
