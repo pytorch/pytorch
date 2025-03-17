@@ -356,7 +356,7 @@ class FSDPModule:
     ) -> None:
         """
         Sets if the module should reshard parameters after forward. This can be
-        used to change the ``_reshard_after_forward`` FSDP arg at runtime. For
+        used to change the ``reshard_after_forward`` FSDP arg at runtime. For
         example, this can be used to set the FSDP root module's value to
         ``True`` (since it is otherwise specially set to ``False``), or it can
         set an FSDP module's value to ``False`` for running evals and set back
