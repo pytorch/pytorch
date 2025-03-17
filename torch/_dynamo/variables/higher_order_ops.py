@@ -3097,6 +3097,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
                 # same unbacked symbols
                 return clone_preserve_strides(example_value)
             return example_value
+
         fake_inputs = [
             _maybe_clone_val(node)
             for node in body_gmod.graph.nodes
