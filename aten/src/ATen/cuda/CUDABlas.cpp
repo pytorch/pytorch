@@ -199,12 +199,18 @@ static size_t _parseChosenWorkspaceSize() {
   if (val.has_value()) {
     try {
       workspace_size = std::stoi(val.value());
-    } catch(std::invalid_argument const& e) {
-      TORCH_WARN("invalid CUBLASLT_WORKSPACE_SIZE,",
-                 " using default workspace size of ", workspace_size, " KiB.");
-    } catch(std::out_of_range const& e) {
-      TORCH_WARN("CUBLASLT_WORKSPACE_SIZE out of range,",
-                 " using default workspace size of ", workspace_size, " KiB.");
+    } catch (std::invalid_argument const&) {
+      TORCH_WARN(
+          "invalid CUBLASLT_WORKSPACE_SIZE,",
+          " using default workspace size of ",
+          workspace_size,
+          " KiB.");
+    } catch (std::out_of_range const&) {
+      TORCH_WARN(
+          "CUBLASLT_WORKSPACE_SIZE out of range,",
+          " using default workspace size of ",
+          workspace_size,
+          " KiB.");
     }
   }
   return workspace_size * 1024;
