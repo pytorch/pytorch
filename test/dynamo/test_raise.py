@@ -47,6 +47,12 @@ class ContextManager:
 class TestRaise(torch._dynamo.test_case.TestCase):
     # Tests taken from CPython source code in cpython/Lib/test/test_raise.py
     # https://github.com/python/cpython/blob/v3.13.1/Lib/test/test_raise.py
+    def setUp(self):
+        self._prev = torch._dynamo.config.enable_trace_unittest
+        torch._dynamo.config.enable_trace_unittest = True
+
+    def tearDown(self):
+        torch._dynamo.config.enable_trace_unittest = self._prev
 
     @make_dynamo_test
     def test_invalid_reraise(self):
@@ -191,6 +197,12 @@ class TestRaise(torch._dynamo.test_case.TestCase):
 class TestCause(torch._dynamo.test_case.TestCase):
     # Tests taken from CPython source code in cpython/Lib/test/test_raise.py
     # https://github.com/python/cpython/blob/v3.13.1/Lib/test/test_raise.py
+    def setUp(self):
+        self._prev = torch._dynamo.config.enable_trace_unittest
+        torch._dynamo.config.enable_trace_unittest = True
+
+    def tearDown(self):
+        torch._dynamo.config.enable_trace_unittest = self._prev
 
     @make_dynamo_test
     def testCauseSyntax(self):
@@ -253,6 +265,12 @@ class TestCause(torch._dynamo.test_case.TestCase):
 class TestTraceback(torch._dynamo.test_case.TestCase):
     # Tests taken from CPython source code in cpython/Lib/test/test_raise.py
     # https://github.com/python/cpython/blob/v3.13.1/Lib/test/test_raise.py
+    def setUp(self):
+        self._prev = torch._dynamo.config.enable_trace_unittest
+        torch._dynamo.config.enable_trace_unittest = True
+
+    def tearDown(self):
+        torch._dynamo.config.enable_trace_unittest = self._prev
 
     @unittest.expectedFailure  # Dynamo doesn't track traceback
     @make_dynamo_test
@@ -280,6 +298,12 @@ class TestTraceback(torch._dynamo.test_case.TestCase):
 class TestTracebackType(torch._dynamo.test_case.TestCase):
     # Tests taken from CPython source code in cpython/Lib/test/test_raise.py
     # https://github.com/python/cpython/blob/v3.13.1/Lib/test/test_raise.py
+    def setUp(self):
+        self._prev = torch._dynamo.config.enable_trace_unittest
+        torch._dynamo.config.enable_trace_unittest = True
+
+    def tearDown(self):
+        torch._dynamo.config.enable_trace_unittest = self._prev
 
     def raiser(self):
         raise ValueError
@@ -352,6 +376,12 @@ class TestTracebackType(torch._dynamo.test_case.TestCase):
 class TestContext(torch._dynamo.test_case.TestCase):
     # Tests taken from CPython source code in cpython/Lib/test/test_raise.py
     # https://github.com/python/cpython/blob/v3.13.1/Lib/test/test_raise.py
+    def setUp(self):
+        self._prev = torch._dynamo.config.enable_trace_unittest
+        torch._dynamo.config.enable_trace_unittest = True
+
+    def tearDown(self):
+        torch._dynamo.config.enable_trace_unittest = self._prev
 
     @unittest.expectedFailure  # missing Exception.__eq__
     @make_dynamo_test

@@ -1873,29 +1873,34 @@ class BuiltinVariable(VariableTracker):
                 variables.UserDefinedObjectVariable,
             ),
         ):
-            if (
-                name
-                in (
+            if isinstance(obj, variables.UserDefinedObjectVariable) and isinstance(
+                obj.value, unittest.TestCase
+            ):
+                if not config.enable_trace_unittest:
+                    unimplemented_v2(
+                        gb_type="Attempted to call function marked as skipped",
+                        context=f"function: unittest.TestCase.{name}",
+                        explanation=f"Dynamo cannot trace function unittest.TestCase.{name} which is marked as skipped by default",
+                        hints=["Set `torch._dynamo.config.enable_trace_unittest=True`"],
+                    )
+
+                if name in (
                     "assertRaisesRegex",
                     "assertNotWarns",
                     "assertWarnsRegex",
-                    # "assertMultiLineEqual",
                     "assertDictEqual",
                     "assertSequenceEqual",
                     "assertWarns",
-                )
-                and isinstance(obj, variables.UserDefinedObjectVariable)
-                and isinstance(obj.value, unittest.TestCase)
-            ):
-                unimplemented_v2(
-                    gb_type="Failed to trace builtin operator",
-                    context=f"ctx manager unittest.TestCase.{name}",
-                    explanation="Dynamo does not know how to trace builtin operator `assertRaisesRegex` ",
-                    hints=[
-                        f"Avoid calling builtin `{name}` "
-                        "Please report an issue to PyTorch.",
-                    ],
-                )
+                ):
+                    unimplemented_v2(
+                        gb_type="Failed to trace builtin operator",
+                        context=f"function: unittest.TestCase.{name}",
+                        explanation=f"Dynamo does not know how to trace builtin operator `{name}` ",
+                        hints=[
+                            f"Avoid calling builtin `{name}`. "
+                            "Please report an issue to PyTorch.",
+                        ],
+                    )
 
             try:
                 return obj.var_getattr(tx, name)
