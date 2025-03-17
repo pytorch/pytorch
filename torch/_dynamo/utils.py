@@ -4465,3 +4465,16 @@ def get_optimize_ddp_mode():
         f"Invalid dynamo config optimize_ddp value {mode=}"
     )
     return mode
+
+
+@contextmanager
+def maybe_disable_inference_mode() -> Generator[None, None, None]:
+    is_inference_mode_on = (
+        config.fake_tensor_disable_inference_mode and torch.is_inference_mode_enabled()
+    )
+    if is_inference_mode_on:
+        with torch.inference_mode(False), torch.no_grad():
+            yield
+    else:
+        with contextlib.nullcontext():
+            yield
