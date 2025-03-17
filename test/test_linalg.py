@@ -91,9 +91,7 @@ def tunableop_matmul(device, dtype):
 
 def get_tunableop_validators():
     assert len(torch.cuda.tunable.get_validators()) > 0
-    validators = {}
-    for key, value in torch.cuda.tunable.get_validators():
-        validators[key] = value
+    validators = dict(torch.cuda.tunable.get_validators())
     return validators
 
 class TestLinalg(TestCase):
@@ -9129,6 +9127,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         self.assertEqual(out1, out2)
         self.assertEqual(out_ref, out2.cpu())
 
+    @onlyCUDA
     @skipCUDAIfNotRocm
     @unittest.skipIf(not blaslt_supported_device(), "blasLt not supported on current device")
     @setBlasBackendsToDefaultFinally

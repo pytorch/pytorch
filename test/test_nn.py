@@ -41,7 +41,7 @@ from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, Criteri
     module_tests, criterion_tests, loss_reference_fns, _create_basic_net, \
     ctcloss_reference, get_new_module_tests, single_batch_reference_fn, _test_bfloat16_ops, _test_module_empty_input
 from torch.testing._internal.common_device_type import dtypesIfMPS, instantiate_device_type_tests, dtypes, \
-    dtypesIfCUDA, precisionOverride, skipCUDAIfCudnnVersionLessThan, onlyCUDA, onlyCPU, \
+    dtypesIfCUDA, precisionOverride, onlyCUDA, onlyCPU, \
     skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, \
     onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, expectedFailureMPS, \
     skipMeta, get_all_device_types
@@ -6837,6 +6837,10 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         expected = m(input1.view(6, 5), input2.view(6, 6)).view(2, 3, 8)
         self.assertEqual(expected, m(input1, input2))
 
+    def test_bilinear_value_error(self):
+        with self.assertRaisesRegex(ValueError, "in1_features must be > 0"):
+            nn.Bilinear(0, 0, 0)
+
     def test_fold_invalid_arg(self):
         # input.size(1) not divisible by \prod(kernel_size)
 
@@ -10913,7 +10917,6 @@ class TestNNDeviceType(NNTestCase):
         out = m(inp)
 
     @onlyCUDA
-    @skipCUDAIfCudnnVersionLessThan(7600)
     def test_CTCLoss_cudnn(self, device):
         def _helper(zero_infinity):
             target_lengths = [30, 25, 20]
@@ -11176,20 +11179,22 @@ class TestNNDeviceType(NNTestCase):
         inputs.requires_grad = True
         self.assertTrue(gradcheck(F.hardswish, (inputs,)))
 
-    @onlyCPU
-    @dtypes(torch.half, torch.bfloat16, torch.float)
-    def test_hardswish_grad_corner(self, device, dtype):
+    def _test_hardswish_grad_corner(self, device, dtype, scalar, ref_fn):
         m = nn.Hardswish()
         shape = (1, 9, 9, 1)
-        cpu_input = torch.ones(shape, device=device, dtype=dtype)
-        cpu_input = cpu_input * 3
-        cpu_input.requires_grad = True
-        fwd_result = m(cpu_input)
-        grad = torch.ones_like(fwd_result)
-        fwd_result.backward(grad)
-        ref = torch.ones(shape, device=device, dtype=dtype)
-        ref.fill_(1.5)
-        self.assertEqual(cpu_input.grad, ref)
+        inputs = torch.ones(shape, device=device, dtype=dtype)
+        inputs = inputs * scalar
+        inputs.requires_grad = True
+        fwd_result = m(inputs)
+        fwd_result.backward(torch.ones_like(fwd_result))
+        ref = ref_fn(shape, device=device, dtype=dtype)
+        self.assertEqual(inputs.grad, ref)
+
+    @onlyNativeDeviceTypes
+    @dtypes(torch.half, torch.bfloat16, torch.float)
+    def test_hardswish_grad_corner(self, device, dtype):
+        self._test_hardswish_grad_corner(device, dtype, 3, torch.ones)
+        self._test_hardswish_grad_corner(device, dtype, -3, torch.zeros)
 
     def _test_batchnorm_eval(self, ndim, device, dtype, module_dtype=None):
         module_dtype = module_dtype or dtype
@@ -11456,7 +11461,6 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyCUDA
     @skipCUDAIfRocm(msg="skipped Cudnn test on ROCm")
-    @skipCUDAIfCudnnVersionLessThan(7600)
     def test_ctc_loss_cudnn(self, device):
         batch_size = 16
         input_length = 30
@@ -11481,7 +11485,6 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyCUDA
     @skipCUDAIfRocm(msg="skipped Cudnn test on ROCm")
-    @skipCUDAIfCudnnVersionLessThan(8000)
     def test_ctc_loss_cudnn_tensor(self, device):
         batch_size = 16
         input_length = 30
