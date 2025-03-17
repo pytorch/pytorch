@@ -23,6 +23,7 @@ from torch.distributed.checkpoint.state_dict import (
     set_state_dict,
 )
 from torch.distributed.checkpoint.state_dict_loader import _load_state_dict_from_keys
+from torch.distributed.checkpoint.state_dict_saver import AsyncCheckpointerType
 from torch.distributed.checkpoint.stateful import Stateful
 from torch.distributed.checkpoint.utils import CheckpointException
 from torch.distributed.distributed_c10d import ReduceOp
@@ -214,17 +215,31 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
     @with_comms
     @skip_if_lt_x_gpu(4)
     @with_temp_dir
-    @parametrize("cache_staged_state_dict", [False, True])
-    def test_e2e_async_cached(self, cache_staged_state_dict):
+    @parametrize(
+        "cache_staged_state_dict, async_checkpointer_type",
+        [
+            (False, AsyncCheckpointerType.THREAD),
+            (True, AsyncCheckpointerType.THREAD),
+            (False, AsyncCheckpointerType.PROCESS),
+            (True, AsyncCheckpointerType.PROCESS),
+        ],
+    )
+    def test_e2e_async_cached(self, cache_staged_state_dict, async_checkpointer_type):
         self._run_e2e_test(
             compile=False,
             model_type=ModelType.FSDP,
             async_op=True,
             cache_staged_state_dict=cache_staged_state_dict,
+            async_checkpointer_type=async_checkpointer_type,
         )
 
     def _run_e2e_test(
-        self, compile, model_type, async_op=False, cache_staged_state_dict=False
+        self,
+        compile,
+        model_type,
+        async_op=False,
+        cache_staged_state_dict=False,
+        async_checkpointer_type=None,
     ):
         model, optim = self._create_model(compile, ModelType.NONE)
         _train(model, optim, train_steps=2)
@@ -244,7 +259,13 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
             writer = DCP.FileSystemWriter(
                 self.temp_dir, cache_staged_state_dict=cache_staged_state_dict
             )
-            f = saver.async_save(sd, storage_writer=writer)
+            f = saver.async_save(
+                sd,
+                storage_writer=writer,
+                async_checkpointer_type=async_checkpointer_type
+                if async_checkpointer_type
+                else AsyncCheckpointerType.THREAD,
+            )
             t = time.monotonic()
             while not f.done():
                 time.sleep(1)
