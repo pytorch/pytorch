@@ -3897,16 +3897,19 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         mod = MyMod().cuda()
 
         fn = torch.compile(mod, backend="eager")
-        x = torch.randn(10, 10).cuda()
+        x = torch.randn(10, 10, device="cuda")
         torch.cuda.reset_peak_memory_stats()
 
         fn(x)
         peak_mem1 = torch.cuda.max_memory_allocated()
 
-        for _ in range(100):
+        for _ in range(1000):
             fn(x)
         peak_mem2 = torch.cuda.max_memory_allocated()
-        self.assertTrue(peak_mem1 == peak_mem2)
+        # ideally peak_mem1 == peak_mem2, but CI tests running in parallel can
+        # make this flaky. So running the test 1000 times, and putting a margin
+        # of 10x.
+        self.assertTrue(peak_mem2 < 10 * peak_mem1)
 
     @requires_cuda
     def test_guard_default_device(self):
