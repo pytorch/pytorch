@@ -2152,7 +2152,7 @@ def meta__pdist_backward(grad: Tensor, self: Tensor, p: float, pdist: Tensor) ->
 
 
 @register_meta([aten.baddbmm.default, aten.baddbmm.out])
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def meta_baddbmm(self, batch1, batch2, *, beta=1, alpha=1):
     dim1 = batch1.size(0)
     dim2 = batch1.size(1)
@@ -3460,7 +3460,7 @@ def meta_convolution_backward(
 
 
 @register_meta([aten.addbmm.default, aten.addbmm.out])
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def meta_addbmm(self, batch1, batch2, *, beta=1, alpha=1):
     dim1 = batch1.size(1)
     dim2 = batch2.size(2)
