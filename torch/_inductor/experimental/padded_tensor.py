@@ -152,7 +152,7 @@ class PaddedTensor(torch.Tensor):
         ]  # TODO: support different neural element
 
         out_flat, spec = pytree.tree_flatten(out)
-        fake_out_flat, fake_spec = pytree.tree_flatten(out)
+        fake_out_flat, fake_spec = pytree.tree_flatten(fake_out)
         assert spec == fake_spec
         #
         combined_flat = [
