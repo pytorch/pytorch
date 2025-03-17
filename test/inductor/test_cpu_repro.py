@@ -4139,8 +4139,8 @@ class CPUReproTests(TestCase):
                 compiled_m = torch.compile(mod, dynamic=dynamic)
                 actual, code = run_and_get_cpp_code(compiled_m, x)
                 self.assertEqual(expected, actual)
-                # 2 generated kernels (one for var_mean, the other for result)
-                check_metrics_vec_kernel_count(2)
+                # 3 generated kernels (first one for var_mean, last two for result)
+                check_metrics_vec_kernel_count(3)
 
                 # check loop split optimization
                 if fmt == torch.channels_last:
@@ -4168,8 +4168,8 @@ class CPUReproTests(TestCase):
                 compiled_m = torch.compile(mod)
                 actual = compiled_m(x)
                 self.assertEqual(expected, actual)
-                # 2 generated kernels (one for var_mean, the other for result)
-                check_metrics_vec_kernel_count(2)
+                # 3 generated kernels (first one for var_mean, last two for result)
+                check_metrics_vec_kernel_count(3)
                 # check that there is no outer loop fusion.
                 self.assertEqual(
                     len(metrics.cpp_outer_loop_fused_inner_counts),
