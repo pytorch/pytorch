@@ -2500,7 +2500,7 @@ class _CoalescingManager:
     def __init__(self) -> None:
         self.works: list[Work] = []
 
-    def append(self, work: Optional[Work] = None):
+    def append(self, work: Work):
         if work:
             self.works.append(work)
 
@@ -2513,7 +2513,7 @@ class _CoalescingManager:
 def _coalescing_manager(
     group: Optional[ProcessGroup] = None,
     device: Optional[torch.device] = None,
-    async_ops: bool = False,
+    async_ops: Optional[bool] = False,
 ):
     """
     Context manager used to coalesce collectives or P2P operations when possible.
@@ -2552,7 +2552,6 @@ def _coalescing_manager(
         group._start_coalescing(device)
     cm = _CoalescingManager()
     yield cm
-    work = None
     op_list = _world.pg_coalesce_state.pop(group)
     if op_list:
         # Collectives supporting "Fast Path" coalescing are captured.
@@ -2566,7 +2565,6 @@ def _coalescing_manager(
             tensors = [op.tensor for op in op_list]
             all_reduce_opts = AllreduceCoalescedOptions()
             all_reduce_opts.reduceOp = not_none(op_list[0].redop)
-            all_reduce_opts.asyncOp = async_ops
             work = group.allreduce_coalesced(tensors, all_reduce_opts)
         elif op0 == all_gather_into_tensor:
             inputs = []
@@ -2574,8 +2572,6 @@ def _coalescing_manager(
             for op in op_list:
                 inputs.append(op.tensor)
                 outputs.append(not_none(op.dst_tensor))
-            all_gather_opts = AllgatherOptions()
-            all_gather_opts.asyncOp = async_ops
             work = group.allgather_into_tensor_coalesced(outputs, inputs)
         elif op0 == reduce_scatter_tensor:
             inputs = []
@@ -2585,7 +2581,6 @@ def _coalescing_manager(
                 outputs.append(not_none(op.dst_tensor))
             reduce_opts = ReduceScatterOptions()
             reduce_opts.reduceOp = not_none(op_list[0].redop)
-            reduce_opts.asyncOp = async_ops
             work = group.reduce_scatter_tensor_coalesced(outputs, inputs, reduce_opts)
         else:
             raise AssertionError(
@@ -2598,12 +2593,9 @@ def _coalescing_manager(
         work = group._end_coalescing(device)
 
     if async_ops:
-        cm.append(work)
-    elif (
-        work is not None
-    ):  # Backward compatible with backends that don't sync at CPP level
-        work.wait()
-    # Otherwise, the backend has sync'ed at CPP level
+        cm.append(work)  # type: ignore[possibly-undefined]
+    else:
+        work.wait()  # type: ignore[possibly-undefined]
 
 
 def batch_isend_irecv(p2p_op_list: list[P2POp]) -> list[Work]:
@@ -2728,11 +2720,8 @@ def broadcast(
     work = group.broadcast([tensor], opts)
     if async_op:
         return work
-    elif (
-        work is not None
-    ):  # Backward compatible with backends that don't sync at CPP level
+    else:
         work.wait()
-    # Otherwise, the backend has sync'ed at CPP level
 
 
 @_exception_logger
@@ -2812,7 +2801,6 @@ def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op=False):
 
     opts = AllreduceOptions()
     opts.reduceOp = op
-    opts.asyncOp = async_op
     if group is None:
         group = _get_default_group()
 
@@ -2829,11 +2817,8 @@ def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op=False):
 
     if async_op:
         return work
-    elif (
-        work is not None
-    ):  # Backward compatible with backends that don't sync at CPP level
+    else:
         work.wait()
-    # Otherwise, the backend has sync'ed at CPP level
 
 
 @_exception_logger
@@ -2892,17 +2877,13 @@ def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op=False):
 
     opts = AllreduceCoalescedOptions()
     opts.reduceOp = op
-    opts.asyncOp = async_op
     group = group or _get_default_group()
     work = group.allreduce_coalesced(tensors, opts)
 
     if async_op:
         return work.get_future()
-    elif (
-        work is not None
-    ):  # Backward compatible with backends that don't sync at CPP level
+    else:
         work.wait()
-    # Otherwise, the backend has sync'ed at CPP level
 
 
 @_exception_logger
@@ -2947,15 +2928,11 @@ def reduce(
     opts = ReduceOptions()
     opts.reduceOp = op
     opts.rootRank = group_dst
-    opts.asyncOp = async_op
     work = group.reduce([tensor], opts)
     if async_op:
         return work
-    elif (
-        work is not None
-    ):  # Backward compatible with backends that don't sync at CPP level
+    else:
         work.wait()
-    # Otherwise, the backend has sync'ed at CPP level
 
 
 def _object_to_tensor(obj, device, group):
@@ -3754,17 +3731,12 @@ def all_gather(tensor_list, tensor, group=None, async_op=False):
     tensor = tensor if not tensor.is_complex() else torch.view_as_real(tensor)
 
     group = group or _get_default_group()
-    opts = AllgatherOptions()
-    opts.asyncOp = async_op
-    work = group.allgather([tensor_list], [tensor], opts)
+    work = group.allgather([tensor_list], [tensor])
 
     if async_op:
         return work
-    elif (
-        work is not None
-    ):  # Backward compatible with backends that don't sync at CPP level
+    else:
         work.wait()
-    # Otherwise, the backend has sync'ed at CPP level
 
 
 @_exception_logger
@@ -3871,11 +3843,8 @@ def all_gather_into_tensor(output_tensor, input_tensor, group=None, async_op=Fal
 
     if async_op:
         return work
-    elif (
-        work is not None
-    ):  # Backward compatible with backends that don't sync at CPP level
+    else:
         work.wait()
-    # Otherwise, the backend has sync'ed at CPP level
 
 
 @_exception_logger
@@ -3985,17 +3954,12 @@ def all_gather_coalesced(
     ]
 
     group = group or _get_default_group()
-    opts = AllgatherOptions()
-    opts.asyncOp = async_op
-    work = group.allgather_coalesced(output_tensor_lists, input_tensor_list, opts)
+    work = group.allgather_coalesced(output_tensor_lists, input_tensor_list)
 
     if async_op:
         return work.get_future()
-    elif (
-        work is not None
-    ):  # Backward compatible with backends that don't sync at CPP level
+    else:
         work.wait()
-    # Otherwise, the backend has sync'ed at CPP level
 
 
 def _validate_output_list_for_rank(my_rank, dst, gather_list):
@@ -4082,16 +4046,12 @@ def gather(
 
     opts = GatherOptions()
     opts.rootRank = group_dst
-    opts.asyncOp = async_op
     work = group.gather(output_tensors, input_tensors, opts)
 
     if async_op:
         return work
-    elif (
-        work is not None
-    ):  # Backward compatible with backends that don't sync at CPP level
+    else:
         work.wait()
-    # Otherwise, the backend has sync'ed at CPP level
 
 
 @_exception_logger
@@ -4193,11 +4153,8 @@ def scatter(
 
     if async_op:
         return work
-    elif (
-        work is not None
-    ):  # Backward compatible with backends that don't sync at CPP level
+    else:
         work.wait()
-    # Otherwise, the backend has sync'ed at CPP level
 
 
 @_exception_logger
@@ -4229,18 +4186,14 @@ def reduce_scatter(output, input_list, op=ReduceOp.SUM, group=None, async_op=Fal
 
     opts = ReduceScatterOptions()
     opts.reduceOp = op
-    opts.asyncOp = async_op
 
     group = group or _get_default_group()
     work = group.reduce_scatter([output], [input_list], opts)
 
     if async_op:
         return work
-    elif (
-        work is not None
-    ):  # Backward compatible with backends that don't sync at CPP level
+    else:
         work.wait()
-    # Otherwise, the backend has sync'ed at CPP level
 
 
 @_exception_logger
@@ -4340,11 +4293,8 @@ def reduce_scatter_tensor(output, input, op=ReduceOp.SUM, group=None, async_op=F
 
     if async_op:
         return work
-    elif (
-        work is not None
-    ):  # Backward compatible with backends that don't sync at CPP level
+    else:
         work.wait()
-    # Otherwise, the backend has sync'ed at CPP level
 
 
 @deprecated(
@@ -4497,7 +4447,6 @@ def all_to_all_single(
         return
 
     opts = AllToAllOptions()
-    opts.asyncOp = async_op
     _check_single_tensor(output, "output")
     _check_single_tensor(input, "input")
     _ensure_all_tensors_same_dtype(output, input)
@@ -4517,11 +4466,8 @@ def all_to_all_single(
 
     if async_op:
         return work
-    elif (
-        work is not None
-    ):  # Backward compatible with backends that don't sync at CPP level
+    else:
         work.wait()
-    # Otherwise, the backend has sync'ed at CPP level
 
 
 @_exception_logger
@@ -4622,7 +4568,6 @@ def all_to_all(output_tensor_list, input_tensor_list, group=None, async_op=False
         return
 
     opts = AllToAllOptions()
-    opts.asyncOp = async_op
     _check_tensor_list(output_tensor_list, "output_tensor_list")
     _check_tensor_list(input_tensor_list, "input_tensor_list")
     _ensure_all_tensors_same_dtype(output_tensor_list, input_tensor_list)
@@ -4639,11 +4584,8 @@ def all_to_all(output_tensor_list, input_tensor_list, group=None, async_op=False
 
     if async_op:
         return work
-    elif (
-        work is not None
-    ):  # Backward compatible with backends that don't sync at CPP level
+    else:
         work.wait()
-    # Otherwise, the backend has sync'ed at CPP level
 
 
 @_exception_logger
@@ -4674,7 +4616,6 @@ def barrier(
 
     opts = BarrierOptions()
     opts.device = torch.device(_get_object_coll_device(group))
-    opts.asyncOp = async_op
     if device_ids is not None:
         if isinstance(device_ids, list):
             opts.device_ids = device_ids
@@ -4688,11 +4629,8 @@ def barrier(
 
     if async_op:
         return work
-    elif (
-        work is not None
-    ):  # Backward compatible with backends that don't sync at CPP level
+    else:
         work.wait()
-    # Otherwise, the backend has sync'ed at CPP level
 
 
 def monitored_barrier(
