@@ -1,8 +1,9 @@
 # Owner(s): ["module: higher order operators"]
 # flake8: noqa: B950
 
-from parameterized import parameterized_class
 import unittest
+
+from parameterized import parameterized_class
 
 import torch
 import torch._dynamo
@@ -847,7 +848,6 @@ class GraphModule(torch.nn.Module):
         self.assertTrue(torch.allclose(ep.module()(x, y), M()(x, y)))
         self.assertEqual(len(list(ep.graph_module.named_modules())), 2)
 
-    @unittest.expectedFailure
     def test_pending_unbacked(self):
         class M(torch.nn.Module):
             @mark_compile_region
