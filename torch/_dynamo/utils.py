@@ -4491,3 +4491,13 @@ def maybe_disable_inference_mode() -> Generator[None, None, None]:
     else:
         with contextlib.nullcontext():
             yield
+
+
+@contextmanager
+def maybe_disable_inference_mode_for_fake_prop() -> Generator[None, None, None]:
+    if config.fake_tensor_disable_inference_mode:
+        with torch._subclasses.meta_utils.disable_inference_mode_for_fake_prop():
+            yield
+    else:
+        with contextlib.nullcontext():
+            yield

@@ -139,6 +139,7 @@ from .utils import (
     istype,
     LazyString,
     maybe_disable_inference_mode,
+    maybe_disable_inference_mode_for_fake_prop,
     orig_code_map,
     reset_graph_break_dup_checker,
     setup_compile_debug,
@@ -233,7 +234,11 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
         # it. This can happen because the dispatch bits aren't a true
         # stack/counter - so we can't just increment/decrement them as we enter
         # and leave.
-        with torch._C._PreserveDispatchKeyGuard(), maybe_disable_inference_mode():
+        with (
+            torch._C._PreserveDispatchKeyGuard(),
+            maybe_disable_inference_mode(),
+            maybe_disable_inference_mode_for_fake_prop(),
+        ):
             prior_inference_mode = torch.is_inference_mode_enabled()
             prior_deterministic = torch.are_deterministic_algorithms_enabled()
             prior_warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
