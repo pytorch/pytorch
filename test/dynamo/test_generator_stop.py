@@ -1,5 +1,8 @@
 # Owner(s): ["module: dynamo"]
 
+import sys
+import unittest
+
 import torch
 import torch._dynamo.test_case
 from torch.testing._internal.common_utils import make_dynamo_test
@@ -18,6 +21,7 @@ class TestPEP479(torch._dynamo.test_case.TestCase):
     def assertEqual(self, x, y):
         assert x == y
 
+    @unittest.skipIf(sys.version_info < (3, 12), "Test does not work in Python < 3.12")
     @make_dynamo_test
     def test_stopiteration_wrapping(self):
         def f():
@@ -37,6 +41,7 @@ class TestPEP479(torch._dynamo.test_case.TestCase):
         #     next(g())
         # self.assertEqual("generator raised StopIteration", str(cm.exception))
 
+    @unittest.skipIf(sys.version_info < (3, 12), "Test does not work in Python < 3.12")
     @make_dynamo_test
     def test_stopiteration_wrapping_context(self):
         def f():
