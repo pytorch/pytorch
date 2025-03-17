@@ -8,9 +8,9 @@ import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._dispatch.python import suspend_functionalization
 from torch._higher_order_ops.utils import (
-    _set_compilation_env,
     _from_fun,
     _maybe_reenter_make_fx,
+    _set_compilation_env,
     clone_outputs_aliasing_inputs,
     get_dummy_aot_autograd_config,
     prepare_fw_with_masks,
@@ -22,9 +22,9 @@ from torch._ops import HigherOrderOperator
 from torch._subclasses import FakeTensorMode
 from torch._subclasses.functional_tensor import disable_functional_mode
 from torch.fx.experimental.proxy_tensor import (
-    disable_proxy_modes_tracing,
     _temp_remove_metadata_torch_function_mode,
-    _temp_remove_pre_dispatch_torch_function_mode,  
+    _temp_remove_pre_dispatch_torch_function_mode,
+    disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
