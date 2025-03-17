@@ -2575,6 +2575,41 @@ class TestLRScheduler(TestCase):
                 self.assertEqual(group["swa_lr"], 0.05)
                 self.assertEqual(sch.base_lrs, [0.1])
 
+    @parametrize(
+        "LRClass",
+        [
+            partial(LambdaLR, lr_lambda=lambda e: e // 10),
+            partial(MultiplicativeLR, lr_lambda=lambda: 0.95),
+            partial(StepLR, step_size=30),
+            partial(MultiStepLR, milestones=[30, 80]),
+            ConstantLR,
+            LinearLR,
+            partial(ExponentialLR, gamma=0.9),
+            PolynomialLR,
+            partial(CosineAnnealingLR, T_max=10),
+            lambda opt, **kwargs: SequentialLR(
+                opt,
+                schedulers=[ConstantLR(opt), ConstantLR(opt)],
+                milestones=[2],
+                **kwargs,
+            ),
+            partial(CyclicLR, base_lr=0.01, max_lr=0.1),
+            partial(OneCycleLR, max_lr=0.01, total_steps=10, anneal_strategy="linear"),
+            partial(CosineAnnealingWarmRestarts, T_0=20),
+        ],
+    )
+    def test_lr_after_load_state_dict(self, LRClass):
+        model = torch.nn.Linear(3, 3)
+        optim = torch.optim.AdamW(model.parameters())
+        sch = LRClass(optim)
+        optim.step()
+        sch.step()
+
+        optim2 = torch.optim.AdamW(model.parameters())
+        optim2.load_state_dict(optim.state_dict())
+        sch2 = LRClass(optim2, last_epoch=0)
+        self.assertEqual(optim.param_groups[0]["lr"], optim2.param_groups[0]["lr"])
+
 
 instantiate_parametrized_tests(TestLRScheduler)
 
