@@ -129,11 +129,7 @@ class LogRegistry:
 
     # flattens all the qnames together (TODO: consider memoizing?)
     def get_log_qnames(self) -> set[str]:
-        return {
-            qname
-            for qnames in self.log_alias_to_log_qnames.values()
-            for qname in qnames
-        }
+        return set(itertools.chain.from_iterable(self.log_alias_to_log_qnames.values()))
 
     def get_artifact_log_qnames(self):
         return set(self.artifact_log_qnames)
@@ -686,11 +682,12 @@ TORCH_LOGS Info
 
 
 def _invalid_settings_err_msg(settings, verbose=False):
-    valid_settings = ", ".join(
+    valid_settings = (
         ["all"]
         + list(log_registry.log_alias_to_log_qnames.keys())
         + list(log_registry.artifact_names)
     )
+    valid_settings = ", ".join(sorted(valid_settings))
     msg = f"""
 Invalid log settings: {settings}, must be a comma separated list of fully
 qualified module names, registered log names or registered artifact names.

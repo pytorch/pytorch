@@ -262,9 +262,9 @@ class BuiltinVariable(VariableTracker):
 
     @staticmethod
     @functools.lru_cache(None)
-    def _binops() -> (
-        dict[Callable[..., object], tuple[list[str], Callable[..., object]]]
-    ):
+    def _binops() -> dict[
+        Callable[..., object], tuple[list[str], Callable[..., object]]
+    ]:
         # function -> ([forward name, reverse name, in-place name], in-place op)
         fns: dict[Callable[..., object], tuple[list[str], Callable[..., object]]] = {
             operator.add: (["__add__", "__radd__", "__iadd__"], operator.iadd),
@@ -1014,11 +1014,14 @@ class BuiltinVariable(VariableTracker):
                 # Standard indexing will force specialization due to
                 # __index__.  Rewrite as a regular torch op which will
                 # trace fine
-                fn, args = torch.select, [
-                    args[0],
-                    variables.ConstantVariable.create(0),
-                    args[1],
-                ]
+                fn, args = (
+                    torch.select,
+                    [
+                        args[0],
+                        variables.ConstantVariable.create(0),
+                        args[1],
+                    ],
+                )
 
             # Interaction between ndarray and tensors:
             #   We prefer the tensor op whenever there are tensors involved
@@ -1908,6 +1911,7 @@ class BuiltinVariable(VariableTracker):
                 variables.PlacementVariable,
                 variables.NamedTupleVariable,
                 variables.UserDefinedObjectVariable,
+                variables.ExceptionVariable,
             ),
         ):
             return obj.call_method(tx, "__setattr__", [name_var, val], {})

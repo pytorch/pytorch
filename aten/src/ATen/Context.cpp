@@ -254,7 +254,7 @@ void Context::setBenchmarkLimitCuDNN(int b) {
 
 bool Context::allowTF32CuBLAS() const {
 #ifdef USE_ROCM
-    const static auto allow_tf32 = c10::utils::check_env(hipblaslt_allow_tf32);
+    const auto allow_tf32 = c10::utils::check_env(hipblaslt_allow_tf32);
     if (allow_tf32 != true) {
       return false;
     }
@@ -264,7 +264,7 @@ bool Context::allowTF32CuBLAS() const {
 
 void Context::setAllowTF32CuBLAS(bool b) {
 #ifdef USE_ROCM
-  const static auto allow_tf32 = c10::utils::check_env(hipblaslt_allow_tf32);
+  const auto allow_tf32 = c10::utils::check_env(hipblaslt_allow_tf32);
   if (allow_tf32 != true) {
     C10_LOG_FIRST_N(INFO, 10) << "torch.backends.cuda.matmul.allow_tf32 is not supported on ROCm by default. "
                               << "Please set environment variable HIPBLASLT_ALLOW_TF32=1 to enable it.";
@@ -588,7 +588,7 @@ Allocator* getCPUAllocator() {
 //    means the allow_tf32 flags are overridden and tf32 is force disabled
 // override_allow_tf32_flag = false
 //    means the original allow_tf32 flags are followed
-thread_local bool override_allow_tf32_flag = false;
+thread_local static bool override_allow_tf32_flag = false;
 
 NoTF32Guard::NoTF32Guard() {
   if (!override_allow_tf32_flag) {
@@ -611,7 +611,7 @@ bool NoTF32Guard::should_disable_tf32() {
 // This information can be used, for example, to select implementations
 // with different numerical or performance characteristics.
 // See https://pytorch.org/docs/stable/notes/numerical_accuracy.html for details.
-thread_local bool rocm_is_backward_pass;
+thread_local static bool rocm_is_backward_pass;
 
 ROCmBackwardPassGuard::ROCmBackwardPassGuard() {
   rocm_is_backward_pass = true;

@@ -481,9 +481,9 @@ class GenLazyNativeFuncDefinition:
         optional_devices = [
             a.name for a in scalar_args if a.lazy_type == optional_device
         ]
-        assert (
-            len(value_types_names) > 0 or len(optional_devices) > 0
-        ), "Expected at least one Value or Device type"
+        assert len(value_types_names) > 0 or len(optional_devices) > 0, (
+            "Expected at least one Value or Device type"
+        )
         get_device_str = (
             f"{self.get_device_fn}({', '.join(value_types_names + optional_devices)})"
         )
@@ -580,9 +580,9 @@ std::vector<torch::lazy::Shape> shapes{torch::lazy::Shape(out_meta.scalar_type()
         # xla uses an instance method for tensor creation, for the time being
         if self.create_from_first_tensor:
             # TODO(whc) remove this if XLA switches to using static method for creation
-            assert (
-                first_tensor_name is not None
-            ), "Requires first tensor to create lazy tensor"
+            assert first_tensor_name is not None, (
+                "Requires first tensor to create lazy tensor"
+            )
             return f"{first_tensor_name}.{self.create_tensor}"
         return f"{self.backend_namespace}::{self.create_tensor}"
 
@@ -595,9 +595,9 @@ std::vector<torch::lazy::Shape> shapes{torch::lazy::Shape(out_meta.scalar_type()
                 {self.create_lazy_tensor(first_tensor_name)}(std::move(node), *common_device));"""
 
         if returns_length > 1:
-            assert (
-                len(value_types_names) > 0
-            ), "Code below assumes there is at least one tensor arg"
+            assert len(value_types_names) > 0, (
+                "Code below assumes there is at least one tensor arg"
+            )
             bridge_str = f"""std::vector<{self.lazy_tensor_ptr}> lazy_tensors;
         for (int i = 0; i < {returns_length}; i++) {{
             lazy_tensors.push_back({self.create_lazy_tensor(first_tensor_name)}({getValueT()}(node, i), *common_device));
