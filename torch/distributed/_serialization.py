@@ -1,14 +1,14 @@
 import pickle
 from dataclasses import dataclass
 from io import BufferedIOBase
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 import torch
 import torch._weights_only_unpickler as _weights_only_unpickler
 from torch.serialization import _load, _save, DEFAULT_PROTOCOL, MAP_LOCATION
 
 
-__all__: List[str] = []
+__all__: list[str] = []
 
 
 @dataclass
@@ -23,7 +23,7 @@ _weights_only_unpickler._add_safe_globals([_Entry])
 
 class _PseudoZipFile:
     def __init__(self) -> None:
-        self.records: Dict[str, Tuple[object, int]] = {}
+        self.records: dict[str, tuple[object, int]] = {}
 
     def write_record(self, key: str, data: object, length: int) -> None:
         self.records[key] = (data, length)

@@ -10,7 +10,7 @@ import operator
 import re
 from collections.abc import Iterable
 from contextlib import contextmanager
-from inspect import Parameter
+from inspect import ismethod, Parameter
 from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import torch
@@ -1257,7 +1257,7 @@ def register_module_as_pytree_input_node(cls: type[torch.nn.Module]) -> None:
 
     class PrototypeModule(weakref.ref):
         def __init__(self, m, *args, **kwargs):
-            super().__init__(m, *args, **kwargs)
+            super().__init__(m, *args, **kwargs)  # type: ignore[call-arg]
             assert isinstance(m, torch.nn.Module)
             assert not hasattr(self, "_proto_cls")
             self._proto_cls = cls
@@ -1350,3 +1350,52 @@ def register_module_as_pytree_input_node(cls: type[torch.nn.Module]) -> None:
 def deregister_module_as_pytree_input_node(cls: type[torch.nn.Module]) -> None:
     _deregister_pytree_node(cls)
     _deregister_pytree_flatten_spec(cls)
+
+
+def _sync_state(src, dst):
+    assert isinstance(
+        src,
+        torch.nn.Module,
+    ), f"Expected {src} to be a nn.Module"
+    assert isinstance(
+        dst,
+        torch.nn.Module,
+    ), f"Expected {dst} to be a nn.Module"
+    # Share state (params, buffers) between modules.
+    # This ensures that state mutations are visible across them.
+    # Since tensor constants are not mutable, copying (without sharing) is OK.
+    # Also, primitive constants are specialized, so copying (without sharing) is OK.
+    dst._parameters = src._parameters
+    dst._buffers = src._buffers
+
+
+def sync_state(*wrapped_method_modules):
+    """
+    Sync state between exported modules corresponding to wrapped methods.
+    This might be necessary after serializing/deserializing due to copying.
+    """
+    if wrapped_method_modules:
+        m, *other_ms = wrapped_method_modules
+        for other_m in other_ms:
+            _sync_state(m, other_m)
+
+
+class _WrappedMethod(torch.nn.Module):
+    def __init__(self, method):
+        super().__init__()
+        # share state of method's self module
+        _sync_state(method.__self__, self)
+        # redirect forward to method
+        self.forward = method
+
+
+def wrap_method(method):
+    """
+    Wrap a method as a module so that it can be exported.
+    The wrapped module's forward points to the method, and
+    the method's original module state is shared.
+    """
+    assert ismethod(
+        method,
+    ), f"Expected {method} to be a method"
+    return _WrappedMethod(method)

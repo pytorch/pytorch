@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 from __future__ import annotations
 
 import os
@@ -214,9 +216,6 @@ class UploadUtilizationData:
         db_metadata, db_records = UtilizationDbConverter(
             self.info, metadata, valid_records, segments
         ).convert()
-        print(
-            f"[db model] Peek db metadatga \n: {json.dumps(asdict(db_metadata), indent=4)}"
-        )
 
         if len(db_records) > 0:
             print(
@@ -338,8 +337,6 @@ class UploadUtilizationData:
         if len(lines) < 2:
             print("Expected at least two records from log file")
             return None, [], []
-        print(f"[Raw Log] Peek raw metadata json: {lines[0]} \n")
-        print(f"[Raw Log] Peek raw record json: {lines[1]} \n")
 
         try:
             metadata = UtilizationMetadata.from_json(lines[0])

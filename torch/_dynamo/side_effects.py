@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+
 import collections
 import contextlib
 import inspect
@@ -10,7 +11,7 @@ from typing import Any, Optional, TYPE_CHECKING
 
 import torch.nn
 
-from . import utils, variables
+from . import graph_break_hints, utils, variables
 from .bytecode_transformation import (
     bytecode_from_template,
     create_call_function,
@@ -18,7 +19,7 @@ from .bytecode_transformation import (
     create_instruction,
 )
 from .codegen import PyCodegen
-from .exc import SideEffectsError, unimplemented
+from .exc import SideEffectsError, unimplemented_v2
 from .source import GlobalSource, LocalCellSource, LocalSource, Source
 from .utils import is_frozen_dataclass, nn_module_new, object_new
 from .variables.base import (
@@ -48,10 +49,29 @@ def _manual_dict_setitem(dict_from, dict_to, mro_index):
         dict_class.__setitem__(dict_to, k, v)
 
 
+def _manual_list_update(list_from, list_to):
+    list.clear(list_to)
+    list.extend(list_to, list_from)
+
+
 class SideEffects:
     """
-    Track side effects (list mutation, setattr, etc) that need to be
+    Maintain records of mutations and provide methods to apply them during code generation.
+
+    Handles tracking and applying side effects during PyTorch Dynamo compilation,
+    maintaining Python semantics by managing mutations, attribute modifications,
+    and other side effects that occur during program execution.
+
+    Key responsibilities:
+    - Tracks mutations to Python objects, lists, and dictionaries that need to be
     applied after an FX graph is run.
+    - Manages attribute modifications and deletions
+    - Handles tensor hooks and backward pass state
+    - Tracks cell variable mutations and global variable changes
+    - Ensures correct ordering and application of side effects after graph execution
+
+    This ensures that optimized code behaves identically to the original Python code with
+    respect to object mutations and other side effects.
     """
 
     id_to_variable: dict[int, VariableTracker]
@@ -74,6 +94,9 @@ class SideEffects:
         self.keepalive = keepalive or []
         self.save_for_backward = save_for_backward or []
         self.tensor_hooks = tensor_hooks or {}
+        # Used by MappingProxyVariable to graph break in case of any mutated
+        # dict
+        self._has_existing_dict_mutation = False
         # Track Compiled Autograd final callbacks that must be called at the end of Compiled Autograd backward graph.
         # Only applicable if this graph is created from Dynamo tracing in Compiled Autograd.
         self.ca_final_callbacks_var = None
@@ -163,8 +186,12 @@ class SideEffects:
                 "unintended variable modifications."
             )
         if not is_side_effect_safe(item.mutation_type):
-            unimplemented(
-                "HigherOrderOperator: Mutating a variable not in the current scope (SideEffects)"
+            # TODO plumb HOP information here
+            unimplemented_v2(
+                gb_type="HigherOrderOperator: Mutating a variable not in the current scope (SideEffects)",
+                context="",
+                explanation="This is not supported.",
+                hints=[],
             )
 
     def store_attr(self, item: VariableTracker, name: str, value: VariableTracker):
@@ -179,12 +206,22 @@ class SideEffects:
             assert self.is_attribute_mutation(item)
         result = self.store_attr_mutations[item][name]
         if not deleted_ok and isinstance(result, variables.DeletedVariable):
-            unimplemented("read deleted attribute")
+            unimplemented_v2(
+                gb_type="Attempted to read a deleted variable",
+                context=f"item: {item}, name: {name}",
+                explanation="",
+                hints=[*graph_break_hints.USER_ERROR],
+            )
         return result
 
     def store_cell(self, cellvar, value):
         if cellvar.is_immutable():
-            unimplemented("Dynamo currently doesn't support writing to such cell")
+            unimplemented_v2(
+                gb_type="Write to immutable cell",
+                context=f"cellvar: {cellvar}, value: {value}",
+                explanation="Dynamo doesn't support writing to immutable/sourceless cell variables.",
+                hints=[*graph_break_hints.DIFFICULT],
+            )
         assert isinstance(cellvar, variables.CellVariable)
         assert isinstance(value, variables.VariableTracker)
         self.store_attr(cellvar, "cell_contents", value)
@@ -195,7 +232,12 @@ class SideEffects:
             return self.load_attr(cellvar, "cell_contents", check=False)
         if cellvar.pre_existing_contents:
             return cellvar.pre_existing_contents
-        unimplemented("cannot read uninitialized cell")
+        unimplemented_v2(
+            gb_type="Read uninitialized cell",
+            context=str(cellvar),
+            explanation="Attempted to read a cell variable that has not been populated yet.",
+            hints=[*graph_break_hints.USER_ERROR],
+        )
 
     def load_global(self, gvar: VariableTracker, name: str):
         assert isinstance(gvar, variables.VariableTracker)
@@ -213,6 +255,8 @@ class SideEffects:
             dict.__getattribute__,
             int.__getattribute__,
             str.__getattribute__,
+            list.__getattribute__,
+            BaseException.__getattribute__,
         )
 
     def is_attribute_mutation(self, item):
@@ -233,8 +277,16 @@ class SideEffects:
             return False
         if isinstance(item.mutation_type, (AttributeMutationNew, ValueMutationNew)):
             return True
+
+        if isinstance(item, variables.UserDefinedObjectVariable):
+            # Checks if the underlying dict or tuple vt has been modified
+            return item in self.store_attr_mutations or item.is_underlying_vt_modified(
+                self
+            )
+
         if self.is_attribute_mutation(item):
             return item in self.store_attr_mutations
+
         return item.mutation_type.is_modified
 
     def _track_obj(
@@ -268,7 +320,9 @@ class SideEffects:
         variable: VariableTracker,
     ):
         return self._track_obj(
-            item, variable, mutation_type_cls=AttributeMutationExisting
+            item,
+            variable,
+            mutation_type_cls=AttributeMutationExisting,
         )
 
     def track_object_new(
@@ -299,9 +353,9 @@ class SideEffects:
         from .variables.torch_function import TorchFunctionModeVariable
         from .variables.user_defined import is_forbidden_context_manager
 
-        variable_cls: type[
+        variable_cls: type[variables.UserDefinedObjectVariable] = (
             variables.UserDefinedObjectVariable
-        ] = variables.UserDefinedObjectVariable
+        )
         if issubclass(
             user_cls, TorchFunctionMode
         ) and TorchFunctionModeVariable.is_supported_torch_function_mode(user_cls):
@@ -318,10 +372,14 @@ class SideEffects:
             variable_cls = variables.UserDefinedDictVariable
         elif issubclass(user_cls, tuple):
             variable_cls = variables.UserDefinedTupleVariable
+        elif issubclass(user_cls, list):
+            variable_cls = variables.UserDefinedListVariable
         elif issubclass(user_cls, MutableMapping):
             variable_cls = variables.MutableMappingVariable
         elif is_frozen_dataclass(user_cls):
             variable_cls = FrozenDataClassVariable
+        elif issubclass(user_cls, BaseException):
+            variable_cls = variables.UserDefinedExceptionObjectVariable
         assert issubclass(variable_cls, variables.UserDefinedObjectVariable)
         return variable_cls
 
@@ -453,7 +511,8 @@ class SideEffects:
             # Also recurse through the new value to detect alive AttributeMutationNew.
             if var in self.store_attr_mutations:
                 VariableTracker.visit(
-                    visit, self.store_attr_mutations[var]  # noqa: F821
+                    visit,  # noqa: F821
+                    self.store_attr_mutations[var],
                 )
 
         def is_live(var: VariableTracker):
@@ -503,6 +562,15 @@ class SideEffects:
         self.check_allowed_side_effect(var)
         if isinstance(var.mutation_type, ValueMutationExisting):
             var.mutation_type.is_modified = True
+        if (
+            var.source
+            and isinstance(var, variables.ConstDictVariable)
+            and not isinstance(var, variables.SetVariable)
+        ):
+            self._has_existing_dict_mutation = True
+
+    def has_existing_dict_mutation(self):
+        return self._has_existing_dict_mutation
 
     def _get_modified_vars(self):
         return [var for var in self.id_to_variable.values() if self.is_modified(var)]
@@ -529,7 +597,12 @@ class SideEffects:
                     var.source = LocalCellSource(var.local_name)
             elif isinstance(var.mutation_type, AttributeMutationNew):
                 if isinstance(var, variables.AutogradFunctionContextVariable):
-                    unimplemented("AutogradFunctionContextVariable escaped")
+                    unimplemented_v2(
+                        gb_type="AutogradFunctionContextVariable escaped Dynamo-traced region",
+                        context="",
+                        explanation="We cannot reconstruct a torch.autograd.Function's context object.",
+                        hints=[],
+                    )
 
                 # Reconstruct the bytecode for
                 # base_cls.__new__(user_cls, *args)
@@ -678,7 +751,14 @@ class SideEffects:
                     isinstance(var.maxlen, variables.ConstantVariable)
                     and var.maxlen.value is None
                 ):
-                    unimplemented("side effect on existing deque with limited maxlen")
+                    unimplemented_v2(
+                        gb_type="Side effect on existing deque with limited maxlen",
+                        context="",
+                        explanation="This is not supported.",
+                        hints=[
+                            "Don't use a deque with `maxlen` specified.",
+                        ],
+                    )
 
                 # old.extend(new), this runs last
                 cg(var.source)
@@ -771,7 +851,9 @@ class SideEffects:
                     suffixes.append([cg.create_store_deref(var.local_name)])
 
             elif self.is_attribute_mutation(var):
-                if isinstance(var, variables.UserDefinedDictVariable):
+                if isinstance(
+                    var, variables.UserDefinedDictVariable
+                ) and self.is_modified(var._dict_vt):
                     # Do dict related update manually here. The store_attr
                     # mutations will be applied later.
                     varname_map = {}
@@ -819,6 +901,43 @@ class SideEffects:
                     suffixes.append(
                         [
                             *dict_update_insts,
+                            create_instruction("POP_TOP"),
+                        ]
+                    )
+                elif isinstance(
+                    var, variables.UserDefinedListVariable
+                ) and self.is_modified(var._list_vt):
+                    # Update the list to the updated items. Be careful in
+                    # calling the list methods and not the overridden methods.
+                    varname_map = {}
+                    for name in _manual_list_update.__code__.co_varnames:
+                        varname_map[name] = cg.tx.output.new_var()
+
+                    cg(var.source)  # type: ignore[attr-defined]
+                    cg.extend_output(
+                        [
+                            create_instruction(
+                                "STORE_FAST", argval=varname_map["list_to"]
+                            )
+                        ]
+                    )
+
+                    cg(var._list_vt, allow_cache=False)  # Don't codegen via source
+                    cg.extend_output(
+                        [
+                            create_instruction(
+                                "STORE_FAST", argval=varname_map["list_from"]
+                            )
+                        ]
+                    )
+
+                    list_update_insts = bytecode_from_template(
+                        _manual_list_update, varname_map=varname_map
+                    )
+
+                    suffixes.append(
+                        [
+                            *list_update_insts,
                             create_instruction("POP_TOP"),
                         ]
                     )

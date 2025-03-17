@@ -71,7 +71,7 @@ from sys import maxsize
 from typing import Any, Callable, Union
 
 import torch
-from torch._utils import IMPORT_MAPPING, NAME_MAPPING
+from torch._utils import _sparse_tensors_to_validate, IMPORT_MAPPING, NAME_MAPPING
 
 
 # modules in this list are never allowed, even if the user attempts to allowlist
@@ -141,7 +141,7 @@ def _get_user_allowed_globals():
             f, name = f
             rc[name] = f
         else:
-            module, name = f.__module__, f.__name__
+            module, name = f.__module__, f.__qualname__
             rc[f"{module}.{name}"] = f
     return rc
 
@@ -190,6 +190,11 @@ def _get_allowed_globals():
         rc[str(t)] = t
     for t in torch.storage._new_dtypes():
         rc[str(t)] = t
+    for t in [getattr(torch, f"uint{x}") for x in range(1, 8)]:
+        rc[str(t)] = t
+    for t in [getattr(torch, f"int{x}") for x in range(1, 8)]:
+        rc[str(t)] = t
+
     # Tensor classes
     for tt in torch._tensor_classes:
         rc[f"{tt.__module__}.{tt.__name__}"] = tt
@@ -356,10 +361,21 @@ class Unpickler:
                         "``torch.distributed.tensor`` must be imported to load DTensors"
                     )
                 else:
+                    builtins_name = "builtins"
+                    if (
+                        builtins_name in full_path
+                        and builtins_name == full_path[: len(builtins_name)]
+                    ):
+                        full_path = full_path[len(builtins_name) :]
+                        full_path = (
+                            full_path[1:]
+                            if len(full_path) > 0 and full_path[0] == "."
+                            else builtins_name + full_path
+                        )
                     raise UnpicklingError(
                         f"Unsupported global: GLOBAL {full_path} was not an allowed global by default. "
-                        f"Please use `torch.serialization.add_safe_globals([{name}])` or the "
-                        f"`torch.serialization.safe_globals([{name}])` context manager to allowlist this global "
+                        f"Please use `torch.serialization.add_safe_globals([{full_path}])` or the "
+                        f"`torch.serialization.safe_globals([{full_path}])` context manager to allowlist this global "
                         "if you trust this class/function."
                     )
             elif key[0] == NEWOBJ[0]:
@@ -371,7 +387,10 @@ class Unpickler:
                     cls in _get_user_allowed_globals().values()
                     or cls in _get_allowed_globals().values()
                 ):
-                    self.append(cls.__new__(cls, *args))
+                    result = cls.__new__(cls, *args)
+                    if cls in torch._tensor_classes and "sparse" in cls.__module__:
+                        _sparse_tensors_to_validate.append(result)
+                    self.append(result)
                 else:
                     raise UnpicklingError(
                         "Can only create new object for nn.Parameter or classes allowlisted "
@@ -387,7 +406,10 @@ class Unpickler:
                     raise UnpicklingError(
                         f"Trying to call reduce for unrecognized function {func}"
                     )
-                self.stack[-1] = func(*args)
+                result = func(*args)
+                if func in torch._tensor_classes and "sparse" in func.__module__:
+                    _sparse_tensors_to_validate.append(result)
+                self.stack[-1] = result
             elif key[0] == BUILD[0]:
                 state = self.stack.pop()
                 inst = self.stack[-1]
