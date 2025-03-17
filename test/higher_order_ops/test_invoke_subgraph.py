@@ -488,18 +488,19 @@ class GraphModule(torch.nn.Module):
             return torch.mul(x, y)
 
         def fn(x, y):
-            return gn(torch.cos(x), y)
+            z = torch.cos(x)
+            with torch.inference_mode():
+                return gn(torch.cos(z), y)
 
         opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
-        with torch.inference_mode():
-            x = torch.randn(8, requires_grad=False)
-            y = torch.randn(8, requires_grad=False)
+        x = torch.randn(8, requires_grad=False)
+        y = torch.randn(8, requires_grad=False)
 
-            with self.assertRaisesRegex(
-                torch._dynamo.exc.Unsupported,
-                "Encountered input mutation during higher order op tracing",
-            ):
-                opt_fn(x, y)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Encountered input mutation during higher order op tracing",
+        ):
+            opt_fn(x, y)
 
     def test_simple_module(self):
         mod = torch.nn.Linear(8, 8)
