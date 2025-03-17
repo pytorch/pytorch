@@ -1,10 +1,22 @@
 # mypy: allow-untyped-defs
+
+"""
+Configuration module for TorchDynamo compiler and optimization settings.
+
+This module contains various configuration flags and settings that control TorchDynamo's
+behavior, including:
+- Runtime behavior flags (e.g., guard settings, specialization options)
+- Debugging and development options
+- Performance tuning parameters
+- Feature toggles for experimental features
+"""
+
 import getpass
 import os
 import sys
 import tempfile
 from os.path import abspath, dirname
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, Literal, Optional, TYPE_CHECKING, Union
 
 from torch._environment import is_fbcode
 from torch.utils._config_module import Config, get_tristate_env, install_config_module
@@ -43,7 +55,7 @@ recompile_limit = 8
 # [@compile_ignored: runtime_behaviour] safeguarding to prevent horrible recomps
 accumulated_recompile_limit = 256
 
-# [@compile_ignored: runtime_behaviour] skip tracing recursively if cache limit is hit
+# [@compile_ignored: runtime_behaviour] skip tracing recursively if cache limit is hit (deprecated: does not do anything)
 skip_code_recursive_on_recompile_limit_hit = True
 
 # raise a hard error if cache limit is hit.  If you are on a model where you
@@ -57,6 +69,8 @@ cache_size_limit: int = Config(alias="torch._dynamo.config.recompile_limit")
 accumulated_cache_size_limit: int = Config(
     alias="torch._dynamo.config.accumulated_recompile_limit"
 )
+
+# (deprecated: does not do anything)
 skip_code_recursive_on_cache_limit_hit: bool = Config(
     alias="torch._dynamo.config.skip_code_recursive_on_recompile_limit_hit"
 )
@@ -96,7 +110,7 @@ assume_static_by_default = True
 automatic_dynamic_shapes = True
 
 # Valid options: "dynamic", "unbacked"
-automatic_dynamic_shapes_mark_as = "dynamic"
+automatic_dynamic_shapes_mark_as: Literal["dynamic", "unbacked"] = "dynamic"
 
 # This flag changes how the shapes of parameters are treated.
 # If this flag is set to True, then the shapes of torch.nn.Parameter as well as of torch.Tensor are attempted to be dynamic
@@ -281,7 +295,7 @@ force_unspec_int_unbacked_size_like_on_torchrec_kjt = False
 allow_unspec_int_on_nn_module = False
 
 # Specify how to optimize a compiled DDP module. The flag accepts a boolean
-# value or a string. There are 4 modes.
+# value or a string. There are 3 modes.
 # 1. "ddp_optimizer" (or True): with "ddp_ptimizer", Dynamo will automatically
 # split model graph into pieces to match DDP bucket sizes to allow DDP
 # comm/compute overlap.
@@ -289,17 +303,22 @@ allow_unspec_int_on_nn_module = False
 # of compiled_autograd. With "python_reducer", DDP will disable the C++ reducer
 # and use the Python reducer to allow compiled_autograd to trace the
 # communication and allow comm/compute overlap without graph-breaks.
-# 3. "python_reducer_without_compiled_forward" (experimental): this mode is
-# similar to "python_reducer". One should only use this optimization mode
-# when compiled_autograd is used but the DDP module is not compiled.
-# 4. "no_optimization" (or False): Dynamo won't split the model graph, nor
+# 3. "no_optimization" (or False): Dynamo won't split the model graph, nor
 # will Python reducer be used. With this mode, there will be no graph-breaks
 # and the original DDP C++ reducer will be used. There will no comm/compute
 # overlap. This mode CANNOT be used with compiled_autograd.
 # Note that to avoid breaking the existing usage, mode 1 and mode 4 can be
 # specified with a boolean value. True is using ddp_optimizer and False is
 # no optimization.
-optimize_ddp: Union[bool, str] = True
+optimize_ddp: Union[
+    bool,
+    Literal[
+        "ddp_optimizer",
+        "python_reducer",
+        "python_reducer_without_compiled_forward",
+        "no_optimization",
+    ],
+] = True
 
 # By default, Dynamo emits runtime asserts (e.g. torch._check, torch._check_is_size) in the graph.
 # In some cases those asserts could be performance costly
@@ -309,30 +328,6 @@ optimize_ddp: Union[bool, str] = True
 do_not_emit_runtime_asserts: bool = (
     os.environ.get("TORCH_DYNAMO_DO_NOT_EMIT_RUNTIME_ASSERTS", "0") == "1"
 )
-
-_ddp_optimization_mode = [
-    "ddp_optimizer",
-    "python_reducer",  # experimental mode
-    "python_reducer_without_compiled_forward",  # experimental mode
-    "no_optimization",
-]
-
-
-def _get_optimize_ddp_mode():
-    m = sys.modules[__name__]
-    if isinstance(m.optimize_ddp, bool):
-        if m.optimize_ddp:
-            mode = "ddp_optimizer"
-        else:
-            mode = "no_optimization"
-    elif isinstance(m.optimize_ddp, str):
-        mode = m.optimize_ddp
-    else:
-        raise ValueError(f"Invalid type, {type(optimize_ddp)=}")
-
-    assert mode in m._ddp_optimization_mode, f"Invalid mode {mode=}"
-    return mode
-
 
 # Skip tracing the torchrec files added to trace_rules.FBCODE_SKIP_DIRS
 skip_torchrec = True
@@ -607,8 +602,7 @@ _custom_ops_profile: Optional[Any] = None
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
 
-    def _make_closure_patcher(**changes):
-        ...
+    def _make_closure_patcher(**changes): ...
 
 
 install_config_module(sys.modules[__name__])

@@ -1,12 +1,13 @@
 # mypy: allow-untyped-defs
-""" Triton Implementation of the flex_attention Kernel"""
+"""Triton Implementation of the flex_attention Kernel"""
 
+import copy
 import logging
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import auto, Enum
-from typing import Any, Dict, Optional, Union
+from typing import Any, Optional, Union
 
 import sympy
 
@@ -14,6 +15,8 @@ import torch
 from torch._inductor.virtualized import V
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
+from torch.utils._sympy.numbers import int_oo
+from torch.utils._sympy.value_ranges import ValueRanges
 
 from .. import config
 from ..ir import (
@@ -43,7 +46,12 @@ from ..lowering import (
     register_lowering,
     to_dtype,
 )
-from ..select_algorithm import autotune_select_algorithm, realize_inputs, TritonTemplate
+from ..select_algorithm import (
+    autotune_select_algorithm,
+    realize_inputs,
+    SymbolicGridFn,
+    TritonTemplate,
+)
 
 
 log = logging.getLogger(__name__)
@@ -57,9 +65,9 @@ def construct_strides(
 ) -> Sequence[int]:
     """From a list of sizes and a fill order, construct the strides of the permuted tensor."""
     # Initialize strides
-    assert len(sizes) == len(
-        fill_order
-    ), "Length of sizes must match the length of the fill order"
+    assert len(sizes) == len(fill_order), (
+        "Length of sizes must match the length of the fill order"
+    )
     strides = [0] * len(sizes)
 
     # Start with stride 1 for the innermost dimension
@@ -88,22 +96,32 @@ def infer_dense_strides(size: Sequence[int], orig_strides: Sequence[int]):
     return construct_strides(size, fill_order)
 
 
-def flex_attention_grid(batch_size, q_heads, num_queries, d_model, meta):
+@SymbolicGridFn
+def flex_attention_grid(batch_size, q_heads, num_queries, d_model, meta, *, cdiv):
     """How is this kernel parallelized?
     We create a grid of (batch_size * num_heads, ceil_div(n_queries, query_block_size), 1)
     Each block is responsible for iterating over blocks of keys and values calculating
     the final attention output.
     """
-    import triton
-
-    return (triton.cdiv(num_queries, meta["BLOCK_M"]), batch_size * q_heads, 1)
+    return (cdiv(num_queries, meta["BLOCK_M"]), batch_size * q_heads, 1)
 
 
 def create_placeholder(
-    name: str, dtype: torch.dtype, device: torch.device
+    name: str,
+    dtype: torch.dtype,
+    device: torch.device,
+    size: Optional[list[int]] = None,
 ) -> TensorBox:
     """Creates a placeholder input buffers for producing subgraph_output."""
-    input_buffer = InputBuffer(name=name, layout=FixedLayout(device, dtype, [], []))
+    input_buffer = InputBuffer(
+        name=name,
+        layout=FixedLayout(
+            device,
+            dtype,
+            size if size else [],
+            FlexibleLayout.contiguous_strides(size) if size else [],
+        ),
+    )
     return TensorBox.create(input_buffer)
 
 
@@ -120,7 +138,11 @@ def maybe_realize(args: list[Optional[IRNode]]):
 
 
 def get_float32_precision():
-    if torch.get_float32_matmul_precision() == "highest" or torch.version.hip:
+    if (
+        torch.get_float32_matmul_precision() == "highest"
+        or torch.version.hip
+        or torch.mtia.is_available()
+    ):
         return "'ieee'"
     else:
         return "'tf32'"
@@ -173,7 +195,9 @@ def zeros_and_scatter_lowering(shape: list[int], indices, values):
 SubgraphResults = Union[list[Optional[ComputedBuffer]], Optional[ComputedBuffer]]
 
 
-def build_subgraph_buffer(args: list[TensorBox], subgraph: Subgraph) -> SubgraphResults:
+def build_subgraph_module_buffer(
+    args: list[TensorBox], graph_module: torch.fx.GraphModule
+) -> SubgraphResults:
     """This function's goal is to take in the required args and produce the subgraph buffer
     The subgraph buffer is a ComputedBuffer that will be inlined into the triton template
 
@@ -184,7 +208,7 @@ def build_subgraph_buffer(args: list[TensorBox], subgraph: Subgraph) -> Subgraph
     from ..subgraph_lowering import PointwiseSubgraphLowering
 
     pw_subgraph = PointwiseSubgraphLowering(
-        subgraph.graph_module,
+        graph_module,
         root_graph_lowering=V.graph,
         allowed_mutations=OrderedSet([torch.ops.flex_lib.zeros_and_scatter.default]),
         additional_lowerings={
@@ -226,6 +250,10 @@ def build_subgraph_buffer(args: list[TensorBox], subgraph: Subgraph) -> Subgraph
         return subgraph_buffer
 
     return tree_map(convert_output_node_to_buffer, pw_subgraph.graph_outputs)
+
+
+def build_subgraph_buffer(args: list[TensorBox], subgraph: Subgraph) -> SubgraphResults:
+    return build_subgraph_module_buffer(args, subgraph.graph_module)
 
 
 # Inner Triton functions shared by flex_attention & split-k decoding kernels.
@@ -586,7 +614,8 @@ def forward_block_mn(
     {{gen_defines() | indent_except_first(1)}}
 
     # -- load k --
-    k = load_checked_block(K_block_ptr, IS_DIVISIBLE, SAFE_HEAD_DIM)
+    # NB reversed order to since K is transposed
+    k = load_checked_block(K_block_ptr, SAFE_HEAD_DIM, IS_DIVISIBLE)
     # -- compute qk ---
     qk = tl.dot(q, k, input_precision=FLOAT32_PRECISION) # TODO: use cuda matmul when q_len <= 2.
     if not PRESCALE_QK:
@@ -673,20 +702,43 @@ flex_attention_template = TritonTemplate(
 )
 
 
-def _use_flex_decoding(query, kernel_options):
+def _use_flex_decoding(query, kv_indices, kernel_options, enable_gqa):
     """Decide which kernel to use, return true if use flex decoding kernel.
     Note:
        Since the number of splits is calculated based of the the number of batch and head dims
        we need to ensure that the batch and head dims are statically known. Otherwise we just
        use the main flex_attention kernel.
     """
-    force_flex = kernel_options.get("FORCE_USE_FLEX_DECODING", False)
+    force_flex = kernel_options.get("FORCE_USE_FLEX_ATTENTION", False)
     short_query_length = V.graph.sizevars.evaluate_expr(
         sympy.Lt(query.get_size()[-2], 128)
     )
+    non_zero_length = V.graph.sizevars.evaluate_expr(sympy.Gt(query.get_size()[-2], 0))
     static_batch = isinstance(query.get_size()[0], (int, sympy.Integer))
     static_num_heads = isinstance(query.get_size()[1], (int, sympy.Integer))
-    return not force_flex and short_query_length and static_batch and static_num_heads
+    if enable_gqa:
+        # in the current flex decoding triton kernel, grouped query heads for the
+        # same kv head are handled by the same block. So it's hard to support different
+        # kv num blocks for grouped query heads. We just fall back to main flex_attention
+        # kernel where each query head is handled by a separate block.
+        valid_block_mask_num_heads = V.graph.sizevars.evaluate_expr(
+            sympy.Eq(kv_indices.get_size()[1], 1)
+        )
+    else:
+        valid_block_mask_num_heads = V.graph.sizevars.evaluate_expr(
+            sympy.Or(
+                sympy.Eq(kv_indices.get_size()[1], 1),
+                sympy.Eq(kv_indices.get_size()[1], query.get_size()[1]),
+            )
+        )
+    return (
+        not force_flex
+        and short_query_length
+        and static_batch
+        and static_num_heads
+        and non_zero_length
+        and valid_block_mask_num_heads
+    )
 
 
 _h100_default_config = {
@@ -768,7 +820,7 @@ def _get_nv_config(query, mode: Mode) -> tuple[int, int, int, int]:
     dtype = query.get_dtype()
     head_dim = V.graph.sizevars.evaluate_static_shape(query.get_size()[-1])
     fwd_config = None
-
+    bwd_config = None
     capability = torch.cuda.get_device_capability()
 
     if mode == Mode.fwd:
@@ -791,25 +843,26 @@ def _get_nv_config(query, mode: Mode) -> tuple[int, int, int, int]:
     else:  # bwd
         assert mode == Mode.bwd
         if dtype == torch.float32:
-            return (16, 16, 4, 1)
+            bwd_config = (16, 16, 4, 1)
         elif head_dim <= 256 and capability >= (9, 0):  # H100
             if head_dim == 64:
-                return (64, 64, 4, 3)
+                bwd_config = (64, 64, 4, 3)
             elif head_dim == 128:
-                return (64, 128, 8, 3)
+                bwd_config = (64, 128, 8, 3)
             else:
-                return (64, 64, 4, 2)
+                bwd_config = (64, 64, 4, 2)
         elif capability >= (8, 0):
             if head_dim >= 64:
-                return (32, 128, 4, 3)
+                bwd_config = (32, 128, 4, 3)
             elif head_dim == 128:
                 # SM86/89 have smaller shared memory sizes
                 num_stages = 3 if capability[-1] == 0 else 2
-                return (64, 64, 4, num_stages)
+                bwd_config = (64, 64, 4, num_stages)
             else:
-                return (64, 64, 4, 2)
+                bwd_config = (64, 64, 4, 2)
         else:  # modest hardware or extremely large head_dim
-            return (16, 16, 4, 1)
+            bwd_config = (16, 16, 4, 1)
+        return bwd_config
 
 
 def _get_default_config_fwd(query) -> tuple[int, int, int, int]:
@@ -914,14 +967,31 @@ def lower_cpu(
         )
 
     fake_buffers: list[Buffer] = []  # noqa: F821
+
+    # [Note] Handle the case where the split sizes are not statically known.
+    # The value of cur_qSplitSize and cur_kvSplitSize are decided during runtime.
+    # We use symbols to represent them during the compilation here.
+    # They'll be replaced by the string "cur_qSplitSize" and "cur_kvSplitSize" in
+    # the modification function of the CppFlexAttentionTemplate class.
+    cur_qSplitSize = V.graph.sizevars.shape_env.create_unbacked_symint().node.expr
+    cur_kvSplitSize = V.graph.sizevars.shape_env.create_unbacked_symint().node.expr
+    shape_env = V.graph.sizevars.shape_env
+
+    # We don't know the concret value of cur_qSplitSize and cur_kvSplitSize during the compilation.
+    # Mark symbols > 1 to ensure broadcasting is always applied.
+    # This avoids treating them as equal when `eq(var, 1)` is evaluated in `broadcast_symbolic_shapes`.
+    shape_env.var_to_range[cur_qSplitSize] = ValueRanges(2, int_oo)
+    shape_env.var_to_range[cur_kvSplitSize] = ValueRanges(2, int_oo)
+
+    score_dtype = torch.float
     placeholder_inps = [
-        create_placeholder(name, dtype, query.get_device())
-        for name, dtype in [
-            ("score", torch.float),
-            ("b", torch.int64),
-            ("h", torch.int64),
-            ("q_idx", torch.int64),
-            ("kv_idx", torch.int64),
+        create_placeholder(name, dtype, query.get_device(), size)
+        for name, dtype, size in [
+            ("score", score_dtype, [cur_qSplitSize, cur_kvSplitSize]),
+            ("b", torch.int64, []),
+            ("h", torch.int64, []),
+            ("q_idx", torch.int64, [cur_qSplitSize, 1]),
+            ("kv_idx", torch.int64, [1, cur_kvSplitSize]),
         ]
     ]
     subgraph_buffer = build_subgraph_buffer(
@@ -935,17 +1005,82 @@ def lower_cpu(
         else:
             subgraph_buffer.freeze_layout()
     mask_graph_placeholder_inps = [
-        create_placeholder(name, dtype, query.get_device())
-        for name, dtype in [
-            ("b", torch.int64),
-            ("h", torch.int64),
-            ("q_idx", torch.int64),
-            ("kv_idx", torch.int64),
+        create_placeholder(name, dtype, query.get_device(), size)
+        for name, dtype, size in [
+            ("score", score_dtype, [cur_qSplitSize, cur_kvSplitSize]),
+            ("b", torch.int64, []),
+            ("h", torch.int64, []),
+            ("q_idx", torch.int64, [cur_qSplitSize, 1]),
+            ("kv_idx", torch.int64, [1, cur_kvSplitSize]),
         ]
     ]
-    mask_graph_buffer = build_subgraph_buffer(
-        mask_graph_placeholder_inps + list(mask_mod_other_buffers), mask_graph
+
+    # The original mask_graph works on a scalar and only includes
+    # the logic of calculating the mask value.
+    # We need to add the logic of applying the mark to the qk_data tensor
+    # into the graph for the later codegen of this part.
+    # Example:
+    #   mask_graph:
+    #   def mask_fn(b, h, q_idx, kv_idx):
+    #       mask = q_idx >= kv_idx
+    #       return mask
+    #   The converted_mask_graph should be:
+    #   def converted_mask_fn(qk_data, b, h, q_idx, kv_idx):
+    #       mask = q_idx >= kv_idx
+    #       qk_data = torch.where(mask, qk_data, torch.full_like(qk_data, -float("inf")))
+    #       return qk_data
+    def convert_mask_graph_module(mask_graph):
+        gm = copy.deepcopy(mask_graph.graph_module)
+        graph = gm.graph
+        # Add qk_data as the first input
+        with graph.inserting_before(next(iter(graph.nodes))):
+            qk_data_node = graph.placeholder("qk_data")
+
+        # Find the node that returns the mask
+        output_node = None
+        for node in graph.nodes:
+            if node.op == "output":
+                output_node = node
+                break
+
+        # Get the mask node
+        assert output_node is not None
+        mask_node = output_node.args[0]
+
+        size_node = [cur_qSplitSize, cur_kvSplitSize]
+        # Create a new node for torch.full
+        with graph.inserting_after(mask_node):
+            full_node = graph.call_function(
+                torch.full,
+                args=(size_node, -float("inf")),
+                kwargs={"dtype": score_dtype},
+            )
+
+        # Create a new node for torch.where
+        with graph.inserting_after(full_node):
+            where_node = graph.call_function(
+                torch.ops.aten.where, args=(mask_node, qk_data_node, full_node)
+            )
+
+        # Update the output node to return the result of torch.where
+        output_node.args = (where_node,)
+
+        graph.lint()
+        converted = torch.fx.GraphModule(gm, graph)
+        return converted
+
+    converted_mask_graph_module = convert_mask_graph_module(mask_graph)
+
+    mask_graph_buffer = build_subgraph_module_buffer(
+        mask_graph_placeholder_inps + list(mask_mod_other_buffers),
+        converted_mask_graph_module,
     )
+
+    # Clear the pending fresh unbacked symbols that are created for cur_qSplitSize and cur_kvSplitSize in the current kernel.
+    pending = V.graph.sizevars.shape_env.pending_fresh_unbacked_symbols
+    V.graph.sizevars.shape_env.pending_fresh_unbacked_symbols = [
+        x for x in pending if x not in (cur_qSplitSize, cur_kvSplitSize)
+    ]
 
     buffer_list = (
         placeholder_inps
@@ -989,9 +1124,9 @@ def lower_cpu(
         raise NotImplementedError(
             "Unsupported for now if query, key, value are the same buffer."
         )
-    if query.get_dtype() not in [torch.float, torch.bfloat16]:
+    if query.get_dtype() not in [torch.float, torch.bfloat16, torch.float16]:
         raise NotImplementedError(
-            "`torch.float` and `torch.bfloat16` are supported in FlexAttention for CPU device. "
+            "`torch.float` , `torch.float16` and `torch.bfloat16` are supported in FlexAttention for CPU device. "
             f"Found input tensors are `{query.get_dtype()}`."
         )
     score_mod_other_buffers = maybe_realize(score_mod_other_buffers)
@@ -1041,10 +1176,14 @@ def lower_cpu(
     SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_Q_BLOCK_SIZE)
     assert V.graph.sizevars.evaluate_expr(
         sympy.Le(seq_len_q, sympy.Mul(kv_indices.get_size()[-2], SPARSE_Q_BLOCK_SIZE))
-    ), "Q seqlen must be smaller than the block_mask size in the Q dimension, considering pass a larger block_mask."
+    ), (
+        "Q seqlen must be smaller than the block_mask size in the Q dimension, considering pass a larger block_mask."
+    )
     assert V.graph.sizevars.evaluate_expr(
         sympy.Le(seq_len_kv, sympy.Mul(kv_indices.get_size()[-1], SPARSE_KV_BLOCK_SIZE))
-    ), "KV seqlen must be smaller than the block_mask size in the KV dimension, considering pass a larger block_mask."
+    ), (
+        "KV seqlen must be smaller than the block_mask size in the KV dimension, considering pass a larger block_mask."
+    )
     CppFlexAttentionTemplate.add_choices(
         choices=_choices,
         input_nodes=input_nodes,
@@ -1059,6 +1198,7 @@ def lower_cpu(
         len_score_other=len(score_mod_other_buffers),
         len_mask_other=len(mask_mod_other_buffers),
         kernel_input_name_to_buffer=kernel_input_name_to_buffer,
+        block_vars=(cur_qSplitSize, cur_kvSplitSize),
     )
     inputs_for_autotuning = [
         query,
@@ -1085,7 +1225,7 @@ def next_power_of_two(n):
 
 
 def set_head_dim_values(
-    kernel_options: Dict[str, Any], qk_head_dim, v_head_dim, graph_sizevars
+    kernel_options: dict[str, Any], qk_head_dim, v_head_dim, graph_sizevars
 ):
     """
     Mutates kernel options, adding head dimension calculations.
@@ -1145,6 +1285,15 @@ def flex_attention(
         )
 
     # below is cuda path if device is not cpu
+    # tl.dot does not support embedding size less than 16
+    small_dqk = V.graph.sizevars.evaluate_expr(sympy.Lt(query.get_size()[-1], 16))
+    small_dv = V.graph.sizevars.evaluate_expr(sympy.Lt(value.get_size()[-1], 16))
+    if small_dqk or small_dv:
+        raise NotImplementedError(
+            f"NYI: embedding dimension of the query, key, and value must be "
+            f"at least 16 but got E={query.get_size()[-1]} and Ev={value.get_size()[-1]}"
+        )
+
     (
         _,  # q_length
         _,  # kv_length
@@ -1197,7 +1346,10 @@ def flex_attention(
         for k, v in kernel_options.items()
     }
     kernel_options.setdefault("FLOAT32_PRECISION", get_float32_precision())
-    if _use_flex_decoding(query, kernel_options):
+    enable_gqa = V.graph.sizevars.evaluate_expr(
+        sympy.Ne(query.get_size()[1], key.get_size()[1]),
+    )
+    if _use_flex_decoding(query, kv_indices, kernel_options, enable_gqa):
         return create_flex_decoding_kernel(
             query,
             key,
@@ -1244,9 +1396,16 @@ def flex_attention(
 
     Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
-    assert V.graph.sizevars.evaluate_expr(
-        sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)
-    ), f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
+    assert V.graph.sizevars.evaluate_expr(sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)), (
+        f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
+    )
+    assert V.graph.sizevars.evaluate_expr(sympy.Gt(seq_len_q, 0)), (
+        "Query length must be greater than 0"
+    )
+    assert V.graph.sizevars.evaluate_expr(sympy.Gt(seq_len_kv, 0)), (
+        "Key length must be greater than 0"
+    )
+
     B = Bq
 
     if seq_len_q % 128 != 0 or seq_len_kv % 128 != 0:
@@ -1313,6 +1472,10 @@ def flex_attention(
     # Mark SPARSE_KV_BLOCK_SIZE & SPARSE_Q_BLOCK_SIZE as static shapes and add guards.
     SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_KV_BLOCK_SIZE)
     SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_Q_BLOCK_SIZE)
+
+    # ROCm specific considerations
+    if torch.version.hip:
+        kernel_options["kpack"] = 2
 
     # Note, we don't need to pass in the captured buffers explicitly
     # because they're implicitly added by the score_mod function
@@ -2164,9 +2327,9 @@ def process_joint_outputs(
         JointOutputResult containing processed buffers and gradients
     """
     assert isinstance(all_joint_outputs, list)
-    assert (
-        all_joint_outputs[0] is not None
-    ), "joint_subgraph_buffer is None - this is a bug!"
+    assert all_joint_outputs[0] is not None, (
+        "joint_subgraph_buffer is None - this is a bug!"
+    )
 
     joint_buffer = all_joint_outputs[0]
     other_grads = all_joint_outputs[num_placeholders - 1 :]
@@ -2265,9 +2428,9 @@ def flex_attention_backward(*args, **kwargs):
     Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
 
-    assert V.graph.sizevars.evaluate_expr(
-        sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)
-    ), f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
+    assert V.graph.sizevars.evaluate_expr(sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)), (
+        f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
+    )
 
     kernel_options = dict(kernel_options)
     # Mark symbols in custom kernel options as static shapes and add guards.
@@ -2512,9 +2675,11 @@ def flex_attention_backward(*args, **kwargs):
         grad_key = broadcasted_grad_key
         grad_value = broadcasted_grad_value
     else:
-        assert V.graph.sizevars.evaluate_expr(
-            sympy.Gt(Bq, 1) & sympy.Eq(Bkv, 1)
-        ), f"Bq and Bkv must broadcastable. Got Bq={V.graph.sizevars.evaluate_expr(Bq)} and Bkv={V.graph.sizevars.evaluate_expr(Bkv)}"  # noqa: B950
+        assert V.graph.sizevars.evaluate_expr(sympy.Gt(Bq, 1) & sympy.Eq(Bkv, 1)), (
+            f"Bq and Bkv must broadcastable. "
+            f"Got Bq={V.graph.sizevars.evaluate_expr(Bq)} "
+            f"and Bkv={V.graph.sizevars.evaluate_expr(Bkv)}"
+        )
         grad_key = lowerings[aten.sum](broadcasted_grad_key, axis=0, keepdims=True)
         grad_value = lowerings[aten.sum](broadcasted_grad_value, axis=0, keepdims=True)
 

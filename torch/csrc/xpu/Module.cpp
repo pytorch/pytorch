@@ -9,6 +9,7 @@
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/xpu/Module.h>
 
 #ifndef WIN32
 #include <pthread.h>
@@ -38,7 +39,7 @@ static void poison_fork() {
 
 // XPU management methods
 
-PyObject* THXPModule_getArchFlags(PyObject* self, PyObject* noargs) {
+static PyObject* THXPModule_getArchFlags(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
 #ifdef XPU_ARCH_FLAGS
   static const char* flags = C10_STRINGIZE(XPU_ARCH_FLAGS);
@@ -55,7 +56,7 @@ static PyObject* THXPModule_isInBadFork_wrap(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THXPModule_setDevice_wrap(PyObject* self, PyObject* arg) {
+static PyObject* THXPModule_setDevice_wrap(PyObject* self, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to set_device");
 
@@ -66,7 +67,7 @@ PyObject* THXPModule_setDevice_wrap(PyObject* self, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THXPModule_exchangeDevice_wrap(PyObject* self, PyObject* arg) {
+static PyObject* THXPModule_exchangeDevice_wrap(PyObject* self, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to exchange_device");
 
@@ -82,7 +83,9 @@ PyObject* THXPModule_exchangeDevice_wrap(PyObject* self, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THXPModule_maybeExchangeDevice_wrap(PyObject* self, PyObject* arg) {
+static PyObject* THXPModule_maybeExchangeDevice_wrap(
+    PyObject* self,
+    PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       THPUtils_checkLong(arg), "invalid argument to maybe_exchange_device");
@@ -99,7 +102,7 @@ PyObject* THXPModule_maybeExchangeDevice_wrap(PyObject* self, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THXPModule_getDevice_wrap(PyObject* self, PyObject* noargs) {
+static PyObject* THXPModule_getDevice_wrap(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
 
   auto device_index = c10::xpu::current_device();
@@ -108,14 +111,16 @@ PyObject* THXPModule_getDevice_wrap(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THXPModule_getDeviceCount_wrap(PyObject* self, PyObject* noargs) {
+static PyObject* THXPModule_getDeviceCount_wrap(
+    PyObject* self,
+    PyObject* noargs) {
   HANDLE_TH_ERRORS
   poison_fork();
   return THPUtils_packUInt64(at::xpu::device_count());
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THXPModule_getCurrentStream_wrap(
+static PyObject* THXPModule_getCurrentStream_wrap(
     PyObject* self,
     PyObject* device_index) {
   HANDLE_TH_ERRORS
@@ -136,7 +141,7 @@ PyObject* THXPModule_getCurrentStream_wrap(
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THXPModule_getCurrentStream_raw(
+static PyObject* THXPModule_getCurrentStream_raw(
     PyObject* self,
     PyObject* device_index) {
   HANDLE_TH_ERRORS
@@ -149,7 +154,7 @@ PyObject* THXPModule_getCurrentStream_raw(
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THXPModule_setStream_wrap(
+static PyObject* THXPModule_setStream_wrap(
     PyObject* self,
     PyObject* args,
     PyObject* kwargs) {
@@ -186,7 +191,7 @@ PyObject* THXPModule_setStream_wrap(
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THXPModule_xpuSynchronize(PyObject* self, PyObject* arg) {
+static PyObject* THXPModule_xpuSynchronize(PyObject* self, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to synchronize");
   auto device_index = THPUtils_unpackDeviceIndex(arg);
@@ -200,22 +205,22 @@ PyObject* THXPModule_xpuSynchronize(PyObject* self, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THXPModule_emptyCache(PyObject* self, PyObject* noargs) {
+static PyObject* THXPModule_emptyCache(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   c10::xpu::XPUCachingAllocator::emptyCache();
   END_HANDLE_TH_ERRORS
   Py_RETURN_NONE;
 }
 
-PyObject* THXPModule_memoryStats(PyObject* self, PyObject* arg) {
+static PyObject* THXPModule_memoryStats(PyObject* self, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to memory_stats");
   const auto device_index = THPUtils_unpackDeviceIndex(arg);
 
+  using c10::CachingAllocator::Stat;
+  using c10::CachingAllocator::StatArray;
+  using c10::CachingAllocator::StatType;
   using c10::CachingDeviceAllocator::DeviceStats;
-  using c10::CachingDeviceAllocator::Stat;
-  using c10::CachingDeviceAllocator::StatArray;
-  using c10::CachingDeviceAllocator::StatType;
 
   const auto statToDict = [](const Stat& stat) {
     py::dict dict;
@@ -250,7 +255,9 @@ PyObject* THXPModule_memoryStats(PyObject* self, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THXPModule_resetPeakMemoryStats(PyObject* self, PyObject* arg) {
+static PyObject* THXPModule_resetPeakMemoryStats(
+    PyObject* self,
+    PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       THPUtils_checkLong(arg), "invalid argument to reset_peak_memory_stats");
@@ -260,7 +267,7 @@ PyObject* THXPModule_resetPeakMemoryStats(PyObject* self, PyObject* arg) {
   Py_RETURN_NONE;
 }
 
-PyObject* THXPModule_resetAccumulatedMemoryStats(
+static PyObject* THXPModule_resetAccumulatedMemoryStats(
     PyObject* self,
     PyObject* arg) {
   HANDLE_TH_ERRORS
@@ -380,8 +387,15 @@ static void initXpuMethodBindings(PyObject* module) {
   m.def("_xpu_getMemoryInfo", [](c10::DeviceIndex device_index) {
 #if SYCL_COMPILER_VERSION >= 20250000
     auto total = at::xpu::getDeviceProperties(device_index)->global_mem_size;
-    auto free = c10::xpu::get_raw_device(device_index)
-                    .get_info<sycl::ext::intel::info::device::free_memory>();
+    auto& device = c10::xpu::get_raw_device(device_index);
+    TORCH_CHECK(
+        device.has(sycl::aspect::ext_intel_free_memory),
+        "The device (",
+        at::xpu::getDeviceProperties(device_index)->name,
+        ") doesn't support querying the available free memory. ",
+        "You can file an issue at https://github.com/pytorch/pytorch/issues ",
+        "to help us prioritize its implementation.");
+    auto free = device.get_info<sycl::ext::intel::info::device::free_memory>();
     return std::make_tuple(free, total);
 #else
   TORCH_CHECK_NOT_IMPLEMENTED(
