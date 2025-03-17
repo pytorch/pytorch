@@ -397,7 +397,7 @@ def parse_args():
     )
     parser.add_argument(
         "--numpy-check",
-        help="Check numpy compile",
+        help="Check numpy",
         type=str,
         choices=["enabled", "disabled"],
         default="enabled",
