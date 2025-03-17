@@ -1527,6 +1527,13 @@ If the above doesn't work, please subtmit an issue to GitHub.
         res = torch.compile(f4_unskip, backend=cnts)(inp)
         self.assertEqual(res, inp + 15)
 
+        # test dont_skip_tracing that is activated outside torch.compile
+        torch._dynamo.reset()
+        f4_unskip2 = torch._dynamo.dont_skip_tracing(torch.compile(f4, backend=cnts))
+        cnts.clear()
+        res = f4_unskip2(inp)
+        self.assertEqual(res, inp + 15)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
