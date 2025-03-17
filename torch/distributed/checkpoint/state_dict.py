@@ -154,7 +154,6 @@ class _StateDictInfo(StateDictOptions):
     fsdp_modules: list[nn.Module] = field(default_factory=list)
 
 
-@functools.cache
 def _get_fqns(
     model: nn.Module,
     name: str,
@@ -295,9 +294,9 @@ def _verify_options(
 
     options = options or StateDictOptions()
 
-    fqn_param_mapping: dict[
-        Union[str, torch.Tensor], Union[set[str], torch.Tensor]
-    ] = {}
+    fqn_param_mapping: dict[Union[str, torch.Tensor], Union[set[str], torch.Tensor]] = (
+        {}
+    )
     shared_params_mapping: dict[
         Union[str, torch.Tensor], Union[set[str], torch.Tensor]
     ] = {}
