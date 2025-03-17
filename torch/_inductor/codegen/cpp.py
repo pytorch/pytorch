@@ -3087,7 +3087,7 @@ class CppVecKernel(CppKernel):
         chunk_size = 4096
         num_chunks = CeilDiv(vec_num_range_thread, chunk_size)
         welford_helper_init_line = (
-            f"WelfordHelper<{self._get_vec_type(dtype)}> {welford_helper_val}"
+            f"WelfordHelper<{self._get_vec_type(dtype)}, {chunk_size}> {welford_helper_val}"
             f"("
             f"{vec_num_range_thread_expr}"
             f");"

@@ -49,8 +49,6 @@ typedef at::BFloat16 bfloat16;
 typedef at::Float8_e4m3fn float8_e4m3fn;
 typedef at::Float8_e5m2 float8_e5m2;
 
-const uint64_t kChunkSize = 4096;
-
 template <typename T>
 struct Welford {
   T mean = T(0);
@@ -72,7 +70,7 @@ template <typename T, int N>
 struct IsVecType<at::vec::VectorizedN<T, N>>: std::true_type {};
 #endif
 
-template <typename T>
+template <typename T, uint64_t kChunkSize>
 struct WelfordHelper {
   // A data struct to help welford reduction:
   // 1. Save the reciprocal of weights to avoid redundant divisions.
@@ -91,8 +89,8 @@ struct WelfordHelper {
   }
 };
 
-template<typename T>
-std::vector<typename T::value_type> WelfordHelper<T>::weight_recps = []() {
+template<typename T, uint64_t kChunkSize>
+std::vector<typename T::value_type> WelfordHelper<T, kChunkSize>::weight_recps = []() {
   using scalar_t = typename T::value_type;
   std::vector<scalar_t> temp(kChunkSize);
   for (const auto i : c10::irange(kChunkSize)) {
@@ -128,8 +126,8 @@ Welford<T> welford_combine(const Welford<T>& a, const Welford<T>& b, bool use_in
   return result;
 }
 
-template <typename T>
-Welford<T> welford_combine(Welford<T>& acc, T& data, WelfordHelper<T>* w=nullptr) {
+template <typename T, uint64_t kChunkSize>
+Welford<T> welford_combine(Welford<T>& acc, T& data, WelfordHelper<T, kChunkSize>* w=nullptr) {
   // Combine welford reduction with cascade summation to improve numerical stability.
   // https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance
   // https://en.wikipedia.org/wiki/Pairwise_summation
@@ -173,8 +171,8 @@ Welford<T> welford_combine(Welford<T>& acc, T& data, WelfordHelper<T>* w=nullptr
   return result;
 }
 
-template <typename T>
-Welford<T> welford_combine(Welford<T>& acc, WelfordHelper<T>* w) {
+template <typename T, uint64_t kChunkSize>
+Welford<T> welford_combine(Welford<T>& acc, WelfordHelper<T, kChunkSize>* w) {
   for (const auto i : c10::irange(w->depth)) {
     acc = welford_combine(acc, w->welford_stk[i]);
   }
@@ -190,8 +188,8 @@ struct IndexValue {
 };
 
 #if INDUCTOR_USE_VECTOR_TYPES()
-template <typename T>
-Welford<T> welford_combine(Welford<T>& acc, T& data, int64_t tail_size, WelfordHelper<T>* w=nullptr) {
+template <typename T, uint64_t kChunkSize>
+Welford<T> welford_combine(Welford<T>& acc, T& data, int64_t tail_size, WelfordHelper<T, kChunkSize>* w=nullptr) {
   auto out = welford_combine(acc, data, w);
   return Welford<T>{
     T::set(acc.mean, out.mean, tail_size),
