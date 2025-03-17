@@ -45,6 +45,15 @@ class ExprPrinter(StrPrinter):
     def _print_Identity(self, expr: sympy.Expr) -> str:
         return self._print(expr.args[0])
 
+    def _print_Float(self, expr: sympy.Expr) -> str:
+        if expr._prec == 53:
+            # IEEE-754 double precision have 53 bits. SymPy prints them with
+            # 15 digits, but we need 17 for round-trip correctness
+            return str(sympy.Float(expr, dps=17))
+        else:
+            # We don't use other precisions in pytorch
+            return str(expr)
+
     # This must be implemented because sympy will collect x * x into Pow(x, 2), without
     # any explicit intervention.  We print it just like x * x, notably, we
     # never generate sympy.Pow with floats.
