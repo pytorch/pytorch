@@ -137,8 +137,6 @@ class PaddedTensor(torch.Tensor):
             )
             fake_out = func(*fake_args, **fake_kwargs)
 
-        outer_size, outer_stride = fake_out.shape, fake_out.stride()
-
         tensor_args = transform(args, PaddedTensor.to_tensor)
         tensor_kwargs = transform(kwargs, PaddedTensor.to_tensor)
         out = func(*tensor_args, **tensor_kwargs)
@@ -153,13 +151,21 @@ class PaddedTensor(torch.Tensor):
             0
         ]  # TODO: support different neural element
 
-        out = PaddedTensor(
-            out,
-            outer_size,
-            outer_stride,
-            multipliers,
-            neutral_element,
-        )
-        assert hasattr(out, "multipliers"), breakpoint()
+        out_flat, spec = pytree.tree_flatten(out)
+        fake_out_flat, fake_spec = pytree.tree_flatten(out)
+        assert spec == fake_spec
+        #
+        combined_flat = [
+            PaddedTensor(
+                out,
+                fake.shape,
+                fake.stride(),
+                multipliers,
+                neutral_element,
+            )
+            for out, fake in zip(out_flat, fake_out_flat)
+        ]
+        #
+        out = pytree.tree_unflatten(combined_flat, spec)
 
         return return_and_correct_aliasing(func, args, kwargs, out)
