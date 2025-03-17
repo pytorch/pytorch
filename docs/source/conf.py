@@ -18,7 +18,7 @@ import inspect
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 #
 import os
-
+import sys
 # import sys
 import pkgutil
 import re
@@ -38,8 +38,12 @@ except ImportError:
 
 RELEASE = os.environ.get("RELEASE", False)
 
-import pytorch_sphinx_theme
 
+sys.path.insert(0, os.path.abspath(".."))
+import pytorch_sphinx_theme2
+
+html_theme = "pytorch_sphinx_theme2"
+html_theme_path = [pytorch_sphinx_theme2.get_html_theme_path()]
 
 # -- General configuration ------------------------------------------------
 
@@ -58,13 +62,19 @@ extensions = [
     "sphinx.ext.todo",
     "sphinx.ext.coverage",
     "sphinx.ext.napoleon",
-    "sphinx.ext.viewcode",
     "sphinxcontrib.katex",
     "sphinx.ext.autosectionlabel",
     "sphinx_copybutton",
-    "sphinx_panels",
+    "sphinx_design",
     "myst_parser",
     "sphinx.ext.linkcode",
+    "sphinxcontrib.mermaid",
+]
+
+myst_enable_extensions = [
+    "colon_fence",
+    "deflist",
+    "html_image",
 ]
 
 # build the templated autosummary files
@@ -85,10 +95,119 @@ autosectionlabel_prefix_document = True
 
 katex_prerender = True
 
+# General information about the project.
+project = "PyTorch"
+copyright = "PyTorch Contributors"
+author = "PyTorch Contributors"
+torch_version = str(torch.__version__)
+
+# The version info for the project you're documenting, acts as replacement for
+# |version| and |release|, also used in various other places throughout the
+# built documents.
+#
+# The short X.Y version.
+# TODO: change to [:2] at v1.0
+version = "main (" + torch_version + " )"
+# The full version, including alpha/beta/rc tags.
+# TODO: verify this works as expected
+release = "main"
+
+# Customized html_title here.
+# Default is " ".join(project, release, "documentation") if not set
+if RELEASE:
+    # Turn 1.11.0aHASH into 1.11
+    # Note: the release candidates should no longer have the aHASH suffix, but in any
+    # case we wish to leave only major.minor, even for rc builds.
+    version = ".".join(torch_version.split(".")[:2])
+    html_title = " ".join((project, version, "documentation"))
+    release = version
+
+switcher_version = "main" if not RELEASE else version
+
+html_theme_options = {
+    "analytics_id": "GTM-T8XT4PS",
+    "logo": {
+        "text": "Home",
+        "image_dark": "None",
+        "image_light": "None",
+    },
+    "icon_links": [
+          {
+              "name": "X",
+              "url": "https://x.com/PyTorch",
+              "icon": "fa-brands fa-x-twitter",
+              "type": "fontawesome",
+          },
+          {
+              "name": "GitHub",
+              "url": "https://github.com/pytorch/pytorch",
+              "icon": "fa-brands fa-github",
+              "type": "fontawesome",
+          },
+          {
+              "name": "Discourse",
+              "url": "https://dev-discuss.pytorch.org/",
+              "icon": "fa-brands fa-discourse",
+              "type": "fontawesome",
+          },
+          {
+              "name": "PyPi",
+              "url": "https://pypi.org/project/torch/",
+              "icon": "fa-brands fa-python",
+              "type": "fontawesome",
+          },
+    ],
+    "language_bindings_links": [
+          {
+              "url": "https://pytorch.org/docs/stable/cpp_index.html",
+              "name": "C++",
+          },
+          {
+              "url": "https://pytorch.org/javadoc/",
+              "name": "Javadoc",
+          },
+          {
+              "url": "https://github.com/pytorch/multipy",
+              "name": "torch.multiply",
+          },
+    ],
+    "external_links": [
+          {
+              "name": "Tutorials",
+              "url": "https://pytorch.org/tutorials/",
+          },
+    ],
+    "switcher": {
+          "json_url": "https://raw.githubusercontent.com/svekars/doc-test/refs/heads/gh-pages-test/versions.json",
+          "version_match": switcher_version,
+    },
+    "pytorch_project": "docs",
+}
+
+theme_variables = pytorch_sphinx_theme2.get_theme_variables()
+
+html_context = {
+    "theme_variables": theme_variables,
+    "display_github": True,
+    "github_url": "https://github.com",
+    "github_user": "pytorch",
+    "github_repo": "pytorch",
+    "feedback_url": "https://github.com/pytorch/pytorch",
+    "github_version": "main",
+    "doc_path": "docs/source",
+    "library_links": theme_variables.get("library_links", []),
+    "community_links": theme_variables.get("community_links", []),
+    "pytorch_project": "docs",
+    "language_bindings_links": html_theme_options.get("language_bindings_links", []),
+}
+
 napoleon_use_ivar = True
 
 # Add any paths that contain templates here, relative to this directory.
-templates_path = ["_templates"]
+templates_path = [
+    "_templates",
+    os.path.join(os.path.dirname(pytorch_sphinx_theme2.__file__), "templates"),
+    ]
 
 # TODO: document these and remove them from here.
 
@@ -3364,34 +3483,6 @@ source_suffix = ".rst"
 # The master toctree document.
 master_doc = "index"
 
-# General information about the project.
-project = "PyTorch"
-copyright = "PyTorch Contributors"
-author = "PyTorch Contributors"
-torch_version = str(torch.__version__)
-
-# The version info for the project you're documenting, acts as replacement for
-# |version| and |release|, also used in various other places throughout the
-# built documents.
-#
-# The short X.Y version.
-# TODO: change to [:2] at v1.0
-version = "main (" + torch_version + " )"
-# The full version, including alpha/beta/rc tags.
-# TODO: verify this works as expected
-release = "main"
-
-# Customized html_title here.
-# Default is " ".join(project, release, "documentation") if not set
-if RELEASE:
-    # Turn 1.11.0aHASH into 1.11
-    # Note: the release candidates should no longer have the aHASH suffix, but in any
-    # case we wish to leave only major.minor, even for rc builds.
-    version = ".".join(torch_version.split(".")[:2])
-    html_title = " ".join((project, version, "documentation"))
-    release = version
-
-
 # Use the linkcode extension to override [SOURCE] links to point
 # to the repo. Use the torch_version variable defined above to
 # determine link
@@ -3497,8 +3588,6 @@ autodoc_docstring_signature = True
 #
 #
 
-html_theme = "pytorch_sphinx_theme"
-html_theme_path = [pytorch_sphinx_theme.get_html_theme_path()]
 
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
@@ -3506,16 +3595,10 @@ html_theme_path = [pytorch_sphinx_theme.get_html_theme_path()]
 
 html_theme_options = {
     "pytorch_project": "docs",
-    "canonical_url": "https://pytorch.org/docs/stable/",
-    "collapse_navigation": False,
     "display_version": True,
-    "logo_only": True,
     "analytics_id": "GTM-T8XT4PS",
 }
 
-html_logo = "_static/img/pytorch-logo-dark-unstable.png"
-if RELEASE:
-    html_logo = "_static/img/pytorch-logo-dark.svg"
 
 
 # Add any paths that contain custom static files (such as style sheets) here,
@@ -3655,12 +3738,6 @@ def setup(app):
     html_css_files = [
         "https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.css"
     ]
-
-    # In Sphinx 1.8 it was renamed to `add_css_file`, 1.7 and prior it is
-    # `add_stylesheet` (deprecated in 1.8).
-    add_css = getattr(app, "add_css_file", app.add_stylesheet)
-    for css_file in html_css_files:
-        add_css(css_file)
 
     app.connect("build-finished", coverage_post_process)
     app.connect("autodoc-process-docstring", process_docstring)
