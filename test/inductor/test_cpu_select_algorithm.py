@@ -1373,12 +1373,12 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @patches
     @torch.no_grad
     @dtypes(torch.bfloat16)
-    @parametrize("batch_size", (32,))
-    @parametrize("in_features", (128, 144))
-    @parametrize("out_features", (64, 65))
+    @parametrize("batch_size", (17, 32,))
+    @parametrize("in_features", (128, 144, 1024))
+    @parametrize("out_features", (64, 65, 1024))
     def test_int8_woq_mm(self, dtype, batch_size, in_features, out_features):
         # x will be reshaped from 3d to 2d
-        second_dim_size = 8
+        second_dim_size = 1
 
         def _convert_weight_to_int8pack(w):
             scale, zp = _calculate_dynamic_per_channel_qparams(
