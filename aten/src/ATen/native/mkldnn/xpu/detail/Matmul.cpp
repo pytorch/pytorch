@@ -291,13 +291,12 @@ sycl::event scaled_matmul(
        mat1.strides().vec()},
       engine,
       mat1.data_ptr());
-  auto mat2_c = mat2.contiguous();
   dnnl::memory weight = at::native::onednn::make_onednn_memory(
       {weight_dims,
-       at::native::onednn::get_onednn_dtype(mat2_c),
-       mat2_c.strides().vec()},
+       at::native::onednn::get_onednn_dtype(mat2),
+       mat2.strides().vec()},
       engine,
-      mat2_c.data_ptr());
+      mat2.data_ptr());
   dnnl::memory dst = at::native::onednn::make_onednn_memory(
       {dst_dims,
        at::native::onednn::get_onednn_dtype(result),
@@ -370,7 +369,7 @@ sycl::event scaled_matmul(
   if (with_bias) {
     args.insert({DNNL_ARG_BIAS, onednn_bias});
   }
-  // auto sycl_queue = dnnl::sycl_interop::get_queue(stream);
+
   dnnl::memory src_scales_t = scale_a.numel() == 1
       ? at::native::onednn::make_onednn_memory(
             {{1}, dnnl::memory::data_type::f32, {1}},

@@ -361,6 +361,8 @@ Tensor& scaled_mm_out_xpu(
     std::optional<c10::ScalarType> out_dtype,
     bool use_fast_accum,
     Tensor& out) {
+  checkBackend(
+      "scaled_mm_out", {out, scale_a, scale_b, mat1, mat2}, Backend::XPU);
   TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix");
   TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
   TORCH_CHECK(
@@ -405,29 +407,16 @@ Tensor& scaled_mm_out_xpu(
       isFloat8Type(mat2.scalar_type()),
       "Expected mat2 to be Float8 matrix got ",
       mat2.scalar_type());
+  TORCH_CHECK(
+      !isFloat8Type(out.scalar_type()), "Did not support FP8 output yet ");
+  TORCH_CHECK(
+      scale_result.has_value() == false, "scale_result is not supported yet");
   if (bias) {
     TORCH_CHECK(
-        out.scalar_type() != kFloat,
-        "Bias is not supported when out_dtype is set to Float32");
-    TORCH_CHECK(
         bias->scalar_type() == ScalarType::BFloat16 ||
-            bias->scalar_type() == ScalarType::Half,
-        "Bias must be either Half or BFloat16, but got ",
-        bias->scalar_type());
-    TORCH_CHECK(
-        (out.scalar_type() != kFloat &&
-         out.scalar_type() != ScalarType::BFloat16) ||
-            bias->scalar_type() == ScalarType::BFloat16,
-        "Bias must be BFloat16 to compute ",
-        out.scalar_type(),
-        " output, but got ",
-        bias->scalar_type());
-    TORCH_CHECK(
-        out.scalar_type() != ScalarType::Half ||
-            bias->scalar_type() == ScalarType::Half,
-        "Bias must be Float16 to compute ",
-        out.scalar_type(),
-        " output, but got ",
+            bias->scalar_type() == ScalarType::Half ||
+            bias->scalar_type() == kFloat,
+        "Bias must be Half, BFloat16 or Float32 but got ",
         bias->scalar_type());
   }
   at::native::resize_output(out, {mat1.size(0), mat2.size(1)});
@@ -445,7 +434,7 @@ Tensor scaled_mm_xpu(
     const std::optional<at::Tensor>& scale_result,
     std::optional<c10::ScalarType> out_dtype,
     bool use_fast_accum) {
-  const auto out_dtype_ = out_dtype.value_or(mat_a.scalar_type());
+  const auto out_dtype_ = out_dtype.value_or(kFloat);
   Tensor out = at::empty({0}, mat_a.options().dtype(out_dtype_));
   return scaled_mm_out_xpu(
       mat_a,
