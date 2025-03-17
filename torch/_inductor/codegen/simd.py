@@ -423,7 +423,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                 val: idx for idx, val in enumerate(val for val in seq if val in mask)
             }
 
-        grid_dims = ["x", "y", "z"]
+        grid_dims = ["z", "y", "x"]
         reduction_dims = ["r0_", "r1_"]
         if no_x_dim:
             tensor_dims = reduction_dims
@@ -667,9 +667,9 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                     )
             return_getters_groups.append(return_getters)
 
-        assert all(V.graph.sizevars.size_hint(s) == 1 for s in remaining), (
-            f"failed to set ranges {remaining} {lengths}"
-        )
+        assert all(
+            V.graph.sizevars.size_hint(s) == 1 for s in remaining
+        ), f"failed to set ranges {remaining} {lengths}"
 
         return new_ranges, return_getters_groups
 
@@ -818,12 +818,14 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         trees = [
             t for t in self.range_trees if not t.is_reduction or self.inside_reduction
         ]
-        if reorder and len(trees) > 1:
-            count = sum(t.prefix in "xyz" for t in trees)
-            assert "".join(t.prefix for t in trees[:count]) == "zyx"[-count:], [
-                t.prefix for t in trees[:count]
-            ]
-            trees[:count] = reversed(trees[:count])
+
+        def tree_order(tree: IterationRangesRoot) -> int:
+            assert tree.tensor_dim is not None, f"Invalid tensor dim: {tree.tensor_dim}"
+            return tree.tensor_dim
+
+        if reorder:
+            trees = sorted(trees, key=tree_order)
+
         return trees
 
     def codegen_indexing(self, expr: sympy.Expr) -> sympy.Expr:
