@@ -1,8 +1,9 @@
 # Owner(s): ["module: higher order operators"]
 # flake8: noqa: B950
 
-from parameterized import parameterized_class
 import unittest
+
+from parameterized import parameterized_class
 
 import torch
 import torch._dynamo
