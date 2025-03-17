@@ -121,15 +121,19 @@ class PaddedTensor(torch.Tensor):
         with disable_proxy_modes_tracing(), FakeTensorMode():
             fake_args = transform(
                 args,
-                lambda t: torch.empty_strided(t.shape, t.stride())
-                if isinstance(t, torch.Tensor)
-                else t,
+                lambda t: (
+                    torch.empty_strided(t.shape, t.stride())
+                    if isinstance(t, torch.Tensor)
+                    else t
+                ),
             )
             fake_kwargs = transform(
                 kwargs,
-                lambda t: torch.empty_strided(t.shape, t.stride())
-                if isinstance(t, torch.Tensor)
-                else t,
+                lambda t: (
+                    torch.empty_strided(t.shape, t.stride())
+                    if isinstance(t, torch.Tensor)
+                    else t
+                ),
             )
             fake_out = func(*fake_args, **fake_kwargs)
 
@@ -140,10 +144,14 @@ class PaddedTensor(torch.Tensor):
         out = func(*tensor_args, **tensor_kwargs)
         multipliers = transform(
             args, lambda t: t.multipliers if isinstance(t, PaddedTensor) else None
-        )[0]  # TODO: support different multipliers from args
+        )[
+            0
+        ]  # TODO: support different multipliers from args
         neutral_element = transform(
             args, lambda t: t.neutral_element if isinstance(t, PaddedTensor) else None
-        )[0]  # TODO: support different neural element
+        )[
+            0
+        ]  # TODO: support different neural element
 
         out = PaddedTensor(
             out,
