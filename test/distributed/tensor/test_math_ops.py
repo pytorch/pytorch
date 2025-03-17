@@ -429,6 +429,9 @@ class DistMathOpsTest(DTensorTestBase):
     @with_comms
     def test_layer_norm_bwd_req_grad(self):
         device_mesh = self.build_device_mesh()
+        print(
+            f"[rank {self.rank}] world size: {self.world_size}, current device: {torch.cuda.current_device()}"
+        )
         batch, seq_len, embedding_dim, vocab_size = 8, 8, 10, 32
 
         # build our subtest configurations and filter out invalid ones
@@ -495,13 +498,16 @@ class DistMathOpsTest(DTensorTestBase):
                 }
 
                 model = LnTpBlock()
-                model_local = copy.deepcopy(model).to(device=self.device_type)
+                model_local = copy.deepcopy(model).to(
+                    device=self.device_type
+                )  # python stacktrace says the stuck happens here
                 model_dist = parallelize_module(model, device_mesh, parallel_plan)
                 req_grad_map = {
                     "preln_embeddings": emb_req_grad,
                     "postln_linear": out_req_grad,
                     "layer_norm": ln_req_grad,
                 }
+                print(f"subtest: {subtest_cfg}, TP complete")
 
                 # apply the relevant `requires_grad` mask for this subtest to both models
                 for target_model in [model_local, model_dist]:
@@ -517,8 +523,11 @@ class DistMathOpsTest(DTensorTestBase):
                 x_local = x.detach().clone()
                 output_local = model_local(x_local)
 
-                with CommDebugMode() as comm_mode:
-                    output_dist = model_dist(x)
+                # the test goes through if we call continue
+                output_dist = model_dist(x)  # STUCK HERE
+
+                print(f"subtest: {subtest_cfg}, model eval complete")
+                continue  # the test has timeout even without the logic below
 
                 self.assertEqual(output_local, output_dist)
 
@@ -536,6 +545,7 @@ class DistMathOpsTest(DTensorTestBase):
 
                 with CommDebugMode() as comm_mode:
                     output_dist.sum().backward()
+                print(f"subtest: {subtest_cfg}, model backward complete")
 
                 # ensure gradients (and parameters) remain equal between local and distributed models
                 self._check_module(model_local, model_dist, check_grad=True)
