@@ -68,7 +68,7 @@ def load(
     costs).
 
     Each rank will try to read the least amount of data necessary
-    to fullfill the requested `state_dict`. When loading :class:`ShardedTensor`
+    to fulfill the requested `state_dict`. When loading :class:`ShardedTensor`
     or :class:`DTensor` instances, each rank only reads data for their local shards.
 
     For each ``Stateful`` object (having both a ``state_dict`` and a ``load_state_dict``),
@@ -125,7 +125,9 @@ def load(
         >>> my_model = MyModule()
         >>> optimizer = Adagrad(my_model.parameters())
         >>> model_state_dict = my_model.state_dict()
-        >>> fs_storage_reader = torch.distributed.checkpoint.FileSystemReader("/checkpoint/1")
+        >>> fs_storage_reader = torch.distributed.checkpoint.FileSystemReader(
+        ...     "/checkpoint/1"
+        ... )
 
         >>> torch.distributed.checkpoint.load_state_dict(
         >>>     state_dict=model_state_dict,
@@ -277,7 +279,7 @@ def _load_state_dict_from_keys(
         Rank 0 is assumed to be the coordinator rank.
 
     Args:
-        keys (Optional[Union[Set[str], str]]):
+        keys (Optional[Union[set[str], str]]):
             Loads any key specified in this set. If no keys are specified, the entire checkpoint
             is loaded.
         checkpoint_id (Union[str, os.PathLike, None]):

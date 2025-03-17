@@ -203,6 +203,15 @@ class InPlaceCompilationTests(TestCase):
         with self.assertRaises(AttributeError):
             opt_mod(x)
 
+    def test_torch_script_compilation(self):
+        @torch.jit.script
+        def fn(x: torch.Tensor) -> torch.Tensor:
+            return x
+
+        a = torch.randn(1, 1)
+        out = torch.compile(fn)(a)
+        self.assertEqual(out, a)
+
 
 # The private variants of the below functions are extensively tested
 # So as long as the signatures match we're good

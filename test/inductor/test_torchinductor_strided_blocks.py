@@ -54,6 +54,8 @@ def run_and_compare(
     expected_num_programs: int = 1,
     expected_num_triton_kernels: int = 1,
     config_patches: Optional[dict] = None,
+    rtol: Optional[float] = None,
+    atol: Optional[float] = None,
 ):
     """
     Runs the module through Inductor, comparing to eager reference.
@@ -75,7 +77,9 @@ def run_and_compare(
     ref_tensors = flatten_tensors(func(*args))
     actual_tensors = flatten_tensors(result)
     for ref, actual in zip(ref_tensors, actual_tensors):
-        self.assertTrue(torch.allclose(ref, actual))
+        # Don't clobber the default tolerance values
+        tol = {t: v for t, v in {"rtol": rtol, "atol": atol}.items() if v is not None}
+        self.assertTrue(torch.allclose(ref, actual, **tol))
 
     def count_code(substr: str, expected: Optional[int]):
         count = sum(prog.count(substr) for prog in code)
@@ -924,6 +928,30 @@ class CommonTemplate:
         # Check for 3D tiling
         self.assertIn("ZBLOCK", code)
 
+    # block_ptr advancements should also be deferrered conditional
+    # on the associated buffer not being removed
+    # in this case the bernoulli operation is fused with the following sum
+    # so an output buffer is not needed to store the immediate result of the
+    # bernoulli operation
+    # TODO: fails for triton CPU "Failed to convert to LLVM IR"
+    @test_torchinductor.xfail_if_triton_cpu
+    def test_removed_buffers(self):
+        from torch.ops import aten
+
+        def fn(a):
+            return aten.bernoulli(a).sum() / torch.prod(torch.tensor(a.size()))
+
+        p = 0.3
+        result, code = run_and_compare(
+            self,
+            fn,
+            *[torch.ones(200, 200, device=self.device) * p],
+            expected_num_triton_kernels=2,
+            expected_num_block_pointers=3,
+            atol=p * 0.06,
+            rtol=0.06,
+        )
+
 
 @unittest.skipIf(not TRITON_HAS_CPU, "requires triton CPU backend")
 @config.patch(cpu_backend="triton")
@@ -932,7 +960,12 @@ class TritonBlockPointerTestCPU(BlockPointerTestBase):
     device = "cpu"
 
 
-test_torchinductor.copy_tests(CommonTemplate, TritonBlockPointerTestCPU, "cpu")
+test_torchinductor.copy_tests(
+    CommonTemplate,
+    TritonBlockPointerTestCPU,
+    "cpu",
+    xfail_prop="_expected_failure_triton_cpu",
+)
 
 
 @unittest.skipIf(not HAS_GPU, "requires triton GPU backend")

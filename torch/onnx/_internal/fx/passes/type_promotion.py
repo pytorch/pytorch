@@ -280,9 +280,9 @@ class ReductionTypePromotionRule(TypePromotionRule):
     def preview_type_promotion(
         self, args: tuple, kwargs: dict
     ) -> TypePromotionSnapshot:
-        assert (
-            len(args) >= 1
-        ), f"Reduction op torch.ops.{self.namespace}.{self.op_name} expects at least one argument"
+        assert len(args) >= 1, (
+            f"Reduction op torch.ops.{self.namespace}.{self.op_name} expects at least one argument"
+        )
         arg = args[0]
         assert isinstance(arg, torch.Tensor), f"{type(arg)=} is not torch.Tensor"
         dtype: torch.dtype | None = kwargs.get("dtype", None)
@@ -319,9 +319,9 @@ class AllOrAnyReductionTypePromotionRule(ReductionTypePromotionRule):
     def preview_type_promotion(
         self, args: tuple, kwargs: dict
     ) -> TypePromotionSnapshot:
-        assert (
-            len(args) >= 1
-        ), f"Reduction op torch.ops.{self.namespace}.{self.op_name} expects at least one argument"
+        assert len(args) >= 1, (
+            f"Reduction op torch.ops.{self.namespace}.{self.op_name} expects at least one argument"
+        )
         arg = args[0]
         assert isinstance(arg, torch.Tensor), f"{type(arg)=} is not torch.Tensor"
         computation_dtype = torch.bool
@@ -344,9 +344,9 @@ class SumLikeReductionTypePromotionRule(ReductionTypePromotionRule):
     def preview_type_promotion(
         self, args: tuple, kwargs: dict
     ) -> TypePromotionSnapshot:
-        assert (
-            len(args) >= 1
-        ), f"Reduction op torch.ops.{self.namespace}.{self.op_name} expects at least one argument"
+        assert len(args) >= 1, (
+            f"Reduction op torch.ops.{self.namespace}.{self.op_name} expects at least one argument"
+        )
         arg = args[0]
         assert isinstance(arg, torch.Tensor), f"{type(arg)=} is not torch.Tensor"
         dtype: torch.dtype | None = kwargs.get("dtype", None)
@@ -1319,17 +1319,17 @@ def find_compatible_op_overload(
     op_trace_dispatch_mode = _OpTraceDispatchMode()
     with op_trace_dispatch_mode:
         op(*args, **kwargs)
-    assert (
-        len(op_trace_dispatch_mode.traced_ops) >= 1
-    ), "Expected at least 1 traced op, got 0"
+    assert len(op_trace_dispatch_mode.traced_ops) >= 1, (
+        "Expected at least 1 traced op, got 0"
+    )
 
     new_op_overload = op_trace_dispatch_mode.traced_ops[0]
-    assert isinstance(
-        new_op_overload, torch._ops.OpOverload
-    ), f"Expected OpOverload, got {type(new_op_overload)}"
-    assert (
-        new_op_overload.overloadpacket == op
-    ), f"Expected same OpOverload packet, got {new_op_overload.overloadpacket} != {op}"
+    assert isinstance(new_op_overload, torch._ops.OpOverload), (
+        f"Expected OpOverload, got {type(new_op_overload)}"
+    )
+    assert new_op_overload.overloadpacket == op, (
+        f"Expected same OpOverload packet, got {new_op_overload.overloadpacket} != {op}"
+    )
 
     return new_op_overload
 
@@ -1398,9 +1398,9 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
         assert node_val is not None, f"Node {node} node.meta['val'] is not set."
         args, kwargs = self.fetch_args_kwargs_from_env(node)
         target = node.target
-        assert isinstance(
-            target, torch._ops.OpOverload
-        ), f"Expected OpOverload, got {type(target)}"
+        assert isinstance(target, torch._ops.OpOverload), (
+            f"Expected OpOverload, got {type(target)}"
+        )
         node.target = find_compatible_op_overload(target.overloadpacket, args, kwargs)
 
         new_node_val = self._run_node_and_set_meta(node)

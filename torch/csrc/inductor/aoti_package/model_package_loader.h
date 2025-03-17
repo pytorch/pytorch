@@ -7,10 +7,10 @@
 namespace torch::inductor {
 class TORCH_API AOTIModelPackageLoader {
  public:
-  AOTIModelPackageLoader(const std::string& model_package_path);
   AOTIModelPackageLoader(
       const std::string& model_package_path,
-      const std::string& model_name);
+      const std::string& model_name = "model",
+      const bool run_single_threaded = false);
   ~AOTIModelPackageLoader();
 
   AOTIModelContainerRunner* get_runner();
