@@ -1118,11 +1118,11 @@ at::Tensor PackedLinearWeightsACL::apply_impl(
     int64_t output_zero_point) {
   const int64_t dim = input.dim();
   TORCH_CHECK(
-      dim != 0, "qlinear (ONEDNN): input dim should be at least 1, but got 0");
+      dim != 0, "qlinear (ACL): input dim should be at least 1, but got 0");
   TORCH_CHECK(
       input.scalar_type() == c10::ScalarType::QUInt8 ||
           input.scalar_type() == c10::ScalarType::QInt8,
-      "qlinear (ONEDNN): data type of input should be QUInt8 or QInt8.");
+      "qlinear (ACL): data type of input should be QUInt8 or QInt8.");
 
   auto input_contig = input.expect_contiguous();
 

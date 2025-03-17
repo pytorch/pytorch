@@ -713,7 +713,7 @@ at::Tensor PackedLinearWeightsACL::apply_dynamic_impl(
       "The dimension of input tensor should be larger than or equal to 2");
   TORCH_CHECK(
       input.scalar_type() == c10::ScalarType::Float,
-      "qlinear_dynamic (ONEDNN): data type of input should be float.");
+      "qlinear_dynamic (ACL): data type of input should be float.");
 
   auto input_contig = input.contiguous();
   const int64_t dim = input.dim();
@@ -774,7 +774,7 @@ at::Tensor PackedLinearWeightsACL::apply_dynamic_impl(
     acl_gemm->quant.run();
 
     // allocation for fp32 out tensor
-    at::Tensor output = at::empty({m, n_}, input.options().dtype(at::kFloat));
+    auto output = at::empty({m, n_}, input.options().dtype(at::kFloat));
     if (output.numel() == 0)
       return output;
 
@@ -790,7 +790,7 @@ at::Tensor PackedLinearWeightsACL::apply_dynamic_impl(
     acl_gemm->gemm.run();
 
     if (acl_gemm->relu.has_value()) {
-      acl_gemm->relu.value().run();
+      acl_gemm->relu->run();
     }
 
     // this will not free memory, it will just tell ACL that we're no longer

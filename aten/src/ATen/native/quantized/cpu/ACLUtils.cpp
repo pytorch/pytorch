@@ -36,8 +36,8 @@ QuantMatmul::QuantMatmul(
         arm_compute::DataType::F32);
     bia_tensor_ = arm_compute::Tensor();
 
-    bia_tensor_.value().allocator()->init(bia_tensor_info);
-    bia_tensor_.value().allocator()->import_memory(bias_ptr.value());
+    bia_tensor_->allocator()->init(bia_tensor_info);
+    bia_tensor_->allocator()->import_memory(bias_ptr.value());
   }
   const bool fuse_relu =
       std::get<static_cast<int>(QuantMatmulCacheKeyIndex::FUSE_RELU)>(key);
@@ -52,7 +52,7 @@ QuantMatmul::~QuantMatmul() {
   // using the pointer
   wei_q_tensor_.allocator()->free();
   if (bia_tensor_.has_value()) {
-    bia_tensor_.value().allocator()->free();
+    bia_tensor_->allocator()->free();
   }
 }
 
@@ -147,7 +147,7 @@ void DynamicQuantMatmul::configure() {
       &dst_tensor,
       gemm_info_);
   if (relu.has_value()) {
-    relu.value().configure(&dst_tensor, &dst_tensor, relu_info_.value());
+    relu->configure(&dst_tensor, &dst_tensor, relu_info_.value());
   }
 }
 
@@ -348,8 +348,8 @@ PackedLinearWeightsACL::PackedLinearWeightsACL(
   auto w = *(weight_.get());
   k_ = w.get_dim(0);
   n_ = w.get_dim(1);
-  wei_zero_point_ = orig_weight_.q_zero_point();
-  wei_scale_ = orig_weight_.q_scale();
+  weight_zero_point_ = orig_weight_.q_zero_point();
+  weight_scale_ = orig_weight_.q_scale();
 }
 
 #endif // AT_MKLDNN_ACL_ENABLED()
