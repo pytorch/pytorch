@@ -1,4 +1,4 @@
-sphinx==7.4.7
+sphinx==5.3.0
 #Description: This is used to generate PyTorch docs
 #Pinned versions: 8.1.0
 -e git+https://github.com/pytorch/pytorch_sphinx_theme.git@pytorch_sphinx_theme2#egg=pytorch_sphinx_theme2
@@ -27,7 +27,7 @@ exhale==0.2.3
 #Description: This is used to generate PyTorch C++ docs
 #Pinned versions: 0.2.3
 
-docutils==0.21.2
+docutils==0.16
 #Description: This is used to generate PyTorch C++ docs
 #Pinned versions: 0.16
 
