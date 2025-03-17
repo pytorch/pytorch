@@ -657,11 +657,10 @@ def foreach_copy_run_and_map_input_device(fake_mode, func, *args, **kwargs):
     assert tensor_lists
     out_fake = []
     for i, meta_t in enumerate(out_meta):
-        new_list = tuple([tl[i] for tl in tensor_lists] + [args[-1]])
-        _, new_kwargs = normalize_function(
-            func, args=new_list, kwargs=kwargs, normalize_to_only_use_kwargs=True
-        )
-        device = new_kwargs["input"][0].device
+        device = None
+        for arg in [tl[i] for tl in tensor_lists]:
+            device = arg.device
+            break
         out_fake.append(
             fake_mode.fake_tensor_converter.from_meta_and_device(
                 fake_mode, meta_t, device
