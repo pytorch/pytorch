@@ -1267,6 +1267,27 @@ graph():
         )
         torch.export.export(M(), args)
 
+    def test_numpy(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                a = x.numpy()
+                return x + x.numpy().sum()
+
+        foo = Foo()
+        foo(torch.randn(10, 10))
+
+        non_strict_graph = (
+            export(foo, (torch.randn(10, 10),), strict=False)
+            .run_decompositions({})
+            .graph
+        )
+        strict_graph = (
+            export(foo, (torch.randn(10, 10),), strict=True)
+            .run_decompositions({})
+            .graph
+        )
+        self.assertEqual(str(non_strict_graph), str(strict_graph))
+
     def test_cond_int_closure(self):
         class M(torch.nn.Module):
             def __init__(self):

@@ -79,8 +79,8 @@ def _unlift_inputs_as_getattr(
         else:
             with gm.graph.inserting_after(input_node):
                 # It is fine to ignore this warning because
-                # it is guaranteed that we will populate this 
-                # attr later. 
+                # it is guaranteed that we will populate this
+                # attr later.
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore")
                     getattr_node = gm.graph.get_attr(lifted_node)

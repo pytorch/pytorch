@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import collections
 import logging
-import warnings
 from typing import Any, Union
 
 import torch
@@ -18,6 +17,7 @@ from torch.export.exported_program import (
     TensorArgument,
 )
 from torch.fx.graph_module import _get_attr
+
 
 log = logging.getLogger(__name__)
 
