@@ -14139,7 +14139,7 @@ if RUN_GPU:
 
             if not config.cpp_wrapper:
                 FileCheck().check("def partition_0(args):").check(
-                    "(buf0, buf1, arg0_1, arg1_1) = self.partitions[0](partition0_args)"
+                    "self.partitions[0](partition0_args)"
                 ).check("recursively_apply_fns = runner.recursively_apply_fns").run(
                     code[0]
                 )
