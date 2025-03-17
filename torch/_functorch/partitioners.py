@@ -7,14 +7,19 @@ import logging
 import math
 import operator
 import os
+import os.path
 from collections import defaultdict
 from dataclasses import dataclass, replace
 from typing import Callable, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch._inductor.inductor_prims
+import torch.distributed
 import torch.fx as fx
 import torch.utils._pytree as pytree
+from torch._functorch._activation_checkpointing.ac_logging_utils import (
+    create_structured_trace_for_min_cut_info,
+)
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
@@ -37,7 +42,7 @@ from ._activation_checkpointing.knapsack import (
 )
 from ._activation_checkpointing.knapsack_evaluator import KnapsackEvaluator
 from ._aot_autograd.logging_utils import get_aot_graph_name
-from ._aot_autograd.utils import is_with_effects
+from ._aot_autograd.utils import get_cuda_generator_meta_val, is_with_effects
 from .compile_utils import fx_graph_cse, get_aten_target
 
 
@@ -575,9 +580,7 @@ def reordering_to_mimic_autograd_engine(gm: fx.GraphModule) -> fx.GraphModule:
     for node in gm.graph.find_nodes(op="placeholder"):
         env[node] = new_graph.node_copy(node, lambda x: env[x])
 
-    order = {}
-    for idx, node in enumerate(gm.graph.nodes):
-        order[node] = idx
+    order = {node: idx for idx, node in enumerate(gm.graph.nodes)}
 
     def insert_node_in_graph(node):
         cur_nodes = [node]
@@ -619,6 +622,99 @@ def reordering_to_mimic_autograd_engine(gm: fx.GraphModule) -> fx.GraphModule:
     return new_gm
 
 
+def apply_graphsafe_rng_functionalization(
+    fw_module: torch.fx.GraphModule,
+    bw_module: torch.fx.GraphModule,
+    fw_node: torch.fx.Node,
+    bw_node: torch.fx.Node,
+    device: torch.device,
+    rng_count: int,
+    last_fwd_input: torch.fx.Node,
+    last_bwd_input: torch.fx.Node,
+):
+    """
+    Note [CUDA Graph Safe RNG Functionalization]
+
+    CUDA Graph capture doesn't work with get_rng_state and set_rng_state because these functions operate on CPU values,
+    while CUDA Graph RNG capture uses on-device CUDA tensors. To solve this, we use graphsafe_set_state with a
+    CUDA Generator registered to the CUDA Graph before capture begins. graphsafe_set_state updates the generator's pointer
+    to reference a different GeneratorImpl, ensuring subsequent calls are correctly forwarded to the desired generator
+    (and its cuda-tensor RNG state during graph capture).
+
+    For each RNG operation's forward/backward pair:
+
+    - We create two generators initialized with identical values
+    - Each forward and backward call advances its respective generator equally
+    - This keeps generators synchronized so forward and backward operations use matching RNG values
+
+    When forward is called multiple times before backward (causing desynchronization):
+
+    - We save the forward RNG state
+    - We update the backward Generator's state before executing backward
+
+    Before each CUDA Graph replay, replay_prologue updates captured RNG pointers with current states, ensuring backward Generator
+    changes are reflected during replay.
+
+    This function modifies both forward and backward computation graphs by:
+
+    Creating RNG state placeholders for both passes
+    Updating the forward node to use graph-safe RNG state
+    Updating the backward node to use graph-safe RNG state
+
+    For more details: https://github.com/pytorch/pytorch/issues/113541
+    """
+    device_idx = device.index
+    assert device_idx is not None
+    fw_graph = fw_module.graph
+    bw_graph = bw_module.graph
+    graphsafe_run_with_rng_state = torch._prims.rng_prims.graphsafe_run_with_rng_state
+
+    # Handle forward pass
+
+    # Note: [Generator arguments in AOTDispatcher]
+    # Generator arguments in AOTDispatcher are added to support graphsafe rng
+    # functionalization. See note above [CUDA Graph Safe RNG Functionalization]
+    with fw_module.graph.inserting_after(last_fwd_input):
+        fwd_rng_state = fw_module.graph.placeholder(f"fwd_rng_state_{rng_count}")
+        fwd_rng_state.meta["val"] = get_cuda_generator_meta_val(device_idx)
+        last_fwd_input = fwd_rng_state
+
+    # Handle backward pass
+    with bw_module.graph.inserting_after(last_bwd_input):
+        bwd_rng_state = bw_module.graph.placeholder(f"bwd_rng_state_{rng_count}")
+        # as above, clone so that meta val generator will not contain tensors
+        bwd_rng_state.meta["val"] = get_cuda_generator_meta_val(device_idx)
+        last_bwd_input = bwd_rng_state
+
+    # Update forward node
+    fw_kwargs = dict(fw_node.kwargs)
+    fw_kwargs["rng_state"] = fwd_rng_state
+    with fw_module.graph.inserting_after(fw_node):
+        functional_fw_node = fw_graph.create_node(
+            "call_function",
+            graphsafe_run_with_rng_state,
+            args=(fw_node.target, *fw_node.args),  # type: ignore[arg-type]
+            kwargs=fw_kwargs,
+        )
+    fw_node.replace_all_uses_with(functional_fw_node)
+    fw_graph.erase_node(fw_node)
+
+    # Update backward node
+    bwd_kwargs = dict(bw_node.kwargs)
+    bwd_kwargs["rng_state"] = bwd_rng_state
+    with bw_graph.inserting_before(bw_node):
+        rng_output = bw_graph.create_node(
+            "call_function",
+            graphsafe_run_with_rng_state,
+            args=(bw_node.target, *bw_node.args),  # type: ignore[arg-type]
+            kwargs=bwd_kwargs,
+        )
+        bw_node.replace_all_uses_with(rng_output)
+        bw_graph.erase_node(bw_node)
+
+    return last_fwd_input, last_bwd_input
+
+
 def functionalize_rng_ops(
     joint_module: fx.GraphModule,
     fw_module: fx.GraphModule,
@@ -657,7 +753,7 @@ def functionalize_rng_ops(
                 random_nodes[node.name] = node
         return random_nodes
 
-    def get_device(node):
+    def get_device(node) -> Optional[torch.device]:
         """
         Check the example value of the node outputs to find the device type.
         """
@@ -671,12 +767,12 @@ def functionalize_rng_ops(
         for candidate in candidates:
             if isinstance(candidate, torch.Tensor):
                 if candidate.device.type == "cuda":
-                    return "cuda"
+                    return candidate.device
 
-        return "cpu"
+        return torch.device("cpu")
 
-    def get_sample_rng_state(device):
-        if device == "cuda":
+    def get_sample_rng_state(device: Optional[torch.device]):
+        if device is not None and device.type == "cuda":
             return torch.cuda.get_rng_state()
         return torch.get_rng_state()
 
@@ -698,6 +794,7 @@ def functionalize_rng_ops(
 
     run_and_save_rng = torch._prims.rng_prims.run_and_save_rng_state
     run_with_rng_state = torch._prims.rng_prims.run_with_rng_state
+
     bw_tangent_start_node = None
     for node in bw_module.graph.find_nodes(op="placeholder"):
         if "tangent" in node.name:
@@ -709,71 +806,131 @@ def functionalize_rng_ops(
         )
 
     fw_rng_state_outputs = []
-    for base_node, node_pair in recomputable_rng_ops_map.items():
+
+    last_fwd_input = next(reversed(fw_module.graph.find_nodes(op="placeholder")))
+    last_bwd_input = next(reversed(bw_module.graph.find_nodes(op="placeholder")))
+
+    devices = OrderedSet(
+        get_device(node_pair["fwd"]) for node_pair in recomputable_rng_ops_map.values()
+    )
+    devices.discard(torch.device("cpu"))
+    # multiple cuda devices wont work with cudagraphs anyway,
+    # fallback to non graphsafe rng checkpointing
+    multi_cuda_devices = len(devices) > 1
+
+    # this changes numerics, so if fallback_random is set we will not use it
+    ind_config = torch._inductor.config
+    use_rng_graphsafe_rng_functionalization = (
+        config.graphsafe_rng_functionalization
+        and not multi_cuda_devices
+        and (
+            not ind_config.fallback_random
+            or ind_config.test_configs.graphsafe_rng_func_ignores_fallback_random
+        )
+    )
+
+    for rng_count, (base_node, node_pair) in enumerate(
+        recomputable_rng_ops_map.items()
+    ):
         # Step 2 - Modify the fwd pass such that
         fw_node = node_pair["fwd"]
         bw_node = node_pair["bwd"]
+        device = get_device(fw_node)
+
         fw_graph = fw_module.graph
-        with fw_graph.inserting_before(fw_node):
-            functional_fw_node = fw_graph.create_node(
-                "call_function",
-                run_and_save_rng,
-                args=(fw_node.target, *fw_node.args),
-                kwargs=fw_node.kwargs,
-            )
-            state = fw_graph.create_node(
-                "call_function",
-                operator.getitem,
-                args=(functional_fw_node, 0),
-                kwargs={},
-            )
-            rng_output = fw_graph.create_node(
-                "call_function",
-                operator.getitem,
-                args=(
-                    functional_fw_node,
-                    1,
-                ),
-                kwargs={},
-            )
-            fw_node.replace_all_uses_with(rng_output)
-            fw_graph.erase_node(fw_node)
-            fw_rng_state_outputs.append(state)
-
-        # Step 3 - Modify the bwd pass such that
         bw_graph = bw_module.graph
-        with bw_graph.inserting_before(bw_tangent_start_node):
-            state_name = f"rng_state_output_{next(uid)}"
-            bw_rng_state_node = bw_graph.placeholder(state_name)
-            bw_rng_state_node.meta["val"] = get_sample_rng_state(get_device(fw_node))
 
-        with bw_graph.inserting_before(bw_node):
-            rng_output = bw_graph.create_node(
-                "call_function",
-                run_with_rng_state,
-                args=(bw_rng_state_node, bw_node.target, *bw_node.args),
-                kwargs=bw_node.kwargs,
+        if (
+            use_rng_graphsafe_rng_functionalization
+            and device is not None
+            and device.type == "cuda"
+        ):
+            last_fwd_input, last_bwd_input = apply_graphsafe_rng_functionalization(
+                fw_module,
+                bw_module,
+                fw_node,
+                bw_node,
+                device,
+                rng_count,
+                last_fwd_input,
+                last_bwd_input,
             )
+        else:
+            with fw_graph.inserting_before(fw_node):
+                functional_fw_node = fw_graph.create_node(
+                    "call_function",
+                    run_and_save_rng,
+                    args=(fw_node.target, *fw_node.args),
+                    kwargs=fw_node.kwargs,
+                )
+                state = fw_graph.create_node(
+                    "call_function",
+                    operator.getitem,
+                    args=(functional_fw_node, 0),
+                    kwargs={},
+                )
+                rng_output = fw_graph.create_node(
+                    "call_function",
+                    operator.getitem,
+                    args=(
+                        functional_fw_node,
+                        1,
+                    ),
+                    kwargs={},
+                )
+                fw_node.replace_all_uses_with(rng_output)
+                fw_graph.erase_node(fw_node)
+                fw_rng_state_outputs.append(state)
 
-            bw_node.replace_all_uses_with(rng_output)
-            bw_graph.erase_node(bw_node)
+            # Step 3 - Modify the bwd pass such that
+            with bw_graph.inserting_before(bw_tangent_start_node):
+                state_name = f"rng_state_output_{next(uid)}"
+                bw_rng_state_node = bw_graph.placeholder(state_name)
+                bw_rng_state_node.meta["val"] = get_sample_rng_state(device)
+
+            with bw_graph.inserting_before(bw_node):
+                rng_output = bw_graph.create_node(
+                    "call_function",
+                    run_with_rng_state,
+                    args=(bw_rng_state_node, bw_node.target, *bw_node.args),
+                    kwargs=bw_node.kwargs,
+                )
+
+                bw_node.replace_all_uses_with(rng_output)
+                bw_graph.erase_node(bw_node)
 
     # Add the rng states in the output of the fwd graph. AOT Autograd assumes
     # that symints are at the end of forward graph outputs. So, insert the new
     # rng states accordingly.
-    fw_output_node = next(iter(fw_module.graph.find_nodes(op="output")))
-    fw_outputs = fw_output_node.args[0]
-    sym_node_start_idx = len(fw_outputs) - num_sym_nodes
-    outputs = (
-        fw_outputs[:sym_node_start_idx]
-        + tuple(fw_rng_state_outputs)
-        + fw_outputs[sym_node_start_idx:]
-    )
-    fw_module.graph.output(outputs)
-    fw_module.graph.erase_node(fw_output_node)
+    if fw_rng_state_outputs:
+        fw_output_node = next(iter(fw_module.graph.find_nodes(op="output")))
+        fw_outputs = fw_output_node.args[0]
+        sym_node_start_idx = len(fw_outputs) - num_sym_nodes
+        outputs = (
+            fw_outputs[:sym_node_start_idx]
+            + tuple(fw_rng_state_outputs)
+            + fw_outputs[sym_node_start_idx:]
+        )
+        fw_module.graph.output(outputs)
+        fw_module.graph.erase_node(fw_output_node)
     fw_module.recompile()
     bw_module.recompile()
     return fw_module, bw_module
+
+
+def force_save_collectives(joint_module: fx.GraphModule) -> None:
+    """
+    By default, the partitioner is not allowed to recompute collectives
+    unless they come from a user-annotated AC region.
+    See Note [Recomputing collectives in the partitioner]
+    """
+    for node in joint_module.graph.nodes:
+        if (
+            isinstance(node.target, torch._ops.OpOverload)
+            and node.target.namespace == "_c10d_functional"
+            and not must_recompute(node)
+        ):
+            node.meta["recompute"] = CheckpointPolicy.MUST_SAVE
 
 
 def cleanup_recompute_tags(joint_module: fx.GraphModule) -> fx.GraphModule:
@@ -990,7 +1147,14 @@ def solve_min_cut(
         if op_types.is_view(node):
             return False
         if node in dont_ban:
-            return False
+            # collectives are *always* banned from recompute, overriding `dont_ban`
+            # (in particular, the activation memory budget logic is not allowed to recompute collectives)
+            is_collective = (
+                isinstance(node.target, torch._ops.OpOverload)
+                and node.target.namespace == "_c10d_functional"
+            )
+            if config.unsafe_allow_optimization_of_collectives or not is_collective:
+                return False
         # This bans recomputation of the node unless we've been forced not to by
         # user annotation
         if must_recompute(node):
@@ -998,7 +1162,6 @@ def solve_min_cut(
 
         if "val" in node.meta and isinstance(node.meta["val"], torch.SymFloat):
             return False
-
         banned_nodes.add(node)
         # A node will only ever be recomputed if there is a path from an
         # ancestor of this node to the backwards path through this node that
@@ -1447,20 +1610,24 @@ def _optimize_runtime_with_given_memory(
 from torch.utils._mode_utils import no_dispatch
 
 
+# replace symbols in size and strides with their hints without guarding.
+def _remove_symbols_without_guarding(x: torch.Tensor, fallback: int) -> torch.Tensor:
+    shape = list(x.shape)
+
+    def realize_symbol(d):
+        return hint_int(d, fallback=fallback)
+
+    shape = [realize_symbol(s) for s in shape]
+    stride = [realize_symbol(s) for s in x.stride()]
+    return x.new_empty_strided(shape, stride=stride)
+
+
 def estimate_runtime(node):
     RUNTIME_MODE = config.activation_memory_budget_runtime_estimator
 
     def materialize_arg(x):
         if isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.Tensor):
-            shape = list(x.meta["val"].shape)
-
-            def realize_symbol(d):
-                return hint_int(d, fallback=4096)
-
-            shape = [realize_symbol(s) for s in shape]
-            return x.meta["val"].new_empty_strided(
-                shape, stride=x.meta["tensor_meta"].stride
-            )
+            return _remove_symbols_without_guarding(x.meta["val"], fallback=4096)
         elif isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.SymInt):
             return hint_int(x.meta["val"], fallback=4096)
         elif isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.SymFloat):
@@ -1623,44 +1790,6 @@ def choose_saved_values_set(
                 node_info,
                 all_recomputable_banned_nodes,
             )
-            if AOT_PARTITIONER_DEBUG:
-                max_runtime = max(
-                    runtimes_banned_nodes
-                )  # For normalizing runtimes in logs
-                input_summary = [
-                    f"\n\t\t\t{index}, {memory}, {runtime / max_runtime}, {node.op}, {node.target}, {node.meta}, {node.args}"
-                    for index, (memory, runtime, node) in enumerate(
-                        zip(
-                            memories_banned_nodes,
-                            runtimes_banned_nodes,
-                            all_recomputable_banned_nodes,
-                        )
-                    )
-                ]
-                joint_graph_nodes = [node.name for node in joint_graph.nodes]
-                joint_graph_edges = [
-                    (inp.name, node.name)
-                    for node in joint_graph.nodes
-                    for inp in node.all_input_nodes
-                ]
-                knapsack_summary = f"""
-Activation Checkpointing - Knapsack Problem Summary:
-    Input:
-        Solver: {config.activation_memory_budget_solver}
-        Max Memory: {max(config.activation_memory_budget, 0)}
-        Graph Nodes: {joint_graph_nodes}
-        Graph Edges: {joint_graph_edges}
-        (Index, Memory, Runtime, Node.Op, Node.Target, Metadata): {"".join(input_summary)}
-    Output:
-        Expected Runtime: {expected_runtime}
-        Saved Nodes: {saved_node_idxs}
-        Recomputable Nodes: {recomputable_node_idxs}
-            """
-                torch._logging.trace_structured(
-                    name="artifact",
-                    payload_fn=lambda: knapsack_summary,
-                )
-                log.info(knapsack_summary)
         dont_ban: OrderedSet[fx.Node] = OrderedSet()
         for idx in recomputable_node_idxs:
             # if idx in all_recomputable_banned_nodes:
@@ -1677,21 +1806,47 @@ Activation Checkpointing - Knapsack Problem Summary:
             aggressive_options,
             dont_ban,
         )
+        if AOT_PARTITIONER_DEBUG:
+            create_structured_trace_for_min_cut_info(
+                joint_graph=joint_graph,
+                all_recomputable_banned_nodes=all_recomputable_banned_nodes,
+                saved_node_idxs=saved_node_idxs,
+                recomputable_node_idxs=recomputable_node_idxs,
+                expected_runtime=expected_runtime,
+                memories_banned_nodes=memories_banned_nodes,
+                runtimes_banned_nodes=runtimes_banned_nodes,
+                min_cut_saved_values=saved_values,
+            )
         return saved_values, expected_runtime
 
     if config.visualize_memory_budget_pareto:
-        options = []
-        for sweep_memory_budget in range(100, -1, -5):
+
+        def estimate_for_budget(b):
             saved_values, expected_runtime = get_saved_values_knapsack(
-                sweep_memory_budget / 100, node_info=node_info, joint_graph=joint_graph
+                b, node_info=node_info, joint_graph=joint_graph
             )
-            options.append(
-                (
-                    sweep_memory_budget,
-                    sum(runtimes_banned_nodes) - expected_runtime,
-                    get_mem_ratio(saved_values),
-                )
+            return (
+                b,
+                sum(runtimes_banned_nodes) - expected_runtime,
+                get_mem_ratio(saved_values),
             )
+
+        options = [estimate_for_budget(0.0), estimate_for_budget(1.0)]
+
+        if options[0][1:] != options[1][1:]:
+            bisects = [(options[0], options[1])]
+            while bisects:
+                lhs, rhs = bisects.pop()
+                if rhs[0] - lhs[0] < 1e-3:
+                    options.append(lhs)
+                    options.append(rhs)
+                    continue
+                mid = estimate_for_budget((lhs[0] + rhs[0]) / 2)
+                if mid[1:] != lhs[1:]:
+                    bisects.append((lhs, mid))
+                if mid[1:] != rhs[1:]:
+                    bisects.append((mid, rhs))
+        options.sort()
 
         import matplotlib.pyplot as plt
 
@@ -1705,7 +1860,7 @@ Activation Checkpointing - Knapsack Problem Summary:
         # Adding labels for each point
         for i, txt in enumerate(x_values):
             plt.annotate(
-                f"{txt:.2f}",
+                f"{txt:.4f}",
                 (txt, y_values[i]),
                 textcoords="offset points",
                 xytext=(0, 10),
@@ -1718,7 +1873,16 @@ Activation Checkpointing - Knapsack Problem Summary:
         plt.grid(True)
         fig = plt.gcf()
         plt.show()
-        fig_name = f"memory_budget_pareto_{get_aot_graph_name()}.png"
+        fig_dir = os.getcwd()
+        if config.memory_budget_pareto_dir is not None:
+            fig_dir = config.memory_budget_pareto_dir
+            os.makedirs(fig_dir, exist_ok=True)
+        rank_suffix = ""
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            rank_suffix = f"_rank_{torch.distributed.get_rank()}"
+        fig_name = os.path.join(
+            fig_dir, f"memory_budget_pareto{rank_suffix}_{get_aot_graph_name()}.svg"
+        )
         fig.savefig(fig_name)
         log.warning("Generated Pareto frontier curve at %s", fig_name)
 
@@ -1781,6 +1945,8 @@ def min_cut_rematerialization_partition(
     graph_has_recomputable_rng_ops = has_recomputable_rng_ops(joint_module)
     if graph_has_recomputable_ops:
         joint_module = cleanup_recompute_tags(joint_module)
+    if not config.unsafe_allow_optimization_of_collectives:
+        force_save_collectives(joint_module)
 
     def classify_nodes(joint_module):
         name_to_node = get_name_to_node(joint_module.graph)
@@ -1869,7 +2035,6 @@ def min_cut_rematerialization_partition(
         saved_sym_nodes=saved_sym_nodes,
         num_fwd_outputs=num_fwd_outputs,
     )
-
     if graph_has_recomputable_ops:
         if graph_has_recomputable_rng_ops:
             fw_module, bw_module = functionalize_rng_ops(

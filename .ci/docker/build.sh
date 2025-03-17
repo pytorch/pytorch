@@ -1,4 +1,8 @@
 #!/bin/bash
+# The purpose of this script is to:
+# 1. Extract the set of parameters to be used for a docker build based on the provided image name.
+# 2. Run docker build with the parameters found in step 1.
+# 3. Run the built image and print out the expected and actual versions of packages installed.
 
 set -ex
 
@@ -86,16 +90,20 @@ CMAKE_VERSION=3.18.5
 
 _UCX_COMMIT=7bb2722ff2187a0cad557ae4a6afa090569f83fb
 _UCC_COMMIT=20eae37090a4ce1b32bcce6144ccad0b49943e0b
+if [[ "$image" == *rocm* ]]; then
+  _UCX_COMMIT=cc312eaa4655c0cc5c2bcd796db938f90563bcf6
+  _UCC_COMMIT=0c0fc21559835044ab107199e334f7157d6a0d3d
+fi
 
 # It's annoying to rename jobs every time you want to rewrite a
 # configuration, so we hardcode everything here rather than do it
 # from scratch
 case "$image" in
-  pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9)
-    CUDA_VERSION=12.4.1
+  pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc11)
+    CUDA_VERSION=12.6.3
     CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=9
+    GCC_VERSION=11
     PROTOBUF=yes
     DB=yes
     VISION=yes
@@ -137,6 +145,65 @@ case "$image" in
     ;;
   pytorch-linux-focal-cuda12.4-cudnn9-py3.13-gcc9-inductor-benchmarks)
     CUDA_VERSION=12.4.1
+    CUDNN_VERSION=9
+    ANACONDA_PYTHON_VERSION=3.13
+    GCC_VERSION=9
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    KATEX=yes
+    UCX_COMMIT=${_UCX_COMMIT}
+    UCC_COMMIT=${_UCC_COMMIT}
+    CONDA_CMAKE=yes
+    TRITON=yes
+    INDUCTOR_BENCHMARKS=yes
+    ;;
+  pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc9)
+    CUDA_VERSION=12.6.3
+    CUDNN_VERSION=9
+    ANACONDA_PYTHON_VERSION=3.10
+    GCC_VERSION=9
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    KATEX=yes
+    UCX_COMMIT=${_UCX_COMMIT}
+    UCC_COMMIT=${_UCC_COMMIT}
+    CONDA_CMAKE=yes
+    TRITON=yes
+    ;;
+  pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc9-inductor-benchmarks)
+    CUDA_VERSION=12.6.3
+    CUDNN_VERSION=9
+    ANACONDA_PYTHON_VERSION=3.10
+    GCC_VERSION=9
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    KATEX=yes
+    UCX_COMMIT=${_UCX_COMMIT}
+    UCC_COMMIT=${_UCC_COMMIT}
+    CONDA_CMAKE=yes
+    TRITON=yes
+    INDUCTOR_BENCHMARKS=yes
+    ;;
+  pytorch-linux-focal-cuda12.6-cudnn9-py3.12-gcc9-inductor-benchmarks)
+    CUDA_VERSION=12.6.3
+    CUDNN_VERSION=9
+    ANACONDA_PYTHON_VERSION=3.12
+    GCC_VERSION=9
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    KATEX=yes
+    UCX_COMMIT=${_UCX_COMMIT}
+    UCC_COMMIT=${_UCC_COMMIT}
+    CONDA_CMAKE=yes
+    TRITON=yes
+    INDUCTOR_BENCHMARKS=yes
+    ;;
+  pytorch-linux-focal-cuda12.6-cudnn9-py3.13-gcc9-inductor-benchmarks)
+    CUDA_VERSION=12.6.3
     CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.13
     GCC_VERSION=9
@@ -206,7 +273,7 @@ case "$image" in
     ;;
   pytorch-linux-focal-rocm-n-1-py3)
     ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=9
+    GCC_VERSION=11
     PROTOBUF=yes
     DB=yes
     VISION=yes
@@ -214,10 +281,14 @@ case "$image" in
     NINJA_VERSION=1.9.0
     CONDA_CMAKE=yes
     TRITON=yes
+    KATEX=yes
+    UCX_COMMIT=${_UCX_COMMIT}
+    UCC_COMMIT=${_UCC_COMMIT}
+    INDUCTOR_BENCHMARKS=yes
     ;;
   pytorch-linux-focal-rocm-n-py3)
     ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=9
+    GCC_VERSION=11
     PROTOBUF=yes
     DB=yes
     VISION=yes
@@ -225,6 +296,10 @@ case "$image" in
     NINJA_VERSION=1.9.0
     CONDA_CMAKE=yes
     TRITON=yes
+    KATEX=yes
+    UCX_COMMIT=${_UCX_COMMIT}
+    UCC_COMMIT=${_UCC_COMMIT}
+    INDUCTOR_BENCHMARKS=yes
     ;;
   pytorch-linux-jammy-xpu-2024.0-py3)
     ANACONDA_PYTHON_VERSION=3.9
@@ -310,7 +385,7 @@ case "$image" in
     EXECUTORCH=yes
     ;;
   pytorch-linux-jammy-py3.12-halide)
-    CUDA_VERSION=12.4
+    CUDA_VERSION=12.6
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=11
     CONDA_CMAKE=yes
@@ -318,7 +393,7 @@ case "$image" in
     TRITON=yes
     ;;
   pytorch-linux-jammy-py3.12-triton-cpu)
-    CUDA_VERSION=12.4
+    CUDA_VERSION=12.6
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=11
     CONDA_CMAKE=yes

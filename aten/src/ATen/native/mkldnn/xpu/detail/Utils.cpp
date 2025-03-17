@@ -1,4 +1,9 @@
+#include <ATen/Context.h>
+#include <ATen/native/ConvUtils.h>
 #include <ATen/native/mkldnn/xpu/detail/Utils.h>
+
+#include <oneapi/dnnl/dnnl.hpp>
+#include <oneapi/dnnl/dnnl_common.hpp>
 
 namespace at::native::onednn {
 
@@ -93,10 +98,8 @@ dnnl::memory::data_type get_onednn_dtype_include_double(
 }
 
 bool is_supported_onednn_dtype(const at::Tensor& tensor) {
-  return get_onednn_dtype(tensor, /*allow_undef*/ true) ==
-          dnnl::memory::data_type::undef
-      ? false
-      : true;
+  return get_onednn_dtype_include_double(tensor) !=
+      dnnl::memory::data_type::undef;
 }
 
 dnnl::memory::dims get_onednn_dims(const at::Tensor& tensor) {
@@ -115,7 +118,10 @@ dnnl::memory::dims get_onednn_strides(const at::Tensor& tensor) {
 
 dnnl::memory::desc get_onednn_md(const at::Tensor& tensor) {
   Tensor t = tensor.sizes().empty() ? tensor.unsqueeze(0) : tensor;
-  return {get_onednn_dims(t), get_onednn_dtype(t), get_onednn_strides(t)};
+  return {
+      get_onednn_dims(t),
+      get_onednn_dtype_include_double(t),
+      get_onednn_strides(t)};
 }
 
 bool onednn_strides_check(const Tensor& src) {
@@ -207,7 +213,75 @@ bool is_broadcast(const at::Tensor& t) {
   return false;
 }
 
-bool is_onednn_matmul_strides(const at::Tensor& tensor, bool is_dst) {
+void undo_broadcast_on_batch(at::Tensor& m1, at::Tensor& m2) {
+  // oneDNN support one of src and wei broadcasted on batch dim
+  // tensor shape = [b, m, n]
+  constexpr int dim_b = 0;
+  constexpr int dim_m = 1;
+  constexpr int dim_n = 2;
+  auto only_broadcasted_on_batch =
+      [dim_b, dim_m, dim_n](const at::Tensor& tensor) {
+        auto tensor_dim = tensor.dim();
+        bool is_bmm = tensor_dim == 3;
+        if (!is_bmm)
+          return false;
+        bool broadcast_on_mn =
+            tensor.stride(dim_m) == 0 || tensor.stride(dim_n) == 0;
+        bool has_broadcast_on_batch =
+            tensor.stride(dim_b) == 0 && tensor.size(dim_b) > 1;
+        // We do not support broadcast on dim m,n,k.
+        // We can further optimize the case that both dim b and m are
+        // broadcasted.
+        if (broadcast_on_mn)
+          return false;
+        return has_broadcast_on_batch;
+      };
+  bool m1_only_batch_broadcasted = only_broadcasted_on_batch(m1);
+  bool m2_only_batch_broadcasted = only_broadcasted_on_batch(m2);
+  bool has_broadcast = m1_only_batch_broadcasted || m2_only_batch_broadcasted;
+  bool both_broadcast = m1_only_batch_broadcasted && m2_only_batch_broadcasted;
+  if (both_broadcast) {
+    // oneDNN does not support both src and wei broadcasted on batch dim. We
+    // copy the smaller one.
+    if (m1.size(dim_m) < m2.size(dim_n)) {
+      m1 = m1.contiguous();
+      m1_only_batch_broadcasted = false;
+    } else {
+      m2 = m2.contiguous();
+    }
+  }
+  if (has_broadcast) {
+    at::Tensor& tensor = m1_only_batch_broadcasted ? m1 : m2;
+    tensor = tensor
+                 .as_strided(
+                     {tensor.size(dim_m), tensor.size(dim_n)},
+                     {tensor.stride(dim_m), tensor.stride(dim_n)})
+                 .unsqueeze(dim_b);
+  }
+}
+
+void undo_broadcast(at::Tensor& tensor) {
+  // pytorch use stride = 0 for the dim to be broadcasted, but oneDNN only
+  // support shape(dim) = 1 to implicitly indicate the broadcast dim.
+  std::vector<int64_t> new_shape;
+  std::vector<int64_t> new_strides;
+  std::vector<int64_t> unsqueeze_dims;
+  for (int i = 0; i < tensor.dim(); i++) {
+    if (tensor.stride(i) == 0) {
+      unsqueeze_dims.push_back(i);
+    } else {
+      new_shape.push_back(tensor.size(i));
+      new_strides.push_back(tensor.stride(i));
+    }
+  }
+  tensor = tensor.as_strided(new_shape, new_strides);
+  for (size_t i = 0; i < unsqueeze_dims.size(); i++) {
+    tensor = tensor.unsqueeze(unsqueeze_dims[i]);
+  }
+  return;
+}
+
+bool is_onednn_matmul_strides(const at::Tensor& tensor) {
   // https://oneapi-src.github.io/oneDNN/dev_guide_matmul.html
   // oneDNN matmul only support 2-dim and 3-dim
   // 2D src(Mxk), wei(KxN), dst(MxN)
@@ -232,18 +306,10 @@ bool is_onednn_matmul_strides(const at::Tensor& tensor, bool is_dst) {
   if (is_broadcast(tensor)) {
     return false;
   }
-
-  if (is_dst) {
-    // The memory format of the destination tensor should always
-    // be plain with n axis contiguous
-    if (strides[-1] != 1)
-      return false;
-  } else {
-    // the src and weight must have at least one of the axes
-    // m or k and n or k contiguous (i.e., stride=1) respectively.
-    if (strides[tensor_dim - 1] != 1 && strides[tensor_dim - 2] != 1)
-      return false;
-  }
+  // the src and weight must have at least one of the axes
+  // m or k and n or k contiguous (i.e., stride=1) respectively.
+  if (strides[tensor_dim - 1] != 1 && strides[tensor_dim - 2] != 1)
+    return false;
 
   if (!onednn_strides_check(tensor))
     return false;
@@ -360,19 +426,7 @@ static inline bool is_smf_channels_last(const Tensor& t) {
 bool use_channels_last_for_conv(
     const at::Tensor& src,
     const at::Tensor& weight) {
-  if (!src.defined() || src.is_sparse()) {
-    // suggest channels_first
-    return false;
-  }
-
-  auto suggest_channels_last_format =
-      (is_smf_channels_last(src) || is_smf_channels_last(weight));
-  if (suggest_channels_last_format) {
-    // suggest channels_last
-    return true;
-  }
-
-  return false;
+  return xpu_conv_use_channels_last(src, weight);
 }
 
 dnnl::memory::format_tag conv_src_fmt(
@@ -444,6 +498,14 @@ dnnl::memory::format_tag conv_weight_fmt(
         : ((ndim == 5) ? (grouped ? dnnl::memory::format_tag::godhwi
                                   : dnnl::memory::format_tag::odhwi)
                        : dnnl::memory::format_tag::undef);
+  }
+}
+
+void apply_tf32_if_allowed(dnnl::primitive_attr& pattr) {
+  auto& ctx = at::globalContext();
+  bool allow_tf32 = ctx.allowTF32OneDNN();
+  if (allow_tf32) {
+    pattr.set_fpmath_mode(dnnl::fpmath_mode::tf32);
   }
 }
 
