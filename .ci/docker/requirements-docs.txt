@@ -27,7 +27,7 @@ exhale==0.2.3
 #Description: This is used to generate PyTorch C++ docs
 #Pinned versions: 0.2.3
 
-docutils==0.22
+docutils==0.21.2
 #Description: This is used to generate PyTorch C++ docs
 #Pinned versions: 0.16
 
