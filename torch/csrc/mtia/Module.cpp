@@ -60,6 +60,13 @@ void initModule(PyObject* module) {
         at::detail::getMTIAHooks().getCurrentDevice());
   });
 
+  m.def("_mtia_exchangeDevice", [](c10::DeviceIndex device_index) {
+    if (device_index < 0) {
+      return static_cast<c10::DeviceIndex>(-1);
+    }
+    return at::detail::getMTIAHooks().exchangeDevice(device_index);
+  });
+
   m.def("_mtia_getDefaultStream", [](c10::DeviceIndex device_index) {
     torch::utils::device_lazy_init(at::kMTIA);
     return at::detail::getMTIAHooks().getDefaultStream(device_index);
