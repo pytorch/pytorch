@@ -298,7 +298,7 @@ def gen_declaration_and_definition(
     ret_assignments_str = "\n" + "\n".join(ret_assignments) if ret_assignments else ""
     definition = f"""
 {declaration} {{
-    AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({{
+    AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE("aoti_torch_{device}_{func_name}", {{
         {tmp_result}{backend_call}(
 {textwrap.indent(", ".join(callsite_exprs), "            ")}
         );{textwrap.indent(ret_assignments_str, "        ")}
@@ -512,6 +512,7 @@ extern "C" {{
 
 #include <torch/csrc/inductor/aoti_torch/generated/{"extend/" if extend_aoti_c_shim else ""}c_shim_{device}.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
+#include <ATen/record_function.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/{str(dispatch_key)}Functions.h>

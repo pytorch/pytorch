@@ -1,4 +1,5 @@
 
+#include <ATen/record_function.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
 
@@ -45,7 +46,7 @@ AOTITorchError aoti_torch_cpu_mkldnn__convolution_pointwise_binary(
     int64_t unary_scalars_len_,
     const char** unary_algorithm,
     AtenTensorHandle* ret0) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE("at::native::mkldnn_convolution_pointwise_binary", {
     c10::List<std::optional<c10::Scalar>> unary_scalars_list;
     unary_scalars_list.reserve(unary_scalars_len_);
     for (int64_t i = 0; i < unary_scalars_len_; i++) {
@@ -88,7 +89,7 @@ AOTITorchError aoti_torch_cpu_mkldnn__convolution_pointwise_binary_(
     int64_t unary_scalars_len_,
     const char** unary_algorithm,
     AtenTensorHandle* ret0) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE("at::native::mkldnn_convolution_pointwise_binary_", {
     c10::List<std::optional<c10::Scalar>> unary_scalars_list;
     unary_scalars_list.reserve(unary_scalars_len_);
     for (int64_t i = 0; i < unary_scalars_len_; i++) {
@@ -128,7 +129,7 @@ AOTITorchError aoti_torch_cpu_mkldnn__convolution_pointwise(
     int64_t scalars_len_,
     const char** algorithm,
     AtenTensorHandle* ret0) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE("at::native::mkldnn_convolution_pointwise", {
     c10::List<std::optional<c10::Scalar>> scalars_list;
     scalars_list.reserve(scalars_len_);
     for (int64_t i = 0; i < scalars_len_; i++) {
@@ -167,7 +168,7 @@ AOTITorchError aoti_torch_cpu_mkldnn__convolution_transpose_pointwise(
     int64_t scalars_len_,
     const char** algorithm,
     AtenTensorHandle* ret0) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE("at::native::mkldnn_convolution_transpose_pointwise", {
     c10::List<std::optional<c10::Scalar>> scalars_list;
     scalars_list.reserve(scalars_len_);
     for (int64_t i = 0; i < scalars_len_; i++) {
@@ -211,7 +212,7 @@ AOTITorchError aoti_torch_cpu_mkldnn_rnn_layer(
     AtenTensorHandle* ret1,
     AtenTensorHandle* ret2,
     AtenTensorHandle* ret3) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE("at::cpu::mkldnn_rnn_layer", {
     auto tmp_result = at::cpu::mkldnn_rnn_layer(
         *tensor_handle_to_tensor_pointer(input),
         *tensor_handle_to_tensor_pointer(weight0),
@@ -245,7 +246,7 @@ AOTITorchError aoti_torch_cpu__linear_pointwise(
     int64_t scalars_len_,
     const char** algorithm,
     AtenTensorHandle* ret0) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE("at::native::mkldnn_linear_pointwise_binary", {
     c10::List<std::optional<c10::Scalar>> scalars_list;
     scalars_list.reserve(scalars_len_);
     for (int64_t i = 0; i < scalars_len_; i++) {
@@ -269,7 +270,7 @@ AOTITorchError aoti_torch_cpu__linear_pointwise_binary(
     AtenTensorHandle* B,
     const char* attr,
     AtenTensorHandle* ret0) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE("at::native::mkldnn_linear_pointwise", {
     auto tmp_result = at::native::mkldnn_linear_pointwise_binary(
         *tensor_handle_to_tensor_pointer(X),
         *tensor_handle_to_tensor_pointer(other),
@@ -296,7 +297,7 @@ AOTITorchError aoti_torch_cpu__qlinear_pointwise_tensor(
     int64_t post_op_args_len_,
     const char* post_op_algorithm,
     AtenTensorHandle* ret0) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE("at::native::QLinearOnednn::run_pointwise_tensor", {
     c10::List<std::optional<c10::Scalar>> scalars_list;
     scalars_list.reserve(post_op_args_len_);
     for (int64_t i = 0; i < post_op_args_len_; i++) {
@@ -342,7 +343,7 @@ AOTITorchError aoti_torch_cpu__qlinear_pointwise_binary_tensor(
     int64_t unary_post_op_args_len_,
     const char* unary_post_op_algorithm,
     AtenTensorHandle* ret0) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE("at::native::QConvoneDNN::run_pointwise_tensor", {
     c10::List<std::optional<c10::Scalar>> scalars_list;
     scalars_list.reserve(unary_post_op_args_len_);
     for (int64_t i = 0; i < unary_post_op_args_len_; i++) {
@@ -395,7 +396,7 @@ AOTITorchError aoti_torch_cpu__qconv2d_pointwise_tensor(
     int64_t post_op_args_len_,
     const char** algorithm,
     AtenTensorHandle* ret0) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE("at::native::QConvoneDNN::run_pointwise_binary_tensor", {
     c10::List<std::optional<c10::Scalar>> scalars_list;
     scalars_list.reserve(post_op_args_len_);
     for (int64_t i = 0; i < post_op_args_len_; i++) {
@@ -459,7 +460,7 @@ AOTITorchError aoti_torch_cpu__qconv2d_pointwise_binary_tensor(
     int64_t unary_scalars_len_,
     const char** unary_algorithm,
     AtenTensorHandle* ret0) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE("at::native::QConvoneDNN::run_pointwise_binary_tensor", {
     c10::List<std::optional<c10::Scalar>> unary_scalars_list;
     unary_scalars_list.reserve(unary_scalars_len_);
     for (int64_t i = 0; i < unary_scalars_len_; i++) {
@@ -509,7 +510,7 @@ AOTITorchError aoti_torch_cpu__mkl_linear(
     AtenTensorHandle* B,
     int64_t prepack_batch_size,
     AtenTensorHandle* ret0) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE("at::native::mkl_linear", {
     auto tmp_result = at::native::mkl_linear(
         *tensor_handle_to_tensor_pointer(X),
         *tensor_handle_to_tensor_pointer(W),

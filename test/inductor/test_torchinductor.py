@@ -472,6 +472,15 @@ def check_model(
 
     torch.manual_seed(0)
     actual = run(*example_inputs, **kwargs)
+
+    from torch._inductor import config as inductor_config
+
+    inductor_config.profiler_mark_wrapper_call = True
+    inductor_config.cpp.enable_kernel_profile = True
+
+    with torch.autograd.profiler.profile() as prof:
+        actual_2 = run(*example_inputs, **kwargs)
+    print(prof.key_averages().table(sort_by="self_cpu_time_total"))
     # if not called:
     #     exp = torch._dynamo.explain(run)(*example_inputs)
     #     print("Explain:", exp[0])

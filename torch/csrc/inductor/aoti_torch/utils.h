@@ -11,16 +11,17 @@
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <optional>
 
-#define AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(...)    \
-  try {                                                    \
-    __VA_ARGS__                                            \
-  } catch (const std::exception& e) {                      \
-    LOG(ERROR) << "Exception in aoti_torch: " << e.what(); \
-    return AOTI_TORCH_FAILURE;                             \
-  } catch (...) {                                          \
-    LOG(ERROR) << "Exception in aoti_torch: UNKNOWN";      \
-    return AOTI_TORCH_FAILURE;                             \
-  }                                                        \
+#define AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(func_name, ...)    \
+  try {                                                               \
+    RECORD_FUNCTION(func_name, c10::ArrayRef<c10::IValue>());         \
+    __VA_ARGS__                                                       \
+  } catch (const std::exception& e) {                                 \
+    LOG(ERROR) << "Exception in aoti_torch: " << e.what();            \
+    return AOTI_TORCH_FAILURE;                                        \
+  } catch (...) {                                                     \
+    LOG(ERROR) << "Exception in aoti_torch: UNKNOWN";                 \
+    return AOTI_TORCH_FAILURE;                                        \
+  }                                                                   \
   return AOTI_TORCH_SUCCESS;
 
 namespace torch::aot_inductor {
