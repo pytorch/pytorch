@@ -4482,7 +4482,11 @@ def maybe_disable_inference_mode() -> Generator[None, None, None]:
         config.fake_tensor_disable_inference_mode and torch.is_inference_mode_enabled()
     )
     if is_inference_mode_on:
-        with torch.inference_mode(False), torch.no_grad():
+        with (
+            torch.inference_mode(False),
+            torch.no_grad(),
+            torch._subclasses.meta_utils.disable_inference_mode_for_fake_prop(),
+        ):
             yield
     else:
         with contextlib.nullcontext():
