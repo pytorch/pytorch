@@ -53,7 +53,9 @@ from torch._inductor.codegen.rocm.compile_command import (
     rocm_compile_command,
     rocm_compiler,
 )
+from torch._inductor.compile_worker.utils import in_toplevel_process
 from torch._inductor.cpp_builder import (
+    _LINKER_SCRIPT,
     _set_gpu_runtime_env,
     _TORCH_PATH,
     _transform_cuda_paths,
@@ -67,10 +69,7 @@ from torch._inductor.cpp_builder import (
 from torch._inductor.cpu_vec_isa import pick_vec_isa
 from torch._inductor.custom_graph_pass import CustomGraphPass, CustomGraphPassType
 from torch._inductor.freezing_utils import has_frozen_params, is_frozen_param
-from torch._inductor.runtime.compile_tasks import (
-    _reload_python_module,
-    _reload_python_module_in_subproc,
-)
+from torch._inductor.runtime.compile_tasks import _reload_python_module
 from torch._inductor.runtime.runtime_utils import cache_dir, default_cache_dir
 from torch._inductor.utils import (
     ALIGN_BYTES,
@@ -90,6 +89,7 @@ from torch.compiler._cache import CacheArtifactManager, CacheArtifactType
 from torch.fx.experimental.symbolic_shapes import has_hint, hint_int, ShapeEnv
 from torch.utils._ordered_set import OrderedSet
 
+from .package.pt2_archive_constants import CUSTOM_OBJ_FILENAME_PREFIX
 from .remote_cache import create_cache
 from .runtime import autotune_cache
 from .runtime.autotune_cache import AutotuneCacheBundler
@@ -417,9 +417,9 @@ def write_atomic(
 ) -> None:
     # Write into temporary file first to avoid conflicts between threads
     # Avoid using a named temporary file, as those have restricted permissions
-    assert isinstance(
-        content, (str, bytes)
-    ), "Only strings and byte arrays can be saved in the cache"
+    assert isinstance(content, (str, bytes)), (
+        "Only strings and byte arrays can be saved in the cache"
+    )
     path = Path(path_)
     if make_dirs:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -975,9 +975,9 @@ class FxGraphCache:
         symints = FxGraphCache._filter_backed_symints(example_inputs)
         hints = [hint_int(s) for s in symints]
 
-        def iterate_over_candidates() -> (
-            Generator[tuple[CompiledFxGraph, bytes], None, None]
-        ):
+        def iterate_over_candidates() -> Generator[
+            tuple[CompiledFxGraph, bytes], None, None
+        ]:
             if local:
                 subdir = FxGraphCache._get_tmp_dir_for_key(key)
                 if os.path.exists(subdir):
@@ -1052,7 +1052,7 @@ class FxGraphCache:
                     "inductor_compile", cached_kernel_names=meta.cached_kernel_names
                 )
                 if len(meta.cached_kernel_names) > 0:
-                    CompileEventLogger.increment_toplevel("num_triton_bundles", 1)
+                    CompileEventLogger.increment_toplevel("num_triton_bundles")
 
         try:
             artifact_path = graph.after_deserialization(constants)
@@ -1123,9 +1123,9 @@ class FxGraphCache:
         """
         from .compile_fx import CompiledFxGraph
 
-        assert isinstance(
-            compiled_graph, CompiledFxGraph
-        ), f"serialization for {type(compiled_graph)} NYI"
+        assert isinstance(compiled_graph, CompiledFxGraph), (
+            f"serialization for {type(compiled_graph)} NYI"
+        )
         disk_compiled_graph = copy(compiled_graph)
         disk_compiled_graph.prepare_for_serialization()
 
@@ -1170,6 +1170,24 @@ class FxGraphCache:
             counters["inductor"]["fxgraph_cache_write_error"] += 1
 
     @staticmethod
+    def _check_for_hop(gm: torch.fx.GraphModule) -> None:
+        for module in gm.modules():
+            if not isinstance(module, torch.fx.GraphModule):
+                continue
+            for node in module.graph.nodes:
+                if (
+                    isinstance(node.target, torch._ops.HigherOrderOperator)
+                    and not node.target.cacheable()
+                ):
+                    raise BypassFxGraphCache(
+                        f"Can't cache HigherOrderOperator: {node.target.name()}"
+                    )
+                if node.op == "getattr" and isinstance(
+                    getattr(gm, node.target), torch._C.ScriptObject
+                ):
+                    raise BypassFxGraphCache("Can't cache torchbind objects")
+
+    @staticmethod
     def _check_can_cache(gm: torch.fx.GraphModule) -> None:
         """
         Check some conditions that would preclude caching and raise BypassFxGraphCache
@@ -1205,22 +1223,8 @@ class FxGraphCache:
             log.debug("fx graph cache no shape env")
             raise BypassFxGraphCache("No shape env")
 
-        # We skip caching if there are any torchbind objects.
-        for module in gm.modules():
-            if not isinstance(module, torch.fx.GraphModule):
-                continue
-            for node in module.graph.nodes:
-                if (
-                    isinstance(node.target, torch._ops.HigherOrderOperator)
-                    and not node.target.cacheable()
-                ):
-                    raise BypassFxGraphCache(
-                        f"Can't cache HigherOrderOperator: {node.target.name()}"
-                    )
-                if node.op == "getattr" and isinstance(
-                    getattr(gm, node.target), torch._C.ScriptObject
-                ):
-                    raise BypassFxGraphCache("Can't cache torchbind objects")
+        # We skip caching if there are any HOPs or torchbind objects.
+        FxGraphCache._check_for_hop(gm)
 
     @staticmethod
     def prepare_key(
@@ -1303,7 +1307,7 @@ class FxGraphCache:
             if remote_cache:
                 # Count remote cache hit stats
                 CompileEventLogger.increment_toplevel(
-                    "inductor_fx_remote_cache_hit_count", 1
+                    "inductor_fx_remote_cache_hit_count"
                 )
                 CompileEventLogger.add_to_set_toplevel(
                     "inductor_fx_remote_cache_hit_keys", key
@@ -1315,16 +1319,15 @@ class FxGraphCache:
                     "distributed_ephemeral_timeout_us", time_saved_ns // 1000
                 )
                 if (
-                    ephemeral_increase := add_ephemeral_timeout_increase_for_distributed(
-                        time_saved_ns
-                    )
+                    ephemeral_increase
+                    := add_ephemeral_timeout_increase_for_distributed(time_saved_ns)
                 ) != 0:
                     cache_info["ephemeral_timeout_increase"] = ephemeral_increase
         else:
             if remote_cache:
                 # Count remote cache miss stats
                 CompileEventLogger.increment_toplevel(
-                    "inductor_fx_remote_cache_miss_count", 1
+                    "inductor_fx_remote_cache_miss_count"
                 )
                 CompileEventLogger.add_to_set_toplevel(
                     "inductor_fx_remote_cache_miss_keys", key
@@ -1359,7 +1362,7 @@ def split_aot_inductor_output_path(path: str) -> tuple[str, str]:
 
 @clear_on_fresh_inductor_cache
 class CudaKernelParamCache:
-    cache: dict[str, dict[str, str]] = {}
+    cache: dict[str, dict[str, Any]] = {}
     cache_clear = staticmethod(cache.clear)
 
     @classmethod
@@ -1377,7 +1380,7 @@ class CudaKernelParamCache:
         cls.cache[key] = params
 
     @classmethod
-    def get(cls, key: str) -> Optional[dict[str, str]]:
+    def get(cls, key: str) -> Optional[dict[str, Any]]:
         return cls.cache.get(key, None)
 
     @classmethod
@@ -1390,8 +1393,10 @@ class AotCodeCompiler:
     def compile(
         cls,
         graph: GraphLowering,
-        source_code: str,
+        wrapper_code: str,
+        kernel_code: str,
         serialized_extern_kernel_nodes: Optional[str],
+        *,
         device_type: str,
         additional_files: list[str],
     ) -> Union[list[str], str]:
@@ -1424,41 +1429,67 @@ class AotCodeCompiler:
         cpp_command = repr(vec_isa_cmd_gen.get_command_line())
 
         # Meta internal AOTInductor CPU
-        fbcode_aot_cpu_re = (
+        use_relative_path = (
             config.is_fbcode() and device_type == "cpu" and graph.aot_mode
         )
-        use_relative_path = fbcode_aot_cpu_re
 
         (
             specified_output_path,
             specified_artifact_name,
         ) = split_aot_inductor_output_path(config.aot_inductor.output_path)
-        key, cpp_path = write(
-            source_code,
-            "cpp",
+
+        # TODO (benjaminglass1): the CMake packaging path doesn't support linking files
+        # built with different flags.  Until that's implemented, append the kernel code
+        # to the wrapper and build everything at max optimization.
+        if config.aot_inductor.package_cpp_only:
+            wrapper_code = "\n".join((wrapper_code, kernel_code))
+            kernel_code = ""
+
+        wrapper_key, wrapper_path = write(
+            wrapper_code,
+            "wrapper.cpp",
+            extra=cpp_command,
+            specified_dir=specified_output_path,
+        )
+        _, kernel_path = write(
+            kernel_code,
+            "kernel.cpp",
             extra=cpp_command,
             specified_dir=specified_output_path,
         )
 
         if config.aot_inductor.package:
-            generated_files.append(cpp_path)
+            generated_files.append(wrapper_path)
+            if not config.aot_inductor.package_cpp_only:
+                generated_files.append(kernel_path)
 
-        output_code_log.info("Output code written to: %s", cpp_path)
+        output_code_log.info("Wrapper code written to: %s", wrapper_path)
+        output_code_log.info("Kernel code written to: %s", kernel_path)
         trace_structured(
             "graph_dump",
             lambda: {
-                "name": "inductor_aot_code",
+                "name": "inductor_aot_wrapper_code",
                 "type": "cpp",
-                "filename": cpp_path,
+                "filename": wrapper_path,
             },
-            payload_fn=lambda: source_code,
+            payload_fn=lambda: wrapper_code,
+        )
+        trace_structured(
+            "graph_dump",
+            lambda: {
+                "name": "inductor_aot_kernel_code",
+                "type": "cpp",
+                "filename": kernel_path,
+            },
+            payload_fn=lambda: kernel_code,
         )
 
         # We use a file lock below to protect FS operations. The lock file
         # is scoped to the 'key', so make sure the consts_s is protected
         # by the same lock:
-        cpp_path_operator = Path(cpp_path)
-        specified_sub_dir = cpp_path_operator.parent / key
+        wrapper_path_operator = Path(wrapper_path)
+        kernel_path_operator = Path(kernel_path)
+        specified_sub_dir = wrapper_path_operator.parent / wrapper_key
         if not specified_sub_dir.exists():
             specified_sub_dir.mkdir(exist_ok=True)
         cmake_path = str(Path(specified_sub_dir) / "CMakeLists.txt")
@@ -1521,13 +1552,7 @@ class AotCodeCompiler:
                 BuildOption=object_build_options,
             )
             consts_o = object_builder.get_target_file_path()
-            if fbcode_aot_cpu_re:
-                # TODO: refactor fbcode_aot_cpu_re logic into CppBuilder
-                consts_o = str(consts_s.with_suffix(".o"))
-                object_builder.build_fbcode(str(consts_s), consts_o)
-                os.chmod(consts_o, 0o644)
-            else:
-                object_builder.build()
+            object_builder.build()
 
             if is_large_consts:
                 with open(consts_o, "r+b") as f:
@@ -1550,10 +1575,14 @@ class AotCodeCompiler:
         from torch.utils._filelock import FileLock
 
         lock_dir = get_lock_dir()
-        lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
+        lock = FileLock(
+            os.path.join(lock_dir, wrapper_key + ".lock"), timeout=LOCK_TIMEOUT
+        )
         with lock:
             if serialized_extern_kernel_nodes:
-                extern_kernel_nodes_json = str(cpp_path_operator.with_suffix(".json"))
+                extern_kernel_nodes_json = str(
+                    wrapper_path_operator.with_suffix(".json")
+                )
                 with open(extern_kernel_nodes_json, "w") as f:
                     f.write(serialized_extern_kernel_nodes)
 
@@ -1565,23 +1594,34 @@ class AotCodeCompiler:
 
             # Save user provided metadata
             meta_json = str(
-                cpp_path_operator.with_name(f"{cpp_path_operator.stem}_metadata.json")
+                wrapper_path_operator.with_name(
+                    f"{wrapper_path_operator.stem}_metadata.json"
+                )
             )
             for k, v in config.aot_inductor.metadata.items():
-                assert isinstance(k, str) and isinstance(
-                    v, (str)
-                ), "Metadata must only contain strings"
+                assert isinstance(k, str) and isinstance(v, (str)), (
+                    "Metadata must only contain strings"
+                )
 
             with open(meta_json, "w") as f:
                 f.write(json.dumps(config.aot_inductor.metadata))
 
+            kernel_meta_json = str(
+                kernel_path_operator.with_name(
+                    f"{kernel_path_operator.stem}_metadata.json"
+                )
+            )
+            shutil.copy(meta_json, kernel_meta_json)
+
             if config.aot_inductor.package:
                 generated_files.append(meta_json)
+                if not config.aot_inductor.package_cpp_only:
+                    generated_files.append(kernel_meta_json)
 
             output_so = (
                 config.aot_inductor.output_path
                 if specified_artifact_name
-                else str(cpp_path_operator.with_suffix(".so"))
+                else str(wrapper_path_operator.with_suffix(".so"))
             )
             all_cuda = all(
                 graph.get_original_value_of_constant(name).is_cuda
@@ -1635,43 +1675,59 @@ class AotCodeCompiler:
             if config.aot_inductor.force_mmap_weights:
                 use_mmap_weights = True
 
-            object_build_options = CppTorchDeviceOptions(
-                vec_isa=picked_vec_isa,
-                device_type=device_type,
-                aot_mode=graph.aot_mode,
+            compile_command: dict[str, Any] = {
+                "aot_mode": graph.aot_mode,
+                "device_type": device_type,
+                "use_mmap_weights": use_mmap_weights,
+                "use_relative_path": config.is_fbcode(),
+                "vec_isa": picked_vec_isa,
+            }
+            # If we're packaging via CMake, we build the whole code at max optimization.
+            wrapper_build_options = CppTorchDeviceOptions(
                 compile_only=True,
-                use_relative_path=use_relative_path,
-                use_mmap_weights=use_mmap_weights,
+                min_optimize=not config.aot_inductor.package_cpp_only,
+                **compile_command,
             )
-            object_builder = CppBuilder(
-                name=str(cpp_path_operator.stem),
-                sources=cpp_path,
-                output_dir=str(cpp_path_operator.parent),
-                BuildOption=object_build_options,
+            kernel_build_options = CppTorchDeviceOptions(
+                compile_only=True,
+                **compile_command,
             )
-            compile_cmd = object_builder.get_command_line()
-            output_o = object_builder.get_target_file_path()
 
-            log.debug("aot compilation command: %s", compile_cmd)
+            wrapper_builder = CppBuilder(
+                name=str(wrapper_path_operator.stem),
+                sources=wrapper_path,
+                output_dir=str(wrapper_path_operator.parent),
+                BuildOption=wrapper_build_options,
+            )
+            wrapper_compile_cmd = wrapper_builder.get_command_line()
+            wrapper_o = wrapper_builder.get_target_file_path()
+
+            kernel_builder = CppBuilder(
+                name=str(kernel_path_operator.stem),
+                sources=kernel_path,
+                output_dir=str(wrapper_path_operator.parent),
+                BuildOption=kernel_build_options,
+            )
+            kernel_compile_cmd = kernel_builder.get_command_line()
+            kernel_o = kernel_builder.get_target_file_path()
+
+            log.debug("aot wrapper compilation command: %s", wrapper_compile_cmd)
+            log.debug("aot kernel compilation command: %s", kernel_compile_cmd)
             if config.aot_inductor.package_cpp_only:
                 # Not doing the actual compilation here
                 compile_flags = str(
-                    cpp_path_operator.with_name(
-                        f"{cpp_path_operator.stem}_compile_flags.json"
+                    wrapper_path_operator.with_name(
+                        f"{wrapper_path_operator.stem}_compile_flags.json"
                     )
                 )
-                object_build_options.save_flags_to_json(compile_flags)
+                wrapper_build_options.save_flags_to_json(compile_flags)
                 generated_files.append(compile_flags)
-                object_builder.save_compile_cmd_to_cmake(cmake_path)
-                object_builder.save_src_to_cmake(cmake_path, cpp_path)
+                wrapper_builder.save_compile_cmd_to_cmake(cmake_path)
+                wrapper_builder.save_src_to_cmake(cmake_path, wrapper_path)
                 generated_files.append(cmake_path)
             else:
-                if fbcode_aot_cpu_re:
-                    output_o = str(cpp_path_operator.with_suffix(".o"))
-                    object_builder.build_fbcode(cpp_path, output_o)
-                    os.chmod(output_o, 0o644)
-                else:
-                    object_builder.build()
+                wrapper_builder.build()
+                kernel_builder.build()
 
             if not use_mmap_weights:
                 aot_constants = serialized_weights
@@ -1683,15 +1739,47 @@ class AotCodeCompiler:
                 aot_constants = struct.pack("qq", consts_size + 8, magic_number)
 
             consts_o = _compile_consts(aot_constants, sys.platform)
+            custom_obj_idx = 0
+            # Note that custom_objs_config.json file is different from the model_constants_config.json file produced
+            # in package_sigmoid(). The keys in custom_objs_config.json directly correspond to the arg name in extern
+            # nodes json. The key in model_constants_config.json produced by package_sigmoid is the attribute name in the
+            # user model code.
+
+            qual_name_to_id = {}  # Map from constant name to its name in constants folder
+            for custom_obj_idx, (name, constant) in enumerate(
+                graph.torchbind_constants.items()
+            ):
+                assert isinstance(constant, torch._C.ScriptObject)
+                custom_obj_name = f"{CUSTOM_OBJ_FILENAME_PREFIX}{custom_obj_idx}"
+
+                log.debug("saving script object %s as %s", name, custom_obj_name)
+
+                qual_name_to_id[name] = custom_obj_name
+                custom_obj_bytes = torch._C._pickle_save(constant)
+                custom_obj_path = os.path.join(
+                    wrapper_path_operator.parent, custom_obj_name
+                )
+
+                write_atomic(custom_obj_path, custom_obj_bytes, True)
+                generated_files.append(custom_obj_path)
+
+            if qual_name_to_id:
+                constants_config_json = os.path.join(
+                    wrapper_path_operator.parent, "custom_objs_config.json"
+                )
+                with open(constants_config_json, "w") as f:
+                    f.write(json.dumps(qual_name_to_id))
+                generated_files.append(constants_config_json)
+
             gpu_codecache: Union[ROCmCodeCache, CUDACodeCache] = (
                 ROCmCodeCache() if torch.version.hip else CUDACodeCache()
             )
-            kernels_o = [
+            gpu_kernels_o = [
                 entry.output_path
                 for entry in gpu_codecache.cache.values()
                 if entry.output_path.endswith(".o")
             ]
-            kernels_o = " ".join(kernels_o)
+            gpu_kernels_o = " ".join(gpu_kernels_o)
 
             output_name, output_dir = get_name_and_dir_from_output_file_path(output_so)
             so_build_options = CppTorchDeviceOptions(
@@ -1703,7 +1791,9 @@ class AotCodeCompiler:
 
             so_builder = CppBuilder(
                 name=output_name,
-                sources=[output_o, consts_o, kernels_o],
+                sources=[wrapper_o, kernel_o, consts_o, gpu_kernels_o]
+                if gpu_kernels_o
+                else [wrapper_o, kernel_o, consts_o],
                 output_dir=output_dir,
                 BuildOption=so_build_options,
             )
@@ -1713,27 +1803,33 @@ class AotCodeCompiler:
             log.debug("aot linkage command: %s", link_cmd)
 
             # Append cmds to the end of codegen-ed wrapper file
-            with open(cpp_path, "a") as f:
+            with open(wrapper_path, "a") as f:
                 f.write("\n")
-                f.write(f"// Compile cmd\n// {compile_cmd}\n")
+                f.write(f"// Compile cmd\n// {wrapper_compile_cmd}\n")
+                f.write(f"// Link cmd\n// {link_cmd}\n")
+
+            with open(kernel_path, "a") as f:
+                f.write("\n")
+                f.write(f"// Compile cmd\n// {kernel_compile_cmd}\n")
                 f.write(f"// Link cmd\n// {link_cmd}\n")
 
             if config.aot_inductor.package_cpp_only:
                 linker_flags = str(
-                    cpp_path_operator.with_name(
-                        f"{cpp_path_operator.stem}_linker_flags.json"
+                    wrapper_path_operator.with_name(
+                        f"{wrapper_path_operator.stem}_linker_flags.json"
                     )
                 )
                 so_build_options.save_flags_to_json(linker_flags)
                 generated_files.append(linker_flags)
+                generated_files.append(_LINKER_SCRIPT)
 
                 # If we only want to package the cpp, then we need to save the
                 # weights separately into a bin, and we also need to prevent compiling the so
 
                 if use_mmap_weights:
                     weight_file = str(
-                        cpp_path_operator.with_name(
-                            f"{cpp_path_operator.stem}_serialized_weights.bin"
+                        wrapper_path_operator.with_name(
+                            f"{wrapper_path_operator.stem}_serialized_weights.bin"
                         )
                     )
                     with open(weight_file, "wb") as f_weights:
@@ -1743,28 +1839,16 @@ class AotCodeCompiler:
                     generated_files.append(weight_file)
 
                 generated_files.append(consts_o)
-                generated_files.append(kernels_o)
+                generated_files.append(gpu_kernels_o)
 
                 so_builder.save_src_to_cmake(cmake_path, consts_o)
-                for kernel_o in kernels_o.split():
-                    so_builder.save_src_to_cmake(cmake_path, kernel_o)
+                for gpu_o in gpu_kernels_o.split():
+                    so_builder.save_src_to_cmake(cmake_path, gpu_o)
                 so_builder.save_link_cmd_to_cmake(cmake_path)
             else:
-                if fbcode_aot_cpu_re:
-                    output_so = (
-                        config.aot_inductor.output_path
-                        if specified_artifact_name
-                        else str(cpp_path_operator.with_suffix(".so"))
-                    )
-                    so_builder.build_fbcode([output_o, consts_o], output_so)
-                    os.chmod(output_so, 0o755)
-                else:
-                    so_builder.build()
+                so_builder.build()
 
-                for o_file in [
-                    output_o,
-                    consts_o,
-                ]:
+                for o_file in [wrapper_o, kernel_o, consts_o]:
                     # Remove these as they are not needed anymore
                     os.remove(o_file)
 
@@ -1938,35 +2022,25 @@ class CppCodeCache:
 
             lock_path = os.path.join(get_lock_dir(), key + ".lock")
             output_name, output_dir = get_name_and_dir_from_output_file_path(input_path)
-            """
-            If `fb_code` env, it need to be dispatched to original `compile_file` function.
-            So, we still need to prepare parameters for the function: `input_path` and `fb_output_path`.
-            """
-            fb_output_path = input_path[:-3] + "so"
             future: Optional[Future[Any]] = None
             lib = None
 
-            cpp_build_option = CppTorchDeviceOptions(**compile_command)
+            cpp_build_option = CppTorchDeviceOptions(
+                **compile_command,
+                use_relative_path=(config.is_fbcode() and device_type == "cpu"),
+            )
             cpp_builder = CppBuilder(
                 name=output_name,
                 sources=input_path,
                 output_dir=output_dir,
                 BuildOption=cpp_build_option,
             )
-
             worker_fn = functools.partial(
                 _worker_compile_cpp,
                 lock_path,
                 cpp_builder,
-                input_path,
-                fb_output_path,
             )
-
-            binary_path = normalize_path_separator(
-                fb_output_path
-                if config.is_fbcode()
-                else cpp_builder.get_target_file_path()
-            )
+            binary_path = normalize_path_separator(cpp_builder.get_target_file_path())
 
             def load_fn() -> Any:
                 nonlocal lib
@@ -1996,23 +2070,12 @@ class CppCodeCache:
 def _worker_compile_cpp(
     lock_path: str,
     cpp_builder: CppBuilder,
-    fb_input_path: str,
-    fb_output_path: str,
 ) -> None:
     from torch.utils._filelock import FileLock
 
     with FileLock(lock_path, timeout=LOCK_TIMEOUT):
-        binary_path = (
-            fb_output_path if config.is_fbcode() else cpp_builder.get_target_file_path()
-        )
-        if not os.path.exists(binary_path):
-            if config.is_fbcode():
-                cpp_builder.build_fbcode(
-                    fb_input_path,
-                    fb_output_path,
-                )
-            else:
-                cpp_builder.build()
+        if not os.path.exists(cpp_builder.get_target_file_path()):
+            cpp_builder.build()
 
 
 # Customized Python binding for cpp kernels
@@ -2026,11 +2089,11 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         "shared": True,
     }
     entry_function = "kernel"
-    call_entry_function = "kernel(%s);Py_RETURN_NONE;"
+    call_entry_function = "kernel({}); Py_RETURN_NONE;"
     extra_parse_arg = ""
     suffix_template = textwrap.dedent(
         """
-        // Python bindings to call %s():
+        // Python bindings to call {entry_func}():
         #define PY_SSIZE_T_CLEAN
         #include <Python.h>
         #include <sstream>
@@ -2052,68 +2115,68 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         // We manually link it below to workaround issues with fbcode build.
         static void* (*_torchinductor_pyobject_tensor_data_ptr)(PyObject* obj);
 
-        template <typename T> static inline T parse_arg(PyObject* args, size_t n) {
+        template <typename T> static inline T parse_arg(PyObject* args, size_t n) {{
             static_assert(std::is_pointer_v<T>, "arg type must be pointer or long");
             return static_cast<T>(_torchinductor_pyobject_tensor_data_ptr(PyTuple_GET_ITEM(args, n)));
-        }
-        template <> inline int64_t parse_arg<int64_t>(PyObject* args, size_t n) {
+        }}
+        template <> inline int64_t parse_arg<int64_t>(PyObject* args, size_t n) {{
             auto result = PyLong_AsSsize_t(PyTuple_GET_ITEM(args, n));
             if(unlikely(result == -1 && PyErr_Occurred()))
                 throw std::runtime_error("expected int arg");
             return result;
-        }
-        template <> inline uintptr_t parse_arg<uintptr_t>(PyObject* args, size_t n) {
+        }}
+        template <> inline uintptr_t parse_arg<uintptr_t>(PyObject* args, size_t n) {{
             auto result = PyLong_AsVoidPtr(PyTuple_GET_ITEM(args, n));
             if(unlikely(result == reinterpret_cast<void*>(-1) && PyErr_Occurred()))
                 throw std::runtime_error("expected int arg");
             return reinterpret_cast<uintptr_t>(result);
-        }
+        }}
 
-        %s
+        {extra_parse_arg}
 
-        static PyObject* %s_py(PyObject* self, PyObject* args) {
-            try {
+        static PyObject* {entry_func}_py(PyObject* self, PyObject* args) {{
+            try {{
                 if(unlikely(!PyTuple_CheckExact(args)))
                     throw std::runtime_error("tuple args required");
-                if(unlikely(PyTuple_GET_SIZE(args) != %s))
-                    throw std::runtime_error("requires %s args");
-                %s
-            } catch(std::exception const& e) {
+                if(unlikely(PyTuple_GET_SIZE(args) != {arg_len}))
+                    throw std::runtime_error("requires {arg_len} args");
+                {call_entry_func}
+            }} catch(std::exception const& e) {{
                 PyErr_SetString(PyExc_RuntimeError, e.what());
                 return nullptr;
-            } catch(...) {
+            }} catch(...) {{
                 PyErr_SetString(PyExc_RuntimeError, "unhandled error");
                 return nullptr;
-            }
-        }
+            }}
+        }}
 
-        static PyMethodDef py_methods[] = {
-            {"%s", %s_py, METH_VARARGS, ""},
-            {NULL, NULL, 0, NULL}};
+        static PyMethodDef py_methods[] = {{
+            {{"{entry_func}", {entry_func}_py, METH_VARARGS, ""}},
+            {{NULL, NULL, 0, NULL}}}};
 
         static struct PyModuleDef py_module =
-            {PyModuleDef_HEAD_INIT, "%s", NULL, -1, py_methods};
+            {{PyModuleDef_HEAD_INIT, "{entry_func}", NULL, -1, py_methods}};
 
-        PyMODINIT_FUNC PyInit_%s(void) {
+        PyMODINIT_FUNC PyInit_{entry_func}(void) {{
             const char* str_addr = std::getenv("_TORCHINDUCTOR_PYOBJECT_TENSOR_DATA_PTR");
-            if(!str_addr) {
+            if(!str_addr) {{
                 PyErr_SetString(PyExc_RuntimeError, "_TORCHINDUCTOR_PYOBJECT_TENSOR_DATA_PTR must be set");
                 return nullptr;
-            }
+            }}
             std::istringstream iss(str_addr);
             uintptr_t addr = 0;
             iss >> addr;
             _torchinductor_pyobject_tensor_data_ptr =
                 reinterpret_cast<decltype(_torchinductor_pyobject_tensor_data_ptr)>(addr);
             PyObject* module = PyModule_Create(&py_module);
-            if (module == NULL) {
+            if (module == NULL) {{
                 return NULL;
-            }
+            }}
             #ifdef Py_GIL_DISABLED
                 PyUnstable_Module_SetGIL(mod, Py_MOD_GIL_NOT_USED);
             #endif
             return module;
-        }
+        }}
         """
     )
 
@@ -2158,17 +2221,11 @@ class CppPythonBindingsCodeCache(CppCodeCache):
             f"parse_arg<{argtype.replace('const ', '')}>(args, {n})"
             for n, argtype in enumerate(argtypes)
         )
-        suffix = cls.suffix_template % (
-            cls.entry_function,
-            cls.extra_parse_arg % num_outputs if cls.extra_parse_arg else "",
-            cls.entry_function,
-            len(argtypes),
-            len(argtypes),
-            cls.call_entry_function % parseargs,
-            cls.entry_function,
-            cls.entry_function,
-            cls.entry_function,
-            cls.entry_function,
+        suffix = cls.suffix_template.format(
+            arg_len=len(argtypes),
+            call_entry_func=cls.call_entry_function.format(parseargs),
+            entry_func=cls.entry_function,
+            extra_parse_arg=cls.extra_parse_arg.format(array_len=num_outputs),
         )
         get_result = cls.load_async(
             source_code + suffix,
@@ -2201,59 +2258,58 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
         "shared": True,
     }
     entry_function = "inductor_entry_cpp"
-    call_entry_function = "return inductor_entry_cpp(%s);"
+    call_entry_function = "return inductor_entry_cpp({});"
     extra_parse_arg = textwrap.dedent(
         """
         #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 
-        static inline std::vector<AtenTensorHandle> unpack_tensor_handle_list(PyObject* pyvec) {
+        static inline std::vector<AtenTensorHandle> unpack_tensor_handle_list(PyObject* pyvec) {{
             std::vector<AtenTensorHandle> result;
             size_t result_len = PyList_GET_SIZE(pyvec);
             result.reserve(result_len);
-            for (size_t i = 0; i < result_len; i++) {
+            for (size_t i = 0; i < result_len; i++) {{
                 // AtenTensorHandle is essentially a pointer
                 void* elem = PyCapsule_GetPointer(PyList_GET_ITEM(pyvec, i), NULL);
                 result.push_back(reinterpret_cast<AtenTensorHandle>(elem));
-            }
+            }}
             return result;
-        }
+        }}
 
-        static inline PyObject* pack_tensor_handle_list(const std::vector<AtenTensorHandle>& cppvec) {
-            size_t result_len = cppvec.size();
-            PyObject* result = PyList_New(static_cast<Py_ssize_t>(result_len));
-            for (size_t i = 0; i < result_len; i++) {
+        static inline PyObject* pack_tensor_handle_list(const std::array<AtenTensorHandle, {array_len}>& arr) {{
+            PyObject* result = PyList_New({array_len});
+            for (size_t i = 0; i < {array_len}; i++) {{
                 PyObject *elem =
-                    cppvec[i] == nullptr
+                    arr[i] == nullptr
                         ? Py_None
                         // Store AtenTensorHandle as PyCapsulate
-                        : PyCapsule_New(reinterpret_cast<void*>(cppvec[i]), NULL, NULL);
+                        : PyCapsule_New(reinterpret_cast<void*>(arr[i]), NULL, NULL);
                 PyList_SET_ITEM(result, i, elem);
-            }
+            }}
             return result;
-        }
+        }}
 
-        template <> inline std::vector<AtenTensorHandle> parse_arg<std::vector<AtenTensorHandle>>(PyObject* args, size_t n) {
+        template <> inline std::vector<AtenTensorHandle> parse_arg<std::vector<AtenTensorHandle>>(PyObject* args, size_t n) {{
             return unpack_tensor_handle_list(PyTuple_GET_ITEM(args, n));
-        }
+        }}
 
-        PyObject* inductor_entry_cpp(std::vector<AtenTensorHandle>&& input_handles) {
-            // For outputs, we only allocate a vector to hold returned tensor handles,
-            // not allocating the actual output tensor storage here
-            std::vector<AtenTensorHandle> output_handles(%s);
-            try {
+        PyObject* inductor_entry_cpp(std::vector<AtenTensorHandle>&& input_handles) {{
+            // For outputs, we only allocate an array to hold returned tensor handles,
+            // not the actual output tensor storage.
+            std::array<AtenTensorHandle, {array_len}> output_handles{{}};
+            try {{
                 inductor_entry_impl(input_handles.data(), output_handles.data());
-                if (PyErr_Occurred()) {
+                if (PyErr_Occurred()) {{
                     return nullptr;
-                }
+                }}
                 return pack_tensor_handle_list(output_handles);
-            } catch(std::exception const& e) {
+            }} catch(std::exception const& e) {{
                 PyErr_SetString(PyExc_RuntimeError, e.what());
                 return nullptr;
-            } catch(...) {
+            }} catch(...) {{
                 PyErr_SetString(PyExc_RuntimeError, "unhandled error");
                 return nullptr;
-            }
-        }
+            }}
+        }}
         """
     )
 
@@ -2687,21 +2743,19 @@ class PyCodeCache:
         if linemap is None:
             linemap = []
 
-        mod = _reload_python_module(key, path)
+        in_toplevel = in_toplevel_process()
+        mod = _reload_python_module(key, path, set_sys_modules=in_toplevel)
 
         # unzip into separate lines/nodes lists
-        cls.linemaps[path] = list(zip(*linemap))
+        if in_toplevel:
+            cls.linemaps[path] = list(zip(*linemap))
 
         if attrs is not None:
             for k, v in attrs.items():
                 setattr(mod, k, v)
 
-        if not (linemap or attrs):
-            mod._reload_in_subproc = functools.partial(  # type: ignore[attr-defined]
-                _reload_python_module_in_subproc, key, path
-            )
-
-        cls.modules.append(mod)
+        if in_toplevel:
+            cls.modules.append(mod)
         return mod
 
     @classmethod

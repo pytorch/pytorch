@@ -71,9 +71,9 @@ if HAS_GPU:
             return f"equal_to_1={params}"
 
     # Define shared triton constants here.
-    CONSTANT_C: tl.constexpr = 4
-    STRING_CONSTANT_C: tl.constexpr = "CONSTANT_C"
-    BOOL_CONSTANT_C: tl.constexpr = True
+    CONSTANT_C: tl.constexpr = tl.constexpr(4)
+    STRING_CONSTANT_C: tl.constexpr = tl.constexpr("CONSTANT_C")
+    BOOL_CONSTANT_C: tl.constexpr = tl.constexpr(True)
     FLOAT_CONSTANT_C = tl.constexpr(3.14)  # intentionally un-annotated
 
 
@@ -735,7 +735,7 @@ def forward(self, x_1, output_1):
         global CONSTANT_C
         prev_c = CONSTANT_C
         # If the behavior of triton kernels change, this test will fail
-        CONSTANT_C = 10
+        CONSTANT_C = tl.constexpr(10)
         assert CONSTANT_C != prev_c
 
         t = torch.randn(5, device=GPU_TYPE)
@@ -3127,9 +3127,13 @@ if HAS_GPU:
             {"ptr": t, "n_elements": 4, "BLOCK_SIZE": 4},
             ["ptr"],
         ],
-        # Cant optimize since the kernel contains a tl.inline_asm_elementwise
         [
-            inline_asm_kernel,
+            inline_asm_kernel_is_pure_true,
+            {"X": t, "Y": t, "Z": t, "n": 4, "BLOCK": 4},
+            ["Z"],
+        ],
+        [
+            inline_asm_kernel_is_pure_false,
             {"X": t, "Y": t, "Z": t, "n": 4, "BLOCK": 4},
             ["X", "Y", "Z"],
         ],
@@ -3402,8 +3406,8 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             output = x + y
             tl.store(out_ptr + offsets, output, mask=mask)
 
-        x = torch.randn(4, 4, 2, 2, device="cuda")
-        other = torch.randn(4, 4, 2, 2, device="cuda")
+        x = torch.randn(4, 4, 2, 2, device=GPU_TYPE)
+        other = torch.randn(4, 4, 2, 2, device=GPU_TYPE)
 
         def f(x, other):
             y = x.transpose(2, 3).contiguous().transpose(2, 3)
@@ -3631,8 +3635,10 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         output = "\n".join(record.getMessage() for record in log.records)
         # correct grid example values updated per block size
         FileCheck().check("Compile-time auto-tuning block:").check(
-            "grid_wrapper_for_op_zeros_0"
-        ).check_next("return (256").check_next("return (64").run(output)
+            "PrecomputedGrid"
+        ).check("(31 + _launcher_s0) // 32").check("(127 + _launcher_s0) // 128").run(
+            output
+        )
 
     # Triton 3.2.0 adds the required flags to the Autotuner object for this test
     # PR: https://github.com/triton-lang/triton/pull/5092
