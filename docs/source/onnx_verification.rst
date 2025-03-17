@@ -5,6 +5,11 @@ torch.onnx.verification
 
 .. autofunction:: verify_onnx_program
 
+.. autoclass:: VerificationInfo
+    :members:
+    :undoc-members:
+    :member-order: bysource
+
 .. autofunction:: verify
 
 .. Some deprecated members are not publicly shown
@@ -13,7 +18,6 @@ torch.onnx.verification
 .. py:class:: GraphInfoPrettyPrinter
 .. py:class:: OnnxBackend
 .. py:class:: OnnxTestCaseRepro
-.. py:class:: VerificationInfo
 .. py:class:: VerificationOptions
 .. py:func:: find_mismatch
 .. py:func:: verify_aten_graph
