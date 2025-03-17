@@ -70,6 +70,7 @@ def all_gather_copy_in_meta(
 @torch.library.impl(lib, "all_gather_copy_in", "HPU")
 @torch.library.impl(lib, "all_gather_copy_in", "CPU")
 @torch.library.impl(lib, "all_gather_copy_in", "MTIA")
+@torch.library.impl(lib, "all_gather_copy_in", "PrivateUse1")
 def all_gather_copy_in_cuda(
     all_gather_inputs: list[torch.Tensor],
     inp_split_sizes: list[int],
@@ -102,6 +103,7 @@ lib.define(
 @torch.library.impl(lib, "split_with_sizes_copy", "HPU")
 @torch.library.impl(lib, "split_with_sizes_copy", "CPU")
 @torch.library.impl(lib, "split_with_sizes_copy", "MTIA")
+@torch.library.impl(lib, "split_with_sizes_copy", "PrivateUse1")
 def split_with_sizes_copy(
     all_gather_output: torch.Tensor,
     all_gather_input_split_sizes: list[int],
@@ -124,6 +126,7 @@ lib.define(
 @torch.library.impl(lib, "chunk_cat", "HPU")
 @torch.library.impl(lib, "chunk_cat", "CPU")
 @torch.library.impl(lib, "chunk_cat", "MTIA")
+@torch.library.impl(lib, "chunk_cat", "PrivateUse1")
 def chunk_cat(
     tensors: list[torch.Tensor],
     dim: int,
