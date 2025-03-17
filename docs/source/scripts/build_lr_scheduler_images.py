@@ -36,11 +36,6 @@ optimizer = optim.SGD(model.parameters(), lr=0.1)
 
 num_epochs = 100
 
-
-def mock_val_loss(epoch):
-    return 1.0 / (epoch + 1)
-
-
 scheduler1 = ConstantLR(optimizer, factor=0.1, total_iters=2)
 scheduler2 = ExponentialLR(optimizer, gamma=0.9)
 
@@ -52,16 +47,16 @@ schedulers = [
     (lambda opt: ConstantLR(opt, factor=0.5, total_iters=4)),
     (lambda opt: LinearLR(opt, start_factor=0.5, total_iters=4)),
     (lambda opt: ExponentialLR(opt, gamma=0.95)),
-    (lambda opt: PolynomialLR(opt, total_iters=num_epochs, power=1.0)),
+    (lambda opt: PolynomialLR(opt, total_iters=4, power=1.0)),
     (lambda opt: CosineAnnealingLR(opt, T_max=num_epochs)),
     (lambda opt: CosineAnnealingWarmRestarts(opt, T_0=20)),
     (lambda opt: CyclicLR(opt, base_lr=0.01, max_lr=0.1)),
-    (lambda opt: OneCycleLR(opt, max_lr=0.01, total_steps=num_epochs)),
-    (lambda opt: ReduceLROnPlateau(opt, mode="min", factor=0.1, patience=10)),
+    (lambda opt: OneCycleLR(opt, max_lr=0.01, epochs=num_epochs, steps_per_epoch=10)),
+    (lambda opt: ReduceLROnPlateau(opt, mode="min")),
     (lambda opt: ChainedScheduler([scheduler1, scheduler2])),
     (
         lambda opt: SequentialLR(
-            opt, schedulers=[scheduler1, scheduler2], milestones=[30]
+            opt, schedulers=[scheduler1, scheduler2], milestones=[2]
         )
     ),
 ]
@@ -78,10 +73,10 @@ def plot_function(scheduler):
     if plot_path.exists():
         return
 
-    for epoch in range(num_epochs):
+    for _ in range(num_epochs):
         lrs.append(optimizer.param_groups[0]["lr"])
         if isinstance(scheduler, ReduceLROnPlateau):
-            val_loss = mock_val_loss(epoch)
+            val_loss = torch.randn(1).item()
             scheduler.step(val_loss)
         else:
             scheduler.step()

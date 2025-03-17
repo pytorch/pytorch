@@ -260,10 +260,18 @@ class LambdaLR(LRScheduler):
     Example:
         >>> # xdoctest: +SKIP
         >>> # Assuming optimizer has two groups.
+        >>> num_epochs = 100
         >>> lambda1 = lambda epoch: epoch // 30
         >>> lambda2 = lambda epoch: 0.95 ** epoch
         >>> scheduler = LambdaLR(optimizer, lr_lambda=[lambda1, lambda2])
-        >>> for epoch in range(100):
+        >>> for epoch in range(num_epochs):
+        >>>     train(...)
+        >>>     validate(...)
+        >>>     scheduler.step()
+        >>>
+        >>> # Alternatively, you can use a single lambda function for all groups.
+        >>> scheduler = LambdaLR(opt, lr_lambda=lambda epoch: 1 - epoch / num_epochs)
+        >>> for epoch in range(num_epochs):
         >>>     train(...)
         >>>     validate(...)
         >>>     scheduler.step()
@@ -725,6 +733,14 @@ class ExponentialLR(LRScheduler):
         gamma (float): Multiplicative factor of learning rate decay.
         last_epoch (int): The index of last epoch. Default: -1.
 
+    Example:
+        >>> # xdoctest: +SKIP
+        >>> scheduler = ExponentialLR(optimizer, gamma=0.95)
+        >>> for epoch in range(100):
+        >>>     train(...)
+        >>>     validate(...)
+        >>>     scheduler.step()
+
     .. image:: ../scripts/lr_scheduler_images/ExponentialLR.png
     """
 
@@ -993,6 +1009,15 @@ class CosineAnnealingLR(LRScheduler):
 
     .. _SGDR\: Stochastic Gradient Descent with Warm Restarts:
         https://arxiv.org/abs/1608.03983
+
+    Example:
+        >>> # xdoctest: +SKIP
+        >>> num_epochs = 100
+        >>> scheduler = CosineAnnealingLR(optimizer, T_max=num_epochs)
+        >>> for epoch in range(num_epochs):
+        >>>     train(...)
+        >>>     validate(...)
+        >>>     scheduler.step()
 
     .. image:: ../scripts/lr_scheduler_images/CosineAnnealingLR.png
     """
@@ -1648,6 +1673,15 @@ class CosineAnnealingWarmRestarts(LRScheduler):
 
     .. _SGDR\: Stochastic Gradient Descent with Warm Restarts:
         https://arxiv.org/abs/1608.03983
+
+    Example:
+        >>> # xdoctest: +SKIP
+        >>> optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
+        >>> scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, base_lr=0.01, max_lr=0.1)
+        >>> for epoch in range(100):
+        >>>     train(...)
+        >>>     validate(...)
+        >>>     scheduler.step()
 
     .. image:: ../scripts/lr_scheduler_images/CosineAnnealingWarmRestarts.png
     """
