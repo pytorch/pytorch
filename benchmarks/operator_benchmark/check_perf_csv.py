@@ -56,7 +56,7 @@ def check_perf(actual_csv, expected_csv, expected_filename, threshold):
             msg += textwrap.dedent(
                 f"""
             Error: {len(failed)} models have performance status regressed:
-                {' '.join(failed)}
+                {" ".join(failed)}
 
             """
             )
@@ -64,7 +64,7 @@ def check_perf(actual_csv, expected_csv, expected_filename, threshold):
             msg += textwrap.dedent(
                 f"""
             Improvement: {len(improved)} models have performance status improved:
-                {' '.join(improved)}
+                {" ".join(improved)}
 
             """
             )
