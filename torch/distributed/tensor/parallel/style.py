@@ -54,6 +54,13 @@ class ColwiseParallel(ParallelStyle):
         output_layouts (Placement, optional):
             The DTensor layout of the output for the nn.Module, this is used to ensure the output of the nn.Module
             with the user desired layout. If not specified, the output tensor is sharded on the last dimension.
+        fused_linear_weight_splits (tuple[int, ...], optional):
+            The splits of the "fused" nn.Linear layer, where the nn.Linear to be parallelized is one single linear that
+            conceptually combined multiple linear layers together (i.e. Fused QKV Linear layer in some Attention variants
+            where one Linear layer might be more performant than three individual linear layers). This option contains
+            the corresponding individual dimension sizes on the fused weight dimension. After sharding, the fused
+            Linear layer weight would become a single sharded DTensor that contain shards from the individual linear layers.
+            If not specified, we assume the Linear layer is not fused or the module to be parallelized is not a Linear layer.
         use_local_output (bool, optional):
             Whether to use local :class:`torch.Tensor` instead of :class:`DTensor` for the module output, default: True.
     Returns:
@@ -83,6 +90,7 @@ class ColwiseParallel(ParallelStyle):
         *,
         input_layouts: Optional[Placement] = None,
         output_layouts: Optional[Placement] = None,
+        fused_linear_weight_splits: Optional[tuple[int, ...]] = None,
         use_local_output: bool = True,
     ):
         super().__init__()
@@ -92,6 +100,7 @@ class ColwiseParallel(ParallelStyle):
         # 1. requires replicate input
         # 2. shard output on last dim
         self.desired_input_layouts = (Replicate(),)
+        self.fused_linear_weight_splits = fused_linear_weight_splits
         self.use_local_output = use_local_output
 
     @staticmethod
@@ -118,13 +127,70 @@ class ColwiseParallel(ParallelStyle):
         # colwise shard weight/bias to Shard(0), weight be Shard(0)
         # means Colwise as Linear is input * weight^T + bias, where
         # weight would become Shard(1)
-        for name, param in module.named_parameters():
-            dist_param = nn.Parameter(
-                distribute_tensor(
-                    param, device_mesh, [Shard(0)], src_data_rank=self.src_data_rank
-                )
+        if self.fused_linear_weight_splits is not None:
+            fused_weight = module.get_parameter("weight")
+            separate_weights = fused_weight.split(
+                self.fused_linear_weight_splits, dim=0
             )
-            module.register_parameter(name, dist_param)
+            # shard each fused linear weight separately
+            sharded_weights = [
+                distribute_tensor(
+                    weight.detach(),
+                    device_mesh,
+                    [Shard(0)],
+                    src_data_rank=self.src_data_rank,
+                ).to_local()
+                for weight in separate_weights
+            ]
+            # combine the sharded weights back together and create one sharded DTensor
+            combined_sharded_weight = torch.cat(sharded_weights, dim=0)
+            module.register_parameter(
+                "weight",
+                nn.Parameter(
+                    DTensor.from_local(
+                        combined_sharded_weight,
+                        device_mesh,
+                        [Shard(0)],
+                        run_check=False,
+                    )
+                ),
+            )
+            # handle the fused bias if it exists
+            if getattr(module, "bias", None) is not None:
+                fused_bias = module.get_parameter("bias")
+                separate_biases = fused_bias.split(
+                    self.fused_linear_weight_splits, dim=0
+                )
+                sharded_biases = [
+                    distribute_tensor(
+                        bias.detach(),
+                        device_mesh,
+                        [Shard(0)],
+                        src_data_rank=self.src_data_rank,
+                    ).to_local()
+                    for bias in separate_biases
+                ]
+                combined_sharded_bias = torch.cat(sharded_biases, dim=0)
+                module.register_parameter(
+                    "bias",
+                    nn.Parameter(
+                        DTensor.from_local(
+                            combined_sharded_bias,
+                            device_mesh,
+                            [Shard(0)],
+                            run_check=False,
+                        )
+                    ),
+                )
+        else:
+            # handle a normal Linear layer
+            for name, param in module.named_parameters():
+                dist_param = nn.Parameter(
+                    distribute_tensor(
+                        param, device_mesh, [Shard(0)], src_data_rank=self.src_data_rank
+                    )
+                )
+                module.register_parameter(name, dist_param)
 
     def _partition_embedding_fn(self, name, module, device_mesh):
         # colwise shard embedding.weight is straight forward as Shard(1)
@@ -148,6 +214,9 @@ class ColwiseParallel(ParallelStyle):
         if isinstance(module, nn.Linear):
             partition_fn = self._partition_linear_fn
         elif isinstance(module, nn.Embedding):
+            assert self.fused_linear_weight_splits is None, (
+                "Embedding module does not support fused linear weight splits option!"
+            )
             partition_fn = self._partition_embedding_fn
         else:
             raise NotImplementedError(
