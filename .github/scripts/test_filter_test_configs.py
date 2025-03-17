@@ -633,6 +633,7 @@ class TestConfigFilter(TestCase):
             ci_no_td: bool = False,
             ci_td_distributed: bool = False,
             is_unstable: bool = False,
+            build_distributed: bool = False,
             reenabled_issues: str = "",
         ) -> str:
             return (
@@ -644,6 +645,7 @@ class TestConfigFilter(TestCase):
                 f"ci-td-distributed={ci_td_distributed}\n"
                 f"is-unstable={is_unstable}\n"
                 f"reenabled-issues={reenabled_issues}\n"
+                f"build-distributed={build_distributed}\n"
             )
 
         mocked_subprocess.return_value = b""
@@ -755,6 +757,14 @@ class TestConfigFilter(TestCase):
                 "pr_body": "resolves #123 fixes #234",
                 "expected": _gen_expected_string(reenabled_issues="123,234"),
                 "description": "Reenable some issues",
+            },
+            {
+                "labels": {},
+                "test_matrix": '{include: [{config: "distributed"}]}',
+                "job_name": "A job name",
+                "pr_body": "",
+                "expected": _gen_expected_string(build_distributed=True),
+                "description": "Set build-distributed",
             },
         ]
 
