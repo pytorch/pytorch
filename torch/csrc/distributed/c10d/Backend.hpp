@@ -73,7 +73,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     return false;
   }
 
-  virtual bool supportsCommTimeEstimation() const {
+  virtual bool supportsTimeEstimation() const {
     return false;
   }
 

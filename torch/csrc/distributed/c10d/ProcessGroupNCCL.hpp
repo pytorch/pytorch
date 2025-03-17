@@ -622,7 +622,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     return true;
   }
 
-  bool supportsCommTimeEstimation() const override {
+  bool supportsTimeEstimation() const override {
 #ifdef NCCL_SIM_INFO_INITIALIZER
     return true;
 #else
@@ -634,9 +634,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   c10::intrusive_ptr<Work> endCoalescing() override;
 
-  void startCommTimeEstimate();
+  void startTimeEstimate();
 
-  float endCommTimeEstimate();
+  float endTimeEstimate();
 
   // For specifying a composite optype, such as ALLGATHER and REDUCE_SCATTER
   c10::intrusive_ptr<Work> endCoalescing(OpType optype);

@@ -119,8 +119,10 @@ std::shared_ptr<NCCLComm> NCCLComm::create_scalable(
 #endif // NCCL_HAS_CONFIG
 
 #ifdef NCCL_SIM_INFO_INITIALIZER
-ncclResult_t NCCLComm::ncclCollectiveEstimateEnd(ncclSimInfo_t* simInfo) {
-  return ncclGroupSimulateEnd(simInfo);
+float NCCLComm::ncclCollectiveEstimateEnd(
+    std::unique_ptr<ncclSimInfo_t> simInfo) {
+  C10D_NCCL_CHECK(ncclGroupSimulateEnd(simInfo.get()), std::nullopt);
+  return simInfo->estimatedTime;
 }
 #endif // NCCL_SIM_INFO_INITIALIZER
 

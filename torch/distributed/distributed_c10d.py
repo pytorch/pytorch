@@ -2600,6 +2600,43 @@ def _coalescing_manager(
     # Otherwise, the backend has sync'ed at CPP level
 
 
+class _CollectiveEstimator:
+    def __init__(self) -> None:
+        self.estimated_time: Optional[float] = None
+
+@contextlib.contextmanager
+def _collective_estimator(
+    group: Optional[ProcessGroup] = None,
+    device: Optional[torch.device] = None,
+):
+    """
+    Context manager used to coalesce collectives or P2P operations when possible.
+
+    Args:
+        group (`ProcessGroup`, optional): The process group to work on. If None,
+            the default process group will be used.
+        device (`torch.device`, optional): Default is None, set to a device if
+            there isn't a `**_coalesced` implementation by the backend.
+
+    Examples:
+        >>> # xdoctest: +SKIP("no rank")
+        >>> # Synchronous ops
+        >>> with _collective_estimator() as cm:
+        >>>     for i in range(num_colls):
+        >>>         dist.all_reduce(tensors[i])
+        >>> # estimate time is stored in cm.estimated_time
+    """
+    group = group or _get_default_group()
+    device = device or _get_pg_default_device(group)
+    backend = group._get_backend(device)
+    if not backend.supports_time_estimate:
+        raise NotImplementedError(f"collective time estimator is not supported for backend {backend}")
+    backend._start_time_estimate()  # type: ignore[attr-defined]
+    cm = _CollectiveEstimator()
+    yield cm
+    cm.estimated_time = backend._end_time_estimate()  # type: ignore[attr-defined]
+
+
 def batch_isend_irecv(p2p_op_list: list[P2POp]) -> list[Work]:
     """
     Send or Receive a batch of tensors asynchronously and return a list of requests.

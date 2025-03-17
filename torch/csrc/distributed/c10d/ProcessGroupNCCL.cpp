@@ -3249,17 +3249,14 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing() {
   return endCoalescing(OpType::COALESCED);
 }
 
-void ProcessGroupNCCL::startCommTimeEstimate() {
+void ProcessGroupNCCL::startTimeEstimate() {
   groupStart();
 }
 
-float ProcessGroupNCCL::endCommTimeEstimate() {
+float ProcessGroupNCCL::endTimeEstimate() {
 #ifdef NCCL_SIM_INFO_INITIALIZER
-  auto simInfo = std::make_shared<ncclSimInfo_t>();
-  ncclResult_t result = NCCLComm::ncclCollectiveEstimateEnd(simInfo.get());
-  TORCH_CHECK_WITH(
-      DistBackendError, result == ncclSuccess, "ncclGroupSimulateEnd failed");
-  return simInfo->estimatedTime;
+  auto simInfo = std::make_unique<ncclSimInfo_t>();
+  return NCCLComm::ncclCollectiveEstimateEnd(std::move(simInfo));
 #else
   TORCH_CHECK(
       false,
