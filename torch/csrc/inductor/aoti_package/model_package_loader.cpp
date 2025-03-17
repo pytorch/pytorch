@@ -70,7 +70,7 @@ namespace torch::inductor {
 namespace {
 const nlohmann::json& load_json_file(std::string json_path) {
   if (!file_exists(json_path)) {
-    throw std::runtime_error("File found: " + json_path);
+    throw std::runtime_error("File not found: " + json_path);
   }
 
   std::ifstream json_file(json_path);
@@ -339,12 +339,9 @@ void AOTIModelPackageLoader::load_metadata(const std::string& cpp_filename) {
 }
 
 AOTIModelPackageLoader::AOTIModelPackageLoader(
-    const std::string& model_package_path)
-    : AOTIModelPackageLoader(model_package_path, "model") {}
-
-AOTIModelPackageLoader::AOTIModelPackageLoader(
     const std::string& model_package_path,
-    const std::string& model_name = "model") {
+    const std::string& model_name,
+    const bool run_single_threaded) {
   // Extract all files within the zipfile to a temporary directory
   mz_zip_archive zip_archive;
   memset(&zip_archive, 0, sizeof(zip_archive));
@@ -457,7 +454,8 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
   }
 
   std::string cubin_dir = temp_dir_ + k_separator + model_directory;
-  runner_ = registered_aoti_runner[device](so_path, 1, device, cubin_dir);
+  runner_ = registered_aoti_runner[device](
+      so_path, 1, device, cubin_dir, run_single_threaded);
 }
 
 AOTIModelPackageLoader::~AOTIModelPackageLoader() {

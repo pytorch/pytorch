@@ -961,6 +961,34 @@ class TestFlexDecoding(InductorTestCase):
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
+    @common_utils.parametrize("score_mod", test_score_mods)
+    @common_utils.parametrize("head_dims", test_Hq_Hkv)
+    def test_head_dependent_mask_mod(self, dtype: torch.dtype, score_mod, head_dims):
+        Hq, Hkv = head_dims
+        assert Hq % Hkv == 0
+
+        def head_attention_mod(kv_head_num):
+            head_type = torch.tensor(
+                [False if i % kv_head_num == 0 else True for i in range(kv_head_num)],
+                dtype=torch.bool,
+                device="cuda",
+            )
+
+            def mask_mod(b, h, q_idx, kv_idx):
+                bi_mask = head_type[h]
+                causal_mask = q_idx >= kv_idx
+
+                return bi_mask & causal_mask
+
+            return mask_mod
+
+        mask_mod = head_attention_mod(Hq)
+        mask = create_block_mask(mask_mod, 1, Hq, 1, S, device="cuda")
+        self.run_test(score_mod, dtype, Q_H=Hq, KV_H=Hkv, block_mask=mask)
+        self.run_test_with_paged_attention(score_mod, dtype, Q_H=Hq, KV_H=Hkv)
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes_fast)
     def test_subgraph_respect_decompostion(self, dtype):
         from torch._decomp import core_aten_decompositions
         from torch.fx.experimental.proxy_tensor import make_fx

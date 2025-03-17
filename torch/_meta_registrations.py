@@ -5260,6 +5260,50 @@ def zeros_like(
     return res
 
 
+@register_meta([aten.ones.default, aten.ones.out])
+@out_wrapper()
+def meta_ones(
+    size,
+    *,
+    dtype=None,
+    layout=None,
+    device=None,
+    pin_memory=None,
+    requires_grad=False,
+):
+    if dtype is None:
+        dtype = torch.get_default_dtype()
+    if device is None:
+        device = torch.get_default_device()
+    if layout is None:
+        layout = torch.strided
+    return torch.empty(
+        size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+    )
+
+
+@register_meta([aten.zeros.default, aten.zeros.out])
+@out_wrapper()
+def meta_zeros(
+    size,
+    *,
+    dtype=None,
+    layout=None,
+    device=None,
+    pin_memory=None,
+    requires_grad=False,
+):
+    if dtype is None:
+        dtype = torch.get_default_dtype()
+    if device is None:
+        device = torch.get_default_device()
+    if layout is None:
+        layout = torch.strided
+    return torch.empty(
+        size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+    )
+
+
 @register_meta(aten.select.int)
 def meta_select(self, dim, index):
     from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
@@ -5583,7 +5627,20 @@ def meta__scaled_dot_product_cudnn_attention(
     S_KV = key.size(2)
     D_V = value.size(-1)
 
-    res = torch.empty((B, H, S_Q, D_V), dtype=query.dtype, device=query.device)
+    res_shape = (B, H, S_Q, D_V)
+    if tuple(query.shape) == res_shape:
+        query_t = query.transpose(1, 2)
+        res = torch.empty_like(query_t).transpose(1, 2)
+    else:
+        dim_order = sorted(
+            [0, 1, 2, 3], key=lambda idx: query.stride()[idx], reverse=True
+        )
+        permuted_shape = [res_shape[idx] for idx in dim_order]
+        final_permute = [dim_order.index(i) for i in range(len(dim_order))]
+        res = torch.empty(
+            permuted_shape, dtype=query.dtype, device=query.device
+        ).permute(final_permute)
+
     logsum_exp = torch.empty(
         (B, H, S_Q),
         dtype=torch.float,
@@ -7086,6 +7143,60 @@ def meta_polygamma(n: int, self: Tensor) -> Tensor:
 @register_meta(aten._local_scalar_dense)
 def meta_local_scalar_dense(self: Tensor):
     raise RuntimeError("Tensor.item() cannot be called on meta tensors")
+
+
+@register_meta(aten.silu)
+@out_wrapper(exact_dtype=True)
+def silu(self: Tensor) -> Tensor:
+    return torch.empty_like(self)
+
+
+@register_meta(aten.sigmoid)
+@out_wrapper()
+def sigmoid(self: Tensor) -> Tensor:
+    _, result_dtype = elementwise_dtypes(
+        self,
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    )
+    return torch.empty_like(self, dtype=result_dtype)
+
+
+@register_meta(aten._softmax)
+@out_wrapper()
+def softmax(x: Tensor, dim: int, half_to_float: bool) -> Tensor:
+    if half_to_float:
+        assert x.dtype == torch.half
+    computation_dtype, result_dtype = utils.elementwise_dtypes(
+        x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    )
+
+    result_dtype = result_dtype if not half_to_float else computation_dtype
+    res = torch.empty_like(x, dtype=result_dtype, memory_format=torch.contiguous_format)
+    return res
+
+
+@register_meta(aten.embedding)
+@out_wrapper()
+def embedding(
+    weight: Tensor,
+    indices: Tensor,
+    padding_idx: int = -1,
+    scale_grad_by_freq: bool = False,
+    sparse: bool = False,
+) -> Tensor:
+    assert weight.dim() == 2, "'weight' must be 2-D"
+    weight_shape = weight.shape
+    indices_shape = indices.shape
+
+    if indices.ndim == 0:
+        out_shape: tuple[int, ...] = (weight_shape[1],)
+    elif indices.ndim == 1:
+        out_shape = (indices_shape[0], weight_shape[1])
+    else:
+        out_shape = (*indices_shape, weight_shape[1])
+
+    out_dtype = weight.dtype
+    return weight.new_empty(out_shape, dtype=out_dtype)
 
 
 @register_meta(aten._jagged_to_padded_dense_forward.default)
