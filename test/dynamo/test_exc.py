@@ -37,7 +37,12 @@ class ExcTests(LoggingTestCase):
                 torch.randn(1)
             ),
             """\
-'skip function graph_break in file _dynamo/decorators.py'
+Call to `torch._dynamo.graph_break()`
+  Explanation: User-inserted graph break. Message: None
+  Hint: Remove the `torch._dynamo.graph_break()` call.
+
+  Developer debug context: Called `torch._dynamo.graph_break()` with args `[]`, kwargs `{}`
+
 
 from user code:
    File "test_exc.py", line N, in fn001
@@ -171,8 +176,15 @@ from user code:
             munge_exc(record.getMessage()),
             """\
 Graph break in user code at test_exc.py:N
-Reason: Unsupported: 'skip function graph_break in file _dynamo/decorators.py'
+Graph Break Reason: Call to `torch._dynamo.graph_break()`
+  Explanation: User-inserted graph break. Message: None
+  Hint: Remove the `torch._dynamo.graph_break()` call.
+
+  Developer debug context: Called `torch._dynamo.graph_break()` with args `[]`, kwargs `{}`
+
 User code traceback:
+  File "test_exc.py", line N, in test_graph_break_log
+    torch.compile(fn001, backend="eager")(torch.randn(1))
   File "test_exc.py", line N, in fn001
     return fn002(x)
   File "test_exc.py", line N, in fn002
