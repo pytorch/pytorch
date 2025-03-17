@@ -43,7 +43,7 @@ class AOTIModelPackageLoaderPybind : public AOTIModelPackageLoader {
   }
 };
 
-namespace {
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 void initAOTIPackageBindings(PyObject* module) {
   auto rootModule = py::handle(module).cast<py::module>();
   auto m = rootModule.def_submodule("_aoti");
@@ -68,6 +68,5 @@ void initAOTIPackageBindings(PyObject* module) {
       .def(
           "update_constant_buffer",
           &AOTIModelPackageLoaderPybind::update_constant_buffer);
-}
 }
 } // namespace torch::inductor
