@@ -782,41 +782,41 @@ def is_cpp_backend(device):
 
 def skip_if_cpu(fn):
     @functools.wraps(fn)
-    def wrapper(self):
+    def wrapper(self, *args, **kwargs):
         if self.device == "cpu":
             raise unittest.SkipTest("cpu not supported")
-        return fn(self)
+        return fn(self, *args, **kwargs)
 
     return wrapper
 
 
 def skip_if_halide(fn):
     @functools.wraps(fn)
-    def wrapper(self):
+    def wrapper(self, *args, **kwargs):
         if is_halide_backend(self.device):
             raise unittest.SkipTest("halide not supported")
-        return fn(self)
+        return fn(self, *args, **kwargs)
 
     return wrapper
 
 
 def xfail_if_mps(fn):
     @functools.wraps(fn)
-    def wrapper(self):
+    def wrapper(self, *args, **kwargs):
         if not is_mps_backend(self.device):
-            return fn(self)
+            return fn(self, *args, **kwargs)
         with self.assertRaises(Exception):
-            return fn(self)
+            return fn(self, *args, **kwargs)
 
     return wrapper
 
 
 def skip_if_triton(fn):
     @functools.wraps(fn)
-    def wrapper(self):
+    def wrapper(self, *args, **kwargs):
         if is_triton_backend(self.device):
             raise unittest.SkipTest("triton not supported")
-        return fn(self)
+        return fn(self, *args, **kwargs)
 
     return wrapper
 
@@ -833,10 +833,10 @@ def skip_if_not_triton(fn):
 
 def skip_if_dynamic(fn):
     @functools.wraps(fn)
-    def wrapper(self):
+    def wrapper(self, *args, **kwargs):
         if ifdynstaticdefault(True, False) or torch._dynamo.config.dynamic_shapes:
             raise unittest.SkipTest("associtaive_scan doesn's support lifted SymInts.")
-        return fn(self)
+        return fn(self, *args, **kwargs)
 
     return wrapper
 
@@ -892,13 +892,13 @@ def xfail_if_triton_cpu(fn):
 
 def skip_if_gpu_halide(fn):
     @functools.wraps(fn)
-    def wrapper(self):
+    def wrapper(self, *args, **kwargs):
         if (
             is_halide_backend(self.device)
             and getattr(self.device, "type", self.device) == "cuda"
         ):
             raise unittest.SkipTest("halide not supported")
-        return fn(self)
+        return fn(self, *args, **kwargs)
 
     return wrapper
 
@@ -907,12 +907,12 @@ class skip_if_cpp_wrapper:
     def __init__(self, reason: str = "") -> None:
         self.reason = reason
 
-    def __call__(self, fn):
+    def __call__(self, fn, *args, **kwargs):
         @functools.wraps(fn)
         def wrapper(test_self):
             if config.cpp_wrapper:
                 raise unittest.SkipTest(f"cpp wrapper bug to be fixed: {self.reason}")
-            return fn(test_self)
+            return fn(test_self, *args, **kwargs)
 
         return wrapper
 
