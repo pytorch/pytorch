@@ -906,7 +906,11 @@ def unload_xpu_triton_pyds() -> None:
                     kernel, torch._inductor.runtime.triton_heuristics.CachingAutotuner
                 ):
                     for result in kernel.compile_results:
-                        result.kernel.run.mod.__del__()
+                        if isinstance(
+                            result,
+                            torch._inductor.runtime.triton_heuristics.TritonCompileResult,
+                        ):
+                            result.kernel.run.mod.__del__()
         del sys.modules[module_name]
 
     # unload spirv_utils.pyd

@@ -1142,15 +1142,15 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
             if not torch._inductor.config.use_static_cuda_launcher:
                 raise CannotStaticallyLaunchKernel("Static launcher disabled")
 
+            if triton_meta.get("device_type", None) != "cuda":
+                # Only cuda kernels
+                raise CannotStaticallyLaunchKernel("Non-cuda device")
+
             if torch._inductor.config.cpp_wrapper:
                 # If we're running with cpp wrapper, it doesn't
                 # make sense to statically compile since everything
                 # is codegenned anyway
                 raise CannotStaticallyLaunchKernel("Cpp wrapper enabled")
-
-            if triton_meta.get("device_type", None) != "cuda":
-                # Only cuda kernels
-                raise CannotStaticallyLaunchKernel("Non-cuda device")
 
             if heuristic_type == HeuristicType.USER_AUTOTUNE:
                 # Don't support user defined triton kernels yet
