@@ -61,10 +61,15 @@ fi
 ROCM_SO=(
     "${libamdhip}"
     "libhsa-runtime64.so.1"
-    "libamd_comgr.so.2"
     "libdrm.so.2"
     "libdrm_amdgpu.so.1"
 )
+
+if [[ $ROCM_INT -ge 60400 ]]; then
+    ROCM_SO+=("libamd_comgr.so.3")
+else
+    ROCM_SO+=("libamd_comgr.so.2")
+fi
 
 if [[ $ROCM_INT -ge 60100 ]]; then
     ROCM_SO+=("librocprofiler-register.so.0")
