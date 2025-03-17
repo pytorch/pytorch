@@ -246,10 +246,10 @@ class CompileCounter:
 class CompileCounterWithBackend:
     def __init__(
         self,
-        backend: str | Callable[..., Any],
-        mode: str | None = None,
-        options: dict[str, Union[str, int, bool]] | None = None,
-        dynamic: bool | None = None,
+        backend: Union[str | Callable[..., Any]],
+        mode: Optional[str] = None,
+        options: Optional[dict[str, Union[str, int, bool]]] = None,
+        dynamic: Optional[bool] = None,
     ) -> None:
         from torch import _TorchCompileInductorWrapper, _TorchCompileWrapper
 
