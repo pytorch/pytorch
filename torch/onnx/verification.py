@@ -1,8 +1,5 @@
 # mypy: allow-untyped-defs
-"""Functions to verify exported ONNX model is functionally equivalent to original PyTorch model.
-
-ONNX Runtime is required, and is used as the ONNX backend for export verification.
-"""
+"""The ONNX verification module provides a set of tools to verify the correctness of ONNX models."""
 
 from __future__ import annotations
 
@@ -15,6 +12,11 @@ __all__ = [
     "VerificationInfo",
     "VerificationInterpreter",
     "verify_onnx_program",
+    "GraphInfo",
+    "GraphInfoPrettyPrinter",
+    "OnnxTestCaseRepro",
+    "find_mismatch",
+    "verify_aten_graph",
 ]
 
 import contextlib
