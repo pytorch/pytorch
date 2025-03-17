@@ -72,6 +72,7 @@ ignore = [
     # these ignores are from ruff PERF; please fix!
     "PERF203",
     "PERF401",
+    "PERF403",
     # these ignores are from PYI; please fix!
     "PYI024",
     "PYI036",

@@ -1564,7 +1564,9 @@ class ExportedProgramSerializer(metaclass=Final):
         # TODO: Directly serialize exported_program.constants once
         # CustomClassHolders get stored in the ExportedProgram rather than in
         # the graph
-        constants: dict[str, Any] = gm_serializer.custom_objs.copy()
+        constants: dict[str, Any] = {}
+        for n, c in gm_serializer.custom_objs.items():
+            constants[n] = c
         for n, t in exported_program.constants.items():
             assert n not in constants
             constants[n] = t
