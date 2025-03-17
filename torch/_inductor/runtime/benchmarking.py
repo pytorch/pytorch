@@ -24,7 +24,7 @@ T = TypeVar("T")
 
 
 def time_and_count(
-    fn: Callable[Concatenate[Any, P], T]
+    fn: Callable[Concatenate[Any, P], T],
 ) -> Callable[Concatenate[Any, P], T]:
     """Wraps `fn` with `dynamo_timed` context, and increments the appropriate dynamo
     counters. It is expected that `fn` is a method of `Benchmarker` or one of its
