@@ -11835,6 +11835,34 @@ class CommonTemplate:
         assert out.shape == (5, 5)
         assert out.tensor.shape == (8, 8)
 
+    def test_padded_tensor2(self):
+        from torch._inductor.experimental.padded_tensor import PaddedTensor
+
+        @torch.compile(fullgraph=True)
+        def f(x, y):
+            return torch.concat((x, y), dim=0)
+
+        x = torch.randn((3, 3), device="cuda")
+        y = torch.randn((3, 3), device="cuda")
+        x = PaddedTensor.from_tensor(x, multipliers={0: 1, 1: 1})
+        y = PaddedTensor.from_tensor(y, multipliers={0: 1, 1: 1})
+
+        assert f(x, y).shape == (6, 3)
+
+    def test_padded_tensor3(self):
+        from torch._inductor.experimental.padded_tensor import PaddedTensor
+
+        @torch.compile(fullgraph=True)
+        def f(x, y):
+            return torch.stack([x, y], dim=0)
+
+        x = torch.randn((3, 3), device="cuda")
+        y = torch.randn((3, 3), device="cuda")
+        x = PaddedTensor.from_tensor(x, multipliers={0: 1, 1: 1})
+        y = PaddedTensor.from_tensor(y, multipliers={0: 1, 1: 1})
+
+        assert f(x, y).shape == (2, 3, 3)
+
     # If we serve from the cache, the init hook isn't called
     @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
     @skipIfWindows(msg="torch._dynamo.exc.Unsupported")

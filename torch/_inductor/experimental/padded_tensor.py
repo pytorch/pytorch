@@ -1,27 +1,30 @@
+from typing import Any, Callable, Optional
+
 import torch
 import torch.nn.functional as F
 import torch.utils._pytree as pytree
-from torch.utils._python_dispatch import return_and_correct_aliasing
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing
-
-
-from typing import Any, Callable, Optional
+from torch.utils._python_dispatch import return_and_correct_aliasing
 
 
 def get_padded_shape(shape: torch.Size, multipliers: dict[int, int]) -> torch.Size:
     padded_shape = list(shape)
     for dim, multiplier in multipliers.items():
-        padded_shape[dim] = (padded_shape[dim] + multiplier - 1) // multiplier * multiplier
+        padded_shape[dim] = (
+            (padded_shape[dim] + multiplier - 1) // multiplier * multiplier
+        )
     return torch.Size(padded_shape)
 
 
-def get_pad(shape: torch.Size, multipliers: dict[int, int]) -> tuple[int,...]:
+def get_pad(shape: torch.Size, multipliers: dict[int, int]) -> tuple[int, ...]:
     pad = [0] * (len(shape) * 2)
     for dim, multiplier in multipliers.items():
-        if 2 * dim + 1 >= len(pad): # TODO
+        if 2 * dim + 1 >= len(pad):  # TODO
             break
-        pad[2 * dim] = (shape[dim] + multiplier - 1) // multiplier * multiplier - shape[dim]
+        pad[2 * dim] = (shape[dim] + multiplier - 1) // multiplier * multiplier - shape[
+            dim
+        ]
         pad[2 * dim + 1] = 0
     return tuple(pad[::-1])
 
@@ -64,7 +67,7 @@ class PaddedTensor(torch.Tensor):
         neutral_element: int = 0,
     ):
         self.multipliers = multipliers
-        self.neutral_element=neutral_element
+        self.neutral_element = neutral_element
         self.tensor = tensor
 
     @staticmethod
@@ -116,8 +119,18 @@ class PaddedTensor(torch.Tensor):
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs):
         with disable_proxy_modes_tracing(), FakeTensorMode():
-            fake_args = transform(args, lambda t: torch.empty_strided(t.shape, t.stride()) if isinstance(t, torch.Tensor) else t)
-            fake_kwargs = transform(kwargs, lambda t: torch.empty_strided(t.shape, t.stride()) if isinstance(t, torch.Tensor) else t)
+            fake_args = transform(
+                args,
+                lambda t: torch.empty_strided(t.shape, t.stride())
+                if isinstance(t, torch.Tensor)
+                else t,
+            )
+            fake_kwargs = transform(
+                kwargs,
+                lambda t: torch.empty_strided(t.shape, t.stride())
+                if isinstance(t, torch.Tensor)
+                else t,
+            )
             fake_out = func(*fake_args, **fake_kwargs)
 
         outer_size, outer_stride = fake_out.shape, fake_out.stride()
@@ -125,15 +138,19 @@ class PaddedTensor(torch.Tensor):
         tensor_args = transform(args, PaddedTensor.to_tensor)
         tensor_kwargs = transform(kwargs, PaddedTensor.to_tensor)
         out = func(*tensor_args, **tensor_kwargs)
-        multipliers = transform(args, lambda t: t.multipliers if isinstance(t, PaddedTensor) else None)[0] # TODO: support different multipliers from args
-        neutral_element = transform(args, lambda t: t.neutral_element if isinstance(t, PaddedTensor) else None)[0]  # TODO: support different neural element
+        multipliers = transform(
+            args, lambda t: t.multipliers if isinstance(t, PaddedTensor) else None
+        )[0]  # TODO: support different multipliers from args
+        neutral_element = transform(
+            args, lambda t: t.neutral_element if isinstance(t, PaddedTensor) else None
+        )[0]  # TODO: support different neural element
 
         out = PaddedTensor(
             out,
             outer_size,
             outer_stride,
             multipliers,
-            neutral_element,            
+            neutral_element,
         )
         assert hasattr(out, "multipliers"), breakpoint()
 
