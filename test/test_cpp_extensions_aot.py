@@ -3,7 +3,6 @@
 import os
 import re
 import subprocess
-import sys
 import unittest
 from itertools import repeat
 from pathlib import Path
@@ -16,7 +15,6 @@ import torch.utils.cpp_extension
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
-    shell,
     skipIfTorchDynamo,
     TEST_XPU,
     xfailIfTorchDynamo,
@@ -216,7 +214,6 @@ class TestCppExtensionAOT(common.TestCase):
 
         missing_symbols = subprocess.check_output(["nm", "-u", so_file]).decode("utf-8")
         self.assertFalse("Py" in missing_symbols)
-
 
     @unittest.skipIf(not TEST_CUDA, "some aspects of this test require CUDA")
     def test_libtorch_agnostic(self):
