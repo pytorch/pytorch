@@ -625,6 +625,8 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
     """
 
     def _override(self, func, args, kwargs):
+        if "__array__" in str(func):
+            breakpoint()
         if torch.distributed.is_available():
             from torch.distributed._functional_collectives import (
                 REDUCE_OP_TO_STR,
@@ -663,6 +665,10 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
 
         if func.__name__ == "numpy" and isinstance(args[0], torch.Tensor):
             return torch._refs.view_as, [args[0], args[0]], {}
+
+        if func.__name__ == "__array__" and isinstance(args[0], torch.Tensor):
+            return torch._numpy.ndarray, [args[0]], {}
+        
         return func, args, kwargs
 
     def __torch_function__(self, func, types, args=(), kwargs=None):
