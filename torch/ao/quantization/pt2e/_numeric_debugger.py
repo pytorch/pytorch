@@ -318,10 +318,28 @@ def compare_results(
             )
             continue
         actual_name, actual_stack, actual_stats = actual_results[debug_handle]
+        for a, b in zip(actual_stats, ref_stats):
+            if (
+                isinstance(a, torch.Tensor)
+                and isinstance(b, torch.Tensor)
+                and a.shape != b.shape
+            ):
+                log.warning(
+                    "Cannot compare tensors with different shapes: actual=%s vs ref=%s",
+                    a.shape,
+                    b.shape,
+                )
         try:
             results = [
                 QuantizationComparisonResult(actual=a, ref=b)
                 for a, b in zip(actual_stats, ref_stats)
+                # Only compare objects if they're both collections, or both single
+                # tensors of the same shape.
+                # TODO: use torch.fx.node.map_aggregate for the collection of
+                # comparison results instead.
+                if not isinstance(a, torch.Tensor)
+                or not isinstance(b, torch.Tensor)
+                or a.shape == b.shape
             ]
         except Exception as e:
             # Add extra information for an exception from QuantizationComparisonResult
