@@ -127,8 +127,10 @@ jobs:
         shell: bash
         run: python pytorch/.github/scripts/parse_ref.py
 
-      - name: Change Directory
-        run: cd pytorch
+      - name: Change Directory & print inside directory
+        run: |
+          cd pytorch
+          dir
 
       - name: Get workflow job id
         id: get-job-id
