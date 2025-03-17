@@ -52,7 +52,7 @@ If applicable, prepare your model against bad inputs and prompt injections. Some
 
 ### Data privacy
 
-**Take special security measures if your model if you train models with sensitive data**. Prioritize [sandboxing](https://developers.google.com/code-sandboxing) your models and:
+**Take special security measures if your model is trained with sensitive data**. Prioritize [sandboxing](https://developers.google.com/code-sandboxing) your models and:
 - Do not feed sensitive data to untrusted model (even if runs in a sandboxed environment)
 - If you consider publishing a model that was partially trained with sensitive data, be aware that data can potentially be recovered from the trained weights (especially if model overfits).
 
