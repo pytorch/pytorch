@@ -455,6 +455,7 @@ def download_json(url: str, headers: dict[str, str], num_retries: int = 3) -> An
 
 
 def set_output(name: str, val: Any) -> None:
+    print(f"Setting output {name}={val}")
     if os.getenv("GITHUB_OUTPUT"):
         with open(str(os.getenv("GITHUB_OUTPUT")), "a") as env:
             print(f"{name}={val}", file=env)
@@ -487,6 +488,13 @@ def get_reenabled_issues(pr_body: str = "") -> list[str]:
         warnings.warn(f"failed to get commit messages: {e}")
         commit_messages = ""
     return parse_reenabled_issues(pr_body) + parse_reenabled_issues(commit_messages)
+
+
+def check_should_build_distributed(test_matrix: dict[str, list[Any]]) -> bool:
+    for entry in test_matrix.get("include", []):
+        if entry.get("config") in ("distributed", "multigpu"):
+            return True
+    return False
 
 
 def check_for_setting(labels: set[str], body: str, setting: str) -> bool:
@@ -542,6 +550,8 @@ def perform_misc_tasks(
         for config in test_matrix.get("include", []):
             if is_cuda_or_rocm_job(job_name):
                 config["mem_leak_check"] = "mem_leak_check"
+
+    set_output("build-distributed", check_should_build_distributed(test_matrix) or os.getenv("BUILD_DISTRIBUTED"))
 
 
 def main() -> None:

@@ -53,6 +53,9 @@ outputs:
   ci-td-distributed:
     description: True if ci-td-distributed label was on PR or [ci-td-distributed] in PR body.
     value: ${{ steps.filter.outputs.ci-td-distributed }}
+  build-distributed:
+    description: True if distributed should be built
+    value: ${{ steps.filter.outputs.build-distributed }}
 
 runs:
   using: composite
