@@ -19,7 +19,7 @@
 
 namespace at::functorch {
 
-bool kVmapFallbackWarningEnabled = true;
+static bool kVmapFallbackWarningEnabled = true;
 
 bool isVmapFallbackWarningEnabled() {
   return kVmapFallbackWarningEnabled;
@@ -29,7 +29,7 @@ void setVmapFallbackWarningEnabled(bool enabled) {
   kVmapFallbackWarningEnabled = enabled;
 }
 
-bool kVmapFallbackEnabled = true;
+static bool kVmapFallbackEnabled = true;
 
 bool isVmapFallbackEnabled() {
   return kVmapFallbackEnabled;

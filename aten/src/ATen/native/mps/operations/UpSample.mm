@@ -263,28 +263,28 @@ static void upsample_kernel_out_template(const Tensor& input,
     return;
   }
   std::array<float, 2> scales = {
-      area_pixel_compute_scale<float>(input.size(3), output.size(3), align_corners, scale_w_opt),
+      area_pixel_compute_scale<float>(input.size(-1), output.size(-1), align_corners, scale_w_opt),
       area_pixel_compute_scale<float>(input.size(2), output.size(2), align_corners, scale_h_opt)};
   auto upsamplePSO = lib.getPipelineStateForFunc(fmt::format("upsample_{}_{}", name, scalarToMetalTypeString(input)));
   auto stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
-      std::array<int64_t, 4> output_strides = {output.stride(3), output.stride(2), output.stride(1), output.stride(0)};
-      std::array<int64_t, 4> output_sizes = {output.size(3), output.size(2), output.size(1), output.size(0)};
-      std::array<int64_t, 4> input_sizes = {input.size(3), input.size(2), input.size(1), input.size(0)};
-      std::array<int64_t, 4> input_strides = {input.stride(3), input.stride(2), input.stride(1), input.stride(0)};
       auto computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:upsamplePSO];
       mtl_setArgs(computeEncoder,
                   input,
                   output,
-                  input_strides,
-                  output_strides,
-                  input_sizes,
-                  output_sizes,
+                  input.strides(),
+                  output.strides(),
+                  input.sizes(),
+                  output.sizes(),
                   scales,
                   align_corners);
-      mtl_dispatch1DJob(computeEncoder, upsamplePSO, output_size[0] * output_size[1]);
+      if (output.ndimension() == 4) {
+        mtl_dispatch1DJob(computeEncoder, upsamplePSO, output_size[0] * output_size[1]);
+      } else {
+        mtl_dispatch1DJob(computeEncoder, upsamplePSO, output_size[0]);
+      }
     }
   });
 }
@@ -309,23 +309,15 @@ static void upsample_kernel_backward_out_template(const Tensor& grad_input,
   auto stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
-      std::array<int64_t, 4> output_strides = {
-          grad_output.stride(3), grad_output.stride(2), grad_output.stride(1), grad_output.stride(0)};
-      std::array<int64_t, 4> output_sizes = {
-          grad_output.size(3), grad_output.size(2), grad_output.size(1), grad_output.size(0)};
-      std::array<int64_t, 4> input_sizes = {
-          grad_input.size(3), grad_input.size(2), grad_input.size(1), grad_input.size(0)};
-      std::array<int64_t, 4> input_strides = {
-          grad_input.stride(3), grad_input.stride(2), grad_input.stride(1), grad_input.stride(0)};
       auto computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:upsamplePSO];
       mtl_setArgs(computeEncoder,
                   grad_input,
                   grad_output,
-                  input_strides,
-                  output_strides,
-                  input_sizes,
-                  output_sizes,
+                  grad_input.strides(),
+                  grad_output.strides(),
+                  grad_input.sizes(),
+                  grad_output.sizes(),
                   scales,
                   align_corners);
       mtl_dispatch1DJob(computeEncoder, upsamplePSO, output_size[0] * output_size[1]);
@@ -405,7 +397,7 @@ TORCH_IMPL_FUNC(_upsample_nearest_exact2d_backward_out_mps)
 
 TORCH_IMPL_FUNC(upsample_linear1d_out_mps)
 (const Tensor& input, IntArrayRef output_size, bool align_corners, std::optional<double> scale, const Tensor& output) {
-  mps::upsample_out_template(input, output_size, std::nullopt, std::nullopt, scale, output, align_corners, "bilinear");
+  mps::upsample_kernel_out_template(input, output_size, align_corners, scale, scale, output, "linear1d");
 }
 
 TORCH_IMPL_FUNC(upsample_linear1d_backward_out_mps)
