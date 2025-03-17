@@ -1,11 +1,12 @@
 import torch
 import torch.nn.functional as F
+import torch.utils._pytree as pytree
 from torch.utils._python_dispatch import return_and_correct_aliasing
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing
 
 
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 
 def get_padded_shape(shape: torch.Size, multipliers: dict[int, int]) -> torch.Size:
@@ -23,6 +24,12 @@ def get_pad(shape: torch.Size, multipliers: dict[int, int]) -> tuple[int,...]:
         pad[2 * dim] = (shape[dim] + multiplier - 1) // multiplier * multiplier - shape[dim]
         pad[2 * dim + 1] = 0
     return tuple(pad[::-1])
+
+
+def transform(args: Any, fn: Callable[..., Any]) -> Any:
+    flat, spec = pytree.tree_flatten(args)
+    out_flat = [fn(o) for o in flat]
+    return pytree.tree_unflatten(out_flat, spec)
 
 
 class PaddedTensor(torch.Tensor):
@@ -109,17 +116,17 @@ class PaddedTensor(torch.Tensor):
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs):
         with disable_proxy_modes_tracing(), FakeTensorMode():
-            fake_args = tuple(torch.empty_strided(t.shape, t.stride()) if isinstance(t, torch.Tensor) else t for t in args)
-            fake_kwargs = {k : torch.empty_strided(v.shape, v.stride()) if isinstance(v, torch.Tensor) else v for k,v in enumerate(kwargs.items())}
+            fake_args = transform(args, lambda t: torch.empty_strided(t.shape, t.stride()) if isinstance(t, torch.Tensor) else t)
+            fake_kwargs = transform(kwargs, lambda t: torch.empty_strided(t.shape, t.stride()) if isinstance(t, torch.Tensor) else t)
             fake_out = func(*fake_args, **fake_kwargs)
 
         outer_size, outer_stride = fake_out.shape, fake_out.stride()
 
-        tensor_args = tuple(map(PaddedTensor.to_tensor, args))
-        tensor_kwargs = {k : PaddedTensor.to_tensor(kwargs[k]) for k in kwargs}
+        tensor_args = transform(args, PaddedTensor.to_tensor)
+        tensor_kwargs = transform(kwargs, PaddedTensor.to_tensor)
         out = func(*tensor_args, **tensor_kwargs)
-        multipliers = args[0].multipliers # TODO: support different multipliers from args
-        neutral_element = args[0].neutral_element # TODO: support different neural element
+        multipliers = transform(args, lambda t: t.multipliers if isinstance(t, PaddedTensor) else None)[0] # TODO: support different multipliers from args
+        neutral_element = transform(args, lambda t: t.neutral_element if isinstance(t, PaddedTensor) else None)[0]  # TODO: support different neural element
 
         out = PaddedTensor(
             out,
