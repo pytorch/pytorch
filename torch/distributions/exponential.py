@@ -24,6 +24,7 @@ class Exponential(ExponentialFamily):
     Args:
         rate (float or Tensor): rate = 1 / scale of the distribution
     """
+
     arg_constraints = {"rate": constraints.positive}
     support = constraints.nonnegative
     has_rsample = True

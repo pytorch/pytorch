@@ -11,6 +11,7 @@ import torch
 import torch.distributed.tensor._dispatch as op_dispatch
 import torch.distributed.tensor._random as random
 import torch.nn as nn
+from torch._export.wrappers import mark_subclass_constructor_exportable_experimental
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
 from torch.distributed.tensor._collective_utils import check_tensor_meta, mesh_broadcast
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
@@ -282,6 +283,11 @@ class DTensor(torch.Tensor):
         r._local_tensor = local_tensor
         return r
 
+    @torch._disable_dynamo
+    @mark_subclass_constructor_exportable_experimental
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+
     # pyre-fixme[14]: `__repr__` overrides method defined in `DTensor` inconsistently.
     # pyre-fixme[3]: Return type must be annotated.
     def __repr__(self):  # type: ignore[override]
@@ -297,9 +303,9 @@ class DTensor(torch.Tensor):
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors, flatten_spec, outer_size, outer_stride):
-        assert (
-            flatten_spec is not None
-        ), "Expecting spec to be not None from `__tensor_flatten__` return value!"
+        assert flatten_spec is not None, (
+            "Expecting spec to be not None from `__tensor_flatten__` return value!"
+        )
         local_tensor = inner_tensors["_local_tensor"]
         spec, requires_grad = flatten_spec
         unflatten_tensor_meta = TensorMeta(
@@ -694,9 +700,7 @@ def distribute_tensor(
                 xla_distribute_tensor,
             )
 
-            return xla_distribute_tensor(
-                tensor, device_mesh, placements
-            )  # type:ignore[return-value]
+            return xla_distribute_tensor(tensor, device_mesh, placements)  # type:ignore[return-value]
         except ImportError as e:
             msg = "To use DTensor API with xla, you must install the torch_xla package!"
             raise ImportError(msg) from e
@@ -930,7 +934,9 @@ def distribute_module(
                 FutureWarning,
                 stacklevel=2,
             )
-            module.register_forward_pre_hook(lambda _, inputs: input_fn(inputs, device_mesh))  # type: ignore[call-arg]
+            module.register_forward_pre_hook(
+                lambda _, inputs: input_fn(inputs, device_mesh)  # type: ignore[call-arg]
+            )
         elif num_args == 3:
             # input_fn takes in module, inputs, device mesh
             module.register_forward_pre_hook(
@@ -990,9 +996,9 @@ def _dtensor_init_helper(  # type: ignore[no-untyped-def]
     placements = placements or tuple(Replicate() for _ in range(device_mesh.ndim))
 
     # check device_mesh againts placements
-    assert device_mesh.ndim == len(
-        placements
-    ), "mesh dimension does not match the length of placements"
+    assert device_mesh.ndim == len(placements), (
+        "mesh dimension does not match the length of placements"
+    )
 
     assert kwargs["layout"] == torch.strided, "layout value not supported!"
     torch_stride = torch._prims_common.make_contiguous_strides_for(size)

@@ -63,9 +63,9 @@ class EinsumDims:
                 if is_batch_dim:
                     batch_dims.append(dim_char)
                 else:
-                    assert (
-                        len(input_dims) == 2
-                    ), "free dimension only supported for two inputs!"
+                    assert len(input_dims) == 2, (
+                        "free dimension only supported for two inputs!"
+                    )
                     lhs, rhs = input_dims
                     if dim_char in lhs:
                         lhs_out_only_dims.append(dim_char)

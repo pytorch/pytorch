@@ -596,7 +596,7 @@ def dynamo_timed(
     dynamo_compile_column_us: Optional[str] = None,
     dynamo_compile_runtime_column_us: Optional[str] = None,
     compile_id: Optional[CompileId] = None,
-    is_forward: Optional[bool] = None,
+    is_backward: Optional[bool] = None,
     log_waitcounter: bool = False,
 ) -> Generator[Any, None, None]:
     """
@@ -638,7 +638,8 @@ def dynamo_timed(
     - compile_id: In the typical case, this parameter should not be needed. Use to
       supply the compile_id for those cases where we want to log a compile_id where
       it's not naturally available, e.g., for runtime autotuning.
-    - is_forward: Optionally set an is_forward field for those logging destinations
+    - is_backward: Specify forward/backward directly when not available in a
+      CompileContext, e.g., during runtime autotuning.
       that support it.
     - log_waitcounter: If set, we'll log a waitcounter of the form "pytorch.dynamo_timed.{key}"
     """
@@ -664,8 +665,8 @@ def dynamo_timed(
         event_metadata.update(metadata)
     if fn_name:
         event_metadata.update({"fn_name": fn_name})
-    if is_forward is not None:
-        event_metadata.update({"is_backward": not is_forward})
+    if is_backward is not None:
+        event_metadata.update({"is_backward": is_backward})
 
     chromium_log: ChromiumEventLogger = get_chromium_event_logger()
     start_ns = time.time_ns()
@@ -707,22 +708,20 @@ def dynamo_timed(
                 extra={
                     "compile_id": compile_id,
                     "is_runtime": True,
-                    "is_forward": is_forward,
+                    "is_forward": not is_backward,
                 },
             )
             cumulative_time_spent_ns[event_name] += time_spent_ns
 
 
 @overload
-def compile_times(repr: Literal["str"], aggregate: bool = False) -> str:
-    ...
+def compile_times(repr: Literal["str"], aggregate: bool = False) -> str: ...
 
 
 @overload
 def compile_times(
     repr: Literal["csv"], aggregate: bool = False
-) -> tuple[list[str], list[object]]:
-    ...
+) -> tuple[list[str], list[object]]: ...
 
 
 def compile_times(repr="str", aggregate: bool = False):
@@ -922,20 +921,17 @@ class ExactWeakKeyDictionary:
 
 
 @overload
-def istype(obj: object, allowed_types: type[T]) -> TypeIs[T]:
-    ...
+def istype(obj: object, allowed_types: type[T]) -> TypeIs[T]: ...
 
 
 @overload
 def istype(
     obj: object, allowed_types: tuple[type[list[T]], type[tuple[T, ...]]]
-) -> TypeIs[T]:
-    ...
+) -> TypeIs[T]: ...
 
 
 @overload
-def istype(obj: object, allowed_types: Iterable[type]) -> bool:
-    ...
+def istype(obj: object, allowed_types: Iterable[type]) -> bool: ...
 
 
 def istype(obj, allowed_types):
@@ -1036,6 +1032,16 @@ cmp_name_to_op_mapping = {
     "__le__": operator.le,
     "__gt__": operator.gt,
     "__ge__": operator.ge,
+}
+
+
+cmp_name_to_op_str_mapping = {
+    "__eq__": "==",
+    "__ne__": "!=",
+    "__lt__": "<",
+    "__le__": "<=",
+    "__gt__": ">",
+    "__ge__": ">=",
 }
 
 
@@ -1191,7 +1197,7 @@ class CompilationMetrics:
     inductor_cumulative_compile_time_us: Optional[int] = None
     inductor_code_gen_cumulative_compile_time_us: Optional[int] = None
     triton_compile_time_us: Optional[int] = None
-    runtime_cudagraphify_time_us: Optional[int] = None  # TODO: instrument
+    runtime_cudagraphify_time_us: Optional[int] = None
     runtime_triton_autotune_time_us: Optional[int] = None
     dynamo_compile_time_before_restart_us: Optional[int] = None
     cuda_synchronize_time_us: Optional[int] = None  # TODO: instrument
@@ -1224,6 +1230,9 @@ class CompilationMetrics:
     guard_latency_us: Optional[float] = None
     recompile_reason: Optional[str] = None
     num_graph_breaks: Optional[int] = None
+    triton_kernel_compile_times_us: Optional[str] = None
+    ir_count: Optional[int] = None
+    cudagraph_skip_reason: Optional[str] = None
 
     @classmethod
     def create(cls, metrics: dict[str, Any]):
@@ -1253,6 +1262,14 @@ class CompilationMetrics:
                 return "<unknown>"
 
             return ",".join(safe_str(item) for item in sorted(metric))
+
+        def collection_to_json_str(metric: Optional[Any]) -> Optional[str]:
+            if metric is None:
+                return None
+            try:
+                return json.dumps(list(metric))
+            except Exception:
+                return "<unknown>"
 
         # TODO: The following are legacy fields, populated from the fields that replace
         # them. Remove these when we decide we can really deprecate them.
@@ -1292,6 +1309,9 @@ class CompilationMetrics:
         )
         all_metrics["inductor_fx_remote_cache_miss_keys"] = collection_to_str(
             all_metrics.get("inductor_fx_remote_cache_miss_keys")
+        )
+        all_metrics["triton_kernel_compile_times_us"] = collection_to_json_str(
+            all_metrics.get("triton_kernel_compile_times_us")
         )
         compile_id = all_metrics.get("compile_id")
         all_metrics["compile_id"] = str(compile_id) if compile_id else None
@@ -2466,8 +2486,11 @@ def set_example_value(node, example_value):
     # the program was traced).
     node.meta["example_value"] = example_value
     shape_env = TracingContext.get().fake_mode.shape_env
-    if symbol_to_path := torch.fx.experimental.symbolic_shapes.compute_unbacked_bindings(
-        shape_env, example_value
+    if (
+        symbol_to_path
+        := torch.fx.experimental.symbolic_shapes.compute_unbacked_bindings(
+            shape_env, example_value
+        )
     ):
         node.meta["unbacked_bindings"] = symbol_to_path
 
@@ -2663,9 +2686,9 @@ def same(
     if isinstance(
         ref, (list, tuple, collections.deque, torch.nn.ParameterList, torch.Size)
     ):
-        assert isinstance(
-            res, (list, tuple, collections.deque)
-        ), f"type mismatch {type(ref)} {type(res)}"
+        assert isinstance(res, (list, tuple, collections.deque)), (
+            f"type mismatch {type(ref)} {type(res)}"
+        )
         if len(ref) != len(res):
             log_error("Length mismatch")
             return False
@@ -2706,9 +2729,9 @@ def same(
         )
     elif isinstance(ref, dict):
         assert isinstance(res, dict)
-        assert set(ref.keys()) == set(
-            res.keys()
-        ), f"keys mismatch {set(ref.keys())} == {set(res.keys())}"
+        assert set(ref.keys()) == set(res.keys()), (
+            f"keys mismatch {set(ref.keys())} == {set(res.keys())}"
+        )
         for k in sorted(ref.keys()):
             if not (
                 same(
@@ -2832,11 +2855,11 @@ def same(
                     )
 
                     if use_larger_multiplier_for_smaller_tensor and (
-                        fp64_ref.numel() <= 10 and tol >= 4 * 1e-2
+                        fp64_ref.numel() <= 10
                     ):
                         multiplier = 10.0
                     elif use_larger_multiplier_for_smaller_tensor and (
-                        fp64_ref.numel() <= 500 and tol >= 4 * 1e-2
+                        fp64_ref.numel() <= 500
                     ):
                         multiplier = 5.0
                     elif (
@@ -3250,7 +3273,10 @@ def run_node(tracer, node, args, kwargs, nnmodule):
     with set_current_node(node):
 
         def make_error_message(e):
-            return f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n" + str(e)
+            return (
+                f"Dynamo failed to run FX node with fake tensors: {op} {node.target}(*{args}, **{kwargs}): got "
+                + repr(e)
+            )
 
         from .exc import Unsupported
 
@@ -3281,11 +3307,17 @@ def run_node(tracer, node, args, kwargs, nnmodule):
             # NB: mimic how wrap_fake_exception does it
             from .exc import unimplemented_v2
 
+            hints = []
+            if isinstance(e, NotImplementedError):
+                hints = [
+                    "If the op is a PyTorch op, please file an issue to PyTorch.",
+                ]
+
             unimplemented_v2(
-                gb_type="NotImplementedError/UnsupportedFakeTensorException when running node",
-                context=str(e),
+                gb_type="NotImplementedError/UnsupportedFakeTensorException when running FX node",
+                context="",
                 explanation=make_error_message(e),
-                hints=[],
+                hints=hints,
                 from_exc=e,
             )
         except Unsupported:
@@ -3349,13 +3381,13 @@ def assert_no_fake_params_or_buffers(gm):
             return "Enable TORCH_FAKE_TENSOR_DEBUG=1 to get creation stack traces on fake tensors."
 
     for name, buffer in gm.named_buffers():
-        assert not is_fake(
-            buffer
-        ), f"Unexpected fake buffer {name} {stack_or_hint(buffer)}"
+        assert not is_fake(buffer), (
+            f"Unexpected fake buffer {name} {stack_or_hint(buffer)}"
+        )
     for name, param in gm.named_parameters():
-        assert not is_fake(
-            param
-        ), f"Unexpected fake param {name} {stack_or_hint(param)}"
+        assert not is_fake(param), (
+            f"Unexpected fake param {name} {stack_or_hint(param)}"
+        )
 
 
 def fqn(obj: Any):
@@ -4438,7 +4470,7 @@ def get_optimize_ddp_mode():
             f"Invalid dynamo config optimize_ddp type {type(optimize_ddp)=}"
         )
 
-    assert (
-        mode in _ddp_optimization_mode
-    ), f"Invalid dynamo config optimize_ddp value {mode=}"
+    assert mode in _ddp_optimization_mode, (
+        f"Invalid dynamo config optimize_ddp value {mode=}"
+    )
     return mode
