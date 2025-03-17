@@ -790,7 +790,7 @@ at::Tensor PackedLinearWeightsACL::apply_dynamic_impl(
     acl_gemm->gemm.run();
 
     if (acl_gemm->relu.has_value()) {
-      acl_gemm->relu.value().run();
+      acl_gemm->relu->run();
     }
 
     // this will not free memory, it will just tell ACL that we're no longer

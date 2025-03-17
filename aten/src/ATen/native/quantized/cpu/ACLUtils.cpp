@@ -143,7 +143,7 @@ void DynamicQuantMatmul::configure() {
   gemm.configure(
       &src_q_tensor,
       &wei_q_tensor_,
-      bia_tensor_.value_or(nullptr),
+      bia_tensor_.has_value() ? &bia_tensor_.value() : nullptr,
       &dst_tensor,
       gemm_info_);
   if (relu.has_value()) {
@@ -303,8 +303,8 @@ PackedLinearWeightsACL::PackedLinearWeightsACL(
   auto w = *(weight_.get());
   k_ = w.get_dim(0);
   n_ = w.get_dim(1);
-  wei_zero_point_ = orig_weight_.q_zero_point();
-  wei_scale_ = orig_weight_.q_scale();
+  weight_zero_point_ = orig_weight_.q_zero_point();
+  weight_scale_ = orig_weight_.q_scale();
 }
 
 #endif // AT_MKLDNN_ACL_ENABLED()

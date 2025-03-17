@@ -160,8 +160,8 @@ struct PackedLinearWeightsACL : public PackedLinearWeightsOnednn {
  private:
   int64_t k_;
   int64_t n_;
-  int64_t wei_zero_point_;
-  double wei_scale_;
+  int64_t weight_zero_point_;
+  double weight_scale_;
 
   // A 2 element (per layer) cache. Given it's not intended to store more than 2
   // elements, we do not need a fancy implementation. The idea behind it is to
@@ -200,8 +200,8 @@ struct PackedLinearWeightsACL : public PackedLinearWeightsOnednn {
     auto acl_gemm = std::make_shared<ACLQuantMatmulT>(
         k_,
         n_,
-        wei_scale_,
-        wei_zero_point_,
+        weight_scale_,
+        weight_zero_point_,
         (int8_t*)weight_.get()->get_data_handle(),
         bias_ptr,
         key);
