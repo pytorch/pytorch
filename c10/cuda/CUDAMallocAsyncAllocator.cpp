@@ -504,9 +504,9 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
         CUDAGuard g(static_cast<c10::DeviceIndex>(dev));
 
         cudaMemPool_t mempool = nullptr;
-        cudaDeviceGetDefaultMemPool(&mempool, dev);
-        cudaDeviceSynchronize();
-        cudaMemPoolTrimTo(mempool, 0);
+        C10_CUDA_CHECK(cudaDeviceGetDefaultMemPool(&mempool, dev));
+        C10_CUDA_CHECK(cudaDeviceSynchronize());
+        C10_CUDA_CHECK(cudaMemPoolTrimTo(mempool, 0));
       }
     }
   }
