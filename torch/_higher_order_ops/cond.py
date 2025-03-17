@@ -248,7 +248,7 @@ def create_bw_fn(
     exclude_set: torch._C.DispatchKeySet,
 ):
     from torch._functorch.aot_autograd import AOTConfig, create_joint
-    from torch._higher_order_ops.utils import prepare_fw_with_masks
+    from torch._higher_order_ops.utils import prepare_fw_with_masks2
 
     dummy_aot_config = AOTConfig(
         fw_compiler=None,  # type: ignore[arg-type]
@@ -260,18 +260,26 @@ def create_bw_fn(
         keep_inference_input_mutations=False,
     )
 
+    bw_f = create_joint(prepare_fw_with_masks2(fn), aot_config=dummy_aot_config)
+
     def bw_fn(*grads_and_primals):
         grads = grads_and_primals[:-num_primals]
         primals = grads_and_primals[-num_primals:]
-        bw_f = create_joint(prepare_fw_with_masks(fn), aot_config=dummy_aot_config)
-        # TODO: somehow we still need to call torch.enable_grad() here, otherwise the grads
-        # info are gone.
+        # When the backward of Autograd.Function is called, torch.is_grad_enabled() is set
+        # to False, so we need to manually enable it.
+        assert not torch.is_grad_enabled()
         with torch._C._ForceDispatchKeyGuard(
             include_set, exclude_set
         ), torch.enable_grad():
             inp_tangents = bw_f(primals, grads)[1]
+
+        def _zeros_like_when_none(inp: Any, tangent: Any):
+            if tangent is None and isinstance(inp, torch.Tensor):
+                return torch.zeros_like(inp)
+            return tangent
+
         return [
-            inp_tangent if inp_tangent is not None else torch.zeros_like(inp)
+            _zeros_like_when_none(inp, inp_tangent)
             for inp, inp_tangent in zip(primals, inp_tangents)
         ]
 
@@ -344,31 +352,49 @@ class CondAutogradOp(torch.autograd.Function):
     def forward(
         ctx,
         pred,
-        fw_true_graph,
-        fw_false_graph,
-        joint_true_graph,
-        joint_false_graph,
+        true_fn,
+        false_fn,
         *operands,
     ):
         ctx._pred = pred
-        ctx._joint_true_graph = joint_true_graph
-        ctx._joint_false_graph = joint_false_graph
+        ctx._true_fn = true_fn
+        ctx._false_fn = false_fn
+        ctx._forward_include_key_set = torch._C._dispatch_tls_local_include_set()
+        ctx._forward_exclude_key_set = torch._C._dispatch_tls_local_exclude_set()
+        ctx._true_bw_fn = create_bw_fn(
+            ctx._true_fn,
+            len(operands),
+            ctx._forward_include_key_set,
+            ctx._forward_exclude_key_set,
+        )
+        ctx._false_bw_fn = create_bw_fn(
+            ctx._false_fn,
+            len(operands),
+            ctx._forward_include_key_set,
+            ctx._forward_exclude_key_set,
+        )
         save_tensors_and_symints_for_backward(ctx, operands)
 
         with torch._C._AutoDispatchBelowAutograd():
-            return cond_op(pred, fw_true_graph, fw_false_graph, operands)
+            return cond_op(pred, true_fn, false_fn, operands)
 
     @staticmethod
     def backward(ctx, *flat_grads):
         operands = saved_tensors_and_symints(ctx)
 
-        grads = cond_op(
-            ctx._pred,
-            ctx._joint_true_graph,
-            ctx._joint_false_graph,
-            flat_grads + operands,
-        )
-        return None, None, None, None, None, *grads
+        # We need to disable the backward function to avoid
+        # dynamo peeking into it.
+        @torch._dynamo.disable(recursive=True)
+        def f():
+            return cond_op(
+                ctx._pred,
+                ctx._true_bw_fn,
+                ctx._false_bw_fn,
+                flat_grads + operands,
+            )
+
+        grads = f()
+        return None, None, None, *grads
 
 
 @cond_op.py_impl(DispatchKey.Autograd)
@@ -383,27 +409,12 @@ def cond_autograd(pred, true_fn, false_fn, operands):
         with torch._C._AutoDispatchBelowAutograd():
             return cond_op(pred, true_fn, false_fn, operands)
 
-    true_bw_fn = create_bw_fn(
-        true_fn,
-        len(operands),
-        torch._C._dispatch_tls_local_include_set(),
-        torch._C._dispatch_tls_local_exclude_set(),
-    )
-    false_bw_fn = create_bw_fn(
-        false_fn,
-        len(operands),
-        torch._C._dispatch_tls_local_include_set(),
-        torch._C._dispatch_tls_local_exclude_set(),
-    )
-    flat_out = CondAutogradOp.apply(
+    return CondAutogradOp.apply(
         pred,
         true_fn,
         false_fn,
-        true_bw_fn,
-        false_bw_fn,
         *operands,
     )
-    return flat_out
 
 
 @cond_op.py_impl(ProxyTorchDispatchMode)

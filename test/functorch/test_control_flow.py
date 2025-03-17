@@ -856,9 +856,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
 def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1):
     add = torch.ops.aten.add.Tensor(arg1_1, arg2_1);  arg1_1 = arg2_1 = add = None
     zeros_like = torch.ops.aten.zeros_like.default(arg5_1, pin_memory = False);  arg5_1 = None
-    clone = torch.ops.aten.clone.default(arg0_1)
-    clone_1 = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
-    return [clone, clone_1, None, None, zeros_like, None]""",
+    return [arg0_1, arg0_1, None, None, zeros_like, None]""",
         )
 
     def test_cond_autograd_pytree_input(self):
@@ -1425,31 +1423,46 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
 
         if compile_mode == "eager" or compile_mode == "none":
             self.assertExpectedInline(
-                gm.code.strip(),
+                normalize_gm(gm.print_readable(print_output=False)),
                 """\
-def forward(self):
-    _tensor_constant0 = self._tensor_constant0
-    ones_like = torch.ops.aten.ones_like.default(_tensor_constant0, pin_memory = False,\
- memory_format = torch.preserve_format);  _tensor_constant0 = None
-    _tensor_constant1 = self._tensor_constant1
-    true_graph_0 = self.true_graph_0
-    false_graph_0 = self.false_graph_0
-    _tensor_constant2 = self._tensor_constant2
-    _tensor_constant3 = self._tensor_constant3
-    _tensor_constant4 = self._tensor_constant4
-    _tensor_constant5 = self._tensor_constant5
-    _tensor_constant6 = self._tensor_constant6
-    cond = torch.ops.higher_order.cond(_tensor_constant1, true_graph_0, false_graph_0,\
- (ones_like, _tensor_constant2, _tensor_constant3, _tensor_constant4, _tensor_constant5,\
- _tensor_constant6));  _tensor_constant1 = true_graph_0 = false_graph_0 = ones_like =\
- _tensor_constant2 = _tensor_constant3 = _tensor_constant4 = _tensor_constant5 =\
- _tensor_constant6 = None
-    getitem = cond[0];  getitem = None
-    getitem_1 = cond[1]
-    getitem_2 = cond[2]
-    getitem_3 = cond[3]
-    getitem_4 = cond[4];  cond = None
-    return (getitem_1, getitem_2, getitem_3, getitem_4)""",
+class f(torch.nn.Module):
+    def forward(self):
+        _tensor_constant0 = self._tensor_constant0
+        ones_like: "f32[]" = torch.ops.aten.ones_like.default(_tensor_constant0, pin_memory = False, memory_format = torch.preserve_format);  _tensor_constant0 = None
+        _tensor_constant2 = self._tensor_constant2
+        true_graph_0 = self.true_graph_0
+        false_graph_0 = self.false_graph_0
+        _tensor_constant3 = self._tensor_constant3
+        _tensor_constant4 = self._tensor_constant4
+        _tensor_constant5 = self._tensor_constant5
+        _tensor_constant6 = self._tensor_constant6
+        _tensor_constant7 = self._tensor_constant7
+        cond = torch.ops.higher_order.cond(_tensor_constant2, true_graph_0, false_graph_0, (ones_like, _tensor_constant3, _tensor_constant4, _tensor_constant5, _tensor_constant6, _tensor_constant7));  _tensor_constant2 = true_graph_0 = false_graph_0 = ones_like = _tensor_constant3 = _tensor_constant4 = _tensor_constant5 = _tensor_constant6 = _tensor_constant7 = None
+        getitem: "f32[4, 5]" = cond[0];  getitem = None
+        getitem_1: "f32[2, 4]" = cond[1]
+        getitem_2: "f32[2, 1]" = cond[2]
+        getitem_3: "f32[2, 4]" = cond[3]
+        getitem_4: "f32[1, 5]" = cond[4];  cond = None
+        return (getitem_1, getitem_2, getitem_3, getitem_4)
+
+    class true_graph_0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[]", arg1_1: "f32[4, 5]", arg2_1: "f32[2, 4]", arg3_1: "f32[2, 1]", arg4_1: "f32[2, 4]", arg5_1: "f32[1, 5]"):
+            zeros_like: "f32[4, 5]" = torch.ops.aten.zeros_like.default(arg1_1, pin_memory = False);  arg1_1 = None
+            zeros_like_1: "f32[2, 4]" = torch.ops.aten.zeros_like.default(arg4_1, pin_memory = False);  arg4_1 = None
+            zeros_like_2: "f32[1, 5]" = torch.ops.aten.zeros_like.default(arg5_1, pin_memory = False);  arg5_1 = None
+            _tensor_constant0 = self._tensor_constant0
+            _tensor_constant1 = self._tensor_constant1
+            return [zeros_like, _tensor_constant0, _tensor_constant1, zeros_like_1, zeros_like_2]
+
+    class false_graph_0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[]", arg1_1: "f32[4, 5]", arg2_1: "f32[2, 4]", arg3_1: "f32[2, 1]", arg4_1: "f32[2, 4]", arg5_1: "f32[1, 5]"):
+            zeros_like: "f32[4, 5]" = torch.ops.aten.zeros_like.default(arg1_1, pin_memory = False);  arg1_1 = None
+            zeros_like_1: "f32[2, 4]" = torch.ops.aten.zeros_like.default(arg2_1, pin_memory = False);  arg2_1 = None
+            zeros_like_2: "f32[2, 1]" = torch.ops.aten.zeros_like.default(arg3_1, pin_memory = False);  arg3_1 = None
+            _tensor_constant0 = self._tensor_constant0
+            _tensor_constant1 = self._tensor_constant1
+            return [zeros_like, zeros_like_1, zeros_like_2, _tensor_constant0, _tensor_constant1]
+""",  # noqa: B950
             )
         else:
             self.assertExpectedInline(
@@ -4329,7 +4342,7 @@ class TestControlFlowTraced(TestCase):
 
         backend = EagerAndRecordGraphs()
         torch.compile(f, backend=backend)(torch.tensor(False), x)
-        self.assertEqual(len(backend.graphs), 2)
+        self.assertEqual(len(backend.graphs), 1)
         gm = backend.graphs[0]
 
         self.assertExpectedInline(
@@ -4344,38 +4357,6 @@ def forward(self, L_pred_ : torch.Tensor, L_x_ : torch.Tensor):
     result = cond[0];  cond = None
     grad_out = torch.ones_like(result)
     return (result, grad_out)""",  # noqa: B950
-        )
-
-        self.assertExpectedInline(
-            gm.cond_true_0.code.strip(),
-            """\
-def forward(self, l_x_):
-    l_x__1 = l_x_
-    sin = l_x__1.sin();  l_x__1 = None
-    return (sin,)""",  # noqa: B950
-        )
-        self.assertExpectedInline(
-            gm.cond_false_0.code.strip(),
-            """\
-def forward(self, l_x_):
-    l_x__1 = l_x_
-    cos = l_x__1.cos();  l_x__1 = None
-    return (cos,)""",  # noqa: B950
-        )
-
-        backward_gm = backend.graphs[1]
-        self.assertExpectedInline(
-            backward_gm.code.strip(),
-            """\
-def forward(self, L_ctx_saved_tensors_0_ : torch.Tensor, L_ctx_pred : torch.Tensor, L_flat_grads_0_ : torch.Tensor):
-    l_ctx_saved_tensors_0_ = L_ctx_saved_tensors_0_
-    l_ctx_pred = L_ctx_pred
-    l_flat_grads_0_ = L_flat_grads_0_
-    cond_true_0 = self.cond_true_0
-    cond_false_0 = self.cond_false_0
-    cond = torch.ops.higher_order.cond(l_ctx_pred, cond_true_0, cond_false_0, [l_ctx_saved_tensors_0_, l_flat_grads_0_]);  l_ctx_pred = cond_true_0 = cond_false_0 = l_ctx_saved_tensors_0_ = l_flat_grads_0_ = None
-    getitem = cond[0];  cond = None
-    return (getitem,)""",  # noqa: B950
         )
 
     def test_while_loop_op_mismatch_in_meta(self):

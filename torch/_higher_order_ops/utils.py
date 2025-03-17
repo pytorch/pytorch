@@ -336,6 +336,20 @@ def prepare_fw_with_masks(fn):
     return fw_with_masks
 
 
+def prepare_fw_with_masks2(fn):
+    def fw_with_masks(*args):
+        fw_out = fn(*args)
+        # Note [Force all outputs to be require grad]
+        out = pytree.tree_map_only(
+            torch.Tensor, lambda x: x.requires_grad_(True), fw_out
+        )
+        return out, pytree.tree_map(
+            lambda x: True if isinstance(x, torch.Tensor) else False, fw_out
+        )
+
+    return fw_with_masks
+
+
 # This function replaces None gradients with all-zero gradients.
 # `None` gradients are problematic for CUDA graphs. Those gradients are
 # replaced with an all-zero tensor for better optimization
