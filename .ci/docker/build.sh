@@ -105,7 +105,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
@@ -119,7 +118,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
@@ -134,7 +132,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=9
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
@@ -149,7 +146,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.13
     GCC_VERSION=9
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
@@ -164,7 +160,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
@@ -178,7 +173,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
@@ -193,7 +187,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=9
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
@@ -208,7 +201,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.13
     GCC_VERSION=9
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
@@ -223,7 +215,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
@@ -235,7 +226,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.9
     CLANG_VERSION=10
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     CONDA_CMAKE=yes
     ONNX=yes
@@ -244,7 +234,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.9
     CLANG_VERSION=10
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     VULKAN_SDK_VERSION=1.2.162.1
     SWIFTSHADER=yes
@@ -255,7 +244,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.11
     CLANG_VERSION=10
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     VULKAN_SDK_VERSION=1.2.162.1
     SWIFTSHADER=yes
@@ -266,7 +254,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.9
     GCC_VERSION=9
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     CONDA_CMAKE=yes
     TRITON=yes
@@ -275,7 +262,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     ROCM_VERSION=6.2.4
     NINJA_VERSION=1.9.0
@@ -290,7 +276,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     ROCM_VERSION=6.3
     NINJA_VERSION=1.9.0
@@ -305,7 +290,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.9
     GCC_VERSION=11
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     XPU_VERSION=0.5
     NINJA_VERSION=1.9.0
@@ -316,7 +300,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.9
     GCC_VERSION=11
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     XPU_VERSION=2025.0
     NINJA_VERSION=1.9.0
@@ -327,7 +310,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.9
     GCC_VERSION=11
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     KATEX=yes
     CONDA_CMAKE=yes
@@ -341,7 +323,6 @@ case "$image" in
     CUDNN_VERSION=9
     CLANG_VERSION=12
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     TRITON=yes
     ;;
@@ -349,7 +330,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.9
     CLANG_VERSION=12
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     CONDA_CMAKE=yes
     TRITON=yes
@@ -370,7 +350,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.9
     GCC_VERSION=11
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     KATEX=yes
     CONDA_CMAKE=yes
@@ -416,7 +395,6 @@ case "$image" in
     GCC_VERSION=11
     ACL=yes
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     CONDA_CMAKE=yes
     # snadampal: skipping llvm src build install because the current version
@@ -428,7 +406,6 @@ case "$image" in
     GCC_VERSION=11
     ACL=yes
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     CONDA_CMAKE=yes
     # snadampal: skipping llvm src build install because the current version
@@ -439,7 +416,6 @@ case "$image" in
   *)
     # Catch-all for builds that are not hardcoded.
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     echo "image '$image' did not match an existing build configuration"
     if [[ "$image" == *py* ]]; then
@@ -495,7 +471,6 @@ docker build \
        --build-arg "BUILD_ENVIRONMENT=${image}" \
        --build-arg "PROTOBUF=${PROTOBUF:-}" \
        --build-arg "LLVMDEV=${LLVMDEV:-}" \
-       --build-arg "DB=${DB:-}" \
        --build-arg "VISION=${VISION:-}" \
        --build-arg "UBUNTU_VERSION=${UBUNTU_VERSION}" \
        --build-arg "CENTOS_VERSION=${CENTOS_VERSION}" \
