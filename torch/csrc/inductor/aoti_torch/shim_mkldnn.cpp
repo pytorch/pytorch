@@ -46,28 +46,30 @@ AOTITorchError aoti_torch_cpu_mkldnn__convolution_pointwise_binary(
     int64_t unary_scalars_len_,
     const char** unary_algorithm,
     AtenTensorHandle* ret0) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE("at::native::mkldnn_convolution_pointwise_binary", {
-    c10::List<std::optional<c10::Scalar>> unary_scalars_list;
-    unary_scalars_list.reserve(unary_scalars_len_);
-    for (int64_t i = 0; i < unary_scalars_len_; i++) {
-      unary_scalars_list.emplace_back(pointer_to_optional(unary_scalars[i]));
-    }
-    auto tmp_result = at::native::mkldnn_convolution_pointwise_binary(
-        *tensor_handle_to_tensor_pointer(X),
-        *tensor_handle_to_tensor_pointer(other),
-        *tensor_handle_to_tensor_pointer(W),
-        pointer_to_optional<at::Tensor>(B),
-        pointer_to_list<int64_t>(padding, padding_len_),
-        pointer_to_list<int64_t>(stride, stride_len_),
-        pointer_to_list<int64_t>(dilation, dilation_len_),
-        groups,
-        binary_attr,
-        pointer_to_optional<c10::Scalar>(alpha),
-        pointer_to_optional<std::string_view>(unary_attr),
-        unary_scalars_list,
-        pointer_to_optional<std::string_view>(unary_algorithm));
-    *ret0 = new_tensor_handle(std::move(tmp_result));
-  });
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      "at::native::mkldnn_convolution_pointwise_binary", {
+        c10::List<std::optional<c10::Scalar>> unary_scalars_list;
+        unary_scalars_list.reserve(unary_scalars_len_);
+        for (int64_t i = 0; i < unary_scalars_len_; i++) {
+          unary_scalars_list.emplace_back(
+              pointer_to_optional(unary_scalars[i]));
+        }
+        auto tmp_result = at::native::mkldnn_convolution_pointwise_binary(
+            *tensor_handle_to_tensor_pointer(X),
+            *tensor_handle_to_tensor_pointer(other),
+            *tensor_handle_to_tensor_pointer(W),
+            pointer_to_optional<at::Tensor>(B),
+            pointer_to_list<int64_t>(padding, padding_len_),
+            pointer_to_list<int64_t>(stride, stride_len_),
+            pointer_to_list<int64_t>(dilation, dilation_len_),
+            groups,
+            binary_attr,
+            pointer_to_optional<c10::Scalar>(alpha),
+            pointer_to_optional<std::string_view>(unary_attr),
+            unary_scalars_list,
+            pointer_to_optional<std::string_view>(unary_algorithm));
+        *ret0 = new_tensor_handle(std::move(tmp_result));
+      });
 }
 
 AOTITorchError aoti_torch_cpu_mkldnn__convolution_pointwise_binary_(
@@ -89,28 +91,30 @@ AOTITorchError aoti_torch_cpu_mkldnn__convolution_pointwise_binary_(
     int64_t unary_scalars_len_,
     const char** unary_algorithm,
     AtenTensorHandle* ret0) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE("at::native::mkldnn_convolution_pointwise_binary_", {
-    c10::List<std::optional<c10::Scalar>> unary_scalars_list;
-    unary_scalars_list.reserve(unary_scalars_len_);
-    for (int64_t i = 0; i < unary_scalars_len_; i++) {
-      unary_scalars_list.emplace_back(pointer_to_optional(unary_scalars[i]));
-    }
-    auto tmp_result = at::native::mkldnn_convolution_pointwise_binary_(
-        *tensor_handle_to_tensor_pointer(other),
-        *tensor_handle_to_tensor_pointer(X),
-        *tensor_handle_to_tensor_pointer(W),
-        pointer_to_optional<at::Tensor>(B),
-        pointer_to_list<int64_t>(padding, padding_len_),
-        pointer_to_list<int64_t>(stride, stride_len_),
-        pointer_to_list<int64_t>(dilation, dilation_len_),
-        groups,
-        binary_attr,
-        pointer_to_optional<c10::Scalar>(alpha),
-        pointer_to_optional<std::string_view>(unary_attr),
-        unary_scalars_list,
-        pointer_to_optional<std::string_view>(unary_algorithm));
-    *ret0 = new_tensor_handle(std::move(tmp_result));
-  });
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      "at::native::mkldnn_convolution_pointwise_binary_", {
+        c10::List<std::optional<c10::Scalar>> unary_scalars_list;
+        unary_scalars_list.reserve(unary_scalars_len_);
+        for (int64_t i = 0; i < unary_scalars_len_; i++) {
+          unary_scalars_list.emplace_back(
+              pointer_to_optional(unary_scalars[i]));
+        }
+        auto tmp_result = at::native::mkldnn_convolution_pointwise_binary_(
+            *tensor_handle_to_tensor_pointer(other),
+            *tensor_handle_to_tensor_pointer(X),
+            *tensor_handle_to_tensor_pointer(W),
+            pointer_to_optional<at::Tensor>(B),
+            pointer_to_list<int64_t>(padding, padding_len_),
+            pointer_to_list<int64_t>(stride, stride_len_),
+            pointer_to_list<int64_t>(dilation, dilation_len_),
+            groups,
+            binary_attr,
+            pointer_to_optional<c10::Scalar>(alpha),
+            pointer_to_optional<std::string_view>(unary_attr),
+            unary_scalars_list,
+            pointer_to_optional<std::string_view>(unary_algorithm));
+        *ret0 = new_tensor_handle(std::move(tmp_result));
+      });
 }
 
 AOTITorchError aoti_torch_cpu_mkldnn__convolution_pointwise(
@@ -129,25 +133,26 @@ AOTITorchError aoti_torch_cpu_mkldnn__convolution_pointwise(
     int64_t scalars_len_,
     const char** algorithm,
     AtenTensorHandle* ret0) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE("at::native::mkldnn_convolution_pointwise", {
-    c10::List<std::optional<c10::Scalar>> scalars_list;
-    scalars_list.reserve(scalars_len_);
-    for (int64_t i = 0; i < scalars_len_; i++) {
-      scalars_list.emplace_back(pointer_to_optional(scalars[i]));
-    }
-    auto tmp_result = at::native::mkldnn_convolution_pointwise(
-        *tensor_handle_to_tensor_pointer(X),
-        *tensor_handle_to_tensor_pointer(W),
-        pointer_to_optional<at::Tensor>(B),
-        pointer_to_list<int64_t>(padding, padding_len_),
-        pointer_to_list<int64_t>(stride, stride_len_),
-        pointer_to_list<int64_t>(dilation, dilation_len_),
-        groups,
-        attr,
-        scalars_list,
-        pointer_to_optional<std::string_view>(algorithm));
-    *ret0 = new_tensor_handle(std::move(tmp_result));
-  });
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      "at::native::mkldnn_convolution_pointwise", {
+        c10::List<std::optional<c10::Scalar>> scalars_list;
+        scalars_list.reserve(scalars_len_);
+        for (int64_t i = 0; i < scalars_len_; i++) {
+          scalars_list.emplace_back(pointer_to_optional(scalars[i]));
+        }
+        auto tmp_result = at::native::mkldnn_convolution_pointwise(
+            *tensor_handle_to_tensor_pointer(X),
+            *tensor_handle_to_tensor_pointer(W),
+            pointer_to_optional<at::Tensor>(B),
+            pointer_to_list<int64_t>(padding, padding_len_),
+            pointer_to_list<int64_t>(stride, stride_len_),
+            pointer_to_list<int64_t>(dilation, dilation_len_),
+            groups,
+            attr,
+            scalars_list,
+            pointer_to_optional<std::string_view>(algorithm));
+        *ret0 = new_tensor_handle(std::move(tmp_result));
+      });
 }
 
 AOTITorchError aoti_torch_cpu_mkldnn__convolution_transpose_pointwise(
@@ -168,26 +173,27 @@ AOTITorchError aoti_torch_cpu_mkldnn__convolution_transpose_pointwise(
     int64_t scalars_len_,
     const char** algorithm,
     AtenTensorHandle* ret0) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE("at::native::mkldnn_convolution_transpose_pointwise", {
-    c10::List<std::optional<c10::Scalar>> scalars_list;
-    scalars_list.reserve(scalars_len_);
-    for (int64_t i = 0; i < scalars_len_; i++) {
-      scalars_list.emplace_back(pointer_to_optional(scalars[i]));
-    }
-    auto tmp_result = at::native::mkldnn_convolution_transpose_pointwise(
-        *tensor_handle_to_tensor_pointer(X),
-        *tensor_handle_to_tensor_pointer(W),
-        pointer_to_optional<at::Tensor>(B),
-        pointer_to_list<int64_t>(padding, padding_len_),
-        pointer_to_list<int64_t>(output_padding, output_padding_len_),
-        pointer_to_list<int64_t>(stride, stride_len_),
-        pointer_to_list<int64_t>(dilation, dilation_len_),
-        groups,
-        attr,
-        scalars_list,
-        pointer_to_optional<std::string_view>(algorithm));
-    *ret0 = new_tensor_handle(std::move(tmp_result));
-  });
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      "at::native::mkldnn_convolution_transpose_pointwise", {
+        c10::List<std::optional<c10::Scalar>> scalars_list;
+        scalars_list.reserve(scalars_len_);
+        for (int64_t i = 0; i < scalars_len_; i++) {
+          scalars_list.emplace_back(pointer_to_optional(scalars[i]));
+        }
+        auto tmp_result = at::native::mkldnn_convolution_transpose_pointwise(
+            *tensor_handle_to_tensor_pointer(X),
+            *tensor_handle_to_tensor_pointer(W),
+            pointer_to_optional<at::Tensor>(B),
+            pointer_to_list<int64_t>(padding, padding_len_),
+            pointer_to_list<int64_t>(output_padding, output_padding_len_),
+            pointer_to_list<int64_t>(stride, stride_len_),
+            pointer_to_list<int64_t>(dilation, dilation_len_),
+            groups,
+            attr,
+            scalars_list,
+            pointer_to_optional<std::string_view>(algorithm));
+        *ret0 = new_tensor_handle(std::move(tmp_result));
+      });
 }
 
 AOTITorchError aoti_torch_cpu_mkldnn_rnn_layer(
@@ -246,21 +252,22 @@ AOTITorchError aoti_torch_cpu__linear_pointwise(
     int64_t scalars_len_,
     const char** algorithm,
     AtenTensorHandle* ret0) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE("at::native::mkldnn_linear_pointwise_binary", {
-    c10::List<std::optional<c10::Scalar>> scalars_list;
-    scalars_list.reserve(scalars_len_);
-    for (int64_t i = 0; i < scalars_len_; i++) {
-      scalars_list.emplace_back(pointer_to_optional(scalars[i]));
-    }
-    auto tmp_result = at::native::mkldnn_linear_pointwise(
-        *tensor_handle_to_tensor_pointer(X),
-        *tensor_handle_to_tensor_pointer(W),
-        pointer_to_optional<at::Tensor>(B),
-        attr,
-        scalars_list,
-        pointer_to_optional<std::string_view>(algorithm));
-    *ret0 = new_tensor_handle(std::move(tmp_result));
-  });
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      "at::native::mkldnn_linear_pointwise_binary", {
+        c10::List<std::optional<c10::Scalar>> scalars_list;
+        scalars_list.reserve(scalars_len_);
+        for (int64_t i = 0; i < scalars_len_; i++) {
+          scalars_list.emplace_back(pointer_to_optional(scalars[i]));
+        }
+        auto tmp_result = at::native::mkldnn_linear_pointwise(
+            *tensor_handle_to_tensor_pointer(X),
+            *tensor_handle_to_tensor_pointer(W),
+            pointer_to_optional<at::Tensor>(B),
+            attr,
+            scalars_list,
+            pointer_to_optional<std::string_view>(algorithm));
+        *ret0 = new_tensor_handle(std::move(tmp_result));
+      });
 }
 
 AOTITorchError aoti_torch_cpu__linear_pointwise_binary(
@@ -270,15 +277,16 @@ AOTITorchError aoti_torch_cpu__linear_pointwise_binary(
     AtenTensorHandle* B,
     const char* attr,
     AtenTensorHandle* ret0) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE("at::native::mkldnn_linear_pointwise", {
-    auto tmp_result = at::native::mkldnn_linear_pointwise_binary(
-        *tensor_handle_to_tensor_pointer(X),
-        *tensor_handle_to_tensor_pointer(other),
-        *tensor_handle_to_tensor_pointer(W),
-        pointer_to_optional<at::Tensor>(B),
-        attr);
-    *ret0 = new_tensor_handle(std::move(tmp_result));
-  });
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      "at::native::mkldnn_linear_pointwise", {
+        auto tmp_result = at::native::mkldnn_linear_pointwise_binary(
+            *tensor_handle_to_tensor_pointer(X),
+            *tensor_handle_to_tensor_pointer(other),
+            *tensor_handle_to_tensor_pointer(W),
+            pointer_to_optional<at::Tensor>(B),
+            attr);
+        *ret0 = new_tensor_handle(std::move(tmp_result));
+      });
 }
 
 AOTITorchError aoti_torch_cpu__qlinear_pointwise_tensor(
@@ -297,29 +305,30 @@ AOTITorchError aoti_torch_cpu__qlinear_pointwise_tensor(
     int64_t post_op_args_len_,
     const char* post_op_algorithm,
     AtenTensorHandle* ret0) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE("at::native::QLinearOnednn::run_pointwise_tensor", {
-    c10::List<std::optional<c10::Scalar>> scalars_list;
-    scalars_list.reserve(post_op_args_len_);
-    for (int64_t i = 0; i < post_op_args_len_; i++) {
-      scalars_list.emplace_back(pointer_to_optional(post_op_args[i]));
-    }
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      "at::native::QLinearOnednn::run_pointwise_tensor", {
+        c10::List<std::optional<c10::Scalar>> scalars_list;
+        scalars_list.reserve(post_op_args_len_);
+        for (int64_t i = 0; i < post_op_args_len_; i++) {
+          scalars_list.emplace_back(pointer_to_optional(post_op_args[i]));
+        }
 
-    auto tmp_result = at::native::QLinearOnednn::run_pointwise_tensor(
-        *tensor_handle_to_tensor_pointer(X),
-        *tensor_handle_to_tensor_pointer(act_scale),
-        *tensor_handle_to_tensor_pointer(act_zero_point),
-        *tensor_handle_to_tensor_pointer(onednn_weight),
-        *tensor_handle_to_tensor_pointer(weight_scales),
-        *tensor_handle_to_tensor_pointer(weight_zero_points),
-        pointer_to_optional<at::Tensor>(B),
-        output_scale,
-        output_zero_point,
-        pointer_to_optional<at::ScalarType>(output_dtype),
-        post_op_name,
-        scalars_list,
-        post_op_algorithm);
-    *ret0 = new_tensor_handle(std::move(tmp_result));
-  });
+        auto tmp_result = at::native::QLinearOnednn::run_pointwise_tensor(
+            *tensor_handle_to_tensor_pointer(X),
+            *tensor_handle_to_tensor_pointer(act_scale),
+            *tensor_handle_to_tensor_pointer(act_zero_point),
+            *tensor_handle_to_tensor_pointer(onednn_weight),
+            *tensor_handle_to_tensor_pointer(weight_scales),
+            *tensor_handle_to_tensor_pointer(weight_zero_points),
+            pointer_to_optional<at::Tensor>(B),
+            output_scale,
+            output_zero_point,
+            pointer_to_optional<at::ScalarType>(output_dtype),
+            post_op_name,
+            scalars_list,
+            post_op_algorithm);
+        *ret0 = new_tensor_handle(std::move(tmp_result));
+      });
 }
 
 AOTITorchError aoti_torch_cpu__qlinear_pointwise_binary_tensor(
@@ -343,34 +352,36 @@ AOTITorchError aoti_torch_cpu__qlinear_pointwise_binary_tensor(
     int64_t unary_post_op_args_len_,
     const char* unary_post_op_algorithm,
     AtenTensorHandle* ret0) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE("at::native::QConvoneDNN::run_pointwise_tensor", {
-    c10::List<std::optional<c10::Scalar>> scalars_list;
-    scalars_list.reserve(unary_post_op_args_len_);
-    for (int64_t i = 0; i < unary_post_op_args_len_; i++) {
-      scalars_list.emplace_back(pointer_to_optional(unary_post_op_args[i]));
-    }
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      "at::native::QConvoneDNN::run_pointwise_tensor", {
+        c10::List<std::optional<c10::Scalar>> scalars_list;
+        scalars_list.reserve(unary_post_op_args_len_);
+        for (int64_t i = 0; i < unary_post_op_args_len_; i++) {
+          scalars_list.emplace_back(pointer_to_optional(unary_post_op_args[i]));
+        }
 
-    auto tmp_result = at::native::QLinearOnednn::run_pointwise_binary_tensor(
-        *tensor_handle_to_tensor_pointer(X),
-        *tensor_handle_to_tensor_pointer(act_scale),
-        *tensor_handle_to_tensor_pointer(act_zero_point),
-        *tensor_handle_to_tensor_pointer(onednn_weight),
-        *tensor_handle_to_tensor_pointer(weight_scales),
-        *tensor_handle_to_tensor_pointer(weight_zero_points),
-        pointer_to_optional<at::Tensor>(other),
-        pointer_to_optional<at::Tensor>(B),
-        output_scale,
-        output_zero_point,
-        pointer_to_optional<at::ScalarType>(output_dtype),
-        other_scale,
-        other_zero_point,
-        binary_post_op,
-        binary_alpha,
-        unary_post_op,
-        scalars_list,
-        unary_post_op_algorithm);
-    *ret0 = new_tensor_handle(std::move(tmp_result));
-  });
+        auto tmp_result =
+            at::native::QLinearOnednn::run_pointwise_binary_tensor(
+                *tensor_handle_to_tensor_pointer(X),
+                *tensor_handle_to_tensor_pointer(act_scale),
+                *tensor_handle_to_tensor_pointer(act_zero_point),
+                *tensor_handle_to_tensor_pointer(onednn_weight),
+                *tensor_handle_to_tensor_pointer(weight_scales),
+                *tensor_handle_to_tensor_pointer(weight_zero_points),
+                pointer_to_optional<at::Tensor>(other),
+                pointer_to_optional<at::Tensor>(B),
+                output_scale,
+                output_zero_point,
+                pointer_to_optional<at::ScalarType>(output_dtype),
+                other_scale,
+                other_zero_point,
+                binary_post_op,
+                binary_alpha,
+                unary_post_op,
+                scalars_list,
+                unary_post_op_algorithm);
+        *ret0 = new_tensor_handle(std::move(tmp_result));
+      });
 }
 
 AOTITorchError aoti_torch_cpu__qconv2d_pointwise_tensor(
@@ -396,40 +407,41 @@ AOTITorchError aoti_torch_cpu__qconv2d_pointwise_tensor(
     int64_t post_op_args_len_,
     const char** algorithm,
     AtenTensorHandle* ret0) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE("at::native::QConvoneDNN::run_pointwise_binary_tensor", {
-    c10::List<std::optional<c10::Scalar>> scalars_list;
-    scalars_list.reserve(post_op_args_len_);
-    for (int64_t i = 0; i < post_op_args_len_; i++) {
-      scalars_list.emplace_back(pointer_to_optional(post_op_args[i]));
-    }
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      "at::native::QConvoneDNN::run_pointwise_binary_tensor", {
+        c10::List<std::optional<c10::Scalar>> scalars_list;
+        scalars_list.reserve(post_op_args_len_);
+        for (int64_t i = 0; i < post_op_args_len_; i++) {
+          scalars_list.emplace_back(pointer_to_optional(post_op_args[i]));
+        }
 
-    c10::List<int64_t> stride_list =
-        convert_to_c10_List<int64_t>(stride_args, stride_len_);
-    c10::List<int64_t> padding_list =
-        convert_to_c10_List<int64_t>(padding_args, padding_len_);
-    c10::List<int64_t> dilation_list =
-        convert_to_c10_List<int64_t>(dilation_args, dilation_len_);
+        c10::List<int64_t> stride_list =
+            convert_to_c10_List<int64_t>(stride_args, stride_len_);
+        c10::List<int64_t> padding_list =
+            convert_to_c10_List<int64_t>(padding_args, padding_len_);
+        c10::List<int64_t> dilation_list =
+            convert_to_c10_List<int64_t>(dilation_args, dilation_len_);
 
-    auto tmp_result = at::native::QConvoneDNN::run_pointwise_tensor(
-        *tensor_handle_to_tensor_pointer(X),
-        *tensor_handle_to_tensor_pointer(act_scale),
-        *tensor_handle_to_tensor_pointer(act_zero_point),
-        *tensor_handle_to_tensor_pointer(onednn_weight),
-        *tensor_handle_to_tensor_pointer(weight_scales),
-        *tensor_handle_to_tensor_pointer(weight_zero_points),
-        pointer_to_optional<at::Tensor>(B),
-        stride_list,
-        padding_list,
-        dilation_list,
-        groups,
-        output_scale,
-        output_zero_point,
-        pointer_to_optional<at::ScalarType>(output_dtype),
-        attr,
-        scalars_list,
-        pointer_to_optional<std::string_view>(algorithm));
-    *ret0 = new_tensor_handle(std::move(tmp_result));
-  });
+        auto tmp_result = at::native::QConvoneDNN::run_pointwise_tensor(
+            *tensor_handle_to_tensor_pointer(X),
+            *tensor_handle_to_tensor_pointer(act_scale),
+            *tensor_handle_to_tensor_pointer(act_zero_point),
+            *tensor_handle_to_tensor_pointer(onednn_weight),
+            *tensor_handle_to_tensor_pointer(weight_scales),
+            *tensor_handle_to_tensor_pointer(weight_zero_points),
+            pointer_to_optional<at::Tensor>(B),
+            stride_list,
+            padding_list,
+            dilation_list,
+            groups,
+            output_scale,
+            output_zero_point,
+            pointer_to_optional<at::ScalarType>(output_dtype),
+            attr,
+            scalars_list,
+            pointer_to_optional<std::string_view>(algorithm));
+        *ret0 = new_tensor_handle(std::move(tmp_result));
+      });
 }
 
 AOTITorchError aoti_torch_cpu__qconv2d_pointwise_binary_tensor(
@@ -460,45 +472,47 @@ AOTITorchError aoti_torch_cpu__qconv2d_pointwise_binary_tensor(
     int64_t unary_scalars_len_,
     const char** unary_algorithm,
     AtenTensorHandle* ret0) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE("at::native::QConvoneDNN::run_pointwise_binary_tensor", {
-    c10::List<std::optional<c10::Scalar>> unary_scalars_list;
-    unary_scalars_list.reserve(unary_scalars_len_);
-    for (int64_t i = 0; i < unary_scalars_len_; i++) {
-      unary_scalars_list.emplace_back(pointer_to_optional(unary_scalars[i]));
-    }
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      "at::native::QConvoneDNN::run_pointwise_binary_tensor", {
+        c10::List<std::optional<c10::Scalar>> unary_scalars_list;
+        unary_scalars_list.reserve(unary_scalars_len_);
+        for (int64_t i = 0; i < unary_scalars_len_; i++) {
+          unary_scalars_list.emplace_back(
+              pointer_to_optional(unary_scalars[i]));
+        }
 
-    c10::List<int64_t> stride_list =
-        convert_to_c10_List<int64_t>(stride_args, stride_len_);
-    c10::List<int64_t> padding_list =
-        convert_to_c10_List<int64_t>(padding_args, padding_len_);
-    c10::List<int64_t> dilation_list =
-        convert_to_c10_List<int64_t>(dilation_args, dilation_len_);
+        c10::List<int64_t> stride_list =
+            convert_to_c10_List<int64_t>(stride_args, stride_len_);
+        c10::List<int64_t> padding_list =
+            convert_to_c10_List<int64_t>(padding_args, padding_len_);
+        c10::List<int64_t> dilation_list =
+            convert_to_c10_List<int64_t>(dilation_args, dilation_len_);
 
-    auto tmp_result = at::native::QConvoneDNN::run_pointwise_binary_tensor(
-        *tensor_handle_to_tensor_pointer(X),
-        *tensor_handle_to_tensor_pointer(act_scale),
-        *tensor_handle_to_tensor_pointer(act_zero_point),
-        *tensor_handle_to_tensor_pointer(onednn_weight),
-        *tensor_handle_to_tensor_pointer(weight_scales),
-        *tensor_handle_to_tensor_pointer(weight_zero_points),
-        *tensor_handle_to_tensor_pointer(accum),
-        pointer_to_optional<at::Tensor>(B),
-        stride_list,
-        padding_list,
-        dilation_list,
-        groups,
-        output_scale,
-        output_zero_point,
-        pointer_to_optional<at::ScalarType>(output_dtype),
-        accum_scale,
-        accum_zero_point,
-        binary_attr,
-        pointer_to_optional<c10::Scalar>(alpha),
-        pointer_to_optional<std::string_view>(unary_attr),
-        unary_scalars_list,
-        pointer_to_optional<std::string_view>(unary_algorithm));
-    *ret0 = new_tensor_handle(std::move(tmp_result));
-  });
+        auto tmp_result = at::native::QConvoneDNN::run_pointwise_binary_tensor(
+            *tensor_handle_to_tensor_pointer(X),
+            *tensor_handle_to_tensor_pointer(act_scale),
+            *tensor_handle_to_tensor_pointer(act_zero_point),
+            *tensor_handle_to_tensor_pointer(onednn_weight),
+            *tensor_handle_to_tensor_pointer(weight_scales),
+            *tensor_handle_to_tensor_pointer(weight_zero_points),
+            *tensor_handle_to_tensor_pointer(accum),
+            pointer_to_optional<at::Tensor>(B),
+            stride_list,
+            padding_list,
+            dilation_list,
+            groups,
+            output_scale,
+            output_zero_point,
+            pointer_to_optional<at::ScalarType>(output_dtype),
+            accum_scale,
+            accum_zero_point,
+            binary_attr,
+            pointer_to_optional<c10::Scalar>(alpha),
+            pointer_to_optional<std::string_view>(unary_attr),
+            unary_scalars_list,
+            pointer_to_optional<std::string_view>(unary_algorithm));
+        *ret0 = new_tensor_handle(std::move(tmp_result));
+      });
 }
 
 #if AT_MKL_ENABLED()
