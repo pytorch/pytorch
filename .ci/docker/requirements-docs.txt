@@ -1,4 +1,4 @@
-sphinx==5.3.0
+sphinx==7.4.7
 #Description: This is used to generate PyTorch docs
 #Pinned versions: 8.1.0
 -e git+https://github.com/pytorch/pytorch_sphinx_theme.git@pytorch_sphinx_theme2#egg=pytorch_sphinx_theme2
@@ -6,7 +6,7 @@ sphinx==5.3.0
 # TODO: sphinxcontrib.katex 0.9.0 adds a local KaTeX server to speed up pre-rendering
 # but it doesn't seem to work and hangs around idly. The initial thought is probably
 # something related to Docker setup. We can investigate this later
-sphinxcontrib.katex==0.8.6
+sphinxcontrib.katex==0.9.10
 #Description: This is used to generate PyTorch docs
 #Pinned versions: 0.8.6
 
@@ -19,7 +19,7 @@ tensorboard==2.18.0 ; python_version >= "3.13"
 #Description: This is used to generate PyTorch docs
 #Pinned versions: 2.13.0
 
-breathe==4.34.0
+breathe==4.36.0
 #Description: This is used to generate PyTorch C++ docs
 #Pinned versions: 4.34.0
 
@@ -27,7 +27,7 @@ exhale==0.2.3
 #Description: This is used to generate PyTorch C++ docs
 #Pinned versions: 0.2.3
 
-docutils==0.16
+docutils==0.21.2
 #Description: This is used to generate PyTorch C++ docs
 #Pinned versions: 0.16
 
