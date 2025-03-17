@@ -1416,7 +1416,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         additional_inputs_proxy = additional_inputs.as_proxy() + combine_freevars_proxy
         proxy_vars = xs_proxy, additional_inputs_proxy
         proxy_vars_inputcheck = (
-            tuple(sarg.as_proxy() for sarg in sub_args) + additional_inputs_proxy
+            tuple(sarg.as_proxy() for sarg in sub_args) + combine_freevars_proxy
         )
         check_mutation_and_alias(
             tx, combine_gm, pytree.tree_leaves(proxy_vars_inputcheck), "Combine_fn"
@@ -1631,7 +1631,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         y_proxies = [y_var.as_proxy() for y_var in out_vars]
         proxy_vars = init_proxy, xs_proxy, additional_inputs_proxy
         proxy_vars_inputcheck = tuple(sarg.as_proxy() for sarg in sub_args) + tuple(
-            additional_inputs_proxy
+            combine_freevars_proxy
         )
         check_mutation_and_alias(
             tx, combine_gm, pytree.tree_leaves(proxy_vars_inputcheck), "Combine_fn"
