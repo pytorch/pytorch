@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: distributed"]
 
-import unittest
 from collections import deque, OrderedDict
 from contextlib import ContextDecorator, contextmanager, nullcontext
 from copy import deepcopy
@@ -9,9 +8,13 @@ from functools import partial
 import torch
 import torch.nn as nn
 from torch.distributed._composable import checkpoint
-from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_fsdp import get_devtype
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.utils.checkpoint import CheckpointError
+
+
+device_type = torch.device(get_devtype())
 
 
 class MemoryDelta(ContextDecorator):
@@ -22,16 +25,20 @@ class MemoryDelta(ContextDecorator):
 
     def __enter__(self):
         self.active_memory_enter = (
-            torch.cuda.memory_stats()["active_bytes.all.current"]
-            if self.device.type == "cuda"
+            torch.get_device_module(self.device).memory_stats()[
+                "active_bytes.all.current"
+            ]
+            if self.device.type == torch.get_device_module(self.device)
             else 0
         )
         return self
 
     def __exit__(self, *exc):
         self.active_memory_exit = (
-            torch.cuda.memory_stats()["active_bytes.all.current"]
-            if self.device.type == "cuda"
+            torch.get_device_module(self.device).memory_stats()[
+                "active_bytes.all.current"
+            ]
+            if self.device.type == torch.get_device_module(self.device)
             else 0
         )
 
@@ -126,7 +133,7 @@ class TestCheckpoint(TestCase):
             loss2 = net2(x2).sum()
         loss2.backward()
 
-        if x.is_cuda:
+        if x.device.type == device_type:
             self.assertTrue(mem2.delta() < mem1.delta())
 
         for p1, p2 in zip(net1.parameters(), net2.parameters()):
@@ -137,10 +144,10 @@ class TestCheckpoint(TestCase):
         net = ToyModel()
         self._test_tensor_only(net, x)
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @skip_if_lt_x_gpu(1)
     def test_tensor_only_gpu(self):
-        x = torch.randn(20, 100, device="cuda:0")
-        net = ToyModel().to("cuda:0")
+        x = torch.randn(20, 100, device=device_type)
+        net = ToyModel().to(device_type)
         self._test_tensor_only(net, x)
 
     def test_random_cpu(self):

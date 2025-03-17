@@ -11,13 +11,15 @@ import unittest
 import torch
 import torch.nn as nn
 from torch.distributed.optim import _NamedOptimizer
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 
 
-def _run_model_training(model_optim_lists):
+def _run_model_training(model_optim_lists, device):
     for _ in range(2):
-        x = torch.rand(5, 8)
+        x = torch.rand(5, 8, device=device)
         for model_optim_list in model_optim_lists:
             model = model_optim_list[0]
+            model.to(device)
             optim_list = model_optim_list[1]
             y = model(x)
             y.sum().backward()
@@ -72,7 +74,7 @@ class NamedOptimizerTest(unittest.TestCase):
                 for tensors in zip(val, group_2[key]):
                     self.assertTrue(torch.allclose(tensors[0], tensors[1]))
 
-    def test_state_dict(self):
+    def test_state_dict(self, device):
         """Check that NamedOptimizer exposes the expected state dict
         interface."""
         m = TestDummyModel()
@@ -91,7 +93,7 @@ class NamedOptimizerTest(unittest.TestCase):
         )
         self._compare_param_groups(optim.param_groups, named_optim.param_groups)
 
-        _run_model_training([(m, [optim]), (m_dup, [named_optim])])
+        _run_model_training([(m, [optim]), (m_dup, [named_optim])], device=device)
         self._compare_param_groups(optim.param_groups, named_optim.param_groups)
 
         sd = optim.state_dict()
@@ -119,7 +121,7 @@ class NamedOptimizerTest(unittest.TestCase):
             assert_equal=True,
         )
 
-    def test_state_dict_multi_param_group(self):
+    def test_state_dict_multi_param_group(self, device):
         """Check that NamedOptimizer exposes the expected state dict
         interface when multiple param groups are specified."""
         m = TestDummyModel()
@@ -163,7 +165,8 @@ class NamedOptimizerTest(unittest.TestCase):
         self._compare_param_groups(optim_2.param_groups, named_optim_2.param_groups)
 
         _run_model_training(
-            [(m, [optim_1, optim_2]), (m_dup, [named_optim_1, named_optim_2])]
+            [(m, [optim_1, optim_2]), (m_dup, [named_optim_1, named_optim_2])],
+            device=device,
         )
         self._compare_param_groups(optim_1.param_groups, named_optim_1.param_groups)
         self._compare_param_groups(optim_2.param_groups, named_optim_2.param_groups)
@@ -204,7 +207,7 @@ class NamedOptimizerTest(unittest.TestCase):
             sd_2["param_groups"][1], named_sd_2["param_groups"][1], assert_equal=True
         )
 
-    def test_load_state_dict(self):
+    def test_load_state_dict(self, device):
         """Check that NamedOptimizer's load_state_dict works as expected."""
         m = TestDummyModel()
         named_optim_1 = _NamedOptimizer(
@@ -214,7 +217,7 @@ class NamedOptimizerTest(unittest.TestCase):
             momentum=0.9,
         )
 
-        _run_model_training([(m, [named_optim_1])])
+        _run_model_training([(m, [named_optim_1])], device=device)
         state_dict_to_load = named_optim_1.state_dict()
 
         named_optim_2 = _NamedOptimizer(
@@ -224,7 +227,7 @@ class NamedOptimizerTest(unittest.TestCase):
             momentum=0.6,
         )
 
-        _run_model_training([(m, [named_optim_2])])
+        _run_model_training([(m, [named_optim_2])], device=device)
         state_dict_before_load = named_optim_2.state_dict()
 
         # Compare "state" in optim state dict
@@ -274,7 +277,7 @@ class NamedOptimizerTest(unittest.TestCase):
             assert_equal=True,
         )
 
-    def test_load_state_dict_conditional_training(self):
+    def test_load_state_dict_conditional_training(self, device):
         """Check that NamedOptimizer load_state_dict works under conditional training case."""
         m = TestDummyModel()
         named_optim_1 = _NamedOptimizer(
@@ -288,7 +291,7 @@ class NamedOptimizerTest(unittest.TestCase):
             momentum=0.9,
         )
 
-        _run_model_training([(m, [named_optim_1])])
+        _run_model_training([(m, [named_optim_1])], device=device)
         state_dict_to_load = named_optim_1.state_dict()
 
         named_optim_2 = _NamedOptimizer(
@@ -298,7 +301,7 @@ class NamedOptimizerTest(unittest.TestCase):
             momentum=0.6,
         )
 
-        _run_model_training([(m, [named_optim_2])])
+        _run_model_training([(m, [named_optim_2])], device=device)
         named_optim_2.load_state_dict(state_dict_to_load)
         state_dict_after_load = named_optim_2.state_dict()
 
@@ -314,7 +317,7 @@ class NamedOptimizerTest(unittest.TestCase):
             assert_equal=True,
         )
 
-    def test_load_state_dict_error(self):
+    def test_load_state_dict_error(self, device):
         m = TestDummyModel()
         named_optim_1 = _NamedOptimizer(
             m.named_parameters(),
@@ -323,7 +326,7 @@ class NamedOptimizerTest(unittest.TestCase):
             momentum=0.9,
         )
 
-        _run_model_training([(m, [named_optim_1])])
+        _run_model_training([(m, [named_optim_1])], device=device)
         state_dict_to_load = named_optim_1.state_dict()
 
         named_optim_2 = _NamedOptimizer(
@@ -339,7 +342,7 @@ class NamedOptimizerTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, err_msg):
             named_optim_2.load_state_dict(state_dict_to_load)
 
-    def test_add_param_group(self):
+    def test_add_param_group(self, device):
         m = TestDummyModel()
         m_dup = TestDummyModel()
         optim = torch.optim.SGD(
@@ -361,17 +364,17 @@ class NamedOptimizerTest(unittest.TestCase):
             momentum=0.9,
         )
 
-        _run_model_training([(m, [optim]), (m_dup, [named_optim])])
+        _run_model_training([(m, [optim]), (m_dup, [named_optim])], device=device)
         self._compare_param_groups(optim.param_groups, named_optim.param_groups)
 
         optim.add_param_group({"params": m.net2.parameters(), "lr": 1e-5})
         named_optim.add_param_group({"params": m_dup.net2.parameters(), "lr": 1e-5})
-        _run_model_training([(m, [optim]), (m_dup, [named_optim])])
+        _run_model_training([(m, [optim]), (m_dup, [named_optim])], device=device)
         self._compare_param_groups(optim.param_groups, named_optim.param_groups)
 
         optim.add_param_group({"params": m.net4[1].weight, "lr": 1e-3})
         named_optim.add_param_group({"params": m_dup.net4[1].weight, "lr": 1e-3})
-        _run_model_training([(m, [optim]), (m_dup, [named_optim])])
+        _run_model_training([(m, [optim]), (m_dup, [named_optim])], device=device)
         self._compare_param_groups(optim.param_groups, named_optim.param_groups)
 
     def test_add_param_group_error(self):
@@ -424,3 +427,8 @@ class NamedOptimizerTest(unittest.TestCase):
         self.assertFalse(
             torch.all(named_sd["state"]["net3.weight"]["momentum_buffer"]).item()
         )
+
+
+device = ["cpu", "cuda", "hpu", "xpu"]
+
+instantiate_device_type_tests(NamedOptimizerTest, globals(), only_for=device)
