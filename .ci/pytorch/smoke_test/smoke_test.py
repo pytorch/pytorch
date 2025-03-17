@@ -395,6 +395,13 @@ def parse_args():
         choices=["enabled", "disabled"],
         default="enabled",
     )
+    parser.add_argument(
+        "--numpy-check",
+        help="Check numpy compile",
+        type=str,
+        choices=["enabled", "disabled"],
+        default="enabled",
+    )
     return parser.parse_args()
 
 
@@ -409,7 +416,10 @@ def main() -> None:
     check_version(options.package)
     smoke_test_conv2d()
     test_linalg()
-    test_numpy()
+
+    if options.numpy_check == "enabled":
+        test_numpy()
+        
     if is_cuda_system:
         test_linalg("cuda")
         test_cuda_gds_errors_captured()
