@@ -4715,14 +4715,11 @@ def get_params(dtypes: list[torch.dtype]) -> list[Params]:
         )
     return params
 
-
 supports_learnable_bias = unittest.skipUnless(
-    torch.cuda.is_available()
-    and torch.utils._triton.has_triton()
-    and torch.cuda.get_device_capability() >= (8, 0),
-    "Requires CUDA and Triton",
+    (torch.cuda.is_available() and has_triton())
+    and (torch.cuda.get_device_capability() == (8, 0) or torch.version.hip),
+    "Requires Triton + A100 or Triton + ROCm",
 )
-
 
 @supports_learnable_bias
 class TestLearnableBiases(InductorTestCase):
