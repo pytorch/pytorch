@@ -67,7 +67,7 @@ struct TORCH_API ${op} : public ${superclass} {
     ${release_variables}
   }
   ${will_release_variables}
-  void compiled_args(CompiledNodeArgs& args) override;
+  void compiled_args(CompiledNodeArgs& args) const override;
   variable_list apply_with_saved(const variable_list& inputs, SwapSavedVariables& saved) override;
   ${saved_variables}
   ${saved_list_sizes}
@@ -127,7 +127,7 @@ variable_list ${op}::apply(variable_list&& grads) {
   return ${op}_apply_functional(std::move(grads), needs_input_grad${,apply_functional_args});
 }
 
-void ${op}::compiled_args(CompiledNodeArgs& args) {
+void ${op}::compiled_args(CompiledNodeArgs& args) const {
     ${compiled_args}
 }
 variable_list ${op}::apply_with_saved(const variable_list& grads, SwapSavedVariables& saved) {

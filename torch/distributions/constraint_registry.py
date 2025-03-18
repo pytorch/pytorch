@@ -23,7 +23,7 @@ suitable for coordinate-wise optimization algorithms like Adam::
 
     loc = torch.zeros(100, requires_grad=True)
     unconstrained = torch.zeros(100, requires_grad=True)
-    scale = transform_to(Normal.arg_constraints['scale'])(unconstrained)
+    scale = transform_to(Normal.arg_constraints["scale"])(unconstrained)
     loss = -Normal(loc, scale).log_prob(data).sum()
 
 The ``biject_to()`` registry is useful for Hamiltonian Monte Carlo, where
@@ -65,7 +65,6 @@ or as a decorator on parameterized constraints::
 You can create your own registry by creating a new :class:`ConstraintRegistry`
 object.
 """
-
 
 from torch.distributions import constraints, transforms
 from torch.types import _Number
@@ -127,9 +126,9 @@ class ConstraintRegistry:
         Looks up a transform to constrained space, given a constraint object.
         Usage::
 
-            constraint = Normal.arg_constraints['scale']
+            constraint = Normal.arg_constraints["scale"]
             scale = transform_to(constraint)(torch.zeros(1))  # constrained
-            u = transform_to(constraint).inv(scale)           # unconstrained
+            u = transform_to(constraint).inv(scale)  # unconstrained
 
         Args:
             constraint (:class:`~torch.distributions.constraints.Constraint`):

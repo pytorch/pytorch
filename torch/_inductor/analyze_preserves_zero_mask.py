@@ -156,8 +156,9 @@ def can_codegen_without_upcasts(
     low_prec_analysis = RecordLowPrecisionOps(disallow_fp32_ops)
 
     # Need to turn off upcasting to do analysis of whether we can turn it off
-    with config.patch("triton.codegen_upcast_to_fp32", False), V.set_ops_handler(
-        low_prec_analysis
+    with (
+        config.patch("triton.codegen_upcast_to_fp32", False),
+        V.set_ops_handler(low_prec_analysis),
     ):
         prologue._body(*prologue.get_ranges())
 
