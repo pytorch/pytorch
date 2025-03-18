@@ -73,6 +73,11 @@ output tensor having 1 (or ``len(dim)``) fewer dimension(s).
         If ``None``, all dimensions are reduced.
 """
     },
+    {
+        "opt_keepdim": """
+    keepdim (bool, optional): whether the output tensor has :attr:`dim` retained or not. Default: ``False``.
+"""
+    },
 )
 
 single_dim_common = merge_dicts(
@@ -913,13 +918,15 @@ Create a view of an existing `torch.Tensor` :attr:`input` with specified
 :attr:`size`, :attr:`stride` and :attr:`storage_offset`.
 
 .. warning::
-    Prefer using other view functions, like :meth:`torch.Tensor.expand`,
-    to setting a view's strides manually with `as_strided`, as this
-    function's behavior depends on the implementation of a tensor's storage.
-    The constructed view of the storage must only refer to elements within
-    the storage or a runtime error will be thrown, and if the view is
-    "overlapped" (with multiple indices referring to the same element in
-    memory) its behavior is undefined.
+    Prefer using other view functions, like :meth:`torch.Tensor.view` or
+    :meth:`torch.Tensor.expand`, to setting a view's strides manually with
+    `as_strided`, as this function will throw an error on non-standard Pytorch
+    backends (that do not have a concept of stride) and the result will depend
+    on the current layout in memory. The constructed view must only refer to
+    elements within the Tensor's storage or a runtime error will be thrown.
+    If the generated view is "overlapped" (with multiple indices referring to
+    the same element in memory), the behavior of inplace operations on this view
+    is undefined (and might not throw runtime errors).
 
 Args:
     {input}
@@ -6483,8 +6490,8 @@ in the output tensors having 1 fewer dimension than ``input``.
 
 Args:
     {input}
-    {dim}
-    {keepdim} Default: ``False``.
+    {opt_dim}
+    {opt_keepdim}
 
 Keyword args:
     out (tuple, optional): the result tuple of two output tensors (max, max_indices)
@@ -6499,13 +6506,22 @@ Example::
             [-0.6172,  1.0036, -0.6060, -0.2432]])
     >>> torch.max(a, 1)
     torch.return_types.max(values=tensor([0.8475, 1.1949, 1.5717, 1.0036]), indices=tensor([3, 0, 0, 1]))
+    >>> a = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
+    >>> a.max(dim=1, keepdim=True)
+    torch.return_types.max(
+    values=tensor([[2.], [4.]]),
+    indices=tensor([[1], [1]]))
+    >>> a.max(dim=1, keepdim=False)
+    torch.return_types.max(
+    values=tensor([2., 4.]),
+    indices=tensor([1, 1]))
 
 .. function:: max(input, other, *, out=None) -> Tensor
    :noindex:
 
 See :func:`torch.maximum`.
 
-""".format(**single_dim_common),
+""".format(**multi_dim_common),
 )
 
 add_docstr(
@@ -13790,12 +13806,7 @@ Args:
 Keyword args:
     out_int32 (bool, optional): indicate the output data type. torch.int32 if True, torch.int64 otherwise.
                                 Default value is False, i.e. default output data type is torch.int64.
-    right (bool, optional): if False, return the first suitable location that is found. If True, return the
-                            last such index. If no suitable index found, return 0 for non-numerical value
-                            (eg. nan, inf) or the size of :attr:`boundaries` (one pass the last index).
-                            In other words, if False, gets the lower bound index for each value in :attr:`input`
-                            from :attr:`boundaries`. If True, gets the upper bound index instead.
-                            Default value is False.
+    right (bool, optional): determines the behavior for values in :attr:`boundaries`. See the table above.
     out (Tensor, optional): the output tensor, must be the same size as :attr:`input` if provided.
 
 
