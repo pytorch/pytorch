@@ -1768,8 +1768,21 @@ class OutputGraph:
 
     def normalize_intermediate_node_names(self) -> None:
         intermediate_nodes = [node for node in self.graph.nodes if node.op != "placeholder" and node.op != "output"]
-        for i, node in enumerate(intermediate_nodes):
-            node.name = f"x_{i}"
+        base_name_counter = {}
+
+        for node in intermediate_nodes:
+            name_parts = node.name.split('_')
+            if len(name_parts) > 1 and name_parts[-1].isdigit():
+                base_name = '_'.join(name_parts[:-1])
+            else:
+                base_name = node.name
+
+            if base_name not in base_name_counter:
+                base_name_counter[base_name] = 0
+            else:
+                base_name_counter[base_name] += 1
+
+            node.name = f"{base_name}_{base_name_counter[base_name]}"
 
     def add_output_instructions(self, prefix: list[Instruction]) -> None:
         """
