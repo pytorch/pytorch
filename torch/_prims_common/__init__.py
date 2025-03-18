@@ -507,10 +507,15 @@ def compute_elementwise_output_logical_to_physical_perm(
     def should_swap(idx_a, idx_b):
         def gte(a, b):
             # semantics for a >= b, assuming a != b, a >= 0, b >= 0
+            if _guard_semantics(a == 0):
+                return False
+            if _guard_semantics(b == 0):
+                return True
+
             expr = (a.node.expr if isinstance(a, torch.SymInt) else a) // (b.node.expr if isinstance(b, torch.SymInt) else b)
-            if isinstance(expr, int):
+            if isinstance(expr, (int, sympy.Integer)):
                 return expr >= 1
-            return not (isinstance(expr, sympy.floor) or _guard_semantics(expr == 0))
+            return not isinstance(expr, sympy.floor)
 
         for tensor in tensors:
             stride_a = tensor.stride()[idx_a]
