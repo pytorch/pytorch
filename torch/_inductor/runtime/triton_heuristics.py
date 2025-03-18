@@ -85,6 +85,8 @@ class NoTritonConfigsError(RuntimeError):
 if TYPE_CHECKING:
     from collections.abc import Container, Hashable, Sequence
 
+    from torch._guards import CompileId
+
     LauncherType = Any
 
 _KernelType = Union[CompiledKernel, StaticallyLaunchedCudaKernel]
@@ -164,8 +166,7 @@ def _dump_launch_params(args, kwargs, launcher, kernel_name, grid):
         else:
             call_kwargs[k] = v
     if not triton_version_uses_attrs_dict():
-        for k, v in launcher.config.kwargs.items():
-            call_kwargs[k] = v
+        call_kwargs.update(launcher.config.kwargs)
     call_kwargs["num_warps"] = launcher.config.num_warps
     call_kwargs["num_stages"] = launcher.config.num_stages
     args_str = [*call_args]
@@ -269,6 +270,16 @@ class CachingAutotuner(KernelInterface):
         )
 
         self.triton_interpret = os.environ.get("TRITON_INTERPRET", "0") == "1"
+
+        # Compile-time info included in runtime logginging
+        self.compile_id: Optional[CompileId] = None
+        self.is_backward = False
+
+    def set_compile_info(
+        self, compile_id: Optional[CompileId], is_backward: bool
+    ) -> None:
+        self.compile_id = compile_id
+        self.is_backward = is_backward
 
     def precompile(
         self,
@@ -562,6 +573,7 @@ class CachingAutotuner(KernelInterface):
         static_launcher = StaticTritonCompileResult.can_statically_launch(
             binary, self.inductor_meta, self.triton_meta, self.heuristic_type
         )
+
         if static_launcher is not None:
             result = StaticTritonCompileResult(
                 static_launcher, cfg, compile_meta, self.inductor_meta
@@ -753,8 +765,9 @@ class CachingAutotuner(KernelInterface):
             "CachingAutotuner.benchmark_all_configs",
             log_pt2_compile_event=True,
             metadata={"kernel_name": self.inductor_meta.get("kernel_name")},
-            # TODO(masnesral): Enable this when we figure out how to get the CompileId:
-            # dynamo_compile_runtime_column_us="runtime_triton_autotune_time_us",
+            dynamo_compile_runtime_column_us="runtime_triton_autotune_time_us",
+            compile_id=self.compile_id,
+            is_backward=self.is_backward,
         ):
             timings = {
                 launcher: self.bench(launcher, *args, **kwargs)
@@ -1024,9 +1037,6 @@ class CompileResult(Generic[_T]):
     def make_launcher(self) -> LauncherType: ...
 
     def _gen_launcher_code(self, scope, def_args, runner_args) -> LauncherType:
-        if "extra_launcher_args" in self.inductor_meta:
-            def_args = [*def_args, *self.inductor_meta["extra_launcher_args"]]
-
         grid = GridExpr.from_meta(self.inductor_meta, self.config)
         # grid.prefix is usually empty, grid.x_grid is something like `-(xnumel//-1024)`
         lines = [
@@ -1103,7 +1113,15 @@ class CompileResult(Generic[_T]):
                 for name in arg_names
                 if name not in cfg_dict and name not in none_args
             ]
+
+        if "extra_launcher_args" in self.inductor_meta:
+            def_args = [*def_args, *self.inductor_meta["extra_launcher_args"]]
+
         return call_args, def_args, none_args
+
+
+class CannotStaticallyLaunchKernel(Exception):
+    pass
 
 
 class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
@@ -1119,34 +1137,57 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
         triton_meta: dict[str, Any],
         heuristic_type: HeuristicType,
     ) -> Optional[StaticallyLaunchedCudaKernel]:
-        if triton_meta.get("device_type", None) != "cuda":
-            # Only cuda kernels
-            return None
-        if heuristic_type == HeuristicType.USER_AUTOTUNE:
-            return None
+        def check_can_launch() -> StaticallyLaunchedCudaKernel:
+            if not torch._inductor.config.use_static_cuda_launcher:
+                raise CannotStaticallyLaunchKernel("Static launcher disabled")
 
-        if inductor_meta.get("store_cubin", None):
-            # Requires storing the entire binary
-            return None
+            if triton_meta.get("device_type", None) != "cuda":
+                # Only cuda kernels
+                raise CannotStaticallyLaunchKernel("Non-cuda device")
 
-        cubin_location = os.path.join(
-            triton_cache_dir(triton_meta.get("device", 0)),
-            triton_hash_to_path_key(kernel.hash),
-            f"{kernel.src.fn.__name__}.cubin",
-        )
+            if torch._inductor.config.cpp_wrapper:
+                # If we're running with cpp wrapper, it doesn't
+                # make sense to statically compile since everything
+                # is codegenned anyway
+                raise CannotStaticallyLaunchKernel("Cpp wrapper enabled")
 
-        if not os.path.exists(cubin_location):
-            return None
-        else:
-            kernel._cubin_path = cubin_location
+            if heuristic_type == HeuristicType.USER_AUTOTUNE:
+                # Don't support user defined triton kernels yet
+                raise CannotStaticallyLaunchKernel("User defined triton kernel")
+
+            if inductor_meta.get("store_cubin", None):
+                # Requires storing the entire binary
+                raise CannotStaticallyLaunchKernel("store_cubin is enabled")
+
+            cubin_location = os.path.join(
+                triton_cache_dir(triton_meta.get("device", 0)),
+                triton_hash_to_path_key(kernel.hash),
+                f"{kernel.src.fn.__name__}.cubin",
+            )
+
+            if not os.path.exists(cubin_location):
+                raise CannotStaticallyLaunchKernel(
+                    f"Cubin path not found: {cubin_location}"
+                )
+
+            else:
+                kernel._cubin_path = cubin_location
+
+            try:
+                static_kernel = StaticallyLaunchedCudaKernel(kernel)
+            except NotImplementedError as e:
+                raise CannotStaticallyLaunchKernel(f"NotImplemented: {str(e)}") from e
+
+            return static_kernel
 
         try:
-            static_kernel = StaticallyLaunchedCudaKernel(kernel)
-        except NotImplementedError as e:
-            log.warning("Bypassing StaticallyLaunchedCudaKernel due to %s", str(e))
+            result = check_can_launch()
+            return result
+        except CannotStaticallyLaunchKernel as e:
+            log.info("Bypassing StaticallyLaunchedCudaKernel due to %s", str(e))
+            if torch._inductor.config.strict_static_cuda_launcher:
+                raise e
             return None
-
-        return static_kernel
 
     def make_launcher(self) -> LauncherType:
         # Load the binary on the parent
@@ -1154,20 +1195,38 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
         scope = {
             "runner": self.kernel.run,
         }
-        # StaticallyLaunchedCudaKernel handles constexprs and stuff already in its run function:
-        # we just have to pass in the arg_names directly
-        call_args, def_args, none_args = self._get_arg_lists(
-            self.kernel.arg_names, self.kernel.constexprs
+
+        # NOTE: Constexpr handling for triton and static cuda launcher
+
+        # Triton kernels have two types of constexprs: *declared* ones, which are ones the user
+        # has explicitly declared as tl.constexpr, and *implied* ones, which are expressions triton
+        # deems constant while compiling/analyzing the code (i.e. unused parameters, for example)
+
+        # Triton kernels handle constexprs slightly differently depending on which version of triton
+        # we care about (we support 3.2.0 and 3.3.0).
+
+        # In 3.2.0, triton kernels do not require passing any declared constexprs into the kernel
+        # In 3.3.0, triton kernels require all declared constexprs be passed into the kernel, where
+        # they are subsequently ignored.
+        # When statically launching, since we're launching from the triton generated cubin, we actually want to
+        # always get rid of all const exprs, declared or implied, since the underlying cubin file has all
+        # of the constants stripped away anyway.
+
+        # But CachingAutotuner.run will pass us a different number of arguments depending on
+        # whether or not we're in triton 3.2.0 or later, so we grab def_args with the same logic
+        # as the (non static) TritonCompileResult. We then generate call_args ourselves, since we
+        # want only a subset of the arguments passed to triton.
+        # Here, arg_names is exactly fn.src.arg_names and declared_constexprs is exactly fn.src.constexprs,
+        # which matches behavior with regular TritonCompileResult
+        _, def_args, none_args = self._get_arg_lists(
+            self.kernel.arg_names, self.kernel.declared_constexprs
         )
 
-        if triton_version_uses_attrs_dict():
-            # When launching directly from cubin on later triton versions,
-            # we actually need to get rid constexpr call args
-            call_args = [
-                arg
-                for i, arg in enumerate(self.kernel.arg_names)
-                if i not in self.kernel.constexprs and arg not in none_args
-            ]
+        call_args = [
+            arg
+            for i, arg in enumerate(self.kernel.arg_names)
+            if i not in self.kernel.full_constexprs and arg not in none_args
+        ]
 
         # StaticallyLaunchedCudaKernel.run takes in order grid_0, grid_1, grid_2, stream, and call_args
         runner_args = ["grid_0", "grid_1", "grid_2", "stream", *call_args]

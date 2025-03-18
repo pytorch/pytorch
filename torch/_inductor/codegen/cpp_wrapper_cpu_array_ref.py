@@ -189,17 +189,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                         """
                     )
 
-                run_impl_proto = ""
-                if config.aot_inductor.compile_wrapper_with_O0:
-                    run_impl_proto += """
-                    #ifdef __clang__
-                    __attribute__((optnone))
-                    #else
-                    __attribute__((optimize("O0")))
-                    #endif
-                    """
-
-                run_impl_proto += """
+                run_impl_proto = """
                     void AOTInductorModel::run_impl(
                         AtenTensorHandle*
                             input_handles, // array of input AtenTensorHandle; handles

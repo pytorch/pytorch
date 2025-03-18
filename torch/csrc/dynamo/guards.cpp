@@ -1486,6 +1486,36 @@ class ID_MATCH : public LeafGuard {
   intptr_t _expected;
 };
 
+class NONE_MATCH : public LeafGuard {
+ public:
+  NONE_MATCH(py::object verbose_code_parts)
+      : LeafGuard(std::move(verbose_code_parts)) {}
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    return value == Py_None;
+  }
+};
+
+class TRUE_MATCH : public LeafGuard {
+ public:
+  TRUE_MATCH(py::object verbose_code_parts)
+      : LeafGuard(std::move(verbose_code_parts)) {}
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    return value == Py_True;
+  }
+};
+
+class FALSE_MATCH : public LeafGuard {
+ public:
+  FALSE_MATCH(py::object verbose_code_parts)
+      : LeafGuard(std::move(verbose_code_parts)) {}
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    return value == Py_False;
+  }
+};
+
 class EQUALS_MATCH : public LeafGuard {
  public:
   EQUALS_MATCH(py::object value, py::object verbose_code_parts)
@@ -5233,6 +5263,18 @@ PyObject* torch_c_dynamo_guards_init() {
   py::class_<ID_MATCH, LeafGuard, std::shared_ptr<ID_MATCH>>(py_m, "ID_MATCH")
       .def(py::init<py::object, py::list>())
       .def("__call__", &ID_MATCH::check);
+  py::class_<NONE_MATCH, LeafGuard, std::shared_ptr<NONE_MATCH>>(
+      py_m, "NONE_MATCH")
+      .def(py::init<py::list>())
+      .def("__call__", &NONE_MATCH::check);
+  py::class_<TRUE_MATCH, LeafGuard, std::shared_ptr<TRUE_MATCH>>(
+      py_m, "TRUE_MATCH")
+      .def(py::init<py::list>())
+      .def("__call__", &TRUE_MATCH::check);
+  py::class_<FALSE_MATCH, LeafGuard, std::shared_ptr<FALSE_MATCH>>(
+      py_m, "FALSE_MATCH")
+      .def(py::init<py::list>())
+      .def("__call__", &FALSE_MATCH::check);
   py::class_<EQUALS_MATCH, LeafGuard, std::shared_ptr<EQUALS_MATCH>>(
       py_m, "EQUALS_MATCH")
       .def(py::init<py::object, py::list>())
@@ -5477,6 +5519,27 @@ PyObject* torch_c_dynamo_guards_init() {
             SKIP_IF_GUARD_ALREADY_PRESENT("ID_MATCH");
             self.add_leaf_guard(std::make_shared<ID_MATCH>(
                 std::move(value), std::move(verbose_code_parts)));
+          })
+      .def(
+          "add_none_match_guard",
+          [](GuardManager& self, py::object verbose_code_parts) -> void {
+            SKIP_IF_GUARD_ALREADY_PRESENT("NONE_MATCH");
+            self.add_leaf_guard(
+                std::make_shared<NONE_MATCH>(std::move(verbose_code_parts)));
+          })
+      .def(
+          "add_true_match_guard",
+          [](GuardManager& self, py::object verbose_code_parts) -> void {
+            SKIP_IF_GUARD_ALREADY_PRESENT("TRUE_MATCH");
+            self.add_leaf_guard(
+                std::make_shared<TRUE_MATCH>(std::move(verbose_code_parts)));
+          })
+      .def(
+          "add_false_match_guard",
+          [](GuardManager& self, py::object verbose_code_parts) -> void {
+            SKIP_IF_GUARD_ALREADY_PRESENT("FALSE_MATCH");
+            self.add_leaf_guard(
+                std::make_shared<FALSE_MATCH>(std::move(verbose_code_parts)));
           })
       .def(
           "add_equals_match_guard",
