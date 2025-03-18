@@ -40,7 +40,7 @@ def main(args):
             textwrap.dedent(
                 f"""
                 Error: {len(failed)} models below expected memory compression ratio:
-                    {' '.join(failed)}
+                    {" ".join(failed)}
                 If this drop is expected, you can update `{args.expected}`.
                 """
             )

@@ -558,6 +558,13 @@ size_t computeLengthsAndOffsets(
   return offset;
 }
 
+// Get the start and stride of the global rank from a list of global ranks
+// If the global ranks do not follow the consecutive rule, the stride will be -1
+void TORCH_API getGlobalRankStartAndStride(
+    const std::vector<uint64_t>& globalRanksInGroup,
+    int& globalRankStart,
+    int& globalRankStride);
+
 using RankType = uint32_t;
 using SizeType = uint64_t;
 

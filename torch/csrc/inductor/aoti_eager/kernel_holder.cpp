@@ -437,7 +437,8 @@ std::shared_ptr<AOTIModelContainerRunner> AOTIPythonKernelHolder::
     return std::make_shared<AOTIModelContainerRunnerCpu>(so_path);
   } else {
     auto aoti_model_runer_fn = registered_aoti_runner[device_name];
-    return aoti_model_runer_fn(so_path, 1, device_name, "");
+    return aoti_model_runer_fn(
+        so_path, 1, device_name, "", /*run_single_threaded=*/false);
   }
 }
 

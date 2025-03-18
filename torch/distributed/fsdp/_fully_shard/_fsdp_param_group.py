@@ -424,9 +424,9 @@ class FSDPParamGroup:
             if all_reduce_pg is None and self._all_reduce_hook_stream is not None:
                 # this means the native HSDP is not enabled,
                 # but user may want to have a custom HSDP setup
-                assert (
-                    self._all_reduce_hook is not None
-                ), "all reduce hook stream is specified but hook itself is missing."
+                assert self._all_reduce_hook is not None, (
+                    "all reduce hook stream is specified but hook itself is missing."
+                )
                 all_reduce_stream = self._all_reduce_hook_stream
             else:
                 all_reduce_stream = self.comm_ctx.all_reduce_stream
@@ -513,9 +513,10 @@ class FSDPParamGroup:
         else:
             raise ValueError(f"Unknown pass type: {pass_type}")
         target_fqn = target_fsdp_param_group._module_fqn
-        with record_function(
-            f"FSDP::{pass_type}_prefetch for {target_fqn}"
-        ), target_fsdp_param_group.use_training_state(training_state):
+        with (
+            record_function(f"FSDP::{pass_type}_prefetch for {target_fqn}"),
+            target_fsdp_param_group.use_training_state(training_state),
+        ):
             async_op = target_fsdp_param_group.unshard_async_op
             target_fsdp_param_group.unshard(async_op)
 
@@ -592,9 +593,9 @@ class FSDPParamGroup:
     def _register_state_dict_hooks(self) -> None:
         num_pre_save_hooks = len(self._module_to_pre_save_state_dict_hook_handle)
         num_pre_load_hooks = len(self._module_to_pre_load_state_dict_hook_handle)
-        assert (
-            num_pre_save_hooks == num_pre_load_hooks
-        ), f"Pre-save: {num_pre_save_hooks} pre-load: {num_pre_load_hooks}"
+        assert num_pre_save_hooks == num_pre_load_hooks, (
+            f"Pre-save: {num_pre_save_hooks} pre-load: {num_pre_load_hooks}"
+        )
         if num_pre_save_hooks > 0:
             return  # already registered
         modules_with_fsdp_params: set[nn.Module] = {
@@ -605,12 +606,12 @@ class FSDPParamGroup:
             self._to_sharded()
 
         for module in modules_with_fsdp_params:
-            self._module_to_pre_save_state_dict_hook_handle[
-                module
-            ] = module.register_state_dict_pre_hook(to_sharded_hook)
-            self._module_to_pre_load_state_dict_hook_handle[
-                module
-            ] = module._register_load_state_dict_pre_hook(to_sharded_hook)
+            self._module_to_pre_save_state_dict_hook_handle[module] = (
+                module.register_state_dict_pre_hook(to_sharded_hook)
+            )
+            self._module_to_pre_load_state_dict_hook_handle[module] = (
+                module._register_load_state_dict_pre_hook(to_sharded_hook)
+            )
 
     # Properties #
     @property
