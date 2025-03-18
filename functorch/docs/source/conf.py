@@ -13,11 +13,10 @@
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 #
 import os
+import sys
 
 import functorch
 
-
-import sys
 
 # source code directory, relative to this file, for sphinx-autobuild
 # sys.path.insert(0, os.path.abspath('../..'))
@@ -173,7 +172,6 @@ html_theme_path = [pytorch_sphinx_theme2.get_html_theme_path()]
 html_theme_options = {
     "collapse_navigation": False,
     "display_version": True,
-    "logo_only": True,
     "pytorch_project": "functorch",
     "navigation_with_keys": True,
     "analytics_id": "UA-117752657-2",

@@ -20,12 +20,14 @@
 # See https://github.com/pytorch/pytorch/issues/79992.
 
 import os
-import textwrap
 import sys
+import textwrap
+
 
 # sys.path.insert(0, os.path.abspath('.'))
 sys.path.insert(0, os.path.abspath(".."))
 import pytorch_sphinx_theme2
+
 
 # -- General configuration ------------------------------------------------
 
@@ -39,7 +41,9 @@ run_doxygen = os.environ.get("RUN_DOXYGEN", "false") == "true"
 # ones.
 extensions = [
     "sphinx.ext.intersphinx",
-] + (["breathe", "exhale"] if run_doxygen else [])
+    "breathe",
+    "exhale",
+] #+ (["breathe", "exhale"] if run_doxygen else [])
 
 intersphinx_mapping = {"pytorch": ("https://pytorch.org/docs/main", None)}
 
