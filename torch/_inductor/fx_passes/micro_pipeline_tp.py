@@ -650,23 +650,21 @@ def _scatter_dim_after_reshape(
     if not reshape_node:
         return orig_scatter_dim
 
-    assert len(reshape_node.all_input_nodes) == 1, (
-        "rehshape node must have exactly one parent"
+    reshape_op_output_tensor = _get_tensor(reshape_node)
+    assert reshape_op_output_tensor.ndim == 2, (
+        "reshape must produce 2D tensor for scaled_mm"
     )
 
-    reshaped_tensor = _get_tensor(reshape_node)
-    assert reshaped_tensor.ndim == 2, "reshape must produce 2D tensor for scaled_mm"
-
-    reshape_op_input_tensor = _get_tensor(reshape_node.all_input_nodes[0])
-    assert reshape_op_input_tensor.ndim > reshaped_tensor.ndim, (
+    reshape_op_input_tensor = _get_tensor(reshape_node.args[0])
+    assert reshape_op_input_tensor.ndim > reshape_op_output_tensor.ndim, (
         "reshape must be from 3D+ to 2D"
     )
 
     # Note: for a N-D tensor to be reshaped into 2D, either the leading dims or ending dims must
     # be collapsed to a single dim. First determine which of these happened.
-    old_shape = reshape_op_input_tensor.shape
-    new_shape = reshaped_tensor.shape
-    leading_dims_collapsed = new_shape[0] == prod(old_shape[:-1])
+    input_shape = reshape_op_input_tensor.shape
+    output_shape = reshape_op_output_tensor.shape
+    leading_dims_collapsed = output_shape[0] == prod(input_shape[:-1])
 
     # Case 1: scatter dim 0 always maps to 0 after any reshape from 3D+ to 2D, regardless if
     # leading dims or ending dims were collapsed.
@@ -827,9 +825,8 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> bool:
     # We need to track 3 values for the fused scaled mm reduce scatter implementation:
     #   1. The scatter dim before the reshape, which was assigned using the original (a,b,c) @ (c,d) = (a,b,d) dims.
     #   2. The scatter dim after the reshape, to use when we are doing the 2D (a*b,c) @ (c,d) = (a,b,d) scaled mm op.
-    #   3. Store expected potentially 3D+ mm output shape, since the mm node itself only contains 2D input args,
-    #      and the fused matmul reduce scatter implementation needs to reshape the output to the expected
-    #      potentially 3D+ shape before applying reduce-scatter, and to prevent shape erros with subsequent ops.
+    #   3. Store expected potentially 3D+ mm output shape, so we can reshape the 2D mm output to the intended
+    #      3D+ shape before applying reduce-scatter, and to prevent shape erros with subsequent ops.
 
     # If 'A' was reshaped from 3D+ -> 2D for the mm, we need to determine the new scattter dim after the reshape
     # for the fused matmul reduce scatter implementation to use.
