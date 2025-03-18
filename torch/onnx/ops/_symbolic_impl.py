@@ -1,3 +1,15 @@
+"""Implementation of symbolic FX ops to represent arbitrary ONNX ops.
+
+This module provides a way to create symbolic FX operators that can represent
+arbitrary ONNX operators.
+
+The operators are called "symbolic" because they don't do any actual computation
+but instead serve as placeholders in the computation graph.
+
+Each implementation contains two parts: A "real" implementation that produce all
+zeros based on the input shape and dtype, and a "fake" implementation that does more
+or less the same thing but is required by the `torch.library.custom_op` interface.
+"""
 import dataclasses
 from collections.abc import Sequence
 from typing import Optional, Union
@@ -30,10 +42,30 @@ _ONNX_DTYPE_TO_TORCH_DTYPE: dict[int, torch.dtype] = {
     23: torch.uint8,  # FLOAT4E2M1
 }
 
+_INT_TYPE = "i"
+_FLOAT_TYPE = "f"
+_STRING_TYPE = "s"
+_INT_SEQ_TYPE = "is"
+_FLOAT_SEQ_TYPE = "fs"
+_STRING_SEQ_TYPE = "ss"
 
 @dataclasses.dataclass
 class EncodedAttrs:
-    """Class to encode attributes from dictionary into lists of FX compatible attributes."""
+    """Class to encode attributes from dictionary into lists of FX compatible attributes.
+
+    Since FX does not support dictionaries, we need to encode the attributes into
+    lists. This class provides a way to encode and decode the attributes.
+
+    Attributes:
+        attr_keys: List of attribute keys.
+        attr_types: List of attribute types. Values can be "i" (int), "f" (float),
+            "s" (string), "is" (int sequence), "fs" (float sequence), or "ss" (string sequence).
+        attr_pos: List of tuples representing the start and end positions of each
+            attribute in the corresponding list.
+        attr_ints: List of integer attributes.
+        attr_floats: List of float attributes.
+        attr_strs: List of string attributes.
+    """
 
     attr_keys: list[str]
     attr_types: list[str]
@@ -73,17 +105,17 @@ class EncodedAttrs:
                 start_pos = len(encoded.attr_ints)
                 encoded.attr_ints.append(v)
                 encoded.attr_pos.append((start_pos, start_pos + 1))
-                encoded.attr_types.append("i")
+                encoded.attr_types.append(_INT_TYPE)
             elif isinstance(v, float):
                 start_pos = len(encoded.attr_floats)
                 encoded.attr_floats.append(v)
                 encoded.attr_pos.append((start_pos, start_pos + 1))
-                encoded.attr_types.append("f")
+                encoded.attr_types.append(_FLOAT_TYPE)
             elif isinstance(v, str):
                 start_pos = len(encoded.attr_strs)
                 encoded.attr_strs.append(v)
                 encoded.attr_pos.append((start_pos, start_pos + 1))
-                encoded.attr_types.append("s")
+                encoded.attr_types.append(_STRING_TYPE)
             elif isinstance(v, Sequence):
                 if len(v) == 0:
                     raise ValueError(f"Empty sequence for attribute {k}")
@@ -91,17 +123,17 @@ class EncodedAttrs:
                     start_pos = len(encoded.attr_floats)
                     encoded.attr_floats.extend([float(elem) for elem in v])
                     encoded.attr_pos.append((start_pos, start_pos + len(v)))
-                    encoded.attr_types.append("fs")
+                    encoded.attr_types.append(_FLOAT_SEQ_TYPE)
                 elif isinstance(v[0], int):
                     start_pos = len(encoded.attr_ints)
                     encoded.attr_ints.extend([int(elem) for elem in v])
                     encoded.attr_pos.append((start_pos, start_pos + len(v)))
-                    encoded.attr_types.append("is")
+                    encoded.attr_types.append(_INT_SEQ_TYPE)
                 elif isinstance(v[0], str):
                     start_pos = len(encoded.attr_strs)
                     encoded.attr_strs.extend([str(elem) for elem in v])
                     encoded.attr_pos.append((start_pos, start_pos + len(v)))
-                    encoded.attr_types.append("ss")
+                    encoded.attr_types.append(_STRING_SEQ_TYPE)
                 else:
                     raise ValueError(f"Unsupported sequence type for attribute {k}")
             else:
@@ -141,17 +173,17 @@ class EncodedAttrs:
         ] = {}
         for i, key in enumerate(self.attr_keys):
             attr_type = self.attr_types[i]
-            if attr_type == "i":
+            if attr_type == _INT_TYPE:
                 attrs[key] = self.attr_ints[self.attr_pos[i][0]]
-            elif attr_type == "f":
+            elif attr_type == _FLOAT_TYPE:
                 attrs[key] = self.attr_floats[self.attr_pos[i][0]]
-            elif attr_type == "s":
+            elif attr_type == _STRING_TYPE:
                 attrs[key] = self.attr_strs[self.attr_pos[i][0]]
-            elif attr_type == "fs":
+            elif attr_type == _FLOAT_SEQ_TYPE:
                 attrs[key] = self.attr_floats[self.attr_pos[i][0] : self.attr_pos[i][1]]
-            elif attr_type == "is":
+            elif attr_type == _INT_SEQ_TYPE:
                 attrs[key] = self.attr_ints[self.attr_pos[i][0] : self.attr_pos[i][1]]
-            elif attr_type == "ss":
+            elif attr_type == _STRING_SEQ_TYPE:
                 attrs[key] = self.attr_strs[self.attr_pos[i][0] : self.attr_pos[i][1]]
             else:
                 raise ValueError(f"Unsupported attribute type: {attr_type}")
@@ -186,7 +218,6 @@ def _symbolic(
     domain: str = "",
     version: Optional[int] = None,
 ) -> torch.Tensor:
-    # TODO: Verify that shape supports SymInt
     torch._check(
         onnx_dtype in _ONNX_DTYPE_TO_TORCH_DTYPE,
         lambda: f"{onnx_dtype} is invalid as an ONNX data type. Valid values are {list(_ONNX_DTYPE_TO_TORCH_DTYPE.keys())}",
@@ -216,6 +247,8 @@ def _(
         onnx_dtype in _ONNX_DTYPE_TO_TORCH_DTYPE,
         lambda: f"{onnx_dtype} is invalid as an ONNX data type. Valid values are {list(_ONNX_DTYPE_TO_TORCH_DTYPE.keys())}",
     )
+    # NOTE(justinchuby): Use zeros instead of torch.empty because I haven't figured
+    # out how it can handle empty shapes
     return torch.zeros(shape, dtype=_ONNX_DTYPE_TO_TORCH_DTYPE[onnx_dtype])
 
 
@@ -289,5 +322,7 @@ def _(
             onnx_dtype in _ONNX_DTYPE_TO_TORCH_DTYPE,
             lambda: f"{onnx_dtype} is invalid as an ONNX data type. Valid values are {list(_ONNX_DTYPE_TO_TORCH_DTYPE.keys())}",
         )
+        # NOTE(justinchuby): Use zeros instead of torch.empty because I haven't figured
+        # out how it can handle empty shapes
         outputs.append(torch.zeros(shape, dtype=_ONNX_DTYPE_TO_TORCH_DTYPE[onnx_dtype]))
     return outputs

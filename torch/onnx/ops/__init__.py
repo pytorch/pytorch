@@ -1,3 +1,9 @@
+"""ONNX operators as native torch.fx operators.
+
+This module provides a set of functions to create ONNX operators in the FX graph
+which are exportable to ONNX.
+"""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -68,9 +74,9 @@ def symbolic(
     version: int | None = None,
     metadata_props: dict[str, str] | None = None,
 ) -> torch.Tensor:
-    """Create a symbolic ONNX operator for exporting to ONNX.
+    """Create a symbolic FX operator to represent an arbitrary ONNX operator.
 
-    This function is used to create a symbolic ONNX operator with a single output.
+    This function is used to create a symbolic operator with a single output.
     To create an operator with multiple outputs, use :func:`symbolic_multi_out`.
 
     Example::
@@ -160,7 +166,7 @@ def symbolic_multi_out(
     version: int | None = None,
     metadata_props: dict[str, str] | None = None,
 ) -> Sequence[torch.Tensor]:
-    """Create a symbolic ONNX operator with multiple outputs.
+    """Create a symbolic FX operator to represent an arbitrary ONNX operator with multiple outputs.
 
     Example::
 

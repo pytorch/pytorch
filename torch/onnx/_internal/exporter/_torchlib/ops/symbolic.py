@@ -27,12 +27,10 @@ def _call_symbolic_op(
         | float
         | str
         | bool
-        | Sequence[int]
-        | Sequence[float]
-        | Sequence[str]
-        | Sequence[bool],
+        | list[int]
+        | list[float]
+        | list[str]
     ],
-    shapes: Sequence[Sequence[int | ir.Value]],
     dtypes: Sequence[int],
     version: int | None,
     metadata_props: dict[str, str] | None,
@@ -100,6 +98,7 @@ def onnx_symbolic_symbolic(
     domain: str = "",
     version: int | None = None,
 ) -> ir.Value:
+    del shape  # Unused. The shapes are set by the graph builder
     encoded = _symbolic_impl.EncodedAttrs(
         attr_keys=list(attr_keys),
         attr_types=list(attr_types),
@@ -114,7 +113,6 @@ def onnx_symbolic_symbolic(
         domain,
         inputs,
         attrs,
-        shapes=[shape],
         dtypes=[onnx_dtype],
         version=version,
         metadata_props=dict(zip(metadata_props_keys, metadata_props_values)),
@@ -139,6 +137,7 @@ def onnx_symbolic_symbolic_multi_out(
     domain: str = "",
     version: int | None = None,
 ) -> Sequence[ir.Value]:
+    del shapes  # Unused. The shapes are set by the graph builder
     encoded = _symbolic_impl.EncodedAttrs(
         attr_keys=list(attr_keys),
         attr_types=list(attr_types),
@@ -153,7 +152,6 @@ def onnx_symbolic_symbolic_multi_out(
         domain,
         inputs,
         attrs,
-        shapes=shapes,
         dtypes=onnx_dtypes,
         version=version,
         metadata_props=dict(zip(metadata_props_keys, metadata_props_values)),
