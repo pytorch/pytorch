@@ -2259,7 +2259,8 @@ class TestOptimRenewed(TestCase):
         ]
 
         num_params = 4
-        size_of_param_in_bytes = 32 * 16 * dtype.__sizeof__()
+        dtype_size = torch.tensor(0,dtype=dtype).element_size()
+        size_of_param_in_bytes = 32 * 16 * dtype_size 
         for optim_input in beta_1_optim_inputs:
             zero = (
                 0.0
@@ -2285,7 +2286,6 @@ class TestOptimRenewed(TestCase):
                         p.grad = torch.rand_like(p)
 
                 total_sizes.append(get_obj_size(optim.state_dict()))
-
             # size of exp_avg should match the size of params, as all the params here requires grad
             size_of_exp_avgs = num_params * size_of_param_in_bytes
             self.assertEqual(total_sizes[0], total_sizes[1] + size_of_exp_avgs)
@@ -2326,22 +2326,24 @@ class TestOptimRenewed(TestCase):
             # model and optimizer corresponding to beta1 = 0.0
             model_beta1_zero, optim_beta1_zero = init_model_and_optim(
                 next(
-                    [
+                    (
                         optim_input
                         for optim_input in optim_inputs
                         if "betas" in optim_input.kwargs
                         and optim_input.kwargs["betas"][0] == 0.0
-                    ]
+                    ),
+                    None
                 )
             )
             # model and optimizer corresponding to default params
             model_default, optim_default = init_model_and_optim(
                 next(
-                    [
+                    (
                         optim_input
                         for optim_input in optim_inputs
                         if optim_input.desc == "default"
-                    ]
+                    ),
+                    None
                 )
             )
 
