@@ -3955,7 +3955,13 @@ struct BackendStaticInitializer {
   // version checks, to CUDAAllocatorConfig's runtime doublecheck. If this
   // works, maybe we should move all of CUDAAllocatorConfig here?
   CUDAAllocator* parseEnvForBackend() {
-    const auto val = c10::utils::get_env("PYTORCH_CUDA_ALLOC_CONF");
+    auto val = c10::utils::get_env("PYTORCH_CUDA_ALLOC_CONF");
+#ifdef USE_ROCM
+    // convenience for ROCm users to allow either CUDA or HIP env var
+    if (!val.has_value()) {
+      val = c10::utils::get_env("PYTORCH_HIP_ALLOC_CONF");
+    }
+#endif
     if (val.has_value()) {
       const std::string& config = val.value();
 
@@ -3971,7 +3977,15 @@ struct BackendStaticInitializer {
         std::vector<std::string> kv(it2, end2);
         if (kv.size() >= 2) {
           if (kv[0] == "backend") {
+#ifdef USE_ROCM
+            // convenience for ROCm users to allow either CUDA or HIP env var
+            if (kv[1] ==
+                    "cud"
+                    "aMallocAsync" ||
+                kv[1] == "hipMallocAsync")
+#else
             if (kv[1] == "cudaMallocAsync")
+#endif
               return CudaMallocAsync::allocator();
             if (kv[1] == "native")
               return &Native::allocator;
