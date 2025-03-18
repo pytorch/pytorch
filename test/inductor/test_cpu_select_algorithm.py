@@ -1375,10 +1375,10 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @dtypes(torch.bfloat16)
     @parametrize(
         "batch_size",
-       (
+        (
             17,
             32,
-       ),
+        ),
     )
     @parametrize("in_features", (128, 144, 1024))
     @parametrize("out_features", (64, 65, 1024))
