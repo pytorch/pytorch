@@ -1045,6 +1045,13 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         m2 = ops.reduction(dtype, dtype, "sum", dx2)
         return OpsWrapper._unwrap((mean, m2, rnumel))
 
+    def prepare_softmax_twopass_fallback(self, dtype, value):
+        vmax = ops.reduction(dtype, dtype, "max", value)
+        sub = ops.sub(value, vmax)
+        exp = ops.exp(sub)
+        vsum = ops.reduction(dtype, dtype, "sum", exp)
+        return OpsWrapper._unwrap((vmax, vsum))
+
     def codegen_kernel(self):
         raise NotImplementedError
 
@@ -1549,13 +1556,10 @@ class SIMDScheduling(BaseScheduling):
 
             if config.benchmark_kernel:
                 num_gb = kernel.estimate_kernel_num_bytes() / 1e9
-                grid_args = V.graph.sizevars.size_hints(kernel.call_sizes)
-                assert kernel.meta is not None, "meta is None"
-                grid = kernel.grid_fn(*grid_args, kernel.meta)
                 src_code = (
                     f"{kernel.imports_for_benchmark_kernel()}\n"
                     f"{src_code}\n"
-                    f"{kernel.codegen_kernel_benchmark(num_gb, grid).getvalue()}"
+                    f"{kernel.codegen_kernel_benchmark(num_gb).getvalue()}"
                 )
 
             if only_gen_src_code:
