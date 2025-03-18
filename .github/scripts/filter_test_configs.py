@@ -490,11 +490,13 @@ def get_reenabled_issues(pr_body: str = "") -> list[str]:
     return parse_reenabled_issues(pr_body) + parse_reenabled_issues(commit_messages)
 
 
-def check_should_build_distributed(test_matrix: dict[str, list[Any]]) -> bool:
+def check_should_build_distributed(test_matrix: dict[str, list[Any]]) -> str:
     for entry in test_matrix.get("include", []):
         if entry.get("config") in ("distributed", "multigpu"):
-            return True
-    return False
+            return "!"
+    if os.environ.get("BUILD_DISTRIBUTED", "").lower() in ("1", "true", "yes"):
+        return "1"
+    return "0"
 
 
 def check_for_setting(labels: set[str], body: str, setting: str) -> bool:
@@ -551,11 +553,7 @@ def perform_misc_tasks(
             if is_cuda_or_rocm_job(job_name):
                 config["mem_leak_check"] = "mem_leak_check"
 
-    set_output(
-        "build-distributed",
-        check_should_build_distributed(test_matrix)
-        or os.getenv("BUILD_DISTRIBUTED", "").lower() in ("1", "true", "yes"),
-    )
+    set_output("build-distributed", check_should_build_distributed(test_matrix))
 
 
 def main() -> None:
