@@ -41,9 +41,7 @@ run_doxygen = os.environ.get("RUN_DOXYGEN", "false") == "true"
 # ones.
 extensions = [
     "sphinx.ext.intersphinx",
-    "breathe",
-    "exhale",
-] #+ (["breathe", "exhale"] if run_doxygen else [])
+] + (["breathe", "exhale"] if run_doxygen else [])
 
 intersphinx_mapping = {"pytorch": ("https://pytorch.org/docs/main", None)}
 
