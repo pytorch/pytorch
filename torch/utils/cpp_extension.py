@@ -625,6 +625,9 @@ class BuildExtension(build_ext):
 
             self._add_compile_flag(extension, '-DTORCH_API_INCLUDE_EXTENSION_H')
 
+            if IS_HIP_EXTENSION:
+                self._hipify_compile_flags(extension)
+
             if extension.py_limited_api:
                 # compile any extension that has passed in py_limited_api to the
                 # Extension constructor with the Py_LIMITED_API flag set to our
@@ -1044,6 +1047,29 @@ class BuildExtension(build_ext):
                 args.append(flag)
         else:
             extension.extra_compile_args.append(flag)
+
+    # Simple hipify, replace the first occurrence of CUDA with HIP
+    # in flags starting with "-" and containing "CUDA", but exclude -I flags
+    def _hipify_compile_flags(self, extension):
+        if isinstance(extension.extra_compile_args, dict) and 'nvcc' in extension.extra_compile_args:
+            modified_flags = []
+            for flag in extension.extra_compile_args['nvcc']:
+                if flag.startswith("-") and "CUDA" in flag and not flag.startswith("-I"):
+                    # check/split flag into flag and value
+                    parts = flag.split("=", 1)
+                    if len(parts) == 2:
+                        flag_part, value_part = parts
+                        # replace fist instance of "CUDA" with "HIP" only in the flag and not flag value
+                        modified_flag_part = flag_part.replace("CUDA", "HIP", 1)
+                        modified_flag = f"{modified_flag_part}={value_part}"
+                    else:
+                        # replace fist instance of "CUDA" with "HIP" in flag
+                        modified_flag = flag.replace("CUDA", "HIP", 1)
+                    modified_flags.append(modified_flag)
+                    print(f'Modified flag: {flag} -> {modified_flag}', file=sys.stderr)
+                else:
+                    modified_flags.append(flag)
+            extension.extra_compile_args['nvcc'] = modified_flags
 
     def _define_torch_extension_name(self, extension):
         # pybind11 doesn't support dots in the names
