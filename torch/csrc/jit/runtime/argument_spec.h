@@ -101,7 +101,7 @@ struct ArgumentSpec {
     const at::Tensor* t = reinterpret_cast<const at::Tensor*>(&input);
     arg.defined_ = t->defined();
     if (arg.defined_) {
-      arg.requires_grad_ = with_grad && autograd::Variable(*t).requires_grad();
+      arg.requires_grad_ = with_grad && t->requires_grad();
       arg.dim_ = t->dim();
       at::Device device = t->device();
       arg.dev_type_ =

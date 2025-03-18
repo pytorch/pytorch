@@ -638,7 +638,8 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                     continue
 
                 while current_group < len(remaining) and sv.statically_known_equals(
-                    remaining[current_group], 1  # type: ignore[arg-type]
+                    remaining[current_group],
+                    1,  # type: ignore[arg-type]
                 ):
                     # scroll to next group with remaining elements
                     current_group += 1
@@ -666,9 +667,9 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                     )
             return_getters_groups.append(return_getters)
 
-        assert all(
-            V.graph.sizevars.size_hint(s) == 1 for s in remaining
-        ), f"failed to set ranges {remaining} {lengths}"
+        assert all(V.graph.sizevars.size_hint(s) == 1 for s in remaining), (
+            f"failed to set ranges {remaining} {lengths}"
+        )
 
         return new_ranges, return_getters_groups
 
@@ -836,7 +837,8 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                     replacements[ps] = V.graph.sizevars.lookup_precomputed_size(ps)
                 if len(replacements) > 0:
                     self.range_tree_nodes[sym].expr = sympy_subs(  # type: ignore[index]
-                        self.range_tree_nodes[sym].expr, replacements  # type: ignore[index]
+                        self.range_tree_nodes[sym].expr,
+                        replacements,  # type: ignore[index]
                     )
                 self.range_tree_nodes[sym].codegen()  # type: ignore[index]
         return expr
@@ -1042,6 +1044,13 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         dx2 = ops.mul(dx, dx)
         m2 = ops.reduction(dtype, dtype, "sum", dx2)
         return OpsWrapper._unwrap((mean, m2, rnumel))
+
+    def prepare_softmax_twopass_fallback(self, dtype, value):
+        vmax = ops.reduction(dtype, dtype, "max", value)
+        sub = ops.sub(value, vmax)
+        exp = ops.exp(sub)
+        vsum = ops.reduction(dtype, dtype, "sum", exp)
+        return OpsWrapper._unwrap((vmax, vsum))
 
     def codegen_kernel(self):
         raise NotImplementedError
@@ -1547,13 +1556,10 @@ class SIMDScheduling(BaseScheduling):
 
             if config.benchmark_kernel:
                 num_gb = kernel.estimate_kernel_num_bytes() / 1e9
-                grid_args = V.graph.sizevars.size_hints(kernel.call_sizes)
-                assert kernel.meta is not None, "meta is None"
-                grid = kernel.grid_fn(*grid_args, kernel.meta)
                 src_code = (
                     f"{kernel.imports_for_benchmark_kernel()}\n"
                     f"{src_code}\n"
-                    f"{kernel.codegen_kernel_benchmark(num_gb, grid).getvalue()}"
+                    f"{kernel.codegen_kernel_benchmark(num_gb).getvalue()}"
                 )
 
             if only_gen_src_code:
@@ -2071,9 +2077,10 @@ class SIMDScheduling(BaseScheduling):
                 features=SIMDKernelFeatures(node_schedule, numel, rnumel),
             )
             self.codegen_node_schedule_with_kernel(node_schedule, kernel)
-            with config.patch(
-                "benchmark_kernel", benchmark_kernel
-            ), V.set_kernel_handler(kernel):
+            with (
+                config.patch("benchmark_kernel", benchmark_kernel),
+                V.set_kernel_handler(kernel),
+            ):
                 src_code = kernel.codegen_kernel()
         else:
             prologue, template, epilogue = nodes[0].get_prologue_template_epilogue(

@@ -25,7 +25,7 @@ errors.
 from __future__ import annotations
 
 import os
-from typing import Callable, Optional, Sequence, Tuple, TYPE_CHECKING
+from typing import Callable, Optional, TYPE_CHECKING
 
 import error_reproduction
 import numpy as np
@@ -44,6 +44,7 @@ from torch.utils import _pytree as pytree
 
 if TYPE_CHECKING:
     import unittest
+    from collections.abc import Sequence
 
     from torch.testing._internal.opinfo import core as opinfo_core
 
@@ -73,7 +74,7 @@ def dtypes_except(*dtypes: torch.dtype) -> Sequence[torch.dtype]:
 
 def _should_skip_xfail_test_sample(
     op_name: str, sample, dtype: torch.dtype, device_type: str
-) -> Tuple[Optional[str], Optional[str]]:
+) -> tuple[Optional[str], Optional[str]]:
     """Returns a reason if a test sample should be skipped."""
     if op_name not in ops_test_data.OP_WITH_SKIPPED_XFAIL_SUBTESTS:
         return None, None
