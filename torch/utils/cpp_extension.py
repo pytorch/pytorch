@@ -295,7 +295,7 @@ def _get_sycl_arch_list():
         return []
     else:
         return ['-fsycl-targets=spir64_gen,spir64',
-                f'-Xs "-device {\',\'.join(arch_list)}"']
+                f'-Xs "-device {",".join(arch_list)}"']
 
 _SYCL_DLINK_FLAGS = [
     *_COMMON_SYCL_FLAGS,
