@@ -102,13 +102,13 @@ def _format_rule_for_python_class(rule: _RuleType) -> str:
         if field_name is not None
     ]
     for field_name in field_names:
-        assert isinstance(
-            field_name, str
-        ), f"Unexpected field type {type(field_name)} from {field_name}. "
+        assert isinstance(field_name, str), (
+            f"Unexpected field type {type(field_name)} from {field_name}. "
+        )
         "Field name must be string.\nFull message template: {message_template}"
-        assert (
-            not field_name.isnumeric()
-        ), f"Unexpected numeric field name {field_name}. "
+        assert not field_name.isnumeric(), (
+            f"Unexpected numeric field name {field_name}. "
+        )
         "Only keyword name formatting is supported.\nFull message template: {message_template}"
     message_arguments = ", ".join(field_names)
     message_arguments_assigned = ", ".join(

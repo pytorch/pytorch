@@ -19,6 +19,7 @@
 #include <torch/csrc/autograd/input_metadata.h>
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/profiler_python.h>
+#include <torch/csrc/autograd/python_autograd.h>
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/autograd/python_saved_variable_hooks.h>
 #include <torch/csrc/autograd/python_variable.h>
@@ -63,6 +64,12 @@ struct EnableTorchFunction {
     at::impl::PythonTorchFunctionTLS::set_disabled_state(
         at::impl::TorchFunctionDisabledState::ENABLED);
   }
+
+  EnableTorchFunction(const EnableTorchFunction& other) = delete;
+  EnableTorchFunction(EnableTorchFunction&& other) = delete;
+  EnableTorchFunction& operator=(const EnableTorchFunction& other) = delete;
+  EnableTorchFunction& operator=(EnableTorchFunction&& other) = delete;
+
   ~EnableTorchFunction() {
     at::impl::PythonTorchFunctionTLS::set_disabled_state(old_);
   }
@@ -73,6 +80,12 @@ struct EnablePythonDispatcher {
   EnablePythonDispatcher() : old_(c10::impl::PythonDispatcherTLS::get_state()) {
     c10::impl::PythonDispatcherTLS::set_state(getPyInterpreter());
   }
+  EnablePythonDispatcher(const EnablePythonDispatcher& other) = delete;
+  EnablePythonDispatcher(EnablePythonDispatcher&& other) = delete;
+  EnablePythonDispatcher& operator=(const EnablePythonDispatcher& other) =
+      delete;
+  EnablePythonDispatcher& operator=(EnablePythonDispatcher&& other) = delete;
+
   ~EnablePythonDispatcher() {
     c10::impl::PythonDispatcherTLS::set_state(old_);
   }
@@ -210,6 +223,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   py::class_<KinetoEvent>(m, "_KinetoEvent")
       // name of the event
       .def("name", [](const KinetoEvent& e) { return e.name(); })
+      .def(
+          "overload_name",
+          [](const KinetoEvent& e) { return e.overload_name(); })
       // PyTorch thread id of the start callback
       .def(
           "start_thread_id",
@@ -371,12 +387,18 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
     if (at::hasMTIA()) {
       activities.insert(torch::profiler::impl::ActivityType::MTIA);
     }
+    if (at::hasHPU()) {
+      activities.insert(torch::profiler::impl::ActivityType::HPU);
+    }
     if (at::getNumGPUs() > 0) {
       activities.insert(torch::profiler::impl::ActivityType::CUDA);
     }
 #elif defined(USE_KINETO)
     if (at::hasXPU()) {
       activities.insert(torch::profiler::impl::ActivityType::XPU);
+    }
+    if (at::hasHPU()) {
+      activities.insert(torch::profiler::impl::ActivityType::HPU);
     }
     if (at::hasMTIA()) {
       activities.insert(torch::profiler::impl::ActivityType::MTIA);
@@ -1274,7 +1296,7 @@ static PyObject* len_torch_dispatch_stack(PyObject* _unused, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPModule_increment_version(
+static PyObject* THPModule_increment_version(
     PyObject* _unused,
     PyObject* tensor_list) {
   HANDLE_TH_ERRORS

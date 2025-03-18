@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
-""" Triton Implementation of the flex_attention Kernel for short query length (FlexDecoding)"""
+"""Triton Implementation of the flex_attention Kernel for short query length (FlexDecoding)"""
+
 from typing import Any
 
 import sympy
@@ -11,7 +12,7 @@ from .. import config, ir
 from ..ir import FixedLayout, FlexibleLayout
 from ..lowering import empty, empty_strided, lowerings
 from ..runtime.runtime_utils import is_power_of_2, next_power_of_2
-from ..select_algorithm import autotune_select_algorithm, TritonTemplate
+from ..select_algorithm import autotune_select_algorithm, SymbolicGridFn, TritonTemplate
 from .flex_attention import (
     compute_forward_block_mn,
     compute_forward_inner,
@@ -29,6 +30,7 @@ aten = torch.ops.aten
 prims = torch.ops.prims
 
 
+@SymbolicGridFn
 def flex_decoding_grid(batch_size, kv_heads, gqa_group_size, n_keys, d_model, meta):
     """How is this kernel parallelized?
     We create a grid of (batch_size * kv_heads, SPLIT_KV, 1)
@@ -113,9 +115,7 @@ flex_decoding_template = TritonTemplate(
     SPARSE_HQ = {{size("KV_NUM_BLKS", 1)}}
 
     sparse_idx_z = off_z % SPARSE_Z
-    # TODO: support masks not broadcasted along the head dimension.
-    tl.device_assert(SPARSE_HQ == 1)
-    sparse_idx_h = 0
+    sparse_idx_h = off_hkv % SPARSE_HQ
 
     SPARSE_KV_MULTIPLE: tl.constexpr = (SPARSE_KV_BLOCK_SIZE // BLOCK_N)
     SPARSE_KV_BLOCK_CNT = tl.cdiv(KV_LEN, SPARSE_KV_BLOCK_SIZE)
@@ -367,9 +367,9 @@ def create_flex_decoding_kernel(*args, **kwargs):
     Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
 
-    assert V.graph.sizevars.evaluate_expr(
-        sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)
-    ), f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
+    assert V.graph.sizevars.evaluate_expr(sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)), (
+        f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
+    )
 
     B = Bq
     kernel_options = dict(kernel_options)
@@ -481,7 +481,8 @@ def create_flex_decoding_kernel(*args, **kwargs):
             max(
                 next_power_of_2(
                     V.graph.sizevars.size_hint(
-                        seq_len_q, fallback=torch._inductor.config.unbacked_symint_fallback  # type: ignore[arg-type]
+                        seq_len_q,
+                        fallback=torch._inductor.config.unbacked_symint_fallback,  # type: ignore[arg-type]
                     )
                     * gqa_shared_heads
                 ),
