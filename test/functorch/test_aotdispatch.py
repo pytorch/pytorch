@@ -6564,7 +6564,6 @@ aot_autograd_failures = {
     skip("as_strided", "partial_views"),  # flaky
     # Given input size: (s0xs1x2). Calculated output size: ...
     skip("max_pool2d_with_indices_backward"),
-    skip("nn.functional.nll_loss", ""),  # UBSAN failure!
     # Misc
     xfail("to_sparse"),
     xfail("corrcoef"),
@@ -6631,9 +6630,6 @@ symbolic_aot_autograd_failures = {
     ),  # rand() received an invalid combination of arguments - g...
     xfail(
         "nn.functional.group_norm", ""
-    ),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail(
-        "nn.functional.nll_loss", ""
     ),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail("trace", ""),  # Cannot call sizes() on tensor with symbolic sizes/strides
     decorate(

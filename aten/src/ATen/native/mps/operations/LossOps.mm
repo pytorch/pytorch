@@ -62,6 +62,10 @@ static Tensor& mse_loss_backward_out_impl(const Tensor& grad_output,
   TORCH_CHECK(target.is_same_size(input), op_name + ": target and input tensors must have identical shapes")
   auto norm = reduction == Reduction::Mean ? 2. / static_cast<double>(input.numel()) : 2.;
 
+  if ((input.numel() == 0) || (target.numel() == 0) || (grad_output.numel() == 0)) {
+    reduction == Reduction::Mean ? grad_input.fill_(std::numeric_limits<float>::quiet_NaN()) : grad_input.zero_();
+    return grad_input;
+  }
   struct CachedGraph : public MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
     MPSGraphTensor *inputTensor = nil, *targetTensor = nil;
@@ -1002,6 +1006,10 @@ Tensor& huber_loss_backward_out_mps(const Tensor& grad_output,
 TORCH_IMPL_FUNC(mse_loss_out_mps)(const Tensor& input, const Tensor& target, int64_t reduction, const Tensor& output_) {
   string op_name = "mse_loss_out_mps";
   using namespace mps;
+  if ((input.numel() == 0) || (target.numel() == 0)) {
+    reduction == Reduction::Mean ? output_.fill_(std::numeric_limits<float>::quiet_NaN()) : output_.zero_();
+    return;
+  }
   bool contiguousOutput = !needsGather(output_);
   Tensor output = output_;
   if (!contiguousOutput) {

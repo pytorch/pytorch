@@ -291,10 +291,10 @@ def _get_sycl_arch_list():
     if 'TORCH_XPU_ARCH_LIST' in os.environ:
         return os.environ.get('TORCH_XPU_ARCH_LIST')
     arch_list = torch.xpu.get_arch_list()
-    # Dropping dg2-* archs since they lack hardware support for fp64 and require
+    # Dropping dg2* archs since they lack hardware support for fp64 and require
     # special consideration from the user. If needed these platforms can
     # be requested thru TORCH_XPU_ARCH_LIST environment variable.
-    arch_list = [x for x in arch_list if not x.startswith('dg2-')]
+    arch_list = [x for x in arch_list if not x.startswith('dg2')]
     return ','.join(arch_list)
 
 _SYCL_DLINK_FLAGS = [
@@ -1332,7 +1332,7 @@ def SyclExtension(name, sources, *args, **kwargs):
     All arguments are forwarded to the :class:`setuptools.Extension`
     constructor.
 
-    .. note::
+    .. warning::
         The PyTorch python API (as provided in libtorch_python) cannot be built
         with the flag ``py_limited_api=True``.  When this flag is passed, it is
         the user's responsibility in their library to not use APIs from
@@ -1340,6 +1340,14 @@ def SyclExtension(name, sources, *args, **kwargs):
         APIs from libtorch (aten objects, operators and the dispatcher). For
         example, to give access to custom ops from python, the library should
         register the ops through the dispatcher.
+
+        Contrary to CPython setuptools, who does not define -DPy_LIMITED_API
+        as a compile flag when py_limited_api is specified as an option for
+        the "bdist_wheel" command in ``setup``, PyTorch does! We will specify
+        -DPy_LIMITED_API=min_supported_cpython to best enforce consistency,
+        safety, and sanity in order to encourage best practices. To target a
+        different version, set min_supported_cpython to the hexcode of the
+        CPython version of choice.
 
     Example:
         >>> # xdoctest: +SKIP
