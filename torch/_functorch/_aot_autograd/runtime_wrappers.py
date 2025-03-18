@@ -8,6 +8,7 @@ This module defines runtime wrappers, which, based on previous analysis attempts
 """
 import builtins
 import collections
+import copy
 import itertools
 import pprint
 from contextlib import nullcontext
@@ -2137,10 +2138,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
             @staticmethod
             def _backward_impl(ctx, all_args):
-                assert (
-                    not ctx._is_compiled_autograd_tracing()
-                ), "compiled autograd reimplements this function at proxy_call_aot_backward"
-
+                # compiled autograd reimplements this function at proxy_call_aot_backward
                 assert (
                     not backward_state_indices
                 ), "BackwardState requires CompiledAutograd"
@@ -2187,7 +2185,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     ):
                         CompileEventLogger.compilation_metric(is_forward=False)
                         CompiledFunction.compiled_bw = aot_config.bw_compiler(
-                            bw_module, placeholder_list
+                            copy.deepcopy(bw_module), placeholder_list
                         )
                         # Maybe save cache entry
                         if try_save_cache_entry is not None:
