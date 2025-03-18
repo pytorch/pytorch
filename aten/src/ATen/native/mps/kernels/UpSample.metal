@@ -273,7 +273,7 @@ struct BilinearFunctor {
     x = abs(x);
     return x < 1.0 ? 1.0 - x : x;
   }
-  float area_factor = 1.0;
+  static constant constexpr float area_factor = 1.0;
 };
 
 struct BicubicFunctor {
@@ -288,7 +288,7 @@ struct BicubicFunctor {
     }
     return 0;
   }
-  float area_factor = 2.0;
+  static constant constexpr float area_factor = 2.0;
 };
 
 template <typename T, typename F>
@@ -310,12 +310,12 @@ kernel void upsample_2d_aa(
       scales.x,
       output_x,
       /*align_corners=*/false,
-      /*cubic=*/f.area_factor == 2.0);
+      /*cubic=*/F::area_factor == 2.0);
   auto y_center = area_pixel_compute_source_index(
       scales.y,
       output_y,
       /*align_corners=*/false,
-      /*cubic=*/f.area_factor == 2.0);
+      /*cubic=*/F::area_factor == 2.0);
   auto clamped_scales = max(1.0, scales);
   auto x_min =
       max(0L, long(floor(x_center - f.area_factor * clamped_scales.x + 1)));
