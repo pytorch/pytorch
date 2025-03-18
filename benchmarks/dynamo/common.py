@@ -3591,7 +3591,7 @@ def run(runner, args, original_dir=None):
         }:
             # some of the models do not support use_deterministic_algorithms
             torch.use_deterministic_algorithms(True)
-        if args.devices == ['xpu']:
+        if args.devices == ["xpu"]:
             torch.use_deterministic_algorithms(True, warn_only=True)
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
         torch.backends.cudnn.deterministic = True
