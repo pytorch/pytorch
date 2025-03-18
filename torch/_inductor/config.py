@@ -139,6 +139,11 @@ triton_kernel_default_layout_constraint: Literal[
 # incompatible with disable_cpp_codegen
 cpp_wrapper: bool = os.environ.get("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1"
 
+# Controls automatic precompiling of common include files for codecache.CppCodeCache
+# (i.e. for cpp_wrapper mode and for cpp kernels on CPU).  AOTI header precompiling is
+# controlled by a separate flag.
+cpp_cache_precompile_headers: bool = True
+
 online_softmax = os.environ.get("TORCHINDUCTOR_ONLINE_SOFTMAX", "1") == "1"
 
 # dead code elimination
@@ -1168,9 +1173,9 @@ class aot_inductor:
     debug_compile = os.environ.get("AOT_INDUCTOR_DEBUG_COMPILE", "0") == "1"
 
     # Annotate generated main wrapper function, i.e. AOTInductorModel::run_impl,
-    # to skip cpp compiler optimizations for faster compilation.
-    compile_wrapper_with_O0 = (
-        os.environ.get("AOT_INDUCTOR_COMPILE_WRAPPER_WITH_O0", "0") == "1"
+    # to use which cpp compiler optimization level, default to O1
+    compile_wrapper_opt_level = os.environ.get(
+        "AOT_INDUCTOR_COMPILE_WRAPPER_OPT_LEVEL", "O1"
     )
 
     # option for debug printing/saving for intermediate tensor values for aot inductor
@@ -1244,6 +1249,9 @@ class aot_inductor:
 
     # Experimental. Flag to control whether to include weight in .so
     package_constants_in_so: bool = True
+
+    # Experimental.  Controls automatic precompiling of common AOTI include files.
+    precompile_headers: bool = False
 
 
 class cuda:
