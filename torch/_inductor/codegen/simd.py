@@ -820,22 +820,28 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             t for t in self.range_trees if not t.is_reduction or self.inside_reduction
         ]
 
-        # Put all trees with tensor_dim=None at the end, in their current order.
-        end_key = (
-            max(
-                (tree.tensor_dim for tree in trees if tree.tensor_dim is not None),
-                default=0,
-            )
-            + 1
-        )
+        if not reorder:
+            return trees
 
         def tree_key(tree: IterationRangesRoot) -> int:
-            return tree.tensor_dim if tree.tensor_dim is not None else end_key
+            assert tree.tensor_dim is not None, f"Missing tensor_dim for tree {tree}"
+            return tree.tensor_dim
 
-        if reorder:
-            trees = sorted(trees, key=tree_key)
+        # Keep all trees with tensor_dim=None in their current position.
+        sorted_trees = sorted(
+            (tree for tree in trees if tree.tensor_dim is not None),
+            key=tree_key,
+        )
+        sorted_idx = 0
+        final_trees = []
+        for tree in trees:
+            if tree.tensor_dim is None:
+                final_trees.append(tree)
+            else:
+                final_trees.append(sorted_trees[sorted_idx])
+                sorted_idx += 1
 
-        return trees
+        return final_trees
 
     def codegen_indexing(self, expr: sympy.Expr) -> sympy.Expr:
         expr = V.graph.sizevars.simplify_with_ranges(expr, self.var_ranges())
