@@ -29,10 +29,11 @@ Error Formatting:
 import logging
 import os
 import re
+import sys
 import textwrap
 import typing
 from enum import auto, Enum
-from traceback import extract_stack, format_exc, format_list, StackSummary
+from traceback import extract_stack, format_exc, format_list, StackSummary, walk_stack
 from typing import Any, NoReturn, Optional, TYPE_CHECKING
 
 import torch._guards
@@ -596,6 +597,12 @@ def get_exc_message(
 
 def get_stack_above_dynamo() -> StackSummary:
     return filter_stack(extract_stack())
+
+
+def get_real_frames_above_dynamo() -> list[types.FrameType]:
+    # get the real frames in the stack above dynamo,
+    # implementation borrowed from traceback.extract_stack
+    return [f[0] for f in walk_stack(sys._getframe().f_back)]
 
 
 def get_real_stack(

@@ -3110,7 +3110,9 @@ class SourcelessBuilder:
         raise AssertionError("Use SourcelessBuilder.create()")
 
     @staticmethod
-    def create(tx: "InstructionTranslator", value) -> VariableTracker:
+    def create(
+        tx: "InstructionTranslator", value, dont_skip_tracing=False
+    ) -> VariableTracker:
         value_type = type(value)
         fast_handler = SourcelessBuilder._type_handlers.get(value_type)
         if fast_handler:
@@ -3128,7 +3130,7 @@ class SourcelessBuilder:
                 tx.output.has_user_defined_allowed_in_graph = True
             return trace_rules.lookup_callable(value)(value)
         elif is_function_or_wrapper(value):
-            return trace_rules.lookup(value)(value)
+            return trace_rules.lookup(value, dont_skip_tracing=dont_skip_tracing)(value)
         elif isinstance(
             value, (enum.Enum, torch.DispatchKey, torch._C._functorch.TransformType)
         ):

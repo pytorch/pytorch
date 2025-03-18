@@ -305,6 +305,7 @@ manual_torch_name_rule_map: dict[str, Any] = {
     "torch._tensor._convert": UserFunctionVariable,
     "torch.jit._unwrap_optional": UserFunctionVariable,
     "torch.backends.mha.get_fastpath_enabled": UserFunctionVariable,
+    "torch._dynamo.decorators.dont_skip_tracing": UserFunctionVariable,
     "torch._dynamo.mark_static": UserFunctionVariable,
     "torch._dynamo.nonstrict_trace": UserFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.guard_size_oblivious": TorchInGraphFunctionVariable,
@@ -3628,7 +3629,7 @@ we don't want to inline the lower level function call (e.g, f3) by default.
 """
 
 
-def check_verbose(obj, is_inlined_call=False):
+def check_verbose(obj, is_inlined_call=False, dont_skip_tracing=False):
     if isinstance(
         obj,
         (
@@ -3658,7 +3659,9 @@ def check_verbose(obj, is_inlined_call=False):
 
     # Consulte the central trace rules defined in torch._dynamo.trace_rules.
     reasons: set[str] = set()
-    rule = lookup_inner(fi.py_obj, fi.name, fi.filename, is_inlined_call, reasons)
+    rule = lookup_inner(
+        fi.py_obj, fi.name, fi.filename, is_inlined_call, reasons, dont_skip_tracing
+    )
     if issubclass(
         rule,
         (
@@ -3684,8 +3687,10 @@ def check_verbose(obj, is_inlined_call=False):
         )
 
 
-def check(obj, is_inlined_call=False):
-    return check_verbose(obj, is_inlined_call).skipped
+def check(obj, is_inlined_call=False, dont_skip_tracing=False):
+    return check_verbose(
+        obj, is_inlined_call, dont_skip_tracing=dont_skip_tracing
+    ).skipped
 
 
 # skip common third party libs
@@ -3738,11 +3743,45 @@ E.g, the lookup result of `torch.sin` is `TorchInGraphFunctionVariable`.
 """
 
 
-def lookup(obj):
-    return lookup_inner(obj)
+def lookup(obj, dont_skip_tracing=False):
+    return lookup_inner(obj, dont_skip_tracing=dont_skip_tracing)
 
 
 def lookup_inner(
+    obj,
+    name=None,
+    filename=None,
+    is_direct_call=True,
+    reasons: Union[None, set[str]] = None,
+    dont_skip_tracing: bool = False,
+):
+    result = _lookup_inner(
+        obj,
+        name=name,
+        filename=filename,
+        is_direct_call=is_direct_call,
+        reasons=reasons,
+    )
+    # there are still some modules we should absolutely NOT trace into - e.g. torch._dynamo, as this
+    # can result in really weird tracing behaviors.
+    if dont_skip_tracing and result is SkipFunctionVariable:
+        if filename is None:
+            filename = getfile(obj)
+        filename = _as_posix_path(filename)
+        dynamo_path = _as_posix_path(_module_dir(torch)) + "_dynamo"
+        if filename.startswith(dynamo_path) and not filename.endswith(
+            "test_dont_skip_tracing_functions.py"
+        ):
+            return SkipFunctionVariable
+        if reasons is not None:
+            reasons.add(
+                "Attempted skip but we are ignoring skips due to dont_skip_tracing"
+            )
+        return UserFunctionVariable
+    return result
+
+
+def _lookup_inner(
     obj,
     name=None,
     filename=None,

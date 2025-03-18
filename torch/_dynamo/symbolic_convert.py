@@ -57,6 +57,7 @@ from torch.utils._functools import cache_method
 from . import (
     config,
     exc,
+    external_utils,
     graph_break_hints,
     logging as torchdynamo_logging,
     trace_rules,
@@ -1075,6 +1076,7 @@ class InstructionTranslatorBase(
     exec_recorder: Optional[ExecutionRecorder]
     strict_checks_fn: Optional[Callable[[VariableTracker], bool]]
     start_point: Optional[int]
+    dont_skip_tracing: bool
 
     def mark_inconsistent_side_effects(self):
         """
@@ -3287,6 +3289,10 @@ class InstructionTranslatorBase(
         )
         linecache.lazycache(f_code.co_filename, f_globals)
 
+        self.dont_skip_tracing = (
+            f_code is external_utils._dont_skip_tracing_wrapper_code
+        )
+
 
 class InstructionTranslator(InstructionTranslatorBase):
     @staticmethod
@@ -3458,6 +3464,12 @@ class InstructionTranslator(InstructionTranslatorBase):
                     self.symbolic_locals
                 )
 
+            if not self.dont_skip_tracing:
+                for frame in exc.get_real_frames_above_dynamo():
+                    if frame.f_code is external_utils._dont_skip_tracing_wrapper_code:
+                        self.dont_skip_tracing = True
+                        break
+
     def _throw_if_in_functorch(self):
         # Fallback to eager in case of a graph break inside vmap
         eager = torch._dynamo.lookup_backend("eager")
@@ -3500,6 +3512,8 @@ class InstructionTranslator(InstructionTranslatorBase):
         super().run()
 
     def should_compile_partial_graph(self):
+        if self.f_code is external_utils._dont_skip_tracing_wrapper_code:
+            return False
         if sys.version_info >= (3, 11):
             # Do not compile if current instruction's block is not the top with block
             entry = self.current_instruction.exn_tab_entry
@@ -3726,7 +3740,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             return tracer.inline_call_()
 
     @staticmethod
-    def check_inlineable(func):
+    def check_inlineable(func, dont_skip_tracing):
         if func.has_self():
             unimplemented_v2(
                 gb_type="Inline attempt with __self__",
@@ -3735,8 +3749,21 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 "Dynamo is expected to decompose method calls into function calls with a `self` argument.",
                 hints=[],
             )
+        if isinstance(func, UserFunctionVariable) and inspect.getattr_static(
+            func.get_function(), "_torchdynamo_disable", False
+        ):
+            unimplemented_v2(
+                gb_type="Skip inlining `torch.compiler.disable()`d function",
+                context=str(func.get_function()),
+                explanation=f"Skip inlining function {func.get_function()} since it was wrapped with `torch.compiler.disable`",
+                hints=[
+                    "Remove the `torch.compiler.disable` call",
+                ],
+            )
 
-        result = trace_rules.check_verbose(func, is_inlined_call=True)
+        result = trace_rules.check_verbose(
+            func, is_inlined_call=True, dont_skip_tracing=dont_skip_tracing
+        )
         if result.skipped:
             from torch._dynamo.variables.misc import produce_trampoline_autograd_apply
 
@@ -3755,11 +3782,12 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             ]
             if "_dynamo" not in func.get_filename():
                 hints += [
-                    f"Remove the function `{fn_qualname}` or the file `{func.get_filename()}` "
-                    "from torch/_dynamo/trace_rules.py. More graph breaks may occur as a result of "
-                    "attempting to trace into the function.",
+                    f"Apply `@torch._dynamo.dont_skip_tracing` to the function `{fn_qualname}` "
+                    "to force tracing into the function. "
+                    "More graph breaks may occur as a result of attempting to trace into the function.",
+                    f"Remove the file`{func.get_filename()}` from torch/_dynamo/trace_rules.py. "
+                    "More graph breaks may occur as a result of attempting to trace into the function.",
                     "Please file an issue to PyTorch.",
-                    # TODO suggest mark_force_inline when implemented
                 ]
             unimplemented_v2(
                 gb_type="Attempted to inline function marked as skipped",
@@ -3769,20 +3797,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 "should not be traced.",
                 hints=hints,
             )
-
-        if isinstance(func, UserFunctionVariable) and inspect.getattr_static(
-            func.get_function(), "_torchdynamo_disable", False
-        ):
-            unimplemented_v2(
-                gb_type="Skip inlining `torch.compiler.disable()`d function",
-                context=str(func.get_function()),
-                explanation=f"Skip inlining function {func.get_function()} since it was wrapped with `torch.compiler.disable`",
-                hints=[
-                    "Remove the `torch.compiler.disable` call",
-                ],
-            )
-        else:
-            return result
+        return result
 
     @staticmethod
     def build_inline_tracer(
@@ -3807,7 +3822,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 LocalGeneratorObjectVariable,
             ),
         )
-        result = InliningInstructionTranslator.check_inlineable(func)
+        result = InliningInstructionTranslator.check_inlineable(
+            func, parent.dont_skip_tracing
+        )
         assert result.skipped is False
         try:
             sub_locals = func.bind_args(parent, args, kwargs)
@@ -3988,6 +4005,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         self.symbolic_result = None
         self.nn_module_stack = parent.nn_module_stack.copy()
         self.one_graph = parent.one_graph
+
+        if not self.dont_skip_tracing:
+            self.dont_skip_tracing = parent.dont_skip_tracing
 
     @property
     def fake_mode(self):

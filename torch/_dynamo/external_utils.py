@@ -187,3 +187,25 @@ def call_module_hooks_from_backward_state(
         if new_result is not None:
             result = new_result
     return result
+
+
+# skip type checking, otherwise, dynamo will trace into it.
+def dont_skip_tracing_decorator_wrapper(recursive):  # type: ignore[no-untyped-def]
+    def decorator_wrapper(fn):  # type: ignore[no-untyped-def]
+        if recursive:
+
+            def dont_skip_tracing_wrapper(*args, **kwargs):  # type: ignore[no-untyped-def]
+                return fn(*args, **kwargs)
+
+            return dont_skip_tracing_wrapper
+        else:
+            raise NotImplementedError(
+                "dont_skip_tracing(recursive=False) not yet implemented"
+            )
+
+    return decorator_wrapper
+
+
+_dont_skip_tracing_wrapper_code = dont_skip_tracing_decorator_wrapper(True)(
+    lambda: None
+).__code__

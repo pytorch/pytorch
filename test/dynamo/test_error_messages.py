@@ -246,7 +246,8 @@ from user code:
 Attempted to call function marked as skipped
   Explanation: Dynamo developers have intentionally marked that the function `skip` in file `case.py` should not be traced.
   Hint: Avoid calling the function `skip`.
-  Hint: Remove the function `skip` or the file `case.py` from torch/_dynamo/trace_rules.py. More graph breaks may occur as a result of attempting to trace into the function.
+  Hint: Apply `@torch._dynamo.dont_skip_tracing` to the function `skip` to force tracing into the function. More graph breaks may occur as a result of attempting to trace into the function.
+  Hint: Remove the file`/data/users/williamwen/py312-env3/lib/python3.12/unittest/case.py` from torch/_dynamo/trace_rules.py. More graph breaks may occur as a result of attempting to trace into the function.
   Hint: Please file an issue to PyTorch.
 
   Developer debug context: module: unittest.case, qualname: skip, skip reason: <missing reason>
@@ -295,7 +296,8 @@ from user code:
 Attempted to inline function marked as skipped
   Explanation: Dynamo developers have intentionally marked that the function `skip` should not be traced.
   Hint: Avoid calling the function `skip`.
-  Hint: Remove the function `case.py` from torch/_dynamo/trace_rules.py. More graph breaks may occur as a result of attempting to trace into the function.
+  Hint: Apply `@torch._dynamo.dont_skip_tracing` to the function `skip` to force tracing into the function. More graph breaks may occur as a result of attempting to trace into the function.
+  Hint: Remove the file`case.py` from torch/_dynamo/trace_rules.py. More graph breaks may occur as a result of attempting to trace into the function.
   Hint: Please file an issue to PyTorch.
 
   Developer debug context: qualname: skip, name: skip, filename: `case.py`, skip reason: skipped according trace_rules.lookup SKIP_DIRS
@@ -1020,12 +1022,12 @@ User code traceback:
     f3(torch.randn(3))
   File "test_error_messages.py", line N, in f3
     Foo().attr = x  # 0
-  File "test_error_messages.py", line N, in torch_dynamo_resume_in_f3_at_999
+  File "test_error_messages.py", line N, in torch_dynamo_resume_in_f3_at_1001
     Foo().attr = x  # 1
 
 ========== most recent `torch.compile` tracing attempt started here ==========
 
-  File "test_error_messages.py", line N, in torch_dynamo_resume_in_f3_at_1000
+  File "test_error_messages.py", line N, in torch_dynamo_resume_in_f3_at_1002
     Foo().attr = x
 
 NOTE: the most recent `torch.compile` tracing attempt might not be where you applied `torch.compile`! This is due to how graph breaks are implemented - the optimized code object returned by Dynamo will call another Dynamo-generated resume function and tracing is re-enabled by calling the resume function as a normal Python function, which Dynamo intercepts as a top-level frame.
