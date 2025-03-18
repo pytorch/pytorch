@@ -244,6 +244,7 @@ def gen_returns(schema: FunctionSchema) -> tuple[list[str], list[str]]:
         "_scaled_dot_product_flash_attention",
         "_scaled_dot_product_efficient_attention",
         "_scaled_dot_product_cudnn_attention",
+        "_scaled_dot_product_fused_attention_overrideable",
         "convolution_backward",
     ]:
         if name in unambiguous_name:
@@ -299,7 +300,7 @@ def gen_declaration_and_definition(
 {declaration} {{
     AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({{
         {tmp_result}{backend_call}(
-{textwrap.indent(', '.join(callsite_exprs), "            ")}
+{textwrap.indent(", ".join(callsite_exprs), "            ")}
         );{textwrap.indent(ret_assignments_str, "        ")}
     }});
 }}

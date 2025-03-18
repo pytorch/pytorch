@@ -654,14 +654,6 @@ def _is_valid_quantized_op_binary_optimization_pattern(
     #   ancestor nodes of the compute node, except for the binary node
     #   connected to the compute node.
     def fn(match):
-        x_meta_value = match.kwargs["x"].meta.get("val")
-        # QLinear binary fusion is not supprted for XPU yet.
-        is_xpu_linear_match = (
-            x_meta_value.device.type == "xpu"
-            and qop == torch.ops.onednn.qlinear_pointwise
-        )
-        if is_xpu_linear_match:
-            return False
         output_dtype = _get_pattern_output_dtype(match)
         compute_node = filter_nodes(match.nodes, qop)[0]
         # qop_pointwise should only have one user
@@ -771,9 +763,9 @@ def _register_quantized_conv_binary_lowering(
         accum.realize()
         from .mkldnn_fusion import _can_be_inplace
 
-        assert _can_be_inplace(
-            accum
-        ), "QConv Binary Inplace Fusion requires accum is not an alias or mutation."
+        assert _can_be_inplace(accum), (
+            "QConv Binary Inplace Fusion requires accum is not an alias or mutation."
+        )
 
         computation_args = (
             x,
@@ -1079,6 +1071,10 @@ def _register_quantization_reshape():
 def _is_valid_woq_optimization_pattern():
     def fn(match):
         assert all(k in match.kwargs for k in ("x", "weight", "scales"))
+        if not all(
+            hasattr(match.kwargs[key], "meta") for key in ["x", "weight", "scales"]
+        ):
+            return False
         x = match.kwargs["x"].meta["val"]
         weight = match.kwargs["weight"].meta["val"]
         scales = match.kwargs["scales"].meta["val"]
@@ -1315,9 +1311,9 @@ def _register_dequant_promotion_pass(pattern, pass_number, dtype=torch.float32):
         def clone_to_new_node(graph, source_node, user_node):
             # Clone the source_node to a new node
             # Replace user_node's input from source_node to new_node
-            assert (
-                source_node.op == "call_function"
-            ), "clone_to_new_node only support node.op call_function"
+            assert source_node.op == "call_function", (
+                "clone_to_new_node only support node.op call_function"
+            )
             with graph.inserting_before(user_node):
                 new_node = graph.call_function(
                     source_node.target,
@@ -1351,9 +1347,9 @@ def _register_dequant_promotion_pass(pattern, pass_number, dtype=torch.float32):
                 # For a dequant pattern, we expect the start node is a dequantize_per_tensor node
                 return _node
             else:
-                assert (
-                    len(_node.args) >= 1
-                ), "In in dequant pattern, each node should have more than 1 arg."
+                assert len(_node.args) >= 1, (
+                    "In in dequant pattern, each node should have more than 1 arg."
+                )
                 return _find_first_node_in_dequant_pattern(_node.args[0])
 
         dequant_pattern_start_node = _find_first_node_in_dequant_pattern(
@@ -1395,10 +1391,8 @@ def _is_valid_dequant_conv2d_pattern(dtype):
                 meta_value is None
                 or (meta_value.device.type != "cpu" and meta_value.device.type != "xpu")
                 or meta_value.dim() != 4
-                or (meta_value.device.type == "xpu" and match.kwargs["groups"] != 1)
             ):
                 # Only support conv2d now
-                # Grouped quantized convolution is not supported at XPU backend
                 return False
 
         assert dtype in [torch.float32, torch.bfloat16]
