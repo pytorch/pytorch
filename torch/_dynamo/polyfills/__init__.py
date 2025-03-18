@@ -77,7 +77,7 @@ def radians(x):
 def accumulate_grad(x, new_grad):
     if new_grad is None:
         return
-    new_grad = torch.clone(new_grad)
+    new_grad = torch.clone(new_grad).as_strided(x.size(), x.stride())
     if x.grad is None:
         x.grad = new_grad
     else:
