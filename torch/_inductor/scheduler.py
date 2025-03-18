@@ -28,9 +28,9 @@ import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncComp
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.codecache import LambdaFuture, PyCodeCache
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
-from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+from torch.fx.experimental.symbolic_shapes import free_symbols, free_unbacked_symbols
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.symbol import free_symbol_is_type, SymT
+from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 from torch.utils._triton import has_triton
 
 from . import comms, config, dependencies, ir, metrics
@@ -3983,15 +3983,15 @@ class Scheduler:
         if getattr(node.node, "unbacked_bindings", None):
             return True
 
-        if (
-            hasattr(node.node, "layout")
-            and hasattr(node.node.layout, "size")
-            and any(
-                isinstance(expr, sympy.Expr) and expr.free_symbols
-                for expr in node.node.layout.size
-            )
-        ):
-            return True
+        # if (
+        #     hasattr(node.node, "layout")
+        #     and hasattr(node.node.layout, "size")
+        #     and any(
+        #         isinstance(expr, sympy.Expr) and expr.free_symbols
+        #         for expr in node.node.layout.size
+        #     )
+        # ):
+        #     return True
 
         return False
 
@@ -4051,6 +4051,55 @@ class Scheduler:
                     signature.constant_names,
                 )
             )
+
+    def get_graph_partition_symbol_inputs(
+        self, partition: PartitionType
+    ) -> OrderedSet[sympy.Symbol]:
+        """
+        Returns all symbol inputs which are required to be in scope to successfully
+        perform codegen for this graph partition, including:
+        - free symbols used in partition nodes
+        - free symbols in partition input shapes, strides, and offsets. This is needed
+          for recording cudagraphs for input tensors with dynamic shapes.
+        """
+
+        def get_scheduler_node_symbol_uses(
+            node: BaseSchedulerNode,
+        ) -> OrderedSet[sympy.Symbol]:
+            if isinstance(node, FusedSchedulerNode):
+                return OrderedSet().union(
+                    *(get_scheduler_node_symbol_uses(snode) for snode in node.snodes)
+                )
+            assert node.node is not None
+
+            candidate_symbols = (
+                node.node.get_free_symbol_uses()
+                | free_symbols(node.node.get_size())
+                | free_symbols(node.node.get_stride())
+                | free_symbols(node.node.get_offset())
+            )
+
+            return OrderedSet(
+                s
+                for s in candidate_symbols
+                if symbol_is_type(
+                    s,
+                    (
+                        SymT.SIZE,
+                        SymT.FLOAT,
+                        SymT.UNBACKED_INT,
+                        SymT.UNBACKED_FLOAT,
+                        SymT.PRECOMPUTED_SIZE,
+                        SymT.XBLOCK,
+                        SymT.YBLOCK,
+                        SymT.ZBLOCK,
+                    ),
+                )
+            )
+
+        return OrderedSet().union(
+            *(get_scheduler_node_symbol_uses(node) for node in partition)
+        )
 
     def get_graph_partition_signature(
         self, partitions: list[PartitionType], skip_cudagraphs: list[bool]
@@ -4116,8 +4165,10 @@ class Scheduler:
             constant_names = [
                 name for name in partition_input_names if name in V.graph.constants
             ]
+            symbol_inputs = self.get_graph_partition_symbol_inputs(partition)
 
             partition_signature = GraphPartitionSignature(
+                symbol_inputs,
                 input_nodes,
                 output_nodes,
                 input_deallocation,
