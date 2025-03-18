@@ -319,6 +319,9 @@ class DTensorAPITest(DTensorTestBase):
         )
 
         # check autocast
+        # `distribute_module` is an in-place operation, so we need to create a
+        # new model
+        model = MyModel(10, 10, device=self.device_type)
         dt = distribute_tensor(torch.rand(10), device_mesh, [Replicate()])
         replica_model = distribute_module(
             model,

@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-import builtins
 import inspect
 import math
 import operator
@@ -140,18 +139,17 @@ class Verifier(metaclass=_VerifierMeta):
             math.floor,
             math.trunc,
             round,
-            builtins.getattr,
         ]
 
     def allowed_op_types(self) -> tuple[type[Any], ...]:
         return (OpOverload, HigherOrderOperator)
 
     def allowed_getattr_types(self) -> tuple[type[Any], ...]:
-        return (torch.fx.GraphModule,)
+        return (torch.fx.GraphModule, torch.utils._pytree.TreeSpec)
 
     def allowed_getattr_types_for_subgm(self) -> tuple[type[Any], ...]:
         # subgm in HOP's argument could has have getattr(weight) nodes, thus stateful
-        return (torch.fx.GraphModule, torch.nn.parameter.Parameter)
+        return (torch.fx.GraphModule, torch.nn.parameter.Parameter, torch.utils._pytree.TreeSpec)
 
     def check_valid_op(self, op):
         pass

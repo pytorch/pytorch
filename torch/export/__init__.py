@@ -9,17 +9,7 @@ import warnings
 import zipfile
 from collections.abc import Iterator
 from enum import auto, Enum
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Optional,
-    Tuple,
-    Type,
-    TYPE_CHECKING,
-    Union,
-)
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -64,6 +54,8 @@ __all__ = [
     "UnflattenedModule",
 ]
 
+# To make sure export specific custom ops are loaded
+import torch.export.custom_ops
 
 from .decomp_utils import CustomDecompTable
 from .dynamic_shapes import Constraint, Dim, dims, ShapesCollection
@@ -266,7 +258,7 @@ def export(
     kwargs: Optional[dict[str, Any]] = None,
     *,
     dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
-    strict: bool = True,
+    strict: bool = False,
     preserve_module_call_signature: tuple[str, ...] = (),
 ) -> ExportedProgram:
     """
@@ -330,15 +322,15 @@ def export(
          are denoted by None. Arguments that are dicts or tuples / lists of tensors are
          recursively specified by using mappings or sequences of contained specifications.
 
-        strict: When enabled (default), the export function will trace the program through
-         TorchDynamo which will ensure the soundness of the resulting graph. Otherwise, the
-         exported program will not validate the implicit assumptions baked into the graph and
-         may cause behavior divergence between the original model and the exported one. This is
-         useful when users need to workaround bugs in the tracer, or simply want incrementally
-         enable safety in their models. Note that this does not affect the resulting IR spec
-         to be different and the model will be serialized in the same way regardless of what value
+        strict: When disabled (default), the export function will trace the program through
+         Python runtime, which by itself will not validate some of the implicit assumptions
+         baked into the graph. It will still validate most critical assumptions like shape
+         safety. When enabled (by setting ``strict=True``), the export function will trace
+         the program through TorchDynamo which will ensure the soundness of the resulting
+         graph. TorchDynamo has limited Python feature coverage, thus you may experience more
+         errors. Note that toggling this argument does not affect the resulting IR spec to be
+         different and the model will be serialized in the same way regardless of what value
          is passed here.
-         WARNING: This option is experimental and use this at your own risk.
 
     Returns:
         An :class:`ExportedProgram` containing the traced callable.

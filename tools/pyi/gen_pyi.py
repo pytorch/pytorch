@@ -1179,7 +1179,7 @@ def gen_pyi(
             "numpy": ["def numpy(self, *, force: _bool = False) -> numpy.ndarray: ..."],
             "apply_": ["def apply_(self, callable: Callable) -> Tensor: ..."],
             "map_": [
-                "def map_(self, tensor: Tensor, callable: Callable) -> Tensor: ..."
+                "def map_(self, other: Tensor, callable: Callable) -> Tensor: ..."
             ],
             "map2_": [
                 "def map2_(self, x: Tensor, y: Tensor, callable: Callable) -> Tensor: ..."
@@ -1228,12 +1228,12 @@ def gen_pyi(
             ],
             "item": ["def item(self) -> Number: ..."],
             "copy_": [
-                "def copy_(self, src: Tensor, non_blocking: _bool = False) -> Tensor: ..."
+                "def copy_(self, other: Tensor, non_blocking: _bool = False) -> Tensor: ..."
             ],
             "set_": [
-                "def set_(self, storage: Union[Storage, TypedStorage, UntypedStorage], "
-                "offset: IntLikeType, size: _symsize, stride: _symsize) -> Tensor: ...",
-                "def set_(self, storage: Union[Storage, TypedStorage, UntypedStorage]) -> Tensor: ...",
+                "def set_(self, source: Union[Storage, TypedStorage, UntypedStorage], "
+                "storage_offset: IntLikeType, size: _symsize, stride: _symsize) -> Tensor: ...",
+                "def set_(self, source: Union[Storage, TypedStorage, UntypedStorage]) -> Tensor: ...",
             ],
             "split": [
                 "def split(self, split_size: _int, dim: _int = 0) -> Sequence[Tensor]: ...",
@@ -1362,7 +1362,7 @@ def gen_pyi(
     # Generate type signatures for dtype classes
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-    # TODO: don't explicitly list dtypes here; get it from canonical
+    # TODO(#146647): don't explicitly list dtypes here; get it from canonical
     # source
     dtype_class_hints = [
         f"{n}: dtype = ..."
@@ -1377,6 +1377,7 @@ def gen_pyi(
             "float8_e4m3fnuz",
             "float8_e5m2",
             "float8_e5m2fnuz",
+            "float8_e8m0fnu",
             "half",
             "uint8",
             "uint16",
@@ -1423,17 +1424,15 @@ def gen_pyi(
 
     # Dispatch key hints
     # ~~~~~~~~~~~~~~~~~~
-    dispatch_key_hints = [f"{d.name}: DispatchKey = ..." for d in DispatchKey]
-    torch_dispatch_mode_key_hints = [
-        f"{k.name}: _TorchDispatchModeKey = ..." for k in _TorchDispatchModeKey
-    ]
+    dispatch_key_hints = [f"{d.name} = ..." for d in DispatchKey]
+    torch_dispatch_mode_key_hints = [f"{k.name} = ..." for k in _TorchDispatchModeKey]
 
     # Tags Enum type hints
     # ~~~~~~~~~~~~~~~~~~~~
 
     tag_names = sorted(parse_tags_yaml(tags_yaml_path))
     tag_attributes = "\n".join(
-        f"{name}: _int = {index}" for index, name in enumerate(tag_names)
+        f"{name} = {index}" for index, name in enumerate(tag_names)
     )
 
     # Write out the stub

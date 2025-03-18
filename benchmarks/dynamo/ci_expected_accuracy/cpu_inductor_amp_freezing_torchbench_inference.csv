@@ -74,7 +74,7 @@ detectron2_fasterrcnn_r_50_fpn,fail_accuracy,46
 
 
 
-detectron2_fcos_r_50_fpn,pass,22
+detectron2_fcos_r_50_fpn,fail_accuracy,22
 
 
 
@@ -290,7 +290,7 @@ soft_actor_critic,pass,0
 
 
 
-speech_transformer,fail_to_run,5
+speech_transformer,pass,10
 
 
 

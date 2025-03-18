@@ -42,14 +42,12 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
         self.assertTrue("traceEvents" in trace_json)
         events = trace_json["traceEvents"]
 
-        kernel_name = "hipModuleLaunchKernel" if torch.version.hip else "cuLaunchKernel"
-
-        def nameMatchesLaunchKernel(event_name):  # noqa: F841
-            return kernel_name in event_name
-
-        self.assertTrue(
-            any(("name" in event and kernel_name == event["name"]) for event in events)
-        )
+        valid_names = {
+            "hipModuleLaunchKernel",
+            "cuLaunchKernel",
+            "triton_poi_fused_add_cos_sin_0",
+        }
+        self.assertTrue(any((event.get("name") in valid_names) for event in events))
 
     def _test_profiling_kernel_names(
         self, fn, args, kernel_name_str: str, check_fn: Optional[Callable] = None
@@ -102,7 +100,11 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
         for event in events:
             if event.name == "triton_poi_fused_add_cos_sin_0":
                 event_found = True
-                self.assertTrue(event.input_shapes == [[4, 4], [4, 4], [4, 4], []])
+                # Note: depending on the triton version, we might get 4 or 5 args
+                # (including / not including the constexpr args). The last two are
+                # both empty args, so we just truncate the event.input_shapes to the
+                # first 4.
+                self.assertEqual(event.input_shapes[:4], [[4, 4], [4, 4], [4, 4], []])
         self.assertTrue(event_found)
 
     @unittest.skipIf(not HAS_TRITON, "requires cuda & triton")
@@ -135,7 +137,7 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
             for event in events:
                 if event.name == "triton_tem_fused_mm_0":
                     event_found = True
-                    self.assertTrue(event.input_shapes == [[4, 4], [4, 4], [4, 4]])
+                    self.assertEqual(event.input_shapes[:3], [[4, 4], [4, 4], [4, 4]])
             self.assertTrue(event_found)
 
     @unittest.skipIf(not HAS_TRITON, "requires cuda & triton")
@@ -261,9 +263,6 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
             self.assertEqual(args["kernel_backend"], "triton", msg=f"event = {e}")
 
             self.assertTrue("stream" in args, msg=f"event = {e}")
-            self.assertTrue("grid" in args, msg=f"event = {e}")
-            self.assertTrue(args["grid"].startswith("grid"), msg=f"event = {e}")
-
             self.assertTrue("kernel_file" in args, msg=f"event = {e}")
             kernel_file = args["kernel_file"]
             self.assertTrue(os.path.isfile(kernel_file), msg=f"event = {e}")

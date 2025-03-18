@@ -14,7 +14,6 @@
 #include <ATen/ops/atan2_native.h>
 #include <ATen/ops/div_native.h>
 #include <ATen/ops/eq_native.h>
-#include <ATen/ops/floor_divide_native.h>
 #include <ATen/ops/fmod_native.h>
 #include <ATen/ops/ge_native.h>
 #include <ATen/ops/gt_native.h>
@@ -224,7 +223,7 @@ static void div_mode_template(const Tensor& self,
     if (!rounding_mode.has_value() || !isFloatOutput) {
       return divTensor;
     } else if (*rounding_mode == "trunc") {
-      auto truncTensor = trunc_tensor(mpsGraph, divTensor);
+      auto truncTensor = [mpsGraph truncateWithTensor:divTensor name:nil];
       if (op_name == "fmod_mps_out") {
         auto mulTensor = [mpsGraph multiplicationWithPrimaryTensor:truncTensor
                                                    secondaryTensor:secondaryCastTensor
@@ -397,7 +396,6 @@ TORCH_IMPL_FUNC(mul_out_mps)(const Tensor& self, const Tensor& other, const Tens
       });
 }
 TORCH_IMPL_FUNC(atan2_out_mps)(const Tensor& self, const Tensor& other, const Tensor& output) {
-  TORCH_CHECK(self.scalar_type() != ScalarType::Long, "MPS does not support atan2 op with int64 input");
   mps::binaryOpTensor(
       self, other, Scalar(1.0), output, "atan2", ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {
         MPSGraph* mpsGraph = cachedGraph->graph();
@@ -448,19 +446,8 @@ TORCH_IMPL_FUNC(pow_Scalar_out_mps)(const Scalar& base, const Tensor& exp, const
   }
 }
 
-Tensor& floor_divide_out_mps(const Tensor& self, const Tensor& other, Tensor& result) {
-  mps::div_mode_template(self, other, "floor", result, "floor_divide_out");
-  return result;
-}
-
-Tensor floor_divide_mps(const Tensor& self, const Tensor& other) {
-  Tensor output = at::empty_like(self);
-  mps::div_mode_template(self, other, "floor", output, "floor_divide");
-  return output;
-}
-
-Tensor& floor_divide_mps_(Tensor& self, const Tensor& other) {
-  return floor_divide_out_mps(self, other, self);
+static void div_floor_kernel_mps(TensorIteratorBase& iter) {
+  mps::div_mode_template(iter.input(0), iter.input(1), "floor", iter.output(0), "floor_divide_out");
 }
 
 TORCH_IMPL_FUNC(remainder_out_mps)(const Tensor& self, const Tensor& other, const Tensor& output) {
@@ -539,4 +526,6 @@ TORCH_IMPL_FUNC(xlogy_out_mps)(const Tensor& self, const Tensor& other, const Te
 TORCH_IMPL_FUNC(lerp_Scalar_mps)(const Tensor& self, const Tensor& end, const Scalar& weight, const Tensor& out) {
   mps::add_sub_lerp_template(self, end, weight, out, "lerp");
 }
+
+REGISTER_DISPATCH(div_floor_stub, &div_floor_kernel_mps);
 } // namespace at::native
