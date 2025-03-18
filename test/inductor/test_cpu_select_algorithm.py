@@ -1373,7 +1373,13 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @patches
     @torch.no_grad
     @dtypes(torch.bfloat16)
-    @parametrize("batch_size", (17, 32,))
+    @parametrize(
+        "batch_size",
+       (
+            17,
+            32,
+       ),
+    )
     @parametrize("in_features", (128, 144, 1024))
     @parametrize("out_features", (64, 65, 1024))
     def test_int8_woq_mm(self, dtype, batch_size, in_features, out_features):
