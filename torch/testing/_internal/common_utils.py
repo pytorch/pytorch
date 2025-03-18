@@ -3229,6 +3229,42 @@ class TestCase(expecttest.TestCase):
             else contextlib.nullcontext()
         )
 
+        if TEST_HPU:
+            from .hpu_test_failures import hpu_expected_failures as expected_failures
+
+            def hpu_expected_failure(f, file_name):
+                @wraps(f)
+                def wrapper(*args, **kwargs):
+                    try:
+                        f(*args, **kwargs)
+                    except BaseException as e:
+                        self.skipTest(e)
+                    raise RuntimeError(f"Unexpected success, please remove `{file_name}`")
+                return wrapper
+            key = f"{self.__class__.__name__}.{self._testMethodName}"
+            subdir = "test/hpu_expected_failures"
+            if key in expected_failures:
+                method = getattr(self, self._testMethodName)
+                file_name = os.path.join(subdir, key)
+                setattr(self, self._testMethodName, hpu_expected_failure(method, file_name))
+
+            def hpu_ignore_failure(f, file_name):
+                @wraps(f)
+                def wrapper(*args, **kwargs):
+                    try:
+                        f(*args, **kwargs)
+                    except BaseException as e:
+                        self.skipTest(e)
+                    raise RuntimeError(f"Unexpected success, please remove `{file_name}`")
+                return wrapper
+
+            subdir = "test/hpu_skips"
+            from .hpu_test_failures import hpu_skips as skips
+            if key in skips:
+                method = getattr(self, self._testMethodName)
+                file_name = os.path.join(subdir, key)
+                setattr(self, self._testMethodName, hpu_ignore_failure(method, file_name))
+
         with unittest.mock.patch("torch._dynamo.config.suppress_errors", suppress_errors), maybe_disable_size_asserts:
             if TEST_WITH_AOT_EAGER:
                 super_run = torch._dynamo.optimize("aot_eager_decomp_partition")(super_run)

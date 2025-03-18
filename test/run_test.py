@@ -605,6 +605,13 @@ CORE_TEST_LIST = [
     "test_torch",
 ]
 
+HPU_TEST = [
+    "test_ops",
+    "test_autograd",
+    "test_modules",
+    "test_nn",
+]
+
 
 # if a test file takes longer than 5 min, we add it to TARGET_DET_LIST
 SLOW_TEST_THRESHOLD = 300
@@ -1565,6 +1572,13 @@ def parse_args():
         "and autograd. They are defined by CORE_TEST_LIST.",
     )
     parser.add_argument(
+        "-hpu",
+        "--hpu",
+        action="store_true",
+        help="Only run hpu tests, or tests that validate PyTorch's ops, modules,"
+        "and autograd. They are defined by HPU_TEST",
+    )
+    parser.add_argument(
         "--onnx",
         "--onnx",
         action="store_true",
@@ -1790,6 +1804,12 @@ def get_selected_tests(options) -> list[str]:
     if options.core:
         selected_tests = list(
             filter(lambda test_name: test_name in CORE_TEST_LIST, selected_tests)
+        )
+
+    # Filter to only run specified tests with HPU when --hpu option is specified
+    if options.hpu:
+        selected_tests = list(
+            filter(lambda test_name: test_name in HPU_TEST, selected_tests)
         )
 
     # Filter to only run functorch tests when --functorch option is specified
