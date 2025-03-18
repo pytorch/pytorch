@@ -327,7 +327,7 @@ class AsyncCompile:
                 # Wrap the cached result in a no-op LambdaFuture (so that any cache misses won't be blocked
                 # on this precompile, which has to happen on the parent.
                 def get_result_cached():
-                    future.precompile(  #  type: ignore[union-attr]
+                    future.precompile(  # type: ignore[union-attr]
                         warm_cache_only=False, reload_kernel=reload_kernel_in_parent
                     )
                     return future
