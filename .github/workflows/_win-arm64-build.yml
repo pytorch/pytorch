@@ -129,6 +129,7 @@ jobs:
 
       - name: Change Directory & print inside directory
         run: |
+          dir
           cd pytorch
           dir
 
