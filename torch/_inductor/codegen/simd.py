@@ -827,7 +827,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             assert tree.tensor_dim is not None, f"Missing tensor_dim for tree {tree}"
             return tree.tensor_dim
 
-        # Keep all trees with tensor_dim=None in their current position.
+        # Keep trees with tensor_dim=None in their current positions.
         sorted_trees = sorted(
             (tree for tree in trees if tree.tensor_dim is not None),
             key=tree_key,
