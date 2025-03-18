@@ -10,6 +10,7 @@ Each implementation contains two parts: A "real" implementation that produce all
 zeros based on the input shape and dtype, and a "fake" implementation that does more
 or less the same thing but is required by the `torch.library.custom_op` interface.
 """
+
 import dataclasses
 from collections.abc import Sequence
 from typing import Optional, Union
@@ -48,6 +49,7 @@ _STRING_TYPE = "s"
 _INT_SEQ_TYPE = "is"
 _FLOAT_SEQ_TYPE = "fs"
 _STRING_SEQ_TYPE = "ss"
+
 
 @dataclasses.dataclass
 class EncodedAttrs:

@@ -21,16 +21,7 @@ def _call_symbolic_op(
     op_type: str,
     domain: str,
     args: Sequence[ir.Value | None],
-    kwargs: dict[
-        str,
-        int
-        | float
-        | str
-        | bool
-        | list[int]
-        | list[float]
-        | list[str]
-    ],
+    kwargs: dict[str, int | float | str | bool | list[int] | list[float] | list[str]],
     dtypes: Sequence[int],
     version: int | None,
     metadata_props: dict[str, str] | None,
