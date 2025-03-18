@@ -13,9 +13,7 @@ from torch.ao.quantization.quantize_pt2e import (
     prepare_qat_pt2e,
 )
 from torch.ao.quantization.quantizer.arm_inductor_quantizer import ArmInductorQuantizer
-from torch.ao.quantization.quantizer.onednn_inductor_quantizer import (
-    QUANT_ANNOTATION_KEY,
-)
+from torch.ao.quantization.quantizer.x86_inductor_quantizer import QUANT_ANNOTATION_KEY
 from torch.export import export_for_training
 from torch.testing._internal.common_quantization import (
     NodeSpec as ns,

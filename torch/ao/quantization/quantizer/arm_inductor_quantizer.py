@@ -3,7 +3,7 @@ import functools
 import operator
 import warnings
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Callable, Optional, TYPE_CHECKING
 from typing_extensions import TypeAlias
 
 import torch
@@ -18,19 +18,18 @@ from torch.ao.quantization.observer import (
     MovingAverageMinMaxObserver,
     PlaceholderObserver,
 )
-from torch.ao.quantization.quantizer.quantizer import QuantizationSpec
+from torch.ao.quantization.quantizer.quantizer import (
+    QuantizationAnnotation,
+    QuantizationSpec,
+)
+from torch.ao.quantization.quantizer.utils import _get_module_name_filter
 from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import QuantizationConfig
 from torch.fx import Node
 
-from .onednn_inductor_quantizer import (
-    create_module_name_filter,
-    create_operator_type_filter,
-    OnednnInductorQuantizationAnnotation,
-    OnednnInductorQuantizer,
-)
+from .x86_inductor_quantizer import X86InductorQuantizer
 
 
-FilterFn: TypeAlias = Callable[[List[Node]], bool]
+FilterFn: TypeAlias = Callable[[list[Node]], bool]
 
 
 if TYPE_CHECKING:
@@ -43,13 +42,13 @@ __all__ = [
 
 
 @dataclass
-class _ArmInductorQuantizationAnnotation(OnednnInductorQuantizationAnnotation):
+class _ArmInductorQuantizationAnnotation(QuantizationAnnotation):
     # _is_output_of_quantized_pattern:
     #  * Node as output node of a fusion pattern.
     #  * The fusion pattern supports int8 data type.
     #  * The fusion pattern has inputs annotated to insert observer.
     #  * The quantization_config is not `None`.
-    pass
+    _is_output_of_quantized_pattern: bool = False
 
 
 # Operators support the int8 data type
@@ -66,7 +65,61 @@ quantizable_ops = default_quantizable_ops | {
 }
 
 
-def _global_config_filter(nodes: List[Node]) -> bool:
+def create_module_name_filter(module_name: str) -> FilterFn:
+    """Create a filter function for a given module name.
+
+    The filter function takes a list of nodes (as determined by the annotate function)
+    and return True if *all* nodes come from the specified module name, False otherwise.
+
+    For example:
+        linear_1: "f32[3, 10]" = torch.ops.aten.linear.default(...) # comes from a module with name `sub.linear1`
+        relu: "f32[3, 10]" = torch.ops.aten.relu.default(linear_1); # comes from a module with name `sub.relu1`
+
+    >> module_name_filter = create_module_name_filter_inner("sub")
+    >> print(module_name_filter([relu, linear_1]))
+    # True  # These two nodes are determined by `_annotate_linear_unary` function and from "sub".
+    """
+
+    filter_fn = _get_module_name_filter(module_name)
+
+    def check_all_nodes_from_module(nodes: list[Node]) -> bool:
+        all_nodes_from_module_name: bool = all(filter_fn(n) for n in nodes)
+        return all_nodes_from_module_name
+
+    return check_all_nodes_from_module
+
+
+def create_operator_type_filter(
+    operator_type: Callable,
+) -> FilterFn:
+    """Create a filter function for a given operator type.
+
+    The filter function takes a list of nodes and returns True if it contains
+    exactly one node with the specified operator type, False otherwise.
+
+    For example:
+        linear_1: "f32[3, 10]" = torch.ops.aten.linear.default(...) # comes from a module with name `sub.linear1`
+        relu: "f32[3, 10]" = torch.ops.aten.relu.default(linear_1); # comes from a module with name `sub.relu1`
+
+    >> operator_type_filter = create_operator_type_filter(torch.ops.aten.linear.default)
+    >> print(operator_type_filter([relu, linear_1]))
+    # True  # These two nodes are determined by `_annotate_linear_unary` function and the second node is `linear`.
+    """
+
+    def operator_type_filter(nodes: list[Node]):
+        num_nodes_with_operator_type = sum(
+            node.target == operator_type for node in nodes
+        )
+        if num_nodes_with_operator_type > 1:
+            raise NotImplementedError(
+                f"Several nodes within a single pattern are {operator_type}."
+            )
+        return num_nodes_with_operator_type == 1
+
+    return operator_type_filter
+
+
+def _global_config_filter(nodes: list[Node]) -> bool:
     """Filter function for global configuration.
 
     This filter function takes a list of nodes and returns True if there is exactly one node
@@ -83,7 +136,7 @@ def _global_config_filter(nodes: List[Node]) -> bool:
 
 
 def _map_module_function_to_aten_operator_type():
-    module_function_to_aten_operator: Dict[Callable, torch._ops.OpOverloadPacket] = {}
+    module_function_to_aten_operator: dict[Callable, torch._ops.OpOverloadPacket] = {}
     map_list = (
         ([torch.nn.Conv2d, F.conv2d], torch.ops.aten.conv2d.default),
         ([torch.nn.Linear, F.linear], torch.ops.aten.linear.default),
@@ -104,7 +157,7 @@ def get_default_arm_inductor_quantization_config(
     is_qat: bool = False,
     is_dynamic: bool = False,
 ):
-    extra_args: Dict[str, Any] = {"eps": 2**-12}
+    extra_args: dict[str, Any] = {"eps": 2**-12}
     if is_qat:
         if is_dynamic:
             act_observer_or_fake_quant_ctr = FakeQuantize
@@ -176,7 +229,7 @@ def _config_checker(method: Callable) -> Callable:
     return wrapper
 
 
-class ArmInductorQuantizer(OnednnInductorQuantizer):
+class ArmInductorQuantizer(X86InductorQuantizer):
     module_function_to_aten_operator_type = _map_module_function_to_aten_operator_type()
 
     def get_global_quantization_config(self):
