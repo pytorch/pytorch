@@ -2568,5 +2568,6 @@ class _StaticCudaLauncher:
         arg_types: str,
         args: Tuple[Any, ...],
         stream: _int,
+        slow_launch_kernel: _bool,
     ) ->  None:
         ...

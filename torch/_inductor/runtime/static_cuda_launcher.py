@@ -36,7 +36,13 @@ class StaticallyLaunchedCudaKernel:
     to how it handles constants in 3.3, so there's some special logic necessary to handle both versions.
     """
 
-    def __init__(self, kernel: CompiledKernel) -> None:
+    def __init__(
+        self, kernel: CompiledKernel, slow_launch_kernel: bool = False
+    ) -> None:
+        # slow_launch_kernel used only for testing purposes
+        # Will always dynamically allocate on the heap
+        self.slow_launch_kernel = slow_launch_kernel
+
         self.name = kernel.src.fn.__name__
         self.cubin_path = kernel._cubin_path
 
@@ -82,7 +88,6 @@ class StaticallyLaunchedCudaKernel:
         self.function: Optional[int] = (
             None  # Loaded by load_kernel(on the parent process)
         )
-        num_args = len(self.arg_tys)
         num_ctas = 1
         if hasattr(kernel, "num_ctas"):
             num_ctas = kernel.num_ctas
@@ -92,11 +97,6 @@ class StaticallyLaunchedCudaKernel:
         if num_ctas != 1:
             raise NotImplementedError(
                 "Static cuda launcher only supports num_ctas == 1"
-            )
-
-        if num_args > MAX_ARGS or num_args == 0:
-            raise NotImplementedError(
-                "No static cuda launcher available for %d arguments", num_args
             )
 
     def load_kernel(self) -> None:
@@ -230,4 +230,5 @@ class StaticallyLaunchedCudaKernel:
             arg_tys,
             args,
             stream,
+            self.slow_launch_kernel,
         )

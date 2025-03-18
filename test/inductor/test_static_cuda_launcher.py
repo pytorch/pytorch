@@ -272,11 +272,31 @@ class TestStaticCudaLauncher(TestCase):
             pass
 
         compiled_kernel = kernel_no_op[(1,)]()
-        self.assertRaisesRegex(
-            NotImplementedError,
-            "No static cuda launcher available",
-            lambda: self._make_launcher(compiled_kernel),
-        )
+        launcher = self._make_launcher(compiled_kernel)
+        device_interface = get_interface_for_device("cuda")
+        stream = device_interface.get_raw_stream(device_interface.current_device())
+        launcher.run(1, 1, 1, stream)
+
+    def test_slow_launch(self):
+        @triton.jit
+        def simple_kernel(arg0, arg1):
+            x = tl.load(arg0)
+            y = arg1
+            tl.store(arg0, x + y)
+
+        arg0 = torch.zeros(1, dtype=torch.int32, device="cuda")
+        arg1 = 5
+        args = (arg0, arg1)
+        compiled_kernel = simple_kernel[(1,)](*args)
+        launcher = self._make_launcher(compiled_kernel)
+        self.assertEqual(arg0, torch.tensor([5], dtype=torch.int32, device="cuda"))
+        self.assertEqual(launcher.arg_tys, "Oi")
+        new_arg0 = torch.zeros(1, dtype=torch.int32, device="cuda")
+        device_interface = get_interface_for_device("cuda")
+        stream = device_interface.get_raw_stream(device_interface.current_device())
+        launcher.slow_launch_kernel = True
+        launcher.run(1, 1, 1, stream, new_arg0, arg1)
+        self.assertEqual(new_arg0, arg0)
 
     @skipIfRocm
     def test_kernel_empty_tensor(self):
