@@ -362,7 +362,7 @@ Then PyTorch can be built with the command:
 if defined CMAKE_PREFIX_PATH (
     set "CMAKE_PREFIX_PATH=%CONDA_PREFIX%\Library;%CMAKE_PREFIX_PATH%"
 ) else (
-    set CMAKE_PREFIX_PATH=%CONDA_PREFIX%\Library
+    set "CMAKE_PREFIX_PATH=%CONDA_PREFIX%\Library"
 )
 
 python setup.py develop
