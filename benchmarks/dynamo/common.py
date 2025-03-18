@@ -3594,7 +3594,7 @@ def run(runner, args, original_dir=None):
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.allow_tf32 = False
-        torch.backends.cudnn.benchmark = False
+        torch.backends.cudnn.benchmark = True
         torch.backends.cuda.matmul.allow_tf32 = False
 
         torch.backends.mkldnn.deterministic = True
