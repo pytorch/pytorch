@@ -93,7 +93,7 @@ class NodeInfo:
     unclaimed_nodes: OrderedSet[fx.Node]
     fw_order: dict[fx.Node, int]
     # Effectively maps to which of our primals are parameters
-    static_input_nodes: OrderedSet[fx.Node]
+    static_lifetime_input_nodes: OrderedSet[fx.Node]
 
     @functools.cached_property
     def required_fw_nodes(self) -> list[fx.Node]:
@@ -400,7 +400,7 @@ def default_partition(
     _joint_inputs,
     *,
     num_fwd_outputs,
-    static_input_indices: Optional[list[int]] = None,
+    static_lifetime_input_indices: Optional[list[int]] = None,
 ) -> tuple[fx.GraphModule, fx.GraphModule]:
     """
     Partitions the :attr:`joint_module` in a manner that closely resembles the
@@ -1123,8 +1123,11 @@ def solve_min_cut(
 
         return not all(is_fusible(node, user) for user in node.users)
 
-    def get_node_weight(node, static_input_nodes) -> float:
-        if config.treat_parameters_as_free_to_save and node in static_input_nodes:
+    def get_node_weight(node, static_lifetime_input_nodes) -> float:
+        if (
+            config.treat_parameters_as_free_to_save
+            and node in static_lifetime_input_nodes
+        ):
             return 0
         mem_sz = _size_of(node)
         if config.recompute_views and op_types.is_view(node):
@@ -1227,7 +1230,7 @@ def solve_min_cut(
                 0.0 if isinstance(node.meta.get("val"), BackwardState) else math.inf
             )
         else:
-            weight = get_node_weight(node, node_info.static_input_nodes)
+            weight = get_node_weight(node, node_info.static_lifetime_input_nodes)
         # Creates the weights on the "node" edge
         nx_graph.add_edge(node.name + "_in", node.name + "_out", capacity=weight)
         for user in node.users:
@@ -1913,7 +1916,7 @@ def min_cut_rematerialization_partition(
     compiler="inductor",
     *,
     num_fwd_outputs,
-    static_input_indices: Optional[list[int]] = None,
+    static_lifetime_input_indices: Optional[list[int]] = None,
 ) -> tuple[fx.GraphModule, fx.GraphModule]:
     """
     Partitions the joint graph such that the backward recomputes the forward.
@@ -1959,7 +1962,7 @@ def min_cut_rematerialization_partition(
     if not config.unsafe_allow_optimization_of_collectives:
         force_save_collectives(joint_module)
 
-    def classify_nodes(joint_module, static_input_indices):
+    def classify_nodes(joint_module, static_lifetime_input_indices):
         name_to_node = get_name_to_node(joint_module.graph)
         required_bw_nodes: OrderedSet[fx.Node] = OrderedSet()
         for node in joint_module.graph.nodes:
@@ -1995,8 +1998,8 @@ def min_cut_rematerialization_partition(
             for node in joint_module.graph.nodes
             if node not in required_fw_nodes and node not in required_bw_nodes
         )
-        static_input_nodes = OrderedSet(
-            p for i, p in enumerate(primal_inputs) if i in static_input_indices
+        static_lifetime_input_nodes = OrderedSet(
+            p for i, p in enumerate(primal_inputs) if i in static_lifetime_input_indices
         )
         fw_cnt = 0
         fw_order = {}
@@ -2010,12 +2013,12 @@ def min_cut_rematerialization_partition(
             required_bw_nodes,
             unclaimed_nodes,
             fw_order,
-            static_input_nodes,
+            static_lifetime_input_nodes,
         )
 
-    if static_input_indices is None:
-        static_input_indices = []
-    node_info = classify_nodes(joint_module, static_input_indices)
+    if static_lifetime_input_indices is None:
+        static_lifetime_input_indices = []
+    node_info = classify_nodes(joint_module, static_lifetime_input_indices)
 
     # networkx blows up on graphs with no required backward nodes
     # Since there's nothing to partition anyway, and the default partitioner can "handle"
