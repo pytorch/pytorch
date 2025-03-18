@@ -348,9 +348,6 @@ class MPSHeapAllocatorImpl {
   // TODO: make a common function to do size unit conversions in PyTorch.
   inline std::string format_size(uint64_t size) const;
 
-  DataPtr clone_from_cpu(const void* data, std::size_t n) override;
-  DataPtr clone_to_cpu(const void* data, std::size_t n) override;
-
  private:
   // (see m_high_watermark_ratio for description)
   constexpr static double default_high_watermark_ratio = 1.7;

@@ -53,6 +53,7 @@ from torch.testing._internal.common_utils import (
     disable_translation_validation_if_dynamic_shapes,
     instantiate_parametrized_tests,
     parametrize,
+    serialTest,
     skipIfHpu,
     skipIfWindows,
     TEST_WITH_ROCM,
@@ -3873,6 +3874,41 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         out2 = torch.empty(12, dtype=torch.int32)
         opt_model(17, (12,), out2)
+
+    @requires_cuda
+    @serialTest
+    def test_mem_leak_guards(self):
+        def gn(x0, x):
+            return x0 * x
+
+        class MyMod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            @torch._dynamo.disable(recursive=False)
+            def forward(self, running_x):
+                # This line creates an temp tensor, which should not be leaked
+                running_x = torch.sin(running_x)
+                x = running_x
+                # This creates a TENSOR_ALIASING guard
+                x = gn(running_x, running_x)
+                # This creates a NO_TENSOR_ALIASING guard which was leaking memory
+                x = gn(running_x, x)
+                return x
+
+        mod = MyMod().cuda()
+
+        fn = torch.compile(mod, backend="eager")
+        x = torch.randn(10, 10, device="cuda")
+        torch.cuda.reset_peak_memory_stats()
+
+        fn(x)
+        peak_mem1 = torch.cuda.max_memory_allocated()
+
+        for _ in range(1000):
+            fn(x)
+        peak_mem2 = torch.cuda.max_memory_allocated()
+        self.assertTrue(peak_mem1 == peak_mem2)
 
     @requires_cuda
     def test_guard_default_device(self):

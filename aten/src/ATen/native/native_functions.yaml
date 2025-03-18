@@ -12767,6 +12767,7 @@
   dispatch:
     CPU: _upsample_bicubic2d_aa_out_cpu
     CUDA: _upsample_bicubic2d_aa_out_cuda
+    MPS: _upsample_bicubic2d_aa_out_mps
 
 - func: _upsample_bicubic2d_aa(Tensor self, SymInt[2] output_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor
   python_module: nn
@@ -15455,7 +15456,7 @@
 
 - func: special_modified_bessel_i1.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA: special_modified_bessel_i1_out
+    CPU, CUDA, MPS: special_modified_bessel_i1_out
   python_module: special
   structured_inherits: TensorIteratorBase
   structured: True
