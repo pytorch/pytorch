@@ -7,6 +7,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._higher_order_ops.torchbind import call_torchbind
+from torch._library.fake_class_registry import FakeScriptObject
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
@@ -116,7 +117,7 @@ def get_effect_key(op, args, kwargs) -> Optional[_EffectType]:
         return SIDE_EFFECTS[op]
 
     for arg in args:
-        if isinstance(arg, torch.ScriptObject):
+        if isinstance(arg, (torch.ScriptObject, FakeScriptObject)):
             # Add it to the table so that next time we see the same op we don't
             # have to parse through the args again
             SIDE_EFFECTS[op] = _EffectType.ORDERED

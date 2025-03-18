@@ -1,8 +1,10 @@
 # mypy: allow-untyped-defs
-from typing import Any, Callable, List, Optional, Tuple, TYPE_CHECKING, TypeVar
+from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
+
+from . import config
 
 
 if TYPE_CHECKING:
@@ -11,6 +13,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "compile",
+    "config",
     "assume_constant_result",
     "reset",
     "allow_in_graph",

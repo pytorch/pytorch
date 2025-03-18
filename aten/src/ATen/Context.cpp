@@ -137,6 +137,18 @@ std::array<at::SDPBackend, at::num_sdp_backends> Context::sDPPriorityOrder() {
   return sdp_priority_order;
 }
 
+bool Context::allowTF32OneDNN() const {
+  return allow_tf32_onednn;
+}
+
+void Context::setAllowTF32OneDNN(bool b){
+#ifdef USE_XPU
+  allow_tf32_onednn = b;
+#else
+  TORCH_WARN("TF32 acceleration on top of oneDNN is available for Intel GPUs. The current Torch version does not have Intel GPU Support.");
+#endif
+}
+
 bool Context::userEnabledFlashSDP() const {
   return enabled_flashSDP;
 }
@@ -242,7 +254,7 @@ void Context::setBenchmarkLimitCuDNN(int b) {
 
 bool Context::allowTF32CuBLAS() const {
 #ifdef USE_ROCM
-    const static auto allow_tf32 = c10::utils::check_env(hipblaslt_allow_tf32);
+    const auto allow_tf32 = c10::utils::check_env(hipblaslt_allow_tf32);
     if (allow_tf32 != true) {
       return false;
     }
@@ -252,7 +264,7 @@ bool Context::allowTF32CuBLAS() const {
 
 void Context::setAllowTF32CuBLAS(bool b) {
 #ifdef USE_ROCM
-  const static auto allow_tf32 = c10::utils::check_env(hipblaslt_allow_tf32);
+  const auto allow_tf32 = c10::utils::check_env(hipblaslt_allow_tf32);
   if (allow_tf32 != true) {
     C10_LOG_FIRST_N(INFO, 10) << "torch.backends.cuda.matmul.allow_tf32 is not supported on ROCm by default. "
                               << "Please set environment variable HIPBLASLT_ALLOW_TF32=1 to enable it.";
@@ -318,9 +330,12 @@ at::BlasBackend Context::blasPreferredBackend() {
   if (blas_preferred_backend == at::BlasBackend::Cublaslt) {
     static const bool hipblaslt_unsupported = []() {
       static const std::vector<std::string> archs = {
-          "gfx90a", "gfx940", "gfx941", "gfx942",
+          "gfx90a", "gfx942",
 #if ROCM_VERSION >= 60300
-          "gfx1100", "gfx1101"
+          "gfx1100", "gfx1101", "gfx1200", "gfx1201"
+#endif
+#if ROCM_VERSION >= 60500
+          "gfx950"
 #endif
       };
       for (auto index: c10::irange(getNumGPUs())) {
@@ -418,6 +433,18 @@ void Context::setAllowFP16AccumulationCuBLAS(bool b) {
   allow_fp16_accumulation_cublas = b;
 }
 
+std::optional<int32_t> Context::_SMCarveout_EXPERIMENTAL() const {
+  return sm_carveout;
+}
+
+void Context::_setSMCarveout_EXPERIMENTAL(std::optional<int32_t> c) {
+  if (c.has_value()) {
+    TORCH_WARN_ONCE(
+      "Setting the SM carveout for matmuls is a temporary experimental mitigation for performance issues, "
+      "while more robust solutions are developed. It may be removed at any moment without notice.");
+  }
+  sm_carveout = c;
+}
 
 bool Context::hasMKL() {
 #if AT_MKL_ENABLED()
@@ -561,7 +588,7 @@ Allocator* getCPUAllocator() {
 //    means the allow_tf32 flags are overridden and tf32 is force disabled
 // override_allow_tf32_flag = false
 //    means the original allow_tf32 flags are followed
-thread_local bool override_allow_tf32_flag = false;
+thread_local static bool override_allow_tf32_flag = false;
 
 NoTF32Guard::NoTF32Guard() {
   if (!override_allow_tf32_flag) {
@@ -584,7 +611,7 @@ bool NoTF32Guard::should_disable_tf32() {
 // This information can be used, for example, to select implementations
 // with different numerical or performance characteristics.
 // See https://pytorch.org/docs/stable/notes/numerical_accuracy.html for details.
-thread_local bool rocm_is_backward_pass;
+thread_local static bool rocm_is_backward_pass;
 
 ROCmBackwardPassGuard::ROCmBackwardPassGuard() {
   rocm_is_backward_pass = true;

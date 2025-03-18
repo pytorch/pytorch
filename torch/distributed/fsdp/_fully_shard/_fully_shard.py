@@ -1,13 +1,23 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
+
+from __future__ import annotations
+
 import functools
-from collections.abc import Iterable
-from typing import Any, Callable, cast, NoReturn, Optional, Union
+from typing import (
+    Any,
+    Callable,
+    cast,
+    NoReturn,
+    Optional,
+    overload,
+    TYPE_CHECKING,
+    Union,
+)
 
 import torch
 import torch.nn as nn
 from torch.distributed._composable import contract
-from torch.distributed.tensor import DeviceMesh, Shard
 from torch.distributed.utils import _get_root_modules
 
 from ._fsdp_api import MixedPrecisionPolicy, OffloadPolicy
@@ -24,6 +34,11 @@ from ._fsdp_param_group import FSDPParamGroup
 from ._fsdp_state import _get_module_fsdp_state, FSDPState
 
 
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    from torch.distributed.tensor import DeviceMesh, Shard
+
 __all__ = [
     "fully_shard",
     "FSDPModule",
@@ -35,11 +50,40 @@ __all__ = [
 cls_to_fsdp_cls: dict[type, type] = {}
 
 
+@overload
+def fully_shard(
+    module: nn.Module,
+    *,
+    mesh: Optional[DeviceMesh] = ...,
+    reshard_after_forward: Union[bool, int] = ...,
+    shard_placement_fn: Optional[Callable[[nn.Parameter], Optional[Shard]]] = ...,
+    mp_policy: MixedPrecisionPolicy = ...,
+    offload_policy: OffloadPolicy = ...,
+    ignored_params: Optional[set[nn.Parameter]] = ...,
+) -> FSDPModule: ...
+
+
+@overload
+def fully_shard(
+    module: list[nn.Module],
+    *,
+    mesh: Optional[DeviceMesh] = ...,
+    reshard_after_forward: Union[bool, int] = ...,
+    shard_placement_fn: Optional[Callable[[nn.Parameter], Optional[Shard]]] = ...,
+    mp_policy: MixedPrecisionPolicy = ...,
+    offload_policy: OffloadPolicy = ...,
+    ignored_params: Optional[set[nn.Parameter]] = ...,
+) -> list[FSDPModule]: ...
+
+
 # The decorator adds a state object to `module` that can be accessed via
 # `fully_shard.state(module)`. The state object and module are 1:1.
-@contract(state_cls=FSDPState)
+# [1] Python runtime decorator does not play well with static type checking
+# so suppressing some type checks to support type overloads
+# such that caller can still get correct return types based on input type
+@contract(state_cls=FSDPState)  # type: ignore[misc] # see [1]
 def fully_shard(
-    module: Union[nn.Module, list[nn.Module]],
+    module,
     *,
     mesh: Optional[DeviceMesh] = None,
     reshard_after_forward: Union[bool, int] = True,
@@ -132,8 +176,12 @@ def fully_shard(
         offload_policy (OffloadPolicy): This controls the offloading policy,
             which offers parameter/gradient/optimizer state offloading. See
             :class:`OffloadPolicy` and its subclasses for details.
-        ignored_params: Optional(Set[nn.Parameter]): The set of parameters that we
-            don't want to shard with FSDP.
+        ignored_params: Optional(Set[nn.Parameter]): The set of parameters to be
+            ignored by FSDP. They will not be sharded, nor moved to the device
+            during init, nor have their gradients reduced in backward.
+
+    Returns:
+        FSDPModule: The module with FSDP applied (in-place).
     """
     if isinstance(module, (nn.ModuleList, nn.ModuleDict)):
         raise ValueError(
@@ -159,7 +207,7 @@ def fully_shard(
     modules = (
         (module,) if isinstance(module, nn.Module) else tuple(_get_root_modules(module))
     )
-    state = fully_shard.state(modules[0])
+    state = fully_shard.state(modules[0])  # type: ignore[attr-defined] # see [1]
     state.init(modules, device, mp_policy)
 
     managed_modules = _get_managed_modules(modules, ignored_params)
@@ -224,7 +272,7 @@ class FSDPModule:
         if fsdp_param_group := state._fsdp_param_group:
             fsdp_param_group.reshard()
 
-    def unshard(self, async_op: bool = False) -> Optional["UnshardHandle"]:
+    def unshard(self, async_op: bool = False) -> Optional[UnshardHandle]:
         """
         Unshards the module's parameters by allocating memory and all-gathering
         the parameters. This method is *not* recursive. The unshard follows the
@@ -269,7 +317,8 @@ class FSDPModule:
         """
         Sets if the module should sync gradients. This can be used to implement
         gradient accumulation *without communication*. For HSDP, this controls
-        both reduce-scatter and all-reduce together.
+        both reduce-scatter and all-reduce together. This is the equivalence of
+        `no_sync` in FSDP1.
 
         Args:
             requires_gradient_sync (bool): Whether to reduce gradients for the
@@ -325,7 +374,7 @@ class FSDPModule:
                 if fsdp_param_group := state._fsdp_param_group:
                     fsdp_param_group.reshard_after_backward = reshard_after_backward
 
-    def set_modules_to_forward_prefetch(self, modules: list["FSDPModule"]) -> None:
+    def set_modules_to_forward_prefetch(self, modules: list[FSDPModule]) -> None:
         """
         Sets the FSDP modules for which this FSDP module should explicitly
         prefetch all-gathers in forward. The prefetching runs after this
@@ -345,7 +394,7 @@ class FSDPModule:
             module._get_fsdp_state() for module in modules
         ]
 
-    def set_modules_to_backward_prefetch(self, modules: list["FSDPModule"]) -> None:
+    def set_modules_to_backward_prefetch(self, modules: list[FSDPModule]) -> None:
         """
         Sets the FSDP modules for which this FSDP module should explicitly
         prefetch all-gathers in backward. This overrides the default backward
@@ -364,6 +413,31 @@ class FSDPModule:
         self._get_fsdp_state()._states_to_backward_prefetch = [
             module._get_fsdp_state() for module in modules
         ]
+
+    def set_all_reduce_hook(
+        self,
+        hook: Callable[[torch.Tensor], None],
+        *,
+        stream: Optional[torch.cuda.Stream] = None,
+    ):
+        """
+        Args:
+            hook (Callable[[torch.Tensor], None]): User-defined all-reduce hook
+                with expected signature ``hook(reduce_output: torch.Tensor) -> None``
+                where ``reduce_output`` is the reduce-scatter output if only
+                using FSDP or the all-reduce output if using native HSDP.
+            stream (Optional[torch.cuda.Stream]): Stream to run the all-reduce
+                hook in. This should only be set if not using native HSDP. If
+                using native HSDP, the hook will run in the internally defined
+                all-reduce stream used by the native HSDP all-reduce.
+        """
+        state = self._get_fsdp_state()
+        if (fsdp_param_group := state._fsdp_param_group) is not None:
+            fsdp_param_group._all_reduce_hook = hook
+            if stream is not None:
+                if fsdp_param_group._is_hsdp:
+                    raise ValueError("stream cannot be set when using native HSDP")
+                fsdp_param_group._all_reduce_hook_stream = stream
 
     def set_post_optim_event(self, event: torch.Event) -> None:
         """
