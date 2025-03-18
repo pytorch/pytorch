@@ -1306,41 +1306,15 @@ def _strict_export(
     kwargs: dict[str, Any],
     dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]],
     preserve_module_call_signature: tuple[str, ...],
-    pre_dispatch: bool,
-    original_state_dict: dict[str, Any],
     orig_in_spec: TreeSpec,
     allow_complex_guards_as_runtime_asserts: bool,
     _is_torch_jit_trace: bool,
+    _to_aten_func: Callable,
 ) -> ExportArtifact:
-    lower_to_aten = functools.partial(_export_to_aten_ir, pre_dispatch=pre_dispatch)
-    return _strict_export_lower_to_aten_ir(
-        mod=mod,
-        args=args,
-        kwargs=kwargs,
-        dynamic_shapes=dynamic_shapes,
-        preserve_module_call_signature=preserve_module_call_signature,
-        pre_dispatch=pre_dispatch,
-        original_state_dict=original_state_dict,
-        orig_in_spec=orig_in_spec,
-        allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
-        _is_torch_jit_trace=_is_torch_jit_trace,
-        lower_to_aten_callback=lower_to_aten,
-    )
+    """
+    _to_aten_func can either be `_export_to_aten_ir_make_fx` or `_export_to_aten_ir`
+    """
 
-
-def _strict_export_lower_to_aten_ir(
-    mod: torch.nn.Module,
-    args: tuple[Any, ...],
-    kwargs: dict[str, Any],
-    dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]],
-    preserve_module_call_signature: tuple[str, ...],
-    pre_dispatch: bool,
-    original_state_dict: dict[str, Any],
-    orig_in_spec: TreeSpec,
-    allow_complex_guards_as_runtime_asserts: bool,
-    _is_torch_jit_trace: bool,
-    lower_to_aten_callback: Callable,
-) -> ExportArtifact:
     gm_torch_level = _export_to_torch_ir(
         mod,
         args,
@@ -1428,8 +1402,9 @@ def _strict_export_lower_to_aten_ir(
         for name in non_persistent_buffers
         if name in reverse_name_lookup
     }
+
     with dynamo_fake_mode:
-        aten_export_artifact = lower_to_aten_callback(
+        aten_export_artifact = _to_aten_func(
             gm_torch_level,
             # NOTE: graph module expects only positional args
             _convert_to_positional_args(orig_arg_names, fake_args, fake_kwargs),
@@ -1775,18 +1750,15 @@ def _non_strict_export(
     kwargs: dict[str, Any],
     dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]],
     preserve_module_call_signature: tuple[str, ...],
-    pre_dispatch: bool,
-    original_state_dict: dict[str, Any],
     orig_in_spec: TreeSpec,
     allow_complex_guards_as_runtime_asserts: bool,
     _is_torch_jit_trace: bool,
-    dispatch_tracing_mode: str = "aot_export",
+    _to_aten_func: Callable,
 ) -> ExportArtifact:
     """
-    ``dispatch_tracing_mode`` can be either "make_fx” or “aot_export”, corresponding to
-    _export_to_aten_ir_make_fx and _export_to_aten_ir, respectively.
+    _to_aten_func can either be `_export_to_aten_ir_make_fx` or `_export_to_aten_ir`
     """
-    assert dispatch_tracing_mode in ["make_fx", "aot_export"]
+
     out_spec: Optional[TreeSpec] = None
     in_spec: Optional[TreeSpec] = None
 
@@ -1898,15 +1870,6 @@ def _non_strict_export(
             new_fake_constant_attrs,
             map_fake_to_real,
         ), _fakify_module_inputs(fake_args, fake_kwargs, fake_mode):
-            _to_aten_func = (
-                _export_to_aten_ir_make_fx
-                if dispatch_tracing_mode == "make_fx"
-                else functools.partial(
-                    _export_to_aten_ir,
-                    pre_dispatch=pre_dispatch,
-                    _is_torch_jit_trace=_is_torch_jit_trace,
-                )
-            )
             aten_export_artifact = _to_aten_func(  # type: ignore[operator]
                 patched_mod,
                 new_fake_args,
@@ -1961,28 +1924,19 @@ def _export_for_training(
 
     original_state_dict = _get_original_state_dict(mod)
 
-    export_func = (
-        functools.partial(
-            _strict_export_lower_to_aten_ir,
-            lower_to_aten_callback=_export_to_aten_ir_make_fx,
-        )
-        if strict
-        else functools.partial(
-            _non_strict_export,
-            dispatch_tracing_mode="make_fx",
-        )
-    )
-    export_artifact = export_func(  # type: ignore[operator]
+    # Call the appropriate export function based on the strictness of tracing.
+    export_func = _strict_export if strict else _non_strict_export
+
+    export_artifact = export_func(
         mod=mod,
         args=args,
         kwargs=kwargs,
         dynamic_shapes=dynamic_shapes,
         preserve_module_call_signature=preserve_module_call_signature,
-        pre_dispatch=False,
-        original_state_dict=original_state_dict,
         orig_in_spec=orig_in_spec,
         allow_complex_guards_as_runtime_asserts=False,
         _is_torch_jit_trace=False,
+        _to_aten_func=_export_to_aten_ir_make_fx,
     )
 
     export_graph_signature = export_artifact.aten.sig
@@ -2133,16 +2087,19 @@ def _export(
     export_func = _strict_export if strict else _non_strict_export
 
     export_artifact = export_func(  # type: ignore[operator]
-        mod,
-        args,
-        kwargs,
-        dynamic_shapes,
-        preserve_module_call_signature,
-        pre_dispatch,
-        original_state_dict,
-        original_in_spec,
-        allow_complex_guards_as_runtime_asserts,
-        _is_torch_jit_trace,
+        mod=mod,
+        args=args,
+        kwargs=kwargs,
+        dynamic_shapes=dynamic_shapes,
+        preserve_module_call_signature=preserve_module_call_signature,
+        orig_in_spec=original_in_spec,
+        allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
+        _is_torch_jit_trace=_is_torch_jit_trace,
+        _to_aten_func=functools.partial(
+            _export_to_aten_ir,
+            pre_dispatch=pre_dispatch,
+            _is_torch_jit_trace=_is_torch_jit_trace,
+        ),
     )
     export_graph_signature: ExportGraphSignature = export_artifact.aten.sig
 
