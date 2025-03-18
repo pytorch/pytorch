@@ -509,62 +509,6 @@ __global__ void layer_norm_grad_input_kernel_vectorized(
   }
 }
 
-// When the data size is a multiple of the tile size we can use fewer
-// instructions and registers. Example, this is the case when M=256 N=256.
-template <typename T, typename T_ACC,
-unsigned int block_dim_x,
-unsigned int block_dim_y,
-unsigned int rows_per_block_y,
-bool aligned_grid>
-__device__
-__forceinline__
-void
-blockReduceGammaBetaBackwardsAligned(
-    int64_t M,
-    int64_t N,
-    const T* __restrict__ dY,
-    const T* __restrict__ X,
-    const T_ACC* __restrict__ mean,
-    const T_ACC* __restrict__ rstd,
-    T* __restrict__ dg,
-    T* __restrict__ db,
-    T_ACC &dg_sum,
-    T_ACC &db_sum
-) {
-  constexpr int rows_per_thread_y = rows_per_block_y / block_dim_y;
-  int64_t thread_x = blockIdx.x * block_dim_x + threadIdx.x;
-  for (int64_t M_start = blockIdx.y * rows_per_block_y;
-        M_start < M;
-        M_start += rows_per_block_y * gridDim.y) {
-    int lane_id = (threadIdx.y * blockDim.x + threadIdx.x) & (kWarpSize - 1);
-    int64_t mean_index = M_start + threadIdx.y * rows_per_thread_y;
-    T_ACC warp_mean = 0, warp_rstd = 0;
-    if (lane_id < rows_per_thread_y) {
-      warp_mean = mean[mean_index + lane_id];
-      warp_rstd = rstd[mean_index + lane_id];
-    }
-    WARP_SYNC();
-    T_ACC dY_regs[rows_per_thread_y] = {0};
-    T_ACC X_regs[rows_per_thread_y] = {0};
-    #pragma unroll
-    for (int i = 0; i < rows_per_thread_y; ++i) {
-      int64_t current_y = M_start + threadIdx.y * rows_per_thread_y + i;
-      if (aligned_grid || (current_y < M && thread_x < N)) {
-        dY_regs[i] = dY[current_y * N + thread_x];
-        X_regs[i] = X[current_y * N + thread_x];
-      }
-    }
-
-    #pragma unroll
-    for (int i = 0; i < rows_per_thread_y; ++i) {
-      T_ACC mean_reg = WARP_SHFL(warp_mean, i, kWarpSize);
-      T_ACC rstd_reg = WARP_SHFL(warp_rstd, i, kWarpSize);
-      dg_sum += dY_regs[i] * (X_regs[i] - mean_reg) * rstd_reg;
-      db_sum += dY_regs[i];
-    }
-  }
-}
-
 template <typename T, typename T_ACC,
 unsigned int block_dim_x,
 unsigned int block_dim_y,
@@ -598,8 +542,6 @@ blockReduceGammaBetaBackwardsHelper(
       warp_rstd = rstd[mean_index + lane_id];
     }
     WARP_SYNC();
-
-
 
     T_ACC dY_regs[rows_per_thread_y] = {0};
     T_ACC X_regs[rows_per_thread_y] = {0};
@@ -653,7 +595,7 @@ blockReduceGammaBetaBackwardsWithChecks(
         M_start < M;
         M_start += rows_per_block_y * gridDim.y) {
     int64_t M_end = M_start + rows_per_block_y - 1;
-    if (M_end < M) {
+    if (!check_y || M_end < M) {
       blockReduceGammaBetaBackwardsHelper<T, T_ACC, block_dim_x, block_dim_y, rows_per_block_y, check_x, false>
       (M_start, M, N, dY, X, mean, rstd, dg, db, dg_sum, db_sum);
     } else {
@@ -702,9 +644,9 @@ void
   if (aligned_grid) {
     // When N and M align perfectly with block_dim_x and block_dim_y, we
     // can skip boundary condition checks that waste instruction issue slots.
-    blockReduceGammaBetaBackwardsAligned
-        <T, T_ACC, block_dim_x, block_dim_y, rows_per_block_y, true>
-        (M, N, dY, X, mean, rstd, dg, db, dg_sum, db_sum);
+    blockReduceGammaBetaBackwardsWithChecks
+          <T, T_ACC, block_dim_x, block_dim_y, rows_per_block_y, false, false>
+          (M, N, dY, X, mean, rstd, dg, db, dg_sum, db_sum);
   } else {
     // In the general case we need to check boundary conditions in the M
     // dimension. However, we can still avoid boundary checks in the N dimension
@@ -896,11 +838,11 @@ void LaunchGammaBetaBackwardCUDAKernel(
     T * dgamma_blocks_ptr = nullptr;
     T * dbeta_blocks_ptr = nullptr;
     if (dgamma->defined()) {
-      dgamma_blocks = at::zeros({blocks.y * threads.y, dgamma->size(-1)}, options);
+      dgamma_blocks = at::empty({blocks.y * threads.y, dgamma->size(-1)}, options);
       dgamma_blocks_ptr = dgamma_blocks.data_ptr<T>();
     }
     if (dbeta->defined()) {
-      dbeta_blocks = at::zeros({blocks.y * threads.y, dgamma->size(-1)}, options);
+      dbeta_blocks = at::empty({blocks.y * threads.y, dgamma->size(-1)}, options);
       dbeta_blocks_ptr = dbeta_blocks.data_ptr<T>();
     }
     LaunchAndCheckGammaBetaBackwardKernel<T, T_ACC, block_dim_x, block_dim_y, rows_per_block_y, true>(
