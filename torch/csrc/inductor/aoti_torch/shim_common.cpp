@@ -1439,14 +1439,16 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_library_impl(
 
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_library_def(TorchLibraryHandle self, const char* name) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
-      "TODO", { reinterpret_cast<torch::Library*>(self)->def(name); });
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE("aoti_torch_library_def", {
+    reinterpret_cast<torch::Library*>(self)->def(name);
+  });
 }
 
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_delete_library_object(TorchLibraryHandle tlh) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
-      "TODO", { delete reinterpret_cast<torch::Library*>(tlh); });
+      "aoti_torch_delete_library_object",
+      { delete reinterpret_cast<torch::Library*>(tlh); });
 }
 
 static c10::IValue to_ivalue(
