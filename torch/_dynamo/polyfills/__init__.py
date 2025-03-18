@@ -77,11 +77,12 @@ def radians(x):
 def accumulate_grad(x, new_grad):
     if new_grad is None:
         return
-    new_grad = torch.clone(new_grad).as_strided(x.size(), x.stride())
+    new_grad_strided = torch.empty_strided(x.size(), x.stride())
+    new_grad_strided.copy_(new_grad)
     if x.grad is None:
-        x.grad = new_grad
+        x.grad = new_grad_strided
     else:
-        x.grad.add_(new_grad)
+        x.grad.add_(new_grad_strided)
 
 
 # This mirrors
