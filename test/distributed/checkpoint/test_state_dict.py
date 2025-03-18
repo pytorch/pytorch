@@ -46,6 +46,7 @@ from torch.testing._internal.common_dist_composable import (
     UnitModule,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -1086,6 +1087,51 @@ class TestNoComm(MultiProcessTestCase):
         )
         set_optimizer_state_dict(model, optim, osd)
         set_optimizer_state_dict(model, optim, optim.state_dict())
+
+
+class TestStateDictMemory(FSDPTest):
+    def _get_curr_active_memory_mb(self) -> int:
+        mem_stats = torch.cuda.memory_stats()
+        return round(mem_stats["active_bytes.all.current"] / 1e6)
+
+    @skip_if_lt_x_gpu(2)
+    def test_get_model_state_dict_del_memory(self):
+        import gc
+
+        from torch.testing._internal.distributed._tensor.common_dtensor import (
+            ModelArgs,
+            Transformer,
+            TransformerBlock,
+        )
+
+        base_mem_mb = self._get_curr_active_memory_mb()
+        model_args = ModelArgs(
+            vocab_size=32, n_layers=3, dim=768, n_heads=12, weight_tying=False
+        )
+        model = Transformer(model_args)
+        for module in model.modules():
+            if isinstance(module, TransformerBlock):
+                fully_shard(module)
+        fully_shard(model)
+
+        unsharded_numel = sum(p.numel() for p in model.parameters())
+        sharded_numel = unsharded_numel // self.world_size
+        buffer_mb = 4
+        mem_mb = self._get_curr_active_memory_mb()
+        expected_mb = sharded_numel * 4 / 1e6 + buffer_mb
+        self.assertLessEqual(mem_mb - base_mem_mb, expected_mb)
+
+        options = StateDictOptions(
+            full_state_dict=True, cpu_offload=True, broadcast_from_rank0=True
+        )
+        model_state_dict = get_model_state_dict(model, options=options)
+
+        del model
+        del model_state_dict
+
+        gc.collect()
+        mem_mb = self._get_curr_active_memory_mb()
+        self.assertEqual(mem_mb, base_mem_mb)
 
 
 if __name__ == "__main__":
