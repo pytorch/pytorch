@@ -834,12 +834,21 @@ def _compile_fx_inner(
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
 
     # This message is for printing overview information of inductor mm counts, shapes,etc after lowering
-    log.info(
-        "Overview info of inductor aten mms: %s",
-        ", ".join(
-            f"({key}: {value})" for key, value in counters["aten_mm_info"].items()
-        ),
-    )
+    if log.isEnabledFor(logging.INFO):
+        mm_table_data = []
+        for key, value in counters["aten_mm_info"].items():
+            name, m, n, k = key.split("_")
+            mm_table_data.append([name, m, n, k, value])
+        log.info("Overview info of inductor aten mms: ")
+        log.info(
+            "{:<20} | {:<20} | {:<20} | {:<20} | {:<20}".format(  # noqa: G001
+                "Name", "M", "N", "K", "Count"
+            )
+        )
+        log.info("-" * 100)
+        for row in mm_table_data:
+            log.info("{:<20} | {:<20} | {:<20} | {:<20} | {:<20}".format(*row))  # noqa: G001
+            log.info("-" * 100)
 
     # Clear Compiled Triton Kernels per inductor compile, as the future objects
     # may not be valid for use after they are run/autotuned
@@ -1994,8 +2003,16 @@ def compile_fx(
             cuda_context = get_cuda_device_context(gm)
             with cuda_context:
                 _recursive_joint_graph_passes(gm)
+
+            static_lifetime_input_indices: Optional[list[int]] = kwargs.pop(  # type: ignore[assignment]
+                "static_lifetime_input_indices", None
+            )
             return min_cut_rematerialization_partition(
-                gm, joint_inputs, **kwargs, compiler="inductor"
+                gm,
+                joint_inputs,
+                compiler="inductor",
+                static_lifetime_input_indices=static_lifetime_input_indices,
+                **kwargs,
             )
 
         @compile_time_strobelight_meta(phase_name="backward")
