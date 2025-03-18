@@ -2498,7 +2498,6 @@ class FakeTensorMode(TorchDispatchMode):
                     if isinstance(x, FakeTensor) and x.fake_mode is not self:
                         raise AssertionError("Mixing fake modes NYI")
                     args, kwargs = pytree.tree_unflatten(flat_args, args_spec)
-                    breakpoint()
                     raise AssertionError(
                         f"Please convert all Tensors to FakeTensors first or instantiate FakeTensorMode "
                         f"with 'allow_non_fake_inputs'. Found in {render_call(func, args, kwargs)}"
