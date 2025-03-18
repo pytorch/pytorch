@@ -201,7 +201,9 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         if self.distribute_region_enabled:
             old_offset = self.get_offset("parallel-rng")
             self._set_pre_op_offset(spec)
-            with torch.random.fork_rng(devices=[self._device], device_type=self._device.type):
+            with torch.random.fork_rng(
+                devices=[self._device], device_type=self._device.type
+            ):
                 assert self._device_handle is not None
                 self._device_handle.set_rng_state(self.rng_states["parallel-rng"])
                 try:
