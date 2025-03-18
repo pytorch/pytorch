@@ -2642,7 +2642,7 @@ def _collective_estimator(
     backend = group._get_backend(device)
     if not backend.supports_time_estimate:
         raise NotImplementedError(
-            f"collective time estimator is not supported for backend {backend}"
+            f"collective time estimator is not supported in the curent version of backend {backend}"
         )
     backend._start_time_estimate()  # type: ignore[attr-defined]
     cm = _CollectiveEstimator()
