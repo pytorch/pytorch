@@ -8,9 +8,9 @@ namespace metal {
 
 template <typename T>
 opmath_t<T> threadgroup_sum(threadgroup T* data, unsigned size) {
-  opmath_t<T> rc = data[0];
   // TODO: This should be moved to the callee
-  ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
+  ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);  
+  opmath_t<T> rc = data[0];
   // TODO: Use `simd_shuffle_down`
   for (unsigned idx = 1; idx < size; ++idx) {
     rc += data[idx];
@@ -20,9 +20,9 @@ opmath_t<T> threadgroup_sum(threadgroup T* data, unsigned size) {
 
 template <typename T>
 opmath_t<T> threadgroup_prod(threadgroup T* data, unsigned size) {
-  opmath_t<T> rc = data[0];
   // TODO: This should be moved to the callee
   ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
+  opmath_t<T> rc = data[0];
   for (unsigned idx = 1; idx < size; ++idx) {
     rc *= data[idx];
   }
