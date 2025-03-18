@@ -3614,6 +3614,87 @@ class TestOutOfOrderDataLoader(TestCase):
         self.assertNotEqual(data, [0, 5, 1, 6, 2, 7, 3, 8, 4, 9])
         self.assertEqual(expected_data, data)
 
+class TestBatchSampler(TestCase):
+    """
+    Tests the implementation of BatchSampler.
+    """
+    def _test_batch_sampler(self, sampler_fn):
+        """
+        Denote the sequence of indices returned by sampler as s1.
+        Denote the sequence of batches returned by batch sampler as s2.
+
+        Test the following:
+        1. If drop_last = False:
+            1. s1 == concatenation of s2
+            2. all batches (except last) have size of `batch size`
+            3. Last batch of size of remainder
+        2. If drop_last = True:
+            1. s1[:-remainder] == concatenation of s2
+            2. all batches have size of `batch size`
+        """
+        from torch.utils.data import BatchSampler
+
+        sampler = sampler_fn()
+        sampler_indices = list(sampler)
+
+        batch_size = 3
+        remainder = len(sampler) % batch_size
+
+        # drop_last = False
+        sampler = sampler_fn()
+        batch_sampler = BatchSampler(sampler, batch_size=batch_size, drop_last=False)
+        batches = list(batch_sampler)
+
+        self.assertEqual(sampler_indices, sum(batches, []))
+        for batch in batches[:-1]:
+            self.assertEqual(len(batch), 3)
+        self.assertEqual(len(batches[-1]), remainder)
+
+        # drop_last = True
+        sampler = sampler_fn()
+        batch_sampler = BatchSampler(sampler, batch_size=batch_size, drop_last=True)
+        batches = list(batch_sampler)
+
+        self.assertEqual(sampler_indices[:-remainder], sum(batches, []))
+        for batch in batches:
+            self.assertEqual(len(batch), 3)
+
+    def test_all_samplers(self):
+        dataset = range(100)
+
+        from torch.utils.data import (
+            SequentialSampler,
+            RandomSampler,
+            SubsetRandomSampler,
+            WeightedRandomSampler,
+        )
+
+        weights = torch.rand(len(dataset))
+        weights = weights / weights.sum()
+
+        sampler_fns = (
+            lambda: SequentialSampler(
+                dataset
+            ),
+            lambda: RandomSampler(
+                dataset,
+                replacement=False,
+                generator=torch.Generator().manual_seed(42)
+            ),
+            lambda: SubsetRandomSampler(
+                range(10),
+                generator=torch.Generator().manual_seed(42)
+            ),
+            lambda: WeightedRandomSampler(
+                weights=weights,
+                num_samples=len(dataset),
+                generator=torch.Generator().manual_seed(42)
+            )
+        )
+
+        for sampler_fn in sampler_fns:
+            self._test_batch_sampler(sampler_fn)
+
 
 instantiate_device_type_tests(TestDataLoaderDeviceType, globals())
 
