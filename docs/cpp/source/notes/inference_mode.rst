@@ -6,7 +6,7 @@ to be used when you are certain your operations will have no interactions
 with autograd (e.g. model training). Compared to ``NoGradMode``, code run
 under this mode gets better performance by disabling autograd related work like
 view tracking and version counter bumps. However, tensors created inside
-``c10::InferenceMode`` has more limitation when interacting with autograd system as well.
+``c10::InferenceMode`` have more limitations when interacting with autograd system as well.
 
 ``InferenceMode`` can be enabled for a given block of code. Inside ``InferenceMode``
 all newly allocated (non-view) tensors are marked as inference tensors. Inference tensors:
