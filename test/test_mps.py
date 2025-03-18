@@ -50,6 +50,16 @@ import operator
 test_consistency_op_db = copy.deepcopy(op_db)
 test_error_inputs_op_db = copy.deepcopy(op_db)
 
+# Add bicubic2d_aa to test_consistency_op_db
+for op in op_db:
+    if op.name != "_upsample_bilinear2d_aa":
+        continue
+    op = copy.deepcopy(op)
+    op.name = "_upsample_bicubic2d_aa"
+    op.op = torch.ops.aten._upsample_bicubic2d_aa
+    test_consistency_op_db.append(op)
+    break
+
 # Copied from `test_ops.py` for the purposes of duplicating `test_numpy_ref`
 _ref_test_ops = tuple(
     filter(
@@ -82,6 +92,7 @@ def mps_ops_grad_modifier(ops):
         '_segment_reduce': [torch.float16, torch.float32],
         '_chunk_cat': [torch.float16, torch.float32],
         '_upsample_bilinear2d_aa': None,  # `_upsample_bilinear2d_aa_backward_out` not implemented for MPS
+        '_upsample_bicubic2d_aa': None,  # `_upsample_bilinear2d_aa_backward_out` not implemented for MPS
         'sparse.mmreduce': [torch.float32],  # csr not supported
         'unique_consecutive': [torch.float16, torch.float32],
         'special_modified_bessel_i0': [torch.float16, torch.float32],
@@ -669,6 +680,7 @@ def mps_ops_modifier(ops):
         'vdot': None,
         'segment_reduce_': None,
         '_upsample_bilinear2d_aa': [torch.uint8],  # uint8 is for CPU only
+        '_upsample_bicubic2d_aa': [torch.uint8],  # uint8 is for CPU only
         'geometric' : None,
         'geometric_': None,
         'log_normal_': None,
@@ -12604,11 +12616,10 @@ class TestConsistency(TestCaseMPS):
                 # in slight numerical differences
                 atol, rtol = 1, 0
 
-            if op.name == "_upsample_bilinear2d_aa" and cpu_kwargs.get("scale_factors") == [1.7, 0.9]:
+            if op.name in ["_upsample_bilinear2d_aa", "_upsample_bicubic2d_aa"] and cpu_kwargs.get("scale_factors") == [1.7, 0.9]:
                 # Similar to the above, float vs double precision aresults in slight error
                 atol, rtol = 2e-5, 2e-6
             self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
-
 
     @ops(mps_ops_grad_modifier(copy.deepcopy(test_consistency_op_db)), allowed_dtypes=MPS_GRAD_DTYPES)
     def test_output_grad_match(self, device, dtype, op):
