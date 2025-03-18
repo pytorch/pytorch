@@ -40,7 +40,7 @@ class InvokeSubgraphHOP(HigherOrderOperator):
     # identifying two invoke_subgraph calls have same subgraph.
     def __call__(
         self,
-        subgraph: GraphModule,
+        subgraph: Union[GraphModule, FunctionalizeCtxWrapper],
         identifier: Optional[str],
         operands: Union[
             list[Union[torch.Tensor, int, torch.SymInt]],

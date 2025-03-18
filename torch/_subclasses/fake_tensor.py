@@ -1188,7 +1188,7 @@ class FakeTensorMode(TorchDispatchMode):
             torch._functorch.config.fake_tensor_allow_unsafe_data_ptr_access
         )
         self.allow_meta = torch._functorch.config.fake_tensor_allow_meta
-        self.cache_enabled = (
+        self.cache_enabled: bool = (
             torch._dynamo.config.fake_tensor_cache_enabled
             and not self.propagate_real_tensors
         )
