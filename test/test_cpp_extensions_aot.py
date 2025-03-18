@@ -458,6 +458,38 @@ class TestMAIATensor(common.TestCase):
         self.assertEqual(maia_extension.get_test_int(), 3)
         self.assertEqual(grad[0].shape, input.shape)
 
+    def test_autocast_apis_for_maia_device(self):
+        # Default low-precision type in MAIA's autocast.
+        fast_dtype = torch.get_autocast_dtype("maia")
+        self.assertEqual(fast_dtype, torch.bfloat16)
+        self.assertTrue(torch._C._is_autocast_available("maia"))
+
+    @skipIfTorchDynamo(
+        "dynamo cannot handle maia device. Output tensor may have wrong dtype."
+    )
+    def test_matmul_autocast_float16_precision(self):
+        # Ensure we can change low precision dtype.
+        x = torch.empty((2, 4), dtype=torch.float, device="maia")
+        w = torch.empty((4, 2), dtype=torch.float, device="maia")
+        with torch.autocast(device_type="maia", dtype=torch.float16):
+            self.assertTrue(torch.is_autocast_enabled("maia"))
+            y = torch.ops.aten.matmul(x, w)
+            self.assertEqual(y.dtype, torch.float16)
+            self.assertEqual(y.shape, (2, 2))
+
+    @skipIfTorchDynamo(
+        "dynamo cannot handle maia device. Output tensor may have wrong dtype."
+    )
+    def test_matmul_autocast_default_precision(self):
+        # Use default lower precision dtype, bfloat16.
+        x = torch.empty((2, 4), dtype=torch.float, device="maia")
+        w = torch.empty((4, 2), dtype=torch.float, device="maia")
+        with torch.autocast(device_type="maia"):
+            self.assertTrue(torch.is_autocast_enabled("maia"))
+            y = torch.ops.aten.matmul(x, w)
+            self.assertEqual(y.dtype, torch.bfloat16)
+            self.assertEqual(y.shape, (2, 2))
+
 
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestRNGExtension(common.TestCase):
