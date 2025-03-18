@@ -6,6 +6,7 @@ using namespace metal;
 DEFINE_UNARY_FLOATING_FUNCTOR(bessel_j0_forward);
 DEFINE_UNARY_FLOATING_FUNCTOR(bessel_j1_forward);
 DEFINE_UNARY_FLOATING_FUNCTOR(modified_bessel_i0_forward);
+DEFINE_UNARY_FLOATING_FUNCTOR(modified_bessel_i1_forward);
 DEFINE_UNARY_FLOATING_FUNCTOR(i0);
 DEFINE_UNARY_FLOATING_FUNCTOR(i0e);
 DEFINE_UNARY_FLOATING_FUNCTOR(i1);
@@ -49,6 +50,7 @@ struct bessel_y1_forward_functor {
   REGISTER_UNARY_OP(bessel_j0_forward, DTI, DTO);          \
   REGISTER_UNARY_OP(bessel_j1_forward, DTI, DTO);          \
   REGISTER_UNARY_OP(modified_bessel_i0_forward, DTI, DTO); \
+  REGISTER_UNARY_OP(modified_bessel_i1_forward, DTI, DTO); \
   REGISTER_UNARY_OP(bessel_y0_forward, DTI, DTO);          \
   REGISTER_UNARY_OP(bessel_y1_forward, DTI, DTO);          \
   REGISTER_UNARY_OP(i0, DTI, DTO);                         \

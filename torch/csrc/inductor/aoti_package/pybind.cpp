@@ -43,6 +43,7 @@ class AOTIModelPackageLoaderPybind : public AOTIModelPackageLoader {
   }
 };
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 void initAOTIPackageBindings(PyObject* module) {
   auto rootModule = py::handle(module).cast<py::module>();
   auto m = rootModule.def_submodule("_aoti");
@@ -61,9 +62,11 @@ void initAOTIPackageBindings(PyObject* module) {
           py::arg("inputs"),
           py::arg("stream_handle") = nullptr)
       .def("get_call_spec", &AOTIModelPackageLoaderPybind::get_call_spec)
+      .def(
+          "get_constant_fqns", &AOTIModelPackageLoaderPybind::get_constant_fqns)
       .def("load_constants", &AOTIModelPackageLoaderPybind::load_constants)
       .def(
-          "get_constant_fqns",
-          &AOTIModelPackageLoaderPybind::get_constant_fqns);
+          "update_constant_buffer",
+          &AOTIModelPackageLoaderPybind::update_constant_buffer);
 }
 } // namespace torch::inductor
