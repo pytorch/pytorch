@@ -541,6 +541,8 @@ blockReduceGammaBetaBackwardsHelper(
       warp_mean = mean[mean_index + lane_id];
       warp_rstd = rstd[mean_index + lane_id];
     }
+    // We do a WARP_SYNC() here because we use WARP_SHFL below to access
+    // warp_mean and warp_rstd.
     WARP_SYNC();
 
     T_ACC dY_regs[rows_per_thread_y] = {0};
