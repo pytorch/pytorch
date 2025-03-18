@@ -10027,7 +10027,6 @@ class TestNNDeviceType(NNTestCase):
         torch.set_printoptions(precision=5)
         self.assertEqual(out_t, expected_out_t, atol=1e-5, rtol=0)
 
-    @expectedFailureMPS  # NotImplementedError: aten::_upsample_bicubic2d_aa.out https://github.com/pytorch/pytorch/issues/77764
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
     def test_upsamplingBicubic2d_aa_correctness(self, device, memory_format):
         t_in = torch.arange(3 * 8 * 8, dtype=torch.float, device=device).reshape(1, 3, 8, 8)
