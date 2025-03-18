@@ -1211,8 +1211,8 @@ def dispatch_trace(
 
 
 def wrap_key(
-    f: Callable[_P, R], tensors: _P.args, tracer: _ProxyTracer, pre_dispatch: bool
-) -> Callable[_P, R]:
+    f: Callable[..., R], tensors: Any, tracer: _ProxyTracer, pre_dispatch: bool
+) -> Callable[..., R]:
     flat_tensors, _tensors_spec = pytree.tree_flatten(tensors)
 
     @functools.wraps(f)
@@ -2268,7 +2268,7 @@ def get_proxy_mode() -> Optional[ProxyTorchDispatchMode]:
     return pre_dispatch_mode or mode
 
 
-def handle_sym_dispatch(func: Callable[_P, R], args: _P.args, kwargs: _P.kwargs) -> R:
+def handle_sym_dispatch(func: Callable[..., R], args: Any, kwargs: Any) -> R:
     """
     Call into the currently active proxy tracing mode to do a
     SymInt/SymFloat/SymBool dispatch trace on a function that operates on

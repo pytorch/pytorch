@@ -860,7 +860,7 @@ def create_add_loggers_graph(
                     new_args = cur_node_orig.args
                     new_kwargs = cur_node_orig.kwargs
                 else:
-                    first_arg_for_copy = cur_node_copy
+                    first_arg_for_copy: torch.fx.Node = cur_node_copy
                     new_args = (first_arg_for_copy, *cur_node_orig.args[1:])
                     new_kwargs = cur_node_orig.kwargs
                 # make a copy of cur_node_orig

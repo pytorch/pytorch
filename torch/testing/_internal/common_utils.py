@@ -3752,14 +3752,16 @@ class TestCase(expecttest.TestCase):
                         if target is None:
                             target = batch_data[layout] = (ext_coo_indices1, d[1])
                         else:
-                            target[0].set_(torch.cat((target[0], ext_coo_indices1), 1))
-                            target[1].set_(torch.cat((target[1], d[1])))
+                            # Use copy_ instead of set_ to avoid overload matching issues
+                            target[0].copy_(torch.cat((target[0], ext_coo_indices1), 1))
+                            target[1].copy_(torch.cat((target[1], d[1])))
                     else:
                         if target is None:
                             target = batch_data[layout] = tuple(d[j].unsqueeze(0) for j in range(len(d)))
                         else:
                             for j in range(len(d)):
-                                target[j].set_(torch.cat((target[j], d[j].unsqueeze(0))))
+                                # Use copy_ instead of set_ to avoid overload matching issues
+                                target[j].copy_(torch.cat((target[j], d[j].unsqueeze(0))))
             return batch_data
 
         def generate_values(base, densesize):
@@ -5600,7 +5602,7 @@ def check_leaked_tensors(limit=1, matched_type=torch.Tensor):
                 f"{num_garbage_objs} tensors were found in the garbage. Did you introduce a reference cycle?"
             )
             try:
-                import objgraph  # type: ignore[import-not-found]
+                import objgraph  # type: ignore[import-untyped]
                 warnings.warn(
                     f"Dumping first {limit} objgraphs of leaked {matched_type}s rendered to png"
                 )

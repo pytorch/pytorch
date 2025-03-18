@@ -848,7 +848,7 @@ class SplitCatSimplifier:
         We replace a split node with an unflatten followed by a movedim
         """
         split_dim = _get_dim(split_node)
-        split_sections = split_node.args[1]
+        split_sections: list[int] = split_node.args[1]  # type: ignore[assignment]
         transform_params_list: list[list[_TransformParam]] = []
 
         for user_node, user_inputs in zip(next_users, user_inputs_list):
@@ -864,7 +864,7 @@ class SplitCatSimplifier:
                     transform_params.append((None, None, None, None))
                 elif isinstance(user_input, tuple):  # Split being simplified
                     # Verify equal split
-                    subset_split_sections = split_sections[  # type: ignore[index]
+                    subset_split_sections = split_sections[
                         user_input[0] : user_input[1] + 1
                     ]
                     # All sections should be equal
@@ -1439,12 +1439,20 @@ def simplify_split_cat(match: Match, split_sections: list[int], dim: int):
 
 def has_same_parent_node(node: torch.fx.Node):
     # the input nodes of the node should come from the same parent
+    # First check if node.args[0] is a sequence
+    if not isinstance(node.args[0], (list, tuple)):
+        return False
+    
     prev_node = None
-    for getitem in node.args[0]:  # type: ignore[union-attr]
-        if getitem.target != operator.getitem:  # type: ignore[union-attr]
+    for getitem in node.args[0]:
+        if not isinstance(getitem, torch.fx.Node) or getitem.target != operator.getitem:
             return False
+        
+        if not hasattr(getitem, 'args') or len(getitem.args) == 0:
+            return False
+            
         if prev_node is None:
-            prev_node = getitem.args[0]  # type: ignore[union-attr]
+            prev_node = getitem.args[0]
         else:
             if getitem.args[0] != prev_node:
                 return False
