@@ -551,7 +551,11 @@ def perform_misc_tasks(
             if is_cuda_or_rocm_job(job_name):
                 config["mem_leak_check"] = "mem_leak_check"
 
-    set_output("build-distributed", check_should_build_distributed(test_matrix) or os.getenv("BUILD_DISTRIBUTED"))
+    set_output(
+        "build-distributed",
+        check_should_build_distributed(test_matrix)
+        or os.getenv("BUILD_DISTRIBUTED", "").lower() in ("1", "true", "yes"),
+    )
 
 
 def main() -> None:
