@@ -138,6 +138,9 @@ def get_compile_threads() -> int:
     return config.compile_threads
 
 
+CacheResult = Union[LambdaFuture | CachingAutotuner]
+
+
 @clear_on_fresh_inductor_cache
 class CompiledTritonKernels:
     """
@@ -149,7 +152,7 @@ class CompiledTritonKernels:
     Currently, the cache stores Future objects, but it should be generalizable for any kernels.
     """
 
-    _cache: dict[str, Union[LambdaFuture | CachingAutotuner]] = {}
+    _cache: dict[str, CacheResult] = {}
 
     @staticmethod
     def key(kernel_src: str):
@@ -175,9 +178,13 @@ class CompiledTritonKernels:
         CompiledTritonKernels._cache[key] = future
 
     @staticmethod
-    def get(kernel_src: str, default: Any) -> LambdaFuture:
+    def get(kernel_src: str) -> Optional[CacheResult]:
         key = CompiledTritonKernels.key(kernel_src)
-        return CompiledTritonKernels._cache.get(key, default)
+        result = CompiledTritonKernels._cache.get(key, None)
+        if result is not None and isinstance(result, CachingAutotuner):
+            # Return a copy so we don't pollute the cached result
+            return copy.copy(result)
+        return result
 
     @staticmethod
     def cache_clear():
@@ -196,7 +203,7 @@ class CompiledTritonKernels:
             del CompiledTritonKernels._cache[key]
 
         # Replace it with the fully compiled kernel if one exists
-        if compiled_kernel is not None:
+        if compiled_kernel is not None and compiled_kernel.is_statically_launchable():
             new_kernel = copy.copy(compiled_kernel)
             new_kernel.prepare_for_pickle()
             CompiledTritonKernels._cache[key] = new_kernel
@@ -206,8 +213,8 @@ class CompiledTritonKernels:
         result = {}
         for key, kernel in CompiledTritonKernels._cache.items():
             if isinstance(kernel, CachingAutotuner):
-                if kernel.is_statically_launchable():
-                    result[key] = kernel
+                assert kernel.is_statically_launchable()
+                result[key] = kernel
         return result
 
 
@@ -313,15 +320,15 @@ class AsyncCompile:
             with dynamo_timed("reload_kernel_in_parent"):
                 return load_kernel()
 
-        if future := CompiledTritonKernels.get(source_code, None):
+        if (kernel := CompiledTritonKernels.get(source_code)) is not None:
             counters["inductor"]["async_compile_cache_hit"] += 1
             # If it's already a CachingAutotuner, we want to load it directly
-            if isinstance(future, CachingAutotuner):
-                future.precompile(
+            if isinstance(kernel, CachingAutotuner):
+                kernel.precompile(
                     warm_cache_only=False, reload_kernel=reload_kernel_in_parent
                 )
-                return future
-            return future
+                return kernel
+            return kernel
 
         counters["inductor"]["async_compile_cache_miss"] += 1
 
