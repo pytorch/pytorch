@@ -1053,6 +1053,7 @@ def _fused_matmul_reduce_scatter_fallback(
     res = funcol.wait_tensor(res)
     return res
 
+
 def _fused_matmul_reduce_scatter_impl(
     mm_out_op: torch._ops.OpOverload,
     A: torch.Tensor,
@@ -1206,17 +1207,18 @@ def _fused_scaled_matmul_reduce_scatter_fallback(
     res = funcol.reduce_scatter_tensor(
         C,
         reduce_op,
-        orig_scatter_dim,  # need original 3D+ scatter dim here
+        orig_scatter_dim,  # need original scatter dim for 3D+ output tensor here
         group_name,
     )
     res = funcol.wait_tensor(res)
     return res
 
+
 def _fused_scaled_matmul_reduce_scatter_impl(
     mm_out_op: torch._ops.OpOverload,
     A: torch.Tensor,
     B: torch.Tensor,
-    A_scale: Optional[torch.Tensor],
+    A_scale: torch.Tensor,
     kwargs: dict[str, Any],
     out_dtype: Optional[torch.dtype],
     reduce_op: str,
@@ -1285,9 +1287,7 @@ def _fused_scaled_matmul_reduce_scatter_impl(
 
     # Computing block-wise matmul along the first dim of A
     def chunk_producer(rank: int, out: torch.Tensor) -> None:
-        mm_out_op(
-            A_shards[rank], B, scale_a=A_scale_shards[rank], **kwargs, out=out
-        )
+        mm_out_op(A_shards[rank], B, scale_a=A_scale_shards[rank], **kwargs, out=out)
 
     # Stacked partials will be the 2D outputs of the the pipelined scaled mm, and will
     # have the shape (A_with_scatter_dim_0_tensor.shape[0], B.shape[1]) to align with the formula:
@@ -1318,11 +1318,10 @@ def _fused_scaled_matmul_reduce_scatter_impl(
     # Ensures that the transpose and reduction produce contiguous result
     # in a single reduction kernel.
     reduced_out = reduce_fn(
-        stacked_partials.view(
-            *stacked_partials_3D_leading_dims, -1
-        ).movedim(  # View 2D stacked partials as 3D+ tensor of shape (`group_size`, ...)
-            0, orig_scatter_dim
-        ),  # Swap back the scatter dim (which we moved to 0, and now is `group_size`)
+        # View 2D stacked partials as 3D+ tensor of shape (`group_size`, ...)
+        stacked_partials.view(*stacked_partials_3D_leading_dims, -1)
+        # Swap back the scatter dim (which we moved to 0, and now is `group_size`)
+        .movedim(0, orig_scatter_dim),
         dim=orig_scatter_dim,  # Reduce along the origal scatter dim (`group_size`)
     )
 
