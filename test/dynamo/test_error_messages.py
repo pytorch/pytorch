@@ -247,7 +247,7 @@ Attempted to call function marked as skipped
   Explanation: Dynamo developers have intentionally marked that the function `skip` in file `case.py` should not be traced.
   Hint: Avoid calling the function `skip`.
   Hint: Apply `@torch._dynamo.dont_skip_tracing` to the function `skip` to force tracing into the function. More graph breaks may occur as a result of attempting to trace into the function.
-  Hint: Remove the file`/data/users/williamwen/py312-env3/lib/python3.12/unittest/case.py` from torch/_dynamo/trace_rules.py. More graph breaks may occur as a result of attempting to trace into the function.
+  Hint: Remove the file `case.py` from torch/_dynamo/trace_rules.py. More graph breaks may occur as a result of attempting to trace into the function.
   Hint: Please file an issue to PyTorch.
 
   Developer debug context: module: unittest.case, qualname: skip, skip reason: <missing reason>
@@ -1012,8 +1012,15 @@ User code traceback:
         self.assertIn("Foo().attr = x  # 0", records[-1].getMessage())
         self.assertIn("Foo().attr = x  # 1", records[-1].getMessage())
 
+        def post_munge(s):
+            return re.sub(
+                r"torch_dynamo_resume_in_f(\d)_at_\d+",
+                "torch_dynamo_resume_in_f\\1_at_N",
+                s,
+            )
+
         self.assertExpectedInline(
-            munge_exc(records[-1].getMessage(), skip=0),
+            post_munge(munge_exc(records[-1].getMessage(), skip=0)),
             """\
 Graph break in user code at test_error_messages.py:N
 Graph Break Reason: STORE_ATTR-caused graph break
@@ -1022,12 +1029,12 @@ User code traceback:
     f3(torch.randn(3))
   File "test_error_messages.py", line N, in f3
     Foo().attr = x  # 0
-  File "test_error_messages.py", line N, in torch_dynamo_resume_in_f3_at_1001
+  File "test_error_messages.py", line N, in torch_dynamo_resume_in_f3_at_N
     Foo().attr = x  # 1
 
 ========== most recent `torch.compile` tracing attempt started here ==========
 
-  File "test_error_messages.py", line N, in torch_dynamo_resume_in_f3_at_1002
+  File "test_error_messages.py", line N, in torch_dynamo_resume_in_f3_at_N
     Foo().attr = x
 
 NOTE: the most recent `torch.compile` tracing attempt might not be where you applied `torch.compile`! This is due to how graph breaks are implemented - the optimized code object returned by Dynamo will call another Dynamo-generated resume function and tracing is re-enabled by calling the resume function as a normal Python function, which Dynamo intercepts as a top-level frame.

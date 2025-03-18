@@ -1370,6 +1370,8 @@ class CatchErrorsWrapper:
 
         input_codes.add(frame.f_code)
 
+        # If this frame is skipped by trace_rules, but dont_skip_tracing is active,
+        # then do not actually skip the frame.
         dont_skip_tracing = False
         frames = [frame] + exc.get_real_frames_above_dynamo()
         for f in frames:

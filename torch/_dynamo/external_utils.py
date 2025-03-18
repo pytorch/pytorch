@@ -206,6 +206,8 @@ def dont_skip_tracing_decorator_wrapper(recursive):  # type: ignore[no-untyped-d
     return decorator_wrapper
 
 
+# get a copy of the dont_skip_tracing_wrapper code object that can be used to identify
+# dont_skip_tracing_wrapper frames
 _dont_skip_tracing_wrapper_code = dont_skip_tracing_decorator_wrapper(True)(
     lambda: None
 ).__code__

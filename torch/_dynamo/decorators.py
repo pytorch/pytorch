@@ -715,6 +715,14 @@ def _allow_in_graph_einops():
 trace_rules.add_module_init_func("einops", _allow_in_graph_einops)
 
 
+# Implementation details
+# We add a `dont_skip_tracing` option to trace_rules - if set, then functions/modules
+# with SkipFunctionVariable rules will instead have a UserFunctionVariable rule - i.e. inline the function.
+# We still skip on certain functions - notably most of torch/_dynamo, because tracing into things like eval_frame
+# will cause problems.
+# We detect if `dont_skip_tracing` is active by inspecting the current frame and previous frames, looking
+# for a frame that has dont_skip_tracing_wrapper as its code object. If we find such a frame, then we should
+# perform trace_rules lookups with `dont_skip_tracing` set.
 def dont_skip_tracing(fn=None, recursive=True):
     """
     There are some functions/modules that are intentionally marked by developers to not be
