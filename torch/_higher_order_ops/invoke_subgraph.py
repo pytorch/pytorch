@@ -177,7 +177,7 @@ def create_fw_bw_graph(subgraph, operands, grad_outputs=None):
             fake_mode = detect_fake_mode(fw_inputs)
             context = (
                 nullcontext()
-                if fake_mode is None
+                if fake_mode is None or fake_mode.shape_env is None
                 else fake_mode.shape_env.ignore_fresh_unbacked_symbols()
             )
 
