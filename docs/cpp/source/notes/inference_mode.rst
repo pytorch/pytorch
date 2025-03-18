@@ -66,7 +66,7 @@ users should pay additional attention to:
     also affects tensor creation while ``AutoNonVariableTypeMode`` doesn't. In other words, tensors created
     inside ``InferenceMode`` are marked as inference tensors so that certain limitation can be applied after
     exiting ``InferenceMode``.
-  - Enabled/disabled ``InferenceMode`` states can be nested while ``AutoNonVariableTypeMode`` only allows enabled state..
+  - Enabled/disabled ``InferenceMode`` states can be nested while ``AutoNonVariableTypeMode`` only allows enabled state.
 
 .. code-block:: cpp
 
@@ -82,7 +82,7 @@ users should pay additional attention to:
   // InferenceMode is off
 
 
-2. Users trying to implement a customized kernel who wants to redispatch under ``Autograd`` dispatch
+2. Users trying to implement a customized kernel who want to redispatch under ``Autograd`` dispatch
    keys should use ``AutoDispatchBelowADInplaceOrView`` instead. Note ``AutoDispatchBelowADInplaceOrView`` is just a new name
    of ``AutoNonVariableTypeMode`` since it explains the guard's functionality better. We're deprecating
    ``AutoNonVariableTypeMode`` and it'll be removed in 1.10 release. See customized kernel
