@@ -1149,7 +1149,7 @@ class triton:
     # Whether persistent matmul kernels should be enabled this flag only has effect when on h100
     # with a verison of triton new enough to support TMA
     enable_persistent_tma_matmul = (
-        os.environ.get("ENABLE_PERSISTENT_TMA_MATMUL", "0") == "1"
+        os.environ.get("ENABLE_PERSISTENT_TMA_MATMUL", "1") == "1"
     )
     # Skip L1 cache for buffers that are used only once.  Disabled by default
     skip_l1_cache = os.environ.get("TORCHINDUCTOR_SKIP_L1", "0") == "1"
