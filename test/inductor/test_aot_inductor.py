@@ -4388,12 +4388,12 @@ class AOTInductorTestsTemplate:
         a = torch.randn(M, K, device=self.device)
         example_inputs = (a,)
         with torch.no_grad(), config.patch({"always_keep_tensor_constants": True}):
-            so_path = AOTIRunnerUtil.compile(
+            so_path = AOTIRunnerUtil.legacy_compile(
                 model=model,
                 example_inputs=example_inputs,
             )
 
-        runner = AOTIRunnerUtil.load_runner(self.device, so_path)
+        runner = AOTIRunnerUtil.legacy_load_runner(self.device, so_path)
 
         def runner_call(*args, **kwargs):
             import torch.fx._pytree as fx_pytree
@@ -4445,12 +4445,12 @@ class AOTInductorTestsTemplate:
         a = torch.randn(M, K, device=self.device)
         example_inputs = (a,)
         with torch.no_grad(), config.patch({"always_keep_tensor_constants": True}):
-            so_path = AOTIRunnerUtil.compile(
+            so_path = AOTIRunnerUtil.legacy_compile(
                 model=model,
                 example_inputs=example_inputs,
             )
 
-        runner = AOTIRunnerUtil.load_runner(self.device, so_path)
+        runner = AOTIRunnerUtil.legacy_load_runner(self.device, so_path)
 
         def runner_call(*args, **kwargs):
             import torch.fx._pytree as fx_pytree
