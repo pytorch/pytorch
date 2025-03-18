@@ -99,10 +99,14 @@ def update_wheel(wheel_path, desired_cuda) -> None:
         if "126" in desired_cuda:
             libs_to_copy += [
                 "/usr/local/cuda/lib64/libnvrtc-builtins.so.12.6",
+                "/usr/local/cuda/lib64/libcufile.so.0",
+                "/usr/local/cuda/lib64/libcufile_rdma.so.1",
             ]
         elif "128" in desired_cuda:
             libs_to_copy += [
                 "/usr/local/cuda/lib64/libnvrtc-builtins.so.12.8",
+                "/usr/local/cuda/lib64/libcufile.so.0",
+                "/usr/local/cuda/lib64/libcufile_rdma.so.1",
             ]
     else:
         libs_to_copy += [
@@ -204,7 +208,7 @@ if __name__ == "__main__":
         else:
             build_vars += f"BUILD_TEST=0 PYTORCH_BUILD_VERSION={version}.dev{build_date} PYTORCH_BUILD_NUMBER=1 "
     elif branch.startswith(("v1.", "v2.")):
-        build_vars += f"BUILD_TEST=0 PYTORCH_BUILD_VERSION={branch[1:branch.find('-')]} PYTORCH_BUILD_NUMBER=1 "
+        build_vars += f"BUILD_TEST=0 PYTORCH_BUILD_VERSION={branch[1 : branch.find('-')]} PYTORCH_BUILD_NUMBER=1 "
 
     if enable_mkldnn:
         build_ArmComputeLibrary()
