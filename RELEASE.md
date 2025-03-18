@@ -369,23 +369,23 @@ The patch release process takes around 4-5 weeks to complete.
 2. Go/No Go meeting between PyTorch Releng, PyTorch Core and Project Managers where potential issues triggering a release in milestones are reviewed, and following decisions are made:
   * Should the new patch release be created?
   * Timeline execution for the patch release
-3. Cherry picking phase starts after the decision is made to create patch release. At this point a new release tracker for the patch release is created, and an announcement will be made on official channels [example announcement](https://dev-discuss.pytorch.org/t/pytorch-release-2-0-1-important-information/1176). The authors of the fixes to regressions will be asked to create their own cherry picks. This process normally takes 2 weeks.
-4. Building Binaries, Promotion to Stable and testing. After all cherry picks have been merged, Release Managers trigger new build and produce new release candidate. Announcement is made on the official channel about the RC availability at this point. This process normally takes 2 weeks.
+3. Cherry picking phase starts after the decision is made to create a patch release. At this point, a new release tracker for the patch release is created, and an announcement will be made on official channels [example announcement](https://dev-discuss.pytorch.org/t/pytorch-release-2-0-1-important-information/1176). The authors of the fixes to regressions will be asked to create their own cherry picks. This process normally takes 2 weeks.
+4. Building Binaries, Promotion to Stable and testing. After all cherry picks have been merged, Release Managers trigger a new build and produce a new release candidate. An announcement is made on the official channel about the RC availability at this point. This process normally takes 2 weeks.
 5. General Availability
 
 ### Triage
 
 > Main POC: Triage Reviewers
 
-1. Tag issues / pull requests that are candidates for a potential patch release with `triage review`
+1. Tag issues/pull requests that are candidates for a potential patch release with `triage review`
     * ![adding triage review label](https://user-images.githubusercontent.com/1700823/132589089-a9210a14-6159-409d-95e5-f79067f6fa38.png)
-2. Triage reviewers will then check if the regression / fix identified fits within above mentioned [Patch Release Criteria](#patch-release-criteria)
-3. Triage reviewers will then add the issue / pull request to the related milestone (i.e. `1.9.1`) if the regressions is found to be within the [Patch Release Criteria](#patch-release-criteria)
+2. Triage reviewers will then check if the regression/fix identified fits within the above mentioned [Patch Release Criteria](#patch-release-criteria)
+3. Triage reviewers will then add the issue/pull request to the related milestone (i.e. `1.9.1`) if the regression is found to be within the [Patch Release Criteria](#patch-release-criteria)
     * ![adding to milestone](https://user-images.githubusercontent.com/1700823/131175980-148ff38d-44c3-4611-8a1f-cd2fd1f4c49d.png)
 
 ### Issue Tracker for Patch releases
 
-For patch releases issue tracker needs to be created. For patch release, we require all cherry-pick changes to have links to either a high-priority GitHub issue or a CI failure from previous RC. An example of this would look like:
+For patch releases, an issue tracker needs to be created. For a patch release, we require all cherry-pick changes to have links to either a high-priority GitHub issue or a CI failure from previous RC. An example of this would look like:
 * https://github.com/pytorch/pytorch/issues/128436
 
 Only following issues are accepted:
