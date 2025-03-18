@@ -43,10 +43,11 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
-from .. import config, variables
+from .. import config, graph_break_hints, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
 from ..exc import (
     unimplemented,
+    unimplemented_v2,
     UnknownPropertiesDuringBackwardTrace,
     UserError,
     UserErrorType,
@@ -708,6 +709,16 @@ class TensorVariable(VariableTracker):
             return ConstantVariable.create(self.dtype.is_floating_point)
 
     def method_is_inference(self):
+        if config.fake_tensor_disable_inference_mode:
+            unimplemented_v2(
+                gb_type="Encountered tensor.is_inference() during tracing",
+                context="",
+                explanation="tensor.is_inference() is not supported",
+                hints=[
+                    *graph_break_hints.FUNDAMENTAL,
+                    *graph_break_hints.INFERENCE_MODE,
+                ],
+            )
         if (fake := self.proxy.node.meta.get("example_value")) is not None:
             return ConstantVariable.create(fake.is_inference())
 
