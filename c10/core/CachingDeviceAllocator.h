@@ -62,25 +62,24 @@ struct DeviceStats {
   int64_t max_split_size = 0;
 };
 
-// Size pretty-printer
-inline std::string format_size(uint64_t size) {
-  std::ostringstream os;
-  os.precision(2);
-  os << std::fixed;
-  if (size <= 1024) {
-    os << size << " bytes";
-  } else if (size <= 1048576) {
-    os << (static_cast<double>(size) / 1024.0);
-    os << " KiB";
-  } else if (size <= 1073741824ULL) {
-    os << static_cast<double>(size) / 1048576.0;
-    os << " MiB";
-  } else {
-    os << static_cast<double>(size) / 1073741824.0;
-    os << " GiB";
-  }
-  return os.str();
-}
+class CachingDeviceAllocatorInterface : public c10::Allocator {
+ public:
+  virtual void* raw_alloc(size_t nbytes) = 0;
+  virtual void* raw_alloc_with_stream(size_t nbytes, c10::Stream stream) = 0;
+  virtual void raw_delete(void* ptr) = 0;
+  virtual void init(int device_count) = 0;
+  virtual bool initialized() = 0;
+  virtual void emptyCache() = 0;
+  virtual void enable(bool value) = 0;
+  virtual bool isEnabled() const = 0;
+  virtual void* getBaseAllocation(void* ptr, size_t* size) = 0;
+  virtual void recordStream(const DataPtr&, c10::Stream stream) = 0;
+  virtual c10::CachingDeviceAllocator::DeviceStats getDeviceStats(
+      c10::DeviceIndex device) = 0;
+  virtual void resetAccumulatedStats(c10::DeviceIndex device) = 0;
+  virtual void resetPeakStats(c10::DeviceIndex device) = 0;
+  virtual std::string name() = 0;
+};
 
 class CachingDeviceAllocatorInterface : public c10::Allocator {
  public:
