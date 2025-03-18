@@ -101,7 +101,7 @@ def find_tunableop_result(results, OpSig, ParamSig):
     assert isinstance(results, tuple)
     for inner_tuple in results:
         if OpSig in inner_tuple and ParamSig in inner_tuple:
-                return inner_tuple
+            return inner_tuple
     return None
 
 class TestLinalg(TestCase):
