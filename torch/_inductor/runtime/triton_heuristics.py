@@ -975,6 +975,12 @@ class CachingAutotuner(KernelInterface):
                 triton_cache_hash=launcher.cache_hash,
             )
 
+    def save_gpu_kernel(self, grid, stream, launcher):
+        if callable(grid):
+            grid_x, grid_y, grid_z = grid(launcher.config.kwargs)
+        else:
+            grid_x, grid_y, grid_z = grid
+
     def save_gpu_kernel(self, stream, launcher):
         key = self.inductor_meta.get("kernel_name", None)  # unique kernel name
         assert key is not None, "kernel_name can not be None"
