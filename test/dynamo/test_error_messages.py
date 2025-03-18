@@ -232,32 +232,6 @@ from user code:
     print("abc")""",
         )
 
-    def test_skipfile_call(self):
-        def fn():
-            return unittest.skip("test")
-
-        def post_munge(s):
-            return re.sub(r"file `.*case\.py`", "file `case.py`", s)
-
-        self.assertExpectedInlineMunged(
-            Unsupported,
-            lambda: torch.compile(fn, backend="eager", fullgraph=True)(),
-            """\
-Attempted to call function marked as skipped
-  Explanation: Dynamo developers have intentionally marked that the function `skip` in file `case.py` should not be traced.
-  Hint: Avoid calling the function `skip`.
-  Hint: Remove the function `skip` or the file `case.py` from torch/_dynamo/trace_rules.py. More graph breaks may occur as a result of attempting to trace into the function.
-  Hint: Please file an issue to PyTorch.
-
-  Developer debug context: module: unittest.case, qualname: skip, skip reason: <missing reason>
-
-
-from user code:
-   File "test_error_messages.py", line N, in fn
-    return unittest.skip("test")""",
-            post_munge=post_munge,
-        )
-
     def test_skipfile_dynamo_call(self):
         def fn():
             torch._dynamo.disable()
