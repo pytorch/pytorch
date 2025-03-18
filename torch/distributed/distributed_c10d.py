@@ -2604,6 +2604,7 @@ class _CollectiveEstimator:
     def __init__(self) -> None:
         self.estimated_time: Optional[float] = None
 
+
 @contextlib.contextmanager
 def _collective_estimator(
     group: Optional[ProcessGroup] = None,
@@ -2630,7 +2631,9 @@ def _collective_estimator(
     device = device or _get_pg_default_device(group)
     backend = group._get_backend(device)
     if not backend.supports_time_estimate:
-        raise NotImplementedError(f"collective time estimator is not supported for backend {backend}")
+        raise NotImplementedError(
+            f"collective time estimator is not supported for backend {backend}"
+        )
     backend._start_time_estimate()  # type: ignore[attr-defined]
     cm = _CollectiveEstimator()
     yield cm
