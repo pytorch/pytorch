@@ -17,7 +17,7 @@ import os
 import functorch
 
 
-# import sys
+import sys
 
 # source code directory, relative to this file, for sphinx-autobuild
 # sys.path.insert(0, os.path.abspath('../..'))
