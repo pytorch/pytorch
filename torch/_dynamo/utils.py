@@ -1233,6 +1233,7 @@ class CompilationMetrics:
     triton_kernel_compile_times_us: Optional[str] = None
     ir_count: Optional[int] = None
     cudagraph_skip_reason: Optional[str] = None
+    python_version: Optional[str] = None
 
     @classmethod
     def create(cls, metrics: dict[str, Any]):
@@ -1494,6 +1495,7 @@ def record_compilation_metrics(
         "triton_version": triton.__version__ if has_triton() else "",
         "remote_cache_version": remote_cache_version,
         "inductor_fx_remote_cache_backend_type": inductor_fx_remote_cache_backend_type,
+        "python_version": sys.version,
     }
 
     compilation_metrics = CompilationMetrics.create({**common_metrics, **metrics})
