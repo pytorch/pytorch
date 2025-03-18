@@ -295,13 +295,13 @@ void vdot<c10::complex<double>>(CUDABLAS_DOT_ARGTYPES(c10::complex<double>));
 template<class Dtype>
 void getrsBatched(CUDABLAS_GETRS_ARGTYPES(Dtype)) {
 // HIP doesn't support sparse operations on Windows
-#if !defined(USE_ROCM) && !defined(_MSC_VER)
+#if !defined(USE_ROCM) || !defined(_MSC_VER)
   static_assert(false&&sizeof(Dtype),"at::cuda::blas::getrsBatched: not implemented");
 #endif
 }
 
 // HIP doesn't support sparse operations on Windows
-#if !defined(USE_ROCM) && !defined(_MSC_VER)
+#if !defined(USE_ROCM) || !defined(_MSC_VER)
 template<>
 TORCH_CUDA_CU_API void getrsBatched<float>(CUDABLAS_GETRS_ARGTYPES(float));
 template<>
@@ -319,12 +319,12 @@ TORCH_CUDA_CU_API void getrsBatched<c10::complex<double>>(CUDABLAS_GETRS_ARGTYPE
 template <class Dtype>
 void geqrfBatched(CUDABLAS_GEQRF_BATCHED_ARGTYPES(Dtype)) {
 // HIP doesn't support sparse operations on Windows
-#if !defined(USE_ROCM) && !defined(_MSC_VER)
+#if !defined(USE_ROCM) || !defined(_MSC_VER)
   static_assert(false&&sizeof(Dtype), "at::cuda::blas::geqrfBatched: not implemented");
 #endif
 }
 // HIP doesn't support sparse operations on Windows
-#if !defined(USE_ROCM) && !defined(_MSC_VER)
+#if !defined(USE_ROCM) || !defined(_MSC_VER)
 template <>
 TORCH_CUDA_CU_API void geqrfBatched<float>(CUDABLAS_GEQRF_BATCHED_ARGTYPES(float));
 template <>
@@ -346,7 +346,7 @@ void getrfBatched(CUDABLAS_GETRF_ARGTYPES(Dtype)) {
 }
 
 // HIP doesn't support sparse operations on Windows
-#if !defined(USE_ROCM) && !defined(_MSC_VER)
+#if !defined(USE_ROCM) || !defined(_MSC_VER)
 template<>
 TORCH_CUDA_CU_API void getrfBatched<float>(CUDABLAS_GETRF_ARGTYPES(float));
 template<>
@@ -363,12 +363,12 @@ TORCH_CUDA_CU_API void getrfBatched<c10::complex<float>>(CUDABLAS_GETRF_ARGTYPES
 template <class Dtype>
 void gelsBatched(CUDABLAS_GELS_BATCHED_ARGTYPES(Dtype)) {
 // HIP doesn't support sparse operations on Windows
-#if !defined(USE_ROCM) && !defined(_MSC_VER)
+#if !defined(USE_ROCM) || !defined(_MSC_VER)
   static_assert(false&&sizeof(Dtype),"at::cuda::blas::gelsBatched: not implemented");
 #endif
 }
 // HIP doesn't support sparse operations on Windows
-#if !defined(USE_ROCM) && !defined(_MSC_VER)
+#if !defined(USE_ROCM) || !defined(_MSC_VER)
 template<>
 TORCH_CUDA_CU_API void gelsBatched<double>(CUDABLAS_GELS_BATCHED_ARGTYPES(double));
 template<>
