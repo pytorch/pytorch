@@ -91,7 +91,7 @@ class Library:
         dispatch_key: PyTorch dispatch key (default: "")
     """
 
-    def __init__(self, ns, kind, dispatch_key=""):
+    def __init__(self, ns, kind="IMPL", dispatch_key=""):
         if kind not in ("IMPL", "DEF", "FRAGMENT"):
             raise ValueError("Unsupported kind: ", kind)
 
