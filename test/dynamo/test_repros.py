@@ -53,6 +53,7 @@ from torch.testing._internal.common_utils import (
     disable_translation_validation_if_dynamic_shapes,
     instantiate_parametrized_tests,
     parametrize,
+    serialTest,
     skipIfHpu,
     skipIfWindows,
     TEST_WITH_ROCM,
@@ -3875,6 +3876,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_model(17, (12,), out2)
 
     @requires_cuda
+    @serialTest
     def test_mem_leak_guards(self):
         def gn(x0, x):
             return x0 * x
@@ -3906,10 +3908,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         for _ in range(1000):
             fn(x)
         peak_mem2 = torch.cuda.max_memory_allocated()
-        # ideally peak_mem1 == peak_mem2, but CI tests running in parallel can
-        # make this flaky. So running the test 1000 times, and putting a margin
-        # of 10x.
-        self.assertTrue(peak_mem2 < 10 * peak_mem1)
+        self.assertTrue(peak_mem1 == peak_mem2)
 
     @requires_cuda
     def test_guard_default_device(self):
