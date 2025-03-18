@@ -3924,6 +3924,71 @@ class CompiledAutograd1(torch.nn.Module):
             fn, count=[1, 5], compiler_fn=make_compiler_fn(fullgraph=False)
         )
 
+    def test_dont_dce_side_effects(self):
+        class SideEffectfulBackward(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x
+
+            @staticmethod
+            def backward(ctx, gO):
+                torch.randn(10, 10)
+                return gO
+
+        x = torch.randn(10, 10, requires_grad=True)
+
+        @torch.compile(backend="aot_eager")
+        def fn(x):
+            return SideEffectfulBackward.apply(x).sum()
+
+        gm = None
+
+        def extract(ca_gm):
+            nonlocal gm
+            gm = ca_gm
+            return ca_gm
+
+        with compiled_autograd._enable(extract):
+            fn(x).backward()
+
+        self.assertTrue("aten.randn" in str(gm))
+
+    def test_aot_bwd_gm_runnable(self):
+        # This test ensures that the bw_module saved in
+        # CompiledFunction._lazy_backward_info is executable,
+        # by ensuring post grad passes have not ran on it.
+
+        post_grad_graphs = []
+
+        def post_grad_pass(graph):
+            nonlocal post_grad_graphs
+            post_grad_graphs.append(graph)
+            return graph
+
+        x = torch.randn(10, 10, requires_grad=True)
+        y = torch.randn(10, 10, requires_grad=True)
+        # forces symints to be saved for backward
+        # and forces aot compilation of the backward
+        torch._dynamo.mark_dynamic(x, 0)
+        torch._dynamo.mark_dynamic(y, 1)
+
+        @torch.compile
+        def fn(x, y):
+            return torch.matmul(x, y).sum()
+
+        with inductor_config.patch(post_grad_custom_post_pass=post_grad_pass):
+            loss = fn(x, y)
+            self.assertEqual(len(post_grad_graphs), 2)  # 1 fwd and 1 bwd
+
+        self.assertTrue(loss.grad_fn.name(), "CompiledFunctionBackward")
+        self.assertIsNot(
+            post_grad_graphs[1],
+            loss.grad_fn._forward_cls._lazy_backward_info.bw_module.graph,
+        )
+
+        with compiled_autograd._enable(lambda gm: gm):
+            loss.backward()
+
 
 def load_test_module(name):
     testdir = Path(__file__).absolute().parent.parent
