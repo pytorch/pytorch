@@ -34,6 +34,7 @@ from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inducto
 # This tests basic MPS compile functionality
 
 
+@instantiate_parametrized_tests
 class MPSBasicTests(TestCase):
     is_dtype_supported = CommonTemplate.is_dtype_supported
     common = check_model_gpu
@@ -184,6 +185,7 @@ for test_name in [
     "test_linear_float64",
     "test_log_fp64",
     "test_low_memory_max_pool_dilation_1",
+    "test_low_memory_max_pool_dilation_2",
     "test_max_min",
     "test_max_pool2d2",
     "test_min_max_reduction_nan",
@@ -215,8 +217,6 @@ for test_name in [
     "test_zero_dim_reductions",
 ]:
     setattr(MPSBasicTests, test_name, getattr(CommonTemplate, test_name))
-
-instantiate_parametrized_tests(MPSBasicTests)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
