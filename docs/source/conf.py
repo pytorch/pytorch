@@ -63,7 +63,7 @@ extensions = [
     "sphinx.ext.coverage",
     "sphinx.ext.napoleon",
     "sphinx.ext.autosectionlabel",
-    "sphinxcontrib-katex",
+    "sphinxcontrib.katex",
     "sphinx_copybutton",
     "sphinx_design",
     "myst_parser",
