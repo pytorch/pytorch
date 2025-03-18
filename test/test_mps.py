@@ -652,7 +652,6 @@ def mps_ops_modifier(ops):
         'special.hermite_polynomial_he': None,
         'special.laguerre_polynomial_l': None,
         'special.log_ndtr': None,
-        'special.modified_bessel_i1': None,
         'special.modified_bessel_k0': None,
         'special.modified_bessel_k1': None,
         'special.ndtri': None,
