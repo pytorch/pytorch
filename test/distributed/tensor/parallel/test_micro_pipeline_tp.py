@@ -15,8 +15,8 @@ from torch._inductor.fx_passes.micro_pipeline_tp import (
 from torch._inductor.fx_passes.post_grad import remove_noop_ops, view_to_reshape
 from torch._inductor.utils import fresh_inductor_cache, run_and_get_triton_code
 from torch.distributed._functional_collectives import (
-    all_reduce,
     all_gather_tensor,
+    all_reduce,
     reduce_scatter_tensor,
 )
 from torch.distributed._symmetric_memory import _test_mode
@@ -402,7 +402,7 @@ class MicroPipelineTPTest(TestCase):
 
     @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @parametrize("scatter_dim", [0,1,2])
+    @parametrize("scatter_dim", [0, 1, 2])
     @fresh_inductor_cache()
     def test_fuse_scaled_matmul_reduce_scatter_rowwise_scales_reshape_mm_reshape(
         self, scatter_dim
@@ -489,7 +489,7 @@ class MicroPipelineTPTest(TestCase):
                 AssertionError,
                 "async TP found no matching all-gather/reduce-scatter patterns for fusion",
                 micro_pipeline_tp_pass,
-                gm.graph
+                gm.graph,
             )
 
     @skipIfRocm
@@ -527,7 +527,7 @@ class MicroPipelineTPTest(TestCase):
                 AssertionError,
                 "no successful fusions of matul-reduce-scatters",
                 micro_pipeline_tp_pass,
-                gm.graph
+                gm.graph,
             )
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
