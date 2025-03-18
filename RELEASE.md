@@ -19,7 +19,7 @@
     - [Cherry Picking Fixes](#cherry-picking-fixes)
       - [How to do Cherry Picking](#how-to-do-cherry-picking)
     - [Cherry Picking Reverts](#cherry-picking-reverts)
-  - [Preparing and Creating Final Release candidate](#preparing-and-creating-final-release-candidate)
+  - [Preparing and Creating Final Release Candidate](#preparing-and-creating-final-release-candidate)
   - [Promoting RCs to Stable](#promoting-rcs-to-stable)
   - [Additional Steps to prepare for release day](#additional-steps-to-prepare-for-release-day)
     - [Modify release matrix](#modify-release-matrix)
