@@ -144,6 +144,8 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(
       new_data_ptr.release_context();
       new_data_ptr_opt = c10::DataPtr(
           new_data_ptr.get(), ctx, c10::impl::cow::cow_deleter, dst_device);
+      // KURT: I'm not sure yet, but I might have to register CPU-to-MPS data
+      // pointer into `MPSHeapAllocatorImpl::m_allocated_buffers`?
     }
   }
 

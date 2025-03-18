@@ -686,7 +686,11 @@ void MPSHeapAllocatorImpl::setBufferShape(const void* ptr, const IntArrayRef& sh
   // KURT: For some reason, this is failing for buffers created in
   // `clone_from_cpu`. Need to figure out why. Apparently, when we cloned the
   // CPU data to MPS, the MPS buffer either did not get added to
-  // `m_allocated_buffers` or is getting removed from it before it should.
+  // `m_allocated_buffers` or is getting removed from it before it should.  Aha,
+  // my previous assessment was wrong. This failure happens during a call to
+  // `as_strided`, where the input is the COW MPS tensor that views CPU data.
+  // Of course the buffer block is not found by the MPS allocator, because it
+  // was allocated by the CPU allocator.
   TORCH_INTERNAL_ASSERT(buffer_block, "failed to find the buffer ", ptr);
   // note that the IntArrayRef doesn't own the underlying data, and the backing
   // memory for shape data must persist as long as the buffer is in use.
