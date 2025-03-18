@@ -2617,7 +2617,7 @@ def _collective_estimator(
     device: Optional[torch.device] = None,
 ):
     """
-    Context manager used to coalesce collectives or P2P operations when possible.
+    Context manager used to estimate time of collectives.
 
     Args:
         group (`ProcessGroup`, optional): The process group to work on. If None,
@@ -2632,6 +2632,10 @@ def _collective_estimator(
         >>>     for i in range(num_colls):
         >>>         dist.all_reduce(tensors[i])
         >>> # estimate time is stored in cm.estimated_time
+
+    .. warning::
+       :func:`_collective_estimator` currently only support NCCL backend but it can
+       easily be extended to other backends.
     """
     group = group or _get_default_group()
     device = device or _get_pg_default_device(group)
