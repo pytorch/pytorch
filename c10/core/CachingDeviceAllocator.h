@@ -2,9 +2,6 @@
 
 #include <c10/core/Allocator.h>
 #include <c10/core/Stream.h>
-#include <c10/util/irange.h>
-
-#include <array>
 
 namespace c10::CachingDeviceAllocator {
 
@@ -74,8 +71,7 @@ class CachingDeviceAllocatorInterface : public c10::Allocator {
   virtual bool isEnabled() const = 0;
   virtual void* getBaseAllocation(void* ptr, size_t* size) = 0;
   virtual void recordStream(const DataPtr&, c10::Stream stream) = 0;
-  virtual c10::CachingDeviceAllocator::DeviceStats getDeviceStats(
-      c10::DeviceIndex device) = 0;
+  virtual DeviceStats getDeviceStats(c10::DeviceIndex device) = 0;
   virtual void resetAccumulatedStats(c10::DeviceIndex device) = 0;
   virtual void resetPeakStats(c10::DeviceIndex device) = 0;
   virtual std::string name() = 0;
