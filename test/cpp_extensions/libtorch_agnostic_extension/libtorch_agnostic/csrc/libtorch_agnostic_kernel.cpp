@@ -214,7 +214,7 @@ void boxed_stack_my_ones_like(StableIValue* stack, uint64_t num_args, uint64_t n
   RAIIATH t(to<AtenTensorHandle>(stack[0]));
   StableIValue device = stack[1];
 
-  RAIIATH raiiath_res = my_ones_like(std::move(t), device);
+  RAIIATH raiiath_res = stack_my_ones_like(std::move(t), device);
   stack[0] = from(raiiath_res.release());
 }
 
