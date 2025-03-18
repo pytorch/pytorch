@@ -59,7 +59,7 @@ struct DeviceStats {
   int64_t max_split_size = 0;
 };
 
-class CachingDeviceAllocatorInterface : public c10::Allocator {
+class C10_API DeviceAllocatorInterface : public c10::Allocator {
  public:
   virtual void* raw_alloc(size_t nbytes) = 0;
   virtual void* raw_alloc_with_stream(size_t nbytes, c10::Stream stream) = 0;
@@ -75,6 +75,62 @@ class CachingDeviceAllocatorInterface : public c10::Allocator {
   virtual void resetAccumulatedStats(c10::DeviceIndex device) = 0;
   virtual void resetPeakStats(c10::DeviceIndex device) = 0;
   virtual std::string name() = 0;
+};
+
+template <typename T>
+struct CachingDeviceAllocatorInterface : public at::DeviceAllocatorInterface {
+  CachingDeviceAllocatorInterface() : impl_(std::make_unique<T>()) {}
+
+  at::DataPtr allocate(size_t size) override {
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for allocate");
+  }
+
+  void free(void* ctx) {
+    impl_->free(ctx);
+  }
+
+  template <typename S>
+  bool record_event(void* ptr, void* ctx, S stream) {
+    return impl_->record_event(ptr, ctx, stream);
+  }
+
+  void empty_cache() {
+    impl_->empty_cache();
+  }
+
+  void copy_data(void* dest, const void* src, std::size_t count)
+      const override {
+    impl_->copy_data(dest, src, count);
+  }
+
+  DeviceStats getDeviceStats() {
+    return impl_->getStats();
+  }
+
+  void resetAccumulatedStats() {
+    impl_->resetAccumulatedStats();
+  }
+
+  void resetPeakStats() {
+    impl_->resetPeakStats();
+  }
+
+  std::unique_ptr<T> impl_;
+};
+
+/**
+ * Note [DeviceAllocator design]
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ *
+ */
+
+template <typename S, typename E, typename B = HostBlock<S>>
+struct CachingDeviceAllocatorImpl {
+  virtual ~CachingDeviceAllocatorImpl() = default;
+
+ public:
+ private:
+ protected:
 };
 
 } // namespace c10::CachingDeviceAllocator
