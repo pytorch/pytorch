@@ -18,10 +18,11 @@ import inspect
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 #
 import os
-import sys
+
 # import sys
 import pkgutil
 import re
+import sys
 from os import path
 
 # source code directory, relative to this file, for sphinx-autobuild
@@ -41,6 +42,7 @@ RELEASE = os.environ.get("RELEASE", False)
 
 sys.path.insert(0, os.path.abspath(".."))
 import pytorch_sphinx_theme2
+
 
 html_theme = "pytorch_sphinx_theme2"
 html_theme_path = [pytorch_sphinx_theme2.get_html_theme_path()]
@@ -132,54 +134,54 @@ html_theme_options = {
         "image_light": "None",
     },
     "icon_links": [
-          {
-              "name": "X",
-              "url": "https://x.com/PyTorch",
-              "icon": "fa-brands fa-x-twitter",
-              "type": "fontawesome",
-          },
-          {
-              "name": "GitHub",
-              "url": "https://github.com/pytorch/pytorch",
-              "icon": "fa-brands fa-github",
-              "type": "fontawesome",
-          },
-          {
-              "name": "Discourse",
-              "url": "https://dev-discuss.pytorch.org/",
-              "icon": "fa-brands fa-discourse",
-              "type": "fontawesome",
-          },
-          {
-              "name": "PyPi",
-              "url": "https://pypi.org/project/torch/",
-              "icon": "fa-brands fa-python",
-              "type": "fontawesome",
-          },
+        {
+            "name": "X",
+            "url": "https://x.com/PyTorch",
+            "icon": "fa-brands fa-x-twitter",
+            "type": "fontawesome",
+        },
+        {
+            "name": "GitHub",
+            "url": "https://github.com/pytorch/pytorch",
+            "icon": "fa-brands fa-github",
+            "type": "fontawesome",
+        },
+        {
+            "name": "Discourse",
+            "url": "https://dev-discuss.pytorch.org/",
+            "icon": "fa-brands fa-discourse",
+            "type": "fontawesome",
+        },
+        {
+            "name": "PyPi",
+            "url": "https://pypi.org/project/torch/",
+            "icon": "fa-brands fa-python",
+            "type": "fontawesome",
+        },
     ],
     "language_bindings_links": [
-          {
-              "url": "https://pytorch.org/docs/stable/cpp_index.html",
-              "name": "C++",
-          },
-          {
-              "url": "https://pytorch.org/javadoc/",
-              "name": "Javadoc",
-          },
-          {
-              "url": "https://github.com/pytorch/multipy",
-              "name": "torch.multiply",
-          },
+        {
+            "url": "https://pytorch.org/docs/stable/cpp_index.html",
+            "name": "C++",
+        },
+        {
+            "url": "https://pytorch.org/javadoc/",
+            "name": "Javadoc",
+        },
+        {
+            "url": "https://github.com/pytorch/multipy",
+            "name": "torch.multiply",
+        },
     ],
     "external_links": [
-          {
-              "name": "Tutorials",
-              "url": "https://pytorch.org/tutorials/",
-          },
+        {
+            "name": "Tutorials",
+            "url": "https://pytorch.org/tutorials/",
+        },
     ],
     "switcher": {
-          "json_url": "https://raw.githubusercontent.com/svekars/doc-test/refs/heads/gh-pages-test/versions.json",
-          "version_match": switcher_version,
+        "json_url": "https://raw.githubusercontent.com/svekars/doc-test/refs/heads/gh-pages-test/versions.json",
+        "version_match": switcher_version,
     },
     "pytorch_project": "docs",
 }
@@ -207,7 +209,7 @@ napoleon_use_ivar = True
 templates_path = [
     "_templates",
     os.path.join(os.path.dirname(pytorch_sphinx_theme2.__file__), "templates"),
-    ]
+]
 
 # TODO: document these and remove them from here.
 
@@ -3483,6 +3485,7 @@ source_suffix = ".rst"
 # The master toctree document.
 master_doc = "index"
 
+
 # Use the linkcode extension to override [SOURCE] links to point
 # to the repo. Use the torch_version variable defined above to
 # determine link
@@ -3598,7 +3601,6 @@ html_theme_options = {
     "display_version": True,
     "analytics_id": "GTM-T8XT4PS",
 }
-
 
 
 # Add any paths that contain custom static files (such as style sheets) here,
@@ -3735,9 +3737,6 @@ def setup(app):
     # NOTE: in Sphinx 1.8+ `html_css_files` is an official configuration value
     # and can be moved outside of this function (and the setup(app) function
     # can be deleted).
-    html_css_files = [
-        "https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.css"
-    ]
 
     app.connect("build-finished", coverage_post_process)
     app.connect("autodoc-process-docstring", process_docstring)

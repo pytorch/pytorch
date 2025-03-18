@@ -26,7 +26,7 @@ import functorch
 RELEASE = os.environ.get("RELEASE", False)
 
 
-import pytorch_sphinx_theme
+import pytorch_sphinx_theme2
 
 
 # -- General configuration ------------------------------------------------
@@ -161,7 +161,7 @@ autodoc_docstring_signature = True
 #
 #
 
-html_theme = "pytorch_sphinx_theme"
+html_theme = "pytorch_sphinx_theme2"
 html_theme_path = [pytorch_sphinx_theme.get_html_theme_path()]
 
 # Theme options are theme-specific and customize the look and feel of a theme
