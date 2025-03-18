@@ -23,6 +23,7 @@ def get_field(csv, case: str, field: str):
 def check_perf(actual_csv, expected_csv, expected_filename, threshold):
     failed = []
     improved = []
+    baseline_not_found = []
 
     actual_csv = actual_csv[~actual_csv["Case Name"].isin(set(SKIP_TEST_LISTS))]
 
@@ -31,11 +32,9 @@ def check_perf(actual_csv, expected_csv, expected_filename, threshold):
         expected_perf = get_field(expected_csv, case, "Execution Time")
 
         if expected_perf is None:
-            status = "FAIL"
-            print(
-                f"\n{case:34}  {status:9} Not Found. if it is expected, \
-                you can update in {expected_filename} to reflect the new module. "
-            )
+            status = "Baseline Not Found"
+            print(f"{case:34}  {status}")
+            baseline_not_found.append(case)
             continue
 
         speed_up = expected_perf / perf
@@ -53,7 +52,7 @@ def check_perf(actual_csv, expected_csv, expected_filename, threshold):
         print(f"{case:34}  {status:9} perf={perf}, expected={expected_perf}")
 
     msg = ""
-    if failed or improved:
+    if failed or improved or baseline_not_found:
         if failed:
             msg += textwrap.dedent(
                 f"""
@@ -70,12 +69,22 @@ def check_perf(actual_csv, expected_csv, expected_filename, threshold):
 
             """
             )
+
+        if baseline_not_found:
+            msg += textwrap.dedent(
+                f"""
+            Baseline Not Found: {len(baseline_not_found)} models don't have the baseline data:
+                {" ".join(baseline_not_found)}
+
+            """
+            )
+
         msg += textwrap.dedent(
             f"""
         If this change is expected, you can update `{expected_filename}` to reflect the new baseline.
         """
         )
-    return failed or improved, msg
+    return failed or improved or baseline_not_found, msg
 
 
 def main():
