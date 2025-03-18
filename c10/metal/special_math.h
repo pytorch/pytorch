@@ -1230,17 +1230,10 @@ inline float modified_bessel_i1_forward(T x) {
     for (uint8_t index = 1; index < 29; index++) {
       p = q;
       q = a;
-      a = ((::metal::fabs(x) / T(2.0)) - T(2.0)) * q - p + A[index];
+      a = (.5 * ::metal::fabs(x) - 2.0) * q - p + A[index];
     }
 
-    if (x < T(0.0)) {
-      return -(
-          T(0.5) * (a - p) * ::metal::fabs(x) *
-          ::metal::precise::exp(::metal::fabs(x)));
-    }
-
-    return T(0.5) * (a - p) * ::metal::fabs(x) *
-        ::metal::precise::exp(::metal::fabs(x));
+    return .5 * (a - p) * x * ::metal::precise::exp(::metal::fabs(x));
   }
 
   float b = B[0];
@@ -1248,16 +1241,16 @@ inline float modified_bessel_i1_forward(T x) {
   for (uint8_t index = 1; index < 25; index++) {
     p = q;
     q = b;
-    b = (T(32.0) / ::metal::fabs(x) - T(2.0)) * q - p + B[index];
+    b = (32.0 / ::metal::fabs(x) - 2.0) * q - p + B[index];
   }
 
-  if (x < T(0.0)) {
+  if (x < 0.0) {
     return -(
-        ::metal::precise::exp(::metal::fabs(x)) * (T(0.5) * (b - p)) /
+        ::metal::precise::exp(::metal::fabs(x)) * (0.5 * (b - p)) /
         ::metal::precise::sqrt(::metal::fabs(x)));
   }
 
-  return ::metal::precise::exp(::metal::fabs(x)) * (T(0.5) * (b - p)) /
+  return ::metal::precise::exp(::metal::fabs(x)) * (0.5 * (b - p)) /
       ::metal::precise::sqrt(::metal::fabs(x));
 } // modified_bessel_i1_forward(T x)
 
