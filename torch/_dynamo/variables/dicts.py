@@ -136,9 +136,11 @@ class ConstDictVariable(VariableTracker):
                 # Access the underlying value inside the referent_vt for the key representation
                 Hashable = ConstDictVariable._HashableTracker
                 return Hashable(self.vt.referent_vt).underlying_value
-            elif isinstance(
-                self.vt, variables.UserDefinedObjectVariable
-            ) and isinstance(self.vt.value, t_Hashable):
+            elif (
+                isinstance(self.vt, variables.UserDefinedObjectVariable)
+                and isinstance(self.vt.value, t_Hashable)
+                and self.vt.value.__class__.__hash__ is int.__hash__
+            ):
                 # The re module in Python 3.13+ has a dictionary (_cache2) with
                 # an object as key (_ZeroSentinel):
                 # python test/dynamo/test_unittest.py CPythonTestLongMessage.test_baseAssertEqual

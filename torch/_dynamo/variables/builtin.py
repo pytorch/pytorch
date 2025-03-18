@@ -10,6 +10,7 @@ import operator
 import sys
 import types
 import typing
+import unittest
 from collections import defaultdict, OrderedDict
 from collections.abc import KeysView, Sequence
 from typing import Callable, TYPE_CHECKING, Union
@@ -1872,13 +1873,10 @@ class BuiltinVariable(VariableTracker):
                 variables.UserDefinedObjectVariable,
             ),
         ):
-            if (
-                isinstance(obj, variables.UserDefinedObjectVariable)
-                and (mod := inspect.getmodule(obj.value))
-                and (mod_name := mod.__name__)
-                and mod_name in ("_pytest.unittest", "unittest")
+            if isinstance(obj, variables.UserDefinedObjectVariable) and issubclass(
+                obj.value.__class__, unittest.TestCase
             ):
-                if not config.enable_trace_unittest:
+                if not config.enable_trace_unittest and name in dir(unittest.TestCase):
                     unimplemented_v2(
                         gb_type="Attempted to call function marked as skipped",
                         context=f"function: unittest.TestCase.{name}",
