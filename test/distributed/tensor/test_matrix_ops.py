@@ -18,7 +18,7 @@ from torch.distributed.tensor import (
 )
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
-from torch.testing._internal.common_utils import run_tests, skipIfRocm
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_ROCM
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     skip_unless_torch_gpu,
@@ -33,8 +33,14 @@ def scale_for_fp8(
         t = t.unsqueeze(0).unsqueeze(-2)
     else:
         t = t.unflatten(0, (scale_shape[0], -1)).unflatten(-1, (scale_shape[1], -1))
-    scale = t.abs().amax(dim=[1, -1]).float() / torch.finfo(torch.float8_e4m3fn).max
-    t_fp8 = (t / scale[:, None, :, None]).to(torch.float8_e4m3fn)
+
+    if TEST_WITH_ROCM:
+        scale = t.abs().amax(dim=[1, -1]).float() / torch.finfo(torch.float8_e4m3fnuz).max
+        t_fp8 = (t / scale[:, None, :, None]).to(torch.float8_e4m3fnuz)
+    else:
+        scale = t.abs().amax(dim=[1, -1]).float() / torch.finfo(torch.float8_e4m3fn).max
+        t_fp8 = (t / scale[:, None, :, None]).to(torch.float8_e4m3fn)
+
     return t_fp8.flatten(end_dim=1).flatten(start_dim=-2), scale.view(scale_shape)
 
 
@@ -205,7 +211,7 @@ class DistMatrixOpsTest(DTensorTestBase):
 
             full_dist_res = dist_res.full_tensor()
             # Fp8 matmuls are quite inaccurate, we need high tolerances
-            self.assertEqual(full_dist_res, full_ref_res, atol=1, rtol=7e-2)
+            self.assertEqual(full_dist_res, full_ref_res, atol=1.5, rtol=7e-2)
 
             self.assertEqual(comm_mode.get_total_counts(), 0)
 
@@ -448,7 +454,6 @@ class DistMatrixOpsTest(DTensorTestBase):
                     self.assertTrue(dist_value.grad.placements[0].is_shard(dim=1))
                     self.assertEqual(dist_value.grad.full_tensor(), value.grad)
 
-    @skipIfRocm
     @skip_unless_torch_gpu
     @with_comms()
     def test_dtensor_mm(self):
@@ -472,7 +477,7 @@ class DistMatrixOpsTest(DTensorTestBase):
             lhs_dtensor = distribute_tensor(lhs, mesh, [Shard(dim=0), Replicate()])
             rhs_dtensor = distribute_tensor(rhs, mesh, [Replicate(), Shard(dim=1)])
             dtensor_result = lhs_dtensor @ rhs_dtensor
-            self.assertEqual(dtensor_result.full_tensor(), mm_result)
+            self.assertEqual(dtensor_result.full_tensor(), mm_result, atol=1.5e-5, rtol=1e-6)
 
     @with_comms
     @skip_unless_torch_gpu

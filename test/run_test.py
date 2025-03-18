@@ -172,19 +172,10 @@ ROCM_BLOCKLIST = [
     "distributed/rpc/test_tensorpipe_agent",
     "distributed/rpc/test_share_memory",
     "distributed/rpc/cuda/test_tensorpipe_agent",
-    "distributed/_shard/checkpoint/test_checkpoint"
-    "distributed/_shard/checkpoint/test_file_system_checkpoint"
-    "distributed/_shard/sharding_spec/test_sharding_spec",
-    "distributed/_shard/sharded_tensor/ops/test_embedding",
-    "distributed/_shard/sharded_tensor/ops/test_embedding_bag",
-    "distributed/_shard/sharded_tensor/ops/test_binary_cmp",
-    "distributed/_shard/sharded_tensor/ops/test_init",
-    "distributed/_shard/sharded_optim/test_sharded_optim",
     "test_determination",
     "test_jit_legacy",
     "test_cuda_nvml_based_avail",
     "test_jit_cuda_fuser",
-    "distributed/tensor/test_attention",
 ]
 
 S390X_BLOCKLIST = [
