@@ -308,6 +308,6 @@ def load_package(
 
     path = os.fspath(path)  # AOTIModelPackageLoader expects (str, str)
     loader = torch._C._aoti.AOTIModelPackageLoader(
-        path, model_name, run_single_threaded
+        path, model_name, run_single_threaded, num_runners
     )  # type: ignore[call-arg]
     return AOTICompiledModel(loader)

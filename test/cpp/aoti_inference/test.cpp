@@ -12,6 +12,9 @@
 
 #include <torch/csrc/inductor/aoti_package/model_package_loader.h>
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cpu.h>
+#if defined(USE_CUDA)
+#include <cuda_runtime.h>
+#endif
 #if defined(USE_CUDA) || defined(USE_ROCM)
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cuda.h>
 #endif
@@ -324,6 +327,93 @@ void test_aoti_double_buffering_with_tensor_constants() {
   ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
 }
 
+#if defined(USE_CUDA)
+void test_aoti_free_buffer() {
+  torch::NoGradGuard no_grad;
+
+  std::string data_path =
+      (std::filesystem::path(
+           STRINGIZE(CMAKE_CURRENT_BINARY_DIR)) / "large_data.pt")
+           .string();
+
+  // Memory information variable
+  cudaError_t cudaStatus;
+  size_t DATASIZE = 128 * 1024 * 1024; // We have 128MB of weight data.
+
+  torch::jit::script::Module data_loader = torch::jit::load(data_path);
+  std::string path_attr = "model_so_path";
+  std::string inputs_attr = "inputs";
+  std::string outputs_attr = "outputs";
+  std::string weights_attr = "w_pre";
+  std::string add_attr = "w_add";
+  const auto& model_so_path = data_loader.attr(path_attr.c_str()).toStringRef();
+  auto input_tensors =
+      data_loader.attr(inputs_attr.c_str()).toTensorList().vec();
+  const auto& ref_output_tensors =
+      data_loader.attr(outputs_attr.c_str()).toTensorList().vec();
+
+  const auto& weight_tensors =
+      data_loader.attr(weights_attr.c_str()).toTensor();
+  const auto& add_tensors = data_loader.attr(add_attr.c_str()).toTensor();
+
+  torch::inductor::TensorConstantMap rand_map, real_map;
+  rand_map.emplace("L__self___w_pre", new at::Tensor(at::randn({4096, 4096})));
+  rand_map.emplace("L__self___w_add", new at::Tensor(at::randn({4096, 4096})));
+  real_map.emplace("L__self___w_pre", new at::Tensor(weight_tensors));
+  real_map.emplace("L__self___w_add", new at::Tensor(add_tensors));
+
+  std::unique_ptr<torch::inductor::AOTIModelContainerRunner> runner;
+  runner = std::make_unique<torch::inductor::AOTIModelContainerRunnerCuda>(
+      model_so_path);
+
+  // We extract the initial memory here.
+  size_t initMemory = 0;
+  size_t totalMemory = 0;
+  cudaStatus = cudaMemGetInfo(&initMemory, &totalMemory);
+  if (cudaStatus != cudaSuccess) {
+    throw std::runtime_error("cudaMemGetInfo failed!");
+  }
+
+  // We update inactive buffer, this should create one copy (128MB)
+  runner->update_inactive_constant_buffer(real_map);
+  size_t updateMemory2 = 0;
+  cudaStatus = cudaMemGetInfo(&updateMemory2, &totalMemory);
+  if (cudaStatus != cudaSuccess) {
+    throw std::runtime_error("cudaMemGetInfo failed!");
+  }
+  ASSERT_EQ(initMemory - DATASIZE, updateMemory2);
+
+  // We swap and free the inactive buffer.
+  runner->swap_constant_buffer();
+  runner->free_inactive_constant_buffer();
+  size_t postFreeMemory = 0;
+  cudaStatus = cudaMemGetInfo(&postFreeMemory, &totalMemory);
+  if (cudaStatus != cudaSuccess) {
+    throw std::runtime_error("cudaMemGetInfo failed!");
+  }
+  // We should only have one set of buffer (#2), memory used should equal
+  // initial memory.
+  ASSERT_EQ(initMemory, postFreeMemory);
+
+  // We update random weights to buffer #1.
+  runner->update_inactive_constant_buffer(rand_map);
+  size_t updateMemory1 = 0;
+  cudaStatus = cudaMemGetInfo(&updateMemory1, &totalMemory);
+  if (cudaStatus != cudaSuccess) {
+    throw std::runtime_error("cudaMemGetInfo failed!");
+  }
+  ASSERT_EQ(initMemory - DATASIZE, updateMemory1);
+
+  // Test if we directly free the buffer #1.
+  runner->free_inactive_constant_buffer();
+  size_t finalMemory = 0;
+  cudaStatus = cudaMemGetInfo(&finalMemory, &totalMemory);
+  if (cudaStatus != cudaSuccess) {
+    throw std::runtime_error("cudaMemGetInfo failed!");
+  }
+  ASSERT_EQ(initMemory, finalMemory);
+}
+
 class ThreadPool {
  private:
   struct Task {
@@ -467,8 +557,7 @@ void test_multi_cuda_streams(const std::string& device) {
 #endif
 } // namespace
 
-namespace torch {
-namespace aot_inductor {
+namespace torch::aot_inductor {
 
 TEST(AotInductorTest, BasicTestCpu) {
   test_aoti("cpu", false);
@@ -516,10 +605,13 @@ TEST(AotInductorTest, UpdateInactiveConstantsWithTensorConstantsCuda) {
   test_aoti_double_buffering_with_tensor_constants();
 }
 
+TEST(AotInductorTest, FreeInactiveConstantBufferCuda) {
+  test_aoti_free_buffer();
+}
+
 TEST(AotInductorTest, MultiStreamTestCuda) {
   test_multi_cuda_streams("cuda");
 }
 #endif
 
-} // namespace aot_inductor
-} // namespace torch
+} // namespace torch::aot_inductor
