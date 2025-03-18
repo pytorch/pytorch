@@ -2528,7 +2528,7 @@ class InstructionTranslatorBase(
         if sys.version_info >= (3, 11):
             # MAKE_FUNCTION behavior actually changed in 3.11, see
             # https://github.com/python/cpython/pull/93189/
-            assert hasattr(code.value, "co_name")  # type: ignore[attr-defined]
+            assert hasattr(code.value, "co_qualname")  # type: ignore[attr-defined]
             fn_name = ConstantVariable.create(value=code.value.co_name)  # type: ignore[attr-defined]
         defaults = None
         closure = None
