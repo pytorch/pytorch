@@ -100,8 +100,7 @@ def get_tunableop_validators():
 def find_tunableop_result(results, OpSig, ParamSig):
     assert isinstance(results, tuple)
     for inner_tuple in results:
-        if OpSig in inner_tuple:
-            if ParamSig in inner_tuple:
+        if OpSig in inner_tuple and ParamSig in inner_tuple:
                 return inner_tuple
     return None
 
