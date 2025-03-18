@@ -38,9 +38,8 @@ struct MTIAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   }
 
   void setDevice(c10::Device d) const override {
-    c10::Device current_device = getDevice();
-    if (current_device.index() != d.index()) {
-      current_device = d;
+    if (getDevice().index() != d.index()) {
+      current_device = d.index();
     }
   }
   void uncheckedSetDevice(c10::Device d) const noexcept override {
