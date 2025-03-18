@@ -6,7 +6,8 @@ import os
 import contextlib
 import torch._logging
 import torch._logging._internal
-from typing import Callable, ContextManager, List, Tuple
+from contextlib import AbstractContextManager
+from typing import Callable
 from torch._dynamo.utils import LazyString
 from torch._inductor import config as inductor_config
 import logging
@@ -214,7 +215,7 @@ def logs_to_string(module, log_option):
     return log_stream, ctx_manager
 
 
-def multiple_logs_to_string(module: str, *log_options: str) -> Tuple[List[io.StringIO], Callable[[], ContextManager[None]]]:
+def multiple_logs_to_string(module: str, *log_options: str) -> tuple[list[io.StringIO], Callable[[], AbstractContextManager[None]]]:
     """Example:
     multiple_logs_to_string("torch._inductor.compile_fx", "pre_grad_graphs", "post_grad_graphs")
     returns the output of TORCH_LOGS="pre_graph_graphs, post_grad_graphs" from the
@@ -234,7 +235,7 @@ def multiple_logs_to_string(module: str, *log_options: str) -> Tuple[List[io.Str
             for logger, handler in zip(loggers, handlers):
                 logger.removeHandler(handler)
 
-    def ctx_manager() -> ContextManager[None]:
+    def ctx_manager() -> AbstractContextManager[None]:
         exit_stack = log_settings(", ".join(log_options))
         exit_stack.enter_context(tmp_redirect_logs())
         return exit_stack  # type: ignore[return-value]

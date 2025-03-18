@@ -319,9 +319,9 @@ def _handle_getitem_node(
     assert len(node.all_input_nodes) == 1
     source = node.all_input_nodes[0]
     source_outputs = node_name_to_values[source.name]
-    assert isinstance(
-        source_outputs, Sequence
-    ), f"Expected {source.name} to output sequence, got {node_name_to_values[source.name]}"
+    assert isinstance(source_outputs, Sequence), (
+        f"Expected {source.name} to output sequence, got {node_name_to_values[source.name]}"
+    )
     index = typing.cast(int, node.args[1])
     value = source_outputs[index]
     # Save the getitem value to the values mapping to in case
@@ -644,9 +644,9 @@ def _handle_output_node(
     # for example, a subgraph has multiple outputs. We flatten them all as ONNX graph outputs
     for output in node.args[0]:  # type: ignore[index,union-attr]
         output_value_name = output.name  # type: ignore[union-attr]
-        assert isinstance(
-            output_value_name, str
-        ), f"Bug: Expected {output_value_name!r} to be a string"
+        assert isinstance(output_value_name, str), (
+            f"Bug: Expected {output_value_name!r} to be a string"
+        )
         values = node_name_to_values[output_value_name]
         if isinstance(values, Sequence):
             graph_like.outputs.extend(values)
@@ -749,9 +749,9 @@ def _get_inputs_and_attributes(
         return inputs, {}, [], [node.name]  # type: ignore[return-value]
 
     # The target should be an ATen operator now
-    assert hasattr(
-        node.target, "_schema"
-    ), f"The target should be an ATen operator now, but node target {node.target} has no schema"
+    assert hasattr(node.target, "_schema"), (
+        f"The target should be an ATen operator now, but node target {node.target} has no schema"
+    )
     node_schema: torch.FunctionSchema = node.target._schema
 
     # This function assumes the order of arguments in FX op is the
@@ -1045,9 +1045,9 @@ def _exported_program_to_onnx_program(
         persistent = spec.persistent
         value = values[value_name]
 
-        assert not isinstance(
-            value, Sequence
-        ), f"Input '{value_name}' should not be a sequence. This is unexpected."
+        assert not isinstance(value, Sequence), (
+            f"Input '{value_name}' should not be a sequence. This is unexpected."
+        )
 
         value.metadata_props["pkg.torch.export.graph_signature.InputSpec.kind"] = (
             input_kind.name
@@ -1223,6 +1223,7 @@ def export(
     failed_results: list[_capture_strategies.Result] = []
 
     program: torch.export.ExportedProgram | None = None
+    capture_strategy: str | None = None
     # Step 1: Export the model with torch.export.export if the model is not already an ExportedProgram
     if isinstance(model, torch.export.ExportedProgram):
         # We know the model is already exported program, so the args, kwargs, and dynamic_shapes
@@ -1258,6 +1259,7 @@ def export(
                 failed_results.append(result)
 
         assert result is not None
+        capture_strategy = result.strategy
         if result.exported_program is None:
             # If all strategies fail, produce an error report and raise the first error
             profile_result = _maybe_stop_profiler_and_get_result(profiler)
@@ -1371,6 +1373,8 @@ def export(
         onnx_program = _exported_program_to_onnx_program(
             decomposed_program, registry=registry
         )
+        # Record the strategy used for getting the exported program for unit test assertions
+        onnx_program._capture_strategy = capture_strategy
 
         # Run the ONNX passes
         if input_names:
@@ -1398,7 +1402,7 @@ def export(
                 _reporting.create_onnx_export_report(
                     report_path,
                     f"{_format_exceptions_for_all_strategies(failed_results)}\n\n{_format_exception(e)}",
-                    program,
+                    decomposed_program,
                     decomp_comparison=_reporting.format_decomp_comparison(
                         pre_decomp_unique_ops, post_decomp_unique_ops
                     ),
