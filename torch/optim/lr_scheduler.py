@@ -75,6 +75,7 @@ class LRScheduler:
     r"""Adjusts the learning rate during optimization."""
 
     _get_lr_called_within_step: bool = False
+    _is_initial: bool = False
 
     def __init__(
         self,
@@ -134,7 +135,8 @@ class LRScheduler:
     def _initial_step(self):
         """Initialize step counts and perform a step."""
         self._step_count = 0
-        self._update_lr(self.last_epoch)
+        with _initial_mode(self):
+            self.step()
 
     def state_dict(self):
         """Return the state of the scheduler as a :class:`dict`.
@@ -188,9 +190,7 @@ class LRScheduler:
                     "https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate",
                     UserWarning,
                 )
-        self._update_lr(epoch)
 
-    def _update_lr(self, epoch: Optional[int] = None):
         self._step_count += 1
 
         with _enable_get_lr_call(self):
@@ -200,7 +200,7 @@ class LRScheduler:
             else:
                 warnings.warn(EPOCH_DEPRECATION_WARNING, UserWarning)
                 self.last_epoch = epoch
-                if self.last_epoch != -1 and hasattr(self, "_get_closed_form_lr"):
+                if hasattr(self, "_get_closed_form_lr"):
                     values = cast(list[float], self._get_closed_form_lr())
                 else:
                     values = self.get_lr()
@@ -242,6 +242,17 @@ class _enable_get_lr_call:
 
     def __exit__(self, type, value, traceback):
         self.o._get_lr_called_within_step = False
+
+
+class _initial_mode:
+    def __init__(self, o: LRScheduler):
+        self.o = o
+
+    def __enter__(self):
+        self.o._is_initial = True
+
+    def __exit__(self, type, value, traceback):
+        self.o._is_initial = False
 
 
 class LambdaLR(LRScheduler):
@@ -727,7 +738,7 @@ class ExponentialLR(LRScheduler):
         """Compute the learning rate of each parameter group."""
         _warn_get_lr_called_within_step(self)
 
-        if self.last_epoch == 0:
+        if self._is_initial:
             return [group["lr"] for group in self.optimizer.param_groups]
         return [group["lr"] * self.gamma for group in self.optimizer.param_groups]
 
