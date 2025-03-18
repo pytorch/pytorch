@@ -889,7 +889,7 @@ struct TORCH_API MPSAllocator final : public IMPSAllocator {
     at::detail::getMPSHooks().deviceSynchronize();
     void* dest = new_data.mutable_get();
     std::cout << "[MPSAllocator::clone_from_cpu] dest: " << dest << std::endl;
-    if (_getAllocImpl().get_allocated_buffer_block(ptr)) {
+    if (_getAllocImpl().get_allocated_buffer_block(dest)) {
       std::cout << "[MPSAllocator::clone_from_cpu] found allocated buffer block" << std::endl;
     } else {
       std::cout << "[MPSAllocator::clone_from_cpu] did not find allocated buffer block????" << std::endl;
