@@ -39,7 +39,7 @@ IPython==8.12.0
 #Description: This is used to generate PyTorch functorch docs
 #Pinned versions: 8.12.0
 
-myst-nb==0.17.2
+myst-nb==1.2.0
 #Description: This is used to generate PyTorch functorch docs
 #Pinned versions: 0.13.2
 
