@@ -674,6 +674,11 @@ ssize_t MPSHeapAllocatorImpl::getUnalignedBufferSize(const void* ptr) {
   return -1;
 }
 
+bool MPSHeapAllocatorImpl::hasBuffer(const void* ptr) {
+  BufferBlock* buffer_block = get_allocated_buffer_block(ptr);
+  return buffer_block;
+}
+
 void MPSHeapAllocatorImpl::setBufferShape(const void* ptr, const IntArrayRef& shape) {
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
@@ -889,7 +894,7 @@ struct TORCH_API MPSAllocator final : public IMPSAllocator {
     at::detail::getMPSHooks().deviceSynchronize();
     void* dest = new_data.mutable_get();
     std::cout << "[MPSAllocator::clone_from_cpu] dest: " << dest << std::endl;
-    if (_getAllocImpl().get_allocated_buffer_block(dest)) {
+    if (_getAllocImpl().hasBuffer(dest)) {
       std::cout << "[MPSAllocator::clone_from_cpu] found allocated buffer block" << std::endl;
     } else {
       std::cout << "[MPSAllocator::clone_from_cpu] did not find allocated buffer block????" << std::endl;
