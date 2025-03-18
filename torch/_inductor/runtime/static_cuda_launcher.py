@@ -6,7 +6,7 @@ from .triton_compat import ASTSource, CompiledKernel
 
 
 MAX_SHARED_MEMORY = 49152
-MAX_ARGS = 50
+MAX_ARGS = 120
 
 
 class StaticallyLaunchedCudaKernel:

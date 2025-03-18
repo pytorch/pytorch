@@ -51,7 +51,8 @@ const at::cuda::NVRTC& nvrtc() {
   return at::globalContext().getNVRTC();
 }
 
-#define MAX_ARGS 50
+// 120 max args + 1 for global scratch size
+#define MAX_ARGS 121
 
 CUdeviceptr getPointer(PyObject* obj) {
   CUdeviceptr data_ptr = 0;
@@ -320,7 +321,7 @@ PyObject* launch_kernel(PyObject* self, PyObject* args) {
   auto num_args = std::strlen(argTypes);
   TORCH_CHECK(
       num_args <= MAX_ARGS,
-      "Static Cuda Launcher only supports up to 50 arguments");
+      "Static Cuda Launcher only supports up to 120 arguments");
   return launch_kernel_inner(
       func,
       gridX,
@@ -338,7 +339,7 @@ std::array<PyMethodDef, 2> StaticCudaLauncherMethods = {
         "_launch_kernel",
         (PyCFunction)launch_kernel,
         METH_VARARGS,
-        "Cuda Launcher with up to 50 args"},
+        "Cuda Launcher with up to 120 args"},
     PyMethodDef{
         "_load_kernel",
         (PyCFunction)load_kernel,
