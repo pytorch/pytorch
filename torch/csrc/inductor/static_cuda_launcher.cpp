@@ -51,6 +51,9 @@ const at::cuda::NVRTC& nvrtc() {
   return at::globalContext().getNVRTC();
 }
 
+// 120 max args + 1 for global scratch size
+#define MAX_ARGS 121
+
 CUdeviceptr getPointer(PyObject* obj) {
   CUdeviceptr data_ptr = 0;
   if (THPUtils_checkLong(obj)) {
@@ -62,24 +65,22 @@ CUdeviceptr getPointer(PyObject* obj) {
     return data_ptr;
   }
   auto ptr = THPObjectPtr{PyObject_GetAttrString(obj, "data_ptr")};
-  if (ptr) {
-    auto empty_tuple = THPObjectPtr{PyTuple_New(0)};
-    auto ret = THPObjectPtr{PyObject_Call(ptr, empty_tuple, nullptr)};
-    if (!THPUtils_checkLong(ret)) {
-      throw std::runtime_error(
-          "data_ptr method of Pointer object must return 64-bit int");
-    }
-    data_ptr = THPUtils_unpackUInt64(ret);
-    if (!data_ptr)
-      return data_ptr;
+  TORCH_CHECK(
+      ptr != nullptr,
+      "Pointer argument must be either uint64 or have data_ptr method")
+  auto empty_tuple = THPObjectPtr{PyTuple_New(0)};
+  auto ret = THPObjectPtr{PyObject_Call(ptr, empty_tuple, nullptr)};
+  TORCH_CHECK(
+      THPUtils_checkLong(ret),
+      "data_ptr method of Pointer object must return 64-bit int");
+  data_ptr = THPUtils_unpackUInt64(ret);
+  if (!data_ptr)
+    return data_ptr;
 
-    CUdeviceptr dev_ptr = 0;
-    AT_CUDA_DRIVER_CHECK(nvrtc().cuPointerGetAttribute(
-        &dev_ptr, CU_POINTER_ATTRIBUTE_DEVICE_POINTER, data_ptr));
-    return dev_ptr;
-  }
-  throw std::runtime_error(
-      "Pointer argument must be either uint64 or have data_ptr method");
+  CUdeviceptr dev_ptr = 0;
+  AT_CUDA_DRIVER_CHECK(nvrtc().cuPointerGetAttribute(
+      &dev_ptr, CU_POINTER_ATTRIBUTE_DEVICE_POINTER, data_ptr));
+  return dev_ptr;
 }
 
 CUfunction loadKernel(
@@ -137,7 +138,7 @@ void convertType(F converter, const char* name, void* slot, PyObject* item) {
   if (PyErr_Occurred()) {
     std::string msg = "Failed to convert argument to ";
     msg += name;
-    throw std::runtime_error(msg);
+    TORCH_CHECK(false, msg);
   }
   *reinterpret_cast<FINAL*>(slot) = static_cast<FINAL>(temp);
 }
@@ -151,20 +152,17 @@ void convertType(F converter, const char* name, void* slot, PyObject* item) {
 
   * TODO: Need to handle NvtmDesc here.
 */
-template <size_t NUM_ARGS>
 void parseKernelArgs(
     PyObject* varArgs,
     const char* argTypes,
-    std::array<uint64_t, NUM_ARGS>& argStorage,
-    std::array<void*, NUM_ARGS>& kernelArgs) {
+    uint64_t* argStorage,
+    void** kernelArgs) {
   int numKernelArgs = static_cast<int>(std::strlen(argTypes));
-  if (!PyTuple_Check(varArgs)) {
-    throw std::runtime_error("Kernel arguments must be provided as a tuple");
-  }
-  if (PyTuple_Size(varArgs) != static_cast<Py_ssize_t>(numKernelArgs)) {
-    throw std::runtime_error(
-        "Mismatch between number of argument types and provided arguments");
-  }
+  TORCH_CHECK(
+      PyTuple_Check(varArgs), "Kernel arguments must be provided as a tuple");
+  TORCH_CHECK(
+      PyTuple_Size(varArgs) == static_cast<Py_ssize_t>(numKernelArgs),
+      "Mismatch between number of argument types and provided arguments");
 
   for (int i = 0; i < numKernelArgs; ++i) {
     // Get pointer to the ith 8-byte slot.
@@ -209,8 +207,7 @@ void parseKernelArgs(
         break;
       }
       default:
-        throw std::runtime_error(
-            std::string("Unsupported argument type: ") + typeChar);
+        TORCH_CHECK(false, "Unknown type passed in: ", typeChar);
     }
     // Save the pointer to this slot.
     kernelArgs[i] = slot;
@@ -233,24 +230,18 @@ PyObject* load_kernel(PyObject* self, PyObject* args) {
     return nullptr;
   }
   CUfunction func = nullptr;
-  try {
-    func = loadKernel(filePath, funcName, sharedMemBytes);
-    // Taken from triton/nvidia/backend/driver.c
-    AT_CUDA_DRIVER_CHECK(
-        nvrtc().cuFuncGetAttribute(&n_regs, CU_FUNC_ATTRIBUTE_NUM_REGS, func));
-    AT_CUDA_DRIVER_CHECK(nvrtc().cuFuncGetAttribute(
-        &n_spills, CU_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES, func));
-    n_spills /= 4;
-  } catch (const std::runtime_error& e) {
-    PyErr_SetString(PyExc_RuntimeError, e.what());
-    return nullptr;
-  }
+  func = loadKernel(filePath, funcName, sharedMemBytes);
+  // Taken from triton/nvidia/backend/driver.c
+  AT_CUDA_DRIVER_CHECK(
+      nvrtc().cuFuncGetAttribute(&n_regs, CU_FUNC_ATTRIBUTE_NUM_REGS, func));
+  AT_CUDA_DRIVER_CHECK(nvrtc().cuFuncGetAttribute(
+      &n_spills, CU_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES, func));
+  n_spills /= 4;
   // Return a tuple of CUFunction, n_regs, n_spills
   return Py_BuildValue(
       "(Kii)", reinterpret_cast<uint64_t>(func), n_regs, n_spills);
 }
 
-template <size_t NUM_ARGS>
 PyObject* launch_kernel_inner(
     CUfunction func,
     int gridX,
@@ -261,42 +252,26 @@ PyObject* launch_kernel_inner(
     const char* argTypes,
     PyObject* varArgs,
     cudaStream_t cudaStream) {
-  try {
-    // Launch the kernel
-    // Prepare the arguments for the kernel
-    // We allocate 8 bytes per argument on the stack. We then allocate 8 more
-    // bytes to point to each 8 byte slot in argStorage, and pass that array of
-    // pointers to launchKernel.
-    std::array<uint64_t, NUM_ARGS> argStorage = {};
-    std::array<void*, NUM_ARGS> kernelArgs = {};
-    parseKernelArgs(varArgs, argTypes, argStorage, kernelArgs);
+  // Launch the kernel
+  // Prepare the arguments for the kernel
+  // We allocate 8 bytes per argument on the stack. We then allocate 8 more
+  // bytes to point to each 8 byte slot in argStorage, and pass that array of
+  // pointers to launchKernel.
+  std::array<uint64_t, MAX_ARGS> argStorage = {};
+  std::array<void*, MAX_ARGS> kernelArgs = {};
+  parseKernelArgs(varArgs, argTypes, argStorage.data(), kernelArgs.data());
 
-    launchKernel(
-        func,
-        gridX,
-        gridY,
-        gridZ,
-        numWarps,
-        sharedMemBytes,
-        kernelArgs,
-        cudaStream);
-  } catch (const std::runtime_error& e) {
-    PyErr_SetString(PyExc_RuntimeError, e.what());
-    return nullptr;
-  }
+  launchKernel(
+      func,
+      gridX,
+      gridY,
+      gridZ,
+      numWarps,
+      sharedMemBytes,
+      kernelArgs,
+      cudaStream);
   Py_RETURN_NONE;
 }
-#define LAUNCH_KERNEL(N)  \
-  launch_kernel_inner<N>( \
-      func,               \
-      gridX,              \
-      gridY,              \
-      gridZ,              \
-      numWarps,           \
-      sharedMemBytes,     \
-      argTypes,           \
-      varArgs,            \
-      cudaStream)
 
 /**
 *  Main entrypoint function called at runtime; called like this in python land:
@@ -337,67 +312,26 @@ PyObject* launch_kernel(PyObject* self, PyObject* args) {
           &stream)) {
     return nullptr;
   }
+  if (gridX * gridY * gridZ <= 0) {
+    // No need to do any work if we're outside of grid bounds
+    Py_RETURN_NONE;
+  }
   CUfunction func = reinterpret_cast<CUfunction>(func_ptr); // NOLINT
   cudaStream_t cudaStream = reinterpret_cast<cudaStream_t>(stream); // NOLINT
   auto num_args = std::strlen(argTypes);
-  // Support up to 25 args by default
-  // We use a templated function here to avoid heap allocations for the
-  // argument.
-  switch (num_args) {
-    case 1:
-      return LAUNCH_KERNEL(1);
-    case 2:
-      return LAUNCH_KERNEL(2);
-    case 3:
-      return LAUNCH_KERNEL(3);
-    case 4:
-      return LAUNCH_KERNEL(4);
-    case 5:
-      return LAUNCH_KERNEL(5);
-    case 6:
-      return LAUNCH_KERNEL(6);
-    case 7:
-      return LAUNCH_KERNEL(7);
-    case 8:
-      return LAUNCH_KERNEL(8);
-    case 9:
-      return LAUNCH_KERNEL(9);
-    case 10:
-      return LAUNCH_KERNEL(10);
-    case 11:
-      return LAUNCH_KERNEL(11);
-    case 12:
-      return LAUNCH_KERNEL(12);
-    case 13:
-      return LAUNCH_KERNEL(13);
-    case 14:
-      return LAUNCH_KERNEL(14);
-    case 15:
-      return LAUNCH_KERNEL(15);
-    case 16:
-      return LAUNCH_KERNEL(16);
-    case 17:
-      return LAUNCH_KERNEL(17);
-    case 18:
-      return LAUNCH_KERNEL(18);
-    case 19:
-      return LAUNCH_KERNEL(19);
-    case 20:
-      return LAUNCH_KERNEL(20);
-    case 21:
-      return LAUNCH_KERNEL(21);
-    case 22:
-      return LAUNCH_KERNEL(22);
-    case 23:
-      return LAUNCH_KERNEL(23);
-    case 24:
-      return LAUNCH_KERNEL(24);
-    case 25:
-      return LAUNCH_KERNEL(25);
-    default:
-      throw std::runtime_error(
-          "Unsupported number of arguments; must be between 1 and 25");
-  }
+  TORCH_CHECK(
+      num_args <= MAX_ARGS,
+      "Static Cuda Launcher only supports up to 120 arguments");
+  return launch_kernel_inner(
+      func,
+      gridX,
+      gridY,
+      gridZ,
+      numWarps,
+      sharedMemBytes,
+      argTypes,
+      varArgs,
+      cudaStream);
 }
 
 std::array<PyMethodDef, 2> StaticCudaLauncherMethods = {
@@ -405,7 +339,7 @@ std::array<PyMethodDef, 2> StaticCudaLauncherMethods = {
         "_launch_kernel",
         (PyCFunction)launch_kernel,
         METH_VARARGS,
-        "Cuda Launcher with up to 25 args"},
+        "Cuda Launcher with up to 120 args"},
     PyMethodDef{
         "_load_kernel",
         (PyCFunction)load_kernel,

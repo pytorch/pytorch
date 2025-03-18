@@ -6,6 +6,7 @@ from .triton_compat import ASTSource, CompiledKernel
 
 
 MAX_SHARED_MEMORY = 49152
+MAX_ARGS = 120
 
 
 class StaticallyLaunchedCudaKernel:
@@ -30,22 +31,21 @@ class StaticallyLaunchedCudaKernel:
     Note that after step 3, StaticallyLaunchedCudaKernel is fully pickleable/serializable.
     This allows it to be cached by FXGraphCache/TritonBundler, as well as sent from the worker
     to the parent process in inductor.
+
+    There are two main versions of triton that we wish to support: 3.3 and 3.2. Triton makes considerable changes
+    to how it handles constants in 3.3, so there's some special logic necessary to handle both versions.
     """
 
     def __init__(self, kernel: CompiledKernel) -> None:
-        # To be used later when hooking up with torch.compile:
-        # inductor knows where the cubin file should be from triton,
-        # so won't need to write to a tmp file directly.
-        if hasattr(kernel, "_cubin_path"):
-            self.cubin_path = kernel._cubin_path
-        else:
-            self.cubin = kernel.asm["cubin"]
-
-        # TODO: is this right?
         self.name = kernel.src.fn.__name__
+        self.cubin_path = kernel._cubin_path
 
         # Used by torch.compile to filter constants in older triton versions
         self.arg_names = kernel.src.fn.arg_names
+
+        # Const exprs that are declared by the triton kernel directly
+        # Used to generate the kernel launcher's def args
+        self.declared_constexprs = kernel.src.fn.constexprs
 
         self.hash = kernel.hash
         if (
@@ -94,7 +94,7 @@ class StaticallyLaunchedCudaKernel:
                 "Static cuda launcher only supports num_ctas == 1"
             )
 
-        if num_args > 25 or num_args == 0:
+        if num_args > MAX_ARGS or num_args == 0:
             raise NotImplementedError(
                 "No static cuda launcher available for %d arguments", num_args
             )
@@ -113,19 +113,6 @@ class StaticallyLaunchedCudaKernel:
         )
         # Don't need the cubin path anymore now that we've loaded
         self.cubin_path = None
-
-    def write_cubin_to_file(self, filepath: str) -> None:
-        """
-        Only used for tests where we don't have a cubin path.
-        """
-        if hasattr(self, "cubin_path"):
-            return
-        # Just used by tests for now.
-        # TODO: derive cubin_path from wherever triton stores the cubin file on disk.
-        with open(filepath, "wb") as f:
-            f.write(self.cubin)
-            del self.cubin
-        self.cubin_path = filepath
 
     @staticmethod
     @functools.lru_cache
@@ -179,7 +166,7 @@ class StaticallyLaunchedCudaKernel:
         # constants declared by the triton kernel directly, whereas this list can have
         # constants that are unused by the triton kernel that triton figured out during
         # compilation.
-        self.constexprs = constants
+        self.full_constexprs = constants
         # Despite requiring them to be passed in, the triton CUDA launcher
         # completely ignores the constexprs passed into it when generating code.
         # So we can ignore them here too
@@ -196,12 +183,11 @@ class StaticallyLaunchedCudaKernel:
                 params.append(self.extract_type(ty))
         return "".join(params)
 
-    def __getstate__(self):
+    def __getstate__(self) -> dict[str, Any]:
         # Remove objects that are no longer valid for pickling
         state = self.__dict__.copy()
-        state['function'] = None
+        state["function"] = None
         return state
-
 
     def run(
         self,
