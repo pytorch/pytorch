@@ -3,7 +3,11 @@
 #if AT_MKLDNN_ACL_ENABLED()
 
 #include <ATen/Parallel.h>
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
 #include <ATen/ops/empty.h>
+#endif
 #include <arm_compute/core/Helpers.h>
 #include <arm_compute/core/Types.h>
 #include <arm_compute/core/Utils.h>
