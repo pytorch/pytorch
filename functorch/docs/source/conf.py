@@ -25,7 +25,7 @@ import functorch
 
 RELEASE = os.environ.get("RELEASE", False)
 
-
+sys.path.insert(0, os.path.abspath(".."))
 import pytorch_sphinx_theme2
 
 
@@ -77,8 +77,10 @@ napoleon_use_ivar = True
 autosummary_generate = True
 
 # Add any paths that contain templates here, relative to this directory.
-templates_path = ["_templates"]
-
+templates_path = [
+    "_templates",
+    os.path.join(os.path.dirname(pytorch_sphinx_theme2.__file__), "templates"),
+]
 # The suffix(es) of source filenames.
 # You can specify multiple suffix as a list of string:
 #
@@ -162,7 +164,7 @@ autodoc_docstring_signature = True
 #
 
 html_theme = "pytorch_sphinx_theme2"
-html_theme_path = [pytorch_sphinx_theme.get_html_theme_path()]
+html_theme_path = [pytorch_sphinx_theme2.get_html_theme_path()]
 
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the

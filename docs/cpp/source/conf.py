@@ -24,7 +24,8 @@ import textwrap
 
 
 # sys.path.insert(0, os.path.abspath('.'))
-
+sys.path.insert(0, os.path.abspath(".."))
+import pytorch_sphinx_theme2
 
 # -- General configuration ------------------------------------------------
 
@@ -111,7 +112,10 @@ highlight_language = "cpp"
 
 # Add any paths that contain templates here, relative to this directory.
 # templates_path = ['_templates']
-
+templates_path = [
+    "_templates",
+    os.path.join(os.path.dirname(pytorch_sphinx_theme2.__file__), "templates"),
+]
 # The suffix(es) of source filenames.
 # You can specify multiple suffix as a list of string:
 #
