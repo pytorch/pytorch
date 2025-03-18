@@ -3374,6 +3374,7 @@ def assert_no_fake_params_or_buffers(gm):
         if FakeTensorConfig.debug:
             import traceback
 
+            breakpoint()
             return f"FAKE TENSOR CREATION TRACEBACK: \n {traceback.format_list(t._debug_trace)}"
         else:
             return "Enable TORCH_FAKE_TENSOR_DEBUG=1 to get creation stack traces on fake tensors."
