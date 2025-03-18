@@ -9,6 +9,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_upsample_bicubic2d_aa_native.h>
 #include <ATen/ops/_upsample_bilinear2d_aa_backward_native.h>
 #include <ATen/ops/_upsample_bilinear2d_aa_native.h>
 #include <ATen/ops/_upsample_nearest_exact1d.h>
@@ -465,6 +466,18 @@ TORCH_IMPL_FUNC(_upsample_bilinear2d_aa_out_mps)
   TORCH_CHECK(at::isFloatingType(input.scalar_type()),
               "_upsample_bilineard2d_aa_out_mps only supports floating-point dtypes");
   mps::upsample_kernel_out_template(input, output_size, align_corners, scales_h, scales_w, output, "bilinear2d_aa");
+}
+
+TORCH_IMPL_FUNC(_upsample_bicubic2d_aa_out_mps)
+(const Tensor& input,
+ IntArrayRef output_size,
+ bool align_corners,
+ std::optional<double> scales_h,
+ std::optional<double> scales_w,
+ const Tensor& output) {
+  TORCH_CHECK(at::isFloatingType(input.scalar_type()),
+              "_upsample_bicubic2d_aa_out_mps only supports floating-point dtypes");
+  mps::upsample_kernel_out_template(input, output_size, align_corners, scales_h, scales_w, output, "bicubic2d_aa");
 }
 
 } // namespace at::native
