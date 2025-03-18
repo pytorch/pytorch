@@ -493,7 +493,7 @@ def get_reenabled_issues(pr_body: str = "") -> list[str]:
 def check_should_build_distributed(test_matrix: dict[str, list[Any]]) -> str:
     for entry in test_matrix.get("include", []):
         if entry.get("config") in ("distributed", "multigpu"):
-            return "!"
+            return "1"
     if os.environ.get("BUILD_DISTRIBUTED", "").lower() in ("1", "true", "yes"):
         return "1"
     return "0"
