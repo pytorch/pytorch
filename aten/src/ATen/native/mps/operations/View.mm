@@ -26,7 +26,8 @@ namespace mps {
 static bool is_cow_mps_backed(const Tensor& self) {
   const DataPtr& data_ptr = self.storage().data_ptr();
   if (c10::impl::cow::is_cow_data_ptr(data_ptr)) {
-    auto context = new_storage->data_ptr().cast_context<c10::impl::cow::COWDeleterContext>(c10::impl::cow::cow_deleter);
+    c10::impl::cow::COWDeleterContext* context =
+        data_ptr.cast_context<c10::impl::cow::COWDeleterContext>(c10::impl::cow::cow_deleter);
     return context->original_device().type() == c10::kMPS;
   } else {
     return false;
