@@ -819,10 +819,9 @@ class GitHubPR:
                     cursor=info["reviews"]["pageInfo"]["startCursor"],
                 )
                 info = rc["data"]["repository"]["pullRequest"]
-        reviews = {}
-        for author, state in self._reviews:
-            if state != "COMMENTED":
-                reviews[author] = state
+        reviews = {
+            author: state for author, state in self._reviews if state != "COMMENTED"
+        }
         return list(reviews.items())
 
     def get_approved_by(self) -> list[str]:
