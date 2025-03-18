@@ -5,7 +5,6 @@ import os
 import shutil
 import tempfile
 import types
-from typing import Any, Optional, Union
 
 import torch
 import torch._export
@@ -32,7 +31,7 @@ class WrapperModule(torch.nn.Module):
 
 class AOTIRunnerUtil:
     @staticmethod
-    def legacy_compile(
+    def compile(
         model,
         example_inputs,
         options=None,
@@ -73,7 +72,7 @@ class AOTIRunnerUtil:
         return so_path
 
     @staticmethod
-    def legacy_load_runner(device, so_path):
+    def load_runner(device, so_path):
         if IS_FBCODE:
             from .fb import test_aot_inductor_model_runner_pybind  # @manual
 
@@ -102,10 +101,10 @@ class AOTIRunnerUtil:
                 return torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1, device)
 
     @staticmethod
-    def legacy_load(device, so_path):
+    def load(device, so_path):
         # TODO: unify fbcode and oss behavior to only use torch._export.aot_load
         if IS_FBCODE:
-            runner = AOTIRunnerUtil.legacy_load_runner(device, so_path)
+            runner = AOTIRunnerUtil.load_runner(device, so_path)
 
             def optimized(*args, **kwargs):
                 call_spec = runner.get_call_spec()
@@ -121,75 +120,39 @@ class AOTIRunnerUtil:
             return torch._export.aot_load(so_path, device)
 
     @staticmethod
-    def legacy_run(
-        device: str,
+    def run(
+        device,
         model,
         example_inputs,
         options=None,
         dynamic_shapes=None,
         disable_constraint_solver=False,
     ):
-        so_path = AOTIRunnerUtil.legacy_compile(
+        so_path = AOTIRunnerUtil.compile(
             model,
             example_inputs,
             options=options,
             dynamic_shapes=dynamic_shapes,
             disable_constraint_solver=disable_constraint_solver,
         )
-        optimized = AOTIRunnerUtil.legacy_load(device, so_path)
-        return optimized(*example_inputs)
-
-    @staticmethod
-    def compile(
-        model: Union[torch.nn.Module, types.FunctionType],
-        example_inputs: list[torch.Tensor],
-        inductor_configs: Optional[dict[str, Any]] = None,
-        dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
-    ):
-        if not isinstance(model, torch.nn.Module):
-            # This should really be the default behavior of torch.export.export
-            model = WrapperModule(model)
-
-        with torch.no_grad():
-            # strict=False needs extra migration work
-            ep = torch.export.export(
-                model, example_inputs, dynamic_shapes=dynamic_shapes, strict=True
-            )
-            package_path = torch._inductor.aoti_compile_and_package(
-                ep, inductor_configs=inductor_configs
-            )
-        return package_path
-
-    @staticmethod
-    def run(
-        model: Union[torch.nn.Module, types.FunctionType],
-        example_inputs: list[torch.Tensor],
-        inductor_configs: Optional[dict[str, Any]] = None,
-        dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
-    ):
-        package_path = AOTIRunnerUtil.compile(
-            model,
-            example_inputs,
-            inductor_configs=inductor_configs,
-            dynamic_shapes=dynamic_shapes,
-        )
-        optimized = torch._inductor.aoti_load_package(package_path)
+        optimized = AOTIRunnerUtil.load(device, so_path)
         return optimized(*example_inputs)
 
     @staticmethod
     def run_multiple(
-        model: Union[torch.nn.Module, types.FunctionType],
-        list_example_inputs: list[list[torch.Tensor]],
-        inductor_configs: Optional[dict[str, Any]] = None,
-        dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
+        device,
+        model,
+        list_example_inputs,
+        options=None,
+        dynamic_shapes=None,
     ):
-        package_path = AOTIRunnerUtil.compile(
+        so_path = AOTIRunnerUtil.compile(
             model,
             list_example_inputs[0],
-            inductor_configs=inductor_configs,
+            options=options,
             dynamic_shapes=dynamic_shapes,
         )
-        optimized = torch._inductor.aoti_load_package(package_path)
+        optimized = AOTIRunnerUtil.load(device, so_path)
         list_output_tensors = []
         for example_inputs in list_example_inputs:
             list_output_tensors.append(optimized(*example_inputs))
@@ -202,6 +165,7 @@ def check_model(
     example_inputs,
     options=None,
     dynamic_shapes=None,
+    disable_constraint_solver=False,
     atol=None,
     rtol=None,
 ):
@@ -232,10 +196,12 @@ def check_model(
 
         torch.manual_seed(0)
         actual = AOTIRunnerUtil.run(
+            self.device,
             model,
             example_inputs,
             options,
             dynamic_shapes,
+            disable_constraint_solver,
         )
 
     self.assertEqual(actual, expected, atol=atol, rtol=rtol)
@@ -262,7 +228,7 @@ def check_model_with_multiple_inputs(
 
         torch.manual_seed(0)
         list_actual = AOTIRunnerUtil.run_multiple(
-            model, list_example_inputs, options, dynamic_shapes
+            self.device, model, list_example_inputs, options, dynamic_shapes
         )
 
     self.assertTrue(same(list_actual, list_expected))
@@ -281,9 +247,9 @@ def code_check_count(
             "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
         }
     ):
-        package_path = torch._export.aot_compile(model, example_inputs)
+        so_path = torch._export.aot_compile(model, example_inputs)
 
-    with open(os.path.splitext(package_path)[0] + ".cpp") as cpp:
+    with open(os.path.splitext(so_path)[0] + ".cpp") as cpp:
         src_code = cpp.read()
         FileCheck().check_count(
             target_str,
