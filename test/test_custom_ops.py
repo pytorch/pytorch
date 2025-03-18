@@ -3932,9 +3932,7 @@ Please use `add.register_fake` to add an fake impl.""",
         self.assertTrue(
             test_fn([torch.zeros(1, requires_grad=True), torch.ones(1)], torch.zeros(1))
         )
-        self.assertFalse(
-            test_fn([torch.zeros(1), torch.ones(1)], torch.zeros(1))
-        )
+        self.assertFalse(test_fn([torch.zeros(1), torch.ones(1)], torch.zeros(1)))
 
     def test_any_output_is_alias_to_input_or_output(self):
         test_fn = torch._C._any_output_is_alias_to_input_or_output
