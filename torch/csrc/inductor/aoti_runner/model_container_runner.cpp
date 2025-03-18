@@ -31,6 +31,17 @@ AOTIModelContainerRunner::AOTIModelContainerRunner(
     const std::string& device_str,
     const std::string& cubin_dir,
     const bool run_single_threaded) {
+  if (run_single_threaded) {
+    if (num_models != 1) {
+      throw std::runtime_error(
+          "num_models must be 1 when run_single_threaded is true");
+    }
+  } else {
+    if (num_models < 1) {
+      throw std::runtime_error(
+          "num_models must be >=1 when run_single_threaded is false");
+    }
+  }
   model_so_ = std::make_unique<at::DynamicLibrary>(model_so_path.c_str());
   TORCH_CHECK(model_so_, "Failed to load model: ", model_so_path);
   create_func_ = reinterpret_cast<decltype(create_func_)>(

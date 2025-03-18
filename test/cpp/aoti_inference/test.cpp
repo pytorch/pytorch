@@ -1,7 +1,13 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include <atomic>
+#include <condition_variable>
 #include <filesystem>
+#include <functional>
+#include <mutex>
+#include <queue>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <torch/csrc/inductor/aoti_package/model_package_loader.h>
@@ -317,8 +323,148 @@ void test_aoti_double_buffering_with_tensor_constants() {
   actual_output_tensors = runner->run(input_tensors);
   ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
 }
-#endif
 
+class ThreadPool {
+ private:
+  struct Task {
+    int id;
+    std::vector<torch::Tensor> inputs;
+  };
+
+  std::vector<std::thread> workers;
+  std::vector<c10::cuda::CUDAStream> cuda_streams;
+  std::queue<Task> tasks;
+  std::mutex queue_mutex;
+  std::condition_variable condition;
+  std::condition_variable completion_condition;
+  std::atomic<int> active_tasks{0};
+  std::atomic<bool> stop;
+
+ public:
+  ThreadPool(size_t num_threads) : stop(false) {
+    // Create CUDA streams
+    cuda_streams.reserve(num_threads);
+    for (size_t i = 0; i < num_threads; ++i) {
+      cuda_streams.push_back(c10::cuda::getStreamFromPool());
+    }
+
+    // Create worker threads
+    for (size_t i = 0; i < num_threads; ++i) {
+      workers.emplace_back([this, i] {
+        while (true) {
+          Task task;
+          {
+            std::unique_lock<std::mutex> lock(this->queue_mutex);
+            this->condition.wait(
+                lock, [this] { return this->stop || !this->tasks.empty(); });
+
+            if (this->stop && this->tasks.empty()) {
+              return;
+            }
+
+            task = std::move(this->tasks.front());
+            this->tasks.pop();
+          }
+
+          // Process the task with this thread's CUDA stream
+          process_function(task.id, task.inputs, this->cuda_streams[i]);
+
+          // Mark task as completed
+          {
+            std::unique_lock<std::mutex> lock(this->queue_mutex);
+            active_tasks--;
+            if (active_tasks == 0 && this->tasks.empty()) {
+              completion_condition.notify_all();
+            }
+          }
+        }
+      });
+    }
+  }
+
+  // Updated processing function for vector of tensors and CUDA stream
+  std::function<
+      void(int, const std::vector<torch::Tensor>&, c10::cuda::CUDAStream&)>
+      process_function;
+
+  // Enqueue task with vector of tensors as input
+  void enqueue(int i, std::vector<torch::Tensor> inputs) {
+    {
+      std::unique_lock<std::mutex> lock(queue_mutex);
+      tasks.push({i, std::move(inputs)});
+      active_tasks++;
+    }
+    condition.notify_one();
+  }
+
+  // Wait for all tasks to complete
+  void wait() {
+    std::unique_lock<std::mutex> lock(queue_mutex);
+    completion_condition.wait(
+        lock, [this] { return active_tasks == 0 && tasks.empty(); });
+  }
+
+  ~ThreadPool() {
+    {
+      std::unique_lock<std::mutex> lock(queue_mutex);
+      stop = true;
+    }
+
+    condition.notify_all();
+    for (std::thread& worker : workers) {
+      worker.join();
+    }
+  }
+};
+
+void test_multi_cuda_streams(const std::string& device) {
+  c10::InferenceMode mode;
+  std::string data_path =
+      (std::filesystem::path(STRINGIZE(CMAKE_CURRENT_BINARY_DIR)) / "data.pt")
+           .string();
+  torch::jit::script::Module data_loader = torch::jit::load(data_path);
+  std::string path_attr = "pt2_package_path_" + device;
+  std::string inputs_attr = "inputs_" + device;
+  std::string outputs_attr = "outputs_" + device;
+  const auto& pt2_package_path =
+      data_loader.attr(path_attr.c_str()).toStringRef();
+  const auto& ref_output_tensors =
+      data_loader.attr(outputs_attr.c_str()).toTensorList().vec();
+  auto inputs = data_loader.attr(inputs_attr.c_str()).toTensorList().vec();
+
+  constexpr int N = 16;
+  constexpr int num_threads = 4;
+  std::vector<std::vector<torch::Tensor>> all_outputs(N);
+  // Create thread pool with desired number of threads
+  torch::inductor::AOTIModelPackageLoader loader(
+      pt2_package_path, "model", false, num_threads);
+  ThreadPool pool(num_threads);
+  std::mutex results_mutex;
+
+  // Set the processing function
+  pool.process_function = [&](int i,
+                              const std::vector<torch::Tensor>& inputs,
+                              c10::cuda::CUDAStream& stream) {
+    // Run inference with the task-specific input
+    std::vector<torch::Tensor> outputs = loader.run(inputs, stream.stream());
+    // Store results safely
+    {
+      std::lock_guard<std::mutex> lock(results_mutex);
+      all_outputs[i] = outputs;
+    }
+  };
+  // Enqueue all tasks
+  for (int i = 0; i < N; i++) {
+    pool.enqueue(i, inputs);
+  }
+  // Wait for all tasks to complete
+  pool.wait();
+
+  for (int i = 0; i < N; i++) {
+    ASSERT_TRUE(torch::allclose(ref_output_tensors[0], all_outputs[i][0]));
+  }
+}
+#endif
 } // namespace
 
 namespace torch {
@@ -368,6 +514,10 @@ TEST(AotInductorTest, UpdateInactiveConstantsCuda) {
 
 TEST(AotInductorTest, UpdateInactiveConstantsWithTensorConstantsCuda) {
   test_aoti_double_buffering_with_tensor_constants();
+}
+
+TEST(AotInductorTest, MultiStreamTestCuda) {
+  test_multi_cuda_streams("cuda");
 }
 #endif
 
