@@ -14,7 +14,7 @@ class SchemaTest(common_utils.TestCase):
     def test_symbolic_has_correct_schema(self):
         torch.library.opcheck(
             _symbolic_impl._symbolic,
-            ([torch.tensor(1)], "CustomOp", 1, [torch.tensor(42)]),
+            ([torch.tensor(1)], "CustomOp", 1),
             dict(
                 shape=[
                     1,
@@ -35,7 +35,7 @@ class SchemaTest(common_utils.TestCase):
         # Empty inputs
         torch.library.opcheck(
             _symbolic_impl._symbolic,
-            ([], "CustomOp", 1, []),
+            ([], "CustomOp", 1),
             dict(
                 shape=[
                     1,
@@ -54,7 +54,7 @@ class SchemaTest(common_utils.TestCase):
     def test_symbolic_multi_out_has_correct_schema(self):
         torch.library.opcheck(
             _symbolic_impl._symbolic_multi_out,
-            ([torch.tensor(1)], "CustomMultiOutOp", [1, 2, 10], [torch.tensor(42)]),
+            ([torch.tensor(1)], "CustomMultiOutOp", [1, 2, 10]),
             dict(
                 shapes=[[1, 2], [42], []],
                 attr_keys=["key"],
@@ -73,7 +73,7 @@ class SchemaTest(common_utils.TestCase):
         # Empty inputs
         torch.library.opcheck(
             _symbolic_impl._symbolic_multi_out,
-            ([], "CustomMultiOutOp", [], []),
+            ([], "CustomMultiOutOp", []),
             dict(
                 shapes=[],
                 attr_keys=[],
@@ -173,17 +173,17 @@ class SymbolicOpsTest(common_utils.TestCase):
         self.assertEqual(
             attributes,
             dict(
-                int_key=1,
-                float_key=1.0,
-                str_key="attr",
-                bool_key=True,
-                list_int_key=[1, 2],
-                list_float_key=[1.0, 2.0],
-                list_str_key=["attr1", "attr2"],
-                list_bool_key=[True, False],
+                int_key=ir.AttrInt64("int_key", 1),
+                float_key=ir.AttrFloat32("float_key", 1.0),
+                str_key=ir.AttrString("str_key", "attr"),
+                bool_key=ir.AttrInt64("bool_key", 1),
+                list_int_key=ir.AttrInt64s("list_int_key", [1, 2]),
+                list_float_key=ir.AttrFloat32s("list_float_key", [1.0, 2.0]),
+                list_str_key=ir.AttrStrings("list_str_key", ["attr1", "attr2"]),
+                list_bool_key=ir.AttrInt64s("list_bool_key", [1, 0]),
             ),
         )
-        self.assertEqual(node.metadata_props, {"meta_key": "meta_value"})
+        self.assertEqual(node.metadata_props["meta_key"], "meta_value")
         outputs = node.outputs
         self.assertEqual(list(outputs[0].shape), [1, 2, 3])
         self.assertEqual(outputs[0].dtype, ir.DataType.INT64)
@@ -211,15 +211,15 @@ class SymbolicOpsTest(common_utils.TestCase):
         self.assertEqual(node.op_type, "CustomOp")
         self.assertEqual(node.domain, "custom_domain")
         inputs = onnx_program.model.graph.inputs
-        self.assertEqual(str(inputs[0][0]), "batch")
-        self.assertEqual(inputs[0][1], 3)
-        self.assertEqual(inputs[1][0], 1)
-        self.assertEqual(str(inputs[1][1]), "something_else")
+        self.assertEqual(str(inputs[0].shape[0]), "batch")
+        self.assertEqual(inputs[0].shape[1], 3)
+        self.assertEqual(inputs[1].shape[0], 1)
+        self.assertEqual(str(inputs[1].shape[1]), "something_else")
         outputs = node.outputs
-        self.assertEqual(str(outputs[0][0]), "batch")
-        self.assertEqual(outputs[0][1], 3)
-        self.assertEqual(outputs[0][2], 1)
-        self.assertEqual(str(outputs[0][3]), "something_else")
+        self.assertEqual(str(outputs[0].shape[0]), "batch")
+        self.assertEqual(outputs[0].shape[1], 3)
+        self.assertEqual(outputs[0].shape[2], 1)
+        self.assertEqual(str(outputs[0].shape[3]), "something_else")
         self.assertEqual(outputs[0].dtype, ir.DataType.FLOAT)
 
     def test_symbolic_multi_out_accepts_valid_inputs(self):
@@ -257,32 +257,32 @@ class SymbolicOpsTest(common_utils.TestCase):
         self.assertEqual(outputs[2].device, torch.device("cpu"))
 
     def test_symbolic_multi_out_accepts_valid_inputs_empty_shape(self):
-        output = torch.onnx.ops.symbolic_multi_out(
+        outputs = torch.onnx.ops.symbolic_multi_out(
             "custom_domain::CustomOp",
             (torch.tensor(1),),
             dtypes=(torch.float32,),
             shapes=[[]],
         )
-        self.assertEqual(output.shape, torch.Size([]))
+        self.assertEqual(outputs[0].shape, torch.Size([]))
 
     def test_symbolic_multi_out_accepts_valid_inputs_integer_types(self):
-        output = torch.onnx.ops.symbolic_multi_out(
+        outputs = torch.onnx.ops.symbolic_multi_out(
             "custom_domain::CustomOp",
             (torch.tensor(1),),
             dtypes=(1,),  # 1 is float32 in ONNX
             shapes=[[42]],
         )
-        self.assertEqual(output.dtype, torch.float32)
+        self.assertEqual(outputs[0].dtype, torch.float32)
 
     def test_symbolic_multi_out_accepts_valid_inputs_int4_type(self):
-        output = torch.onnx.ops.symbolic_multi_out(
+        outputs = torch.onnx.ops.symbolic_multi_out(
             "custom_domain::CustomOp",
             (torch.tensor(1),),
             dtypes=(22,),  # 22 is INT4 in ONNX
             shapes=[[42]],
         )
         # We use torch uint8 for int4
-        self.assertEqual(output.dtype, torch.uint8)
+        self.assertEqual(outputs[0].dtype, torch.uint8)
 
     def test_symbolic_multi_out_is_exportable(self):
         class Model(torch.nn.Module):
@@ -317,24 +317,24 @@ class SymbolicOpsTest(common_utils.TestCase):
         self.assertEqual(
             attributes,
             dict(
-                int_key=1,
-                float_key=1.0,
-                str_key="attr",
-                bool_key=True,
-                list_int_key=[1, 2],
-                list_float_key=[1.0, 2.0],
-                list_str_key=["attr1", "attr2"],
-                list_bool_key=[True, False],
+                int_key=ir.AttrInt64("int_key", 1),
+                float_key=ir.AttrFloat32("float_key", 1.0),
+                str_key=ir.AttrString("str_key", "attr"),
+                bool_key=ir.AttrInt64("bool_key", 1),
+                list_int_key=ir.AttrInt64s("list_int_key", [1, 2]),
+                list_float_key=ir.AttrFloat32s("list_float_key", [1.0, 2.0]),
+                list_str_key=ir.AttrStrings("list_str_key", ["attr1", "attr2"]),
+                list_bool_key=ir.AttrInt64s("list_bool_key", [1, 0]),
             ),
         )
-        self.assertEqual(node.metadata_props, {"meta_key": "meta_value"})
+        self.assertEqual(node.metadata_props["meta_key"], "meta_value")
         outputs = node.outputs
         self.assertEqual(list(outputs[0].shape), [1, 2])
         self.assertEqual(outputs[0].dtype, ir.DataType.FLOAT)
-        self.assertEqual(list(outputs[0].shape), [42])
+        self.assertEqual(list(outputs[1].shape), [42])
         self.assertEqual(outputs[1].dtype, ir.DataType.INT32)
-        self.assertEqual(list(outputs[1].shape), [])
-        self.assertEqual(outputs[0].dtype, ir.DataType.FLOAT8E4M3FN)
+        self.assertEqual(list(outputs[2].shape), [])
+        self.assertEqual(outputs[2].dtype, ir.DataType.FLOAT8E4M3FN)
 
     def test_symbolic_multi_out_preserves_dynamic_shapes(self):
         class Model(torch.nn.Module):
@@ -359,17 +359,17 @@ class SymbolicOpsTest(common_utils.TestCase):
         self.assertEqual(node.op_type, "CustomOp")
         self.assertEqual(node.domain, "custom_domain")
         inputs = onnx_program.model.graph.inputs
-        self.assertEqual(str(inputs[0][0]), "batch")
-        self.assertEqual(inputs[0][1], 3)
-        self.assertEqual(inputs[1][0], 1)
-        self.assertEqual(str(inputs[1][1]), "something_else")
+        self.assertEqual(str(inputs[0].shape[0]), "batch")
+        self.assertEqual(inputs[0].shape[1], 3)
+        self.assertEqual(inputs[1].shape[0], 1)
+        self.assertEqual(str(inputs[1].shape[1]), "something_else")
         outputs = node.outputs
-        self.assertEqual(str(outputs[0][0]), "batch")
-        self.assertEqual(outputs[0][1], 3)
-        self.assertEqual(outputs[0][2], 1)
-        self.assertEqual(str(outputs[0][3]), "something_else")
-        self.assertEqual(outputs[0].dtype, ir.DataType.FLOAT32)
-        self.assertEqual(list(outputs[1].shape), 42)
+        self.assertEqual(str(outputs[0].shape[0]), "batch")
+        self.assertEqual(outputs[0].shape[1], 3)
+        self.assertEqual(outputs[0].shape[2], 1)
+        self.assertEqual(str(outputs[0].shape[3]), "something_else")
+        self.assertEqual(outputs[0].dtype, ir.DataType.FLOAT)
+        self.assertEqual(list(outputs[1].shape), [42])
         self.assertEqual(outputs[1].dtype, ir.DataType.INT4)
 
     def test_symbolic_multi_out_raises_when_dtypes_and_shapes_differ(self):
