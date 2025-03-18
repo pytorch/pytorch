@@ -14987,70 +14987,21 @@ dedent """
         self.assertTrue(y.is_contiguous(memory_format=torch.channels_last))
 
     def test_torchscript_multi_head_attn(self):
-        @torch.jit.script
-        def jit_multihead_attn_forward(query,                   # type: Tensor
-                                       key,                     # type: Tensor
-                                       value,                   # type: Tensor
-                                       embed_dim_to_check,      # type: int
-                                       num_heads,               # type: int
-                                       in_proj_weight,          # type: Tensor
-                                       in_proj_bias,            # type: Tensor
-                                       bias_k,                  # type: Optional[Tensor]
-                                       bias_v,                  # type: Optional[Tensor]
-                                       add_zero_attn,           # type: bool
-                                       dropout,                 # type: float
-                                       out_proj_weight,         # type: Tensor
-                                       out_proj_bias,           # type: Tensor
-                                       training=True,           # type: bool
-                                       key_padding_mask=None,   # type: Optional[Tensor]
-                                       need_weights=True,       # type: bool
-                                       attn_mask=None           # type: Optional[Tensor]
-                                       ):
-            # type: (...) -> Tuple[Tensor, Optional[Tensor]]
-            return torch.nn.functional.multi_head_attention_forward(query, key, value,
-                                                                    embed_dim_to_check, num_heads,
-                                                                    in_proj_weight, in_proj_bias,
-                                                                    bias_k, bias_v,
-                                                                    add_zero_attn, dropout,
-                                                                    out_proj_weight, out_proj_bias,
-                                                                    training, key_padding_mask,
-                                                                    need_weights, attn_mask)
-
         src_l = 3
         bsz = 5
         embed_size = 8
         nhead = 2
-        multi_head_attn = torch.nn.MultiheadAttention(embed_size, nhead)
         query = torch.rand((src_l, bsz, embed_size))
         key = torch.rand((src_l, bsz, embed_size))
         value = torch.rand((src_l, bsz, embed_size))
 
         mask = (torch.triu(torch.ones(src_l, src_l)) == 1).transpose(0, 1)
         mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, 0.0).to(torch.get_default_dtype())
-
-        jit_out = jit_multihead_attn_forward(query, key, value,
-                                             embed_size, nhead,
-                                             multi_head_attn.in_proj_weight,
-                                             multi_head_attn.in_proj_bias,
-                                             multi_head_attn.bias_k, multi_head_attn.bias_v,
-                                             multi_head_attn.add_zero_attn, multi_head_attn.dropout,
-                                             multi_head_attn.out_proj.weight,
-                                             multi_head_attn.out_proj.bias, attn_mask=mask)[0]
-
-        py_out = torch.nn.functional.multi_head_attention_forward(query, key, value,
-                                                                  embed_size, nhead,
-                                                                  multi_head_attn.in_proj_weight,
-                                                                  multi_head_attn.in_proj_bias,
-                                                                  multi_head_attn.bias_k,
-                                                                  multi_head_attn.bias_v,
-                                                                  multi_head_attn.add_zero_attn,
-                                                                  multi_head_attn.dropout,
-                                                                  multi_head_attn.out_proj.weight,
-                                                                  multi_head_attn.out_proj.bias,
-                                                                  attn_mask=mask)[0]
-        # print("rel. error: ")
-        # print(jit_out / py_out - 1)
-        self.assertEqual(jit_out, py_out, atol=5e-4, rtol=1e-4)
+        for bias in [True, False]:
+            multi_head_attn = torch.nn.MultiheadAttention(embed_size, nhead, bias=bias)
+            py_out = multi_head_attn(query, key, value)[0]
+            jit_out = torch.jit.script(multi_head_attn)(query, key, value)[0]
+            self.assertEqual(jit_out, py_out, atol=5e-4, rtol=1e-4)
 
     def test_torchscript_multi_head_attn_fast_path(self):
         src_l = 3

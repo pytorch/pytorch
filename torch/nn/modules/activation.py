@@ -1247,8 +1247,11 @@ class MultiheadAttention(Module):
             # enforce that the dtypes all match or test cases where
             # they don't!
             why_not_fast_path = "non-self attention was used (query, key, and value are not the same Tensor)"
-        elif self.in_proj_bias is not None and query.dtype != self.in_proj_bias.dtype:
-            why_not_fast_path = f"dtypes of query ({query.dtype}) and self.in_proj_bias ({self.in_proj_bias.dtype}) don't match"
+        elif self.in_proj_bias is not None:
+            if (
+                query.dtype != self.in_proj_bias.dtype
+            ):  # done this way due to issue #149391(i.e. torchscript)
+                why_not_fast_path = f"dtypes of query ({query.dtype}) and self.in_proj_bias ({self.in_proj_bias.dtype}) don't match"
         elif self.in_proj_weight is None:
             why_not_fast_path = "in_proj_weight was None"
         elif query.dtype != self.in_proj_weight.dtype:
