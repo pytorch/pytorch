@@ -1873,8 +1873,10 @@ class BuiltinVariable(VariableTracker):
                 variables.UserDefinedObjectVariable,
             ),
         ):
-            if isinstance(obj, variables.UserDefinedObjectVariable) and isinstance(
-                obj.value, unittest.TestCase
+            if (
+                isinstance(obj, variables.UserDefinedObjectVariable)
+                and isinstance(obj.value, unittest.TestCase)
+                and name in dir(unittest.TestCase)
             ):
                 if not config.enable_trace_unittest:
                     unimplemented_v2(
