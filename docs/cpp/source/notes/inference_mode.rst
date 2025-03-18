@@ -19,7 +19,7 @@ all newly allocated (non-view) tensors are marked as inference tensors. Inferenc
   To work around you can make a clone outside ``InferenceMode`` to get a normal tensor before mutating.
 
 A non-view tensor is an inference tensor if and only if it was allocated inside ``InferenceMode``.
-A view tensor is an inference tensor if and only if the tensor it is a view of is an inference tensor.
+A view tensor is an inference tensor if and only if it is a view of an inference tensor.
 
 Inside an ``InferenceMode`` block, we make the following performance guarantees:
 
