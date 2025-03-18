@@ -10,7 +10,6 @@ import operator
 import sys
 import types
 import typing
-import unittest
 from collections import defaultdict, OrderedDict
 from collections.abc import KeysView, Sequence
 from typing import Callable, TYPE_CHECKING, Union
@@ -1875,8 +1874,9 @@ class BuiltinVariable(VariableTracker):
         ):
             if (
                 isinstance(obj, variables.UserDefinedObjectVariable)
-                and isinstance(obj.value, unittest.TestCase)
-                and name in dir(unittest.TestCase)
+                and (mod := inspect.getmodule(obj.value))
+                and (mod_name := mod.__name__)
+                and mod_name in ("_pytest.unittest", "unittest")
             ):
                 if not config.enable_trace_unittest:
                     unimplemented_v2(
