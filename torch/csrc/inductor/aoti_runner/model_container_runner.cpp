@@ -51,10 +51,6 @@ AOTIModelContainerRunner::AOTIModelContainerRunner(
   LOAD_SYMBOL(delete_func_, "AOTInductorModelContainerDelete")
   LOAD_SYMBOL(get_num_outputs_func_, "AOTInductorModelContainerGetNumOutputs")
   LOAD_SYMBOL(
-      run_func_,
-      run_single_threaded ? "AOTInductorModelContainerRunSingleThreaded"
-                          : "AOTInductorModelContainerRun")
-  LOAD_SYMBOL(
       get_num_constants_func_, "AOTInductorModelContainerGetNumConstants")
   LOAD_SYMBOL(
       get_constant_name_func_, "AOTInductorModelContainerGetConstantName")
@@ -76,11 +72,23 @@ AOTIModelContainerRunner::AOTIModelContainerRunner(
   LOAD_SYMBOL(get_call_spec_func_, "AOTInductorModelContainerGetCallSpec")
 #undef LOAD_SYMBOL
 
+// NOLINTBEGIN(performance-avoid-endl)
 #define TRY_LOAD_SYMBOL(var, name_str)                               \
   try {                                                              \
     var = reinterpret_cast<decltype(var)>(model_so_->sym(name_str)); \
   } catch (const at::DynamicLibraryError& e) {                       \
     std::cerr << "Could not dlsym " << name_str << std::endl;        \
+  }
+  // NOLINTEND(performance-avoid-endl)
+
+  const char* run_func_name = run_single_threaded
+      ? "AOTInductorModelContainerRunSingleThreaded"
+      : "AOTInductorModelContainerRun";
+  TRY_LOAD_SYMBOL(run_func_, run_func_name)
+  if (run_func_ == nullptr && run_single_threaded) {
+    throw std::runtime_error(
+        "No AOTInductorModelContainerRunSingleThreaded function in .so! To use AOTInductor-compiled model in the single-threaded mode,\
+consider rebuild your model with the latest AOTInductor.");
   }
 
   TRY_LOAD_SYMBOL(
@@ -239,7 +247,7 @@ void AOTIModelContainerRunner::swap_constant_buffer() {
 void AOTIModelContainerRunner::free_inactive_constant_buffer() {
   if (!free_inactive_constant_buffer_func_) {
     throw std::runtime_error(
-        "No free_inactive_constant_buffer in .so! Consider rebuild .so with latest package.");
+        "No free_inactive_constant_buffer in .so! Consider rebuild your model with the latest AOTInductor.");
   }
   AOTI_RUNTIME_ERROR_CODE_CHECK(
       free_inactive_constant_buffer_func_(container_handle_));

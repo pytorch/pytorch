@@ -327,7 +327,6 @@ void test_aoti_double_buffering_with_tensor_constants() {
   ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
 }
 
-#if defined(USE_CUDA)
 void test_aoti_free_buffer() {
   torch::NoGradGuard no_grad;
 
