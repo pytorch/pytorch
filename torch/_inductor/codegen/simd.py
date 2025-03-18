@@ -668,9 +668,9 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                     )
             return_getters_groups.append(return_getters)
 
-        assert all(
-            V.graph.sizevars.size_hint(s) == 1 for s in remaining
-        ), f"failed to set ranges {remaining} {lengths}"
+        assert all(V.graph.sizevars.size_hint(s) == 1 for s in remaining), (
+            f"failed to set ranges {remaining} {lengths}"
+        )
 
         return new_ranges, return_getters_groups
 
@@ -822,7 +822,11 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
 
         # Put all trees with tensor_dim=None at the end, in their current order.
         end_key = (
-            max(tree.tensor_dim for tree in trees if tree.tensor_dim is not None) + 1
+            max(
+                (tree.tensor_dim for tree in trees if tree.tensor_dim is not None),
+                default=0,
+            )
+            + 1
         )
 
         def tree_key(tree: IterationRangesRoot) -> int:
