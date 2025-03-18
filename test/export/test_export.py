@@ -6,6 +6,7 @@ import dataclasses
 import logging
 import operator
 import re
+import types
 import unittest
 import warnings
 from contextlib import contextmanager
@@ -791,6 +792,50 @@ graph():
         ).run(ep_decomposed.graph_module.code)
         exp_out = m(*args)
         self.assertEqual(exp_out, ep.module()(*args))
+
+    def test_scan_mods(self):
+        from torch._higher_order_ops.scan import scan_layers
+
+        class M1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layers = torch.nn.ModuleList([M1() for _ in range(5)])
+                self.m = M1()
+
+            def forward(self, x):
+                raise RuntimeError("skip")
+
+        def forward_orig(self, x):
+            for layer in self.layers:
+                x = layer(x)
+            return x
+
+        def forward_scan(self, x):
+            return scan_layers(self.layers, x)[0]
+
+        inp = torch.randn(3)
+        m = M()
+        m.forward = types.MethodType(forward_orig, m)
+        ep = export(m, (torch.zeros(3),))
+        orig_out = m(inp)
+        self.assertTrue(torch.allclose(orig_out, ep.module()(inp)))
+
+        m.forward = types.MethodType(forward_scan, m)
+        self.assertTrue(torch.allclose(orig_out, m(inp)))
+        ep = export(m, (torch.zeros(3),))
+        self.assertTrue(torch.allclose(orig_out, ep.module()(inp)))
+        print(ep)
+        FileCheck().check_count("torch._higher_order_ops.scan", 1, exactly=True).run(
+            ep.graph_module.code
+        )
 
     @requires_gpu
     @testing.expectedFailureLegacyExportNonStrict  # Old export graph contains auto_functionalize not Triton wrapper

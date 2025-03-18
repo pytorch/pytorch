@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import copy
 import functools
 import itertools
 from typing import Any, Callable
@@ -174,6 +175,27 @@ def scan(
         out = pytree.tree_map(lambda elem: elem.flip([0]), out)
 
     return carry, out
+
+
+def scan_layers(layers: torch.nn.ModuleList, init: pytree.PyTree):
+    assert len(layers) > 0, "Number of layers to scan over has to be > 0"
+
+    params = []
+    buffers = []
+    for layer in layers:
+        params.append(dict(layer.named_parameters()))
+        buffers.append(dict(layer.named_buffers()))
+
+    stacked_params = pytree.tree_map(lambda *t: torch.stack(t, dim=0), *params)
+    stacked_buffers = pytree.tree_map(lambda *t: torch.stack(t, dim=0), *buffers)
+
+    layer = copy.deepcopy(layers[0])
+
+    def scan_fn(carry, weights):
+        res = torch.func.functional_call(layer, weights, carry)
+        return res, weights
+
+    return scan(scan_fn, init, (stacked_params, stacked_buffers))
 
 
 class ScanOp(HigherOrderOperator):
