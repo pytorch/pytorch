@@ -212,8 +212,10 @@ class ReplicateTest(MultiProcessInductorTestCase):
     @skip_if_lt_x_gpu(2)
     def test_compile_bf16(self):
         # Check device capability wrt bf16
-        if not sm_is_or_higher_than(torch.device(device_type), 8, 0) and \
-                torch.version.hip is None:
+        if (
+            not sm_is_or_higher_than(torch.device(device_type), 8, 0)
+            and torch.version.hip is None
+        ):
             self.skipTest("bf16 requires sm >= 8.0")
 
         def setup(model, compiled_replicate_model, compiled_ddp_model) -> None:

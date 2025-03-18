@@ -35,7 +35,9 @@ def scale_for_fp8(
         t = t.unflatten(0, (scale_shape[0], -1)).unflatten(-1, (scale_shape[1], -1))
 
     if TEST_WITH_ROCM:
-        scale = t.abs().amax(dim=[1, -1]).float() / torch.finfo(torch.float8_e4m3fnuz).max
+        scale = (
+            t.abs().amax(dim=[1, -1]).float() / torch.finfo(torch.float8_e4m3fnuz).max
+        )
         t_fp8 = (t / scale[:, None, :, None]).to(torch.float8_e4m3fnuz)
     else:
         scale = t.abs().amax(dim=[1, -1]).float() / torch.finfo(torch.float8_e4m3fn).max
@@ -477,7 +479,9 @@ class DistMatrixOpsTest(DTensorTestBase):
             lhs_dtensor = distribute_tensor(lhs, mesh, [Shard(dim=0), Replicate()])
             rhs_dtensor = distribute_tensor(rhs, mesh, [Replicate(), Shard(dim=1)])
             dtensor_result = lhs_dtensor @ rhs_dtensor
-            self.assertEqual(dtensor_result.full_tensor(), mm_result, atol=1.5e-5, rtol=1e-6)
+            self.assertEqual(
+                dtensor_result.full_tensor(), mm_result, atol=1.5e-5, rtol=1e-6
+            )
 
     @with_comms
     @skip_unless_torch_gpu
