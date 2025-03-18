@@ -138,7 +138,7 @@ def get_compile_threads() -> int:
     return config.compile_threads
 
 
-CacheResult = Union[LambdaFuture | CachingAutotuner]
+CacheResult = Union[LambdaFuture, CachingAutotuner]
 
 
 @clear_on_fresh_inductor_cache
