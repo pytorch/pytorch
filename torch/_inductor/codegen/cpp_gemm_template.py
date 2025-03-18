@@ -365,20 +365,11 @@ SMALL_M_GEMM_TEMPLATE = r"""
                 {%- set tile_X = kernel.slice_nd(X, [(0, "M"), ("k_start", "k_end")]) %}
                 {%- set tile_W_3d = kernel.slice_nd(W, [("nr_block_id", "nr_block_id + 1"), ("k_start", "k_end"), ()]) %}
                 {%- set tile_W = kernel.view(tile_W_3d, ["k_end - k_start", micro_gemm.register_blocking.block_n]) %}
-                {%- if x_scale is none and w_scale is not none %}
-                    {%- set tile_scale = kernel.slice_nd(w_scale, [("nr_block_id*Nr", "(nr_block_id + 1)*Nr")]) %}
-                    if (kr_block_id == 0) {
-                        {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, acc, accum=False, scales=tile_scale)|indent(28, false) }}
-                    } else {
-                        {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, acc, accum=True, scales=tile_scale)|indent(28, false) }}
-                    }
-                {%- else %}
-                    if (kr_block_id == 0) {
-                        {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, acc, accum=False)|indent(28, false) }}
-                    } else {
-                        {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, acc, accum=True)|indent(28, false) }}
-                    }
-                {%- endif %}
+                if (kr_block_id == 0) {
+                    {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, acc, accum=False)|indent(20, false) }}
+                } else {
+                    {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, acc, accum=True)|indent(20, false) }}
+                }
             }
             {%- set tile_Y = kernel.slice_nd(Y_2d, [("m_start", "m_end"), ("n_start", "n_end")]) %}
             {%- set tile_acc = kernel.slice_nd(acc, [("0", "m_end - m_start"), ("0", "n_end - n_start")]) %}
