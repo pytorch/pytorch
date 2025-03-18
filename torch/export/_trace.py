@@ -63,7 +63,7 @@ from torch._functorch.aot_autograd import (
     _detect_attribute_assignment,
     aot_export_module,
 )
-from torch._guards import detect_fake_mode
+from torch._guards import detect_fake_mode, tracing, TracingContext
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._logging import dtrace_structured
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -1403,7 +1403,8 @@ def _strict_export(
         if name in reverse_name_lookup
     }
 
-    with dynamo_fake_mode:
+    tx = TracingContext(dynamo_fake_mode)
+    with dynamo_fake_mode, tracing(tx):
         aten_export_artifact = _to_aten_func(
             gm_torch_level,
             # NOTE: graph module expects only positional args
@@ -1862,7 +1863,8 @@ def _non_strict_export(
             _is_torch_jit_trace=_is_torch_jit_trace,
         )
 
-    with fake_mode, _NonStrictTorchFunctionHandler():
+    tx = TracingContext(fake_mode)
+    with fake_mode, _NonStrictTorchFunctionHandler(), tracing(tx):
         with _fakify_script_objects(mod, fake_args, fake_kwargs, fake_mode) as (
             patched_mod,
             new_fake_args,
