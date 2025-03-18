@@ -1,9 +1,9 @@
 name: inductor-perf-nightly-aarch64
 
 on:
-  schedule:
-    # Does not perform max_autotune on CPU, so skip the weekly run setup
-    - cron: 0 7 * * *
+  # schedule:
+  #   # Does not perform max_autotune on CPU, so skip the weekly run setup
+  #   - cron: 0 7 * * *
   # NB: GitHub has an upper limit of 10 inputs here
   workflow_dispatch:
     inputs:

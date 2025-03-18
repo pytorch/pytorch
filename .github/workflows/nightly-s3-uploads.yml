@@ -1,9 +1,9 @@
 name: Nightly Upload to s3
 
 on:
-  schedule:
-    # Choose a random time near midnight PST because it may be delayed if there are high loads
-    - cron:  37 7 * * *
+  # schedule:
+  #   # Choose a random time near midnight PST because it may be delayed if there are high loads
+  #   - cron:  37 7 * * *
   pull_request:
     paths:
       - 'tools/stats/upload_external_contrib_stats.py'

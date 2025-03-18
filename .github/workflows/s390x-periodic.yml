@@ -1,10 +1,10 @@
 name: s390x-periodic
 
 on:
-  schedule:
-    # We have several schedules so jobs can check github.event.schedule to activate only for a fraction of the runs.
-    # Also run less frequently on weekends.
-    - cron: 29 8 * * *  # about 1:29am PDT, for mem leak check and rerun disabled tests
+  # schedule:
+  #   # We have several schedules so jobs can check github.event.schedule to activate only for a fraction of the runs.
+  #   # Also run less frequently on weekends.
+  #   - cron: 29 8 * * *  # about 1:29am PDT, for mem leak check and rerun disabled tests
   push:
     tags:
       - ciflow/periodic/*

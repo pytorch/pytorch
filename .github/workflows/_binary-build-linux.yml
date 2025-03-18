@@ -18,7 +18,7 @@ on:
         description: prefix for runner label
       runs_on:
         required: false
-        default: linux.12xlarge.memory.ephemeral
+        default: linux.12xlarge.ephemeral
         type: string
         description: Hardware to run this "build" job on, linux.12xlarge or linux.arm64.2xlarge.
       timeout-minutes:
@@ -36,7 +36,7 @@ on:
       ALPINE_IMAGE:
         required: false
         type: string
-        default: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
+        default: "alpine"
         description: Alpine image to use
       PYTORCH_ROOT:
         required: true
@@ -168,7 +168,7 @@ jobs:
         if: inputs.build_environment != 'linux-s390x-binary-manywheel'
         uses: ./.github/actions/chown-workspace
         with:
-          ALPINE_IMAGE: ${{ inputs.ALPINE_IMAGE }}
+          ALPINE_IMAGE: alpine
 
       - name: Clean workspace
         shell: bash

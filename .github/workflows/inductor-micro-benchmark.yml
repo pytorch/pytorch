@@ -1,8 +1,8 @@
 name: inductor-micro-benchmark
 
 on:
-  schedule:
-    - cron: 0 7 * * *
+  # schedule:
+  #   - cron: 0 7 * * *
   push:
     tags:
       - ciflow/inductor-micro-benchmark/*

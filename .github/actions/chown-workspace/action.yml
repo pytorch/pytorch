@@ -6,7 +6,7 @@ inputs:
   ALPINE_IMAGE:
     type: string
     required: false
-    default: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
+    default: "alpine"
     description: selected Alpine docker image to use for chown of workspace
 
 runs:

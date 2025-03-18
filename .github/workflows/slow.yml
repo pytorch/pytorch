@@ -10,8 +10,8 @@ on:
       - release/*
     tags:
       - ciflow/slow/*
-  schedule:
-    - cron: 29 8 * * *  # about 1:29am PDT, for mem leak check and rerun disabled tests
+  # schedule:
+    # - cron: 29 8 * * *  # about 1:29am PDT, for mem leak check and rerun disabled tests
   workflow_dispatch:
 
 concurrency:

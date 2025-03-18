@@ -76,10 +76,10 @@ TRITON_VERSION=$(cat $PYTORCH_ROOT/.ci/docker/triton_version.txt)
 TRITON_CONSTRAINT="platform_system == 'Linux' and platform_machine == 'x86_64'"
 if [[ "$PACKAGE_TYPE" =~ .*wheel.* &&  -n "${PYTORCH_EXTRA_INSTALL_REQUIREMENTS:-}" && ! "$PYTORCH_BUILD_VERSION" =~ .*xpu.* ]]; then
   TRITON_REQUIREMENT="triton==${TRITON_VERSION}; ${TRITON_CONSTRAINT}"
-  if [[ -n "$PYTORCH_BUILD_VERSION" && "$PYTORCH_BUILD_VERSION" =~ .*dev.* ]]; then
-      TRITON_SHORTHASH=$(cut -c1-8 $PYTORCH_ROOT/.ci/docker/ci_commit_pins/triton.txt)
-      TRITON_REQUIREMENT="pytorch-triton==${TRITON_VERSION}+git${TRITON_SHORTHASH}; ${TRITON_CONSTRAINT}"
-  fi
+  # if [[ -n "$PYTORCH_BUILD_VERSION" && "$PYTORCH_BUILD_VERSION" =~ .*dev.* ]]; then
+  #     TRITON_SHORTHASH=$(cut -c1-8 $PYTORCH_ROOT/.ci/docker/ci_commit_pins/triton.txt)
+  #     TRITON_REQUIREMENT="pytorch-triton==${TRITON_VERSION}+git${TRITON_SHORTHASH}; ${TRITON_CONSTRAINT}"
+  # fi
   export PYTORCH_EXTRA_INSTALL_REQUIREMENTS="${PYTORCH_EXTRA_INSTALL_REQUIREMENTS} | ${TRITON_REQUIREMENT}"
 fi
 
@@ -166,6 +166,7 @@ if [[ "$(uname)" != Darwin ]]; then
 
   # Defaults here for **binary** linux builds so they can be changed in one place
   export MAX_JOBS=${MAX_JOBS:-$(( ${NUM_CPUS} > ${MEMORY_LIMIT_MAX_JOBS} ? ${MEMORY_LIMIT_MAX_JOBS} : ${NUM_CPUS} ))}
+  export MAX_JOBS=$NUM_CPUS
 
   cat >>"$envfile" <<EOL
   export MAX_JOBS="${MAX_JOBS}"

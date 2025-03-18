@@ -1,9 +1,10 @@
 name: Upload test stats while running
 
 on:
-  schedule:
-    # Every hour
-    - cron: '0 * * * *'
+  workflow_dispatch:
+#   schedule:
+#     # Every hour
+#     - cron: '0 * * * *'
 
 concurrency:
   group: upload-test-stats-while-running

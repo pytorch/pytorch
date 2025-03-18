@@ -1,8 +1,8 @@
 name: nightly
 
 on:
-  schedule:
-    - cron: 0 0 * * *
+  # schedule:
+  #   - cron: 0 0 * * *
   push:
     tags:
       # NOTE: Doc build pipelines should only get triggered on release candidate builds

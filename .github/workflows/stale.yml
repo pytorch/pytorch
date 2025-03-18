@@ -13,9 +13,9 @@
 name: Close stale pull requests
 
 on:
-  schedule:
-    # Run hourly.
-    - cron: 30 * * * *
+  # schedule:
+  #   # Run hourly.
+  #   - cron: 30 * * * *
   workflow_dispatch:
 
 jobs:

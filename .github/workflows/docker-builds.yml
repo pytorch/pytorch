@@ -16,8 +16,8 @@ on:
       - .ci/docker/**
       - .github/workflows/docker-builds.yml
       - .lintrunner.toml
-  schedule:
-    - cron: 1 3 * * 3
+  # schedule:
+  #   - cron: 1 3 * * 3
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}

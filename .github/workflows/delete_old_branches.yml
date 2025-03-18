@@ -3,9 +3,9 @@
 name: Delete old branches
 
 on:
-  schedule:
-    # Run daily.
-    - cron: 30 1 * * *
+  # schedule:
+  #   # Run daily.
+  #   - cron: 30 1 * * *
   workflow_dispatch:
 
 concurrency:

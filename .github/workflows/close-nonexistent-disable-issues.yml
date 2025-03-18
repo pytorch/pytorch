@@ -1,8 +1,9 @@
 name: Close nonexistent disable issues
 
 on:
-  schedule:
-    - cron: 5 22 * * 5  # this should be about 3PM PT on Friday
+  workflow_dispatch:
+  # schedule:
+  #   - cron: 5 22 * * 5  # this should be about 3PM PT on Friday
 
 jobs:
   close-nonexistent-disable-issues:

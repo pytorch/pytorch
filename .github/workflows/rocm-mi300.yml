@@ -7,8 +7,8 @@ on:
     tags:
       - ciflow/rocm-mi300/*
   workflow_dispatch:
-  schedule:
-    - cron: 29 8 * * *  # about 1:29am PDT
+  # schedule:
+  #   - cron: 29 8 * * *  # about 1:29am PDT
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
