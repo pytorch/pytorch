@@ -538,5 +538,12 @@ std::vector<std::string> AOTIModelPackageLoader::get_constant_fqns() {
   return constant_fqns;
 }
 
+void AOTIModelPackageLoader::update_constant_buffer(
+    std::unordered_map<std::string, at::Tensor>& tensor_map,
+    bool use_inactive,
+    bool validate_full_updates) {
+  runner_->update_constant_buffer(
+      tensor_map, use_inactive, validate_full_updates);
+}
 } // namespace torch::inductor
 #endif
