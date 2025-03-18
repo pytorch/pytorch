@@ -376,6 +376,9 @@ def check_aliasing_constraint(name, prev, result, get_module=lambda: "???"):
 def _c_check_aliasing_constraint(name, args, kwargs, result, get_module=lambda: "???"):
     """
     custom operators' outputs must not have any aliases
+    This version uses C++ implementation for perf.
+    Only List container is supported.
+    Tensors in Lists with not only Tensors are checked.
     """
     tuple_result = result
     if not isinstance(result, tuple):
