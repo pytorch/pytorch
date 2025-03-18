@@ -84,7 +84,6 @@ def mps_ops_grad_modifier(ops):
         '_upsample_bilinear2d_aa': None,  # `_upsample_bilinear2d_aa_backward_out` not implemented for MPS
         'sparse.mmreduce': [torch.float32],  # csr not supported
         'unique_consecutive': [torch.float16, torch.float32],
-        'special_modified_bessel_i0': [torch.float16, torch.float32],
         'scalar_tensor': [torch.float16, torch.float32],
         'cdist': [torch.float32],
         'masked.scatter': [torch.float16, torch.float32],
@@ -653,7 +652,6 @@ def mps_ops_modifier(ops):
         'special.hermite_polynomial_he': None,
         'special.laguerre_polynomial_l': None,
         'special.log_ndtr': None,
-        'special.modified_bessel_i0': None,
         'special.modified_bessel_i1': None,
         'special.modified_bessel_k0': None,
         'special.modified_bessel_k1': None,
@@ -4392,7 +4390,8 @@ class TestMPS(TestCaseMPS):
 
     # See https://github.com/pytorch/pytorch/pull/84742
     # and https://github.com/pytorch/pytorch/pull/78319
-    def test_binops_dtype_precedence(self):
+    @parametrize("binop", ['add', 'sub', 'mul', 'div'])
+    def test_binops_dtype_precedence(self, binop):
         # Test dtype precedence (casting order) in binary operations by comparing to CPU result
         # Example values for all dtypes supported on the MPS backend
         sample_vals = {
@@ -4404,8 +4403,7 @@ class TestMPS(TestCaseMPS):
             torch.float32: [-1.0, 0.0, 0.1, 111.99],
         }
         # Test all combinations of dtypes, operations, dimensionality
-        for dtype1, dtype2, binop in itertools.product(
-                sample_vals.keys(), sample_vals.keys(), ['add', 'sub', 'mul', 'div']):
+        for dtype1, dtype2 in itertools.product(sample_vals, repeat=2):
             # bool minus bool is generally unsupported, so skip
             if binop == 'sub' and (dtype1 == torch.bool or dtype2 == torch.bool):
                 continue
@@ -9259,7 +9257,6 @@ class TestNNMPS(NNTestCase):
         # This used to crash with MPSNDArrayConvolutionA14.mm:4352: failed assertion
         y2.sum().backward()
 
-    @unittest.skipIf(MACOS_VERSION < 13.2, "Skipped on macOS 12")
     def test_conv3d_backward_collision(self):
         # Conv3D is only available from MacOS 13.2 onwards
         x = torch.rand(1, 1, 10, 10, 20, device="mps", requires_grad=True)
@@ -9899,6 +9896,29 @@ class TestSDPA(TestCaseMPS):
         with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
             y = F.scaled_dot_product_attention(q, k, v, attn_mask=mask, dropout_p=0.0, is_causal=False)
         y_ref = F.scaled_dot_product_attention(q.cpu(), k.cpu(), v.cpu(), attn_mask=mask.cpu(), dropout_p=0.0, is_causal=False)
+        self._compare_tensors(y.cpu(), y_ref)
+
+    @parametrize("dtype", [torch.float16, torch.float32])
+    @parametrize("is_causal", [True, False])
+    def test_sdpa_enable_gqa(self, dtype, is_causal):
+        q_heads = 32
+        key_heads = 16
+        L = 7
+        S = 17
+        HS = 23
+
+        q = torch.randn([2, q_heads, L, HS], dtype=dtype, device="mps")
+        k = torch.randn([2, key_heads, S, HS], dtype=dtype, device="mps")
+        v = torch.randn([2, key_heads, S, HS], dtype=dtype, device="mps")
+
+        y_ref = F.scaled_dot_product_attention(
+            q.cpu(), k.cpu(), v.cpu(), dropout_p=0.0, is_causal=is_causal, enable_gqa=True,
+        )
+
+        with torch.nn.attention.sdpa_kernel([torch.nn.attention.SDPBackend.MATH]):
+            y = F.scaled_dot_product_attention(
+                q, k, v, dropout_p=0.0, is_causal=is_causal, enable_gqa=True,
+            )
         self._compare_tensors(y.cpu(), y_ref)
 
 
@@ -11000,7 +11020,6 @@ class TestConvolutionMPS(TestCaseMPS):
             x_gpu = conv_gpu(y_gpu)
             self.assertEqual(x_cpu, x_gpu.cpu(), rtol=1e-03, atol=1e-05)
 
-    @unittest.skipIf(MACOS_VERSION < 13.2, "Skipped on macOS 12")
     def test_conv3d_single_stride(self):
         # Conv3d is only available from MacOS 13.2 onwards
         y_cpu = torch.randn(2, 2, 3, 6)
