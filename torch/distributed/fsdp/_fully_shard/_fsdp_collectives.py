@@ -1,3 +1,4 @@
+from itertools import chain
 from typing import Callable, cast, NamedTuple, Optional, Union
 
 import torch
@@ -66,8 +67,10 @@ def all_gather_copy_in_meta(
 
 @torch.library.impl(lib, "all_gather_copy_in", "CUDA")
 @torch.library.impl(lib, "all_gather_copy_in", "XPU")
+@torch.library.impl(lib, "all_gather_copy_in", "HPU")
 @torch.library.impl(lib, "all_gather_copy_in", "CPU")
 @torch.library.impl(lib, "all_gather_copy_in", "MTIA")
+@torch.library.impl(lib, "all_gather_copy_in", "PrivateUse1")
 def all_gather_copy_in_cuda(
     all_gather_inputs: list[torch.Tensor],
     inp_split_sizes: list[int],
@@ -97,8 +100,10 @@ lib.define(
 @torch.library.impl(lib, "split_with_sizes_copy", "Meta")
 @torch.library.impl(lib, "split_with_sizes_copy", "CUDA")
 @torch.library.impl(lib, "split_with_sizes_copy", "XPU")
+@torch.library.impl(lib, "split_with_sizes_copy", "HPU")
 @torch.library.impl(lib, "split_with_sizes_copy", "CPU")
 @torch.library.impl(lib, "split_with_sizes_copy", "MTIA")
+@torch.library.impl(lib, "split_with_sizes_copy", "PrivateUse1")
 def split_with_sizes_copy(
     all_gather_output: torch.Tensor,
     all_gather_input_split_sizes: list[int],
@@ -118,8 +123,10 @@ lib.define(
 @torch.library.impl(lib, "chunk_cat", "Meta")
 @torch.library.impl(lib, "chunk_cat", "CUDA")
 @torch.library.impl(lib, "chunk_cat", "XPU")
+@torch.library.impl(lib, "chunk_cat", "HPU")
 @torch.library.impl(lib, "chunk_cat", "CPU")
 @torch.library.impl(lib, "chunk_cat", "MTIA")
+@torch.library.impl(lib, "chunk_cat", "PrivateUse1")
 def chunk_cat(
     tensors: list[torch.Tensor],
     dim: int,
@@ -152,7 +159,7 @@ def foreach_all_gather(
                 t.view(torch.uint8) for ts in param_all_gather_inputs for t in ts
             ]
         else:
-            all_gather_inputs = [t for ts in param_all_gather_inputs for t in ts]
+            all_gather_inputs = [*chain.from_iterable(param_all_gather_inputs)]
         inp_split_sizes = [t.numel() for t in all_gather_inputs]
         all_gather_input_numel = sum(inp_split_sizes)
         all_gather_input, all_gather_output = torch.ops.fsdp.all_gather_copy_in(
@@ -374,9 +381,9 @@ def foreach_reduce(
     for i, (fsdp_param, unsharded_grad) in enumerate(zip(fsdp_params, unsharded_grads)):
         if (shard_dim := fsdp_param.fsdp_placement.dim) == 0:
             continue
-        assert (
-            unsharded_grad.size(shard_dim) % world_size == 0
-        ), f"Shard({shard_dim}) requires even sharding: {unsharded_grad.size()=} {world_size=}"
+        assert unsharded_grad.size(shard_dim) % world_size == 0, (
+            f"Shard({shard_dim}) requires even sharding: {unsharded_grad.size()=} {world_size=}"
+        )
         chunks = torch.chunk(unsharded_grad, world_size, dim=shard_dim)
         unsharded_grads[i] = torch.cat(chunks, dim=0)
     padded_unsharded_sizes = tuple(

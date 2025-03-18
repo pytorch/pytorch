@@ -255,9 +255,9 @@ class RuntimeEstimator(TorchDispatchMode):
             Tuple[Any, float]: A tuple containing the result of the function and
                 the mean operation time in milliseconds.
         """
-        assert isinstance(
-            cls.fake_mode, FakeTensorMode
-        ), "Initialize/Assign FakeTensorMode before using this function"
+        assert isinstance(cls.fake_mode, FakeTensorMode), (
+            "Initialize/Assign FakeTensorMode before using this function"
+        )
         mean_op_time = 0.0
         if func._overloadpacket not in _VIEW_OPS:
             try:
@@ -289,9 +289,9 @@ class RuntimeEstimator(TorchDispatchMode):
             Tuple[Any, float]: A tuple containing the result of the function and
                 the mean operation time in milliseconds.
         """
-        assert (
-            torch.cuda.is_available()
-        ), "Roofline estimation needs to access CUDA capabilities to make estimations"
+        assert torch.cuda.is_available(), (
+            "Roofline estimation needs to access CUDA capabilities to make estimations"
+        )
 
         def get_num_bytes(t: torch.Tensor) -> int:
             """
@@ -324,9 +324,9 @@ class RuntimeEstimator(TorchDispatchMode):
                 float: The estimated compute time in nanoseconds.
             """
             if func_packet in flop_registry:
-                assert (
-                    len(out_dtypes) == 1
-                ), f"Only support single out dtype got {out_dtypes} for {func_packet}"
+                assert len(out_dtypes) == 1, (
+                    f"Only support single out dtype got {out_dtypes} for {func_packet}"
+                )
                 dtype = out_dtypes.pop()
                 # This actually gives peta-FLOPs/s hence multiply by 1e15 to get the FLOPs/s
                 peak_gpu_flops = get_device_tflops(dtype) * 1e15
@@ -487,9 +487,9 @@ class RuntimeEstimator(TorchDispatchMode):
 
     def __enter__(self) -> Self:
         fake_mode = active_fake_mode()
-        assert isinstance(
-            fake_mode, FakeTensorMode
-        ), "No FakeTensorMode found, designed to used under FakeTensorMode"
+        assert isinstance(fake_mode, FakeTensorMode), (
+            "No FakeTensorMode found, designed to used under FakeTensorMode"
+        )
         RuntimeEstimator.fake_mode = fake_mode
         self.total_runtime = 0.0
         self.mod_runtimes = defaultdict(lambda: defaultdict(lambda: 0.0))
