@@ -3376,7 +3376,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
 
     @requires_nccl()
     @requires_nccl_version(
-        (2, 26), "Need NCCL 2.26+ for configuring estimate comm time"
+        (2, 22), "Need NCCL 2.22+ for configuring estimate comm time"
     )
     @skip_if_lt_x_gpu(2)
     def test_time_estimate_nccl(self):
