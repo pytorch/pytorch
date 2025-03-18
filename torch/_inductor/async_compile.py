@@ -320,15 +320,19 @@ class AsyncCompile:
             with dynamo_timed("reload_kernel_in_parent"):
                 return load_kernel()
 
-        if (kernel := CompiledTritonKernels.get(source_code)) is not None:
+        if (future := CompiledTritonKernels.get(source_code)) is not None:
             counters["inductor"]["async_compile_cache_hit"] += 1
             # If it's already a CachingAutotuner, we want to load it directly
-            if isinstance(kernel, CachingAutotuner):
-                kernel.precompile(
-                    warm_cache_only=False, reload_kernel=reload_kernel_in_parent
-                )
-                return kernel
-            return kernel
+            if isinstance(future, CachingAutotuner):
+                # Wrap the cached result in a no-op LambdaFuture (so that any cache misses won't be blocked
+                # on this precompile, which has to happen on the parent.
+                def get_result_cached():
+                    future.precompile(
+                        warm_cache_only=False, reload_kernel=reload_kernel_in_parent
+                    )
+                    return future
+                return LambdaFuture(get_result_cached)
+            return future
 
         counters["inductor"]["async_compile_cache_miss"] += 1
 
