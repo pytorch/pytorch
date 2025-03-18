@@ -832,9 +832,9 @@ void hardswish_backward_kernel(TensorIterator& iter) {
     cpu_kernel_vec(
       iter,
       [&](scalar_t grad_val, scalar_t self_val) -> scalar_t {
-        if (float(self_val) < neg_three) {
+        if (float(self_val) <= neg_three) {
           return zero;
-        } else if (float(self_val) <= three) {
+        } else if (float(self_val) < three) {
           return float(grad_val) * ((float(self_val) / three) + one_half);
         } else {
           return grad_val;
@@ -847,19 +847,19 @@ void hardswish_backward_kernel(TensorIterator& iter) {
           Vec::blendv(
             grad_val0 * ((self_val0 / kThreeVec) + kOneHalfVec),
             grad_val0,
-            self_val0 > kThreeVec
+            self_val0 >= kThreeVec
           ),
           kZeroVec,
-          self_val0 < kNegThreeVec
+          self_val0 <= kNegThreeVec
         );
         self_val1 = Vec::blendv(
           Vec::blendv(
             grad_val1 * ((self_val1 / kThreeVec) + kOneHalfVec),
             grad_val1,
-            self_val1 > kThreeVec
+            self_val1 >= kThreeVec
           ),
           kZeroVec,
-          self_val1 < kNegThreeVec
+          self_val1 <= kNegThreeVec
         );
         return convert_from_float<scalar_t>(self_val0, self_val1);
       });
@@ -878,9 +878,9 @@ void hardswish_backward_kernel(TensorIterator& iter) {
     cpu_kernel_vec(
       iter,
       [&](scalar_t grad_val, scalar_t self_val) {
-        if (self_val < neg_three) {
+        if (self_val <= neg_three) {
           return zero;
-        } else if (self_val <= three) {
+        } else if (self_val < three) {
           return grad_val * ((self_val / three) + one_half);
         } else {
           return grad_val;
@@ -891,10 +891,10 @@ void hardswish_backward_kernel(TensorIterator& iter) {
           Vec::blendv(
             grad_val * ((self_val / kThreeVec) + kOneHalfVec),
             grad_val,
-            self_val > kThreeVec
+            self_val >= kThreeVec
           ),
           kZeroVec,
-          self_val < kNegThreeVec
+          self_val <= kNegThreeVec
         );
       }
     );
