@@ -883,7 +883,7 @@ struct TORCH_API MPSAllocator final : public IMPSAllocator {
   }
 
   DataPtr clone_from_cpu(const void* data, std::size_t n) override {
-    std::cout << "==================================================="
+    std::cout << "===================================================" << std::endl;
     std::cout << "[MPSAllocator::clone_from_cpu] data: " << data << ", n: " << n << std::endl;
     DataPtr new_data = allocate(n);
     at::detail::getMPSHooks().deviceSynchronize();
@@ -896,7 +896,7 @@ struct TORCH_API MPSAllocator final : public IMPSAllocator {
     }
     copy_data_from_cpu_to_mps(dest, data, n);
     at::detail::getMPSHooks().deviceSynchronize();
-    std::cout << "==================================================="
+    std::cout << "===================================================" << std::endl;
     return new_data;
   }
   DataPtr clone_to_cpu(const void* data, std::size_t n) override {
