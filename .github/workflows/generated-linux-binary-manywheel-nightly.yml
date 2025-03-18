@@ -55,7 +55,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -77,7 +77,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -100,7 +100,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -120,7 +120,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu-cxx11-abi
       GPU_ARCH_TYPE: cpu-cxx11-abi
-      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-2.7
+      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -142,7 +142,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu-cxx11-abi
       GPU_ARCH_TYPE: cpu-cxx11-abi
-      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-2.7
+      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -165,7 +165,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu-cxx11-abi
       GPU_ARCH_TYPE: cpu-cxx11-abi
-      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-2.7
+      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -186,7 +186,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -210,7 +210,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -234,7 +234,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -255,14 +255,14 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_9-cuda12_6
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.25.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cuda12_6-test:  # Testing
@@ -279,7 +279,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -303,7 +303,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -324,14 +324,14 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_9-cuda12_8
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.7.1.26; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.8.3.14; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.3.41; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.9.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.2.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.7.53; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.25.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.8.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.13.0.11; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.7.1.26; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.8.3.14; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.3.41; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.9.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.2.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.7.53; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.8.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.13.0.11; platform_system == 'Linux' and platform_machine == 'x86_64'
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cuda12_8-test:  # Testing
@@ -348,7 +348,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -372,7 +372,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -393,7 +393,7 @@ jobs:
       DESIRED_CUDA: rocm6.2.4
       GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -418,7 +418,7 @@ jobs:
       GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -447,7 +447,7 @@ jobs:
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.7
         with:
-          docker-image: pytorch/manylinux2_28-builder:rocm6.2.4-2.7
+          docker-image: pytorch/manylinux2_28-builder:rocm6.2.4-main
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
@@ -466,7 +466,7 @@ jobs:
       DESIRED_CUDA: rocm6.2.4
       GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -487,7 +487,7 @@ jobs:
       DESIRED_CUDA: rocm6.3
       GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -512,7 +512,7 @@ jobs:
       GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -541,7 +541,7 @@ jobs:
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.7
         with:
-          docker-image: pytorch/manylinux2_28-builder:rocm6.3-2.7
+          docker-image: pytorch/manylinux2_28-builder:rocm6.3-main
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
@@ -560,7 +560,7 @@ jobs:
       DESIRED_CUDA: rocm6.3
       GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -580,7 +580,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -605,7 +605,7 @@ jobs:
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -643,7 +643,7 @@ jobs:
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.7
         with:
-          docker-image: pytorch/manylinux2_28-builder:xpu-2.7
+          docker-image: pytorch/manylinux2_28-builder:xpu-main
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown XPU
@@ -661,7 +661,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
@@ -681,7 +681,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
@@ -703,7 +703,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
@@ -726,7 +726,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
@@ -746,7 +746,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu-cxx11-abi
       GPU_ARCH_TYPE: cpu-cxx11-abi
-      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-2.7
+      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
@@ -768,7 +768,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu-cxx11-abi
       GPU_ARCH_TYPE: cpu-cxx11-abi
-      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-2.7
+      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
@@ -791,7 +791,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu-cxx11-abi
       GPU_ARCH_TYPE: cpu-cxx11-abi
-      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-2.7
+      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
@@ -812,7 +812,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
@@ -836,7 +836,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
@@ -860,7 +860,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
@@ -881,14 +881,14 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_10-cuda12_6
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.25.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cuda12_6-test:  # Testing
@@ -905,7 +905,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
@@ -929,7 +929,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
@@ -950,14 +950,14 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_10-cuda12_8
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.7.1.26; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.8.3.14; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.3.41; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.9.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.2.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.7.53; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.25.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.8.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.13.0.11; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.7.1.26; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.8.3.14; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.3.41; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.9.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.2.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.7.53; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.8.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.13.0.11; platform_system == 'Linux' and platform_machine == 'x86_64'
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cuda12_8-test:  # Testing
@@ -974,7 +974,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
@@ -998,7 +998,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
@@ -1019,7 +1019,7 @@ jobs:
       DESIRED_CUDA: rocm6.2.4
       GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
@@ -1044,7 +1044,7 @@ jobs:
       GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
@@ -1073,7 +1073,7 @@ jobs:
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.7
         with:
-          docker-image: pytorch/manylinux2_28-builder:rocm6.2.4-2.7
+          docker-image: pytorch/manylinux2_28-builder:rocm6.2.4-main
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
@@ -1092,7 +1092,7 @@ jobs:
       DESIRED_CUDA: rocm6.2.4
       GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
@@ -1113,7 +1113,7 @@ jobs:
       DESIRED_CUDA: rocm6.3
       GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
@@ -1138,7 +1138,7 @@ jobs:
       GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
@@ -1167,7 +1167,7 @@ jobs:
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.7
         with:
-          docker-image: pytorch/manylinux2_28-builder:rocm6.3-2.7
+          docker-image: pytorch/manylinux2_28-builder:rocm6.3-main
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
@@ -1186,7 +1186,7 @@ jobs:
       DESIRED_CUDA: rocm6.3
       GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
@@ -1206,7 +1206,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
@@ -1231,7 +1231,7 @@ jobs:
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
@@ -1269,7 +1269,7 @@ jobs:
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.7
         with:
-          docker-image: pytorch/manylinux2_28-builder:xpu-2.7
+          docker-image: pytorch/manylinux2_28-builder:xpu-main
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown XPU
@@ -1287,7 +1287,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
@@ -1307,7 +1307,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
@@ -1329,7 +1329,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
@@ -1352,7 +1352,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
@@ -1372,7 +1372,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu-cxx11-abi
       GPU_ARCH_TYPE: cpu-cxx11-abi
-      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-2.7
+      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
@@ -1394,7 +1394,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu-cxx11-abi
       GPU_ARCH_TYPE: cpu-cxx11-abi
-      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-2.7
+      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
@@ -1417,7 +1417,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu-cxx11-abi
       GPU_ARCH_TYPE: cpu-cxx11-abi
-      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-2.7
+      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
@@ -1438,7 +1438,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
@@ -1462,7 +1462,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
@@ -1486,7 +1486,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
@@ -1507,14 +1507,14 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_11-cuda12_6
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.25.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cuda12_6-test:  # Testing
@@ -1531,7 +1531,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
@@ -1555,7 +1555,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
@@ -1576,7 +1576,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
       use_split_build: False
       DESIRED_PYTHON: "3.11"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -1598,7 +1598,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
       use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda12_6-full
@@ -1621,7 +1621,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
       use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda12_6-full
@@ -1641,14 +1641,14 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_11-cuda12_8
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.7.1.26; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.8.3.14; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.3.41; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.9.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.2.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.7.53; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.25.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.8.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.13.0.11; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.7.1.26; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.8.3.14; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.3.41; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.9.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.2.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.7.53; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.8.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.13.0.11; platform_system == 'Linux' and platform_machine == 'x86_64'
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cuda12_8-test:  # Testing
@@ -1665,7 +1665,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
@@ -1689,7 +1689,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
@@ -1710,7 +1710,7 @@ jobs:
       DESIRED_CUDA: rocm6.2.4
       GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
@@ -1735,7 +1735,7 @@ jobs:
       GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
@@ -1764,7 +1764,7 @@ jobs:
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.7
         with:
-          docker-image: pytorch/manylinux2_28-builder:rocm6.2.4-2.7
+          docker-image: pytorch/manylinux2_28-builder:rocm6.2.4-main
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
@@ -1783,7 +1783,7 @@ jobs:
       DESIRED_CUDA: rocm6.2.4
       GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
@@ -1804,7 +1804,7 @@ jobs:
       DESIRED_CUDA: rocm6.3
       GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
@@ -1829,7 +1829,7 @@ jobs:
       GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
@@ -1858,7 +1858,7 @@ jobs:
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.7
         with:
-          docker-image: pytorch/manylinux2_28-builder:rocm6.3-2.7
+          docker-image: pytorch/manylinux2_28-builder:rocm6.3-main
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
@@ -1877,7 +1877,7 @@ jobs:
       DESIRED_CUDA: rocm6.3
       GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
@@ -1897,7 +1897,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
@@ -1922,7 +1922,7 @@ jobs:
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
@@ -1960,7 +1960,7 @@ jobs:
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.7
         with:
-          docker-image: pytorch/manylinux2_28-builder:xpu-2.7
+          docker-image: pytorch/manylinux2_28-builder:xpu-main
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown XPU
@@ -1978,7 +1978,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
@@ -1998,7 +1998,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
@@ -2020,7 +2020,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
@@ -2043,7 +2043,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
@@ -2063,7 +2063,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu-cxx11-abi
       GPU_ARCH_TYPE: cpu-cxx11-abi
-      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-2.7
+      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
@@ -2085,7 +2085,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu-cxx11-abi
       GPU_ARCH_TYPE: cpu-cxx11-abi
-      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-2.7
+      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
@@ -2108,7 +2108,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu-cxx11-abi
       GPU_ARCH_TYPE: cpu-cxx11-abi
-      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-2.7
+      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
@@ -2129,7 +2129,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
@@ -2153,7 +2153,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
@@ -2177,7 +2177,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
@@ -2198,14 +2198,14 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_12-cuda12_6
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.25.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cuda12_6-test:  # Testing
@@ -2222,7 +2222,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
@@ -2246,7 +2246,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
@@ -2267,14 +2267,14 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_12-cuda12_8
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.7.1.26; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.8.3.14; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.3.41; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.9.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.2.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.7.53; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.25.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.8.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.13.0.11; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.7.1.26; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.8.3.14; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.3.41; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.9.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.2.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.7.53; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.8.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.13.0.11; platform_system == 'Linux' and platform_machine == 'x86_64'
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cuda12_8-test:  # Testing
@@ -2291,7 +2291,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
@@ -2315,7 +2315,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
@@ -2336,7 +2336,7 @@ jobs:
       DESIRED_CUDA: rocm6.2.4
       GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
@@ -2361,7 +2361,7 @@ jobs:
       GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
@@ -2390,7 +2390,7 @@ jobs:
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.7
         with:
-          docker-image: pytorch/manylinux2_28-builder:rocm6.2.4-2.7
+          docker-image: pytorch/manylinux2_28-builder:rocm6.2.4-main
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
@@ -2409,7 +2409,7 @@ jobs:
       DESIRED_CUDA: rocm6.2.4
       GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
@@ -2430,7 +2430,7 @@ jobs:
       DESIRED_CUDA: rocm6.3
       GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
@@ -2455,7 +2455,7 @@ jobs:
       GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
@@ -2484,7 +2484,7 @@ jobs:
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.7
         with:
-          docker-image: pytorch/manylinux2_28-builder:rocm6.3-2.7
+          docker-image: pytorch/manylinux2_28-builder:rocm6.3-main
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
@@ -2503,7 +2503,7 @@ jobs:
       DESIRED_CUDA: rocm6.3
       GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
@@ -2523,7 +2523,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
@@ -2548,7 +2548,7 @@ jobs:
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
@@ -2586,7 +2586,7 @@ jobs:
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.7
         with:
-          docker-image: pytorch/manylinux2_28-builder:xpu-2.7
+          docker-image: pytorch/manylinux2_28-builder:xpu-main
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown XPU
@@ -2604,7 +2604,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
@@ -2624,7 +2624,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
@@ -2646,7 +2646,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
@@ -2669,7 +2669,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
@@ -2689,7 +2689,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu-cxx11-abi
       GPU_ARCH_TYPE: cpu-cxx11-abi
-      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-2.7
+      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
@@ -2711,7 +2711,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu-cxx11-abi
       GPU_ARCH_TYPE: cpu-cxx11-abi
-      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-2.7
+      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
@@ -2734,7 +2734,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu-cxx11-abi
       GPU_ARCH_TYPE: cpu-cxx11-abi
-      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-2.7
+      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
@@ -2755,7 +2755,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
@@ -2779,7 +2779,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
@@ -2803,7 +2803,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
@@ -2824,14 +2824,14 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_13-cuda12_6
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.25.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_13-cuda12_6-test:  # Testing
@@ -2848,7 +2848,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
@@ -2872,7 +2872,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
@@ -2893,14 +2893,14 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_13-cuda12_8
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.7.1.26; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.8.3.14; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.3.41; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.9.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.2.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.7.53; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.25.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.8.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.13.0.11; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.7.1.26; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.8.3.14; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.3.41; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.9.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.2.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.7.53; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.8.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.13.0.11; platform_system == 'Linux' and platform_machine == 'x86_64'
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_13-cuda12_8-test:  # Testing
@@ -2917,7 +2917,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
@@ -2941,7 +2941,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
@@ -2962,7 +2962,7 @@ jobs:
       DESIRED_CUDA: rocm6.2.4
       GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
@@ -2987,7 +2987,7 @@ jobs:
       GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
@@ -3016,7 +3016,7 @@ jobs:
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.7
         with:
-          docker-image: pytorch/manylinux2_28-builder:rocm6.2.4-2.7
+          docker-image: pytorch/manylinux2_28-builder:rocm6.2.4-main
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
@@ -3035,7 +3035,7 @@ jobs:
       DESIRED_CUDA: rocm6.2.4
       GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
@@ -3056,7 +3056,7 @@ jobs:
       DESIRED_CUDA: rocm6.3
       GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
@@ -3081,7 +3081,7 @@ jobs:
       GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
@@ -3110,7 +3110,7 @@ jobs:
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.7
         with:
-          docker-image: pytorch/manylinux2_28-builder:rocm6.3-2.7
+          docker-image: pytorch/manylinux2_28-builder:rocm6.3-main
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
@@ -3129,7 +3129,7 @@ jobs:
       DESIRED_CUDA: rocm6.3
       GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
@@ -3149,7 +3149,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
@@ -3174,7 +3174,7 @@ jobs:
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
@@ -3212,7 +3212,7 @@ jobs:
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.7
         with:
-          docker-image: pytorch/manylinux2_28-builder:xpu-2.7
+          docker-image: pytorch/manylinux2_28-builder:xpu-main
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown XPU
@@ -3230,7 +3230,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
@@ -3250,7 +3250,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
@@ -3272,7 +3272,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
@@ -3295,7 +3295,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
@@ -3315,7 +3315,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu-cxx11-abi
       GPU_ARCH_TYPE: cpu-cxx11-abi
-      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-2.7
+      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
@@ -3337,7 +3337,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu-cxx11-abi
       GPU_ARCH_TYPE: cpu-cxx11-abi
-      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-2.7
+      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
@@ -3360,7 +3360,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu-cxx11-abi
       GPU_ARCH_TYPE: cpu-cxx11-abi
-      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-2.7
+      DOCKER_IMAGE: pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
@@ -3381,7 +3381,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
@@ -3405,7 +3405,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
@@ -3429,7 +3429,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
@@ -3450,14 +3450,14 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_13t-cuda12_6
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.25.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_13t-cuda12_6-test:  # Testing
@@ -3474,7 +3474,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
@@ -3498,7 +3498,7 @@ jobs:
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
@@ -3519,14 +3519,14 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_13t-cuda12_8
       build_environment: linux-binary-manywheel
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.7.1.26; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.8.3.14; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.3.41; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.9.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.2.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.7.53; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.25.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.8.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.13.0.11; platform_system == 'Linux' and platform_machine == 'x86_64'
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.7.1.26; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.8.3.14; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.3.41; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.9.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.2.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.7.53; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.8.55; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufile-cu12==1.13.0.11; platform_system == 'Linux' and platform_machine == 'x86_64'
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_13t-cuda12_8-test:  # Testing
@@ -3543,7 +3543,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
@@ -3567,7 +3567,7 @@ jobs:
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: 12.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.8-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
@@ -3588,7 +3588,7 @@ jobs:
       DESIRED_CUDA: rocm6.2.4
       GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
@@ -3613,7 +3613,7 @@ jobs:
       GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
@@ -3642,7 +3642,7 @@ jobs:
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.7
         with:
-          docker-image: pytorch/manylinux2_28-builder:rocm6.2.4-2.7
+          docker-image: pytorch/manylinux2_28-builder:rocm6.2.4-main
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
@@ -3661,7 +3661,7 @@ jobs:
       DESIRED_CUDA: rocm6.2.4
       GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
@@ -3682,7 +3682,7 @@ jobs:
       DESIRED_CUDA: rocm6.3
       GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
@@ -3707,7 +3707,7 @@ jobs:
       GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
@@ -3736,7 +3736,7 @@ jobs:
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.7
         with:
-          docker-image: pytorch/manylinux2_28-builder:rocm6.3-2.7
+          docker-image: pytorch/manylinux2_28-builder:rocm6.3-main
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
@@ -3755,7 +3755,7 @@ jobs:
       DESIRED_CUDA: rocm6.3
       GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
@@ -3775,7 +3775,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
@@ -3800,7 +3800,7 @@ jobs:
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
@@ -3838,7 +3838,7 @@ jobs:
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.7
         with:
-          docker-image: pytorch/manylinux2_28-builder:xpu-2.7
+          docker-image: pytorch/manylinux2_28-builder:xpu-main
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown XPU
@@ -3856,7 +3856,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
-      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-2.7
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
       DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
