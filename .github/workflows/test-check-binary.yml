@@ -15,7 +15,7 @@ jobs:
   check_binary_linux_cpu:
     if: github.repository_owner == 'pytorch'
     name: Test check_binary.sh for Linux CPU
-    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
     with:
       docker-image: python:3.11
       docker-build-dir: "skip-docker-build"
@@ -28,7 +28,7 @@ jobs:
   check_binary_linux_cuda:
     if: github.repository_owner == 'pytorch'
     name: Test check_binary.sh for Linux CUDA
-    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
     with:
       runner: linux.4xlarge.nvidia.gpu
       docker-image: python:3.11
