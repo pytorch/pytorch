@@ -1767,14 +1767,12 @@ class OutputGraph:
                 self.remove_node(node)
 
     def normalize_intermediate_node_names(self) -> None:
-        intermediate_nodes = [
-            node
-            for node in self.graph.nodes
-            if node.op != "placeholder" and node.op != "output"
-        ]
-        base_name_counter = {}
+        base_name_counter: dict[str, int] = collections.defaultdict(int)
 
-        for node in intermediate_nodes:
+        for node in self.graph.nodes:
+            if node.op == "placeholder" or node.op == "output":
+                continue
+
             name_parts = node.name.rsplit("_", 1)
             if len(name_parts) > 1 and name_parts[1].isdigit():
                 base_name = name_parts[0]
@@ -1782,7 +1780,6 @@ class OutputGraph:
                 base_name = node.name
 
             if base_name not in base_name_counter:
-                base_name_counter[base_name] = 0
                 node.name = f"{base_name}"
             else:
                 base_name_counter[base_name] += 1
