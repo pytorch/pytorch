@@ -382,13 +382,13 @@ case "$image" in
     # TODO: Use 3.9 here because of this issue https://github.com/python/mypy/issues/13627.
     # We will need to update mypy version eventually, but that's for another day. The task
     # would be to upgrade mypy to 1.0.0 with Python 3.11
-    ANACONDA_PYTHON_VERSION=3.9
-    CONDA_CMAKE=yes
+    PYTHON_VERSION=3.9
+    PIP_CMAKE=yes
     ;;
   pytorch-linux-jammy-cuda11.8-cudnn9-py3.9-linter)
-    ANACONDA_PYTHON_VERSION=3.9
+    PYTHON_VERSION=3.9
     CUDA_VERSION=11.8
-    CONDA_CMAKE=yes
+    PIP_CMAKE=yes
     ;;
   pytorch-linux-jammy-aarch64-py3.10-gcc11)
     ANACONDA_PYTHON_VERSION=3.10
@@ -478,6 +478,7 @@ docker build \
        --build-arg "GLIBC_VERSION=${GLIBC_VERSION}" \
        --build-arg "CLANG_VERSION=${CLANG_VERSION}" \
        --build-arg "ANACONDA_PYTHON_VERSION=${ANACONDA_PYTHON_VERSION}" \
+       --build-arg "PYTHON_VERSION=${PYTHON_VERSION}" \
        --build-arg "GCC_VERSION=${GCC_VERSION}" \
        --build-arg "CUDA_VERSION=${CUDA_VERSION}" \
        --build-arg "CUDNN_VERSION=${CUDNN_VERSION}" \
@@ -494,6 +495,7 @@ docker build \
        --build-arg "UCX_COMMIT=${UCX_COMMIT}" \
        --build-arg "UCC_COMMIT=${UCC_COMMIT}" \
        --build-arg "CONDA_CMAKE=${CONDA_CMAKE}" \
+       --build-arg "PIP_CMAKE=${PIP_CMAKE}" \
        --build-arg "TRITON=${TRITON}" \
        --build-arg "TRITON_CPU=${TRITON_CPU}" \
        --build-arg "ONNX=${ONNX}" \
