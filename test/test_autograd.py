@@ -8630,10 +8630,12 @@ for shape in [(1,), ()]:
             def backward(ctx, gO):
                 pass
 
-        a = torch.tensor([1.], requires_grad=True)
+        a = torch.tensor([1.0], requires_grad=True)
         a_clone = a.clone()
 
-        with self.assertRaisesRegex(RuntimeError, "received a tensor that was not an input."):
+        with self.assertRaisesRegex(
+            RuntimeError, "received a tensor that was not an input."
+        ):
             Func.apply(a_clone)
 
     def test_named_tensor_for_complex_views(self):
