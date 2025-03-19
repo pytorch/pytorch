@@ -208,7 +208,7 @@ void PyTorchStreamReader::init() {
       static_cast<const char*>(version_ptr.get()), version_size);
   try {
     version_ = std::stoull(version);
-  } catch (const std::invalid_argument& e) {
+  } catch (const std::invalid_argument&) {
     CAFFE_THROW("Couldn't parse the version ", version, " as Long Long.");
   }
   if (version_ <
