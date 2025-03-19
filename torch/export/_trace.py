@@ -1220,18 +1220,21 @@ def _get_range_constraints(
     # not based on the signature. I feel it would be better to just enforce
     # one ordering at the start of tracing to avoid confusions, but that is
     # bigger refactor, so do this to unblock for now.
-    combined_args_traced_order = {}
-    for arg in combined_args:
-        if arg not in kwargs:
-            combined_args_traced_order[arg] = combined_args[arg]
+    if not _is_torch_jit_trace:
+        combined_args_traced_order = {}
+        for arg in combined_args:
+            if arg not in kwargs:
+                combined_args_traced_order[arg] = combined_args[arg]
 
-    for key in kwargs:
-        combined_args_traced_order[key] = kwargs[key]
+        for key in kwargs:
+            combined_args_traced_order[key] = kwargs[key]
+
+        combined_args = combined_args_traced_order
 
     range_constraints = make_constraints(
         fake_mode,
         gm,
-        combined_args_traced_order,
+        combined_args,
         dynamic_shapes,
         num_lifted,
     )
