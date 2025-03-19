@@ -42,7 +42,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TestCase,
 )
-
+from torch.testing._internal.triton_utils import requires_cuda
 
 _BOOL_SUB_ERR_MSG = "Subtraction, the `-` operator"
 
@@ -1355,13 +1355,11 @@ class TestForeach(TestCase):
                 for t, ref_t in zip(out, ref_out):
                     self.assertTrue(torch.equal(t, ref_t))
 
-    @onlyCUDA
+    @requires_cuda
     @ops(filter(lambda op: op.name == "_foreach_copy", foreach_binary_op_db))
     def test_foreach_copy_with_different_device_inputs(self, device, dtype, op):
         if dtype in (torch.complex128, torch.complex64):
             self.skipTest("Complex dtype not supported")
-        if dtype in (torch.float16,):
-            self.skipTest("Float16 dtype not supported")
         # check foreach_copy when self and src tensorList have different device
         foreach_copy = op.method_variant
         copy_ = op.ref_inplace
