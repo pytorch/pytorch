@@ -180,16 +180,25 @@ html_theme_options = {
     "pytorch_project": "docs",
     "collapse_navigation": False,
     "display_version": True,
+
 }
 
 html_context = {
     "theme_variables": theme_variables,
+    "display_github": True,
+    "github_url": "https://github.com",
+    "github_user": "pytorch",
+    "github_repo": "pytorch",
+    "feedback_url": "https://github.com/pytorch/pytorch",
+    "github_version": "main",
+    "doc_path": "docs/cpp/source",
+    "library_links": theme_variables.get("library_links", []),
+    "community_links": theme_variables.get("community_links", []),
+    "pytorch_project": "docs",
+    "language_bindings_links": html_theme_options.get("language_bindings_links", []),
 }
 
 # NOTE: sharing python docs resources
-html_logo = os.path.join(
-    repo_root, "docs", "source", "_static", "img", "pytorch-logo-dark-unstable.png"
-)
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
