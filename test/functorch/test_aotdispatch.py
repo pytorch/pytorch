@@ -3970,11 +3970,11 @@ def forward(self, tangents_1):
         counters.clear()
         torch._dynamo.reset()
 
-        @torch.compile(backend="aot_eager")
+        @torch.compile(backend="aot_eager", fullgraph=True)
         def fn(x, y):
             return torch.matmul(x, y)
 
-        @torch.compile(backend="aot_eager")
+        @torch.compile(backend="aot_eager", fullgraph=True)
         def fn2(z):
             return z * 2
 
@@ -4003,21 +4003,21 @@ def forward(self, tangents_1):
         counters.clear()
         torch._dynamo.reset()
 
-        @torch.compile(backend="aot_eager")
+        @torch.compile(backend="aot_eager", fullgraph=True)
         def fn(x, y):
             out = torch.matmul(x, y)
             out2 = torch.matmul(out, y)
             out3 = torch.matmul(out2, y)
             return torch.matmul(out3, y)
 
-        def make_pack(dynamic):
+        def make_assert_pack(dynamic):
             def pack(activation):
                 assert hasattr(activation, "_dynamo_weak_dynamic_indices") == dynamic
                 return activation
 
             return pack
 
-        def make_unpack(dynamic):
+        def make_assert_unpack(dynamic):
             def unpack(activation):
                 assert hasattr(activation, "_dynamo_weak_dynamic_indices") == dynamic
                 return activation
@@ -4028,7 +4028,7 @@ def forward(self, tangents_1):
         x = torch.randn(10, 10, requires_grad=True)
         y = torch.randn(10, 10, requires_grad=True)
         with torch.autograd.graph.saved_tensors_hooks(
-            make_pack(False), make_unpack(False)
+            make_assert_pack(False), make_assert_unpack(False)
         ):
             fn(x, y)
         self.assertEqual(counters["aot_autograd"]["total"], 1)
@@ -4038,9 +4038,65 @@ def forward(self, tangents_1):
         x = torch.randn(20, 20, requires_grad=True)
         y = torch.randn(20, 20, requires_grad=True)
         with torch.autograd.graph.saved_tensors_hooks(
-            make_pack(True), make_unpack(True)
+            make_assert_pack(True), make_assert_unpack(True)
         ):
             fn(x, y)
+        self.assertEqual(counters["aot_autograd"]["total"], 1)
+        counters.clear()
+        torch._dynamo.reset()
+
+    def test_mark_activations_dynamic_with_nested(self):
+        # The flattened tensors of the nested tensor aren't
+        # marked as activations, but they add some offset
+        # to the fw_outs. This test ensures that we handle
+        # that offset properly.
+        counters.clear()
+        torch._dynamo.reset()
+
+        def make_assert_pack(dynamic):
+            def pack(activation):
+                assert hasattr(activation, "_dynamo_weak_dynamic_indices") == dynamic
+                return activation
+
+            return pack
+
+        def make_assert_unpack(dynamic):
+            def unpack(activation):
+                assert hasattr(activation, "_dynamo_weak_dynamic_indices") == dynamic
+                return activation
+
+            return unpack
+
+        # 1. static
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def fn(x, y, nt):
+            out = torch.matmul(x, y)
+            return out.sum() + nt.clone()
+
+        x = torch.randn(10, 10, requires_grad=True)
+        y = torch.randn(10, 10, requires_grad=True)
+        a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64)
+        b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64)
+        c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64)
+        nt = torch.nested.as_nested_tensor([a, b, c], layout=torch.jagged)
+        with torch.autograd.graph.saved_tensors_hooks(
+            make_assert_pack(False), make_assert_unpack(False)
+        ):
+            fn(x, y, nt)
+        self.assertEqual(counters["aot_autograd"]["total"], 1)
+        counters.clear()
+
+        # 2. dynamic
+        x = torch.randn(20, 20, requires_grad=True)
+        y = torch.randn(20, 20, requires_grad=True)
+        a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64)
+        b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64)
+        c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64)
+        nt = torch.nested.as_nested_tensor([a, b, c], layout=torch.jagged)
+        with torch.autograd.graph.saved_tensors_hooks(
+            make_assert_pack(True), make_assert_unpack(True)
+        ):
+            fn(x, y, nt)
         self.assertEqual(counters["aot_autograd"]["total"], 1)
         counters.clear()
         torch._dynamo.reset()
