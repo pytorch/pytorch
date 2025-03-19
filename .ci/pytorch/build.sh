@@ -171,10 +171,10 @@ fi
 if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   # shellcheck disable=SC1091
   source /opt/intel/oneapi/compiler/latest/env/vars.sh
+  # shellcheck disable=SC1091
   source /opt/intel/oneapi/mkl/latest/env/vars.sh
   # XPU kineto feature dependencies are not fully ready, disable kineto build as temp WA
   export USE_KINETO=0
-  export USE_STATIC_MKL=0
   export USE_ONEMKL=1
   export TORCH_XPU_ARCH_LIST=pvc
 fi
@@ -354,7 +354,7 @@ else
 
     mkdir -p "$CUSTOM_OP_BUILD"
     pushd "$CUSTOM_OP_BUILD"
-    cmake "$CUSTOM_OP_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES" -DPython_EXECUTABLE="$(which python)" \
+    cmake "$CUSTOM_OP_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES;$CMAKE_PREFIX_PATH" -DPython_EXECUTABLE="$(which python)" \
           -DCMAKE_MODULE_PATH="$CUSTOM_TEST_MODULE_PATH" -DUSE_ROCM="$CUSTOM_TEST_USE_ROCM"
     make VERBOSE=1
     popd
