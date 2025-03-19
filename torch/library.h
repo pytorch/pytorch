@@ -1027,9 +1027,7 @@ class TorchLibraryInit final {
   static const torch::detail::TorchLibraryInit C10_CONCATENATE(           \
       TORCH_LIBRARY_IMPL_static_init_##ns##_##k##_, uid)(                 \
       torch::Library::IMPL,                                               \
-      (c10::impl::dispatch_key_allowlist_check(c10::DispatchKey::k)       \
-           ? &C10_CONCATENATE(TORCH_LIBRARY_IMPL_init_##ns##_##k##_, uid) \
-           : [](torch::Library&) -> void {}),                             \
+      &C10_CONCATENATE(TORCH_LIBRARY_IMPL_init_##ns##_##k##_, uid),       \
       #ns,                                                                \
       std::make_optional(c10::DispatchKey::k),                            \
       __FILE__,                                                           \

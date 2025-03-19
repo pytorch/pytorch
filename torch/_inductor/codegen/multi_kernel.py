@@ -3,7 +3,6 @@ import functools
 import logging
 import os
 import pathlib
-from typing import Any
 
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch.utils._ordered_set import OrderedSet
@@ -11,11 +10,6 @@ from torch.utils._ordered_set import OrderedSet
 from .. import config
 from ..codecache import code_hash, CodeCacheFuture, get_path
 from ..runtime.benchmarking import benchmarker
-from ..runtime.triton_heuristics import (
-    cooperative_reduction_grid,
-    grid,
-    maybe_cooperative_reduction_grid,
-)
 from ..utils import cache_on_self, IndentedBuffer
 from ..virtualized import V
 from .common import TensorArg, WorkspaceArg
@@ -26,16 +20,16 @@ log = logging.getLogger(__name__)
 
 def get_kernel_argdefs(kernel):
     arg_defs, _, _, _ = kernel.args.python_argdefs()
-    return arg_defs
+    return [x.name for x in arg_defs]
 
 
 def _get_all_args(args_list, arg_types_list=None):
     all_args = max(args_list, key=len)[:]
     arg_types = max(arg_types_list, key=len)[:] if arg_types_list is not None else None
     for args in args_list:
-        assert OrderedSet(args).issubset(
-            OrderedSet(all_args)
-        ), f"{args} v.s. {all_args}"
+        assert OrderedSet(args).issubset(OrderedSet(all_args)), (
+            f"{args} v.s. {all_args}"
+        )
 
     return all_args, arg_types
 
@@ -149,7 +143,9 @@ class MultiKernel:
     Assume we do codegen for a MultiKernel encapsulating kernel1 and kernel2.
     The generated definition for the multi-kernel will looks like:
     ```
-    multi_kernel_kernel1 = MultiKernelCall([kernel1, kernel2], multi_kernel_definition_code)
+    multi_kernel_kernel1 = MultiKernelCall(
+        [kernel1, kernel2], multi_kernel_definition_code
+    )
     ```
 
     Here is an concrete example: https://gist.github.com/shunting314/d9f3fb6bc6cee3dbae005825ca196d39
@@ -194,19 +190,6 @@ class MultiKernel:
             kernel.args.workspace_args = workspace_args
         return workspace_args
 
-    def get_grid_fn(self):
-        fns = OrderedSet(kernel._get_grid_fn() for kernel in self.kernels)
-        if len(fns) == 1:
-            return fns.pop()
-        elif len(fns) == 2:
-            assert fns == OrderedSet([cooperative_reduction_grid, grid])
-            V.graph.wrapper_code.add_import_once(
-                f"from {maybe_cooperative_reduction_grid.__module__} import maybe_cooperative_reduction_grid"
-            )
-            return maybe_cooperative_reduction_grid
-        else:
-            raise NotImplementedError(fns)
-
     def call_kernel(self, kernel_name):
         """
         Collect the union of arguments from all subkernels as the arguments
@@ -220,31 +203,21 @@ class MultiKernel:
             assert call_args == other_call_args, (call_args, other_call_args)
             assert arg_types == other_arg_types
 
-        grid: list[Any] = []
-
         if V.graph.cpp_wrapper and not config.triton.autotune_at_compile_time:
             # for the second pass of cpp-wrapper codegen, we should call
             # the fast kernel directly
             kernel_name = MultiKernelCall.lookup_choice(self.kernel_name)
 
         # numels for all subkernels should be the same. Use kernels[0] here
-        self.kernels[0].add_numel_to_call_args_and_grid(
-            kernel_name, call_args, arg_types, grid
-        )
+        self.kernels[0].add_numel_to_call_args(kernel_name, call_args, arg_types)
 
         for ws in self.kernels[0].args.workspace_args:
             V.graph.wrapper_code.generate_workspace_allocation(ws)
 
-        grid_fn = self.get_grid_fn()
-        grid = V.graph.wrapper_code.generate_default_grid(
-            kernel_name, grid, grid_callable=grid_fn
-        )
         V.graph.wrapper_code.generate_kernel_call(
             kernel_name,
             call_args,
-            grid,
             arg_types=arg_types,
-            grid_fn=grid_fn.__name__,
         )
 
         for ws in reversed(self.kernels[0].args.workspace_args):

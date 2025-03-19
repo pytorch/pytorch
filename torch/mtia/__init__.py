@@ -5,7 +5,7 @@ This package enables an interface for accessing MTIA backend in python
 
 import threading
 import warnings
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 from torch import device as _device, Tensor
@@ -28,6 +28,16 @@ _queued_calls: list[
 _tls = threading.local()
 _initialization_lock = threading.Lock()
 _lazy_seed_tracker = _LazySeedTracker()
+
+
+if hasattr(torch._C, "_mtia_exchangeDevice"):
+    _exchange_device = torch._C._mtia_exchangeDevice
+else:
+
+    def _exchange_device(device: int) -> int:
+        if device < 0:
+            return -1
+        raise RuntimeError("PyTorch was compiled without MTIA support")
 
 
 def init():
@@ -354,6 +364,7 @@ __all__ = [
     "default_stream",
     "memory_stats",
     "max_memory_allocated",
+    "reset_peak_memory_stats",
     "get_device_capability",
     "record_memory_history",
     "snapshot",

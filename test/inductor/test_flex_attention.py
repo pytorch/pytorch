@@ -38,16 +38,15 @@ from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16, TEST_MUL
 from torch.testing._internal.common_device_type import (
     flex_attention_supported_platform as supported_platform,
 )
-from torch.testing._internal.common_utils import IS_MACOS, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import IS_MACOS
 from torch.utils._triton import has_triton
 
 
 # Use this decorator only when hitting Triton bugs on H100
 running_on_a100_only = skipUnless(
-    torch.cuda.is_available()
-    and has_triton()
-    and torch.cuda.get_device_capability() == (8, 0),
-    "Requires A100 and Triton",
+    (torch.cuda.is_available() and has_triton())
+    and (torch.cuda.get_device_capability() == (8, 0) or torch.version.hip),
+    "Requires Triton + A100 or Triton + ROCm",
 )
 
 Tolerances = namedtuple("Tolerances", ["atol", "rtol"])
@@ -135,7 +134,7 @@ else:
     )
 
     test_dtypes = (
-        [torch.float32, torch.bfloat16]
+        [torch.float32, torch.bfloat16, torch.float16]
         if torch.backends.mkldnn.is_available()
         and torch.ops.mkldnn._is_mkldnn_bf16_supported()
         else [torch.float32]
@@ -1680,10 +1679,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     def test_multiple_mask_calls(self):
-        if TEST_WITH_ROCM:
-            self.skipTest(
-                "ROCM BUG SEE: https://github.com/pytorch/pytorch/issues/140855"
-            )
         # Create inputs
         query = torch.randn(
             (1, 4, 512, 64), dtype=torch.float32, device="cuda", requires_grad=True
@@ -2133,10 +2128,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         torch.compile(flex_attention)(q, k, v, score_mod, block_mask=block_mask)
 
     @supported_platform
-    @common_utils.parametrize("head_dim", [13, 24, 94, 121])
+    @common_utils.parametrize("head_dim", [17, 24, 94, 121])
     @common_utils.parametrize("dtype", test_dtypes_fast)
     def test_non_pow_2_headdim(self, dtype, head_dim):
-        self.run_test(_rel_bias, torch.float16, B, H, S, head_dim, B, H, S, head_dim)
+        self.run_test(_rel_bias, dtype, B, H, S, head_dim, B, H, S, head_dim)
 
     @supported_platform
     def test_GQA_causal_mask(self):
@@ -2508,6 +2503,28 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         out.sum().backward()
 
     @supported_platform
+    def test_strided_backwards(self):
+        shape = (1, 2, 4096, 64)
+        Q = torch.randn(shape, requires_grad=True, device="cuda")
+        K = torch.randn(shape, requires_grad=True, device="cuda")
+        V = torch.randn(shape, requires_grad=True, device="cuda")
+        func = torch.compile(flex_attention, dynamic=True, fullgraph=True)
+
+        K_sliced = K[:, :, :-128]
+        V_sliced = V[:, :, :-128]
+
+        out_eager = flex_attention(Q, K_sliced, V_sliced)
+        out_compiled = func(Q, K_sliced, V_sliced)
+
+        grad = torch.rand_like(out_eager)
+
+        eager_grads = torch.autograd.grad(out_eager, (Q, K, V), grad)
+        compiled_grads = torch.autograd.grad(out_compiled, (Q, K, V), grad)
+
+        for eager, compiled in zip(eager_grads, compiled_grads):
+            torch.testing.assert_close(eager, compiled, atol=9e-3, rtol=0)
+
+    @supported_platform
     @common_utils.parametrize("mode", ["eager", "inductor", "paged_attention"])
     @common_utils.parametrize(
         "permute_order",
@@ -2520,10 +2537,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     )
     @common_utils.parametrize("shape", [(2, 1, 128, 16), (4, 2, 64, 16)])
     def test_flex_attention_stride_ordering(self, mode, permute_order, shape):
-        if TEST_WITH_ROCM:
-            self.skipTest(
-                "ROCM BUG SEE: https://github.com/pytorch/pytorch/issues/140855"
-            )
         from torch._inductor.ir import get_stride_order
 
         dtype = torch.float32
@@ -2559,6 +2572,57 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             query_stride_order,
             f"Stride order mismatch: out {out_stride_order}, query {query_stride_order}",
         )
+
+    @supported_platform
+    @common_utils.parametrize("mode", ["eager", "inductor"])
+    @common_utils.parametrize(
+        "permute_order",
+        [
+            (0, 1, 2, 3),
+            (1, 0, 2, 3),
+            (0, 2, 1, 3),
+            (2, 0, 1, 3),
+        ],
+    )
+    @common_utils.parametrize("shape", [(2, 5, 128, 16), (4, 2, 64, 16)])
+    def test_flex_attention_backward_stride_ordering(self, mode, permute_order, shape):
+        from torch._inductor.ir import get_stride_order
+
+        dtype = torch.float32
+        make_tensor = functools.partial(
+            torch.randn, shape, device="cuda", dtype=dtype, requires_grad=False
+        )
+
+        query, key, value = make_tensor(), make_tensor(), make_tensor()
+        query = query.permute(permute_order)
+        key = key.permute(permute_order)
+        value = value.permute(permute_order)
+
+        query.requires_grad_()
+        key.requires_grad_()
+        value.requires_grad_()
+
+        func = (
+            torch.compile(flex_attention, backend=mode, fullgraph=True)
+            if mode == "inductor"
+            else flex_attention
+        )
+        out = func(query, key, value)
+        grad_output = torch.randn_like(out)
+        out.backward(grad_output)
+
+        for leaf, grad, name in [
+            (query, query.grad, "query"),
+            (key, key.grad, "key"),
+            (value, value.grad, "value"),
+        ]:
+            input_stride_order = get_stride_order(grad.stride())
+            orig_stride_order = get_stride_order(leaf.stride())
+            self.assertEqual(
+                input_stride_order,
+                orig_stride_order,
+                f"Mode: {mode}, Stride order mismatch for {name}: grad {input_stride_order}, input {orig_stride_order}.",
+            )
 
     @supported_platform
     @common_utils.parametrize("compile", [True, False])
@@ -3017,8 +3081,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @common_utils.parametrize("backend", ["flex_attention", "flex_decode", "eager"])
     def test_lse_masked_output(self, backend):
         if backend == "flex_decode":
-            if TEST_WITH_ROCM:
-                self.skipTest("backend=flex_decode is unsupported on ROCM, for now")
             kernel_options = {"FORCE_USE_FLEX_ATTENTION": False}
             flex_call = torch.compile(flex_attention, fullgraph=True)
             N_CTX = 96
@@ -3282,6 +3344,43 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         out_compiled = flex_compile(query, key, value, kernel_options=kernel_options)
 
         torch.testing.assert_close(out_eager, out_compiled, atol=3e-3, rtol=2e-3)
+
+    @supported_platform
+    def test_dynamic_shapes_with_max_autotune(self):
+        make_tensor = functools.partial(
+            torch.ones,
+            (8, 8, 1024, 64),
+            device="cuda",
+            dtype=torch.bfloat16,
+        )
+        query, key, value = make_tensor(), make_tensor(), make_tensor()
+        block_mask = create_block_mask(_causal_mask, None, None, 1024, 1024)
+
+        out_eager = flex_attention(query, key, value, block_mask=block_mask)
+
+        flex_compile = torch.compile(
+            flex_attention, fullgraph=True, dynamic=True, mode="max-autotune"
+        )
+        out_compiled = flex_compile(query, key, value, block_mask=block_mask)
+
+        torch.testing.assert_close(out_eager, out_compiled, atol=3e-3, rtol=2e-3)
+
+    @supported_platform
+    def test_zero_length_sequence_error(self):
+        make_tensor = functools.partial(
+            torch.ones,
+            (8, 8, 0, 64),  # Zero in sequence dimension
+            device="cuda",
+            dtype=torch.bfloat16,
+        )
+        query, key, value = make_tensor(), make_tensor(), make_tensor()
+
+        # Test compiled mode - should also raise assertion error
+        flex_compile = torch.compile(flex_attention, fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._inductor.exc.InductorError, "Query length must be greater than 0"
+        ):
+            flex_compile(query, key, value)
 
     @supported_platform
     def test_causal_block_non_divisible_with_captured_buffer(self):
@@ -3563,23 +3662,6 @@ class GraphModule(torch.nn.Module):
         ):
             attention(query, key, value, return_lse=True)
 
-    @unittest.skipIf(TEST_ON_CUDA, "Testing CPU error message")
-    def test_validate_cpu_dtype_error_message(self):
-        make_tensor = functools.partial(
-            torch.randn,
-            (2, 2, 128, 16),
-            device="cpu",
-            dtype=torch.half,
-            requires_grad=False,
-        )
-        query, key, value = make_tensor(), make_tensor(), make_tensor()
-        attention = torch.compile(flex_attention)
-        with self.assertRaisesRegex(
-            torch._inductor.exc.InductorError,
-            r"`torch.float` and `torch.bfloat16` are supported in FlexAttention for CPU device. Found input tensors are `torch.float16`.",
-        ):
-            attention(query, key, value)
-
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     def test_device_cuda_1(self):
         class TestModule(torch.nn.Module):
@@ -3600,6 +3682,31 @@ class GraphModule(torch.nn.Module):
         mod = torch.compile(TestModule())
         attn_output = mod(q, k, v, mask)
         self.assertEqual(attn_output.device, torch.device("cuda:1"))
+
+    @supported_platform
+    def test_validate_small_embedding_size_error_message(self):
+        # eager support for small embedding size
+        q, k, v = [torch.randn(2, 2, 128, 8, device="cuda") for _ in range(3)]
+        flex_attention(q, k, v)
+
+        # compiled cpu support for small embedding size
+        q, k, v = [torch.randn(2, 2, 128, 8, device="cpu") for _ in range(3)]
+        flex_attention(q, k, v)
+
+        # compiled gpu kernel does not support small embedding size
+        q, k, v = [torch.randn(2, 2, 128, 8, device="cuda") for _ in range(3)]
+        compiled_fa = torch.compile(flex_attention)
+
+        with self.assertRaisesRegex(
+            torch._inductor.exc.InductorError,
+            "NYI: embedding dimension of the query, key, and value must be "
+            "at least 16 but got E=8 and Ev=8",
+        ):
+            compiled_fa(q, k, v)
+
+        # compiled gpu kernel supports large embedding size
+        q, k, v = [torch.randn(2, 2, 128, 16, device="cuda") for _ in range(3)]
+        compiled_fa = torch.compile(flex_attention)
 
 
 class TestBlockMask(InductorTestCase):
@@ -3913,6 +4020,18 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         self.assertEqual(block_mask_custom.BLOCK_SIZE, custom_block_size)
 
     @supported_platform
+    def test_upcast_appropriately(self):
+        q = torch.randn((1, 1, 128, 16), dtype=torch.float16, device="cuda")
+        k = torch.randn((1, 1, 128, 16), dtype=torch.float16, device="cuda")
+        v = torch.randn((1, 1, 128, 16), dtype=torch.float16, device="cuda")
+        mass = torch.ones((1), dtype=torch.float16, device="cuda")
+
+        def score_mod(score, b, h, q_idx, kv_idx):
+            return score + torch.log(mass[0])
+
+        torch.compile(flex_attention)(q, k, v, score_mod=score_mod)
+
+    @supported_platform
     def test_init_mismatched_full_kv(self):
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         kv_num_blocks, kv_indices, full_kv_num_blocks, _ = self.generate_test_inputs(
@@ -4103,6 +4222,18 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             expected_shape,
             f"Expected output shape {expected_shape}, but got {result.shape}",
         )
+
+    @supported_platform
+    def test_create_is_cuda_graphable(self):
+        def mask_mod(b, h, q, kv):
+            return q >= kv
+
+        g = torch.cuda.CUDAGraph()
+
+        with torch.cuda.graph(g):
+            create_block_mask(mask_mod, None, None, 256, 256)
+
+        g.replay()
 
     @common_utils.parametrize("compile", [False, True])
     @supported_platform
@@ -4585,13 +4716,10 @@ def get_params(dtypes: list[torch.dtype]) -> list[Params]:
     return params
 
 
-# ROCM BUG SEE: https://github.com/pytorch/pytorch/issues/140855
 supports_learnable_bias = unittest.skipUnless(
-    torch.cuda.is_available()
-    and torch.utils._triton.has_triton()
-    and torch.cuda.get_device_capability() >= (8, 0)
-    and not TEST_WITH_ROCM,
-    "Requires CUDA and Triton, and is not supported on ROCm",
+    (torch.cuda.is_available() and has_triton())
+    and (torch.cuda.get_device_capability() == (8, 0) or torch.version.hip),
+    "Requires Triton + A100 or Triton + ROCm",
 )
 
 

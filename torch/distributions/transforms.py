@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import functools
 import math
-import numbers
 import operator
 import weakref
 from typing import Optional
@@ -17,6 +16,7 @@ from torch.distributions.utils import (
     vec_to_tril_matrix,
 )
 from torch.nn.functional import pad, softplus
+from torch.types import _Number
 
 
 __all__ = [
@@ -543,6 +543,7 @@ class ExpTransform(Transform):
     r"""
     Transform via the mapping :math:`y = \exp(x)`.
     """
+
     domain = constraints.real
     codomain = constraints.positive
     bijective = True
@@ -565,6 +566,7 @@ class PowerTransform(Transform):
     r"""
     Transform via the mapping :math:`y = x^{\text{exponent}}`.
     """
+
     domain = constraints.positive
     codomain = constraints.positive
     bijective = True
@@ -612,6 +614,7 @@ class SigmoidTransform(Transform):
     r"""
     Transform via the mapping :math:`y = \frac{1}{1 + \exp(-x)}` and :math:`x = \text{logit}(y)`.
     """
+
     domain = constraints.real
     codomain = constraints.unit_interval
     bijective = True
@@ -637,6 +640,7 @@ class SoftplusTransform(Transform):
     Transform via the mapping :math:`\text{Softplus}(x) = \log(1 + \exp(x))`.
     The implementation reverts to the linear function when :math:`x > 20`.
     """
+
     domain = constraints.real
     codomain = constraints.positive
     bijective = True
@@ -660,15 +664,24 @@ class TanhTransform(Transform):
     Transform via the mapping :math:`y = \tanh(x)`.
 
     It is equivalent to
-    ```
-    ComposeTransform([AffineTransform(0., 2.), SigmoidTransform(), AffineTransform(-1., 2.)])
-    ```
+
+    .. code-block:: python
+
+        ComposeTransform(
+            [
+                AffineTransform(0.0, 2.0),
+                SigmoidTransform(),
+                AffineTransform(-1.0, 2.0),
+            ]
+        )
+
     However this might not be numerically stable, thus it is recommended to use `TanhTransform`
     instead.
 
     Note that one should use `cache_size=1` when it comes to `NaN/Inf` values.
 
     """
+
     domain = constraints.real
     codomain = constraints.interval(-1.0, 1.0)
     bijective = True
@@ -692,9 +705,8 @@ class TanhTransform(Transform):
 
 
 class AbsTransform(Transform):
-    r"""
-    Transform via the mapping :math:`y = |x|`.
-    """
+    r"""Transform via the mapping :math:`y = |x|`."""
+
     domain = constraints.real
     codomain = constraints.positive
 
@@ -719,6 +731,7 @@ class AffineTransform(Transform):
             for univariate random variables, 1 for distributions over vectors,
             2 for distributions over matrices, etc.
     """
+
     bijective = True
 
     def __init__(self, loc, scale, event_dim=0, cache_size=0):
@@ -754,18 +767,14 @@ class AffineTransform(Transform):
         if not isinstance(other, AffineTransform):
             return False
 
-        if isinstance(self.loc, numbers.Number) and isinstance(
-            other.loc, numbers.Number
-        ):
+        if isinstance(self.loc, _Number) and isinstance(other.loc, _Number):
             if self.loc != other.loc:
                 return False
         else:
             if not (self.loc == other.loc).all().item():
                 return False
 
-        if isinstance(self.scale, numbers.Number) and isinstance(
-            other.scale, numbers.Number
-        ):
+        if isinstance(self.scale, _Number) and isinstance(other.scale, _Number):
             if self.scale != other.scale:
                 return False
         else:
@@ -776,7 +785,7 @@ class AffineTransform(Transform):
 
     @property
     def sign(self) -> int:
-        if isinstance(self.scale, numbers.Real):
+        if isinstance(self.scale, _Number):
             return 1 if float(self.scale) > 0 else -1 if float(self.scale) < 0 else 0
         return self.scale.sign()
 
@@ -789,7 +798,7 @@ class AffineTransform(Transform):
     def log_abs_det_jacobian(self, x, y):
         shape = x.shape
         scale = self.scale
-        if isinstance(scale, numbers.Real):
+        if isinstance(scale, _Number):
             result = torch.full_like(x, math.log(abs(scale)))
         else:
             result = torch.abs(scale).log()
@@ -826,6 +835,7 @@ class CorrCholeskyTransform(Transform):
            - Applies :math:`s_i = StickBreakingTransform(z_i)`.
            - Transforms back into signed domain: :math:`y_i = sign(r_i) * \sqrt{s_i}`.
     """
+
     domain = constraints.real_vector
     codomain = constraints.corr_cholesky
     bijective = True
@@ -901,6 +911,7 @@ class SoftmaxTransform(Transform):
     coordinate-wise (except for the final normalization), and thus is
     appropriate for coordinate-wise optimization algorithms.
     """
+
     domain = constraints.real_vector
     codomain = constraints.simplex
 

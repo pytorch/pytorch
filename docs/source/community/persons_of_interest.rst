@@ -155,6 +155,7 @@ Linear Algebra (torch.linalg)
 -  (emeritus) Mike Ruberry (`mruberry <https://github.com/mruberry>`__)
 -  (emeritus) Ivan Yashchuk (`IvanYashchuk <https://github.com/IvanYashchuk>`__)
 -  (emeritus) Vishwak Srinivasan (`vishwakftw <https://github.com/vishwakftw>`__)
+-  (emeritus) Nikita Vedeneev (`nikitaved <https://github.com/nikitaved>`__)
 
 Sparse (torch.sparse)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

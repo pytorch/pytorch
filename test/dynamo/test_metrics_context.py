@@ -1,6 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
-from torch._dynamo.metrics_context import MetricsContext
+from torch._dynamo.metrics_context import MetricsContext, TopN
 from torch._dynamo.test_case import run_tests, TestCase
 
 
@@ -71,7 +71,15 @@ class TestMetricsContext(TestCase):
             with self.assertRaisesRegex(RuntimeError, "already been set"):
                 context.update({"m1": 7, "m3": 3})
 
-        self.assertEqual(self.metrics, {"m1": 1, "m2": 2})
+    def test_update_allow_overwrite(self):
+        """
+        Validate update will overwite when given param.
+        """
+        with MetricsContext(self._on_exit) as context:
+            context.update({"m1": 1, "m2": 2})
+            context.update({"m1": 7, "m3": 3}, overwrite=True)
+
+        self.assertEqual(self.metrics, {"m1": 7, "m2": 2, "m3": 3})
 
     def test_add_to_set(self):
         """
@@ -95,6 +103,15 @@ class TestMetricsContext(TestCase):
             context.set_key_value("feature_usage", "k2", False)
 
         self.assertEqual(self.metrics, {"feature_usage": {"k": True, "k2": False}})
+
+    def test_top_n(self):
+        top_n = TopN(3)
+        for k, v in (("seven", 7), ("four", 4), ("five", 5), ("six", 6), ("eight", 8)):
+            top_n.add(k, v)
+
+        self.assertEqual(len(top_n), 3)
+        print(list(top_n))
+        self.assertEqual(list(top_n), [("eight", 8), ("seven", 7), ("six", 6)])
 
 
 if __name__ == "__main__":

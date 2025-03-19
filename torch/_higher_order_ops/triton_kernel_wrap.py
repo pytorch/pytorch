@@ -1,6 +1,7 @@
 import collections
 import copy
 import dataclasses
+import functools
 import inspect
 import logging
 import threading
@@ -156,6 +157,11 @@ class Op:
     fn_call_name: Optional[str]
     args: list[Union[Param, Intermediate]]
     ret: Intermediate = dataclasses.field(repr=False)
+    # used for scf.yield: see [Note: scf.yield fix-up]
+    sub_idx: Optional[int] = None
+    # used for tt.elementwise_inline_asm
+    # `is_pure = True` assumes the asm block has no side-effects
+    is_pure: bool = False
 
     def __post_init__(self) -> None:
         if self.name == "tt.call":
@@ -252,8 +258,28 @@ def generate_ttir(
                 get_triton_attrs_descriptor_version()
                 == TritonAttrsDescriptorVersion.V4_DICT
             )
+            # specialize_impl switched to create_specialize_impl in https://github.com/triton-lang/triton/pull/6099
+            if hasattr(triton.runtime.jit, "create_specialize_impl"):
+                try:
+                    # Latest versions of Triton take specialize_extra as an arg to create_specialize_impl
+                    specialize_impl = triton.runtime.jit.create_specialize_impl(
+                        specialize_extra=backend.get_arg_specialization
+                    )
+                except TypeError:  # Unknown arg `specialize_extra`
+                    # Older versions of Triton take specialize_extra as an arg to specialize_impl
+                    specialize_impl = functools.partial(
+                        triton.runtime.jit.create_specialize_impl(),
+                        specialize_extra=backend.get_arg_specialization,
+                    )
+            else:
+                from triton.runtime.jit import specialize_impl as specialize_impl_orig
+
+                specialize_impl = functools.partial(
+                    specialize_impl_orig,
+                    specialize_extra=backend.get_arg_specialization,
+                )
+
             from triton._utils import find_paths_if, get_iterable_path
-            from triton.runtime.jit import specialize_impl
 
             # logic is copied from: binder = create_function_from_signature(self.signature, self.params, backend)
             attrvals = []
@@ -263,7 +289,6 @@ def generate_ttir(
                 else:
                     spec = specialize_impl(
                         arg,
-                        specialize_extra=backend.get_arg_specialization,
                         is_const=kp.is_const,
                         specialize_value=not kp.do_not_specialize,
                         align=not kp.do_not_specialize_on_alignment,
@@ -505,9 +530,59 @@ def ttir_to_functions(
                             op_stack[parent_block_id][op_result].extend(child_ops)
 
                 scf_results = [Intermediate(idx) for idx in result_ids]
-                for scf_result in scf_results:
+
+                if return_ops and all(
+                    (op.name == "scf.yield" and len(result_ids) == len(op.args))
+                    for op in return_ops
+                ):
+                    # [Note: scf.yield fix-up]
+                    #
+                    # TL;DR: if our scf.yield takes N args, then we'll create N scf.yield ops to handle each of the
+                    # args.
+                    #
+                    #      **Context**:
+                    # During mutation analysis, the analysis pass will identify mutating ops (e.g. tt.store)
+                    # and then DFS upwards towards the parameters of the function. Specifically, the analysis pass
+                    # looks at the mutated arg in tt.store; then looks for its source ops; and then recurses on the
+                    # arguments to each of the source ops.
+                    #
+                    # In the case of scf.if/scf.for, we may have multiple return ops, each passed as an arg
+                    # to scf.yield:
+                    #
+                    # %18:2 = scf.if %... -> (!tt.ptr<f32>, !tt.ptr<f32>) {
+                    #   ...
+                    #   scf.yield %1, %2
+                    # } else {
+                    #   scf.yield %3, %4
+                    # }
+                    #
+                    # And for each of the returns of the scf.if, we'd naively assign the source op of each of the
+                    # return values to be the scf.yields. But the scf.yields take _all_ the returns as arguments.
+                    # Therefore, if _any_ of the return values of the scf.if are mutated, then the analysis pass
+                    # would mark _all_ of the yield args as mutated.
+                    #
+                    #      **Solution**:
+                    # For the purposes of this analysis pass, we create N yield ops - one for each
+                    # return-val/yield-arg. In the example above, we'll have two scf.yield's for each branch of the
+                    # scf.if.
+
                     for return_op in return_ops:
-                        op_stack[parent_block_id][scf_result].append(return_op)
+                        for i, (scf_result, yield_arg) in enumerate(
+                            zip(scf_results, return_op.args)
+                        ):
+                            sub_yield_op = Op(
+                                return_op.name,
+                                return_op.fn_call_name,
+                                [yield_arg],
+                                return_op.ret,
+                                sub_idx=i,
+                            )
+                            op_stack[parent_block_id][scf_result].append(sub_yield_op)
+
+                else:
+                    for scf_result in scf_results:
+                        for return_op in return_ops:
+                            op_stack[parent_block_id][scf_result].append(return_op)
             else:
                 raise RuntimeError(
                     f"Unknown blocked function: {name}. Can't capture the TTIR."
@@ -520,14 +595,22 @@ def ttir_to_functions(
                 Intermediate(operand) for operand in operand_ids
             ]
             block_ops = op_stack[parent_block_id]
+
+            is_pure = False
+            # Handle the case for tt.elementwise_inline_asm to set `is_pure` for mutation analysis
+            if name == "tt.elementwise_inline_asm":
+                is_pure = op.get_bool_attr("pure")
+
             if result_ids:
                 for result_id in result_ids:
                     res = Intermediate(result_id)
-                    block_ops[res].append(Op(name, callee, args, res))
+                    block_ops[res].append(Op(name, callee, args, res, is_pure=is_pure))
             else:
                 next_fake_intermediate -= 1
                 fake_res = Intermediate(next_fake_intermediate)
-                block_ops[fake_res].append(Op(name, callee, args, fake_res))
+                block_ops[fake_res].append(
+                    Op(name, callee, args, fake_res, is_pure=is_pure)
+                )
 
     ttir_module.walk(mlir_to_functions)
 
@@ -588,7 +671,14 @@ def analyze_kernel_mutations(
     ops = functions[fn_name]
     for op_list in ops.values():
         for op in op_list:
+            # If we encounter an operation with effects that cannot be reliably analyzed
+            # (e.g. `tt.elementwise_inline_asm`), we assume it does not mutate any input parameters.
             if op.name in UNKNOWN_OPS:
+                if op.name == "tt.elementwise_inline_asm" and op.is_pure:
+                    log.warning(
+                        "TTIR mutation analysis: Skipping pure tt.elementwise_inline_asm op (is_pure=True)"
+                    )
+                    continue
                 raise RuntimeError(
                     f"ttir analysis hit an op we do not know how to analyze: {op.name}"
                 )
@@ -1200,25 +1290,23 @@ class TritonHOPifier:
             defaults = inspect.signature(Autotuner.__init__).parameters
             # Newer version of triton change attribute name from warmup to num_warmup and rep to num_rep.
             # The call to get_first_attr is to maintain backward-compatibility.
+
+            def defaults_ok(
+                attr: str, alternates: tuple[str, ...], values: tuple[Any, ...]
+            ) -> bool:
+                if attr not in defaults:
+                    return True
+                value = torch._dynamo.utils.get_first_attr(kernel, attr, *alternates)
+                if value == defaults[attr].default:
+                    return True
+                return value in values
+
             if (
                 not torch._inductor.config.unsafe_ignore_unsupported_triton_autotune_args
                 and (
-                    (
-                        "warmup" in defaults
-                        and defaults["warmup"].default
-                        != torch._dynamo.utils.get_first_attr(
-                            kernel, "num_warmups", "warmup"
-                        )
-                    )
-                    or (
-                        "rep" in defaults
-                        and defaults["rep"].default
-                        != torch._dynamo.utils.get_first_attr(kernel, "num_reps", "rep")
-                    )
-                    or (
-                        "use_cuda_graph" in defaults
-                        and defaults["use_cuda_graph"].default != kernel.use_cuda_graph
-                    )
+                    not defaults_ok("num_warmups", ("warmup",), (25, None))
+                    or not defaults_ok("num_reps", ("rep",), (100, None))
+                    or not defaults_ok("use_cuda_graph", (), (False,))
                 )
             ):
                 self.raise_unsupported(
