@@ -153,13 +153,13 @@ Tensor& binary_cross_entropy_backward_out_cuda(const Tensor& grad, const Tensor&
 // -----------------------------------
 namespace {
 
-#if defined(USE_ROCM)
 int nll_loss_threads(int64_t nframe){
+#if defined(USE_ROCM)
   return std::clamp(1 << static_cast<int64_t>(std::round(std::log2(nframe/16))), 32, 1024);
-}
 #else
-constexpr int NLL_LOSS_THREADS = 32;
+  return 32;
 #endif
+}
 
 // NOTE(crcrpar): `Byte` support was added for https://github.com/pytorch/pytorch/issues/59765.
 #define AT_DISPATCH_NLL_LOSS_INDEX_TYPES(TYPE, NAME, ...)                     \
@@ -245,14 +245,9 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_2d(
     int64_t n_classes,
     int64_t ignore_index) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  #if defined(USE_ROCM)
   extern __shared__ unsigned char shmem[];
   accscalar_t* sh_inputs = reinterpret_cast<accscalar_t*>(shmem);
   accscalar_t* acc_weight = reinterpret_cast<accscalar_t*>(shmem + blockDim.x * sizeof(accscalar_t));
-  #else
-  __shared__ accscalar_t sh_inputs[NLL_LOSS_THREADS],
-      acc_weight[NLL_LOSS_THREADS];
-  #endif
 
   sh_inputs[threadIdx.x] = static_cast<accscalar_t>(0);
   acc_weight[threadIdx.x] = static_cast<accscalar_t>(0);
@@ -394,18 +389,11 @@ void nll_loss_forward_out_cuda_template(
               "nll_loss_forward_reduce_cuda_kernel_2d_index",
               [&] {
                 using accscalar_t = at::acc_type<scalar_t, /*is_cuda*/true>;
-#if defined (USE_ROCM)
                 int nthreads = nll_loss_threads(input.size(0));
-#endif
                 nll_loss_forward_reduce_cuda_kernel_2d<scalar_t, accscalar_t, index_t>
                     <<<1,
-#if defined (USE_ROCM)
                        nthreads,
                        nthreads * sizeof(accscalar_t) * 2,
-#else
-                       NLL_LOSS_THREADS,
-                       0,
-#endif
                        at::cuda::getCurrentCUDAStream()>>>(
                         output.mutable_data_ptr<scalar_t>(),
                         total_weight.mutable_data_ptr<scalar_t>(),
@@ -588,13 +576,7 @@ void nll_loss_backward_out_cuda_template(
               "nll_loss_backward_reduce_cuda_kernel_2d_index",
               [&] {
             nll_loss_backward_reduce_cuda_kernel_2d<scalar_t, index_t>
-                <<<1,
-#if defined (USE_ROCM)
-                    nll_loss_threads(input.size(0))
-#else
-                    NLL_LOSS_THREADS
-#endif
-                    , 0, at::cuda::getCurrentCUDAStream()>>>(
+                <<<1, nll_loss_threads(input.size(0)), 0, at::cuda::getCurrentCUDAStream()>>>(
                     grad_input.mutable_data_ptr<scalar_t>(),
                     grad_output.const_data_ptr<scalar_t>(),
                     target.const_data_ptr<index_t>(),
