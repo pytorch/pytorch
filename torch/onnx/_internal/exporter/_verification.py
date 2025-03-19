@@ -3,7 +3,6 @@ from __future__ import annotations
 
 __all__ = [
     "VerificationInfo",
-    "VerificationInterpreter",
     "verify_onnx_program",
 ]
 
@@ -27,6 +26,27 @@ logger = logging.getLogger(__name__)
 
 @dataclasses.dataclass
 class VerificationInfo:
+    """Verification information for a value in the ONNX program.
+
+    This class contains the maximum absolute difference, maximum relative difference,
+    and histograms of absolute and relative differences between the expected and actual
+    values. It also includes the expected and actual data types.
+
+    The histograms are represented as tuples of tensors, where the first tensor is the
+    histogram counts and the second tensor is the bin edges.
+
+    Attributes:
+        name: The name of the value (output or intermediate).
+        max_abs_diff: The maximum absolute difference between the expected and actual values.
+        max_rel_diff: The maximum relative difference between the expected and actual values.
+        abs_diff_hist: A tuple of tensors representing the histogram of absolute differences.
+            The first tensor is the histogram counts and the second tensor is the bin edges.
+        rel_diff_hist: A tuple of tensors representing the histogram of relative differences.
+            The first tensor is the histogram counts and the second tensor is the bin edges.
+        expected_dtype: The data type of the expected value.
+        actual_dtype: The data type of the actual value.
+    """
+
     name: str
     max_abs_diff: float
     max_rel_diff: float
@@ -41,8 +61,8 @@ class VerificationInfo:
     def from_tensors(
         cls,
         name: str,
-        expected: torch.Tensor | int | float | bool,
-        actual: torch.Tensor | int | float | bool,
+        expected: torch.Tensor | float | int | bool,
+        actual: torch.Tensor | float | int | bool,
     ) -> VerificationInfo:
         """Create a VerificationInfo object from two tensors.
 
@@ -108,7 +128,20 @@ def verify_onnx_program(
     onnx_program: _onnx_program.ONNXProgram,
     args: tuple[Any, ...] | None = None,
     kwargs: dict[str, Any] | None = None,
+    compare_intermediates: bool = False,
 ) -> list[VerificationInfo]:
+    """Verify the ONNX model by comparing the values with the expected values from ExportedProgram.
+
+    Args:
+        onnx_program: The ONNX program to verify.
+        args: The input arguments for the model.
+        kwargs: The keyword arguments for the model.
+        compare_intermediates: Whether to verify intermediate values. This is going
+            to take longer time, so it is disabled by default.
+
+    Returns:
+        VerificationInfo objects containing the verification information for each value.
+    """
     exported_program = onnx_program.exported_program
     if exported_program is None:
         raise ValueError(
@@ -127,22 +160,35 @@ def verify_onnx_program(
         args = ()
     if kwargs is None:
         kwargs = {}
-    torch_module = exported_program.module()
-    torch_outputs, _ = _pytree.tree_flatten(torch_module(*args, **kwargs))
-    onnx_outputs = onnx_program(*args, **kwargs)
-    results = []
-    for torch_output, onnx_output, output_val in zip(
-        torch_outputs, onnx_outputs, onnx_program.model.graph.outputs
-    ):
-        name = output_val.name
-        results.append(
-            VerificationInfo.from_tensors(
-                name=str(name),
-                expected=torch_output,
-                actual=onnx_output,
-            )
+
+    # Flatten args for ONNX program and the VerificationInterpreter
+    flat_args, _ = exported_program._get_flat_args_with_check(args, kwargs)
+
+    if not compare_intermediates:
+        # Compare the output values
+        torch_outputs, _ = _pytree.tree_flatten(
+            exported_program.module()(*args, **kwargs)
         )
-    return results
+        onnx_outputs = onnx_program(*flat_args)
+        results = []
+        for torch_output, onnx_output, output_val in zip(
+            torch_outputs, onnx_outputs, onnx_program.model.graph.outputs
+        ):
+            results.append(
+                VerificationInfo.from_tensors(
+                    name=str(output_val.name),
+                    expected=torch_output,
+                    actual=onnx_output,
+                )
+            )
+        return results
+
+    # Use the _VerificationInterpreter to get the intermediate values
+    # By design the output values are included too
+    interpreter = _VerificationInterpreter(onnx_program)
+    interpreter.run(*flat_args)
+
+    return interpreter.verification_infos
 
 
 def _create_value_mapping(graph: ir.Graph) -> dict[str, ir.Value]:
@@ -171,7 +217,7 @@ def _create_value_mapping(graph: ir.Graph) -> dict[str, ir.Value]:
     return values
 
 
-class VerificationInterpreter(torch.fx.Interpreter):
+class _VerificationInterpreter(torch.fx.Interpreter):
     """Interpreter for verifying converted ONNX model accuracy by comparing intermediate values.
 
     To compare models, first initialize the interpreter with an ONNX program.
@@ -181,7 +227,7 @@ class VerificationInterpreter(torch.fx.Interpreter):
 
     ::
         onnx_program = torch.onnx.export(model, args, dynamo=True)
-        interpreter = VerificationInterpreter(onnx_program)
+        interpreter = _VerificationInterpreter(onnx_program)
         interpreter.run(*args)
         verification_infos = interpreter.verification_infos
         for info in verification_infos:
@@ -197,7 +243,7 @@ class VerificationInterpreter(torch.fx.Interpreter):
     """
 
     def __init__(self, onnx_program: torch.onnx.ONNXProgram) -> None:
-        """Initialize the VerificationInterpreter with an ONNX program.
+        """Initialize the _VerificationInterpreter with an ONNX program.
 
         Args:
             onnx_program: The ONNX program to verify.
@@ -210,7 +256,7 @@ class VerificationInterpreter(torch.fx.Interpreter):
         super().__init__(onnx_program.exported_program.module())
         self._onnx_program = onnx_program
         self._onnx_values = _create_value_mapping(onnx_program.model.graph)
-        self._args: list[Any] = []
+        self._args: tuple[Any, ...] = ()
         self.verification_infos: list[VerificationInfo] = []
 
     def run(
@@ -233,7 +279,7 @@ class VerificationInterpreter(torch.fx.Interpreter):
             Any: The result of executing the model.
         """
         self.verification_infos = []
-        self.args = args
+        self._args = args
         return super().run(
             *args,
             initial_env=initial_env,
@@ -247,7 +293,15 @@ class VerificationInterpreter(torch.fx.Interpreter):
         node_name = n.name
         if node_name not in self._onnx_values:
             return result
-        (onnx_result,) = self._onnx_program.compute_values([node_name], self.args)
+        try:
+            (onnx_result,) = self._onnx_program.compute_values([node_name], self._args)
+        except Exception as e:
+            logger.warning(
+                "Failed to compute value for node %s: %s",
+                node_name,
+                e,
+            )
+            return result
         info = VerificationInfo.from_tensors(
             name=node_name,
             expected=result,

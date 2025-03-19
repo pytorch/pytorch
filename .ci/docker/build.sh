@@ -99,13 +99,12 @@ fi
 # configuration, so we hardcode everything here rather than do it
 # from scratch
 case "$image" in
-  pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9)
-    CUDA_VERSION=12.4.1
+  pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc11)
+    CUDA_VERSION=12.6.3
     CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=9
+    GCC_VERSION=11
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
@@ -119,7 +118,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
@@ -134,7 +132,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=9
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
@@ -149,7 +146,61 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.13
     GCC_VERSION=9
     PROTOBUF=yes
-    DB=yes
+    VISION=yes
+    KATEX=yes
+    UCX_COMMIT=${_UCX_COMMIT}
+    UCC_COMMIT=${_UCC_COMMIT}
+    CONDA_CMAKE=yes
+    TRITON=yes
+    INDUCTOR_BENCHMARKS=yes
+    ;;
+  pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc9)
+    CUDA_VERSION=12.6.3
+    CUDNN_VERSION=9
+    ANACONDA_PYTHON_VERSION=3.10
+    GCC_VERSION=9
+    PROTOBUF=yes
+    VISION=yes
+    KATEX=yes
+    UCX_COMMIT=${_UCX_COMMIT}
+    UCC_COMMIT=${_UCC_COMMIT}
+    CONDA_CMAKE=yes
+    TRITON=yes
+    ;;
+  pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc9-inductor-benchmarks)
+    CUDA_VERSION=12.6.3
+    CUDNN_VERSION=9
+    ANACONDA_PYTHON_VERSION=3.10
+    GCC_VERSION=9
+    PROTOBUF=yes
+    VISION=yes
+    KATEX=yes
+    UCX_COMMIT=${_UCX_COMMIT}
+    UCC_COMMIT=${_UCC_COMMIT}
+    CONDA_CMAKE=yes
+    TRITON=yes
+    INDUCTOR_BENCHMARKS=yes
+    ;;
+  pytorch-linux-focal-cuda12.6-cudnn9-py3.12-gcc9-inductor-benchmarks)
+    CUDA_VERSION=12.6.3
+    CUDNN_VERSION=9
+    ANACONDA_PYTHON_VERSION=3.12
+    GCC_VERSION=9
+    PROTOBUF=yes
+    VISION=yes
+    KATEX=yes
+    UCX_COMMIT=${_UCX_COMMIT}
+    UCC_COMMIT=${_UCC_COMMIT}
+    CONDA_CMAKE=yes
+    TRITON=yes
+    INDUCTOR_BENCHMARKS=yes
+    ;;
+  pytorch-linux-focal-cuda12.6-cudnn9-py3.13-gcc9-inductor-benchmarks)
+    CUDA_VERSION=12.6.3
+    CUDNN_VERSION=9
+    ANACONDA_PYTHON_VERSION=3.13
+    GCC_VERSION=9
+    PROTOBUF=yes
     VISION=yes
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
@@ -164,7 +215,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
@@ -176,7 +226,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.9
     CLANG_VERSION=10
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     CONDA_CMAKE=yes
     ONNX=yes
@@ -185,7 +234,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.9
     CLANG_VERSION=10
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     VULKAN_SDK_VERSION=1.2.162.1
     SWIFTSHADER=yes
@@ -196,7 +244,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.11
     CLANG_VERSION=10
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     VULKAN_SDK_VERSION=1.2.162.1
     SWIFTSHADER=yes
@@ -207,7 +254,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.9
     GCC_VERSION=9
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     CONDA_CMAKE=yes
     TRITON=yes
@@ -216,7 +262,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     ROCM_VERSION=6.2.4
     NINJA_VERSION=1.9.0
@@ -231,7 +276,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     ROCM_VERSION=6.3
     NINJA_VERSION=1.9.0
@@ -246,7 +290,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.9
     GCC_VERSION=11
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     XPU_VERSION=0.5
     NINJA_VERSION=1.9.0
@@ -257,7 +300,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.9
     GCC_VERSION=11
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     XPU_VERSION=2025.0
     NINJA_VERSION=1.9.0
@@ -268,7 +310,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.9
     GCC_VERSION=11
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     KATEX=yes
     CONDA_CMAKE=yes
@@ -282,7 +323,6 @@ case "$image" in
     CUDNN_VERSION=9
     CLANG_VERSION=12
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     TRITON=yes
     ;;
@@ -290,7 +330,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.9
     CLANG_VERSION=12
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     CONDA_CMAKE=yes
     TRITON=yes
@@ -311,7 +350,6 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.9
     GCC_VERSION=11
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     KATEX=yes
     CONDA_CMAKE=yes
@@ -326,7 +364,7 @@ case "$image" in
     EXECUTORCH=yes
     ;;
   pytorch-linux-jammy-py3.12-halide)
-    CUDA_VERSION=12.4
+    CUDA_VERSION=12.6
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=11
     CONDA_CMAKE=yes
@@ -334,7 +372,7 @@ case "$image" in
     TRITON=yes
     ;;
   pytorch-linux-jammy-py3.12-triton-cpu)
-    CUDA_VERSION=12.4
+    CUDA_VERSION=12.6
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=11
     CONDA_CMAKE=yes
@@ -357,7 +395,6 @@ case "$image" in
     GCC_VERSION=11
     ACL=yes
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     CONDA_CMAKE=yes
     # snadampal: skipping llvm src build install because the current version
@@ -369,7 +406,6 @@ case "$image" in
     GCC_VERSION=11
     ACL=yes
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     CONDA_CMAKE=yes
     # snadampal: skipping llvm src build install because the current version
@@ -380,7 +416,6 @@ case "$image" in
   *)
     # Catch-all for builds that are not hardcoded.
     PROTOBUF=yes
-    DB=yes
     VISION=yes
     echo "image '$image' did not match an existing build configuration"
     if [[ "$image" == *py* ]]; then
@@ -436,7 +471,6 @@ docker build \
        --build-arg "BUILD_ENVIRONMENT=${image}" \
        --build-arg "PROTOBUF=${PROTOBUF:-}" \
        --build-arg "LLVMDEV=${LLVMDEV:-}" \
-       --build-arg "DB=${DB:-}" \
        --build-arg "VISION=${VISION:-}" \
        --build-arg "UBUNTU_VERSION=${UBUNTU_VERSION}" \
        --build-arg "CENTOS_VERSION=${CENTOS_VERSION}" \

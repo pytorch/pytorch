@@ -14,6 +14,7 @@ from torch._higher_order_ops.utils import (
     _has_potential_branch_input_mutation,
     _maybe_compile_and_run_fn,
     autograd_not_implemented,
+    check_meta_consistency,
     first_slice_copy,
     reenter_make_fx,
     unique_graph_id,
@@ -507,20 +508,13 @@ def trace_scan(
     assert outputs is not None
 
     carry, output = _extract_carry_and_out(outputs, len(init))
-
-    for ini, ca in zip(init, carry):
-        ini_meta = ini
-        carry_meta = ca.meta["tensor_meta"]
-        carry_val = ca.meta["val"]
-        if (
-            carry_val.device != ini_meta.device
-            or carry_meta.dtype != ini_meta.dtype
-            or carry_meta.shape != ini_meta.shape
-        ):
-            raise RuntimeError(
-                f"Expected metadata of the combine_fn result {carry_meta} to be the same as "
-                + f"the metadata of init with {ini_meta}"
-            )
+    init_fake_tensors: list[torch.Tensor | torch.SymInt | int] = [
+        i.clone() for i in init
+    ]
+    carry_fake_tensors: list[torch.Tensor | torch.SymInt | int] = [
+        c.meta["val"] for c in carry
+    ]
+    check_meta_consistency(init_fake_tensors, carry_fake_tensors, "init", "carry")
 
     _, combine_graph_name = unique_graph_id(proxy_mode, prefix="scan_combine_graph")
 
