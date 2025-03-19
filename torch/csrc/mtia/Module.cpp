@@ -54,6 +54,11 @@ void initModule(PyObject* module) {
     return at::detail::getMTIAHooks().getCurrentStream(device_index);
   });
 
+  m.def("_mtia_getCurrentRawStream", [](c10::DeviceIndex device_index) {
+    torch::utils::device_lazy_init(at::kMTIA);
+    return at::detail::getMTIAHooks().getCurrentRawStream(device_index);
+  });
+
   m.def("_mtia_deviceSynchronize", []() {
     torch::utils::device_lazy_init(at::kMTIA);
     at::detail::getMTIAHooks().deviceSynchronize(
