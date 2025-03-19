@@ -166,6 +166,15 @@ class ColwiseParallel(ParallelStyle):
             ),
         )
 
+    def __repr__(self) -> str:
+        tmpstr = self.__class__.__name__ + "("
+        tmpstr += f"src_data_rank={self.src_data_rank}, "
+        tmpstr += f"input_layouts={self.input_layouts}, "
+        tmpstr += f"output_layouts={self.output_layouts}, "
+        tmpstr += f"use_local_output={self.use_local_output}"
+        tmpstr += ")"
+        return tmpstr
+
 
 class RowwiseParallel(ParallelStyle):
     """
@@ -303,6 +312,15 @@ class RowwiseParallel(ParallelStyle):
             ),
         )
 
+    def __repr__(self) -> str:
+        tmpstr = self.__class__.__name__ + "("
+        tmpstr += f"src_data_rank={self.src_data_rank}, "
+        tmpstr += f"input_layouts={self.input_layouts}, "
+        tmpstr += f"output_layouts={self.output_layouts}, "
+        tmpstr += f"use_local_output={self.use_local_output}"
+        tmpstr += ")"
+        return tmpstr
+
 
 class SequenceParallel(ParallelStyle):
     """
@@ -397,6 +415,14 @@ class SequenceParallel(ParallelStyle):
             partial(self._prepare_input_fn, self.sequence_sharding),
             partial(self._prepare_output_fn, self.use_local_output),
         )
+
+    def __repr__(self) -> str:
+        tmpstr = self.__class__.__name__ + "("
+        tmpstr += f"src_data_rank={self.src_data_rank}, "
+        tmpstr += f"sequence_sharding={self.sequence_sharding}, "
+        tmpstr += f"use_local_output={self.use_local_output}"
+        tmpstr += ")"
+        return tmpstr
 
 
 class PrepareModuleInput(ParallelStyle):
@@ -557,6 +583,17 @@ class PrepareModuleInput(ParallelStyle):
             )  # type: ignore[misc, call-arg]
         return module
 
+    def __repr__(self) -> str:
+        tmpstr = self.__class__.__name__ + "("
+        tmpstr += f"src_data_rank={self.src_data_rank}, "
+        tmpstr += f"input_layouts={self.input_layouts}, "
+        tmpstr += f"desired_input_layouts={self.desired_input_layouts}, "
+        tmpstr += f"input_kwarg_layouts={self.input_kwarg_layouts}, "
+        tmpstr += f"desired_input_kwarg_layouts={self.desired_input_kwarg_layouts}, "
+        tmpstr += f"use_local_output={self.use_local_output}"
+        tmpstr += ")"
+        return tmpstr
+
 
 class PrepareModuleOutput(ParallelStyle):
     """
@@ -656,3 +693,12 @@ class PrepareModuleOutput(ParallelStyle):
             lambda _, inputs, outputs: self._prepare_out_fn(outputs, device_mesh)
         )  # type: ignore[misc, call-arg]
         return module
+
+    def __repr__(self) -> str:
+        tmpstr = self.__class__.__name__ + "("
+        tmpstr += f"src_data_rank={self.src_data_rank}, "
+        tmpstr += f"output_layouts={self.output_layouts}, "
+        tmpstr += f"desired_output_layouts={self.desired_output_layouts}, "
+        tmpstr += f"use_local_output={self.use_local_output}"
+        tmpstr += ")"
+        return tmpstr
