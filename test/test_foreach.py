@@ -1360,6 +1360,8 @@ class TestForeach(TestCase):
     def test_foreach_copy_with_different_device_inputs(self, device, dtype, op):
         if dtype in (torch.complex128, torch.complex64):
             self.skipTest("Complex dtype not supported")
+        if torch.backends.cudnn.version() < 90100 :
+            self.skipTest("This test expected failure on cuDNN < 9.1.0")
         # check foreach_copy when self and src tensorList have different device
         foreach_copy = op.method_variant
         copy_ = op.ref_inplace
