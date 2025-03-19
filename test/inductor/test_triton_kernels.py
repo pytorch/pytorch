@@ -27,7 +27,6 @@ from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import (
     parametrize,
-    skipIfRocm,
     skipIfWindows,
     skipIfXpu,
     TEST_WITH_ROCM,
@@ -1341,7 +1340,6 @@ def forward(self, x_1, output_1):
         self.assertEqual(compiled_out, eager_out)
 
     @requires_gpu
-    @skipIfRocm
     def test_triton_kernel_with_imported_symbol(self):
         @triton.jit
         def add_kernel_with_imported_symbol(
@@ -1373,7 +1371,6 @@ def forward(self, x_1, output_1):
         self.assertEqual(compiled_out, eager_out)
 
     @requires_gpu
-    @skipIfRocm
     def test_triton_kernel_with_imported_symbol_with_custom_name(self):
         @triton.jit
         def add_kernel_with_imported_symbol(
