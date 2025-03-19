@@ -93,6 +93,7 @@ class LazyVariableTracker(VariableTracker):
         return self._cache.value
 
     def __str__(self) -> str:
+        self.realize()
         if self.is_realized():
             return repr(self.unwrap())
         return super().__repr__()
