@@ -184,7 +184,6 @@ S390X_BLOCKLIST = [
     "inductor/test_cpu_select_algorithm",
     "inductor/test_aot_inductor_arrayref",
     "lazy/test_meta_kernel",
-    "onnx/test_utility_funs",
     "profiler/test_profiler",
     "test_ao_sparsity",
     "test_cpp_extensions_open_device_registration",
