@@ -15470,7 +15470,7 @@
 
 - func: special_modified_bessel_k0.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA: special_modified_bessel_k0_out
+    CPU, CUDA, MPS: special_modified_bessel_k0_out
   python_module: special
   structured_inherits: TensorIteratorBase
   structured: True
