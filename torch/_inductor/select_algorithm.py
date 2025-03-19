@@ -2039,7 +2039,7 @@ class AlgorithmSelectorCache(PersistentCache):
             )
             expected = None
             if VERIFY:
-                choices[0].benchmark(*example_inputs_extern, out=out_extern)
+                choices[0].benchmark(*example_inputs, out=out_extern)
                 expected = out_extern.clone()
 
             return AutotuneArgs.from_choice_args(

@@ -718,7 +718,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     @parametrize("batch_size", (384,))
     @parametrize("in_features", (196,))
-    @parametrize("out_features", (384,))
+    @parametrize("out_features", (196, 384,))
     @parametrize("bias", (True, False))
     @parametrize(
         "binary",
@@ -737,14 +737,16 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             def forward(self, x):
                 return self.binary(self.linear(x))
 
-        counters.clear()
         B = (2, batch_size)
         v = torch.randn(*B, in_features).to(dtype=dtype)
         u = torch.randn(*B, out_features).to(dtype=dtype)
-        mod = M(bias=bias, binary=binary, other=u).to(dtype=dtype).eval()
-        with verify(dtype) as (atol, rtol):
-            self.common(mod, (v,), atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
+        for use_input_as_other in (True, False):
+            use_input_as_other = use_input_as_other and in_features == out_features
+            mod = M(bias=bias, binary=binary, other=v if use_input_as_other else u).to(dtype=dtype).eval()
+            counters.clear()
+            with verify(dtype) as (atol, rtol):
+                self.common(mod, (v,), atol=atol, rtol=rtol)
+            self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
 
     @inductor_config.patch({"freezing": True})
     @patches
