@@ -24,7 +24,7 @@ namespace mps {
 
 static bool is_not_cow_or_cow_mps_backed(const Tensor& self) {
   const DataPtr& data_ptr = self.storage().data_ptr();
-  return !c10::impl::cow::is_cow_data_ptr(data_ptr) || c10::impl::cow::is_cow_data_ptr(data_ptr, c10::MPS);
+  return !c10::impl::cow::is_cow_data_ptr(data_ptr) || c10::impl::cow::is_cow_data_ptr(data_ptr, c10::kMPS);
 }
 
 static IntArrayRef updateTensorBaseShape(const Tensor& self) {
