@@ -684,18 +684,43 @@ class TorchFunctionDisableVariable(ContextWrappingVariable):
         return var
 
     def __init__(
-        self, target_values, initial_values=None, only_subclass=False, **kwargs
+        self, target_values, initial_values=None, only_subclass=True, **kwargs
     ) -> None:
         assert len(target_values) == 0
         assert len(initial_values) == 0
+        from ..symbolic_convert import InstructionTranslator
+
+        tx = InstructionTranslator.current_tx()
+        self.only_subclass = only_subclass
+        self.initial_torch_function_subclass_enabled = (
+            tx.symbolic_torch_function_state.torch_function_subclass_enabled
+        )
+        self.initial_torch_function_subclass_enabled = (
+            tx.symbolic_torch_function_state.torch_function_mode_enabled
+        )
+
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
-        self.only_subclass = only_subclass
         install_guard(self._guards_singleton)
 
     def enter(self, tx):
         return variables.ConstantVariable.create(None)
+
+    def set_cleanup_hook(self, tx: "InstructionTranslator", fn=None):
+        if fn is None:
+
+            def fn():
+                tx.symbolic_torch_function_state.torch_function_subclass_enabled = (
+                    self.initial_torch_function_subclass_enabled
+                )
+                if not self.only_subclass:
+                    tx.symbolic_torch_function_state.torch_function_mode_enabled = (
+                        self.initial_torch_function_subclass_enabled
+                    )
+
+        self.state.cleanup_fn = fn
+        tx.output.add_cleanup_hook(self.state.cleanup)
 
     def _call_func(self, tx: "InstructionTranslator", values):
         assert len(values) == 0
@@ -705,9 +730,11 @@ class TorchFunctionDisableVariable(ContextWrappingVariable):
         tx.output.set_torch_function_state(False)
 
     def module_name(self):
-        return "torch"
+        return "torch._C"
 
     def fn_name(self):
+        if self.only_subclass:
+            return "DisableTorchFunctionSubclass"
         return "DisableTorchFunction"
 
 
