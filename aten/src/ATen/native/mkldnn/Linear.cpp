@@ -321,6 +321,7 @@ Tensor mkldnn_linear_pointwise_binary(
 
   auto other_desc = mkldnn_other.get_desc();
   auto op_attr = ideep::attr_t::fuse_binary(it_binary->second, other_desc);
+  auto aprop_kind = ideep::prop_kind::forward_inference;
 
   if (mkldnn_bias.has_value()) {
     ideep::matmul_forward::compute_binary</*reorder_src=*/false, /*reorder_weight=*/false>(
