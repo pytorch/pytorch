@@ -3031,6 +3031,11 @@ bool check_same_size(const std::vector<at::Tensor>& input_tensors) {
   return true;
 }
 
+at::cuda::CUDAEvent* safeGetCudaEventPtr(
+    const std::shared_ptr<at::cuda::CUDAEvent>& event) {
+  return event ? event.get() : nullptr;
+}
+
 } // namespace
 
 c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
@@ -3081,7 +3086,7 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
         profilingTitle ? profilingTitle : "",
         inputs,
         outputs,
-        r->ncclStartEvent_.get(),
+        safeGetCudaEventPtr(r->ncclStartEvent_),
         r->ncclEndEvent_.get(),
         options_->timeout,
         pgStatus_,
@@ -3796,7 +3801,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
         profilingTitle,
         {tensor},
         {tensor},
-        work->ncclStartEvent_.get(),
+        safeGetCudaEventPtr(work->ncclStartEvent_),
         work->ncclEndEvent_.get(),
         options_->timeout,
         pgStatus_,
