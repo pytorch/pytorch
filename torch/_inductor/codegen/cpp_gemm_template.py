@@ -365,10 +365,12 @@ SMALL_M_GEMM_TEMPLATE = r"""
                 {%- set tile_X = kernel.slice_nd(X, [(0, "M"), ("k_start", "k_end")]) %}
                 {%- set tile_W_3d = kernel.slice_nd(W, [("nr_block_id", "nr_block_id + 1"), ("k_start", "k_end"), ()]) %}
                 {%- set tile_W = kernel.view(tile_W_3d, ["k_end - k_start", micro_gemm.register_blocking.block_n]) %}
-                if (kr_block_id == 0) {
-                    {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, acc, accum=False)|indent(20, false) }}
+                if C10_UNLIKELY(kr_block_id == 0) {
+                    {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, acc, accum=False, prefetch=True)|indent(20, false) }}
+                } else if C10_UNLIKELY(k_end == K) {
+                    {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, acc, accum=True, prefetch=False)|indent(20, false) }}
                 } else {
-                    {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, acc, accum=True)|indent(20, false) }}
+                    {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, acc, accum=True, prefetch=True)|indent(20, false) }}
                 }
             }
             {%- set tile_Y = kernel.slice_nd(Y_2d, [("m_start", "m_end"), ("n_start", "n_end")]) %}

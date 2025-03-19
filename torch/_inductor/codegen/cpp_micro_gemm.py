@@ -317,11 +317,11 @@ class CppMicroGemmRef(CppMicroGemm):
         return KernelTemplate._template_from_string(self.TEMPLATE_ENTRY).render(options)
 
 
-# extra check for CppMicroGemmWoQSmallMDim
+# For int8 WoQ GEMM with small M, use CppMicroGemmWoQSmallMDim instead of CppMicroGemmFP32Vec
 def do_not_use_fp32_gemm_for_int8_woq(config, m, n, k, alpha, num_threads, **kwargs):
     return not (
-        config.register_blocking.block_k == k
-        and config.register_blocking.block_n == n
+        k % config.register_blocking.block_k == 0
+        and n % config.register_blocking.block_n == 0
         and m < 16
     )
 
@@ -920,8 +920,8 @@ inline void {{kernel_name}}_transpose_b_kernel(
 # extra check for CppMicroGemmWoQSmallMDim
 def check_int8_woq_small_m_dim(config, m, n, k, alpha, num_threads, **kwargs):
     return (
-        config.register_blocking.block_k == k
-        and config.register_blocking.block_n == n
+        k % config.register_blocking.block_k == 0
+        and n % config.register_blocking.block_n == 0
         and m < 16
     )
 
@@ -950,8 +950,8 @@ class CppMicroGemmWoQSmallMDim(CppMicroGemm):
 
     TEMPLATE_ENTRY = r"""
 {{declare_kernel}} {
-    {{kernel.assert_function}}(N == {{block_n}}, "N dimension must be multiple of {{block_n}}");
-    {{kernel.assert_function}}(K == {{block_k}}, "K dimension must be multiple of {{block_k}}");
+    {{kernel.assert_function}}(N == {{block_n}}, "N dimension must be equal to {{block_n}}");
+    {{kernel.assert_function}}(K == {{block_k}}, "K dimension must be equal to {{block_k}}");
     for (int64_t m = 0; m < M; m += {{block_m}}) {
         int64_t block_m = std::min<int64_t>(M - m, {{block_m}});
         if (block_m == {{block_m}}) {
@@ -975,7 +975,8 @@ class CppMicroGemmWoQSmallMDim(CppMicroGemm):
                 K,
                 {{block_k}},
                 ldb,
-                ldc
+                ldc,
+                prefetch
             );
         } else {
             switch (block_m) {
@@ -1000,7 +1001,8 @@ class CppMicroGemmWoQSmallMDim(CppMicroGemm):
                     K,
                     {{block_k}},
                     ldb,
-                    ldc
+                    ldc,
+                    prefetch
                 );
                 break;
             }
@@ -1022,7 +1024,8 @@ inline void {{kernel_name}}_kernel(
     int64_t K,
     int64_t lda,
     int64_t ldb,
-    int64_t ldc
+    int64_t ldc,
+    bool prefetch
 ) {
     constexpr auto VLEN = 16;
     constexpr auto ROWS = BLOCK_M;
@@ -1045,7 +1048,9 @@ inline void {{kernel_name}}_kernel(
             // Convert VLEN int8 elements to int16, then fp16, and then apply scale
             auto int8_vector = _mm_loadu_si128((__m128i*)(B + k * ldb + col * VLEN));
             vb[col] =  _mm512_cvtepi32_ps(_mm512_cvtepi8_epi32(int8_vector));
-            _mm_prefetch(B + (k + {{block_k}}) * ldb + col * VLEN, _MM_HINT_T0);
+            if C10_LIKELY(prefetch) {
+              _mm_prefetch(B + (k + {{block_k}}) * ldb + col * VLEN, _MM_HINT_T0);
+            }
         }
         vc[i] = _mm512_fmadd_ps(va, vb[col], vc[i]);
     };
@@ -1084,6 +1089,17 @@ inline void {{kernel_name}}_kernel(
             options
         )
         return result
+
+    def get_kernel_extra_args_declare(self) -> str:
+        return "bool prefetch,"
+
+    def get_kernel_extra_args(self, **kwargs) -> list[str]:
+        assert len(kwargs) == 2
+        assert "prefetch" in kwargs
+        prefetch_val = kwargs.get("prefetch")
+        return [
+            f"{value_to_cpp(prefetch_val, 'bool')},",
+        ]
 
 
 # extra check for CppMicroGemmAMX
