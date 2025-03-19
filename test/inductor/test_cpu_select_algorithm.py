@@ -1380,12 +1380,16 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             32,
         ),
     )
+    @parametrize(
+        "mid_dim",
+        (
+            1,
+            8,
+        ),
+    )
     @parametrize("in_features", (128, 144, 1024))
     @parametrize("out_features", (64, 65, 1024))
-    def test_int8_woq_mm(self, dtype, batch_size, in_features, out_features):
-        # x will be reshaped from 3d to 2d
-        second_dim_size = 1
-
+    def test_int8_woq_mm(self, dtype, batch_size, mid_dim, in_features, out_features):
         def _convert_weight_to_int8pack(w):
             scale, zp = _calculate_dynamic_per_channel_qparams(
                 w.to(torch.float), torch.int8
@@ -1417,7 +1421,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         counters.clear()
         # Currently, the corresponding torch.fx pattern only supports 3D x
         # Add 2D X case once the corresponding pattern-matcher pattern is added
-        x = torch.rand((batch_size, second_dim_size, in_features), dtype=dtype)
+        x = torch.rand((batch_size, mid_dim, in_features), dtype=dtype)
         w = torch.rand((out_features, in_features), dtype=dtype)
         w_int8pack, w_scales = _convert_weight_to_int8pack(w)
         mod = M(w_int8pack).eval()
