@@ -623,7 +623,7 @@ static Tensor median_common_mps(const Tensor& input_t, bool nanmedian) {
   IntArrayRef input_shape = input_t.sizes();
   int64_t num_in_elements = c10::multiply_integers(input_shape);
 
-  // Allocate output tensor with shape [1] (rank 1) instead of a scalar.
+  // we allocate 1 here due to MacOS13 bug for gather MPSGraph op, look below for the error
   Tensor output_t = at::empty({1}, input_t.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
   if (output_t.numel() == 0 || num_in_elements == 0) {
     return output_t;
@@ -635,12 +635,10 @@ static Tensor median_common_mps(const Tensor& input_t, bool nanmedian) {
   using MedianCachedGraph = MPSUnaryCachedGraph;
   auto medianCachedGraph =
       LookUpOrCreateCachedGraph<MedianCachedGraph>(medianKey, [&](auto mpsGraph, auto newCachedGraph) {
-        // Create a placeholder and cast the input as needed.
         MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_t);
         MPSGraphTensor* castInputTensor =
             castToIHFTypes(mpsGraph, inputTensor, input_t, /*includesInt64=*/macOS13_3_plus);
 
-        // Reshape to 1D (e.g. shape [N])
         MPSGraphTensor* reshapedTensor = [mpsGraph reshapeTensor:castInputTensor withShape:@[ @-1 ] name:nil];
 
         MPSGraphTensor* effectiveLengthTensor = nil;
