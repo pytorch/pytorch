@@ -235,8 +235,6 @@ case "$image" in
     CLANG_VERSION=10
     PROTOBUF=yes
     VISION=yes
-    VULKAN_SDK_VERSION=1.2.162.1
-    SWIFTSHADER=yes
     CONDA_CMAKE=yes
     TRITON=yes
     ;;
@@ -245,8 +243,6 @@ case "$image" in
     CLANG_VERSION=10
     PROTOBUF=yes
     VISION=yes
-    VULKAN_SDK_VERSION=1.2.162.1
-    SWIFTSHADER=yes
     CONDA_CMAKE=yes
     TRITON=yes
     ;;
@@ -484,8 +480,6 @@ docker build \
        --build-arg "CUDNN_VERSION=${CUDNN_VERSION}" \
        --build-arg "TENSORRT_VERSION=${TENSORRT_VERSION}" \
        --build-arg "GRADLE_VERSION=${GRADLE_VERSION}" \
-       --build-arg "VULKAN_SDK_VERSION=${VULKAN_SDK_VERSION}" \
-       --build-arg "SWIFTSHADER=${SWIFTSHADER}" \
        --build-arg "CMAKE_VERSION=${CMAKE_VERSION:-}" \
        --build-arg "NINJA_VERSION=${NINJA_VERSION:-}" \
        --build-arg "KATEX=${KATEX:-}" \
