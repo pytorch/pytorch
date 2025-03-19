@@ -1359,7 +1359,13 @@ def get_backend(group: Optional[ProcessGroup] = None) -> Backend:
     pg = group or _get_default_group()
     if _rank_not_in_group(pg):
         raise ValueError("Invalid process group specified")
-    pg_store = _world.pg_map[pg] if pg in _world.pg_map else None
+
+    pg_store = _world.pg_map.get(pg, None)
+    if pg_store is None:
+        raise ValueError(
+            f"Process group {pg} is not initialized in the world group map. Please initialize the group first."
+        )
+
     return Backend(not_none(pg_store)[0])
 
 
@@ -1798,36 +1804,6 @@ def _get_split_source(pg):
     return split_from
 
 
-def _shutdown_backend(pg):
-    """
-    Try to shut down the backend of a process group.
-    Currently, only ProcessGroupNCCL backend is supported.
-    No op for other backends.
-    """
-    backend = None
-    try:
-        backend = pg._get_backend(torch.device("cuda"))
-    except RuntimeError:
-        pass
-    if is_nccl_available() and isinstance(backend, ProcessGroupNCCL):
-        # explicitly call shutdown to ensure that NCCL resources are released
-        backend._shutdown()
-
-
-def _abort_backend(pg: ProcessGroup):
-    """
-    Abort the backend of a process group.
-    Currently, only ProcessGroupNCCL backend is supported.
-    No op for other backends.
-    """
-    try:
-        backend = pg._get_backend(torch.device("cuda"))
-    except RuntimeError:
-        backend = None
-    if isinstance(backend, ProcessGroupNCCL):
-        backend.abort()
-
-
 def _new_process_group_helper(
     group_size,
     group_rank,
@@ -2162,7 +2138,7 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
         for pg_to_shutdown in sorted(
             _world.pg_names, key=lambda x: _world.pg_names[x], reverse=True
         ):
-            _shutdown_backend(pg_to_shutdown)
+            pg_to_shutdown.shutdown()
 
         _update_default_pg(None)
         _world.pg_map.clear()
@@ -2184,7 +2160,7 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
         # process group is in good state, we aren't dealing with failures.
         _world.group_count = 0
     else:
-        _shutdown_backend(pg)
+        pg.shutdown()
         del _world.pg_map[pg]
         del _world.pg_names[pg]
         del _world.pg_group_ranks[pg]
@@ -2240,24 +2216,19 @@ def _abort_process_group(group: Optional[ProcessGroup] = None):
     except RuntimeError:
         backend = None
 
-    if not isinstance(backend, ProcessGroupNCCL):
-        logger.warning(
-            "`abort_process_group` currently only has implementation for ProcessGroupNCCL; "
-            "however, no NCCL backend is found. This call will be a no-op."
-        )
-        return
-
-    if group == GroupMember.WORLD:
+    if group is None or group == GroupMember.WORLD:
         # Abort all backends within a ncclGroupStart|End semantic.
         # This ensures that different NCCL communicators' abort calls won't
         # deadlock each other.
         # For details, please see: https://github.com/pytorch/pytorch/issues/119797
-        backend._group_start()
+        if is_nccl_available() and isinstance(backend, ProcessGroupNCCL):
+            backend._group_start()
         for pg_to_abort in sorted(
             _world.pg_names, key=lambda x: _world.pg_names[x], reverse=True
         ):
-            _abort_backend(pg_to_abort)
-        backend._group_end()
+            pg_to_abort.abort()
+        if is_nccl_available() and isinstance(backend, ProcessGroupNCCL):
+            backend._group_end()
 
         _update_default_pg(None)
         _world.pg_map.clear()
@@ -2279,7 +2250,7 @@ def _abort_process_group(group: Optional[ProcessGroup] = None):
         # process group is in good state, we aren't dealing with failures.
         _world.group_count = 0
     else:
-        _abort_backend(pg)
+        pg.abort()
         del _world.pg_map[pg]
         del _world.pg_names[pg]
         del _world.pg_group_ranks[pg]
@@ -4829,7 +4800,7 @@ def split_group(
     warning:: This is an experimental API and only the ``NCCL`` backend supports this API.
     Other backends will raise an error.
     Users of this API must gurantee that all ranks in the parent group enter this API call,
-    and the split of the sub groups is the same accross all ranks in the parent group.
+    and the split of the sub groups is the same across all ranks in the parent group.
 
     Args:
         parent_pg (ProcessGroup, optional): The parent process group. If None,

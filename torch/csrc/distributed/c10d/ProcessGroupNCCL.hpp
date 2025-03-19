@@ -761,11 +761,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   c10::intrusive_ptr<intra_node_comm::IntraNodeComm> initIntraNodeComm();
 
   // Destroy (shutdown) this backend -- normal exit.
-  void shutdown();
+  void shutdown() override;
 
   // Provides an API to abort the ProcessGroup (similar to ncclCommAbort)
   // instead of relying on ProcessGroupNCCL destructor.
-  void abort();
+  void abort() override;
 
   void eagerConnectSingleDevice(at::Device device) override;
 
@@ -863,8 +863,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   bool useNonblocking();
 
  private:
-  int globalRankStart;
-  int globalRankStride;
+  int globalRankStart_;
+  int globalRankStride_;
 
   // Helper that encapsulates work shared across all collective communication
   // primitives.  The callbacks have the following signatures:

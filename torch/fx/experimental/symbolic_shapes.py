@@ -3484,6 +3484,7 @@ class ShapeEnv:
             "var_to_range_sloc",
             "replacements_slocs",
             "_resimplify_floor_div_axioms",
+            "_expr_sym_node_id",
         )
 
         # Mapping of the value of each to-be-compared field into the values that
@@ -3879,15 +3880,21 @@ class ShapeEnv:
         constraint_dims = symbolic_context.constraint_sizes  # type: ignore[attr-defined]
         size = []
         for i, val in enumerate(tensor_size):
-            size.append(
-                self.create_symbol(
-                    val,
-                    TensorPropertySource(source, TensorProperty.SIZE, i),
-                    dynamic_dims[i],
-                    constraint_dims[i],
-                    symbolic_context=symbolic_context,
-                )
+            sym = self.create_symbol(
+                val,
+                TensorPropertySource(source, TensorProperty.SIZE, i),
+                dynamic_dims[i],
+                constraint_dims[i],
+                do_not_specialize_zero_one=config.backed_size_oblivious,
+                symbolic_context=symbolic_context,
             )
+            if (
+                config.backed_size_oblivious
+                and isinstance(sym, sympy.Symbol)  # could be static
+                and symbol_is_type(sym, SymT.SIZE)
+            ):
+                self.size_like.add(sym)
+            size.append(sym)
         return size
 
     def create_symbolic_sizes_strides_storage_offset(
@@ -4533,7 +4540,9 @@ class ShapeEnv:
                     self._add_assertion(sympy_expr > 1)
 
                     # Apply default range, which assumes not zero-one
-                    self.var_to_range[sympy_expr] = self._default_value_range()
+                    self.var_to_range[sympy_expr] = self._default_value_range(
+                        do_not_specialize_zero_one
+                    )
                     self.var_to_range_sloc[sympy_expr] = ValueRangesSLoc(
                         self._get_sloc(
                             "user code shown is first use of this value--the guard itself is not "
@@ -5283,7 +5292,12 @@ class ShapeEnv:
         # This removes all the checks that follow from bounds
         # We could simply emit those and also the bounds 2 <= size when necessary
         for guard in guards if guards is not None else self.guards:
-            if self._maybe_evaluate_static(guard.expr, axioms=()) is not None:
+            if (
+                self._maybe_evaluate_static(
+                    guard.expr, axioms=(), size_oblivious=guard.size_oblivious
+                )
+                is not None
+            ):
                 continue
             issue_guard(guard)
 
@@ -5586,7 +5600,10 @@ class ShapeEnv:
         return [
             self.simplify(guard.expr)
             for guard in self.guards
-            if self._maybe_evaluate_static(guard.expr, axioms=()) is None
+            if self._maybe_evaluate_static(
+                guard.expr, axioms=(), size_oblivious=guard.size_oblivious
+            )
+            is None
         ]
 
     def format_guards(self, verbose: bool = False) -> str:
@@ -6003,7 +6020,7 @@ class ShapeEnv:
             metadata_fn=lambda: {
                 "expr": repr(expr),
                 "unhinted_expr": repr(unhinted_expr),
-                "expr_id": expr_sym_node_id,
+                "expr_id": self._expr_sym_node_id,
                 "stack": structured.from_traceback(
                     CapturedTraceback.extract(skip=1).summary()
                 ),
@@ -6403,8 +6420,10 @@ class ShapeEnv:
         return
 
     # See: Note - On 0/1 specialization
-    def _default_value_range(self) -> ValueRanges:
-        lower = 2 if self.specialize_zero_one else 0
+    def _default_value_range(
+        self, do_not_specialize_zero_one: bool = False
+    ) -> ValueRanges:
+        lower = 0 if (do_not_specialize_zero_one or not self.specialize_zero_one) else 2
         return ValueRanges(lower, int_oo)
 
     def _default_unspecified_value_range(self) -> ValueRanges:
@@ -6618,6 +6637,25 @@ class ShapeEnv:
                 stack_info=is_debug,
             )
 
+    # A local variable to evaluate_expr stored in the class to avoid
+    # using it for the lru_cache that is on top of it since it does
+    # not effect the results. When needed its read directly.
+    _expr_sym_node_id: Optional[int] = None
+
+    def evaluate_sym_node(
+        self,
+        sym_node: SymNode,
+        size_oblivious: bool = False,
+    ) -> sympy.Basic:
+        """
+        Given a a SymNode, evaluates sym_node.expr, adding guards if necessary.
+        """
+
+        self._expr_sym_node_id = id(sym_node)
+        return self.evaluate_expr(
+            sym_node.expr, sym_node.hint, sym_node.fx_node, size_oblivious
+        )
+
     @lru_cache(256)
     @record_shapeenv_event(save_tracked_fakes=True)
     def evaluate_expr(
@@ -6626,7 +6664,6 @@ class ShapeEnv:
         hint: Optional[Union[int, bool, float]] = None,
         fx_node: Optional[torch.fx.Node] = None,
         size_oblivious: bool = False,
-        expr_sym_node_id: Optional[int] = None,
         *,
         forcing_spec: bool = False,
     ) -> sympy.Basic:
@@ -6636,7 +6673,6 @@ class ShapeEnv:
                 hint,
                 fx_node,
                 size_oblivious,
-                expr_sym_node_id,
                 forcing_spec=forcing_spec,
             )
         except Exception:
@@ -6655,7 +6691,6 @@ class ShapeEnv:
         hint: Optional[Union[bool, int, float]] = None,
         fx_node: Optional[torch.fx.Node] = None,
         size_oblivious: bool = False,
-        expr_sym_node_id: Optional[int] = None,
         *,
         forcing_spec: bool = False,
     ) -> sympy.Basic:
@@ -6756,7 +6791,13 @@ class ShapeEnv:
                     else size_oblivious,
                     static_expr,
                 )
-                if hint is not None:
+                if (
+                    not size_oblivious
+                    and config.backed_size_oblivious
+                    and hint is not None
+                ):
+                    # TODO: maybe reconcile this with use of counterfactual hints
+                    # in unbacked case
                     assert static_expr == hint, f"{static_expr} != {hint}"
                 return static_expr
 
@@ -6834,7 +6875,7 @@ class ShapeEnv:
                             metadata_fn=lambda: {
                                 "expr": repr(orig_expr),
                                 "result": repr(unsound_result),
-                                "expr_node_id": expr_sym_node_id,
+                                "expr_node_id": self._expr_sym_node_id,
                                 "user_stack": structured.get_user_stack(3),
                                 "stack": structured.get_framework_stack(3),
                                 "symbol_to_sources": {
@@ -6854,7 +6895,7 @@ class ShapeEnv:
                             expr.xreplace(self.var_to_val),
                             expr,
                             size_oblivious_result=size_oblivious_result,
-                            expr_sym_node_id=expr_sym_node_id,
+                            expr_sym_node_id=self._expr_sym_node_id,
                         )
                 else:
                     expr = new_expr
@@ -6902,7 +6943,9 @@ class ShapeEnv:
                     # at this point, we've evaluated the concrete expr value, and have
                     # flipped/negated the guard if necessary. Now we know what to guard
                     # or defer to runtime assert on.
-                    guard = ShapeGuard(g, self._get_sloc())
+                    guard = ShapeGuard(
+                        g, self._get_sloc(), size_oblivious=size_oblivious
+                    )
                     self.guards.append(guard)
                     self.axioms.update(dict(self.get_implications(self.simplify(g))))
                 else:

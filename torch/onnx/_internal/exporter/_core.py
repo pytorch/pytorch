@@ -200,27 +200,33 @@ def _set_shape_type(
     | tuple[torch.Tensor],
     complex_to_float: bool,
 ) -> None:
-    # TODO: Consider using meta["tensor_meta"] for this? Would it be faster?
     if isinstance(meta_val, tuple):
         logger.warning("Setting shape and type of tensors is not supported yet")
     if isinstance(meta_val, torch.Tensor):
-        # FIXME: Consider shape for complex values
         dims = []
         for dim in meta_val.shape:
             if isinstance(dim, int):
                 dims.append(dim)
             else:
                 dims.append(str(dim.node))
-        value.dtype = _torch_dtype_to_onnx_dtype(meta_val.dtype)
-        if complex_to_float:
-            if meta_val.dtype == torch.complex64:
-                value.dtype = ir.DataType.FLOAT
-                # Add 2 as the last dimension if the tensor is complex to hold the real/imag parts
-                dims.append(2)
-            elif meta_val.dtype == torch.complex128:
-                value.dtype = ir.DataType.DOUBLE
-                # Add 2 as the last dimension if the tensor is complex to hold the real/imag parts
-                dims.append(2)
+
+        # If the dtype is set already (e.g. by the onnx_symbolic ops),
+        # we don't need to set it again.
+        #
+        # When a user specifies complex in onnx_symbolic, we consider that to
+        # be the intention even though non of the ONNX ops deals with complex values.
+        # In this case, we don't change the dtype or the shape of the tensor.
+        if value.dtype is None:
+            value.dtype = _torch_dtype_to_onnx_dtype(meta_val.dtype)
+            if complex_to_float:
+                if meta_val.dtype == torch.complex64:
+                    value.dtype = ir.DataType.FLOAT
+                    # Add 2 as the last dimension if the tensor is complex to hold the real/imag parts
+                    dims.append(2)
+                elif meta_val.dtype == torch.complex128:
+                    value.dtype = ir.DataType.DOUBLE
+                    # Add 2 as the last dimension if the tensor is complex to hold the real/imag parts
+                    dims.append(2)
 
         value.shape = ir.Shape(dims)
     elif isinstance(meta_val, (int, torch.SymInt)):
@@ -1223,6 +1229,7 @@ def export(
     failed_results: list[_capture_strategies.Result] = []
 
     program: torch.export.ExportedProgram | None = None
+    capture_strategy: str | None = None
     # Step 1: Export the model with torch.export.export if the model is not already an ExportedProgram
     if isinstance(model, torch.export.ExportedProgram):
         # We know the model is already exported program, so the args, kwargs, and dynamic_shapes
@@ -1258,6 +1265,7 @@ def export(
                 failed_results.append(result)
 
         assert result is not None
+        capture_strategy = result.strategy
         if result.exported_program is None:
             # If all strategies fail, produce an error report and raise the first error
             profile_result = _maybe_stop_profiler_and_get_result(profiler)
@@ -1371,6 +1379,8 @@ def export(
         onnx_program = _exported_program_to_onnx_program(
             decomposed_program, registry=registry
         )
+        # Record the strategy used for getting the exported program for unit test assertions
+        onnx_program._capture_strategy = capture_strategy
 
         # Run the ONNX passes
         if input_names:
@@ -1398,7 +1408,7 @@ def export(
                 _reporting.create_onnx_export_report(
                     report_path,
                     f"{_format_exceptions_for_all_strategies(failed_results)}\n\n{_format_exception(e)}",
-                    program,
+                    decomposed_program,
                     decomp_comparison=_reporting.format_decomp_comparison(
                         pre_decomp_unique_ops, post_decomp_unique_ops
                     ),

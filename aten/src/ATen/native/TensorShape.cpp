@@ -3059,8 +3059,7 @@ Tensor slice(
   }
   auto storage_offset = self.storage_offset() + start_val * strides[dim];
   auto len = end_val - start_val;
-  sizes[dim] =
-      (len == 0) ? 0 : (1 + (len - 1) / step); // round-up, avoiding overflow
+  sizes[dim] = (len + step - 1) / step; // round-up
   strides[dim] *= step;
 
   Tensor result;
@@ -3611,11 +3610,11 @@ Tensor& transpose_(Tensor& self, int64_t dim0, int64_t dim1) {
     return at::_mkldnn_transpose_(self, dim0, dim1);
   }
 
-  DimVector sizes(self.sizes().begin(), self.sizes().end());
-  DimVector strides(self.strides().begin(), self.strides().end());
-  std::swap(strides[dim0], strides[dim1]);
+  SymDimVector sizes(self.sym_sizes().begin(), self.sym_sizes().end());
   std::swap(sizes[dim0], sizes[dim1]);
-  self.as_strided_(sizes, strides);
+  SymDimVector strides(self.sym_strides().begin(), self.sym_strides().end());
+  std::swap(strides[dim0], strides[dim1]);
+  auto result = self.as_strided__symint(std::move(sizes), std::move(strides));
   return self;
 }
 

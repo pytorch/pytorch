@@ -558,7 +558,7 @@ def gen_2d_view_of_epilogue_buf(
                 from_stride_ordered_decreasingly_to_epilogue_node_order
             )
 
-            reindexer = ir.fuse_reindexing(stride_reindex, reshape_reindex)
+            reindexer = ir.fuse_reindexing(stride_reindex, reshape_reindex)  # type: ignore[var-annotated]
             return reindexer
 
         if default_reindexers is None:
@@ -1107,8 +1107,9 @@ class CppGemmTemplate(CppTemplate):
         if should_block_weight:
             blocked_w = cls.block_weight(W, new_size, padding)
             new_inputs[1] = cls.pack_vnni_weight(blocked_w, micro_gemm, new_size)
-        else:
-            blocked_w = W
+        elif isinstance(W, ir.IRNode):
+            # Require W layout to be fixed & contiguous, happens inplace.
+            ir.ExternKernel.require_contiguous(W)
 
         def _is_int8_gemm(inputs):
             return (

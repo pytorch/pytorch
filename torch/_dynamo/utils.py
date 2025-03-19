@@ -596,7 +596,7 @@ def dynamo_timed(
     dynamo_compile_column_us: Optional[str] = None,
     dynamo_compile_runtime_column_us: Optional[str] = None,
     compile_id: Optional[CompileId] = None,
-    is_forward: Optional[bool] = None,
+    is_backward: Optional[bool] = None,
     log_waitcounter: bool = False,
 ) -> Generator[Any, None, None]:
     """
@@ -638,7 +638,8 @@ def dynamo_timed(
     - compile_id: In the typical case, this parameter should not be needed. Use to
       supply the compile_id for those cases where we want to log a compile_id where
       it's not naturally available, e.g., for runtime autotuning.
-    - is_forward: Optionally set an is_forward field for those logging destinations
+    - is_backward: Specify forward/backward directly when not available in a
+      CompileContext, e.g., during runtime autotuning.
       that support it.
     - log_waitcounter: If set, we'll log a waitcounter of the form "pytorch.dynamo_timed.{key}"
     """
@@ -664,8 +665,8 @@ def dynamo_timed(
         event_metadata.update(metadata)
     if fn_name:
         event_metadata.update({"fn_name": fn_name})
-    if is_forward is not None:
-        event_metadata.update({"is_backward": not is_forward})
+    if is_backward is not None:
+        event_metadata.update({"is_backward": is_backward})
 
     chromium_log: ChromiumEventLogger = get_chromium_event_logger()
     start_ns = time.time_ns()
@@ -707,7 +708,7 @@ def dynamo_timed(
                 extra={
                     "compile_id": compile_id,
                     "is_runtime": True,
-                    "is_forward": is_forward,
+                    "is_forward": not is_backward,
                 },
             )
             cumulative_time_spent_ns[event_name] += time_spent_ns
@@ -1034,6 +1035,16 @@ cmp_name_to_op_mapping = {
 }
 
 
+cmp_name_to_op_str_mapping = {
+    "__eq__": "==",
+    "__ne__": "!=",
+    "__lt__": "<",
+    "__le__": "<=",
+    "__gt__": ">",
+    "__ge__": ">=",
+}
+
+
 def is_wrapper_or_member_descriptor(value):
     return isinstance(
         value,
@@ -1186,7 +1197,7 @@ class CompilationMetrics:
     inductor_cumulative_compile_time_us: Optional[int] = None
     inductor_code_gen_cumulative_compile_time_us: Optional[int] = None
     triton_compile_time_us: Optional[int] = None
-    runtime_cudagraphify_time_us: Optional[int] = None  # TODO: instrument
+    runtime_cudagraphify_time_us: Optional[int] = None
     runtime_triton_autotune_time_us: Optional[int] = None
     dynamo_compile_time_before_restart_us: Optional[int] = None
     cuda_synchronize_time_us: Optional[int] = None  # TODO: instrument
@@ -1220,6 +1231,8 @@ class CompilationMetrics:
     recompile_reason: Optional[str] = None
     num_graph_breaks: Optional[int] = None
     triton_kernel_compile_times_us: Optional[str] = None
+    ir_count: Optional[int] = None
+    cudagraph_skip_reason: Optional[str] = None
 
     @classmethod
     def create(cls, metrics: dict[str, Any]):
@@ -2842,13 +2855,13 @@ def same(
                     )
 
                     if use_larger_multiplier_for_smaller_tensor and (
-                        fp64_ref.numel() <= 10 and tol >= 4 * 1e-2
+                        fp64_ref.numel() <= 10
                     ):
                         multiplier = 10.0
                     elif use_larger_multiplier_for_smaller_tensor and (
-                        fp64_ref.numel() <= 500 and tol >= 4 * 1e-2
+                        fp64_ref.numel() <= 500
                     ):
-                        multiplier = 5.0
+                        multiplier = 8.0
                     elif (
                         fp64_ref.numel() < 1000
                         or (ref.ndim == 4 and ref.shape[-1] == ref.shape[-2] == 1)
@@ -4461,3 +4474,41 @@ def get_optimize_ddp_mode():
         f"Invalid dynamo config optimize_ddp value {mode=}"
     )
     return mode
+
+
+@contextmanager
+def maybe_disable_inference_mode() -> Generator[None, None, None]:
+    """
+    Disables torch.inference_mode for the compilation (still on at runtime).
+    This simplifies the compile stack where we can assume that inference_mode
+    will always be off.
+
+    Since inference_mode is equivalent to no_grad + some optimizations (version
+    counts etc), we turn on no_grad here. The other optimizations are not
+    relevant to torch.compile.
+    """
+    is_inference_mode_on = (
+        config.fake_tensor_disable_inference_mode and torch.is_inference_mode_enabled()
+    )
+    if is_inference_mode_on:
+        with (
+            torch.inference_mode(False),
+            torch.no_grad(),
+        ):
+            yield
+    else:
+        yield
+
+
+@contextmanager
+def maybe_disable_inference_mode_for_fake_prop() -> Generator[None, None, None]:
+    """
+    Turns off tracking of inference_mode for fake tensor propagation. With this
+    context manager, when a real tensor is converted to fake tensor, the fake
+    tensor looses its inference-ness.
+    """
+    if config.fake_tensor_disable_inference_mode:
+        with torch._subclasses.meta_utils.disable_inference_mode_for_fake_prop():
+            yield
+    else:
+        yield
