@@ -3391,7 +3391,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
             (1024,),
             self.rank,
         ).cuda()
-        with dist._collective_estimator(group=process_group, device=device) as cm:
+        with dist._time_estimator(group=process_group, device=device) as cm:
             c10d.all_reduce(t, c10d.ReduceOp.SUM)
         self.assertTrue(cm.estimated_time is not None)
         self.assertTrue(cm.estimated_time > 0)
