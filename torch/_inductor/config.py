@@ -1057,6 +1057,11 @@ class triton:
     # Setting to None means uninitialized
     autotune_at_compile_time: Optional[bool] = None
 
+    # We use random tensors for autotune by default. Setting this as true will let us
+    # use inputs from sample inputs to autotune user defined triton kernels.
+    # Side effect for this option is increased memory footprint during first pass compilation.
+    autotune_with_sample_inputs: bool = True
+
     # Allows tiling reductions into multiple dimensions.
     # For best results, this should be used with prefer_nd_tiling.
     tile_reductions: bool = False

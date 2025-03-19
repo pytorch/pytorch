@@ -206,6 +206,7 @@ class CppWrapperGpu(CppWrapperCpu):
         super().__init__()
         self.grid_id = count()
         self._triton_call_wrappers: dict[str, DeferredTritonCallWrapper] = {}
+        self.autotune_input_prefix = "_REAL_AUTOTUNE_INPUT"
 
     @staticmethod
     def create(
@@ -243,6 +244,9 @@ class CppWrapperGpu(CppWrapperCpu):
             f"AOTI_TORCH_ERROR_CODE_CHECK({self.device_codegen.aoti_get_stream()}({device_idx}, (void**)&{name}));"
         )
         return name
+
+    def get_autotuning_input_name(self, idx):
+        return f"{self.autotune_input_prefix}_{idx}"
 
     def codegen_inputs(self):
         # See Note: [Input Alignment handling in Inductor]
@@ -416,8 +420,10 @@ class CppWrapperGpu(CppWrapperCpu):
         device=None,
         triton=True,
         arg_types=None,
+        raw_keys=None,
         raw_args=None,
         triton_meta=None,
+        original_fxnode_name=None,
     ):
         """
         Override the default value of argument 'gpu' to True here.
@@ -434,6 +440,7 @@ class CppWrapperGpu(CppWrapperCpu):
                 device=device,
                 triton=triton,
                 arg_types=arg_types,
+                raw_keys=raw_keys,
                 raw_args=raw_args,
                 triton_meta=triton_meta,
             )
@@ -451,8 +458,10 @@ class CppWrapperGpu(CppWrapperCpu):
                 device=device,
                 triton=triton,
                 arg_types=arg_types,
+                raw_keys=raw_keys,
                 raw_args=raw_args,
                 triton_meta=triton_meta,
+                original_fxnode_name=original_fxnode_name,
             )
 
         stream = (
