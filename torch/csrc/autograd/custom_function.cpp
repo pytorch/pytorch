@@ -313,6 +313,7 @@ static optional_variable_list _process_backward_mode_ad(
             "ctx.mark_dirty() received a tensor that was not an input. "
             "Only input Tensors that have been mutated should be passed to "
             "ctx.mark_dirty().";
+        // We reach this path in the view of intermediate case
         TORCH_CHECK(!var.is_view(), mark_dirty_error_msg);
         TORCH_WARN(mark_dirty_error_msg);
       }

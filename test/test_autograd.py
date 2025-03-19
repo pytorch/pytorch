@@ -8618,7 +8618,7 @@ for shape in [(1,), ()]:
                     self.assertTrue(out_dual is x_dual)
                     self.assertTrue(out_tangent is x_tangent)
 
-    def test_custom_funciton_mark_output_view(self):
+    def test_custom_function_mark_output_view_of_intermediate(self):
         class Func(torch.autograd.Function):
             @staticmethod
             def forward(ctx, inp):
