@@ -596,13 +596,14 @@ class Exporter:
             # not valid.
             # Concrete data is expected to be filled for those initializers later during `ONNXProgram.save`.
             if self.options.fake_context is not None:
-                initializers_with_real_tensors: dict[str, torch.Tensor] = {}
-                for (
-                    initializer_name,
-                    initializer,
-                ) in onnxscript_graph.initializers.items():
-                    if not isinstance(initializer, torch._subclasses.FakeTensor):
-                        initializers_with_real_tensors[initializer_name] = initializer
+                initializers_with_real_tensors: dict[str, torch.Tensor] = {
+                    initializer_name: initializer
+                    for (
+                        initializer_name,
+                        initializer,
+                    ) in onnxscript_graph.initializers.items()
+                    if not isinstance(initializer, torch._subclasses.FakeTensor)
+                }
                 onnxscript_graph.initializers = initializers_with_real_tensors
 
             # Export TorchScript graph to ONNX ModelProto.

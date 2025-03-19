@@ -63,6 +63,7 @@ from .ir import (
     PermuteView,
     Pointwise,
     Reduction,
+    ShapeAsConstantBuffer,
     SqueezeView,
     TensorBox,
     validate_ir,
@@ -1319,7 +1320,7 @@ def quantized_decomposed_quantize_per_channel(
     quant_min: int,
     quant_max: int,
     dtype: torch.dtype,
-) -> TensorBox:
+) -> Union[TensorBox, ShapeAsConstantBuffer]:
     assert len(scales.get_size()) == 1, "expect scales 1 dim"
     assert len(zero_points.get_size()) == 1, "expect zero_points 1 dim"
 
@@ -1374,7 +1375,7 @@ def quantized_decomposed_dequantize_per_channel(
     dtype: torch.dtype,
     *,
     out_dtype: Optional[torch.dtype] = None,
-) -> TensorBox:
+) -> Union[TensorBox, ShapeAsConstantBuffer]:
     assert len(scales.get_size()) == 1, "expect scales 1 dim"
     assert len(zero_points.get_size()) == 1, "expect zero_points 1 dim"
     assert input.get_dtype() == dtype, (
@@ -1424,7 +1425,7 @@ def quantized_decomposed_quantize_per_tensor_default(
     quant_min: int,
     quant_max: int,
     dtype: torch.dtype,
-) -> TensorBox:
+) -> Union[TensorBox, ShapeAsConstantBuffer]:
     if input.get_dtype() == torch.bfloat16:
         input = to_dtype(input, torch.float32)
     assert input.get_dtype() == torch.float32, (
@@ -1465,7 +1466,7 @@ def quantized_decomposed_dequantize_per_tensor_default(
     dtype: torch.dtype,
     *,
     out_dtype: Optional[torch.dtype] = None,
-) -> TensorBox:
+) -> Union[TensorBox, ShapeAsConstantBuffer]:
     assert input.get_dtype() == dtype, (
         f"Expecting input to have dtype {dtype}, but got dtype: {input.get_dtype()}"
     )
@@ -1502,7 +1503,7 @@ def quantized_decomposed_quantize_per_tensor_tensor(
     quant_min: int,
     quant_max: int,
     dtype: torch.dtype,
-) -> TensorBox:
+) -> Union[TensorBox, ShapeAsConstantBuffer]:
     if input.get_dtype() == torch.bfloat16:
         input = to_dtype(input, torch.float32)
     assert input.get_dtype() == torch.float32, (
@@ -1552,7 +1553,7 @@ def quantized_decomposed_dequantize_per_tensor_tensor(
     dtype: torch.dtype,
     *,
     out_dtype: Optional[torch.dtype] = None,
-) -> TensorBox:
+) -> Union[TensorBox, ShapeAsConstantBuffer]:
     assert len(scale.get_size()) == 0 or (
         len(scale.get_size()) == 1 and scale.get_size()[0] == 1
     ), "expect scale as scalar tensor"
@@ -2282,7 +2283,7 @@ def searchsorted(
     right: bool = False,
     side: Optional[str] = None,
     sorter: Optional[TensorBox] = None,
-) -> TensorBox:
+) -> Union[TensorBox, ShapeAsConstantBuffer]:
     validate_bucketize = lambda tb: V.graph.has_feature(  # noqa: E731
         tb, BackendFeature.BUCKETIZE
     )

@@ -6,7 +6,7 @@ import sys
 import textwrap
 from collections.abc import Sequence
 from itertools import count
-from typing import Callable, Optional, Protocol, Union
+from typing import Any, Callable, Optional, Protocol, Union
 
 import sympy
 
@@ -1625,7 +1625,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # ```
         return final_tensor_str
 
-    def codegen_device_copy(self, src, dst, non_blocking: bool):
+    def codegen_device_copy(self, src, dst, non_blocking: Any):
         """This function is overridden by cpp_wrapper_cpu_array_ref, so we don't need to
         handle cases where dst is not an AtenTensorHandle."""
         self.writeline(
