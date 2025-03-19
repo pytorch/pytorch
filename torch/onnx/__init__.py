@@ -474,7 +474,7 @@ def dynamo_export(
                     rank = len(x.shape)
                     dynamic_shape = {}
                     for i in range(rank):
-                        dynamic_shape[i] = torch.export.Dim.AUTO  # type: ignore[attr-defined]
+                        dynamic_shape[i] = torch.export.Dim.AUTO
                     return dynamic_shape
                 else:
                     return None
