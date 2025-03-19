@@ -880,12 +880,8 @@ void passEventsToKineto(
     // duration will overflow and become a very large positive number. For a
     // long term solution, add guards in kineto for each activity type
     int64_t act_end_time = std::max(e->endTimeNS(), e->start_time_ns_);
-    std::string name = e->name();
-    if (!e->overload_name().empty()) {
-      name = fmt::format("{}.{}", e->name(), e->overload_name());
-    }
     auto* activity = cpu_trace.addCPUActivity(
-        name,
+        e->name(),
         e->kinetoType(),
         e->kineto_info_,
         e->correlationID(),

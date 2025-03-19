@@ -534,10 +534,6 @@ fake_tensor_cache_crosscheck_enabled = (
     os.environ.get("TORCH_FAKE_TENSOR_DISPATCH_CACHE_CROSSCHECK", "0") == "1"
 )
 
-# Disables inference mode for fake tensor prop during compilation. At runtime,
-# the inference_mode is still respected.
-fake_tensor_disable_inference_mode = True
-
 # Enables the Compiled Autograd engine to trace .backward() calls made under torch.compile().
 # Note: AOT Autograd will still trace joint graphs.
 compiled_autograd = False

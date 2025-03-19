@@ -1795,7 +1795,6 @@ class VariableBuilder:
         example_value = wrap_to_fake_tensor_and_record(
             value, tx=self.tx, is_tensor=True, source=source
         )
-
         tensor_proxy = self.tx.output.root_tracer.create_graph_input(
             re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
             type(value),
@@ -3030,7 +3029,6 @@ def wrap_to_fake_tensor_and_record(
             symbolic_context,
             type(e),
         )
-
         fake_e = wrap_fake_exception(
             lambda: tx.fake_mode.from_tensor(
                 e,
