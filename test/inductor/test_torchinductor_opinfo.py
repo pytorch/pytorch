@@ -488,6 +488,11 @@ inductor_override_kwargs["cuda"] = {
         "atol": 1e-4,
         "rtol": 2e-3,
     },
+    ("nn.functional.embedding_bag", f16): {
+        "reference_in_float": True,
+        "atol": 1e-4,
+        "rtol": 1e-2,
+    },
 }
 
 inductor_override_kwargs["xpu"] = {
