@@ -43,7 +43,6 @@ RELEASE = os.environ.get("RELEASE", False)
 sys.path.insert(0, os.path.abspath(".."))
 import pytorch_sphinx_theme2
 
-
 html_theme = "pytorch_sphinx_theme2"
 html_theme_path = [pytorch_sphinx_theme2.get_html_theme_path()]
 
@@ -82,9 +81,6 @@ myst_enable_extensions = [
 # build the templated autosummary files
 autosummary_generate = True
 numpydoc_show_class_members = False
-
-# Theme has bootstrap already
-panels_add_bootstrap_css = False
 
 # autosectionlabel throws warnings if section names are duplicated.
 # The following tells autosectionlabel to not throw a warning for
@@ -128,10 +124,12 @@ switcher_version = "main" if not RELEASE else version
 
 html_theme_options = {
     "analytics_id": "GTM-T8XT4PS",
+    "canonical_url": "https://pytorch.org/docs/stable/",
+    "pytorch_project": "docs",
     "logo": {
+        "image_light": "_static/logo-light.png",
+        "image_dark": "_static/logo-dark.png",
         "text": "Home",
-        "image_dark": "None",
-        "image_light": "None",
     },
     "icon_links": [
         {
@@ -183,7 +181,6 @@ html_theme_options = {
         "json_url": "https://raw.githubusercontent.com/svekars/doc-test/refs/heads/gh-pages-test/versions.json",
         "version_match": switcher_version,
     },
-    "pytorch_project": "docs",
 }
 
 theme_variables = pytorch_sphinx_theme2.get_theme_variables()
@@ -198,6 +195,7 @@ html_context = {
     "github_version": "main",
     "doc_path": "docs/source",
     "library_links": theme_variables.get("library_links", []),
+    "icon_links": theme_variables.get("icon_links", []),
     "community_links": theme_variables.get("community_links", []),
     "pytorch_project": "docs",
     "language_bindings_links": html_theme_options.get("language_bindings_links", []),

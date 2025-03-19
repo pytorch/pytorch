@@ -180,7 +180,9 @@ html_theme_options = {
     "pytorch_project": "docs",
     "collapse_navigation": False,
     "display_version": True,
-
+    "logo": {
+        "text": "Home",
+    }
 }
 
 html_context = {
