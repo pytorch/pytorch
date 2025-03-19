@@ -374,6 +374,7 @@ def make_constraints(
     if not isinstance(dynamic_shapes, dict):
         assert isinstance(dynamic_shapes, (tuple, list))
         combined_args = type(dynamic_shapes)(combined_args.values())  # type: ignore[assignment, misc]
+    
     flat_dynamic_shapes = _flatten_dynamic_shapes(combined_args, dynamic_shapes)
 
     # check number of shapes vs. number of inputs

@@ -887,6 +887,7 @@ def _get_forward_arg_names(
         else:
             names.append(name)
     # order of kwargs matters for input spec
+    sig.bind_partial(**kwargs).arguments
     if kwargs:
         names.extend([kwarg for kwarg, _ in kwargs.items()])
 
@@ -1138,12 +1139,32 @@ def _process_export_inputs(mod, args, kwargs, dynamic_shapes):
             f"Expecting `args` to be a tuple of example positional inputs, got {type(args)}",
         )
     kwargs = kwargs if kwargs is not None else {}
-    _, original_in_spec = pytree.tree_flatten((args, kwargs))
+    combined_args = _combine_args(mod, args, kwargs)
+    kwargs_correct_order = {}
+    found_keys = set()
+    for key in list(combined_args.keys()):
+        if key in kwargs:
+            kwargs_correct_order[key] = combined_args[key]
+            found_keys.add(key)
+    
+    _, original_in_spec = pytree.tree_flatten((args, kwargs_correct_order))
+
+    for key in kwargs:
+        if key not in found_keys:
+            kwargs_correct_order[key] = kwargs[key]
+    #_, original_in_spec = pytree.tree_flatten((args, kwargs_correct_order))
 
     if isinstance(dynamic_shapes, torch.export.ShapesCollection):
         dynamic_shapes = dynamic_shapes.dynamic_shapes(mod, args, kwargs)
+    
+    if isinstance(dynamic_shapes, dict):
+        dynamic_shapes_reordered = {}
+        for key in combined_args:
+            if key in dynamic_shapes:
+                dynamic_shapes_reordered[key] = dynamic_shapes[key]
+        dynamic_shapes = dynamic_shapes_reordered
 
-    return args, kwargs, original_in_spec, dynamic_shapes
+    return args, kwargs_correct_order, original_in_spec, dynamic_shapes
 
 
 def _get_module_call_graph(
@@ -1952,12 +1973,16 @@ def _export_for_training(
     global _EXPORT_MODULE_HIERARCHY
     _EXPORT_MODULE_HIERARCHY = _get_module_hierarchy(mod)
 
+    print("BEFORE", args, kwargs)
+
     (
         args,
         kwargs,
         orig_in_spec,
         dynamic_shapes,
     ) = _process_export_inputs(mod, args, kwargs, dynamic_shapes)
+
+    print("AFTER", args, kwargs)
 
     original_state_dict = _get_original_state_dict(mod)
 
