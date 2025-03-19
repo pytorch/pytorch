@@ -69,12 +69,12 @@ class Linear(Module):
     Attributes:
         weight: the learnable weights of the module of shape
             :math:`(\text{out\_features}, \text{in\_features})`. The values are
-            initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`, where
-            :math:`k = \frac{1}{\text{in\_features}}`
+            initialized from :math:`\mathcal{U}(-k, k)`, where
+            :math:`k = \frac{1}{\sqrt{in\_features}}`
         bias:   the learnable bias of the module of shape :math:`(\text{out\_features})`.
                 If :attr:`bias` is ``True``, the values are initialized from
-                :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
-                :math:`k = \frac{1}{\text{in\_features}}`
+                :math:`\mathcal{U}(-k, k)` where
+                :math:`k = \frac{1}{\sqrt{in\_features}}`
 
     Examples::
 
