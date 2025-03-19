@@ -420,7 +420,8 @@ def _single_tensor_adam(
 
         if torch.is_complex(param):
             grad = torch.view_as_real(grad)
-            exp_avg = torch.view_as_real(exp_avg)
+            if use_exp_avg : 
+                exp_avg = torch.view_as_real(exp_avg)
             exp_avg_sq = torch.view_as_real(exp_avg_sq)
             if amsgrad:
                 max_exp_avg_sqs[i] = torch.view_as_real(max_exp_avg_sqs[i])
@@ -443,7 +444,8 @@ def _single_tensor_adam(
         # Decay the first and second moment running average coefficient
         if use_exp_avg:
             exp_avg.lerp_(grad, 1 - device_beta1)
-
+        else: 
+            exp_avg = grad
         # Nested if is necessary to bypass jitscript rules
         if differentiable and isinstance(beta2, Tensor):
             if beta2.requires_grad:
@@ -529,9 +531,7 @@ def _single_tensor_adam(
                 denom = (max_exp_avg_sqs[i].sqrt() / bias_correction2_sqrt).add_(eps)
             else:
                 denom = (exp_avg_sq.sqrt() / bias_correction2_sqrt).add_(eps)
-
             param.addcdiv_(exp_avg, denom, value=-step_size)
-
         # Lastly, switch back to complex view
         if amsgrad and torch.is_complex(params[i]):
             max_exp_avg_sqs[i] = torch.view_as_complex(max_exp_avg_sqs[i])
@@ -609,7 +609,6 @@ def _multi_tensor_adam(
         if isinstance(beta1, Tensor) and str(beta1.device) != "cpu"
         else None
     )
-
     use_exp_avg = len(exp_avgs) > 0
     for (
         device_params_,

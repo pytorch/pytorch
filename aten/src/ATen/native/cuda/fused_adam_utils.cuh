@@ -79,15 +79,12 @@ C10_DEVICE inline void adam_math(
       denom = (std::sqrt(exp_avg_sq) / bias_correction2_sqrt) + eps;
     }
     param -= step_size * exp_avg / denom;
-
     // Store results.
     r_args[kParamIdx][ii] = param;
     if (grad_scale_ptr) {
       r_args[kGradIdx][ii] = grad_to_store;
     }
-    if (beta1 > 0) {
-      r_args[kExpAvgIdx][ii] = exp_avg;
-    }
+    r_args[kExpAvgIdx][ii] = exp_avg;
     r_args[kExpAvgSqIdx][ii] = exp_avg_sq;
     if (amsgrad) {
       r_args[kMaxExpAvgSqIdx][ii] = max_exp_avg_sq;
