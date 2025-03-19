@@ -4051,9 +4051,10 @@ class Scheduler:
         Returns all symbol inputs which are required to be in scope to successfully
         perform codegen for this graph partition, including:
         - free symbols used in partition nodes
-        - free symbols in partition input shapes, strides, and offsets. This is needed
-          for recording cudagraphs for input tensors with dynamic shapes.
+        - free symbols in partition input/node shapes, strides, and offsets. This is needed
+          for recording cudagraphs for tensors with dynamic shapes.
         """
+
         def get_scheduler_node_symbol_uses(
             node: BaseSchedulerNode,
         ) -> OrderedSet[sympy.Symbol]:
@@ -4065,7 +4066,17 @@ class Scheduler:
                     *(get_scheduler_node_symbol_uses(snode) for snode in node.snodes)
                 )
             assert node.node is not None
-            return node.node.get_free_symbol_uses()
+            free_symbol_uses = node.node.get_free_symbol_uses()
+
+            layout = node.node.maybe_get_layout()
+            if isinstance(layout, ir.Layout):
+                free_symbol_uses.update(
+                    free_symbols(layout.size)
+                    | free_symbols(layout.stride)
+                    | free_symbols(layout.offset)
+                )
+
+            return free_symbol_uses
 
         def get_input_node_symbols(
             node: Union[ir.IRNode, sympy.Expr, ir.TorchBindObject],
@@ -4119,10 +4130,7 @@ class Scheduler:
             *(get_scheduler_node_symbol_uses(node) for node in partition)
         )
         candidate_symbols.union(
-            *(
-                get_input_node_symbols(node)
-                for _, node in input_nodes.items()
-            )
+            *(get_input_node_symbols(node) for _, node in input_nodes.items())
         )
 
         return filter_symbols(candidate_symbols)

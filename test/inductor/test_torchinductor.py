@@ -14206,6 +14206,30 @@ if RUN_GPU:
             compiled_out = f_compiled(x, y)
             self.assertEqual(compiled_out, f(x, y))
 
+        @dynamo_config.patch("capture_dynamic_output_shape_ops", True)
+        # https://github.com/halide/Halide/issues/8308
+        @config.patch("halide.scheduler_cpu", "Mullapudi2016")
+        @config.patch("halide.scheduler_cuda", "Li2018")
+        @config.patch(implicit_fallbacks=True)
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_symint_from_nested_indirect_indexing(self):
+            def nested(x, repeats):
+                rank = torch.arange(repeats.numel(), device=x.device)
+                index = rank.repeat_interleave(repeats, dim=0)
+                return torch.index_select(x, index=index, dim=0)
+
+            example_inputs = (
+                torch.randn((32, 64), device=self.device),
+                repeats := torch.tensor([5, 10, 15], device=self.device),
+            )
+            torch._dynamo.mark_dynamic(repeats, 0)  # create backed symint
+
+            nested_opt = torch.compile(nested, backend="inductor")
+
+            expect = nested(*example_inputs)
+            actual = nested_opt(*example_inputs)
+            self.assertEqual(expect, actual)
+
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_unbacked_symint(self):
             def f(x, y):
