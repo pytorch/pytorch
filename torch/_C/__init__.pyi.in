@@ -1915,12 +1915,14 @@ def _cuda_record_memory_history_legacy(
     record_context_cpp: _bool,
     alloc_trace_max_entries: _int,
     alloc_trace_record_context: _bool,
+    clear_history: _bool,
 ) -> None: ...
 def _cuda_record_memory_history(
     enabled: Optional[str],
     context: Optional[str],
     stacks: str,
-    max_entries
+    max_entries: _int,
+    clear_history: _bool,
 ) -> None: ...
 def _cuda_isHistoryEnabled() -> _bool: ...
 
