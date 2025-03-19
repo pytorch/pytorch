@@ -1,9 +1,9 @@
 # mypy: allow-untyped-defs
-from numbers import Number, Real
 import math
+from numbers import Number, Real
 
 import torch
-from torch import nan, inf
+from torch import inf, nan
 from torch.distributions import constraints, Distribution
 from torch.distributions.utils import broadcast_all
 

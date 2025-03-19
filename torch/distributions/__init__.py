@@ -86,8 +86,8 @@ from .exp_family import ExponentialFamily
 from .exponential import Exponential
 from .fishersnedecor import FisherSnedecor
 from .gamma import Gamma
-from .geometric import Geometric
 from .generalized_pareto import GeneralizedPareto
+from .geometric import Geometric
 from .gumbel import Gumbel
 from .half_cauchy import HalfCauchy
 from .half_normal import HalfNormal
@@ -136,8 +136,8 @@ __all__ = [
     "ExponentialFamily",
     "FisherSnedecor",
     "Gamma",
-    "Geometric",
     "GeneralizedPareto",
+    "Geometric",
     "Gumbel",
     "HalfCauchy",
     "HalfNormal",
