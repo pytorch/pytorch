@@ -197,7 +197,6 @@ S390X_BLOCKLIST = [
     "inductor/test_coordinate_descent_tuner",
     "test_jiterator",
     "inductor/test_cpu_cpp_wrapper",
-    "export/test_converter",
     "inductor/test_inductor_freezing",
     "dynamo/test_utils",
     "test_nn",
