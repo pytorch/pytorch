@@ -270,14 +270,6 @@ Tensor mkldnn_linear_pointwise_binary(
     const Tensor& weight_t,
     const std::optional<Tensor>& bias_opt,
     std::string_view attr) {
-  auto aprop_kind = ideep::prop_kind::forward;
-  bool maybe_backward = GradMode::is_enabled() &&
-      (input_t.requires_grad() || weight_t.requires_grad() ||
-       (bias_opt.has_value() && bias_opt->defined() &&
-        bias_opt->requires_grad()));
-  if (!maybe_backward) {
-    aprop_kind = ideep::prop_kind::forward_inference;
-  }
   c10::MaybeOwned<Tensor> bias_maybe_owned =
       at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
@@ -335,6 +327,7 @@ Tensor mkldnn_linear_pointwise_binary(
 
   auto other_desc = mkldnn_other.get_desc();
   auto op_attr = ideep::attr_t::fuse_binary(it_binary->second, other_desc);
+  auto aprop_kind = ideep::prop_kind::forward_inference;
 
   if (mkldnn_bias.has_value()) {
     ideep::inner_product_forward::compute_binary</*reorder_src=*/false, /*reorder_weight=*/false>(
