@@ -5,7 +5,6 @@ import functools
 import random
 import string
 import unittest
-from attn_gym.mods import generate_alibi_bias
 from collections import namedtuple
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -5307,7 +5306,7 @@ class TestLearnableBiases(InductorTestCase):
             out_eager, out_compiled, out_gold, (bias,), names=["out", "bias"]
         )
 
-    def test_flex_attention_with_alibi_dynamic_max_autotune(self):
+    def test_flex_attention_with_dynamic_max_autotune(self):
         query = torch.randn(2, 16, 512, 64, device="cuda")
         key = torch.randn(2, 16, 512, 64, device="cuda")
         value = torch.randn(2, 16, 512, 64, device="cuda")
@@ -5315,7 +5314,7 @@ class TestLearnableBiases(InductorTestCase):
         shape = (2, 16, 512, 16, 512, 64)
         B, Hq, M, Hkv, N, D = shape
 
-        score_mod = generate_alibi_bias(Hq)
+        score_mod = _generate_alibi_bias(8)
 
         def causal(b, h, m, n):
             return m >= n
@@ -5323,7 +5322,9 @@ class TestLearnableBiases(InductorTestCase):
         mask_shape = (1, 1, M, N)
         block_mask = torch.compile(create_block_mask)(causal, *mask_shape, "cuda")
 
-        compiled_sdpa = torch.compile(flex_attention, dynamic=True, mode="max-autotune-no-cudagraphs")
+        compiled_sdpa = torch.compile(
+            flex_attention, dynamic=True, mode="max-autotune-no-cudagraphs"
+        )
 
         out = compiled_sdpa(
             query=query,
@@ -5335,7 +5336,9 @@ class TestLearnableBiases(InductorTestCase):
             kernel_options=None,
         )
 
-        self.assertEqual(out.shape, query.shape, f"Expected shape {query.shape}, got {out.shape}")
+        self.assertEqual(
+            out.shape, query.shape, f"Expected shape {query.shape}, got {out.shape}"
+        )
 
 
 common_utils.instantiate_parametrized_tests(TestFlexAttention)
