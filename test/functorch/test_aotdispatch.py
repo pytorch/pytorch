@@ -3967,6 +3967,7 @@ def forward(self, tangents_1):
 
     @parametrize("use_autograd", [False, True])
     def test_mark_outputs_dynamic(self, use_autograd: bool):
+        counters.clear()
         torch._dynamo.reset()
 
         @torch.compile(backend="aot_eager")
@@ -3999,6 +4000,7 @@ def forward(self, tangents_1):
         torch._dynamo.reset()
 
     def test_mark_activations_dynamic(self):
+        counters.clear()
         torch._dynamo.reset()
 
         @torch.compile(backend="aot_eager")
