@@ -1876,6 +1876,7 @@ class BuiltinVariable(VariableTracker):
             if (
                 isinstance(obj, variables.UserDefinedObjectVariable)
                 and issubclass(obj.value.__class__, unittest.TestCase)
+                and config.enable_trace_unittest
                 and name
                 in (
                     "assertRaisesRegex",
