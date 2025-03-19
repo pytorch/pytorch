@@ -199,12 +199,18 @@ static size_t _parseChosenWorkspaceSize() {
   if (val.has_value()) {
     try {
       workspace_size = std::stoi(val.value());
-    } catch(std::invalid_argument const& e) {
-      TORCH_WARN("invalid CUBLASLT_WORKSPACE_SIZE,",
-                 " using default workspace size of ", workspace_size, " KiB.");
-    } catch(std::out_of_range const& e) {
-      TORCH_WARN("CUBLASLT_WORKSPACE_SIZE out of range,",
-                 " using default workspace size of ", workspace_size, " KiB.");
+    } catch (std::invalid_argument const&) {
+      TORCH_WARN(
+          "invalid CUBLASLT_WORKSPACE_SIZE,",
+          " using default workspace size of ",
+          workspace_size,
+          " KiB.");
+    } catch (std::out_of_range const&) {
+      TORCH_WARN(
+          "CUBLASLT_WORKSPACE_SIZE out of range,",
+          " using default workspace size of ",
+          workspace_size,
+          " KiB.");
     }
   }
   return workspace_size * 1024;
@@ -1079,7 +1085,13 @@ void gemm_internal<float>(CUDABLAS_GEMM_ARGTYPES(float))
   }
 #ifdef USE_ROCM
   else if (at::globalContext().blasPreferredBackend() == BlasBackend::Ck) {
-    at::native::gemm_internal_ck<float>(CUDABLAS_GEMM_ARGS(float));
+    auto dprops = at::cuda::getCurrentDeviceProperties();
+    c10::string_view arch(dprops->gcnArchName);
+    if (arch == "gfx1100") { //no CK GEMM version for gfx1100
+      gemm_internal_cublaslt<float>(CUDABLAS_GEMM_ARGS(float));
+    } else{
+      at::native::gemm_internal_ck<float>(CUDABLAS_GEMM_ARGS(float));
+    }
   }
 #endif
   else {
