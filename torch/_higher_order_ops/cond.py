@@ -20,6 +20,7 @@ from torch._functorch.utils import exposed_in
 from torch._higher_order_ops.utils import (
     _has_potential_branch_input_alias,
     _has_potential_branch_input_mutation,
+    _maybe_reenter_make_fx,
     _maybe_run_with_interpreter,
     _set_compilation_env,
     reenter_make_fx,
@@ -241,6 +242,79 @@ def create_fw_bw_graph_branches(true_fn, false_fn, *operands):
         return fw_true_graph, fw_false_graph, joint_true_graph, joint_false_graph
 
 
+def materialize_as_graph(
+    fn: Callable,
+    args: tuple[Any],
+    include_key_set: torch._C.DispatchKeySet,
+    exclude_key_set: torch._C.DispatchKeySet,
+    force_enable_grad=False,
+) -> torch.fx.GraphModule:
+    @torch._dynamo.disable(recursive=True)
+    def _materialize_as_graph_inner():
+        with suspend_functionalization(), disable_functional_mode():
+            with disable_proxy_modes_tracing():
+                unfunc_t = [_from_fun(arg) for arg in args]
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(
+                torch._C._ForceDispatchKeyGuard(include_key_set, exclude_key_set),
+            )
+            if force_enable_grad:
+                stack.enter_context(torch.enable_grad())
+            return _maybe_reenter_make_fx(fn)(*unfunc_t)
+
+    gm = _materialize_as_graph_inner()
+    assert gm is not None
+    return gm
+
+
+def create_bw_fn(fn: Callable, args: tuple[Any]) -> Callable:
+    """
+    For a fn that accepts flat inputs and returns flat outputs:
+        fw_out = fn(*args),
+    this function returns:
+        grad_args = bw_fn(*args_and_grad_output)
+    with the following invariants:
+      1. args + fw_out has an 1-1 correspondence to args_and_grad_output
+      2. grad_args has an 1-1 corresponsence to args
+      3. for tensor arg whose requires_grad is False, its corresponding grad in
+         grad_args will be a zero tensor with the same shape.
+    """
+
+    from torch._functorch.aot_autograd import AOTConfig, create_joint
+    from torch._higher_order_ops.utils import prepare_fw_with_masks_all_requires_grad
+
+    dummy_aot_config = AOTConfig(
+        fw_compiler=None,  # type: ignore[arg-type]
+        bw_compiler=None,  # type: ignore[arg-type]
+        partition_fn=None,  # type: ignore[arg-type]
+        decompositions={},
+        num_params_buffers=0,
+        aot_id=0,
+        keep_inference_input_mutations=False,
+    )
+    n_primals = len(args)
+
+    bw_fn = create_joint(
+        prepare_fw_with_masks_all_requires_grad(fn), aot_config=dummy_aot_config
+    )
+
+    def flat_fn(*args_and_grad_outs):
+        primals = args_and_grad_outs[:n_primals]
+        tangents = args_and_grad_outs[n_primals:]
+        grad_args = bw_fn(primals, tangents)[1]
+        assert len(args) == len(grad_args)
+        return [
+            (
+                torch.zeros_like(arg)
+                if isinstance(arg, torch.Tensor) and grad is None
+                else grad
+            )
+            for grad, arg in zip(grad_args, primals)
+        ]
+
+    return flat_fn
+
+
 def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     assert isinstance(
         operands, (list, tuple)
@@ -307,60 +381,69 @@ class CondAutogradOp(torch.autograd.Function):
     def forward(
         ctx,
         pred,
-        fw_true_graph,
-        fw_false_graph,
-        joint_true_graph,
-        joint_false_graph,
+        true_fn,
+        false_fn,
         *operands,
     ):
         ctx._pred = pred
-        ctx._joint_true_graph = joint_true_graph
-        ctx._joint_false_graph = joint_false_graph
+        ctx._true_bw_fn = create_bw_fn(
+            true_fn,
+            operands,
+        )
+        ctx._false_bw_fn = create_bw_fn(
+            false_fn,
+            operands,
+        )
+        # We snapshot the dispatch keys in forward for materializing the
+        # the bw_graph in backward.
+        ctx._fw_include_key_set = torch._C._dispatch_tls_local_include_set()
+        ctx._fw_exclude_key_set = torch._C._dispatch_tls_local_exclude_set()
         save_tensors_and_symints_for_backward(ctx, operands)
 
         with torch._C._AutoDispatchBelowAutograd():
-            return cond_op(pred, fw_true_graph, fw_false_graph, operands)
+            return cond_op(pred, true_fn, false_fn, operands)
 
     @staticmethod
     def backward(ctx, *flat_grads):
         operands = saved_tensors_and_symints(ctx)
-
+        args = operands + flat_grads
+        # TODO: we need to materialize the bw graphs because dynamo is unable to
+        # trace through the joint funcion when torch.compile torch.autograd.grad.
+        true_bw_gm = materialize_as_graph(
+            ctx._true_bw_fn,
+            args,
+            ctx._fw_include_key_set,
+            ctx._fw_exclude_key_set,
+            force_enable_grad=True,
+        )
+        false_bw_gm = materialize_as_graph(
+            ctx._false_bw_fn,
+            args,
+            ctx._fw_include_key_set,
+            ctx._fw_exclude_key_set,
+            force_enable_grad=True,
+        )
         grads = cond_op(
             ctx._pred,
-            ctx._joint_true_graph,
-            ctx._joint_false_graph,
-            flat_grads + operands,
+            true_bw_gm,
+            false_bw_gm,
+            args,
         )
-        return None, None, None, None, None, *grads
+        return None, None, None, *grads
 
 
+# Note:
+# As long as one of the tensors in pred or operands requires grad,
+# all the output would require grad with backward fn set to be the CondAutogradOp.
+# This is consistent with autograd.Function's semantic.
 @cond_op.py_impl(DispatchKey.Autograd)
 def cond_autograd(pred, true_fn, false_fn, operands):
-    # A shortcut for the case where all inputs don't require gradient,
-    # we skip tracing the forward and backward graph.
-    if pytree.tree_all_only(
-        torch.Tensor,
-        lambda t: not t.requires_grad,  # type: ignore[union-attr]
-        (pred, operands),
-    ):
-        with torch._C._AutoDispatchBelowAutograd():
-            return cond_op(pred, true_fn, false_fn, operands)
-
-    (
-        fw_true_graph,
-        fw_false_graph,
-        joint_true_graph,
-        joint_false_graph,
-    ) = create_fw_bw_graph_branches(true_fn, false_fn, *operands)
-    flat_out = CondAutogradOp.apply(
+    return CondAutogradOp.apply(
         pred,
-        fw_true_graph,
-        fw_false_graph,
-        joint_true_graph,
-        joint_false_graph,
+        true_fn,
+        false_fn,
         *operands,
     )
-    return flat_out
 
 
 @cond_op.py_impl(ProxyTorchDispatchMode)
