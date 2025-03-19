@@ -462,12 +462,11 @@ void cpu_upsample_linear_backward(
     const opmath_t width_scale = area_pixel_compute_scale<opmath_t>(
         input_width, output_width, align_corners, scales[0]);
 
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int64_t iw0, iw1;
     opmath_t w0lambda, w1lambda;
     for (const auto c : c10::irange(begin, end)) {
       int64_t input_offset = buffer_data.get() == nullptr ? c * input_slice_size : 0;
       for (const auto ow : c10::irange(output_width)) {
+        int64_t iw0 = 0, iw1 = 0;
         compute_source_index_and_lambda(
             iw0, iw1, w0lambda, w1lambda, width_scale, ow, input_width, output_width, align_corners);
         opmath_t grad_output_value = grad_output_data[c * output_slice_size + ow];
@@ -497,12 +496,11 @@ void cpu_upsample_linear_backward(
     const opmath_t width_scale = area_pixel_compute_scale<opmath_t>(
         input_width, output_width, align_corners, scales[1]);
 
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int64_t ih0, ih1, iw0, iw1;
     opmath_t h0lambda, h1lambda, w0lambda, w1lambda;
     for (const auto c : c10::irange(begin, end)) {
       int64_t input_offset = buffer_data.get() == nullptr ? c * input_slice_size : 0;
       for (const auto oh : c10::irange(output_height)) {
+        int64_t ih0 = 0, ih1 = 0, iw0 = 0, iw1 = 0;
         compute_source_index_and_lambda(
             ih0, ih1, h0lambda, h1lambda, height_scale, oh, input_height, output_height, align_corners);
         for (const auto ow : c10::irange(output_width)) {
@@ -540,12 +538,11 @@ void cpu_upsample_linear_backward(
     const opmath_t width_scale = area_pixel_compute_scale<opmath_t>(
         input_width, output_width, align_corners, scales[2]);
 
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int64_t id0, id1, ih0, ih1, iw0, iw1;
     opmath_t d0lambda, d1lambda, h0lambda, h1lambda, w0lambda, w1lambda;
     for (const auto c : c10::irange(begin, end)) {
       int64_t input_offset = buffer_data.get() == nullptr ? c * input_slice_size : 0;
       for (const auto od : c10::irange(output_depth)) {
+        int64_t id0 = 0, id1 = 0, ih0 = 0, ih1 = 0, iw0 = 0, iw1 = 0;
         compute_source_index_and_lambda(
             id0, id1, d0lambda, d1lambda, depth_scale, od, input_depth, output_depth, align_corners);
         for (const auto oh : c10::irange(output_height)) {
@@ -644,12 +641,11 @@ void cpu_upsample_linear_backward_channels_last(
       return acc_data_ptr + offset + (h * input_width + w) * channels;
     };
 
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int64_t ih0, ih1, iw0, iw1;
     opmath_t h0lambda, h1lambda, w0lambda, w1lambda;
     for (const auto n : c10::irange(begin, end)) {
       int64_t input_offset = buffer_data.get() == nullptr ? n * input_slice_size : 0;
       for (const auto oh : c10::irange(output_height)) {
+        int64_t ih0 = 0, ih1 = 0, iw0 = 0, iw1 = 0;
         compute_source_index_and_lambda(
             ih0, ih1, h0lambda, h1lambda, height_scale, oh, input_height, output_height, align_corners);
         for (const auto ow : c10::irange(output_width)) {
@@ -693,12 +689,11 @@ void cpu_upsample_linear_backward_channels_last(
       return acc_data_ptr + offset + (d * input_height * input_width + h * input_width + w) * channels;
     };
 
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int64_t id0, id1, ih0, ih1, iw0, iw1;
     opmath_t d0lambda, d1lambda, h0lambda, h1lambda, w0lambda, w1lambda;
     for (const auto n : c10::irange(begin, end)) {
       int64_t input_offset = buffer_data.get() == nullptr ? n * input_slice_size : 0;
       for (const auto od : c10::irange(output_depth)) {
+        int64_t id0 = 0, id1 = 0, ih0 = 0, ih1 = 0, iw0 = 0, iw1 = 0;
         compute_source_index_and_lambda(
             id0, id1, d0lambda, d1lambda, depth_scale, od, input_depth, output_depth, align_corners);
         for (const auto oh : c10::irange(output_height)) {

@@ -377,15 +377,6 @@ class CMake:
             # os.sched_getaffinity(0) on platforms that support it.
             max_jobs = max_jobs or str(multiprocessing.cpu_count())
 
-            # This ``if-else'' clause would be unnecessary when cmake
-            # 3.12 becomes minimum, which provides a '-j' option:
-            # build_args += ['-j', max_jobs] would be sufficient by
-            # then. Until then, we use "--" to pass parameters to the
-            # underlying build system.
-            build_args += ["--"]
-            if IS_WINDOWS and not USE_NINJA:
-                # We are likely using msbuild here
-                build_args += [f"/p:CL_MPCount={max_jobs}"]
-            else:
-                build_args += ["-j", max_jobs]
+            # CMake 3.12 provides a '-j' option.
+            build_args += ["-j", max_jobs]
         self.run(build_args, my_env)

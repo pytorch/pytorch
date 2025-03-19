@@ -234,22 +234,9 @@ Tensor& adaptive_avg_pool3d_backward_out_cpu_template(
   /* get contiguous gradOutput */
   auto gradOutput = gradOutput_.contiguous();
 
-  int64_t ndim = input.dim();
-  TORCH_CHECK((ndim == 4 || ndim == 5),
-    "adaptive_avg_pool3d_backward(): Expected 4D or 5D `input` tensor, but got ", input.sizes());
-  TORCH_CHECK(gradOutput_.dim() == ndim,
-    "adaptive_avg_pool3d_backward(): Expected dimensions ", ndim, " for `gradOutput_` but got dimensions ", gradOutput_.dim());
-  TORCH_CHECK(input.dtype() == gradOutput_.dtype(),
-    "adaptive_avg_pool3d_backward(): Expected dtype ", input.dtype(), " for `gradOutput_` but got dtype ", gradOutput_.dtype());
-  TORCH_CHECK(input.dtype() == gradInput.dtype(),
-    "adaptive_avg_pool3d_backward(): Expected dtype ", input.dtype(), " for `gradInput` but got dtype ", gradInput.dtype());
-  TORCH_CHECK(input.size(0) == gradOutput_.size(0),
-    "adaptive_avg_pool3d_backward(): Expected `gradOutput_.size(0)` to be ", input.size(0), " but got ", gradOutput_.size(0));
-  if (ndim == 5) {
-    TORCH_CHECK(input.size(1) == gradOutput_.size(1),
-      "adaptive_avg_pool3d_backward(): Expected `gradOutput_.size(1)` to be ", input.size(1), " but got ", gradOutput_.size(1));
-  }
   adaptive_pool_empty_output_check(gradOutput_, "adaptive_avg_pool3d_backward");
+  TORCH_CHECK(input.dim() == gradOutput_.dim(),
+    "adaptive_avg_pool3d_backward(): Expected dimensions ", input.dim(), " for `gradOutput_` but got dimensions ", gradOutput_.dim());
 
   /* sizes */
   int64_t sizeD = input.size(-4);

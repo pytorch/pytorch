@@ -334,6 +334,8 @@ def _load_global_deps() -> None:
     except OSError as err:
         # Can only happen for wheel with cuda libs as PYPI deps
         # As PyTorch is not purelib, but nvidia-*-cu12 is
+        from torch.version import cuda as cuda_version
+
         cuda_libs: dict[str, str] = {
             "cublas": "libcublas.so.*[0-9]",
             "cudnn": "libcudnn.so.*[0-9]",
@@ -349,6 +351,14 @@ def _load_global_deps() -> None:
             "nccl": "libnccl.so.*[0-9]",
             "nvtx": "libnvToolsExt.so.*[0-9]",
         }
+        # cufiile is only available on cuda 12+
+        # TODO: Remove once CUDA 11.8 binaries are deprecated
+        if cuda_version is not None:
+            t_version = cuda_version.split(".")
+            t_major = int(t_version[0])  # type: ignore[operator]
+            if t_major >= 12:
+                cuda_libs["cufile"] = "libcufile.so.*[0-9]"
+
         is_cuda_lib_err = [
             lib for lib in cuda_libs.values() if lib.split(".")[0] in err.args[0]
         ]
@@ -1482,7 +1492,7 @@ def set_deterministic_debug_mode(debug_mode: _Union[builtins.int, str]) -> None:
         _C._set_deterministic_algorithms(True)
     else:
         raise RuntimeError(
-            "invalid value of debug_mode, expected 0, 1, or 2, " f"but got {debug_mode}"
+            f"invalid value of debug_mode, expected 0, 1, or 2, but got {debug_mode}"
         )
 
 
@@ -2779,10 +2789,6 @@ def _is_device_backend_autoload_enabled() -> builtins.bool:
     return os.getenv("TORCH_DEVICE_BACKEND_AUTOLOAD", "1") == "1"
 
 
-if _is_device_backend_autoload_enabled():
-    _import_device_backends()
-
-
 def _as_tensor_fullprec(t):
     """
     Like torch.as_tensor, but when given Python data types it will keep
@@ -2795,3 +2801,10 @@ def _as_tensor_fullprec(t):
         return torch.as_tensor(t, dtype=torch.int64)
     else:
         return torch.as_tensor(t)
+
+
+# `_import_device_backends` should be kept at the end to ensure
+# all the other functions in this module that may be accessed by
+# an autoloaded backend are defined
+if _is_device_backend_autoload_enabled():
+    _import_device_backends()

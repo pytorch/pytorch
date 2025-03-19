@@ -63,22 +63,16 @@ namespace {
     const Tensor& grad_output,
     const Tensor& input)
   {
-    int64_t ndim = input.dim();
-    TORCH_CHECK((ndim == 3 || ndim == 4),
-      "adaptive_avg_pool2d_backward(): Expected 3D or 4D `input` tensor, but got ", input.sizes());
-    TORCH_CHECK(grad_output.dim() == ndim,
-      "adaptive_avg_pool2d_backward(): Expected dimensions ", ndim, " for `grad_output` but got dimensions ", grad_output.dim());
-    TORCH_CHECK(input.dtype() == grad_output.dtype(),
-      "adaptive_avg_pool2d_backward(): Expected dtype ", input.dtype(), " for `grad_output` but got dtype ", grad_output.dtype());
-    TORCH_CHECK(input.dtype() == grad_input.dtype(),
-      "adaptive_avg_pool2d_backward(): Expected dtype ", input.dtype(), " for `grad_input` but got dtype ", grad_input.dtype());
-    TORCH_CHECK(input.size(0) == grad_output.size(0),
-      "adaptive_avg_pool2d_backward(): Expected `grad_output.size(0)` to be ", input.size(0), " but got ", grad_output.size(0));
-    if (ndim == 4) {
-      TORCH_CHECK(input.size(1) == grad_output.size(1),
-        "adaptive_avg_pool2d_backward(): Expected `grad_output.size(1)` to be ", input.size(1), " but got ", grad_output.size(1));
-    }
     adaptive_pool_empty_output_check(grad_output, "adaptive_avg_pool2d_backward");
+    int64_t ndim = grad_output.dim();
+    TORCH_CHECK(input.dim() == ndim,
+      "adaptive_avg_pool2d_backward(): Expected dimensions ", input.dim(), " for `grad_output` but got dimensions ", ndim);
+    TORCH_CHECK((ndim == 3 || ndim == 4),
+      "adaptive_avg_pool2d_backward(): Expected 3D or 4D tensor, but got ", input.sizes());
+    TORCH_CHECK(input.dtype() == grad_output.dtype(),
+      "expected dtype ", input.dtype(), " for `grad_output` but got dtype ", grad_output.dtype());
+    TORCH_CHECK(input.dtype() == grad_input.dtype(),
+      "expected dtype ", input.dtype(), " for `grad_input` but got dtype ", grad_input.dtype());
 
     grad_input.resize_(input.sizes(), input.suggest_memory_format());
     grad_input.zero_();

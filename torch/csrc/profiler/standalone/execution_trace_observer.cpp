@@ -270,36 +270,44 @@ static void writeJsonNode(
     const std::string& kernelFile = "",
     const std::string& tensor_range = "",
     const std::string& additiona_attrs = "") {
-  out << fmt::format(
-      R"JSON(
-    {{
-      "id": {}, "name": "{}", "ctrl_deps": {},
-      "inputs": {{"values": {}, "shapes": {}, "types": {}, "strides": {}}},
-      "outputs": {{"values": {}, "shapes": {}, "types": {}, "strides": {}}},
-      "attrs": [{{"name": "rf_id", "type": "uint64", "value": {}}},{{"name": "fw_parent", "type": "uint64", "value": {}}},{{"name": "seq_id", "type": "int64", "value": {}}},{{"name": "scope", "type": "uint64", "value": {}}},{{"name": "tid", "type": "uint64", "value": {}}},{{"name": "fw_tid", "type": "uint64", "value": {}}},{{"name": "op_schema", "type": "string", "value": "{}"}},{{"name": "kernel_backend", "type": "string", "value": "{}"}},{{"name": "kernel_file", "type": "string", "value": "{}"}},{{"name": "tensor_range", "type": "string", "value": "{}"}}{}]
-    }})JSON",
-      id,
-      name,
-      parent,
-      inputs,
-      inputShapes,
-      inputTypes,
-      inputStrides,
-      outputs,
-      output_shapes,
-      output_types,
-      output_strides,
-      rf_id,
-      fw_parent,
-      seq_id,
-      scope,
-      tid,
-      fw_tid,
-      operator_schema,
-      kernelBackend,
-      kernelFile,
-      tensor_range,
-      additiona_attrs);
+  if (!out.is_open() || out.fail() || out.bad()) {
+    return;
+  }
+
+  try {
+    out << fmt::format(
+        R"JSON(
+      {{
+        "id": {}, "name": "{}", "ctrl_deps": {},
+        "inputs": {{"values": {}, "shapes": {}, "types": {}, "strides": {}}},
+        "outputs": {{"values": {}, "shapes": {}, "types": {}, "strides": {}}},
+        "attrs": [{{"name": "rf_id", "type": "uint64", "value": {}}},{{"name": "fw_parent", "type": "uint64", "value": {}}},{{"name": "seq_id", "type": "int64", "value": {}}},{{"name": "scope", "type": "uint64", "value": {}}},{{"name": "tid", "type": "uint64", "value": {}}},{{"name": "fw_tid", "type": "uint64", "value": {}}},{{"name": "op_schema", "type": "string", "value": "{}"}},{{"name": "kernel_backend", "type": "string", "value": "{}"}},{{"name": "kernel_file", "type": "string", "value": "{}"}},{{"name": "tensor_range", "type": "string", "value": "{}"}}{}]
+      }})JSON",
+        id,
+        name,
+        parent,
+        inputs,
+        inputShapes,
+        inputTypes,
+        inputStrides,
+        outputs,
+        output_shapes,
+        output_types,
+        output_strides,
+        rf_id,
+        fw_parent,
+        seq_id,
+        scope,
+        tid,
+        fw_tid,
+        operator_schema,
+        kernelBackend,
+        kernelFile,
+        tensor_range,
+        additiona_attrs);
+  } catch (const std::exception& e) {
+    LOG(ERROR) << "Failed to write json node to execution trace: " << e.what();
+  }
 }
 
 static std::string timeString(const std::time_t timepoint) {
@@ -597,15 +605,6 @@ static void handleKernelBackendInfo(
         fc.kernelFile =
             fc.kernelFile.substr(fc.kernelFile.find_last_of('/') + 1);
       }
-
-      // get grid information
-      TORCH_INTERNAL_ASSERT(
-          kwinputs.find("grid") != kwinputs.end(),
-          "grid is missing in triton kernel");
-      fc.inputValues.emplace_back(
-          "\"" + kwinputs.at("grid").toStringRef() + "\"");
-      fc.inputTypes.emplace_back("\"String\"");
-      fc.inputShapes.emplace_back("[]");
 
       // get stream information
       TORCH_INTERNAL_ASSERT(

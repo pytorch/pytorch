@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+from collections.abc import Sequence
 from typing import Any, Optional
 
 import sympy
@@ -31,12 +32,12 @@ def _prepare_convolution_fusion_create(
     x: "TensorBox",
     weight: "TensorBox",
     bias: "TensorBox",
-    padding: list[int],
-    stride: list[int],
-    dilation: list[int],
+    padding: Sequence[int],
+    stride: Sequence[int],
+    dilation: Sequence[int],
     groups: int,
     transposed: bool = False,
-    output_padding: Optional[list[int]] = None,
+    output_padding: Optional[Sequence[int]] = None,
     quantize_args: Optional[list["TensorBox"]] = None,
     other: Optional["TensorBox"] = None,
 ):
@@ -227,7 +228,8 @@ def _prepare_linear_fusion_create(
     req_stride_order = list(reversed(range(len(x.get_size()))))
 
     x = cls.require_stride_order(x, req_stride_order)
-    assert get_device_type(x) == "cpu" and get_device_type(weight) == "cpu"
+    assert get_device_type(x) == get_device_type(weight)
+    assert get_device_type(x) in ["cpu", "xpu"]
     inputs = [x]
 
     if quantize_args is not None:
@@ -749,9 +751,9 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             unary_algorithm,
         ]
 
-        assert (
-            binary_attr == "sum"
-        ), "For now, only post op sum is supported in QConvPointWiseBinaryPT2E."
+        assert binary_attr == "sum", (
+            "For now, only post op sum is supported in QConvPointWiseBinaryPT2E."
+        )
 
         V.graph.mark_buffer_mutated(qaccum.get_name())
         packed = QConvPointWiseBinaryPT2E(
@@ -1225,3 +1227,58 @@ class MkldnnRnnLayer(ExternKernelAlloc):
     def codegen(self, wrapper):
         wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h")
         return super().codegen(wrapper)
+
+
+# Add this IR so that we can include shim_mkldnn.h for cpp_wrapper
+class WeightInt4PackMatmul(ExternKernelAlloc):
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args=(),
+    ) -> None:
+        """
+        inputs = [x, w, qGroupSize, qScalesAndZeros]
+        constant_args = ()
+        """
+        assert len(inputs) == 4
+        assert len(constant_args) == 0
+        super().__init__(
+            layout,
+            inputs,
+            constant_args,
+            None,
+            op_overload=(torch.ops.quantized.int4mm_packed_weight_cpu.default),
+            cpp_kernel_name=("aoti_torch_cpu__weight_int4pack_mm_cpu_tensor"),
+        )
+
+    def codegen(self, wrapper):
+        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h")
+        super().codegen(wrapper)
+
+        if isinstance(self.layout, Layout):
+            self.codegen_size_asserts(wrapper)
+
+    @classmethod
+    def create(
+        cls,
+        x: "TensorBox",
+        w: "TensorBox",
+        qGroupSize: "TensorBox",
+        qScalesAndZeros: "TensorBox",
+    ):
+        inputs = [x, w, qGroupSize, qScalesAndZeros]
+        *m, _ = x.get_size()
+        n, _ = w.get_size()
+        output_size = list(m) + [n]
+        output_stride = FlexibleLayout.contiguous_strides(output_size)
+        kernel_layout = FixedLayout(
+            x.get_device(),  # type: ignore[arg-type]
+            x.get_dtype(),
+            output_size,
+            output_stride,
+        )
+        return WeightInt4PackMatmul(
+            layout=kernel_layout,
+            inputs=inputs,
+        )
