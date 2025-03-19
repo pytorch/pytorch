@@ -419,7 +419,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
         std::ostream& output,
         const WorkNCCL& workNCCL);
 
-   private:
     // Checks for NCCL errors and sets an appropriate exception_ptr.
     void checkAndSetException();
 
@@ -724,7 +723,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       std::vector<at::Tensor>& tensors,
       int srcRank,
       int tag) override;
-
+  
   void groupStart();
 
   void groupEnd();
@@ -874,7 +873,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Use this helper instead of directly checking `useNonblocking_` variable.
   bool useNonblocking();
 
- private:
+ protected:
   int globalRankStart_;
   int globalRankStride_;
 
