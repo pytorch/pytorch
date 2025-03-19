@@ -125,7 +125,7 @@ void int8pack_mm_kernel_<BFloat16>(
   // n=32 has a better performance than 16.
   static dnnl::ukernel::brgemm brg_first, brg, brg_tail;
   static bool init = false;
-  static size_t max_scratchpad_size = -1;
+  static size_t max_scratchpad_size = 0;
   if (!init) {
     brg_first = dnnl::ukernel::brgemm(
         M,
@@ -172,15 +172,15 @@ void int8pack_mm_kernel_<BFloat16>(
         dnnl::memory::data_type::f32);
     brg_tail.set_post_ops(N, dnnl::memory::data_type::bf16);
     brg_tail.set_B_scales(2);
-    brg_tail.set_add_C(true);
+    brg_tail.set_add_C(k_block >= K);
     brg_tail.finalize();
     brg_tail.generate();
     max_scratchpad_size =
         std::max(max_scratchpad_size, brg_tail.get_scratchpad_size());
     init = true;
   }
-  brg.set_hw_context();
   at::parallel_for(0, N / n_block, 0, [&](int begin, int end) {
+    brg_tail.set_hw_context();
     int local_begin = begin * n_block;
     const int8_t* B_local = B_data + local_begin * ldb;
     const BFloat16* scales_local = S_data + local_begin;
@@ -351,7 +351,6 @@ inline void tinygemm_kernel(
     int ldb,
     int ldc,
     int K) {
-
   constexpr int ROWS = BLOCK_M;
   constexpr int COLS = BLOCK_N;
 
@@ -464,7 +463,6 @@ inline void tinygemm_kernel_(
     int ldb,
     int ldc,
     int K) {
-
   for (const auto m : c10::irange(BLOCK_M)) {
     float32x4_t c_val[BLOCK_N];
     c10::ForcedUnroll<BLOCK_N>{}([&](auto i) {
@@ -547,7 +545,6 @@ inline void tinygemm_kernel(
     int ldb,
     int ldc,
     int K) {
-
   for (const auto m : c10::irange(BLOCK_M)) {
     for (const auto n : c10::irange(BLOCK_N)) {
       float c_val = 0;
@@ -586,13 +583,12 @@ inline void tinygemm_kernel(
       break;                                                     \
   }
 
-template<typename T>
+template <typename T>
 void int8pack_mm_kernel_(
     const Tensor& C,
     const Tensor& A,
     const Tensor& B,
     const Tensor& scales) {
-
   const auto* A_data = A.const_data_ptr<T>();
   const auto* B_data = B.const_data_ptr<int8_t>();
   auto* C_data = C.data_ptr<T>();
@@ -666,4 +662,4 @@ void int8pack_mm_kernel(
 
 ALSO_REGISTER_AVX512_DISPATCH(int8pack_mm_stub, &int8pack_mm_kernel)
 
-} // at::native
+} // namespace at::native
