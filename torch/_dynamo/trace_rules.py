@@ -16,6 +16,7 @@ import sys
 import traceback
 import types
 import typing
+import unittest
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Callable, cast, Optional, Union
@@ -3170,6 +3171,7 @@ BUILTIN_SKIPLIST = (
     random,
     traceback,
     linecache,
+    # unittest,
 )
 
 # third party libraries skiplist is defined by str, because users may not use these libraries.
@@ -3575,6 +3577,12 @@ def check_file(filename, is_inlined_call=False):
         and not bool(FBCODE_INLINE_FILES_IN_SKIPPED_DIRS_RE.match(filename))
     ):
         return SkipResult(True, "FBCODE_SKIP_TORCHREC_DIRS")
+
+    if (
+        filename.startswith(_module_dir(unittest))
+        and not torch._dynamo.config.enable_trace_unittest
+    ):
+        return SkipResult(True, "unittest")
 
     if bool(SKIP_DIRS_RE.match(filename)):
         return SkipResult(True, "SKIP_DIRS")
