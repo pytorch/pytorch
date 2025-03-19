@@ -3171,7 +3171,6 @@ BUILTIN_SKIPLIST = (
     random,
     traceback,
     linecache,
-    # unittest,
 )
 
 # third party libraries skiplist is defined by str, because users may not use these libraries.
