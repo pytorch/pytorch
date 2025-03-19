@@ -65,20 +65,6 @@ def run(fn=None):
     return RunOnlyContext()
 
 
-def skip(fn=None):
-    """
-    Skip frames associated with the function code, but still process recursively
-    invoked frames
-    """
-    if fn is None:
-        return skip
-    fn = innermost_fn(fn)
-    assert callable(fn)
-    skip_code(fn.__code__)
-    fn._torchdynamo_disable = True
-    return fn
-
-
 def disable(fn=None, recursive=True):
     """
     Decorator to disable TorchDynamo
@@ -113,6 +99,20 @@ def disable(fn=None, recursive=True):
 
 _nonrecursive_disable_wrapper_code = disable(lambda: None, recursive=False).__code__  # type: ignore[attr-defined]
 skip_code(_nonrecursive_disable_wrapper_code)
+
+
+def skip(fn=None):
+    """
+    Skip frames associated with the function code, but still process recursively
+    invoked frames
+    """
+    if fn is None:
+        return skip
+    fn = innermost_fn(fn)
+    assert callable(fn)
+    skip_code(fn.__code__)
+    fn._torchdynamo_disable = True
+    return fn
 
 
 class set_stance(_DecoratorContextManager):

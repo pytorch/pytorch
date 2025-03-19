@@ -554,8 +554,7 @@ class ConvertFrameAssert:
             return ConvertFrameReturn()
 
         # skip tracing non-recursive disabled functions
-        # detect if this frame is torch._dynamo.decorators.disable_wrapper
-        # by looking for a torch._dynamo.decorators._disable_wrapper_object freevar
+        # detect if the previous frame (non-convert_frame) is a non-recursive disable wrapper
         prev_frame = sys._getframe()
         while (
             prev_frame
