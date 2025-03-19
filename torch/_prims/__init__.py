@@ -1626,7 +1626,7 @@ def _transpose_meta(a: TensorLikeType, permutation: DimsSequenceType) -> TensorL
 
 
 def _transpose_aten(a: Tensor, permutation: DimsSequenceType) -> Tensor:
-    return torch.permute(a, permutation)  # type: ignore[arg-type]
+    return torch.permute(a, permutation)
 
 
 _transpose_doc = """
@@ -2803,7 +2803,7 @@ def _fft_r2c_aten(
     onesided: bool,
 ) -> TensorLikeType:
     normalization = 0  # No normalization
-    return torch._fft_r2c(input, dim, normalization, onesided)  # type: ignore[arg-type]
+    return torch._fft_r2c(input, dim, normalization, onesided)
 
 
 _fft_r2c_doc = """
@@ -2883,7 +2883,7 @@ def _fft_c2r_aten(
     last_dim_size: int,
 ) -> TensorLikeType:
     normalization = 0  # No normalization
-    return torch._fft_c2r(input, dim, normalization, last_dim_size)  # type: ignore[arg-type]
+    return torch._fft_c2r(input, dim, normalization, last_dim_size)
 
 
 _fft_c2r_doc = """

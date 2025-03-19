@@ -581,12 +581,12 @@ def index_vars_no_squeeze(
 
 def index_vars_squeeze(
     *argsizes: Sequence[sympy.Expr], prefix: str = "d"
-) -> tuple[list[Sequence[sympy.Expr]], VarRanges]:
+) -> tuple[list[list[sympy.Expr]], VarRanges]:
     from .ir import SqueezeView
 
     var_ranges, add_var = var_builder(prefix)
-    args: list[Sequence[sympy.Expr]] = []
-    new_sizes: list[list[sympy.Expr]] = []  # TODO(rec): is this even needed?
+    args: list[list[sympy.Expr]] = []
+    new_sizes: list[list[sympy.Expr]] = []
     for size in argsizes:
         new_size, reindex = SqueezeView.squeezer(size)
         new_sizes.append(new_size)
@@ -606,8 +606,9 @@ def extract_read_writes(
     from .loop_body import LoopBody
 
     if isinstance(fn, LoopBody):
-        hargs: list[Sequence[sympy.Expr]] = [*args, *hidden_args]
-        inner = extract_loop_body_with_args(fn, hargs, var_ranges, normalize)
+        inner = extract_loop_body_with_args(
+            fn, [*args, *hidden_args], var_ranges, normalize
+        )
     else:
         # Slow path tracing the function
         rw = RecordLoadStore(var_ranges, normalize=normalize)
@@ -631,7 +632,7 @@ def extract_read_writes(
 
 def extract_loop_body_with_args(
     fn: Any,
-    args: Sequence[Sequence[sympy.Expr]],
+    args: list[list[sympy.Expr]],
     var_ranges: VarRanges,
     normalize: bool = False,
 ) -> _RecordLoadStoreInner:

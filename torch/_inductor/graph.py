@@ -71,7 +71,6 @@ from .ir import (
     InputBuffer,
     Pointwise,
     Reduction,
-    ShapeAsConstantBuffer,
     StorageBox,
     TensorBox,
     TorchBindObject,
@@ -271,7 +270,7 @@ class GraphLowering(torch.fx.Interpreter):
     def __init__(
         self,
         gm: torch.fx.GraphModule,
-        example_inputs: Sequence[Any] = (),
+        example_inputs: Optional[Sequence[object]] = None,
         shape_env: Optional[ShapeEnv] = None,
         graph_id: Optional[int] = None,
         cpp_wrapper: bool = False,
@@ -722,7 +721,7 @@ class GraphLowering(torch.fx.Interpreter):
     def make_subgraph(
         self,
         gm: torch.fx.GraphModule,
-        example_inputs: Sequence[Any],
+        example_inputs: list[torch.Tensor],
         subgraph_name: str,
     ) -> SubgraphLowering:
         """
@@ -989,7 +988,7 @@ class GraphLowering(torch.fx.Interpreter):
 
     def add_tensor_constant(
         self, data: Tensor, name: Optional[str] = None
-    ) -> Union[TensorBox, ShapeAsConstantBuffer]:
+    ) -> TensorBox:
         new_name = self.allocate_non_dup_const_name(name, data)
         return TensorBox.create(
             ir.ConstantBuffer(
@@ -1093,11 +1092,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.graph_inputs[target] = tensor
         self.graph_input_names.append(target)
-        assert isinstance(tensor, TensorBox)
-        assert isinstance(tensor.data, (ir.BaseView, ir.MutableBox))
-        data = tensor.data.data
-        assert isinstance(data, ir.InputBuffer)
-        self.graph_inputs_original[target] = data
+        self.graph_inputs_original[target] = tensor.data.data
         if self.current_node.users:  # cudagraphs should work with an unused CPU input
             self.add_device_info(example.device)
 
@@ -1218,9 +1213,7 @@ class GraphLowering(torch.fx.Interpreter):
         target: str,  # type: ignore[override]
         args: tuple[()],  # type: ignore[override]
         kwargs: dict[str, object],
-    ) -> Union[
-        Constant, TensorBox, ir.ShapeAsConstantBuffer, ir.Subgraph, TorchBindObject
-    ]:
+    ) -> Union[Constant, TensorBox, ir.Subgraph, TorchBindObject]:
         # this is a constant
         value = getattr_recursive(self.module, target)  # type: ignore[arg-type]
 

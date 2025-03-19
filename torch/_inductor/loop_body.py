@@ -278,8 +278,8 @@ class LoopBody:
     @cache_on_self
     def get_nodes(self):
         all_graphs = itertools.chain(
-            (self.root_block.graph,),  # type: ignore[has-type]
-            (block.graph for block in self.subblocks.values()),  # type: ignore[has-type]
+            (self.root_block.graph,),
+            (block.graph for block in self.subblocks.values()),
         )
         return [node for graph in all_graphs for node in graph.nodes]
 
