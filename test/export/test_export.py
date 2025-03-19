@@ -10568,6 +10568,30 @@ def forward(self, x):
         # check that graph input names are as expected
         self.assertEqual(ep.graph_signature.user_inputs, ("x1", False, "x2"))
 
+    def test_kwarg_dynamic_shapes_diff_order(self):
+        class DummyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.ones(4, 4)
+
+            def forward(self, baba, *, start, end):
+                return baba.sum() + start.sum() + end.sum()
+
+        f = DummyModel()
+        kwargs = {
+            "end": torch.ones(4, 4, 4),
+            "start": torch.ones(4, 4),
+        }
+        dynamic_shapes = {
+            "baba": {0: torch.export.Dim("end_dim")},
+            "end": {0: torch.export.Dim("end_dim")},
+            "start": {0: torch.export.Dim("end_dim"), 1: torch.export.Dim("end_dim")},
+        }
+        ep = torch.export.export(
+            f, (torch.ones(4, 4),), kwargs, dynamic_shapes=dynamic_shapes
+        ).run_decompositions()
+        ep.module()(torch.ones(4, 4), **kwargs)
+
     def test_placeholder_naming_order_variadic(self):
         class Mod(torch.nn.Module):
             def forward(self, a, b, c, **kwargs):
