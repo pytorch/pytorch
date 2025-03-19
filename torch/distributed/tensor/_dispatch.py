@@ -136,8 +136,6 @@ class OpDispatcher:
             aten.bernoulli_.float,
         }
         self._custom_op_handlers = {
-            aten.linear.default: decompose_handler,
-            aten.matmul.default: decompose_handler,
             aten.is_same_size.default: is_same_size_handler,
             aten.convolution.default: convolution_handler,
             aten.convolution_backward.default: convolution_backward_handler,
@@ -160,6 +158,14 @@ class OpDispatcher:
         Main dispatching logic
         """
         # operators that does not need to go through sharding propagation
+        if torch._C._dispatch_has_kernel_for_dispatch_key(
+            op_call.name(), torch._C.DispatchKey.CompositeImplicitAutograd
+        ):
+            # When running under inference mode, CompositeImplicitAutograd ops show up in __torch_dispatch__,
+            # so we manually decompose them, here
+            out = op_call.decompose(*args, **kwargs)
+            assert out is not NotImplemented
+            return out
         if op_call in self._custom_op_handlers:
             return self._custom_op_handlers[op_call](op_call, args, kwargs)  # type: ignore[operator]
 
