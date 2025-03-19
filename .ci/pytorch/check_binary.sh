@@ -197,22 +197,8 @@ setup_link_flags () {
 TEST_CODE_DIR="$(dirname $(realpath ${BASH_SOURCE[0]}))/test_example_code"
 build_and_run_example_cpp () {
   setup_link_flags
-  g++ ${TEST_CODE_DIR}/$1.cpp -I${install_root}/include -I${install_root}/include/torch/csrc/api/include -D_GLIBCXX_USE_CXX11_ABI=$GLIBCXX_USE_CXX11_ABI -std=gnu++17 -L${install_root}/lib ${REF_LIB} ${ADDITIONAL_LINKER_FLAGS} -ltorch $TORCH_CPU_LINK_FLAGS $TORCH_CUDA_LINK_FLAGS $C10_LINK_FLAGS -o $1
+  g++ ${TEST_CODE_DIR}/$1.cpp -I${install_root}/include -I${install_root}/include/torch/csrc/api/include -std=gnu++17 -L${install_root}/lib ${REF_LIB} ${ADDITIONAL_LINKER_FLAGS} -ltorch $TORCH_CPU_LINK_FLAGS $TORCH_CUDA_LINK_FLAGS $C10_LINK_FLAGS -o $1
   ./$1
-}
-
-build_example_cpp_with_incorrect_abi () {
-  set +e
-  setup_link_flags
-  g++ ${TEST_CODE_DIR}/$1.cpp -I${install_root}/include -I${install_root}/include/torch/csrc/api/include -D_GLIBCXX_USE_CXX11_ABI=$GLIBCXX_USE_CXX11_ABI -std=gnu++17 -L${install_root}/lib ${REF_LIB} ${ADDITIONAL_LINKER_FLAGS} -ltorch $TORCH_CPU_LINK_FLAGS $TORCH_CUDA_LINK_FLAGS $C10_LINK_FLAGS -o $1
-  ERRCODE=$?
-  set -e
-  if [ "$ERRCODE" -eq "0" ]; then
-    echo "Building example with incorrect ABI didn't throw error. Aborting."
-    exit 1
-  else
-    echo "Building example with incorrect ABI throws expected error. Proceeding."
-  fi
 }
 
 ###############################################################################
@@ -224,7 +210,6 @@ if [[ "$PACKAGE_TYPE" == 'libtorch' ]]; then
     export LD_LIBRARY_PATH=/usr/local/cuda/lib64
   fi
   build_and_run_example_cpp simple-torch-test
-  build_example_cpp_with_incorrect_abi simple-torch-test
 else
   pushd /tmp
   python -c 'import torch'
