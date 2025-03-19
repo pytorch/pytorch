@@ -21,6 +21,7 @@ POLYFILLED_MODULE_NAMES: tuple[str, ...] = (
     "pytree",
     "sys",
     "fx",
+    "tensor",
 )
 POLYFILLED_MODULES: tuple["ModuleType", ...] = tuple(
     importlib.import_module(f".{submodule}", package=polyfills.__name__)

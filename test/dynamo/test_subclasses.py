@@ -903,6 +903,34 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             res_act = fn_opt(input)
             self.assertEqual(res_exp, res_act)
 
+    def test_make_subclass(self):
+        # Make sure `torch.Tensor._make_subclass` is traceable, and Dynamo
+        # models its aliasing relationships correctly.
+        class MySubclass(torch.Tensor):
+            pass
+
+        def fn(x):
+            # Downcast then upcast
+            y = torch.Tensor._make_subclass(MySubclass, x)
+            z = torch.Tensor._make_subclass(torch.Tensor, x)
+            # Now `x, y, z` should have the same underlying data.
+            x += 1
+            y += 2
+            z += 3
+            res = x * y + z
+            return res
+
+        with traceable_subclass(MySubclass):
+            x0 = torch.randn(2, 2)
+            x1 = x0.clone()
+
+            fn_opt = compile_full_eager(fn)
+
+            res_exp = fn(x0)
+            res_act = fn_opt(x1)
+            self.assertEqual(res_exp, res_act)
+            self.assertEqual(x0, x1)
+
     def test_parameter_subclass_custom_torch_func_and_dynamic_attr(self):
         # This is a slight variation of
         # https://github.com/huggingface/diffusers/blob/fbf6b856cc61fd22ad8635547bff4aafe05723f3/src/diffusers/quantizers/gguf/utils.py#L398-L435
@@ -923,7 +951,9 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
                 self.quant_type = quant_type
 
             def as_tensor(self):
-                return torch.Tensor(self.data)
+                return torch.Tensor._make_subclass(
+                    torch.Tensor, self, self.requires_grad
+                )
 
             @classmethod
             def __torch_function__(cls, func, types, args=(), kwargs=None):

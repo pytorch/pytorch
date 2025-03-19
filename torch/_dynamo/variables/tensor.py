@@ -1442,22 +1442,26 @@ class TensorSubclassVariable(VariableTracker):
         if len(args) == 1 and isinstance(args[0], TensorVariable):
             from .torch_function import TensorWithTFOverrideVariable
 
-            # This simulates `__new__` and _assumes_ it doesn't have
-            # side-effects that matters to Dynamo tracing. TODO trace through
-            # `__new__`.
-            var = TensorWithTFOverrideVariable.from_tensor_var(
-                tx, args[0], self.value, self.source
-            )
+            data = args[0]
+            new_func = self.value.__new__
+            if new_func is torch.Tensor.__new__:
+                # Simulate `torch.Tensor.__new__` as shallow-copying the input
+                # tensor data with a new type. TODO polyfill?
+                var = TensorWithTFOverrideVariable.from_tensor_var(
+                    tx, data, self.value, self.source
+                )
+            else:
+                # Let Dynamo trace through custom `__new__`
+                var = VariableTracker.build(tx, new_func).call_function(
+                    tx, [self, data], kwargs
+                )
 
             # Let Dynamo trace through custom `__init__`
             init_func = self.value.__init__
             # TODO builder should be able to handle `torch.Tensor.__init__`,
             # which is `object.__init__`, so that we can remove this check.
             if init_func is not torch.Tensor.__init__:
-                cls_kwargs = kwargs or {}
-                VariableTracker.build(tx, init_func).call_function(
-                    tx, [var], cls_kwargs
-                )
+                VariableTracker.build(tx, init_func).call_function(tx, [var], kwargs)
             return var
 
         return super().call_function(tx, args, kwargs)
