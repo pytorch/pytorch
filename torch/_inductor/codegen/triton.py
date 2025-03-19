@@ -383,7 +383,7 @@ class BlockPtrOptions:
             broadcast_shape=broadcast_shape,
             broadcasting_dims=broadcasting_dims,
         )
-        result.compute_boundary_check(get_max_block)
+        result.compute_boundary_check(get_max_block, range_trees)
         return result
 
     def replace_offset(
@@ -430,7 +430,11 @@ class BlockPtrOptions:
         ]
         return f"tl.make_block_ptr({', '.join(args)})"
 
-    def compute_boundary_check(self, get_max_block: Callable[[str], int]) -> None:
+    def compute_boundary_check(
+        self,
+        get_max_block: Callable[[str], int],
+        range_trees: list[IterationRangesRoot],
+    ) -> None:
         """List of indices to pass to tl.load(boundary_check=...)"""
         sizevars = V.graph.sizevars
 
@@ -441,23 +445,51 @@ class BlockPtrOptions:
             for symt, block_size in TritonSymbols.block_sizes.items()
         }
 
-        self._boundary_check = [
-            idx
-            for idx in range(len(self.shape))
+        boundary_check = []
+        overflow_grid_check = None
+        for idx in range(len(self.shape)):
+            # See Note: Constant mask optimisation
+            # if ynumel / YBLOCK > max_ygrid, then the z dimension is used to handle
+            # the remaining programs that cannot fit into the y dimension. This means
+            # its possible that some redundant programs are launched, so even if
+            # ynumel divides YBLOCK, boundary checking is required in the relevant dimensions
+            if (
+                TritonSymbols.block_sizes[SymT.YBLOCK]
+                in self.block_shape[idx].free_symbols
+            ):
+                if overflow_grid_check is None:
+                    y_tree: IterationRangesRoot = next(
+                        t for t in range_trees if t.prefix == "y"
+                    )
+                    overflow_grid_check = (
+                        not y_tree.has_zdim
+                        and not V.graph.sizevars.statically_known_leq(
+                            y_tree.numel, get_max_y_grid()
+                        )
+                    )
+
             if (
                 not sizevars.statically_known_equals(self.strides[idx], sympy.S.Zero)
-                and not sizevars.statically_known_multiple_of(
-                    self.shape[idx], self.block_shape[idx]
-                )
-                and not sizevars.statically_known_multiple_of(
-                    self.shape[idx], sympy_subs(self.block_shape[idx], block_to_max)
+                and (
+                    overflow_grid_check
+                    or (
+                        not sizevars.statically_known_multiple_of(
+                            self.shape[idx], self.block_shape[idx]
+                        )
+                        and not sizevars.statically_known_multiple_of(
+                            self.shape[idx],
+                            sympy_subs(self.block_shape[idx], block_to_max),
+                        )
+                    )
                 )
                 and not (
                     V.kernel.no_x_dim
                     and self.block_shape[idx] == TritonSymbols.block_sizes[SymT.XBLOCK]
                 )
-            )
-        ]
+            ):
+                boundary_check.append(idx)
+
+        self._boundary_check = boundary_check
 
     def boundary_check(self) -> list[int]:
         assert self._boundary_check is not None
