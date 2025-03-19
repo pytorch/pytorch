@@ -538,6 +538,24 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         self.assertFalse(res1)
         self.assertTrue(res2)
 
+    def test_disable_all_torch_function_restore_values(self):
+        @torch.compile(backend="eager")
+        def fn(x):
+            with torch._C.DisableTorchFunction():
+                torch._dynamo.graph_break()
+                x = torch._C._is_torch_function_all_disabled()
+
+            return (
+                x,
+                torch._C._is_torch_function_all_disabled(),
+                torch.add(x, 1.0),
+            )
+
+        input = torch.ones(2, 2)
+        res1, res2, _ = fn(input)
+        self.assertTrue(res1)
+        self.assertFalse(res2)
+
     def test_torch_function_state_nested(self):
         @torch.compile(backend="eager")
         def fn(x):
