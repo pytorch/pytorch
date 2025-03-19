@@ -924,7 +924,6 @@ class UserMethodVariable(UserFunctionVariable):
         if self.is_constant:
             fn = getattr(self.obj.value, self.fn.__name__)
             return invoke_and_store_as_constant(tx, fn, self.get_name(), args, kwargs)
-
         return super().call_function(tx, args, kwargs)
 
     def inspect_parameter_names(self):
