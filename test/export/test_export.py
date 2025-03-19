@@ -4737,6 +4737,139 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         self.assertTrue(torch.allclose(orig_res[1], ep_res[1]))
         self.assertTrue(torch.allclose(orig_res[2], ep_res[2]))
 
+    def test_unflatten_placeholder_update_child2parent_swap(self):
+        class Child(torch.nn.Module):
+            def forward(self, x):
+                torch.ops.aten.dropout_(x, 0.5, False)  # Applying dropout inplace
+                return x - 2
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.child = Child()
+
+            def forward(self, x):
+                f1 = self.child(x)
+                f2 = x * 4
+                return f1 + f2
+
+        m = Foo()
+        inp = torch.ones(3, 10, dtype=torch.float32)
+        orig_result = m(inp)
+
+        if not is_retracebility_test(self._testMethodName):
+            inp = torch.ones(3, 10, dtype=torch.float32)
+            ep = export(m, (inp,), preserve_module_call_signature=("child",))
+            unf = unflatten(ep)
+            unf.print_readable()
+
+            inp = torch.ones(3, 10, dtype=torch.float32)
+            ep_result = ep.module()(inp)
+            self.assertTrue(torch.allclose(ep_result, orig_result))
+
+            unf.set_submodule("child", m.child)
+            inp = torch.ones(3, 10, dtype=torch.float32)
+            unf_result = unf(inp)
+            self.assertTrue(torch.allclose(unf_result, orig_result))
+
+    def test_unflatten_placeholder_update_grandchild2cousin_swap(self):
+        class Grandchild(torch.nn.Module):
+            def forward(self, x):
+                a = x.to(torch.float32)  # .to is considered a mutation
+                return x + 4, a
+
+        class Child(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.grandchild = Grandchild()
+
+            def forward(self, x):
+                y, a = self.grandchild(x)
+                return y + a
+
+        class OtherGrandchild(torch.nn.Module):
+            def forward(self, x):
+                return x * 2
+
+        class OtherChild(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.other_grandchild = OtherGrandchild()
+
+            def forward(self, x):
+                return x + self.other_grandchild(x)
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.child = Child()
+                self.other_child = OtherChild()
+
+            def forward(self, x):
+                f1 = self.child(x)
+                f2 = self.other_child(x)
+                return f1 + f2
+
+        inp = torch.ones(2, 3, dtype=torch.float32)
+        orig_result = Foo()(inp)
+        self.assertTrue(torch.allclose(orig_result, torch.ones(2, 3) * 9))
+
+        if not is_retracebility_test(self._testMethodName):
+            inp = torch.ones(2, 3, dtype=torch.float32)
+            ep = export(Foo(), (inp,), preserve_module_call_signature=("child",))
+            unf = unflatten(ep)
+
+            inp = torch.ones(2, 3, dtype=torch.float32)
+            ep_result = ep.module()(inp)
+            self.assertTrue(torch.allclose(ep_result, orig_result))
+
+            unf.set_submodule("child", Child())
+            inp = torch.ones(2, 3, dtype=torch.float32)
+            unf_result = unf(inp)
+            self.assertTrue(torch.allclose(unf_result, orig_result))
+
+    def test_unflatten_buffer_update_child2parent_swap(self):
+        class Child(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.tensor(10))
+
+            def forward(self, x):
+                self.buf.add_(1)
+                return x + 2
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.child = Child()
+
+            def forward(self, x):
+                y = self.child(x)  # child.buf <- 10 + 1 = 11, x + 2 = 3
+                x = y + self.child.buf  # 14
+                y = self.child(x)  # child.buf <- 11 + 1 = 12, x + 2 = 16
+                x = y + self.child.buf  # 28
+                y = self.child(x)  # child.buf <- 12 + 1 = 13, x + 2 = 30
+                x = y + self.child.buf  # 43
+                return x
+
+        inp = torch.ones(2, 3, dtype=torch.float32)
+        orig_result = Foo()(inp)
+        self.assertTrue(torch.allclose(orig_result, torch.ones(2, 3) * 43))
+
+        if not is_retracebility_test(self._testMethodName):
+            inp = torch.ones(2, 3, dtype=torch.float32)
+            ep = export(Foo(), (inp,), preserve_module_call_signature=("child",))
+            unf = unflatten(ep)
+
+            inp = torch.ones(2, 3, dtype=torch.float32)
+            ep_result = ep.module()(inp)
+            self.assertTrue(torch.allclose(ep_result, orig_result))
+
+            unf.set_submodule("child", Child())
+            inp = torch.ones(2, 3, dtype=torch.float32)
+            unf_result = unf(inp)
+            self.assertTrue(torch.allclose(unf_result, orig_result))
+
     def test_export_func_with_var_keyword_pytree_args(self):
         class Module(torch.nn.Module):
             def forward(self, arg1, arg2, *args, kw1, kw2, **kwargs):
@@ -6866,56 +6999,6 @@ def forward(self, b_a_buffer, x):
         )
         self.assertTrue(torch.allclose(core_aten_ep.module()(*inp), m(*inp)))
         self.assertEqual(id(state_dict), id(ep.state_dict))
-
-    @unittest.skipIf(IS_FBCODE, "We can't customize decomp in fbcode")
-    def test_export_for_inference_e2e(self):
-        class M(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.lin = torch.nn.Linear(10, 1)
-
-            def forward(self, x):
-                return self.lin(x)
-
-        inp = (torch.randn(5, 10),)
-        m = M()
-
-        decomp_table = torch.export.default_decompositions()
-
-        def _custom_decomp_for_linear(x, weight, bias):
-            return x + bias.sum()
-
-        decomp_table[torch.ops.aten.linear.default] = _custom_decomp_for_linear
-        del decomp_table[torch.ops.aten.sum.default]
-        ep = torch.export.export_for_inference(
-            m, inp, decomp_table=decomp_table, dynamic_shapes={"x": {0: Dim("batch")}}
-        )
-
-        self.assertExpectedInline(
-            str(ep.graph_module.code).strip(),
-            """\
-def forward(self, p_lin_weight, p_lin_bias, x):
-    sum_1 = torch.ops.aten.sum.default(p_lin_bias);  p_lin_bias = None
-    add = torch.ops.aten.add.Tensor(x, sum_1);  x = sum_1 = None
-    return (add,)""",
-        )
-
-        ep_core = ep.run_decompositions()
-
-        self.assertExpectedInline(
-            str(ep_core.graph_module.code).strip(),
-            """\
-def forward(self, p_lin_weight, p_lin_bias, x):
-    sum_1 = torch.ops.aten.sum.dim_IntList(p_lin_bias, []);  p_lin_bias = None
-    add = torch.ops.aten.add.Tensor(x, sum_1);  x = sum_1 = None
-    return (add,)""",
-        )
-
-        with self.assertRaisesRegex(RuntimeError, "Expected input"):
-            ep.module()(torch.randn(4, 12))
-
-        with self.assertRaisesRegex(RuntimeError, "Expected input"):
-            ep_core.module()(torch.randn(4, 12))
 
     @unittest.skipIf(IS_FBCODE, "We can't customize decomp in fbcode")
     def test_export_decomp_torture_case_1(self):

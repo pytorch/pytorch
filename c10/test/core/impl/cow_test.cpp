@@ -114,6 +114,27 @@ TEST(lazy_clone_storage_test, no_context) {
   ASSERT_THAT(new_storage->data(), testing::Eq(original_storage.data()));
 }
 
+TEST(lazy_clone_storage_test, is_cow_data_ptr_device_type) {
+  StorageImpl original_storage(
+      {}, /*size_bytes=*/7, GetDefaultCPUAllocator(), /*resizable=*/false);
+  ASSERT_THAT(original_storage, testing::Not(is_copy_on_write()));
+  ASSERT_TRUE(cow::has_simple_data_ptr(original_storage));
+
+  intrusive_ptr<StorageImpl> new_storage =
+      cow::lazy_clone_storage(original_storage);
+  ASSERT_THAT(new_storage.get(), testing::NotNull());
+
+  ASSERT_TRUE(cow::is_cow_data_ptr(new_storage->data_ptr()));
+  ASSERT_TRUE(cow::is_cow_data_ptr(new_storage->data_ptr(), c10::kCPU));
+  ASSERT_FALSE(cow::is_cow_data_ptr(new_storage->data_ptr(), c10::kCUDA));
+  ASSERT_FALSE(cow::is_cow_data_ptr(new_storage->data_ptr(), c10::kMPS));
+
+  ASSERT_TRUE(cow::is_cow_data_ptr(original_storage.data_ptr()));
+  ASSERT_TRUE(cow::is_cow_data_ptr(original_storage.data_ptr(), c10::kCPU));
+  ASSERT_FALSE(cow::is_cow_data_ptr(original_storage.data_ptr(), c10::kCUDA));
+  ASSERT_FALSE(cow::is_cow_data_ptr(original_storage.data_ptr(), c10::kMPS));
+}
+
 struct MyDeleterContext {
   MyDeleterContext(void* bytes) : bytes(bytes) {}
 

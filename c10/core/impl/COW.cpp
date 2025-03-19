@@ -45,8 +45,18 @@ bool has_simple_data_ptr(const c10::StorageImpl& storage) {
   }
 }
 
-bool is_cow_data_ptr(const c10::DataPtr& data_ptr) {
-  return (void*)data_ptr.get_deleter() == (void*)&cow::cow_deleter;
+bool is_cow_data_ptr(
+    const c10::DataPtr& data_ptr,
+    optional<DeviceType> device_type_opt) {
+  bool is_cow = (void*)data_ptr.get_deleter() == (void*)&cow::cow_deleter;
+
+  if (is_cow && device_type_opt.has_value()) {
+    COWDeleterContext* context =
+        data_ptr.cast_context<COWDeleterContext>(cow_deleter);
+    return context->original_device().type() == device_type_opt.value();
+  } else {
+    return is_cow;
+  }
 }
 
 static void check_clone_between_devices(
@@ -144,8 +154,6 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(
       new_data_ptr.release_context();
       new_data_ptr_opt = c10::DataPtr(
           new_data_ptr.get(), ctx, c10::impl::cow::cow_deleter, dst_device);
-      // KURT: I'm not sure yet, but I might have to register CPU-to-MPS data
-      // pointer into `MPSHeapAllocatorImpl::m_allocated_buffers`?
     }
   }
 

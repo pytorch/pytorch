@@ -195,7 +195,6 @@ bool MPSHeapAllocatorImpl::alloc_buffer(AllocParams& params) {
   // insert heap after a buffer was created on it to update the order of heap's set
   pool.heaps.insert(heap);
   params.buffer_block = new BufferBlock(params.size(), params.requested_size, buffer, heap);
-  std::cout << "[MPSHeapAllocatorImpl::alloc_buffer] adding buffer: " << params.buffer_block->buffer << std::endl;
   m_allocated_buffers[params.buffer_block->buffer] = params.buffer_block;
   pool.allocated_size += params.size();
   pool.n_buffers++;
@@ -277,7 +276,6 @@ bool MPSHeapAllocatorImpl::get_free_buffer(AllocParams& params) {
   return true;
 }
 
-// KURT: This is the main part of alloc
 BufferBlock* MPSHeapAllocatorImpl::alloc_buffer_block(size_t size, uint32_t usage) {
   TORCH_CHECK(size < m_max_buffer_size, "Invalid buffer size: ", format_size(size));
 
@@ -381,7 +379,6 @@ bool MPSHeapAllocatorImpl::release_buffer(BufferBlock* buffer_block, bool remove
   BufferPool& pool = *heap_block->pool;
   pool.allocated_size -= buffer_block->size;
   pool.available_size -= buffer_block->size;
-  std::cout << "[MPSHeapAllocatorImpl::release_buffer] releasing buffer: " << buffer_block->buffer << std::endl;
   m_allocated_buffers.erase(buffer_block->buffer);
   pool.available_buffers.erase(buffer_block);
   pool.n_buffers--;
@@ -683,14 +680,6 @@ void MPSHeapAllocatorImpl::setBufferShape(const void* ptr, const IntArrayRef& sh
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
   BufferBlock* buffer_block = get_allocated_buffer_block(ptr);
-  // KURT: For some reason, this is failing for buffers created in
-  // `clone_from_cpu`. Need to figure out why. Apparently, when we cloned the
-  // CPU data to MPS, the MPS buffer either did not get added to
-  // `m_allocated_buffers` or is getting removed from it before it should.  Aha,
-  // my previous assessment was wrong. This failure happens during a call to
-  // `as_strided`, where the input is the COW MPS tensor that views CPU data.
-  // Of course the buffer block is not found by the MPS allocator, because it
-  // was allocated by the CPU allocator.
   TORCH_INTERNAL_ASSERT(buffer_block, "failed to find the buffer ", ptr);
   // note that the IntArrayRef doesn't own the underlying data, and the backing
   // memory for shape data must persist as long as the buffer is in use.
@@ -892,22 +881,12 @@ struct TORCH_API MPSAllocator final : public IMPSAllocator {
   }
 
   DataPtr clone_from_cpu(const void* data, std::size_t n) override {
-    std::cout << "===================================================" << std::endl;
-    std::cout << "[MPSAllocator::clone_from_cpu] data: " << data << ", n: " << n << std::endl;
     DataPtr new_data = allocate(n);
-    at::detail::getMPSHooks().deviceSynchronize();
     void* dest = new_data.mutable_get();
-    std::cout << "[MPSAllocator::clone_from_cpu] dest: " << dest << std::endl;
-    if (_getAllocImpl().hasBuffer(dest)) {
-      std::cout << "[MPSAllocator::clone_from_cpu] found allocated buffer block" << std::endl;
-    } else {
-      std::cout << "[MPSAllocator::clone_from_cpu] did not find allocated buffer block????" << std::endl;
-    }
     copy_data_from_cpu_to_mps(dest, data, n);
-    at::detail::getMPSHooks().deviceSynchronize();
-    std::cout << "===================================================" << std::endl;
     return new_data;
   }
+
   DataPtr clone_to_cpu(const void* data, std::size_t n) override {
     DataPtr new_data = c10::GetCPUAllocator()->allocate(n);
     copy_data(new_data.mutable_get(), data, n, /*sync=*/true);

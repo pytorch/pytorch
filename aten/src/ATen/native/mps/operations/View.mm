@@ -9,7 +9,6 @@
 #include <ATen/native/mps/OperationUtils.h>
 #include <c10/core/Device.h>
 #include <c10/core/impl/COW.h>
-#include <c10/core/impl/COWDeleter.h>
 #include <fmt/format.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -23,15 +22,9 @@
 namespace at::native {
 namespace mps {
 
-static bool is_cow_mps_backed(const Tensor& self) {
+static bool is_not_cow_or_cow_mps_backed(const Tensor& self) {
   const DataPtr& data_ptr = self.storage().data_ptr();
-  if (c10::impl::cow::is_cow_data_ptr(data_ptr)) {
-    c10::impl::cow::COWDeleterContext* context =
-        data_ptr.cast_context<c10::impl::cow::COWDeleterContext>(c10::impl::cow::cow_deleter);
-    return context->original_device().type() == c10::kMPS;
-  } else {
-    return false;
-  }
+  return !c10::impl::cow::is_cow_data_ptr(data_ptr) || c10::impl::cow::is_cow_data_ptr(data_ptr, c10::MPS);
 }
 
 static IntArrayRef updateTensorBaseShape(const Tensor& self) {
@@ -46,13 +39,7 @@ static IntArrayRef updateTensorBaseShape(const Tensor& self) {
         : ((self.is_view() && self._base().sizes().size()) ? self._base().sizes() : IntArrayRef(&shape_1d, 1));
 
     // base_shape will be retained in MPSAllocator until buffer gets recycled
-    // KURT: How should this work for a COW MPS tensor that views CPU data? I
-    // suppose it would be ideal if those details are abstracted from this
-    // context, and maybe getBufferShape should know how to handle CPU data
-    // pointers? If so, I think CPU data pointers will have to be registered
-    // into the MPS allocator when _lazy_clone CPU-to-MPS happens.
-    // For now, I'll just try checking right here if it's CPU backed.
-    if (self.storage().data() && is_cow_mps_backed(self))
+    if (self.storage().data() && is_not_cow_or_cow_mps_backed(self))
       getIMPSAllocator()->setBufferShape(self.storage().data(), base_shape);
   }
   return base_shape;
