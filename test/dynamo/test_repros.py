@@ -21,7 +21,7 @@ import unittest
 import warnings
 import weakref
 from abc import ABC
-from collections import namedtuple
+from collections import defaultdict, namedtuple
 from collections.abc import Iterator
 from copy import deepcopy
 from enum import Enum, IntEnum
@@ -46,6 +46,7 @@ from torch._inductor.utils import fresh_inductor_cache
 from torch.nn import functional as F
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
+    PLATFORM_SUPPORTS_FP8,
     TEST_CUDA,
 )
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -59,6 +60,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.two_tensor import TwoTensor
+from torch.utils._python_dispatch import TorchDispatchMode
 
 
 _orig_module_call = torch.nn.Module.__call__
@@ -6907,6 +6909,146 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
             out_ref = f(x_ref, s0, s1, s2)
             out = f_compiled(x, s0, s1, s2)
             self.assertEqual(out_ref, out)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "requires gpu with fp8 support")
+    @requires_cuda
+    def test_partitioner_saves_weights_for_bw(self):
+        def mul_tiled(a, *bs):
+            for b in bs:
+                a = a.unflatten(0, (b.shape[0], -1)).unflatten(-1, (b.shape[-1], -1))
+                a = a * b[:, None, :, None]
+                a = a.flatten(end_dim=1).flatten(start_dim=-2)
+            return a
+
+        def scale(t, amax_t):
+            max_v = torch.finfo(torch.float8_e4m3fn).max
+            scale_t = torch.clamp(amax_t.float(), min=1e-12) / max_v
+            t_fp8 = mul_tiled(t, scale_t.reciprocal()).to(torch.float8_e4m3fn)
+            return t_fp8, scale_t
+
+        def matmul(first, amax_first, second_t, amax_second_t, bias):
+            first_fp8, scale_first = scale(first, amax_first)
+            second_t_fp8, scale_second_t = scale(second_t, amax_second_t)
+            post_scales = []
+            post_bias = None
+            post_scales = [scale_first, scale_second_t.t()]
+            scale_first = scale_first.new_ones((1, 1))
+            scale_second_t = scale_second_t.t().new_ones((1, 1))
+            post_bias, bias = bias, None
+            res = torch._scaled_mm(
+                first_fp8,
+                second_t_fp8.t(),
+                scale_a=scale_first,
+                scale_b=scale_second_t.t(),
+                bias=bias,
+                out_dtype=torch.bfloat16,
+                use_fast_accum=False,
+            )
+            res = mul_tiled(res, *post_scales).to(torch.bfloat16)
+            if post_bias is not None:
+                res += post_bias
+            return res
+
+        @torch.compiler.allow_in_graph
+        class Fp8LinearFn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, a, b_t, bias):
+                amax_a = a.abs().unflatten(-1, (1, -1)).amax(dim=-1)
+                amax_b_t = b_t.abs().unflatten(-1, (1, -1)).amax(dim=-1)
+                out = matmul(a, amax_a, b_t, amax_b_t, bias)
+                ctx.a_requires_grad = a.requires_grad
+                ctx.b_requires_grad = b_t.requires_grad
+                ctx.bias_requires_grad = (
+                    bias.requires_grad if bias is not None else False
+                )
+                ctx.save_for_backward(a, b_t, amax_b_t)
+                return out
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                a, b_t, amax_b_t = ctx.saved_tensors
+                # Workaround for https://github.com/pytorch/pytorch/issues/141881.
+                # The partitioner would pre-compute the transposed scaling of the weight
+                # in the forward (as it's most efficient, but it actually uses too much
+                # memory). We prevent that by making the scaling depend on the gradient
+                # in a way that has no effect and will be optimized away later.
+                # Care is needed to support tensor parallelism and circumvent bugs.
+                #        b_t = b_t + grad_out[:1, :, None].squeeze(0) * 0
+                if ctx.a_requires_grad:
+                    b = b_t.t().contiguous()
+                    amax_grad_out = grad_out.abs().unflatten(-1, (1, -1)).amax(dim=-1)
+                    amax_b = amax_b_t.t().unflatten(-1, (1, -1)).amax(dim=-1)
+                    amax_b = amax_b.repeat_interleave(
+                        b.shape[0] // amax_b.shape[0], dim=0, output_size=b.shape[0]
+                    )
+                    grad_a = matmul(grad_out, amax_grad_out, b, amax_b, None)
+                else:
+                    grad_a = None
+                if ctx.b_requires_grad:
+                    grad_b = grad_out.t() @ a
+                else:
+                    grad_b = None
+                if ctx.bias_requires_grad:
+                    grad_bias = grad_out.sum(dim=0)
+                else:
+                    grad_bias = None
+                return grad_a, grad_b, grad_bias
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.nn.Parameter(
+                    torch.randn(
+                        64, 64, dtype=torch.bfloat16, device="cuda", requires_grad=True
+                    )
+                )
+                self.b = torch.nn.Parameter(
+                    torch.randn(
+                        64, 64, dtype=torch.bfloat16, device="cuda", requires_grad=True
+                    )
+                )
+                self.bias = torch.nn.Parameter(
+                    torch.randn(
+                        64, dtype=torch.bfloat16, device="cuda", requires_grad=True
+                    )
+                )
+
+        class CustomLinear(torch.nn.Linear):
+            def forward(self, input: torch.Tensor) -> torch.Tensor:
+                out = Fp8LinearFn.apply(
+                    input.flatten(end_dim=-2), self.weight, self.bias
+                )
+                out = out.unflatten(0, input.shape[:-1])
+                return out
+
+        m = CustomLinear(64, 64, dtype=torch.bfloat16, device="cuda")
+        m = torch.compile(m, backend="aot_eager")
+
+        # simple mode to track how many collective ops we saw in the backward
+        class TrackingMode(TorchDispatchMode):
+            def __init__(self):
+                super().__init__()
+                self.ops_counter = defaultdict(int)
+
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                rs = func(*args, **kwargs)
+                self.ops_counter[func] += 1
+                return rs
+
+        a = torch.randn(64, 64, dtype=torch.bfloat16, device="cuda", requires_grad=True)
+        out = m(a)
+        with TrackingMode() as mode:
+            out.sum().backward()
+        # If you print out the AOT fw and bw graphs,
+        # the main thing to look for is that both weights (primals_1/primals_2)
+        # *are* saved for backward, and become back inputs.
+        # The easier-to-test thing I'm checking for here is that the recompute
+        # on primals_2 happens in the backward. With the recompute,
+        # there are 5 _to_copy ops in the backwrad. Without it, there are 4
+        # (aka if you set torch._functorch.config.treat_parameters_as_free_to_save = False)
+        self.assertEqual(mode.ops_counter[torch.ops.aten._to_copy.default], 5)
 
     def test_getattr_return(self):
         _WrapperDescriptor = type(type.__call__)
