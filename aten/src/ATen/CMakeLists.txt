@@ -164,13 +164,37 @@ file(GLOB native_quantized_cudnn_hip_cpp "native/quantized/cudnn/hip/*.cpp")
 file(GLOB native_utils_cpp "native/utils/*.cpp")
 
 # flash_attention sources
-file(GLOB flash_attention_cuda_cu "native/transformers/cuda/flash_attn/*.cu")
-file(GLOB flash_attention_cuda_kernels_cu "native/transformers/cuda/flash_attn/kernels/*.cu")
-file(GLOB flash_attention_cuda_cpp "native/transformers/cuda/flash_attn/*.cpp")
+file(GLOB flash_attention_cuda_kernels_cu ${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc/flash_attn/src/*.cu)
+# Flash attention C++ sources
+file(GLOB flash_attention_cuda_cpp
+    "${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc/flash_attn/src/*.cpp"
+    "native/transformers/cuda/flash_attn/flash_api.cpp"
+)
 
-# flash_attention sources
+# flash_attention hip sources
 file(GLOB flash_attention_hip_hip "native/transformers/hip/flash_attn/*.hip")
-file(GLOB flash_attention_src_hip_hip "native/transformers/hip/flash_attn/src/*.hip")
+# if USE_FLASH_ATTENTION is set, ensure CK instances get generated
+if(USE_FLASH_ATTENTION)
+  if(DEFINED ENV{USE_CK_FLASH_ATTENTION})
+    set(USE_CK_FLASH_ATTENTION $ENV{USE_CK_FLASH_ATTENTION})
+      if(USE_CK_FLASH_ATTENTION STREQUAL "1")
+        if(DEFINED ENV{PYTORCH_ROCM_ARCH})
+          list(LENGTH PYTORCH_ROCM_ARCH NUM_ARCHS)
+          if(NUM_ARCHS GREATER 1)
+            message(WARNING "Building CK for multiple archs can increase build time considerably!
+            Consider setting PYTORCH_ROCM_ARCH env var value as the gfx arch you need to build for")
+          endif()
+        endif()
+        message(STATUS "USE_CK_FLASH_ATTENTION is set; building PyTorch with CK Flash Attention enabled")
+        message(STATUS "Generating CK kernel instances...")
+        add_subdirectory(native/transformers/hip/flash_attn/ck)
+        file(GLOB flash_attention_hip_ck_hip "native/transformers/hip/flash_attn/ck/*.hip")
+        list(APPEND native_transformers_hip_hip ${flash_attention_hip_ck_hip})
+      endif()
+  endif()
+  file(GLOB flash_attention_hip_aot_hip "native/transformers/hip/flash_attn/aot/*.hip")
+  file(GLOB flash_attention_src_hip_hip "native/transformers/hip/flash_attn/src/*.hip")
+endif()
 
 #Mem_eff attention sources
 file(GLOB mem_eff_attention_cuda_cu "native/transformers/cuda/mem_eff_attention/*.cu")
@@ -185,6 +209,7 @@ if(USE_FLASH_ATTENTION)
   list(APPEND ATen_ATTENTION_KERNEL_SRCS ${flash_attention_cuda_kernels_cu})
 
   list(APPEND native_transformers_hip_hip ${flash_attention_hip_hip})
+  list(APPEND native_transformers_hip_hip ${flash_attention_hip_aot_hip})
   list(APPEND native_transformers_src_hip_hip ${flash_attention_src_hip_hip})
 endif()
 
@@ -252,7 +277,6 @@ if(USE_XPU)
   list(APPEND ATen_XPU_DEPENDENCY_LIBS ${OCL_LIBRARY})
   list(APPEND ATen_XPU_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/native/mkldnn/xpu)
   list(APPEND ATen_XPU_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/native/mkldnn/xpu/detail)
-  list(APPEND ATen_XPU_INCLUDE ${PROJECT_SOURCE_DIR}/third_party/ideep/mkl-dnn/include)
   list(APPEND ATen_XPU_INCLUDE ${XPU_MKLDNN_INCLUDE})
 
   list(APPEND ATen_XPU_INCLUDE ${SYCL_INCLUDE_DIR})
@@ -319,12 +343,38 @@ if(USE_CUDA)
 endif()
 
 if(USE_ROCM)
+  # NOTE: The PyTorch build does not actually add_subdirectory
+  # third_party/composable_kernel or use it as a CMake library. What is used
+  # is header only, so this should be ok, except that the CMake build generates
+  # a ck/config.h. We just do that part here. Without this, the ck.h from the
+  # ROCM SDK may get accidentally used instead.
+  function(_pytorch_rocm_generate_ck_conf)
+    set(CK_ENABLE_INT8 "ON")
+    set(CK_ENABLE_FP16 "ON")
+    set(CK_ENABLE_FP32 "ON")
+    set(CK_ENABLE_FP64 "ON")
+    set(CK_ENABLE_BF16 "ON")
+    set(CK_ENABLE_FP8 "ON")
+    set(CK_ENABLE_BF8 "ON")
+    set(CK_USE_XDL "ON")
+    set(CK_USE_WMMA "ON")
+    configure_file(
+      "${Torch_SOURCE_DIR}/third_party/composable_kernel/include/ck/config.h.in"
+      "${CMAKE_CURRENT_BINARY_DIR}/composable_kernel/ck/config.h"
+      )
+  endfunction()
   list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/hip)
   list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/composable_kernel/include)
   list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/composable_kernel/library/include)
+  list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_BINARY_DIR}/composable_kernel)
+  _pytorch_rocm_generate_ck_conf()
+
   # Next two lines are needed because TunableOp uses third-party/fmt
   list(APPEND ATen_HIP_INCLUDE $<TARGET_PROPERTY:fmt::fmt-header-only,INTERFACE_INCLUDE_DIRECTORIES>)
   list(APPEND ATen_HIP_DEPENDENCY_LIBS fmt::fmt-header-only)
+if(USE_FLASH_ATTENTION)
+  list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/native/transformers/hip/flash_attn/ck)
+endif()
   list(APPEND ATen_HIP_SRCS
     ${ATen_HIP_SRCS}
     ${hip_hip}
@@ -334,6 +384,13 @@ if(USE_ROCM)
     ${native_quantized_hip_hip}
     ${native_transformers_hip_hip} ${native_transformers_src_hip_hip}
   )
+  if(WIN32) # Windows doesn't support Composable Kernels and Triton
+    file(GLOB native_hip_bgemm "native/hip/bgemm_kernels/*.hip")
+    file(GLOB native_hip_ck "native/hip/ck*.hip")
+    exclude(ATen_HIP_SRCS "${ATen_HIP_SRCS}"
+      ${native_hip_bgemm} ${native_hip_ck}
+      ${native_transformers_hip_hip} ${native_transformers_hip_cpp})
+  endif()
   # TODO: Codegen separate files for HIP and use those (s/cuda_generated_sources/hip_generated_sources)
   list(APPEND all_hip_cpp
     ${native_nested_hip_cpp}
@@ -351,6 +408,9 @@ if(USE_ROCM)
     ${miopen_cpp}
     ${all_hip_cpp}
   )
+  if(WIN32) # Windows doesn't support Triton
+    exclude(all_hip_cpp "${all_hip_cpp}" ${native_transformers_hip_cpp})
+  endif()
 endif()
 
 if(USE_XPU)
@@ -435,11 +495,16 @@ if(MKLDNN_FOUND)
   list(APPEND ATen_CPU_DEPENDENCY_LIBS ${MKLDNN_LIBRARIES})
 endif(MKLDNN_FOUND)
 
+if(USE_MKLDNN_ACL)
+    list(APPEND ATen_CPU_INCLUDE ${ACL_INCLUDE_DIRS})
+    list(APPEND ATen_CPU_DEPENDENCY_LIBS ${ACL_LIBRARIES})
+endif()
+
 if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(s390x|ppc64le)$")
   list(APPEND ATen_CPU_DEPENDENCY_LIBS cpuinfo)
 endif()
 
-if(NOT EMSCRIPTEN AND NOT INTERN_BUILD_MOBILE AND NOT (MSVC AND CMAKE_SYSTEM_PROCESSOR STREQUAL "ARM64"))
+if(NOT EMSCRIPTEN AND NOT INTERN_BUILD_MOBILE)
   if(NOT MSVC)
     # Bump up optimization level for sleef to -O1, since at -O0 the compiler
     # excessively spills intermediate vector registers to the stack
@@ -450,6 +515,8 @@ if(NOT EMSCRIPTEN AND NOT INTERN_BUILD_MOBILE AND NOT (MSVC AND CMAKE_SYSTEM_PRO
     else()
       set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -O1")
     endif()
+  elseif(CMAKE_SYSTEM_PROCESSOR STREQUAL "ARM64")
+    set(SLEEF_ARCH_AARCH64 ON)
   endif()
 
   if(NOT USE_SYSTEM_SLEEF)
@@ -458,6 +525,9 @@ if(NOT EMSCRIPTEN AND NOT INTERN_BUILD_MOBILE AND NOT (MSVC AND CMAKE_SYSTEM_PRO
     set(SLEEF_BUILD_GNUABI_LIBS OFF CACHE BOOL "Don't build sleef gnuabi libs" FORCE)
     set(SLEEF_BUILD_TESTS OFF CACHE BOOL "Don't build sleef tests" FORCE)
     set(SLEEF_BUILD_SCALAR_LIB OFF CACHE BOOL "libsleefscalar will be built." FORCE)
+    if(WIN32)
+      set(SLEEF_BUILD_WITH_LIBM OFF CACHE BOOL "Don't build sleef with libm for Windows." FORCE)
+    endif()
     if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
       if(CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64" OR CMAKE_OSX_ARCHITECTURES MATCHES "arm64")
         set(DISABLE_SVE ON CACHE BOOL "Xcode's clang-12.5 crashes while trying to compile SVE code" FORCE)

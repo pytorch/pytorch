@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import List, Optional
+from typing import Optional
 
 import numpy as np
 
@@ -68,7 +68,7 @@ def int_padding_for_string_padding(func, padding_style, dilation, kernel_size):
         return dilation[i] if isinstance(dilation, tuple) else dilation
 
     if padding_style == "same":
-        padding: List[int] = []
+        padding: list[int] = []
         # F.pad needs the padding in reverse order from what conv expects
         for i in range(conv_picker(func, 0, 1, 2), -1, -1):
             padding += conv_padding_for_same(get_dilation(i), kernel_size[i])
@@ -145,7 +145,7 @@ def conv_backward(func, ctx, grad_output):
     kernel_size = [weight_shape[i] for i in range(2, conv_picker(func, 3, 4, 5))]
 
     batch_size = ctx.batch_size
-    results: List[Optional[torch.Tensor]] = []
+    results: list[Optional[torch.Tensor]] = []
     results.append(None)  # for kwarg names
     results.append(None)  # for op reference
 

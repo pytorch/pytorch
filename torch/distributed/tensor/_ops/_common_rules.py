@@ -1,6 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import string
-from typing import cast, Dict, List, Optional, Tuple
+from typing import cast, Optional
 
 import torch
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
@@ -20,12 +20,12 @@ def _replace_char_in_str(string: str, new_char: str, idx: int) -> str:
 
 def _gen_reshard_suggestions(
     op_schema: OpSchema,
-    input_dims: List[str],
-    input_specs: Tuple[DTensorSpec, ...],
-    dim_to_sharding: Dict[str, int],
-    pending_sum: List[int],
+    input_dims: list[str],
+    input_specs: tuple[DTensorSpec, ...],
+    dim_to_sharding: dict[str, int],
+    pending_sum: list[int],
 ) -> OutputSharding:
-    suggested_arg_specs: List[DTensorSpec] = []
+    suggested_arg_specs: list[DTensorSpec] = []
     for input_dim, input_spec in zip(input_dims, input_specs):
         dim_map = [dim_to_sharding[dim] for dim in input_dim]
         suggested_arg_specs.append(
@@ -49,7 +49,7 @@ def einop_rule(
     op_schema: OpSchema,
     *,
     linearity: bool = False,
-    enforce_sharding: Optional[Dict[str, int]] = None,
+    enforce_sharding: Optional[dict[str, int]] = None,
 ) -> OutputSharding:
     """
     Propagate the sharding of inputs to output for ops whose data moves according to einsum notation.
@@ -77,12 +77,12 @@ def einop_rule(
     # NOTE: only support single output unless needed in future
     output_dim = output_dims[0]
 
-    dim_to_sharding: Dict[str, int] = {}
-    dim_to_size: Dict[str, int] = {}
+    dim_to_sharding: dict[str, int] = {}
+    dim_to_size: dict[str, int] = {}
     # record pending sum, key is mesh dimension, value is pending sum
     # counter across input specs
-    pending_sums_counter: Dict[int, int] = {}
-    seen_shardings: Dict[int, str] = {}
+    pending_sums_counter: dict[int, int] = {}
+    seen_shardings: dict[int, str] = {}
     needs_reshard = False
 
     def merge_sharding(dim: str, a: int, b: int) -> int:
@@ -240,7 +240,7 @@ def pointwise_rule(op_schema: OpSchema, linearity: bool = False) -> OutputShardi
     input_specs = op_schema.args_spec
     max_dim = max(input.ndim for input in input_specs)
     dimchars = []
-    singleton_counter: List[int] = [0] * max_dim
+    singleton_counter: list[int] = [0] * max_dim
     for input in input_specs:
         start_dim = max_dim - input.ndim
         p = alphabet[start_dim:max_dim]
@@ -265,21 +265,18 @@ def pointwise_rule(op_schema: OpSchema, linearity: bool = False) -> OutputShardi
     # check if we replace the all inputs dim char with singleton dimension,
     # if we replace all inputs, we also need to replace the output dimension.
     for output_dim_idx in range(len(out_dimchars)):
-        out_dimchar = out_dimchars[output_dim_idx]
         if singleton_counter[output_dim_idx] == len(input_specs):
             out_dimchars = _replace_char_in_str(out_dimchars, "1", output_dim_idx)
 
     fmt = f"{','.join(p for p in dimchars)}->{out_dimchars}"
 
-    enforce_sharding: Dict[str, int] = {}
+    enforce_sharding: dict[str, int] = {}
     if _is_inplace_op(op_schema.op):
         # inplace op should keep the input sharding it writes to
-        for out_dimchar, mesh_dim in zip(out_dimchars, input_specs[0].dim_map):
-            enforce_sharding[out_dimchar] = mesh_dim
+        enforce_sharding.update(zip(out_dimchars, input_specs[0].dim_map))
     elif _is_out_variant_op(op_schema.op):
         out_spec = cast(DTensorSpec, op_schema.kwargs_schema["out"])
-        for out_dimchar, mesh_dim in zip(out_dimchars, out_spec.dim_map):
-            enforce_sharding[out_dimchar] = mesh_dim
+        enforce_sharding.update(zip(out_dimchars, out_spec.dim_map))
 
     return einop_rule(
         fmt,

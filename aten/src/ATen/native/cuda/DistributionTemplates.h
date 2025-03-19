@@ -279,6 +279,7 @@ namespace cuda {
 
 template<typename RNG>
 void random_from_to_kernel(TensorIteratorBase& iter, uint64_t range, int64_t base, RNG gen) {
+#ifdef FBCODE_CAFFE2
   AT_DISPATCH_V2(iter.dtype(), "random_from_to_kernel_cuda", AT_WRAP([&] {
     if ((
       std::is_same_v<scalar_t, int64_t> ||
@@ -312,6 +313,37 @@ void random_from_to_kernel(TensorIteratorBase& iter, uint64_t range, int64_t bas
         random_func);
     }
    }), AT_EXPAND(AT_ALL_TYPES), kBool, kHalf, kBFloat16, AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
+#else
+  AT_DISPATCH_V2(iter.dtype(), "random_from_to_kernel_cuda", AT_WRAP([&] {
+    if (range >= 1ULL << 28) // allow approx 5% skew in uniform int generation using %
+    {
+      // define lambda to mod with range and add base
+      auto random_func = [range, base] __device__ (uint64_t rand) {
+        return transformation::uniform_int_from_to<scalar_t>(rand, range, base);
+      };
+      distribution_nullary_kernel<scalar_t, uint64_t, ulonglong2>(iter,
+        gen,
+        [] __device__ (curandStatePhilox4_32_10_t* state) -> ulonglong2 {
+          ulonglong2 ret;
+          uint4 rand_val = curand4(state);
+          ret.x = (static_cast<uint64_t>(rand_val.x) << 32) | rand_val.y;
+          ret.y = (static_cast<uint64_t>(rand_val.z) << 32) | rand_val.w;
+          return ret;
+        },
+        random_func);
+    } else {
+      auto random_func = [range, base] __device__ (uint32_t rand) {
+        return transformation::uniform_int_from_to<scalar_t>(rand, range, base);
+      };
+      distribution_nullary_kernel<scalar_t, uint32_t, uint4>(iter,
+        gen,
+        [] __device__ (curandStatePhilox4_32_10_t* state) -> uint4 {
+          return curand4(state);
+        },
+        random_func);
+    }
+   }), AT_EXPAND(AT_ALL_TYPES), kBool, kHalf, kBFloat16, AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
+#endif
 }
 
 // This is the special kernel to handle single specific case:

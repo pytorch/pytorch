@@ -1,7 +1,7 @@
 # Owner(s): ["module: onnx"]
 """Unit tests for the internal registration wrapper module."""
 
-from typing import Sequence
+from collections.abc import Sequence
 
 from torch.onnx import errors
 from torch.onnx._internal import registration

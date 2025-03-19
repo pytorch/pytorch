@@ -5,7 +5,7 @@ import importlib
 import logging
 import os
 import sys
-from typing import Type, TypeVar
+from typing import TypeVar
 
 from torch._inductor.async_compile import pre_fork_setup
 from torch._inductor.compile_worker.subproc_pool import (
@@ -13,7 +13,7 @@ from torch._inductor.compile_worker.subproc_pool import (
     SubprocMain,
     SubprocPickler,
 )
-from torch._inductor.compile_worker.watchdog import _async_compile_initializer
+from torch._inductor.compile_worker.utils import _async_compile_initializer
 from torch._inductor.runtime.compile_tasks import _set_triton_ptxas_path
 
 
@@ -32,7 +32,7 @@ except ImportError:
     pass
 
 
-def _lookup_and_create_type(base: Type[_T], qname: str) -> _T:
+def _lookup_and_create_type(base: type[_T], qname: str) -> _T:
     """
     Given a base type and qualified name: import & lookup that name, check
     that it's of the given type and then instantiate it.

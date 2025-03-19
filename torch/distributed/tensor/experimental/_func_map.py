@@ -1,6 +1,8 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from typing import Callable, Optional, Sequence, Tuple, Union
+import functools
+from collections.abc import Sequence
+from typing import Callable, Optional, Union
 
 import torch
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
@@ -17,8 +19,8 @@ except ImportError:
 __all__ = ["local_map"]
 
 PlacementType = Optional[Sequence[Placement]]
-InputPlacements = Optional[Tuple[PlacementType, ...]]
-OutputPlacements = Union[PlacementType, Tuple[PlacementType, ...]]
+InputPlacements = Optional[tuple[PlacementType, ...]]
+OutputPlacements = Union[PlacementType, tuple[PlacementType, ...]]
 
 
 def local_map(
@@ -112,14 +114,20 @@ def local_map(
         >>>     device_mesh=device_mesh,
         >>> )
         >>>
-        >>> W_dt = distribute_tensor(W, device_mesh, (col_wise))  # col-wisely sharded W tensor
-        >>> X_dt = distribute_tensor(X, device_mesh, (row_wise))  # row-wisely sharded X tensor
-        >>> Y_dt = local_mm_allreduce_forward(device_mesh, W_dt, X_dt)  # apply local_mm_allreduce_forward to DTensors
+        >>> W_dt = distribute_tensor(
+        ...     W, device_mesh, (col_wise)
+        ... )  # col-wisely sharded W tensor
+        >>> X_dt = distribute_tensor(
+        ...     X, device_mesh, (row_wise)
+        ... )  # row-wisely sharded X tensor
+        >>> Y_dt = local_mm_allreduce_forward(
+        ...     device_mesh, W_dt, X_dt
+        ... )  # apply local_mm_allreduce_forward to DTensors
 
     .. note:: This API is currently experimental and subject to change
     """
 
-    def wrapped(*args, **kwargs):
+    def wrapped(device_mesh: Optional[DeviceMesh], *args, **kwargs):
         # process input args
         flat_args, args_spec = pytree.tree_flatten(args)
         if in_placements is not None:
@@ -130,7 +138,6 @@ def local_map(
 
         # we assume every DTensor object is placed on the same device mesh
         flat_local_args = []
-        nonlocal device_mesh  # access var device_mesh from the outer scope
         seen_dtensor_arg = False
         for idx, arg in enumerate(flat_args):
             if isinstance(arg, DTensor):
@@ -150,9 +157,9 @@ def local_map(
                 )
                 if in_placements is not None:
                     spec = in_placements[idx]
-                    assert (
-                        spec is not None
-                    ), f"DTensor input {arg} expects placements but received {spec}!"
+                    assert spec is not None, (
+                        f"DTensor input {arg} expects placements but received {spec}!"
+                    )
 
                     if not isinstance(spec, tuple):
                         spec = tuple(spec)
@@ -207,17 +214,17 @@ def local_map(
             )
             for out, spec in zip(flat_out, out_placements_tuple):
                 if isinstance(out, torch.Tensor):
-                    assert not isinstance(
-                        out, DTensor
-                    ), f"torch.Tensor output expected but received {type(out)}: {out}"
+                    assert not isinstance(out, DTensor), (
+                        f"torch.Tensor output expected but received {type(out)}: {out}"
+                    )
 
                     flat_dist_out.append(
                         DTensor.from_local(out, device_mesh, spec, run_check=False)
                     )
                 else:
-                    assert (
-                        spec is None
-                    ), f"Non-tensor output {out} expects None placements but received {spec}!"
+                    assert spec is None, (
+                        f"Non-tensor output {out} expects None placements but received {spec}!"
+                    )
 
                     flat_dist_out.append(out)
 
@@ -225,4 +232,4 @@ def local_map(
         else:
             return out
 
-    return wrapped
+    return functools.partial(wrapped, device_mesh)

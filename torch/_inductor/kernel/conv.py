@@ -1,9 +1,8 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
 import logging
-from typing import cast, List, Optional, Sequence, Tuple, TYPE_CHECKING, TypedDict
+from typing import cast, Optional, TYPE_CHECKING, TypedDict
 
 import torch
 from torch._inductor.codegen.rocm.ck_conv_template import CKGroupedConvFwdTemplate
@@ -18,10 +17,10 @@ from ..lowering import (
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
+    SymbolicGridFn,
     TritonTemplate,
 )
 from ..utils import (
-    ceildiv,
     is_ones,
     is_zeros,
     pad_listlike,
@@ -34,6 +33,8 @@ from .mm_common import build_rocm_gemm_configs, filtered_configs
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from ..ir import TensorBox
 
 log = logging.getLogger(__name__)
@@ -42,18 +43,20 @@ log = logging.getLogger(__name__)
 aten = torch.ops.aten
 
 
-def conv2d_grid(n, c, h, w, meta):
+@SymbolicGridFn
+def conv2d_grid(n, c, h, w, meta, *, cdiv):
     return (
-        ceildiv(n * h * w, meta["BLOCK_M"]),
-        ceildiv(c, meta["BLOCK_N"]),
+        cdiv(n * h * w, meta["BLOCK_M"]),
+        cdiv(c, meta["BLOCK_N"]),
         meta["GROUPS"],
     )
 
 
-def conv3d_grid(n, c, d, h, w, meta):
+@SymbolicGridFn
+def conv3d_grid(n, c, d, h, w, meta, *, cdiv):
     return (
-        ceildiv(n * d * h * w, meta["BLOCK_M"]),
-        ceildiv(c, meta["BLOCK_N"]),
+        cdiv(n * d * h * w, meta["BLOCK_M"]),
+        cdiv(c, meta["BLOCK_N"]),
         meta["GROUPS"],
     )
 
@@ -73,7 +76,7 @@ kernel_configs = [
 
 # Create filtered list of configs based on conv
 platform_configs = tuple(
-    cast(Tuple[int, int, int, int, int], config["config"])
+    cast(tuple[int, int, int, int, int], config["config"])
     for config in kernel_configs
     if config["cond"]
 )
@@ -460,12 +463,12 @@ def convert_1x1_conv_to_mm(x, weight, bias):
 def convolution(
     x: TensorBox,
     weight: TensorBox,
-    bias: TensorBox,
-    stride: List[int],
-    padding: List[int],
-    dilation: List[int],
+    bias: Optional[TensorBox],
+    stride: Sequence[int],
+    padding: Sequence[int],
+    dilation: Sequence[int],
     transposed: bool,
-    output_padding: List[int],
+    output_padding: Sequence[int],
     groups: int,
 ):
     stride = tuple(stride)
@@ -504,6 +507,32 @@ def convolution(
     out_chan, in_chan, *kernel_shape = V.graph.sizevars.evaluate_static_shapes(
         weight.get_size()
     )
+
+    # Always convert conv1D to 2D for Intel GPU.
+    # Only conv2D can be converted to channel last layout,
+    # which have much better performance.
+    if (
+        len(x.get_size()) == 3
+        and len(kernel_shape) == 1
+        and ir.get_device_type(x) == "xpu"
+    ):
+        kwargs.update(
+            {
+                "stride": (1,) + stride,
+                "padding": (0,) + padding,
+                "dilation": (1,) + dilation,
+                "output_padding": (0,) + output_padding,
+            }
+        )
+        # (N, C, L) -> (N, C, 1, L)
+        x = L[aten.unsqueeze](x, dim=2)
+        weight = L[aten.unsqueeze](weight, dim=2)
+
+        return L[aten.squeeze](
+            convolution(x, weight, bias, **kwargs),
+            dim=2,
+        )
+
     ndim = len(kernel_shape)
     stride = pad_listlike(stride, ndim)
     padding = pad_listlike(padding, ndim)

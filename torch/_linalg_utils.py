@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 """Various linear algebra utility methods for internal use."""
 
-from typing import Optional, Tuple
+from typing import Optional
 
 import torch
 from torch import Tensor
@@ -57,7 +57,7 @@ def basis(A):
     return torch.linalg.qr(A).Q
 
 
-def symeig(A: Tensor, largest: Optional[bool] = False) -> Tuple[Tensor, Tensor]:
+def symeig(A: Tensor, largest: Optional[bool] = False) -> tuple[Tensor, Tensor]:
     """Return eigenpairs of A with specified ordering."""
     if largest is None:
         largest = False
@@ -79,7 +79,7 @@ def matrix_rank(input, tol=None, symmetric=False, *, out=None) -> Tensor:
     )
 
 
-def solve(input: Tensor, A: Tensor, *, out=None) -> Tuple[Tensor, Tensor]:
+def solve(input: Tensor, A: Tensor, *, out=None) -> tuple[Tensor, Tensor]:
     raise RuntimeError(
         "This function was deprecated since version 1.9 and is now removed. "
         "`torch.solve` is deprecated in favor of `torch.linalg.solve`. "
@@ -91,7 +91,7 @@ def solve(input: Tensor, A: Tensor, *, out=None) -> Tuple[Tensor, Tensor]:
     )
 
 
-def lstsq(input: Tensor, A: Tensor, *, out=None) -> Tuple[Tensor, Tensor]:
+def lstsq(input: Tensor, A: Tensor, *, out=None) -> tuple[Tensor, Tensor]:
     raise RuntimeError(
         "This function was deprecated since version 1.9 and is now removed. "
         "`torch.lstsq` is deprecated in favor of `torch.linalg.lstsq`.\n"
@@ -114,7 +114,7 @@ def _symeig(
     upper=True,
     *,
     out=None,
-) -> Tuple[Tensor, Tensor]:
+) -> tuple[Tensor, Tensor]:
     raise RuntimeError(
         "This function was deprecated since version 1.9 and is now removed. "
         "The default behavior has changed from using the upper triangular portion of the matrix by default "
@@ -135,7 +135,7 @@ def eig(
     *,
     e=None,
     v=None,
-) -> Tuple[Tensor, Tensor]:
+) -> tuple[Tensor, Tensor]:
     raise RuntimeError(
         "This function was deprecated since version 1.9 and is now removed. "
         "`torch.linalg.eig` returns complex tensors of dtype `cfloat` or `cdouble` rather than real tensors "

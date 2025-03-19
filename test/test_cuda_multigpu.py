@@ -815,8 +815,8 @@ class TestCudaMultiGPU(TestCase):
             # it may vary on different hardware in different environments.
             # Therefore, this test uses relative comparisons, checking if the
             # sum of parent and child threads execution time is greater than the
-            # real execution time by least 40%.
-            self.assertGreater(parent_time + child_time, total_time * 1.4)
+            # real execution time by least 30%.
+            self.assertGreater(parent_time + child_time, total_time * 1.3)
 
     # This test is flaky for ROCm, see issue #62602
     @skipIfRocm
@@ -950,12 +950,18 @@ class TestCudaMultiGPU(TestCase):
             ext_stream = torch.cuda.ExternalStream(stream_v)
             self.assertEqual(stream_v, ext_stream.cuda_stream)
             self.assertEqual(ext_stream.device.index, device.idx)
+            ext_stream = torch.cuda.get_stream_from_external(stream_v, device)
+            self.assertEqual(stream_v, ext_stream.cuda_stream)
+            self.assertEqual(ext_stream.device.index, device.idx)
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     def test_external_streams_multi_device(self):
         device = torch.cuda.device(1)
         with self._get_external_stream(device) as stream_v:
             ext_stream = torch.cuda.ExternalStream(stream_v, device=device)
+            self.assertEqual(stream_v, ext_stream.cuda_stream)
+            self.assertEqual(ext_stream.device.index, device.idx)
+            ext_stream = torch.cuda.get_stream_from_external(stream_v, device)
             self.assertEqual(stream_v, ext_stream.cuda_stream)
             self.assertEqual(ext_stream.device.index, device.idx)
 

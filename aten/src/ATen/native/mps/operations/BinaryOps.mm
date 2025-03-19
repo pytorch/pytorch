@@ -14,7 +14,6 @@
 #include <ATen/ops/atan2_native.h>
 #include <ATen/ops/div_native.h>
 #include <ATen/ops/eq_native.h>
-#include <ATen/ops/floor_divide_native.h>
 #include <ATen/ops/fmod_native.h>
 #include <ATen/ops/ge_native.h>
 #include <ATen/ops/gt_native.h>
@@ -105,6 +104,18 @@ static void binaryOpTensor(const Tensor& self,
   auto inputDataType = self.scalar_type();
   auto otherDataType = other.scalar_type();
   auto outputDataType = output_.scalar_type();
+  auto common_dtype = c10::promoteTypes(inputDataType, otherDataType);
+  // this type inference is only required at the time of graph creation
+  if (isIntegralType(common_dtype, true)) {
+    // integer inputs must be cast to float, if output is float
+    if (isFloatingType(outputDataType)) {
+      common_dtype = outputDataType;
+      // in boolean comparison ops with signed vs. unsigned integers, we always cast to the unsigned type
+    } else if (outputDataType == ScalarType::Bool &&
+               (inputDataType == ScalarType::Byte || otherDataType == ScalarType::Byte)) {
+      common_dtype = ScalarType::Byte;
+    }
+  }
 
   @autoreleasepool {
     string key = op_name + getTensorsStringKey({self, other, output_});
@@ -117,18 +128,6 @@ static void binaryOpTensor(const Tensor& self,
       MPSGraphTensor* primaryCastTensor = newCachedGraph->primaryTensor;
       MPSGraphTensor* secondaryCastTensor = newCachedGraph->secondaryTensor;
 
-      // this type inference is only required at the time of graph creation
-      ScalarType common_dtype = c10::promoteTypes(inputDataType, otherDataType);
-      if (isIntegralType(common_dtype, true)) {
-        // integer inputs must be cast to float, if output is float
-        if (isFloatingType(outputDataType)) {
-          common_dtype = outputDataType;
-          // in boolean comparison ops with signed vs. unsigned integers, we always cast to the unsigned type
-        } else if (outputDataType == ScalarType::Bool &&
-                   (inputDataType == ScalarType::Byte || otherDataType == ScalarType::Byte)) {
-          common_dtype = ScalarType::Byte;
-        }
-      }
       if (inputDataType != common_dtype) {
         primaryCastTensor = castMPSTensor(mpsGraph, newCachedGraph->primaryTensor, common_dtype);
       }
@@ -175,7 +174,7 @@ static void binaryOpTensor(const Tensor& self,
 
     // 'cachedGraph->alphaTensor' is not nil only if add_sub_lerp_template() was called with an alpha value != 1.0
     if (cachedGraph->alphaTensor) {
-      alpha_scalar = getMPSScalar(alpha, other.scalar_type());
+      alpha_scalar = getMPSScalar(alpha, common_dtype);
       feeds[cachedGraph->alphaTensor] = getMPSGraphTensorFromScalar(mpsStream, alpha_scalar);
     }
 
@@ -224,7 +223,7 @@ static void div_mode_template(const Tensor& self,
     if (!rounding_mode.has_value() || !isFloatOutput) {
       return divTensor;
     } else if (*rounding_mode == "trunc") {
-      auto truncTensor = trunc_tensor(mpsGraph, divTensor);
+      auto truncTensor = [mpsGraph truncateWithTensor:divTensor name:nil];
       if (op_name == "fmod_mps_out") {
         auto mulTensor = [mpsGraph multiplicationWithPrimaryTensor:truncTensor
                                                    secondaryTensor:secondaryCastTensor
@@ -290,7 +289,8 @@ static void add_sub_lerp_template(const Tensor& self,
 
     // if alpha is 1.0, then we don't bother adding another multiply to graph
     if (alpha_has_value) {
-      cachedGraph->alphaTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSScalarType(other.scalar_type()), @[ @1 ]);
+      auto commonDtype = c10::promoteTypes(self.scalar_type(), other.scalar_type());
+      cachedGraph->alphaTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSScalarType(commonDtype), @[ @1 ]);
       secondaryTensor = [mpsGraph multiplicationWithPrimaryTensor:secondaryCastTensor
                                                   secondaryTensor:cachedGraph->alphaTensor
                                                              name:nil];
@@ -375,8 +375,8 @@ CREATE_MPS_STRUCTURED_BOOLEAN_OP_FUNC(gt_scalar_out_mps, greaterThan, Scalar);
 CREATE_MPS_STRUCTURED_BOOLEAN_OP_FUNC(gt_tensor_out_mps, greaterThan, Tensor);
 
 // Arithmetic Binary Ops
-CREATE_MPS_STRUCTURED_BINARY_OP_FUNC(minimum_out_mps, minimum, Tensor);
-CREATE_MPS_STRUCTURED_BINARY_OP_FUNC(maximum_out_mps, maximum, Tensor);
+CREATE_MPS_STRUCTURED_BINARY_OP_FUNC(minimum_out_mps, minimumWithNaNPropagationAndIntFallback, Tensor);
+CREATE_MPS_STRUCTURED_BINARY_OP_FUNC(maximum_out_mps, maximumWithNaNPropagationAndIntFallback, Tensor);
 CREATE_MPS_STRUCTURED_BINARY_OP_FUNC(pow_tensor_scalar_out_mps, power, Scalar);
 CREATE_MPS_STRUCTURED_BINARY_OP_FUNC(pow_tensor_tensor_out_mps, power, Tensor);
 CREATE_MPS_BINARY_COMPARISON_OP_FUNC(logical_and_out_mps, logicalAND, Tensor);
@@ -396,7 +396,6 @@ TORCH_IMPL_FUNC(mul_out_mps)(const Tensor& self, const Tensor& other, const Tens
       });
 }
 TORCH_IMPL_FUNC(atan2_out_mps)(const Tensor& self, const Tensor& other, const Tensor& output) {
-  TORCH_CHECK(self.scalar_type() != ScalarType::Long, "MPS does not support atan2 op with int64 input");
   mps::binaryOpTensor(
       self, other, Scalar(1.0), output, "atan2", ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {
         MPSGraph* mpsGraph = cachedGraph->graph();
@@ -447,19 +446,8 @@ TORCH_IMPL_FUNC(pow_Scalar_out_mps)(const Scalar& base, const Tensor& exp, const
   }
 }
 
-Tensor& floor_divide_out_mps(const Tensor& self, const Tensor& other, Tensor& result) {
-  mps::div_mode_template(self, other, "floor", result, "floor_divide_out");
-  return result;
-}
-
-Tensor floor_divide_mps(const Tensor& self, const Tensor& other) {
-  Tensor output = at::empty_like(self);
-  mps::div_mode_template(self, other, "floor", output, "floor_divide");
-  return output;
-}
-
-Tensor& floor_divide_mps_(Tensor& self, const Tensor& other) {
-  return floor_divide_out_mps(self, other, self);
+static void div_floor_kernel_mps(TensorIteratorBase& iter) {
+  mps::div_mode_template(iter.input(0), iter.input(1), "floor", iter.output(0), "floor_divide_out");
 }
 
 TORCH_IMPL_FUNC(remainder_out_mps)(const Tensor& self, const Tensor& other, const Tensor& output) {
@@ -538,4 +526,6 @@ TORCH_IMPL_FUNC(xlogy_out_mps)(const Tensor& self, const Tensor& other, const Te
 TORCH_IMPL_FUNC(lerp_Scalar_mps)(const Tensor& self, const Tensor& end, const Scalar& weight, const Tensor& out) {
   mps::add_sub_lerp_template(self, end, weight, out, "lerp");
 }
+
+REGISTER_DISPATCH(div_floor_stub, &div_floor_kernel_mps);
 } // namespace at::native

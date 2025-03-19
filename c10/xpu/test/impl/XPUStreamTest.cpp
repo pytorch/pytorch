@@ -11,7 +11,7 @@
 #include <thread>
 #include <unordered_set>
 
-bool has_xpu() {
+static bool has_xpu() {
   return c10::xpu::device_count() > 0;
 }
 
@@ -69,11 +69,24 @@ TEST(XPUStreamTest, StreamBehavior) {
 
   auto [least_priority, greatest_priority] =
       c10::xpu::XPUStream::priority_range();
-  EXPECT_EQ(least_priority, 0);
-  EXPECT_TRUE(greatest_priority < 0);
+  EXPECT_EQ(least_priority, 1);
+  EXPECT_EQ(greatest_priority, -1);
 
   stream = c10::xpu::getStreamFromPool(/* isHighPriority */ true);
-  EXPECT_TRUE(stream.priority() < 0);
+  EXPECT_EQ(stream.priority(), -1);
+  stream = c10::xpu::getStreamFromPool(/* isHighPriority */ false);
+  EXPECT_EQ(stream.priority(), 0);
+
+  stream = c10::xpu::getStreamFromPool(-1);
+  EXPECT_EQ(stream.priority(), -1);
+  stream = c10::xpu::getStreamFromPool(-10);
+  EXPECT_EQ(stream.priority(), -1);
+  stream = c10::xpu::getStreamFromPool(0);
+  EXPECT_EQ(stream.priority(), 0);
+  stream = c10::xpu::getStreamFromPool(1);
+  EXPECT_EQ(stream.priority(), 1);
+  stream = c10::xpu::getStreamFromPool(10);
+  EXPECT_EQ(stream.priority(), 1);
 
   if (c10::xpu::device_count() <= 1) {
     return;
@@ -85,7 +98,7 @@ TEST(XPUStreamTest, StreamBehavior) {
   EXPECT_NE(stream.device_index(), c10::xpu::current_device());
 }
 
-void thread_fun(std::optional<c10::xpu::XPUStream>& cur_thread_stream) {
+static void thread_fun(std::optional<c10::xpu::XPUStream>& cur_thread_stream) {
   auto new_stream = c10::xpu::getStreamFromPool();
   c10::xpu::setCurrentXPUStream(new_stream);
   cur_thread_stream = {c10::xpu::getCurrentXPUStream()};
@@ -140,7 +153,11 @@ TEST(XPUStreamTest, StreamPoolRoundRobinTest) {
   EXPECT_TRUE(result_pair.second);
 }
 
-void asyncMemCopy(sycl::queue& queue, int* dst, int* src, size_t numBytes) {
+static void asyncMemCopy(
+    sycl::queue& queue,
+    int* dst,
+    int* src,
+    size_t numBytes) {
   queue.memcpy(dst, src, numBytes);
 }
 
@@ -202,6 +219,7 @@ TEST(XPUStreamTest, ExternalTest) {
   at::xpu::setCurrentXPUStream(myStream);
   at::xpu::XPUStream curStream = at::xpu::getCurrentXPUStream();
 
+  EXPECT_EQ(myStream.priority(), 0);
   ASSERT_TRUE(curStream == myStream);
   ASSERT_TRUE(&(curStream.queue()) == stream);
 
@@ -230,7 +248,7 @@ TEST(XPUStreamTest, ExternalMultiDeviceTest) {
   }
   {
     c10::DeviceGuard device_guard(c10::Device(c10::DeviceType::XPU, 1));
-    stream_0 = new sycl::queue(
+    stream_1 = new sycl::queue(
         c10::xpu::get_device_context(),
         c10::xpu::get_raw_device(1),
         c10::xpu::asyncHandler,
@@ -247,4 +265,28 @@ TEST(XPUStreamTest, ExternalMultiDeviceTest) {
 
   delete stream_0;
   delete stream_1;
+}
+
+TEST(XPUStreamTest, ExternalStreamDifferentPointersTest) {
+  if (!has_xpu()) {
+    return;
+  }
+
+  using namespace sycl::ext::oneapi::property;
+  sycl::queue ext_queue = sycl::queue(
+      c10::xpu::get_device_context(),
+      c10::xpu::get_raw_device(0),
+      c10::xpu::asyncHandler,
+      {sycl::property::queue::in_order(), queue::priority_normal()});
+
+  // Ponters to queue and its copies will lead to distinct external XPUStreams.
+  auto queue_ptr1 = std::make_unique<sycl::queue>(ext_queue);
+  auto queue_ptr2 = std::make_unique<sycl::queue>(ext_queue);
+
+  at::xpu::XPUStream myStream1 =
+      at::xpu::getStreamFromExternal(queue_ptr1.get(), 0);
+  at::xpu::XPUStream myStream2 =
+      at::xpu::getStreamFromExternal(queue_ptr2.get(), 0);
+
+  EXPECT_NE(myStream1, myStream2);
 }

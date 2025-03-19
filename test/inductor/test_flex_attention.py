@@ -9,7 +9,7 @@ from collections import namedtuple
 from contextlib import contextmanager
 from dataclasses import dataclass
 from itertools import product
-from typing import Callable, List, Optional, Tuple, Union
+from typing import Callable, Optional, Union
 from unittest import expectedFailure, skip, skipUnless
 from unittest.mock import patch
 
@@ -38,16 +38,15 @@ from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16, TEST_MUL
 from torch.testing._internal.common_device_type import (
     flex_attention_supported_platform as supported_platform,
 )
-from torch.testing._internal.common_utils import IS_MACOS, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import IS_MACOS
 from torch.utils._triton import has_triton
 
 
 # Use this decorator only when hitting Triton bugs on H100
 running_on_a100_only = skipUnless(
-    torch.cuda.is_available()
-    and has_triton()
-    and torch.cuda.get_device_capability() == (8, 0),
-    "Requires A100 and Triton",
+    (torch.cuda.is_available() and has_triton())
+    and (torch.cuda.get_device_capability() == (8, 0) or torch.version.hip),
+    "Requires Triton + A100 or Triton + ROCm",
 )
 
 Tolerances = namedtuple("Tolerances", ["atol", "rtol"])
@@ -135,7 +134,7 @@ else:
     )
 
     test_dtypes = (
-        [torch.float32, torch.bfloat16]
+        [torch.float32, torch.bfloat16, torch.float16]
         if torch.backends.mkldnn.is_available()
         and torch.ops.mkldnn._is_mkldnn_bf16_supported()
         else [torch.float32]
@@ -511,7 +510,7 @@ class TestFlexAttention(InductorTestCase):
         block_mask,
         dtype: torch.dtype = torch.float16,
         page_size: int = 128,
-    ) -> Tuple[Tensor, Tensor, BlockMask, _score_mod_signature]:
+    ) -> tuple[Tensor, Tensor, BlockMask, _score_mod_signature]:
         assert block_mask is not None, "Must provide block_mask"
         Q_B, Q_H, Q_S, _ = q.shape
         KV_B, KV_H, KV_S, QK_D = k.shape
@@ -575,7 +574,11 @@ class TestFlexAttention(InductorTestCase):
         )
 
         # update cache with k and v
-        input_pos = torch.arange(KV_S, device=self.device, dtype=torch.int32)
+        input_pos = (
+            torch.arange(KV_S, device=self.device, dtype=torch.int32)
+            .unsqueeze(0)
+            .expand(KV_B, KV_S)
+        )
         batch_idx = torch.arange(KV_B, device=self.device, dtype=torch.int32)
         paged_attention.assign(batch_idx, input_pos, k, v, k_cache, v_cache)
 
@@ -592,7 +595,7 @@ class TestFlexAttention(InductorTestCase):
         v: Tensor,
         dtype: torch.dtype = torch.float16,
         block_mask: Optional[BlockMask] = None,
-    ) -> Tuple[Tensor, Tensor]:
+    ) -> tuple[Tensor, Tensor]:
         B, Q_H, Q_S, KV_H, KV_S = (
             q.shape[0],
             q.shape[1],
@@ -793,7 +796,7 @@ class TestFlexAttention(InductorTestCase):
 
     def run_dynamic_test(
         self,
-        score_mask_mod: Tuple[Callable, Callable],
+        score_mask_mod: tuple[Callable, Callable],
         dtype: torch.dtype = torch.float16,
         B: int = B,
         H: int = H,
@@ -857,7 +860,8 @@ class TestFlexAttention(InductorTestCase):
         torch._dynamo.reset()
 
         # First compilation with original dimensions
-        compiled_sdpa1 = torch.compile(sdpa_partial1, dynamic=True)
+        backend = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+        compiled_sdpa1 = torch.compile(sdpa_partial1, backend=backend, dynamic=True)
         compiled_out1 = compiled_sdpa1(q1, k1, v1)
         compiled_out1.backward(backward_grad1)
 
@@ -875,10 +879,10 @@ class TestFlexAttention(InductorTestCase):
             v1_ref,
             v1,
         )
-        self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
+        self.assertEqual(backend.frame_count, 1)
 
         # Second compilation with new dimensions
-        compiled_sdpa2 = torch.compile(sdpa_partial2, dynamic=True)
+        compiled_sdpa2 = torch.compile(sdpa_partial2, backend=backend, dynamic=True)
         compiled_out2 = compiled_sdpa2(q2, k2, v2)
         compiled_out2.backward(backward_grad2)
 
@@ -896,10 +900,10 @@ class TestFlexAttention(InductorTestCase):
             v2_ref,
             v2,
         )
-        self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
+        self.assertEqual(backend.frame_count, 1)
 
         # Third compilation with new dimensions
-        compiled_sdpa3 = torch.compile(sdpa_partial3, dynamic=True)
+        compiled_sdpa3 = torch.compile(sdpa_partial3, backend=backend, dynamic=True)
         compiled_out3 = compiled_sdpa3(q3, k3, v3)
         compiled_out3.backward(backward_grad3)
 
@@ -917,7 +921,7 @@ class TestFlexAttention(InductorTestCase):
             v3_ref,
             v3,
         )
-        self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
+        self.assertEqual(backend.frame_count, 1)
 
     def run_automatic_dynamic_test(
         self,
@@ -1029,19 +1033,20 @@ class TestFlexAttention(InductorTestCase):
             fudge_factor = 1.1
 
         # The first batch.
-        compiled_out1 = torch.compile(sdpa_partial1)(q1, k1, v1)
+        backend = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+        compiled_out1 = torch.compile(sdpa_partial1, backend=backend)(q1, k1, v1)
         self._check_equal(golden_out1, ref_out1, compiled_out1, fudge_factor)
-        self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
+        self.assertEqual(backend.frame_count, 1)
 
         # The second batch (automatic dynamic).
-        compiled_out2 = torch.compile(sdpa_partial2)(q2, k2, v2)
+        compiled_out2 = torch.compile(sdpa_partial2, backend=backend)(q2, k2, v2)
         self._check_equal(golden_out2, ref_out2, compiled_out2, fudge_factor)
-        self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 2)
+        self.assertEqual(backend.frame_count, 2)
 
         # The third batch (no re-compilation).
-        compiled_out3 = torch.compile(sdpa_partial3)(q3, k3, v3)
+        compiled_out3 = torch.compile(sdpa_partial3, backend=backend)(q3, k3, v3)
         self._check_equal(golden_out3, ref_out3, compiled_out3, fudge_factor)
-        self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 2)
+        self.assertEqual(backend.frame_count, 2)
 
     @common_utils.parametrize("dtype", test_dtypes)
     @common_utils.parametrize("score_mod", test_score_mods)
@@ -1085,7 +1090,7 @@ class TestFlexAttention(InductorTestCase):
     @common_utils.parametrize("dtype", test_dtypes_fast)
     @common_utils.parametrize("score_mask_mod", test_score_mask_mod_map.items())
     def test_builtin_score_mods_dynamic(
-        self, dtype: torch.dtype, score_mask_mod: Tuple[Callable, Callable]
+        self, dtype: torch.dtype, score_mask_mod: tuple[Callable, Callable]
     ):
         self.run_dynamic_test(score_mask_mod, dtype)
 
@@ -1123,7 +1128,7 @@ class TestFlexAttention(InductorTestCase):
         self,
         dtype: torch.dtype,
         score_mod: Callable,
-        BLOCK_SIZE: Union[int, Tuple[int, int]],
+        BLOCK_SIZE: Union[int, tuple[int, int]],
     ):
         block_mask = create_block_mask(
             noop_mask, B, H, S, S, BLOCK_SIZE=BLOCK_SIZE, device=self.device
@@ -1138,8 +1143,8 @@ class TestFlexAttention(InductorTestCase):
     def test_kv_batch_broadcast(
         self,
         dtype: torch.dtype,
-        batch_dims: Tuple[int, int],
-        head_dims: Tuple[int, int],
+        batch_dims: tuple[int, int],
+        head_dims: tuple[int, int],
         score_mod: Callable,
     ):
         Hq, Hkv = head_dims
@@ -1171,8 +1176,8 @@ class TestFlexAttention(InductorTestCase):
     def test_kv_batch_broadcast_causal_mask(
         self,
         dtype: torch.dtype,
-        batch_dims: Tuple[int, int],
-        head_dims: Tuple[int, int],
+        batch_dims: tuple[int, int],
+        head_dims: tuple[int, int],
         score_mod: Callable,
     ):
         Hq, Hkv = head_dims
@@ -1674,10 +1679,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     def test_multiple_mask_calls(self):
-        if TEST_WITH_ROCM:
-            self.skipTest(
-                "ROCM BUG SEE: https://github.com/pytorch/pytorch/issues/140855"
-            )
         # Create inputs
         query = torch.randn(
             (1, 4, 512, 64), dtype=torch.float32, device="cuda", requires_grad=True
@@ -2127,6 +2128,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         torch.compile(flex_attention)(q, k, v, score_mod, block_mask=block_mask)
 
     @supported_platform
+    @common_utils.parametrize("head_dim", [17, 24, 94, 121])
+    @common_utils.parametrize("dtype", test_dtypes_fast)
+    def test_non_pow_2_headdim(self, dtype, head_dim):
+        self.run_test(_rel_bias, dtype, B, H, S, head_dim, B, H, S, head_dim)
+
+    @supported_platform
     def test_GQA_causal_mask(self):
         def mask_mod(b, h, q, kv):
             return q >= kv
@@ -2496,6 +2503,28 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         out.sum().backward()
 
     @supported_platform
+    def test_strided_backwards(self):
+        shape = (1, 2, 4096, 64)
+        Q = torch.randn(shape, requires_grad=True, device="cuda")
+        K = torch.randn(shape, requires_grad=True, device="cuda")
+        V = torch.randn(shape, requires_grad=True, device="cuda")
+        func = torch.compile(flex_attention, dynamic=True, fullgraph=True)
+
+        K_sliced = K[:, :, :-128]
+        V_sliced = V[:, :, :-128]
+
+        out_eager = flex_attention(Q, K_sliced, V_sliced)
+        out_compiled = func(Q, K_sliced, V_sliced)
+
+        grad = torch.rand_like(out_eager)
+
+        eager_grads = torch.autograd.grad(out_eager, (Q, K, V), grad)
+        compiled_grads = torch.autograd.grad(out_compiled, (Q, K, V), grad)
+
+        for eager, compiled in zip(eager_grads, compiled_grads):
+            torch.testing.assert_close(eager, compiled, atol=9e-3, rtol=0)
+
+    @supported_platform
     @common_utils.parametrize("mode", ["eager", "inductor", "paged_attention"])
     @common_utils.parametrize(
         "permute_order",
@@ -2543,6 +2572,57 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             query_stride_order,
             f"Stride order mismatch: out {out_stride_order}, query {query_stride_order}",
         )
+
+    @supported_platform
+    @common_utils.parametrize("mode", ["eager", "inductor"])
+    @common_utils.parametrize(
+        "permute_order",
+        [
+            (0, 1, 2, 3),
+            (1, 0, 2, 3),
+            (0, 2, 1, 3),
+            (2, 0, 1, 3),
+        ],
+    )
+    @common_utils.parametrize("shape", [(2, 5, 128, 16), (4, 2, 64, 16)])
+    def test_flex_attention_backward_stride_ordering(self, mode, permute_order, shape):
+        from torch._inductor.ir import get_stride_order
+
+        dtype = torch.float32
+        make_tensor = functools.partial(
+            torch.randn, shape, device="cuda", dtype=dtype, requires_grad=False
+        )
+
+        query, key, value = make_tensor(), make_tensor(), make_tensor()
+        query = query.permute(permute_order)
+        key = key.permute(permute_order)
+        value = value.permute(permute_order)
+
+        query.requires_grad_()
+        key.requires_grad_()
+        value.requires_grad_()
+
+        func = (
+            torch.compile(flex_attention, backend=mode, fullgraph=True)
+            if mode == "inductor"
+            else flex_attention
+        )
+        out = func(query, key, value)
+        grad_output = torch.randn_like(out)
+        out.backward(grad_output)
+
+        for leaf, grad, name in [
+            (query, query.grad, "query"),
+            (key, key.grad, "key"),
+            (value, value.grad, "value"),
+        ]:
+            input_stride_order = get_stride_order(grad.stride())
+            orig_stride_order = get_stride_order(leaf.stride())
+            self.assertEqual(
+                input_stride_order,
+                orig_stride_order,
+                f"Mode: {mode}, Stride order mismatch for {name}: grad {input_stride_order}, input {orig_stride_order}.",
+            )
 
     @supported_platform
     @common_utils.parametrize("compile", [True, False])
@@ -3001,8 +3081,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @common_utils.parametrize("backend", ["flex_attention", "flex_decode", "eager"])
     def test_lse_masked_output(self, backend):
         if backend == "flex_decode":
-            if TEST_WITH_ROCM:
-                self.skipTest("backend=flex_decode is unsupported on ROCM, for now")
             kernel_options = {"FORCE_USE_FLEX_ATTENTION": False}
             flex_call = torch.compile(flex_attention, fullgraph=True)
             N_CTX = 96
@@ -3249,6 +3327,60 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         assert (
             counter.frame_count == 1
         ), f"Expected 1 graph, but got {counter.frame_count} graphs"
+
+    @supported_platform
+    def test_dynamic_shapes_with_custom_kernel_options(self):
+        make_tensor = functools.partial(
+            torch.ones,
+            (8, 8, 1024, 64),
+            device="cuda",
+            dtype=torch.bfloat16,
+        )
+        query, key, value = make_tensor(), make_tensor(), make_tensor()
+        kernel_options = {"BLOCK_M": 64, "BLOCK_N": 64}
+        out_eager = flex_attention(query, key, value, kernel_options=kernel_options)
+
+        flex_compile = torch.compile(flex_attention, fullgraph=True, dynamic=True)
+        out_compiled = flex_compile(query, key, value, kernel_options=kernel_options)
+
+        torch.testing.assert_close(out_eager, out_compiled, atol=3e-3, rtol=2e-3)
+
+    @supported_platform
+    def test_dynamic_shapes_with_max_autotune(self):
+        make_tensor = functools.partial(
+            torch.ones,
+            (8, 8, 1024, 64),
+            device="cuda",
+            dtype=torch.bfloat16,
+        )
+        query, key, value = make_tensor(), make_tensor(), make_tensor()
+        block_mask = create_block_mask(_causal_mask, None, None, 1024, 1024)
+
+        out_eager = flex_attention(query, key, value, block_mask=block_mask)
+
+        flex_compile = torch.compile(
+            flex_attention, fullgraph=True, dynamic=True, mode="max-autotune"
+        )
+        out_compiled = flex_compile(query, key, value, block_mask=block_mask)
+
+        torch.testing.assert_close(out_eager, out_compiled, atol=3e-3, rtol=2e-3)
+
+    @supported_platform
+    def test_zero_length_sequence_error(self):
+        make_tensor = functools.partial(
+            torch.ones,
+            (8, 8, 0, 64),  # Zero in sequence dimension
+            device="cuda",
+            dtype=torch.bfloat16,
+        )
+        query, key, value = make_tensor(), make_tensor(), make_tensor()
+
+        # Test compiled mode - should also raise assertion error
+        flex_compile = torch.compile(flex_attention, fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._inductor.exc.InductorError, "Query length must be greater than 0"
+        ):
+            flex_compile(query, key, value)
 
     @supported_platform
     def test_causal_block_non_divisible_with_captured_buffer(self):
@@ -3530,23 +3662,6 @@ class GraphModule(torch.nn.Module):
         ):
             attention(query, key, value, return_lse=True)
 
-    @unittest.skipIf(TEST_ON_CUDA, "Testing CPU error message")
-    def test_validate_cpu_dtype_error_message(self):
-        make_tensor = functools.partial(
-            torch.randn,
-            (2, 2, 128, 16),
-            device="cpu",
-            dtype=torch.half,
-            requires_grad=False,
-        )
-        query, key, value = make_tensor(), make_tensor(), make_tensor()
-        attention = torch.compile(flex_attention)
-        with self.assertRaisesRegex(
-            torch._inductor.exc.InductorError,
-            r"`torch.float` and `torch.bfloat16` are supported in FlexAttention for CPU device. Found input tensors are `torch.float16`.",
-        ):
-            attention(query, key, value)
-
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     def test_device_cuda_1(self):
         class TestModule(torch.nn.Module):
@@ -3567,6 +3682,31 @@ class GraphModule(torch.nn.Module):
         mod = torch.compile(TestModule())
         attn_output = mod(q, k, v, mask)
         self.assertEqual(attn_output.device, torch.device("cuda:1"))
+
+    @supported_platform
+    def test_validate_small_embedding_size_error_message(self):
+        # eager support for small embedding size
+        q, k, v = [torch.randn(2, 2, 128, 8, device="cuda") for _ in range(3)]
+        flex_attention(q, k, v)
+
+        # compiled cpu support for small embedding size
+        q, k, v = [torch.randn(2, 2, 128, 8, device="cpu") for _ in range(3)]
+        flex_attention(q, k, v)
+
+        # compiled gpu kernel does not support small embedding size
+        q, k, v = [torch.randn(2, 2, 128, 8, device="cuda") for _ in range(3)]
+        compiled_fa = torch.compile(flex_attention)
+
+        with self.assertRaisesRegex(
+            torch._inductor.exc.InductorError,
+            "NYI: embedding dimension of the query, key, and value must be "
+            "at least 16 but got E=8 and Ev=8",
+        ):
+            compiled_fa(q, k, v)
+
+        # compiled gpu kernel supports large embedding size
+        q, k, v = [torch.randn(2, 2, 128, 16, device="cuda") for _ in range(3)]
+        compiled_fa = torch.compile(flex_attention)
 
 
 class TestBlockMask(InductorTestCase):
@@ -3595,7 +3735,7 @@ class TestBlockMask(InductorTestCase):
 
     @supported_platform
     @common_utils.parametrize("BLOCK_SIZE", [32, 64, 128, 256, (32, 64), (64, 32)])
-    def test_block_size_changes(self, BLOCK_SIZE: Union[int, Tuple[int, int]]):
+    def test_block_size_changes(self, BLOCK_SIZE: Union[int, tuple[int, int]]):
         B, H, Q_LEN, KV_LEN = 4, 2, 2048, 2048
 
         if isinstance(BLOCK_SIZE, int):
@@ -3880,6 +4020,18 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         self.assertEqual(block_mask_custom.BLOCK_SIZE, custom_block_size)
 
     @supported_platform
+    def test_upcast_appropriately(self):
+        q = torch.randn((1, 1, 128, 16), dtype=torch.float16, device="cuda")
+        k = torch.randn((1, 1, 128, 16), dtype=torch.float16, device="cuda")
+        v = torch.randn((1, 1, 128, 16), dtype=torch.float16, device="cuda")
+        mass = torch.ones((1), dtype=torch.float16, device="cuda")
+
+        def score_mod(score, b, h, q_idx, kv_idx):
+            return score + torch.log(mass[0])
+
+        torch.compile(flex_attention)(q, k, v, score_mod=score_mod)
+
+    @supported_platform
     def test_init_mismatched_full_kv(self):
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         kv_num_blocks, kv_indices, full_kv_num_blocks, _ = self.generate_test_inputs(
@@ -3969,7 +4121,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             )
 
         def length_to_offsets(
-            lengths: List[int], device: Union[str, torch.device]
+            lengths: list[int], device: Union[str, torch.device]
         ) -> Tensor:
             offsets = [0]
             offsets.extend(lengths)
@@ -4070,6 +4222,18 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             expected_shape,
             f"Expected output shape {expected_shape}, but got {result.shape}",
         )
+
+    @supported_platform
+    def test_create_is_cuda_graphable(self):
+        def mask_mod(b, h, q, kv):
+            return q >= kv
+
+        g = torch.cuda.CUDAGraph()
+
+        with torch.cuda.graph(g):
+            create_block_mask(mask_mod, None, None, 256, 256)
+
+        g.replay()
 
     @common_utils.parametrize("compile", [False, True])
     @supported_platform
@@ -4346,7 +4510,11 @@ class TestPagedAttention(InductorTestCase):
         self.assertEqual(paged_cache.page_table, expected_page_table)
 
         batch_idx = torch.arange(max_batch_size, device="cuda", dtype=torch.int32)
-        input_pos = torch.arange(max_seq_len, device="cuda", dtype=torch.int32)
+        input_pos = (
+            torch.arange(max_seq_len, device="cuda", dtype=torch.int32)
+            .unsqueeze(0)
+            .expand(max_batch_size, max_seq_len)
+        )
         k = torch.arange(
             max_batch_size * n_heads * max_seq_len * head_dim,
             device="cuda",
@@ -4496,7 +4664,11 @@ class TestPagedAttention(InductorTestCase):
         )
 
         batch_idx = torch.arange(max_batch_size, device=self.device, dtype=torch.int32)
-        input_pos = torch.arange(max_seq_len, device=self.device, dtype=torch.int32)
+        input_pos = (
+            torch.arange(max_seq_len, device=self.device, dtype=torch.int32)
+            .unsqueeze(0)
+            .expand(max_batch_size, max_seq_len)
+        )
         paged_cache.assign(batch_idx, input_pos, k, v, k_cache, v_cache)
 
         new_block_mask = paged_cache.convert_logical_block_mask(block_mask)
@@ -4532,7 +4704,7 @@ class Params:
         return f"batch:{self.batch_size}_head:{self.num_heads}_seq_len:{self.seq_length}_headdim:{self.head_dim}_dtype:{str(self.dtype).split('.')[-1]}"
 
 
-def get_params(dtypes: List[torch.dtype]) -> List[Params]:
+def get_params(dtypes: list[torch.dtype]) -> list[Params]:
     params = []
     seq_lengths = [37, 256, 277]
     for seq_len, dtype in product(seq_lengths, dtypes):
@@ -4544,13 +4716,10 @@ def get_params(dtypes: List[torch.dtype]) -> List[Params]:
     return params
 
 
-# ROCM BUG SEE: https://github.com/pytorch/pytorch/issues/140855
 supports_learnable_bias = unittest.skipUnless(
-    torch.cuda.is_available()
-    and torch.utils._triton.has_triton()
-    and torch.cuda.get_device_capability() >= (8, 0)
-    and not TEST_WITH_ROCM,
-    "Requires CUDA and Triton, and is not supported on ROCm",
+    (torch.cuda.is_available() and has_triton())
+    and (torch.cuda.get_device_capability() == (8, 0) or torch.version.hip),
+    "Requires Triton + A100 or Triton + ROCm",
 )
 
 

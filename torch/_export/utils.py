@@ -1,30 +1,21 @@
 # mypy: allow-untyped-defs
 import ast
+import copy
 import dataclasses
 import functools
 import inspect
+import json
 import math
 import operator
 import re
+from collections.abc import Iterable
 from contextlib import contextmanager
-from inspect import Parameter
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Iterable,
-    List,
-    Optional,
-    Set,
-    Tuple,
-    Type,
-    TYPE_CHECKING,
-    Union,
-)
+from inspect import ismethod, Parameter
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch._guards import detect_fake_mode
-from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx._utils import first_call_function_nn_module_stack
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
@@ -37,7 +28,12 @@ if TYPE_CHECKING:
     from torch.export.graph_signature import ExportGraphSignature
 
 from torch.export.graph_signature import CustomObjArgument, InputKind, OutputKind
+from torch.fx._pytree import (
+    _deregister_pytree_flatten_spec,
+    register_pytree_flatten_spec,
+)
 from torch.utils._pytree import (
+    _deregister_pytree_node,
     _register_pytree_node,
     Context,
     FlattenFunc,
@@ -93,6 +89,52 @@ def _collect_and_set_constant_attrs(
     return constant_attrs
 
 
+def _register_constants_as_buffers(
+    mod: torch.fx.GraphModule, state_dict, non_persistent_buffers
+):
+    # TODO some annoying circular dependency issue
+    from torch.export.unflatten import _assign_attr, _AttrKind
+
+    temp_registered_constants = set()
+
+    for node in mod.graph.nodes:
+        if node.op == "get_attr":
+            target = torch.fx.graph_module._get_attr(mod, node.target)
+            if isinstance(target, torch.Tensor):
+                # Make sure we also check if the original buffer is
+                # non persistent as well.
+                if (node.target not in state_dict) and (
+                    node.target not in non_persistent_buffers
+                ):
+                    torch.fx.graph_module._del_attr(mod, node.target)
+                    _assign_attr(target, mod, node.target, _AttrKind.BUFFER, False)
+                    temp_registered_constants.add(node.target)
+
+    mod.recompile()
+
+    return temp_registered_constants
+
+
+def _override_graph_signature_for_temp_registered_constants(
+    sig: "ExportGraphSignature", temp_registered_constants
+):
+    for spec in sig.input_specs:
+        if spec.target in temp_registered_constants:
+            spec.kind = InputKind.CONSTANT_TENSOR
+            spec.persistent = None
+
+    for spec in sig.output_specs:
+        if (
+            spec.kind == OutputKind.BUFFER_MUTATION
+            and spec.target in temp_registered_constants
+        ):
+            raise RuntimeError(
+                f"Constant {spec.target} is mutated in the forward method. Pls register it as buffer"
+            )
+
+    return sig
+
+
 def _overwrite_signature_for_non_persistent_buffers(
     old_sig: "ExportGraphSignature", new_sig: "ExportGraphSignature"
 ):
@@ -109,7 +151,7 @@ def _overwrite_signature_for_non_persistent_buffers(
     return new_sig
 
 
-def _collect_param_buffer_metadata(mod: torch.fx.GraphModule) -> Dict[str, Any]:
+def _collect_param_buffer_metadata(mod: torch.fx.GraphModule) -> dict[str, Any]:
     """
     Param/buffer metadata needs to be saved before lowering to aten IR
     because aten IR lifts them, as a result, automatic preservation doesn't work.
@@ -167,7 +209,7 @@ def _collect_param_buffer_metadata(mod: torch.fx.GraphModule) -> Dict[str, Any]:
 
 
 def _populate_param_buffer_metadata_to_new_gm(
-    params_buffers_to_node_meta: Dict[str, Any],
+    params_buffers_to_node_meta: dict[str, Any],
     gm: torch.fx.GraphModule,
     new_sig: "ExportGraphSignature",
 ) -> None:
@@ -210,7 +252,7 @@ def _get_shape_env_from_gm(gm: torch.fx.GraphModule):
 
 
 def _rename_without_collisions(
-    name_map: Dict[str, str],
+    name_map: dict[str, str],
     orig_name: str,
     name: str,
     is_placeholder: bool = False,
@@ -239,7 +281,7 @@ def _rename_without_collisions(
 
 
 def _check_input_constraints_for_graph(
-    input_placeholders: List[torch.fx.Node], flat_args_with_path, range_constraints
+    input_placeholders: list[torch.fx.Node], flat_args_with_path, range_constraints
 ) -> None:
     def get_keystr(key_path: KeyPath) -> str:
         """For a given index into the flat_args, return a human readable string
@@ -273,7 +315,7 @@ def _check_input_constraints_for_graph(
     # NOTE: export already guarantees that the same symbol is used in metadata
     # for all InputDims related by equality constraints, so we can just unify
     # symbols with given input dimension values to check equality constraints.
-    unification_map: Dict[sympy.Symbol, Any] = {}
+    unification_map: dict[sympy.Symbol, Any] = {}
     for (key_path, arg), node in zip(flat_args_with_path, input_placeholders):
         node_val = node.meta.get("val")
         if isinstance(node_val, FakeTensor):
@@ -365,7 +407,7 @@ def _check_input_constraints_for_graph(
 
 
 def register_dataclass_as_pytree_node(
-    cls: Type[Any],
+    cls: type[Any],
     flatten_fn: Optional[FlattenFunc] = None,
     unflatten_fn: Optional[UnflattenFunc] = None,
     *,
@@ -378,7 +420,7 @@ def register_dataclass_as_pytree_node(
         cls
     ), f"Only dataclasses can be registered with this function: {cls}"
 
-    def default_flatten_fn(obj: Any) -> Tuple[List[Any], Context]:
+    def default_flatten_fn(obj: Any) -> tuple[list[Any], Context]:
         flattened = []
         flat_names = []
         none_names = []
@@ -395,7 +437,7 @@ def register_dataclass_as_pytree_node(
         flat_names, none_names = context
         return cls(**dict(zip(flat_names, values)), **dict.fromkeys(none_names))
 
-    def default_flatten_fn_with_keys(obj: Any) -> Tuple[List[Any], Context]:
+    def default_flatten_fn_with_keys(obj: Any) -> tuple[list[Any], Context]:
         flattened, (flat_names, _none_names) = flatten_fn(obj)  # type: ignore[misc]
         return [(MappingKey(k), v) for k, v in zip(flat_names, flattened)], flat_names
 
@@ -530,7 +572,7 @@ def sequential_split(
     return new_gm
 
 
-def nodes_filter(nodes: List[torch.fx.Node], node_call_back) -> List[torch.fx.Node]:
+def nodes_filter(nodes: list[torch.fx.Node], node_call_back) -> list[torch.fx.Node]:
     """Returns the nodes that match the node_call_back as a list."""
     return [node for node in nodes if node_call_back(node)]
 
@@ -565,7 +607,7 @@ def apply_runtime_assertion_pass(gm: torch.fx.GraphModule, graph_signature):
 
 
 def nodes_first(
-    nodes: List[torch.fx.Node], node_call_back=None
+    nodes: list[torch.fx.Node], node_call_back=None
 ) -> Optional[torch.fx.Node]:
     """
     Returns the first node that matches the node_call_back. If no node matches, returns None.
@@ -577,12 +619,12 @@ def nodes_first(
     return None
 
 
-def nodes_count(nodes: List[torch.fx.Node], node_call_back) -> int:
+def nodes_count(nodes: list[torch.fx.Node], node_call_back) -> int:
     """Returns the number of nodes that match the node_call_back."""
     return len(nodes_filter(nodes, node_call_back))
 
 
-def nodes_map(nodes: List[torch.fx.Node], node_call_back) -> List[torch.fx.Node]:
+def nodes_map(nodes: list[torch.fx.Node], node_call_back) -> list[torch.fx.Node]:
     """
     Sequentially visit the nodes list and invoke node_call_back on each element.
     Returns the nodes list after the node_call_back is invoked on each element.
@@ -726,7 +768,11 @@ def _bind_signature_to_inputs(mod, fake_args, fake_kwargs):
     else:
         sig = inspect.signature(mod.forward)
 
-    return sig.bind(*fake_args, **fake_kwargs).arguments
+    # Rather than binding both fake_args and fake_kwargs to sig names, we
+    # (partially) bind only fake_args, while reusing fake_kwarg names. This
+    # ensures that fake_kwargs do not get reordered, which is important to
+    # match flattened user inputs.
+    return {**sig.bind_partial(*fake_args).arguments, **fake_kwargs}
 
 
 def _name_hoo_subgraph_placeholders(gm: torch.fx.GraphModule) -> None:
@@ -737,7 +783,7 @@ def _name_hoo_subgraph_placeholders(gm: torch.fx.GraphModule) -> None:
     and gather the top-level named placeholder nodes.
     """
     # gather all HOO subgraphs and their top-level named placeholder nodes
-    subgraph_ph_tuples: List[Tuple[torch.fx.GraphModule, List[torch.fx.Node]]] = []
+    subgraph_ph_tuples: list[tuple[torch.fx.GraphModule, list[torch.fx.Node]]] = []
     for node in gm.graph.nodes:
         if node.op == "call_function" and isinstance(
             node.target, torch._ops.HigherOrderOperator
@@ -758,7 +804,7 @@ def _name_hoo_subgraph_placeholders(gm: torch.fx.GraphModule) -> None:
 
     # propagate names
     for subgraph, hoo_phs in subgraph_ph_tuples:
-        name_map: Dict[str, str] = {}
+        name_map: dict[str, str] = {}
         for i, node in enumerate(subgraph.graph.nodes):
             if i < len(hoo_phs):  # placeholder, retain name
                 name_map[node.name] = hoo_phs[i].name
@@ -778,7 +824,7 @@ def placeholder_naming_pass(
     fake_args,
     fake_kwargs,
     fake_params_buffers,
-    constants: Dict[str, Any],
+    constants: dict[str, Any],
 ) -> None:
     """
     This pass is run at the end of _export_non_strict() to assign better placeholder node names:
@@ -817,7 +863,7 @@ def placeholder_naming_pass(
         else:
             raise RuntimeError(f"Pytree key of type {type(x)} not handled for {x}")
 
-    name_map: Dict[str, str] = {}
+    name_map: dict[str, str] = {}
 
     # map user input names with mod.forward() signature
     combined_args = _bind_signature_to_inputs(mod, fake_args, fake_kwargs)
@@ -916,7 +962,7 @@ def placeholder_naming_pass(
                 del constants[name]
 
 
-def remove_proxy_from_state_dict(state_dict: Dict, in_place: bool) -> Dict:
+def remove_proxy_from_state_dict(state_dict: dict, in_place: bool) -> dict:
     """
     If `in_place` is false, return a new copy of `state_dict` with "proxy" removed from `v.__dict__`.
     `v` is the values in the dictionary.
@@ -946,8 +992,8 @@ def _detect_fake_mode_from_gm(
     If no fake mode is found, we return None for fake_mode.
     """
 
-    fake_inps: List[torch.Tensor] = []
-    fake_vals: List[torch.Tensor] = []
+    fake_inps: list[torch.Tensor] = []
+    fake_vals: list[torch.Tensor] = []
     for node in gm.graph.nodes:
         if node.op == "placeholder" and "val" in node.meta:
             fake_val = node.meta["val"]
@@ -969,8 +1015,8 @@ def _detect_fake_mode_from_gm(
 
 @contextmanager
 def _disable_load_state_dict_hooks(mod: torch.nn.Module):
-    state_dict_hooks: Dict[int, Callable] = dict(mod._state_dict_hooks)
-    state_dict_pre_hooks: Dict[int, Callable] = dict(mod._state_dict_pre_hooks)
+    state_dict_hooks: dict[int, Callable] = dict(mod._state_dict_hooks)
+    state_dict_pre_hooks: dict[int, Callable] = dict(mod._state_dict_pre_hooks)
     mod._state_dict_hooks.clear()
     mod._state_dict_pre_hooks.clear()
     try:
@@ -1064,11 +1110,11 @@ def _check_valid_to_preserve(op_overload: "OperatorBase"):
 
 
 @functools.lru_cache(maxsize=1)
-def _collect_all_valid_cia_ops_for_aten_namespace() -> Set["OperatorBase"]:
+def _collect_all_valid_cia_ops_for_aten_namespace() -> set["OperatorBase"]:
     return _collect_all_valid_cia_ops_for_namespace("aten")
 
 
-def _collect_all_valid_cia_ops_for_namespace(namespace: str) -> Set["OperatorBase"]:
+def _collect_all_valid_cia_ops_for_namespace(namespace: str) -> set["OperatorBase"]:
     # Step 1: Materialize all ops from C++ dispatcher
     _materialize_cpp_cia_ops()
 
@@ -1085,7 +1131,7 @@ def _collect_all_valid_cia_ops_for_namespace(namespace: str) -> Set["OperatorBas
     return cia_ops
 
 
-def _collect_all_valid_cia_ops() -> Set["OperatorBase"]:
+def _collect_all_valid_cia_ops() -> set["OperatorBase"]:
     """
     This is an util function that gets the all CIA functional ops.
 
@@ -1150,3 +1196,206 @@ def _compiling_state_context():
     finally:
         torch.compiler._is_compiling_flag = old_compiling_flag
         torch.compiler._is_exporting_flag = old_exporting_flag
+
+
+def _fakify_params_buffers(
+    fake_mode: FakeTensorMode,
+    mod: torch.nn.Module,
+) -> dict[str, Union[torch.Tensor, torch.nn.Parameter]]:
+    params_buffers = {
+        **dict(mod.named_parameters(remove_duplicate=False)),
+        **dict(mod.named_buffers(remove_duplicate=False)),
+    }
+
+    faked_params_buffers = {}
+    memo: dict[int, FakeTensor] = {}
+    for key, value in params_buffers.items():
+        if id(value) in memo:
+            fake_tensor = memo[id(value)]
+        else:
+            fake_tensor = fake_mode.from_tensor(value, static_shapes=True)
+            memo[id(value)] = fake_tensor
+        faked_params_buffers[key] = fake_tensor
+    return faked_params_buffers  # type: ignore[return-value]
+
+
+def register_module_as_pytree_input_node(cls: type[torch.nn.Module]) -> None:
+    """
+    Registers a module as a valid input type for :func:`torch.export.export`.
+
+    Args:
+        mod: the module instance
+        serialized_type_name: The serialized name for the module. This is
+        required if you want to serialize the pytree TreeSpec containing this
+        module.
+
+    Example::
+
+        import torch
+
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        torch._export.utils.register_module_as_pytree_node(InputDataClass)
+
+        class Mod(torch.nn.Module):
+            def forward(self, x, m):
+                return m(x) + x
+
+        ep = torch.export.export(Mod(), (torch.randn(3), Module()))
+        print(ep)
+
+    """
+    assert issubclass(cls, torch.nn.Module)
+
+    import weakref
+
+    class PrototypeModule(weakref.ref):
+        def __init__(self, m, *args, **kwargs):
+            super().__init__(m, *args, **kwargs)  # type: ignore[call-arg]
+            assert isinstance(m, torch.nn.Module)
+            assert not hasattr(self, "_proto_cls")
+            self._proto_cls = cls
+
+        def __eq__(self, other):
+            return self._proto_cls == other._proto_cls
+
+        def __deepcopy__(self, memo):
+            return PrototypeModule(self())
+
+    def default_flatten_fn(obj: Any) -> tuple[list[Any], Context]:
+        named_parameters = dict(obj.named_parameters())
+        named_buffers = dict(obj.named_buffers())
+        params_buffers = {**named_parameters, **named_buffers}
+        return list(params_buffers.values()), [
+            list(params_buffers.keys()),
+            PrototypeModule(obj),
+        ]
+
+    def default_unflatten_fn(values: Iterable[Any], context: Context) -> Any:
+        flat_names, ref = context
+        if ref is None or ref() is None:
+            raise RuntimeError("Module has been garbage collected")
+        obj = ref()
+        assert flatten_fn is not None
+        flattened, _ = flatten_fn(obj)
+
+        # NOTE: This helper function will replicate an nn.Module in the exactly same
+        #       structure to be used together with _reparametrize_module. This will
+        #       create a clone of the module with the new parameters and buffers without
+        #       affecting the original module.
+        def copy_module(mod: torch.nn.Module):
+            ret = copy.copy(mod)
+            ret.__dict__ = {copy.copy(k): copy.copy(v) for k, v in mod.__dict__.items()}
+            for name, child in ret.named_children():
+                setattr(ret, name, copy_module(child))
+            return ret
+
+        if any(v is not o for v, o in zip(values, flattened)):
+            with torch.nn.utils.stateless._reparametrize_module(
+                obj, dict(zip(flat_names, values)), tie_weights=True, strict=True
+            ):
+                ret = copy_module(obj)
+        else:
+            ret = obj
+        return ret
+
+    def default_flatten_fn_with_keys(obj: Any) -> tuple[list[Any], Context]:
+        flattened, [flat_names, *args] = flatten_fn(obj)  # type: ignore[misc]
+        return [(MappingKey(k), v) for k, v in zip(flat_names, flattened)], [
+            flat_names,
+            *args,
+        ]
+
+    flatten_fn = default_flatten_fn
+    unflatten_fn = default_unflatten_fn
+
+    serialized_type_name = cls.__module__ + "." + cls.__qualname__
+
+    def to_dumpable_context(context):
+        keys, *_ = context
+        return json.dumps([keys, *([None] * len(_))])
+
+    def from_dumpable_context(dumpable):
+        s = json.loads(dumpable)
+        s[1] = PrototypeModule(torch.nn.Module())
+        return s
+
+    _register_pytree_node(
+        cls,
+        flatten_fn,
+        unflatten_fn,
+        serialized_type_name=serialized_type_name,
+        flatten_with_keys_fn=default_flatten_fn_with_keys,
+        to_dumpable_context=to_dumpable_context,
+        from_dumpable_context=from_dumpable_context,
+    )
+
+    def default_flatten_fn_spec(obj, spec) -> list[Any]:
+        flats, context = flatten_fn(obj)
+        assert context == spec.context
+        return flats
+
+    register_pytree_flatten_spec(
+        cls,
+        default_flatten_fn_spec,
+    )
+
+
+def deregister_module_as_pytree_input_node(cls: type[torch.nn.Module]) -> None:
+    _deregister_pytree_node(cls)
+    _deregister_pytree_flatten_spec(cls)
+
+
+def _sync_state(src, dst):
+    assert isinstance(
+        src,
+        torch.nn.Module,
+    ), f"Expected {src} to be a nn.Module"
+    assert isinstance(
+        dst,
+        torch.nn.Module,
+    ), f"Expected {dst} to be a nn.Module"
+    # Share state (params, buffers) between modules.
+    # This ensures that state mutations are visible across them.
+    # Since tensor constants are not mutable, copying (without sharing) is OK.
+    # Also, primitive constants are specialized, so copying (without sharing) is OK.
+    dst._parameters = src._parameters
+    dst._buffers = src._buffers
+
+
+def sync_state(*wrapped_method_modules):
+    """
+    Sync state between exported modules corresponding to wrapped methods.
+    This might be necessary after serializing/deserializing due to copying.
+    """
+    if wrapped_method_modules:
+        m, *other_ms = wrapped_method_modules
+        for other_m in other_ms:
+            _sync_state(m, other_m)
+
+
+class _WrappedMethod(torch.nn.Module):
+    def __init__(self, method):
+        super().__init__()
+        # share state of method's self module
+        _sync_state(method.__self__, self)
+        # redirect forward to method
+        self.forward = method
+
+
+def wrap_method(method):
+    """
+    Wrap a method as a module so that it can be exported.
+    The wrapped module's forward points to the method, and
+    the method's original module state is shared.
+    """
+    assert ismethod(
+        method,
+    ), f"Expected {method} to be a method"
+    return _WrappedMethod(method)

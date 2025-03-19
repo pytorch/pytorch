@@ -38,8 +38,6 @@
 #include <torch/csrc/distributed/c10d/logging.h>
 #include <torch/csrc/distributed/c10d/socket_fmt.h>
 
-#include <c10/util/CallOnce.h>
-
 namespace c10d::detail {
 namespace {
 #ifdef _WIN32
@@ -1027,17 +1025,16 @@ void SocketConnectOp::throwTimeoutError() const {
 
 void Socket::initialize() {
 #ifdef _WIN32
-  static c10::once_flag init_flag{};
-
   // All processes that call socket functions on Windows must first initialize
   // the Winsock library.
-  c10::call_once(init_flag, []() {
+  static bool init_flag [[maybe_unused]] = []() {
     WSADATA data{};
     if (::WSAStartup(MAKEWORD(2, 2), &data) != 0) {
       C10D_THROW_ERROR(
           SocketError, "The initialization of Winsock has failed.");
     }
-  });
+    return true;
+  }();
 #endif
 }
 

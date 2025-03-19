@@ -15,6 +15,9 @@ class DetectorMap {
  public:
   DetectorMap(const DetectorMap&) = delete;
   DetectorMap& operator=(const DetectorMap&) = delete;
+  DetectorMap(DetectorMap&&) = delete;
+  DetectorMap& operator=(DetectorMap&&) = delete;
+  ~DetectorMap() = default;
   static DetectorMap& get() {
     static DetectorMap instance;
     return instance;

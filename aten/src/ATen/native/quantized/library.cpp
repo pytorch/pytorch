@@ -1,5 +1,5 @@
 #include <torch/library.h>
-#include <aten/src/ATen/native/quantized/library.h>
+#include <ATen/native/quantized/library.h>
 
 TORCH_LIBRARY(quantized, m) {
   m.set_python_module("caffe2.torch.fb.model_transform.splitting.split_dispatcher");
@@ -216,6 +216,7 @@ TORCH_LIBRARY(quantized, m) {
   m.def(TORCH_SELECTIVE_SCHEMA("quantized::prelu(Tensor qx, Tensor weight, float output_scale, int output_zero_point) -> Tensor"), {at::Tag::pt2_compliant_tag});
   m.def(TORCH_SELECTIVE_SCHEMA("quantized::sigmoid(Tensor qx, float output_scale, int output_zero_point) -> Tensor"), {at::Tag::pt2_compliant_tag});
   m.def(TORCH_SELECTIVE_SCHEMA("quantized::softmax(Tensor qx, int dim, float output_scale, int output_zero_point) -> Tensor"), {at::Tag::pt2_compliant_tag});
+  m.def(TORCH_SELECTIVE_SCHEMA("quantized::int4mm_packed_weight_cpu(Tensor self, Tensor mat2, Tensor qGroupSize, Tensor qScaleAndZeros) -> Tensor"));
 }
 
 // According to #33294: The "_" prefix registration will be

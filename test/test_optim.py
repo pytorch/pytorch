@@ -4,7 +4,8 @@ import math
 import tempfile
 import unittest
 from copy import deepcopy
-from typing import Any, Dict, Tuple
+from itertools import product
+from typing import Any
 from unittest.mock import patch
 
 from optim.test_lrscheduler import TestLRScheduler  # noqa: F401
@@ -44,7 +45,6 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
-    xfailIfS390X,
 )
 
 
@@ -52,17 +52,17 @@ FP16_REDUCED_PRECISION = {"atol": 1e-5, "rtol": 1e-4}
 
 
 def rosenbrock(tensor):
-    assert tensor.size() == torch.Size(
-        [2]
-    ), f"Requires tensor with 2 scalars but got {tensor.size()}"
+    assert tensor.size() == torch.Size([2]), (
+        f"Requires tensor with 2 scalars but got {tensor.size()}"
+    )
     x, y = tensor
     return (1 - x) ** 2 + 100 * (y - x**2) ** 2
 
 
 def drosenbrock(tensor):
-    assert tensor.size() == torch.Size(
-        [2]
-    ), f"Requires tensor with 2 scalars but got {tensor.size()}"
+    assert tensor.size() == torch.Size([2]), (
+        f"Requires tensor with 2 scalars but got {tensor.size()}"
+    )
     x, y = tensor
     return torch.stack((-400 * x * (y - x**2) - 2 * (1 - x), 200 * (y - x**2)))
 
@@ -315,15 +315,20 @@ class TestOptimRenewed(TestCase):
 
             self.assertLess(closure().item(), initial_value)
 
+    @parametrize("num_dim", [0, 1, 2])
     @optims(optim_db, dtypes=[torch.float32])
-    def test_tensor_lr(self, device, dtype, optim_info):
+    def test_tensor_lr(self, device, dtype, optim_info, num_dim):
         optim_cls = optim_info.optim_cls
+
+        lr_devices = [device]
+        if _get_device_type(device) != "cpu":
+            lr_devices.append("cpu")
 
         # Skip differentiable testing for now, see https://github.com/pytorch/pytorch/issues/116490
         all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(
             device, dtype, optim_info, skip=("differentiable",)
         )
-        for optim_input in all_optim_inputs:
+        for optim_input, lr_device in product(all_optim_inputs, lr_devices):
             weight = Parameter(torch.randn((10, 5), device=device, dtype=dtype))
             weight_c = weight.detach().clone().requires_grad_(True)
             bias = Parameter(torch.randn((10), device=device, dtype=dtype))
@@ -338,7 +343,9 @@ class TestOptimRenewed(TestCase):
             optimizer_r = optim_cls([weight, bias], **kwargs)
 
             try:
-                kwargs["lr"] = torch.tensor(kwargs["lr"])
+                kwargs["lr"] = (
+                    torch.tensor(kwargs["lr"]).reshape([1] * num_dim).to(lr_device)
+                )
                 optimizer = optim_cls([weight_c, bias_c], **kwargs)
             except ValueError as e:
                 self.assertRegex(str(e), ".*lr as a Tensor is not supported.*")
@@ -365,7 +372,9 @@ class TestOptimRenewed(TestCase):
                     )
                 else:
                     closure(optimizer_r, weight, bias, inpt)
+                    optimizer_r.step()
                     closure(optimizer, weight_c, bias_c, inpt)
+                    optimizer.step()
 
                 self.assertEqual(weight, weight_c)
                 self.assertEqual(bias, bias_c)
@@ -581,7 +590,6 @@ class TestOptimRenewed(TestCase):
             self.assertEqual(complex_steps, real_steps)
 
     @skipMPS
-    @xfailIfS390X
     @optims([o for o in optim_db if o.supports_complex], dtypes=[torch.complex64])
     def test_complex_2d(self, device, dtype, optim_info):
         optim_cls = optim_info.optim_cls
@@ -671,9 +679,28 @@ class TestOptimRenewed(TestCase):
 
         loaded_dict = optim.state_dict()
 
+        # Test that Adam respects the decoupled_weight_decay key
         new_optim = torch.optim.Adam(model.parameters())
         new_optim.load_state_dict(loaded_dict)
+        self.assertTrue(new_optim.param_groups[0]["decoupled_weight_decay"])
 
+        # Test that decoupled_weight_decay is always True for AdamW
+        adam_optim = torch.optim.Adam(model.parameters())
+        adam_state_dict = adam_optim.state_dict()
+        self.assertFalse(adam_state_dict["param_groups"][0]["decoupled_weight_decay"])
+
+        new_optim = torch.optim.AdamW(model.parameters())
+        new_optim.load_state_dict(adam_state_dict)
+        self.assertTrue(new_optim.param_groups[0]["decoupled_weight_decay"])
+
+        # Test that state_dicts from the old AdamW (with no decoupled_weight_decay key)
+        # will have decoupled_weight_decay=True in new AdamW:
+        old_adamw_dict = deepcopy(loaded_dict)
+        del old_adamw_dict["param_groups"][0]["decoupled_weight_decay"]
+        self.assertFalse("decoupled_weight_decay" in old_adamw_dict["param_groups"][0])
+
+        new_optim = torch.optim.AdamW(model.parameters())
+        new_optim.load_state_dict(old_adamw_dict)
         self.assertTrue(new_optim.param_groups[0]["decoupled_weight_decay"])
 
     def _compare_between(
@@ -1323,7 +1350,7 @@ class TestOptimRenewed(TestCase):
                 )
 
             if kwargs.get("differentiable", False):
-                params = [param.clone()]
+                params = [param.detach()]
             else:
                 params = [param]
 
@@ -1357,7 +1384,7 @@ class TestOptimRenewed(TestCase):
             kwargs = optim_input.kwargs
 
             if kwargs.get("differentiable", False):
-                params = [param.clone()]
+                params = [param.detach()]
             else:
                 params = [param]
 
@@ -1769,8 +1796,8 @@ class TestOptimRenewed(TestCase):
 
     @staticmethod
     def _state_dict_post_hook(
-        optimizer: Optimizer, state_dict: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        optimizer: Optimizer, state_dict: dict[str, Any]
+    ) -> dict[str, Any]:
         if "test" in state_dict["state"]:
             state_dict["state"].pop("test")
             state_dict["ran_state_dict_pre_hook"] = True
@@ -1821,14 +1848,14 @@ class TestOptimRenewed(TestCase):
 
     @staticmethod
     def _load_state_dict_pre_hook1(
-        optimizer: Optimizer, state_dict: Dict[str, Any]
+        optimizer: Optimizer, state_dict: dict[str, Any]
     ) -> None:
         state_dict["param_groups"][0]["lr"] = 0.002
 
     @staticmethod
     def _load_state_dict_pre_hook2(
-        optimizer: Optimizer, state_dict: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        optimizer: Optimizer, state_dict: dict[str, Any]
+    ) -> dict[str, Any]:
         # The typical use case for returning a state dict is to drastically modify the state dict.
         # I will simulate by simply making a deep copy and ensuring that my_state_dict still gets used
         my_state_dict = deepcopy(state_dict)
@@ -1906,7 +1933,7 @@ class TestOptimRenewed(TestCase):
 
     @optims(optim_db, dtypes=[torch.float32])
     def test_step_post_hook(self, device, dtype, optim_info):
-        def post_hook(opt: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
+        def post_hook(opt: Optimizer, args: tuple[Any], kwargs: dict[Any, Any]):
             nonlocal data
             data += 2
 
@@ -1938,7 +1965,7 @@ class TestOptimRenewed(TestCase):
 
     @optims(optim_db, dtypes=[torch.float32])
     def test_step_pre_hook(self, device, dtype, optim_info):
-        def pre_hook(opt: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
+        def pre_hook(opt: Optimizer, args: tuple[Any], kwargs: dict[Any, Any]):
             nonlocal data
             data += 2
 
@@ -1970,19 +1997,19 @@ class TestOptimRenewed(TestCase):
 
     @optims(optim_db, dtypes=[torch.float32])
     def test_step_all_hooks(self, device, dtype, optim_info):
-        def global_pre_hook(opt: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
+        def global_pre_hook(opt: Optimizer, args: tuple[Any], kwargs: dict[Any, Any]):
             nonlocal data
             data.append(0)
 
-        def global_post_hook(opt: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
+        def global_post_hook(opt: Optimizer, args: tuple[Any], kwargs: dict[Any, Any]):
             nonlocal data
             data.append(5)
 
-        def local_pre_hook(opt: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
+        def local_pre_hook(opt: Optimizer, args: tuple[Any], kwargs: dict[Any, Any]):
             nonlocal data
             data.append(1)
 
-        def local_post_hook(opt: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
+        def local_post_hook(opt: Optimizer, args: tuple[Any], kwargs: dict[Any, Any]):
             nonlocal data
             data.append(2)
 

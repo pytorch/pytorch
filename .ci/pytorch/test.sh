@@ -12,9 +12,9 @@ export TERM=vt100
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
-# Do not change workspace permissions for ROCm CI jobs
+# Do not change workspace permissions for ROCm and s390x CI jobs
 # as it can leave workspace with bad permissions for cancelled jobs
-if [[ "$BUILD_ENVIRONMENT" != *rocm* && -d /var/lib/jenkins/workspace ]]; then
+if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *s390x* && -d /var/lib/jenkins/workspace ]]; then
   # Workaround for dind-rootless userid mapping (https://github.com/pytorch/ci-infra/issues/96)
   WORKSPACE_ORIGINAL_OWNER_ID=$(stat -c '%u' "/var/lib/jenkins/workspace")
   cleanup_workspace() {
@@ -45,6 +45,9 @@ BUILD_BIN_DIR="$BUILD_DIR"/bin
 #Set Default values for these variables in case they are not set
 SHARD_NUMBER="${SHARD_NUMBER:=1}"
 NUM_TEST_SHARDS="${NUM_TEST_SHARDS:=1}"
+
+# enable debug asserts in serialization
+export TORCH_SERIALIZATION_DEBUG=1
 
 export VALGRIND=ON
 # export TORCH_INDUCTOR_INSTALL_GXX=ON
@@ -83,6 +86,13 @@ if [[ "$BUILD_ENVIRONMENT" == *clang9* || "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   #   Tensor b = empty({3, 4});
   #   auto z = call(b, b.sym_sizes(), b.sym_strides(), std::nullopt);
   # }
+  export VALGRIND=OFF
+fi
+
+
+if [[ "$BUILD_ENVIRONMENT" == *s390x* ]]; then
+  # There are additional warnings on s390x, maybe due to newer gcc.
+  # Skip this check for now
   export VALGRIND=OFF
 fi
 
@@ -129,7 +139,7 @@ if [[ "$TEST_CONFIG" == 'default' ]]; then
 fi
 
 if [[ "$TEST_CONFIG" == 'distributed' ]] && [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
-  export HIP_VISIBLE_DEVICES=0,1
+  export HIP_VISIBLE_DEVICES=0,1,2,3
 fi
 
 if [[ "$TEST_CONFIG" == 'slow' ]]; then
@@ -167,6 +177,9 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # Print GPU info
   rocminfo
   rocminfo | grep -E 'Name:.*\sgfx|Marketing'
+
+  # for benchmarks/dynamo/check_accuracy.py, we need to put results in a rocm specific directory to avoid clashes with cuda
+  MAYBE_ROCM="rocm/"
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
@@ -301,6 +314,13 @@ test_python() {
   assert_git_not_dirty
 }
 
+test_lazy_tensor_meta_reference_disabled() {
+  export TORCH_DISABLE_FUNCTIONALIZATION_META_REFERENCE=1
+  echo "Testing lazy tensor operations without meta reference"
+  time python test/run_test.py --include lazy/test_ts_opinfo.py --verbose
+  export -n TORCH_DISABLE_FUNCTIONALIZATION_META_REFERENCE
+}
+
 
 test_dynamo_wrapped_shard() {
   if [[ -z "$NUM_TEST_SHARDS" ]]; then
@@ -329,7 +349,7 @@ test_inductor_distributed() {
   python test/run_test.py -i inductor/test_aot_inductor.py -k test_non_default_cuda_device --verbose
   python test/run_test.py -i inductor/test_aot_inductor.py -k test_replicate_on_devices --verbose
   python test/run_test.py -i distributed/test_c10d_functional_native.py --verbose
-  python test/run_test.py -i distributed/_tensor/test_dtensor_compile.py --verbose
+  python test/run_test.py -i distributed/tensor/test_dtensor_compile.py --verbose
   python test/run_test.py -i distributed/tensor/parallel/test_micro_pipeline_tp.py --verbose
   python test/run_test.py -i distributed/_composable/test_replicate_with_compiler.py --verbose
   python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_comm.py --verbose
@@ -382,15 +402,32 @@ test_inductor_aoti() {
   CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_aoti_inference
 }
 
-test_inductor_cpp_wrapper() {
+test_inductor_cpp_wrapper_shard() {
+  if [[ -z "$NUM_TEST_SHARDS" ]]; then
+    echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
+    exit 1
+  fi
+
   export TORCHINDUCTOR_CPP_WRAPPER=1
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
 
-  # Run certain inductor unit tests with cpp wrapper. In the end state, we should be able to run all the inductor
-  # unit tests with cpp wrapper.
-  python test/run_test.py --include inductor/test_torchinductor.py --verbose
+  if [[ "$1" -eq "2" ]]; then
+    # For now, manually put the opinfo tests in shard 2, and all other tests in
+    # shard 1.  Test specific things triggering past bugs, for now.
+    python test/run_test.py \
+      --include inductor/test_torchinductor_opinfo \
+      -k 'linalg or to_sparse' \
+      --verbose
+    exit
+  fi
 
+  # Run certain inductor unit tests with cpp wrapper. In the end state, we
+  # should be able to run all the inductor unit tests with cpp_wrapper.
+  python test/run_test.py \
+    --include inductor/test_torchinductor inductor/test_max_autotune inductor/test_cpu_repro \
+    --verbose
+  python test/run_test.py --inductor --include test_torch -k 'take' --verbose
 
   # Run inductor benchmark tests with cpp wrapper.
   # Skip benchmark tests if it's in rerun-disabled-mode.
@@ -403,7 +440,7 @@ test_inductor_cpp_wrapper() {
     --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_training.csv"
     python benchmarks/dynamo/check_accuracy.py \
       --actual "$TEST_REPORTS_DIR/inductor_cpp_wrapper_training.csv" \
-      --expected "benchmarks/dynamo/ci_expected_accuracy/inductor_timm_training.csv"
+      --expected "benchmarks/dynamo/ci_expected_accuracy/${MAYBE_ROCM}inductor_timm_training.csv"
 
     python benchmarks/dynamo/torchbench.py --device cuda --accuracy \
       --bfloat16 --inference --inductor --only hf_T5 --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_inference.csv"
@@ -413,7 +450,7 @@ test_inductor_cpp_wrapper() {
       --bfloat16 --inference --inductor --only moco --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_inference.csv"
     python benchmarks/dynamo/check_accuracy.py \
       --actual "$TEST_REPORTS_DIR/inductor_cpp_wrapper_inference.csv" \
-      --expected "benchmarks/dynamo/ci_expected_accuracy/inductor_torchbench_inference.csv"
+      --expected "benchmarks/dynamo/ci_expected_accuracy/${MAYBE_ROCM}inductor_torchbench_inference.csv"
   fi
 }
 
@@ -446,6 +483,8 @@ elif [[ "${TEST_CONFIG}" == *aot_eager* ]]; then
   DYNAMO_BENCHMARK_FLAGS+=(--backend aot_eager)
 elif [[ "${TEST_CONFIG}" == *aot_inductor* ]]; then
   DYNAMO_BENCHMARK_FLAGS+=(--export-aot-inductor)
+elif [[ "${TEST_CONFIG}" == *max_autotune_inductor* ]]; then
+  DYNAMO_BENCHMARK_FLAGS+=(--inductor --inductor-compile-mode max-autotune)
 elif [[ "${TEST_CONFIG}" == *inductor* && "${TEST_CONFIG}" != *perf* ]]; then
   DYNAMO_BENCHMARK_FLAGS+=(--inductor)
 fi
@@ -459,6 +498,59 @@ if [[ "${TEST_CONFIG}" == *cpu* ]]; then
 else
   DYNAMO_BENCHMARK_FLAGS+=(--device cuda)
 fi
+
+test_cachebench() {
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  mkdir -p "$TEST_REPORTS_DIR"
+
+  local BENCHMARK
+  if [[ "${SHARD_NUMBER}" == 1 ]]; then
+    local BENCHMARK=torchbench
+  elif [[ "${SHARD_NUMBER}" == 2 ]]; then
+    local BENCHMARK=huggingface
+  else
+    echo "invalid SHARD_NUMBER: ${SHARD_NUMBER}"
+    exit 1
+  fi
+
+  local mode_options=("training" "inference")
+
+  for mode in "${mode_options[@]}"; do
+    $TASKSET python "benchmarks/dynamo/cachebench.py" \
+        --mode "$mode" \
+        --device cuda \
+        --benchmark "$BENCHMARK" \
+        --repeat 3 \
+        --output "$TEST_REPORTS_DIR/cachebench_${BENCHMARK}_${mode}.json"
+
+    $TASKSET python "benchmarks/dynamo/cachebench.py" \
+        --mode "$mode" \
+        --dynamic \
+        --device cuda \
+        --benchmark "$BENCHMARK" \
+        --repeat 3 \
+        --output "$TEST_REPORTS_DIR/cachebench_${BENCHMARK}_${mode}_dynamic.json"
+  done
+}
+
+test_verify_cachebench() {
+  TMP_TEST_REPORTS_DIR=$(mktemp -d)
+  TEST_OUTPUT="$TMP_TEST_REPORTS_DIR/test.json"
+
+  $TASKSET python "benchmarks/dynamo/cachebench.py" \
+      --mode training \
+      --device cpu \
+      --model nanogpt \
+      --benchmark torchbench \
+      --output "$TEST_OUTPUT"
+
+  # -s checks file exists and is non empty
+  if [[ ! -s "$TEST_OUTPUT" ]]; then
+    echo "Cachebench failed to produce an output."
+    echo "Run 'python benchmarks/dynamo/cachebench.py' to make sure it works"
+    exit 1
+  fi
+}
 
 test_perf_for_dashboard() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
@@ -488,6 +580,10 @@ test_perf_for_dashboard() {
     test_inductor_set_cpu_affinity
   elif [[ "${TEST_CONFIG}" == *cuda_a10g* ]]; then
     device=cuda_a10g
+  elif [[ "${TEST_CONFIG}" == *h100* ]]; then
+    device=cuda_h100
+  elif [[ "${TEST_CONFIG}" == *rocm* ]]; then
+    device=rocm
   fi
 
   for mode in "${modes[@]}"; do
@@ -520,7 +616,7 @@ test_perf_for_dashboard() {
             --dynamic-batch-only "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
-      if [[ "$DASHBOARD_TAG" == *cppwrapper-true* ]] && [[ "$mode" == "inference" ]]; then
+      if [[ "$DASHBOARD_TAG" == *cppwrapper-true* ]]; then
         TORCHINDUCTOR_CPP_WRAPPER=1 $TASKSET python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_cpp_wrapper_${suite}_${dtype}_${mode}_${device}_${target}.csv"
@@ -604,16 +700,16 @@ test_single_dynamo_benchmark() {
       TEST_CONFIG=${TEST_CONFIG//_avx512/}
     fi
     python "benchmarks/dynamo/$suite.py" \
-      --ci --accuracy --timing --explain \
+      --ci --accuracy --timing --explain --print-compilation-time \
       "${DYNAMO_BENCHMARK_FLAGS[@]}" \
       "$@" "${partition_flags[@]}" \
       --output "$TEST_REPORTS_DIR/${name}_${suite}.csv"
     python benchmarks/dynamo/check_accuracy.py \
       --actual "$TEST_REPORTS_DIR/${name}_$suite.csv" \
-      --expected "benchmarks/dynamo/ci_expected_accuracy/${TEST_CONFIG}_${name}.csv"
+      --expected "benchmarks/dynamo/ci_expected_accuracy/${MAYBE_ROCM}${TEST_CONFIG}_${name}.csv"
     python benchmarks/dynamo/check_graph_breaks.py \
       --actual "$TEST_REPORTS_DIR/${name}_$suite.csv" \
-      --expected "benchmarks/dynamo/ci_expected_accuracy/${TEST_CONFIG}_${name}.csv"
+      --expected "benchmarks/dynamo/ci_expected_accuracy/${MAYBE_ROCM}${TEST_CONFIG}_${name}.csv"
   fi
 }
 
@@ -636,7 +732,7 @@ test_inductor_halide() {
 }
 
 test_inductor_triton_cpu() {
-  python test/run_test.py --include inductor/test_triton_cpu_backend.py --verbose
+  python test/run_test.py --include inductor/test_triton_cpu_backend.py inductor/test_torchinductor_strided_blocks.py --verbose
   assert_git_not_dirty
 }
 
@@ -665,6 +761,8 @@ test_dynamo_benchmark() {
         test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --"$dt" "$@"
       fi
     elif [[ "${TEST_CONFIG}" == *aot_inductor* ]]; then
+      test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --bfloat16 "$@"
+    elif [[ "${TEST_CONFIG}" == *max_autotune_inductor* ]]; then
       test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --bfloat16 "$@"
     else
       test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --bfloat16 "$@"
@@ -700,7 +798,7 @@ test_inductor_torchbench_smoketest_perf() {
       --only $test --output "$TEST_REPORTS_DIR/inductor_warm_start_smoketest_$test.csv"
     python benchmarks/dynamo/check_accuracy.py \
       --actual "$TEST_REPORTS_DIR/inductor_warm_start_smoketest_$test.csv" \
-      --expected "benchmarks/dynamo/ci_expected_accuracy/inductor_huggingface_training.csv"
+      --expected "benchmarks/dynamo/ci_expected_accuracy/${MAYBE_ROCM}inductor_huggingface_training.csv"
   done
 }
 
@@ -896,10 +994,20 @@ test_libtorch_api() {
   else
     # Exclude IMethodTest that relies on torch::deploy, which will instead be ran in test_deploy
     OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="${MNIST_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_api -k "not IMethodTest"
-    python test/run_test.py --cpp --verbose -i cpp/test_tensorexpr
+
+    # On s390x, pytorch is built without llvm.
+    # Even if it would be built with llvm, llvm currently doesn't support used features on s390x and
+    # test fails with errors like:
+    # JIT session error: Unsupported target machine architecture in ELF object pytorch-jitted-objectbuffer
+    # unknown file: Failure
+    # C++ exception with description "valOrErr INTERNAL ASSERT FAILED at "/var/lib/jenkins/workspace/torch/csrc/jit/tensorexpr/llvm_jit.h":34, please report a bug to PyTorch. Unexpected failure in LLVM JIT: Failed to materialize symbols: { (main, { func }) }
+    if [[ "${BUILD_ENVIRONMENT}" != *s390x* ]]; then
+      python test/run_test.py --cpp --verbose -i cpp/test_tensorexpr
+    fi
   fi
 
-  if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* && "${BUILD_ENVIRONMENT}" != *asan* ]]; then
+  # quantization is not fully supported on s390x yet
+  if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* && "${BUILD_ENVIRONMENT}" != *asan* && "${BUILD_ENVIRONMENT}" != *s390x* ]]; then
     # NB: This test is not under TORCH_BIN_DIR but under BUILD_BIN_DIR
     export CPP_TESTS_DIR="${BUILD_BIN_DIR}"
     python test/run_test.py --cpp --verbose -i cpp/static_runtime_test
@@ -1397,7 +1505,7 @@ test_executorch() {
 test_linux_aarch64() {
   python test/run_test.py --include test_modules test_mkldnn test_mkldnn_fusion test_openmp test_torch test_dynamic_shapes \
         test_transformers test_multiprocessing test_numpy_interop test_autograd test_binary_ufuncs test_complex test_spectral_ops \
-        test_foreach test_reductions test_unary_ufuncs \
+        test_foreach test_reductions test_unary_ufuncs test_tensor_creation_ops test_ops \
         --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
 
   # Dynamo tests
@@ -1465,6 +1573,16 @@ elif [[ "${TEST_CONFIG}" == *timm* ]]; then
   install_torchvision
   id=$((SHARD_NUMBER-1))
   test_dynamo_benchmark timm_models "$id"
+elif [[ "${TEST_CONFIG}" == cachebench ]]; then
+  install_torchaudio cuda
+  install_torchvision
+  checkout_install_torchbench nanogpt BERT_pytorch resnet50 hf_T5 llama moco
+  PYTHONPATH=$(pwd)/torchbench test_cachebench
+elif [[ "${TEST_CONFIG}" == verify_cachebench ]]; then
+  install_torchaudio cpu
+  install_torchvision
+  checkout_install_torchbench nanogpt
+  PYTHONPATH=$(pwd)/torchbench test_verify_cachebench
 elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
   if [[ "${TEST_CONFIG}" == *cpu* ]]; then
     install_torchaudio cpu
@@ -1500,7 +1618,8 @@ elif [[ "${TEST_CONFIG}" == *inductor_cpp_wrapper* ]]; then
   install_torchaudio cuda
   install_torchvision
   checkout_install_torchbench hf_T5 llama moco
-  PYTHONPATH=$(pwd)/torchbench test_inductor_cpp_wrapper
+  PYTHONPATH=$(pwd)/torchbench test_inductor_cpp_wrapper_shard "$SHARD_NUMBER"
+  test_inductor_aoti
 elif [[ "${TEST_CONFIG}" == *inductor* ]]; then
   install_torchvision
   test_inductor_shard "${SHARD_NUMBER}"
@@ -1520,6 +1639,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == *rocm* && -n "$TESTS_TO_INCLUDE" ]]; then
   test_python_shard "$SHARD_NUMBER"
   test_aten
 elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
+  test_lazy_tensor_meta_reference_disabled
   test_without_numpy
   install_torchvision
   test_python_shard 1

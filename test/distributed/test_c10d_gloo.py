@@ -49,9 +49,11 @@ from torch.testing._internal.common_distributed import (
     verify_ddp_error_logged,
 )
 from torch.testing._internal.common_utils import (
+    MI300_ARCH,
     retry_on_connect_failures,
     run_tests,
     skip_but_pass_in_sandcastle,
+    skipIfRocmArch,
     TestCase,
 )
 
@@ -1097,6 +1099,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         self._test_gather_stress(inputs, lambda t: t.clone())
 
     @skip_if_lt_x_gpu(2)
+    @skipIfRocmArch(MI300_ARCH)
     @requires_gloo()
     def test_gather_stress_cuda(self):
         inputs = [torch.tensor([i + self.rank]).cuda() for i in range(1000)]

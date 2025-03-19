@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: quantization"]
 # ruff: noqa: F841
-from typing import Dict, List, Tuple
 
 import torch
 from torch import Tensor
@@ -338,8 +337,8 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                         )
 
                         def derive_qparams_fn(
-                            obs_or_fqs: List[ObserverOrFakeQuantize],
-                        ) -> Tuple[Tensor, Tensor]:
+                            obs_or_fqs: list[ObserverOrFakeQuantize],
+                        ) -> tuple[Tensor, Tensor]:
                             assert (
                                 len(obs_or_fqs) == 2
                             ), f"Expecting two obs/fqs, one for activation and one for weight, got: {len(obs_or_fqs)}"
@@ -441,8 +440,8 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                         )
 
                         def derive_qparams_fn(
-                            obs_or_fqs: List[ObserverOrFakeQuantize],
-                        ) -> Tuple[Tensor, Tensor]:
+                            obs_or_fqs: list[ObserverOrFakeQuantize],
+                        ) -> tuple[Tensor, Tensor]:
                             assert (
                                 len(obs_or_fqs) == 1
                             ), f"Expecting one weight obs/fq, got: {len(obs_or_fqs)}"
@@ -2422,7 +2421,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             def prepare_obs_or_fq_callback(
                 self,
                 model: torch.fx.GraphModule,
-                edge_or_node_to_obs_or_fq: Dict[EdgeOrNode, ObserverOrFakeQuantize],
+                edge_or_node_to_obs_or_fq: dict[EdgeOrNode, ObserverOrFakeQuantize],
             ) -> None:
                 # hard code output quant by updating entire sharing group
                 output_node = next(n for n in model.graph.nodes if n.op == "output")
@@ -2546,14 +2545,12 @@ class TestQuantizePT2EAffineQuantization(PT2EQuantizationTestCase):
                 return self.linear(x)
 
         node_occurrence = {
-            torch.ops.quant.quantize_affine: 2,
-            torch.ops.quant.dequantize_affine: 2,
+            torch.ops.pt2e_quant.quantize_affine: 1,
+            torch.ops.pt2e_quant.dequantize_affine: 2,
         }
         node_list = [
-            torch.ops.quant.quantize_affine,
-            torch.ops.quant.dequantize_affine,
-            torch.ops.quant.quantize_affine,
-            torch.ops.quant.dequantize_affine,
+            torch.ops.pt2e_quant.quantize_affine,
+            torch.ops.pt2e_quant.dequantize_affine,
         ]
         example_inputs = (torch.randn(5, 128),)
         self._test_quantizer(

@@ -3,7 +3,7 @@
 import contextlib
 import importlib
 import unittest
-from typing import Any, Callable, Optional, Tuple
+from typing import Any, Callable, Optional, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -15,10 +15,12 @@ from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    subtest,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_GPU,
+    requires_gpu,
     skip_windows_ci,
     TRITON_HAS_CPU,
 )
@@ -36,6 +38,12 @@ importlib.import_module("filelock")
 
 max_block: int = TRITON_MAX_BLOCK["X"]
 
+# Config shortcuts
+tiled_reduction_config = {
+    "triton.prefer_nd_tiling": True,
+    "triton.tile_reductions": True,
+}
+
 
 def run_and_compare(
     self: InductorTestCase,
@@ -46,6 +54,8 @@ def run_and_compare(
     expected_num_programs: int = 1,
     expected_num_triton_kernels: int = 1,
     config_patches: Optional[dict] = None,
+    rtol: Optional[float] = None,
+    atol: Optional[float] = None,
 ):
     """
     Runs the module through Inductor, comparing to eager reference.
@@ -67,7 +77,9 @@ def run_and_compare(
     ref_tensors = flatten_tensors(func(*args))
     actual_tensors = flatten_tensors(result)
     for ref, actual in zip(ref_tensors, actual_tensors):
-        self.assertTrue(torch.allclose(ref, actual))
+        # Don't clobber the default tolerance values
+        tol = {t: v for t, v in {"rtol": rtol, "atol": atol}.items() if v is not None}
+        self.assertTrue(torch.allclose(ref, actual, **tol))
 
     def count_code(substr: str, expected: Optional[int]):
         count = sum(prog.count(substr) for prog in code)
@@ -80,6 +92,29 @@ def run_and_compare(
     count_code("tl.make_block_ptr", expected_num_block_pointers)
 
     return result, code
+
+
+class BlockPointerTestBase(InductorTestCase):
+    def _discontiguous_tensor(
+        self, view_size: tuple[int, ...], device: Union[torch.device, str]
+    ) -> torch.Tensor:
+        """
+        Create a padded tensor of the given size.
+        The strides correspond to a tensor that is twice as large in each dimension.
+        """
+        if isinstance(device, str):
+            device = torch.device(device)
+        full_size = tuple(2 * dim for dim in view_size)
+        full = torch.randn(full_size).to(device)
+        view = torch.as_strided(full, view_size, full.stride())
+        return view
+
+    def _assert_reduction_ndims(self, code, num_dims: int) -> None:
+        reduction_blocks = ["R0_BLOCK", "R1_BLOCK"]
+        for expected_block in reduction_blocks[:num_dims]:
+            self.assertIn(expected_block, code)
+        for unexpected_block in reduction_blocks[num_dims:]:
+            self.assertNotIn(unexpected_block, code)
 
 
 @instantiate_parametrized_tests
@@ -139,20 +174,25 @@ class CommonTemplate:
                 False,
             ),  # Non-power-of-2 inner dims: non-block ptr
             ((1, 1, 1), (1, 1, 1), None, None, False),  # Scalar: non-block ptr
-            (
-                (2, 4 * max_block),
-                (2, 3 * max_block),
-                None,
-                None,
-                True,
-            ),  # Inner dim multiple of max_block
+            subtest(
+                arg_values=(
+                    (2, 4 * max_block),
+                    (2, 3 * max_block),
+                    None,
+                    None,
+                    True,
+                ),  # Inner dim multiple of max_block
+                decorators=[
+                    test_torchinductor.skip_if_triton_cpu("Triton CPU: slow test")
+                ],
+            ),
         ],
     )
     def test_pointwise(
         self,
-        full_size: Tuple[int],
-        view_size: Tuple[int],
-        stride: Optional[Tuple[int]],
+        full_size: tuple[int],
+        view_size: tuple[int],
+        stride: Optional[tuple[int]],
         offset: Optional[int],
         require_block_ptr: bool,
         prefer_nd_tiling: bool,
@@ -203,7 +243,7 @@ class CommonTemplate:
         ],
     )
     def test_broadcast(
-        self, x_size: Tuple[int], y_size: Tuple[int], prefer_nd_tiling: bool
+        self, x_size: tuple[int], y_size: tuple[int], prefer_nd_tiling: bool
     ):
         """
         Test that we can generate strided block pointers when inputs have different
@@ -215,14 +255,9 @@ class CommonTemplate:
             b = y * 2
             return a + b
 
-        def get_input(view_size: Tuple[int]) -> torch.Tensor:
-            device = torch.device(self.device)
-            full_size = tuple(2 * dim for dim in view_size)
-            full = torch.randn(full_size).to(device)
-            view = torch.as_strided(full, view_size, full.stride())
-            return view
-
-        x, y = (get_input(size) for size in (x_size, y_size))
+        x, y = (
+            self._discontiguous_tensor(size, self.device) for size in (x_size, y_size)
+        )
 
         # Check that input sizes are not the same
         self.assertNotEqual(x.shape, y.shape)
@@ -257,7 +292,7 @@ class CommonTemplate:
             ((5, 6, 1, 1), (5, 6, 4, 3)),
         ],
     )
-    def test_expand_broadcast(self, x_size: Tuple[int], y_size: Tuple[int]):
+    def test_expand_broadcast(self, x_size: tuple[int], y_size: tuple[int]):
         """
         When the load and store have different shapes, we should use broadcast.
         """
@@ -265,7 +300,7 @@ class CommonTemplate:
         def foo(x, y_size):
             return x.expand(y_size).clone()
 
-        def get_input(size: Tuple[int]) -> torch.Tensor:
+        def get_input(size: tuple[int]) -> torch.Tensor:
             device = torch.device(self.device)
             full = torch.randn(size).to(device)
             view = torch.as_strided(full, size, full.stride())
@@ -286,6 +321,7 @@ class CommonTemplate:
         result, (triton_code,) = run_and_compare(self, foo, x, y)
 
     @parametrize("prefer_nd_tiling", [False, True])
+    @config.patch("triton.skip_l1_cache", False)
     def test_pointwise_broadcast_nonzero_strides(self, prefer_nd_tiling: bool):
         """
         Test that we emit tl.broadcast_to instead of using strides of 0.
@@ -345,8 +381,14 @@ class CommonTemplate:
             ((4, 4), 1, 1),
             ((4, 4, 4), 1, 1),
             ((8, 8, 8), 1, 1),
-            ((15, 15), 0, 1),  # Non-power of 2
-            ((3 * max_block, 2), 3, 2),  # Multiple of max block. Uses loops.
+            ((15, 15), None, 1),  # Non-power of 2
+            # Multiple of max block. Uses loops.
+            subtest(
+                arg_values=((3 * max_block, 2), 3, 2),
+                decorators=[
+                    test_torchinductor.skip_if_triton_cpu("Triton CPU: slow test")
+                ],
+            ),
             (
                 (2, 3 * max_block),
                 2,
@@ -357,7 +399,7 @@ class CommonTemplate:
     )
     def test_reduction(
         self,
-        view_size: Tuple[int],
+        view_size: tuple[int],
         num_block_pointers: int,
         num_triton_kernels: int,
         prefer_nd_tiling: bool,
@@ -380,9 +422,7 @@ class CommonTemplate:
 
         device = torch.device(self.device)
 
-        full_size = tuple(2 * dim for dim in view_size)
-        full = torch.randn(full_size).to(device)
-        view = torch.as_strided(full, view_size, full.stride())
+        view = self._discontiguous_tensor(view_size, self.device)
 
         if num_triton_kernels == 2 and config.triton.cooperative_reductions:
             # fewer kernels with cooperative reductions
@@ -412,7 +452,7 @@ class CommonTemplate:
         ],
     )
     def test_mixed_pointwise_reduction(
-        self, view_size: Tuple[int], num_block_pointers: int, num_triton_kernels: int
+        self, view_size: tuple[int], num_block_pointers: int, num_triton_kernels: int
     ):
         """
         Tests mixing pointwise with reduction ops.
@@ -421,15 +461,9 @@ class CommonTemplate:
         def foo(x, y):
             return torch.sum(x + y)
 
-        device = torch.device(self.device)
-        full_size = tuple(2 * dim for dim in view_size)
-
-        def get_input() -> torch.Tensor:
-            full = torch.randn(full_size).to(device)
-            view = torch.as_strided(full, view_size, full.stride())
-            return view
-
-        inputs = [get_input() for input_idx in range(2)]
+        inputs = [
+            self._discontiguous_tensor(view_size, self.device) for input_idx in range(2)
+        ]
 
         # Expect 2 block pointers: inputs
         result, (code,) = run_and_compare(
@@ -514,18 +548,24 @@ class CommonTemplate:
             ),  # Contiguous 2D tensor. Does not require tiling.
             ((5, 9), (3, 7), 3, 2),  # 2D tensor with 1 discontiguous dim.
             ((11, 13, 7), (9, 13, 5), 3, 2),  # 3D tensor with 1 discontiguous dim (2).
-            (
-                (3, 11, 13, 7),
-                (2, 9, 13, 7),
-                3,
-                2,
+            subtest(
+                arg_values=(
+                    (3, 11, 13, 7),
+                    (2, 9, 13, 7),
+                    3,
+                    2,
+                ),
+                decorators=[
+                    test_torchinductor.skip_if_triton_cpu("Triton CPU: slow test")
+                ],
             ),  # 4D tensor with 1 discontiguous dim (1).
             (
                 (3, 11, 13, 7),
                 (2, 11, 9, 7),
                 3,
                 2,
-            ),  # 4D tensor with 1 discontiguous dim (2).
+            ),
+            # 4D tensor with 1 discontiguous dim (2).
             (
                 (5, 5, 5, 5, 5),
                 (3, 3, 5, 3, 5),
@@ -536,8 +576,8 @@ class CommonTemplate:
     )
     def test_nd_tiling_odd_shapes_pointwise(
         self,
-        full_size: Tuple[int],
-        view_size: Tuple[int],
+        full_size: tuple[int],
+        view_size: tuple[int],
         num_block_pointers: int,
         num_tiles: int,
     ):
@@ -574,6 +614,270 @@ class CommonTemplate:
                 else:
                     self.assertNotIn(tile_name, program)
 
+    @parametrize(
+        "view_size,num_block_pointers,num_triton_kernels,reduction_op",
+        [
+            ((15, 15), 1, 1, torch.sum),  # Non-power-of 2 shapes.
+            ((129, 129), 3, 2, torch.sum),  # Large size, with loops.
+            ((3, 3), 1, 1, torch.argmax),
+            ((129, 129), 1, 1, torch.argmax),
+            ((5, 5), 1, 1, torch.var_mean),  # Reduction + pointwise fusion.
+        ],
+    )
+    def test_2d_reduction_odd_shapes(
+        self,
+        view_size: tuple[int],
+        num_block_pointers: int,
+        num_triton_kernels: int,
+        reduction_op: Callable,
+    ):
+        """
+        Tests 2D reduction kernels. These arise from "odd" shapes which are not
+        expressible with a 1D block pointer.
+        """
+        view = self._discontiguous_tensor(view_size, self.device)
+
+        # Expect at least 1 block pointer for the input.
+        # Add 2 more if we generate 2 kernels.
+        result, (code,) = run_and_compare(
+            self,
+            reduction_op,
+            view,
+            expected_num_block_pointers=num_block_pointers,
+            expected_num_triton_kernels=num_triton_kernels,
+            config_patches=tiled_reduction_config,
+        )
+
+        # Check the code for multiple Rn_BLOCK's
+        self._assert_reduction_ndims(code, 2)
+
+    def test_2d_reduction_no_x_dim(self):
+        """
+        Tests a 2D reduction without an "x" dimension.
+        """
+        # We need a size to get no x dim.
+        view = self._discontiguous_tensor((2, 346), self.device)
+
+        # Expect 1 block pointer for the input.
+        result, (code,) = run_and_compare(
+            self,
+            torch.prod,
+            view,
+            expected_num_block_pointers=1,
+            expected_num_triton_kernels=1,
+            config_patches=tiled_reduction_config,
+        )
+
+        # Check that there's no X dimension in the signature.
+        (signature_line,) = (
+            line for line in code.splitlines() if line.startswith("def triton")
+        )
+        self.assertNotIn("BLOCK", signature_line)
+
+        # Check for 2 reduction dimensions in the body.
+        self._assert_reduction_ndims(code, 2)
+
+    @parametrize(
+        "size,expected_num_block_pointers,expected_num_triton_kernels,expect_fallback",
+        [
+            ((8, 8), 1, 1, True),  # Persistent Welford fallback
+            ((128, 128), 9, 2, False),  # Looped Welford reduction
+        ],
+    )
+    def test_2d_welford_reduction(
+        self,
+        size: tuple[int],
+        expected_num_block_pointers: int,
+        expected_num_triton_kernels: int,
+        expect_fallback: bool,
+    ):
+        """
+        Tests a 2D welford reduction.
+
+        NB: the input size should be "nice" in the sense that it's a multiple of the
+        number of processors. Otherwise, we will get more complex indexing that
+        doesn't generate a block pointer. Since tiling welford reductions depends on
+        the block pointer analysis, those cases would fall back to 1D.
+        """
+        view = self._discontiguous_tensor(size, self.device)
+
+        # We expect many block pointers for this one.
+        result, (code,) = run_and_compare(
+            self,
+            torch.var_mean,
+            view,
+            expected_num_block_pointers=expected_num_block_pointers,
+            expected_num_triton_kernels=expected_num_triton_kernels,
+            config_patches=tiled_reduction_config,
+        )
+
+        # Check for a Welford reduction.
+        self.assertEqual("welford" in code, not expect_fallback)
+
+        # Check for 2 reduction dimensions.
+        self._assert_reduction_ndims(code, 2)
+
+    @test_torchinductor.skip_if_triton_cpu("Triton CPU: slow test")
+    def test_welford_non_block_pointer(
+        self,
+    ):
+        """
+        Tests a welford reduction where block pointer analysis fails.
+        The main loop will be a 1D reduction, instead of 2D.
+        """
+        # Use a "bad" size that's not evenly divisible by the launch grid.
+        # This won't decompose into a block pointer.
+        view = self._discontiguous_tensor((259, 311), self.device)
+
+        # We expect many block pointers for this one.
+        result, (code,) = run_and_compare(
+            self,
+            torch.var_mean,
+            view,
+            expected_num_block_pointers=6,
+            expected_num_triton_kernels=2,
+            config_patches={"triton.prefer_nd_tiling": True},
+        )
+
+        # Check for a Welford reduction.
+        self.assertIn("welford", code)
+
+        # Check for a single reduction dimension.
+        self._assert_reduction_ndims(code, 1)
+
+    def test_reduction_multiple_discontiguous_dims(self):
+        """
+        Test reducing a tensor with more than one discontiguous dimension. This case
+        won't generate a block pointer, since we don'allow enough tiling dimensions.
+        """
+        # Use odd shapes to frustrate block pointer analysis.
+        view = self._discontiguous_tensor((3, 7, 11), self.device)
+
+        result, (code,) = run_and_compare(
+            self,
+            torch.sum,
+            view,
+            expected_num_block_pointers=0,
+            expected_num_triton_kernels=1,
+            config_patches=tiled_reduction_config,
+        )
+
+        # Check for 2 reduction dimensions.
+        self._assert_reduction_ndims(code, 2)
+
+    @test_torchinductor.skip_if_triton_cpu  # Illegal instruction  File; cannot xfail because it crashes process
+    def test_2d_reduction_multi_kernel(self):
+        """
+        Test a 2D reduction in multi kernel mode.
+        """
+        view = self._discontiguous_tensor((2, 4, 1024), self.device)
+
+        def foo(x):
+            """
+            Reshape to 2D and take the softmax of all trailing dims.
+            """
+            x = x.reshape(x.shape[0], -1)
+            return torch.softmax(x, -1)
+
+        result, (code,) = run_and_compare(
+            self,
+            foo,
+            view,
+            expected_num_block_pointers=6,
+            expected_num_triton_kernels=2,
+            config_patches={
+                "triton.multi_kernel": True,
+                **tiled_reduction_config,
+            },
+        )
+
+        # Check for multi kernel mode.
+        self.assertIn("multi_kernel", code)
+
+        # Check for 2 reduction dimensions.
+        self._assert_reduction_ndims(code, 2)
+
+    def test_fused_2d_reduction(
+        self,
+    ):
+        """
+        Tests fusing multiple reductions on the same input, with 2D tiling.
+        """
+
+        def foo(x):
+            return torch.sum(x) + torch.argmax(x)
+
+        view_size = (5, 7)
+        view = self._discontiguous_tensor(view_size, self.device)
+
+        # Expect at least 1 block pointer for the input.
+        result, (code,) = run_and_compare(
+            self,
+            foo,
+            view,
+            expected_num_block_pointers=1,
+            expected_num_triton_kernels=1,
+            config_patches=tiled_reduction_config,
+        )
+
+        # Check the code for multiple Rn_BLOCK's
+        self._assert_reduction_ndims(code, 2)
+
+    @parametrize("reduction_op", [torch.sum, torch.argmax])
+    def test_2d_reductions_mixed_indexing(
+        self,
+        reduction_op: Callable,
+    ):
+        """
+        Tests a program with multiple reductions using different strides.
+        These might not be fused.
+        """
+
+        def foo(*args):
+            return sum(reduction_op(arg) for arg in args)
+
+        view_size = (5, 7)
+        arg0 = self._discontiguous_tensor(view_size, self.device)
+        arg1 = torch.empty(view_size)
+
+        # No guarantees on the number of kernels or pointers.
+        result, (code,) = run_and_compare(
+            self,
+            foo,
+            arg0,
+            arg1,
+            config_patches=tiled_reduction_config,
+        )
+
+        # Check the code for multiple Rn_BLOCK's
+        self._assert_reduction_ndims(code, 2)
+
+    @parametrize(
+        "tile_reductions",
+        [False, True],
+    )
+    def test_enable_tiled_reductions(self, tile_reductions: bool):
+        """
+        Tests enabling and disabling tiled reductions.
+        """
+        view = self._discontiguous_tensor((9, 11), self.device)
+
+        # If tiled, we expect 1 block pointer for the input.
+        result, (code,) = run_and_compare(
+            self,
+            torch.sum,
+            view,
+            expected_num_block_pointers=1 if tile_reductions else 0,
+            expected_num_triton_kernels=1,
+            config_patches={
+                "triton.prefer_nd_tiling": True,
+                "triton.tile_reductions": tile_reductions,
+            },
+        )
+
+        # Check the code for multiple Rn_BLOCK's
+        self._assert_reduction_ndims(code, 2 if tile_reductions else 1)
+
     def test_complex_reshape_block_ptr(self):
         def func(x, y):
             add_ = x + y
@@ -596,20 +900,77 @@ class CommonTemplate:
         )
         self.assertTrue("Min" not in code[0])
 
+    @requires_gpu()  # FIXME this test failed on Triton-CPU
+    def test_3d_permute_tiling(self):
+        """
+        Test 3D tiling with permute.
+        """
+
+        def foo(x, y, z):
+            dims = [0, 2, 1]
+            a = x.permute(dims=dims) + y
+            b = (z + y).permute(dims=dims)
+            return a + b
+
+        inps = (torch.rand((51, 51, 51), device=self.device, dtype=torch.float32),) * 3
+        result, (code,) = run_and_compare(
+            self,
+            foo,
+            *inps,
+            expected_num_triton_kernels=1,
+            expected_num_block_pointers=3,
+            config_patches={
+                "triton.max_tiles": 3,
+                "triton.prefer_nd_tiling": True,
+            },
+        )
+
+        # Check for 3D tiling
+        self.assertIn("ZBLOCK", code)
+
+    # block_ptr advancements should also be deferrered conditional
+    # on the associated buffer not being removed
+    # in this case the bernoulli operation is fused with the following sum
+    # so an output buffer is not needed to store the immediate result of the
+    # bernoulli operation
+    # TODO: fails for triton CPU "Failed to convert to LLVM IR"
+    @test_torchinductor.xfail_if_triton_cpu
+    def test_removed_buffers(self):
+        from torch.ops import aten
+
+        def fn(a):
+            return aten.bernoulli(a).sum() / torch.prod(torch.tensor(a.size()))
+
+        p = 0.3
+        result, code = run_and_compare(
+            self,
+            fn,
+            *[torch.ones(200, 200, device=self.device) * p],
+            expected_num_triton_kernels=2,
+            expected_num_block_pointers=3,
+            atol=p * 0.06,
+            rtol=0.06,
+        )
+
 
 @unittest.skipIf(not TRITON_HAS_CPU, "requires triton CPU backend")
 @config.patch(cpu_backend="triton")
 @config.patch("triton.use_block_ptr", True)
-class TritonBlockPointerTestCPU(InductorTestCase):
+class TritonBlockPointerTestCPU(BlockPointerTestBase):
     device = "cpu"
 
 
-test_torchinductor.copy_tests(CommonTemplate, TritonBlockPointerTestCPU, "cpu")
+test_torchinductor.copy_tests(
+    CommonTemplate,
+    TritonBlockPointerTestCPU,
+    "cpu",
+    xfail_prop="_expected_failure_triton_cpu",
+)
 
 
 @unittest.skipIf(not HAS_GPU, "requires triton GPU backend")
 @config.patch("triton.use_block_ptr", True)
-class TritonBlockPointerTestGPU(InductorTestCase):
+class TritonBlockPointerTestGPU(BlockPointerTestBase):
     device = GPU_TYPE
 
 

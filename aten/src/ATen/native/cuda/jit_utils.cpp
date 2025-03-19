@@ -196,7 +196,7 @@ const std::string jit_common_types = R"ESCAPE(
   static_assert(sizeof(uint32_t) == 4, "expected size does not match");
   static_assert(sizeof(int8_t) == 1, "expected size does not match");
   constexpr int num_threads = CUDA_OR_ROCM_NUM_THREADS;
-  constexpr int thread_work_size = 4; // TODO: make template substitution once we decide where those vars live
+  constexpr int thread_work_size = ${thread_work_size}; // TODO: make template substitution once we decide where those vars live
   constexpr int block_work_size = thread_work_size * num_threads;
 
   ${traits_string}
@@ -923,14 +923,61 @@ void codegenOutputQuery(
 // TODO: try making the CUcontext thread local to see if that improves performance - why is this slow?
 void initializeCudaContext() {
   // lazily construct context if non-existing yet;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   CUcontext pctx = nullptr;
   AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuCtxGetCurrent(&pctx));
   if (!pctx) {
     std::unique_lock<std::mutex> cudaFreeMutexLock(
         *(c10::cuda::getFreeMutex()));
-    cudaFree(nullptr);
+    AT_CUDA_CHECK(cudaFree(nullptr));
   }
+}
+
+int calc_io_size(
+    const int nInputs,
+    const int nOutputs,
+    const c10::ScalarType& inputs_type,
+    const c10::ScalarType& result_type) {
+    if (nInputs > 0 && nOutputs > 0) {
+        return std::min(c10::elementSize(inputs_type), c10::elementSize(result_type));
+    }
+
+    if (nInputs > 0) {
+        return c10::elementSize(inputs_type);
+    }
+
+    if (nOutputs > 0) {
+        return c10::elementSize(result_type);
+    }
+
+    return 0;
+}
+
+int calc_thread_work_size(
+    const int nInputs,
+    const int nOutputs,
+    const c10::ScalarType& inputs_type,
+    const c10::ScalarType& result_type) {
+#ifdef USE_ROCM
+    auto io_size = at::cuda::jit::calc_io_size(nInputs, nOutputs, inputs_type, result_type);
+    TORCH_INTERNAL_ASSERT(io_size > 0);
+    if (io_size == 1) {
+        return 16;
+    } else if (io_size < 4) {
+        return 8;
+    } else {
+        return 4;
+    }
+    return io_size;
+#else
+    auto io_size = at::cuda::jit::calc_io_size(nInputs, nOutputs, inputs_type, result_type);
+    TORCH_INTERNAL_ASSERT(io_size > 0);
+    if (io_size == 1) {
+        return 16;
+    } else {
+        return 8;
+    }
+    return io_size;
+#endif
 }
 
 std::string generate_code(
@@ -938,6 +985,7 @@ std::string generate_code(
     bool contiguous,
     bool dynamic_casting,
     BinaryFuncVariant scalar_pos,
+    int thread_work_size,
     bool vectorized,
     int vec_size,
     bool return_by_ref) {
@@ -958,14 +1006,11 @@ std::string generate_code(
       dynamic_casting,
       scalar_pos,
       extra_args_typenames,
+      thread_work_size,
       vectorized,
       vec_size,
       return_by_ref);
 }
-
-//FIXME - this are defined in Loops.cuh, but including Loops.cuh here would lead to circular includes Loops.cuh -> CUDALoops.cuh -> jit_utils.h -> Loops.cuh
-#define THREAD_WORK_SIZE 4
-constexpr int thread_work_size = THREAD_WORK_SIZE;
 
 std::string generate_code(
     int nInputs,
@@ -979,6 +1024,7 @@ std::string generate_code(
     bool dynamic_casting,
     BinaryFuncVariant scalar_pos,
     c10::SmallVector<std::string>& extra_args_typenames,
+    int thread_work_size,
     bool vectorized,
     int vec_size,
     bool return_by_ref) {
@@ -993,6 +1039,7 @@ std::string generate_code(
   env.s("functor", func);
   env.s("name", name);
   env.s("cmath_string", get_cmath_string());
+  env.s("thread_work_size", std::to_string(thread_work_size));
 
   // Generate `extra_params` for function signature
   // and `extra_args` for computation call if
@@ -1340,6 +1387,7 @@ std::string generate_reduction_code(
     int max_threads_codegen) {
       std::string func = func_;
       at::jit::TemplateEnv env;
+      constexpr int thread_work_size = JIT_THREAD_WORK_SIZE;
       env.s("index_type", "unsigned int");
       env.s("scalar_type", f_inputs_type);
       env.s("result_type", result_type);
@@ -1347,6 +1395,7 @@ std::string generate_reduction_code(
       env.s("vt0", std::to_string(vt0));
       env.s("name", name);
       env.s("max_threads_lb", std::to_string(max_threads_codegen));
+      env.s("thread_work_size", std::to_string(thread_work_size));
       // reductions don't support dynamic casting, so the only way to get nonstandard types
       // is through input
       if (f_inputs_type == "at::Half" || f_inputs_type == "std::complex<at::Half>") {
@@ -1549,7 +1598,6 @@ NvrtcFunction jit_pwise_function(
   const std::string compute = std::string("--gpu-architecture=") +
       (compile_to_sass ? "sm_" : "compute_") + std::to_string(cuda_major) +
       std::to_string(cuda_minor);
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<const char*> args = {
       "--std=c++17", compute.c_str(), "-default-device"};
 #endif

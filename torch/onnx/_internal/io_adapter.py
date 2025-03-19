@@ -1,15 +1,7 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
-from typing import (
-    Any,
-    Callable,
-    Mapping,
-    Protocol,
-    runtime_checkable,
-    Sequence,
-    TYPE_CHECKING,
-)
+from typing import Any, Callable, Protocol, runtime_checkable, TYPE_CHECKING
 
 import torch
 import torch.export as torch_export
@@ -18,6 +10,7 @@ from torch.utils import _pytree as pytree
 
 if TYPE_CHECKING:
     import inspect
+    from collections.abc import Mapping, Sequence
 
 # TODO(bowbao): Add diagnostics for IO adapters.
 
@@ -646,9 +639,9 @@ class PrependParamsAndBuffersAotAutogradOutputStep(OutputAdaptStep):
             flattened_outputs: The flattened model outputs.
         """
 
-        assert isinstance(
-            model, torch_export.ExportedProgram
-        ), "'model' must be torch_export.ExportedProgram"
+        assert isinstance(model, torch_export.ExportedProgram), (
+            "'model' must be torch_export.ExportedProgram"
+        )
         ordered_buffers = tuple(
             model.state_dict[name]
             if name in model.state_dict

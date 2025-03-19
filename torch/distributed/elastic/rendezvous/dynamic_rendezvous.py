@@ -17,7 +17,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Optional
 
 import torch.distributed as dist
 from torch.distributed import Store
@@ -67,7 +67,7 @@ class RendezvousBackend(ABC):
         """Get the name of the backend."""
 
     @abstractmethod
-    def get_state(self) -> Optional[Tuple[bytes, Token]]:
+    def get_state(self) -> Optional[tuple[bytes, Token]]:
         """Get the rendezvous state.
 
         Returns:
@@ -84,7 +84,7 @@ class RendezvousBackend(ABC):
     @abstractmethod
     def set_state(
         self, state: bytes, token: Optional[Token] = None
-    ) -> Optional[Tuple[bytes, Token, bool]]:
+    ) -> Optional[tuple[bytes, Token, bool]]:
         """Set the rendezvous state.
 
         The new rendezvous state is set conditionally:
@@ -132,7 +132,7 @@ class RendezvousTimeout:
             The time within which the rendezvous is expected to close after a
             call to :py:meth:`RendezvousHandler.set_closed` or
             :py:meth:`RendezvousHandler.shutdown`.
-        keep_alive:
+        heartbeat:
             The time within which a keep-alive heartbeat is expected to
             complete.
     """
@@ -298,10 +298,10 @@ class _RendezvousState:
     complete: bool
     deadline: Optional[datetime]
     closed: bool
-    participants: Dict[_NodeDesc, int]
-    wait_list: Set[_NodeDesc]
-    redundancy_list: Set[_NodeDesc]
-    last_heartbeats: Dict[_NodeDesc, datetime]
+    participants: dict[_NodeDesc, int]
+    wait_list: set[_NodeDesc]
+    redundancy_list: set[_NodeDesc]
+    last_heartbeats: dict[_NodeDesc, datetime]
 
     def __init__(self) -> None:
         self.round = 0
@@ -377,7 +377,7 @@ class _BackendRendezvousStateHolder(_RendezvousStateHolder):
     _token: Token
     _dirty: bool
     _last_sync_time: float
-    _dead_nodes: List[_NodeDesc]
+    _dead_nodes: list[_NodeDesc]
 
     def __init__(
         self,
@@ -1017,6 +1017,8 @@ class DynamicRendezvousHandler(RendezvousHandler):
         max_nodes: int,
         local_addr: Optional[str] = None,
         timeout: Optional[RendezvousTimeout] = None,
+        keep_alive_interval: int = 5,
+        keep_alive_max_attempt: int = 3,
     ):
         """Create a new :py:class:`DynamicRendezvousHandler`.
 
@@ -1035,6 +1037,12 @@ class DynamicRendezvousHandler(RendezvousHandler):
                 The local node address.
             timeout:
                 The timeout configuration of the rendezvous.
+            keep_alive_interval:
+                The amount of time a node waits before sending a heartbeat to keep
+                it alive in the rendezvous.
+            keep_alive_max_attempt:
+                The maximum number of failed heartbeat attempts after which a node
+                is considered dead.
         """
         # We associate each handler instance with a unique node descriptor.
         node = cls._node_desc_generator.generate(local_addr)
@@ -1044,8 +1052,8 @@ class DynamicRendezvousHandler(RendezvousHandler):
             min_nodes,
             max_nodes,
             timeout or RendezvousTimeout(),
-            keep_alive_interval=timedelta(seconds=5),
-            keep_alive_max_attempt=3,
+            keep_alive_interval=timedelta(seconds=keep_alive_interval),
+            keep_alive_max_attempt=keep_alive_max_attempt,
         )
 
         state_holder = _BackendRendezvousStateHolder(backend, settings)
@@ -1351,7 +1359,7 @@ class DynamicRendezvousHandler(RendezvousHandler):
 
         self._keep_alive_timer.cancel()
 
-    def _get_world(self) -> Tuple[int, int]:
+    def _get_world(self) -> tuple[int, int]:
         state = self._state_holder.state
 
         return state.participants[self._this_node], len(state.participants)
@@ -1405,13 +1413,27 @@ def create_handler(
     |                   | :py:meth:`RendezvousHandler.shutdown`. Defaults to   |
     |                   | 30 seconds.                                          |
     +-------------------+------------------------------------------------------+
+    | heartbeat         | The time, in seconds, within which a keep-alive      |
+    |                   | heartbeat is expected to complete                    |
+    +-------------------+------------------------------------------------------+
     """
     try:
         timeout = RendezvousTimeout(
             _get_timeout(params, "join"),
             _get_timeout(params, "last_call"),
             _get_timeout(params, "close"),
+            _get_timeout(params, "heartbeat"),
         )
+        keep_alive_interval = params.get_as_int("keep_alive_interval", 5)
+        if keep_alive_interval is None:
+            raise TypeError(
+                "You passed 'keep_alive_interval=None' as a rendezvous configuration option"
+            )
+        keep_alive_max_attempt = params.get_as_int("keep_alive_max_attempt", 3)
+        if keep_alive_max_attempt is None:
+            raise TypeError(
+                "You passed 'keep_alive_max_attempt=None' as a rendezvous configuration option"
+            )
 
         return DynamicRendezvousHandler.from_backend(
             params.run_id,
@@ -1421,6 +1443,8 @@ def create_handler(
             params.max_nodes,
             params.local_addr,
             timeout,
+            keep_alive_interval=keep_alive_interval,
+            keep_alive_max_attempt=keep_alive_max_attempt,
         )
     except Exception as e:
         construct_and_record_rdzv_event(

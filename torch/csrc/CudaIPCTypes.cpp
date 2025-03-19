@@ -150,7 +150,6 @@ CudaIPCSentData::CudaIPCSentData(
     : handle_(std::move(handle)),
       offset_(offset),
       counter_ptr_(counter_ptr),
-      original_ptr_(),
       device_(device) {
 #if !defined(USE_ROCM)
   // CUDA have the unofficial limit on the number of recorded blocking

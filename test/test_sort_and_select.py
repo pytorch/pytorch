@@ -50,7 +50,7 @@ class TestSortAndSelect(TestCase):
                 return ((b != b) | (a <= b)).all().item()
 
         else:
-            error(  # noqa: F821
+            raise ValueError(
                 f'unknown order "{order}", must be "ascending" or "descending"'
             )
 
@@ -174,6 +174,14 @@ class TestSortAndSelect(TestCase):
         x = torch.ones(10)
         y = x.sort(stable=None).values
         self.assertTrue(torch.all(y == torch.ones(10)).item())
+
+    @onlyCPU
+    def test_complex_unsupported_cpu(self):
+        x = torch.tensor([3.0 + 2j, 4.0 + 3j])
+        with self.assertRaisesRegex(
+            ValueError, "Sort currently does not support complex dtypes on CPU."
+        ):
+            torch.sort(input=x)
 
     @onlyCUDA
     def test_sort_large_slice(self, device):

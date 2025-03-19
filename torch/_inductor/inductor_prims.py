@@ -2,10 +2,14 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional, Sequence
+from typing import Optional, TYPE_CHECKING
 
 import torch
 from torch import _prims, Tensor
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 log = logging.getLogger(__name__)
@@ -49,6 +53,11 @@ def eager_force_stride(input_tensor: Tensor, stride) -> Tensor:
     return new_tensor
 
 
+def eager_prepare_softmax(x: Tensor, dim: int) -> tuple[Tensor, Tensor]:
+    amax = torch.amax(x, dim, keepdim=True)
+    return amax, torch.sum(torch.exp(x - amax), dim, keepdim=True)
+
+
 # Custom prims used for handling randomness
 seed = make_prim(
     "inductor_seed(Device device) -> Tensor",
@@ -65,7 +74,7 @@ seeds = make_prim(
 lookup_seed = make_prim(
     # if inductor_lookup_seed changes, update partitioners.py
     "inductor_lookup_seed(Tensor seeds, int index) -> Tensor",
-    lambda seeds, index: seeds[index],
+    lambda seeds, index: seeds[index].clone(),
     doc="Extract a single seed from the result of inductor_seeds()",
 )
 # inductor_random() doesn't accept a dtype.
@@ -101,6 +110,12 @@ fma = make_prim(
     "fma(Tensor a, Tensor b, Tensor c) -> Tensor",
     lambda a, b, c: (a * b) + c,
     doc="Fused multiply add: fma(a, b, c) -> (a * b) + c without rounding after the multiplication",
+)
+prepare_softmax_online = make_prim(
+    "prepare_softmax_online(Tensor a, int dim) -> (Tensor, Tensor)",
+    eager_prepare_softmax,
+    return_type=(_prims.RETURN_TYPE.NEW, _prims.RETURN_TYPE.NEW),
+    doc="Prepare the softmax by computing the max and sum.",
 )
 
 

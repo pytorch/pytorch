@@ -3,7 +3,7 @@ import logging
 import math
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import List, Optional
+from typing import Optional
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -13,10 +13,8 @@ from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
 from torch.distributed.distributed_c10d import (
     _get_group_size_by_name,
     broadcast,
-    get_global_rank,
     get_group_rank,
     get_rank,
-    GroupMember,
     ProcessGroup,
     scatter,
     Work,
@@ -75,10 +73,12 @@ def shard_dim_alltoall(input, gather_dim, shard_dim, mesh, mesh_dim):
 
 def mesh_scatter(
     output: torch.Tensor,
-    scatter_list: List[torch.Tensor],
+    scatter_list: list[torch.Tensor],
     mesh: DeviceMesh,
     mesh_dim: int = 0,
     async_op: bool = False,
+    *,
+    group_src: int = 0,
 ) -> Optional[Work]:
     """
     scatter a list of tensors to a device mesh dimension. We by default
@@ -94,6 +94,13 @@ def mesh_scatter(
             to scatter on, we by default choose the first rank on the
             mesh dimension as source of truth.
 
+    Keyword args:
+        group_src (int, optional): the group rank of the source data for the
+        logical/global tensor, on the specific mesh dimension. By default, we
+        use ``group_rank=0`` on each DeviceMesh dimension as the source data
+        to preserve the single-device semantic. If passing ``None`` explicitly,
+        this method simply uses its local data with no communication.
+
     Returns:
         A :class:`Work` object
     """
@@ -105,27 +112,22 @@ def mesh_scatter(
         return None
     dim_group = mesh.get_group(mesh_dim)
     assert isinstance(dim_group, ProcessGroup)
-    # src need to be global rank
-    src_for_dim = 0
 
-    if dim_group is not GroupMember.WORLD:
-        src_for_dim = get_global_rank(dim_group, 0)
-
-    if src_for_dim == get_rank():
+    if group_src == get_rank(dim_group):
         fut = scatter(
             output,
             scatter_list=scatter_list,
-            src=src_for_dim,
             group=dim_group,
             async_op=async_op,
+            group_src=group_src,
         )
     else:
         fut = scatter(
             output,
             scatter_list=None,
-            src=src_for_dim,
             group=dim_group,
             async_op=async_op,
+            group_src=group_src,
         )
 
     return fut
@@ -136,6 +138,8 @@ def mesh_broadcast(
     mesh: DeviceMesh,
     mesh_dim: int = 0,
     async_op: bool = False,
+    *,
+    group_src: int = 0,
 ) -> Optional[Work]:
     """
     broadcast the tensor to a device mesh dimension. We by default
@@ -150,6 +154,13 @@ def mesh_broadcast(
             to scatter on, we by default choose the first rank on the
             mesh dimension as source of truth.
 
+    Keyword args:
+        group_src (int, optional): the group rank of the source data for the
+        logical/global tensor, on the specific mesh dimension. By default, we
+        use ``group_rank=0`` on each DeviceMesh dimension as the source data
+        to preserve the single-device semantic. If passing ``None`` explicitly,
+        this method simply uses its local data with no communication.
+
     Returns:
         A :class:`Work` object
     """
@@ -161,12 +172,8 @@ def mesh_broadcast(
         return None
     dim_group = mesh.get_group(mesh_dim)
     assert isinstance(dim_group, ProcessGroup)
-    # src need to be global rank
-    src_for_dim = 0
-    if dim_group is not GroupMember.WORLD:
-        src_for_dim = get_global_rank(dim_group, 0)
 
-    return broadcast(tensor, src=src_for_dim, group=dim_group, async_op=async_op)
+    return broadcast(tensor, group=dim_group, async_op=async_op, group_src=group_src)
 
 
 def pad_tensor(tensor: torch.Tensor, pad_dim: int, pad_size: int) -> torch.Tensor:
@@ -188,8 +195,8 @@ def unpad_tensor(tensor: torch.Tensor, pad_dim: int, pad_size: int) -> torch.Ten
 
 
 def fill_empty_tensor_to_shards(
-    shards: List[torch.Tensor], shard_dim: int, num_empty_tensors: int
-) -> List[torch.Tensor]:
+    shards: list[torch.Tensor], shard_dim: int, num_empty_tensors: int
+) -> list[torch.Tensor]:
     if num_empty_tensors == 0:
         return shards
     tensor_size = list(shards[0].size())
@@ -237,9 +244,9 @@ class MeshTopoInfo:
     """
 
     mesh: DeviceMesh
-    mesh_dim_devices: List[int]
-    mesh_dim_bandwidth: List[float]
-    mesh_dim_latency: List[float]
+    mesh_dim_devices: list[int]
+    mesh_dim_bandwidth: list[float]
+    mesh_dim_latency: list[float]
 
     @staticmethod
     @lru_cache(None)
@@ -290,7 +297,7 @@ def allreduce_cost(bytes_gb: float, mesh_topo: MeshTopoInfo, mesh_dim: int) -> f
     num_devices_on_mesh_dim = mesh_topo.mesh_dim_devices[mesh_dim]
     mesh_dim_bandwidth = mesh_topo.mesh_dim_bandwidth[mesh_dim]
     # allreduce have almost 2x comm bytes compare to allgather/reduce_scatter
-    num_hops = 2 * num_devices_on_mesh_dim - 1
+    num_hops = 2 * (num_devices_on_mesh_dim - 1)
 
     latency = 6.6 + num_hops * mesh_topo.mesh_dim_latency[mesh_dim]
     bw = (bytes_gb * num_hops / num_devices_on_mesh_dim) / mesh_dim_bandwidth

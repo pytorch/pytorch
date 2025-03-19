@@ -3,7 +3,7 @@ import copy
 import itertools
 import os
 import unittest
-from typing import Callable, List, Optional
+from typing import Callable, Optional
 
 import torch
 import torch._dynamo.config as dynamo_config
@@ -42,12 +42,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     skipIfXpu,
 )
-from torch.testing._internal.inductor_utils import (
-    GPU_TYPE,
-    HAS_GPU,
-    IS_A100,
-    IS_BIG_GPU,
-)
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, IS_BIG_GPU
 from torch.utils import _pytree as pytree
 
 
@@ -136,17 +131,23 @@ class TestPatternMatcher(TestCase):
         counters.clear()
         ref = fn(*args)
         test, (code,) = run_and_get_code(torch.compile(fn, mode="max-autotune"), *args)
-        self.assertEqual("fused_int_mm_mul" in code, fused_int_mm_mul_expected)
+        self.assertEqual("triton_tem_fused__int" in code, fused_int_mm_mul_expected)
         if fused_int_mm_mul_expected:
             indices = ~ref.isinf()
             torch.testing.assert_close(
                 ref[indices], test[indices]
             )  # also checks that dtype is correct
 
-    @skipIfRocm
     @skipIfXpu
     @skipCUDAIf(not SM80OrLater, "need sm_80")
-    @inductor_config.patch(force_fuse_int_mm_with_mul=True)
+    @inductor_config.patch(
+        {
+            "benchmark_epilogue_fusion": "False",
+            "max_autotune_gemm_backends": "TRITON",
+            "max_autotune_gemm": True,
+        }
+    )
+    @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
     def test_fused_int_mm_mul(self):
         def fn1(a, b, c):
             return out_dtype(torch.ops.aten.mm.default, torch.int32, a, b) * c
@@ -179,7 +180,8 @@ class TestPatternMatcher(TestCase):
             self._test_fused_int_mm_mul_impl(fn2, args, True)
 
     def test_duplicate_search(self):
-        from typing import Callable, Iterable
+        from collections.abc import Iterable
+        from typing import Callable
 
         import torch
         from torch._inductor.pattern_matcher import (
@@ -201,8 +203,7 @@ class TestPatternMatcher(TestCase):
             return x - 2
 
         patterns = PatternMatcherPass()
-        torch.set_default_device("cuda")
-        inputs = [torch.empty(4, 5, dtype=torch.float32)]
+        inputs = [torch.empty(4, 5, dtype=torch.float32, device=GPU_TYPE)]
         register_replacement(pattern1, replacement1, inputs, fwd_only, patterns)
         register_replacement(pattern2, replacement2, inputs, fwd_only, patterns)
 
@@ -234,13 +235,20 @@ class TestPatternMatcher(TestCase):
             y2 = y.relu() - 2
             return y2
 
-        inp = torch.rand(3, 5)
+        inp = torch.rand(3, 5, device=GPU_TYPE)
         self.assertEqual(f(inp), f_replaced(inp))
         self.assertEqual(count, 2)
 
-    @skipIfRocm
     @skipIfXpu
     @skipCUDAIf(not SM80OrLater, "need sm_80")
+    @inductor_config.patch(
+        {
+            "benchmark_epilogue_fusion": "False",
+            "max_autotune_gemm_backends": "TRITON",
+            "max_autotune_gemm": True,
+        }
+    )
+    @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
     @inductor_config.patch(force_fuse_int_mm_with_mul=True)
     @inductor_config.patch("test_configs.runtime_triton_dtype_assert", True)
     def test_fused_int_mm_mul_epilogue(self):
@@ -282,7 +290,14 @@ class TestPatternMatcher(TestCase):
     @skipIfRocm
     @skipIfXpu
     @skipCUDAIf(not SM80OrLater, "need sm_80")
-    @inductor_config.patch(force_fuse_int_mm_with_mul=True)
+    @inductor_config.patch(
+        {
+            "benchmark_epilogue_fusion": "False",
+            "max_autotune_gemm_backends": "TRITON",
+            "max_autotune_gemm": True,
+        }
+    )
+    @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
     def test_fused_int_mm_mul_gating(self):
         def fn1(a, b, c):
             return out_dtype(torch.ops.aten.mm.default, torch.int32, a, b) * c
@@ -298,10 +313,8 @@ class TestPatternMatcher(TestCase):
             torch.randint(-128, 127, (32, 8), dtype=torch.int8, device=GPU_TYPE),
             torch.randn((32, 1), dtype=torch.float16, device=GPU_TYPE),
         )
-        self._test_fused_int_mm_mul_impl(fn1, args1, False)
+        self._test_fused_int_mm_mul_impl(fn1, args1, True)
         self._test_fused_int_mm_mul_impl(fn1, [arg.cpu() for arg in args2], False)
-        inductor_config.force_fuse_int_mm_with_mul = False
-        self._test_fused_int_mm_mul_impl(fn1, args2, False)
 
     def _test_mixed_impl(
         self,
@@ -317,12 +330,29 @@ class TestPatternMatcher(TestCase):
         ref = fn(*args)
         test, (code,) = run_and_get_code(torch.compile(fn), *args)
         torch.testing.assert_close(ref, test, rtol=rtol, atol=atol)
-        self.assertEqual("mixed_mm" in code, mixed_mm_expected)
-        self.assertEqual("fallback_mixed_mm" in code, fallback_mixed_mm_expected)
+
+        if mixed_mm_expected:
+            FileCheck().check("k_idx").check(".to(").check("tl.dot").run(code)
+        else:
+            if "extern_kernels.mm" not in code:
+                FileCheck().check("k_idx").check_not(".to(").check("tl.dot").run(code)
+
+        if fallback_mixed_mm_expected:
+            extern_mm = "extern_kernels.mm" in code
+            FileCheck().check("def call").check(".run").check(
+                "triton_tem" if not extern_mm else "extern_kernels.mm"
+            ).run(code)
 
     @expectedFailureXPU
     @skipCUDAIf(not SM80OrLater, "need sm_80")
-    @inductor_config.patch(mixed_mm_choice="triton")
+    @inductor_config.patch(
+        {
+            "benchmark_epilogue_fusion": "False",
+            "max_autotune_gemm_backends": "TRITON",
+            "max_autotune_gemm": True,
+        }
+    )
+    @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
     def test_mixed_mm(self):
         def fn(a, b):
             return torch.mm(a, b.to(a.dtype))
@@ -351,7 +381,14 @@ class TestPatternMatcher(TestCase):
 
     @expectedFailureXPU
     @skipCUDAIf(not SM80OrLater, "need sm_80")
-    @inductor_config.patch(mixed_mm_choice="triton")
+    @inductor_config.patch(
+        {
+            "benchmark_epilogue_fusion": "False",
+            "max_autotune_gemm_backends": "TRITON",
+            "max_autotune_gemm": True,
+        }
+    )
+    @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
     def test_mixed_mm_exhaustive_dtypes(self):
         def fn(a, b):
             return torch.mm(a, b.to(a.dtype))
@@ -367,21 +404,22 @@ class TestPatternMatcher(TestCase):
                     low, high, (256, 256), dtype=dtype_right, device=GPU_TYPE
                 ),
             )
-            fallback_mixed_mm_expected = (
-                dtype_left == torch.bfloat16 and dtype_right == torch.uint8
-            )
-            self._test_mixed_impl(
-                fn, args, True, fallback_mixed_mm_expected, rtol=0.16, atol=1e-4
-            )
+            self._test_mixed_impl(fn, args, True, False, rtol=0.16, atol=1e-4)
 
     @expectedFailureXPU
     @skipCUDAIf(not SM80OrLater, "need sm_80")
-    @inductor_config.patch(mixed_mm_choice="triton")
+    @inductor_config.patch(
+        {
+            "benchmark_epilogue_fusion": "False",
+            "max_autotune_gemm_backends": "TRITON",
+            "max_autotune_gemm": True,
+        }
+    )
+    @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
     def test_mixed_mm_bad_cases(self):
         def fn(a, b):
             return torch.mm(a, b.to(a.dtype))
 
-        # when b is transposed and not contiguous, we skip triton and use fallback
         args_list = [
             (
                 torch.randn(8, 8, device=GPU_TYPE, dtype=torch.float16),
@@ -398,11 +436,18 @@ class TestPatternMatcher(TestCase):
         ]
 
         for args in args_list:
-            self._test_mixed_impl(fn, args, True, True)
+            self._test_mixed_impl(fn, args, True, False)
 
     @expectedFailureXPU
     @skipCUDAIf(not SM80OrLater, "need sm_80")
-    @inductor_config.patch(mixed_mm_choice="triton", max_autotune_gemm=True)
+    @inductor_config.patch(
+        {
+            "benchmark_epilogue_fusion": "False",
+            "max_autotune_gemm_backends": "TRITON",
+            "max_autotune_gemm": True,
+        }
+    )
+    @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
     def test_mixed_mm_epi_works(self):
         def fn(a, b, c, d):
             return torch.mm(a, b.to(a.dtype)) * c + d
@@ -433,142 +478,7 @@ class TestPatternMatcher(TestCase):
 
     @expectedFailureXPU
     @skipCUDAIf(not SM80OrLater, "need sm_80")
-    @skipCUDAIf(not IS_A100, "heuristic only run on Linux A100")
-    @skipCUDAIf(not IS_BIG_GPU, "tests fail on small GPU")
-    @inductor_config.patch(
-        mixed_mm_choice="heuristic",
-        autoheuristic_use="",
-        fx_graph_cache=False,
-        fx_graph_remote_cache=False,
-        shape_padding=False,
-    )
-    def test_mixed_mm_heuristic_no(self):
-        def fn(a, b):
-            return torch.mm(a, b.to(a.dtype))
-
-        # examples that should not be selected by handwritten heuristic
-        mat1_dtype = torch.float16
-        dyn_tensor = torch.randn(4, 4096, dtype=mat1_dtype, device=GPU_TYPE)
-        torch._dynamo.mark_dynamic(dyn_tensor, 0)
-        args_list = [
-            (
-                torch.randn(1, 4097, dtype=mat1_dtype, device=GPU_TYPE),
-                torch.randint(
-                    -128, 127, (4097, 4096), dtype=torch.int8, device=GPU_TYPE
-                ),
-            ),
-            (
-                torch.randn(1, 4096, dtype=mat1_dtype, device=GPU_TYPE),
-                torch.randint(
-                    -128, 127, (4096, 4097), dtype=torch.int8, device=GPU_TYPE
-                ),
-            ),
-            (
-                torch.randn(8, 8, dtype=mat1_dtype, device=GPU_TYPE),
-                torch.randint(-128, 127, (8, 8), dtype=torch.int8, device=GPU_TYPE),
-            ),
-            (
-                torch.randn(8, 2048, dtype=mat1_dtype, device=GPU_TYPE),
-                torch.randint(
-                    -128, 127, (2048, 2048), dtype=torch.int8, device=GPU_TYPE
-                ),
-            ),
-            (
-                torch.randn(8, 2048, dtype=mat1_dtype, device=GPU_TYPE),
-                torch.randint(
-                    -128, 127, (2048, 2048), dtype=torch.int8, device=GPU_TYPE
-                ).t(),
-            ),
-            (
-                torch.randn(8, 4096, dtype=mat1_dtype, device=GPU_TYPE),
-                torch.randint(
-                    -128, 127, (4096, 4096), dtype=torch.int8, device=GPU_TYPE
-                )[:, ::2],
-            ),
-            (
-                torch.randn(1, 4096, dtype=torch.float32, device=GPU_TYPE),
-                torch.randint(
-                    -128, 127, (4096, 4096), dtype=torch.int8, device=GPU_TYPE
-                ),
-            ),
-            (
-                dyn_tensor,
-                torch.randint(
-                    -128, 127, (4096, 4096), dtype=torch.int8, device=GPU_TYPE
-                ),
-            ),
-        ]
-
-        for args in args_list:
-            self._test_mixed_impl(fn, args, True, True)
-
-    @expectedFailureXPU
-    @skipCUDAIf(not SM80OrLater, "need sm_80")
-    @skipCUDAIf(not IS_A100, "heuristic only run on Linux A100")
-    @skipCUDAIf(not IS_BIG_GPU, "tests fail on small GPU")
-    @inductor_config.patch(
-        mixed_mm_choice="heuristic",
-        autoheuristic_use="",
-        fx_graph_cache=False,
-        fx_graph_remote_cache=False,
-        shape_padding=False,
-    )
-    def test_mixed_mm_heuristic_yes(self):
-        def fn(a, b):
-            return torch.mm(a, b.to(a.dtype))
-
-        mat1_dtype = torch.float16
-        # examples that should be selected by handwritten heuristic
-        args_list = [
-            (
-                torch.randn(1, 4096, dtype=mat1_dtype, device=GPU_TYPE),
-                torch.randint(
-                    -128, 127, (4096, 4096), dtype=torch.int8, device=GPU_TYPE
-                ),
-            ),
-            (
-                torch.randn(4, 4096, dtype=mat1_dtype, device=GPU_TYPE),
-                torch.randint(
-                    -128, 127, (4096, 4096), dtype=torch.int8, device=GPU_TYPE
-                ),
-            ),
-            (
-                torch.randn(8, 4096, dtype=mat1_dtype, device=GPU_TYPE),
-                torch.randint(
-                    -128, 127, (4096, 4096), dtype=torch.int8, device=GPU_TYPE
-                ),
-            ),
-            (
-                torch.randn(8, 4096, dtype=mat1_dtype, device=GPU_TYPE),
-                torch.randint(
-                    -128, 127, (4096, 4096), dtype=torch.int8, device=GPU_TYPE
-                ).t(),
-            ),
-            (
-                torch.randn(16, 4096, dtype=mat1_dtype, device=GPU_TYPE),
-                torch.randint(
-                    -128, 127, (8192, 4096), dtype=torch.int8, device=GPU_TYPE
-                ).t(),
-            ),
-            (
-                torch.randn(32, 4096, dtype=mat1_dtype, device=GPU_TYPE),
-                torch.randint(
-                    -128, 127, (4096, 8192), dtype=torch.int8, device=GPU_TYPE
-                ),
-            ),
-            (
-                torch.randn(64, 4096, dtype=mat1_dtype, device=GPU_TYPE),
-                torch.randint(
-                    -128, 127, (4096, 4096), dtype=torch.int8, device=GPU_TYPE
-                ),
-            ),
-        ]
-
-        for args in args_list:
-            self._test_mixed_impl(fn, args, True, False, rtol=0.01, atol=0.04)
-
-    @expectedFailureXPU
-    @skipCUDAIf(not SM80OrLater, "need sm_80")
+    @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
     def test_mixed_mm_gating(self):
         def fn(a, b):
             return torch.mm(a, b.to(a.dtype))
@@ -577,43 +487,18 @@ class TestPatternMatcher(TestCase):
             torch.randn(8, 8, device=GPU_TYPE),
             torch.randint(-128, 127, (8, 8), dtype=torch.int8, device=GPU_TYPE),
         )
-        # will ignore the mixed_mm code (including fallback)
-        with inductor_config.patch(
-            {"mixed_mm_choice": "default", "use_mixed_mm": False}
-        ):
-            self._test_mixed_impl(fn, args, False, False)
+        # will no max autotune, will not generate fused template
+        self._test_mixed_impl(fn, args, False, True)
 
-        # will use fallback_mixed_mm kernel due to no gemm_autotune
         with inductor_config.patch(
-            {"mixed_mm_choice": "default", "use_mixed_mm": True}
-        ):
-            self._test_mixed_impl(fn, args, True, True)
-
-        # will use mixed_mm kernel
-        with inductor_config.patch(
-            {"mixed_mm_choice": "triton", "use_mixed_mm": False}
+            {
+                "benchmark_epilogue_fusion": "False",
+                "max_autotune_gemm_backends": "TRITON",
+                "max_autotune_gemm": True,
+            }
         ):
             self._test_mixed_impl(fn, args, True, False)
 
-        # shows that use_mixed_mm doesn't do anything if foce_mixed_mm is set
-        with inductor_config.patch({"mixed_mm_choice": "triton", "use_mixed_mm": True}):
-            self._test_mixed_impl(fn, args, True, False)
-
-        # will use fallback_mixed_mm kernel
-        with inductor_config.patch({"mixed_mm_choice": "aten", "use_mixed_mm": False}):
-            self._test_mixed_impl(fn, args, True, True)
-
-        # will use fallback_mixed_mm kernel
-        with inductor_config.patch({"mixed_mm_choice": "aten", "use_mixed_mm": True}):
-            self._test_mixed_impl(fn, args, True, True)
-
-        # will use fallback_mixed_mm kernel because fallback is the only choice
-        with inductor_config.patch(
-            {"mixed_mm_choice": "aten", "use_mixed_mm": True, "max_autotune_gemm": True}
-        ):
-            self._test_mixed_impl(fn, args, True, True)
-
-    @inductor_config.patch(use_mixed_mm=True)
     def test_mixed_mm_cpu(self):
         def fn(a, b):
             return torch.mm(a, b.to(a.dtype))
@@ -672,151 +557,6 @@ class TestPatternMatcher(TestCase):
 
         self.assertEqual(compiled_fn(x), test_fn(x))
         self.assertEqual(counters["inductor"]["partial_reduction_reuse"], 1)
-
-    @expectedFailureXPU
-    @skipCUDAIf(not SM80OrLater, "need sm_80")
-    @inductor_config.patch(use_mixed_mm=True)
-    def test_uint4x2_mixed_mm(self):
-        def fn(a, b):
-            return torch.mm(
-                a,
-                torch.cat((b & 0xF, b >> 4), 1)
-                .reshape(-1, b.shape[1])
-                .to(a.dtype)
-                .sub(8),
-            )
-
-        def check_uint4x2_mixed_mm(args, expect_mixed_mm):
-            torch._dynamo.reset()
-            counters.clear()
-            ref = fn(*args)
-            test, (code,) = run_and_get_code(torch.compile(fn), *args)
-            torch.testing.assert_close(ref, test)
-            self.assertEqual("uint4x2_mixed_mm" in code, expect_mixed_mm)
-
-        args_expect_mixed_mm = [
-            (
-                torch.randn(8, 8, device=GPU_TYPE),
-                torch.randint(0, 255, (4, 8), dtype=torch.uint8, device=GPU_TYPE),
-            ),
-            (
-                torch.randn(8, 8, device=GPU_TYPE, dtype=torch.float16),
-                torch.randint(0, 255, (4, 8), dtype=torch.uint8, device=GPU_TYPE)
-                .t()
-                .contiguous()
-                .t(),
-            ),
-        ]
-
-        for args in args_expect_mixed_mm:
-            check_uint4x2_mixed_mm(args, True)
-
-        # mixed mm is only enabled when casting from a lower-bitwidth dtype to a higher one
-        args_expect_no_mixed_mm = [
-            (
-                torch.randn(8, 8, device=GPU_TYPE),
-                torch.randint(0, 255, (4, 8), dtype=torch.int32, device=GPU_TYPE),
-            ),
-            (
-                torch.randn(8, 8, device=GPU_TYPE),
-                torch.randint(0, 255, (4, 8), dtype=torch.int64, device=GPU_TYPE),
-            ),
-        ]
-
-        for args in args_expect_no_mixed_mm:
-            check_uint4x2_mixed_mm(args, False)
-
-    @expectedFailureXPU
-    @skipCUDAIf(not SM80OrLater, "need sm_80")
-    @inductor_config.patch(use_mixed_mm=True)
-    def test_uint4x2_mixed_mm_epi(self):
-        def fn(a, b, c, d):
-            return (
-                torch.mm(
-                    a,
-                    torch.cat((b & 0xF, b >> 4), 1)
-                    .reshape(-1, b.shape[1])
-                    .to(a.dtype)
-                    .sub(8),
-                )
-                * c
-                + d
-            )
-
-        args_list = [
-            (
-                torch.randn(8, 8, device=GPU_TYPE),
-                torch.randint(0, 255, (4, 8), dtype=torch.uint8, device=GPU_TYPE),
-                torch.randn(8, device=GPU_TYPE),
-                torch.randn(8, device=GPU_TYPE),
-            ),
-        ]
-
-        for args in args_list:
-            torch._dynamo.reset()
-            counters.clear()
-            ref = fn(*args)
-            test, (code,) = run_and_get_code(torch.compile(fn), *args)
-            torch.testing.assert_close(ref, test)
-            self.assertTrue("uint4x2_mixed_mm" in code)
-            self.assertTrue("fused_add_mm_mul" in code)
-
-    @inductor_config.patch(use_mixed_mm=True)
-    def test_uint4x2_mixed_mm_fail_to_match(self):
-        def fn(a, b):
-            return torch.mm(
-                a,
-                torch.cat((b & 0xF, b >> 4), 1)
-                .reshape(-1, b.shape[1])
-                .to(a.dtype)
-                .sub(8),
-            )
-
-        args_list = [
-            (  # cpu
-                torch.randn(8, 8),
-                torch.randint(0, 255, (4, 8), dtype=torch.uint8),
-            ),
-            (  # int8
-                torch.randn(8, 8, device=GPU_TYPE),
-                torch.randint(-128, 127, (4, 8), dtype=torch.int8, device=GPU_TYPE),
-            ),  # we don't match for int8 since numerics
-        ]  # for int8 bitshifts don't match between triton and pytorch
-
-        for args in args_list:
-            torch._dynamo.reset()
-            counters.clear()
-            ref = fn(*args)
-            test, (code,) = run_and_get_code(torch.compile(fn), *args)
-            torch.testing.assert_close(ref, test)
-            self.assertFalse("uint4x2_mixed_mm" in code)
-
-    @inductor_config.patch(mixed_mm_choice="default")
-    @inductor_config.patch(use_mixed_mm=False)
-    def test_uint4x2_mixed_mm_gating_works(self):
-        def fn(a, b):
-            return torch.mm(
-                a,
-                torch.cat((b & 0xF, b >> 4), 1)
-                .reshape(-1, b.shape[1])
-                .to(a.dtype)
-                .sub(8),
-            )
-
-        args_list = [
-            (
-                torch.randn(8, 8, device=GPU_TYPE),
-                torch.randint(0, 255, (4, 8), dtype=torch.uint8, device=GPU_TYPE),
-            ),
-        ]
-
-        for args in args_list:
-            torch._dynamo.reset()
-            counters.clear()
-            ref = fn(*args)
-            test, (code,) = run_and_get_code(torch.compile(fn), *args)
-            torch.testing.assert_close(ref, test)
-            self.assertFalse("uint4x2_mixed_mm" in code)
 
     def test_addmm(self):
         def fn(a, b, c):
@@ -1389,7 +1129,6 @@ class TestPatternMatcher(TestCase):
         self.assertIn("return (buf0, )", code[0])
         self.assertNotIn("async_compile.cpp", code[0])
 
-    @expectedFailureXPU
     def test_unfuse_bias_addmm(self):
         args = [
             torch.randn(20, device=GPU_TYPE),
@@ -1889,7 +1628,7 @@ class TestPatternMatcher(TestCase):
             return graph
 
         def custom_backend(
-            graph: torch.fx.GraphModule, example_inputs: List[torch.Tensor]
+            graph: torch.fx.GraphModule, example_inputs: list[torch.Tensor]
         ) -> Callable:
             from torch._inductor import config
 

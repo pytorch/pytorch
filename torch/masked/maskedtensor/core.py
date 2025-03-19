@@ -170,7 +170,7 @@ class MaskedTensor(torch.Tensor):
         if data.requires_grad:
             warnings.warn(
                 "It is not recommended to create a MaskedTensor with a tensor that requires_grad. "
-                "To avoid this, you can use data.clone().detach()",
+                "To avoid this, you can use data.detach().clone()",
                 UserWarning,
                 stacklevel=2,
             )

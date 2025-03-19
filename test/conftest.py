@@ -7,7 +7,7 @@ import sys
 import xml.etree.ElementTree as ET
 from collections import defaultdict
 from types import MethodType
-from typing import Any, List, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import pytest
 from _pytest.config import Config, filename_arg
@@ -135,8 +135,7 @@ class _NodeReporterReruns(_NodeReporter):
         else:
             assert isinstance(report.longrepr, tuple)
             filename, lineno, skipreason = report.longrepr
-            if skipreason.startswith("Skipped: "):
-                skipreason = skipreason[9:]
+            skipreason = skipreason.removeprefix("Skipped: ")
             details = f"{filename}:{lineno}: {skipreason}"
 
             skipped = ET.Element(
@@ -241,7 +240,7 @@ def pytest_report_teststatus(report, config):
 
 
 @pytest.hookimpl(trylast=True)
-def pytest_collection_modifyitems(items: List[Any]) -> None:
+def pytest_collection_modifyitems(items: list[Any]) -> None:
     """
     This hook is used when rerunning disabled tests to get rid of all skipped tests
     instead of running and skipping them N times. This avoids flooding the console
@@ -304,7 +303,7 @@ class StepcurrentPlugin:
         self.skip: bool = config.getoption("stepcurrent_skip")
         self.run_single: bool = config.getoption("run_single")
 
-    def pytest_collection_modifyitems(self, config: Config, items: List[Any]) -> None:
+    def pytest_collection_modifyitems(self, config: Config, items: list[Any]) -> None:
         if not self.lastrun:
             self.report_status = "Cannot find last run test, not skipping"
             return

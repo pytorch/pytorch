@@ -139,8 +139,10 @@
 #endif
 
 #if defined(TORCH_HIP_BUILD_MAIN_LIB)
+#define TORCH_HIP_CPP_API C10_EXPORT
 #define TORCH_HIP_API C10_EXPORT
 #else
+#define TORCH_HIP_CPP_API C10_IMPORT
 #define TORCH_HIP_API C10_IMPORT
 #endif
 

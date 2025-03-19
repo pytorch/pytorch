@@ -21,7 +21,7 @@ from torch.testing._internal.common_methods_invocations import (
 from torch.testing._internal.common_cuda import SM53OrLater
 from torch._prims_common import corresponding_complex_dtype
 
-from typing import Optional, List
+from typing import Optional
 from packaging import version
 
 
@@ -597,7 +597,7 @@ class TestFFT(TestCase):
                 else:
                     numpy_fn = getattr(np.fft, fname)
 
-                def fn(t: torch.Tensor, s: Optional[List[int]], dim: List[int] = (-2, -1), norm: Optional[str] = None):
+                def fn(t: torch.Tensor, s: Optional[list[int]], dim: list[int] = (-2, -1), norm: Optional[str] = None):
                     return torch_fn(t, s, dim, norm)
 
                 torch_fns = (torch_fn, torch.jit.script(fn))
@@ -1226,6 +1226,14 @@ class TestFFT(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'stft requires the return_complex parameter'):
             y = x.stft(10, pad_mode='constant')
 
+    @onlyNativeDeviceTypes
+    @skipCPUIfNoFFT
+    def test_stft_align_to_window_only_requires_non_center(self, device):
+        x = torch.rand(100)
+        for align_to_window in [True, False]:
+            with self.assertRaisesRegex(RuntimeError, 'stft align_to_window should only be set when center = false'):
+                y = x.stft(10, center=True, return_complex=True, align_to_window=align_to_window)
+
     # stft and istft are currently warning if a window is not provided
     @onlyNativeDeviceTypes
     @skipCPUIfNoFFT
@@ -1358,7 +1366,7 @@ class TestFFT(TestCase):
                 'onesided': True,
             },
         ]
-        for i, pattern in enumerate(patterns):
+        for pattern in patterns:
             _test_istft_is_inverse_of_stft(pattern)
 
     @onlyNativeDeviceTypes
@@ -1425,7 +1433,7 @@ class TestFFT(TestCase):
                 'onesided': True,
             },
         ]
-        for i, pattern in enumerate(patterns):
+        for pattern in patterns:
             _test_istft_is_inverse_of_stft_with_padding(pattern)
 
     @onlyNativeDeviceTypes

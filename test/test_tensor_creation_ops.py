@@ -11,7 +11,7 @@ import unittest
 from itertools import product, combinations, combinations_with_replacement, permutations
 import random
 import tempfile
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
@@ -26,12 +26,12 @@ from torch.testing._internal.common_utils import (
     set_default_dtype,
     set_default_tensor_type,
     TEST_SCIPY,
-    IS_MACOS,
     IS_PPC,
-    IS_JETSON,
     IS_WINDOWS,
     IS_FBCODE,
     IS_SANDCASTLE,
+    IS_S390X,
+    IS_ARM64,
     parametrize,
     skipIfTorchDynamo,
     xfailIfTorchDynamo,
@@ -1049,8 +1049,6 @@ class TestTensorCreation(TestCase):
     # errors with UBSAN. These casts are deliberate in PyTorch, however, and
     # NumPy may have the same behavior.
     @onlyNativeDeviceTypes
-    @unittest.skipIf(IS_MACOS or IS_JETSON, "Test is broken on MacOS and Jetson, \
-        see https://github.com/pytorch/pytorch/issues/38752")
     @unittest.skipIf(IS_PPC, "Test is broken on PowerPC, see https://github.com/pytorch/pytorch/issues/39671")
     @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
     def test_float_to_int_conversion_finite(self, device, dtype):
@@ -1079,20 +1077,26 @@ class TestTensorCreation(TestCase):
         self._float_to_int_conversion_helper(vals, device, dtype, refs)
 
     # Note: CUDA will fail this test on most dtypes, often dramatically.
+    # Note: This test validates undefined behavior consistency in float-to-ints casts
     # NB: torch.uint16, torch.uint32, torch.uint64 excluded as this
     # nondeterministically fails, warning "invalid value encountered in cast"
     @onlyCPU
-    @unittest.skipIf(IS_MACOS, "Nonfinite conversion results on MacOS are different from others.")
+    @unittest.skipIf(IS_S390X, "Test fails for int16 on s390x. Needs investigation.")
     @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
     def test_float_to_int_conversion_nonfinite(self, device, dtype):
         vals = (float('-inf'), float('inf'), float('nan'))
-        refs = 0
-        if dtype == torch.bool:
-            refs = True
-        elif dtype in (torch.int32, torch.int64):
-            refs = torch.iinfo(dtype).min
 
-        self._float_to_int_conversion_helper(vals, device, dtype, (refs, ) * 3)
+        if dtype == torch.bool:
+            refs = (True, True, True)
+        elif IS_ARM64:
+            refs = (torch.iinfo(dtype).min, torch.iinfo(dtype).max, 0)
+            if dtype in (torch.int8, torch.int16):
+                refs = (0, -1, 0)
+        else:
+            refs = (0, 0, 0)
+            if dtype in (torch.int32, torch.int64):
+                refs = (torch.iinfo(dtype).min, ) * 3
+        self._float_to_int_conversion_helper(vals, device, dtype, refs)
 
     @onlyNativeDeviceTypes
     def test_complex_type_conversions(self, device):
@@ -2756,6 +2760,22 @@ class TestTensorCreation(TestCase):
                                                             sparse_size, dtype=torch.float64)
                 self.assertEqual(sparse_with_dtype.device, torch.device('cpu'))
 
+    @onlyCUDA
+    @onlyNativeDeviceTypes
+    def test_new_tensor_device(self, device):
+        torch_device = torch.device(device)
+        cpu_device = torch.device('cpu')
+        tensor = torch.tensor((1, 2, 3), device=device)
+
+        # need more than one device_type to test this
+        assert self.device_type == 'cuda'
+        for left, right in product([tensor, tensor.cpu()], [tensor, tensor.cpu()]):
+            for device_arg in [torch_device, cpu_device, None]:
+                if device_arg is None:
+                    self.assertEqual(left.new_tensor(right).device, left.device)
+                else:
+                    self.assertEqual(left.new_tensor(right, device=device_arg).device, device_arg)
+
     def _test_signal_window_functions(self, name, dtype, device, **kwargs):
         import scipy.signal as signal
 
@@ -3215,6 +3235,10 @@ class TestTensorCreation(TestCase):
         t = torch.randn(2, 5, device=device)
         self.assertIsNone(t.untyped_storage().filename)
 
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    def test_refs_tensor(self, device, dtype):
+        self.assertEqual(torch._refs.tensor([], device=device, dtype=dtype), torch.tensor([], device=device, dtype=dtype))
+
 
 # Class for testing random tensor creation ops, like torch.randint
 class TestRandomTensorCreation(TestCase):
@@ -3463,6 +3487,22 @@ class TestRandomTensorCreation(TestCase):
             self.assertIs(torch.int64, torch.randint(*args, size=size, out=out).dtype)
             self.assertIs(torch.int64, torch.randint(*args, size=size, out=out, dtype=torch.int64).dtype)
 
+        self.assertRaisesRegex(RuntimeError,
+                               "random_ expects 'from' to be less than 'to', but got from=0 >= to=0",
+                               lambda: torch.randint(0, size=size))
+        self.assertRaisesRegex(RuntimeError,
+                               "random_ expects 'from' to be less than 'to', but got from=-1 >= to=-2",
+                               lambda: torch.randint(-1, -2, size=size))
+        self.assertRaisesRegex(TypeError,
+                               r"randint\(\): argument 'high' \(position 1\) must be int, not float",
+                               lambda: torch.randint(.5, size=size))
+        self.assertRaisesRegex(RuntimeError,
+                               "from is out of bounds for",
+                               lambda: torch.randint(-32769, 0, size=size, dtype=torch.int16))
+        self.assertRaisesRegex(RuntimeError,
+                               "from is out of bounds for",
+                               lambda: torch.randint(-1, 1, size=size, dtype=torch.uint32))
+
     # TODO: this test should be updated
     @onlyCPU
     def test_randint(self, device):
@@ -3494,6 +3534,25 @@ class TestRandomTensorCreation(TestCase):
             self.assertEqual(res3, res4)
             self.assertTrue((res1 < 6).all().item())
             self.assertTrue((res1 >= 0).all().item())
+
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "For fb compatibility random not changed in fbcode")
+    def test_randint_distribution(self, device):
+        size = 1_000_000
+        n_max = int(0.75 * 2 ** 32)
+        n_bins = 8
+
+        def bin(index, max_size):
+            return index // (max_size // n_bins)
+        res = torch.randint(n_max, (size,), device=device)
+        # histogram implemented for float only
+        bins = bin(res, n_max).float().cpu()
+        hist, _ = bins.histogram(8, range=(0, n_bins))
+        expected_bin = res.shape[0] / 8
+        expected_error = math.sqrt(expected_bin) / expected_bin * 3
+        error = (hist - expected_bin).abs().max() / expected_bin
+        self.assertTrue(error < expected_error)
+
 
     @dtypes(torch.half, torch.float, torch.bfloat16, torch.double,
             torch.complex32, torch.complex64, torch.complex128)
@@ -3575,6 +3634,29 @@ class TestRandomTensorCreation(TestCase):
             torch.randperm(n, out=non_contiguous_tensor)
             self.assertEqual(non_contiguous_tensor, res)
             self.assertEqual(res.sort().values.long(), torch.arange(n, device=device))
+
+
+    @largeTensorTest("10GB", "cpu")
+    @largeTensorTest("40GB", "cuda")
+    @slowTest
+    def test_randperm_large(self, device):
+        # Test even distribution where rand32 might produce skewed "uniform" distribution
+        # n_items is chosen to not evenly divide 2**32 and be sufficiently large
+        # to easily detect skew
+        def decile(index, collection_size):
+            return index // (collection_size // 10)
+
+        n_items = 700_000_000
+        shuffled = torch.randperm(n_items, device=device)
+        interval = 1_000_000
+        shuffled_interval = shuffled[:interval]
+        # histogram implemented for float only
+        deciles = decile(shuffled_interval, shuffled.shape[0]).float().cpu()
+        hist, _ = deciles.histogram(10, range=(0, 10))
+        expected_bin = shuffled_interval.shape[0] / 10
+        expected_error = math.sqrt(expected_bin) / expected_bin * 3
+        error = (hist - expected_bin).abs().max() / expected_bin
+        self.assertTrue(error < expected_error, f"error {error} > {expected_error}")
 
     # Test exceptions when device and generator types are incompatible
     @onlyCUDA
@@ -4125,7 +4207,7 @@ class TestAsArray(TestCase):
     def test_default_device(self, device):
         original = torch.arange(5)
 
-        examples: List[Tuple[Any, Dict]] = [
+        examples: list[tuple[Any, dict]] = [
             (3, {}),
             (original, {}),
             (to_numpy(original), {}),

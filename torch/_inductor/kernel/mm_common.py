@@ -2,24 +2,25 @@
 import functools
 import itertools
 import logging
-from typing import Any, cast, Dict, Sequence, Tuple
+from collections.abc import Sequence
+from typing import Any, cast
 
 import sympy
 
 import torch
-from torch._inductor.select_algorithm import realize_inputs
+from torch._inductor.select_algorithm import realize_inputs, SymbolicGridFn
 from torch._inductor.virtualized import V
 from torch.utils._ordered_set import OrderedSet
 
 from .. import config as inductor_config
 from ..codegen.wrapper import PythonWrapperCodegen
-from ..ir import Layout
+from ..ir import ChoiceCaller, Layout
 from ..runtime.runtime_utils import next_power_of_2
 from ..utils import (
-    ceildiv as cdiv,
     get_backend_num_stages,
     get_num_sms,
     TMA_DESCRIPTOR_SIZE,
+    use_aten_gemm_kernels,
 )
 
 
@@ -41,7 +42,7 @@ def filtered_configs(
     m: int,
     n: int,
     k: int,
-    configs: Sequence[Tuple[int, int, int, int, int]],
+    configs: Sequence[tuple[int, int, int, int, int]],
     has_int8_tensor=False,
     scale=1,
     exclude=lambda m, n, k: False,
@@ -63,7 +64,8 @@ def filtered_configs(
     m = max(
         next_power_of_2(
             V.graph.sizevars.size_hint(
-                m, fallback=torch._inductor.config.unbacked_symint_fallback  # type: ignore[arg-type]
+                m,
+                fallback=torch._inductor.config.unbacked_symint_fallback,  # type: ignore[arg-type]
             )
         ),
         min_block_size,
@@ -71,7 +73,8 @@ def filtered_configs(
     n = max(
         next_power_of_2(
             V.graph.sizevars.size_hint(
-                n, fallback=torch._inductor.config.unbacked_symint_fallback  # type: ignore[arg-type]
+                n,
+                fallback=torch._inductor.config.unbacked_symint_fallback,  # type: ignore[arg-type]
             )
         ),
         min_block_size,
@@ -79,12 +82,13 @@ def filtered_configs(
     k = max(
         next_power_of_2(
             V.graph.sizevars.size_hint(
-                k, fallback=torch._inductor.config.unbacked_symint_fallback  # type: ignore[arg-type]
+                k,
+                fallback=torch._inductor.config.unbacked_symint_fallback,  # type: ignore[arg-type]
             )
         ),
         min_block_size_k,
     )
-    used = OrderedSet[tuple[int, int, int, int, int, int]]()
+    used = OrderedSet[tuple[int, ...]]()
     for block_m, block_n, block_k, num_stages, num_warps in configs:
         # shrink configs for small sizes
         block_m = max(min(int(block_m * scale), m), min_block_size)
@@ -97,6 +101,7 @@ def filtered_configs(
         # each warp computes 16x16 tile = 256
         num_warps = min(num_warps, block_m * block_n // 256)
         if torch.version.hip:
+            kpack = 2
             for matrix_instr_nonkdim in [0, 16]:
                 if matrix_instr_nonkdim != 0 and (
                     block_m % matrix_instr_nonkdim != 0
@@ -104,6 +109,7 @@ def filtered_configs(
                 ):
                     #  block_m and block_n must be a multiple of matrix_instr_nonkdim
                     continue
+
                 if (
                     block_m,
                     block_n,
@@ -111,6 +117,7 @@ def filtered_configs(
                     num_stages,
                     num_warps,
                     matrix_instr_nonkdim,
+                    kpack,
                 ) not in used and (
                     max_mm_configs is None or len(used) < max_mm_configs
                 ):
@@ -122,6 +129,7 @@ def filtered_configs(
                             num_stages,
                             num_warps,
                             matrix_instr_nonkdim,
+                            kpack,
                         )
                     )
                     yield triton_config(
@@ -131,6 +139,7 @@ def filtered_configs(
                         num_stages=num_stages,
                         num_warps=num_warps,
                         matrix_instr_nonkdim=matrix_instr_nonkdim,
+                        kpack=kpack,
                     )
         else:
             if (block_m, block_n, block_k, num_stages, num_warps, 0) not in used and (
@@ -352,37 +361,37 @@ scaled_persistent_mm_kernel_configs = [
 
 # Create filtered list of configs based on cond evaluation
 mm_platform_configs = tuple(
-    cast(Tuple[int, int, int, int, int], config["config"])
+    cast(tuple[int, int, int, int, int], config["config"])
     for config in mm_kernel_configs
     if config["cond"]
 )
 extra_mm_platform_configs = tuple(
-    cast(Tuple[int, int, int, int, int], config["config"])
+    cast(tuple[int, int, int, int, int], config["config"])
     for config in extra_mm_kernel_configs
     if config["cond"]
 )
 int8_platform_configs = tuple(
-    cast(Tuple[int, int, int, int, int], config["config"])
+    cast(tuple[int, int, int, int, int], config["config"])
     for config in int8_mm_kernel_configs
     if config["cond"]
 )
 mixed_mm_platform_configs = tuple(
-    cast(Tuple[int, int, int, int, int], config["config"])
+    cast(tuple[int, int, int, int, int], config["config"])
     for config in mixed_mm_kernel_configs
     if config["cond"]
 )
 persistent_mm_platform_configs = tuple(
-    cast(Tuple[int, int, int, int, int], config["config"])
+    cast(tuple[int, int, int, int, int], config["config"])
     for config in persistent_mm_kernel_configs
     if config["cond"]
 )
 scaled_mm_platform_configs = tuple(
-    cast(Tuple[int, int, int, int, int], config["config"])
+    cast(tuple[int, int, int, int, int], config["config"])
     for config in scaled_mm_kernel_configs
     if config["cond"]
 )
 scaled_persistent_mm_platform_configs = tuple(
-    cast(Tuple[int, int, int, int, int], config["config"])
+    cast(tuple[int, int, int, int, int], config["config"])
     for config in scaled_persistent_mm_kernel_configs
     if config["cond"]
 )
@@ -410,11 +419,6 @@ int8_mm_configs = functools.partial(
     configs=int8_platform_configs,
 )
 
-mixed_mm_configs = functools.partial(
-    filtered_configs,
-    configs=mixed_mm_platform_configs,
-)
-
 persistent_mm_configs = functools.partial(
     filtered_configs,
     configs=persistent_mm_platform_configs,
@@ -431,14 +435,35 @@ scaled_persistent_mm_configs = functools.partial(
 )
 
 
-def mm_grid(m, n, meta):
+def should_fallback_to_aten(choices: list[ChoiceCaller]) -> bool:
+    if len(choices) == 0 and not use_aten_gemm_kernels():
+        if inductor_config.autotune_fallback_to_aten:
+            log.warning(
+                "No choices for GEMM, using ATen backend as fallback. "
+                "This behavior is being deprecated. Please add include Aten in max_autotune_gemm_backends."
+            )
+            return True
+        else:
+            log.warning(
+                "No choices for GEMM, chose not to fallback to ATen backend. "
+                "To temporarily change this behavior, set autotune_fallback_to_aten to True "
+                "via TORCHINDUCTOR_AUTOTUNE_FALLBACK_TO_ATEN=1, but this knob is being deprecated. "
+                "The long term fix is to include Aten in max_autotune_gemm_backends."
+            )
+            return False
+    return False
+
+
+@SymbolicGridFn
+def mm_grid(m, n, meta, *, cdiv):
     """
     The CUDA grid size for matmul triton templates.
     """
     return (cdiv(m, meta["BLOCK_M"]) * cdiv(n, meta["BLOCK_N"]), 1, 1)
 
 
-def persistent_mm_grid(M: int, N: int, meta: Dict[str, Any]):
+@SymbolicGridFn
+def persistent_mm_grid(M: int, N: int, meta: dict[str, Any], *, cdiv, min):
     """Defines the grid for persistent kernels."""
     return (
         min(meta["NUM_SMS"], cdiv(M, meta["BLOCK_M"]) * cdiv(N, meta["BLOCK_N"])),
@@ -453,14 +478,13 @@ def acc_type(dtype):
     return f"tl.{dtype}".replace("torch.", "")
 
 
-def mm_options(config, sym_m, sym_n, sym_k, layout, b_prologue_cast_type=None):
+def mm_options(config, sym_m, sym_n, sym_k, layout):
     """
     Common options to matmul triton templates.
     """
     even_k_symbolic = (
         # it isn't worth guarding on this
-        sympy.gcd(sym_k, config.kwargs["BLOCK_K"])
-        == config.kwargs["BLOCK_K"]
+        sympy.gcd(sym_k, config.kwargs["BLOCK_K"]) == config.kwargs["BLOCK_K"]
     )
     allow_tf32 = torch.backends.cuda.matmul.allow_tf32 and (
         not inductor_config.force_same_precision
@@ -471,7 +495,6 @@ def mm_options(config, sym_m, sym_n, sym_k, layout, b_prologue_cast_type=None):
         EVEN_K=even_k_symbolic,
         ALLOW_TF32=allow_tf32,
         ACC_TYPE=acc_type(layout.dtype),
-        B_PROLOGUE_CAST_TYPE=b_prologue_cast_type,
         num_stages=config.num_stages,
         num_warps=config.num_warps,
         **config.kwargs,
@@ -540,7 +563,7 @@ def addmm_epilogue(dtype, alpha, beta):
     return epilogue
 
 
-def _is_static_problem(layout: Layout) -> Tuple[bool, bool]:
+def _is_static_problem(layout: Layout) -> tuple[bool, bool]:
     """
     Check if input tensors and output layout have static shapes and non-zero sizes.
 

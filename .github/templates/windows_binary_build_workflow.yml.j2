@@ -43,7 +43,6 @@ on:
 env:
   # Needed for conda builds
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
-  ANACONDA_USER: pytorch
   AWS_DEFAULT_REGION: us-east-1
   BUILD_ENVIRONMENT: !{{ build_environment }}
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -72,7 +71,7 @@ jobs:
     {%- else %}
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
     {%- endif %}
-    timeout-minutes: !{{ common.timeout_minutes }}
+    timeout-minutes: !{{ common.timeout_minutes_windows_binary }}
     !{{ upload.binary_env(config, True) }}
     {%- if config.pytorch_extra_install_requirements is defined and config.pytorch_extra_install_requirements|d('')|length > 0  %}
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: !{{ config.pytorch_extra_install_requirements }}
@@ -109,9 +108,13 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge.nonephemeral"
 {%- endif %}
 {%- else %}
+{%- if branches == "nightly" %}
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
+{%- else %}
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
 {%- endif %}
-    timeout-minutes: !{{ common.timeout_minutes }}
+{%- endif %}
+    timeout-minutes: !{{ common.timeout_minutes_windows_binary }}
     !{{ upload.binary_env(config, True) }}
     steps:
       !{{ common.setup_ec2_windows() }}

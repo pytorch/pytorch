@@ -7,12 +7,8 @@ from typing import NamedTuple
 import torch
 from torch._inductor import config
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch._inductor.utils import is_gpu
-from torch.testing._internal.common_device_type import (
-    get_desired_device_type_test_bases,
-)
-from torch.testing._internal.common_utils import slowTest, TEST_WITH_ASAN
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.common_utils import slowTest
+from torch.testing._internal.inductor_utils import GPU_TYPE, RUN_GPU
 
 
 try:
@@ -39,14 +35,6 @@ except unittest.SkipTest:
     raise
 
 
-_desired_test_bases = get_desired_device_type_test_bases(allow_xpu=True)
-RUN_GPU = (
-    HAS_GPU
-    and any(is_gpu(getattr(x, "device_type", "")) for x in _desired_test_bases)
-    and not TEST_WITH_ASAN
-)
-
-
 class GpuWrapperTemplate:
     pass
 
@@ -54,13 +42,55 @@ class GpuWrapperTemplate:
 class TestGpuWrapper(InductorTestCase):
     device = GPU_TYPE
 
+    def test_aoti_debug_printer_works_on_constants(self):
+        batch_size = 32
+        seq_length = 50
+        hidden_size = 768
+
+        def test_fn():
+            inp = torch.randn(batch_size, seq_length, hidden_size, device=self.device)
+            weight = torch.randn(hidden_size, hidden_size, device=self.device)
+            matmul_output = inp @ weight
+            torch.nn.LayerNorm(hidden_size, device=self.device)(matmul_output)
+            return True
+
+        comp = torch.compile(
+            options={
+                "cpp_wrapper": True,
+                "aot_inductor.debug_intermediate_value_printer": "2",
+            }
+        )(test_fn)
+        comp()
+
 
 class DynamicShapesGpuWrapperGpuTests(InductorTestCase):
     device = GPU_TYPE
 
+    def test_annotation_training(self):
+        batch_size = 32
+        seq_length = 50
+        hidden_size = 768
+
+        def create_test_fn():
+            def test_fn():
+                inp = torch.randn(
+                    batch_size, seq_length, hidden_size, device=self.device
+                )
+                weight = torch.randn(hidden_size, hidden_size, device=self.device)
+                matmul_output = inp @ weight
+                torch.nn.LayerNorm(hidden_size, device=self.device)(matmul_output)
+                return True
+
+            return test_fn
+
+        fn = torch.compile(options={"annotate_training": True, "cpp_wrapper": True})(
+            create_test_fn()
+        )
+        fn()
+
 
 test_failures_gpu_wrapper = {
-    "test_mm_plus_mm2_cuda_dynamic_shapes": test_torchinductor.TestFailure(
+    "test_mm_plus_mm2_dynamic_shapes": test_torchinductor.TestFailure(
         ("gpu_wrapper",), is_skip=True
     ),
     "test_randint_xpu": test_torchinductor.TestFailure(("gpu_wrapper",), is_skip=False),
@@ -146,10 +176,6 @@ if RUN_GPU:
         "test_enable_dynamic_shapes_cpp_wrapper",
         "test_dynamic_shapes_persistent_reduction_mixed_x_dim",
         "test_cat_slice_cat",
-        "test_mm_plus_mm2",
-        "test_mm_plus_mm3",
-        "test_addmm",
-        "test_linear_relu",
         "test_fft_real_input",
         "test_fft_real_input_real_output",
     ]
@@ -232,10 +258,12 @@ if RUN_GPU:
         # ),
         BaseTest(
             "test_mm_plus_mm2",
+            device=None,
             tests=test_select_algorithm.TestSelectAlgorithm(),
         ),
         BaseTest(
             "test_mm_plus_mm3",
+            device=None,
             tests=test_select_algorithm.TestSelectAlgorithm(),
         ),
         BaseTest("test_fft_real_input"),
@@ -254,11 +282,13 @@ if RUN_GPU:
         # skip if not enough SMs
         BaseTest(
             "test_addmm",
+            device=None,
             tests=test_select_algorithm.TestSelectAlgorithm(),
         ),
         # skip if not enough SMs
         BaseTest(
             "test_linear_relu",
+            device=None,
             tests=test_select_algorithm.TestSelectAlgorithm(),
         ),
     ]:
