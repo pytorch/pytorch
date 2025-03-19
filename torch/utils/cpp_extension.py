@@ -285,7 +285,7 @@ _COMMON_SYCL_FLAGS = [
     '-fsycl',
 ]
 
-def _get_sycl_arch_flag():
+def _get_sycl_arch_flags():
     arch_list = torch.xpu.get_arch_list()
     # Dropping dg2* archs since they lack hardware support for fp64 and require
     # special consideration from the user. If needed these platforms can
@@ -295,6 +295,7 @@ def _get_sycl_arch_flag():
         return []
     else:
         return ['-fsycl-targets=spir64_gen,spir64',
+                '-flink-huge-device-code',
                 f'-Xs "-device {",".join(arch_list)}"']
 
 _SYCL_DLINK_FLAGS = [
@@ -302,7 +303,7 @@ _SYCL_DLINK_FLAGS = [
     '-fsycl-link',
     '--offload-compress',
 ]
-_SYCL_DLINK_FLAGS += _get_sycl_arch_flag()
+_SYCL_DLINK_FLAGS += _get_sycl_arch_flags()
 
 JIT_EXTENSION_VERSIONER = ExtensionVersioner()
 
