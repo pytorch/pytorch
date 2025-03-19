@@ -154,6 +154,7 @@ class _StateDictInfo(StateDictOptions):
     fsdp_modules: list[nn.Module] = field(default_factory=list)
 
 
+@functools.cache
 def _get_fqns(
     model: nn.Module,
     name: str,

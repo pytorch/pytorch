@@ -283,10 +283,7 @@ class AOTICompiledModel:
 
 
 def load_package(
-    path: FileLike,
-    model_name: str = "model",
-    run_single_threaded: bool = False,
-    num_runners: int = 1,
+    path: FileLike, model_name: str = "model", run_single_threaded: bool = False
 ) -> AOTICompiledModel:  # type: ignore[type-arg]
     assert (
         isinstance(path, (io.IOBase, IO)) and path.readable() and path.seekable()
@@ -302,12 +299,12 @@ def load_package(
             path.seek(0)
             log.debug("Writing buffer to tmp file located at %s.", f.name)
             loader = torch._C._aoti.AOTIModelPackageLoader(
-                f.name, model_name, run_single_threaded, num_runners
+                f.name, model_name, run_single_threaded
             )  # type: ignore[call-arg]
             return AOTICompiledModel(loader)
 
     path = os.fspath(path)  # AOTIModelPackageLoader expects (str, str)
     loader = torch._C._aoti.AOTIModelPackageLoader(
-        path, model_name, run_single_threaded, num_runners
+        path, model_name, run_single_threaded
     )  # type: ignore[call-arg]
     return AOTICompiledModel(loader)
