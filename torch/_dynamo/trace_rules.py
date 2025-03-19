@@ -3409,7 +3409,7 @@ MOD_SKIPLIST = [
     "torch.mtia",
     "torch.multiprocessing",
     "torch.nested",
-    "torch.nn",
+    # "torch.nn",
     "torch.onnx",
     "torch.overrides",
     "torch.package",
