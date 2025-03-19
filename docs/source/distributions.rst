@@ -122,20 +122,20 @@ Probability distributions - torch.distributions
     :undoc-members:
     :show-inheritance:
 
-:hidden:`Geometric`
-~~~~~~~~~~~~~~~~~~~~~~~
-
-.. currentmodule:: torch.distributions.geometric
-.. autoclass:: Geometric
-    :members:
-    :undoc-members:
-    :show-inheritance:
-
 :hidden:`GeneralizedPareto`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. currentmodule:: torch.distributions.generalized_pareto
 .. autoclass:: GeneralizedPareto
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
+:hidden:`Geometric`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: torch.distributions.geometric
+.. autoclass:: Geometric
     :members:
     :undoc-members:
     :show-inheritance:
