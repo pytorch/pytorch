@@ -298,7 +298,8 @@ class SuperVariable(VariableTracker):
                     tx_old
                 )
 
-        unimplemented(f"non-function or method super: {inner_fn}")
+        args = [self.objvar] + args
+        return VariableTracker.build(tx, inner_fn).call_function(tx, args, kwargs)
 
 
 class ExceptionVariable(VariableTracker):

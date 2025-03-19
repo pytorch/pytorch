@@ -634,13 +634,9 @@ class TensorWithTFOverrideVariable(TensorVariable):
                 f"Accessing {name} on a tensor subclass with a __torch_function__ override is not supported"
             )
 
-        if hasattr(torch.Tensor, name):
-            if _is_attr_overidden(tx, self, name):
-                unimplemented(
-                    f"Accessing overridden method/attribute {name} on a tensor"
-                    " subclass with a __torch_function__ override is not supported"
-                )
-
+        # Handle non-overriden attributes inherited from `torch.Tensor`.
+        attr_is_overriden = _is_attr_overidden(tx, self, name)
+        if hasattr(torch.Tensor, name) and not attr_is_overriden:
             if tx.output.torch_function_enabled:
                 if self.source:
                     install_guard(
@@ -670,11 +666,23 @@ class TensorWithTFOverrideVariable(TensorVariable):
             else:
                 import types
 
+                cls_source = GlobalSource(self.global_mangled_class_name(tx))
+                attr_source = AttrSource(cls_source, name)
                 if isinstance(attr, types.FunctionType):
-                    cls_source = GlobalSource(self.global_mangled_class_name(tx))
-                    func_source = AttrSource(cls_source, name)
-                    install_guard(func_source.make_guard(GuardBuilder.FUNCTION_MATCH))
+                    install_guard(attr_source.make_guard(GuardBuilder.FUNCTION_MATCH))
                     return UserMethodVariable(attr, self)
+
+                elif isinstance(attr, property):
+                    getter_source = AttrSource(attr_source, "fget")
+                    getter = attr.fget
+                    getter_var = UserMethodVariable(getter, self, source=getter_source)
+                    return getter_var.call_function(tx, [], {})
+
+                elif attr_is_overriden:
+                    unimplemented(
+                        f"Currently only support accessing overridden attributes that are functions or properties, but got {type(attr)}"  # noqa: B950
+                    )
+
         return super().var_getattr(tx, name)
 
     def call_torch_function(self, tx: "InstructionTranslator", fn, types, args, kwargs):
