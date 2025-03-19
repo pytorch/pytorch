@@ -2003,16 +2003,8 @@ def compile_fx(
             cuda_context = get_cuda_device_context(gm)
             with cuda_context:
                 _recursive_joint_graph_passes(gm)
-
-            static_lifetime_input_indices: Optional[list[int]] = kwargs.pop(  # type: ignore[assignment]
-                "static_lifetime_input_indices", None
-            )
             return min_cut_rematerialization_partition(
-                gm,
-                joint_inputs,
-                compiler="inductor",
-                static_lifetime_input_indices=static_lifetime_input_indices,
-                **kwargs,
+                gm, joint_inputs, **kwargs, compiler="inductor"
             )
 
         @compile_time_strobelight_meta(phase_name="backward")

@@ -493,7 +493,7 @@ def gen_2d_view_of_epilogue_buf(
                 from_stride_ordered_decreasingly_to_epilogue_node_order
             )
 
-            reindexer = ir.fuse_reindexing(stride_reindex, reshape_reindex)  # type: ignore[var-annotated]
+            reindexer = ir.fuse_reindexing(stride_reindex, reshape_reindex)
             return reindexer
 
         if default_reindexers is None:
