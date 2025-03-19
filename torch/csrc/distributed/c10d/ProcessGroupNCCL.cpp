@@ -3283,9 +3283,9 @@ void ProcessGroupNCCL::startTimeEstimate() {
 
 float ProcessGroupNCCL::endTimeEstimate() {
 #ifdef NCCL_SIM_INFO_INITIALIZER
-  auto simInfo = std::make_unique<ncclSimInfo_t>();
-  *simInfo = NCCL_SIM_INFO_INITIALIZER;
-  return NCCLComm::ncclCollectiveEstimateEnd(std::move(simInfo));
+  ncclSimInfo_t simInfo = NCCL_SIM_INFO_INITIALIZER;
+  C10D_NCCL_CHECK(ncclGroupSimulateEnd(&simInfo), std::nullopt);
+  return simInfo.estimatedTime;
 #else
   TORCH_CHECK(
       false,
