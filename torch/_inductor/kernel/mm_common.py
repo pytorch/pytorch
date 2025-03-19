@@ -12,7 +12,6 @@ from .. import config as inductor_config
 from ..codegen.wrapper import PythonWrapperCodegen
 from ..ir import ChoiceCaller, Layout
 from ..utils import (
-    ceildiv as cdiv,
     get_num_sms,
     TMA_DESCRIPTOR_SIZE,
     use_aten_gemm_kernels,
