@@ -78,12 +78,17 @@ def set_tunableop_defaults():
     torch.cuda.tunable.set_max_tuning_iterations(100)
     torch.cuda.tunable.set_rotating_buffer_size(-1)
 
-def tunableop_matmul(device, dtype):
+def tunableop_matmul(device, dtype, offline=False):
     # Helper function to test TunableOp in a subprocess
     # requires helper function since lambda function
     # not supported by multiprocessing module
     import os
     os.environ["PYTORCH_TUNABLEOP_ENABLED"] = "1"
+
+    if offline:
+        torch.cuda.tunable.tuning_enable(False)
+        torch.cuda.tunable.record_untuned_enable(True)
+
     torch.cuda.tunable.set_max_tuning_duration(1)
     A = torch.randn((17, 17), device=device, dtype=dtype)
     B = torch.randn((17, 17), device=device, dtype=dtype)
