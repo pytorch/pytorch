@@ -76,13 +76,10 @@ def read_release_matrix():
 
 
 def test_numpy():
-    try:
-        import numpy as np
+    import numpy as np
 
-        x = np.arange(5)
-        torch.tensor(x)
-    except ImportError:
-        print("Numpy check skipped. Numpy is not installed.")
+    x = np.arange(5)
+    torch.tensor(x)
 
 
 def check_version(package: str) -> None:
@@ -413,7 +410,6 @@ def main() -> None:
     smoke_test_conv2d()
     test_linalg()
     test_numpy()
-
     if is_cuda_system:
         test_linalg("cuda")
         test_cuda_gds_errors_captured()

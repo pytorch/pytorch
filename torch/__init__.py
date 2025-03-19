@@ -12,7 +12,6 @@ on an NVIDIA GPU with compute capability >= 3.0.
 
 import builtins
 import ctypes
-import functools
 import glob
 import importlib
 import inspect
@@ -2691,7 +2690,6 @@ else:
         raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
 
-@functools.cache
 def get_device_module(device: _Optional[_Union[torch.device, str]] = None):
     """
     Returns the module associated with a given device(e.g., torch.device('cuda'), "mtia:0", "xpu", ...).
