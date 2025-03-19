@@ -610,6 +610,13 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             install_guard(TorchFunctionDisableVariable._guards_singleton)
             return ConstantVariable.create(tx.output.torch_function_enabled)
 
+        @register(torch._C._is_torch_function_all_disabled)
+        def handle_is_torch_function_all_disabled(self, tx):
+            install_guard(TorchFunctionDisableVariable._guards_singleton)
+            return ConstantVariable.create(
+                not tx.symbolic_torch_function_state.torch_function_mode_enabled
+            )
+
         @register(
             torch.overrides.has_torch_function,
             torch.overrides.has_torch_function_variadic,
