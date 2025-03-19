@@ -3983,16 +3983,6 @@ class Scheduler:
         if getattr(node.node, "unbacked_bindings", None):
             return True
 
-        # if (
-        #     hasattr(node.node, "layout")
-        #     and hasattr(node.node.layout, "size")
-        #     and any(
-        #         isinstance(expr, sympy.Expr) and expr.free_symbols
-        #         for expr in node.node.layout.size
-        #     )
-        # ):
-        #     return True
-
         return False
 
     def get_name_to_nodes(
@@ -4053,7 +4043,9 @@ class Scheduler:
             )
 
     def get_graph_partition_symbol_inputs(
-        self, partition: PartitionType
+        self,
+        partition: PartitionType,
+        input_nodes: dict[str, Union[ir.IRNode, ir.TorchBindObject, sympy.Expr]],
     ) -> OrderedSet[sympy.Symbol]:
         """
         Returns all symbol inputs which are required to be in scope to successfully
@@ -4062,26 +4054,52 @@ class Scheduler:
         - free symbols in partition input shapes, strides, and offsets. This is needed
           for recording cudagraphs for input tensors with dynamic shapes.
         """
-
         def get_scheduler_node_symbol_uses(
             node: BaseSchedulerNode,
         ) -> OrderedSet[sympy.Symbol]:
+            """
+            Gets symbols used in node.
+            """
             if isinstance(node, FusedSchedulerNode):
                 return OrderedSet().union(
                     *(get_scheduler_node_symbol_uses(snode) for snode in node.snodes)
                 )
             assert node.node is not None
+            return node.node.get_free_symbol_uses()
 
-            candidate_symbols = (
-                node.node.get_free_symbol_uses()
-                | free_symbols(node.node.get_size())
-                | free_symbols(node.node.get_stride())
-                | free_symbols(node.node.get_offset())
-            )
+        def get_input_node_symbols(
+            node: Union[ir.IRNode, sympy.Expr, ir.TorchBindObject],
+        ) -> OrderedSet[sympy.Symbol]:
+            """
+            Gets symbols used in input node shapes, strides, and offsets.
+            """
+            if isinstance(node, ir.TorchBindObject):
+                return OrderedSet()
+            elif isinstance(node, ir.IRNode):
+                layout = node.maybe_get_layout()
+                if isinstance(layout, ir.Layout):
+                    return (
+                        free_symbols(layout.size)
+                        | free_symbols(layout.stride)
+                        | free_symbols(layout.offset)
+                    )
+                return OrderedSet()
+            elif isinstance(node, sympy.Expr):
+                return OrderedSet(node)
+            else:
+                raise NotImplementedError(f"Unsupported input node type: {type(node)}")
 
+        def filter_symbols(
+            symbols: OrderedSet[sympy.Symbol],
+        ) -> OrderedSet[sympy.Symbol]:
+            """
+            Filters a set of symbols that are required for codegen. Skip symbols
+            that are always internal to kernels, such as SymT.TMP, SymT.INDEX,
+            and SymT.R0_INDEX.
+            """
             return OrderedSet(
                 s
-                for s in candidate_symbols
+                for s in symbols
                 if symbol_is_type(
                     s,
                     (
@@ -4097,9 +4115,17 @@ class Scheduler:
                 )
             )
 
-        return OrderedSet().union(
+        candidate_symbols: OrderedSet[sympy.Symbol] = OrderedSet().union(
             *(get_scheduler_node_symbol_uses(node) for node in partition)
         )
+        candidate_symbols.union(
+            *(
+                get_input_node_symbols(node)
+                for _, node in input_nodes.items()
+            )
+        )
+
+        return filter_symbols(candidate_symbols)
 
     def get_graph_partition_signature(
         self, partitions: list[PartitionType], skip_cudagraphs: list[bool]
@@ -4165,7 +4191,10 @@ class Scheduler:
             constant_names = [
                 name for name in partition_input_names if name in V.graph.constants
             ]
-            symbol_inputs = self.get_graph_partition_symbol_inputs(partition)
+
+            symbol_inputs = self.get_graph_partition_symbol_inputs(
+                partition, input_nodes
+            )
 
             partition_signature = GraphPartitionSignature(
                 symbol_inputs,
