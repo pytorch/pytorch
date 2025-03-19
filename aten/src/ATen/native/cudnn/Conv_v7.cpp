@@ -551,8 +551,8 @@ class AlgoIterator {
       try {
         f(algoPerf);
         return;
-      } catch (c10::OutOfMemoryError& e) {
-        cudaGetLastError(); // clear CUDA error
+      } catch (c10::OutOfMemoryError&) {
+        std::ignore = cudaGetLastError(); // clear CUDA error
       }
     }
 
@@ -564,10 +564,10 @@ class AlgoIterator {
         f(algoPerf);
         cache.insert(args.params, algoPerf);
         return;
-      } catch (c10::OutOfMemoryError& e) {
-        cudaGetLastError(); // clear CUDA error
-      } catch (c10::CuDNNError& e) {
-        cudaGetLastError(); // clear CUDA error
+      } catch (c10::OutOfMemoryError&) {
+        std::ignore = cudaGetLastError(); // clear CUDA error
+      } catch (c10::CuDNNError&) {
+        std::ignore = cudaGetLastError(); // clear CUDA error
       }
     }
     TORCH_CHECK(
