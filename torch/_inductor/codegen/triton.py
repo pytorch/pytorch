@@ -3960,6 +3960,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if tree.is_reduction and self.cooperative_reduction:
             max_block = max_block * self.max_rsplit()
 
+        # [Note: Constant mask optimisation]
         # Optional optimization: if block divides numel exactly, we will
         # never need to do a masked load to handle stragglers at the end.
         # If this tree is for the y dimension, we should only use a constant
