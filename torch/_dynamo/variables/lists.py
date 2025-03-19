@@ -451,21 +451,26 @@ class ListVariable(CommonListMethodsVariable):
             name == "__setitem__"
             and self.is_mutable()
             and args
-            and args[0].is_python_constant()
+            and (
+                args[0].is_python_constant()
+                or isinstance(args[0], variables.SymNodeVariable)
+            )
         ):
             assert not kwargs
             key, value = args
+            if isinstance(key, variables.SymNodeVariable):
+                constant_key = key.evaluate_expr()
+            else:
+                constant_key = key.as_python_constant()
             tx.output.side_effects.mutation(self)
             if isinstance(key, SliceVariable):
                 if not value.has_force_unpack_var_sequence(tx):
                     unimplemented(
                         f"Missing dynamo support for expanding {value} into a list for slice assignment."
                     )
-                self.items[key.as_python_constant()] = value.force_unpack_var_sequence(
-                    tx
-                )
+                self.items[constant_key] = value.force_unpack_var_sequence(tx)
             else:
-                self.items[key.as_python_constant()] = value
+                self.items[constant_key] = value
             return ConstantVariable.create(None)
 
         if name == "sort" and self.is_mutable():
