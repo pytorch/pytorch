@@ -760,16 +760,11 @@ class AutogradCompilerInstance:
         assert i == len(_graph_placeholders) - 1
 
         def is_impure(node):
-            return (
-                node in unpack_nodes
-                or node.op == "placeholder"
-                or node.op == "output"
-                or (node.op == "call_function" and node.target in _impure_targets)
-                or (
-                    node.op == "call_function"
-                    and node.target in torch.fx.node._side_effectful_functions
-                )
-            )
+            if node in unpack_nodes or (
+                node.op == "call_function" and node.target in _impure_targets
+            ):
+                return True
+            return node.is_impure()
 
         before = len(self.fx_tracer.graph.nodes)
         self.fx_tracer.graph.eliminate_dead_code(is_impure)
