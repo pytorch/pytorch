@@ -3133,14 +3133,14 @@ def gather_object(
     group = _group_or_default_group(group)
     if dst is None and group_dst is None:
         dst = 0
-    global_dst = _canonicalize_group_rank(group, dst, group_dst, return_global=True)
+    group_dst = _canonicalize_group_rank(group, dst, group_dst, return_global=False)
     if _rank_not_in_group(group):
         _warn_not_in_group("gather_object")
         return
 
     # Ensure object_gather_list is specified appropriately.
-    my_global_rank = get_rank()
-    _validate_output_list_for_rank(my_global_rank, global_dst, object_gather_list)
+    my_group_rank = group.rank()
+    _validate_output_list_for_rank(my_group_rank, group_dst, object_gather_list)
     current_device = _get_object_coll_device(group)
     input_tensor, local_size = _object_to_tensor(obj, current_device, group)
 
@@ -3161,7 +3161,7 @@ def gather_object(
     # Resize tensor to max size across all ranks.
     input_tensor.resize_(max_object_size)
     # Avoid populating output tensors if the result won't be gathered on this rank.
-    if my_global_rank == global_dst:
+    if my_group_rank == group_dst:
         coalesced_output_tensor = torch.empty(
             max_object_size * group_size, dtype=torch.uint8, device=current_device
         )
@@ -3173,11 +3173,11 @@ def gather_object(
     # All ranks call gather with equal-sized tensors.
     gather(
         input_tensor,
-        gather_list=output_tensors if my_global_rank == global_dst else None,  # type: ignore[possibly-undefined]
-        dst=global_dst,
+        gather_list=output_tensors if my_group_rank == group_dst else None,  # type: ignore[possibly-undefined]
+        group_dst=group_dst,
         group=group,
     )
-    if my_global_rank != global_dst:
+    if my_group_rank != group_dst:
         return
 
     assert object_gather_list is not None, "Must provide object_gather_list on dst rank"
@@ -3461,7 +3461,7 @@ def broadcast_object_list(
     group = _group_or_default_group(group)
     if src is None and group_src is None:
         src = 0
-    global_src = _canonicalize_group_rank(group, src, group_src, return_global=True)
+    group_src = _canonicalize_group_rank(group, src, group_src, return_global=False)
     if _rank_not_in_group(group):
         _warn_not_in_group("broadcast_object_list")
         return
@@ -3473,9 +3473,9 @@ def broadcast_object_list(
     # case it is not ``None`` we move the size and object tensors to be
     # broadcasted to this device.
     current_device = device or _get_object_coll_device(group)
-    my_global_rank = get_rank()
+    my_group_rank = group.rank()
     # Serialize object_list elements to tensors on src rank.
-    if my_global_rank == global_src:
+    if my_group_rank == group_src:
         tensor_list, size_list = zip(
             *[_object_to_tensor(obj, current_device, group) for obj in object_list]
         )
@@ -3486,12 +3486,12 @@ def broadcast_object_list(
         )
 
     # Broadcast object sizes
-    broadcast(object_sizes_tensor, src=global_src, group=group)
+    broadcast(object_sizes_tensor, group_src=group_src, group=group)
 
     # Concatenate and broadcast serialized object tensors
     # Note: torch.cat will do an extra memory copy to the current device, if the tensor_list
     # has only one element, we can skip the copy.
-    if my_global_rank == global_src:
+    if my_group_rank == group_src:
         if len(tensor_list) == 1:  # type: ignore[possibly-undefined]
             object_tensor = tensor_list[0]
         else:
@@ -3503,10 +3503,10 @@ def broadcast_object_list(
             device=current_device,
         )
 
-    broadcast(object_tensor, src=global_src, group=group)
+    broadcast(object_tensor, group_src=group_src, group=group)
     # Deserialize objects using their stored sizes.
     offset = 0
-    if my_global_rank != global_src:
+    if my_group_rank != group_src:
         for i, obj_size in enumerate(object_sizes_tensor):
             obj_view = object_tensor[offset : offset + obj_size]
             obj_view = obj_view.type(torch.uint8)
@@ -3581,7 +3581,7 @@ def scatter_object_list(
     group = _group_or_default_group(group)
     if src is None and group_src is None:
         src = 0
-    global_src = _canonicalize_group_rank(group, src, group_src, return_global=True)
+    group_src = _canonicalize_group_rank(group, src, group_src, return_global=False)
     if _rank_not_in_group(group):
         _warn_not_in_group("scatter_object_list")
         return
@@ -3594,9 +3594,9 @@ def scatter_object_list(
             "Expected argument scatter_object_output_list to be a list of size at least 1."
         )
 
-    my_global_rank = get_rank()
+    my_group_rank = group.rank()
     pg_device = _get_object_coll_device(group)
-    if my_global_rank == global_src:
+    if my_group_rank == group_src:
         if scatter_object_input_list is None:
             raise ValueError(
                 "source rank must provide non-None scatter_object_input_list"
@@ -3616,7 +3616,7 @@ def scatter_object_list(
             tensor.resize_(max_tensor_size)
     else:
         max_tensor_size = torch.tensor([0], dtype=torch.long, device=pg_device)
-    broadcast(max_tensor_size, src=global_src, group=group)
+    broadcast(max_tensor_size, group_src=group_src, group=group)
 
     # Scatter actual serialized objects
     output_tensor = torch.empty(
@@ -3624,8 +3624,8 @@ def scatter_object_list(
     )
     scatter(
         output_tensor,
-        scatter_list=None if my_global_rank != global_src else tensor_list,  # type: ignore[possibly-undefined]
-        src=global_src,
+        scatter_list=None if my_group_rank != group_src else tensor_list,  # type: ignore[possibly-undefined]
+        group_src=group_src,
         group=group,
     )
 
@@ -3633,8 +3633,8 @@ def scatter_object_list(
     obj_tensor_size = torch.tensor([0], dtype=torch.long, device=pg_device)
     scatter(
         obj_tensor_size,
-        scatter_list=None if my_global_rank != global_src else tensor_sizes,  # type: ignore[possibly-undefined]
-        src=global_src,
+        scatter_list=None if my_group_rank != group_src else tensor_sizes,  # type: ignore[possibly-undefined]
+        group_src=group_src,
         group=group,
     )
 
@@ -4037,11 +4037,10 @@ def gather(
         return
     if dst is None and group_dst is None:
         dst = 0
-    global_dst = _canonicalize_group_rank(group, dst, group_dst, return_global=True)
     group_dst = _canonicalize_group_rank(group, dst, group_dst, return_global=False)
-    my_global_rank = get_rank()
-    _validate_output_list_for_rank(my_global_rank, global_dst, gather_list)
-    output_tensors = [gather_list] if global_dst == my_global_rank else []
+    my_group_rank = group.rank()
+    _validate_output_list_for_rank(my_group_rank, group_dst, gather_list)
+    output_tensors = [gather_list] if group_dst == my_group_rank else []
     input_tensors = [tensor]
 
     opts = GatherOptions()
@@ -4120,7 +4119,6 @@ def scatter(
     group = _group_or_default_group(group)
     if src is None and group_src is None:
         src = 0
-    global_src = _canonicalize_group_rank(group, src, group_src, return_global=True)
     group_src = _canonicalize_group_rank(group, src, group_src, return_global=False)
     if _rank_not_in_group(group):
         _warn_not_in_group("scatter")
@@ -4130,8 +4128,8 @@ def scatter(
     ]
     tensor = tensor if not tensor.is_complex() else torch.view_as_real(tensor)
 
-    my_global_rank = get_rank()
-    if global_src == my_global_rank:
+    my_group_rank = group.rank()
+    if group_src == my_group_rank:
         if not scatter_list:
             raise ValueError(
                 "Argument ``scatter_list`` must be specified on source rank."
