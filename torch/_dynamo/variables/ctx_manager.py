@@ -695,9 +695,6 @@ class TorchFunctionDisableVariable(ContextWrappingVariable):
             initial_values=[],
             **kwargs,
         )
-        # mlazos: I think this is here to make sure we don't reinvoke on clone()
-        var._call_func(tx, [])
-        var.set_cleanup_hook(tx)
         return var
 
     def __init__(
@@ -712,7 +709,7 @@ class TorchFunctionDisableVariable(ContextWrappingVariable):
         self.initial_torch_function_subclass_enabled = (
             tx.symbolic_torch_function_state.torch_function_subclass_enabled
         )
-        self.initial_torch_function_subclass_enabled = (
+        self.initial_torch_function_mode_enabled = (
             tx.symbolic_torch_function_state.torch_function_mode_enabled
         )
 
@@ -720,9 +717,6 @@ class TorchFunctionDisableVariable(ContextWrappingVariable):
             target_values=target_values, initial_values=initial_values, **kwargs
         )
         install_guard(self._guards_singleton)
-
-    def enter(self, tx):
-        return variables.ConstantVariable.create(None)
 
     def set_cleanup_hook(self, tx: "InstructionTranslator", fn=None):
         if fn is None:
