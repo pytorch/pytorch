@@ -628,38 +628,9 @@ static Tensor median_common_mps(const Tensor& input_t, bool nanmedian) {
     return output_t;
   }
 
-  int effectiveLength = num_in_elements;
-  if (nanmedian) {
-    Tensor counts = at::empty({1}, kInt, std::nullopt, kMPS, std::nullopt, std::nullopt);
+  std::string medianKey = "median_mps:" + getMPSTypeString(input_t) + getTensorsStringKey(input_t) +
+      std::to_string(num_in_elements) + (nanmedian ? ":nan" : "");
 
-    std::string countKey = "nan_count_mps:" + getMPSTypeString(input_t) + getTensorsStringKey(input_t);
-
-    using CountCachedGraph = MPSUnaryCachedGraph;
-    auto countCachedGraph =
-        LookUpOrCreateCachedGraph<CountCachedGraph>(countKey, [&](auto mpsGraph, auto newCachedGraph) {
-          MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_t);
-          MPSGraphTensor* castInputTensor =
-              castToIHFTypes(mpsGraph, inputTensor, input_t, /*includesInt64=*/macOS13_3_plus);
-
-          MPSGraphTensor* reshapedTensor = [mpsGraph reshapeTensor:castInputTensor withShape:@[ @-1 ] name:nil];
-
-          MPSGraphTensor* isNanTensor = [mpsGraph isNaNWithTensor:reshapedTensor name:nil];
-          MPSGraphTensor* nanCountTensor = [mpsGraph reductionSumWithTensor:isNanTensor axis:-1 name:nil];
-
-          newCachedGraph->inputTensor_ = inputTensor;
-          newCachedGraph->outputTensor_ = nanCountTensor;
-        });
-
-    auto inputPlaceholder = Placeholder(countCachedGraph->inputTensor_, input_t);
-    auto countPlaceholder = Placeholder(countCachedGraph->outputTensor_, counts);
-    auto countFeeds = dictionaryFromPlaceholders(inputPlaceholder);
-    runMPSGraph(getCurrentMPSStream(), countCachedGraph->graph(), countFeeds, countPlaceholder);
-
-    effectiveLength -= counts.item<int>();
-  }
-
-  std::string medianKey =
-      "median_mps:" + getMPSTypeString(input_t) + getTensorsStringKey(input_t) + std::to_string(effectiveLength);
   using MedianCachedGraph = MPSUnaryCachedGraph;
   auto medianCachedGraph =
       LookUpOrCreateCachedGraph<MedianCachedGraph>(medianKey, [&](auto mpsGraph, auto newCachedGraph) {
@@ -669,14 +640,44 @@ static Tensor median_common_mps(const Tensor& input_t, bool nanmedian) {
 
         MPSGraphTensor* reshapedTensor = [mpsGraph reshapeTensor:castInputTensor withShape:@[ @-1 ] name:nil];
 
+        MPSGraphTensor* effectiveLengthTensor = nil;
+        if (nanmedian) {
+          MPSGraphTensor* isNanTensor = [mpsGraph isNaNWithTensor:reshapedTensor name:nil];
+          MPSGraphTensor* nanCountTensor = [mpsGraph reductionSumWithTensor:isNanTensor axis:-1 name:nil];
+
+          MPSGraphTensor* nanCountTensorFloat = [mpsGraph castTensor:nanCountTensor toType:MPSDataTypeInt32 name:nil];
+
+          MPSGraphTensor* totalElementsTensor = [mpsGraph constantWithScalar:num_in_elements
+                                                                       shape:@[]
+                                                                    dataType:MPSDataTypeInt32];
+
+          effectiveLengthTensor = [mpsGraph subtractionWithPrimaryTensor:totalElementsTensor
+                                                         secondaryTensor:nanCountTensor
+                                                                    name:nil];
+        } else {
+          effectiveLengthTensor = [mpsGraph constantWithScalar:num_in_elements shape:@[] dataType:MPSDataTypeInt32];
+        }
+
+        // get median index: medianIdx = ((effectiveLength + 1) / 2) - 1
+        MPSGraphTensor* oneTensor = [mpsGraph constantWithScalar:1 shape:@[] dataType:MPSDataTypeInt32];
+        MPSGraphTensor* twoTensor = [mpsGraph constantWithScalar:2 shape:@[] dataType:MPSDataTypeInt32];
+        MPSGraphTensor* effectivePlusOne = [mpsGraph additionWithPrimaryTensor:effectiveLengthTensor
+                                                               secondaryTensor:oneTensor
+                                                                          name:nil];
+        MPSGraphTensor* halfEffective = [mpsGraph divisionWithPrimaryTensor:effectivePlusOne
+                                                            secondaryTensor:twoTensor
+                                                                       name:nil];
+        MPSGraphTensor* medianIdxTensor = [mpsGraph subtractionWithPrimaryTensor:halfEffective
+                                                                 secondaryTensor:oneTensor
+                                                                            name:nil];
+
         MPSGraphTensor* sortedTensor = [mpsGraph sortWithTensor:reshapedTensor axis:0 name:nil];
 
-        NSUInteger medianIdx = ((effectiveLength + 1) / 2) - 1;
-        MPSGraphTensor* medianTensor = [mpsGraph sliceTensor:sortedTensor
-                                                   dimension:0
-                                                       start:medianIdx
-                                                      length:1
-                                                        name:nil];
+        MPSGraphTensor* medianTensor = [mpsGraph gatherWithUpdatesTensor:sortedTensor
+                                                           indicesTensor:medianIdxTensor
+                                                                    axis:0
+                                                         batchDimensions:0
+                                                                    name:nil];
         MPSGraphTensor* outputTensor = [mpsGraph reshapeTensor:medianTensor withShape:@[] name:nil];
 
         newCachedGraph->inputTensor_ = inputTensor;
