@@ -55,7 +55,6 @@ from torch.fx.experimental.symbolic_shapes import (
     ShapeEnv,
     SymTypes,
 )
-from torch.fx.node import Node
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import SymT
@@ -101,8 +100,7 @@ from .virtualized import ops, OpsValue, V
 
 if TYPE_CHECKING:
     from torch import Tensor
-    from torch.fx.experimental.symbolic_shapes import SympyBoolean
-    from torch.fx.node import Argument
+    from torch.fx.node import Node
 
     from .codegen.cuda.cuda_template import CUDATemplate
     from .codegen.wrapper import PythonWrapperCodegen
@@ -673,7 +671,7 @@ class IRNode:
         raise NotImplementedError(type(self).__name__)
 
     def freeze_layout_with_exact_strides(
-        self, exact_strides: list[_IntLike], allow_padding: bool = False
+        self, exact_strides: Sequence[_IntLike], allow_padding: bool = False
     ) -> None:
         raise NotImplementedError(type(self).__name__)
 
@@ -6237,17 +6235,6 @@ class InplaceBernoulliFallback(ExternKernel):
         V.graph.register_operation(self)
 
 
-def _str_to_bool(s: str) -> bool:
-    try:
-        if (b := int(s)) in (0, 1):
-            return bool(b)
-    except ValueError:
-        pass
-
-    assert s in ("False", "True"), s
-    return s == "True"
-
-
 # Used to deal with torch.complex types
 class InplaceCopyFallback(ExternKernel):
     """
@@ -6256,10 +6243,7 @@ class InplaceCopyFallback(ExternKernel):
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         (dst, src, non_blocking) = self.codegen_args()
-
-        # TODO(rec): non_blocking is definitely a `str` here, and definitely
-        # a `bool` elsewhere. Is this pattern, repeated below, a bug?
-        wrapper.codegen_device_copy(src, dst, _str_to_bool(non_blocking))
+        wrapper.codegen_device_copy(src, dst, non_blocking)
 
     def should_allocate(self) -> bool:
         return False
@@ -6762,7 +6746,7 @@ class FallbackKernel(ExternKernelAlloc):
             def __repr__(self) -> str:
                 return self.ref
 
-        tensor_args = [Shim(x.codegen_reference()) for x in self.inputs]
+        tensor_args = [Shim(x.codegen_reference()) for x in self.inputs_as_nodes]
         args, kwargs = self.unflatten_args(tensor_args, self.constant_args)
         if V.graph.cpp_wrapper and isinstance(self.op_overload, torch._ops.OpOverload):
             args = self.fill_non_provided_args(args, kwargs)
@@ -7058,7 +7042,7 @@ class ComplexView(FallbackKernel):
 
     def get_inputs_that_alias_output(self) -> Sequence[str]:
         # Signal to codegen that our output buffer isn't safe to reuse
-        return [self.inputs[0].get_name()]
+        return [self.inputs_as_nodes[0].get_name()]
 
     def __init__(  # type: ignore[no-untyped-def]
         self,
@@ -7113,7 +7097,9 @@ class MultiOutput(ExternKernel):
     def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         wrapper.codegen_multi_output(
             self.get_name(),
-            self.codegen_list_tuple_access(self.inputs[0].get_name(), self.indices),
+            self.codegen_list_tuple_access(
+                self.inputs_as_nodes[0].get_name(), self.indices
+            ),
         )
         self.codegen_size_asserts(wrapper)
 
@@ -7129,7 +7115,7 @@ class MultiOutput(ExternKernel):
         self.indices = indices
 
     def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
-        return self.inputs[0].get_unbacked_symbol_uses()
+        return self.inputs_as_nodes[0].get_unbacked_symbol_uses()
 
     def should_allocate(self) -> bool:
         if len(self.inputs) == 1 and (
@@ -7191,18 +7177,18 @@ class MutableBox(IRNode):
         return self.data.freeze_layout()
 
     def freeze_layout_with_stride_order(
-        self, order: list[int], allow_padding: bool = False
+        self, order: Sequence[int], allow_padding: bool = False
     ) -> None:
         return self.data.freeze_layout_with_stride_order(order, allow_padding)
 
-    def freeze_layout_with_fill_order(self, order: list[int]) -> None:
+    def freeze_layout_with_fill_order(self, order: Sequence[int]) -> None:
         return self.data.freeze_layout_with_fill_order(order)
 
-    def freeze_layout_with_same_order(self, stride: list[_IntLike]) -> None:
+    def freeze_layout_with_same_order(self, stride: Sequence[_IntLike]) -> None:
         return self.data.freeze_layout_with_same_order(stride)
 
     def freeze_layout_with_exact_strides(
-        self, exact_strides: list[_IntLike], allow_padding: bool = False
+        self, exact_strides: Sequence[_IntLike], allow_padding: bool = False
     ) -> None:
         return self.data.freeze_layout_with_exact_strides(exact_strides, allow_padding)
 
@@ -7332,10 +7318,13 @@ class StorageBox(MutableBox):
         )
         origin_node = self.data.get_origin_node()
         traceback = self.data.get_traceback()
+        device = self.data.get_device()
+        assert device is not None
+
         self.data = ComputedBuffer(
             name=None,
             layout=FlexibleLayout(
-                device=self.data.get_device(),
+                device=device,
                 dtype=self.data.get_dtype(),
                 size=self.data.get_size(),
             ),
@@ -7409,11 +7398,11 @@ def _has_aliased_buffers(buffers: Sequence[IRNode]) -> bool:
 @ir_dataclass(frozen=False)
 class InvokeSubgraph(ExternKernel):
     subgraph: Optional[Subgraph] = None
-    operands: Optional[list[TensorBox]] = None
-    outputs: Optional[list[MultiOutput]] = None
+    operands: Optional[Sequence[IRNode]] = None
+    outputs: Optional[Sequence[IRNode]] = None
 
     def __init__(
-        self, subgraph: Subgraph, operands: list[TensorBox], layout: MultiOutputLayout
+        self, subgraph: Subgraph, operands: Sequence[IRNode], layout: MultiOutputLayout
     ) -> None:
         super().__init__(
             name=None,
@@ -7425,7 +7414,7 @@ class InvokeSubgraph(ExternKernel):
         V.graph.register_operation(self)
 
     @classmethod
-    def create(cls, subgraph: Subgraph, operands):  # type: ignore[no-untyped-def]
+    def create(cls, subgraph: Subgraph, operands: Sequence[IRNode]) -> IRNode:
         # TODO(anijain2305) - Support sym expr as operands in future.
         fx_operands = V.graph.current_node.args[-1]
         fake_operands = [x.meta["val"] for x in fx_operands]  # type: ignore[union-attr]
@@ -7438,7 +7427,7 @@ class InvokeSubgraph(ExternKernel):
         def handle_sym_expr(stride):  # type: ignore[no-untyped-def]
             return [s.node.expr if isinstance(s, torch.SymInt) else s for s in stride]
 
-        new_operands = []
+        new_operands: list[IRNode] = []
         for idx, operand in enumerate(operands):
             if isinstance(operand, ShapeAsConstantBuffer):
                 new_operands.append(operand)
@@ -7475,13 +7464,18 @@ class InvokeSubgraph(ExternKernel):
             layout=MultiOutputLayout(device=device),
         )
 
-        def create_output(output: IRNode, ind: int):
+        def create_output(
+            output: IRNode, ind: int
+        ) -> Union[IRNode, Sequence[Union[IRNode, Sequence[IRNode]]]]:
             if isinstance(output, (ShapeAsConstantBuffer, NoneAsConstantBuffer)):
                 return output
             else:
+                device = output.get_device()
+                assert device is not None
+
                 return MultiOutput(
                     FixedLayout(
-                        device=output.get_device(),
+                        device=device,
                         dtype=output.get_dtype(),
                         size=output.get_size(),  # type: ignore[arg-type]
                         stride=output.get_stride(),
@@ -7491,9 +7485,9 @@ class InvokeSubgraph(ExternKernel):
                     [(list, ind)],
                 )
 
-        outputs = [create_output(output, i) for i, output in enumerate(outputs)]
-        invoke_subgraph.outputs = outputs
-        return outputs
+        outputs_ = [create_output(output, i) for i, output in enumerate(outputs)]
+        invoke_subgraph.outputs = outputs_  # type: ignore[assignment]
+        return outputs_  # type: ignore[return-value]
 
     def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         wrapper.codegen_invoke_subgraph(self)
@@ -7502,15 +7496,15 @@ class InvokeSubgraph(ExternKernel):
 @ir_dataclass(frozen=False)
 class Conditional(ExternKernel):
     predicate: Optional[IRNode] = None
-    operands: Optional[list[Union[TensorBox, ShapeAsConstantBuffer]]] = None
+    operands: Optional[Sequence[IRNode]] = None
     true_subgraph: Optional[Subgraph] = None
     false_subgraph: Optional[Subgraph] = None
-    outputs: Optional[list[MultiOutput]] = None
+    outputs: Optional[Sequence[MultiOutput]] = None
 
     def __init__(
         self,
         predicate: IRNode,
-        operands: list[Union[TensorBox, ShapeAsConstantBuffer]],
+        operands: Sequence[IRNode],
         true_subgraph: Subgraph,
         false_subgraph: Subgraph,
         layout: MultiOutputLayout,
@@ -7521,7 +7515,7 @@ class Conditional(ExternKernel):
         self.true_subgraph = true_subgraph
         self.false_subgraph = false_subgraph
 
-        sym_args, tensor_args = _split_by_sym_type([predicate] + operands)
+        sym_args, tensor_args = _split_by_sym_type([predicate, *operands])
 
         super().__init__(
             name=None,
@@ -7655,16 +7649,16 @@ def _split_by_sym_type(
 
 @ir_dataclass(frozen=False)
 class WhileLoop(ExternKernel):
-    carried_inputs: Optional[list[Union[TensorBox, ShapeAsConstantBuffer]]] = None
-    additional_inputs: Optional[list[Union[TensorBox, ShapeAsConstantBuffer]]] = None
+    carried_inputs: Optional[Sequence[IRNode]] = None
+    additional_inputs: Optional[Sequence[IRNode]] = None
     cond_subgraph: Optional[Subgraph] = None
     body_subgraph: Optional[Subgraph] = None
-    outputs: Optional[list[MultiOutput]] = None
+    outputs: Optional[Sequence[MultiOutput]] = None
 
     def __init__(
         self,
-        carried_inputs: list[Union[TensorBox, ShapeAsConstantBuffer]],
-        additional_inputs: list[Union[TensorBox, ShapeAsConstantBuffer]],
+        carried_inputs: Sequence[IRNode],
+        additional_inputs: Sequence[IRNode],
         cond_subgraph: Subgraph,
         body_subgraph: Subgraph,
         layout: MultiOutputLayout,
@@ -7674,7 +7668,9 @@ class WhileLoop(ExternKernel):
         self.cond_subgraph = cond_subgraph
         self.body_subgraph = body_subgraph
 
-        sym_args, tensor_args = _split_by_sym_type(carried_inputs + additional_inputs)
+        sym_args, tensor_args = _split_by_sym_type(
+            [*carried_inputs, *additional_inputs]
+        )
         super().__init__(
             name=None,
             layout=layout,
@@ -7690,13 +7686,13 @@ class WhileLoop(ExternKernel):
         cls,
         cond_fn: Subgraph,
         body_fn: Subgraph,
-        carried_inputs: list[Union[TensorBox, ShapeAsConstantBuffer]],
-        additional_inputs: list[Union[TensorBox, ShapeAsConstantBuffer]],
+        carried_inputs: Sequence[IRNode],
+        additional_inputs: Sequence[IRNode],
     ):
         def _require_exact_strides(
-            tensor_boxes: list[TensorBox | ShapeAsConstantBuffer],
+            tensor_boxes: Sequence[IRNode],
             fake_tensors: list[Union[int, torch.SymInt, torch.Tensor]],
-        ) -> list[TensorBox | ShapeAsConstantBuffer]:
+        ) -> list[IRNode]:
             assert len(tensor_boxes) == len(fake_tensors)
             ret = []
             for tb, fk in zip(tensor_boxes, fake_tensors):
