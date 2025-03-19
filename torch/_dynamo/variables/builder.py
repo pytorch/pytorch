@@ -2475,9 +2475,6 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
     import torch._utils
 
     if isinstance(example_value, torch.Tensor):
-        is_parameter = isinstance(example_value, torch.nn.Parameter)
-        is_buffer = isinstance(example_value, torch.nn.Buffer)
-
         # NB: In most (all?) cases, this does not actually do a clone.
         # (WARNING: this means that if we mutate metadata on the fake
         # tensor, the stored example value will update too!)
@@ -2495,13 +2492,7 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
             and example_value.fake_mode is tx.fake_mode
         ):
             tensor_type = subclass_type if subclass_type else torch.Tensor
-            specialized_props["class_type"] = (
-                torch.nn.Parameter
-                if is_parameter
-                else torch.nn.Buffer
-                if is_buffer
-                else tensor_type
-            )
+            specialized_props["class_type"] = tensor_type
 
         options.update(specialized_props)
         return target_cls(proxy, **options)

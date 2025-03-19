@@ -903,6 +903,72 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             res_act = fn_opt(input)
             self.assertEqual(res_exp, res_act)
 
+    def test_parameter_subclass_custom_torch_func_and_dynamic_attr(self):
+        # This is a slight variation of
+        # https://github.com/huggingface/diffusers/blob/fbf6b856cc61fd22ad8635547bff4aafe05723f3/src/diffusers/quantizers/gguf/utils.py#L398-L435
+        # which basically
+        # 1. uses tensor subclass to attach quantization metadata onto tensors
+        # 2. preserve them across torch ops
+        # 3. use the metadata to dequantize the tensor
+        # 4. convert it to a regular tensor.
+        #
+        # The test is meant to make sure Dynamo won't graph break over it.
+        class GGUFParameter(torch.nn.Parameter):
+            def __new__(cls, data, requires_grad=False, quant_type=None):
+                data = data if data is not None else torch.empty(0)
+                self = torch.Tensor._make_subclass(cls, data, requires_grad)
+                return self
+
+            def __init__(self, *args, quant_type=None, **kwargs):
+                self.quant_type = quant_type
+
+            def as_tensor(self):
+                return torch.Tensor(self.data)
+
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+
+                result = super().__torch_function__(func, types, args, kwargs)
+
+                quant_type = None
+                for arg in args:
+                    if isinstance(arg, list) and isinstance(arg[0], GGUFParameter):
+                        quant_type = arg[0].quant_type
+                        break
+                    if isinstance(arg, GGUFParameter):
+                        quant_type = arg.quant_type
+                        break
+                if isinstance(result, torch.Tensor):
+                    return cls(result, quant_type=quant_type)
+                # Handle tuples and lists
+                elif isinstance(result, (tuple, list)):
+                    # Preserve the original type (tuple or list)
+                    wrapped = [
+                        cls(x, quant_type=quant_type)
+                        if isinstance(x, torch.Tensor)
+                        else x
+                        for x in result
+                    ]
+                    return type(result)(wrapped)
+                else:
+                    return result
+
+        def f(x):
+            tmp = x * 2
+            tmp = tmp + tmp.quant_type
+            tmp = tmp.as_tensor()
+            return tmp * 3
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+
+        x = GGUFParameter(torch.ones(2), quant_type=42)
+        with traceable_subclass(GGUFParameter):
+            res = f(x)
+            ref = opt_f(x)
+        self.assertEqual(res, ref)
+
     def test_compile_with_fake_tensor_dynamic_dim(self):
         x = torch.randn([3, 4])
 

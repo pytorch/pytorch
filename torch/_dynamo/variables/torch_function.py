@@ -62,6 +62,7 @@ from ..utils import (
 from .base import VariableTracker
 from .constant import ConstantVariable
 from .ctx_manager import GenericContextWrappingVariable
+from .functions import UserMethodVariable
 from .lazy import LazyVariableTracker
 from .lists import TupleVariable
 from .tensor import TensorSubclassVariable, TensorVariable
@@ -588,12 +589,9 @@ class TensorWithTFOverrideVariable(TensorVariable):
     def from_tensor_var(cls, tx, tensor_var, class_type, cls_source):
         # [Note: __torch_function__] coerce `tensor_var` into a
         # TensorWithTFOverrideVariable. In eager, this is just a type change.
-        # This isn't sound if a __torch_function__ tensor subclass defines a
-        # constructor, but if only a __torch_function__ impl is defined, this is
-        # okay to call.  It is up to the user whether this is correct behavior
-        # or not.
         import torch
 
+        # This simulates shallow-copying the tensor object.
         kwargs = dict(tensor_var.__dict__)
         assert kwargs.pop("class_type") is torch.Tensor, (
             "invalid class type in TensorWithTFOverrideVariable.from_tensor_var"
@@ -636,30 +634,48 @@ class TensorWithTFOverrideVariable(TensorVariable):
                 f"Accessing {name} on a tensor subclass with a __torch_function__ override is not supported"
             )
 
-        if _is_attr_overidden(tx, self, name):
-            unimplemented(
-                f"Accessing overridden method/attribute {name} on a tensor"
-                " subclass with a __torch_function__ override is not supported"
-            )
-
-        if tx.output.torch_function_enabled and hasattr(torch.Tensor, name):
-            if self.source:
-                install_guard(
-                    AttrSource(AttrSource(self.source, "__class__"), name).make_guard(
-                        GuardBuilder.FUNCTION_MATCH
-                    )
+        if hasattr(torch.Tensor, name):
+            if _is_attr_overidden(tx, self, name):
+                unimplemented(
+                    f"Accessing overridden method/attribute {name} on a tensor"
+                    " subclass with a __torch_function__ override is not supported"
                 )
-            get_fn = VariableTracker.build(tx, getattr(torch.Tensor, name).__get__)
 
-            return self.call_torch_function(
-                tx,
-                get_fn,
-                TupleVariable([self.class_type_var(tx)]),
-                [self],
-                {},
-            )
+            if tx.output.torch_function_enabled:
+                if self.source:
+                    install_guard(
+                        AttrSource(
+                            AttrSource(self.source, "__class__"), name
+                        ).make_guard(GuardBuilder.FUNCTION_MATCH)
+                    )
+                get_fn = VariableTracker.build(tx, getattr(torch.Tensor, name).__get__)
+
+                return self.call_torch_function(
+                    tx,
+                    get_fn,
+                    TupleVariable([self.class_type_var(tx)]),
+                    [self],
+                    {},
+                )
         else:
-            return super().var_getattr(tx, name)
+            # `TensorVariable.var_getattr` doesn't handle user-defined
+            # function/attribute well, so we explicitly handle them here.
+            #
+            # TODO move this logic into `TensorVariable`, or try to merge it
+            # with similar logic in `UserDefinedObjectVariable`.
+            try:
+                attr = inspect.getattr_static(self.class_type, name)
+            except AttributeError:
+                pass
+            else:
+                import types
+
+                if isinstance(attr, types.FunctionType):
+                    cls_source = GlobalSource(self.global_mangled_class_name(tx))
+                    func_source = AttrSource(cls_source, name)
+                    install_guard(func_source.make_guard(GuardBuilder.FUNCTION_MATCH))
+                    return UserMethodVariable(attr, self)
+        return super().var_getattr(tx, name)
 
     def call_torch_function(self, tx: "InstructionTranslator", fn, types, args, kwargs):
         return call_torch_function(
