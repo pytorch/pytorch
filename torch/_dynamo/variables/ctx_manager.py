@@ -598,27 +598,10 @@ class InferenceModeVariable(ContextWrappingVariable):
         )
 
     def enter(self, tx):
-        disabled_inference_mode_forcibly = False
-        if (
-            torch._dynamo.config.fake_tensor_disable_inference_mode
-            and self.target_values[0]
-        ):
-            # Do not set the inference mode because we keep it off during
-            # compilation. Set the grad_enabled to False to reflect the relevant
-            # part of inference_mode to torch.compile.
-            disabled_inference_mode_forcibly = True
-            prior = torch.is_grad_enabled()
-            torch._C._set_grad_enabled(False)
-        else:
-            ctx = torch.autograd.grad_mode._enter_inference_mode(*self.target_values)
-
-        def cleanup_hook():
-            if disabled_inference_mode_forcibly:
-                torch._C._set_grad_enabled(prior)
-            else:
-                torch.autograd.grad_mode._exit_inference_mode(ctx)
-
-        self.set_cleanup_hook(tx, cleanup_hook)
+        ctx = torch.autograd.grad_mode._enter_inference_mode(*self.target_values)
+        self.set_cleanup_hook(
+            tx, lambda: torch.autograd.grad_mode._exit_inference_mode(ctx)
+        )
         self.state.proxy = tx.output.create_node(
             "call_function",
             torch.autograd.grad_mode._enter_inference_mode,

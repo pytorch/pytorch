@@ -2120,7 +2120,6 @@ class FakeTensorMode(TorchDispatchMode):
             and len(flat_arg_fake_tensors) != 0
             and not has_symbolic_sizes
             and not avoiding_device_init
-            and func is not aten._nested_tensor_from_tensor_list.default
         ):
             const_flat_args = [
                 a.constant if self.is_our_fake(a) else a for a in flat_args
