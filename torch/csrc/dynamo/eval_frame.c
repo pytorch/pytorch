@@ -460,8 +460,6 @@ PyObject* dynamo_eval_custom_code(
   return result;
 }
 
-bool skip_next_frame = false;
-
 static PyObject* dynamo__custom_eval_frame_shim(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
@@ -474,7 +472,6 @@ static PyObject* dynamo__custom_eval_frame_shim(
   PyObject* callback = eval_frame_callback_get();
 
   if (callback == Py_None) {
-    skip_next_frame = false;
     return dynamo_eval_frame_default(tstate, frame, throw_flag);
   }
 

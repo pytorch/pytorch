@@ -32,7 +32,6 @@ THPPyInterpreterFrame* THPPyInterpreterFrame_New(
     THP_EVAL_API_FRAME_OBJECT* frame);
 
 extern bool is_skip_guard_eval_unsafe;
-extern bool skip_next_frame;
 
 void clear_old_frame_if_python_312_plus(
     PyThreadState* tstate,

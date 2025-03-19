@@ -556,13 +556,17 @@ class ConvertFrameAssert:
         # skip tracing non-recursive disabled functions
         # detect if this frame is torch._dynamo.decorators.disable_wrapper
         # by looking for a torch._dynamo.decorators._disable_wrapper_object freevar
-        if frame.f_code.co_name == "nonrecursive_disable_wrapper":
-            for name in frame.f_code.co_freevars:
-                if (
-                    name in frame.f_locals
-                    and frame.f_locals[name] is decorators._disable_wrapper_object
-                ):
-                    return ConvertFrameReturn(skip_next_frame=True)
+        prev_frame = sys._getframe()
+        while (
+            prev_frame
+            and "torch/_dynamo/convert_frame.py" in prev_frame.f_code.co_filename
+        ):
+            prev_frame = prev_frame.f_back  # type: ignore[assignment]
+        if (
+            prev_frame
+            and prev_frame.f_code is decorators._nonrecursive_disable_wrapper_code
+        ):
+            return ConvertFrameReturn(apply_to_code=False)
 
         global initial_global_state
         initial_global_state = GlobalStateGuard()

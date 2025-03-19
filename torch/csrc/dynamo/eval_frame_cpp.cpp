@@ -71,9 +71,6 @@ PyObject* dynamo__custom_eval_frame(
       frame->f_iblock);
 #endif
 
-  bool skip_this_frame = skip_next_frame;
-  skip_next_frame = false;
-
   if (throw_flag) {
     // When unwinding generators, eval frame is called with throw_flag ==
     // true.  Frame evaluation is supposed to continue unwinding by propagating
@@ -157,7 +154,7 @@ PyObject* dynamo__custom_eval_frame(
       _callback_from_action(recursive_callback, strategy.recursive_action);
 
   // Skip this frame
-  if (strategy.cur_action == SKIP || skip_this_frame) {
+  if (strategy.cur_action == SKIP) {
     DEBUG_TRACE("skip %s", get_frame_name(frame));
     eval_default();
     return eval_result;
@@ -239,7 +236,6 @@ PyObject* dynamo__custom_eval_frame(
         callback_result.attr("frame_exec_strategy").cast<FrameExecStrategy>();
     apply_to_code = callback_result.attr("apply_to_code").cast<bool>();
     guarded_code = callback_result.attr("guarded_code").ptr();
-    skip_next_frame = callback_result.attr("skip_next_frame").cast<bool>();
   } catch (py::error_already_set& e) {
     // internal exception, returning here will leak the exception into user
     // code this is useful for debugging -- but we dont want it to happen

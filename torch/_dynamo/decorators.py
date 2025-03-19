@@ -65,9 +65,18 @@ def run(fn=None):
     return RunOnlyContext()
 
 
-# Used to identify that disable_wrapper is the current frame called.
-# We do this by giving disable_wrapper a _disable_wrapper_object freevar.
-_disable_wrapper_object = object()
+def skip(fn=None):
+    """
+    Skip frames associated with the function code, but still process recursively
+    invoked frames
+    """
+    if fn is None:
+        return skip
+    fn = innermost_fn(fn)
+    assert callable(fn)
+    skip_code(fn.__code__)
+    fn._torchdynamo_disable = True
+    return fn
 
 
 def disable(fn=None, recursive=True):
@@ -91,12 +100,10 @@ def disable(fn=None, recursive=True):
         def wrap(fn):
             fn = innermost_fn(fn)
             assert callable(fn)
-            nonrecursive_disable_wrapper = get_nonrecursive_disable_wrapper(
-                fn, _disable_wrapper_object
-            )
+
+            nonrecursive_disable_wrapper = get_nonrecursive_disable_wrapper(fn)
             nonrecursive_disable_wrapper._torchdynamo_disable = True  # type: ignore[attr-defined]
             nonrecursive_disable_wrapper._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
-
             return nonrecursive_disable_wrapper
 
         if fn is None:
@@ -104,18 +111,8 @@ def disable(fn=None, recursive=True):
         return wrap(fn)
 
 
-def skip(fn=None):
-    """
-    Skip frames associated with the function code, but still process recursively
-    invoked frames
-    """
-    if fn is None:
-        return skip
-    fn = innermost_fn(fn)
-    assert callable(fn)
-    skip_code(fn.__code__)
-    fn._torchdynamo_disable = True
-    return fn
+_nonrecursive_disable_wrapper_code = disable(lambda: None, recursive=False).__code__  # type: ignore[attr-defined]
+skip_code(_nonrecursive_disable_wrapper_code)
 
 
 class set_stance(_DecoratorContextManager):

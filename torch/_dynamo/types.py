@@ -71,8 +71,6 @@ class ConvertFrameReturn:
     # also apply frame_exec strategy to future frames with same code
     apply_to_code: bool = True
     guarded_code: Optional[GuardedCode] = None
-    # used to implement disable(recursive=False)
-    skip_next_frame: bool = False
 
 
 def wrap_guarded_code(guarded_code: GuardedCode) -> ConvertFrameReturn:
