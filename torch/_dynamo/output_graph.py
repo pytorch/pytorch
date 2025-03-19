@@ -1391,7 +1391,6 @@ class OutputGraph:
             counters["stats"]["calls_captured"] += ncalls
 
             self.remove_tensorify_specialized_graphargs()
-            self.normalize_intermediate_node_names()
 
             # free a bit of memory
             self.real_value_cache.clear()
@@ -1765,26 +1764,6 @@ class OutputGraph:
                     u.replace_all_uses_with(guard_scalar(example_value.item_memo))
                     self.remove_node(u)
                 self.remove_node(node)
-
-    def normalize_intermediate_node_names(self) -> None:
-        base_name_counter: dict[str, int] = collections.defaultdict(int)
-
-        for node in self.graph.nodes:
-            if node.op == "placeholder" or node.op == "output":
-                continue
-
-            name_parts = node.name.rsplit("_", 1)
-            if len(name_parts) > 1 and name_parts[1].isdigit():
-                base_name = name_parts[0]
-            else:
-                base_name = node.name
-
-            if base_name_counter[base_name] == 0:
-                node.name = f"{base_name}"
-            else:
-                node.name = f"{base_name}_{base_name_counter[base_name]}"
-
-            base_name_counter[base_name] += 1
 
     def add_output_instructions(self, prefix: list[Instruction]) -> None:
         """
