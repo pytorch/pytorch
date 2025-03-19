@@ -623,7 +623,8 @@ static Tensor median_common_mps(const Tensor& input_t, bool nanmedian) {
   IntArrayRef input_shape = input_t.sizes();
   int64_t num_in_elements = c10::multiply_integers(input_shape);
 
-  Tensor output_t = at::empty({}, input_t.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
+  // Allocate output tensor with shape [1] (rank 1) instead of a scalar.
+  Tensor output_t = at::empty({1}, input_t.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
   if (output_t.numel() == 0 || num_in_elements == 0) {
     return output_t;
   }
@@ -634,10 +635,12 @@ static Tensor median_common_mps(const Tensor& input_t, bool nanmedian) {
   using MedianCachedGraph = MPSUnaryCachedGraph;
   auto medianCachedGraph =
       LookUpOrCreateCachedGraph<MedianCachedGraph>(medianKey, [&](auto mpsGraph, auto newCachedGraph) {
+        // Create a placeholder and cast the input as needed.
         MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_t);
         MPSGraphTensor* castInputTensor =
             castToIHFTypes(mpsGraph, inputTensor, input_t, /*includesInt64=*/macOS13_3_plus);
 
+        // Reshape to 1D (e.g. shape [N])
         MPSGraphTensor* reshapedTensor = [mpsGraph reshapeTensor:castInputTensor withShape:@[ @-1 ] name:nil];
 
         MPSGraphTensor* effectiveLengthTensor = nil;
@@ -659,8 +662,8 @@ static Tensor median_common_mps(const Tensor& input_t, bool nanmedian) {
         }
 
         // get median index: medianIdx = ((effectiveLength + 1) / 2) - 1
-        MPSGraphTensor* oneTensor = [mpsGraph constantWithScalar:1 shape:@[] dataType:MPSDataTypeInt32];
-        MPSGraphTensor* twoTensor = [mpsGraph constantWithScalar:2 shape:@[] dataType:MPSDataTypeInt32];
+        MPSGraphTensor* oneTensor = [mpsGraph constantWithScalar:1 shape:@[ @1 ] dataType:MPSDataTypeInt32];
+        MPSGraphTensor* twoTensor = [mpsGraph constantWithScalar:2 shape:@[ @1 ] dataType:MPSDataTypeInt32];
         MPSGraphTensor* effectivePlusOne = [mpsGraph additionWithPrimaryTensor:effectiveLengthTensor
                                                                secondaryTensor:oneTensor
                                                                           name:nil];
@@ -678,7 +681,9 @@ static Tensor median_common_mps(const Tensor& input_t, bool nanmedian) {
                                                                     axis:0
                                                          batchDimensions:0
                                                                     name:nil];
-        MPSGraphTensor* outputTensor = [mpsGraph reshapeTensor:medianTensor withShape:@[] name:nil];
+        // MACOS 13 error: Rank of destination array must be greater than 0
+        // which is why we initialize @1 here
+        MPSGraphTensor* outputTensor = [mpsGraph reshapeTensor:medianTensor withShape:@[ @1 ] name:nil];
 
         newCachedGraph->inputTensor_ = inputTensor;
         newCachedGraph->outputTensor_ = outputTensor;
@@ -688,7 +693,7 @@ static Tensor median_common_mps(const Tensor& input_t, bool nanmedian) {
   auto feeds = dictionaryFromPlaceholders(inputPlaceholder);
   runMPSGraph(getCurrentMPSStream(), medianCachedGraph->graph(), feeds, outputPlaceHolder);
 
-  return output_t;
+  return output_t.squeeze();
 }
 
 static Tensor min_max_mps_impl(const Tensor& input_t, MPSReductionType reduction_type, const std::string& func_name) {
