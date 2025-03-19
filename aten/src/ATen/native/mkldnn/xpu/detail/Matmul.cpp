@@ -356,7 +356,6 @@ sycl::event scaled_matmul(
     // on any other error just re-throw
     throw;
   }
-  auto primitive = dnnl::matmul(primitive_desc);
 
   // Prepare args and execute primitive
   dnnl::memory scratchpad = at::native::onednn::make_onednn_memory(
@@ -376,7 +375,9 @@ sycl::event scaled_matmul(
             engine,
             scale_a.data_ptr())
       : at::native::onednn::make_onednn_memory(
-            {{scale_a.numel(), 1}, dnnl::memory::data_type::f32, {1}},
+            {{scale_a.numel(), 1},
+             dnnl::memory::data_type::f32,
+             dnnl::memory::format_tag::ab},
             engine,
             scale_a.data_ptr());
   args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC, src_scales_t});
@@ -386,11 +387,12 @@ sycl::event scaled_matmul(
             engine,
             scale_b.data_ptr())
       : at::native::onednn::make_onednn_memory(
-            {{scale_b.numel(), 1}, dnnl::memory::data_type::f32, {1}},
+            {{scale_b.numel(), 1},
+             dnnl::memory::data_type::f32,
+             dnnl::memory::format_tag::ab},
             engine,
             scale_b.data_ptr());
   args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS, wei_scales_t});
-
   auto matmul_forward = dnnl::matmul(primitive_desc);
   sycl::event matmul_fwd_event =
       dnnl::sycl_interop::execute(matmul_forward, stream, args);
