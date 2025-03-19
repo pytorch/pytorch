@@ -940,13 +940,13 @@ std::string get_exception_message() {
   PyErr_Fetch(&ptype, &pvalue, &ptraceback);
 
   PyObject* exc_message_pyobj = PyObject_Str(pvalue);
-  const char* exc_message = PyUnicode_AsUTF8(exc_message_pyobj);
+  std::string exc_message = PyUnicode_AsUTF8(exc_message_pyobj);
 
   Py_DECREF(exc_message_pyobj);
   Py_XDECREF(ptype);
   Py_XDECREF(pvalue);
   Py_XDECREF(ptraceback);
-  return std::string(exc_message);
+  return exc_message;
 }
 
 bool is_immutable_object(py::handle example_value) {
