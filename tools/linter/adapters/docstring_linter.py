@@ -3,10 +3,8 @@ from __future__ import annotations
 import itertools
 import json
 import sys
-import token
 from functools import cached_property
 from pathlib import Path
-from tokenize import TokenInfo
 from typing import Any, Callable, TYPE_CHECKING
 
 
@@ -22,7 +20,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
 
 
-GRANDFATHER_LIST = _linter.LINTER / "docstring_linter.py-grandfather.json"
+GRANDFATHER_LIST = _FILE.parent / "docstring_linter-grandfather.json"
 
 # We tolerate a 10% increase in block size before demanding a docstring
 TOLERANCE_PERCENT = 10
@@ -74,8 +72,8 @@ class DocstringFile(_linter.PythonFile):
         return {}
 
     @cached_property
-    def blocks(self) -> list[_linter.Block]:
-        blocks: list[_linter.Block] = []
+    def blocks(self) -> list[Block]:
+        blocks: list[Block] = []
 
         for i in range(len(self.tokens)):
             try:
@@ -103,8 +101,8 @@ class DocstringFile(_linter.PythonFile):
             b.is_local = not all(p.is_class for p in parents)
             b.is_method = not b.is_class and bool(parents) and parents[0].is_class
 
-        def add_full_names(children: Sequence[_linter.Block], prefix: str = "") -> None:
-            dupes: dict[str, list[_linter.Block]] = {}
+        def add_full_names(children: Sequence[Block], prefix: str = "") -> None:
+            dupes: dict[str, list[Block]] = {}
             for b in children:
                 dupes.setdefault(b.name, []).append(b)
 
@@ -112,10 +110,6 @@ class DocstringFile(_linter.PythonFile):
                 for i, b in enumerate(dl):
                     suffix = f"[{i + 1}]" if len(dl) > 1 else ""
                     b.full_name = prefix + b.name + suffix
-
-        add_full_names([b for b in blocks if b.parent is None])
-        return blocks
-
 
 class DocstringLinter(_linter.FileLinter):
     linter_name = "docstring_linter"

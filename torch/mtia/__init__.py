@@ -30,6 +30,26 @@ _initialization_lock = threading.Lock()
 _lazy_seed_tracker = _LazySeedTracker()
 
 
+if hasattr(torch._C, "_mtia_exchangeDevice"):
+    _exchange_device = torch._C._mtia_exchangeDevice
+else:
+
+    def _exchange_device(device: int) -> int:
+        if device < 0:
+            return -1
+        raise RuntimeError("PyTorch was compiled without MTIA support")
+
+
+if hasattr(torch._C, "_mtia_maybeExchangeDevice"):
+    _maybe_exchange_device = torch._C._mtia_maybeExchangeDevice
+else:
+
+    def _maybe_exchange_device(device: int) -> int:
+        if device < 0:
+            return -1
+        raise RuntimeError("PyTorch was compiled without MTIA support")
+
+
 def init():
     _lazy_init()
 
