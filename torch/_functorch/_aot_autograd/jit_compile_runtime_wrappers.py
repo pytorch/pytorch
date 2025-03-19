@@ -868,31 +868,29 @@ def aot_dispatch_autograd(
             # the user forward might have returned in its own output
             fw_outs_saved_for_bw = fw_outs[num_inner_fwd_outputs:]
             num_fw_outs_saved_for_bw = len(fw_outs_saved_for_bw)
-            symint_outs_saved_for_bw = [
-                n for n in fw_outs_saved_for_bw if is_sym_node(n)
-            ]
+            symint_outs_saved_for_bw = []
+            for idx, node in enumerate(fw_outs_saved_for_bw):
+                if is_sym_node(node):
+                    symint_outs_saved_for_bw.append(node)
+                elif (
+                    isinstance(node, torch.fx.Node)
+                    and "val" in getattr(node, "meta", {})
+                    and isinstance(node.meta["val"], FakeTensor)
+                ):
+                    # record dynamic tensor activations
+                    dynamic_dims: set[int] = {
+                        dim
+                        for dim, size in enumerate(node.meta["val"].shape)
+                        if not isinstance(size, int)
+                    }
+                    if dynamic_dims:
+                        fw_metadata.dynamic_tensors_saved_for_backward[
+                            idx
+                        ] = dynamic_dims
+
             fw_metadata.num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
             inner_meta.num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
             num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
-
-            nodes_saved_for_backwards = fw_outs[
-                fw_metadata.tensors_saved_for_backwards_slice
-            ]
-            for idx, node in enumerate(nodes_saved_for_backwards):
-                if "val" not in getattr(node, "meta", {}) or not isinstance(
-                    node.meta["val"], FakeTensor
-                ):
-                    continue
-
-                # record dynamic activations
-                dynamic_dims: set[int] = {
-                    dim
-                    for dim, size in enumerate(node.meta["val"].shape)
-                    if not isinstance(size, int)
-                }
-                if dynamic_dims:
-                    fw_metadata.dynamic_tensors_saved_for_backward[idx] = dynamic_dims
-
             if torch._functorch.config.donated_buffer:
                 fw_metadata.bw_donated_idxs = collect_bw_donated_buffer_idxs(
                     fw_module,
