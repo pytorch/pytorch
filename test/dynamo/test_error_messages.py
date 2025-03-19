@@ -232,6 +232,32 @@ from user code:
     print("abc")""",
         )
 
+    def test_skipfile_call(self):
+        def fn():
+            return unittest.skip("test")
+
+        def post_munge(s):
+            return re.sub(r"file `.*case\.py`", "file `case.py`", s)
+
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: torch.compile(fn, backend="eager", fullgraph=True)(),
+            """\
+Attempted to call function marked as skipped
+  Explanation: Dynamo developers have intentionally marked that the function `skip` in file `case.py` should not be traced.
+  Hint: Avoid calling the function `skip`.
+  Hint: Remove the function `skip` or the file `case.py` from torch/_dynamo/trace_rules.py. More graph breaks may occur as a result of attempting to trace into the function.
+  Hint: Please file an issue to PyTorch.
+
+  Developer debug context: module: unittest.case, qualname: skip, skip reason: <missing reason>
+
+
+from user code:
+   File "test_error_messages.py", line N, in fn
+    return unittest.skip("test")""",
+            post_munge=post_munge,
+        )
+
     def test_skipfile_dynamo_call(self):
         def fn():
             torch._dynamo.disable()
@@ -248,8 +274,7 @@ Attempted to call function marked as skipped
 
 
 from user code:
-   File "test_error_messages.py", line N, in fn
-    torch._dynamo.disable()""",
+   File "test_error_messages.py", line N, in fn""",
         )
 
     def test_skipfile_inline(self):
@@ -272,12 +297,11 @@ Attempted to inline function marked as skipped
   Hint: Remove the function `case.py` from torch/_dynamo/trace_rules.py. More graph breaks may occur as a result of attempting to trace into the function.
   Hint: Please file an issue to PyTorch.
 
-  Developer debug context: qualname: skip, name: skip, filename: `case.py`, skip reason: skipped according trace_rules.lookup SKIP_DIRS
+  Developer debug context: qualname: skip, name: skip, filename: `case.py`, skip reason: skipped according trace_rules.lookup unittest
 
 
 from user code:
-   File "test_error_messages.py", line N, in fn
-    Foo().fn()""",
+   File "test_error_messages.py", line N, in fn""",
             post_munge=post_munge,
         )
 
@@ -371,7 +395,7 @@ Attempted to call function marked as skipped
 
 from user code:
    File "test_error_messages.py", line N, in fn
-    warnings.warn("test")""",
+    def fn():""",
         )
 
     @unittest.skipIf(not python_pytree._cxx_pytree_exists, "missing optree package")
@@ -496,7 +520,7 @@ Dynamic slicing with Tensor arguments
 
 from user code:
    File "test_error_messages.py", line N, in fn
-    return x[:y]""",
+    def fn(x, y):""",
         )
 
     def test_observed_exception(self):
@@ -542,7 +566,7 @@ Uninitialized nn.Module
 
 from user code:
    File "test_error_messages.py", line N, in fn
-    return mod(1)""",
+    def fn(mod):""",
         )
 
     @torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
@@ -643,7 +667,7 @@ Missing bytecode handler
 
 from user code:
    File "test_error_messages.py", line N, in fn
-    class Foo:""",
+    def fn():""",
             post_munge=post_munge,
         )
 
@@ -994,12 +1018,12 @@ User code traceback:
     f3(torch.randn(3))
   File "test_error_messages.py", line N, in f3
     Foo().attr = x  # 0
-  File "test_error_messages.py", line N, in torch_dynamo_resume_in_f3_at_999
+  File "test_error_messages.py", line N, in torch_dynamo_resume_in_f3_at_996
     Foo().attr = x  # 1
 
 ========== most recent `torch.compile` tracing attempt started here ==========
 
-  File "test_error_messages.py", line N, in torch_dynamo_resume_in_f3_at_1000
+  File "test_error_messages.py", line N, in torch_dynamo_resume_in_f3_at_997
     Foo().attr = x
 
 NOTE: the most recent `torch.compile` tracing attempt might not be where you applied `torch.compile`! This is due to how graph breaks are implemented - the optimized code object returned by Dynamo will call another Dynamo-generated resume function and tracing is re-enabled by calling the resume function as a normal Python function, which Dynamo intercepts as a top-level frame.
