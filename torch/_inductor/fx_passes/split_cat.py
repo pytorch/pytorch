@@ -2,6 +2,7 @@
 import itertools
 import logging
 import operator
+from collections import defaultdict
 from collections.abc import Sequence
 from typing import Any, Callable, Optional, Union
 from typing_extensions import TypeAlias
@@ -1668,7 +1669,7 @@ def mutate_cat_node(match: Match, split_sections: list[int], dim: int):
 getitem_split_aten = ListOf(
     CallFunction(
         operator.getitem,
-        CallFunctionVarArgs(torch.ops.aten.split.Tensor, users=MULTIPLE),
+        CallFunctionVarArgs([torch.ops.aten.split_with_sizes.default], users=MULTIPLE),
         Ignored(),
         _users=MULTIPLE,
     ),
@@ -1697,8 +1698,8 @@ def normalize_split_default_aten(match: Match, *args, **kwargs):
         return
     if split_dim < 0:  # Normalize split dim
         split_dim += split_input.meta["val"].dim()
-
-    new_args = (split_input, split_size)
+    split_section_list = [split_size] * (len(split_node.meta["val"]))
+    new_args = (split_input, split_section_list)
     new_kwargs = {"dim": split_dim}
     if (
         split_node.args == new_args
@@ -1709,7 +1710,48 @@ def normalize_split_default_aten(match: Match, *args, **kwargs):
 
     with graph.inserting_after(split_node):
         new_split_node = graph.call_function(
-            torch.ops.aten.split.Tensor,
+            torch.ops.aten.split_with_sizes.default,
+            args=new_args,
+            kwargs=new_kwargs,  # type: ignore[arg-type]
+        )
+    split_node.replace_all_uses_with(new_split_node)
+    new_split_node.meta.update(split_node.meta)
+    graph.erase_node(split_node)
+    counters["inductor"]["normalization_aten_pass"] += 1
+
+
+@register_graph_pattern(
+    CallFunctionVarArgs(torch.ops.aten.split_with_sizes.default, users=MULTIPLE),
+    pass_dict=construct_pattern_matcher_pass("normalization_aten_pass"),
+)
+def normalize_split_with_size_default_aten(match: Match, *args, **kwargs):
+    split_node = match.nodes[0]
+    graph = match.graph
+    split_input, split_sections, split_dim = _get_split_args_default(split_node)
+    if split_input is None or split_dim is None or split_sections is None:
+        log.debug("couldn't find split args")
+        return
+    if not is_node_meta_valid(split_node):
+        log.debug("val absent for node: %s", split_node)
+        return
+    if any(isinstance(section, torch.SymInt) for section in split_sections):
+        # TODO dynamic_shapes with assume_static_by_default=False fails while AOT Autograd tracing.
+        return
+    if split_dim < 0:  # Normalize split dim
+        split_dim += split_input.meta["val"].dim()
+
+    new_args = (split_input, split_sections)
+    new_kwargs = {"dim": split_dim}
+    if (
+        split_node.args == new_args
+        and split_node.kwargs == new_kwargs
+        and split_node.op == "call_function"
+    ):
+        return
+
+    with graph.inserting_after(split_node):
+        new_split_node = graph.call_function(
+            torch.ops.aten.split_with_sizes.default,
             args=new_args,
             kwargs=new_kwargs,  # type: ignore[arg-type]
         )
@@ -1731,27 +1773,83 @@ def normalize_split_default_aten(match: Match, *args, **kwargs):
 def merge_split_cat_aten(match: Match, *args, **kwargs):
     graph = match.graph
     split_node = match.nodes[0]
-    split_input, _, split_dim = _get_split_args_default(split_node)
+    threshold_to_cat = torch._inductor.config.post_grad_fusion_options[
+        "split_cat_aten_pass"
+    ].get("threshold_to_cat", 10)
     # get the getitem nodes from the split node
     getitem_nodes = list(split_node.users.keys())
     for cat_node in list(getitem_nodes[0].users.keys()):
         cat_dim = get_arg_value(cat_node, 1, "dim")
         cat_inputs = get_arg_value(cat_node, 0, "tensors")
+        if len(cat_inputs) < threshold_to_cat:
+            continue
         # check split node and cat node has same dim, and all getitem nodes have same parent node
-        if split_dim != cat_dim or not has_same_parent_node(cat_node):
-            continue
-        # check the cat node has consecutive indices
-        indices = [arg.args[1] for arg in cat_node.args[0]]  # type: ignore[union-attr]
-        if (
-            not is_sorted_and_consecutive(indices)  # type: ignore[arg-type]
-            and len(getitem_nodes) != len(cat_inputs)
-        ):
-            continue
-        # replace the users of the cat node to be the input of the split node
-        cat_node.replace_all_uses_with(split_input)
-        # remove the cat node
-        graph.erase_node(cat_node)
-        # remove getitem nodes and split node with no users
+        parent_to_indices = defaultdict(list)  # type: ignore[var-annotated]
+        parent_to_getitems = defaultdict(list)  # type: ignore[var-annotated]
+        for cat_input in cat_inputs:
+            # skip all non-getitem cat input
+            if cat_input.target != operator.getitem:
+                continue
+            current_getitem_parent = cat_input.args[0]
+            split_dim = get_arg_value(current_getitem_parent, 2, "dim")
+            if split_dim != cat_dim:
+                break
+            getitem_idx = cat_input.args[1]
+            if (
+                current_getitem_parent not in parent_to_indices
+            ) or getitem_idx != parent_to_indices[current_getitem_parent][-1][-1] + 1:
+                parent_to_indices[current_getitem_parent].append([getitem_idx])
+                parent_to_getitems[current_getitem_parent].append([cat_input])
+            else:
+                parent_to_getitems[current_getitem_parent][-1].append(cat_input)
+                parent_to_indices[current_getitem_parent][-1].append(getitem_idx)
+
+        cat_inputs_list = list(cat_inputs)
+        update_cat_arg = []
+        # iterate through the indices to construct the slice nodes
+        for parent, indices in parent_to_indices.items():
+            for idx, indice in enumerate(indices):
+                start, end = indice[0], indice[-1]
+                split_sections = list(parent.args[1])
+                input_of_current_getitem_parent = parent.args[0]
+                if len(indice) >= threshold_to_cat or len(indice) == len(
+                    split_sections
+                ):
+                    if len(indice) != len(split_sections):
+                        # get the start and end slicing indices
+                        slice_node = graph.call_function(
+                            torch.ops.aten.slice.Tensor,
+                            args=(
+                                input_of_current_getitem_parent,
+                                split_dim,  # type: ignore[possibly-undefined]
+                                sum(split_sections[:start]),
+                                sum(split_sections[: end + 1]),
+                            ),
+                        )
+                    else:
+                        slice_node = input_of_current_getitem_parent
+                    # find the index in the cat_inputs_list given the getitem node
+                    update_cat_arg.append(
+                        (
+                            slice_node,
+                            cat_inputs_list.index(parent_to_getitems[parent][idx][0]),
+                            cat_inputs_list.index(parent_to_getitems[parent][idx][-1]),
+                        )
+                    )
+
+        result = []
+        i = 0
+        for slice_tensor, start, end in update_cat_arg:
+            while i < start:
+                result.append(cat_inputs_list[i])
+                i += 1
+            result.append(slice_tensor)
+            i = end + 1
+        while i < len(cat_inputs_list):
+            result.append(cat_inputs_list[i])
+            i += 1
+
+        cat_node.update_arg(0, result)
         for getitem_node in getitem_nodes:
             if len(getitem_node.users) == 0:
                 graph.erase_node(getitem_node)

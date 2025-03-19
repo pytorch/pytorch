@@ -49,6 +49,92 @@ class TestSplitCat(torch.nn.Module):
         return torch.ops.aten.cat.default([cat_1, cat_2], 1)
 
 
+class TestSplitCatPartial(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+
+    def forward(
+        self, x1: torch.Tensor, x2: torch.Tensor, y: torch.Tensor, z: torch.Tensor
+    ):
+        split_with_sizes_1 = torch.ops.aten.split_with_sizes.default(
+            x1,
+            [
+                96,
+                96,
+                96,
+                96,
+                96,
+                96,
+                96,
+                96,
+                96,
+                96,
+                96,
+                96,
+                96,
+                96,
+                96,
+                96,
+                96,
+                96,
+                96,
+                96,
+                96,
+            ],
+            1,
+        )
+        split_with_sizes_2 = torch.ops.aten.split_with_sizes.default(
+            x2, [96, 96, 96, 96], 1
+        )
+        getitem_71 = split_with_sizes_1[0]
+        getitem_72 = split_with_sizes_1[1]
+        getitem_73 = split_with_sizes_1[2]
+        getitem_74 = split_with_sizes_1[3]
+        getitem_75 = split_with_sizes_1[4]
+        getitem_76 = split_with_sizes_1[5]
+        getitem_77 = split_with_sizes_1[10]
+        getitem_78 = split_with_sizes_1[11]
+        getitem_79 = split_with_sizes_1[12]
+        getitem_80 = split_with_sizes_1[13]
+        getitem_81 = split_with_sizes_1[14]
+        getitem_82 = split_with_sizes_1[15]
+        getitem_83 = split_with_sizes_1[16]
+        getitem_84 = split_with_sizes_1[17]
+        getitem_85 = split_with_sizes_2[0]
+        getitem_86 = split_with_sizes_2[1]
+        getitem_87 = split_with_sizes_2[2]
+        getitem_88 = split_with_sizes_2[3]
+
+        cat = torch.ops.aten.cat.default(
+            [
+                z,
+                getitem_71,
+                getitem_72,
+                getitem_73,
+                getitem_74,
+                getitem_75,
+                getitem_76,
+                getitem_82,
+                getitem_83,
+                getitem_84,
+                y,
+                getitem_77,
+                getitem_78,
+                getitem_79,
+                getitem_80,
+                getitem_81,
+                y,
+                getitem_85,
+                getitem_86,
+                getitem_87,
+                getitem_88,
+                z,
+            ],
+            1,
+        )
+        return cat
+
+
 class TestSelectCat(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
@@ -111,7 +197,7 @@ class TestSplitCatAten(TestCase):
         pre_grad_fusion_options={},
         post_grad_fusion_options={
             "normalization_aten_pass": {},
-            "split_cat_aten_pass": {},
+            "split_cat_aten_pass": {"threshold_to_cat": 5},
         },
     )
     def test_split_cat_post_grad(self):
@@ -127,6 +213,23 @@ class TestSplitCatAten(TestCase):
         res = traced(*inputs)
         self.compare_pred(module, traced, inputs)
         self.assertEqual(counters["inductor"]["normalization_aten_pass"], 5)
+        self.assertEqual(counters["inductor"]["split_cat_aten_pass"], 1)
+        self.assertEqual(ref, res, rtol=1e-8, atol=1e-8)
+        self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
+        counters.clear()
+
+        inputs = [
+            torch.randn(1024, 96 * 21, device=torch.device(device=GPU_TYPE)),
+            torch.randn(1024, 96 * 4, device=torch.device(device=GPU_TYPE)),
+            torch.randn(1024, 96, device=torch.device(device=GPU_TYPE)),
+            torch.randn(1024, 96, device=torch.device(device=GPU_TYPE)),
+        ]
+        module = TestSplitCatPartial()
+        traced = torch.compile(module)
+        ref = module(*inputs)
+        res = traced(*inputs)
+        self.compare_pred(module, traced, inputs)
+        self.assertEqual(counters["inductor"]["normalization_aten_pass"], 3)
         self.assertEqual(counters["inductor"]["split_cat_aten_pass"], 1)
         self.assertEqual(ref, res, rtol=1e-8, atol=1e-8)
         self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
