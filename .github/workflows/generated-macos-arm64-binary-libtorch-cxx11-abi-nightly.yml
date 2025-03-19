@@ -43,7 +43,6 @@ jobs:
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-with-deps
-      DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.9"
@@ -128,7 +127,6 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu-main
       LIBTORCH_VARIANT: shared-with-deps
-      DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cpu-shared-with-deps-cxx11-abi
       use_s3: False
     secrets:
