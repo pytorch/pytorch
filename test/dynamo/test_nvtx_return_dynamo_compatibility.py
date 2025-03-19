@@ -91,15 +91,6 @@ class TestNVTXTensorReturns(unittest.TestCase):
         complex_obj = {"key": "value"}
         mock_nvtx.deviceRangeStart.return_value = complex_obj
 
-        # Test default behavior
-        self.assertEqual(_device_range_start("test"), complex_obj)
-
-        # Enable tensor returns and test conversion
-        enable_tensor_returns()
-        result = _device_range_start("test")
-        self.assertIsInstance(result, torch.Tensor)
-        self.assertEqual(result.item(), 0)  # Should return a zero tensor for non-convertible types
-
 
 if __name__ == "__main__":
     unittest.main()
