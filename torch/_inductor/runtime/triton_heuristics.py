@@ -1562,11 +1562,6 @@ def check_max_block(cfg: dict[str, int]):
 
 
 def _num_warps(num_warps, max_num_warps=8, min_num_warps=2, register_intensive=False):
-    # On AMD GPU each warp has 64 lanes which is double the size on NV GPU,
-    # therefore using half the number of warps here correspondingly.
-    if torch.version.hip:
-        max_num_warps = (max_num_warps + 1) // 2
-        min_num_warps = (min_num_warps + 1) // 2
     # persistent reduction is register intensive
     if register_intensive:
         max_num_warps = max_num_warps // 2
@@ -1664,7 +1659,7 @@ def triton_config(
     # given that this is a rare situation, don't expect this to affect perf
     # in general
     # see https://github.com/pytorch/pytorch/pull/97950
-    if conditional_product(x, y, z) >= 128 and not torch.version.hip:
+    if conditional_product(x, y, z) >= 128:
         num_warps = max(num_warps, 4)
     xnumel = size_hints["x"]
     ynumel = size_hints.get("y")
