@@ -6657,6 +6657,19 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(cnt.frame_count, 3)
         self.assertEqual(cnt.op_count, 18)
 
+    def test_vmap_out_dims_None(self):
+        # issue https://github.com/pytorch/pytorch/issues/149509
+        def fn(x, y):
+            return x, y * 2
+
+        def wrapper_fn(x, y):
+            return torch.func.vmap(fn, in_dims=(None, 0), out_dims=(None, 0))(x, y)
+
+        x, y = torch.randn(4), torch.randn(3, 4)
+        expected = wrapper_fn(x, y)
+        got = torch.compile(wrapper_fn, fullgraph=True)(x, y)
+        self.assertEqual(expected, got)
+
     def test_vmap_new_tensor_in_body(self):
         def fn(x):
             return x + torch.ones(3)
