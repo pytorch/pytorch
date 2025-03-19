@@ -10743,6 +10743,20 @@ def forward(self, x):
         self.assertEqual(div_spec.arg.name, "div")
         self.assertEqual(div_spec.arg.value, "floor")
 
+    def test_attr_assignment_extra(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                self.bar = x.sum()
+                return x + 2
+
+        with self.assertRaisesRegex(
+            ValueError, "During export following attrs are deleted:"
+        ):
+            _ = export(Foo(), (torch.randn(4, 4),), strict=False)
+
     def test_unbacked_deferred_runtime_retrace(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):
