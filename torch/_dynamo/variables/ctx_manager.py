@@ -674,29 +674,41 @@ class TorchFunctionDisableVariable(ContextWrappingVariable):
     @staticmethod
     def create(tx: "InstructionTranslator", **kwargs):
         var = TorchFunctionDisableVariable(
-            target_values=[False],
-            initial_values=[tx.output.torch_function_enabled],
+            target_values=[],
+            initial_values=[],
             **kwargs,
         )
         # mlazos: I think this is here to make sure we don't reinvoke on clone()
-        var._call_func(tx, [False])
+        var._call_func(tx, [])
         var.set_cleanup_hook(tx)
         return var
 
-    def __init__(self, target_values, initial_values=None, **kwargs) -> None:
+    def __init__(
+        self, target_values, initial_values=None, only_subclass=False, **kwargs
+    ) -> None:
+        assert len(target_values) == 0
+        assert len(initial_values) == 0
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
+        self.only_subclass = only_subclass
         install_guard(self._guards_singleton)
 
     def enter(self, tx):
         return variables.ConstantVariable.create(None)
 
     def _call_func(self, tx: "InstructionTranslator", values):
-        assert len(values) == 1
-        tx.symbolic_torch_function_state.torch_function_subclass_enabled = values[0]
-        tx.symbolic_torch_function_state.torch_function_mode_enabled = values[0]
-        tx.output.set_torch_function_state(values[0])
+        assert len(values) == 0
+        tx.symbolic_torch_function_state.torch_function_subclass_enabled = False
+        if not self.only_subclass:
+            tx.symbolic_torch_function_state.torch_function_mode_enabled = False
+        tx.output.set_torch_function_state(False)
+
+    def module_name(self):
+        return "torch"
+
+    def fn_name(self):
+        return "DisableTorchFunction"
 
 
 class DeterministicAlgorithmsVariable(ContextWrappingVariable):
