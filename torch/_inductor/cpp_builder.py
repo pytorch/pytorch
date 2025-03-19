@@ -190,7 +190,6 @@ def _is_gcc(cpp_compiler: str) -> bool:
     return bool(re.search(r"(gcc|g\+\+|gnu-c\+\+)", cpp_compiler))
 
 
-
 @functools.lru_cache(None)
 def _is_msvc_cl(cpp_compiler: str) -> bool:
     if not _IS_WINDOWS:
