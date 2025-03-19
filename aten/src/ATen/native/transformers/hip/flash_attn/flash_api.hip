@@ -159,7 +159,7 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
   const int num_heads_k = k.size(2);
   TORCH_CHECK(batch_size > 0, "batch size must be positive");
   TORCH_CHECK(head_size_og % 8 == 0, "head_size must be a multiple of 8, this is ensured by padding!");
-  TORCH_CHECK(head_size_og <= 256, "FlashAttention forward only supports head dimension at most 256");
+  TORCH_CHECK(head_size_og <= 512, "FlashAttention on ROCm forward only supports head dimension at most 512");
   TORCH_CHECK(num_heads % num_heads_k == 0, "Number of heads in key/value must divide number of heads in query");
 
   if (seqlen_q == 1) { is_causal = false; }  // causal=true is the same as causal=false in this case
@@ -314,7 +314,7 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
   const int total_q = temp_q.sizes()[0];
 
   TORCH_CHECK(batch_size > 0, "batch size must be positive");
-  TORCH_CHECK(head_size_og <= 256, "FlashAttention forward only supports head dimension at most 256");
+  TORCH_CHECK(head_size_og <= 512, "FlashAttention on ROCm forward only supports head dimension at most 512");
   TORCH_CHECK(num_heads % num_heads_k == 0, "Number of heads in key/value must divide number of heads in query");
 
   if (window_size_left >= max_seqlen_k) {
@@ -479,7 +479,7 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
   TORCH_CHECK(batch_size > 0, "batch size must be positive");
   TORCH_CHECK(head_size % 8 == 0, "head_size should be a multiple of 8");
   TORCH_CHECK(head_size_og % 8 == 0, "head_size_og should be a multiple of 8, this is ensured by padding!");
-  TORCH_CHECK(head_size <= 256, "FlashAttention backward only supports head dimension at most 256");
+  TORCH_CHECK(head_size <= 512, "FlashAttention on ROCm backward only supports head dimension at most 512");
   TORCH_CHECK(num_heads % num_heads_k == 0, "Number of heads in key/value must divide number of heads in query");
 
   auto round_multiple = [](int x, int m) { return (x + m - 1) / m * m; };
@@ -650,7 +650,7 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
   const int total_k = k.size(0);
   const int num_heads_k = k.size(1);
   TORCH_CHECK(batch_size > 0, "batch size must be positive");
-  TORCH_CHECK(head_size <= 256, "FlashAttention backward only supports head dimension at most 256");
+  TORCH_CHECK(head_size <= 512, "FlashAttention on ROCm backward only supports head dimension at most 512");
   TORCH_CHECK(num_heads % num_heads_k == 0, "Number of heads in key/value must divide number of heads in query");
 
   if (window_size_left >= max_seqlen_k) { window_size_left = -1; }
