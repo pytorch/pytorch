@@ -2252,6 +2252,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
     [
         "torch.__future__.get_overwrite_module_params_on_conversion",
         "torch.__future__.set_overwrite_module_params_on_conversion",
+        "torch.__future__.get_swap_module_params_on_conversion",
         "torch.__getattr__",
         "torch._assert",
         "torch._check_index",

@@ -2650,6 +2650,7 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
             torch.backends.cuda.is_flash_attention_available,
             torch.backends.cuda.can_use_flash_attention,
             torch.backends.cuda.can_use_efficient_attention,
+            torch.__future__.get_swap_module_params_on_conversion,
             "is_integer",
         ]
         + list(supported_const_comparison_op_values.keys())
@@ -2663,6 +2664,9 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
     elif isinstance(example_value, float) or proxy.node.target in ["hex", "__round__"]:
+        set_example_value(proxy.node, example_value)
+        return ConstantVariable.create(example_value, **options)
+    elif isinstance(example_value, torch.device):
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
     else:
