@@ -123,7 +123,6 @@ mv "$pt_checkout/docs/build/html" "$install_path"
 # generated source files.
 # NB: the following only works on gnu sed. The sed shipped with mac os is different.
 # One can `brew install gnu-sed` on a mac and then use "gsed" instead of "sed".
-find "$install_path/_modules" -name "*.html" -print0 | xargs -0 sed -i '/<head>/a \ \ <meta name="robots" content="noindex">'
 
 git add "$install_path" || true
 git status
