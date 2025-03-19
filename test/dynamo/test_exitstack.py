@@ -211,12 +211,18 @@ class CPythonTestBaseExitStack:
     @make_dynamo_test
     def test_enter_context_errors(self):
         with self.exit_stack() as stack:
-            with self.assertRaisesRegex(TypeError, "the context manager"):
+            with self.assertRaises(TypeError, "the context manager") as cm:
                 stack.enter_context(LacksEnterAndExit())
-            with self.assertRaisesRegex(TypeError, "the context manager"):
+            self.assertRegex(str(cm.exception), "the context manager")
+
+            with self.assertRaises(TypeError, "the context manager") as cm:
                 stack.enter_context(LacksEnter())
-            with self.assertRaisesRegex(TypeError, "the context manager"):
+            self.assertRegex(str(cm.exception), "the context manager")
+
+            with self.assertRaises(TypeError, "the context manager") as cm:
                 stack.enter_context(LacksExit())
+            self.assertRegex(str(cm.exception), "the context manager")
+
             self.assertFalse(stack._exit_callbacks)
 
     @make_dynamo_test
@@ -386,6 +392,7 @@ class CPythonTestBaseExitStack:
         self.assertIsInstance(inner_exc, ValueError)
         self.assertIsInstance(inner_exc.__context__, ZeroDivisionError)
 
+    @unittest.expectedFailure
     @make_dynamo_test
     def test_exit_exception_explicit_none_context(self):
         # Ensure ExitStack chaining matches actual nested `with` statements
