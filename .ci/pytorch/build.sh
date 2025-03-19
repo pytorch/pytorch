@@ -174,6 +174,8 @@ if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   source /opt/intel/oneapi/mkl/latest/env/vars.sh
   # XPU kineto feature dependencies are not fully ready, disable kineto build as temp WA
   export USE_KINETO=0
+  export USE_STATIC_MKL=0
+  export USE_ONEMKL=1
   export TORCH_XPU_ARCH_LIST=pvc
 fi
 
