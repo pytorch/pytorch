@@ -1193,6 +1193,7 @@ sizes_strides_methods = {
     "is_non_overlapping_and_dense_indicator": _sympy_is_non_overlapping_and_dense_indicator,
 }
 
+
 def to_node(self, num):
     if isinstance(num, SymTypes):
         return num.node
