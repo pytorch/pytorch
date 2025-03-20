@@ -1271,7 +1271,12 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         torch._dynamo.testing.standard_test(self, fn=fn2, nargs=1, expected_ops=1)
 
-    @torch._dynamo.config.patch(specialize_float=False)
+    # When we unspecialize float, we wobble this test by changing
+    # the op count since previously we would just specialize and constant
+    # fold floats into the graph, whereas when we unspecialize we will have
+    # ops for item, add, and all other tensorified operations. Since this
+    # test really isn't testing that, we purposely specialize floats here.
+    @torch._dynamo.config.patch(specialize_float=True)
     def test_config_obj(self):
         class Cfg:
             def __init__(self) -> None:
@@ -3600,7 +3605,12 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         self.assertTrue(same(out[0], out[1]))
 
-    @torch._dynamo.config.patch(specialize_float=False)
+    # When we unspecialize float, we wobble this test by changing
+    # the op count since previously we would just specialize and constant
+    # fold floats into the graph, whereas when we unspecialize we will have
+    # ops for item, add, and all other tensorified operations. Since this
+    # test really isn't testing that, we purposely specialize floats here.
+    @torch._dynamo.config.patch(specialize_float=True)
     def test_closure_out_of_scope_cell(self):
         cell1 = torch.rand(1).item()
         cell2 = torch.rand(3, 3)
