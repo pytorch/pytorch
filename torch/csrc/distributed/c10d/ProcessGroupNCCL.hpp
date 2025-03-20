@@ -248,12 +248,14 @@ struct CoalescingState {
   bool async = false;
   // Stores the list of tensors for all collectives run inside a coalescing
   // TODO (eqy)
+  std::vector<at::Tensor> tensors;
 
   void reset() {
     active = false;
     opType = 0;
     comm = nullptr;
     async = false;
+    tensors.clear();
   }
 };
 

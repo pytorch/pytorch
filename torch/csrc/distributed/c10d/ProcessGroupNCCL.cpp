@@ -3207,6 +3207,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
   work->blockingWait_ = blockingWait_;
   work->store_ = store_;
   assignTimeoutToWork(work, options_);
+  work->stashTensors(coalescingState_.tensors);
 
   // Record start before ncclGroupEnd
   if (work->timingEnabled_) {
@@ -3310,8 +3311,15 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   // stream, we don't need to do anything for tensor lifetime management.
   // Otherwise, we need to stage the tensors will `work.wait()`.
   if (asyncOp) {
-    work->stashTensors(inputs);
-    work->stashTensors(outputs);
+    if (coalescingState_.active) {
+      coalescingState_.tensors.insert(
+          coalescingState_.tensors.end(), inputs.begin(), inputs.end());
+      coalescingState_.tensors.insert(
+          coalescingState_.tensors.end(), outputs.begin(), outputs.end());
+    } else {
+      work->stashTensors(inputs);
+      work->stashTensors(outputs);
+    }
   }
 
   if (nanCheck) {
