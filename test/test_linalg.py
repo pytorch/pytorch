@@ -107,6 +107,31 @@ def find_tunableop_result(results, OpSig, ParamSig):
             return inner_tuple
     return None
 
+def compare_untuned_tuned_param_sig(untuned_filename, tuned_filename):
+    # Compare Param Signature of untuned and tuned Tunableop results
+    # file. Verify that for each Param Signature in the untuned file
+    # there is a matching one in the tuned results file.
+    import csv
+    ok = False
+    with open(untuned_filename) as file1:
+        with open(tuned_filename) as file2:
+            untuned_reader = csv.reader(file1)
+            untuned_csv_entries = [row[1] for row in untuned_reader]
+
+            tuned_reader = csv.reader(file2)
+            for _ in range(5):  # Skip the first 5 lines for the validator
+                next(tuned_reader, None)
+
+            result_csv_entries = [row[1] for row in tuned_reader]
+
+            for value in untuned_csv_entries:
+                if value in result_csv_entries:
+                    ok = True
+                else:
+                    ok = False
+
+    return ok
+
 class TestLinalg(TestCase):
     @contextlib.contextmanager
     def _hip_allow_tf32(self):
