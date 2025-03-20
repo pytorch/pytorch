@@ -63,7 +63,11 @@ class BlockPatternMatcher:
         index = cls._preprocess(index)
 
         # Pattern match to find the strides and offset.
-        wild = functools.partial(sympy.Wild, exclude=[index_var])
+        wild = functools.partial(
+            sympy.Wild,
+            exclude=[index_var],
+            properties=[lambda x: x.is_integer and x.is_nonnegative],
+        )
         dims: list[Expr] = [wild(f"dim_mod{idx}") for idx in range(num_dims)]
         strides: list[Expr] = [wild(f"stride_mod{idx}") for idx in range(num_dims)]
 
@@ -167,7 +171,11 @@ class BlockPatternMatcher:
         stride.
         """
         index = cls._preprocess(index)
-        stride = sympy.Wild("stride", exclude=[index_var])
+        stride = sympy.Wild(
+            "stride",
+            exclude=[index_var],
+            properties=[lambda x: x.is_integer and x.is_nonnegative],
+        )
         m = index.match(index_var * stride)
         if m is None:
             return None
