@@ -94,7 +94,13 @@ def fakify(
         return t
 
     if not isinstance(t, torch.Tensor):
-        raise ValueError(f"Unsupported input type {type(t)}")
+        raise ValueError(
+            f"Unsupported input type {type(t)}. "
+            "Export only supports pytree containers of basic types (Tensor, int, float, ...) as input. "
+            "To register a custom dataclass, use torch.export.register_dataclass. "
+            "To register a custom container type, use torch.utils._pytree.register_pytree_node. "
+            "To register a constant input, use torch.utils._pytree.register_constant"
+        )
     n_dims = len(t.shape)
     dynamic_sizes = []
     constraint_sizes = [None] * n_dims
@@ -150,6 +156,7 @@ def make_fake_inputs(
     # In strict, these steps are spread across multiple files:
     #   - output_graph.py fakifies inputs.
     #   - [post-tracing] guards.py processes input shape equalities.
+    import torch._functorch.config as _config
 
     combined_args = _combine_args(nn_module, args, kwargs)
     _check_dynamic_shapes(combined_args, dynamic_shapes)
@@ -171,25 +178,27 @@ def make_fake_inputs(
             "co_filename": code.co_filename,
             "co_firstlineno": code.co_firstlineno,
         }
-        fake_mode = FakeTensorMode(
-            shape_env=ShapeEnv(
-                tracked_fakes=[],
-                co_fields=co_fields,
-                prefer_deferred_runtime_asserts_over_guards=True,
-                allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
-            ),
-            allow_non_fake_inputs=True,
-            export=True,
-        )
+        with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
+            fake_mode = FakeTensorMode(
+                shape_env=ShapeEnv(
+                    tracked_fakes=[],
+                    co_fields=co_fields,
+                    prefer_deferred_runtime_asserts_over_guards=True,
+                    allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
+                ),
+                allow_non_fake_inputs=True,
+                export=True,
+            )
     else:
-        fake_mode = FakeTensorMode(
-            shape_env=ShapeEnv(
-                tracked_fakes=[],
-                prefer_deferred_runtime_asserts_over_guards=True,
-                allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
-            ),
-            allow_non_fake_inputs=True,
-        )
+        with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
+            fake_mode = FakeTensorMode(
+                shape_env=ShapeEnv(
+                    tracked_fakes=[],
+                    prefer_deferred_runtime_asserts_over_guards=True,
+                    allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
+                ),
+                allow_non_fake_inputs=True,
+            )
     if fake_mode.shape_env is None or fake_mode.shape_env.tracked_fakes is None:
         raise ValueError(
             "Detected fake_mode does not have a shape_env with tracked fakes. "

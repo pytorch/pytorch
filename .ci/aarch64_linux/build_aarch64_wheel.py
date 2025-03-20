@@ -19,13 +19,11 @@ import boto3
 
 # AMI images for us-east-1, change the following based on your ~/.aws/config
 os_amis = {
-    "ubuntu18_04": "ami-078eece1d8119409f",  # login_name: ubuntu
     "ubuntu20_04": "ami-052eac90edaa9d08f",  # login_name: ubuntu
     "ubuntu22_04": "ami-0c6c29c5125214c77",  # login_name: ubuntu
     "redhat8": "ami-0698b90665a2ddcf1",  # login_name: ec2-user
 }
 
-ubuntu18_04_ami = os_amis["ubuntu18_04"]
 ubuntu20_04_ami = os_amis["ubuntu20_04"]
 
 
@@ -659,18 +657,6 @@ def configure_system(
             "sudo apt-get install -y python3-dev python3-yaml python3-setuptools python3-wheel python3-pip"
         )
     host.run_cmd("pip3 install dataclasses typing-extensions")
-    # Install and switch to gcc-8 on Ubuntu-18.04
-    if not host.using_docker() and host.ami == ubuntu18_04_ami and compiler == "gcc-8":
-        host.run_cmd("sudo apt-get install -y g++-8 gfortran-8")
-        host.run_cmd(
-            "sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-8 100"
-        )
-        host.run_cmd(
-            "sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-8 100"
-        )
-        host.run_cmd(
-            "sudo update-alternatives --install /usr/bin/gfortran gfortran /usr/bin/gfortran-8 100"
-        )
     if not use_conda:
         print("Installing Cython + numpy from PyPy")
         host.run_cmd("sudo pip3 install Cython")
@@ -761,7 +747,7 @@ def start_build(
         version = host.check_output("cat pytorch/version.txt").strip()[:-2]
         build_vars += f"BUILD_TEST=0 PYTORCH_BUILD_VERSION={version}.dev{build_date} PYTORCH_BUILD_NUMBER=1"
     if branch.startswith(("v1.", "v2.")):
-        build_vars += f"BUILD_TEST=0 PYTORCH_BUILD_VERSION={branch[1:branch.find('-')]} PYTORCH_BUILD_NUMBER=1"
+        build_vars += f"BUILD_TEST=0 PYTORCH_BUILD_VERSION={branch[1 : branch.find('-')]} PYTORCH_BUILD_NUMBER=1"
     if host.using_docker():
         build_vars += " CMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=0x10000"
     if enable_mkldnn:

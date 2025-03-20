@@ -29,14 +29,14 @@ from typing import Callable, Optional, TYPE_CHECKING, Union
 import torch._C
 from torch._guards import Guard
 
-from .. import variables
+from .. import graph_break_hints, variables
 from ..bytecode_transformation import (
     create_call_function,
     create_instruction,
     create_setup_with,
 )
 from ..device_interface import get_interface_for_device
-from ..exc import unimplemented, Unsupported
+from ..exc import unimplemented_v2
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GlobalStateSource
 from .base import VariableTracker
@@ -173,41 +173,20 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
 
     def enter(self, tx):
         source = None if self.source is None else AttrSource(self.source, "__enter__")
-        try:
-            return variables.UserMethodVariable(
-                self.cm_obj.__enter__.__func__,
-                self,
-                source=source,
-            ).call_function(tx, [], {})
-        except Unsupported as e:
-            unimplemented(
-                f"Unsupported context manager {self.cm_obj}'s __enter__ function",
-                from_exc=e,
-            )
+        return variables.UserMethodVariable(
+            self.cm_obj.__enter__.__func__,
+            self,
+            source=source,
+        ).call_function(tx, [], {})
 
     def exit(self, tx: "InstructionTranslator", *args):
         source = None if self.source is None else AttrSource(self.source, "__exit__")
-        try:
-            x = variables.UserMethodVariable(
-                self.cm_obj.__exit__.__func__,
-                self,
-                source=source,
-            ).call_function(
-                tx,
-                [
-                    variables.ConstantVariable.create(None),
-                    variables.ConstantVariable.create(None),
-                    variables.ConstantVariable.create(None),
-                ],
-                {},
-            )
-        except Unsupported as e:
-            unimplemented(
-                f"Unsupported context manager {self.cm_obj}'s __exit__ function",
-                from_exc=e,
-            )
-
-        tx.generic_context_manager_depth -= 1
+        x = variables.UserMethodVariable(
+            self.cm_obj.__exit__.__func__,
+            self,
+            source=source,
+        ).call_function(tx, args, {})
+        tx.active_generic_context_managers.pop()
         return x
 
     def supports_graph_breaks(self):
@@ -619,10 +598,27 @@ class InferenceModeVariable(ContextWrappingVariable):
         )
 
     def enter(self, tx):
-        ctx = torch.autograd.grad_mode._enter_inference_mode(*self.target_values)
-        self.set_cleanup_hook(
-            tx, lambda: torch.autograd.grad_mode._exit_inference_mode(ctx)
-        )
+        disabled_inference_mode_forcibly = False
+        if (
+            torch._dynamo.config.fake_tensor_disable_inference_mode
+            and self.target_values[0]
+        ):
+            # Do not set the inference mode because we keep it off during
+            # compilation. Set the grad_enabled to False to reflect the relevant
+            # part of inference_mode to torch.compile.
+            disabled_inference_mode_forcibly = True
+            prior = torch.is_grad_enabled()
+            torch._C._set_grad_enabled(False)
+        else:
+            ctx = torch.autograd.grad_mode._enter_inference_mode(*self.target_values)
+
+        def cleanup_hook():
+            if disabled_inference_mode_forcibly:
+                torch._C._set_grad_enabled(prior)
+            else:
+                torch.autograd.grad_mode._exit_inference_mode(ctx)
+
+        self.set_cleanup_hook(tx, cleanup_hook)
         self.state.proxy = tx.output.create_node(
             "call_function",
             torch.autograd.grad_mode._enter_inference_mode,
@@ -750,9 +746,11 @@ class DeterministicAlgorithmsVariable(ContextWrappingVariable):
     def _call_func(self, tx: "InstructionTranslator", values):
         assert len(values) == 1
         value = values[0]
-        tx.output.create_node(
-            "call_function", torch._C._set_deterministic_algorithms, (value,), {}
-        ),
+        (
+            tx.output.create_node(
+                "call_function", torch._C._set_deterministic_algorithms, (value,), {}
+            ),
+        )
         torch._C._set_deterministic_algorithms(value)
 
     def module_name(self):
@@ -919,11 +917,13 @@ class ProfilerContextVariable(ContextWrappingVariable):
         return "nullcontext"
 
     def reconstruct(self, cg):
-        unimplemented(
-            """
-Dynamo doesn't support compiling a region that leaks torch profiler context
-objects which will be used outside the region
-"""
+        unimplemented_v2(
+            gb_type="torch.profiler object escaped from compiled region",
+            context=str(self),
+            explanation="Dynamo doesn't support compiling a region that returns a torch.profiler context manager.",
+            hints=[
+                *graph_break_hints.SUPPORTABLE,
+            ],
         )
 
 
@@ -1041,8 +1041,16 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
         ).call_function(tx, [self.tensors, self.prev_versions], {})
 
     def reconstruct(self, codegen):
-        unimplemented(
-            "torch.autograd._unsafe_preserve_version_counter with graph break"
+        unimplemented_v2(
+            gb_type="torch.autograd._unsafe_preserve_version_counter escaped from compiled region",
+            context=str(self),
+            explanation=(
+                "Dynamo doesn't support compiling a region that returns "
+                "a torch.autograd._unsafe_preserve_version_counter context manager."
+            ),
+            hints=[
+                *graph_break_hints.SUPPORTABLE,
+            ],
         )
 
 
@@ -1111,12 +1119,13 @@ class SDPAKernelVariable(ContextWrappingVariable):
     """represents torch.nn.attention.sdpa_kernel"""
 
     @staticmethod
-    def create(tx: "InstructionTranslator", backends, **kwargs):
+    def create(tx: "InstructionTranslator", backends, set_priority=False, **kwargs):
         if isinstance(backends, torch.nn.attention.SDPBackend):
             backends = [backends]
         var = SDPAKernelVariable(
             target_values=backends,
             initial_values=None,
+            set_priority=set_priority,
             **kwargs,
         )
         return var
@@ -1125,11 +1134,13 @@ class SDPAKernelVariable(ContextWrappingVariable):
         self,
         target_values: list[torch.nn.attention.SDPBackend],
         initial_values=None,
+        set_priority: bool = False,
         **kwargs,
     ) -> None:
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
+        self.set_priority = set_priority
 
     @staticmethod
     def _backends_to_nodes(tx, backends):
@@ -1146,16 +1157,23 @@ class SDPAKernelVariable(ContextWrappingVariable):
         return nodes
 
     def enter(self, tx):
-        self.prev_backends = torch.nn.attention._cur_sdpa_kernel_backends()
-        self.set_cleanup_hook(
-            tx, lambda: torch.nn.attention._sdpa_kernel(self.prev_backends)
+        self.prev_backends = torch.nn.attention._cur_sdpa_kernel_backends(
+            with_priority=self.set_priority
         )
-        torch.nn.attention._sdpa_kernel(self.target_values)
+        self.set_cleanup_hook(
+            tx,
+            lambda: torch.nn.attention._sdpa_kernel(
+                self.prev_backends, set_priority=self.set_priority
+            ),
+        )
+        torch.nn.attention._sdpa_kernel(
+            self.target_values, set_priority=self.set_priority
+        )
         arg = self._backends_to_nodes(tx, self.target_values)
         tx.output.create_node(
             "call_function",
             torch.nn.attention._sdpa_kernel,
-            (arg,),
+            (arg, bool(self.set_priority)),
             {},
         )
         return variables.ConstantVariable.create(None)
@@ -1166,7 +1184,7 @@ class SDPAKernelVariable(ContextWrappingVariable):
         tx.output.create_node(
             "call_function",
             torch.nn.attention._sdpa_kernel,
-            (arg,),
+            (arg, bool(self.set_priority)),
             {},
         )
         return variables.ConstantVariable.create(None)
@@ -1184,9 +1202,9 @@ class StreamVariable(VariableTracker):
     def __init__(self, proxy, value, device, **kwargs) -> None:
         if proxy is not None and "example_value" in proxy.node.meta:
             assert proxy.node.meta["example_value"] == value
-        assert (
-            value.device.type == device.type
-        ), "stream value is not equal to the passed device"
+        assert value.device.type == device.type, (
+            "stream value is not equal to the passed device"
+        )
         super().__init__(**kwargs)
         self.proxy = proxy
         self.value = value
@@ -1290,7 +1308,17 @@ class EventVariable(VariableTracker):
                 ),
             )
         else:
-            unimplemented(f"event method {name} unsupported")
+            unimplemented_v2(
+                gb_type="Unsupported torch.cuda.Event method",
+                context=str(name),
+                explanation=(
+                    f"Dynamo doesn't support tracing the torch.cuda.Event.{name} method. "
+                    f"We currently support wait, record, synchronize, and query.",
+                ),
+                hints=[
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
 
     def as_proxy(self):
         return self.proxy

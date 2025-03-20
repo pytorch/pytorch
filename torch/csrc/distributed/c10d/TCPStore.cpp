@@ -246,9 +246,10 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
   STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.TCPStore__init);
 
   if (opts.useLibUV) {
-    TORCH_CHECK(
+    TORCH_CHECK_WITH(
+        DistStoreError,
         ::c10d::detail::is_libuv_tcpstore_backend_available(),
-        "use_libuv was requested but PyTorch was build without libuv support");
+        "use_libuv was requested but PyTorch was built without libuv support, run with USE_LIBUV=0 to disable it.");
 
     if (opts.masterListenFd.has_value()) {
       // TODO(xilunwu): support this init method after testing
@@ -521,7 +522,8 @@ bool TCPStore::check(const std::vector<std::string>& keys) {
   if (response == detail::CheckResponseType::NOT_READY) {
     return false;
   }
-  TORCH_CHECK(false, "ready or not_ready response expected");
+  TORCH_CHECK_WITH(
+      DistStoreError, false, "ready or not_ready response expected");
 }
 
 void TCPStore::wait(const std::vector<std::string>& keys) {
@@ -558,7 +560,8 @@ void TCPStore::doWait(
       client_->receiveValueWithTimeout<detail::WaitResponseType>(timeout);
   if (response_opt.has_value()) {
     if (response_opt != detail::WaitResponseType::STOP_WAITING) {
-      TORCH_CHECK(false, "Stop_waiting response is expected");
+      TORCH_CHECK_WITH(
+          DistStoreError, false, "Stop_waiting response is expected");
     }
     return;
   }
@@ -573,12 +576,14 @@ void TCPStore::doWait(
   // this can happen if the server responds before we cancel, just ignore it
   if (response != detail::WaitResponseType::WAIT_CANCELED) {
     if (response != detail::WaitResponseType::STOP_WAITING) {
-      TORCH_CHECK(false, "Stop_waiting response is expected");
+      TORCH_CHECK_WITH(
+          DistStoreError, false, "Stop_waiting response is expected");
     }
 
     response = client_->receiveValue<detail::WaitResponseType>(); // ignore
     if (response != detail::WaitResponseType::WAIT_CANCELED) {
-      TORCH_CHECK(false, "wait_canceled response is expected");
+      TORCH_CHECK_WITH(
+          DistStoreError, false, "wait_canceled response is expected");
     }
   }
   C10_THROW_ERROR(
@@ -630,7 +635,8 @@ void TCPStore::multiSet(
     const std::vector<std::string>& keys,
     const std::vector<std::vector<uint8_t>>& values) {
   STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.TCPStore__multiSet);
-  TORCH_CHECK(
+  TORCH_CHECK_WITH(
+      DistStoreError,
       keys.size() == values.size(),
       "multiSet keys and values vectors must be of same size");
   const std::lock_guard<std::mutex> lock(activeOpLock_);
