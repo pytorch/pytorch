@@ -274,7 +274,8 @@ Attempted to call function marked as skipped
 
 
 from user code:
-   File "test_error_messages.py", line N, in fn""",
+   File "test_error_messages.py", line N, in fn
+    torch._dynamo.disable()""",
         )
 
     def test_skipfile_inline(self):
@@ -301,7 +302,8 @@ Attempted to inline function marked as skipped
 
 
 from user code:
-   File "test_error_messages.py", line N, in fn""",
+   File "test_error_messages.py", line N, in fn
+    Foo().fn()""",
             post_munge=post_munge,
         )
 
@@ -395,7 +397,7 @@ Attempted to call function marked as skipped
 
 from user code:
    File "test_error_messages.py", line N, in fn
-    def fn():""",
+    warnings.warn("test")""",
         )
 
     @unittest.skipIf(not python_pytree._cxx_pytree_exists, "missing optree package")
@@ -520,7 +522,7 @@ Dynamic slicing with Tensor arguments
 
 from user code:
    File "test_error_messages.py", line N, in fn
-    def fn(x, y):""",
+    return x[:y]""",
         )
 
     def test_observed_exception(self):
@@ -566,7 +568,7 @@ Uninitialized nn.Module
 
 from user code:
    File "test_error_messages.py", line N, in fn
-    def fn(mod):""",
+    return mod(1)""",
         )
 
     @torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
@@ -667,7 +669,7 @@ Missing bytecode handler
 
 from user code:
    File "test_error_messages.py", line N, in fn
-    def fn():""",
+    class Foo:""",
             post_munge=post_munge,
         )
 
@@ -1018,12 +1020,12 @@ User code traceback:
     f3(torch.randn(3))
   File "test_error_messages.py", line N, in f3
     Foo().attr = x  # 0
-  File "test_error_messages.py", line N, in torch_dynamo_resume_in_f3_at_996
+  File "test_error_messages.py", line N, in torch_dynamo_resume_in_f3_at_999
     Foo().attr = x  # 1
 
 ========== most recent `torch.compile` tracing attempt started here ==========
 
-  File "test_error_messages.py", line N, in torch_dynamo_resume_in_f3_at_997
+  File "test_error_messages.py", line N, in torch_dynamo_resume_in_f3_at_1000
     Foo().attr = x
 
 NOTE: the most recent `torch.compile` tracing attempt might not be where you applied `torch.compile`! This is due to how graph breaks are implemented - the optimized code object returned by Dynamo will call another Dynamo-generated resume function and tracing is re-enabled by calling the resume function as a normal Python function, which Dynamo intercepts as a top-level frame.
