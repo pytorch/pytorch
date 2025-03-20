@@ -3247,6 +3247,26 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 9)
 
+    def test_nesteduserfunction_setattr(self):
+        x = 0
+
+        def update(y):
+            def wrapper():
+                x += y
+
+            return wrapper
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            w = update(123)
+            w.__wrapped__ = x
+            return t.sin(), w
+
+        t = torch.randn(2)
+        y, w = fn(t)
+        self.assertEqual(y, t.sin())
+        self.assertEqual(w.__wrapped__, x)
+
     def test_object_setattr(self):
         @dataclasses.dataclass
         class A:
