@@ -156,6 +156,7 @@ class NullKernelHandler(NullHandler):
 
     def get_index_dtype_as_torch_dtype(self):
         import torch
+
         if self.index_dtype == "tl.int64":
             return torch.int64
         elif self.index_dtype == "tl.int32":
