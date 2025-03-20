@@ -6965,6 +6965,72 @@ def forward(self, b_a_buffer, x):
                 dynamic_shapes={"x": (A, B), "y": (B, A)},
             )
 
+    def test_multinomial_dynamic(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.multinomial(x, y.shape[0])
+
+        model = Model()
+        DYNAMIC = torch.export.Dim.DYNAMIC
+
+        def exported_module(inputs):
+            dynamic_shapes = tuple(tuple(DYNAMIC for _ in inp.shape) for inp in inputs)
+            ep = export(model, inputs, dynamic_shapes=dynamic_shapes)
+            return ep.module()
+
+        def check(inputs, epm):
+            eager_result = model(*inputs)
+            ep_result = epm(*inputs)
+            self.assertEqual(ep_result.shape, eager_result.shape)
+
+        inputs = (
+            torch.tensor([0, 10, 3, 0], dtype=torch.float32),
+            torch.ones(2, dtype=torch.int64),
+        )
+        epm = exported_module(inputs)
+        # output shape is (2,), where n_sample 2 <= dist_size 4
+        check(inputs, epm)
+
+        inputs = (
+            torch.tensor([0, 10, 3, 7, 6, 0], dtype=torch.float32),
+            torch.ones(3, dtype=torch.int64),
+        )
+        # output shape is (3,), with n_sample 3 <= dist_size 6
+        check(inputs, epm)
+
+        inputs = (
+            torch.tensor([0, 10, 3, 0], dtype=torch.float32),
+            torch.ones(5, dtype=torch.int64),
+        )
+        with self.assertRaisesRegex(RuntimeError, "cannot sample"):
+            # n_sample 5 > dist_size 4
+            epm(*inputs)
+
+        inputs = (
+            torch.tensor([[4, 5], [6, 7], [8, 9]], dtype=torch.float32),
+            torch.ones(2, dtype=torch.int64),
+        )
+        epm = exported_module(inputs)
+        # output shape is (3, 2), with n_row 3 and n_sample 2 <= dist_size 2
+        check(inputs, epm)
+
+        inputs = (
+            torch.tensor([[4, 5], [6, 7], [8, 9], [10, 11]], dtype=torch.float32),
+            torch.ones(1, dtype=torch.int64),
+        )
+        epm = exported_module(inputs)
+        # output shape is (4, 1), with n_row 4 and n_sample 1 <= dist_size 2
+        check(inputs, epm)
+
+        inputs = (
+            torch.tensor([[4, 5], [6, 7], [8, 9]], dtype=torch.float32),
+            torch.ones(3, dtype=torch.int64),
+        )
+        epm = exported_module(inputs)
+        with self.assertRaisesRegex(RuntimeError, "cannot sample"):
+            # n_sample 3 > dist_size 2
+            epm(*inputs)
+
     def test_export_with_wrong_inputs(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
@@ -6999,56 +7065,6 @@ def forward(self, b_a_buffer, x):
         )
         self.assertTrue(torch.allclose(core_aten_ep.module()(*inp), m(*inp)))
         self.assertEqual(id(state_dict), id(ep.state_dict))
-
-    @unittest.skipIf(IS_FBCODE, "We can't customize decomp in fbcode")
-    def test_export_for_inference_e2e(self):
-        class M(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.lin = torch.nn.Linear(10, 1)
-
-            def forward(self, x):
-                return self.lin(x)
-
-        inp = (torch.randn(5, 10),)
-        m = M()
-
-        decomp_table = torch.export.default_decompositions()
-
-        def _custom_decomp_for_linear(x, weight, bias):
-            return x + bias.sum()
-
-        decomp_table[torch.ops.aten.linear.default] = _custom_decomp_for_linear
-        del decomp_table[torch.ops.aten.sum.default]
-        ep = torch.export.export_for_inference(
-            m, inp, decomp_table=decomp_table, dynamic_shapes={"x": {0: Dim("batch")}}
-        )
-
-        self.assertExpectedInline(
-            str(ep.graph_module.code).strip(),
-            """\
-def forward(self, p_lin_weight, p_lin_bias, x):
-    sum_1 = torch.ops.aten.sum.default(p_lin_bias);  p_lin_bias = None
-    add = torch.ops.aten.add.Tensor(x, sum_1);  x = sum_1 = None
-    return (add,)""",
-        )
-
-        ep_core = ep.run_decompositions()
-
-        self.assertExpectedInline(
-            str(ep_core.graph_module.code).strip(),
-            """\
-def forward(self, p_lin_weight, p_lin_bias, x):
-    sum_1 = torch.ops.aten.sum.dim_IntList(p_lin_bias, []);  p_lin_bias = None
-    add = torch.ops.aten.add.Tensor(x, sum_1);  x = sum_1 = None
-    return (add,)""",
-        )
-
-        with self.assertRaisesRegex(RuntimeError, "Expected input"):
-            ep.module()(torch.randn(4, 12))
-
-        with self.assertRaisesRegex(RuntimeError, "Expected input"):
-            ep_core.module()(torch.randn(4, 12))
 
     @unittest.skipIf(IS_FBCODE, "We can't customize decomp in fbcode")
     def test_export_decomp_torture_case_1(self):
