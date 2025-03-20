@@ -1459,6 +1459,13 @@ def merge_view_inputs(
         return args_to_functionalization, post_processed_calling_convention_meta
 
 
+# Note: [Backward graph lazy lowering]
+# After AOTDispatch traces the backward for graphs requiring autograd, we will lower the graph lazily,
+# unless we suspect that inductor might specialize and insert additional guards. When we do lazy
+# lowering, we stash the AOT backward graph (bw_module) in this class.
+#
+# Lowering passes are performed on a deepcopy of this bw_module due to compatbility
+# with compiled autograd. See: https://github.com/pytorch/pytorch/pull/149229#discussion_r2002122645.
 @dataclass
 class AutogradLazyBackwardCompileInfo:
     bw_module: Callable
@@ -2184,6 +2191,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         dynamo_compile_column_us="backward_cumulative_compile_time_us",
                     ):
                         CompileEventLogger.compilation_metric(is_forward=False)
+                        # See Note: [Backward graph lazy lowering]
                         CompiledFunction.compiled_bw = aot_config.bw_compiler(
                             copy.deepcopy(bw_module), placeholder_list
                         )
