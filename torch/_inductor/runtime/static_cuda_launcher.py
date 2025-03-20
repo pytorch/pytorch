@@ -5,10 +5,6 @@ from typing_extensions import Unpack
 from .triton_compat import ASTSource, CompiledKernel
 
 
-MAX_SHARED_MEMORY = 49152
-MAX_ARGS = 120
-
-
 class StaticallyLaunchedCudaKernel:
     """
     Parses the metadata of a CompiledKernel from Triton into a structure that can
@@ -36,13 +32,7 @@ class StaticallyLaunchedCudaKernel:
     to how it handles constants in 3.3, so there's some special logic necessary to handle both versions.
     """
 
-    def __init__(
-        self, kernel: CompiledKernel, slow_launch_kernel: bool = False
-    ) -> None:
-        # slow_launch_kernel used only for testing purposes
-        # Will always dynamically allocate on the heap
-        self.slow_launch_kernel = slow_launch_kernel
-
+    def __init__(self, kernel: CompiledKernel) -> None:
         self.name = kernel.src.fn.__name__
         self.cubin_path = kernel._cubin_path
 
@@ -65,13 +55,6 @@ class StaticallyLaunchedCudaKernel:
         self.shared = (
             kernel.shared if hasattr(kernel, "shared") else kernel.metadata.shared
         )
-        # When shared memory > 48 KB, triton allocates CUDA memory via both static and dynamic
-        # memory allocation, which gets really complicated. We'll handle it later.
-        # See triton/third-party/nvidia/driver.c in loadBinary
-        if self.shared > MAX_SHARED_MEMORY:
-            raise NotImplementedError(
-                "Shared memory size > 48KB requires special triton handling"
-            )
 
         # Newer triton versions pass an extra global scratch parameter to the compiled cuda kernel.
         # Inductor never uses this field or enables it, but we still have to pass
@@ -99,7 +82,7 @@ class StaticallyLaunchedCudaKernel:
                 "Static cuda launcher only supports num_ctas == 1"
             )
 
-    def load_kernel(self) -> None:
+    def load_kernel(self, device: int) -> None:
         from torch._C import _StaticCudaLauncher
 
         if self.function is not None:
@@ -109,7 +92,7 @@ class StaticallyLaunchedCudaKernel:
         assert self.cubin_path is not None
 
         (self.function, self.n_regs, self.n_spills) = _StaticCudaLauncher._load_kernel(
-            self.cubin_path, self.name, self.shared
+            self.cubin_path, self.name, self.shared, device
         )
         # Don't need the cubin path anymore now that we've loaded
         self.cubin_path = None
@@ -214,7 +197,6 @@ class StaticallyLaunchedCudaKernel:
             args = (*args, None)
         else:
             arg_tys = self.arg_tys
-
         assert len(args) == len(arg_tys)
 
         # TODO: can handle grid functions here or in C++, so
@@ -230,5 +212,4 @@ class StaticallyLaunchedCudaKernel:
             arg_tys,
             args,
             stream,
-            self.slow_launch_kernel,
         )
