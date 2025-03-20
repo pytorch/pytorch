@@ -111,6 +111,7 @@ class DocstringFile(_linter.PythonFile):
                     suffix = f"[{i + 1}]" if len(dl) > 1 else ""
                     b.full_name = prefix + b.name + suffix
 
+
 class DocstringLinter(_linter.FileLinter):
     linter_name = "docstring_linter"
     description = DESCRIPTION
