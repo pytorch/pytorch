@@ -806,7 +806,9 @@ def proxy_call(
 
     if func is torch.ops.aten.is_nonzero.default:
         with proxy_mode:
-            if args[0].numel() != 1:
+            from .symbolic_shapes import guard_size_oblivious
+
+            if guard_size_oblivious(args[0].numel() != 1):  # type: ignore[attr-defined]
                 raise RuntimeError(
                     "Can't call is_nonzero on a tensor of elements more than one"
                 )
