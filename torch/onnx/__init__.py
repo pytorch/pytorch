@@ -181,9 +181,9 @@ def export(
     1. If the model is already an ExportedProgram, it will be used as-is.
     2. Use :func:`torch.export.export` and set ``strict=False``.
     3. Use :func:`torch.export.export` and set ``strict=True``.
-    4. Use ``draft_export`` which is removes some soundness guarantees in data-dependent
-        operations to allow export to proceed. You will get a warning if any of
-        the data-dependent operations are encountered.
+    4. Use ``draft_export`` which removes some soundness guarantees in data-dependent
+        operations to allow export to proceed. You will get a warning if the exporter
+        encounters any unsound data-dependent operation.
     5. Use :func:`torch.jit.trace` to trace the model then convert to ExportedProgram.
         This is the most unsound strategy but may be useful for converting TorchScript
         models to ONNX.
