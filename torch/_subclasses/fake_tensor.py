@@ -981,7 +981,9 @@ class TensorMetadata:
             if isinstance(value, (tuple, list, torch.Size)):
                 # This will recursively flatten the iterable, calling
                 # convert_sym_int() as necessary.
-                mode._prep_args_for_hash(result, value, state)
+                id_hashed_objects: list[object] = []
+                mode._prep_args_for_hash(result, value, state, id_hashed_objects)
+                id_hashed_objects.clear()
             elif isinstance(value, SymInt):
                 state.convert_sym_int(result, value)
             else:
@@ -1433,12 +1435,21 @@ class FakeTensorMode(TorchDispatchMode):
             # where it wasn't seen on a previous instance of the same op.
             self.shape_env.settings if self.shape_env else None,
         ]
+        # Collect the id_hashed objects to attach a weakref finalize later
+        id_hashed_objects: list[object] = []
         # Translate any FakeTensor args to metadata.
         if args:
-            self._prep_args_for_hash(key_values, args, state)
+            self._prep_args_for_hash(key_values, args, state, id_hashed_objects)
         if kwargs:
-            self._prep_args_for_hash(key_values, kwargs, state)
-        return _DispatchCacheKey(tuple(key_values))
+            self._prep_args_for_hash(key_values, kwargs, state, id_hashed_objects)
+        key = _DispatchCacheKey(tuple(key_values))
+
+        for id_hashed_obj in id_hashed_objects:
+            weakref.finalize(
+                id_hashed_obj, functools.partial(evict_fake_tensor_cache_key, key=key)
+            )
+        id_hashed_objects.clear()
+        return key
 
     def _validate_cache_key(
         self,
@@ -1531,6 +1542,7 @@ class FakeTensorMode(TorchDispatchMode):
         result: list[object],
         args: Union[Mapping[str, object], Sequence[object], Iterable[object]],
         state: _CacheKeyState,
+        id_hashed_objects: list[object],
     ) -> None:
         """
         Translate the provided args into a form suitable for caching at FakeTensor
@@ -1541,8 +1553,8 @@ class FakeTensorMode(TorchDispatchMode):
         from torch._higher_order_ops.utils import FunctionalizeCtxWrapper
 
         if isinstance(args, dict):
-            self._prep_args_for_hash(result, args.keys(), state)
-            self._prep_args_for_hash(result, args.values(), state)
+            self._prep_args_for_hash(result, args.keys(), state, id_hashed_objects)
+            self._prep_args_for_hash(result, args.values(), state, id_hashed_objects)
             return
 
         for arg in args:
@@ -1566,7 +1578,7 @@ class FakeTensorMode(TorchDispatchMode):
             elif isinstance(arg, (SymBool, SymFloat)):
                 raise _BypassDispatchCache("symbolic shape")
             elif isinstance(arg, (list, tuple, dict)):
-                self._prep_args_for_hash(result, arg, state)
+                self._prep_args_for_hash(result, arg, state, id_hashed_objects)
             elif isinstance(arg, types.FunctionType):
                 raise _BypassDispatchCache("function argument")
             elif isinstance(arg, torch.fx.GraphModule):
@@ -1574,10 +1586,12 @@ class FakeTensorMode(TorchDispatchMode):
                 # us to cache fake outputs
                 result.append(type(arg))
                 result.append(id(arg))
+                id_hashed_objects.append(arg)
             elif isinstance(arg, FunctionalizeCtxWrapper):
                 # Special case for AOT Dispatcher first pass, where the fake
                 # tensor is called on the functional wrapper of the subgraph.
                 result.append(hash(arg))
+                id_hashed_objects.append(arg)
             else:
                 # It's important to capture the type of the arg since, e.g., 1 and 1.0
                 # hash to the same value, but can produce different dtypes for the
@@ -2917,6 +2931,11 @@ from torch._subclasses.fake_impls import (  # noqa: F401
     op_implementations_checks,
     stride_incorrect_op,
 )
+
+
+def evict_fake_tensor_cache_key(key: _DispatchCacheKey) -> None:
+    if key in FakeTensorMode.cache:
+        FakeTensorMode.cache.pop(key)
 
 
 @atexit.register
