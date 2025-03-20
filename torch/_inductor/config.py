@@ -139,6 +139,11 @@ triton_kernel_default_layout_constraint: Literal[
 # incompatible with disable_cpp_codegen
 cpp_wrapper: bool = os.environ.get("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1"
 
+# Controls automatic precompiling of common include files for codecache.CppCodeCache
+# (i.e. for cpp_wrapper mode and for cpp kernels on CPU).  AOTI header precompiling is
+# controlled by a separate flag.
+cpp_cache_precompile_headers: bool = True
+
 online_softmax = os.environ.get("TORCHINDUCTOR_ONLINE_SOFTMAX", "1") == "1"
 
 # dead code elimination
@@ -719,6 +724,17 @@ def decide_compile_threads() -> int:
 # TODO: Set directly after internal rollout.
 compile_threads: Optional[int] = None if is_fbcode() else decide_compile_threads()
 
+# Whether or not to enable statically launching CUDA kernels
+# compiled by triton (instead of using triton's own launcher)
+use_static_cuda_launcher: bool = (
+    os.environ.get("TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER", "0") == "1"
+)
+
+# Raise error if we bypass the launcher
+strict_static_cuda_launcher: bool = (
+    os.environ.get("TORCHINDUCTOR_STRICT_STATIC_CUDA_LAUNCHER", "0") == "1"
+)
+
 # gemm autotuning global cache dir
 global_cache_dir: Optional[str]
 if is_fbcode():
@@ -1244,6 +1260,9 @@ class aot_inductor:
 
     # Experimental. Flag to control whether to include weight in .so
     package_constants_in_so: bool = True
+
+    # Experimental.  Controls automatic precompiling of common AOTI include files.
+    precompile_headers: bool = False
 
 
 class cuda:
