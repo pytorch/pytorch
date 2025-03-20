@@ -11790,7 +11790,8 @@ def forward(self, x):
         """Make sure the metadata is kept after exported program run_decompositions."""
 
         @torch.library.custom_op("mylib::add", mutates_args=())
-        def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor: ...
+        def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            ...
 
         @torch.library.register_fake("mylib::add")
         def _(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
