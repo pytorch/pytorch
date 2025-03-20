@@ -11786,6 +11786,35 @@ def forward(self, x):
     return (getitem_3, cos_1)""",
         )
 
+    def test_run_decompositions_keep_metadata(self):
+        """Make sure the metadata is kept after exported program run_decompositions."""
+
+        @torch.library.custom_op("mylib::add", mutates_args=())
+        def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor: ...
+
+        @torch.library.register_fake("mylib::add")
+        def _(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            return torch.empty_like(x)
+
+        class TestModel(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.ops.mylib.add(x, y)
+
+        model = TestModel()
+        x_example = torch.randn(2, 3)
+        y_example = torch.randn(2, 3)
+        exported_program = export(model, (x_example, y_example))
+
+        for node in exported_program.graph.nodes:
+            node.meta["custom"] = {"my_field": "dummy"}
+
+        for node in exported_program.graph.nodes:
+            self.assertEqual(node.meta["custom"]["my_field"], "dummy")
+
+        decomposed_program = exported_program.run_decompositions()
+        for node in decomposed_program.graph.nodes:
+            self.assertEqual(node.meta["custom"]["my_field"], "dummy")
+
     def test_export_linear_preserve_dynamic_shape(self):
         class M(torch.nn.Module):
             def __init__(self):
