@@ -272,7 +272,7 @@ tlparse==0.3.7
 #test that import: dynamo/test_structured_trace.py
 
 # needed by torchgen utils
-typing-extensions==4.10.0
+typing-extensions==4.12.2
 #Description: type hints for python
 #Pinned versions:
 #test that import:
