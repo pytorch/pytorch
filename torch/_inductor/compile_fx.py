@@ -626,7 +626,9 @@ def compile_fx_inner(
         # the counter here because we may dropped into compile_fx directly
         # from lazy backwards compilation.
         stack.enter_context(_WaitCounter("pytorch.wait_counter.dynamo_compile").guard())
-        stack.enter_context(_WaitCounter("pytorch.wait_counter.all_compilation_types").guard())
+        stack.enter_context(
+            _WaitCounter("pytorch.wait_counter.all_compilation_types").guard()
+        )
 
         if torch._dynamo.callback_handler.prevent_duplicate_callbacks:
             stack.enter_context(torch._dynamo.callback_handler.install_callbacks())
