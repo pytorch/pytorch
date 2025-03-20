@@ -1065,8 +1065,8 @@ class TritonTemplate(KernelTemplate):
     def generate_and_load(
         self, kernel_options, kernel_name, fake_out, workspace_arg, layout, input_nodes
     ):
-        kwargs = kernel_options["meta"]
         """Generate the python code and load it into the current process"""
+        kwargs = kernel_options["meta"]
 
         with (
             patch.object(V.graph, "get_dtype", self._fake_get_dtype(fake_out)),
