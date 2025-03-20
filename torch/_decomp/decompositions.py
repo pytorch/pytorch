@@ -212,9 +212,9 @@ def hardswish(self: Tensor) -> Tensor:
 @pw_cast_for_opmath
 def hardswish_backward(grad_output: Tensor, self: Tensor) -> Tensor:
     return torch.where(
-        self < -3,
+        self <= -3,
         0.0,
-        torch.where(self <= 3, grad_output * ((self / 3) + 0.5), grad_output),
+        torch.where(self < 3, grad_output * ((self / 3) + 0.5), grad_output),
     )
 
 
@@ -507,9 +507,9 @@ def glu_backward(grad_output: Tensor, self: Tensor, dim: int) -> Tensor:
     assert self.dim() > 0, "glu does not support 0-dimensional tensors"
     wrap_dim = utils.canonicalize_dim(self.dim(), dim)
     nIn = self.size(wrap_dim)
-    assert (
-        nIn % 2 == 0
-    ), f"Halving dimension must be even, but dimension {wrap_dim} is size {nIn}"
+    assert nIn % 2 == 0, (
+        f"Halving dimension must be even, but dimension {wrap_dim} is size {nIn}"
+    )
     inputSize = nIn // 2
     firstHalf = self.narrow(wrap_dim, 0, inputSize)
     secondHalf = self.narrow(wrap_dim, inputSize, inputSize)
@@ -533,22 +533,22 @@ def nll_loss_backward(
     total_weight: Tensor,
 ) -> Tensor:
     assert 0 <= self.dim() <= 2, "input tensor should be 1D or 2D"
-    assert (
-        target.dim() <= 1
-    ), "0D or 1D target tensor expected, multi-target not supported"
+    assert target.dim() <= 1, (
+        "0D or 1D target tensor expected, multi-target not supported"
+    )
 
     no_batch_dim = self.dim() == 1 and target.dim() == 0
-    assert no_batch_dim or (
-        self.shape[0] == target.shape[0]
-    ), f"size mismatch (got input: {self.shape}, target: {target.shape})"
+    assert no_batch_dim or (self.shape[0] == target.shape[0]), (
+        f"size mismatch (got input: {self.shape}, target: {target.shape})"
+    )
     assert total_weight.numel() == 1, (
         "expected total_weight to be a single element tensor, got: ",
         f"{total_weight.shape} ({total_weight.numel()} elements)",
     )
 
-    assert (
-        weight is None or weight.numel() == self.shape[-1]
-    ), "weight tensor should be defined either for all or no classes"
+    assert weight is None or weight.numel() == self.shape[-1], (
+        "weight tensor should be defined either for all or no classes"
+    )
 
     if reduction == Reduction.NONE.value and self.dim() == 2:
         assert grad_output.dim() == 1 and grad_output.shape[0] == self.shape[0], (
@@ -556,9 +556,9 @@ def nll_loss_backward(
             f"got: dimension {grad_output.dim()} and tensor.size[0] == {grad_output.shape[0]}"
         )
     else:
-        assert (
-            grad_output.dim() <= 1 and grad_output.numel() == 1
-        ), f"Expected a single element grad_output tensor, but got: {grad_output.shape}"
+        assert grad_output.dim() <= 1 and grad_output.numel() == 1, (
+            f"Expected a single element grad_output tensor, but got: {grad_output.shape}"
+        )
 
     return _nll_loss_backward(
         grad_output, self, target, weight, reduction, ignore_index, total_weight
@@ -576,13 +576,13 @@ def nll_loss2d_backward(
     ignore_index: int,
     total_weight: Tensor,
 ) -> Tensor:
-    assert (
-        self.dim() == 4
-    ), f"only batches of spatial inputs supported (4D tensors), but got input of dimension: {self.dim()}"
+    assert self.dim() == 4, (
+        f"only batches of spatial inputs supported (4D tensors), but got input of dimension: {self.dim()}"
+    )
 
-    assert (
-        target.dim() == 3
-    ), f"only batches of spatial targets supported (3D tensors) but got targets of dimension: {target.dim()}"
+    assert target.dim() == 3, (
+        f"only batches of spatial targets supported (3D tensors) but got targets of dimension: {target.dim()}"
+    )
 
     assert (
         self.shape[0] == target.shape[0]
@@ -1491,6 +1491,8 @@ def addmv(self: Tensor, mat1: Tensor, vec: Tensor, beta: int = 1, alpha: int = 1
     out = alpha * torch.mv(mat1, vec)
     if beta == 0:
         return out
+    if out.numel() == 0:  # handle empty matrix
+        return beta * self
     return out + beta * self
 
 
@@ -1988,7 +1990,9 @@ def _get_batch_norm_reserve_tensor(
     )
     reserve_size = 0
     if backend == torch._C._BatchNormBackend.Cudnn:  # type: ignore[attr-defined]
-        reserve_size = torch._C._get_cudnn_batch_norm_reserve_space_size(input, training)  # type: ignore[attr-defined]
+        reserve_size = torch._C._get_cudnn_batch_norm_reserve_space_size(  # type: ignore[attr-defined]
+            input, training
+        )
     return torch.empty(
         reserve_size, dtype=torch.uint8, layout=input.layout, device=input.device
     )
@@ -2277,7 +2281,10 @@ def native_batch_norm_backward(
     dot_p = torch.sum(grad_out_cast * (input_cast - mean), reduction_axes)  # type: ignore[operator]
 
     grad_mean = _broadcast_batch_norm_backward(grad_output_sum * norm, broadcast_mask)
-    proj_scale = _broadcast_batch_norm_backward(torch.mul(dot_p * norm, invstd * invstd), broadcast_mask)  # type: ignore[operator]
+    proj_scale = _broadcast_batch_norm_backward(
+        torch.mul(dot_p * norm, invstd * invstd),  # type: ignore[operator]
+        broadcast_mask,
+    )
 
     if weight_cast is None:
         grad_scale = _broadcast_batch_norm_backward(invstd, broadcast_mask) * 1.0  # type: ignore[arg-type]
@@ -3430,8 +3437,9 @@ def one_layer_lstm_data(inp, hidden, params, has_biases, batch_sizes, reverse=Fa
 
     orig_hx = hidden[0]
     orig_cx = hidden[1]
-    hx, cx = orig_hx.narrow(0, 0, last_batch_size), orig_cx.narrow(
-        0, 0, last_batch_size
+    hx, cx = (
+        orig_hx.narrow(0, 0, last_batch_size),
+        orig_cx.narrow(0, 0, last_batch_size),
     )
 
     for inp in split_inp:
@@ -3995,20 +4003,21 @@ def nll_loss_forward(
     ignore_index: int,
 ) -> tuple[Tensor, Tensor]:
     assert self.dim() > 0 and self.dim() <= 2, "input tensor should be 1D or 2D"
-    assert (
-        target.dim() <= 1
-    ), "0D or 1D target tensor expected, multi-target not supported"
+    assert target.dim() <= 1, (
+        "0D or 1D target tensor expected, multi-target not supported"
+    )
 
     no_batch_dim = self.dim() == 1 and target.dim() == 0
-    assert no_batch_dim or (
-        self.shape[0] == target.shape[0]
-    ), f"size mismatch (got input: {self.shape}, target: {target.shape})"
+    assert no_batch_dim or (self.shape[0] == target.shape[0]), (
+        f"size mismatch (got input: {self.shape}, target: {target.shape})"
+    )
 
     n_classes = self.shape[-1]
 
-    assert weight is None or (
-        weight.dim() == 1 and weight.numel() == n_classes
-    ), f"weight tensor should be defined either for all {n_classes} classes or no classes but got weight tensor of shape: {weight.shape}"  # noqa: B950
+    assert weight is None or (weight.dim() == 1 and weight.numel() == n_classes), (
+        f"weight tensor should be defined either for all {n_classes} classes or no classes "
+        f"but got weight tensor of shape: {weight.shape}"
+    )
 
     return _nll_loss_forward(self, target, weight, reduction, ignore_index)
 
@@ -5091,7 +5100,10 @@ def isin(elements, test_elements, *, assume_unique=False, invert=False):
     if not isinstance(elements, torch.Tensor):
         elements = torch.tensor(elements, device=test_elements.device)
     if not isinstance(test_elements, torch.Tensor):
-        test_elements = torch.tensor(test_elements, device=elements.device)
+        if invert:
+            return torch.ne(elements, test_elements)
+        else:
+            return torch.eq(elements, test_elements)
 
     if test_elements.numel() < 10.0 * pow(elements.numel(), 0.145):
         return isin_default(elements, test_elements, invert=invert)
@@ -5123,14 +5135,10 @@ def bernoulli(
 def isin_default(elements, test_elements, *, invert=False):
     if elements.numel() == 0:
         return torch.empty_like(elements, dtype=torch.bool)
-
     x = elements.view(*elements.shape, *((1,) * test_elements.ndim))
-    if not invert:
-        cmp = x == test_elements
-    else:
-        cmp = x != test_elements
     dim = tuple(range(-1, -test_elements.ndim - 1, -1))
-    return cmp.any(dim=dim)
+    res = (x == test_elements).any(dim=dim)
+    return ~res if invert else res
 
 
 def isin_sorting(elements, test_elements, *, assume_unique=False, invert=False):

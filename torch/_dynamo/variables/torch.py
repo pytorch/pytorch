@@ -1,10 +1,39 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
+
+"""
+This module implements variable tracking for torch functions and operations during Dynamo tracing.
+
+It provides classes to handle different types of torch operations:
+
+TorchInGraphFunctionVariable: Handles torch.* functions that should be captured in the FX graph.
+Provides special handling for constant folding, tensor methods, and torch function overrides.
+Manages complex cases like out= variants and parameter construction.
+
+TorchCtxManagerClassVariable: Handles torch context managers like torch.no_grad(), autocast, etc.
+Provides implementations for entering/exiting these contexts during tracing.
+
+DispatchKeySetVariable: Represents torch.DispatchKeySet for managing dispatch keys and
+device-specific operations during tracing.
+
+The module includes special handling for:
+- Constant folding of pure functions
+- Tensor method calls
+- torch.nn.Parameter construction
+- __torch_function__ overrides
+- Context manager state tracking
+- Device and dtype management
+
+This is a core part of Dynamo's tracing system, translating torch operations into
+traceable graph nodes while preserving correct semantics and handling edge cases.
+"""
+
 import functools
 import inspect
 import logging
 import math
 import re
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 import torch._C
@@ -41,6 +70,7 @@ from .ctx_manager import (
     ProfilerContextVariable,
     TorchFunctionDisableVariable,
 )
+from .dicts import ConstDictVariable
 from .distributed import DistributedVariable, ProcessGroupVariable
 from .lists import ListVariable, TupleVariable
 from .torch_function import (
@@ -166,7 +196,7 @@ def get_overridable_functions():
 
     from torch.overrides import get_overridable_functions as get_overridable_functions_
 
-    funcs = set(chain(*get_overridable_functions_().values()))
+    funcs = set(chain.from_iterable(get_overridable_functions_().values()))
     more = {
         torch.ones,
         torch.ones_like,
@@ -207,7 +237,7 @@ class BaseTorchVariable(VariableTracker):
     def as_python_constant(self):
         return self.value
 
-    def call_hasattr(self, tx: "InstructionTranslator", name):
+    def call_obj_hasattr(self, tx: "InstructionTranslator", name):
         result = hasattr(self.value, name)
         return variables.ConstantVariable.create(result)
 
@@ -242,7 +272,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "list[VariableTracker]",
+        args: Sequence[VariableTracker],
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from . import (
@@ -360,7 +390,10 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
         elif self.value is torch.nn.attention.sdpa_kernel:
             assert len(args) == 1 or (len(kwargs) == 1 and "backends" in kwargs)
             backends = args[0] if len(args) == 1 else kwargs["backends"]
-            return SDPAKernelVariable.create(tx, backends.as_python_constant())
+            set_priority = kwargs["set_priority"] if "set_priority" in kwargs else False
+            return SDPAKernelVariable.create(
+                tx, backends.as_python_constant(), set_priority
+            )
         elif self.value is torch.nn.attention._sdpa_kernel_variadic:
             return SDPAKernelVariable.create(
                 tx, [arg.as_python_constant() for arg in args]
@@ -372,8 +405,16 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
 class TorchInGraphFunctionVariable(BaseTorchVariable):
     """Points to a torch function/method that should be put in FX graph"""
 
+    def __init__(self, value, nonstrict_traceable=None, **kwargs) -> None:
+        super().__init__(value, **kwargs)
+        from ..trace_rules import is_nonstrict_trace_callable
+
+        if nonstrict_traceable is None:
+            nonstrict_traceable = is_nonstrict_trace_callable(value)
+        self.nonstrict_traceable = nonstrict_traceable
+
     def __repr__(self) -> str:
-        return f"TorchInGraphFunctionVariable({self.value})"
+        return f"TorchInGraphFunctionVariable({self.value}, nonstrict_traceable={self.nonstrict_traceable})"
 
     def get_function(self):
         return self.value
@@ -612,9 +653,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             #   (c) some initialization has completed
             # technically, it depends on some global state from (c) (torch.backends.cudnn.__cudnn_version)
             assert not extra, "Expect 1 input to cudnn.is_acceptable"
-            assert isinstance(
-                tensor, TensorVariable
-            ), "Expect input to cudnn.is_acceptable to be a tensor"
+            assert isinstance(tensor, TensorVariable), (
+                "Expect input to cudnn.is_acceptable to be a tensor"
+            )
             tensor_inp = torch.tensor(0, dtype=tensor.dtype, device=tensor.device)
             return ConstantVariable.create(
                 torch.backends.cudnn.is_acceptable(tensor_inp)
@@ -652,6 +693,16 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
                 return TorchInGraphFunctionVariable(torch.add).call_function(
                     tx, [args[0], result], {}
+                )
+
+        @register(torch.full)
+        def handle_full(self, tx, size, fill_value, **kwargs):
+            if isinstance(fill_value, TensorVariable):
+                result = TorchInGraphFunctionVariable(
+                    torch.ops.aten._local_scalar_dense
+                ).call_function(tx, [fill_value], {})
+                return TorchInGraphFunctionVariable(torch.full).call_function(
+                    tx, [size, result], kwargs
                 )
 
         @register(torch._foreach_lerp_)
@@ -931,11 +982,132 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "list[VariableTracker]",
+        args: Sequence[VariableTracker],
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from . import ConstantVariable, SymNodeVariable, TensorVariable
         from .builder import wrap_fx_proxy
+
+        if self.nonstrict_traceable:
+            import torch._higher_order_ops.flat_apply as flat_apply
+            from torch._higher_order_ops.flat_apply import (
+                func_to_graphable,
+                is_graphable_type,
+            )
+            from torch._subclasses.fake_tensor import fake_tensor_tls
+            from torch.utils._pytree import tree_flatten
+
+            from .base import AsPythonConstantNotImplementedError
+
+            # 1. Convert `args, kwargs` into pytree-flattened proxy forms.
+            #
+            # Rather than reconstructing `args, kwargs` into python objects and
+            # then tree_flatten them, we just let Dynamo symbolically interpret
+            # `tree_flatten((args, kwargs))`. This saves us from having to
+            # worry about the reconstruction logic, side effects, and guards.
+            packed_input_vt = TupleVariable.build(
+                tx, (TupleVariable.build(tx, args), ConstDictVariable.build(tx, kwargs))
+            )
+            out_vt = variables.UserFunctionVariable(tree_flatten).call_function(
+                tx, [packed_input_vt], {}
+            )
+            assert isinstance(out_vt, TupleVariable) and len(out_vt.items) == 2
+            flat_args_vts, input_spec_vt = out_vt.items
+            assert isinstance(flat_args_vts, ListVariable)
+
+            # Handle the case when the input contains a non-graphable type.
+            for flat_arg_vt in flat_args_vts.items:
+                arg_type = flat_arg_vt.python_type()
+                if not is_graphable_type(arg_type):
+                    type_name = flat_arg_vt.python_type().__qualname__
+                    unimplemented(
+                        f"""
+For `nonstrict_trace`-ed function, the only allowed input types are basic types (e.g., torch.Tensor, int, float) or pytree containers of those. Here you are calling the function with arguments that contain a value of type <{type_name}>, please use one of the following to register the type with pytree:
+  * `torch.utils._pytree.register_constant`
+  * `torch.utils._pytree.register_dataclass`
+  * `torch.utils._pytree.register_pytree_node`
+"""  # NOQA: B950
+                    )
+
+            # Since we checked with `is_graphable` above, `as_proxy` on the
+            # flat_arg VT should always work.
+            proxified_flat_args = [
+                flat_arg_vt.as_proxy() for flat_arg_vt in flat_args_vts.items
+            ]
+
+            # The downstream `flat_apply` call requires the input spec; however,
+            # the spec not a graphable type, so we still have to reconstruct it
+            # into a python object, and store it as a constant attribute on the
+            # fx graph.
+            try:
+                input_spec = input_spec_vt.as_python_constant()
+            except AsPythonConstantNotImplementedError as e:
+                typ = e.vt.python_type()
+                type_name = typ.__qualname__
+                import torch.utils._pytree as pytree
+
+                if pytree.is_constant_class(typ):
+                    unimplemented(
+                        f"""
+You are calling a `nonstrict_trace`-ed function with an input that contains an object of type <{type_name}>, which was marked with `pytree.register_constant`. However, the object was constructed _inside_ the `torch.compile` region.
+
+Please construct the object _outside_ the `torch.compile` region, or submit an issue to GitHub.
+    """  # NOQA: B950
+                    )
+                else:
+                    unimplemented(
+                        f"""
+You are calling a `nonstrict_trace`-ed function where one one of the inputs has been registered with a `pytree_flatten` that puts an object of type <{type_name}> into the context.
+
+Please consider modifying that `pytree_flatten` to avoid putting the object into context, and apply one of the following to <{type_name}>
+  * `torch.utils._pytree.register_constant`
+  * `torch.utils._pytree.register_dataclass`
+  * `torch.utils._pytree.register_pytree_node`
+
+If the above doesn't work, please subtmit an issue to GitHub.
+"""  # NOQA: B950
+                    )
+
+            fn = self.value
+
+            def patched_fn(*args, **kwargs):
+                # This enables reads to global/captured tensors, and we'll just
+                # treat them as constants in the graph. Note that after
+                # AOTDispatcher, this logic would disappear.
+                old_val = fake_tensor_tls.allow_non_fake_inputs_override
+                fake_tensor_tls.allow_non_fake_inputs_override = True
+                try:
+                    res = fn(*args, **kwargs)
+                finally:  # reset even when `fn` raises
+                    fake_tensor_tls.allow_non_fake_inputs_override = old_val
+                return res
+
+            # `flat_apply` wants a TreeSpec for the function input.
+            _, f_spec = func_to_graphable(patched_fn)
+
+            # TreeSpec isn't graphable, so we register the function and input
+            # specs as attributes on the graph module.
+            f_spec_proxy = tx.output.register_static_attr_and_return_proxy(
+                f"{fn.__name__}_spec", f_spec
+            )
+            input_spec_proxy = tx.output.register_static_attr_and_return_proxy(
+                fn.__name__ + "_input_spec", input_spec
+            )
+            f_spec_proxy.node.type = type(f_spec)
+            input_spec_proxy.node.type = type(input_spec)
+            all_args = (f_spec_proxy, input_spec_proxy, *proxified_flat_args)
+
+            # 2. Create a proxy call to `flat_apply`, then fake-tensor propagate
+            # the call and wrap output into a VariableTracker.
+            proxy = tx.output.create_proxy("call_function", flat_apply, all_args, {})
+            out_vt = wrap_fx_proxy(tx, proxy)
+            # TODO support more output types
+            # Q: flat_apply will likely pytree_flatten the output for this, then
+            # how do we intercept the output before flatten, and wrap those?
+            # - Maybe we can have `flat_apply` return the output spec, so that
+            #   Dynamo can unflatten and wrap the result.
+
+            return out_vt
 
         if self.torch_function_override_enabled(tx, args, kwargs):
             return dispatch_torch_function(tx, self, args, kwargs)
@@ -995,6 +1167,10 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             ):
                 fn_ = getattr(torch, torch_sym_op)
 
+        # TODO for each of the following check on `out=` or `requires_grad=`
+        # variant torch ops, the original function could come from a user
+        # defined `@allow_in_graph` function as well, which doesn't have the
+        # same semantics as the torch ops.
         fake_out_shape = None
         if "out" in kwargs and isinstance(kwargs["out"], variables.TensorVariable):
             # Calling fake tensor propagation can mutate the out= tensor in
@@ -1014,6 +1190,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             ),
         )
 
+        # Handle e.g., `torch.ones(10, requires_grad=True)`
         if (
             isinstance(tensor_variable, TensorVariable)
             and "requires_grad" in kwargs
@@ -1024,6 +1201,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 Either create the tensor outside the compiled region, or do not set the tensor to require_grad"""
             )
 
+        # Handle e.g., `torch.add(a, b, out=result)`
         if "out" in kwargs and not (
             isinstance(kwargs["out"], variables.ConstantVariable)
             and kwargs["out"].as_python_constant() is None
@@ -1306,4 +1484,9 @@ class FuncTorchInterpreterVariable(BaseTorchVariable):
             )
         elif name in ["level", "batch_size", "randomness"]:
             return variables.ConstantVariable.create(getattr(self.value, name)())
+        elif name == "lower":
+            assert not args and not kwargs
+            return variables.TemporarilyPopInterpreterStackCtxManagerVariable.create(
+                tx, None
+            )
         return super().call_method(tx, name, args, kwargs)

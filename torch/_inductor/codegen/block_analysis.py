@@ -17,8 +17,8 @@ class BlockPatternMatcher:
     Matches block indexing expressions.
     """
 
-    @staticmethod
-    def get_subexpr_involving_symbol(expr: Expr, symbol: Symbol) -> Expr:
+    @classmethod
+    def get_subexpr_involving_symbol(cls, expr: Expr, symbol: Symbol) -> Expr:
         """
         Given a sympy expression, return the subexpression comprised only of terms
         involving the specified symbol.
@@ -26,6 +26,7 @@ class BlockPatternMatcher:
         For example, if `expr` is `x * 5 + x ** 2 + y * 2 + 5`, and `symbol` is `x`,
         this returns `x * 5 + x ** 2`.
         """
+        expr = cls._preprocess(expr)
         return sympy.S.Zero + sum(
             term for term in sympy.Add.make_args(expr) if symbol in term.free_symbols
         )
@@ -42,6 +43,11 @@ class BlockPatternMatcher:
             numels.appendleft(numel)
         return [*numels]
 
+    @staticmethod
+    def _preprocess(expr: Expr) -> Expr:
+        # Remove any Identity nodes, e.g. expand x + (5 * y) to x + 5 * y.
+        return expr.expand(identity=True)
+
     @classmethod
     def match_mod_div_block_expr(
         cls,
@@ -54,6 +60,7 @@ class BlockPatternMatcher:
         Matches modular indexing expressions, converting them to implied block dimensions and strides.
         See triton.py for more information.
         """
+        index = cls._preprocess(index)
 
         # Pattern match to find the strides and offset.
         wild = functools.partial(sympy.Wild, exclude=[index_var])
@@ -132,7 +139,14 @@ class BlockPatternMatcher:
 
         # Sanity check that we can recover the index from the matched subexpressions.
         matched_index = sympy_dot(strides, block_index_exprs)
-        assert sizevars.statically_known_equals(matched_index, index), textwrap.dedent(
+        assert sizevars.statically_known_equals(
+            # New precomputed replacements may be generated when the `get_match` function
+            # above is called, but the `index` that is being matched has not been updated.
+            # So remove them when checking for equivalence e.g. if ps0=3*s0 and
+            # index=3*s0*expr, matched_index=ps0*expr, then index == matched_index
+            sizevars.remove_precomputed_replacements(matched_index),
+            sizevars.remove_precomputed_replacements(index),
+        ), textwrap.dedent(
             f"""
             Invalid match!
             Index: {index}
@@ -141,3 +155,21 @@ class BlockPatternMatcher:
         )
 
         return dims, strides, block_index_exprs
+
+    @classmethod
+    def match_affine_block_expr(
+        cls,
+        index: Expr,
+        index_var: Symbol,
+    ) -> Optional[Expr]:
+        """
+        Matches simple expressions of the form stride * index, returning the
+        stride.
+        """
+        index = cls._preprocess(index)
+        stride = sympy.Wild("stride", exclude=[index_var])
+        m = index.match(index_var * stride)
+        if m is None:
+            return None
+
+        return m[stride]

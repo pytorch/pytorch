@@ -37,6 +37,7 @@ from torch._inductor.utils import should_use_remote_fx_graph_cache
 from torch._logging import LazyString
 from torch._utils_internal import log_cache_bypass
 from torch.compiler._cache import CacheArtifactManager, CacheArtifactType
+from torch.utils._triton import has_triton_package
 from torchgen.utils import dataclass_repr
 
 from .runtime_wrappers import (
@@ -206,10 +207,6 @@ def check_cacheable(gm: torch.fx.GraphModule):
     Checks that the graph module only uses supported operators
     """
     nodes = gm.graph.nodes
-    if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
-        raise BypassAOTAutogradCache(
-            "Cannot cache a graph with compiled autograd enabled"
-        )
     if torch._inductor.config.freezing:
         raise BypassAOTAutogradCache("Cannot cache a graph with freezing enabled")
 
@@ -318,6 +315,19 @@ def autograd_cache_key(
     Generate a unique hash of the FX graph for caching.
     """
     check_cacheable(gm)
+    if has_triton_package():
+        # Due to https://github.com/triton-lang/triton/issues/3729,
+        # if triton is < 3.2.0, AOTAutogradCache may cause us to
+        # attempt to load a cache entry without initializing
+        # the CUDA context on the autograd thread.
+
+        # Without caching, we naturally do this initialization when
+        # tracing through the graph with the autograd engine.
+        import triton
+
+        if triton.__version__ < "3.2.0":
+            raise BypassAOTAutogradCache("AOTAutogradCache requires triton 3.2.0")
+
     details = AOTAutogradCacheDetails(gm, example_inputs, config, fx_config)
     pickler = AOTAutogradCachePickler(gm)
     # The prefix distinguishes among the other kinds of objects we cache
@@ -826,9 +836,7 @@ class AOTAutogradCache:
                         entry: AOTAutogradCacheEntry = pickle.loads(pickled_content)
                         return entry
                 except Exception as e:
-                    log.warning(
-                        "AOTAutograd cache unable to load compiled graph: %s", e
-                    )
+                    log.info("AOTAutograd cache unable to load compiled graph: %s", e)
                     if config.strict_autograd_cache:
                         raise e
 
@@ -853,7 +861,7 @@ class AOTAutogradCache:
                     log_cache_bypass(
                         "bypass_aot_autograd", "Unable to deserialize: " + str(e)
                     )
-                    log.warning(
+                    log.info(
                         "remote autograd cache unable to load compiled graph",
                         exc_info=True,
                     )
@@ -884,12 +892,12 @@ class AOTAutogradCache:
             counters["aot_autograd"]["autograd_cache_saved"] += 1
         except BypassAOTAutogradCache as e:
             counters["aot_autograd"]["autograd_cache_bypass"] += 1
-            log.warning("Bypassing autograd cache due to: %s", e)
+            log.info("Bypassing autograd cache due to: %s", e)
             if remote:
                 log_cache_bypass("bypass_aot_autograd", str(e))
             return None
         except Exception as e:
-            log.warning("AOTAutograd cache unable to serialize compiled graph: %s", e)
+            log.info("AOTAutograd cache unable to serialize compiled graph: %s", e)
             if remote:
                 log_cache_bypass(
                     "bypass_aot_autograd", "Unable to serialize: " + str(e)

@@ -85,11 +85,67 @@ class MPSBasicTests(TestCase):
     def test_pointwise_i0(self):
         self.common(torch.special.i0, (torch.rand(128, 128),), check_lowp=False)
 
+    def test_pointwise_i0e(self):
+        self.common(torch.special.i0e, (torch.rand(128, 128),), check_lowp=False)
+
     def test_pointwise_i1(self):
         self.common(torch.special.i1, (torch.rand(128, 128),), check_lowp=False)
 
+    def test_pointwise_i1e(self):
+        self.common(torch.special.i1e, (torch.rand(128, 128),), check_lowp=False)
+
     def test_pointwise_erf(self):
         self.common(torch.special.erf, (torch.rand(128, 128),), check_lowp=False)
+
+    def test_pointwise_polygamma(self):
+        self.common(
+            torch.special.polygamma,
+            (
+                1,
+                torch.rand(128, 128),
+            ),
+            check_lowp=False,
+        )
+
+    def test_pointwise_digamma(self):
+        self.common(torch.special.digamma, (torch.rand(128, 128),), check_lowp=False)
+
+    def test_pointwise_sinc(self):
+        self.common(torch.special.sinc, (torch.rand(128, 128),), check_lowp=False)
+
+    def test_pointwise_zeta(self):
+        self.common(
+            torch.special.zeta,
+            (torch.rand(128, 128), torch.rand(128, 128)),
+            check_lowp=False,
+        )
+
+    def test_pointwise_spherical_bessel_j0(self):
+        self.common(
+            torch.special.spherical_bessel_j0, (torch.rand(128, 128),), check_lowp=False
+        )
+
+    def test_pointwise_bessel_j0(self):
+        self.common(torch.special.bessel_j0, (torch.rand(128, 128),), check_lowp=True)
+
+    def test_pointwise_bessel_j1(self):
+        self.common(torch.special.bessel_j1, (torch.rand(128, 128),), check_lowp=True)
+
+    def test_pointwise_bessel_y0(self):
+        self.common(torch.special.bessel_y0, (torch.rand(128, 128),), check_lowp=False)
+
+    def test_pointwise_bessel_y1(self):
+        self.common(torch.special.bessel_y1, (torch.rand(128, 128),), check_lowp=True)
+
+    def test_pointwise_xlog1py(self):
+        self.common(
+            torch.special.xlog1py,
+            (torch.rand(128, 128), torch.rand(128, 128)),
+            check_lowp=False,
+        )
+
+    def test_pointwise_entr(self):
+        self.common(torch.special.entr, (torch.rand(128, 128),), check_lowp=False)
 
     def test_broadcast(self):
         self.common(torch.add, (torch.rand(32, 1024), torch.rand(1024)))
@@ -101,21 +157,40 @@ class MPSBasicTests(TestCase):
 
         self.common(inc_, (torch.rand(1024),))
 
+    # TODO(NS): Replace me with full test_prod when multi-stage reductions are implemented
+    def test_prod(self):
+        def fn(a):
+            return a.prod(0), a.prod(1), a.prod()
+
+        self.common(fn, (torch.rand((10, 10)),))
+
 
 # Copy tests
 for test_name in [
+    "test_min_max_reduction",
     "test_add_const_int",
     "test_add_inplace_permuted",
     "test_addmm",
+    "test_angle",
+    "test_any",
     "test_arange5",
     "test_argmax_min_int32",
+    "test_argmax_argmin1",
+    "test_argmax_argmin2",
     "test_avg_pool2d5",
     "test_avg_pool2d8",
+    "test_bernoulli1",
     "test_builtins_round",
     "test_builtins_round_float_ndigits_neg",
     "test_cat_empty",
     "test_cat_unbacked_empty_1d",
+    "test_consecutive_split_cumprod",
+    "test_consecutive_split_cumsum",
+    "test_constant_pad_float64",
+    "test_cumsum_inf",
+    "test_custom_op_2",
     "test_div1",
+    "test_div2",
     "test_div3",
     "test_erfinv",
     "test_floordiv",
@@ -126,13 +201,18 @@ for test_name in [
     "test_inf",
     "test_isinf",
     "test_isinf2",
+    "test_layer_norm",
     "test_lgamma",
+    "test_linear_float64",
     "test_log_fp64",
     "test_low_memory_max_pool",
     "test_max_min",
     "test_max_pool2d2",
+    "test_multilayer_prime_size",
+    "test_min_max_reduction_nan",
     "test_nan_to_num",
     "test_pow2",
+    "test_prod",
     "test_randint_int64_mod",
     "test_randn_generator",
     "test_remainder",
@@ -145,8 +225,13 @@ for test_name in [
     "test_signbit",
     "test_silu",
     "test_slice_scatter4",
+    "test_softmax",
     "test_sort",
+    "test_split_cumsum",
+    "test_sum_int",
+    "test_sum_keepdims",
     "test_tanh",
+    "test_vectorized_ops_masked",
     "test_view_as_complex",
     "test_view_on_aliased",
     "test_views3",

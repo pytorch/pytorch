@@ -126,6 +126,10 @@ static std::vector<std::string> TORCH_NCCL_LOG_CPP_STACK_ON_UNCLEAN_SHUTDOWN = {
 static std::vector<std::string> TORCH_NCCL_CUDA_EVENT_CACHE = {
     "TORCH_NCCL_CUDA_EVENT_CACHE"};
 
+// Control the number of ranks each root can cover during NCCL comm init.
+static std::vector<std::string> TORCH_NCCL_RANKS_PER_ROOT = {
+    "TORCH_NCCL_RANKS_PER_ROOT"};
+
 static std::vector<std::string> TORCH_NCCL_NAN_CHECK = {"TORCH_NCCL_NAN_CHECK"};
 
 constexpr const char* NCCL_BACKEND_NAME = "nccl";
@@ -378,9 +382,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Clone of blockingWait_ from ProcessGroupNCCL.
     bool blockingWait_{false};
 
-    // Clone of avoidRecordStreams_ from ProcessGroupNCCL.
-    bool avoidRecordStreams_{false};
-
     // Clone of opTimeout_ from ProcessGroupNCCL.
     std::chrono::milliseconds opTimeout_{};
 
@@ -427,6 +428,13 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // exception_ptr.
     bool finishedGPUExecutionInternal() const;
 
+    // Stash tensors so that CachingAllocator cannot recycle them prematurely.
+    // Used in case of async ops.
+    void stashTensors(std::vector<at::Tensor>& tensors);
+
+    // Unstage the stashed tensors so that CachingAllocator can recycle them
+    void unstashTensors();
+
     // Reference to the store so that we can write aborted communicators
     // to the store.
     c10::intrusive_ptr<Store> store_;
@@ -446,6 +454,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // For in-place collectives, some refs stashed here may alias outputs_,
     // but that doesn't do any harm.
     std::shared_ptr<std::vector<at::Tensor>> stashed_for_allocator_safety_;
+    // Need a mutex to protect stashed_for_allocator_safety_ because it can be
+    // accessed from both main thread and watchdog thread.
+    std::mutex stashMutex_;
 
     // The future returned by getFuture.
     c10::intrusive_ptr<at::ivalue::Future> future_;
@@ -492,7 +503,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Schedule NCCL operations on high priority CUDA streams
     bool is_high_priority_stream;
 
-#ifdef NCCL_HAS_COMM_NONBLOCKING
+#ifdef NCCL_HAS_CONFIG
     // Configure ranks
     ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
 #endif
@@ -604,6 +615,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   }
 
   bool supportsSplitting() const override {
+    return true;
+  }
+
+  bool supportsCoalescing() const override {
     return true;
   }
 
@@ -753,11 +768,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   c10::intrusive_ptr<intra_node_comm::IntraNodeComm> initIntraNodeComm();
 
   // Destroy (shutdown) this backend -- normal exit.
-  void shutdown();
+  void shutdown() override;
 
   // Provides an API to abort the ProcessGroup (similar to ncclCommAbort)
   // instead of relying on ProcessGroupNCCL destructor.
-  void abort();
+  void abort() override;
 
   void eagerConnectSingleDevice(at::Device device) override;
 
@@ -767,6 +782,14 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   bool isInitialized();
 
   ErrorType getError() override;
+
+  std::shared_ptr<c10::Allocator> getMemAllocator() override;
+
+  // Allocate tensor from communication-optimized memory pool
+  at::Tensor allocateTensor(long size, at::TensorOptions options = {}) override;
+
+  // Whether tensor allocation from NCCL memory pool is supported
+  bool supportsTensorAlloc(c10::DeviceIndex deviceIdx) override;
 
   // Performs NCCL user buffer registration for all buffers in
   // the given MemPool
@@ -801,6 +824,12 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       bool isSingleP2POp,
       const std::string& devicesKey,
       int p2pRank);
+
+  // Helper that allgathers nccl unique IDs to all ranks through the store
+  void allgatherUniqueNCCLIDs(
+      int rootIdx,
+      ncclUniqueId* ncclID,
+      std::vector<ncclUniqueId>& ncclIDs);
 
   // Helper that looks up the cached NCCL communicators only
   std::shared_ptr<NCCLComm> getNCCLComm(const std::string& deviceKey);
@@ -841,8 +870,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   bool useNonblocking();
 
  private:
-  int globalRankStart;
-  int globalRankStride;
+  int globalRankStart_;
+  int globalRankStride_;
 
   // Helper that encapsulates work shared across all collective communication
   // primitives.  The callbacks have the following signatures:
@@ -856,8 +885,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       at::Tensor& output,
       Fn fn,
       OpType opType,
+      bool asyncOp,
       const char* profilingTitle = nullptr,
-      bool avoidRecordStreams = false,
       bool nanCheck = true);
 
   template <typename Fn, typename PreProcess, typename PostProcess>
@@ -868,8 +897,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       PreProcess pre,
       PostProcess post,
       OpType opType,
+      bool asyncOp,
       const char* profilingTitle = nullptr,
-      bool avoidRecordStreams = false,
       bool nanCheck = true);
 
   template <typename Fn, typename PreProcess, typename PostProcess>
@@ -880,8 +909,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       PreProcess pre,
       PostProcess post,
       OpType opType,
+      bool asyncOp,
       const char* profilingTitle = nullptr,
-      bool avoidRecordStreams = false,
       bool nanCheck = true);
 
   template <typename Fn>
@@ -890,8 +919,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       std::vector<at::Tensor>& output,
       Fn fn,
       OpType opType,
-      const char* profilingTitle = nullptr,
-      bool avoidRecordStreams = false);
+      bool asyncOp,
+      const char* profilingTitle = nullptr);
 
   // Helper that encapsulates work shared across point-to-point communication
   // primitives. It is the same structure as the helper used for collective
@@ -1017,6 +1046,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::string getNCCLWatchdogTimeoutExitMsg(const std::string& exitReason);
 
   void checkAndSetRemoteError();
+
+  // A helper function to guess the device id of the current rank, based on
+  // bounded device or used device. Do not use this function if you already know
+  // the device id to operate on.
+  c10::DeviceIndex guessDeviceId() const;
 
   static const int64_t kWatchdogThreadSleepMillis;
 
@@ -1195,6 +1229,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Stores communicators for all collectives run inside a coalescing block
   std::shared_ptr<NCCLComm> coalescedComm_ = nullptr;
 
+  // Whether the coalesced calls are sync or async.
+  bool coalescedAsync_;
+
   // Whether or not wait() and synchronize() are blocking operations that wait
   // for the operation to complete.
   bool blockingWait_ = false;
@@ -1282,6 +1319,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Internal cached value: use NCCL non-blocking API mode or not.
   // Use `useNonblocking()` method instead of accessing this variable directly.
   std::optional<bool> useNonblocking_{std::nullopt};
+
+  // Communication-optimized memory pool associated with this PG
+  std::unique_ptr<c10::cuda::MemPool> memPool_ = nullptr;
 };
 
 // Dumps the NCCL comm traces and additional information about the Process

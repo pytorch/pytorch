@@ -113,7 +113,7 @@ TORCH_API inline void set_autocast_gpu_dtype(at::ScalarType dtype) {
     set_autocast_dtype(device_type, dtype);                                                          \
   }
 
-#define AT_FORALL_DEPRECATED_AUTOCAST_BAKCNEDS(_) \
+#define AT_FORALL_DEPRECATED_AUTOCAST_BACKENDS(_) \
   _(cpu, at::kCPU)                                \
   _(mtia, at::kMTIA)                              \
   _(xpu, at::kXPU)                                \
@@ -123,7 +123,8 @@ TORCH_API inline void set_autocast_gpu_dtype(at::ScalarType dtype) {
   _(privateuseone, at::kPrivateUse1)
 
 // deprecated other backend specific autocast APIs
-AT_FORALL_DEPRECATED_AUTOCAST_BAKCNEDS(DECLARE_DEPRECATED_AUTOCAST_APIS)
+// NOLINTNEXTLINE(misc-use-internal-linkage)
+AT_FORALL_DEPRECATED_AUTOCAST_BACKENDS(DECLARE_DEPRECATED_AUTOCAST_APIS)
 
 const std::array<at::DeviceType, 9> _AUTOCAST_SUPPORTED_DEVICES{
     at::kCPU,

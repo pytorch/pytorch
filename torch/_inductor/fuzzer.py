@@ -7,7 +7,7 @@ import signal
 import string
 import sys
 import traceback
-from collections.abc import KeysView
+from collections.abc import KeysView, Sequence
 from enum import Enum
 from functools import partial, wraps
 from types import FrameType
@@ -18,7 +18,6 @@ from typing import (
     get_origin,
     Literal,
     Optional,
-    Sequence,
     TypeVar,
     Union,
 )
@@ -501,6 +500,8 @@ MODULE_DEFAULTS: dict[str, ConfigType] = {
     "torch._dynamo.config": {
         "traceable_tensor_subclasses": DEFAULT,  # Typing
         "compiled_autograd_kwargs_override": DEFAULT,  # Typing
+        "fail_on_recompile_limit_hit": DEFAULT,  # fails in combo with suppress_errors
+        "suppress_errors": DEFAULT,
     },
 }
 
@@ -525,6 +526,7 @@ class ConfigFuzzer:
     ```python
     import torch._inductor.config as cfg
 
+
     def create_simple_test_model_gpu() -> FactoryOutputType:
         batch_size = 32
         seq_length = 50
@@ -538,6 +540,8 @@ class ConfigFuzzer:
             return True
 
         return test_fn
+
+
     fuzzer = ConfigFuzzer(cfg, create_simple_test_model_gpu, seed=2)
 
     # Test every pair of configs:
@@ -549,7 +553,9 @@ class ConfigFuzzer:
     ret = fuzzer.bisect(num_attempts=10)
 
     # reproduce a failing config
-    fuzzer.reproduce([{"triton.autotune_pointwise": ..., "coordinate_descent_tuning": ...}])
+    fuzzer.reproduce(
+        [{"triton.autotune_pointwise": ..., "coordinate_descent_tuning": ...}]
+    )
     ```
 
     The list of known failures on inductor config are:
@@ -805,6 +811,7 @@ class ConfigFuzzer:
                 if (
                     field_name not in config
                     and not field_name.startswith("_")
+                    and "TESTING_ONLY" not in field_name
                     and random.random() < p
                 ):
                     value = self.sample(

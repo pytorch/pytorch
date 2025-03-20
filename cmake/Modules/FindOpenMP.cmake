@@ -79,12 +79,25 @@ cmake_policy(SET CMP0012 NEW) # if() recognizes numbers and booleans
 cmake_policy(SET CMP0054 NEW) # if() quoted variables not dereferenced
 cmake_policy(SET CMP0057 NEW) # if IN_LIST
 
+
+if(NOT "$ENV{OMP_PREFIX}" STREQUAL "")
+  set(OpenMP_PREFIX "$ENV{OMP_PREFIX}")
+elseif(${CMAKE_SYSTEM_NAME} STREQUAL "Darwin" AND EXISTS /opt/homebrew/opt/libomp)
+  set(OpenMP_PREFIX "/opt/homebrew/opt/libomp")
+endif()
+
 function(_OPENMP_FLAG_CANDIDATES LANG)
   if(NOT OpenMP_${LANG}_FLAG)
     unset(OpenMP_FLAG_CANDIDATES)
 
     set(OMP_FLAG_GNU "-fopenmp")
-    set(OMP_FLAG_Clang "-fopenmp=libomp" "-fopenmp=libiomp5" "-fopenmp")
+    if(CMAKE_${LANG}_COMPILER_ID STREQUAL "Clang" AND CMAKE_${LANG}_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+      # clang-cl specific flags
+      set(OMP_FLAG_Clang "-Xclang -fopenmp=libomp" "-Xclang -fopenmp=libiomp5" "-Xclang -fopenmp")
+    else()
+      # regular clang flags
+      set(OMP_FLAG_Clang "-fopenmp=libomp" "-fopenmp=libiomp5" "-fopenmp")
+    endif()
 
     if(WIN32)
       # Prefer Intel OpenMP header which can be provided by CMAKE_INCLUDE_PATH.
@@ -93,7 +106,7 @@ function(_OPENMP_FLAG_CANDIDATES LANG)
     else()
       # AppleClang may need a header file, search for omp.h with hints to brew
       # default include dir
-      find_path(__header_dir "omp.h" HINTS "/usr/local/include")
+      find_path(__header_dir "omp.h" HINTS "/usr/local/include" "${OpenMP_PREFIX}/include")
     endif()
     set(OMP_FLAG_AppleClang "-Xpreprocessor -fopenmp" "-Xpreprocessor -fopenmp -I${__header_dir}")
 
@@ -268,6 +281,16 @@ function(_OPENMP_GET_FLAGS LANG FLAG_MODE OPENMP_FLAG_VAR OPENMP_LIB_NAMES_VAR)
       find_library(OpenMP_libomp_LIBRARY
         NAMES omp gomp iomp5
         HINTS ${CMAKE_${LANG}_IMPLICIT_LINK_DIRECTORIES}
+        DOC "libomp location for OpenMP"
+      )
+      mark_as_advanced(OpenMP_libomp_LIBRARY)
+    endif()
+
+    # Use OpenMP_PREFIX if defined
+    if (NOT OpenMP_libomp_LIBRARY AND NOT "${OpenMP_PREFIX}" STREQUAL "")
+      find_library(OpenMP_libomp_LIBRARY
+        NAMES omp gomp iomp5
+        HINTS "${OpenMP_PREFIX}/lib"
         DOC "libomp location for OpenMP"
       )
       mark_as_advanced(OpenMP_libomp_LIBRARY)
@@ -666,5 +689,6 @@ unset(OpenMP_Fortran_TEST_SOURCE)
 unset(OpenMP_C_CXX_CHECK_VERSION_SOURCE)
 unset(OpenMP_Fortran_CHECK_VERSION_SOURCE)
 unset(OpenMP_Fortran_INCLUDE_LINE)
+unset(OpenMP_PREFIX)
 
 cmake_policy(POP)

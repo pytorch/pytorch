@@ -1449,6 +1449,8 @@ def opcheck(
     *,
     test_utils: Union[str, Sequence[str]] = _OPCHECK_DEFAULT_UTILS,
     raise_exception: bool = True,
+    atol=None,
+    rtol=None,
 ) -> dict[str, str]:
     """Given an operator and some sample arguments, tests if the operator is
     registered correctly.
@@ -1507,6 +1509,14 @@ def opcheck(
         raise_exception: If we should raise an exception on the first
             error. If False, we will return a dict with information
             on if each test passed or not.
+        rtol (Optional[float]): Relative tolerance for floating point comparisons.
+            If specified ``atol`` must also be specified.
+            If omitted, default values based on the ``dtype`` are selected
+            (see the table in :func:`torch.testing.assert_close`).
+        atol (Optional[float]): Absolute tolerance for floating point comparisons.
+            If specified ``rtol`` must also be specified.
+            If omitted, default values based on the ``dtype`` are selected
+            (see the table in :func:`torch.testing.assert_close`).
 
     .. warning::
 
@@ -1552,5 +1562,11 @@ def opcheck(
     import torch.testing._internal.optests as optests
 
     return optests.opcheck(
-        op, args, kwargs, test_utils=test_utils, raise_exception=raise_exception
+        op,
+        args,
+        kwargs,
+        test_utils=test_utils,
+        raise_exception=raise_exception,
+        rtol=rtol,
+        atol=atol,
     )

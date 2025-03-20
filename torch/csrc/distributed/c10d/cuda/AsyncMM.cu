@@ -5,44 +5,17 @@
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <c10/cuda/CUDAGuard.h>
 
-#if false && !defined(USE_ROCM) && !defined(_WIN32) && defined(CUDA_VERSION) && \
+// Two warninngs in Cutlass included header files
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wset-but-not-used")
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-parameter")
+
+#if !defined(USE_ROCM) && !defined(_WIN32) && defined(CUDA_VERSION) && \
     CUDA_VERSION >= 12000
 #define BUILD_ASYNC_MM_KERNEL
 #endif
 
 #if defined(BUILD_ASYNC_MM_KERNEL)
 
-// We are going to override the cuTensorMapEncodeTiled driver api with our lazy
-// loader
-static CUresult CUDAAPI nvrtc_cuTensorMapEncodeTiled(
-    CUtensorMap* tensorMap,
-    CUtensorMapDataType tensorDataType,
-    cuuint32_t tensorRank,
-    void* globalAddress,
-    const cuuint64_t* globalDim,
-    const cuuint64_t* globalStrides,
-    const cuuint32_t* boxDim,
-    const cuuint32_t* elementStrides,
-    CUtensorMapInterleave interleave,
-    CUtensorMapSwizzle swizzle,
-    CUtensorMapL2promotion l2Promotion,
-    CUtensorMapFloatOOBfill oobFill) {
-  return at::globalContext().getNVRTC().cuTensorMapEncodeTiled(
-      tensorMap,
-      tensorDataType,
-      tensorRank,
-      globalAddress,
-      globalDim,
-      globalStrides,
-      boxDim,
-      elementStrides,
-      interleave,
-      swizzle,
-      l2Promotion,
-      oobFill);
-}
-
-// clang-format off
 #include <cutlass/core_io.h>
 #include <cutlass/cutlass.h>
 #include <cutlass/gemm/device/gemm.h>
@@ -50,13 +23,9 @@ static CUresult CUDAAPI nvrtc_cuTensorMapEncodeTiled(
 #include <cutlass/numeric_types.h>
 #include <cutlass/trace.h>
 #include <cutlass/util/host_tensor.h>
-
-// Rename the global function symbol
-#define cuTensorMapEncodeTiled nvrtc_cuTensorMapEncodeTiled
 #include <cute/tensor.hpp>
-#undef cuTensorMapEncodeTiled
-// Set everything back to normal
 
+#include <cutlass/version.h>
 #include <cutlass/gemm/collective/collective_builder.hpp>
 #include <cutlass/gemm/device/gemm_universal_adapter.h>
 #include <cutlass/epilogue/collective/collective_builder.hpp>
@@ -65,9 +34,11 @@ static CUresult CUDAAPI nvrtc_cuTensorMapEncodeTiled(
 #include <cutlass/gemm/dispatch_policy.hpp>
 #include <cutlass/gemm/kernel/gemm_universal.hpp>
 #include <cutlass/util/packed_stride.hpp>
-// clang-format on
 
 #include <torch/csrc/distributed/c10d/cuda/cutlass/gemm/kernel/persistent_async_input_scheduler.cuh>
+
+C10_DIAGNOSTIC_POP()
+C10_DIAGNOSTIC_POP()
 
 namespace {
 
@@ -107,7 +78,7 @@ at::Tensor async_input_mm_impl(
           cutlass::epilogue::collective::EpilogueTileAuto,
           ElementAccumulator,
           ElementAccumulator,
-          void,
+          ElementC,
           LayoutC,
           AlignmentC,
           ElementC,
@@ -133,7 +104,7 @@ at::Tensor async_input_mm_impl(
           KernelSchedule>::CollectiveOp;
 
   using GemmKernel = cutlass::gemm::kernel::GemmUniversal<
-      Shape<int, int, int, int>,
+      Shape<int, int, int>,
       CollectiveMainloop,
       CollectiveEpilogue,
       cutlass::gemm::PersistentAsyncInputScheduler<KernelSchedule>>;
@@ -171,7 +142,7 @@ at::Tensor async_input_mm_impl(
 
   typename Gemm::Arguments arguments{
       cutlass::gemm::GemmUniversalMode::kGemm,
-      {M, N, K, 1},
+      {M, N, K},
       {
           reinterpret_cast<ElementA*>(a.data_ptr<at::BFloat16>()),
           stride_A,
@@ -179,7 +150,7 @@ at::Tensor async_input_mm_impl(
           stride_B,
       },
       {{1, 1},
-       nullptr,
+       reinterpret_cast<ElementC*>(out.data_ptr<at::BFloat16>()),
        stride_C,
        reinterpret_cast<ElementC*>(out.data_ptr<at::BFloat16>()),
        stride_C},
@@ -253,7 +224,6 @@ at::Tensor async_input_mm_out(
       a.is_contiguous() && out.is_contiguous(),
       "async_input_mm: `a` and `out` must be in row-major layout");
 
-  bool is_b_row_major = b.is_contiguous();
   if (!b.is_contiguous()) {
     TORCH_CHECK(b.stride(1) == b.size(0));
     TORCH_CHECK(b.stride(0) == 1);
@@ -270,6 +240,7 @@ at::Tensor async_input_mm_out(
   TORCH_CHECK_EQ(out.sizes()[1], N);
 
 #if defined(BUILD_ASYNC_MM_KERNEL)
+  const bool is_b_row_major = b.is_contiguous();
   DISPATCH_LAYOUT_B(is_b_row_major, [&]() {
     // TODO(yifu): tuning
     async_input_mm_impl<LayoutB, Shape<_128, _256, _64>, Shape<_2, _1, _1>>(

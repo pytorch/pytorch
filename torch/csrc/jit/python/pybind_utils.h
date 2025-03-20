@@ -65,7 +65,7 @@ TORCH_PYTHON_API py::object toPyObject(IValue ivalue);
 // Hack to overload the behavior of toIValue to accept Python
 // numbers in places where a Tensor is expected
 // See also torch::should_allow_numbers_as_tensors
-class ToIValueAllowNumbersAsTensors {
+class TORCH_PYTHON_API ToIValueAllowNumbersAsTensors {
   bool old_;
 
  public:

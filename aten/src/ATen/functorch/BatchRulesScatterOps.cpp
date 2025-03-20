@@ -57,6 +57,7 @@ static int64_t get_max_index_logical_dim(
 }
 
 static std::vector<std::optional<Tensor>> batchIndices(
+  at::TensorOptions options,
   ArrayRef<std::optional<Tensor>> indices,
   ArrayRef<std::optional<int64_t>> indices_bdims,
   const c10::SymInt& batch_size,
@@ -111,7 +112,7 @@ static std::vector<std::optional<Tensor>> batchIndices(
   } else if (indices_batched && !self_bdim.has_value()) {
     // do nothing
   } else if (indices_batched && (self_bdim.has_value() || values_bdim.has_value())) {
-    auto arange_index = at::arange(0, batch_size);
+    auto arange_index = at::arange(batch_size, options.dtype(kLong));
     while (arange_index.dim() < maxIndexDim) {
       arange_index = arange_index.unsqueeze(-1);
     }
@@ -236,7 +237,7 @@ std::tuple<Tensor, std::optional<int64_t>> index_batch_rule(
   bool advanced_indices_are_adjacent = are_advanced_indices_adjacent(indices);
 
   // Step 1
-  const auto batched_indices = batchIndices(indices, indices_bdims, self_.sym_size(0), self_bdim);
+  const auto batched_indices = batchIndices(self.options(), indices, indices_bdims, self_.sym_size(0), self_bdim);
   auto num_leading_nones = get_num_leading_nones(indices);
   auto max_index_dim = get_max_index_logical_dim(indices, indices_bdims);
 
@@ -419,7 +420,7 @@ namespace {
     TORCH_INTERNAL_ASSERT(indices.size() == indices_bdims.size());
 
     // we've already made sure that self has bdim at 0.
-    const auto indices_ = batchIndices(indices, indices_bdims, batch_size, /*self_bdim=*/0, values_bdim);
+    const auto indices_ = batchIndices(self.options(), indices, indices_bdims, batch_size, /*self_bdim=*/0, values_bdim);
 
     auto indexed_shape = get_indexed_shape(self_, List<std::optional<Tensor>>(indices_));
 
@@ -1154,7 +1155,9 @@ std::tuple<Tensor, std::optional<int64_t>> index_fill_int_scalar_batch_rule_impl
     return std::make_tuple(self_, 0);
   }
 
-  self_ = self_bdim.has_value() ? self_ : self_.clone();
+  if (!self_bdim.has_value()) {
+    self_ = self_.clone();
+  }
 
   return index_fill_batch_rule_helper(batch_size, self_logical_rank, index_logical_rank, self_, dim, index_, value);
 }
@@ -1208,7 +1211,9 @@ std::tuple<Tensor, std::optional<int64_t>> index_fill_int_tensor_batch_rule_impl
     return std::make_tuple(self_, 0);
   }
 
-  self_ = self_bdim.has_value() ? self_ : self_.clone();
+  if (!self_bdim.has_value()) {
+    self_ = self_.clone();
+  }
 
   // calling .item() on value is safe here because value is guaranteed to not be a batched tensor.
   return index_fill_batch_rule_helper(batch_size, self_logical_rank, index_logical_rank, self_, dim, index_, value.item());

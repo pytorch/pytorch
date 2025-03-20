@@ -242,7 +242,7 @@ class DistributedPatternTests(TestCase):
             x = x.sin()
             v = w._version
             w.copy_(x + 1)
-            torch._C._autograd._unsafe_set_version_counter(w, v)
+            torch._C._autograd._unsafe_set_version_counter((w,), (v,))
             return w, v
 
         for v in (3, 0, 1):
@@ -266,7 +266,7 @@ class DistributedPatternTests(TestCase):
             with torch.no_grad():
                 v = w._version
                 w.copy_(x)
-                torch._C._autograd._unsafe_set_version_counter(w, v)
+                torch._C._autograd._unsafe_set_version_counter((w,), (v,))
             return r
 
         w1 = torch.randn(1, requires_grad=True)
