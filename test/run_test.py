@@ -186,7 +186,6 @@ S390X_BLOCKLIST = [
     "lazy/test_meta_kernel",
     "onnx/test_utility_funs",
     "profiler/test_profiler",
-    "test_ao_sparsity",
     "test_jit",
     "test_metal",
     "test_mps",
