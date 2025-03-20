@@ -246,7 +246,7 @@ class TorchExportDraftExportStrategy(CaptureStrategy):
         report = ep._report  # type: ignore[attr-defined]
         if not report.successful():
             self._exception = RuntimeError(str(report))
-        # The report is logged and displayed by draft_export already, so we don't need to print it again.
+            self._verbose_print(f"Draft Export report:\n{report}")
         return ep
 
     def _enter(self, model) -> None:
