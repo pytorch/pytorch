@@ -702,7 +702,7 @@ def speculate_subgraph(
                     if mutation_info.has_mutation:
                         context = f"{mutation_info.msg} in\n {graph}"
                         unimplemented_v2(
-                            gb_type="Encountered input mutation during higher order op tracing",
+                            gb_type=f"Encountered input mutation during higher order op tracing for HOP - {source_target.name()}",
                             context=context,
                             explanation="Higher order ops do not support input mutation",
                             hints=[
@@ -716,7 +716,7 @@ def speculate_subgraph(
                     if aliasing_info.has_aliasing:
                         context = f"{aliasing_info.msg} in\n {graph}"
                         unimplemented_v2(
-                            gb_type="Encountered aliasing during higher order op tracing",
+                            gb_type=f"Encountered aliasing during higher order op tracing for HOP - {source_target.name()}",
                             context=context,
                             explanation="Higher order ops do not support aliasing",
                             hints=[

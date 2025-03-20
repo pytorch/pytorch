@@ -476,11 +476,10 @@ class GraphModule(torch.nn.Module):
         opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
         with self.assertRaisesRegex(
             torch._dynamo.exc.Unsupported,
-            "Encountered input mutation during higher order op tracing",
+            "Encountered input mutation during higher order op tracing for HOP - invoke_subgraph",
         ):
             opt_fn(x, y)
 
-    # @unittest.skip("speculate_subgraph fails with inference_mode")
     def test_input_mutation_inference_mode(self):
         @mark_compile_region
         def gn(x, y):
