@@ -10753,7 +10753,7 @@ def forward(self, x):
                 return x + 2
 
         with self.assertRaisesRegex(
-            ValueError, "During export following attrs are deleted:"
+            ValueError, "During export following attrs were created:"
         ):
             _ = export(Foo(), (torch.randn(4, 4),), strict=False)
 

@@ -1661,22 +1661,22 @@ def _detect_attribute_assignment(mod: torch.nn.Module):
 
         new_attrs = _get_attributes(mod)
         if len(new_attrs) != len(snapshot):
-            newly_created_attrs = []
-            deleted_attrs = []
-            for k in new_attrs:
-                if k not in snapshot:
-                    newly_created_attrs.append(k)
+            added_attrs = new_attrs.keys() - snapshot.keys()
+            deleted_attrs = snapshot.keys() - new_attrs.keys()
 
-            for k in snapshot:
-                if k not in new_attrs:
-                    deleted_attrs.append(k)
+            if len(added_attrs) > 0:
+                raise ValueError(
+                    f"During export following attrs were created: {added_attrs} "
+                    f"Such attributes must be registered as buffers using the `register_buffer` API "
+                    f"(https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_buffer)."
+                )
 
-            raise ValueError(
-                f"During export following attrs are deleted: {deleted_attrs} "
-                f"and following attrs are created: {new_attrs}. "
-                f"Such attributes must be registered as buffers using the `register_buffer` API "
-                f"(https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_buffer)."
-            )
+            if len(deleted_attrs) > 0:
+                raise ValueError(
+                    f"During export following attrs were deleted: {deleted_attrs} "
+                    f"Such attributes must be registered as buffers using the `register_buffer` API "
+                    f"(https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_buffer)."
+                )
 
         pytree.tree_map_with_path(
             _collect_assigned_tensor_attributes, snapshot, new_attrs
