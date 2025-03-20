@@ -17,7 +17,7 @@ import time
 from concurrent.futures import as_completed, ThreadPoolExecutor
 from io import StringIO
 from types import ModuleType
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union, NamedTuple
 from typing_extensions import Self
 from unittest.mock import patch
 
@@ -1081,8 +1081,7 @@ class TritonTemplate(KernelTemplate):
         self.debug = debug
         self._generated_module_cache: GeneratedModulesCache = {}
 
-    # Those are class static flags are used mostly for testing _generated_module_cache
-
+    # Those class fields used for testing _generated_module_cache.
     # When this flag is on, we ensure that the cached results and the generated result if cache
     # was not used are the same.
     test_cache = True
