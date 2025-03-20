@@ -106,7 +106,6 @@ class TestCKBackend(TestCase):
         ):
             if use_aoti:
                 Y_compiled = AOTIRunnerUtil.run(
-                    device="cuda",
                     model=mm,
                     example_inputs=(a, b),
                 )
