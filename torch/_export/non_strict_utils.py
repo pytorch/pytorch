@@ -185,6 +185,7 @@ def make_fake_inputs(
                     co_fields=co_fields,
                     prefer_deferred_runtime_asserts_over_guards=True,
                     allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
+                    trace_asserts=True,
                 ),
                 allow_non_fake_inputs=True,
                 export=True,
@@ -196,6 +197,7 @@ def make_fake_inputs(
                     tracked_fakes=[],
                     prefer_deferred_runtime_asserts_over_guards=True,
                     allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
+                    trace_asserts=True,
                 ),
                 allow_non_fake_inputs=True,
             )
