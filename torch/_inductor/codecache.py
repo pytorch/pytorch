@@ -2989,6 +2989,8 @@ def _nvcc_compiler_options() -> list[str]:
     if arch == "90":
         # Required by cutlass compilation.
         arch = "90a"
+    if arch == "100":
+        arch = "100a"
     code = [f"sm_{arch}", f"compute_{arch}"]
     if config.cuda.enable_cuda_lto:
         code += [f"lto_{arch}"]
