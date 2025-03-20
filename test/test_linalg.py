@@ -4780,12 +4780,14 @@ class TestLinalg(TestCase):
             # Scaled GEMM parameters
             fillA = 0.25
             fillB = 0.75
-            m = n = k = 16
+            n = 16
+            m = 32
+            k = 64
             scaleA = torch.tensor(0.8, device=device)
             scaleB = torch.tensor(0.9, device=device)
 
             dtypeA = dtypeB = dtype
-            matA = torch.full((k, m), fillA, dtype=dtypeA, device=device)
+            matA = torch.full((m, k), fillA, dtype=dtypeA, device=device)
             matB = torch.full((n, k), fillB, dtype=dtypeB, device=device).t()
 
             # Summary of bias types that are supported:
@@ -4813,7 +4815,7 @@ class TestLinalg(TestCase):
             # rowwise scaling, only supported for this dtype combination
             if dtype is torch.torch.float8_e4m3fnuz:
                 scaleA = torch.ones((matA.shape[0], 1), device=device)
-                scaleB = torch.ones((1, matB.shape[0]), device=device)
+                scaleB = torch.ones((1, matB.shape[1]), device=device)
                 torch._scaled_mm(matA, matB, scale_a=scaleA, scale_b=scaleB, out_dtype=torch.bfloat16)
 
             self.assertTrue(torch.cuda.tunable.is_enabled())
@@ -4850,6 +4852,8 @@ class TestLinalg(TestCase):
             self.assertTrue(os.path.exists(result_filename))
             self.assertGreater(os.path.getsize(result_filename), 0)
 
+            
+
         finally:
             # disable TunableOp
             torch.cuda.tunable.enable(False)
@@ -4861,12 +4865,12 @@ class TestLinalg(TestCase):
                 pass
 
             # clean up, remove any files that were generated
-            for filename in [untuned_filename, result_filename]:
-                try:
-                    os.remove(filename)
-                # NB: The file is locked on Windows
-                except (FileNotFoundError, PermissionError):
-                    pass
+            # for filename in [untuned_filename, result_filename]:
+            #     try:
+            #         os.remove(filename)
+            #     # NB: The file is locked on Windows
+            #     except (FileNotFoundError, PermissionError):
+            #         pass
 
     @unittest.skipIf(not TEST_MULTIGPU, "Requires at least 2 GPUs")
     @onlyCUDA
