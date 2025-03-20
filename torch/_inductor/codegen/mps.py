@@ -250,6 +250,10 @@ class MetalOverrides(OpOverrides):
         return f"c10::metal::i1({x})"
 
     @staticmethod
+    def i1e(x: CSEVariable) -> str:
+        return f"c10::metal::i1e({x})"
+
+    @staticmethod
     def erf(x: CSEVariable) -> str:
         return f"c10::metal::erf({x})"
 
@@ -284,6 +288,10 @@ class MetalOverrides(OpOverrides):
     @staticmethod
     def atan(x: CSEVariable) -> str:
         return f"metal::atan({x})"
+
+    @staticmethod
+    def atan2(x: CSEVariable, y: CSEVariable) -> str:
+        return f"::metal::atan2({x}, {y})"
 
     @staticmethod
     def sqrt(x: CSEVariable) -> str:
@@ -393,6 +401,18 @@ class MetalOverrides(OpOverrides):
     @staticmethod
     def bessel_y1(x: CSEVariable) -> str:
         return f"c10::metal::bessel_y1_forward({x})"
+
+    @staticmethod
+    def modified_bessel_i0(x: CSEVariable) -> str:
+        return f"c10::metal::modified_bessel_i0_forward({x})"
+
+    @staticmethod
+    def modified_bessel_i1(x: CSEVariable) -> str:
+        return f"c10::metal::modified_bessel_i1_forward({x})"
+
+    @staticmethod
+    def modified_bessel_k0(x: CSEVariable) -> str:
+        return f"c10::metal::modified_bessel_k0_forward({x})"
 
 
 MetalOverrides._initialize_pointwise_overrides("mps")
