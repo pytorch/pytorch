@@ -17,6 +17,7 @@ on:
       - 'ciflow/binaries/*'
       - 'ciflow/binaries_wheel/*'
   workflow_dispatch:
+  pull_request:
 
 env:
   # Needed for conda builds
