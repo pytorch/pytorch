@@ -3041,24 +3041,6 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
 
         expected_logs = [
             "code: CompiledFunctionBackward (NodeCall 2)",
-            "code: CompiledFunctionBackward0 (NodeCall 2)",
-            "aot0_primals_3",
-            "aot0_relu",
-            "aot0_le",
-            "aot0_permute_2",
-            "aot0_full_default",
-            "aot0_where",
-            "aot0_mm",
-            "aot0_permute_3",
-            "aot0_mm_1",
-            "aot0_sum_1",
-            "aot0_view",
-            "aot0_le_1",
-            "aot0_where_1",
-            "aot0_permute_6",
-            "aot0_mm_2",
-            "aot0_sum_2",
-            "aot0_view_1",
         ]
 
         found = 0
@@ -3923,6 +3905,35 @@ class CompiledAutograd1(torch.nn.Module):
         self.check_output_and_recompiles(
             fn, count=[1, 5], compiler_fn=make_compiler_fn(fullgraph=False)
         )
+
+    def test_dont_dce_side_effects(self):
+        class SideEffectfulBackward(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x
+
+            @staticmethod
+            def backward(ctx, gO):
+                torch.randn(10, 10)
+                return gO
+
+        x = torch.randn(10, 10, requires_grad=True)
+
+        @torch.compile(backend="aot_eager")
+        def fn(x):
+            return SideEffectfulBackward.apply(x).sum()
+
+        gm = None
+
+        def extract(ca_gm):
+            nonlocal gm
+            gm = ca_gm
+            return ca_gm
+
+        with compiled_autograd._enable(extract):
+            fn(x).backward()
+
+        self.assertTrue("aten.randn" in str(gm))
 
 
 def load_test_module(name):
