@@ -52,6 +52,7 @@ self-hosted-runner:
     - linux.rocm.gpu
     - linux.rocm.gpu.2
     - linux.rocm.gpu.4
+    - rocm-docker
     # Repo-specific Apple hosted  runners
     - macos-m1-ultra
     - macos-m2-14

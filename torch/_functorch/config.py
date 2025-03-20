@@ -34,6 +34,10 @@ decompose_custom_triton_ops = True
 
 static_weight_shapes = True
 
+# See https://github.com/pytorch/pytorch/issues/141881
+# Tells partitioner that parameters are free to save for backward.
+treat_parameters_as_free_to_save = True
+
 # Applies CSE to the graph before partitioning
 cse = True
 
