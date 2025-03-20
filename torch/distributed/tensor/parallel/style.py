@@ -416,7 +416,8 @@ class SequenceParallel(ParallelStyle):
 
     def __repr__(self) -> str:
         tmpstr = self.__class__.__name__ + "("
-        tmpstr += f"sequence_dim={self.sequence_sharding.dim}, "
+        if len(self.sequence_sharding) == 1:
+            tmpstr += f"sequence_dim={self.sequence_sharding[0].dim}, "
         tmpstr += f"use_local_output={self.use_local_output}"
         tmpstr += ")"
         return tmpstr
