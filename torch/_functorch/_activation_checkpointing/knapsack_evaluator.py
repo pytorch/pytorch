@@ -2,7 +2,6 @@ from collections import deque
 from typing import Callable
 
 import networkx as nx
-import numpy as np
 
 from torch._functorch._activation_checkpointing.graph_info_provider import (
     GraphInfoProvider,
@@ -237,6 +236,7 @@ class KnapsackEvaluator:
         Returns:
             float: Memory budget at the knee point.
         """
+        import numpy as np
         results = self.evaluate_distribution_of_results_for_knapsack_algo(
             knapsack_algo=knapsack_algo,
             memory_budget_values=np.linspace(  # type: ignore[arg-type]
