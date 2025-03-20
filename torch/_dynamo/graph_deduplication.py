@@ -13,7 +13,6 @@ from collections.abc import Iterable
 from typing import Any
 
 import torch.fx
-from torch._higher_order_ops.utils import has_potential_input_alias_or_mutation
 from torch.utils._pytree import tree_flatten
 
 from .graph_region_tracker import Node, Region
@@ -127,14 +126,14 @@ def _replace_region_with_subgraph(
         sub_args.append(flattened_args_kwargs[arg_ind])
 
     invoke_args = (get_subgraph_node, subgraph_name, tuple(sub_args))
-    fake_inputs = [node.meta["example_value"] for node in sub_args]
+    # fake_inputs = [node.meta["example_value"] for node in sub_args]
 
-    if has_potential_input_alias_or_mutation(sub_gm, fake_inputs):
-        log.debug(
-            "NYI: Failed to substitute region %s due to input alias or mutation",
-            region,
-        )
-        return
+    # if has_potential_input_alias_or_mutation(sub_gm, fake_inputs):
+    #    log.debug(
+    #        "NYI: Failed to substitute region %s due to input alias or mutation",
+    #        region,
+    #    )
+    #    return
 
     latest_region_node = region[-1]
     with graph.inserting_after(latest_region_node):
