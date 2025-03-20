@@ -4881,7 +4881,9 @@ class TestLinalg(TestCase):
             self.assertTrue(os.path.exists(result_filename))
             self.assertGreater(os.path.getsize(result_filename), 0)
 
-            
+            # Compare Param Signature of untuned and tuned results
+            ok = compare_untuned_tuned_param_sig(untuned_filename, result_filename)
+            self.assertTrue(ok)
 
         finally:
             # disable TunableOp
@@ -4894,12 +4896,12 @@ class TestLinalg(TestCase):
                 pass
 
             # clean up, remove any files that were generated
-            # for filename in [untuned_filename, result_filename]:
-            #     try:
-            #         os.remove(filename)
-            #     # NB: The file is locked on Windows
-            #     except (FileNotFoundError, PermissionError):
-            #         pass
+            for filename in [untuned_filename, result_filename]:
+                try:
+                    os.remove(filename)
+                # NB: The file is locked on Windows
+                except (FileNotFoundError, PermissionError):
+                    pass
 
     @unittest.skipIf(not TEST_MULTIGPU, "Requires at least 2 GPUs")
     @onlyCUDA
