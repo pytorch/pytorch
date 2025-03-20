@@ -2103,7 +2103,7 @@ class CppCodeCache:
             **cls.cpp_compile_command_flags,
             "device_type": device_type,
             "extra_flags": extra_flags,
-            "use_relative_path": config.is_fbcode() and device_type == "cpu",
+            "use_relative_path": config.is_fbcode(),
             "vec_isa": pick_vec_isa(),
         }
 
