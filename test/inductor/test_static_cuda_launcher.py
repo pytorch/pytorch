@@ -1,9 +1,11 @@
 # Owner(s): ["module: inductor"]
 import os
+import random
 import tempfile
 
 import torch
 from torch._dynamo.device_interface import get_interface_for_device
+from torch._inductor.codecache import PyCodeCache
 from torch._inductor.runtime import triton_helpers
 from torch._inductor.runtime.static_cuda_launcher import StaticallyLaunchedCudaKernel
 from torch._inductor.runtime.triton_compat import CompiledKernel, tl, triton
@@ -52,7 +54,8 @@ class TestStaticCudaLauncher(TestCase):
         cubin_file = self.write_cubin_to_tmp(compiled_kernel)
         compiled_kernel._cubin_path = cubin_file
         result = StaticallyLaunchedCudaKernel(compiled_kernel)
-        result.load_kernel()
+        device_interface = get_interface_for_device("cuda")
+        result.load_kernel(device_interface.current_device())
         return result
 
     @skipIfRocm
@@ -265,7 +268,7 @@ class TestStaticCudaLauncher(TestCase):
         self.assertEqual(arg1, arg2)
 
     @skipIfRocm
-    def test_incompatible_args(self):
+    def test_kernel_no_args(self):
         # Just an easy way to test incompatible number of arguments
         @triton.jit
         def kernel_no_op():
@@ -277,17 +280,19 @@ class TestStaticCudaLauncher(TestCase):
         stream = device_interface.get_raw_stream(device_interface.current_device())
         launcher.run(1, 1, 1, stream)
 
-    def test_slow_launch(self):
+    @skipIfRocm
+    def test_high_shared_mem(self):
         @triton.jit
         def simple_kernel(arg0, arg1):
             x = tl.load(arg0)
             y = arg1
             tl.store(arg0, x + y)
-
         arg0 = torch.zeros(1, dtype=torch.int32, device="cuda")
         arg1 = 5
         args = (arg0, arg1)
         compiled_kernel = simple_kernel[(1,)](*args)
+        # Allocate 50 KB of memory
+        compiled_kernel.shared = 50000
         launcher = self._make_launcher(compiled_kernel)
         self.assertEqual(arg0, torch.tensor([5], dtype=torch.int32, device="cuda"))
         self.assertEqual(launcher.arg_tys, "Oi")
@@ -297,6 +302,7 @@ class TestStaticCudaLauncher(TestCase):
         launcher.slow_launch_kernel = True
         launcher.run(1, 1, 1, stream, new_arg0, arg1)
         self.assertEqual(new_arg0, arg0)
+
 
     @skipIfRocm
     def test_kernel_empty_tensor(self):
@@ -357,6 +363,37 @@ class TestStaticCudaLauncher(TestCase):
         stream = device_interface.get_raw_stream(device_interface.current_device())
 
         launcher.run(1, 1, 1, stream, arg1, arg2, buf1, arg0, xnumel)
+        self.assertEqual(buf0, buf1)
+
+    @skipIfRocm
+    def test_kernel_many_args(self):
+        N = 200
+        # Make 200 arguments
+        args = [f"arg_{i}" for i in range(N)]
+        decl = ", ".join(args)
+        sums = [f"    total += arg_{i}" for i in range(N)]
+        sums_str = "\n".join(sums)
+
+        template = f"""
+from torch._inductor.runtime.triton_compat import tl, triton
+@triton.jit
+def kernel_many_args(out_tensor, {decl}):
+    out = tl.load(out_tensor)
+    total = out
+{sums_str}
+    tl.store(out_tensor, total)
+        """
+
+        result = PyCodeCache.load(template.lstrip())
+
+        kernel_args = tuple(random.random() for _ in range(N))
+        buf0 = torch.zeros(1, device="cuda")
+        compiled_kernel = result.kernel_many_args[1,](buf0, *kernel_args)
+        launcher = self._make_launcher(compiled_kernel)
+        device_interface = get_interface_for_device("cuda")
+        stream = device_interface.get_raw_stream(device_interface.current_device())
+        buf1 = torch.zeros(1, device="cuda")
+        launcher.run(1, 1, 1, stream, buf1, *kernel_args)
         self.assertEqual(buf0, buf1)
 
 
