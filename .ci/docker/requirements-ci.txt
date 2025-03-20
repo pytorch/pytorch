@@ -10,7 +10,7 @@ boto3==1.35.42
 #Pinned versions: 1.19.12, 1.16.34
 #test that import:
 
-click==8.1.8
+click
 #Description: Command Line Interface Creation Kit
 #Pinned versions:
 #test that import:
@@ -191,7 +191,7 @@ pytest-flakefinder==1.1.0
 #Pinned versions: 1.1.0
 #test that import:
 
-pytest-rerunfailures==10.3
+pytest-rerunfailures>=10.3
 #Description: plugin for rerunning failure tests in pytest
 #Pinned versions:
 #test that import:
@@ -272,7 +272,7 @@ tlparse==0.3.7
 #test that import: dynamo/test_structured_trace.py
 
 # needed by torchgen utils
-typing-extensions==4.12.2
+typing-extensions>=4.10.0
 #Description: type hints for python
 #Pinned versions:
 #test that import:
@@ -293,7 +293,7 @@ lintrunner==0.12.5
 #Pinned versions: 0.12.5
 #test that import:
 
-redis==4.0.0
+redis>=4.0.0
 #Description: redis database
 #test that import: anything that tests OSS caching/mocking (inductor/test_codecache.py, inductor/test_max_autotune.py)
 
@@ -379,4 +379,3 @@ pulp==2.9.0 ; python_version >= "3.8"
 #Description: required for testing ilp formulaiton under torch/distributed/_tools
 #Pinned versions: 2.9.0
 #test that import: test_sac_ilp.py
-
