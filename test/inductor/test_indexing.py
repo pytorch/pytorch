@@ -12,7 +12,7 @@ from torch._inductor.codegen.wrapper import pexpr
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch._inductor.utils import run_and_get_triton_code
+from torch._inductor.utils import run_and_get_triton_code, sympy_subs
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_MACOS,
@@ -225,6 +225,20 @@ class TestIndexingSimplification(InductorTestCase):
         self.assertNotEqual(expr, actual)
         expected = FloorDiv(x * 15 + y, 3)
         self.assertEqual(expected, FloorDiv(actual, denominator))
+
+    def test_modular_indexing_simplification(self):
+        q0 = sympy.Symbol("q0", integer=True)
+        tiling = sympy.Symbol("tiling", integer=True)
+
+        expr = FloorDiv(q0, 64) + 4096 * ModularIndexing(32 * q0, 1, 2048)
+
+        ind_i = expr.subs(q0, q0 * tiling)
+        ind_i_plus_1 = expr.subs(q0, (q0 + 1) * tiling)
+
+        diff = ind_i_plus_1 - ind_i
+        equation = sympy.Eq(diff, 1)
+
+        self.assertEqual(sympy_subs(equation, {tiling: 64}), True)
 
     @unittest.skipUnless(HAS_GPU, "Need GPU for this test")
     def test_int8_unpack(self):

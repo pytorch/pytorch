@@ -308,6 +308,11 @@ class ModularIndexing(sympy.Function):
         if base == 0 or modulus == 1:
             return sympy.S.Zero
 
+        if isinstance(base, sympy.Mul):
+            coeff, _ = base.as_coeff_Mul()
+            if coeff % modulus == 0:
+                return sympy.S.Zero
+
         if (
             isinstance(base, sympy.Integer)
             and isinstance(divisor, sympy.Integer)
