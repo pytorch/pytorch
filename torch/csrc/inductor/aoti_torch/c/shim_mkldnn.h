@@ -4,10 +4,11 @@
 #include <ATen/Config.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 
-#if AT_MKLDNN_ENABLED()
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+#if AT_MKLDNN_ENABLED()
 
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_cpu_mkldnn__convolution_pointwise_binary(
@@ -235,8 +236,16 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__mkl_linear(
 
 #endif // AT_MKL_ENABLED
 
+#endif // AT_MKLDNN_ENABLED()
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__weight_int4pack_mm_cpu_tensor(
+    AtenTensorHandle X,
+    AtenTensorHandle w,
+    AtenTensorHandle qGroupSize,
+    AtenTensorHandle qScaleAndZeros,
+    AtenTensorHandle* ret0);
+
 #ifdef __cplusplus
 } // extern "C"
 #endif
-#endif // AT_MKLDNN_ENABLED()
 #endif // AOTI_TORCH_SHIM_MKLDNN

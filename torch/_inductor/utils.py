@@ -151,6 +151,24 @@ class align(sympy.Function):
             return value
 
 
+@dataclasses.dataclass(frozen=True)
+class GraphPartitionMap:
+    """
+    Mapping from the partition info (e.g., input/output) to the graph info
+    """
+
+    # a unique id of graph partition
+    id: int
+
+    # map partition input/output indices to graph input/output indices. None indicates
+    # a partition input/output is not a graph input/output.
+    input_index_mapping: list[Optional[int]]
+    output_index_mapping: list[Optional[int]]
+
+    # name of constants read/written by the graph partition
+    constant_names: list[str]
+
+
 def do_bench_using_profiling(
     fn: Callable[[], Any], warmup: int = 25, rep: int = 100
 ) -> float:
@@ -305,6 +323,9 @@ def _type_of(key: Optional[torch.dtype]) -> str:
         "float8e4b15x4": "fp8e4b15x4",
         "float8_e4m3fn": "fp8e4nv",
         "float8_e5m2": "fp8e5",
+        # TODO: remove when support is added in triton
+        # https://github.com/triton-lang/triton/issues/6054
+        "float8_e8m0fnu": "u8",
         "float16": "fp16",
         "bfloat16": "bf16",
         "float32": "fp32",
@@ -319,8 +340,7 @@ def _type_of(key: Optional[torch.dtype]) -> str:
         "uint64": "u64",
     }
     # reinterpret can create triton type
-    for v in list(tys.values()):
-        tys[v] = v
+    tys.update({v: v for v in list(tys.values())})
     return key if isinstance(key, str) else f"*{tys[dtype_str]}"
 
 
@@ -614,9 +634,7 @@ def get_kernel_metadata(
             single_graph = inductor_nodes[0].graph
             # create a map of idx -> node and cache it
             if not hasattr(single_graph, "_inductor_kernel_metadata_node_to_idx_map"):
-                node_to_idx_map = {}
-                for idx, n in enumerate(single_graph.nodes):
-                    node_to_idx_map[n] = idx
+                node_to_idx_map = {n: idx for idx, n in enumerate(single_graph.nodes)}
                 single_graph._inductor_kernel_metadata_node_to_idx_map = node_to_idx_map  # type: ignore[attr-defined]
             inductor_nodes.sort(
                 key=lambda n: single_graph._inductor_kernel_metadata_node_to_idx_map[n]  # type: ignore[attr-defined]
@@ -869,6 +887,34 @@ def clear_inductor_caches() -> None:
         obj.cache_clear()
 
 
+import gc
+
+
+def unload_xpu_triton_pyds() -> None:
+    # unload __triton_launcher.pyd
+    for module_name in list(sys.modules.keys()):
+        if not module_name.startswith("torch._inductor.runtime.compile_tasks."):
+            continue
+        m = sys.modules[module_name]
+        for attr_name in m.__dict__.keys():
+            if attr_name.startswith("triton_"):
+                kernel = getattr(m, attr_name)
+                if isinstance(
+                    kernel, torch._inductor.runtime.triton_heuristics.CachingAutotuner
+                ):
+                    for result in kernel.compile_results:
+                        result.kernel.run.mod.__del__()
+        del sys.modules[module_name]
+
+    # unload spirv_utils.pyd
+    if "triton.runtime.driver" in sys.modules:
+        mod = sys.modules["triton.runtime.driver"]
+        del type(mod.driver.active.utils).instance
+        del mod.driver.active.utils
+
+    gc.collect()
+
+
 @contextlib.contextmanager
 def fresh_inductor_cache(
     cache_entries: Optional[dict[str, Any]] = None,
@@ -904,6 +950,9 @@ def fresh_inductor_cache(
                             }
                         )
         if delete:
+            if is_windows() and torch.xpu.is_available():
+                unload_xpu_triton_pyds()
+
             shutil.rmtree(
                 inductor_cache_dir,
                 # Let's not fail if we can't clean up the temp dir. Also note that for
@@ -1222,8 +1271,15 @@ def is_big_gpu(index_or_device: Union[int, torch.device] = 0) -> bool:
 
 
 @functools.lru_cache
-def get_num_sms() -> int:
+def get_max_num_sms() -> int:
     return torch.cuda.get_device_properties("cuda").multi_processor_count
+
+
+def get_num_sms() -> int:
+    """Handle experimental carveout if set otherwise return hardware SM count"""
+    # TODO we need to properly guard on this global
+    carveout = torch._C._get_sm_carveout_experimental()
+    return get_max_num_sms() - (carveout if carveout is not None else 0)
 
 
 def get_tma_workspace_arg(
@@ -2479,6 +2535,9 @@ _triton_type_mapping = {
     "tl.float8_e5m2": "tl.float8e5",
     "tl.float8_e4m3fnuz": "tl.float8e4b8",
     "tl.float8_e5m2fnuz": "tl.float8e5b16",
+    # TODO: remove when support is added in triton
+    # https://github.com/triton-lang/triton/issues/6054
+    "tl.float8_e8m0fnu": "tl.uint8",
 }
 _torch_triton_mapping = {v: k for k, v in _triton_type_mapping.items()}
 
