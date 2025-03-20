@@ -409,7 +409,6 @@ def tuned_mm(mat1, mat2, *, layout=None):
     choices = (
         [aten_mm.bind((mat1, mat2), aten_layout)] if use_aten_gemm_kernels() else []
     )
-    
     static_shape, is_nonzero = _is_static_problem(layout)
     if is_nonzero and use_triton_template(layout):
         for config in mm_configs(m, n, k, **mm_config_kwargs(ir.get_device_type(mat1))):
