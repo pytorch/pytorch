@@ -69,6 +69,7 @@ from torch.testing._internal.common_utils import (
     skipIfCrossRef,
     skipIfXpu,
     TEST_TRANSFORMERS,
+    TEST_WITH_CROSSREF,
     TestCase as TorchTestCase,
 )
 from torch.testing._internal.custom_tensor import (
@@ -4735,6 +4736,139 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         self.assertTrue(torch.allclose(orig_res[0], ep_res[0]))
         self.assertTrue(torch.allclose(orig_res[1], ep_res[1]))
         self.assertTrue(torch.allclose(orig_res[2], ep_res[2]))
+
+    def test_unflatten_placeholder_update_child2parent_swap(self):
+        class Child(torch.nn.Module):
+            def forward(self, x):
+                torch.ops.aten.dropout_(x, 0.5, False)  # Applying dropout inplace
+                return x - 2
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.child = Child()
+
+            def forward(self, x):
+                f1 = self.child(x)
+                f2 = x * 4
+                return f1 + f2
+
+        m = Foo()
+        inp = torch.ones(3, 10, dtype=torch.float32)
+        orig_result = m(inp)
+
+        if not is_retracebility_test(self._testMethodName):
+            inp = torch.ones(3, 10, dtype=torch.float32)
+            ep = export(m, (inp,), preserve_module_call_signature=("child",))
+            unf = unflatten(ep)
+            unf.print_readable()
+
+            inp = torch.ones(3, 10, dtype=torch.float32)
+            ep_result = ep.module()(inp)
+            self.assertTrue(torch.allclose(ep_result, orig_result))
+
+            unf.set_submodule("child", m.child)
+            inp = torch.ones(3, 10, dtype=torch.float32)
+            unf_result = unf(inp)
+            self.assertTrue(torch.allclose(unf_result, orig_result))
+
+    def test_unflatten_placeholder_update_grandchild2cousin_swap(self):
+        class Grandchild(torch.nn.Module):
+            def forward(self, x):
+                a = x.to(torch.float32)  # .to is considered a mutation
+                return x + 4, a
+
+        class Child(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.grandchild = Grandchild()
+
+            def forward(self, x):
+                y, a = self.grandchild(x)
+                return y + a
+
+        class OtherGrandchild(torch.nn.Module):
+            def forward(self, x):
+                return x * 2
+
+        class OtherChild(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.other_grandchild = OtherGrandchild()
+
+            def forward(self, x):
+                return x + self.other_grandchild(x)
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.child = Child()
+                self.other_child = OtherChild()
+
+            def forward(self, x):
+                f1 = self.child(x)
+                f2 = self.other_child(x)
+                return f1 + f2
+
+        inp = torch.ones(2, 3, dtype=torch.float32)
+        orig_result = Foo()(inp)
+        self.assertTrue(torch.allclose(orig_result, torch.ones(2, 3) * 9))
+
+        if not is_retracebility_test(self._testMethodName):
+            inp = torch.ones(2, 3, dtype=torch.float32)
+            ep = export(Foo(), (inp,), preserve_module_call_signature=("child",))
+            unf = unflatten(ep)
+
+            inp = torch.ones(2, 3, dtype=torch.float32)
+            ep_result = ep.module()(inp)
+            self.assertTrue(torch.allclose(ep_result, orig_result))
+
+            unf.set_submodule("child", Child())
+            inp = torch.ones(2, 3, dtype=torch.float32)
+            unf_result = unf(inp)
+            self.assertTrue(torch.allclose(unf_result, orig_result))
+
+    def test_unflatten_buffer_update_child2parent_swap(self):
+        class Child(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.tensor(10))
+
+            def forward(self, x):
+                self.buf.add_(1)
+                return x + 2
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.child = Child()
+
+            def forward(self, x):
+                y = self.child(x)  # child.buf <- 10 + 1 = 11, x + 2 = 3
+                x = y + self.child.buf  # 14
+                y = self.child(x)  # child.buf <- 11 + 1 = 12, x + 2 = 16
+                x = y + self.child.buf  # 28
+                y = self.child(x)  # child.buf <- 12 + 1 = 13, x + 2 = 30
+                x = y + self.child.buf  # 43
+                return x
+
+        inp = torch.ones(2, 3, dtype=torch.float32)
+        orig_result = Foo()(inp)
+        self.assertTrue(torch.allclose(orig_result, torch.ones(2, 3) * 43))
+
+        if not is_retracebility_test(self._testMethodName):
+            inp = torch.ones(2, 3, dtype=torch.float32)
+            ep = export(Foo(), (inp,), preserve_module_call_signature=("child",))
+            unf = unflatten(ep)
+
+            inp = torch.ones(2, 3, dtype=torch.float32)
+            ep_result = ep.module()(inp)
+            self.assertTrue(torch.allclose(ep_result, orig_result))
+
+            unf.set_submodule("child", Child())
+            inp = torch.ones(2, 3, dtype=torch.float32)
+            unf_result = unf(inp)
+            self.assertTrue(torch.allclose(unf_result, orig_result))
 
     def test_export_func_with_var_keyword_pytree_args(self):
         class Module(torch.nn.Module):
@@ -11276,6 +11410,125 @@ graph():
             r"Runtime assertion failed for expression u[\d+] \>\= 3",
         ):
             ep.module()(torch.randn(10), torch.tensor(2))
+
+    @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
+    @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
+    @testing.expectedFailureSerDerNonStrict  # construtor is not serialized today
+    @testing.expectedFailureSerDer  # constructor is not serialized today
+    @testing.expectedFailureRetraceability  # dynamo doesn't work with FlatApply op
+    def test_capture_subclass_constructor(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buffer = torch.nn.Buffer(
+                    TwoTensor(torch.randn(4, 4), torch.randn(4, 4))
+                )
+
+            def forward(self, x):
+                two_tensor = TwoTensor(x, TwoTensor(x, x)) + self.buffer
+                val = x + two_tensor
+                return val.b.a
+
+        mod = Foo()
+        ep = export_for_training(mod, (torch.randn(4, 4),), strict=False)
+        self.assertExpectedInline(
+            str(ep.graph).strip(),
+            """\
+graph():
+    %b_buffer : [num_users=1] = placeholder[target=b_buffer]
+    %x : [num_users=1] = placeholder[target=x]
+    %twotensor___init__0 : [num_users=1] = get_attr[target=twotensor___init__0]
+    %twotensor_const_func_spec0 : [num_users=1] = get_attr[target=twotensor_const_func_spec0]
+    %flat_apply : [num_users=2] = call_function[target=torch.ops.higher_order.flat_apply](args = (%twotensor_const_func_spec0, %twotensor___init__0, %x, %x), kwargs = {})
+    %access_subclass_inner_tensor_default_7 : [num_users=1] = call_function[target=torch.ops.export.access_subclass_inner_tensor.default](args = (%flat_apply, b), kwargs = {})
+    %twotensor___init__1 : [num_users=1] = get_attr[target=twotensor___init__1]
+    %twotensor_const_func_spec0_1 : [num_users=1] = get_attr[target=twotensor_const_func_spec0]
+    %flat_apply_1 : [num_users=2] = call_function[target=torch.ops.higher_order.flat_apply](args = (%twotensor_const_func_spec0_1, %twotensor___init__1, %access_subclass_inner_tensor_default_7, %flat_apply), kwargs = {})
+    %access_subclass_inner_tensor_default_17 : [num_users=1] = call_function[target=torch.ops.export.access_subclass_inner_tensor.default](args = (%flat_apply_1, b), kwargs = {})
+    %access_subclass_inner_tensor_default_23 : [num_users=1] = call_function[target=torch.ops.export.access_subclass_inner_tensor.default](args = (%access_subclass_inner_tensor_default_17, b), kwargs = {})
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%flat_apply_1, %b_buffer), kwargs = {})
+    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%access_subclass_inner_tensor_default_23, %add), kwargs = {})
+    %access_subclass_inner_tensor_default_24 : [num_users=1] = call_function[target=torch.ops.export.access_subclass_inner_tensor.default](args = (%add_1, b), kwargs = {})
+    %access_subclass_inner_tensor_default_29 : [num_users=1] = call_function[target=torch.ops.export.access_subclass_inner_tensor.default](args = (%access_subclass_inner_tensor_default_24, a), kwargs = {})
+    return (access_subclass_inner_tensor_default_29,)""",
+        )
+
+        inp = torch.randn(4, 4)
+        self.assertEqual(ep.module()(inp), mod(inp))
+
+        mod = Foo()
+        ep = export(mod, (torch.randn(4, 4),)).run_decompositions({})
+
+        self.assertEqual(ep.module()(inp), mod(inp))
+        if is_training_ir_test(self._testMethodName):
+            self.assertExpectedInline(
+                str(ep.graph).strip(),
+                """\
+graph():
+    %b_parametrizations_buffer_original0 : [num_users=0] = placeholder[target=b_parametrizations_buffer_original0]
+    %b_parametrizations_buffer_original1 : [num_users=1] = placeholder[target=b_parametrizations_buffer_original1]
+    %x : [num_users=2] = placeholder[target=x]
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %b_parametrizations_buffer_original1), kwargs = {})
+    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %add), kwargs = {})
+    return (add_1,)""",
+            )
+        else:
+            self.assertExpectedInline(
+                str(ep.graph).strip(),
+                """\
+graph():
+    %b_parametrizations_buffer_original0 : [num_users=0] = placeholder[target=b_parametrizations_buffer_original0]
+    %b_parametrizations_buffer_original1 : [num_users=1] = placeholder[target=b_parametrizations_buffer_original1]
+    %x : [num_users=2] = placeholder[target=x]
+    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %b_parametrizations_buffer_original1), kwargs = {})
+    %add_4 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %add_1), kwargs = {})
+    return (add_4,)""",
+            )
+
+    def test_capture_subclass_wrong(self):
+        from torch._export.wrappers import (
+            mark_subclass_constructor_exportable_experimental,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "on fn which is not supported. If"):
+
+            @torch._disable_dynamo
+            @mark_subclass_constructor_exportable_experimental
+            def fn(a, b):
+                return a + b
+
+        class Foo(torch.nn.Module):
+            @torch._disable_dynamo
+            @mark_subclass_constructor_exportable_experimental
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x.cos()
+
+        with self.assertRaisesRegex(
+            RuntimeError, "TestExport.test_capture_subclass_wrong.<locals>.Foo"
+        ):
+            export(Foo(), (torch.randn(4, 4),))
+
+    def test_capture_subclass_constructor_torch_ir(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buffer = torch.nn.Buffer(
+                    TwoTensor(torch.randn(4, 4), torch.randn(4, 4))
+                )
+
+            def forward(self, x):
+                two_tensor = TwoTensor(x, TwoTensor(x, x)) + self.buffer
+                val = x + two_tensor
+                return val.b.a
+
+        mod = Foo()
+        gm_torch_ir = _export_to_torch_ir(mod, (torch.randn(4, 4),))
+        FileCheck().check_count(
+            "torch.testing._internal.two_tensor.TwoTensor", 2, exactly=True
+        ).run(gm_torch_ir.code)
 
     def test_cse_for_symint(self):
         class Foo(torch.nn.Module):

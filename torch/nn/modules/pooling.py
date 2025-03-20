@@ -108,11 +108,22 @@ class MaxPool1d(_MaxPoolNd):
 
     Shape:
         - Input: :math:`(N, C, L_{in})` or :math:`(C, L_{in})`.
-        - Output: :math:`(N, C, L_{out})` or :math:`(C, L_{out})`, where
+        - Output: :math:`(N, C, L_{out})` or :math:`(C, L_{out})`,
+
+          where ``ceil_mode = False``
 
           .. math::
               L_{out} = \left\lfloor \frac{L_{in} + 2 \times \text{padding} - \text{dilation}
-                    \times (\text{kernel\_size} - 1) - 1}{\text{stride}} + 1\right\rfloor
+                   \times (\text{kernel\_size} - 1) - 1}{\text{stride}}\right\rfloor + 1
+
+          where ``ceil_mode = True``
+
+          .. math::
+              L_{out} = \left\lceil \frac{L_{in} + 2 \times \text{padding} - \text{dilation}
+                    \times (\text{kernel\_size} - 1) - 1 + (stride - 1)}{\text{stride}}\right\rceil + 1
+
+        - Ensure that the last pooling starts inside the image, make :math:`L_{out} = L_{out} - 1`
+          when :math:`(L_{out} - 1) * \text{stride} >= L_{in} + \text{padding}`.
 
     Examples::
 
