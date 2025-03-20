@@ -1680,6 +1680,9 @@ def triton_config(
         cfg["YBLOCK"] = y
     if z:
         cfg["ZBLOCK"] = z
+
+    cfg["waves_per_eu"] = int(8 // num_warps)
+
     check_max_block(cfg)
     check_config(cfg, xnumel=xnumel, ynumel=ynumel, znumel=znumel)
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
@@ -1770,6 +1773,8 @@ def triton_config_reduction(
                 break
             rnumels[prefix] //= 2
 
+    cfg["waves_per_eu"] = int(8 // num_warps)
+
     cfg = _get_config({"x": x, **rnumels})
     check_max_block(cfg)
     check_config(cfg, xnumel=size_hints["x"])
@@ -1815,6 +1820,8 @@ def triton_config_tiled_reduction(size_hints, x, y, r, num_stages=1):
 
     cfg = _get_config({"x": x, "y": y, **rnumels})
     num_warps = _num_warps(total_numel() // 256, min_num_warps=1)
+    
+    cfg["waves_per_eu"] = int(8 // num_warps)
     check_config(cfg, xnumel=size_hints[0], ynumel=size_hints[1])
     check_max_block(cfg)
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
