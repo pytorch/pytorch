@@ -270,6 +270,7 @@ class Backend(str):  # noqa: SLOT000
         "cpu": GLOO,
         "cuda": NCCL,
         "xpu": XCCL,
+        "mps": GLOO,
     }
 
     backend_capability: dict[str, list[str]] = {
