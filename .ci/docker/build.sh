@@ -482,7 +482,6 @@ docker build \
        --build-arg "GRADLE_VERSION=${GRADLE_VERSION}" \
        --build-arg "CMAKE_VERSION=${CMAKE_VERSION:-}" \
        --build-arg "NINJA_VERSION=${NINJA_VERSION:-}" \
-       --build-arg "KATEX=${KATEX:-}" \
        --build-arg "ROCM_VERSION=${ROCM_VERSION:-}" \
        --build-arg "PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH:-gfx90a;gfx942}" \
        --build-arg "IMAGE_NAME=${IMAGE_NAME}" \
