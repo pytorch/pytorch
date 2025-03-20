@@ -9,8 +9,8 @@ psutil==7.0.0
 pyyaml==6.0.2
 requests==2.32.3
 setuptools==75.8.0
-types-dataclasses?
-typing_extensions==4.12.2
+types-dataclasses==4.12.2
+typing-extensions==4.12.2
 sympy==1.13.1 ; python_version >= "3.9"
 filelock==3.17.0
 networkx==2.8.8
