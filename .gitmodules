@@ -69,7 +69,7 @@
 [submodule "third_party/fbgemm"]
     ignore = dirty
     path = third_party/fbgemm
-    url = https://github.com/pytorch/fbgemm
+    url = https://github.com/MatzeB/fbgemm
 [submodule "android/libs/fbjni"]
     ignore = dirty
     path = android/libs/fbjni
