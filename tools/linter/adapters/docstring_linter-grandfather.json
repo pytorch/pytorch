@@ -27,8 +27,8 @@
     "class ValueRangeAnalysis": 107
   },
   "torch/_inductor/codecache.py": {
-    "class AotCodeCompiler": 496,
-    "class CppCodeCache": 109,
+    "class AotCodeCompiler": 508,
+    "class CppCodeCache": 125,
     "class CppPythonBindingsCodeCache": 168,
     "class HalideCodeCache": 350
   },
@@ -40,18 +40,18 @@
     "class OpOverrides": 227
   },
   "torch/_inductor/codegen/cpp.py": {
-    "class CppKernel": 569,
-    "class CppKernelProxy": 598,
+    "class CppKernel": 572,
+    "class CppKernelProxy": 601,
     "class CppOverrides": 429,
-    "class CppScheduling": 773,
-    "class CppVecKernel": 813,
+    "class CppScheduling": 777,
+    "class CppVecKernel": 855,
     "class OuterLoopFusedSchedulerNode": 159,
-    "def CppKernel.codegen_loops_impl()": 142,
+    "def CppKernel.codegen_loops_impl()": 144,
     "def CppKernelProxy.codegen_functions()": 183,
     "def CppKernelProxy.legalize_lowp_fp_dtype_loopbody()": 224,
     "def CppScheduling.fuse()": 81,
-    "def CppVecKernel.reduction()": 186,
-    "def CppVecKernel.reduction_combine_vec()": 85,
+    "def CppVecKernel.reduction()": 193,
+    "def CppVecKernel.reduction_combine_vec()": 87,
     "def TilingSelect.select_tiling()": 165
   },
   "torch/_inductor/codegen/cpp_flex_attention_template.py": {
@@ -113,7 +113,7 @@
   },
   "torch/_inductor/codegen/mps.py": {
     "class MetalKernel": 323,
-    "class MetalOverrides": 285,
+    "class MetalOverrides": 293,
     "def MetalKernel.reduction()": 98
   },
   "torch/_inductor/codegen/rocm/ck_conv_template.py": {
@@ -214,6 +214,7 @@
   "torch/_inductor/fx_passes/split_cat.py": {
     "def SplitCatSimplifier.replace_cat()": 145,
     "def merge_getitem_cat()": 97,
+    "def merge_split_cat_aten()": 87,
     "def move_reshape_out_of_split_stack()": 108
   },
   "torch/_inductor/fx_utils.py": {
@@ -236,17 +237,17 @@
     "class IRNode": 242,
     "class Layout": 202,
     "class Loops": 128,
-    "class Reduction": 689,
+    "class Reduction": 735,
     "class Scan": 195,
     "class Sort": 146,
     "class UserDefinedTritonKernel": 174,
-    "class View": 151,
+    "class View": 174,
     "class WelfordReduction": 221,
     "class WhileLoop": 177,
     "def ConcatKernel.create()": 95,
     "def ExternKernel.process_kernel()": 100,
     "def ExternKernel.require_strides()": 149,
-    "def Reduction.create()": 135,
+    "def Reduction.create()": 136,
     "def Reduction.num_splits()": 152,
     "def Scan.create()": 83,
     "def WelfordReduction.create()": 110,
@@ -294,7 +295,7 @@
     "def searchsorted()": 84
   },
   "torch/_inductor/mkldnn_ir.py": {
-    "class MkldnnRnnLayer": 111
+    "class MkldnnRnnLayer": 114
   },
   "torch/_inductor/mkldnn_lowerings.py": {
     "def register_onednn_fusion_ops()": 1152
