@@ -89,7 +89,6 @@ jobs:
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: !{{ config.pytorch_extra_install_requirements }}
     {%- endif %}
     steps:
-      !{{ set_runner_specific_vars() }}
 {%- if os == "windows-arm64" %}
       - name: Bootstrap folders
         shell: cmd
@@ -141,6 +140,7 @@ jobs:
       !{{ common.setup_ec2_windows() }}
       !{{ common.checkout(deep_clone=False, directory="pytorch") }}
 {%- endif %}
+      !{{ set_runner_specific_vars() }}
       - name: Populate binary env
         shell: bash
         run: |
@@ -189,7 +189,16 @@ jobs:
     timeout-minutes: !{{ common.timeout_minutes_windows_binary }}
     !{{ upload.binary_env(config, True) }}
     steps:
-{%- if os != "windows-arm64" %}
+{%- if os == "windows-arm64" %}
+      - name: Git checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          path: "pytorch"
+      - name: Bootstrap Git
+        shell: cmd
+        run: |
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_git.bat"
+{%- else %}
       !{{ common.setup_ec2_windows() }}
       !{{ common.checkout(deep_clone=False, directory="pytorch") }}
 {%- endif %}
