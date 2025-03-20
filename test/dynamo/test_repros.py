@@ -54,6 +54,7 @@ from torch.testing._internal.common_utils import (
     disable_translation_validation_if_dynamic_shapes,
     instantiate_parametrized_tests,
     parametrize,
+    serialTest,
     skipIfHpu,
     skipIfWindows,
     TEST_WITH_ROCM,
@@ -3877,6 +3878,41 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_model(17, (12,), out2)
 
     @requires_cuda
+    @serialTest
+    def test_mem_leak_guards(self):
+        def gn(x0, x):
+            return x0 * x
+
+        class MyMod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            @torch._dynamo.disable(recursive=False)
+            def forward(self, running_x):
+                # This line creates an temp tensor, which should not be leaked
+                running_x = torch.sin(running_x)
+                x = running_x
+                # This creates a TENSOR_ALIASING guard
+                x = gn(running_x, running_x)
+                # This creates a NO_TENSOR_ALIASING guard which was leaking memory
+                x = gn(running_x, x)
+                return x
+
+        mod = MyMod().cuda()
+
+        fn = torch.compile(mod, backend="eager")
+        x = torch.randn(10, 10, device="cuda")
+        torch.cuda.reset_peak_memory_stats()
+
+        fn(x)
+        peak_mem1 = torch.cuda.max_memory_allocated()
+
+        for _ in range(1000):
+            fn(x)
+        peak_mem2 = torch.cuda.max_memory_allocated()
+        self.assertTrue(peak_mem1 == peak_mem2)
+
+    @requires_cuda
     def test_guard_default_device(self):
         try:
             torch.set_default_device("cuda")
@@ -6225,7 +6261,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         from torch.distributions import Categorical
 
         class SubCateg(Categorical):
-            ...
+            pass
 
         @torch.compile(backend="eager", fullgraph=True)
         def make_dist_and_execute(t, d):
@@ -6349,6 +6385,42 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         opt_fn = torch.compile(fn, backend="eager", dynamic=True, fullgraph=True)
         inp = torch.randn(3, 3)
         self.assertEqual(fn(inp), opt_fn(inp))
+
+    def test_ones_out_dynamic(self):
+        def ones_fn(size, out):
+            return torch.ones(size, out=out)
+
+        opt_model = torch.compile(ones_fn)
+
+        out1 = torch.empty(2, 3)
+        opt_model((2, 3), out1)
+
+        out2 = torch.empty(3, 4)
+        opt_model((3, 4), out2)
+
+    def test_zeros_out_dynamic(self):
+        def zeros_fn(size, out):
+            return torch.zeros(size, out=out)
+
+        opt_model = torch.compile(zeros_fn)
+
+        out1 = torch.empty(2, 3)
+        opt_model((2, 3), out1)
+
+        out2 = torch.empty(3, 4)
+        opt_model((3, 4), out2)
+
+    def test_empty_out_dynamic(self):
+        def empty_fn(size, out):
+            return torch.empty(size, out=out)
+
+        opt_model = torch.compile(empty_fn)
+
+        out1 = torch.empty(2, 3)
+        opt_model((2, 3), out1)
+
+        out2 = torch.empty(3, 4)
+        opt_model((3, 4), out2)
 
     def test_dataclass_in_module(self):
         @dataclasses.dataclass
