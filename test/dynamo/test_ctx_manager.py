@@ -2695,16 +2695,9 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(y, t.sin())
 
 
-class CPythonContextManagerTestCase(torch._dynamo.test_case.TestCase):
+class CPythonContextManagerTestCase(torch._dynamo.test_case.CPythonTestCase):
     # Tests taken from CPython source code in cpython/Lib/test/test_contextlib.py
     # https://github.com/python/cpython/blob/d48cc82ed25e26b02eb97c6263d95dcaa1e9111b/Lib/test/test_contextlib.py#L70
-    def setUp(self):
-        self._prev = torch._dynamo.config.enable_trace_unittest
-        torch._dynamo.config.enable_trace_unittest = True
-
-    def tearDown(self):
-        torch._dynamo.config.enable_trace_unittest = self._prev
-
     def test_contextmanager_plain(self):
         state = []
 
