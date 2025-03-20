@@ -294,7 +294,7 @@ def _maybe_fake_tracing(fn, inputs: list[Any], pre_dispatch):
             pre_dispatch=pre_dispatch,
             _error_on_data_dependent_ops=False,
         )(*inputs)
-        if not isinstance(fake_mode, nullcontext):
+        if not isinstance(fake_mode, nullcontext) and fake_mode.shape_env is not None:
             insert_deferred_runtime_asserts(
                 gm, fake_mode.shape_env, "hoo_maybe_fake_tracing", export=True
             )
