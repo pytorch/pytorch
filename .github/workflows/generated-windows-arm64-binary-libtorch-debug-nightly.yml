@@ -64,12 +64,7 @@ jobs:
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.9"
-    steps:
-      - name: Bootstrap folders
-        shell: cmd
-        run: |
-          mkdir "%NIGHTLIES_PYTORCH_ROOT%"
-          mkdir "%PYTORCH_FINAL_PACKAGE_DIR%"
+    steps:      
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -124,6 +119,11 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
+      - name: Bootstrap folders
+        shell: cmd
+        run: |
+          mkdir "%NIGHTLIES_PYTORCH_ROOT%"
+          mkdir "%PYTORCH_FINAL_PACKAGE_DIR%"
       - name: Build PyTorch binary
         shell: bash
         run: |
