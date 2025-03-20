@@ -14231,6 +14231,25 @@ if RUN_GPU:
             self.assertEqual(expect, actual)
 
         @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_symint_from_mutation_index(self):
+            x = torch.zeros(7, device="cuda")
+
+            def fn(n, a):
+                a[n] = -1
+                return a
+
+            opt_fn = torch.compile(fn, fullgraph=True)
+
+            for n in range(2, x.shape[0]):
+                opt_fn(n, x)
+                self.assertEqual(x[n], -1)
+
+            # Negative index triggers new compilation.
+            opt_fn(-x.shape[0], x)
+
+            self.assertEqual(x[0], -1)
+
+        @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_unbacked_symint(self):
             def f(x, y):
                 x1 = x + 1

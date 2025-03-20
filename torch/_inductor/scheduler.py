@@ -4055,6 +4055,20 @@ class Scheduler:
           for recording cudagraphs for tensors with dynamic shapes.
         """
 
+        def get_layout_symints(node: ir.IRNode) -> OrderedSet[sympy.Symbol]:
+            free_symbol_uses:  OrderedSet[sympy.Symbol] = OrderedSet()
+            layout = node.maybe_get_layout()
+            if isinstance(layout, ir.Layout):
+                free_symbol_uses.update(
+                    free_symbols(layout.size)
+                    | free_symbols(layout.stride)
+                    | free_symbols(layout.offset)
+                )
+            if isinstance(layout, ir.MutationLayoutSHOULDREMOVE):
+                # symint may be used as index in layout.target
+                free_symbol_uses.update(get_layout_symints(layout.target))
+            return free_symbol_uses
+
         def get_scheduler_node_symbol_uses(
             node: BaseSchedulerNode,
         ) -> OrderedSet[sympy.Symbol]:
@@ -4067,15 +4081,7 @@ class Scheduler:
                 )
             assert node.node is not None
             free_symbol_uses = node.node.get_free_symbol_uses()
-
-            layout = node.node.maybe_get_layout()
-            if isinstance(layout, ir.Layout):
-                free_symbol_uses.update(
-                    free_symbols(layout.size)
-                    | free_symbols(layout.stride)
-                    | free_symbols(layout.offset)
-                )
-
+            free_symbol_uses.update(get_layout_symints(node.node))
             return free_symbol_uses
 
         def get_input_node_symbols(
@@ -4087,14 +4093,7 @@ class Scheduler:
             if isinstance(node, ir.TorchBindObject):
                 return OrderedSet()
             elif isinstance(node, ir.IRNode):
-                layout = node.maybe_get_layout()
-                if isinstance(layout, ir.Layout):
-                    return (
-                        free_symbols(layout.size)
-                        | free_symbols(layout.stride)
-                        | free_symbols(layout.offset)
-                    )
-                return OrderedSet()
+                return get_layout_symints(node)
             elif isinstance(node, sympy.Expr):
                 return OrderedSet(node)
             else:
@@ -4126,6 +4125,7 @@ class Scheduler:
                 )
             )
 
+        # breakpoint()
         candidate_symbols: OrderedSet[sympy.Symbol] = OrderedSet().union(
             *(get_scheduler_node_symbol_uses(node) for node in partition)
         )
