@@ -354,7 +354,7 @@ use_experimental_benchmarker: bool = Config(
 )
 
 # enable slow autotuning passes to select algorithms
-max_autotune = True  # os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
+max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
 
 # enable slow autotuning passes to select pointwise/reductions algorithms
 max_autotune_pointwise = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE") == "1"
