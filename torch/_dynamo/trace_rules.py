@@ -3424,7 +3424,7 @@ MOD_SKIPLIST = [
     "torch.storage",
     "torch.testing",
     "torch.types",
-    "torch.utils",
+    # "torch.utils",
     "torch.xpu",
 ]
 
