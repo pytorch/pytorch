@@ -881,7 +881,7 @@ def infer_size(a, b):
         torch._check(
             _guard_semantics(sizeA == 1)
             or _guard_semantics(sizeB == 1)
-            or _guard_semantics(sizeA == sizeB),
+            or sizeA == sizeB,
             lambda: f"The size of tensor a ({sizeA}) "
             f"must match the size of tensor b ({sizeB}) "
             f"at non-singleton dimension {i})",
