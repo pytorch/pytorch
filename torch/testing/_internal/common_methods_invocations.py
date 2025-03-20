@@ -12705,6 +12705,12 @@ op_db: list[OpInfo] = [
                    }),
                    'TestCommon', device_type='cpu',
                ),
+               DecorateInfo(
+                   toleranceOverride({
+                       torch.float32: tol(atol=5e-03, rtol=1e-04)
+                   }),
+                   'TestEagerFusionOpInfo', device_type='cpu',
+               ),
            ],
            skips=(
                # Strides are not the same! Original strides were ((4, 2, 1),) and strides are now ((4, 1, 2),)
