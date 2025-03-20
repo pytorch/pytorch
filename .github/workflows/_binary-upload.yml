@@ -43,6 +43,10 @@ on:
         required: false
         type: string
         description: Desired libtorch variant (for libtorch builds only)
+      DESIRED_DEVTOOLSET:
+        required: false
+        type: string
+        description: Desired dev toolset
       DESIRED_PYTHON:
         required: false
         type: string
@@ -76,6 +80,7 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_CONFIG: ${{ inputs.LIBTORCH_CONFIG }}
       LIBTORCH_VARIANT: ${{ inputs.LIBTORCH_VARIANT }}
+      DESIRED_DEVTOOLSET: ${{ inputs.DESIRED_DEVTOOLSET }}
       DESIRED_PYTHON: ${{ inputs.DESIRED_PYTHON }}
       BINARY_ENV_FILE: /tmp/env
       GITHUB_TOKEN: ${{ secrets.github-token }}
