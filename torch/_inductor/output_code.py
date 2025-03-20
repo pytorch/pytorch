@@ -32,6 +32,7 @@ from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 from typing_extensions import TypeAlias
 
 import torch
+import torch._inductor.async_compile
 from torch._dynamo.utils import counters, get_runtime_metrics_context
 from torch._inductor.cudagraph_utils import (
     BoxedDeviceIndex,
@@ -62,6 +63,7 @@ if TYPE_CHECKING:
 
     from torch._inductor import metrics
     from torch._inductor.graph import GraphLowering
+    from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 
     from .compile_fx import _CompileFxKwargs
     from .triton_bundler import TritonKernelArtifacts
@@ -409,6 +411,7 @@ class CompiledFxGraph(OutputCode):
     fx_kwargs: _CompileFxKwargs
     inputs_to_check: Sequence[int]
     boxed_forward_device_index: Optional[BoxedDeviceIndex]
+    static_compiled_triton_kernels: Optional[dict[str, CachingAutotuner]]
 
     _boxed_call: Optional[bool] = None
     _triton_bundle: Optional[list[TritonKernelArtifacts]] = None
@@ -630,6 +633,17 @@ class CompiledFxGraph(OutputCode):
             PyCodeCache,
             write_atomic,
         )
+
+        with dynamo_timed("load_compiled_kernels"):
+            if static_compiled_triton_kernels := getattr(
+                self, "static_compiled_triton_kernels", None
+            ):
+                log.warning(
+                    "Loading %d triton kernels", len(static_compiled_triton_kernels)
+                )
+                torch._inductor.async_compile.CompiledTritonKernels._cache.update(
+                    static_compiled_triton_kernels
+                )
 
         # See _save_graph(); we don't store the callable in the cache entry so
         # recreate it here from the PyCodeCache disk cache.

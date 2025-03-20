@@ -51,7 +51,8 @@ const at::cuda::NVRTC& nvrtc() {
   return at::globalContext().getNVRTC();
 }
 
-#define MAX_ARGS 50
+// 120 max args + 1 for global scratch size
+#define MAX_ARGS 121
 
 CUdeviceptr getPointer(PyObject* obj) {
   CUdeviceptr data_ptr = 0;
@@ -105,7 +106,6 @@ CUfunction loadKernel(
   return func;
 }
 
-template <size_t NUM_ARGS>
 inline void launchKernel(
     CUfunction func,
     uint32_t gridX,
@@ -113,7 +113,7 @@ inline void launchKernel(
     uint32_t gridZ,
     uint32_t numWarps,
     uint32_t sharedMemBytes,
-    std::array<void*, NUM_ARGS>& args,
+    void** args,
     cudaStream_t stream) {
   // cta_args is always 1 for inductor generated triton kernels,
   // so we don't need to figure out grid dimension here
@@ -127,7 +127,7 @@ inline void launchKernel(
       1, // blockDim.z
       sharedMemBytes,
       stream,
-      args.data(),
+      args,
       nullptr));
 }
 
@@ -267,7 +267,36 @@ PyObject* launch_kernel_inner(
       gridZ,
       numWarps,
       sharedMemBytes,
-      kernelArgs,
+      kernelArgs.data(),
+      cudaStream);
+  Py_RETURN_NONE;
+}
+
+PyObject* launch_kernel_slow(
+    CUfunction func,
+    int gridX,
+    int gridY,
+    int gridZ,
+    int numWarps,
+    int sharedMemBytes,
+    const char* argTypes,
+    PyObject* varArgs,
+    cudaStream_t cudaStream) {
+  /* For the slow case, allocate memory on the stack instead of the heap */
+  size_t numArgs = std::strlen(argTypes);
+  std::vector<uint64_t> argStorage(numArgs);
+  std::vector<void*> kernelArgs(numArgs);
+
+  parseKernelArgs(varArgs, argTypes, argStorage.data(), kernelArgs.data());
+
+  launchKernel(
+      func,
+      gridX,
+      gridY,
+      gridZ,
+      numWarps,
+      sharedMemBytes,
+      kernelArgs.data(),
       cudaStream);
   Py_RETURN_NONE;
 }
@@ -297,9 +326,10 @@ PyObject* launch_kernel(PyObject* self, PyObject* args) {
   const char* argTypes = nullptr;
   PyObject* varArgs = nullptr;
   // Parse the fixed arguments and the format string
+  int slow_kernel_launch = 0;
   if (!PyArg_ParseTuple(
           args,
-          "KiiiiisOl",
+          "KiiiiisOlp",
           &func_ptr,
           &gridX,
           &gridY,
@@ -308,25 +338,52 @@ PyObject* launch_kernel(PyObject* self, PyObject* args) {
           &sharedMemBytes,
           &argTypes,
           &varArgs,
-          &stream)) {
+          &stream,
+          &slow_kernel_launch)) {
     return nullptr;
+  }
+  if (gridX * gridY * gridZ <= 0) {
+    // No need to do any work if we're outside of grid bounds
+    Py_RETURN_NONE;
   }
   CUfunction func = reinterpret_cast<CUfunction>(func_ptr); // NOLINT
   cudaStream_t cudaStream = reinterpret_cast<cudaStream_t>(stream); // NOLINT
   auto num_args = std::strlen(argTypes);
-  TORCH_CHECK(
-      num_args <= MAX_ARGS,
-      "Static Cuda Launcher only supports up to 50 arguments");
-  return launch_kernel_inner(
-      func,
-      gridX,
-      gridY,
-      gridZ,
-      numWarps,
-      sharedMemBytes,
-      argTypes,
-      varArgs,
-      cudaStream);
+  // Kernels with no arguments should just pass nullptr to cuLaunchKernel
+  if (num_args == 0) {
+    launchKernel(
+        func,
+        gridX,
+        gridY,
+        gridZ,
+        numWarps,
+        sharedMemBytes,
+        nullptr,
+        cudaStream);
+    Py_RETURN_NONE;
+  } else if (!slow_kernel_launch && num_args <= MAX_ARGS) {
+    return launch_kernel_inner(
+        func,
+        gridX,
+        gridY,
+        gridZ,
+        numWarps,
+        sharedMemBytes,
+        argTypes,
+        varArgs,
+        cudaStream);
+  } else {
+    return launch_kernel_slow(
+        func,
+        gridX,
+        gridY,
+        gridZ,
+        numWarps,
+        sharedMemBytes,
+        argTypes,
+        varArgs,
+        cudaStream);
+  }
 }
 
 std::array<PyMethodDef, 2> StaticCudaLauncherMethods = {
@@ -334,7 +391,7 @@ std::array<PyMethodDef, 2> StaticCudaLauncherMethods = {
         "_launch_kernel",
         (PyCFunction)launch_kernel,
         METH_VARARGS,
-        "Cuda Launcher with up to 50 args"},
+        "Cuda Launcher with up to 120 args"},
     PyMethodDef{
         "_load_kernel",
         (PyCFunction)load_kernel,
