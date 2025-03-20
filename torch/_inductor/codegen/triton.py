@@ -2081,9 +2081,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     continue
 
                 advancements = self.pointer_advancements[symt]
-                assert block_ptr not in advancements, (
-                    "duplicate advancement for pointer '{block_ptr}' at type '{symt}'"
-                )
+                assert (
+                    block_ptr not in advancements
+                ), "duplicate advancement for pointer '{block_ptr}' at type '{symt}'"
                 advancements[block_ptr] = advance_offsets
         else:
             block_ptr = indexing.format(var)
@@ -3163,9 +3163,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.filter_masks(masks)
         masks = sorted(masks)
         assert not self._load_mask, "ops.sort not supported inside ops.masked"
-        assert self.persistent_reduction, (
-            "ops.sort is only supported in persistent reductions"
-        )
+        assert (
+            self.persistent_reduction
+        ), "ops.sort is only supported in persistent reductions"
 
         cse_compute = functools.partial(self.cse.generate, self.compute)
         dim = self.triton_tensor_ndim() - self.num_reduction_dims
@@ -3457,6 +3457,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             "min_split_scan_rblock": config.triton.min_split_scan_rblock,
             "spill_threshold": config.triton.spill_threshold,
             "store_cubin": config.triton.store_cubin,
+            "fx_graph_cache_key": V.graph.fx_graph_cache_key,
         }
         if torch.version.hip is not None:
             inductor_meta["is_hip"] = True
@@ -4451,9 +4452,9 @@ def debug_triton_code(node: BaseSchedulerNode) -> list[str]:
         device = node.get_device()
         assert device is not None
         backend = node.scheduler.get_backend(device)
-        assert isinstance(backend, (SIMDScheduling, CUDACombinedScheduling)), (
-            f"Scheduling backend should be SIMD or CUDACombined when generating debug Triton strings, got: {type(backend)}"
-        )
+        assert isinstance(
+            backend, (SIMDScheduling, CUDACombinedScheduling)
+        ), f"Scheduling backend should be SIMD or CUDACombined when generating debug Triton strings, got: {type(backend)}"
 
         with V.graph.set_current_device(device):
             # Don't increment kernel count when generating debug string.

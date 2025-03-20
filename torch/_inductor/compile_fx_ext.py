@@ -11,7 +11,6 @@ import warnings
 from abc import abstractmethod
 from dataclasses import dataclass
 from typing import Any, Optional, TYPE_CHECKING, Union
-from typing_extensions import final, override, Self, TypeGuard
 
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 import torch.fx
@@ -25,6 +24,7 @@ from torch._inductor.output_code import (
 )
 from torch._subclasses import FakeTensorMode
 from torch.utils._ordered_set import OrderedSet
+from typing_extensions import final, override, Self, TypeGuard
 
 from . import config
 from .compile_fx import _CompileFxKwargs, _InProcessFxCompile, FxCompile, log
@@ -188,6 +188,7 @@ class _WireProtocolInput:
     gm: torch.fx.GraphModule
     example_inputs: Sequence[InputType]
     inputs_to_check: Sequence[int]
+    fx_graph_cache_key: Optional[str]
     graph_kwargs: _CompileFxKwargs
     tracing_context: Optional[torch._guards.TracingContext]
     config: dict[str, object]
@@ -403,17 +404,18 @@ class _SerializedFxCompile(FxCompile):
         gm: GraphModule,
         example_inputs: Sequence[InputType],
         inputs_to_check: Sequence[int],
+        fx_graph_cache_key: Optional[str],
         graph_kwargs: _CompileFxKwargs,
     ) -> OutputCode:
         # If this code changes it's likely _AsyncFxCompile.codegen_and_compile()
         # will also need to match.
 
         serialized = self.serialize_compile(
-            gm, example_inputs, inputs_to_check, graph_kwargs
+            gm, example_inputs, inputs_to_check, fx_graph_cache_key, graph_kwargs
         )
         if not serialized:
             return _InProcessFxCompile().codegen_and_compile(
-                gm, example_inputs, inputs_to_check, graph_kwargs
+                gm, example_inputs, inputs_to_check, fx_graph_cache_key, graph_kwargs
             )
 
         inputs, constants = serialized
@@ -432,6 +434,7 @@ class _SerializedFxCompile(FxCompile):
         gm: GraphModule,
         example_inputs: Sequence[InputType],
         inputs_to_check: Sequence[int],
+        fx_graph_cache_key: Optional[str],
         graph_kwargs: _CompileFxKwargs,
     ) -> Optional[tuple[_WireProtocolPickledInput, CompiledFxGraphConstantsWithGm]]:
         """
@@ -471,6 +474,7 @@ class _SerializedFxCompile(FxCompile):
                 gm,
                 example_inputs,
                 inputs_to_check,
+                fx_graph_cache_key,
                 graph_kwargs,
                 context,
                 config.save_config_portable(),
@@ -540,6 +544,7 @@ class _SerializedFxCompile(FxCompile):
                 input.gm,
                 input.example_inputs,
                 input.inputs_to_check,
+                input.fx_graph_cache_key,
                 input.graph_kwargs,
             )
 

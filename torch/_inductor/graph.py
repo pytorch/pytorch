@@ -138,9 +138,7 @@ else:
 def may_get_constant_buffer_dtype(constant_buffer: sympy.Expr) -> Optional[torch.dtype]:
     assert isinstance(
         constant_buffer, (sympy.Symbol, sympy.Expr, sympy.core.numbers.Integer)
-    ), (
-        "get_constant_buffer_dtype only supports input of sympy.Symbol, sympy.Expr or sympy.core.numbers.Integer"
-    )
+    ), "get_constant_buffer_dtype only supports input of sympy.Symbol, sympy.Expr or sympy.core.numbers.Integer"
     if isinstance(constant_buffer, sympy.core.numbers.Integer):
         return torch.int64
 
@@ -402,6 +400,7 @@ class GraphLowering(torch.fx.Interpreter):
         self._warned_fallback = OrderedSet(["aten.convolution_backward"])
         self.user_visible_output_strides = get_user_visible_output_strides(gm.graph)
         mark_nodes_dislike_padding(gm.graph, self.user_visible_output_strides)
+        self.fx_graph_cache_key: str = ""  # This is the cache key for the fx graph
         self.cache_key: str = ""  # This is the cache key for the compiled artifact
         self.cache_path: str = ""  # This is the path in the filesystem where the compiled artifact is stored
         self.cache_linemap: list[
@@ -1125,9 +1124,9 @@ class GraphLowering(torch.fx.Interpreter):
             return target(*args, **kwargs)
 
         if target not in lowerings:
-            assert isinstance(target, torch._ops.OpOverload), (
-                f"{target} is not an OpOverload"
-            )
+            assert isinstance(
+                target, torch._ops.OpOverload
+            ), f"{target} is not an OpOverload"
             base_name = target.name().split(".")[0]
             if base_name in FALLBACK_ALLOW_LIST:
                 make_fallback(target, warn=False, override_decomp=True)
@@ -1863,9 +1862,9 @@ class GraphLowering(torch.fx.Interpreter):
         wrapper_code_gen_cls = get_wrapper_codegen_for_device(
             self.device_type, self.cpp_wrapper
         )
-        assert wrapper_code_gen_cls is not None, (
-            f"Device {self.device_type} not supported"
-        )
+        assert (
+            wrapper_code_gen_cls is not None
+        ), f"Device {self.device_type} not supported"
         self.wrapper_code = wrapper_code_gen_cls.create(
             is_subgraph,
             subgraph_name,

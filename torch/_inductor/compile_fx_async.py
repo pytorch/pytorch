@@ -147,10 +147,11 @@ class _AsyncFxCompile(FxCompile):
         gm: GraphModule,
         example_inputs: Sequence[InputType],
         inputs_to_check: Sequence[int],
+        fx_graph_cache_key: Optional[str],
         graph_kwargs: _CompileFxKwargs,
     ) -> OutputCode:
         eager_output_code = _InProcessFxCompile().codegen_and_compile(
-            gm, example_inputs, inputs_to_check, graph_kwargs
+            gm, example_inputs, inputs_to_check, fx_graph_cache_key, graph_kwargs
         )
 
         # This is similar to _SerializedFxCompile.codegen_and_compile() but

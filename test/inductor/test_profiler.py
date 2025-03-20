@@ -280,6 +280,65 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
         for e in triton_events:
             check_triton_event(e)
 
+    @unittest.skipIf(not HAS_TRITON, "requires cuda & triton")
+    def test_pt2_triton_fx_graph_cache_key(self):
+        device = "cuda"
+        debug = False  # set to True to get output file
+
+        config.fx_graph_cache = False
+        config.fx_graph_remote_cache = True
+        config.bundle_triton_into_fx_graph_cache = True
+
+        @torchdynamo.optimize("inductor")
+        def fn(a, b, c):
+            x = torch.nn.functional.linear(a, b)
+            x = x + c
+            return x.cos()
+
+        a, b, c = (torch.randn(4, 4, requires_grad=True).to(device) for _ in range(3))
+
+        inputs = [a, b, c]
+        with config.patch(compile_threads=1):
+            fn(*inputs)
+
+        fp = tempfile.NamedTemporaryFile("w+t", suffix=".json", delete=not debug)
+        fp.close()
+
+        with torch.profiler.profile(
+            activities=torch.profiler.supported_activities(),
+            record_shapes=True,
+            schedule=torch.profiler.schedule(
+                skip_first=3, wait=1, warmup=1, active=2, repeat=1
+            ),
+        ) as prof:
+            for idx in range(10):
+                fn(*inputs)
+                prof.step()
+
+        prof.export_chrome_trace(fp.name)
+        print(f"Trace written to {fp.name}, set debug=True to retain file.")
+
+        triton_events = []
+        with open(fp.name) as f:
+            trace_json = json.load(f)
+            triton_events = [
+                event
+                for event in trace_json["traceEvents"]
+                if "kernel_backend" in event.get("args", {}).keys()
+            ]
+
+        print(triton_events)
+        self.assertEqual(len(triton_events), 2)
+
+        def check_triton_cache_key(e) -> None:
+            args = e.get("args", {})
+            self.assertNotEqual(args, {}, msg=f"event = {e}")
+
+            self.assertTrue("fx_graph_cache_key" in args, msg=f"event = {e}")
+
+        for e in triton_events:
+            check_triton_cache_key(e)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
