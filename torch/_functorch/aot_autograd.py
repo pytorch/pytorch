@@ -1666,15 +1666,17 @@ def _detect_attribute_assignment(mod: torch.nn.Module):
 
             if len(added_attrs) > 0:
                 raise ValueError(
-                    f"During export following attrs were created: {added_attrs} "
-                    f"Such attributes must be registered as buffers using the `register_buffer` API "
+                    f"During torch.export, following attrs were created in the model.forward: {added_attrs} "
+                    f"Such attributes must be registered as buffers using the `register_buffer` "
+                    f"API and must be initialized at model.__init__ "
                     f"(https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_buffer)."
                 )
 
             if len(deleted_attrs) > 0:
                 raise ValueError(
-                    f"During export following attrs were deleted: {deleted_attrs} "
-                    f"Such attributes must be registered as buffers using the `register_buffer` API "
+                    f"During torch.export, following attrs were deleted in the model.forward: {deleted_attrs} "
+                    f"Such attributes must be registered as buffers using the `register_buffer` "
+                    f"API and must be initialized at model.__init__ "
                     f"(https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_buffer)."
                 )
 
