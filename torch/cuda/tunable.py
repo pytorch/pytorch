@@ -534,9 +534,9 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
             else torch.full((m, k), fillA, dtype=dtypeA, device=deviceid)
         )
         matB = (
-            torch.full((n, k), fillB, dtype=dtypeB, device=deviceid)
+            torch.full((n, k), fillB, dtype=dtypeB, device=deviceid).t()
             if transA
-            else torch.full((k, n), fillB, dtype=dtypeB, device=deviceid).t()
+            else torch.full((k, n), fillB, dtype=dtypeB, device=deviceid)
         )
 
         assert untuned_gemm_temp[8] == "rw"
