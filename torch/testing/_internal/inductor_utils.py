@@ -15,8 +15,11 @@ from torch._inductor.graph import GraphLowering
 from torch._inductor.compile_fx import shape_env_from_inputs
 from torch._inductor.codecache import CppCodeCache
 from torch._inductor.utils import get_gpu_shared_memory, is_big_gpu
-from torch._inductor.utils import GPU_TYPES, get_gpu_type
+from torch._inductor.utils import GPU_TYPES, get_gpu_type, is_gpu
 from torch.utils._triton import has_triton
+from torch.testing._internal.common_device_type import (
+    get_desired_device_type_test_bases,
+)
 from torch.testing._internal.common_utils import (
     LazyVal,
     IS_FBCODE,
@@ -65,6 +68,17 @@ GPU_TYPE = get_gpu_type()
 HAS_MULTIGPU = any(
     getattr(torch, gpu).is_available() and getattr(torch, gpu).device_count() >= 2
     for gpu in GPU_TYPES
+)
+
+_desired_test_bases = get_desired_device_type_test_bases(allow_xpu=True)
+RUN_GPU = (
+    HAS_GPU
+    and any(is_gpu(getattr(x, "device_type", "")) for x in _desired_test_bases)
+)
+
+RUN_CPU = (
+    HAS_CPU
+    and any(getattr(x, "device_type", "") == "cpu" for x in _desired_test_bases)
 )
 
 def _check_has_dynamic_shape(
