@@ -8,6 +8,7 @@ This module defines runtime wrappers, which, based on previous analysis attempts
 """
 import builtins
 import collections
+import copy
 import itertools
 import pprint
 from contextlib import nullcontext
@@ -246,6 +247,14 @@ def make_output_handler(info, runtime_metadata, trace_joint):
     return handler_type(info, runtime_metadata, trace_joint)
 
 
+# not sure why AOTDispatcher needs to manually set this
+def maybe_mark_dynamic_helper(t: torch.Tensor, dims: set[int]):
+    if hasattr(t, "_dynamo_weak_dynamic_indices"):
+        t._dynamo_weak_dynamic_indices |= dims
+    else:
+        t._dynamo_weak_dynamic_indices = dims.copy()  # type: ignore[attr-defined]
+
+
 def _create_runtime_wrapper(
     compiled_fn,
     *,
@@ -431,10 +440,7 @@ def _create_runtime_wrapper(
             for t, o in zip(ret_outs, runtime_metadata.output_info):
                 if o.dynamic_dims is None:
                     continue
-                if hasattr(t, "_dynamo_weak_dynamic_indices"):
-                    t._dynamo_weak_dynamic_indices |= o.dynamic_dims
-                else:
-                    t._dynamo_weak_dynamic_indices = o.dynamic_dims.copy()
+                maybe_mark_dynamic_helper(t, o.dynamic_dims)
         if runtime_metadata.grad_enabled_mutation is not None:
             torch._C._set_grad_enabled(runtime_metadata.grad_enabled_mutation)
         return ret_outs
@@ -1458,6 +1464,13 @@ def merge_view_inputs(
         return args_to_functionalization, post_processed_calling_convention_meta
 
 
+# Note: [Backward graph lazy lowering]
+# After AOTDispatch traces the backward for graphs requiring autograd, we will lower the graph lazily,
+# unless we suspect that inductor might specialize and insert additional guards. When we do lazy
+# lowering, we stash the AOT backward graph (bw_module) in this class.
+#
+# Lowering passes are performed on a deepcopy of this bw_module due to compatbility
+# with compiled autograd. See: https://github.com/pytorch/pytorch/pull/149229#discussion_r2002122645.
 @dataclass
 class AutogradLazyBackwardCompileInfo:
     bw_module: Callable
@@ -1954,11 +1967,24 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 assert all(
                     isinstance(x, torch.Tensor) for x in tensors_saved_for_backwards
                 )
+
+                def mark_dynamic_activations(activations: list[torch.Tensor]):
+                    for (
+                        idx,
+                        dims,
+                    ) in (
+                        CompiledFunction.metadata.dynamic_tensors_saved_for_backward.items()
+                    ):
+                        maybe_mark_dynamic_helper(activations[idx], dims)
+                    return activations
+
                 # See Note [Detaching saved tensors in AOTAutograd]
                 ctx.save_for_backward(
-                    *(
-                        x.detach() if x._is_view() else x
-                        for x in tensors_saved_for_backwards
+                    *mark_dynamic_activations(
+                        [
+                            x.detach() if x._is_view() else x
+                            for x in tensors_saved_for_backwards
+                        ]
                     )
                 )
                 symint_outs = fw_outs[
@@ -2183,14 +2209,12 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         dynamo_compile_column_us="backward_cumulative_compile_time_us",
                     ):
                         CompileEventLogger.compilation_metric(is_forward=False)
+                        # See Note: [Backward graph lazy lowering]
                         CompiledFunction.compiled_bw = aot_config.bw_compiler(
-                            bw_module, placeholder_list
+                            copy.deepcopy(bw_module), placeholder_list
                         )
                         # Maybe save cache entry
                         if try_save_cache_entry is not None:
-                            # CompiledFunction.metadata
-                            # CompiledFunction.maybe_subclass_metadata
-                            # bw_module
                             try_save_cache_entry(
                                 CompiledFunction.compiled_bw,
                                 fw_metadata,
