@@ -187,7 +187,6 @@ S390X_BLOCKLIST = [
     "inductor/test_torchinductor_codegen_dynamic_shapes",
     "lazy/test_meta_kernel",
     "profiler/test_profiler",
-    "test_ao_sparsity",
     "test_cpp_extensions_open_device_registration",
     "test_jit",
     "test_metal",
