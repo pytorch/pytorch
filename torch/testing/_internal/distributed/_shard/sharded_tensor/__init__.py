@@ -20,7 +20,7 @@ class ShardedTensorTestBase(MultiProcessTestCase):
         return TEST_GPU_NUM
 
     def init_pg(self, backend="nccl"):
-        if backend not in ["nccl", "gloo", "mpi"]:
+        if backend not in ["nccl", "gloo", "mpi", "xccl"]:
             raise RuntimeError(f"Backend {backend} not supported!")
 
         dist.init_process_group(
@@ -31,8 +31,8 @@ class ShardedTensorTestBase(MultiProcessTestCase):
         )
 
         # set device for nccl pg for collectives
-        if backend == "nccl":
-            torch.cuda.set_device(self.rank)
+        if backend == "nccl" or backend == "xccl":
+            torch.accelerator.set_device_index(self.rank)
 
 
     def init_rpc(self):
