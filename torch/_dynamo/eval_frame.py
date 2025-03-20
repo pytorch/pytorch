@@ -635,6 +635,9 @@ class _TorchDynamoContext:
                         "a dynamo-optimized function. This is not supported at the moment."
                     )
 
+                if trace_rules.is_forbidden(fn):
+                    raise AssertionError(f"Attempt to trace forbidden callable {fn}")
+
                 cleanups = [enter() for enter in self.enter_exit_hooks]
                 prior_skip_guard_eval_unsafe = set_skip_guard_eval_unsafe(
                     _is_skip_guard_eval_unsafe_stance()
