@@ -46,7 +46,9 @@ function(parse_sycl_compiler_version version_number)
   set(${version_number} "${VERSION_NUMBER_MATCH}" PARENT_SCOPE)
 endfunction()
 
-parse_sycl_compiler_version(SYCL_COMPILER_VERSION)
+if(SYCL_COMPILER)
+  parse_sycl_compiler_version(SYCL_COMPILER_VERSION)
+endif()
 
 if(NOT SYCL_COMPILER_VERSION)
   set(SYCL_FOUND False)
