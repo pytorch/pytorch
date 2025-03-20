@@ -42,6 +42,7 @@ import weakref
 from pathlib import Path
 from types import CellType, CodeType, FunctionType, ModuleType
 from typing import Any, Callable, Optional, TypeVar, Union
+from typing_extensions import ParamSpec
 from weakref import ReferenceType
 
 import torch
@@ -70,9 +71,8 @@ from torch.utils._python_dispatch import (
     is_in_torch_dispatch_mode,
 )
 from torch.utils._traceback import CapturedTraceback, format_traceback_short
-from typing_extensions import ParamSpec
 
-from . import config, exc, external_utils, graph_break_hints, trace_rules
+from . import config, decorators, exc, external_utils, graph_break_hints, trace_rules
 from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
 from .bytecode_transformation import (
     check_inst_exn_tab_entries_valid,
@@ -138,6 +138,8 @@ from .utils import (
     is_namedtuple,
     istype,
     LazyString,
+    maybe_disable_inference_mode,
+    maybe_disable_inference_mode_for_fake_prop,
     orig_code_map,
     reset_graph_break_dup_checker,
     setup_compile_debug,
@@ -227,11 +229,16 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     def _fn(*args: _P.args, **kwargs: _P.kwargs) -> _T:
         guards = GlobalStateGuard()
         prior_grad_mode = torch.is_grad_enabled()
+
         # Just in case we get left in a bad dispatch state we want to restore
         # it. This can happen because the dispatch bits aren't a true
         # stack/counter - so we can't just increment/decrement them as we enter
         # and leave.
-        with torch._C._PreserveDispatchKeyGuard():
+        with (
+            torch._C._PreserveDispatchKeyGuard(),
+            maybe_disable_inference_mode(),
+            maybe_disable_inference_mode_for_fake_prop(),
+        ):
             prior_inference_mode = torch.is_inference_mode_enabled()
             prior_deterministic = torch.are_deterministic_algorithms_enabled()
             prior_warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
@@ -257,9 +264,9 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                 return fn(*args, **kwargs)
             finally:
                 cleanup.close()
-                assert (
-                    torch._C._len_torch_function_stack() == 0
-                ), "Torch function mode stack state changed while dynamo tracing, please report a bug"
+                assert torch._C._len_torch_function_stack() == 0, (
+                    "Torch function mode stack state changed while dynamo tracing, please report a bug"
+                )
                 exit_stack.close()
                 torch._C._set_grad_enabled(prior_grad_mode)
                 torch.autograd.grad_mode._enter_inference_mode(prior_inference_mode)
@@ -278,9 +285,9 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                     torch.cuda.set_rng_state(cuda_rng_state)
                 torch._C._set_cublas_allow_tf32(allow_tf32)
                 torch.fx.graph_module._forward_from_src = prior_fwd_from_src
-                assert (
-                    guards.check()
-                ), f"Global {guards.reason()}state changed while dynamo tracing, please report a bug"
+                assert guards.check(), (
+                    f"Global {guards.reason()}state changed while dynamo tracing, please report a bug"
+                )
 
     _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
     return _fn
@@ -552,6 +559,20 @@ class ConvertFrameAssert:
 
         if not has_tensor_in_frame(frame):
             return ConvertFrameReturn()
+
+        # skip tracing non-recursive disabled functions
+        # detect if the previous frame (non-convert_frame) is a non-recursive disable wrapper
+        prev_frame = sys._getframe()
+        while (
+            prev_frame
+            and "torch/_dynamo/convert_frame.py" in prev_frame.f_code.co_filename
+        ):
+            prev_frame = prev_frame.f_back  # type: ignore[assignment]
+        if (
+            prev_frame
+            and prev_frame.f_code is decorators._nonrecursive_disable_wrapper_code
+        ):
+            return ConvertFrameReturn(apply_to_code=False)
 
         global initial_global_state
         initial_global_state = GlobalStateGuard()
@@ -831,9 +852,9 @@ def _compile(
                     log.debug("No graph captured with one_graph=True")
                 return ConvertFrameReturn()
 
-        assert (
-            distributed_state is None or distributed_state.all_states is not None
-        ), "compiler collective wasn't run before compilation completed"
+        assert distributed_state is None or distributed_state.all_states is not None, (
+            "compiler collective wasn't run before compilation completed"
+        )
 
         assert out_code is not None
         log_bytecode(
@@ -1378,7 +1399,7 @@ class CatchErrorsWrapper:
             if f.f_code is external_utils._dont_skip_tracing_wrapper_code:
                 dont_skip_tracing = True
                 break
-        # necessary to prevent refleaks
+        # necessary to prevent refleaks since `frames` holds a reference to this current frame
         del frames
 
         is_skipfile = trace_rules.check(
@@ -1431,7 +1452,9 @@ class CatchErrorsWrapper:
                     )
                     assert hasattr(
                         self._torchdynamo_orig_callable, "_clone_with_backend"
-                    ), "DDPOptimizer only supports callback fns that know how to clone themselves."
+                    ), (
+                        "DDPOptimizer only supports callback fns that know how to clone themselves."
+                    )
                     hijacked_callback = (
                         self._torchdynamo_orig_callable._clone_with_backend(
                             ddp_optimizer.compile_fn,

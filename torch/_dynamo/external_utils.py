@@ -189,6 +189,17 @@ def call_module_hooks_from_backward_state(
     return result
 
 
+# used for torch._dynamo.disable(recursive=False)
+def get_nonrecursive_disable_wrapper(fn: Callable[..., Any]) -> Callable[..., Any]:
+    # wrap function to get the right error message
+    # this function is in external_utils so that convert_frame doesn't skip it.
+    @functools.wraps(fn)
+    def nonrecursive_disable_wrapper(*args, **kwargs):  # type: ignore[no-untyped-def]
+        return fn(*args, **kwargs)
+
+    return nonrecursive_disable_wrapper
+
+
 # skip type checking, otherwise, dynamo will trace into it.
 def dont_skip_tracing_decorator_wrapper(recursive):  # type: ignore[no-untyped-def]
     def decorator_wrapper(fn):  # type: ignore[no-untyped-def]

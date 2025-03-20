@@ -47,6 +47,7 @@ from torch._prims_common import (
 )
 from torch._subclasses.fake_tensor import get_schema_info
 from torch.fx.experimental.symbolic_shapes import (
+    _remove_effect_token_unbacked_bindings,
     compute_unbacked_bindings,
     free_unbacked_symbols,
     rebind_unbacked,
@@ -1473,6 +1474,7 @@ class Reduction(Loops):
                 reduction_type,
                 split,
                 reduction_hint,
+                input_node,
             )
 
         return TensorBox.create(
@@ -1545,6 +1547,38 @@ class Reduction(Loops):
         return reduction_hint
 
     @classmethod
+    def check_for_split_dense_dim_reindexing(
+        cls, reduction_numel: _IntLike, input_node: Optional[IRNode]
+    ) -> Optional[int]:
+        """
+        If we are reducing over the full tensor, and it is non-dense in the last dimension,
+        reindex so we reduce over the dense dimension. initially just handle complete
+        reduction case
+        """
+        if input_node is None:
+            return None
+
+        if not V.graph.sizevars.statically_known_equals(
+            input_node.get_numel(), reduction_numel
+        ):
+            return None
+
+        input_node.realize()
+        try:
+            # finalize layout
+            as_storage_and_layout(input_node)
+        except NotImplementedError:
+            return None
+
+        strides = input_node.get_stride()
+
+        for i, s in enumerate(strides[:-1]):
+            if V.graph.sizevars.statically_known_equals(s, 1):
+                return i
+
+        return None
+
+    @classmethod
     def _multilayer_wrap_loader(
         cls,
         loader: Callable[..., OpsValue],
@@ -1553,8 +1587,14 @@ class Reduction(Loops):
         split: _IntLike,
         block_size: _IntLike,
         default: Union[_NumLike, Sequence[_NumLike]],
+        input_node: Optional[IRNode] = None,
     ) -> Callable[..., object]:
-        reindex = View.dynamic_reshape_indexer(reduction_ranges, [reduction_numel])
+        dense_index = cls.check_for_split_dense_dim_reindexing(
+            reduction_numel, input_node
+        )
+        reindex = View.dynamic_reshape_indexer(
+            reduction_ranges, [reduction_numel], dense_index
+        )
         need_mask = not V.graph.sizevars.is_expr_static_and_true(
             sympy.Eq(reduction_numel % split, 0)
         )
@@ -1685,6 +1725,7 @@ class Reduction(Loops):
         reduction_type: ReductionType,
         split: _IntLike,
         reduction_hint: ReductionHint,
+        input_node: Optional[IRNode] = None,
     ) -> TensorBox:
         """
         Break a large reduction up into multiple smaller reductions
@@ -1695,7 +1736,13 @@ class Reduction(Loops):
         block_size = FloorDiv(reduction_numel + (split - 1), split)
         default = cls.default_value(reduction_type, dst_dtype)
         wrapper_fn = cls._multilayer_wrap_loader(
-            inner_fn, reduction_ranges, reduction_numel, split, block_size, default
+            inner_fn,
+            reduction_ranges,
+            reduction_numel,
+            split,
+            block_size,
+            default,
+            input_node,
         )
 
         return cls.create_multilayer_helper(
@@ -2896,9 +2943,14 @@ class View(GenericView):
         return old_size, new_size
 
     @classmethod
-    def dynamic_reshape_indexer(cls, old_size, new_size):  # type: ignore[no-untyped-def]
+    def dynamic_reshape_indexer(
+        cls,
+        old_size: Sequence[_IntLike],
+        new_size: Sequence[_IntLike],
+        dense_dim: Optional[int] = None,  # type: ignore[no-untyped-def]
+    ) -> Callable[[Sequence[_T]], Sequence[_V]]:
         try:
-            reindex = cls._dynamic_reshape_indexer(old_size, new_size)
+            reindex = cls._dynamic_reshape_indexer(old_size, new_size, dense_dim)
         except (AssertionError, IndexError):
             # optimistic algorithm failed, lets do a fallback
             flat = [sympy_product(old_size)]
@@ -2908,7 +2960,7 @@ class View(GenericView):
         return reindex
 
     @staticmethod
-    def _dynamic_reshape_indexer(old_size, new_size):  # type: ignore[no-untyped-def]
+    def _dynamic_reshape_indexer(old_size, new_size, dense_dim: Optional[int] = None):  # type: ignore[no-untyped-def]
         """
         Perform a reshape entirely by modifying indexing math
         """
@@ -2921,6 +2973,17 @@ class View(GenericView):
 
         stack_new = list(zip(vars, new_size))
         stack_old = list(old_size)
+
+        # process the dense dim first
+        reordering_dense_dim = (
+            dense_dim is not None
+            and dense_dim != len(stack_old) - 1
+            and len(new_size) == 1
+        )
+        if reordering_dense_dim:
+            assert dense_dim is not None  # mypy
+            old_dim = stack_old.pop(dense_dim)
+            stack_old.append(old_dim)
 
         view_expr = []
         while stack_new and stack_old:
@@ -2964,7 +3027,14 @@ class View(GenericView):
             var, size_new = stack_new.pop()
             V.graph.sizevars.guard_equals(size_new, 1)
 
-        view_expr.reverse()
+        if dense_dim is not None and len(new_size) == 1:
+            view_expr.reverse()
+            # Move the last expression (dense dim) to its original position
+            dense_expr = view_expr.pop()
+            view_expr.insert(dense_dim, dense_expr)
+        else:
+            view_expr.reverse()
+
         assert len(view_expr) == len(old_size)
 
         def reindex(index):  # type: ignore[no-untyped-def]
@@ -5116,9 +5186,17 @@ class ExternKernel(InputsKernel):
 
         unbacked_bindings: Optional[dict[sympy.Symbol, pytree.KeyPath]] = None
         if shape_env := V.fake_mode.shape_env:
-            rebind_unbacked(shape_env, V.current_node, example_output)
+            node_meta_val = V.current_node.meta.get("val")
+            ctx = nullcontext()
+            if V.current_node.target == torch._higher_order_ops.effects.with_effects:
+                # remove the first effect token in meta["val"] and meta["unbacked_bindings"]
+                node_meta_val = node_meta_val[1]
+                ctx = _remove_effect_token_unbacked_bindings(V.current_node)  # type: ignore[assignment]
+
+            with ctx:
+                rebind_unbacked(shape_env, V.current_node, example_output)
             unbacked_bindings = compute_unbacked_bindings(
-                shape_env, example_output, V.current_node.meta.get("val")
+                shape_env, example_output, node_meta_val
             )
 
         example_out_li = (
@@ -7502,6 +7580,8 @@ class WhileLoop(ExternKernel):
         carried_inputs: list[Union[TensorBox, ShapeAsConstantBuffer]],
         additional_inputs: list[Union[TensorBox, ShapeAsConstantBuffer]],
     ):
+        from torch._higher_order_ops.utils import check_input_alias_and_mutation
+
         def _require_exact_strides(
             tensor_boxes: list[TensorBox | ShapeAsConstantBuffer],
             fake_tensors: list[Union[int, torch.SymInt, torch.Tensor]],
@@ -7610,7 +7690,22 @@ class WhileLoop(ExternKernel):
             layout=MultiOutputLayout(device=device),
         )
 
-        outputs = [
+        assert body_fn.graph is not None and isinstance(
+            body_fn.graph.module, torch.fx.GraphModule
+        )  # to make linter happy
+
+        # Handling input mutations
+        mutated_idxs = check_input_alias_and_mutation(
+            body_fn.graph.module, fake_all_inputs
+        )[0]
+        mutated_idx_set = OrderedSet(mutated_idxs)
+        mutated_inputs = [all_inputs[idx] for idx in mutated_idx_set]
+        real_outputs = {
+            idx: out
+            for idx, out in enumerate(body_outputs)
+            if idx not in mutated_idx_set
+        }
+        real_outputs = [
             MultiOutput(
                 FixedLayout(
                     device=output.get_device(),
@@ -7620,12 +7715,23 @@ class WhileLoop(ExternKernel):
                     offset=output.get_layout().offset,
                 ),
                 while_loop,
-                [(list, i)],
+                [(list, idx)],
             )
-            for i, output in enumerate(body_outputs)
+            for idx, output in real_outputs.items()
+        ]
+        while_loop.outputs = real_outputs
+        while_loop.mutation_outputs = [
+            MutationOutput(inp.layout, inp, while_loop)  # type: ignore[union-attr]
+            for inp in mutated_inputs
         ]
 
-        for inp, out in zip(carried_inputs, outputs):
+        outputs_iter = iter(real_outputs)
+        mutated_inputs_iter = iter(mutated_inputs)
+        all_outputs = [
+            next(mutated_inputs_iter) if idx in mutated_idx_set else next(outputs_iter)
+            for idx in range(len(body_outputs))
+        ]
+        for inp, out in zip(carried_inputs, all_outputs):
             if inp.get_name() in V.graph.graph_inputs:
                 # if a carried input of the while_loop is a graph input,
                 # it can be returned as is when the number of iterations
@@ -7633,9 +7739,7 @@ class WhileLoop(ExternKernel):
                 # output buffers corresponding to the graph inputs, as
                 # the inputs may end up being mutated.
                 V.graph.never_reuse_buffers.add(out.get_name())
-
-        while_loop.outputs = outputs
-        return outputs
+        return all_outputs
 
     def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         wrapper.codegen_while_loop(self)
