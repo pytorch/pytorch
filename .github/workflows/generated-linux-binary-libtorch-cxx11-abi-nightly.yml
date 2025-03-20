@@ -57,6 +57,7 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu-main
       LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: libtorch-cpu-shared-with-deps-cxx11-abi
       build_environment: linux-binary-libtorch-cxx11-abi
@@ -77,6 +78,7 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu-main
       LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cpu-shared-with-deps-cxx11-abi
       build_environment: linux-binary-libtorch-cxx11-abi
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -98,6 +100,7 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu-main
       LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cpu-shared-with-deps-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -117,6 +120,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.8-main
       LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: libtorch-cuda11_8-shared-with-deps-cxx11-abi
       build_environment: linux-binary-libtorch-cxx11-abi
@@ -138,6 +142,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.8-main
       LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cuda11_8-shared-with-deps-cxx11-abi
       build_environment: linux-binary-libtorch-cxx11-abi
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -160,6 +165,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.8-main
       LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cuda11_8-shared-with-deps-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -179,6 +185,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.6-main
       LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: libtorch-cuda12_6-shared-with-deps-cxx11-abi
       build_environment: linux-binary-libtorch-cxx11-abi
@@ -200,6 +207,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.6-main
       LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cuda12_6-shared-with-deps-cxx11-abi
       build_environment: linux-binary-libtorch-cxx11-abi
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -222,6 +230,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.6-main
       LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cuda12_6-shared-with-deps-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -241,6 +250,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.8-main
       LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: libtorch-cuda12_8-shared-with-deps-cxx11-abi
       build_environment: linux-binary-libtorch-cxx11-abi
@@ -262,6 +272,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.8-main
       LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cuda12_8-shared-with-deps-cxx11-abi
       build_environment: linux-binary-libtorch-cxx11-abi
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -284,6 +295,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.8-main
       LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cuda12_8-shared-with-deps-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -303,6 +315,7 @@ jobs:
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm6.2.4-main
       LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: libtorch-rocm6_2_4-shared-with-deps-cxx11-abi
       build_environment: linux-binary-libtorch-cxx11-abi
@@ -326,6 +339,7 @@ jobs:
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm6.2.4-main
       LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
@@ -373,6 +387,7 @@ jobs:
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm6.2.4-main
       LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-rocm6_2_4-shared-with-deps-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -392,6 +407,7 @@ jobs:
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm6.3-main
       LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: libtorch-rocm6_3-shared-with-deps-cxx11-abi
       build_environment: linux-binary-libtorch-cxx11-abi
@@ -415,6 +431,7 @@ jobs:
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm6.3-main
       LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
@@ -462,6 +479,7 @@ jobs:
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm6.3-main
       LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-rocm6_3-shared-with-deps-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
