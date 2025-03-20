@@ -80,17 +80,25 @@ class ContextWrappingVariable(VariableTracker):
         "cm_obj",
         "target_values",
         "initial_values",
-        "state",
+        "cleanup_fn",
+        "proxy",
         *VariableTracker._nonvar_fields,
     }
 
     def __init__(
-        self, target_values, initial_values=None, *, state=None, **kwargs
+        self,
+        target_values,
+        initial_values=None,
+        *,
+        cleanup_fn=None,
+        proxy=None,
+        **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         self.target_values = target_values
         self.initial_values = initial_values
-        self.state = ContextManagerState() if state is None else state
+        self.cleanup_fn = cleanup_fn
+        self.proxy = proxy
 
     def enter(self, tx):
         self._call_func(tx, self.target_values)
@@ -103,11 +111,20 @@ class ContextWrappingVariable(VariableTracker):
             def fn():
                 self._call_func(tx, self.initial_values)
 
-        self.state.cleanup_fn = fn
-        tx.output.add_cleanup_hook(self.state.cleanup)
+        self.cleanup_fn = fn
+        tx.output.add_cleanup_hook(self.cleanup)
+
+    def cleanup(self):
+        if self.cleanup_fn is not None:
+            self.cleanup_fn()
+            self.cleanup_fn = None
+
+    def cleanup_assert(self):
+        assert self.cleanup_fn, "multiple exits?"
+        self.cleanup()
 
     def exit(self, tx: "InstructionTranslator", *args):
-        self.state.cleanup_assert()
+        self.cleanup_assert()
         return variables.ConstantVariable.create(None)
 
     def reconstruct_type(self, codegen):
@@ -217,7 +234,7 @@ class GradInplaceRequiresGradCtxManagerVariable(ContextWrappingVariable):
                 self.prev_state
             ),
         )
-        self.state.proxy = tx.output.create_node(
+        self.proxy = tx.output.create_node(
             "call_function",
             torch._C._functorch.set_inplace_requires_grad_allowed,
             (enabled,),
@@ -226,7 +243,7 @@ class GradInplaceRequiresGradCtxManagerVariable(ContextWrappingVariable):
         return variables.ConstantVariable.create(None)
 
     def exit(self, tx: "InstructionTranslator", *args):
-        self.state.cleanup()
+        self.cleanup()
         tx.output.create_node(
             "call_function",
             torch._C._functorch.set_inplace_requires_grad_allowed,
@@ -253,7 +270,7 @@ class TemporarilyPopInterpreterStackCtxManagerVariable(ContextWrappingVariable):
             tx,
             lambda: torch._C._functorch.push_dynamic_layer_stack(self.saved),
         )
-        self.state.proxy = tx.output.create_node(
+        self.proxy = tx.output.create_node(
             "call_function",
             torch._C._functorch.pop_dynamic_layer_stack,
             (),
@@ -262,11 +279,11 @@ class TemporarilyPopInterpreterStackCtxManagerVariable(ContextWrappingVariable):
         return variables.ConstantVariable.create(None)
 
     def exit(self, tx: "InstructionTranslator", *args):
-        self.state.cleanup()
+        self.cleanup()
         tx.output.create_node(
             "call_function",
             torch._C._functorch.push_dynamic_layer_stack,
-            (self.state.proxy,),
+            (self.proxy,),
             {},
         )
         return variables.ConstantVariable.create(None)
@@ -297,7 +314,7 @@ class JvpIncrementNestingCtxManagerVariable(ContextWrappingVariable):
         self.set_cleanup_hook(
             tx, lambda: torch._functorch.eager_transforms.exit_jvp_nesting()
         )
-        self.state.proxy = tx.output.create_node(
+        self.proxy = tx.output.create_node(
             "call_function",
             torch._C._functorch._jvp_increment_nesting,
             (),
@@ -306,7 +323,7 @@ class JvpIncrementNestingCtxManagerVariable(ContextWrappingVariable):
         return variables.ConstantVariable.create(jvp_level)
 
     def exit(self, tx: "InstructionTranslator", *args):
-        self.state.cleanup()
+        self.cleanup()
         tx.output.create_node(
             "call_function", torch._C._functorch._jvp_decrement_nesting, (), {}
         )
@@ -332,7 +349,7 @@ class SetFwdGradEnabledContextManager(ContextWrappingVariable):
             tx,
             lambda: torch._C._set_fwd_grad_enabled(self.prev_state),
         )
-        self.state.proxy = tx.output.create_node(
+        self.proxy = tx.output.create_node(
             "call_function",
             torch._C._set_fwd_grad_enabled,
             (mode,),
@@ -341,7 +358,7 @@ class SetFwdGradEnabledContextManager(ContextWrappingVariable):
         return variables.ConstantVariable.create(None)
 
     def exit(self, tx: "InstructionTranslator", *args):
-        self.state.cleanup()
+        self.cleanup()
         tx.output.create_node(
             "call_function",
             torch._C._set_fwd_grad_enabled,
@@ -370,7 +387,7 @@ class DualLevelContextManager(ContextWrappingVariable):
         self.set_cleanup_hook(
             tx, lambda: torch.autograd.forward_ad.exit_dual_level(level=self.new_level)
         )
-        self.state.proxy = tx.output.create_node(
+        self.proxy = tx.output.create_node(
             "call_function",
             torch._C._enter_dual_level,
             (),
@@ -379,7 +396,7 @@ class DualLevelContextManager(ContextWrappingVariable):
         return variables.ConstantVariable.create(self.new_level)
 
     def exit(self, tx: "InstructionTranslator", *args):
-        self.state.cleanup()
+        self.cleanup()
         tx.output.create_node(
             "call_function",
             torch._C._exit_dual_level,
@@ -412,7 +429,7 @@ class GradIncrementNestingCtxManagerVariable(ContextWrappingVariable):
         install_guard(self._guards_singleton)
         grad_level = torch._C._functorch._grad_increment_nesting()
         self.set_cleanup_hook(tx, lambda: torch._C._functorch._grad_decrement_nesting())
-        self.state.proxy = tx.output.create_node(
+        self.proxy = tx.output.create_node(
             "call_function",
             torch._C._functorch._grad_increment_nesting,
             (),
@@ -421,7 +438,7 @@ class GradIncrementNestingCtxManagerVariable(ContextWrappingVariable):
         return variables.ConstantVariable.create(grad_level)
 
     def exit(self, tx: "InstructionTranslator", *args):
-        self.state.cleanup()
+        self.cleanup()
         tx.output.create_node(
             "call_function", torch._C._functorch._grad_decrement_nesting, (), {}
         )
@@ -492,7 +509,7 @@ class VmapIncrementNestingCtxManagerVariable(ContextWrappingVariable):
             batch_size_value, randomness
         )
         self.set_cleanup_hook(tx, lambda: torch._C._functorch._vmap_decrement_nesting())
-        self.state.proxy = tx.output.create_node(
+        self.proxy = tx.output.create_node(
             "call_function",
             torch._C._functorch._vmap_increment_nesting,
             (batch_size_node, randomness),
@@ -501,7 +518,7 @@ class VmapIncrementNestingCtxManagerVariable(ContextWrappingVariable):
         return variables.ConstantVariable.create(vmap_level)
 
     def exit(self, tx: "InstructionTranslator", *args):
-        self.state.cleanup()
+        self.cleanup()
         tx.output.create_node(
             "call_function", torch._C._functorch._vmap_decrement_nesting, (), {}
         )
@@ -589,11 +606,11 @@ class InferenceModeVariable(ContextWrappingVariable):
         self.target_values = target_values
 
     def exit(self, tx: "InstructionTranslator", *args):
-        self.state.cleanup_assert()
+        self.cleanup_assert()
         tx.output.create_node(
             "call_function",
             torch.autograd.grad_mode._exit_inference_mode,
-            (self.state.proxy,),
+            (self.proxy,),
             {},
         )
 
@@ -619,7 +636,7 @@ class InferenceModeVariable(ContextWrappingVariable):
                 torch.autograd.grad_mode._exit_inference_mode(ctx)
 
         self.set_cleanup_hook(tx, cleanup_hook)
-        self.state.proxy = tx.output.create_node(
+        self.proxy = tx.output.create_node(
             "call_function",
             torch.autograd.grad_mode._enter_inference_mode,
             (*self.target_values,),
@@ -657,11 +674,11 @@ class CUDADeviceVariable(ContextWrappingVariable):
         self.target_values = target_values
 
     def exit(self, tx: "InstructionTranslator", *args):
-        self.state.cleanup_assert()
+        self.cleanup_assert()
         tx.output.create_node(
             "call_function",
             torch.cuda._maybe_exchange_device,
-            (self.state.proxy,),
+            (self.proxy,),
             {},
         )
         return variables.ConstantVariable.create(False)
@@ -669,7 +686,7 @@ class CUDADeviceVariable(ContextWrappingVariable):
     def enter(self, tx):
         prev_idx = torch.cuda._exchange_device(*self.target_values)
         self.set_cleanup_hook(tx, lambda: torch.cuda._maybe_exchange_device(prev_idx))
-        self.state.proxy = tx.output.create_node(
+        self.proxy = tx.output.create_node(
             "call_function",
             torch.cuda._exchange_device,
             (*self.target_values,),
@@ -852,15 +869,15 @@ class AutocastModeVariable(ContextWrappingVariable):
         self.target_values = target_values
 
     def exit(self, tx: "InstructionTranslator", *args):
-        self.state.cleanup_assert()
+        self.cleanup_assert()
         tx.output.create_node(
-            "call_function", torch.amp._exit_autocast, (self.state.proxy,), {}
+            "call_function", torch.amp._exit_autocast, (self.proxy,), {}
         )
 
     def enter(self, tx):
         ctx = torch.amp._enter_autocast(*self.target_values)
         self.set_cleanup_hook(tx, lambda: torch.amp._exit_autocast(ctx))
-        self.state.proxy = tx.output.create_node(
+        self.proxy = tx.output.create_node(
             "call_function", torch.amp._enter_autocast, (*self.target_values,), {}
         )
 
@@ -988,7 +1005,7 @@ class StreamContextVariable(ContextWrappingVariable):
             (self.initial_values[0].as_proxy(),),
             {},
         )
-        self.state.cleanup_assert()
+        self.cleanup_assert()
 
 
 class PreserveVersionContextVariable(ContextWrappingVariable):
@@ -1179,7 +1196,7 @@ class SDPAKernelVariable(ContextWrappingVariable):
         return variables.ConstantVariable.create(None)
 
     def exit(self, tx: "InstructionTranslator", *args):
-        self.state.cleanup_assert()
+        self.cleanup_assert()
         arg = self._backends_to_nodes(tx, self.prev_backends)
         tx.output.create_node(
             "call_function",
