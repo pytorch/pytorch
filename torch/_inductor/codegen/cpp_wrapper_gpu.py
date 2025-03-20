@@ -110,7 +110,11 @@ class DeferredTritonCallWrapper:
                     prefix.writeline(f"bool {name},")
                 else:
                     raise ValueError(f"Unexpected arg type {arg_type}")
-            prefix.writeline(f"{wrapper.device_codegen.cpp_stream_type()} stream_,")
+            prefix.writeline(
+                maybe_hipify_code_wrapper(
+                    f"{wrapper.device_codegen.cpp_stream_type()} stream_,"
+                )
+            )
             if V.graph.aot_mode:
                 prefix.writeline("kernels_type_& kernels_,")
             prefix.writeline(

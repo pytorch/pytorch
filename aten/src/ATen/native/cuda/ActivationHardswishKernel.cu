@@ -45,9 +45,9 @@ void hardswish_backward_kernel(TensorIterator& iter) {
       [zero, three, neg_three, one_half]GPU_LAMBDA(scalar_t grad_val_, scalar_t self_val_) -> scalar_t {
         opmath_t grad_val = static_cast<opmath_t>(grad_val_);
         opmath_t self_val = static_cast<opmath_t>(self_val_);
-        if (self_val < neg_three) {
+        if (self_val <= neg_three) {
           return zero;
-        } else if (self_val <= three) {
+        } else if (self_val < three) {
           return grad_val * ((self_val / three) + one_half);
         } else {
           return grad_val;
