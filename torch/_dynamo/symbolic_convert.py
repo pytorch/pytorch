@@ -4146,7 +4146,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
 
             # The iterator is exhausted. Stop the loop and return.
             self.pop()
-            self.push(ConstantVariable.create(ex.value))
+            self.push(ex.value or ConstantVariable.create(ex.value))
         else:
             # Repeat the YIELD_FROM instruction in the next eval loop
             assert (
