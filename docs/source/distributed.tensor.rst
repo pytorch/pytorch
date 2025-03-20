@@ -145,6 +145,47 @@ specifying the :class:`DeviceMesh` and :class:`Placement` for the :class:`DTenso
 
 .. autofunction:: randn
 
+DTensor Semantics
+------------------
+
+Uneven Sharding
+^^^^^^^^^^^^^^^
+DTensors can only represent a subset of all possible sharding configurations.
+
+A sharding for a tensor dimension T over a mesh dimension M is legal if it satisfies the following conditions:
+- If M evenly divides T, the sharding shall be 'even' (local shards will have the same size T/M on each rank)
+- Otheriwse, following torch.chunk semantics, mesh-dim-local ranks 0..M-2 will get chunks of size T/M, and rank M-1 will
+  get the remainder.
+
+This condition is not always explicitly enforced today, but we should improve this and give clear / informative errors.
+
+The motivation for a restricted set of legal shardings is to simplify the design of DTensor and Distributed
+Checkpointing.  For example:
+- given 2 DTensors with Shard(0) placement, currently during dispatch/propagation we can simply assume the local_tensor
+  backing the DTensor follows this legality principle and we only have to ensure the sharding and global DTensor shape
+  are compatible before dispatching the local_tensor to an ATen op.
+- Given a distributed checkpoint file on disk, it should be possible to assume from global metadata which part of the
+  tensor is contained in which file, but global metadata only includes global tensor shape, mesh shape, and sharding
+  configuration.
+
+Note: Illegal shardings can be created inadvertently.  Consider the following example:
+
+::
+
+  mesh = init_device_mesh("cuda", [4], mesh_dim_names=["tp"])  # 4-GPUs 1-D mesh
+  x=torch.randn((6,256),dtype=torch.float32,device="cuda")
+  d_x = DTensor.from_local(x, device_mesh=new_mesh, placements=[Replicate()])
+  d_x_shard = d_x.redistribute(device_mesh=new_mesh, placements=[Shard(dim=0)])
+  d_x_shard_view = d_x_shard.view(-1)
+
+d_x_shard_view could be implemented in one of two ways: (1) it retains local tensors of shape (512,) on 3 ranks and an
+empty shard on the last rank, (2) a redistribution occurs and leaves even shards of (384,) on each rank.
+
+We choose to error here, becuase (1) violates legal sharding, since 512*3 is divisible by, requiring the sharding to be
+(384,) * 4 instead, while (2) requires an implicit redistribution (expensive communication) which violates the
+assumption that view operations are lightweight as in regular pytorch.
+"""
+
 
 Debugging
 ---------------------------------------
