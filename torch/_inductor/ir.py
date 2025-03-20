@@ -2515,9 +2515,12 @@ def is_stride_order_storage_and_layout(
 
 
 @ir_dataclass
-class BaseView(IRNode):
+class HasData(IRNode):
     data: IRNode
 
+
+@ir_dataclass
+class BaseView(HasData):
     def get_unbacked_symbol_uses(self) -> OrderedSet[Symbol]:
         return self.data.get_unbacked_symbol_uses()
 
@@ -6959,13 +6962,10 @@ class MultiOutput(ExternKernel):
 # We just use a normal dataclass for MutableBox/TensorBox/StorageBox since
 # they're mainly lowering-time constructs that we expect to mutate and such.
 @dataclasses.dataclass
-class MutableBox(IRNode):
+class MutableBox(HasData):
     """
     TensorBox / StorageBox allow in-place mutation of Tensors
     """
-
-    data: IRNode
-
     def has_exceeded_max_reads(self) -> bool:
         return self.data.has_exceeded_max_reads()
 
