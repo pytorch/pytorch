@@ -1063,7 +1063,7 @@ class TritonTemplate(KernelTemplate):
         self.debug = debug
 
     def generate_and_load(
-        self, kernel_options, kernel_name, fake_out, workspace_arg, layout, input_nodes
+        self, kernel_options, kernel_name, fake_out, workspace_arg, layout
     ):
         """Generate the python code and load it into the current process"""
         kwargs = kernel_options["meta"]
@@ -1191,9 +1191,10 @@ class TritonTemplate(KernelTemplate):
             args_sizevars_keys,
             prologue_supported_inputs,
         ) = self.generate_and_load(
-            kernel_options, kernel_name, fake_out, workspace_arg, layout, input_nodes
+            kernel_options, kernel_name, fake_out, workspace_arg, layout
         )
 
+        expected_input_args = tuple(unique(x.get_name() for x in input_nodes))
         # We expect the input_buffer order to be [*input_nodes, *captured_buffers]
         assert input_call_args[: len(expected_input_args)] == expected_input_args, (
             input_call_args,
