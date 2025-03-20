@@ -1059,7 +1059,6 @@ class GeneratedModulesCacheEntry(NamedTuple):
     args_sizevars_keys: tuple[sympy.Expr, ...]
 
 
-@clear_on_fresh_inductor_cache
 class GeneratedModulesCache(dict[str, GeneratedModulesCacheEntry]):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -1079,7 +1078,8 @@ class TritonTemplate(KernelTemplate):
         assert name not in self.all_templates, "duplicate template name"
         TritonTemplate.all_templates[name] = self
         self.debug = debug
-        self._generated_module_cache: GeneratedModulesCache = {}
+        self._generated_module_cache: GeneratedModulesCache = GeneratedModulesCache()
+        clear_on_fresh_inductor_cache(self._generated_module_cache)
 
     # Those class fields used for testing _generated_module_cache.
     # When this flag is on, we ensure that the cached results and the generated result if cache
@@ -1104,6 +1104,15 @@ class TritonTemplate(KernelTemplate):
         """Generate the python code and load it into the current process"""
         cache_key = None
 
+        # Each input name is mapped to an index, for example for inputs (x, y, x) we generate 
+        # x->0, y->1, x->2 . We also generate the inverse mapping 2->x, 1->y.
+
+        # After running the codegen, for the outputs (kernel.args.input_buffers.keys()) and 
+        # if we do cache the result we cache the indices of the inputs instrea. 
+        # for example if kernel.args.input_buffers.keys() was (x, y, x) we would cache (2, 1, 2).
+
+        # if this is called again and we get a cache hit with another inputs (m, h, m) then we can 
+        # use that indexing to regenerate the kernel.args.input_buffers.keys() it would be (m, h, m).
         input_name_to_index: dict[str, int] = {
             value.get_name(): index for index, value in enumerate(input_nodes)
         }
@@ -1147,6 +1156,7 @@ class TritonTemplate(KernelTemplate):
             )
 
             print(cache_key)
+            
         assert self.template, "requires jinja2"
         defines = StringIO()
 
