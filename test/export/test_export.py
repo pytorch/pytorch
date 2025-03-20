@@ -10939,6 +10939,123 @@ def forward(self, x):
         self.assertEqual(div_spec.arg.name, "div")
         self.assertEqual(div_spec.arg.value, "floor")
 
+    def test_loss_of_sizelikeness(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                u0 = x.item()
+                y = torch.empty(u0, 4)
+                return y[:-1] + y[1:]
+
+        inps = (torch.tensor(5),)
+        ep = export(Foo(), inps)
+        ep.module()(*inps)
+        ep.module()(torch.tensor(8))
+        ep.module()(torch.tensor(1))
+
+    def test_issue_125519(self):
+        @torch.compile(fullgraph=True, dynamic=True)
+        def f(x, y):
+            return torch.functional.split(x.clone(), y.tolist(), dim=1)
+
+        with torch._dynamo.config.patch(capture_scalar_outputs = True):
+            f(torch.randn(80, 100), torch.tensor([20, 40, 40]))
+            f(torch.randn(80, 100), torch.tensor([100]))
+
+    def test_issue_120288_c1(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, x, y):
+                # small
+                A1 = x[0].item()
+                A2 = x[1].item()
+                # large
+                B1 = y[0].item()
+                B2 = y[1].item()
+
+                torch._check(A1 >= 0)
+                torch._check(A2 >= 0)
+                torch._check(B1 >= 0)
+                torch._check(B2 >= 0)
+
+                torch._check(B1 >= A1)
+                torch._check(B2 >= A2)
+
+                small = torch.ones(A1, A2)
+                large = torch.zeros(B1, B2)
+                large_resized = large.narrow(0, 0, A1).narrow(1, 0, A2)
+                large_resized.copy_(small)
+                return large
+
+        m = MyModule()
+        example_inputs = (torch.tensor([4, 4]), torch.tensor([6, 6]))
+        ep = export(m, example_inputs)
+        ep.module()(*example_inputs)
+        ep.module()(torch.tensor([5, 5]), torch.tensor([7, 7]))
+        ep.module()(torch.tensor([1, 1]), torch.tensor([8, 8]))
+        ep.module()(torch.tensor([1, 1]), torch.tensor([1, 1]))
+
+    def test_issue_120288_c2(self):
+        class TestModel(torch.nn.Module):
+            def __init__(self, max_num_tiles):
+                super().__init__()
+                self.max_num_tiles = max_num_tiles
+                scale = 32**-0.5
+                self.embedding = torch.nn.Parameter(
+                    scale * torch.randn(max_num_tiles, max_num_tiles, 1, 32)
+                )
+                self.gate = torch.nn.Parameter(torch.zeros(1))
+
+            def forward(self, x, y):
+                n_tiles_h, n_tiles_w = y[0]
+                n_tiles_h = n_tiles_h.item()
+                n_tiles_w = n_tiles_w.item()
+                torch._check_is_size(n_tiles_h)
+                torch._check_is_size(n_tiles_w)
+                torch._check(n_tiles_h < self.max_num_tiles, "n_tiles_h")
+                torch._check(n_tiles_w < self.max_num_tiles, "n_tiles_w")
+                pos_embed = self.embedding[:n_tiles_h, :n_tiles_w, :, :]
+                n_non_padded_tiles = n_tiles_h * n_tiles_w
+                pos_embed = pos_embed.clone()
+                pos_embed = pos_embed.reshape(n_non_padded_tiles, 1, 32)
+                x[0, :n_non_padded_tiles] += pos_embed * self.gate.tanh()
+                return x
+
+        test_model = TestModel(4)
+        test_model.eval()
+        image = torch.ones([1, 4, 1, 32])
+        aspect_ratio = torch.tensor([[1, 3]])
+        test_model(image, aspect_ratio)
+        ep = export(test_model, (image, aspect_ratio))
+        ep.module()(image, aspect_ratio)
+
+    def test_issue_120288_c5(self):
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, cache, update, pos):
+                _, _, max_seq_len, _ = cache.shape
+                _, _, seqlen, _ = update.shape
+
+                pos_item = pos[0].item()
+                before = cache.narrow(2, 0, pos_item)
+                after = cache.narrow(2, (pos_item + seqlen), (max_seq_len - pos_item - seqlen))
+                return torch.cat([before, update, after], dim=2)
+
+        repro = Repro()
+        bsz = 1
+        n_heads = 4
+        max_seq_len = 512
+        head_dim = 64
+        seqlen = 5
+        pos_item = 1
+
+        cache = torch.zeros(bsz, n_heads, max_seq_len, head_dim)
+        update = torch.ones(bsz, n_heads, seqlen, head_dim)
+        pos = torch.tensor([pos_item])
+        example_inputs = (cache, update, pos)
+        ep = export(repro, example_inputs)
+        ep.module()(*example_inputs)
+
     def test_unbacked_deferred_runtime_retrace(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):

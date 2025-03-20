@@ -222,8 +222,8 @@ inline Tensor applySlice(
         ? (*self_sizes)[dim]
         : self.sym_size(dim);
     if (!disable_slice_optimization &&
-        TORCH_GUARD_SIZE_OBLIVIOUS(start.sym_eq(0)) &&
-        TORCH_GUARD_SIZE_OBLIVIOUS(length.sym_eq(stop)) && step == 1) {
+        TORCH_GUARD_SEMANTICS(start.sym_eq(0)) &&
+        TORCH_GUARD_SEMANTICS(length.sym_eq(stop)) && step == 1) {
       return self;
     }
   }

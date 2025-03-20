@@ -592,6 +592,11 @@ class SymNode:
             log.warning("Failed to convert to bool: %s", r)
             raise
 
+    def guard_semantics(self, file, line):
+        from torch.fx.experimental.symbolic_shapes import _guard_semantics
+
+        return _guard_semantics(SymBool(self))
+
     def bool_(self):
         return self.guard_bool("", 0)
 
