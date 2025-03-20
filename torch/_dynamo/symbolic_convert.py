@@ -3289,6 +3289,8 @@ class InstructionTranslatorBase(
         )
         linecache.lazycache(f_code.co_filename, f_globals)
 
+        # are we currently in a dont_skip_tracing decorator?
+        # (also updated in superclass init methods)
         self.dont_skip_tracing = (
             f_code is external_utils._dont_skip_tracing_wrapper_code
         )
@@ -3465,7 +3467,8 @@ class InstructionTranslator(InstructionTranslatorBase):
                 )
 
             if not self.dont_skip_tracing:
-                for frame in exc.get_real_frames_above_dynamo():
+                # we are tracing the top-level frame, so see if any frames above are dont_skip_tracing frames
+                for frame in exc.get_real_frames():
                     if frame.f_code is external_utils._dont_skip_tracing_wrapper_code:
                         self.dont_skip_tracing = True
                         break
@@ -3512,6 +3515,9 @@ class InstructionTranslator(InstructionTranslatorBase):
         super().run()
 
     def should_compile_partial_graph(self):
+        # do not do partial compile if this frame is _dont_skip_tracing_wrapper_code,
+        # because we identify these frames by comparing the frame's code object,
+        # and partially compiling the frame creates a new code object.
         if self.f_code is external_utils._dont_skip_tracing_wrapper_code:
             return False
         if sys.version_info >= (3, 11):
@@ -3785,7 +3791,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                     f"Apply `@torch._dynamo.dont_skip_tracing` to the function `{fn_qualname}` "
                     "to force tracing into the function. "
                     "More graph breaks may occur as a result of attempting to trace into the function.",
-                    f"Remove the file`{func.get_filename()}` from torch/_dynamo/trace_rules.py. "
+                    f"Remove the file `{func.get_filename()}` from torch/_dynamo/trace_rules.py. "
                     "More graph breaks may occur as a result of attempting to trace into the function.",
                     "Please file an issue to PyTorch.",
                 ]
@@ -4007,6 +4013,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         self.one_graph = parent.one_graph
 
         if not self.dont_skip_tracing:
+            # Inlining into `dont_skip_tracing` is handled by InstructionTranslatorBase.__init__
             self.dont_skip_tracing = parent.dont_skip_tracing
 
     @property

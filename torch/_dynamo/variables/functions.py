@@ -1198,7 +1198,7 @@ class SkipFunctionVariable(VariableTracker):
             torch._dynamo.utils.warn_once(msg)
             unimplemented(msg)
         else:
-            if tx.dont_skip_tracing:
+            if tx and tx.dont_skip_tracing:
                 from .builder import SourcelessBuilder
 
                 # re-build the function, attempting to not skip

@@ -599,7 +599,7 @@ def get_stack_above_dynamo() -> StackSummary:
     return filter_stack(extract_stack())
 
 
-def get_real_frames_above_dynamo() -> list[types.FrameType]:
+def get_real_frames() -> list[types.FrameType]:
     # get the real frames in the stack above dynamo,
     # implementation borrowed from traceback.extract_stack
     return [f[0] for f in walk_stack(sys._getframe().f_back)]
