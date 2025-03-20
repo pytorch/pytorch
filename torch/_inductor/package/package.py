@@ -16,12 +16,7 @@ from torch._inductor.cpp_builder import BuildOptionsBase, CppBuilder
 from torch.export._tree_utils import reorder_kwargs
 from torch.types import FileLike
 
-from .pt2_archive_constants import (
-    AOTINDUCTOR_DIR,
-    ARCHIVE_VERSION,
-    CONSTANTS_DIR,
-    CUSTOM_OBJ_FILENAME_PREFIX,
-)
+from .pt2_archive_constants import AOTINDUCTOR_DIR, ARCHIVE_VERSION
 
 
 log = logging.getLogger(__name__)
@@ -217,10 +212,7 @@ def package_aoti(
                         )
 
                 filename = os.path.basename(file)
-                if filename.startswith(CUSTOM_OBJ_FILENAME_PREFIX):
-                    new_filepath = os.path.join(CONSTANTS_DIR, filename)
-                else:
-                    new_filepath = os.path.join(AOTINDUCTOR_DIR, model_name, filename)
+                new_filepath = os.path.join(AOTINDUCTOR_DIR, model_name, filename)
                 log.debug(
                     "Saving AOTI generated file %s to archive in %s", file, new_filepath
                 )

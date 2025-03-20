@@ -21,7 +21,6 @@ These classes help Dynamo track and handle arbitrary Python objects during traci
 maintaining proper semantics while enabling optimizations where possible.
 """
 
-import builtins
 import collections
 import contextlib
 import dataclasses
@@ -100,7 +99,7 @@ if TYPE_CHECKING:
 
 
 def is_standard_setattr(val):
-    return val in (object.__setattr__, BaseException.__setattr__)
+    return val in (object.__setattr__,)
 
 
 def is_forbidden_context_manager(ctx):
@@ -139,7 +138,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         return self.value
 
     def __repr__(self) -> str:
-        return f"{self.__class__.__name__}({self.value})"
+        return f"UserDefinedClassVariable({self.value})"
 
     @staticmethod
     @functools.lru_cache(None)
@@ -172,18 +171,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
     @staticmethod
     @functools.lru_cache(None)
     def supported_c_new_functions():
-        exceptions = [
-            getattr(builtins, name).__new__
-            for name in dir(builtins)
-            if isinstance(getattr(builtins, name), type)
-            and issubclass(getattr(builtins, name), BaseException)
-        ]
         return {
             object.__new__,
             dict.__new__,
             tuple.__new__,
             list.__new__,
-        }.union(exceptions)
+        }
 
     @staticmethod
     def is_supported_new_method(value):
@@ -694,16 +687,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if name == "__name__":
             return self.value.__name__
         return super().const_getattr(tx, name)
-
-
-class UserDefinedExceptionClassVariable(UserDefinedClassVariable):
-    @property
-    def fn(self):
-        return self.value
-
-    @property
-    def python_type(self):
-        return self.value
 
 
 class NO_SUCH_SUBOBJ:
@@ -1408,47 +1391,6 @@ class SourcelessGraphModuleVariable(UserDefinedObjectVariable):
             args,
             kwargs,
         )
-
-
-class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
-    def __init__(self, value, **kwargs):
-        super().__init__(value, **kwargs)
-        self.exc_vt = variables.ExceptionVariable(self.value_type, ())
-
-    @property
-    def fn(self):
-        return self.value_type
-
-    def call_method(self, tx, name, args, kwargs):
-        if (
-            name == "__init__"
-            and (method := self._maybe_get_baseclass_method(name))
-            and inspect.ismethoddescriptor(method)
-            and len(kwargs) == 0
-        ):
-            self.exc_vt.args = args
-            self.value.args = args
-            return variables.ConstantVariable(None)
-        if (
-            name == "__setattr__"
-            and len(args) == 2
-            and isinstance(args[0], variables.ConstantVariable)
-            and args[0].value
-            in ("__cause__", "__context__", "__suppress_context__", "__traceback__")
-        ):
-            self.exc_vt.call_setattr(tx, args[0], args[1])
-        return super().call_method(tx, name, args, kwargs)
-
-    @property
-    def __context__(self):
-        return self.exc_vt.__context__
-
-    def set_context(self, context: "variables.ExceptionVariable"):
-        return self.exc_vt.set_context(context)
-
-    @property
-    def exc_type(self):
-        return self.exc_vt.exc_type
 
 
 class KeyedJaggedTensorVariable(UserDefinedObjectVariable):

@@ -999,23 +999,20 @@ This class does not support ``__members__`` property.)");
   py::class_<::c10d::AllreduceOptions>(module, "AllreduceOptions")
       .def(py::init<>())
       .def_readwrite("reduceOp", &::c10d::AllreduceOptions::reduceOp)
-      .def_readwrite("timeout", &::c10d::AllreduceOptions::timeout)
-      .def_readwrite("asyncOp", &::c10d::AllreduceOptions::asyncOp);
+      .def_readwrite("timeout", &::c10d::AllreduceOptions::timeout);
 
   py::class_<::c10d::AllreduceCoalescedOptions>(
       module, "AllreduceCoalescedOptions")
       .def(py::init<>())
       .def_readwrite("reduceOp", &::c10d::AllreduceCoalescedOptions::reduceOp)
-      .def_readwrite("timeout", &::c10d::AllreduceCoalescedOptions::timeout)
-      .def_readwrite("asyncOp", &::c10d::AllreduceCoalescedOptions::asyncOp);
+      .def_readwrite("timeout", &::c10d::AllreduceCoalescedOptions::timeout);
 
   py::class_<::c10d::ReduceOptions>(module, "ReduceOptions")
       .def(py::init<>())
       .def_readwrite("reduceOp", &::c10d::ReduceOptions::reduceOp)
       .def_readwrite("rootRank", &::c10d::ReduceOptions::rootRank)
       .def_readwrite("rootTensor", &::c10d::ReduceOptions::rootTensor)
-      .def_readwrite("timeout", &::c10d::ReduceOptions::timeout)
-      .def_readwrite("asyncOp", &::c10d::ReduceOptions::asyncOp);
+      .def_readwrite("timeout", &::c10d::ReduceOptions::timeout);
 
   py::class_<::c10d::AllgatherOptions>(module, "AllgatherOptions")
       .def(py::init<>())
@@ -1025,8 +1022,7 @@ This class does not support ``__members__`` property.)");
   py::class_<::c10d::GatherOptions>(module, "GatherOptions")
       .def(py::init<>())
       .def_readwrite("rootRank", &::c10d::GatherOptions::rootRank)
-      .def_readwrite("timeout", &::c10d::GatherOptions::timeout)
-      .def_readwrite("asyncOp", &::c10d::GatherOptions::asyncOp);
+      .def_readwrite("timeout", &::c10d::GatherOptions::timeout);
 
   py::class_<::c10d::ScatterOptions>(module, "ScatterOptions")
       .def(py::init<>())
@@ -1044,13 +1040,11 @@ This class does not support ``__members__`` property.)");
       .def(py::init<>())
       .def_readwrite("device_ids", &::c10d::BarrierOptions::device_ids)
       .def_readwrite("timeout", &::c10d::BarrierOptions::timeout)
-      .def_readwrite("device", &::c10d::BarrierOptions::device)
-      .def_readwrite("asyncOp", &::c10d::BarrierOptions::asyncOp);
+      .def_readwrite("device", &::c10d::BarrierOptions::device);
 
   py::class_<::c10d::AllToAllOptions>(module, "AllToAllOptions")
       .def(py::init<>())
-      .def_readwrite("timeout", &::c10d::AllToAllOptions::timeout)
-      .def_readwrite("asyncOp", &::c10d::AllToAllOptions::asyncOp);
+      .def_readwrite("timeout", &::c10d::AllToAllOptions::timeout);
 
   py::class_<::c10d::DistributedBackendOptions>(
       module, "_DistributedBackendOptions")
@@ -1967,16 +1961,6 @@ communication mechanism.
           .def("rank", &::c10d::ProcessGroup::getRank, R"(Get the rank of this process group.)")
           .def("size", &::c10d::ProcessGroup::getSize, R"(Get the size of this process group.)")
           .def("name", &::c10d::ProcessGroup::getBackendName, R"(Get the name of this process group.)")
-          .def(
-              "abort",
-              &::c10d::ProcessGroup::abort,
-              py::call_guard<py::gil_scoped_release>(),
-              "abort all operations and connections if supported by the backend")
-          .def(
-              "shutdown",
-              &::c10d::ProcessGroup::shutdown,
-              py::call_guard<py::gil_scoped_release>(),
-              "shutdown the process group")
           .def("_id", &::c10d::ProcessGroup::getID)
           .def(
               "_backend_id",
@@ -2494,16 +2478,6 @@ Arguments:
           .def("rank", &::c10d::Backend::getRank)
           .def("size", &::c10d::Backend::getSize)
           .def("name", &::c10d::Backend::getBackendName)
-          .def(
-              "abort",
-              &::c10d::Backend::abort,
-              py::call_guard<py::gil_scoped_release>(),
-              "abort all operations and connections if supported by the backend")
-          .def(
-              "shutdown",
-              &::c10d::Backend::shutdown,
-              py::call_guard<py::gil_scoped_release>(),
-              "shutdown the backend")
           .def_property_readonly(
               "supports_splitting",
               &::c10d::Backend::supportsSplitting,
@@ -2998,6 +2972,12 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               py::arg("size"),
               py::arg("timeout") = ::c10d::kProcessGroupNCCLDefaultTimeout,
               R"(Create a new ProcessGroupNCCL instance.)")
+          .def(
+              "_shutdown",
+              [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self) {
+                return self->shutdown();
+              },
+              py::call_guard<py::gil_scoped_release>())
           .def("_group_start", &::c10d::ProcessGroupNCCL::groupStart)
           .def("_group_end", &::c10d::ProcessGroupNCCL::groupEnd)
           .def(
@@ -3045,6 +3025,11 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           .def(
               "deregister_mem_pool",
               &::c10d::ProcessGroupNCCL::deregisterMemPool)
+          .def(
+              "abort",
+              &::c10d::ProcessGroupNCCL::abort,
+              py::call_guard<py::gil_scoped_release>(),
+              R"(Abort the process group.)")
           .def(
               "_is_initialized",
               &::c10d::ProcessGroupNCCL::isInitialized,
@@ -3236,11 +3221,10 @@ Example::
       .def_readonly("time_started", &::c10d::WorkInfo::timeStarted)
       .def_readonly("time_finished", &::c10d::WorkInfo::timeFinished)
       .def_readonly("active_duration", &::c10d::WorkInfo::activeDuration);
-
   auto work =
       py::class_<
           ::c10d::Work,
-          IntrusivePtrNoGilDestructor<::c10d::Work>,
+          c10::intrusive_ptr<::c10d::Work>,
           ::c10d::PyProcessGroup::PyWork>(module, "Work", R"(
 A `Work` object represents the handle to a pending asynchronous operation in
 PyTorch's distributed package. It is returned by non-blocking collective operations,

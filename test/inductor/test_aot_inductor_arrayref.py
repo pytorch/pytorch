@@ -78,8 +78,6 @@ CPU_TEST_FAILURES = {
     "test_while_loop_with_mixed_device_dynamic_False": fail_stack_allocation(),
     "test_while_loop_with_sym_expr_cond_dynamic_True": fail_minimal_arrayref_interface(),
     "test_while_loop_with_sym_expr_cond_dynamic_False": fail_minimal_arrayref_interface(),
-    "test_while_loop_with_conv_dynamic_True": fail_minimal_arrayref_interface(),
-    "test_while_loop_with_conv_dynamic_False": fail_minimal_arrayref_interface(),
     "test_while_loop_with_parameters": fail_minimal_arrayref_interface(),
     "test_while_loop_with_pytree_inputs": fail_stack_allocation(),
     # FIXME: failed with Segfault while exiting the Python runtime
@@ -169,6 +167,8 @@ CPU_TEST_FAILURES = {
     "test_symbool_item": fail_minimal_arrayref_interface(is_skip=True),
     # TODO: AttributeError: 'ShapeAsConstantBuffer' object has no attribute 'dtype'
     "test_symfloat_item": fail_minimal_arrayref_interface(is_skip=True),
+    "test_update_constant_buffer": fail_stack_allocation(is_skip=True),
+    "test_so_without_weight": fail_stack_allocation(is_skip=True),
 }
 
 

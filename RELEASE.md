@@ -9,9 +9,9 @@
   - [Cutting a release branch preparations](#cutting-a-release-branch-preparations)
   - [Cutting release branches](#cutting-release-branches)
     - [`pytorch/pytorch`](#pytorchpytorch)
-    - [PyTorch ecosystem libraries](#pytorch-ecosystem-libraries)
+    - [`pytorch/builder` / PyTorch domain libraries](#pytorchbuilder--pytorch-domain-libraries)
     - [Making release branch specific changes for PyTorch](#making-release-branch-specific-changes-for-pytorch)
-    - [Making release branch specific changes for ecosystem libraries](#making-release-branch-specific-changes-for-ecosystem-libraries)
+    - [Making release branch specific changes for domain libraries](#making-release-branch-specific-changes-for-domain-libraries)
   - [Running Launch Execution team Core XFN sync](#running-launch-execution-team-core-xfn-sync)
   - [Drafting RCs (Release Candidates) for PyTorch and domain libraries](#drafting-rcs-release-candidates-for-pytorch-and-domain-libraries)
     - [Release Candidate Storage](#release-candidate-storage)
@@ -50,7 +50,6 @@ Following is the Release Compatibility Matrix for PyTorch releases:
 
 | PyTorch version | Python | C++ | Stable CUDA | Experimental CUDA | Stable ROCm |
 | --- | --- | --- | --- | --- | --- |
-| 2.7 | >=3.9, <=3.13, (3.13t experimental) | C++17 | CUDA 11.8 (CUDNN 9.1.0.70), CUDA 12.6 (CUDNN 9.5.1.17) | CUDA 12.8 (CUDNN 9.7.1.26) | ROCm 6.3 |
 | 2.6 | >=3.9, <=3.13, (3.13t experimental) | C++17 | CUDA 11.8, CUDA 12.4 (CUDNN 9.1.0.70) | CUDA 12.6 (CUDNN 9.5.1.17) | ROCm 6.2.4 |
 | 2.5 | >=3.9, <=3.12, (3.13 experimental) | C++17 | CUDA 11.8, CUDA 12.1, CUDA 12.4, CUDNN 9.1.0.70  | None | ROCm 6.2 |
 | 2.4 | >=3.8, <=3.12 | C++17 | CUDA 11.8, CUDA 12.1, CUDNN 9.1.0.70  | CUDA 12.4, CUDNN 9.1.0.70 | ROCm 6.1 |
@@ -63,21 +62,19 @@ Following is the Release Compatibility Matrix for PyTorch releases:
 
 ## Release Cadence
 
-Following is the release cadence. All future dates below are tentative, for latest updates on the release scheduled please follow [dev discuss](https://dev-discuss.pytorch.org/c/release-announcements/27). Please note: Patch Releases are optional.
+Following is the release cadence for year 2023/2024. All dates below are tentative, for latest updates on the release scheduled please follow [dev discuss](https://dev-discuss.pytorch.org/c/release-announcements/27). Please note: Patch Releases are optional.
 
 | Minor Version | Release branch cut | Release date | First patch release date | Second patch release date|
 | --- | --- | --- | --- | --- |
 | 2.1 | Aug 2023 | Oct 2023 | Nov 2023 | Dec 2023 |
 | 2.2 | Dec 2023 | Jan 2024 | Feb 2024 | Mar 2024 |
 | 2.3 | Mar 2024 | Apr 2024 | Jun 2024 | Not planned |
-| 2.4 | Jun 2024 | Jul 2024 | Sept 2024 | Not planned |
-| 2.5 | Sep 2024 | Oct 2024 | Nov 2024 |  Not planned |
-| 2.6 | Dec 2024 | Jan 2025 | Not planned | Not planned |
+| 2.4 | Jun 2024 | Jul 2024 | (Sept 2024) | Not planned |
+| 2.5 | Sep 2024 | Oct 2024 | (Nov 2024) | (Dec 2024) |
+| 2.6 | Dec 2024 | Jan 2025 | (Feb 2025) | (Mar 2025) |
 | 2.7 | Mar 2025 | Apr 2025 | (May 2025) | (Jun 2025) |
 | 2.8 | Jun 2025 | Jul 2025 | (Aug 2025) | (Sep 2025) |
 | 2.9 | Aug 2025 | Oct 2025 | (Nov 2025) | (Dec 2025) |
-| 2.10 | Dec 2025 | Jan 2026 | (Feb 2026) | (Mar 2026) |
-| 2.11 | Mar 2026 | Apr 2026 | (Jun 2026) | (Jul 2026) |
 
 ## General Overview
 
@@ -101,9 +98,9 @@ Releasing a new version of PyTorch generally entails 3 major steps:
 
 Following Requirements needs to be met prior to cutting a release branch:
 
-* Resolve all outstanding issues in the milestones(for example [1.11.0](https://github.com/pytorch/pytorch/milestone/28))before first RC cut is completed. After RC cut is completed following script should be executed from test-infra repo in order to validate the presence of the fixes in the release branch :
+* Resolve all outstanding issues in the milestones(for example [1.11.0](https://github.com/pytorch/pytorch/milestone/28))before first RC cut is completed. After RC cut is completed following script should be executed from builder repo in order to validate the presence of the fixes in the release branch :
 ``` python github_analyze.py --repo-path ~/local/pytorch --remote upstream --branch release/1.11 --milestone-id 26 --missing-in-branch ```
-* Validate that all new workflows have been created in the PyTorch and domain libraries included in the release. Validate it against all dimensions of release matrix, including operating systems(Linux, MacOS, Windows), Python versions as well as CPU architectures(x86 and arm) and accelerator versions(CUDA, ROCm, XPU).
+* Validate that all new workflows have been created in the PyTorch and domain libraries included in the release. Validate it against all dimensions of release matrix, including operating systems(Linux, MacOS, Windows), Python versions as well as CPU architectures(x86 and arm) and accelerator versions(CUDA, ROCm).
 * All the nightly jobs for pytorch and domain libraries should be green. Validate this using following HUD links:
   * [Pytorch](https://hud.pytorch.org/hud/pytorch/pytorch/nightly)
   * [TorchVision](https://hud.pytorch.org/hud/pytorch/vision/nightly)
@@ -129,10 +126,10 @@ This script should create 2 branches:
 * `release/{MAJOR}.{MINOR}`
 * `orig/release/{MAJOR}.{MINOR}`
 
-### PyTorch ecosystem libraries
+### `pytorch/builder` / PyTorch domain libraries
 
-*Note*:  Release branches for individual ecosystem libraries should be created after first release candidate build of PyTorch is available in staging channels (which happens about a week after PyTorch release branch has been created). This is absolutely required to allow sufficient testing time for each of the domain library. Domain libraries branch cut is performed by Ecosystem Library POC.
-Test-Infra branch cut should be performed at the same time as Pytorch core branch cut. Convenience script can also be used domains.
+*Note*:  Release branches for individual domain libraries should be created after first release candidate build of PyTorch is available in staging channels (which happens about a week after PyTorch release branch has been created). This is absolutely required to allow sufficient testing time for each of the domain library. Domain libraries branch cut is performed by Domain Library POC.
+Builder branch cut should be performed at the same time as Pytorch core branch cut. Convenience script can also be used domains as well as `pytorch/builder`
 
 > NOTE: RELEASE_VERSION only needs to be specified if version.txt is not available in root directory
 
@@ -147,7 +144,7 @@ them:
 
 * Update backwards compatibility tests to use RC binaries instead of nightlies
   * Example: https://github.com/pytorch/pytorch/pull/77983 and https://github.com/pytorch/pytorch/pull/77986
-* A release branches should also be created in [`pytorch/xla`](https://github.com/pytorch/xla) and [`pytorch/test-infra`](https://github.com/pytorch/test-infra) repos and pinned in `pytorch/pytorch`
+* A release branches should also be created in [`pytorch/xla`](https://github.com/pytorch/xla) and [`pytorch/builder`](https://github.com/pytorch/builder) repos and pinned in `pytorch/pytorch`
   * Example: https://github.com/pytorch/pytorch/pull/86290 and https://github.com/pytorch/pytorch/pull/90506
 * Update branch used in composite actions from trunk to release (for example, can be done by running `for i in .github/workflows/*.yml; do sed -i -e s#@main#@release/2.0# $i; done`
   * Example: https://github.com/pytorch/pytorch/commit/17f400404f2ca07ea5ac864428e3d08149de2304
@@ -157,9 +154,9 @@ These are examples of changes that should be made to the *default* branch after 
 * Nightly versions should be updated in all version files to the next MINOR release (i.e. 0.9.0 -> 0.10.0) in the default branch:
   * Example: https://github.com/pytorch/pytorch/pull/77984
 
-### Making release branch specific changes for ecosystem libraries
+### Making release branch specific changes for domain libraries
 
-Ecosystem libraries branch cut is done a few days after branch cut for the `pytorch/pytorch`. The branch cut is performed by the Ecosystem Library POC.
+Domain library branch cut is done a week after branch cut for the `pytorch/pytorch`. The branch cut is performed by the Domain Library POC.
 After the branch cut is performed, the Pytorch Dev Infra member should be informed of the branch cut and Domain Library specific change is required before Drafting RC for this domain library.
 
 Follow these examples of PR that updates the version and sets RC Candidate upload channel:
@@ -295,7 +292,7 @@ After the final RC is created. The following tasks should be performed :
 
 * Perform [Release Candidate health validation](#release-candidate-health-validation). CI should have the green signal.
 
-* Run and inspect the output [Validate Binaries](https://github.com/pytorch/test-infra/actions/workflows/validate-binaries.yml) workflow.
+* Run and inspect the output [Validate Binaries](https://github.com/pytorch/builder/actions/workflows/validate-binaries.yml) workflow.
 
 * All the closed issues from [milestone](https://github.com/pytorch/pytorch/milestone/39) need to be validated. Confirm the validation by commenting on the issue: https://github.com/pytorch/pytorch/issues/113568#issuecomment-1851031064
 
@@ -304,14 +301,14 @@ After the final RC is created. The following tasks should be performed :
 * Run performance tests in [benchmark repository](https://github.com/pytorch/benchmark). Make sure there are no performance regressions.
 
 * Prepare and stage PyPI binaries for promotion. This is done with this script:
-[`pytorch/test-infra:release/pypi/promote_pypi_to_staging.sh`](https://github.com/pytorch/test-infra/blob/main/release/pypi/promote_pypi_to_staging.sh)
+[`pytorch/builder:release/pypi/promote_pypi_to_staging.sh`](https://github.com/pytorch/builder/blob/main/release/pypi/promote_pypi_to_staging.sh)
 
 * Validate staged PyPI binaries. Make sure generated packages are correct and package size does not exceeds maximum allowed PyPI package size.
 
 ## Promoting RCs to Stable
 
 Promotion of RCs to stable is done with this script:
-[`pytorch/test-infra:release/promote.sh`](https://github.com/pytorch/test-infra/blob/main/release/promote.sh)
+[`pytorch/builder:release/promote.sh`](https://github.com/pytorch/builder/blob/main/release/promote.sh)
 
 Users of that script should take care to update the versions necessary for the specific packages you are attempting to promote.
 

@@ -143,7 +143,6 @@ size_t CUDAAllocatorConfig::parseRoundUpPower2Divisions(
   if (++i < config.size()) {
     if (std::string_view(config[i]) == "[") {
       size_t last_index = 0;
-      // NOLINTNEXTLINE(bugprone-inc-dec-in-conditions)
       while (++i < config.size() && std::string_view(config[i]) != "]") {
         const std::string& val1 = config[i];
         size_t val2 = 0;

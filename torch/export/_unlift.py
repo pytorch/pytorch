@@ -239,7 +239,7 @@ def _register_attrs_to_new_gm(
         )
 
     # Technically this doesn't account for the aliased multiple constants but
-    # it is ok because we have a separate pass later in the stack that populates
+    # it is ok because we have a seperate pass later in the stack that populates
     # the final gm.
     for name in chain(
         graph_signature.lifted_custom_objs, graph_signature.lifted_tensor_constants

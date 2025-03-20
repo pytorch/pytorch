@@ -64,7 +64,6 @@ test/generated_type_hints_smoketest.py
 test/htmlcov
 test/cpp_extensions/install/
 test/cpp_extensions/open_registration_extension/install
-test/cpp_extensions/libtorch_agnostic_extension/install
 test/kernel.errors.txt
 third_party/build/
 third_party/nccl/

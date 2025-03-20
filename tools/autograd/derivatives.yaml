@@ -1040,10 +1040,9 @@
   result: logsumexp_jvp(self_p, self_t, dim, keepdim)
 
 - name: linalg_lstsq(Tensor self, Tensor b, float? rcond=None, *, str? driver=None) -> (Tensor solution, Tensor residuals, Tensor rank, Tensor singular_values)
-  self, b: linalg_lstsq_backward(grads[0], grads[1], self, b, solution, grad_input_mask)
-  solution: linalg_lstsq_solution_jvp(self_p, b_p, self_t, b_t)
-  residuals: linalg_lstsq_residuals_jvp(self_p, b_p, self_t, b_t, solution, residuals)
-  output_differentiability: [True, True, False, False]
+  self, b: linalg_lstsq_backward(grad, self, b, grad_input_mask)
+  solution: linalg_lstsq_jvp(self_p, b_p, self_t, b_t)
+  output_differentiability: [True, False, False, False]
 
 - name: lt_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   self: zeros_like(self)

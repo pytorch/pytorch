@@ -272,7 +272,6 @@ MapAllocator::MapAllocator(WithFd, std::string_view filename, int fd, int flags,
       }
     } else {
       fd = fd_;
-      TORCH_INTERNAL_ASSERT(fd >= 0);
     }
 
     struct stat file_stat{};
