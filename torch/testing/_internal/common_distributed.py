@@ -85,6 +85,7 @@ TEST_SKIPS = {
     ),
     "importerror": TestSkip(88, "Test skipped due to missing import"),
     "no_accelerator": TestSkip(89, "accelerator is not available."),
+    "not-support-multithread": TestSkip(90, "backend not support multithread."),
 }
 
 
@@ -92,17 +93,17 @@ TEST_SKIPS = {
 class DistTestCases:
     # Backends that do not support a specific collective
     skip_collective = {}
-    skip_collective["allgather_coalesced"] = {"nccl", "mpi", "ucc"}
+    skip_collective["allgather_coalesced"] = {"nccl", "mpi", "ucc", "xccl"}
     skip_collective["reduce"] = set()
-    skip_collective["sendrecv anysource"] = {"nccl", "ucc"}
-    skip_collective["cpu barrier"] = {"nccl", "ucc"}
+    skip_collective["sendrecv anysource"] = {"nccl", "ucc", "xccl"}
+    skip_collective["cpu barrier"] = {"nccl", "ucc", "xccl"}
 
     # Sets showing that something is implemented
     backend_feature = {}
     backend_feature["gpu"] = {"nccl", "gloo", "ucc"}
     backend_feature["cuda"] = {"nccl", "gloo", "ucc"}
     backend_feature["ddp"] = {"nccl", "gloo", "ucc"}
-    backend_feature["subgroup"] = {"nccl", "gloo", "ucc"}
+    backend_feature["subgroup"] = {"nccl", "gloo", "ucc", "xccl"}
     backend_feature["plugin"] = set()
     if TEST_HPU:
         backend_feature["hpu"] = {"hccl"}
@@ -342,6 +343,12 @@ def requires_nccl():
     return skip_but_pass_in_sandcastle_if(
         not c10d.is_nccl_available(),
         "c10d was not compiled with the NCCL backend",
+    )
+
+def requires_xccl():
+    return skip_but_pass_in_sandcastle_if(
+        not c10d.is_xccl_available(),
+        "c10d was not compiled with the XCCL backend",
     )
 
 def requires_ucc():

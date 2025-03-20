@@ -1600,6 +1600,10 @@ class dtypesIfCUDA(dtypes):
     def __init__(self, *args):
         super().__init__(*args, device_type="cuda")
 
+# Overrides specified dtypes on CUDA.
+class dtypesIfXPU(dtypes):
+    def __init__(self, *args):
+        super().__init__(*args, device_type="xpu")
 
 class dtypesIfMPS(dtypes):
     def __init__(self, *args):
@@ -1965,6 +1969,8 @@ def skipMPS(fn):
 def skipHPU(fn):
     return skipHPUIf(True, "test doesn't work on HPU backend")(fn)
 
+def skipXPU(fn):
+    return skipXPUIf(True, "test doesn't work on XPU backend")(fn)
 
 def skipPRIVATEUSE1(fn):
     return skipPRIVATEUSE1If(True, "test doesn't work on privateuse1 backend")(fn)
