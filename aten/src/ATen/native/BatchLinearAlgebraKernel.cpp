@@ -178,7 +178,7 @@ void apply_linalg_eig(Tensor& values, Tensor& vectors, Tensor& input, Tensor& in
   lapackEig<scalar_t, value_t>(jobvl, jobvr, n, input_data, lda, values_data,
     lvectors_data, ldvl, rvectors_data, ldvr, &work_query, -1, rwork_data, &infos_data[0]);
 
-  int lwork = std::max<int>(1, static_cast<int>(real_impl<scalar_t, value_t>(work_query)));
+  int lwork = lapack_work_to_int(work_query);
   Tensor work = at::empty({lwork}, input.dtype());
   auto work_data = work.mutable_data_ptr<scalar_t>();
 
