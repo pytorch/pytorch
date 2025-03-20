@@ -63,7 +63,7 @@ from torch._dynamo.utils import counters
 from torch._prims_common import is_integer_dtype
 from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+from torch.fx.experimental.symbolic_shapes import statically_known_true
 from torch.fx.graph_module import _get_attr
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
@@ -1345,7 +1345,7 @@ def register_replacement(
                     )
                     for v in itertools.chain(args[i].shape, args[i].stride()):
                         if isinstance(v, torch.SymInt) and all(
-                            guard_size_oblivious(v != a) for a in sym_args
+                            statically_known_true(v != a) for a in sym_args
                         ):
                             sym_args.append(v)
 
@@ -1513,8 +1513,13 @@ def _serialize_pattern(
         pattern_matcher_imports = []
         for name in dir(torch._inductor.pattern_matcher):
             attr = getattr(torch._inductor.pattern_matcher, name)
-            if isinstance(attr, type) and issubclass(attr, (PatternExpr, _TargetExpr)):
-                pattern_matcher_imports.append(name)
+            try:
+                if isinstance(attr, type) and issubclass(
+                    attr, (PatternExpr, _TargetExpr)
+                ):
+                    pattern_matcher_imports.append(name)
+            except TypeError:
+                pass
 
         formatted_imports = ",\n   ".join(pattern_matcher_imports)
         formatted_imports = f"from torch._inductor.pattern_matcher import (\n   {formatted_imports},\n)\n"
