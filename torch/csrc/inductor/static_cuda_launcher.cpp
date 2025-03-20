@@ -52,7 +52,7 @@ const at::cuda::NVRTC& nvrtc() {
 }
 
 // 120 max args + 1 for global scratch size
-#define MAX_ARGS 1
+#define MAX_ARGS 121
 
 CUdeviceptr getPointer(PyObject* obj) {
   CUdeviceptr data_ptr = 0;
