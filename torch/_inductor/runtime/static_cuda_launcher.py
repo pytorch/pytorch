@@ -2,13 +2,11 @@ import functools
 from typing import Any, Optional
 from typing_extensions import Unpack
 
-from torch.utils._ordered_set import OrderedSet
-
 from .triton_compat import ASTSource, CompiledKernel
 
 
 MAX_SHARED_MEMORY = 49152
-MAX_ARGS = 50
+MAX_ARGS = 120
 
 
 class StaticallyLaunchedCudaKernel:
@@ -33,19 +31,22 @@ class StaticallyLaunchedCudaKernel:
     Note that after step 3, StaticallyLaunchedCudaKernel is fully pickleable/serializable.
     This allows it to be cached by FXGraphCache/TritonBundler, as well as sent from the worker
     to the parent process in inductor.
+
+    There are two main versions of triton that we wish to support: 3.3 and 3.2. Triton makes considerable changes
+    to how it handles constants in 3.3, so there's some special logic necessary to handle both versions.
     """
 
     def __init__(self, kernel: CompiledKernel) -> None:
-        # To be used later when hooking up with torch.compile:
-        # inductor knows where the cubin file should be from triton,
-        # so won't need to write to a tmp file directly.
-        if hasattr(kernel, "_cubin_path"):
-            self.cubin_path = kernel._cubin_path
-        else:
-            self.cubin = kernel.asm["cubin"]
-
-        # TODO: is this right?
         self.name = kernel.src.fn.__name__
+        self.cubin_path = kernel._cubin_path
+
+        # Used by torch.compile to filter constants in older triton versions
+        self.arg_names = kernel.src.fn.arg_names
+
+        # Const exprs that are declared by the triton kernel directly
+        # Used to generate the kernel launcher's def args
+        self.declared_constexprs = kernel.src.fn.constexprs
+
         self.hash = kernel.hash
         if (
             kernel.__class__.launch_enter_hook is not None
@@ -67,8 +68,8 @@ class StaticallyLaunchedCudaKernel:
             )
 
         # Newer triton versions pass an extra global scratch parameter to the compiled cuda kernel.
-        # Inductor never uses this field or enables it, but we still have to pass an extra None
-        # into the set of params if its enabled
+        # Inductor never uses this field or enables it, but we still have to pass
+        # an extra None into the set of params if its enabled
         if hasattr(kernel.metadata, "global_scratch_size"):
             if kernel.metadata.global_scratch_size > 0:
                 raise NotImplementedError("Global scratch not yet supported")
@@ -77,11 +78,10 @@ class StaticallyLaunchedCudaKernel:
         else:
             self.has_global_scratch = False
 
-        self.arg_tys, self.constant_idxs = self.arg_ty_from_signature(kernel.src)
+        self.arg_tys = self.arg_ty_from_signature(kernel.src)
         self.function: Optional[int] = (
             None  # Loaded by load_kernel(on the parent process)
         )
-        num_args = len(self.arg_tys)
         num_ctas = 1
         if hasattr(kernel, "num_ctas"):
             num_ctas = kernel.num_ctas
@@ -93,33 +93,20 @@ class StaticallyLaunchedCudaKernel:
                 "Static cuda launcher only supports num_ctas == 1"
             )
 
-        if num_args > MAX_ARGS or num_args == 0:
-            raise NotImplementedError(
-                "No static cuda launcher available for %d arguments", num_args
-            )
-
     def load_kernel(self) -> None:
         from torch._C import _StaticCudaLauncher
 
-        assert hasattr(self, "cubin_path")
         if self.function is not None:
             return
+
+        assert hasattr(self, "cubin_path")
+        assert self.cubin_path is not None
+
         (self.function, self.n_regs, self.n_spills) = _StaticCudaLauncher._load_kernel(
             self.cubin_path, self.name, self.shared
         )
-
-    def write_cubin_to_file(self, filepath: str) -> None:
-        """
-        Only used for tests where we don't have a cubin path.
-        """
-        if hasattr(self, "cubin_path"):
-            return
-        # Just used by tests for now.
-        # TODO: derive cubin_path from wherever triton stores the cubin file on disk.
-        with open(filepath, "wb") as f:
-            f.write(self.cubin)
-            del self.cubin
-        self.cubin_path = filepath
+        # Don't need the cubin path anymore now that we've loaded
+        self.cubin_path = None
 
     @staticmethod
     @functools.lru_cache
@@ -156,31 +143,53 @@ class StaticallyLaunchedCudaKernel:
             raise NotImplementedError("nvTmaDesc kernels are not yet supported")
         return StaticallyLaunchedCudaKernel.type_mappings()[ty]
 
-    def arg_ty_from_signature(self, src: ASTSource) -> tuple[str, OrderedSet[int]]:
+    def arg_ty_from_signature(self, src: ASTSource) -> str:
         def index_key(i: Any) -> int:
-            return src.fn.arg_names.index(i) if isinstance(i, str) else i
+            if isinstance(i, str):
+                return src.fn.arg_names.index(i)
+            elif isinstance(i, tuple):
+                # In triton 3.3, src.fn.constants has tuples as a key
+                return i[0]
+            else:
+                return i
 
         signature = {index_key(key): value for key, value in src.signature.items()}
+        # Triton uses these as the main way to filter out constants passed to their cubin
         constants = [index_key(key) for key in getattr(src, "constants", dict())]
+        # This value is always a superset of kernel.fn.constexprs: kernel.fn.constexprs are
+        # constants declared by the triton kernel directly, whereas this list can have
+        # constants that are unused by the triton kernel that triton figured out during
+        # compilation.
+        self.full_constexprs = constants
         # Despite requiring them to be passed in, the triton CUDA launcher
         # completely ignores the constexprs passed into it when generating code.
         # So we can ignore them here too
         params = []
 
-        constant_idxs: OrderedSet[int] = OrderedSet()
         for i in sorted(signature.keys()):
             ty = signature[i]
             # In newer triton versions, constants are passed in to signature with type `constexpr`
             # In older triton versions, there can be constants in src.constants that are not `constexpr` in signature
             # so we check both here
             if ty == "constexpr" or i in constants:
-                constant_idxs.add(i)
+                pass
             else:
                 params.append(self.extract_type(ty))
-        return "".join(params), constant_idxs
+        return "".join(params)
+
+    def __getstate__(self) -> dict[str, Any]:
+        # Remove objects that are no longer valid for pickling
+        state = self.__dict__.copy()
+        state["function"] = None
+        return state
 
     def run(
-        self, grid: tuple[int, ...], stream: int, *args: Unpack[tuple[object, ...]]
+        self,
+        grid_x: int,
+        grid_y: int,
+        grid_z: int,
+        stream: int,
+        *args: Unpack[tuple[object, ...]],
     ) -> None:
         """Actually run the kernel at runtime. This function is the hot codepath."""
         from torch._C import _StaticCudaLauncher
@@ -193,25 +202,17 @@ class StaticallyLaunchedCudaKernel:
         # thing, it should always match.
         # Get rid of constants before passing to cubin launcher
 
-        # TODO: is this (and the check below) slow to do at runtime? The thing is,
-        # we already spend the time in CachingAutotuner.launch() to massage the arguments
-        # properly anyways so this isn't exactly slower than that...
-        args = tuple(args[i] for i in range(len(args)) if i not in self.constant_idxs)
-
         # Add a None if triton wants an extra parameter to the cubin
         if self.has_global_scratch:
             arg_tys = self.arg_tys + "O"
             args = (*args, None)
         else:
             arg_tys = self.arg_tys
-
         assert len(args) == len(arg_tys)
 
         # TODO: can handle grid functions here or in C++, so
         # that we don't need the grid handler above.
-        grid_x = grid[0]
-        grid_y = grid[1] if len(grid) > 1 else 1
-        grid_z = grid[2] if len(grid) > 2 else 1
+
         _StaticCudaLauncher._launch_kernel(
             self.function,
             grid_x,
