@@ -243,6 +243,9 @@ class Dim(type):
     DYNAMIC = _DimHint.DYNAMIC()
     STATIC = _DimHint.STATIC()
 
+    min: int
+    max: int
+
     def __new__(
         metacls, name: str, *, min: Optional[int] = None, max: Optional[int] = None
     ):
