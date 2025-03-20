@@ -41,6 +41,7 @@ TORCH_SDT_DEFINE_SEMAPHORE(free)
 
 namespace c10 {
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 C10_DEFINE_REGISTRY(FreeCudaMemoryCallbacksRegistry, FreeMemoryCallback)
 
 namespace cuda::CUDACachingAllocator {
@@ -3903,11 +3904,17 @@ class NativeCachingAllocator : public CUDAAllocator {
              curr_device, handle, *device_allocator[curr_device])});
     auto sp = std::shared_ptr<void>(
         inserted->second.ptr(), [handle, this](void* ptr) {
-          std::lock_guard<std::mutex> deleter_lock(IpcMutex);
+          std::unique_lock<std::mutex> deleter_lock(IpcMutex);
+
           auto it = ipcMemHandle_to_devptr.find(handle);
           TORCH_INTERNAL_ASSERT(it != ipcMemHandle_to_devptr.end());
-          it->second.clear();
+          auto entry = std::move(it->second);
           ipcMemHandle_to_devptr.erase(it);
+
+          // ExpandableSegment synchronizes on destruction in unmapHandles, so
+          // we need to release the lock first to minimize the performance hit.
+          deleter_lock.unlock();
+          entry.clear();
         });
     inserted->second.wp_ = sp;
     return sp;
@@ -3936,6 +3943,7 @@ void local_raw_delete(void* ptr) {
 
 namespace CudaMallocAsync {
 // If this is put in its own header file, it gets incorrectly renamed in HIPify.
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 CUDAAllocator* allocator();
 
 } // namespace CudaMallocAsync
@@ -3947,7 +3955,13 @@ struct BackendStaticInitializer {
   // version checks, to CUDAAllocatorConfig's runtime doublecheck. If this
   // works, maybe we should move all of CUDAAllocatorConfig here?
   CUDAAllocator* parseEnvForBackend() {
-    const auto val = c10::utils::get_env("PYTORCH_CUDA_ALLOC_CONF");
+    auto val = c10::utils::get_env("PYTORCH_CUDA_ALLOC_CONF");
+#ifdef USE_ROCM
+    // convenience for ROCm users to allow either CUDA or HIP env var
+    if (!val.has_value()) {
+      val = c10::utils::get_env("PYTORCH_HIP_ALLOC_CONF");
+    }
+#endif
     if (val.has_value()) {
       const std::string& config = val.value();
 
@@ -3963,7 +3977,15 @@ struct BackendStaticInitializer {
         std::vector<std::string> kv(it2, end2);
         if (kv.size() >= 2) {
           if (kv[0] == "backend") {
+#ifdef USE_ROCM
+            // convenience for ROCm users to allow either CUDA or HIP env var
+            if (kv[1] ==
+                    "cud"
+                    "aMallocAsync" ||
+                kv[1] == "hipMallocAsync")
+#else
             if (kv[1] == "cudaMallocAsync")
+#endif
               return CudaMallocAsync::allocator();
             if (kv[1] == "native")
               return &Native::allocator;
