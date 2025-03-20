@@ -1141,6 +1141,31 @@ class CommonTemplate:
         # Singleton splits should be discarded.
         self._assert_pointwise_ndims(triton_code, 2)
 
+    # Integration test to ensure that matched dims & strides from match_mod_div_expr
+    # are nonnegative integers. This test case has the following index
+    # index=(ModularIndexing(xindex, 4, 4)) + 4*(ModularIndexing(xindex, 32, 2))
+    # and the match below is a candidate that is invalid:
+    # match={
+    #   dim_mod4_: 32, dim_mod3_: 2, stride_mod3_: 4, dim_mod2_: 1/16,
+    #   dim_mod1_: 4, stride_mod1_: 1, stride_mod4_: 0, stride_mod2_: 0, stride_mod0_: 0
+    # }
+    # This is now fixed by ensuring that that wild symbols only match nonnegative integers
+    def test_ensure_integral_dims_and_strides(self):
+        def model(data, *args):
+            return torch.nn.functional.unfold(data, *args)
+
+        data = torch.zeros([2, 3, 5, 5], dtype=torch.float16, requires_grad=True)
+        args = [2, 1, 0, 1]
+        run_and_compare(
+            self,
+            model,
+            data,
+            *args,
+            expected_num_triton_kernels=2,
+            expected_num_block_pointers=4,
+            compile_kwargs={"fullgraph": True},
+        )
+
 
 @unittest.skipIf(not TRITON_HAS_CPU, "requires triton CPU backend")
 @config.patch(cpu_backend="triton")
