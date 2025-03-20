@@ -4692,7 +4692,7 @@ class AOTInductorTestsTemplate:
                 K, N = y.shape
                 M = torch.abs(m)
                 out = torch.empty((_M, N), device=x.device, dtype=torch.float32)
-                grid = lambda META: (
+                grid = lambda META: (  # noqa: E731
                     triton.cdiv(
                         4096 * 2046, META["BLOCK_SIZE_M"] * META["BLOCK_SIZE_N"]
                     ),
@@ -4710,15 +4710,6 @@ class AOTInductorTestsTemplate:
         x = torch.randn(4096, 1024, device=self.device)
         y = torch.randn(1024, 2048, device=self.device)
         m = torch.tensor([4096], dtype=torch.int32, device=self.device)
-
-        dim_m = Dim("dim_m", min=1, max=4096)
-        dim_n = Dim("dim_n", min=1, max=4096)
-        dim_k = Dim("dim_k", min=1, max=4096)
-        dynamic_shapes = {
-            "x": {0: dim_m, 1: dim_k},
-            "y": {0: dim_k, 1: dim_n},
-            "m": {0: 1},
-        }
 
         with config.patch("triton.autotune_with_sample_inputs", True):
             self.code_check_count(Model(), (x, y, m), "uint32_t grid_0 = 1023L;", 1)
@@ -4745,7 +4736,7 @@ class AOTInductorTestsTemplate:
                 M = torch.empty((1), device=x.device, dtype=torch.int32)
                 add_one_kernel[(1,)](m, M, 1)
                 out = torch.empty((_M, N), device=x.device, dtype=torch.float32)
-                grid = lambda META: (
+                grid = lambda META: (  # noqa: E731
                     triton.cdiv(
                         4096 * 2046, META["BLOCK_SIZE_M"] * META["BLOCK_SIZE_N"]
                     ),
@@ -4764,14 +4755,6 @@ class AOTInductorTestsTemplate:
         y = torch.randn(1024, 2048, device=self.device)
         m = torch.tensor([4095], dtype=torch.int32, device=self.device)
 
-        dim_m = Dim("dim_m", min=1, max=4096)
-        dim_n = Dim("dim_n", min=1, max=4096)
-        dim_k = Dim("dim_k", min=1, max=4096)
-        dynamic_shapes = {
-            "x": {0: dim_m, 1: dim_k},
-            "y": {0: dim_k, 1: dim_n},
-            "m": {0: 1},
-        }
         with config.patch("triton.autotune_with_sample_inputs", True):
             self.code_check_count(Model(), (x, y, m), "uint32_t grid_0 = 1023L;", 1)
 
