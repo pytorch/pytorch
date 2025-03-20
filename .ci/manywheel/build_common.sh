@@ -111,12 +111,6 @@ case ${DESIRED_PYTHON} in
     ;;
 esac
 
-if [[ "$DESIRED_DEVTOOLSET" == *"cxx11-abi"* ]]; then
-    export _GLIBCXX_USE_CXX11_ABI=1
-else
-    export _GLIBCXX_USE_CXX11_ABI=0
-fi
-
 if [[ "$DESIRED_CUDA" == *"rocm"* ]]; then
     echo "Calling build_amd.py at $(date)"
     python tools/amd_build/build_amd.py
@@ -220,12 +214,6 @@ if [[ -n "$BUILD_PYTHONLESS" ]]; then
     echo "$(pushd $PYTORCH_ROOT && git rev-parse HEAD)" > libtorch/build-hash
 
     mkdir -p /tmp/$LIBTORCH_HOUSE_DIR
-
-    if [[ "$DESIRED_DEVTOOLSET" == *"cxx11-abi"* ]]; then
-        LIBTORCH_ABI="cxx11-abi-"
-    else
-        LIBTORCH_ABI=
-    fi
 
     zip -rq /tmp/$LIBTORCH_HOUSE_DIR/libtorch-$LIBTORCH_ABI$LIBTORCH_VARIANT-$PYTORCH_BUILD_VERSION.zip libtorch
     cp /tmp/$LIBTORCH_HOUSE_DIR/libtorch-$LIBTORCH_ABI$LIBTORCH_VARIANT-$PYTORCH_BUILD_VERSION.zip \
