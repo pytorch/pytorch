@@ -44,16 +44,9 @@ class ContextManager:
         raise NameError
 
 
-class TestRaise(torch._dynamo.test_case.TestCase):
+class TestRaise(torch._dynamo.test_case.CPythonTestCase):
     # Tests taken from CPython source code in cpython/Lib/test/test_raise.py
     # https://github.com/python/cpython/blob/v3.13.1/Lib/test/test_raise.py
-    def setUp(self):
-        self._prev = torch._dynamo.config.enable_trace_unittest
-        torch._dynamo.config.enable_trace_unittest = True
-
-    def tearDown(self):
-        torch._dynamo.config.enable_trace_unittest = self._prev
-
     @make_dynamo_test
     def test_invalid_reraise(self):
         try:

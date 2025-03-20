@@ -28,16 +28,9 @@ class TestUnittest(torch._dynamo.test_case.TestCase):
         self.assertEqual(z, 1)
 
 
-class CPythonTest_Assertions(torch._dynamo.test_case.TestCase):
+class CPythonTest_Assertions(torch._dynamo.test_case.CPythonTestCase):
     # Tests taken from CPython source code in cpython/Lib/test/test_unittest/test_assertions.py
     # https://github.com/python/cpython/blob/3.13/Lib/test/test_unittest/test_assertions.py
-
-    def setUp(self):
-        self._prev = torch._dynamo.config.enable_trace_unittest
-        torch._dynamo.config.enable_trace_unittest = True
-
-    def tearDown(self):
-        torch._dynamo.config.enable_trace_unittest = self._prev
 
     @make_dynamo_test
     def test_AlmostEqual(self):
@@ -148,7 +141,7 @@ class CPythonTest_Assertions(torch._dynamo.test_case.TestCase):
             self.fail("assertNotRegex should have failed.")
 
 
-class CPythonTestLongMessage(torch._dynamo.test_case.TestCase):
+class CPythonTestLongMessage(torch._dynamo.test_case.CPythonTestCase):
     """Test that the individual asserts honour longMessage.
     This actually tests all the message behaviour for
     asserts that use longMessage."""
@@ -172,12 +165,6 @@ class CPythonTestLongMessage(torch._dynamo.test_case.TestCase):
 
         self.testableTrue = TestableTestTrue("testTest")
         self.testableFalse = TestableTestFalse("testTest")
-
-        self._prev = torch._dynamo.config.enable_trace_unittest
-        torch._dynamo.config.enable_trace_unittest = True
-
-    def tearDown(self):
-        torch._dynamo.config.enable_trace_unittest = self._prev
 
     def testDefault(self):
         self.assertTrue(unittest.TestCase.longMessage)
