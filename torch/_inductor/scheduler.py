@@ -1961,6 +1961,10 @@ class Scheduler:
         self._graph_partition_counter = itertools.count()
 
         self.completed_operations = OrderedSet[str]()
+
+        self.nodes = [self.create_scheduler_node(n) for n in nodes]
+        self.update_zero_dim_cpu_tensor()
+
         self.available_buffer_names = OrderedSet(
             [
                 *V.graph.graph_inputs.keys(),
@@ -1969,10 +1973,6 @@ class Scheduler:
             ]
         )
 
-        self.nodes = [self.create_scheduler_node(n) for n in nodes]
-        self.update_zero_dim_cpu_tensor()
-        # some new constants could have been created above
-        self.available_buffer_names.update(V.graph.constants.keys())
         for node in self.nodes:
             node.prune_deps()
 
