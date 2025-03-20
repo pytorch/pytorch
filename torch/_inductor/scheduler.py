@@ -1723,8 +1723,9 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         template_nodes = [x for x in filtered_nodes if x.is_template()]
         if template_nodes:
             log.debug(
-                "ComboKernels: %d template nodes are filtered",
-                OrderedSet([len(template_nodes)]),
+                "ComboKernels: %d template nodes are filtered: %s",
+                len(template_nodes),
+                template_nodes,
             )
         filtered_nodes = [x for x in filtered_nodes if x not in template_nodes]
         return filtered_nodes
@@ -3096,7 +3097,7 @@ class Scheduler:
         self.nodes = sorted(fused_nodes, key=lambda x: x.min_order)
         self.nodes = self.topological_sort_schedule(self.nodes)
         log.info(
-            "Generated ComboKernel nodes: %d ComboKernels, totally %d -> %d nodels",
+            "Generated ComboKernel nodes: %d ComboKernels, totally %d -> %d nodes",
             count,
             num_nodes_orig,
             len(self.nodes),
