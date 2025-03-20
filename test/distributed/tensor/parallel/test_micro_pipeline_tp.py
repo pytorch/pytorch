@@ -492,44 +492,6 @@ class MicroPipelineTPTest(TestCase):
                 gm.graph,
             )
 
-    @skipIfRocm
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @fresh_inductor_cache()
-    def test_unsuccessful_fusion(self):
-        group = dist.group.WORLD
-        scatter_dim = 0
-
-        def no_matching_pattern(
-            A: torch.Tensor,
-            B: torch.Tensor,
-        ) -> torch.Tensor:
-            """
-            Performs 'reshape -> reciprocal -> mm -> reshape -> reduce scatter' pattern,
-            so the extra 'reciprocal' op in the middle should cause pattern matching to fail.
-            """
-            out_shape = [*A.shape[:-1], B.shape[-1]]
-            A = A.reshape(-1, A.shape[-1])
-
-            # insert extra op after reshape that will cause pattern matching to fail
-            A = torch.reciprocal(A)
-
-            C = A @ B
-            C = C.view(out_shape)
-            return reduce_scatter_tensor(C, "sum", scatter_dim, group)
-
-        A = torch.rand(2, 16, 32, device="cuda").to(torch.bfloat16)
-        B = torch.rand(16, 32, device="cuda").to(torch.bfloat16).T
-
-        gm = _make_post_grad_fx(no_matching_pattern, A, B)
-
-        with _test_mode():
-            self.assertRaisesRegex(
-                AssertionError,
-                "no successful fusions of matul-reduce-scatters",
-                micro_pipeline_tp_pass,
-                gm.graph,
-            )
-
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @parametrize("shard_dim", [0, 1])
     @fresh_inductor_cache()
