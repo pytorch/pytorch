@@ -4758,6 +4758,10 @@ class TestLinalg(TestCase):
             self.assertTrue(os.path.exists(result_filename))
             self.assertGreater(os.path.getsize(result_filename), 0)
 
+            # Compare Param Signature of untuned and tuned results
+            ok = compare_untuned_tuned_param_sig(untuned_filename, result_filename)
+            self.assertTrue(ok)
+
         finally:
             # disable TunableOp
             torch.cuda.tunable.enable(False)
@@ -5419,6 +5423,10 @@ class TestLinalg(TestCase):
             self.assertTrue(os.path.exists(result_filename))
             self.assertGreater(os.path.getsize(result_filename), 0)
 
+            # Compare Param Signature of untuned and tuned results
+            ok = compare_untuned_tuned_param_sig(untuned_filename, result_filename)
+            self.assertTrue(ok)
+
         finally:
             # disable TunableOp
             torch.cuda.tunable.enable(False)
@@ -5673,6 +5681,16 @@ class TestLinalg(TestCase):
                                                      'GemmTunableOp_float_NN',
                                                      'nn_41_41_41_ld_41_41_41')
                 self.assertTrue(found_result is not None)
+
+                self.assertTrue(torch.cuda.tunable.write_file())
+
+                # Make sure the results file exists and that it is not zero
+                self.assertTrue(os.path.exists(result_filename))
+                self.assertGreater(os.path.getsize(result_filename), 0)
+
+                # Compare Param Signature of untuned and tuned results
+                ok = compare_untuned_tuned_param_sig(untuned_filename, result_filename)
+                self.assertTrue(ok)
 
         finally:
             # Disable TF32
