@@ -20,11 +20,10 @@ consistency between eager execution and compiled graph behavior by capturing and
 restoring state changes.
 """
 
-import dataclasses
 import inspect
 import sys
 import warnings
-from typing import Callable, Optional, TYPE_CHECKING, Union
+from typing import TYPE_CHECKING, Union
 
 import torch._C
 from torch._guards import Guard
@@ -52,27 +51,6 @@ from .user_defined import UserDefinedObjectVariable
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
-
-
-@dataclasses.dataclass
-class ContextManagerState:
-    """
-    Mutating `self` in VariableTracker is not allowed because we copy
-    them.  This is a mutable container pointed to by context managers
-    that won't get copied, so it is safe to mutate.
-    """
-
-    cleanup_fn: Optional[Callable] = None
-    proxy: Optional[torch.fx.Proxy] = None
-
-    def cleanup(self):
-        if self.cleanup_fn is not None:
-            self.cleanup_fn()
-            self.cleanup_fn = None
-
-    def cleanup_assert(self):
-        assert self.cleanup_fn, "multiple exits?"
-        self.cleanup()
 
 
 class ContextWrappingVariable(VariableTracker):
