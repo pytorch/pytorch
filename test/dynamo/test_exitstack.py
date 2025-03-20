@@ -591,7 +591,9 @@ class CPythonTestBaseExitStack:
         self.assertIs(exc.__cause__, exc.__context__)
 
 
-class CPythonTestExitStack(CPythonTestBaseExitStack, torch._dynamo.test_case.CPythonTestCase):
+class CPythonTestExitStack(
+    CPythonTestBaseExitStack, torch._dynamo.test_case.CPythonTestCase
+):
     # Tests taken from CPython source code in cpython/Lib/test/test_contextlib.py
     # https://github.com/python/cpython/blob/v3.13.1/Lib/test/test_contextlib.py
     exit_stack = ExitStack
