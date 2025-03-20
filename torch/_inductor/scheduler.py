@@ -4127,7 +4127,6 @@ class Scheduler:
                 )
             )
 
-        # breakpoint()
         candidate_symbols: OrderedSet[sympy.Symbol] = OrderedSet().union(
             *(get_scheduler_node_symbol_uses(node) for node in partition)
         )

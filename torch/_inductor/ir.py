@@ -2132,9 +2132,6 @@ class Scan(Loops):
         )
 
     def get_free_symbol_uses(self) -> OrderedSet[Symbol]:
-        # TODO: Can combine_fn/reindex close over unbacked symbols? If so, we
-        # need to explicitly represent the closure so we can pull out unbacked
-        # symbols here
         return (
             super().get_free_symbol_uses()
             | OrderedSet().union(*(free_symbols(e) for e in self.scan_ranges))
@@ -5721,14 +5718,11 @@ class ExternKernel(InputsKernel):
         return r
 
     def get_free_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
-        # TODO
-        # NB: It's not necessary to check regular inputs as we automatically
-        # have dependencies on them
         r = OrderedSet[sympy.Symbol]()
         for arg in self.constant_args:
-            r |= maybe_free_unbacked_symbols(arg)
+            r |= maybe_free_symbols(arg)
         for arg in self.kwargs.values():
-            r |= maybe_free_unbacked_symbols(arg)
+            r |= maybe_free_symbols(arg)
         return r
 
     def __str__(self) -> str:
@@ -8053,5 +8047,21 @@ def maybe_free_unbacked_symbols(s: object) -> OrderedSet[Symbol]:
     elif isinstance(s, torch.Tensor):
         # This branch is impossible in constant-args position
         return free_unbacked_symbols(s)
+    else:
+        return OrderedSet()
+
+
+def maybe_free_symbols(s: object) -> OrderedSet[Symbol]:
+    if isinstance(s, (SymTypes, Expr)):
+        # This branch should be impossible in return position
+        return free_symbols(s)
+    elif isinstance(s, (tuple, list)):
+        r = OrderedSet[sympy.Symbol]()
+        for t in s:
+            r |= maybe_free_symbols(t)
+        return r
+    elif isinstance(s, torch.Tensor):
+        # This branch is impossible in constant-args position
+        return free_symbols(s)
     else:
         return OrderedSet()
