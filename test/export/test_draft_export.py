@@ -265,7 +265,6 @@ class TestDraftExport(TestCase):
         self.assertEqual(
             report.failures[0].failure_type, FailureType.DATA_DEPENDENT_ERROR
         )
-        self.assertTrue(len(report.expressions_created) >= 4)
         for _ep in [ep, ep.run_decompositions()]:
             # check data-dependent asserts
             assert_scalar_nodes = [

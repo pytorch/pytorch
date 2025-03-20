@@ -6593,9 +6593,10 @@ class ShapeEnv:
             "guard_added",
             metadata_fn=lambda: {
                 "expr": str(g),
-                "stack": structured.from_traceback(
-                    CapturedTraceback.extract(skip=1).summary()
-                ),
+                "prefix": prefix,
+                "expr_node_id": self._expr_sym_node_id,
+                "user_stack": structured.get_user_stack(3),
+                "stack": structured.get_framework_stack(3),
                 "symbol_to_sources": {
                     str(v): k
                     for k, v in self.source_to_var.items()
