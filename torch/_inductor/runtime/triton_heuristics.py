@@ -1137,10 +1137,10 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
         triton_meta: dict[str, Any],
         heuristic_type: HeuristicType,
     ) -> Optional[StaticallyLaunchedCudaKernel]:
-        def check_can_launch() -> StaticallyLaunchedCudaKernel:
-            if not torch._inductor.config.use_static_cuda_launcher:
-                raise CannotStaticallyLaunchKernel("Static launcher disabled")
+        if not torch._inductor.config.use_static_cuda_launcher:
+            return None
 
+        def check_can_launch() -> StaticallyLaunchedCudaKernel:
             if triton_meta.get("device_type", None) != "cuda":
                 # Only cuda kernels
                 raise CannotStaticallyLaunchKernel("Non-cuda device")
