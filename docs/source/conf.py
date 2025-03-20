@@ -131,32 +131,6 @@ html_theme_options = {
         "image_dark": "_static/logo-dark.png",
         "text": "Home",
     },
-    "icon_links": [
-        {
-            "name": "X",
-            "url": "https://x.com/PyTorch",
-            "icon": "fa-brands fa-x-twitter",
-            "type": "fontawesome",
-        },
-        {
-            "name": "GitHub",
-            "url": "https://github.com/pytorch/pytorch",
-            "icon": "fa-brands fa-github",
-            "type": "fontawesome",
-        },
-        {
-            "name": "Discourse",
-            "url": "https://dev-discuss.pytorch.org/",
-            "icon": "fa-brands fa-discourse",
-            "type": "fontawesome",
-        },
-        {
-            "name": "PyPi",
-            "url": "https://pypi.org/project/torch/",
-            "icon": "fa-brands fa-python",
-            "type": "fontawesome",
-        },
-    ],
     "language_bindings_links": [
         {
             "url": "https://pytorch.org/docs/stable/cpp_index.html",
