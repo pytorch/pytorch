@@ -76,7 +76,7 @@ TRITON_VERSION=$(cat $PYTORCH_ROOT/.ci/docker/triton_version.txt)
 TRITON_CONSTRAINT="platform_system == 'Linux' and platform_machine == 'x86_64'"
 
 # This is Linux aarch64 CUDA build. We do have triton build for it. Hence add triton constrain
-if [[ "$GPU_ARCH_TYPE" =~ .*aarch64.* && "$DESIRED_CUDA" != cpu ]]; then
+if [[ "$DESIRED_CUDA" == cu128 ]]; then
   TRITON_CONSTRAINT="platform_system == 'Linux'"
 fi
 
