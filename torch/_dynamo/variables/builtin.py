@@ -667,7 +667,12 @@ class BuiltinVariable(VariableTracker):
                 def handle_is(tx: "InstructionTranslator", left, right):
                     # If the two objects are of different type, we can safely return False
                     # and True for `is` and `is not`, respectively
-                    if type(left) is not type(right):
+                    if type(left) is not type(right) and not any(
+                        istype(a, variables.GetAttrVariable) for a in (left, right)
+                    ):
+                        # We cannot reason about the types if either left or right
+                        # is a `GetAttrVariable(...)`:
+                        # python test/dynamo/test_repros.py ReproTests.test_inplace_unsqueeze_input
                         return ConstantVariable.create(op.__name__ != "is_")
                     if left is right:
                         return ConstantVariable.create(op(left, right))
