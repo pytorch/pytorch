@@ -806,6 +806,10 @@ def proxy_call(
 
     if func is torch.ops.aten.is_nonzero.default:
         with proxy_mode:
+            if args[0].numel() != 1:
+                raise RuntimeError(
+                    "Can't call is_nonzero on a tensor of elements more than one"
+                )
             return (args[0] != 0).item()  # type: ignore[attr-defined]
 
     tracer = proxy_mode.tracer
