@@ -14,11 +14,11 @@ import re
 import sys
 import textwrap
 import time
-from collections import namedtuple
 from concurrent.futures import as_completed, ThreadPoolExecutor
 from io import StringIO
 from types import ModuleType
-from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing_extensions import Self
 from unittest.mock import patch
 
 import sympy
@@ -31,7 +31,6 @@ from torch._dynamo.utils import counters, dynamo_timed, identity, preserve_rng_s
 from torch._inductor.utils import clear_on_fresh_inductor_cache
 from torch.utils._filelock import FileLock
 from torch.utils._ordered_set import OrderedSet
-from typing_extensions import Self
 
 from ..utils._sympy.functions import CeilDiv
 from . import config, ir
@@ -174,9 +173,9 @@ class PartialRender:
                 )
             else:
                 return
-        assert (
-            self.replacement_hooks[hook_key] is not None
-        ), "hook_key can only be called once"
+        assert self.replacement_hooks[hook_key] is not None, (
+            "hook_key can only be called once"
+        )
         self.code = self.code.replace(hook_key, self.replacement_hooks[hook_key]())
         self.replacement_hooks[hook_key] = None
 
@@ -263,9 +262,9 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
         This is used by flex_attention's backwards grad for captured buffers, see
         zeros_and_scatter lowering
         """
-        assert (
-            self.mask is not None
-        ), "Mask is required for inner stores in modifications"
+        assert self.mask is not None, (
+            "Mask is required for inner stores in modifications"
+        )
         assert mode == "atomic_add", "Only atomic_add is supported for inner stores"
 
         buf_name = self._add_kernel_input(name)
@@ -586,12 +585,12 @@ class TritonTemplateKernel(TritonKernel):
     def _get_subgraph(self, subgraph_number: int):
         assert isinstance(subgraph_number, int)
         assert isinstance(self.subgraphs, list)
-        assert subgraph_number < len(
-            self.subgraphs
-        ), f"Invalid subgraph number provided to create_modification, {subgraph_number} must be < {len(self.subgraphs)}"
-        assert (
-            self.body.getvalue() == ""
-        ), "Body should be clear before adding a modification"
+        assert subgraph_number < len(self.subgraphs), (
+            f"Invalid subgraph number provided to create_modification, {subgraph_number} must be < {len(self.subgraphs)}"
+        )
+        assert self.body.getvalue() == "", (
+            "Body should be clear before adding a modification"
+        )
         return self.subgraphs[subgraph_number]
 
     def _handle_scatter_graph(self, scatter_graph):
@@ -600,9 +599,9 @@ class TritonTemplateKernel(TritonKernel):
         Args:
             scatter_graph: The scatter graph to process
         """
-        assert isinstance(
-            scatter_graph, ir.ComputedBuffer
-        ), f"scatter_graph must be an instance of ComputeBuffer but got {type(scatter_graph)}"
+        assert isinstance(scatter_graph, ir.ComputedBuffer), (
+            f"scatter_graph must be an instance of ComputeBuffer but got {type(scatter_graph)}"
+        )
 
         def contiguous_strides(x):
             # We always create a fresh contiguous grad for scattering into
@@ -641,9 +640,9 @@ class TritonTemplateKernel(TritonKernel):
                 self, subgraph_number, fixed_inputs, mask
             )
             with V.set_ops_handler(modification_handler):
-                assert isinstance(
-                    subgraph, (ir.ComputedBuffer, list)
-                ), f"Expected the subgraph to be a ComputedBuffer or a List[ComputedBuffer], got {type(subgraph)}"
+                assert isinstance(subgraph, (ir.ComputedBuffer, list)), (
+                    f"Expected the subgraph to be a ComputedBuffer or a List[ComputedBuffer], got {type(subgraph)}"
+                )
                 # Handle scatter stores
                 if isinstance(subgraph, list):
                     for scatter_graph in subgraph:
@@ -1059,6 +1058,7 @@ class GeneratedModulesCacheEntry(NamedTuple):
     normalized_prologue_supported_inputs: list[int]
     args_sizevars_keys: tuple[sympy.Expr, ...]
 
+
 @clear_on_fresh_inductor_cache
 class GeneratedModulesCache(dict[str, GeneratedModulesCacheEntry]):
     def __init__(self, *args, **kwargs):
@@ -1066,6 +1066,7 @@ class GeneratedModulesCache(dict[str, GeneratedModulesCacheEntry]):
 
     def cache_clear(self):
         super().clear()
+
 
 class TritonTemplate(KernelTemplate):
     index_counter = itertools.count()
@@ -1079,13 +1080,13 @@ class TritonTemplate(KernelTemplate):
         TritonTemplate.all_templates[name] = self
         self.debug = debug
         self._generated_module_cache: GeneratedModulesCache = {}
-      
+
     # Those are class static flags are used mostly for testing _generated_module_cache
 
-    # When this flag is on, we ensure that the cached results and the generated result if cache 
+    # When this flag is on, we ensure that the cached results and the generated result if cache
     # was not used are the same.
     test_cache = True
-    generated_module_cache_hit = 0    
+    generated_module_cache_hit = 0
 
     def generate_and_load(
         self,
@@ -1104,11 +1105,20 @@ class TritonTemplate(KernelTemplate):
         """Generate the python code and load it into the current process"""
         cache_key = None
 
-        input_name_to_index :dict[str, int] = {value.get_name(): index for index, value in enumerate(input_nodes)}
-        index_to_input_name :dict[int, str]=  {index: value.get_name() for index, value in enumerate(input_nodes)}
+        input_name_to_index: dict[str, int] = {
+            value.get_name(): index for index, value in enumerate(input_nodes)
+        }
+        index_to_input_name: dict[int, str] = {
+            index: value.get_name() for index, value in enumerate(input_nodes)
+        }
 
         # We do not include those inputs the cache key because we only cache under this condition.
-        if epilogue_fn==identity and subgraphs==None and call_sizes==layout.size and workspace_arg==None:
+        if (
+            epilogue_fn == identity
+            and subgraphs is None
+            and call_sizes == layout.size
+            and workspace_arg is None
+        ):
 
             def input_key(input):
                 # We omit input nodes names from the cache, to make the cache insensitive to the input nodes names.
@@ -1116,22 +1126,31 @@ class TritonTemplate(KernelTemplate):
                 # and kernel.args.input_buffers.
                 # To address that, we do normalization using input_name_to_index and index_to_input_name.
 
-                # TODO Normalize symbols in input_nodes so that inputs 
+                # TODO Normalize symbols in input_nodes so that inputs
                 # [s0, s2] * [s2, s3] and [s4, s5] * [s6, s7] would cache hit.
-                return (input.get_size(), input.get_stride(), input.get_dtype(), input.get_device().type,)
+                return (
+                    input.get_size(),
+                    input.get_stride(),
+                    input.get_dtype(),
+                    input.get_device().type,
+                )
+
             cache_key = repr(
-                        {"input_nodes":[input_key(name) for name in input_nodes],
-                         "num_stages":num_stages,
-                         "num_stages":num_stages,
-                         "prefix_args": prefix_args,
-                         "suffix_args":suffix_args,
-                         "layout":layout, 
-                         "kwargs":kwargs})
+                {
+                    "input_nodes": [input_key(name) for name in input_nodes],
+                    "num_stages": num_stages,
+                    "num_warps": num_stages,
+                    "prefix_args": prefix_args,
+                    "suffix_args": suffix_args,
+                    "layout": layout,
+                    "kwargs": kwargs,
+                }
+            )
 
             print(cache_key)
         assert self.template, "requires jinja2"
         defines = StringIO()
-    
+
         for name, val in kwargs.items():
             defines.write(f"{name} : tl.constexpr = {val}\n")
         defines = defines.getvalue()
@@ -1160,15 +1179,28 @@ class TritonTemplate(KernelTemplate):
             "subgraphs": subgraphs,
         }
         cache_result = None
-        if cache_key is not None and (entry := self._generated_module_cache.get(cache_key, None)):
-            TritonTemplate.generated_module_cache_hit = TritonTemplate.generated_module_cache_hit + 1
-            cache_result =  (
+        if cache_key is not None and (
+            entry := self._generated_module_cache.get(cache_key, None)
+        ):
+            TritonTemplate.generated_module_cache_hit = (
+                TritonTemplate.generated_module_cache_hit + 1
+            )
+            cache_result = (
                 entry.mod,
                 entry.extra,
-                tuple(index_to_input_name[i] for i in entry.normalized_kernel_args_input_buffers_keys),
-                OrderedSet([index_to_input_name[i] for i in entry.normalized_prologue_supported_inputs]),
+                tuple(
+                    index_to_input_name[i]
+                    for i in entry.normalized_kernel_args_input_buffers_keys
+                ),
+                OrderedSet(
+                    [
+                        index_to_input_name[i]
+                        for i in entry.normalized_prologue_supported_inputs
+                    ]
+                ),
                 entry.args_sizevars_keys,
-                kernel_options)
+                kernel_options,
+            )
             if not TritonTemplate.test_cache:
                 return cache_result
 
@@ -1208,24 +1240,33 @@ class TritonTemplate(KernelTemplate):
             mod = PyCodeCache.load(code, extra)
 
             if cache_key is not None and cache_result is None:
-                # add a cache entry. 
-                normalized_kernel_args_input_buffers_keys = [input_name_to_index[n] for n in kernel.args.input_buffers.keys()]
-                normalized_prologue_supported_inputs = [input_name_to_index[n] for n in kernel.prologue_supported_inputs]
-                self._generated_module_cache[cache_key] = GeneratedModulesCacheEntry(mod, extra, normalized_kernel_args_input_buffers_keys, normalized_prologue_supported_inputs,tuple(kernel.args.sizevars.keys()))
-            
-            
-            result= (
+                # add a cache entry.
+                normalized_kernel_args_input_buffers_keys = [
+                    input_name_to_index[n] for n in kernel.args.input_buffers.keys()
+                ]
+                normalized_prologue_supported_inputs = [
+                    input_name_to_index[n] for n in kernel.prologue_supported_inputs
+                ]
+                self._generated_module_cache[cache_key] = GeneratedModulesCacheEntry(
+                    mod,
+                    extra,
+                    normalized_kernel_args_input_buffers_keys,
+                    normalized_prologue_supported_inputs,
+                    tuple(kernel.args.sizevars.keys()),
+                )
+
+            result = (
                 mod,
                 extra,
                 tuple(kernel.args.input_buffers.keys()),
                 kernel.prologue_supported_inputs.copy(),
                 tuple(kernel.args.sizevars.keys()),
-                kernel_options)
+                kernel_options,
+            )
             if cache_result:
-                # Compare all except mod. 
-                assert(result[1:]==cache_result[1:])
+                # Compare all except mod.
+                assert result[1:] == cache_result[1:]
             return result
-            
 
     def generate(  # type: ignore[override]
         self,
@@ -1274,20 +1315,20 @@ class TritonTemplate(KernelTemplate):
             input_call_args,
             prologue_supported_inputs,
             args_sizevars_keys,
-            kernel_options
+            kernel_options,
         ) = self.generate_and_load(
-                input_nodes,
-                num_stages,
-                num_warps,
-                call_sizes,
-                prefix_args,
-                suffix_args,
-                epilogue_fn,
-                subgraphs,
-                workspace_arg,
-                layout,
-                kwargs)
-
+            input_nodes,
+            num_stages,
+            num_warps,
+            call_sizes,
+            prefix_args,
+            suffix_args,
+            epilogue_fn,
+            subgraphs,
+            workspace_arg,
+            layout,
+            kwargs,
+        )
 
         expected_input_args = tuple(unique(x.get_name() for x in input_nodes))
         # We expect the input_buffer order to be [*input_nodes, *captured_buffers]
@@ -1572,9 +1613,9 @@ class ExternKernelCaller(ChoiceCaller):
 
     def output_node(self):
         if self.choice.use_fallback_kernel:
-            assert (
-                self.choice.op_overload is not None
-            ), "Please provide an op_overload to use ir.FallbackKernel"
+            assert self.choice.op_overload is not None, (
+                "Please provide an op_overload to use ir.FallbackKernel"
+            )
             inner = ir.FallbackKernel.create(
                 self.choice.op_overload, *self.input_nodes, **self.kwargs
             )
