@@ -16,15 +16,16 @@ from typing import Optional
 
 
 # NOTE: Also update the CUDA sources in tools/nightly.py when changing this list
-CUDA_ARCHES = ["11.8", "12.6", "12.8"]
-CUDA_STABLE = "12.6"
+CUDA_ARCHES = ["11.8", "12.4", "12.6", "12.8"]
 CUDA_ARCHES_FULL_VERSION = {
     "11.8": "11.8.0",
+    "12.4": "12.4.1",
     "12.6": "12.6.3",
     "12.8": "12.8.0",
 }
 CUDA_ARCHES_CUDNN_VERSION = {
     "11.8": "9",
+    "12.4": "9",
     "12.6": "9",
     "12.8": "9",
 }
@@ -40,7 +41,7 @@ CPU_AARCH64_ARCH = ["cpu-aarch64"]
 
 CPU_S390X_ARCH = ["cpu-s390x"]
 
-CUDA_AARCH64_ARCHES = ["12.8-aarch64"]
+CUDA_AARCH64_ARCHES = ["12.6-aarch64", "12.8-aarch64"]
 
 
 PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
@@ -56,6 +57,21 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cusparse-cu11==11.7.5.86; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-nccl-cu11==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-nvtx-cu11==11.8.86; platform_system == 'Linux' and platform_machine == 'x86_64'"
+    ),
+    "12.4": (
+        "nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-nccl-cu12==2.25.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'"
     ),
     "12.6": (
         "nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | "
@@ -77,7 +93,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cuda-nvrtc-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cuda-runtime-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cuda-cupti-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cudnn-cu12==9.8.0.87; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cudnn-cu12==9.7.1.26; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cublas-cu12==12.8.3.14; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cufft-cu12==11.3.3.41; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-curand-cu12==10.3.9.55; platform_system == 'Linux' and platform_machine == 'x86_64' | "
@@ -332,7 +348,7 @@ def generate_wheels_matrix(
                 continue
 
             if use_split_build and (
-                arch_version not in ["12.6", "12.8", "11.8", "cpu"] or os != "linux"
+                arch_version not in ["12.6", "12.4", "11.8", "cpu"] or os != "linux"
             ):
                 raise RuntimeError(
                     "Split build is only supported on linux with cuda 12*, 11.8, and cpu.\n"
@@ -343,27 +359,26 @@ def generate_wheels_matrix(
             # cuda linux wheels require PYTORCH_EXTRA_INSTALL_REQUIREMENTS to install
 
             if (
-                arch_version in ["12.8", "12.6", "11.8"]
+                arch_version in ["12.8", "12.6", "12.4", "11.8"]
                 and os == "linux"
                 or arch_version in CUDA_AARCH64_ARCHES
             ):
-                desired_cuda = translate_desired_cuda(gpu_arch_type, gpu_arch_version)
                 ret.append(
                     {
                         "python_version": python_version,
                         "gpu_arch_type": gpu_arch_type,
                         "gpu_arch_version": gpu_arch_version,
-                        "desired_cuda": desired_cuda,
+                        "desired_cuda": translate_desired_cuda(
+                            gpu_arch_type, gpu_arch_version
+                        ),
                         "use_split_build": "True" if use_split_build else "False",
                         "devtoolset": "cxx11-abi",
                         "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
                         "package_type": package_type,
                         "pytorch_extra_install_requirements": (
-                            PYTORCH_EXTRA_INSTALL_REQUIREMENTS[
-                                f"{desired_cuda[2:4]}.{desired_cuda[4:]}"  # for cuda-aarch64: cu126 -> 12.6
-                            ]
-                            if os == "linux-aarch64"
-                            else PYTORCH_EXTRA_INSTALL_REQUIREMENTS[arch_version]
+                            PYTORCH_EXTRA_INSTALL_REQUIREMENTS[arch_version]
+                            if os != "linux-aarch64"
+                            else ""
                         ),
                         "build_name": (
                             f"{package_type}-py{python_version}-{gpu_arch_type}"
@@ -373,8 +388,8 @@ def generate_wheels_matrix(
                         ),  # include special case for aarch64 build, remove the -aarch64 postfix
                     }
                 )
-                # Special build building to use on Colab. Python 3.11 for 12.6 CUDA
-                if python_version == "3.11" and arch_version == CUDA_STABLE:
+                # Special build building to use on Colab. Python 3.11 for 12.4 CUDA
+                if python_version == "3.11" and arch_version == "12.4":
                     ret.append(
                         {
                             "python_version": python_version,
@@ -417,7 +432,7 @@ def generate_wheels_matrix(
                         "pytorch_extra_install_requirements": (
                             PYTORCH_EXTRA_INSTALL_REQUIREMENTS["xpu"]
                             if gpu_arch_type == "xpu"
-                            else PYTORCH_EXTRA_INSTALL_REQUIREMENTS[CUDA_STABLE]
+                            else PYTORCH_EXTRA_INSTALL_REQUIREMENTS["12.4"]
                             if os != "linux"
                             else ""
                         ),
@@ -429,4 +444,5 @@ def generate_wheels_matrix(
 
 validate_nccl_dep_consistency("12.8")
 validate_nccl_dep_consistency("12.6")
+validate_nccl_dep_consistency("12.4")
 validate_nccl_dep_consistency("11.8")

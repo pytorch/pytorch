@@ -140,13 +140,13 @@ def recommended_max_memory() -> int:
     return torch._C._mps_recommendedMaxMemory()
 
 
-def compile_shader(source: str):
+def _compile_shader(source: str):
     r"""Compiles compute shader from source and allows one to invoke kernels
     defined there from the comfort of Python runtime
     Example::
 
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_MPS)
-        >>> lib = torch.mps.compile_shader(
+        >>> lib = torch.mps._compile_shader(
         ... "kernel void full(device float* out, constant float& val, uint idx [[thread_position_in_grid]]) { out[idx] = val; }"
         ...  )
         >>> x = torch.zeros(16, device="mps")
@@ -175,7 +175,6 @@ from .event import Event
 
 
 __all__ = [
-    "compile_shader",
     "device_count",
     "get_rng_state",
     "manual_seed",

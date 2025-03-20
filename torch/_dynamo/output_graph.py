@@ -98,7 +98,6 @@ from .source import (
     is_constant_source,
     is_from_local_source,
     LocalSource,
-    NumpyTensorSource,
     ParamBufferSource,
     ShapeEnvSource,
     SyntheticLocalSource,
@@ -807,9 +806,7 @@ class OutputGraph:
                 if target in self.root_tx.output.side_effects:
                     return self.root_tx.output.side_effects[target]
 
-                if get_static_address_type(target) == "guarded" and not isinstance(
-                    source, NumpyTensorSource
-                ):
+                if get_static_address_type(target) == "guarded":
                     install_guard(source.make_guard(GuardBuilder.ID_MATCH))
                 elif not is_constant_source(source):
                     install_guard(source.make_guard(GuardBuilder.TENSOR_MATCH))
@@ -1776,6 +1773,9 @@ class OutputGraph:
             name_parts = node.name.rsplit("_", 1)
             if len(name_parts) > 1 and name_parts[1].isdigit():
                 base_name = name_parts[0]
+                base_name_counter[base_name] = max(
+                    base_name_counter[base_name], int(name_parts[1])
+                )
             else:
                 base_name = node.name
 

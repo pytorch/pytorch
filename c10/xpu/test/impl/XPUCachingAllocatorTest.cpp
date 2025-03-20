@@ -4,6 +4,10 @@
 #include <c10/xpu/XPUCachingAllocator.h>
 #include <c10/xpu/XPUException.h>
 
+bool has_xpu() {
+  return c10::xpu::device_count() > 0;
+}
+
 TEST(XPUCachingAllocatorTest, GetXPUAllocator) {
   auto* allocator = c10::xpu::XPUCachingAllocator::get();
 

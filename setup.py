@@ -219,7 +219,7 @@
 #      Builds libtorch.so and its dependencies as a wheel
 #
 #   BUILD_PYTHON_ONLY
-#      Builds pytorch as a wheel using libtorch.so from a separate wheel
+#      Builds pytorch as a wheel using libtorch.so from a seperate wheel
 
 import os
 import sys
@@ -1274,7 +1274,6 @@ def main():
         "include/c10/xpu/impl/*.h",
         "include/torch/*.h",
         "include/torch/csrc/*.h",
-        "include/torch/csrc/stable/*.h",
         "include/torch/csrc/api/include/torch/*.h",
         "include/torch/csrc/api/include/torch/data/*.h",
         "include/torch/csrc/api/include/torch/data/dataloader/*.h",

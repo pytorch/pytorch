@@ -41,7 +41,6 @@ TORCH_SDT_DEFINE_SEMAPHORE(free)
 
 namespace c10 {
 
-// NOLINTNEXTLINE(misc-use-internal-linkage)
 C10_DEFINE_REGISTRY(FreeCudaMemoryCallbacksRegistry, FreeMemoryCallback)
 
 namespace cuda::CUDACachingAllocator {
@@ -3904,17 +3903,11 @@ class NativeCachingAllocator : public CUDAAllocator {
              curr_device, handle, *device_allocator[curr_device])});
     auto sp = std::shared_ptr<void>(
         inserted->second.ptr(), [handle, this](void* ptr) {
-          std::unique_lock<std::mutex> deleter_lock(IpcMutex);
-
+          std::lock_guard<std::mutex> deleter_lock(IpcMutex);
           auto it = ipcMemHandle_to_devptr.find(handle);
           TORCH_INTERNAL_ASSERT(it != ipcMemHandle_to_devptr.end());
-          auto entry = std::move(it->second);
+          it->second.clear();
           ipcMemHandle_to_devptr.erase(it);
-
-          // ExpandableSegment synchronizes on destruction in unmapHandles, so
-          // we need to release the lock first to minimize the performance hit.
-          deleter_lock.unlock();
-          entry.clear();
         });
     inserted->second.wp_ = sp;
     return sp;
@@ -3943,7 +3936,6 @@ void local_raw_delete(void* ptr) {
 
 namespace CudaMallocAsync {
 // If this is put in its own header file, it gets incorrectly renamed in HIPify.
-// NOLINTNEXTLINE(misc-use-internal-linkage)
 CUDAAllocator* allocator();
 
 } // namespace CudaMallocAsync

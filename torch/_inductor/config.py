@@ -303,6 +303,7 @@ fx_passes_numeric_check: dict[str, Any] = {
 mixed_mm_choice: Literal["default", "triton", "aten", "heuristic"] = "heuristic"
 
 # enable reordering pass for increasing overlap between compute and communication
+# only use with fsdp
 reorder_for_compute_comm_overlap = False
 
 # passes (in execution order) for increasing overlap between compute and communication
@@ -1168,9 +1169,9 @@ class aot_inductor:
     debug_compile = os.environ.get("AOT_INDUCTOR_DEBUG_COMPILE", "0") == "1"
 
     # Annotate generated main wrapper function, i.e. AOTInductorModel::run_impl,
-    # to use which cpp compiler optimization level, default to O1
-    compile_wrapper_opt_level = os.environ.get(
-        "AOT_INDUCTOR_COMPILE_WRAPPER_OPT_LEVEL", "O1"
+    # to skip cpp compiler optimizations for faster compilation.
+    compile_wrapper_with_O0 = (
+        os.environ.get("AOT_INDUCTOR_COMPILE_WRAPPER_WITH_O0", "0") == "1"
     )
 
     # option for debug printing/saving for intermediate tensor values for aot inductor

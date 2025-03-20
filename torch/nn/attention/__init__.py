@@ -73,31 +73,18 @@ def _backend_from_string(name: str):
     return getattr(SDPBackend, name)
 
 
-def _cur_sdpa_kernel_backends(with_priority: bool = False):
-    backends = []
+def _cur_sdpa_kernel_backends():
+    backends: list[SDPBackend] = []
     for name, val in _backend_names.items():
         if getattr(torch.backends.cuda, f"{name}_sdp_enabled")():
             backends.append(getattr(SDPBackend, val))
-    if with_priority:
-        curr_priority = torch._C._get_sdp_priority_order()
-        backends = sorted(
-            backends, key=lambda backend: curr_priority.index(int(backend))
-        )
     return backends
 
 
-def _sdpa_kernel(backends: Iterable, set_priority: bool = False):
+def _sdpa_kernel(backends: Iterable[SDPBackend]):
     for name, val in _backend_names.items():
         enabled = getattr(SDPBackend, val) in backends
         getattr(torch.backends.cuda, f"enable_{name}_sdp")(enabled)
-    if set_priority:
-        # backends should be a unique list
-        user_priority = [int(backend) for backend in backends]
-        previous_priority = torch._C._get_sdp_priority_order()
-        for backend in previous_priority:
-            if backend not in user_priority:
-                user_priority.append(int(backend))
-        torch._C._set_sdp_priority_order(user_priority)
 
 
 @contextlib.contextmanager
@@ -137,14 +124,28 @@ def sdpa_kernel(
     if isinstance(backends, SDPBackend):
         backends = [backends]
 
-    backends = list(dict.fromkeys(backends))
+    backends_set = set(backends)
+    user_priority = None
+    previous_priority = None
 
-    previous_backends = _cur_sdpa_kernel_backends(with_priority=set_priority)
+    if set_priority:
+        user_priority = [
+            int(x) for idx, x in enumerate(backends) if backends.index(x) == idx  # type: ignore[call-overload]
+        ]
+        previous_priority = torch._C._get_sdp_priority_order()
+        for backend in previous_priority:
+            if backend not in user_priority:
+                user_priority.append(int(backend))
+    previous_backends = _cur_sdpa_kernel_backends()
     try:
-        _sdpa_kernel(backends, set_priority)
+        if set_priority:
+            torch._C._set_sdp_priority_order(user_priority)  # type: ignore[arg-type]
+        _sdpa_kernel(backends_set)
         yield {}
     finally:
-        _sdpa_kernel(previous_backends, set_priority)
+        _sdpa_kernel(previous_backends)
+        if set_priority:
+            torch._C._set_sdp_priority_order(previous_priority)  # type: ignore[arg-type]
 
 
 # variadic version of sdpa_kernel for dynamo to use while reconstructing

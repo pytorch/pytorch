@@ -31,11 +31,7 @@
 
 // for validators
 #ifdef USE_ROCM
-#ifdef _WIN32
-#include <hip/hip_version.h>
-#else
 #include <rocm-core/rocm_version.h>
-#endif
 #define ROCBLAS_BETA_FEATURES_API
 #include <rocblas/rocblas.h>
 #include <hipblaslt/hipblaslt.h>
@@ -222,11 +218,7 @@ TuningResultsValidator::TuningResultsValidator() {
 #ifdef USE_ROCM
   // rocm
   {
-#ifdef _WIN32
-    std::string rocm_version = HIP_VERSION_BUILD_NAME;
-#else
     std::string rocm_version = ROCM_BUILD_INFO;
-#endif
     RegisterValidator(
        "ROCM_VERSION",
        [rocm_version]() { return rocm_version; },

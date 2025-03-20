@@ -39,7 +39,7 @@ struct TORCH_API PyCompilerInterface {
       // NOLINTNEXTLINE(performance-unnecessary-value-param)
       std::vector<at::TypePtr> packed_args_schema,
       bool is_custom_function = false,
-      bool is_traceable = true) const {
+      bool is_traceable = true) {
     TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
   }
 
@@ -51,14 +51,14 @@ struct TORCH_API PyCompilerInterface {
       const std::string& fn_name,
       const variable_list& inputs,
       const ivalue_list& packed_args,
-      const c10::IValue& output_metadata) const {
+      const c10::IValue& output_metadata) {
     TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
   }
   virtual variable_list call_copy_slices_prologue(
       PyObject* py_compiler,
       const variable_list& inputs,
       const at::TensorGeometry& base,
-      const at::TensorGeometry& view) const {
+      const at::TensorGeometry& view) {
     TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
   }
   virtual variable_list call_copy_slices_epilogue(
@@ -66,13 +66,13 @@ struct TORCH_API PyCompilerInterface {
       const std::vector<bool>& needs_input_grad,
       const at::Tensor& result,
       const variable_list& res,
-      const at::Tensor& grad_slice) const {
+      const at::Tensor& grad_slice) {
     TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
   }
   virtual at::Tensor call_unpack(
       PyObject* py_compiler,
       std::optional<size_t> hook_id,
-      size_t hook_input_id) const {
+      size_t hook_input_id) {
     TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
   }
 };
@@ -349,9 +349,6 @@ struct AutogradCompilerCall {
   std::vector<uint32_t> size_input_origins;
   std::unordered_map<const SavedVariable*, std::pair<size_t, size_t>>
       sv_to_hooks;
-  // pynode -> backward and backward state idx
-  std::unordered_map<const Node*, std::pair<size_t, std::optional<size_t>>>
-      pynode_objs;
 };
 
 class CompiledNodeArgs {
@@ -538,7 +535,7 @@ class CompiledNodeArgs {
     // Note: this is only capturing the ID of the node not everything
     // contained inside it.  This is used for tracking connections between
     // nodes and the actual details of the node itself must be handled by
-    // a separate call to `node->compiled_args()`.
+    // a seperate call to `node->compiled_args()`.
     if (cond((bool)t)) {
       collect(_compiler.node_calls.lookup(t));
     }
@@ -622,17 +619,12 @@ class CompiledNodeArgs {
         typeid(*node), _specialization_key, _specialization_key_size);
   }
 
-  void collect_pynode_objs(
-      const Node* pynode,
-      c10::SafePyObject&& bwd,
-      std::optional<c10::SafePyObject>&& bwd_state) {
-    size_t bwd_idx = _compiler.emplace_hook(std::move(bwd));
-    std::optional<size_t> bwd_state_idx;
-    if (auto state = std::move(bwd_state); state.has_value()) {
-      bwd_state_idx = _compiler.emplace_hook(std::move(state.value()));
-    }
-    _compiler.pynode_objs.emplace(
-        pynode, std::make_pair(bwd_idx, bwd_state_idx));
+  size_t add_backward(c10::SafePyObject&& obj) {
+    return _compiler.emplace_hook(std::move(obj));
+  }
+
+  size_t add_backward_state(c10::SafePyObject&& obj) {
+    return _compiler.emplace_hook(std::move(obj));
   }
 
   void add_tensor_pre_hook(c10::SafePyObject&& obj, int index) {
@@ -751,13 +743,6 @@ class SwapSavedVariables {
   // cache-miss. It swaps any 'lifted' inputs (tensors, symints) to proxy nodes,
   // allows tracing to happen, then swaps them back afterwards.
  public:
-  std::pair<size_t, std::optional<size_t>> retrieve_pynode_objs(
-      Node* pynode) const {
-    auto it = compiler.pynode_objs.find(pynode);
-    TORCH_INTERNAL_ASSERT(it != compiler.pynode_objs.end());
-    return it->second;
-  }
-
   void before(at::Tensor& t) {
     TensorArg& arg = compiler.tensor_args.lookup(t);
     stashed_tensors.save(&t, std::move(t));
@@ -963,7 +948,7 @@ class SwapSavedVariables {
       const NodeCall& n)
       : compiler(c), state(s), py_compiler(p), curr_node_call(n) {}
 
-  PyObject* get_py_compiler() const {
+  PyObject* get_py_compiler() {
     return py_compiler;
   }
 

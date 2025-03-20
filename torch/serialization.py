@@ -1246,13 +1246,9 @@ def _save(
 
                 if (
                     config.save.use_pinned_memory_for_d2h
-                    and (
-                        acc := torch.accelerator.current_accelerator(
-                            check_available=True
-                        )
-                    )
-                    is not None
-                    and acc.type == storage.device.type
+                    and torch.accelerator.is_available()
+                    and torch.accelerator.current_accelerator().type
+                    == storage.device.type
                 ):
                     new_storage = torch.empty(
                         num_bytes, dtype=torch.uint8, device="cpu", pin_memory=True
