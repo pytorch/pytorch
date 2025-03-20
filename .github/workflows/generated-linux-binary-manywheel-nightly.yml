@@ -59,6 +59,7 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
       use_split_build: False
+      use_sequential: True
       DESIRED_PYTHON: "3.9"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_9-cpu
@@ -80,6 +81,7 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
       use_split_build: False
+      use_sequential: True
       DESIRED_PYTHON: "3.9"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build_name: manywheel-py3_9-cuda12_6
