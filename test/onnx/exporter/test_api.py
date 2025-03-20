@@ -460,6 +460,23 @@ class TestFakeTensorExport(common_utils.TestCase):
             onnx_model.graph.initializers["weight"].const_value.numpy(), 42.0
         )
 
+    def test_is_in_onnx_export(self):
+        test_self = self
+
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                test_self.assertTrue(torch.onnx.is_in_onnx_export())
+                raise ValueError
+                return x + 1
+
+        x = torch.randn(3, 4)
+        try:
+            torch.onnx.export(MyModule(), (x,), dynamo=True, fallback=False)
+        except torch.onnx.errors.OnnxExporterError:
+            # Because TorchScript is the last strategy, it will raise
+            # an OnnxExporterError.
+            self.assertFalse(torch.onnx.is_in_onnx_export())
+
 
 if __name__ == "__main__":
     common_utils.run_tests()
