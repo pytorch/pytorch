@@ -1,5 +1,5 @@
 
-#include <torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h>
+#include <torch/csrc/inductor/aoti_torch/c/shim_cpu.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS

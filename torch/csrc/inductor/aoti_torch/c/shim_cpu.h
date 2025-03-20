@@ -1,5 +1,5 @@
-#ifndef AOTI_TORCH_SHIM_MKLDNN
-#define AOTI_TORCH_SHIM_MKLDNN
+#ifndef AOTI_TORCH_SHIM_CPU
+#define AOTI_TORCH_SHIM_CPU
 
 #include <ATen/Config.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
@@ -248,4 +248,4 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__weight_int4pack_mm_cpu_tensor(
 #ifdef __cplusplus
 } // extern "C"
 #endif
-#endif // AOTI_TORCH_SHIM_MKLDNN
+#endif // AOTI_TORCH_SHIM_CPU
