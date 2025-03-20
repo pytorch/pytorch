@@ -159,14 +159,21 @@ class FxCompileMode(enum.Enum):
     SUBPROCESS = 2
 
 
-def _fx_compile_mode_default() -> FxCompileMode:
+# Return compile mode and use_async flag
+def _fx_compile_mode_default() -> tuple[FxCompileMode, bool]:
     name = "TORCHINDUCTOR_FX_COMPILE_MODE"
     value = os.environ.get(name)
     if value is None:
-        return FxCompileMode.NORMAL
+        return FxCompileMode.NORMAL, False
+
+    use_async = False
+    if value.lower().startswith("async+"):
+        use_async = True
+        value = value[6:]
+
     try:
         value = value.upper()
-        return FxCompileMode[value]
+        return FxCompileMode[value], use_async
     except KeyError:
         import logging
 
@@ -179,10 +186,10 @@ def _fx_compile_mode_default() -> FxCompileMode:
         )
         # Remove from the environment so subprocesses don't ALSO complain.
         os.environ.pop(name)
-        return FxCompileMode.NORMAL
+        return FxCompileMode.NORMAL, False
 
 
-fx_compile_mode = _fx_compile_mode_default()
+fx_compile_mode, fx_compile_async = _fx_compile_mode_default()
 
 log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
@@ -1314,6 +1321,15 @@ def fx_codegen_and_compile(
         from .compile_fx_subproc import _SubprocessFxCompile
 
         scheme = _SubprocessFxCompile()
+
+    if fx_compile_async:
+        from .compile_fx_async import _AsyncFxCompile
+        from .compile_fx_ext import _OutOfProcessFxCompile
+
+        assert isinstance(scheme, _OutOfProcessFxCompile), (
+            "async is only valid with an out-of-process compile mode"
+        )
+        scheme = _AsyncFxCompile(scheme)
 
     return scheme.codegen_and_compile(gm, example_inputs, inputs_to_check, graph_kwargs)
 

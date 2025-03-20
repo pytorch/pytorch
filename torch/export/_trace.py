@@ -63,7 +63,7 @@ from torch._functorch.aot_autograd import (
     _detect_attribute_assignment,
     aot_export_module,
 )
-from torch._guards import detect_fake_mode
+from torch._guards import detect_fake_mode, tracing, TracingContext
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._logging import dtrace_structured
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -1194,7 +1194,12 @@ def _get_module_call_graph(
 
 
 def _get_range_constraints(
-    export_artifact: ExportArtifact, combined_args: dict[str, Any], dynamic_shapes
+    mod: torch.nn.Module,
+    export_artifact: ExportArtifact,
+    args,
+    kwargs,
+    dynamic_shapes,
+    _is_torch_jit_trace=False,
 ):
     gm: torch.fx.GraphModule = export_artifact.aten.gm
     export_graph_signature: ExportGraphSignature = export_artifact.aten.sig
@@ -1207,6 +1212,25 @@ def _get_range_constraints(
         ),
         len(export_graph_signature.input_specs),
     )
+    combined_args = _combine_args(
+        mod, args, kwargs, _is_torch_jit_trace=_is_torch_jit_trace
+    )
+
+    # This is because we trace based on the kewargs passed in from user
+    # not based on the signature. I feel it would be better to just enforce
+    # one ordering at the start of tracing to avoid confusions, but that is
+    # bigger refactor, so do this to unblock for now.
+    if not _is_torch_jit_trace:
+        combined_args_traced_order = {}
+        for arg in combined_args:
+            if arg not in kwargs:
+                combined_args_traced_order[arg] = combined_args[arg]
+
+        for key in kwargs:
+            combined_args_traced_order[key] = kwargs[key]
+
+        combined_args = combined_args_traced_order
+
     range_constraints = make_constraints(
         fake_mode,
         gm,
@@ -1403,7 +1427,8 @@ def _strict_export(
         if name in reverse_name_lookup
     }
 
-    with dynamo_fake_mode:
+    tx = TracingContext(dynamo_fake_mode)
+    with dynamo_fake_mode, tracing(tx):
         aten_export_artifact = _to_aten_func(
             gm_torch_level,
             # NOTE: graph module expects only positional args
@@ -1862,7 +1887,8 @@ def _non_strict_export(
             _is_torch_jit_trace=_is_torch_jit_trace,
         )
 
-    with fake_mode, _NonStrictTorchFunctionHandler():
+    tx = TracingContext(fake_mode)
+    with fake_mode, _NonStrictTorchFunctionHandler(), tracing(tx):
         with _fakify_script_objects(mod, fake_args, fake_kwargs, fake_mode) as (
             patched_mod,
             new_fake_args,
@@ -1948,8 +1974,10 @@ def _export_for_training(
     # Note: _get_range_constraints depends on "inline_constraints" to be set.
     export_artifact.aten.gm.meta["inline_constraints"] = inline_constraints
     range_constraints = _get_range_constraints(
+        mod,
         export_artifact,
-        _combine_args(mod, args, kwargs, _is_torch_jit_trace=False),
+        args,
+        kwargs,
         dynamic_shapes,
     )
     # The returned the gm is in-place modified
@@ -2112,9 +2140,12 @@ def _export(
     # Note: this step must be before _get_range_constraints.
     export_artifact.aten.gm.meta["inline_constraints"] = inline_constraints
     range_constraints = _get_range_constraints(
+        mod,
         export_artifact,
-        _combine_args(mod, args, kwargs, _is_torch_jit_trace=_is_torch_jit_trace),
+        args,
+        kwargs,
         dynamic_shapes,
+        _is_torch_jit_trace=_is_torch_jit_trace,
     )
     gm, module_call_graph = _get_module_call_graph(
         export_artifact,
