@@ -586,9 +586,7 @@ def reordering_to_mimic_autograd_engine(gm: fx.GraphModule) -> fx.GraphModule:
     for node in gm.graph.find_nodes(op="placeholder"):
         env[node] = new_graph.node_copy(node, lambda x: env[x])
 
-    order = {}
-    for idx, node in enumerate(gm.graph.nodes):
-        order[node] = idx
+    order = {node: idx for idx, node in enumerate(gm.graph.nodes)}
 
     def insert_node_in_graph(node):
         cur_nodes = [node]

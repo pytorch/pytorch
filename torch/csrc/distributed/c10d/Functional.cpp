@@ -100,7 +100,7 @@ std::vector<at::Tensor> all_gather_into_tensor_coalesced(
     std::vector<at::Tensor> inputs,
     int64_t group_size,
     // NOLINTNEXTLINE(performance-unnecessary-value-param)
-    const std::string& group_name) {
+    std::string group_name) {
   std::vector<at::Tensor> outputs;
   outputs.reserve(inputs.size());
   for (const auto& tensor : inputs) {
@@ -119,10 +119,11 @@ std::vector<at::Tensor> all_gather_into_tensor_coalesced(
 at::Tensor all_gather_into_tensor(
     const at::Tensor& input,
     int64_t group_size,
-    const std::string& group_name) {
+    std::string group_name) {
   TORCH_CHECK(input.is_contiguous());
   std::vector<at::Tensor> inputs{input};
-  return all_gather_into_tensor_coalesced(inputs, group_size, group_name)[0];
+  return all_gather_into_tensor_coalesced(
+      inputs, group_size, std::move(group_name))[0];
 }
 
 at::Tensor& all_gather_into_tensor_out(
@@ -158,10 +159,10 @@ at::Tensor allocate_reduce_scatter_output(
 std::vector<at::Tensor> reduce_scatter_tensor_coalesced(
     std::vector<at::Tensor> inputs,
     // NOLINTNEXTLINE(performance-unnecessary-value-param)
-    const std::string& reduce_op,
+    std::string reduce_op,
     int64_t group_size,
     // NOLINTNEXTLINE(performance-unnecessary-value-param)
-    const std::string& group_name) {
+    std::string group_name) {
   c10d::ReduceScatterOptions opts;
   opts.reduceOp = to_reduce_op(reduce_op);
   std::vector<at::Tensor> outputs;
@@ -181,21 +182,21 @@ std::vector<at::Tensor> reduce_scatter_tensor_coalesced(
 
 at::Tensor reduce_scatter_tensor(
     const at::Tensor& input,
-    const std::string& reduce_op,
+    std::string reduce_op,
     int64_t group_size,
-    const std::string& group_name) {
+    std::string group_name) {
   TORCH_CHECK(input.is_contiguous());
   std::vector<at::Tensor> inputs{input};
   return reduce_scatter_tensor_coalesced(
-      inputs, reduce_op, group_size, group_name)[0];
+      inputs, std::move(reduce_op), group_size, std::move(group_name))[0];
 }
 
 at::Tensor all_to_all_single(
     const at::Tensor& input,
-    const std::vector<int64_t>& output_split_sizes,
-    const std::vector<int64_t>& input_split_sizes,
+    std::vector<int64_t> output_split_sizes,
+    std::vector<int64_t> input_split_sizes,
     // NOLINTNEXTLINE(performance-unnecessary-value-param)
-    const std::string& group_name) {
+    std::string group_name) {
   TORCH_CHECK(input.is_contiguous());
   std::vector<int64_t> output_sizes = input.sizes().vec();
   output_sizes[0] = std::accumulate(
@@ -203,16 +204,12 @@ at::Tensor all_to_all_single(
   auto output = input.new_empty(output_sizes);
 
   auto group = c10d::resolve_process_group(group_name);
-  // we could avoid this copy if we update all alltoall_base APIs
-  // to accept split sizes by const_ref
-  std::vector<int64_t> output_split_sizes_copy = output_split_sizes;
-  std::vector<int64_t> input_split_sizes_copy = input_split_sizes;
   auto work = group->alltoall_base(
       output,
       // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
       const_cast<at::Tensor&>(input),
-      output_split_sizes_copy,
-      input_split_sizes_copy);
+      output_split_sizes,
+      input_split_sizes);
   c10d::register_work(output, work);
   return output;
 }
@@ -528,12 +525,6 @@ TORCH_LIBRARY(_c10d_functional_autograd, m) {
       torch::dispatch(
           c10::DispatchKey::Autograd, ::all_gather_into_tensor_autograd),
       {at::Tag::pt2_compliant_tag});
-}
-
-TORCH_LIBRARY_IMPL(_c10d_functional_autograd, CompositeExplicitAutograd, m) {
-  m.impl("all_to_all_single", ::all_to_all_single);
-  m.impl("reduce_scatter_tensor", ::reduce_scatter_tensor);
-  m.impl("all_gather_into_tensor", ::all_gather_into_tensor);
 }
 
 namespace {

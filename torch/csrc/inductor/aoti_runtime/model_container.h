@@ -309,12 +309,13 @@ class AOTInductorModelContainer {
       auto constant_name =
           std::string(models_[0]->constant_name(static_cast<int64_t>(idx)));
       auto it = constants_map.find(constant_name);
-      if (it == constants_map.end() && !use_inactive) {
+      if (it == constants_map.end() &&
+          !(_should_skip_update(idx) && use_inactive)) {
         continue;
       }
 
       AtenTensorHandle tensor;
-      if (it == constants_map.end() && use_inactive) {
+      if (_should_skip_update(idx) && use_inactive) {
         aoti_torch_clone(
             original_constants_map->find(constant_name)->second.get(), &tensor);
       } else {
@@ -349,12 +350,13 @@ class AOTInductorModelContainer {
       auto constant_name =
           std::string(models_[0]->constant_name(static_cast<int64_t>(idx)));
       auto it = constants_map.find(constant_name);
-      if (it == constants_map.end() && !use_inactive) {
+      if (it == constants_map.end() &&
+          !(_should_skip_update(idx) && use_inactive)) {
         continue;
       }
 
       AtenTensorHandle tensor;
-      if (it == constants_map.end() && use_inactive) {
+      if (_should_skip_update(idx) && use_inactive) {
         tensor = original_constants_map->find(constant_name)->second.get();
       } else {
         tensor = it->second;
@@ -443,6 +445,14 @@ class AOTInductorModelContainer {
     }
 
     use_secondary_ = !use_secondary_;
+  }
+
+  void free_inactive_constant_buffer() {
+    if (use_secondary_ && constant_blob_) {
+      constant_blob_.reset();
+    } else if (constant_blob_secondary_) {
+      constant_blob_secondary_.reset();
+    }
   }
 
   size_t num_inputs() const {
@@ -540,17 +550,24 @@ class AOTInductorModelContainer {
   // make sure no one is executing the model.
   std::shared_mutex model_exec_mutex_;
 
+  RAIIDataPtr allocate_constant_blob() {
+#if defined(USE_CUDA) || defined(USE_XPU)
+    return RAII_gpuMalloc(blob_size_);
+#else
+    return RAII_cpuMalloc(blob_size_);
+#endif // USE_CUDA
+  }
+
   void* get_constant_blob_ptr(bool get_inactive) {
     if ((get_inactive && use_secondary_) ||
         (!get_inactive && !use_secondary_)) {
+      if (!constant_blob_) {
+        constant_blob_ = allocate_constant_blob();
+      }
       return constant_blob_.get();
     } else {
       if (!constant_blob_secondary_) {
-#if defined(USE_CUDA) || defined(USE_XPU)
-        constant_blob_secondary_ = RAII_gpuMalloc(blob_size_);
-#else
-        constant_blob_secondary_ = RAII_cpuMalloc(blob_size_);
-#endif // USE_CUDA
+        constant_blob_secondary_ = allocate_constant_blob();
       }
       return constant_blob_secondary_.get();
     }
