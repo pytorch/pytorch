@@ -1780,7 +1780,7 @@ class OutputGraph:
                 base_name = node.name
 
             if base_name_counter[base_name] == 0:
-                node.name = f"{base_name}"
+                node.name = f"{node.name}"
             else:
                 node.name = f"{base_name}_{base_name_counter[base_name]}"
 
