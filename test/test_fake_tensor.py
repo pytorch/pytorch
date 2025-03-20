@@ -2169,14 +2169,17 @@ class FakeTensorDispatchCache(TestCase):
 
             ref = invoke_subgraph(fn, "subgraph", (x, y))
             self.assertHitsMisses(0, 2)
+            self.assertBypasses("function argument", 1)
 
             res = invoke_subgraph(fn, "subgraph", (x, y))
             # The hits are from the ops inside fn
             self.assertHitsMisses(2, 2)
+            self.assertBypasses("function argument", 2)
 
             res = invoke_subgraph(fn, "subgraph", (x, y))
             # The hits are from the ops inside fn
             self.assertHitsMisses(4, 2)
+            self.assertBypasses("function argument", 3)
 
         # Get the mod as if its going through torch.compile
         backend = torch._dynamo.testing.AotEagerAndRecordGraphs()
@@ -2212,6 +2215,83 @@ class FakeTensorDispatchCache(TestCase):
                     extract_tensor_metadata(a),
                     extract_tensor_metadata(b),
                 )
+
+    @skipIfTorchDynamo("cache hit/miss changes with invoke_subgraph caching")
+    def test_invoke_subgraph_non_cacheable(self):
+        invoke_subgraph = torch._higher_order_ops.invoke_subgraph
+
+
+        def fn(x, y):
+            # aten ops are used so that eager backend graph is suitable for fake
+            # tensor testing
+            cos = torch.ops.aten.cos.default(x)
+            # inplace-view - this should cause the whole invoke_subgraph to not
+            # being able to cache
+            t = torch.ops.aten.t_.default(cos)
+            mul = torch.ops.aten.mul.Tensor(t, y)
+            return (mul,)
+
+        # Ensure there is no caching for non-Fx graph module inputs
+        with FakeTensorMode():
+            x = torch.randn(4, 4)
+            y = torch.randn(4, 4)
+
+            FakeTensorMode.cache_clear()
+            self.assertHitsMisses(0, 0)
+
+            ref = invoke_subgraph(fn, "subgraph", (x, y))
+            self.assertHitsMisses(0, 2)
+            self.assertBypasses("inplace view", 1)
+
+            res = invoke_subgraph(fn, "subgraph", (x, y))
+            # The hits are from the ops inside fn
+            self.assertHitsMisses(2, 2)
+            self.assertBypasses("inplace view", 2)
+
+            res = invoke_subgraph(fn, "subgraph", (x, y))
+            # The hits are from the ops inside fn
+            self.assertHitsMisses(4, 2)
+            self.assertBypasses("inplace view", 3)
+
+        # Get the mod as if its going through torch.compile
+        backend = torch._dynamo.testing.AotEagerAndRecordGraphs()
+        x = torch.randn(4, 4)
+        y = torch.randn(4, 4)
+        torch.compile(fn, backend=backend, fullgraph=True)(x, y)
+        self.assertEqual(len(backend.graphs), 1)
+        mod = backend.graphs[0]
+
+        # Ensure that invoke_subgraph result is not cached
+        with FakeTensorMode():
+            x = torch.randn(4, 4)
+            y = torch.randn(4, 4)
+
+            FakeTensorMode.cache_clear()
+            self.assertHitsMisses(0, 0)
+
+            ref = invoke_subgraph(mod, "subgraph", (x, y))
+            self.assertHitsMisses(0, 2)
+            self.assertBypasses("hop invoke_subgraph failed because of inplace view", 1)
+
+            res = invoke_subgraph(mod, "subgraph", (x, y))
+            # The hits are from the ops inside fn and not the subgraph
+            self.assertHitsMisses(2, 2)
+            self.assertBypasses("hop invoke_subgraph failed because of inplace view", 2)
+
+            res = invoke_subgraph(mod, "subgraph", (x, y))
+            # The hits are from the ops inside fn and not the subgraph
+            self.assertHitsMisses(4, 2)
+            self.assertBypasses("hop invoke_subgraph failed because of inplace view", 3)
+
+            self.assertEqual(len(ref), len(res))
+            self.assertEqual(len(ref), len(res))
+            for a, b in zip(ref, res):
+                self.assertEqual(
+                    extract_tensor_metadata(a),
+                    extract_tensor_metadata(b),
+                )
+
+
 
 
 if __name__ == "__main__":

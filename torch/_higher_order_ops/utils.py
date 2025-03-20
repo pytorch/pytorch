@@ -656,7 +656,7 @@ def check_input_alias_and_mutation(
 registered_hop_fake_fns: dict[torch._ops.OpOverload, Callable] = {}
 
 
-def register_hop_fake(hop, fn=None):
+def register_fake(hop, fn=None):
     """
     Register a fake function for a HOP. This is conceptually equivalent of the
     register_fake utility for the custom ops. The registered function is called
@@ -699,6 +699,9 @@ class FunctionalizeCtxWrapper:
 
     def __hash__(self):
         return id(self.subgraph)
+
+    def __repr__(self):
+        return f"FunctionalizeCtxWrapper on subgraph {self.subgraph})"
 
     def __call__(self, *args, **kwargs):
         return self.ctx.functionalize(self.subgraph)(*args, **kwargs)

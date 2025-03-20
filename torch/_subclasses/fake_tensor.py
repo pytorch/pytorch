@@ -1453,12 +1453,48 @@ class FakeTensorMode(TorchDispatchMode):
         # Avoid caching for any ops that would require a more sophisticated
         # caching implementation, e.g., data dependent ops or ops that modify
         # the inputs.
-        from torch._higher_order_ops.utils import registered_hop_fake_fns
+        from torch._higher_order_ops.utils import (
+            FunctionalizeCtxWrapper,
+            registered_hop_fake_fns,
+        )
 
         if (
             isinstance(func, torch._ops.HigherOrderOperator)
             and func in registered_hop_fake_fns
         ):
+            # Go through the nodes in the graph modules and check if each
+            # call_function node is cacheable. This relies on the hop to tell us
+            # the index of subgraphs in the args using `subgraph_indexes`
+            # Note that this is only called once - for the first time before you
+            # are about to cache the results. If caching succeeds, this function
+            # is not called at the lookup.
+
+            if not hasattr(func, "subgraph_indexes"):
+                raise NotImplementedError(
+                    f"Add subgraph_indexes in the {func.name()} __init__ method"
+                )
+            for subgraph_index in func.subgraph_indexes:  # type: ignore[attr-defined]
+                subgraph_mod = args[subgraph_index]
+
+                # Special case for AOT Dispatcher first pass, where the fake
+                # tensor is called on the functional wrapper of the subgraph.
+                if isinstance(subgraph_mod, FunctionalizeCtxWrapper):
+                    subgraph_mod = subgraph_mod.subgraph
+                if not isinstance(subgraph_mod, torch.fx.GraphModule):
+                    raise _BypassDispatchCache(
+                        f"{func.name()} hop with a non GraphModule input"
+                    )
+
+                for node in subgraph_mod.graph.nodes:
+                    if node.op == "call_function":
+                        try:
+                            self._validate_cache_key(node.target, [], {})
+                        except _BypassDispatchCache as e:
+                            raise _BypassDispatchCache(
+                                f"hop {func.name()} failed because of {str(e)}"
+                            ) from None
+
+            # All nodes in the subgraph are cache-able.
             return
 
         if torch.Tag.data_dependent_output in func.tags:
@@ -1539,6 +1575,8 @@ class FakeTensorMode(TorchDispatchMode):
                 result.append(type(arg))
                 result.append(id(arg))
             elif isinstance(arg, FunctionalizeCtxWrapper):
+                # Special case for AOT Dispatcher first pass, where the fake
+                # tensor is called on the functional wrapper of the subgraph.
                 result.append(hash(arg))
             else:
                 # It's important to capture the type of the arg since, e.g., 1 and 1.0

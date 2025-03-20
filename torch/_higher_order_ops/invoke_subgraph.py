@@ -15,7 +15,7 @@ from torch._higher_order_ops.utils import (
     get_dummy_aot_autograd_config,
     prepare_fw_with_masks,
     reenter_make_fx,
-    register_hop_fake,
+    register_fake,
     save_tensors_and_symints_for_backward,
     saved_tensors_and_symints,
 )
@@ -35,6 +35,12 @@ invoke_subgraph_counter = 0
 class InvokeSubgraphHOP(HigherOrderOperator):
     def __init__(self) -> None:
         super().__init__("invoke_subgraph")
+        # This is used by the fake tensor cache key validator to extract the
+        # subgraph and iterate over the nodes to find if all nodes are fake
+        # tensor cacheable.
+        self.subgraph_indexes = [
+            0,
+        ]
 
     # identifier is setup by upper part of the stack. This helps us in
     # identifying two invoke_subgraph calls have same subgraph.
@@ -274,7 +280,7 @@ def _(ctx, subgraph, identifier, operands):
 
 
 # Register the hop fake fn. This will be called in the fake_tensor _dispatch_impl.
-@register_hop_fake(invoke_subgraph)
+@register_fake(invoke_subgraph)
 def _(subgraph, identifier, operands):
     return subgraph(*operands)
 
