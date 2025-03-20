@@ -1572,6 +1572,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._scaled_dot_product_efficient_attention",
         "torch._scaled_dot_product_flash_attention",
         "torch._scaled_dot_product_flash_attention_for_cpu",
+        "torch._scaled_dot_product_int8",
         "torch._scaled_dot_product_cudnn_attention",
         "torch._scaled_mm",
         "torch._shape_as_tensor",
