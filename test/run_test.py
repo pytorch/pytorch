@@ -189,12 +189,6 @@ S390X_BLOCKLIST = [
     "profiler/test_profiler",
     "test_cpp_extensions_open_device_registration",
     "test_jit",
-    "test_metal",
-    "test_mps",
-    "dynamo/test_torchrec",
-    "inductor/test_aot_inductor_utils",
-    "inductor/test_coordinate_descent_tuner",
-    "test_jiterator",
     "inductor/test_cpu_cpp_wrapper",
     "inductor/test_inductor_freezing",
     "dynamo/test_utils",
@@ -203,8 +197,6 @@ S390X_BLOCKLIST = [
     # these tests run long and fail in addition to that
     "dynamo/test_dynamic_shapes",
     "test_quantization",
-    "inductor/test_torchinductor",
-    "inductor/test_torchinductor_dynamic_shapes",
     "inductor/test_torchinductor_opinfo",
     "test_binary_ufuncs",
     "test_unary_ufuncs",
@@ -225,9 +217,12 @@ S390X_BLOCKLIST = [
     # these tests fail when mkldnn is not available
     "inductor/test_custom_post_grad_passes",
     "inductor/test_mkldnn_pattern_matcher",
+    "test_metal",
     # lacks quantization support
     "onnx/test_models_quantized_onnxruntime",
     "onnx/test_pytorch_onnx_onnxruntime",
+    # sysctl -n hw.memsize is not available
+    "test_mps",
     # https://github.com/pytorch/pytorch/issues/102078
     "test_decomp",
     # https://github.com/pytorch/pytorch/issues/146698
