@@ -2,7 +2,7 @@
 
 # Template is at:    .github/templates/macos_binary_build_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: macos-arm64-binary-libtorch-cxx11-abi
+name: macos-arm64-binary-libtorch
 
 on:
 # TODO: Migrate to new ciflow trigger, reference https://github.com/pytorch/pytorch/pull/70321
@@ -21,16 +21,16 @@ on:
 env:
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
   AWS_DEFAULT_REGION: us-east-1
-  BUILD_ENVIRONMENT: macos-arm64-binary-libtorch-cxx11-abi
+  BUILD_ENVIRONMENT: macos-arm64-binary-libtorch
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   PR_NUMBER: ${{ github.event.pull_request.number }}
   SKIP_ALL_TESTS: 0
 concurrency:
-  group: macos-arm64-binary-libtorch-cxx11-abi-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: macos-arm64-binary-libtorch-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 jobs:
-  libtorch-cpu-shared-with-deps-cxx11-abi-build:
+  libtorch-cpu-shared-with-deps-release-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: macos-14-xlarge
     timeout-minutes: 240
@@ -42,8 +42,8 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
+      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
-      DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.9"
@@ -109,16 +109,16 @@ jobs:
       - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
-          name: libtorch-cpu-shared-with-deps-cxx11-abi
+          name: libtorch-cpu-shared-with-deps-release
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-  libtorch-cpu-shared-with-deps-cxx11-abi-upload:  # Uploading
+  libtorch-cpu-shared-with-deps-release-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read
-    needs: libtorch-cpu-shared-with-deps-cxx11-abi-build
+    needs: libtorch-cpu-shared-with-deps-release-build
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: libtorch
@@ -127,9 +127,9 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu-main
+      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
-      DESIRED_DEVTOOLSET: cxx11-abi
-      build_name: libtorch-cpu-shared-with-deps-cxx11-abi
+      build_name: libtorch-cpu-shared-with-deps-release
       use_s3: False
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
