@@ -12779,6 +12779,29 @@ class CommonTemplate:
         self.assertEqual(expect, actual)
 
     @torch._inductor.config.patch("graph_partition", True)
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_graph_partition_dynamic_scalar_inputs(self):
+        def f(x, y, integer):
+            x1 = x + 1
+            y1 = y + 1
+            y_cpu = y1.cpu() + 1
+            z = x @ y
+            z += integer
+            return x1 + y1 + z + y_cpu.cuda()
+
+        f_compiled = torch.compile(f)
+        x, y = torch.ones(3, 3, device="cuda"), torch.randn(3, 3, device="cuda")
+
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+        torch._dynamo.decorators.mark_unbacked(y, 1)
+
+        compiled_out = f_compiled(x, y, 5)
+        self.assertEqual(compiled_out, f(x, y, 5))
+
+        compiled_out = f_compiled(x, y, 6)
+        self.assertEqual(compiled_out, f(x, y, 6))
+
+    @torch._inductor.config.patch("graph_partition", True)
     def test_graph_partition_refcount(self):
         contexts = [
             contextlib.nullcontext,

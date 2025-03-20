@@ -4056,7 +4056,7 @@ class Scheduler:
         """
 
         def get_layout_symints(node: ir.IRNode) -> OrderedSet[sympy.Symbol]:
-            free_symbol_uses:  OrderedSet[sympy.Symbol] = OrderedSet()
+            free_symbol_uses: OrderedSet[sympy.Symbol] = OrderedSet()
             layout = node.maybe_get_layout()
             if isinstance(layout, ir.Layout):
                 free_symbol_uses.update(
@@ -4081,7 +4081,9 @@ class Scheduler:
                 )
             assert node.node is not None
             free_symbol_uses = node.node.get_free_symbol_uses()
-            free_symbol_uses.update(get_layout_symints(node.node))
+            free_symbol_uses.update(
+                *(get_layout_symints(ir_node) for ir_node in node.node.get_outputs())
+            )
             return free_symbol_uses
 
         def get_input_node_symbols(
