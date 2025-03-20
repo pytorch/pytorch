@@ -3,6 +3,8 @@
 # This file implements PaddedTensor, which is used for testing tensor subclass
 # and graph partition. This is for testing only.
 
+from typing import Any, Callable, Optional
+
 import torch
 import torch.nn.functional as F
 import torch.utils._pytree as pytree
@@ -69,7 +71,7 @@ class PaddedTensor(torch.Tensor):
         tensor: torch.Tensor,
         multipliers: Optional[dict[int, int]] = None,
         neutral_element: int = 0,
-    ) -> PaddedTensor:
+    ) -> "PaddedTensor":
         multipliers = multipliers if multipliers is not None else {}
         padded_tensor = F.pad(
             input=tensor,
