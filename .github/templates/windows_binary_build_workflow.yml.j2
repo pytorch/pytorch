@@ -89,12 +89,7 @@ jobs:
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: !{{ config.pytorch_extra_install_requirements }}
     {%- endif %}
     steps:
-{%- if os == "windows-arm64" %}
-      - name: Bootstrap folders
-        shell: cmd
-        run: |
-          mkdir "%NIGHTLIES_PYTORCH_ROOT%"
-          mkdir "%PYTORCH_FINAL_PACKAGE_DIR%"
+{%- if os == "windows-arm64" %}      
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
@@ -146,6 +141,11 @@ jobs:
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
 {%- if os == "windows-arm64" %}
+      - name: Bootstrap folders
+        shell: cmd
+        run: |
+          mkdir "%NIGHTLIES_PYTORCH_ROOT%"
+          mkdir "%PYTORCH_FINAL_PACKAGE_DIR%"
       - name: Build PyTorch binary
         shell: bash
         run: |
