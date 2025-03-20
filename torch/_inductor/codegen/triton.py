@@ -1966,7 +1966,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 index_relative_to_xyr_index = sympy_subs(
                     index, {v: t.expr for v, t in self.range_tree_nodes.items()}
                 )
-                range_trees = self.active_range_trees(reorder=True)
+                range_trees = self.active_range_trees()
 
                 # Partition the index into subexpressions pertaining to each range tree.
                 # For example xindex * 5 + r0_index * 3 is partitioned to
