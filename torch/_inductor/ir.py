@@ -8,13 +8,14 @@ import logging
 import textwrap
 import traceback
 import typing
-from collections.abc import Generator, Iterable, Sequence
+from collections.abc import Generator, Iterable, Iterator, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from enum import Enum
 from functools import partial
 from typing import (
     Any,
     Callable,
+    cast,
     ClassVar,
     Literal,
     Optional,
@@ -23,7 +24,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import assert_never, Never, TypeAlias
+from typing_extensions import assert_never, Never, Self, TypeAlias
 from unittest.mock import patch
 
 import sympy
@@ -63,6 +64,7 @@ from .codegen.common import (
     BackendFeature,
     get_scheduling_for_device,
     index_prevent_reordering,
+    Kernel,
 )
 from .dependencies import (
     Dep,
@@ -97,9 +99,11 @@ from .virtualized import ops, OpsValue, V
 
 
 if TYPE_CHECKING:
+    from torch import Tensor
     from torch.fx.node import Node
 
     from .codegen.cuda.cuda_template import CUDATemplate
+    from .codegen.wrapper import PythonWrapperCodegen
     from .graph import GraphLowering
     from .utils import IndentedBuffer
 
@@ -123,6 +127,8 @@ _V = TypeVar("_V")
 
 _IntLike: TypeAlias = Union[int, Expr]
 _NumLike: TypeAlias = Union[int, float, Expr]
+
+_OpOverloads: TypeAlias = Union[torch._ops.OpOverload, torch._ops.HigherOrderOperator]
 
 log = logging.getLogger(__name__)
 indent = functools.partial(textwrap.indent, prefix="  ")
@@ -233,7 +239,7 @@ def validate_ir(node_or_nodes: Optional[_NodeOrNodes]) -> None:
 
 
 def ops_wrapper(name: str) -> Callable[..., OpsValue]:
-    assert isinstance(name, str)
+    assert isinstance(name, str), type(name)
 
     def fn(*args: object, **kwargs: object) -> OpsValue:
         return getattr(ops, name)(*args, **kwargs)
@@ -386,7 +392,7 @@ def is_triton(x: Union[IRNode, torch.device, None, str]) -> bool:
         return False
     from .codegen.triton import TritonScheduling
 
-    assert isinstance(device_scheduling, type)
+    assert isinstance(device_scheduling, type), type(device_scheduling)
     return issubclass(device_scheduling, TritonScheduling)
 
 
@@ -420,7 +426,7 @@ def significant_strides_equal(
     """
     assert len(shape) == len(strides1) and len(strides1) == len(strides2)
     for dim, s1, s2 in zip(shape, strides1, strides2):
-        if V.graph.sizevars.statically_known_leq(dim, 1):  # type: ignore[arg-type]
+        if V.graph.sizevars.statically_known_leq(dim, 1):
             continue
 
         if not V.graph.sizevars.statically_known_equals(
@@ -434,9 +440,9 @@ def significant_strides_equal(
 
 
 def try_match_insignificant_strides(
-    tensor: Union[TensorBox, BaseView],
+    tensor: IRNode,
     strides: Sequence[Union[int, torch.SymInt]],
-) -> Union[TensorBox, BaseView]:
+) -> IRNode:
     """
     Tries to match the strides of the tensor to those in the meta_strides. Strides of insignificant
     dimensions - size 0 or 1 - will be updated.
@@ -450,7 +456,7 @@ def try_match_insignificant_strides(
         V.graph.sizevars.statically_known_equals(s1, s2)
         for s1, s2 in zip(strides, tensor.get_stride())
     ):
-        return tensor  # type: ignore[arg-type]
+        return tensor
 
     if not significant_strides_equal(strides, tensor.get_stride(), tensor.get_size()):
         return tensor
@@ -458,7 +464,7 @@ def try_match_insignificant_strides(
     storage, old_layout = as_storage_and_layout(tensor)
     new_stride = [*old_layout.stride]
     for i, s in enumerate(tensor.get_size()):
-        if V.graph.sizevars.statically_known_leq(s, 1):  # type: ignore[arg-type]
+        if V.graph.sizevars.statically_known_leq(s, 1):
             new_stride[i] = strides[i]
 
     new_layout = FixedLayout(
@@ -654,18 +660,18 @@ class IRNode:
         raise NotImplementedError(type(self).__name__)
 
     def freeze_layout_with_stride_order(
-        self, order: list[int], allow_padding: bool = False
+        self, order: Sequence[int], allow_padding: bool = False
     ) -> None:
         raise NotImplementedError(type(self).__name__)
 
-    def freeze_layout_with_fill_order(self, order: list[int]) -> None:
+    def freeze_layout_with_fill_order(self, order: Sequence[int]) -> None:
         raise NotImplementedError(type(self).__name__)
 
-    def freeze_layout_with_same_order(self, stride: list[_IntLike]) -> None:
+    def freeze_layout_with_same_order(self, stride: Sequence[_IntLike]) -> None:
         raise NotImplementedError(type(self).__name__)
 
     def freeze_layout_with_exact_strides(
-        self, exact_strides: list[_IntLike], allow_padding: bool = False
+        self, exact_strides: Sequence[_IntLike], allow_padding: bool = False
     ) -> None:
         raise NotImplementedError(type(self).__name__)
 
@@ -687,7 +693,7 @@ class IRNode:
     def get_reduction_type(self) -> Optional[str]:
         raise NotImplementedError(type(self).__name__)
 
-    def get_reduction_size(self) -> Sequence[sympy.Expr]:
+    def get_reduction_size(self) -> Sequence[Expr]:
         raise NotImplementedError(type(self).__name__)
 
     def is_extern(self) -> bool:
@@ -828,7 +834,9 @@ class Loops(IRNode):
         return self.ranges
 
     @classmethod
-    def create(cls, *args: Any, **kwargs: Any) -> TensorBox:
+    def create(
+        cls, *args: Any, **kwargs: Any
+    ) -> Union[TensorBox, ShapeAsConstantBuffer]:
         origin_node = kwargs.pop("origin_node", None)
         tb = kwargs.pop("traceback", None)
         # if "origin_node" in kwargs:
@@ -897,7 +905,7 @@ class Loops(IRNode):
     def num_reads(self) -> int:
         return len(self.inner_fn_opcount().read_buffers)
 
-    def get_reduction_size(self) -> Sequence[sympy.Expr]:
+    def get_reduction_size(self) -> Sequence[Expr]:
         raise NotImplementedError(
             f"get_reduction_size() is not implemented by {type(self)}!"
         )
@@ -980,7 +988,7 @@ class Scatter(Pointwise):
         loader = self.make_loader()
         if output_name is None:
             output_name = "unnamed"
-        return ops.store(
+        ops.store(
             output_name,
             indexer(self.output_indexer(vars)),
             loader(vars),
@@ -1079,7 +1087,7 @@ class Reduction(Loops):
             *(free_unbacked_symbols(e) for e in self.reduction_ranges)
         )
 
-    def get_reduction_size(self) -> Sequence[sympy.Expr]:
+    def get_reduction_size(self) -> Sequence[Expr]:
         return self.reduction_ranges
 
     def get_reduction_type(self) -> Optional[str]:
@@ -1098,7 +1106,7 @@ class Reduction(Loops):
             self.reduction_type,
             self.inner_fn(vars, reduction_vars),
         )
-        return ops.store_reduction(output_name or "unnamed", indexer(vars), value)
+        ops.store_reduction(output_name or "unnamed", indexer(vars), value)
 
     def index_length(self) -> int:
         return len(self.ranges) + len(self.reduction_ranges)
@@ -1228,10 +1236,12 @@ class Reduction(Loops):
         )
 
         def get_read_indices(r: Reduction) -> tuple[Sequence[Expr], bool]:
+            device = r.get_device()
+            assert device is not None
             cb = ComputedBuffer(
                 name=None,
                 layout=FlexibleLayout(
-                    device=r.get_device(),
+                    device=device,
                     dtype=r.get_dtype(),
                     size=r.get_size(),
                 ),
@@ -1319,12 +1329,10 @@ class Reduction(Loops):
 
         value_fn: Callable[[Sequence[_IntLike], Sequence[_IntLike]], Any]
         if reduction_type in ("argmin", "argmax"):
-            flatten_index = FixedLayout(
-                None,  # type: ignore[arg-type]
-                None,  # type: ignore[arg-type]
+            flatten_index = _fixed_indexer(
                 reduction_ranges,
                 FlexibleLayout.contiguous_strides(reduction_ranges),
-            ).make_indexer()
+            )
 
             def value_fn(
                 index: Sequence[_IntLike], rindex: Sequence[_IntLike]
@@ -1352,7 +1360,7 @@ class Reduction(Loops):
         reduction_type: ReductionType,
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
         input_node: Optional[IRNode] = None,
-    ) -> TensorBox:
+    ) -> Union[TensorBox, ShapeAsConstantBuffer]:
         reduction_numel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
 
         if reduction_numel == 0:
@@ -1363,10 +1371,10 @@ class Reduction(Loops):
                 if dst_dtype == torch.bool:
                     return bool(val)
                 elif dst_dtype.is_floating_point:
-                    assert isinstance(val, typing.SupportsFloat)
+                    assert isinstance(val, typing.SupportsFloat), type(val)
                     return float(val)
                 else:
-                    assert isinstance(val, typing.SupportsInt)
+                    assert isinstance(val, typing.SupportsInt), type(val)
                     return int(val)
 
             rtypes_to_inits = {
@@ -1583,7 +1591,7 @@ class Reduction(Loops):
     @classmethod
     def _multilayer_wrap_loader_existing_ranges(
         cls,
-        loader: Callable[[Sequence[sympy.Expr], Sequence[sympy.Expr]], OpsValue],
+        loader: Callable[[Sequence[Expr], Sequence[Expr]], OpsValue],
         original_ranges: Sequence[Expr],
         original_reduction_ranges: Sequence[Expr],
         new_ranges: Sequence[Integer],
