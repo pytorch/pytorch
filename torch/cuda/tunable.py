@@ -526,6 +526,10 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
         matB = matB.transpose(1, 2) if transA else matB
         torch.bmm(matA, matB)
     elif op_sig == "ScaledGemmTunableOp":
+        # Only combination supported by PyTorch
+        assert transA is True
+        assert transB is False
+
         fillA = 0.25
         fillB = 0.75
         matA = (
@@ -545,8 +549,16 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
         else:
             rowwise = False
         if rowwise:
-            scaleA = torch.ones((matA.shape[0], 1), device=deviceid)
-            scaleB = torch.ones((1, matB.shape[0]), device=deviceid)
+            scaleA = (
+                torch.ones((1, m), device=deviceid)
+                if transB
+                else torch.ones((m, 1), device=deviceid)
+            )
+            scaleB = (
+                torch.ones((1, n), device=deviceid)
+                if transA
+                else torch.ones((n, 1), device=deviceid)
+            )
         else:
             scaleA = torch.tensor(0.8, device=deviceid)
             scaleB = torch.tensor(0.9, device=deviceid)
