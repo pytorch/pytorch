@@ -12661,6 +12661,9 @@ class TestAutogradInferenceMode(TestCase):
         self.assertFalse(func_out.requires_grad)
         self.assertTrue(func_out.is_leaf)
 
+    @skipIfTorchDynamo(
+        "exception from ill-formed graph module is not propagated with eager_noexcept"
+    )
     def test_inference_mode_inf_tensor_in_normal_mode_inplace_op(self):
         def run_test(fn):
             for requires_grad in (False, True):

@@ -2977,7 +2977,7 @@
 - name: ne.Tensor(Tensor self, Tensor other) -> Tensor
   output_differentiability: [False]
 
-- name: multinomial(Tensor self, int num_samples, bool replacement=False, *, Generator? generator=None) -> Tensor
+- name: multinomial(Tensor self, SymInt num_samples, bool replacement=False, *, Generator? generator=None) -> Tensor
   output_differentiability: [False]
 
 - name: nonzero(Tensor self) -> Tensor
