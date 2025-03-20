@@ -140,7 +140,7 @@ def vector_norm(
 
     # Implementation
     if ord == 0.0:
-        return torch.sum(torch.ne(x, 0.0), dim=dim, keepdim=keepdim, dtype=result_dtype)
+        return torch.sum(torch.ne(x, 0.0), dim=dim, keepdim=keepdim, dtype=result_dtype)  # type: ignore[arg-type]
     elif ord == float("inf"):
         return to_result_dtype(torch.amax(torch.abs(x), dim=dim, keepdim=keepdim))  # type: ignore[return-value,arg-type]
     elif ord == float("-inf"):

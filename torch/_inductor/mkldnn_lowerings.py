@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import functools
-from typing import Optional
+from typing import cast, Optional
 
 import torch
 import torch.utils._pytree as pytree
@@ -243,8 +243,7 @@ def register_onednn_fusion_ops():
             if len(x_size) > 2:
                 # GEMM template needs 2D input, normalize input shape here
                 x = view(x, [-1, x_size[-1]])
-            if b is not None:
-                b = ir.ExternKernel.realize_input(b)
+            b = ir.ExternKernel.realize_input(b)
             choices: list[ChoiceCaller] = []
             if use_max_autotune():
                 transposed_w = permute(w, [1, 0])
@@ -306,8 +305,10 @@ def register_onednn_fusion_ops():
             y_size = y.get_size()
             if len(y_size) > 2:
                 y = view(y, [-1, y_size[-1]])
-            if b is not None:
-                b = ir.ExternKernel.realize_input(b)
+            b_: Optional[ir.IRNode] = (
+                None if b is None else ir.ExternKernel.realize_input(b)
+            )
+
             choices: list[ChoiceCaller] = []
             if use_max_autotune():
                 transposed_w = permute(w, [1, 0])
@@ -320,24 +321,24 @@ def register_onednn_fusion_ops():
                         return create_epilogue_with_attr(buf, attr, other=y)
 
                     kwargs = dict(
-                        has_bias=b is not None,
+                        has_bias=b_ is not None,
                         trans_w=True,
                         epilogue_creator=epilogue_creator,
                     )
-                    kwargs["input_indices"] = [0, 2, 1] if b is None else [3, 0, 2, 1]
+                    kwargs["input_indices"] = [0, 2, 1] if b_ is None else [3, 0, 2, 1]
                     CppGemmTemplate.add_choices(
                         choices,
                         layout,
-                        [x, y, w] if b is None else [x, y, w, b],
+                        [x, y, w] if b_ is None else [x, y, w, b_],
                         **kwargs,  # type: ignore[arg-type]
                     )
             if len(choices) == 0 or use_aten_gemm_kernels():
                 kwargs = dict(attr=attr)
-                if b is None:
+                if b_ is None:
                     kwargs["B"] = None
                 choices.append(
                     aten_mkldnn_linear_binary.bind(
-                        [x, y, w] if b is None else [x, y, w, b],
+                        [x, y, w] if b_ is None else [x, y, w, b_],
                         layout,
                         **kwargs,
                     )
@@ -349,7 +350,7 @@ def register_onednn_fusion_ops():
             result = autotune_select_algorithm(
                 "linear_binary",
                 choices,
-                [x, y, w] if b is None else [x, y, w, b],
+                [x, y, w] if b_ is None else [x, y, w, b_],
                 layout,
                 input_gen_fns=input_gen_fns,
             )
@@ -458,6 +459,8 @@ def register_onednn_fusion_ops():
                 torch.tensor(x_zp, dtype=torch.int32), name="x_zp"
             )
 
+            assert isinstance(x_scale, TensorBox)
+            assert isinstance(x_zp, TensorBox)
             return TensorBox.create(
                 mkldnn_ir.QConvPointWisePT2E.create(
                     x,
@@ -531,6 +534,8 @@ def register_onednn_fusion_ops():
                 # Since the accum will be inplaced changed with post op sum,
                 # we will do accum dtype convertion here.
                 accum = to_dtype(accum, output_dtype)
+            assert isinstance(x_scale, TensorBox)
+            assert isinstance(x_zp, TensorBox)
             return TensorBox.create(
                 mkldnn_ir.QConvPointWiseBinaryPT2E.create(
                     x,
@@ -632,8 +637,12 @@ def register_onednn_fusion_ops():
             ):
                 # W_zp might be a ConstantBuffer with int64, convert it to int32
                 w_zp_tensor = V.graph.constants[w_zp.get_name()].to(torch.int32)
-                w_zp = V.graph.add_tensor_constant(
-                    torch.tensor(w_zp_tensor, dtype=torch.int32), name=w_zp.get_name()
+                w_zp = cast(
+                    TensorBox,
+                    V.graph.add_tensor_constant(
+                        torch.tensor(w_zp_tensor, dtype=torch.int32),
+                        name=w_zp.get_name(),
+                    ),
                 )
 
             bias_dtype = None if bias is None else bias.get_dtype()
@@ -936,8 +945,12 @@ def register_onednn_fusion_ops():
                 ir.ConstantBuffer,
             ):
                 w_zp_tensor = V.graph.constants[w_zp.get_name()].to(torch.int32)
-                w_zp = V.graph.add_tensor_constant(
-                    torch.tensor(w_zp_tensor, dtype=torch.int32), name=w_zp.get_name()
+                w_zp = cast(
+                    TensorBox,
+                    V.graph.add_tensor_constant(
+                        torch.tensor(w_zp_tensor, dtype=torch.int32),
+                        name=w_zp.get_name(),
+                    ),
                 )
             if binary_attr == "sum":
                 if output_dtype in [
