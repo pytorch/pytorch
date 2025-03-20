@@ -350,6 +350,7 @@ def generate_wheels_matrix(
                 desired_cuda = translate_desired_cuda(gpu_arch_type, gpu_arch_version)
                 ret.append(
                     {
+                        "os": os,
                         "python_version": python_version,
                         "gpu_arch_type": gpu_arch_type,
                         "gpu_arch_version": gpu_arch_version,
@@ -377,6 +378,7 @@ def generate_wheels_matrix(
                 if python_version == "3.11" and arch_version == CUDA_STABLE:
                     ret.append(
                         {
+                            "os": os,
                             "python_version": python_version,
                             "gpu_arch_type": gpu_arch_type,
                             "gpu_arch_version": gpu_arch_version,
@@ -396,6 +398,7 @@ def generate_wheels_matrix(
             else:
                 ret.append(
                     {
+                        "os": os,
                         "python_version": python_version,
                         "gpu_arch_type": gpu_arch_type,
                         "gpu_arch_version": gpu_arch_version,
