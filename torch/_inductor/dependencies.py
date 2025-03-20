@@ -585,8 +585,8 @@ def index_vars_squeeze(
     from .ir import SqueezeView
 
     var_ranges, add_var = var_builder(prefix)
-    args: list[list[sympy.Expr]] = []
-    new_sizes: list[list[sympy.Expr]] = []
+    args: list[Sequence[sympy.Expr]] = []
+    new_sizes: list[Sequence[sympy.Expr]] = []
     for size in argsizes:
         new_size, reindex = SqueezeView.squeezer(size)
         new_sizes.append(new_size)

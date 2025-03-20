@@ -124,6 +124,8 @@ _V = TypeVar("_V")
 _IntLike: TypeAlias = Union[int, Expr]
 _NumLike: TypeAlias = Union[int, float, Expr]
 
+_OpOverloads: TypeAlias = Union[torch._ops.OpOverload, torch._ops.HigherOrderOperator]
+
 log = logging.getLogger(__name__)
 indent = functools.partial(textwrap.indent, prefix="  ")
 aten = torch.ops.aten
@@ -233,7 +235,7 @@ def validate_ir(node_or_nodes: Optional[_NodeOrNodes]) -> None:
 
 
 def ops_wrapper(name: str) -> Callable[..., OpsValue]:
-    assert isinstance(name, str)
+    assert isinstance(name, str), type(name)
 
     def fn(*args: object, **kwargs: object) -> OpsValue:
         return getattr(ops, name)(*args, **kwargs)
@@ -386,7 +388,7 @@ def is_triton(x: Union[IRNode, torch.device, None, str]) -> bool:
         return False
     from .codegen.triton import TritonScheduling
 
-    assert isinstance(device_scheduling, type)
+    assert isinstance(device_scheduling, type), type(device_scheduling)
     return issubclass(device_scheduling, TritonScheduling)
 
 
@@ -420,7 +422,7 @@ def significant_strides_equal(
     """
     assert len(shape) == len(strides1) and len(strides1) == len(strides2)
     for dim, s1, s2 in zip(shape, strides1, strides2):
-        if V.graph.sizevars.statically_known_leq(dim, 1):  # type: ignore[arg-type]
+        if V.graph.sizevars.statically_known_leq(dim, 1):
             continue
 
         if not V.graph.sizevars.statically_known_equals(
@@ -434,9 +436,9 @@ def significant_strides_equal(
 
 
 def try_match_insignificant_strides(
-    tensor: Union[TensorBox, BaseView],
+    tensor: IRNode,
     strides: Sequence[Union[int, torch.SymInt]],
-) -> Union[TensorBox, BaseView]:
+) -> IRNode:
     """
     Tries to match the strides of the tensor to those in the meta_strides. Strides of insignificant
     dimensions - size 0 or 1 - will be updated.
@@ -450,7 +452,7 @@ def try_match_insignificant_strides(
         V.graph.sizevars.statically_known_equals(s1, s2)
         for s1, s2 in zip(strides, tensor.get_stride())
     ):
-        return tensor  # type: ignore[arg-type]
+        return tensor
 
     if not significant_strides_equal(strides, tensor.get_stride(), tensor.get_size()):
         return tensor
@@ -458,7 +460,7 @@ def try_match_insignificant_strides(
     storage, old_layout = as_storage_and_layout(tensor)
     new_stride = [*old_layout.stride]
     for i, s in enumerate(tensor.get_size()):
-        if V.graph.sizevars.statically_known_leq(s, 1):  # type: ignore[arg-type]
+        if V.graph.sizevars.statically_known_leq(s, 1):
             new_stride[i] = strides[i]
 
     new_layout = FixedLayout(
@@ -654,18 +656,18 @@ class IRNode:
         raise NotImplementedError(type(self).__name__)
 
     def freeze_layout_with_stride_order(
-        self, order: list[int], allow_padding: bool = False
+        self, order: Sequence[int], allow_padding: bool = False
     ) -> None:
         raise NotImplementedError(type(self).__name__)
 
-    def freeze_layout_with_fill_order(self, order: list[int]) -> None:
+    def freeze_layout_with_fill_order(self, order: Sequence[int]) -> None:
         raise NotImplementedError(type(self).__name__)
 
-    def freeze_layout_with_same_order(self, stride: list[_IntLike]) -> None:
+    def freeze_layout_with_same_order(self, stride: Sequence[_IntLike]) -> None:
         raise NotImplementedError(type(self).__name__)
 
     def freeze_layout_with_exact_strides(
-        self, exact_strides: list[_IntLike], allow_padding: bool = False
+        self, exact_strides: Sequence[_IntLike], allow_padding: bool = False
     ) -> None:
         raise NotImplementedError(type(self).__name__)
 
@@ -687,7 +689,7 @@ class IRNode:
     def get_reduction_type(self) -> Optional[str]:
         raise NotImplementedError(type(self).__name__)
 
-    def get_reduction_size(self) -> Sequence[sympy.Expr]:
+    def get_reduction_size(self) -> Sequence[Expr]:
         raise NotImplementedError(type(self).__name__)
 
     def is_extern(self) -> bool:
@@ -828,7 +830,9 @@ class Loops(IRNode):
         return self.ranges
 
     @classmethod
-    def create(cls, *args: Any, **kwargs: Any) -> TensorBox:
+    def create(
+        cls, *args: Any, **kwargs: Any
+    ) -> Union[TensorBox, ShapeAsConstantBuffer]:
         origin_node = kwargs.pop("origin_node", None)
         tb = kwargs.pop("traceback", None)
         # if "origin_node" in kwargs:
@@ -897,7 +901,7 @@ class Loops(IRNode):
     def num_reads(self) -> int:
         return len(self.inner_fn_opcount().read_buffers)
 
-    def get_reduction_size(self) -> Sequence[sympy.Expr]:
+    def get_reduction_size(self) -> Sequence[Expr]:
         raise NotImplementedError(
             f"get_reduction_size() is not implemented by {type(self)}!"
         )
@@ -980,7 +984,7 @@ class Scatter(Pointwise):
         loader = self.make_loader()
         if output_name is None:
             output_name = "unnamed"
-        return ops.store(
+        ops.store(
             output_name,
             indexer(self.output_indexer(vars)),
             loader(vars),
@@ -1079,7 +1083,7 @@ class Reduction(Loops):
             *(free_unbacked_symbols(e) for e in self.reduction_ranges)
         )
 
-    def get_reduction_size(self) -> Sequence[sympy.Expr]:
+    def get_reduction_size(self) -> Sequence[Expr]:
         return self.reduction_ranges
 
     def get_reduction_type(self) -> Optional[str]:
@@ -1098,7 +1102,7 @@ class Reduction(Loops):
             self.reduction_type,
             self.inner_fn(vars, reduction_vars),
         )
-        return ops.store_reduction(output_name or "unnamed", indexer(vars), value)
+        ops.store_reduction(output_name or "unnamed", indexer(vars), value)
 
     def index_length(self) -> int:
         return len(self.ranges) + len(self.reduction_ranges)
@@ -1228,10 +1232,12 @@ class Reduction(Loops):
         )
 
         def get_read_indices(r: Reduction) -> tuple[Sequence[Expr], bool]:
+            device = r.get_device()
+            assert device is not None
             cb = ComputedBuffer(
                 name=None,
                 layout=FlexibleLayout(
-                    device=r.get_device(),
+                    device=device,
                     dtype=r.get_dtype(),
                     size=r.get_size(),
                 ),
@@ -1319,12 +1325,10 @@ class Reduction(Loops):
 
         value_fn: Callable[[Sequence[_IntLike], Sequence[_IntLike]], Any]
         if reduction_type in ("argmin", "argmax"):
-            flatten_index = FixedLayout(
-                None,  # type: ignore[arg-type]
-                None,  # type: ignore[arg-type]
+            flatten_index = _fixed_indexer(
                 reduction_ranges,
                 FlexibleLayout.contiguous_strides(reduction_ranges),
-            ).make_indexer()
+            )
 
             def value_fn(
                 index: Sequence[_IntLike], rindex: Sequence[_IntLike]
@@ -1352,7 +1356,7 @@ class Reduction(Loops):
         reduction_type: ReductionType,
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
         input_node: Optional[IRNode] = None,
-    ) -> TensorBox:
+    ) -> Union[TensorBox, ShapeAsConstantBuffer]:
         reduction_numel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
 
         if reduction_numel == 0:
@@ -1363,10 +1367,10 @@ class Reduction(Loops):
                 if dst_dtype == torch.bool:
                     return bool(val)
                 elif dst_dtype.is_floating_point:
-                    assert isinstance(val, typing.SupportsFloat)
+                    assert isinstance(val, typing.SupportsFloat), type(val)
                     return float(val)
                 else:
-                    assert isinstance(val, typing.SupportsInt)
+                    assert isinstance(val, typing.SupportsInt), type(val)
                     return int(val)
 
             rtypes_to_inits = {
@@ -1583,7 +1587,7 @@ class Reduction(Loops):
     @classmethod
     def _multilayer_wrap_loader_existing_ranges(
         cls,
-        loader: Callable[[Sequence[sympy.Expr], Sequence[sympy.Expr]], OpsValue],
+        loader: Callable[[Sequence[Expr], Sequence[Expr]], OpsValue],
         original_ranges: Sequence[Expr],
         original_reduction_ranges: Sequence[Expr],
         new_ranges: Sequence[Integer],
@@ -1597,8 +1601,8 @@ class Reduction(Loops):
         )
 
         def wrapper_fn(
-            merged_index: Sequence[sympy.Expr],
-            new_reduction_index: Sequence[sympy.Expr],
+            merged_index: Sequence[Expr],
+            new_reduction_index: Sequence[Expr],
         ) -> OpsValue:
             original_idx = merged_index[: len(original_ranges)]
             new_index = merged_index[len(original_ranges) :]
@@ -1623,7 +1627,7 @@ class Reduction(Loops):
         reduction_type: ReductionType,
         split: _IntLike,
         reduction_hint: ReductionHint,
-    ) -> TensorBox:
+    ) -> Union[TensorBox, ShapeAsConstantBuffer]:
         """
         Break a large reduction up into multiple smaller reductions
         recursively
@@ -1685,7 +1689,7 @@ class Reduction(Loops):
         reduction_type: ReductionType,
         split: _IntLike,
         reduction_hint: ReductionHint,
-    ) -> TensorBox:
+    ) -> Union[TensorBox, ShapeAsConstantBuffer]:
         """
         Break a large reduction up into multiple smaller reductions
         recursively
@@ -1725,7 +1729,7 @@ class Reduction(Loops):
         new_reduction_ranges: list[Integer],
         reduction_type: ReductionType,
         reduction_hint: ReductionHint,
-    ) -> TensorBox:
+    ) -> Union[TensorBox, ShapeAsConstantBuffer]:
         """
         Break a large reduction up into multiple smaller reductions
         recursively
@@ -1750,6 +1754,25 @@ class Reduction(Loops):
             -1,
             reduction_hint,
         )
+
+
+def _fixed_indexer(
+    size: Sequence[Expr],
+    stride: Optional[Sequence[Expr]] = None,
+    offset: Expr = Integer(0),
+) -> Callable[[Sequence[Expr]], Expr]:
+    """A closure containing math to read a given element"""
+
+    def indexer(index: Sequence[int]) -> int:
+        assert stride is not None and len(index) == len(stride)
+        assert len(index) == len(size)
+        result = offset
+        for idx, st, sz in zip(index, stride, size):
+            if sz != 1:
+                result = result + idx * st
+        return result
+
+    return indexer
 
 
 INNER_FN_TY = Callable[[Sequence[Expr], Sequence[Expr]], OpsValue]
@@ -1808,9 +1831,9 @@ class MultiOutputReduction(Reduction):
             self.reduction_type,
             self.inner_fn(vars, reduction_vars),
         )
-        assert isinstance(values, (tuple, list)), f"{type(values)}"
+        assert isinstance(values, (tuple, list)), type(values)
         value = values[self.output_index]
-        return ops.store_reduction(output_name or "unnamed", indexer(vars), value)
+        ops.store_reduction(output_name or "unnamed", indexer(vars), value)
 
 
 class OnlineSoftmaxReduction(MultiOutputReduction):
@@ -1826,7 +1849,7 @@ class OnlineSoftmaxReduction(MultiOutputReduction):
         num_output: int,
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
         input_node: Optional[IRNode] = None,
-    ) -> Sequence[TensorBox]:
+    ) -> Sequence[Union[TensorBox, ShapeAsConstantBuffer]]:
         """
         Create the reduction disregarding splitting.
         """
@@ -1862,12 +1885,12 @@ class WelfordReduction(MultiOutputReduction):
         reduction_ranges: list[Integer],
         reduction_type: ReductionType,
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
-    ) -> Sequence[TensorBox]:
+    ) -> Sequence[Union[TensorBox, ShapeAsConstantBuffer]]:
         assert reduction_type in ("welford_reduce", "welford_combine")
 
         reduction_numel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
 
-        def const(val: int) -> TensorBox:
+        def const(val: int) -> Union[TensorBox, ShapeAsConstantBuffer]:
             def inner_fn(idx: Sequence[Expr]) -> OpsValue:
                 return ops.constant(
                     val,
@@ -1891,7 +1914,7 @@ class WelfordReduction(MultiOutputReduction):
 
             def copy(
                 loader: Callable[[Sequence[Expr], Sequence[Expr]], OpsValue],
-            ) -> TensorBox:
+            ) -> Union[TensorBox, ShapeAsConstantBuffer]:
                 def inner_fn(idx: Sequence[Expr]) -> OpsValue:
                     reduction_index = [sympy.S.Zero for _ in reduction_ranges]
                     return loader(idx, reduction_index)
@@ -1990,7 +2013,7 @@ class WelfordReduction(MultiOutputReduction):
         reduction_type: ReductionType,
         split: _IntLike,
         reduction_hint: ReductionHint,
-    ) -> Sequence[TensorBox]:
+    ) -> Sequence[Union[TensorBox, ShapeAsConstantBuffer]]:
         """
         Break a large reduction up into multiple smaller reductions
         recursively
@@ -2111,15 +2134,13 @@ class Scan(Loops):
         idx = self.reindex(vars, scan_vars)
         values = tuple(inner_fn(idx) for inner_fn in self.inner_fns)
         result = ops.scan(self.dtypes, self.combine_fn, values)
-        return ops.store(
-            output_name or "unnamed", indexer(idx), result[self.output_index]
-        )
+        ops.store(output_name or "unnamed", indexer(idx), result[self.output_index])
 
     def get_reduction_type(self) -> Optional[str]:
         # return self.scan_op
         return "custom"
 
-    def get_reduction_size(self) -> Sequence[sympy.Expr]:
+    def get_reduction_size(self) -> Sequence[Expr]:
         return self.scan_ranges
 
     def get_size(self) -> Sequence[Expr]:
@@ -2157,7 +2178,7 @@ class Scan(Loops):
         # Whether we have the option to fallback to aten
         can_fallback_to_aten: bool = True,
         **kwargs: Any,
-    ) -> Sequence[Optional[TensorBox]]:
+    ) -> Sequence[Optional[Union[TensorBox, ShapeAsConstantBuffer]]]:
         pointwise_ranges = [*size[:axis], *size[axis + 1 :]]
         scan_ranges = [size[axis]]
 
@@ -2313,9 +2334,7 @@ class Sort(Loops):
         idx = self.reindex(vars, reduction_vars)
         values = tuple(inner_fn(idx) for inner_fn in self.inner_fns)
         result = ops.sort(self.dtypes, values, self.stable, self.descending)
-        return ops.store(
-            output_name or "unnamed", indexer(idx), result[self.output_index]
-        )
+        ops.store(output_name or "unnamed", indexer(idx), result[self.output_index])
 
     def get_reduction_type(self) -> Optional[str]:
         return "sort"
@@ -2356,7 +2375,7 @@ class Sort(Loops):
         descending: bool,
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
         **kwargs: Any,
-    ) -> Sequence[Optional[TensorBox]]:
+    ) -> Sequence[Optional[Union[TensorBox, ShapeAsConstantBuffer]]]:
         pointwise_ranges = [*size[:axis], *size[axis + 1 :]]
         sort_ranges = [size[axis]]
 
@@ -2520,8 +2539,6 @@ class DataNode(IRNode):
 
 @ir_dataclass
 class BaseView(DataNode):
-    data: IRNode
-
     def get_unbacked_symbol_uses(self) -> OrderedSet[Symbol]:
         return self.data.get_unbacked_symbol_uses()
 
@@ -2574,17 +2591,18 @@ class BaseView(DataNode):
     def realize(self) -> Optional[str]:
         return self.data.realize()
 
-    def realize_hint(self):  # type: ignore[no-untyped-def]
-        return self.data.realize_hint()
+    def realize_hint(self) -> None:
+        self.data.realize_hint()
 
-    def get_storage_numel(self):  # type: ignore[no-untyped-def]
+    def get_storage_numel(self) -> _IntLike:
         return self.data.get_storage_numel()
 
     def is_extern(self) -> bool:
-        return self.data.is_extern()  # type: ignore[attr-defined]
+        return self.data.is_extern()
 
     def is_module_buffer(self) -> bool:
-        return self.data.is_module_buffer()  # type: ignore[attr-defined]
+        assert isinstance(self.data, DataNode), type(self.data)
+        return self.data.is_module_buffer()
 
     def get_read_names(self) -> OrderedSet[str]:
         return self.data.get_read_names()
@@ -2593,12 +2611,12 @@ class BaseView(DataNode):
         with patch.object(FlexibleLayout, "allow_indexing", True):
             return extract_read_writes(
                 self.make_loader(),
-                self.get_size(),  # type: ignore[arg-type]
+                self.get_size(),
             ).reads
 
-    def unwrap_view(self):  # type: ignore[no-untyped-def]
+    def unwrap_view(self) -> IRNode:
         x: IRNode = self
-        while isinstance(x, BaseView):
+        while isinstance(x, DataNode):
             x = x.data
         return x
 
@@ -2616,13 +2634,13 @@ class BaseView(DataNode):
 
 @ir_dataclass
 class ExpandView(BaseView):
-    size: list[Expr]
+    size: Sequence[Expr]
 
     @staticmethod
-    def _normalize_size(x, new_size):  # type: ignore[no-untyped-def]
+    def _normalize_size(x: IRNode, new_size: Sequence[_IntLike]) -> Sequence[_IntLike]:
         """Replace `-1` with correct sizes"""
         sizevars = V.graph.sizevars
-        new_size = list(map(sympy.expand, new_size))
+        new_size = [sympy.expand(s) for s in new_size]
         old_size = x.get_size()
         old_size = [None] * (len(new_size) - len(old_size)) + list(old_size)
         assert len(new_size) == len(old_size)
@@ -2646,7 +2664,7 @@ class ExpandView(BaseView):
         return new_size
 
     @classmethod
-    def create(cls, x, new_size):  # type: ignore[no-untyped-def]
+    def create(cls, x: IRNode, new_size: Sequence[_IntLike]) -> BaseView:
         new_size = cls._normalize_size(x, new_size)
 
         if is_storage_and_layout(x):
@@ -2676,12 +2694,16 @@ class ExpandView(BaseView):
     def get_size(self) -> Sequence[Expr]:
         return self.size
 
-    def make_reindexer(self):  # type: ignore[no-untyped-def]
+    def make_reindexer(
+        self,
+    ) -> Callable[[Sequence[Expr]], Sequence[Expr]]:
         target = self.get_size()
         actual = self.data.get_size()
         skip = len(target) - len(actual)
 
-        def reindex(index):  # type: ignore[no-untyped-def]
+        def reindex(
+            index: Sequence[Expr],
+        ) -> Sequence[Expr]:
             index = list(index[skip:])
             assert len(index) == len(actual)
             for i in range(len(actual)):
@@ -2698,7 +2720,7 @@ class PermuteView(BaseView):
     dims: list[Expr]
 
     @classmethod
-    def create(cls, x, dims):  # type: ignore[no-untyped-def]
+    def create(cls, x: IRNode, dims: Sequence[int]) -> BaseView:
         dims = cls._map_neg_dims(dims)
         assert OrderedSet(dims) == OrderedSet(range(len(dims)))
 
@@ -2716,7 +2738,7 @@ class PermuteView(BaseView):
         return PermuteView(data=x, dims=dims)
 
     @classmethod
-    def _map_neg_dims(cls, dims):  # type: ignore[no-untyped-def]
+    def _map_neg_dims(cls, dims: Sequence[int]) -> list[int]:
         return [dim if dim >= 0 else len(dims) + dim for dim in dims]
 
     def get_size(self) -> Sequence[Expr]:
@@ -2726,12 +2748,16 @@ class PermuteView(BaseView):
         size = self.data.get_size()
         return [size[i] for i in self.dims]
 
-    def make_reindexer(self):  # type: ignore[no-untyped-def]
+    def make_reindexer(
+        self,
+    ) -> Callable[[Sequence[Expr]], Sequence[Expr]]:
         inv = {j: i for i, j in enumerate(self.dims)}
         inv = [inv[i] for i in range(len(self.dims))]
         assert OrderedSet(inv) == OrderedSet(range(len(self.dims)))
 
-        def reindex(index):  # type: ignore[no-untyped-def]
+        def reindex(
+            index: Sequence[Expr],
+        ) -> Sequence[Expr]:
             return [index[i] for i in inv]
 
         return reindex
@@ -2740,13 +2766,13 @@ class PermuteView(BaseView):
 @ir_dataclass
 class SqueezeView(BaseView):
     @classmethod
-    def create(cls, x, *, dim=None):  # type: ignore[no-untyped-def]
+    def create(cls, x: IRNode, *, dim: Optional[int] = None) -> IRNode:
         if is_storage_and_layout(x):
             storage, old_layout = as_storage_and_layout(x)
             new_size = []
             new_stride = []
             if dim is not None:
-                assert isinstance(dim, int), "expected integer dim argument"
+                assert isinstance(dim, int), type(dim)
                 assert 0 <= dim and dim < len(old_layout.size)
 
             for i, (size, stride) in enumerate(zip(old_layout.size, old_layout.stride)):
@@ -2778,12 +2804,14 @@ class SqueezeView(BaseView):
             return View.create(x, [s for i, s in enumerate(x.get_size()) if i != dim])
 
     @staticmethod
-    def squeezer(size: Sequence[sympy.Expr]):  # type: ignore[no-untyped-def]
+    def squeezer(
+        size: Sequence[Expr],
+    ) -> tuple[list[int], Callable[[Sequence[Expr]], tuple[Expr]]]:
         new_size = [s for s in size if s != 1]
         not_one = [i for i, s in enumerate(size) if s != 1]
         length = len(size)
 
-        def reindex(index: list[sympy.Expr]) -> tuple[sympy.Expr, ...]:
+        def reindex(index: Sequence[Expr]) -> tuple[Expr]:
             assert len(index) == len(not_one), f"{index} {not_one}"
             new_index = [sympy.S.Zero] * length
             for idx, s in zip(not_one, index):
@@ -2792,16 +2820,18 @@ class SqueezeView(BaseView):
 
         return new_size, reindex
 
-    def __init__(self, data) -> None:  # type: ignore[no-untyped-def]
+    def __init__(self, data: Any) -> None:
         raise AssertionError("use SqueezeView.create()")
 
 
 @ir_dataclass
 class GenericView(BaseView):
-    size: list[Expr]
-    reindex: Callable[..., Any]
+    size: Sequence[Expr]
+    reindex: Callable[[Sequence[Expr]], Sequence[Expr]]
 
-    def make_reindexer(self):  # type: ignore[no-untyped-def]
+    def make_reindexer(
+        self,
+    ) -> Callable[[Sequence[Expr]], Sequence[Expr]]:
         return self.reindex
 
     def reindex_str(self) -> str:
@@ -2819,7 +2849,12 @@ class GenericView(BaseView):
     __repr__ = __str__
 
     @classmethod
-    def create(cls, x, new_size, reindex):  # type: ignore[no-untyped-def]
+    def create(
+        cls,
+        x: IRNode,
+        new_size: Sequence[Expr],
+        reindex: Callable[[Sequence[Expr]], Sequence[Expr]],
+    ) -> BaseView:
         return cls(data=x, size=list(new_size), reindex=reindex)
 
     def get_size(self) -> Sequence[Expr]:
@@ -2829,7 +2864,7 @@ class GenericView(BaseView):
 @ir_dataclass
 class View(GenericView):
     @staticmethod
-    def handle_negative_index(idx, size):  # type: ignore[no-untyped-def]
+    def handle_negative_index(idx: Expr, size: Expr) -> Expr:
         idx = sympy.expand(idx)
         size = sympy.expand(size)
         evaluate_expr = V.graph.sizevars.shape_env.evaluate_expr
@@ -2838,8 +2873,8 @@ class View(GenericView):
         return idx
 
     @classmethod
-    def create(cls, x, new_size):  # type: ignore[no-untyped-def]
-        assert isinstance(new_size, (tuple, list))
+    def create(cls, x: IRNode, new_size: Sequence[Expr]) -> IRNode:  # type: ignore[override]
+        assert isinstance(new_size, (tuple, list)), type(new_size)
         old_size, new_size = cls.resolve_negative_size(x.get_size(), new_size)
 
         # Skip pointless views
@@ -2855,7 +2890,7 @@ class View(GenericView):
 
         if 0 in new_size:
 
-            def fake_reindex(index):  # type: ignore[no-untyped-def]
+            def fake_reindex(index: Any) -> tuple[int, ...]:
                 return tuple([0] * len(old_size))
 
             return cls(data=x, size=list(new_size), reindex=fake_reindex)
@@ -2885,7 +2920,9 @@ class View(GenericView):
         return cls(data=x, size=list(new_size), reindex=reindex)
 
     @staticmethod
-    def resolve_negative_size(old_size, new_size):  # type: ignore[no-untyped-def]
+    def resolve_negative_size(
+        old_size: Sequence[Expr], new_size: Sequence[Expr]
+    ) -> tuple[Sequence[Expr], Sequence[Expr]]:
         new_size = [V.graph.sizevars.simplify(x) for x in new_size]
         old_size = [V.graph.sizevars.simplify(x) for x in old_size]
 
@@ -3271,8 +3308,8 @@ class Layout(OutputSpec):
         self,
         device: torch.device,
         dtype: torch.dtype,
-        size: list[Expr],
-        stride: Optional[list[Expr]] = None,
+        size: Sequence[Expr],
+        stride: Optional[Sequence[Expr]] = None,
         offset: Expr = Integer(0),
     ) -> None:
         if stride is None:
@@ -3281,9 +3318,9 @@ class Layout(OutputSpec):
         self.dtype = dtype
         assert len(size) == len(stride), f"size={size}, stride={stride}"
         assert all(isinstance(s, (Expr, int)) for s in size)
-        self.size: list[Expr] = size
-        self.stride: list[Expr] = stride
-        self.offset: Expr = offset
+        self.size = size
+        self.stride = stride
+        self.offset = offset
 
     def __str__(self) -> str:
         offset = ""
@@ -3781,7 +3818,7 @@ class MutationLayoutSHOULDREMOVE(Layout):
         src.realize_hint()
 
         if not unsafe_alias:
-            src = Pointwise.create(
+            pw = Pointwise.create(
                 device=src.get_device(),
                 dtype=src.get_dtype(),
                 inner_fn=src.make_loader(),
@@ -3789,7 +3826,9 @@ class MutationLayoutSHOULDREMOVE(Layout):
                     V.graph.sizevars.guard_equals(a, b)
                     for a, b in zip(src.get_size(), dst.get_size())
                 ],
-            ).data
+            )
+            assert isinstance(pw, DataNode)
+            src = pw.data
 
         src.realize()
         assert isinstance(src.data.layout, FlexibleLayout)
@@ -5166,6 +5205,7 @@ class ExternKernel(InputsKernel):
         if (
             x_unwrap_view_fx_node is not None
             and "val" in x_unwrap_view_fx_node.meta
+            and isinstance(x_unwrap_view, (ReinterpretView, Buffer))
             and isinstance(x_unwrap_view.layout, FlexibleLayout)
             and (
                 x_unwrap_view_fx_node.meta["val"].is_contiguous(
@@ -5354,7 +5394,7 @@ class ExternKernel(InputsKernel):
             return x
         if (
             isinstance(x, TensorBox)
-            and isinstance(x.data, BaseView)
+            and isinstance(x.data, DataNode)
             and not isinstance(x.data, ReinterpretView)
             and is_storage_and_layout(x.unwrap_view())
             and not isinstance(x.unwrap_view().data, ExternKernelAlloc)  # type: ignore[attr-defined]
@@ -6968,8 +7008,6 @@ class MutableBox(DataNode):
     TensorBox / StorageBox allow in-place mutation of Tensors
     """
 
-    data: IRNode
-
     def has_exceeded_max_reads(self) -> bool:
         return self.data.has_exceeded_max_reads()
 
@@ -7004,18 +7042,18 @@ class MutableBox(DataNode):
         return self.data.freeze_layout()
 
     def freeze_layout_with_stride_order(
-        self, order: list[int], allow_padding: bool = False
+        self, order: Sequence[int], allow_padding: bool = False
     ) -> None:
         return self.data.freeze_layout_with_stride_order(order, allow_padding)
 
-    def freeze_layout_with_fill_order(self, order: list[int]) -> None:
+    def freeze_layout_with_fill_order(self, order: Sequence[int]) -> None:
         return self.data.freeze_layout_with_fill_order(order)
 
-    def freeze_layout_with_same_order(self, stride: list[_IntLike]) -> None:
+    def freeze_layout_with_same_order(self, stride: Sequence[_IntLike]) -> None:
         return self.data.freeze_layout_with_same_order(stride)
 
     def freeze_layout_with_exact_strides(
-        self, exact_strides: list[_IntLike], allow_padding: bool = False
+        self, exact_strides: Sequence[_IntLike], allow_padding: bool = False
     ) -> None:
         return self.data.freeze_layout_with_exact_strides(exact_strides, allow_padding)
 

@@ -3,7 +3,7 @@ import functools
 import itertools
 import logging
 from collections.abc import Iterable, Sequence
-from typing import Any, Callable, cast, Optional, Union
+from typing import Any, Callable, cast, Optional, TYPE_CHECKING, Union
 
 import sympy
 from sympy import Expr
@@ -23,6 +23,10 @@ from .utils import (
     VarRanges,
 )
 from .virtualized import V
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 log = logging.getLogger(__name__)
@@ -340,7 +344,9 @@ class SizeVarAllocator:
         return self.is_expr_static_and_true(sympy.Eq(left, right))  # type: ignore[arg-type]
 
     # See Note - [On Statically Known]
-    def statically_known_list_equals(self, left: list[Expr], right: list[Expr]) -> bool:
+    def statically_known_list_equals(
+        self, left: Sequence[Expr], right: Sequence[Expr]
+    ) -> bool:
         """
         Returns a bool indicating if it is sound to optimize as if left and right lists are equal.
         """
