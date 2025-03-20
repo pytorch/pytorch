@@ -4,9 +4,10 @@ from __future__ import annotations
 
 __all__ = [
     # Modules
+    "errors",
+    "ops",
     "symbolic_helper",
     "utils",
-    "errors",
     # All opsets
     "symbolic_caffe2",
     "symbolic_opset7",
@@ -52,7 +53,6 @@ from typing import Any, Callable, TYPE_CHECKING
 from typing_extensions import deprecated
 
 import torch
-from torch import _C
 from torch._C import _onnx as _C_onnx
 from torch._C._onnx import OperatorExportTypes, TensorProtoDataType, TrainingMode
 
@@ -77,6 +77,7 @@ from .utils import (
 
 from . import (  # usort: skip. Keep the order instead of sorting lexicographically
     errors,
+    ops,
     symbolic_caffe2,
     symbolic_helper,
     symbolic_opset7,
@@ -473,7 +474,7 @@ def dynamo_export(
                     rank = len(x.shape)
                     dynamic_shape = {}
                     for i in range(rank):
-                        dynamic_shape[i] = torch.export.Dim.AUTO  # type: ignore[attr-defined]
+                        dynamic_shape[i] = torch.export.Dim.AUTO
                     return dynamic_shape
                 else:
                     return None
