@@ -2520,6 +2520,8 @@ class DataNode(IRNode):
 
 @ir_dataclass
 class BaseView(DataNode):
+    data: IRNode
+
     def get_unbacked_symbol_uses(self) -> OrderedSet[Symbol]:
         return self.data.get_unbacked_symbol_uses()
 
@@ -6965,6 +6967,9 @@ class MutableBox(DataNode):
     """
     TensorBox / StorageBox allow in-place mutation of Tensors
     """
+
+    data: IRNode
+
     def has_exceeded_max_reads(self) -> bool:
         return self.data.has_exceeded_max_reads()
 
