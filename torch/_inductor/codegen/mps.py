@@ -242,8 +242,16 @@ class MetalOverrides(OpOverrides):
         return f"c10::metal::i0({x})"
 
     @staticmethod
+    def i0e(x: CSEVariable) -> str:
+        return f"c10::metal::i0e({x})"
+
+    @staticmethod
     def i1(x: CSEVariable) -> str:
         return f"c10::metal::i1({x})"
+
+    @staticmethod
+    def i1e(x: CSEVariable) -> str:
+        return f"c10::metal::i1e({x})"
 
     @staticmethod
     def erf(x: CSEVariable) -> str:
@@ -280,6 +288,10 @@ class MetalOverrides(OpOverrides):
     @staticmethod
     def atan(x: CSEVariable) -> str:
         return f"metal::atan({x})"
+
+    @staticmethod
+    def atan2(x: CSEVariable, y: CSEVariable) -> str:
+        return f"::metal::atan2({x}, {y})"
 
     @staticmethod
     def sqrt(x: CSEVariable) -> str:
@@ -373,6 +385,34 @@ class MetalOverrides(OpOverrides):
     @staticmethod
     def entr(x: CSEVariable) -> str:
         return f"c10::metal::entr({x})"
+
+    @staticmethod
+    def bessel_j0(x: CSEVariable) -> str:
+        return f"c10::metal::bessel_j0_forward({x})"
+
+    @staticmethod
+    def bessel_j1(x: CSEVariable) -> str:
+        return f"c10::metal::bessel_j1_forward({x})"
+
+    @staticmethod
+    def bessel_y0(x: CSEVariable) -> str:
+        return f"c10::metal::bessel_y0_forward({x})"
+
+    @staticmethod
+    def bessel_y1(x: CSEVariable) -> str:
+        return f"c10::metal::bessel_y1_forward({x})"
+
+    @staticmethod
+    def modified_bessel_i0(x: CSEVariable) -> str:
+        return f"c10::metal::modified_bessel_i0_forward({x})"
+
+    @staticmethod
+    def modified_bessel_i1(x: CSEVariable) -> str:
+        return f"c10::metal::modified_bessel_i1_forward({x})"
+
+    @staticmethod
+    def modified_bessel_k0(x: CSEVariable) -> str:
+        return f"c10::metal::modified_bessel_k0_forward({x})"
 
 
 MetalOverrides._initialize_pointwise_overrides("mps")
@@ -693,7 +733,8 @@ class MetalKernel(SIMDKernel):
         # See https://github.com/pytorch/pytorch/issues/144634
         expr_str = self.index_to_str(expr)
         lower_expr = f"{expr_str} < 0" if lower else ""
-        upper_expr = f"{expr_str} >= {self.index_to_str(size)}" if upper else ""
+        # TODO(malfet): Is upper bound inclusive or exclusive?
+        upper_expr = f"{expr_str} > {self.index_to_str(size)}" if upper else ""
         if lower and upper:
             line = f"if (({lower_expr}) && ({upper_expr})) return"
         else:

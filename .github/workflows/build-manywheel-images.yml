@@ -93,7 +93,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.2xlarge.ephemeral"
     strategy:
       matrix:
-        cuda_version: ["12.8", "12.6"]
+        cuda_version: ["12.8"]
     env:
       GPU_ARCH_TYPE: cuda-aarch64
       GPU_ARCH_VERSION: ${{ matrix.cuda_version }}
@@ -362,35 +362,3 @@ jobs:
           retry_wait_seconds: 90
           command: |
             .ci/docker/manywheel/build.sh manylinux2_28-builder:xpu
-  build-docker-cpu-s390x:
-    if: github.repository_owner == 'pytorch'
-    environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
-    runs-on: linux.s390x
-    env:
-      GPU_ARCH_TYPE: cpu-s390x
-    steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
-        with:
-          submodules: false
-          no-sudo: true
-      - name: Authenticate if WITH_PUSH
-        if: env.WITH_PUSH == 'true'
-        env:
-          DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
-          DOCKER_ID: ${{ secrets.DOCKER_ID }}
-        run: |
-          if [[ "${WITH_PUSH}" == true ]]; then
-            echo "${DOCKER_TOKEN}" | docker login -u "${DOCKER_ID}" --password-stdin
-          fi
-      - name: Build Docker Image
-        run: |
-          .ci/docker/manywheel/build.sh manylinuxs390x-builder:cpu-s390x
-      - name: Cleanup docker
-        if: cancelled()
-        shell: bash
-        run: |
-          # if podman build command is interrupted,
-          # it can leave a couple of processes still running.
-          # order them to stop for clean shutdown.
-          docker system prune --build -f || true
