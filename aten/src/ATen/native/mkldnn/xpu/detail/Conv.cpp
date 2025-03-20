@@ -83,9 +83,8 @@ sycl::event convolution(
     int64_t groups,
     Attr& attr,
     const std::vector<sycl::event>& deps) {
-  auto engine = GpuEngineManager::Instance().get_engine(
-      {c10::kXPU, c10::xpu::current_device()});
-  auto stream = GpuStreamManager::Instance().get_stream();
+  auto& engine = GpuEngineManager::Instance().get_engine();
+  auto& stream = GpuStreamManager::Instance().get_stream();
 
   bool is_channels_last = use_channels_last_for_conv(src, weight);
 
@@ -184,9 +183,8 @@ sycl::event convolution_backward_weights(
     IntArrayRef dilation,
     int64_t groups,
     const std::vector<sycl::event>& deps) {
-  auto engine = GpuEngineManager::Instance().get_engine(
-      {c10::kXPU, c10::xpu::current_device()});
-  auto stream = GpuStreamManager::Instance().get_stream();
+  auto& engine = GpuEngineManager::Instance().get_engine();
+  auto& stream = GpuStreamManager::Instance().get_stream();
 
   bool is_channels_last = use_channels_last_for_conv(src, diff_dst);
 
@@ -292,9 +290,8 @@ sycl::event convolution_backward_data(
     int64_t groups,
     bool bias_defined,
     const std::vector<sycl::event>& deps) {
-  auto engine = GpuEngineManager::Instance().get_engine(
-      {c10::kXPU, c10::xpu::current_device()});
-  auto stream = GpuStreamManager::Instance().get_stream();
+  auto& engine = GpuEngineManager::Instance().get_engine();
+  auto& stream = GpuStreamManager::Instance().get_stream();
 
   bool is_channels_last = use_channels_last_for_conv(diff_dst, weight);
 
