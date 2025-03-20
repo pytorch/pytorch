@@ -50,6 +50,10 @@ LOG_TRACE_HANDLER: Optional["LazyTraceHandler"] = None
 
 GET_DTRACE_STRUCTURED = False
 
+# 全局变量定义
+triton_trace_log = logging.getLogger("torch.__triton_trace")
+TRITON_TRACE_HANDLER = None
+
 
 @dataclass
 class LogRegistry:
@@ -1315,3 +1319,177 @@ def dtrace_structured(
 import torch._guards
 import torch._utils_internal
 import torch.distributed as dist
+
+
+class TritonLazyTraceHandler(LazyTraceHandler):
+    """A specialized LazyTraceHandler for Triton compilation tracing that outputs JSON."""
+    
+    def __init__(self, root_dir: Optional[str], prefix="dedicated_log_torch_triton_trace_"):
+        super().__init__(root_dir)
+        self.prefix = prefix
+    
+    def emit(self, record):
+        if self.stream is None:
+            if self.root_dir is not None:
+                os.makedirs(self.root_dir, exist_ok=True)
+                ranksuffix = ""
+                if dist.is_available() and dist.is_initialized():
+                    ranksuffix = f"rank_{dist.get_rank()}_"
+                
+                # Create a unique filename
+                unique_id = f"_{int(time.time())}"
+                self.stream = tempfile.NamedTemporaryFile(
+                    mode="w+",
+                    suffix=".json",  # Use JSON extension
+                    prefix=f"{self.prefix}{ranksuffix}{unique_id}_",
+                    dir=self.root_dir,
+                    delete=False,
+                )
+                
+                log.info("TritonLazyTraceHandler: logging to %s", self.stream.name)
+            else:
+                # If root_dir is not set, handle it the same way as the parent class
+                trace_log.removeHandler(self)
+                return
+        
+        if self.stream:
+            super().emit(record)
+
+
+class TritonJsonFormatter(logging.Formatter):
+    """Format log records as JSON for Triton compilation tracing."""
+    
+    def format(self, record):
+        # Create basic JSON structure
+        log_entry = {
+            "timestamp": self.formatTime(record, "%Y-%m-%dT%H:%M:%S.%fZ"),
+            "level": record.levelname,
+            "logger": record.name,
+        }
+        
+        # Add metadata
+        if hasattr(record, 'metadata'):
+            log_entry.update(record.metadata)
+        
+        # Add payload
+        if hasattr(record, 'payload') and record.payload is not None:
+            # Try to parse JSON string, if fails add as raw string
+            try:
+                if isinstance(record.payload, str) and (record.payload.startswith('{') or record.payload.startswith('[')):
+                    log_entry["payload"] = json.loads(record.payload)
+                else:
+                    log_entry["payload"] = record.payload
+            except json.JSONDecodeError:
+                log_entry["payload"] = record.payload
+        
+        # Handle exception information
+        if record.exc_info:
+            log_entry["exception"] = self.formatException(record.exc_info)
+        
+        # Convert the entire record to a JSON string
+        return json.dumps(log_entry)
+
+
+def _init_triton_trace_logging(trace_dir_name=None):
+    """Initialize the tracing log system for Triton compilation"""
+    global TRITON_TRACE_HANDLER
+    
+    # If directory is set in environment variable, use it
+    if trace_dir_name is None:
+        trace_dir_name = os.environ.get(TRACE_ENV_VAR, None)
+    
+    # Ensure triton_trace_log doesn't propagate to parent loggers
+    triton_trace_log.propagate = False
+    triton_trace_log.setLevel(logging.DEBUG)
+    
+    # Clear existing handlers
+    for handler in list(triton_trace_log.handlers):
+        triton_trace_log.removeHandler(handler)
+    
+    # Create new handler
+    if TRITON_TRACE_HANDLER is None:
+        TRITON_TRACE_HANDLER = TritonLazyTraceHandler(trace_dir_name)
+    
+    # Set JSON formatter
+    formatter = TritonJsonFormatter()
+    TRITON_TRACE_HANDLER.setFormatter(formatter)
+    
+    # Add handler to logger
+    triton_trace_log.addHandler(TRITON_TRACE_HANDLER)
+    
+    return triton_trace_log
+
+
+def trace_structured_triton(
+    name: str,
+    metadata_fn: Callable[[], dict[str, Any]] = dict,
+    *,
+    payload_fn: Callable[[], Optional[Union[str, object]]] = lambda: None,
+    kernel_name: Optional[str] = None,
+    grid_size: Optional[tuple] = None,
+    compile_time_ms: Optional[float] = None,
+):
+    """
+    Record structured trace information for Triton kernel compilation
+    
+    Args:
+        name: Name of the trace event
+        metadata_fn: Function that returns metadata dictionary
+        payload_fn: Function that returns payload data
+        kernel_name: Triton kernel name
+        grid_size: Grid size
+        compile_time_ms: Compile time in milliseconds
+    """
+    # Ensure triton trace logging system is initialized
+    if not triton_trace_log.handlers:
+        _init_triton_trace_logging()
+    
+    # If no handlers, return immediately
+    if not triton_trace_log.handlers:
+        return
+    
+    # Get basic metadata
+    record = {"event_type": name}
+    
+    # Add caller-provided metadata
+    user_metadata = metadata_fn()
+    if user_metadata:
+        record.update(user_metadata)
+    
+    # Add Triton-specific metadata
+    if kernel_name is not None:
+        record["kernel_name"] = kernel_name
+    if grid_size is not None:
+        record["grid_size"] = grid_size
+    if compile_time_ms is not None:
+        record["compile_time_ms"] = compile_time_ms
+    
+    # Add context information
+    if dist.is_available() and dist.is_initialized():
+        record["rank"] = dist.get_rank()
+    
+    # Add current process and thread information
+    record["pid"] = os.getpid()
+    record["thread_id"] = threading.get_ident()
+    
+    # Get trace ID and compile ID (if available)
+    trace_id = torch._guards.CompileContext.current_trace_id()
+    if trace_id is not None:
+        cid = trace_id.compile_id
+        if cid is not None:
+            if cid.compiled_autograd_id is not None:
+                record["compiled_autograd_id"] = cid.compiled_autograd_id
+            if cid.frame_id is not None:
+                record["frame_id"] = cid.frame_id
+            if cid.frame_compile_id is not None:
+                record["frame_compile_id"] = cid.frame_compile_id
+        record["attempt"] = trace_id.attempt
+    
+    # Get payload
+    payload = payload_fn()
+    
+    # Log the record
+    triton_trace_log.debug(
+        "", 
+        extra={"metadata": record, "payload": payload}
+    )
