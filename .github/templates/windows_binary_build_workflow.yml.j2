@@ -97,11 +97,11 @@ jobs:
       - name: Bootstrap Build Tools
         shell: cmd
         run: |
-          "${PYTORCH_ROOT}/.ci/pytorch/windows/arm64/bootstrap_buildtools.bat"
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_buildtools.bat"
       - name: Bootstrap Git
         shell: cmd
         run: |
-          "${PYTORCH_ROOT}/.ci/pytorch/windows/arm64/bootstrap_git.bat"
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_git.bat"
       - name: Remove Pytorch folder
         shell: cmd
         run: |
@@ -114,23 +114,23 @@ jobs:
       - name: Bootstrap Python
         shell: cmd
         run: |
-          "${PYTORCH_ROOT}/.ci/pytorch/windows/arm64/bootstrap_python.bat"
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_python.bat"
       - name: Bootstrap APL
         shell: cmd
         run: |
-          "${PYTORCH_ROOT}/.ci/pytorch/windows/arm64/bootstrap_apl.bat"
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_apl.bat"
       - name: Bootstrap Rust
         shell: cmd
         run: |
-          "${PYTORCH_ROOT}/.ci/pytorch/windows/arm64/bootstrap_rust.bat"
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_rust.bat"
       - name: Bootstrap sccache
         shell: cmd
         run: |
-          "${PYTORCH_ROOT}/.ci/pytorch/windows/arm64/bootstrap_sccache.bat"
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_sccache.bat"
       - name: Bootstrap Libuv
         shell: cmd
         run: |
-          "${PYTORCH_ROOT}/.ci/pytorch/windows/arm64/bootstrap_libuv.bat"
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_libuv.bat"
 {%- else %}      
       !{{ common.setup_ec2_windows() }}
       !{{ common.checkout(deep_clone=False, directory="pytorch") }}
@@ -233,23 +233,23 @@ jobs:
       - name: Bootstrap APL
         shell: cmd
         run: |
-          "${PYTORCH_ROOT}/.ci/pytorch/windows/arm64/bootstrap_apl.bat"
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_apl.bat"
       - name: Bootstrap Python
         shell: cmd
         run: |
-          "${PYTORCH_ROOT}/.ci/pytorch/windows/arm64/bootstrap_python.bat"
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_python.bat"
       - name: Bootstrap Build Tools
         shell: cmd
         run: |
-          "${PYTORCH_ROOT}/.ci/pytorch/windows/arm64/bootstrap_buildtools.bat"
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_buildtools.bat"
       - name: Bootstrap Rust
         shell: cmd
         run: |
-          "${PYTORCH_ROOT}/.ci/pytorch/windows/arm64/bootstrap_rust.bat"
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_rust.bat"
       - name: Test PyTorch binary
         shell: bash
         run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_arm64_test.sh"
+          "pytorch/.circleci/scripts/binary_windows_arm64_test.sh"
 {%- else %}
       - name: Test PyTorch binary
         shell: bash
