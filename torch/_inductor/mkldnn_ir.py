@@ -1039,7 +1039,7 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
     def get_mutation_names(self):
         binary_post_op = self.constant_args[-5]
         if binary_post_op == "sum":
-            return [self.inputs_as_nodes[self.idx_for_inplace_sum].get_name()]
+            return [self.inputs[self.idx_for_inplace_sum].get_name()]
         else:
             return []
 
