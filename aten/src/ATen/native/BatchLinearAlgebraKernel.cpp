@@ -137,6 +137,25 @@ Tensor& cholesky_inverse_kernel_impl(Tensor& result, Tensor& infos, bool upper) 
 }
 
 /*
+ LAPACK query functions return workspace size as floating point value, which means
+ that it might not be accurately represented if it's size exceed mantissa of the
+ corresponding type. Fix it by adding 1ULP to the value before casting to it
+ For more info see https://github.com/pytorch/pytorch/issues/145801#issuecomment-2631781776
+*/
+template <typename T>
+static inline
+std::enable_if_t<std::is_floating_point_v<T>, int> lapack_work_to_int(const T val) {
+    const auto next_after = std::nextafter(val, std::numeric_limits<T>::infinity());
+    return std::max<int>(1, std::ceil(next_after));
+}
+template <typename T>
+static inline
+std::enable_if_t<c10::is_complex<T>::value, int> lapack_work_to_int(const T val) {
+    return lapack_work_to_int(val.real());
+}
+
+
+/*
   Computes the eigenvalues and eigenvectors of n-by-n matrix 'input'.
   This is an in-place routine, content of 'input', 'values', 'vectors' is overwritten.
   'infos' is an int Tensor containing error codes for each matrix in the batched input.
@@ -218,25 +237,6 @@ void linalg_eig_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos,
   'compute_eigenvectors' controls whether eigenvectors should be computed.
   This function doesn't do any error checks and it's assumed that every argument is valid.
 */
-
-
-/*
- LAPACK query functions return workspace size as floating point value, which means
- that it might not be accurately represented if it's size exceed mantissa of the
- corresponding type. Fix it by adding 1ULP to the value before casting to it
- For more info see https://github.com/pytorch/pytorch/issues/145801#issuecomment-2631781776
-*/
-template <typename T>
-static inline
-std::enable_if_t<std::is_floating_point_v<T>, int> lapack_work_to_int(const T val) {
-    const auto next_after = std::nextafter(val, std::numeric_limits<T>::infinity());
-    return std::max<int>(1, std::ceil(next_after));
-}
-template <typename T>
-static inline
-std::enable_if_t<c10::is_complex<T>::value, int> lapack_work_to_int(const T val) {
-    return lapack_work_to_int(val.real());
-}
 
 
 template <typename scalar_t>
@@ -350,7 +350,6 @@ static void apply_geqrf(const Tensor& input, const Tensor& tau) {
       "Calling torch.geqrf on a CPU tensor requires compiling ",
       "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
 #else
-  using value_t = typename c10::scalar_value_type<scalar_t>::type;
   auto input_data = input.data_ptr<scalar_t>();
   auto tau_data = tau.data_ptr<scalar_t>();
   auto input_matrix_stride = matrixStride(input);
@@ -420,7 +419,6 @@ inline void apply_orgqr(Tensor& self, const Tensor& tau) {
     return;
   }
 
-  using value_t = typename c10::scalar_value_type<scalar_t>::type;
   auto self_data = self.data_ptr<scalar_t>();
   auto tau_data = tau.const_data_ptr<scalar_t>();
   auto self_matrix_stride = matrixStride(self);
