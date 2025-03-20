@@ -1387,7 +1387,7 @@ class TritonJsonFormatter(logging.Formatter):
             log_entry["exception"] = self.formatException(record.exc_info)
         
         # Convert the entire record to a JSON string
-        return json.dumps(log_entry)
+        return json.dumps(log_entry, indent=4)
 
 
 def _init_triton_trace_logging(trace_dir_name=None):
@@ -1470,7 +1470,7 @@ def trace_structured_triton(
     
     # Add current process and thread information
     record["pid"] = os.getpid()
-    record["thread_id"] = threading.get_ident()
+    # record["thread_id"] = threading.get_ident()
     
     # Get trace ID and compile ID (if available)
     trace_id = torch._guards.CompileContext.current_trace_id()
@@ -1484,7 +1484,7 @@ def trace_structured_triton(
             if cid.frame_compile_id is not None:
                 record["frame_compile_id"] = cid.frame_compile_id
         record["attempt"] = trace_id.attempt
-    
+
     # Get payload
     payload = payload_fn()
     
