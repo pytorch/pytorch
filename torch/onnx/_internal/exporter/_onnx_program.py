@@ -135,6 +135,7 @@ def _to_ort_value(tensor: torch.Tensor) -> ort.OrtValue:
 
 def _from_ort_value(value: ort.OrtValue) -> torch.Tensor:
     if value.element_type() == ir.DataType.BFLOAT16:
+        # This requires ONNX Runtime 1.21 or newer
         return torch.from_dlpack(value._get_c_value())
     return torch.from_numpy(value.numpy())
 
