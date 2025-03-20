@@ -7,6 +7,7 @@ import dataclasses
 import functools
 import logging
 import math
+import operator
 import os
 import threading
 import traceback
@@ -1497,7 +1498,10 @@ class FakeTensorMode(TorchDispatchMode):
                     )
 
                 for node in subgraph_mod.graph.nodes:
-                    if node.op == "call_function":
+                    if (
+                        node.op == "call_function"
+                        and node.target is not operator.getitem
+                    ):
                         try:
                             self._validate_cache_key(node.target, [], {})
                         except _BypassDispatchCache as e:
