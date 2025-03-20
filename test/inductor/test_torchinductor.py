@@ -12790,7 +12790,9 @@ class CommonTemplate:
             return x1 + y1 + z + y_cpu.cuda()
 
         f_compiled = torch.compile(f)
-        x, y = torch.ones(3, 3, device="cuda"), torch.randn(3, 3, device="cuda")
+        x, y = torch.ones(3, 3, device=self.device), torch.randn(
+            3, 3, device=self.device
+        )
 
         torch._dynamo.decorators.mark_unbacked(x, 0)
         torch._dynamo.decorators.mark_unbacked(y, 1)
