@@ -601,6 +601,7 @@ class TritonTemplateKernel(TritonKernel):
         assert isinstance(scatter_graph, ir.ComputedBuffer), (
             f"scatter_graph must be an instance of ComputeBuffer but got {type(scatter_graph)}"
         )
+
         def contiguous_strides(x):
             # We always create a fresh contiguous grad for scattering into
             return sum(
@@ -1053,8 +1054,6 @@ class TritonTemplate(KernelTemplate):
     index_counter = itertools.count()
     all_templates: dict[str, "TritonTemplate"] = {}
 
-    _cached_generated_module: dict[str, Tuple[Any, str]] = {}
-
     def __init__(self, name: str, grid: Any, source: str, debug=False) -> None:
         super().__init__(name)
         self.grid = grid
@@ -1204,7 +1203,6 @@ class TritonTemplate(KernelTemplate):
             input_call_args,
             expected_input_args,
         )
-        print(f"kernel.args.sizevars.keys() {args_sizevars_keys }")
 
         full_input_nodes = tuple([V.graph.get_buffer(k) for k in input_call_args])
         extra_args = V.graph.sizevars.size_hints(
@@ -1482,9 +1480,9 @@ class ExternKernelCaller(ChoiceCaller):
 
     def output_node(self):
         if self.choice.use_fallback_kernel:
-            assert (
-                self.choice.op_overload is not None
-            ), "Please provide an op_overload to use ir.FallbackKernel"
+            assert self.choice.op_overload is not None, (
+                "Please provide an op_overload to use ir.FallbackKernel"
+            )
             inner = ir.FallbackKernel.create(
                 self.choice.op_overload, *self.input_nodes, **self.kwargs
             )
