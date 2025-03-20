@@ -73,26 +73,14 @@ fi
 # Check GCC ABI
 ###############################################################################
 
-# NOTE [ Building libtorch with old vs. new gcc ABI ]
-#
-# Packages built with one version of ABI could not be linked against by client
-# C++ libraries that were compiled using the other version of ABI. Since both
-# gcc ABIs are still common in the wild, we need to support both ABIs. Currently:
-#
-# - All the nightlies built on CentOS 7 + devtoolset7 use the old gcc ABI.
-# - All the nightlies built on Ubuntu 16.04 + gcc 5.4 use the new gcc ABI.
+# NOTE: As of https://github.com/pytorch/pytorch/issues/126551 we only produce
+#       wheels with cxx11-abi
 
 echo "Checking that the gcc ABI is what we expect"
 if [[ "$(uname)" != 'Darwin' ]]; then
   function is_expected() {
-    if [[ "$DESIRED_DEVTOOLSET" == *"cxx11-abi"* || "$DESIRED_CUDA" == *"rocm"* ]]; then
-      if [[ "$1" -gt 0 || "$1" == "ON " ]]; then
-        echo 1
-      fi
-    else
-      if [[ -z "$1" || "$1" == 0 || "$1" == "OFF" ]]; then
-        echo 1
-      fi
+    if [[ "$1" -gt 0 || "$1" == "ON " ]]; then
+      echo 1
     fi
   }
 
@@ -208,33 +196,9 @@ setup_link_flags () {
 
 TEST_CODE_DIR="$(dirname $(realpath ${BASH_SOURCE[0]}))/test_example_code"
 build_and_run_example_cpp () {
-  if [[ "$DESIRED_DEVTOOLSET" == *"cxx11-abi"* ]]; then
-    GLIBCXX_USE_CXX11_ABI=1
-  else
-    GLIBCXX_USE_CXX11_ABI=0
-  fi
   setup_link_flags
-  g++ ${TEST_CODE_DIR}/$1.cpp -I${install_root}/include -I${install_root}/include/torch/csrc/api/include -D_GLIBCXX_USE_CXX11_ABI=$GLIBCXX_USE_CXX11_ABI -std=gnu++17 -L${install_root}/lib ${REF_LIB} ${ADDITIONAL_LINKER_FLAGS} -ltorch $TORCH_CPU_LINK_FLAGS $TORCH_CUDA_LINK_FLAGS $C10_LINK_FLAGS -o $1
+  g++ ${TEST_CODE_DIR}/$1.cpp -I${install_root}/include -I${install_root}/include/torch/csrc/api/include -std=gnu++17 -L${install_root}/lib ${REF_LIB} ${ADDITIONAL_LINKER_FLAGS} -ltorch $TORCH_CPU_LINK_FLAGS $TORCH_CUDA_LINK_FLAGS $C10_LINK_FLAGS -o $1
   ./$1
-}
-
-build_example_cpp_with_incorrect_abi () {
-  if [[ "$DESIRED_DEVTOOLSET" == *"cxx11-abi"* ]]; then
-    GLIBCXX_USE_CXX11_ABI=0
-  else
-    GLIBCXX_USE_CXX11_ABI=1
-  fi
-  set +e
-  setup_link_flags
-  g++ ${TEST_CODE_DIR}/$1.cpp -I${install_root}/include -I${install_root}/include/torch/csrc/api/include -D_GLIBCXX_USE_CXX11_ABI=$GLIBCXX_USE_CXX11_ABI -std=gnu++17 -L${install_root}/lib ${REF_LIB} ${ADDITIONAL_LINKER_FLAGS} -ltorch $TORCH_CPU_LINK_FLAGS $TORCH_CUDA_LINK_FLAGS $C10_LINK_FLAGS -o $1
-  ERRCODE=$?
-  set -e
-  if [ "$ERRCODE" -eq "0" ]; then
-    echo "Building example with incorrect ABI didn't throw error. Aborting."
-    exit 1
-  else
-    echo "Building example with incorrect ABI throws expected error. Proceeding."
-  fi
 }
 
 ###############################################################################
@@ -246,11 +210,6 @@ if [[ "$PACKAGE_TYPE" == 'libtorch' ]]; then
     export LD_LIBRARY_PATH=/usr/local/cuda/lib64
   fi
   build_and_run_example_cpp simple-torch-test
-  # `_GLIBCXX_USE_CXX11_ABI` is always ignored by gcc in devtoolset7, so we test
-  # the expected failure case for Ubuntu 16.04 + gcc 5.4 only.
-  if [[ "$DESIRED_DEVTOOLSET" == *"cxx11-abi"* ]]; then
-    build_example_cpp_with_incorrect_abi simple-torch-test
-  fi
 else
   pushd /tmp
   python -c 'import torch'
