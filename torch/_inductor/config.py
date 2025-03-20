@@ -724,9 +724,10 @@ def decide_compile_threads() -> int:
 # TODO: Set directly after internal rollout.
 compile_threads: Optional[int] = None if is_fbcode() else decide_compile_threads()
 
-# TODO: Default to on while I test code
+# Whether or not to enable statically launching CUDA kernels
+# compiled by triton (instead of using triton's own launcher)
 use_static_cuda_launcher: bool = (
-    os.environ.get("TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER", "1") == "1"
+    os.environ.get("TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER", "0") == "1"
 )
 
 # Raise error if we bypass the launcher
