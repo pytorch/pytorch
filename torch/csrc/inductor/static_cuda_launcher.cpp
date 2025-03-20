@@ -83,10 +83,13 @@ CUdeviceptr getPointer(PyObject* obj) {
   return dev_ptr;
 }
 
+#define SHARED_MEM_STATIC_MAX 49152 // 48 KB
+
 CUfunction loadKernel(
     std::string filePath,
     const std::string& funcName,
     uint32_t sharedMemBytes,
+    CUdevice device,
     const std::optional<std::string>& cubinDir = std::nullopt) {
   if (cubinDir) {
     std::filesystem::path p1{*cubinDir};
@@ -99,9 +102,41 @@ CUfunction loadKernel(
   AT_CUDA_DRIVER_CHECK(nvrtc().cuModuleLoad(&mod, filePath.c_str()));
   AT_CUDA_DRIVER_CHECK(
       nvrtc().cuModuleGetFunction(&func, mod, funcName.c_str()));
-  if (sharedMemBytes > 0) {
+  int shared_optin = 0;
+  AT_CUDA_DRIVER_CHECK(nvrtc().cuDeviceGetAttribute(
+      &shared_optin,
+      CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK_OPTIN,
+      device));
+  // Shared memory logic from triton/third-party/nvidia/backend/driver.c
+  // If we're using more than 48 KB of shared memory, and we have
+  // access to more than 48 KB of shared memory on the device,
+  // we set maximum dynamic shared memory to the difference between
+  // the static shared memory and total max shared memory allowed on the device.
+  // This prevents us from setting shared memory above the maximum
+  TORCH_CHECK(
+      sharedMemBytes < static_cast<uint32_t>(shared_optin),
+      "out of resource: ",
+      funcName,
+      " Required: ",
+      sharedMemBytes,
+      " Hardware limit:",
+      shared_optin,
+      " Reducing block sizes or `num_stages` may help.");
+  if (sharedMemBytes > SHARED_MEM_STATIC_MAX &&
+      shared_optin > SHARED_MEM_STATIC_MAX) {
+    AT_CUDA_DRIVER_CHECK(
+        nvrtc().cuFuncSetCacheConfig(func, CU_FUNC_CACHE_PREFER_SHARED));
+    int shared_total = 0, shared_static = 0;
+    AT_CUDA_DRIVER_CHECK(nvrtc().cuDeviceGetAttribute(
+        &shared_total,
+        CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_MULTIPROCESSOR,
+        device));
+    AT_CUDA_DRIVER_CHECK(nvrtc().cuFuncGetAttribute(
+        &shared_static, CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES, func));
     AT_CUDA_DRIVER_CHECK(nvrtc().cuFuncSetAttribute(
-        func, CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, sharedMemBytes));
+        func,
+        CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
+        shared_optin - shared_static));
   }
   return func;
 }
@@ -225,11 +260,14 @@ PyObject* load_kernel(PyObject* self, PyObject* args) {
   int sharedMemBytes = 0;
   int n_regs = 0;
   int n_spills = 0;
-  if (!PyArg_ParseTuple(args, "ssi", &filePath, &funcName, &sharedMemBytes)) {
+  int device_ptr = 0;
+  if (!PyArg_ParseTuple(
+          args, "ssii", &filePath, &funcName, &sharedMemBytes, &device_ptr)) {
     return nullptr;
   }
+  CUdevice device = reinterpret_cast<CUdevice>(device_ptr); // NOLINT
   CUfunction func = nullptr;
-  func = loadKernel(filePath, funcName, sharedMemBytes);
+  func = loadKernel(filePath, funcName, sharedMemBytes, device);
   // Taken from triton/nvidia/backend/driver.c
   AT_CUDA_DRIVER_CHECK(
       nvrtc().cuFuncGetAttribute(&n_regs, CU_FUNC_ATTRIBUTE_NUM_REGS, func));

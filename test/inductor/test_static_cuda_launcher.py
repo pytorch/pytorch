@@ -54,7 +54,8 @@ class TestStaticCudaLauncher(TestCase):
         cubin_file = self.write_cubin_to_tmp(compiled_kernel)
         compiled_kernel._cubin_path = cubin_file
         result = StaticallyLaunchedCudaKernel(compiled_kernel)
-        result.load_kernel()
+        device_interface = get_interface_for_device("cuda")
+        result.load_kernel(device_interface.current_device())
         return result
 
     @skipIfRocm
@@ -278,6 +279,30 @@ class TestStaticCudaLauncher(TestCase):
         device_interface = get_interface_for_device("cuda")
         stream = device_interface.get_raw_stream(device_interface.current_device())
         launcher.run(1, 1, 1, stream)
+
+    @skipIfRocm
+    def test_high_shared_mem(self):
+        @triton.jit
+        def simple_kernel(arg0, arg1):
+            x = tl.load(arg0)
+            y = arg1
+            tl.store(arg0, x + y)
+        arg0 = torch.zeros(1, dtype=torch.int32, device="cuda")
+        arg1 = 5
+        args = (arg0, arg1)
+        compiled_kernel = simple_kernel[(1,)](*args)
+        # Allocate 50 KB of memory
+        compiled_kernel.shared = 50000
+        launcher = self._make_launcher(compiled_kernel)
+        self.assertEqual(arg0, torch.tensor([5], dtype=torch.int32, device="cuda"))
+        self.assertEqual(launcher.arg_tys, "Oi")
+        new_arg0 = torch.zeros(1, dtype=torch.int32, device="cuda")
+        device_interface = get_interface_for_device("cuda")
+        stream = device_interface.get_raw_stream(device_interface.current_device())
+        launcher.slow_launch_kernel = True
+        launcher.run(1, 1, 1, stream, new_arg0, arg1)
+        self.assertEqual(new_arg0, arg0)
+
 
     @skipIfRocm
     def test_kernel_empty_tensor(self):
