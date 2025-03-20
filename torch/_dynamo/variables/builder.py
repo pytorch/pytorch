@@ -257,6 +257,7 @@ from .user_defined import (
     SourcelessGraphModuleVariable,
     UserDefinedClassVariable,
     UserDefinedDictVariable,
+    UserDefinedExceptionClassVariable,
     UserDefinedListVariable,
     UserDefinedObjectVariable,
     UserDefinedTupleVariable,
@@ -1162,6 +1163,10 @@ class VariableBuilder:
             # insert a FUNCTION_MATCH guard here. method-wrappers are very
             # unlikely to change, so its ok to skip the guard here.
             return MethodWrapperVariable(value)
+        elif issubclass(type(value), type) and issubclass(value, BaseException):
+            # match user defined exceptions
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return UserDefinedExceptionClassVariable(value)
         elif issubclass(type(value), type):
             if value in (
                 torch.utils.hooks.BackwardHook,
@@ -1790,6 +1795,7 @@ class VariableBuilder:
         example_value = wrap_to_fake_tensor_and_record(
             value, tx=self.tx, is_tensor=True, source=source
         )
+
         tensor_proxy = self.tx.output.root_tracer.create_graph_input(
             re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
             type(value),
@@ -3024,6 +3030,7 @@ def wrap_to_fake_tensor_and_record(
             symbolic_context,
             type(e),
         )
+
         fake_e = wrap_fake_exception(
             lambda: tx.fake_mode.from_tensor(
                 e,
