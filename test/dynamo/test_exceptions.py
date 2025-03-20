@@ -19,8 +19,7 @@ from torch.testing._internal.common_utils import (
 )
 
 
-class CustomException(Exception):
-    ...
+class CustomException(Exception): ...
 
 
 class CustomExceptionWithArgs(Exception):
@@ -319,8 +318,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(expected, got)
 
     def test_raise_custom_exception(self):
-        class Exc(Exception):
-            ...
+        class Exc(Exception): ...
 
         @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
@@ -336,8 +334,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(y, t.sin())
 
     def test_raise_custom_exception_with_args(self):
-        class Exc(Exception):
-            ...
+        class Exc(Exception): ...
 
         @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
@@ -883,16 +880,9 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         assert exc2.__context__ is None
 
 
-class CPythonExceptionTests(torch._dynamo.test_case.TestCase):
+class CPythonExceptionTests(torch._dynamo.test_case.CPythonTestCase):
     # Tests taken from CPython source code in cpython/Lib/test/test_exceptions.py
     # https://github.com/python/cpython/blob/v3.13.1/Lib/test/test_exceptions.py
-    def setUp(self):
-        self._prev = torch._dynamo.config.enable_trace_unittest
-        torch._dynamo.config.enable_trace_unittest = True
-
-    def tearDown(self):
-        torch._dynamo.config.enable_trace_unittest = self._prev
-
     @make_dynamo_test
     def testChainingAttrs(self):
         e = Exception()
