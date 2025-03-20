@@ -1104,12 +1104,10 @@ class TritonTemplate(KernelTemplate):
             mod = PyCodeCache.load(code, extra)
 
             input_call_args = tuple(kernel.args.input_buffers.keys())
-            expected_input_args = tuple(unique(x.get_name() for x in input_nodes))
             return (
                 mod,
                 extra,
                 input_call_args,
-                expected_input_args,
                 kernel.args.sizevars.keys(),
                 kernel.prologue_supported_inputs.copy(),
             )
@@ -1190,7 +1188,6 @@ class TritonTemplate(KernelTemplate):
             mod,
             extra,
             input_call_args,
-            expected_input_args,
             args_sizevars_keys,
             prologue_supported_inputs,
         ) = self.generate_and_load(
