@@ -325,6 +325,17 @@ def _extract_fwd_bwd_modules(
         if not node.users:
             _remove_by_name(saved_values, node.name)
             _remove_by_name(saved_sym_nodes, node.name)
+        # wait_tensor is a bit special: if we have a "dead activation" that is not used in the bw,
+        # but this dead activation is actually a collective,
+        # then the collective will generally by followed by a wait_tensor() call.
+        # we need to peak one node further to see if this wait_tensor is dead as well.
+        elif all(
+            n.target is torch.ops._c10d_functional.wait_tensor.default
+            and len(n.users) == 0
+            for n in node.users
+        ):
+            _remove_by_name(saved_values, node.name)
+            _remove_by_name(saved_sym_nodes, node.name)
         elif _is_backward_state(node):
             # BackwardState is saved directly
             _remove_by_name(saved_values, node.name)
@@ -586,9 +597,7 @@ def reordering_to_mimic_autograd_engine(gm: fx.GraphModule) -> fx.GraphModule:
     for node in gm.graph.find_nodes(op="placeholder"):
         env[node] = new_graph.node_copy(node, lambda x: env[x])
 
-    order = {}
-    for idx, node in enumerate(gm.graph.nodes):
-        order[node] = idx
+    order = {node: idx for idx, node in enumerate(gm.graph.nodes)}
 
     def insert_node_in_graph(node):
         cur_nodes = [node]
