@@ -4001,6 +4001,7 @@
   dispatch:
     CPU: nanmedian_cpu
     CUDA: nanmedian_cuda
+    MPS: nanmedian_mps
   autogen: nanmedian.out
 
 - func: nanmedian.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
