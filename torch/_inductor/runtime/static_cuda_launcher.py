@@ -36,13 +36,7 @@ class StaticallyLaunchedCudaKernel:
     to how it handles constants in 3.3, so there's some special logic necessary to handle both versions.
     """
 
-    def __init__(
-        self, kernel: CompiledKernel, slow_launch_kernel: bool = False
-    ) -> None:
-        # slow_launch_kernel used only for testing purposes
-        # Will always dynamically allocate on the heap
-        self.slow_launch_kernel = slow_launch_kernel
-
+    def __init__(self, kernel: CompiledKernel) -> None:
         self.name = kernel.src.fn.__name__
         self.cubin_path = kernel._cubin_path
 
@@ -214,7 +208,6 @@ class StaticallyLaunchedCudaKernel:
             args = (*args, None)
         else:
             arg_tys = self.arg_tys
-
         assert len(args) == len(arg_tys)
 
         # TODO: can handle grid functions here or in C++, so
@@ -230,5 +223,4 @@ class StaticallyLaunchedCudaKernel:
             arg_tys,
             args,
             stream,
-            self.slow_launch_kernel,
         )

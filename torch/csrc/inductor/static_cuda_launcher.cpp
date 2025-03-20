@@ -326,10 +326,9 @@ PyObject* launch_kernel(PyObject* self, PyObject* args) {
   const char* argTypes = nullptr;
   PyObject* varArgs = nullptr;
   // Parse the fixed arguments and the format string
-  int slow_kernel_launch = 0;
   if (!PyArg_ParseTuple(
           args,
-          "KiiiiisOlp",
+          "KiiiiisOl",
           &func_ptr,
           &gridX,
           &gridY,
@@ -338,8 +337,7 @@ PyObject* launch_kernel(PyObject* self, PyObject* args) {
           &sharedMemBytes,
           &argTypes,
           &varArgs,
-          &stream,
-          &slow_kernel_launch)) {
+          &stream)) {
     return nullptr;
   }
   if (gridX * gridY * gridZ <= 0) {
@@ -361,7 +359,7 @@ PyObject* launch_kernel(PyObject* self, PyObject* args) {
         nullptr,
         cudaStream);
     Py_RETURN_NONE;
-  } else if (!slow_kernel_launch && num_args <= MAX_ARGS) {
+  } else if (num_args <= MAX_ARGS) {
     return launch_kernel_inner(
         func,
         gridX,
@@ -391,7 +389,7 @@ std::array<PyMethodDef, 2> StaticCudaLauncherMethods = {
         "_launch_kernel",
         (PyCFunction)launch_kernel,
         METH_VARARGS,
-        "Cuda Launcher with up to 120 args"},
+        "Statically launch triton compiled CUDA kernels"},
     PyMethodDef{
         "_load_kernel",
         (PyCFunction)load_kernel,
