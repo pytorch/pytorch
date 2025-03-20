@@ -6667,7 +6667,7 @@ class GraphModule(torch.nn.Module):
 
         x, y = torch.randn(4), torch.randn(3, 4)
         expected = wrapper_fn(x, y)
-        got = torch.compile(wrapper_fn, fullgraph=True)(x, y)
+        got = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=True)(x, y)
         self.assertEqual(expected, got)
 
     def test_vmap_new_tensor_in_body(self):
