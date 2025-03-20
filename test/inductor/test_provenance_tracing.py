@@ -174,9 +174,7 @@ class TestProvenanceTracingArtifact(TestCase):
                         level=logging.WARNING,
                     ) as cm:
                         if backend == "aot_inductor":
-                            so_path = torch._inductor.aot_compile(gm, example_inputs)
-                            optimized = AOTIRunnerUtil.load("cpu", so_path)
-                            optimized(*example_inputs)
+                            AOTIRunnerUtil.run(model, example_inputs)
                         else:
                             compiled = torch.compile(gm, backend=backend)
                             compiled(*example_inputs)
