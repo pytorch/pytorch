@@ -1340,18 +1340,7 @@ class InstructionTranslatorBase(
                 raise
             except BackendCompilerFailed:
                 raise
-            except RuntimeError as e:
-                if hasattr(e, "msg") and "Data-dependent" in e.msg:
-                    print(
-                        "\n"
-                        + torch.fx.GraphModule(
-                            self.output.nn_modules, self.output.graph
-                        ).print_readable(
-                            print_output=False, include_stride=True, include_device=True
-                        ),
-                        file=sys.stderr,
-                    )
-
+            except RuntimeError:
                 raise
             except Exception as e:
                 if self.exec_recorder:
@@ -1369,9 +1358,9 @@ class InstructionTranslatorBase(
                     self.output.cleanup()
 
     def push(self, val: Optional[VariableTracker]):
-        assert val is None or isinstance(val, VariableTracker), (
-            f"push expects VariableTracker, got {typestr(val)}"
-        )
+        assert val is None or isinstance(
+            val, VariableTracker
+        ), f"push expects VariableTracker, got {typestr(val)}"
         self.stack.append(val)  # type: ignore[arg-type]
 
     def push_many(self, vals: list[VariableTracker]):
@@ -2340,9 +2329,9 @@ class InstructionTranslatorBase(
         if isinstance(obj, NNModuleVariable) and not isinstance(val, ConstantVariable):
             # We don't allow side effects during export on non-constant values
             # https://github.com/pytorch/torchdynamo/issues/1475
-            assert not self.export, (
-                f"Mutating module attribute {inst.argval} during export."
-            )
+            assert (
+                not self.export
+            ), f"Mutating module attribute {inst.argval} during export."
 
         try:
             BuiltinVariable(setattr).call_function(
@@ -3364,9 +3353,9 @@ class InstructionTranslator(InstructionTranslatorBase):
             self.one_graph: bool = one_graph
             self.export = export
             if self.export:
-                assert self.one_graph, (
-                    "Export without one graph - something has gone wrong."
-                )
+                assert (
+                    self.one_graph
+                ), "Export without one graph - something has gone wrong."
 
             self.symbolic_locals = {}
             # Populate `symbolic_locals` with non-cell variables.
