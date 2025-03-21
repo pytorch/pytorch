@@ -52,6 +52,7 @@ from torch._inductor.output_code import MockFXGraphCacheOutput
 from torch._subclasses.fake_tensor import DynamicOutputShapeException, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import is_sym_node
 from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode, ShapeEnv
+from torch.nn.attention.flex_attention import flex_attention
 from torch.nn.utils.rnn import PackedSequence
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -5802,45 +5803,69 @@ metadata incorrectly.
 class GradsNoForceContiguousContextManager(ContextDecorator):
     def __enter__(self):
         # flake8: noqa: TOR901
-        self.lib = torch.library.Library("_mylib", "FRAGMENT")
+        self.lib = torch.library.Library("_test_aotdispatch_lib", "FRAGMENT")
         self.d = {
             torch.channels_last: 0,
             torch.contiguous_format: 0,
         }
+        self.tangent_strides = []
 
-        self.lib.define("foo(Tensor x) -> Tensor")
-        self.lib.define("foo2(Tensor x) -> Tensor")
+        self.lib.define("log_tangents_memory_format(Tensor x) -> Tensor")
+        self.lib.define("log_tangents_memory_format_log(Tensor x) -> Tensor")
 
-        def foo_impl(a):
+        def log_tangents_memory_format_impl(a):
             return a.clone()
 
-        def foo_meta(a):
+        def log_tangents_memory_format_meta(a):
             return a.clone()
 
-        def foo2_impl(x):
+        def log_tangents_memory_format_log_impl(x):
             self.d[torch._prims_common.suggest_memory_format(x)] += 1
+            self.tangent_strides.append(x.stride())
             return x.clone()
 
-        def foo2_meta(a):
+        def log_tangents_memory_format_log_meta(a):
             return a.clone()
 
         for backend in ["CPU", "CUDA"]:
-            self.lib.impl("foo", foo_impl, backend)
-            self.lib.impl("foo2", foo2_impl, backend)
+            self.lib.impl(
+                "log_tangents_memory_format", log_tangents_memory_format_impl, backend
+            )
+            self.lib.impl(
+                "log_tangents_memory_format_log",
+                log_tangents_memory_format_log_impl,
+                backend,
+            )
 
-        self.lib.impl("foo", foo_meta, "Meta")
-        self.lib.impl("foo2", foo2_meta, "Meta")
+        self.lib.impl(
+            "log_tangents_memory_format", log_tangents_memory_format_meta, "Meta"
+        )
+        self.lib.impl(
+            "log_tangents_memory_format_log",
+            log_tangents_memory_format_log_meta,
+            "Meta",
+        )
 
-        def foo_bwd(ctx, grad):
-            torch.ops._mylib.foo2(grad)
+        def log_tangents_memory_format_bwd(ctx, grad):
+            torch.ops._test_aotdispatch_lib.log_tangents_memory_format_log(grad)
             return grad.clone()
 
-        torch.library.register_autograd("_mylib::foo", foo_bwd, lib=self.lib)
+        torch.library.register_autograd(
+            "_test_aotdispatch_lib::log_tangents_memory_format",
+            log_tangents_memory_format_bwd,
+            lib=self.lib,
+        )
 
         from torch._higher_order_ops.effects import _EffectType, _register_effectful_op
 
-        _register_effectful_op(torch.ops._mylib.foo.default, _EffectType.ORDERED)
-        _register_effectful_op(torch.ops._mylib.foo2.default, _EffectType.ORDERED)
+        _register_effectful_op(
+            torch.ops._test_aotdispatch_lib.log_tangents_memory_format.default,
+            _EffectType.ORDERED,
+        )
+        _register_effectful_op(
+            torch.ops._test_aotdispatch_lib.log_tangents_memory_format_log.default,
+            _EffectType.ORDERED,
+        )
 
         return self
 
@@ -6097,7 +6122,7 @@ class TestAOTModuleSimplified(AOTTestCase):
                     z = y + 3
                     y.mul_(2)
                     r = self.conv(x)
-                    r = torch.ops._mylib.foo(r)
+                    r = torch.ops._test_aotdispatch_lib.log_tangents_memory_format(r)
                     return (
                         r,
                         r.transpose(0, 1),
@@ -6143,7 +6168,7 @@ class TestAOTModuleSimplified(AOTTestCase):
 
                 def forward(self, x, y):
                     r = self.conv(x)
-                    r = torch.ops._mylib.foo(r)
+                    r = torch.ops._test_aotdispatch_lib.log_tangents_memory_format(r)
                     return r, y + 1
 
             m = M()
@@ -6186,7 +6211,7 @@ class TestAOTModuleSimplified(AOTTestCase):
 
                 def forward(self, x):
                     r = self.conv(x)
-                    r = torch.ops._mylib.foo(r)
+                    r = torch.ops._test_aotdispatch_lib.log_tangents_memory_format(r)
                     return r
 
             m = M()
@@ -6465,6 +6490,116 @@ metadata incorrectly.
         _test_fn(fn_functional)
         _test_fn(fn_mutation)
         _test_fn(fn_inplace, check_backward=False)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    @parametrize("dynamic_shapes", [True, False])
+    @parametrize("test_subclasses", [True, False])
+    @parametrize("device", ["cuda", "cpu"])
+    def test_noncontig_nonmemformat_tangents(
+        self, dynamic_shapes, test_subclasses, device
+    ):
+        B = 2
+        T = 4
+        E = 6
+
+        def fn(x):
+            x = x + 1
+            return x.transpose(1, 2)
+
+        def _inp_dense():
+            t = torch.randn(B, T, E, device=device, requires_grad=True)
+            if dynamic_shapes:
+                for i in range(t.ndim):
+                    torch._dynamo.mark_dynamic(t, i)
+            return t
+
+        def _inp_sc():
+            return TwoTensor(_inp_dense(), _inp_dense())
+
+        _inp = _inp_dense if not test_subclasses else _inp_sc
+
+        comp_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+
+        def _tg3(y):
+            t = torch.randn(
+                2 * y.shape, dtype=y.dtype, layout=y.layout, device=y.device
+            )
+            return t.as_strided(y.shape, tuple(s * 2 for s in y.stride()))
+
+        TEST_CASES = [
+            (_inp, lambda y: torch.ones(y.shape, dtype=y.dtype, device=y.device)),
+            # Memory overlap, dense tangent
+            (
+                _inp,
+                lambda y: torch.tensor([1], dtype=y.dtype, device=y.device).as_strided(
+                    y.shape, (0,) * y.ndim
+                ),
+            ),
+            # No memory overlap, not-dense tangent
+            (_inp, _tg3),
+        ]
+
+        for i, (inp_fn, tg_fn) in enumerate(TEST_CASES):
+            ref_x = inp_fn()
+            x = ref_x.detach().clone().requires_grad_()
+
+            ref_y = fn(ref_x)
+
+            y = comp_fn(x)
+            self.assertEqual(ref_y, y)
+
+            ref_tg = (
+                tg_fn(ref_y)
+                if not test_subclasses
+                else TwoTensor(tg_fn(ref_y), tg_fn(ref_y))
+            )
+            tg = ref_tg.clone()
+
+            ref_y.backward(ref_tg)
+            y.backward(tg)
+
+            self.assertEqual(ref_x.grad, x.grad)
+
+    def test_flex_attn_noncontiguous_tangents(self):
+        with GradsNoForceContiguousContextManager() as ctx:
+            E = 16  # embedding dim
+            H = 4  # number of heads
+
+            @torch.compile(backend="aot_eager", fullgraph=True)
+            def attn_fn(q, k, v):
+                y = flex_attention(query=q, key=k, value=v)
+                y = torch.ops._test_aotdispatch_lib.log_tangents_memory_format(y)
+                return y
+
+            class M(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.c_attn = torch.nn.Linear(E, 3 * E)
+
+                def forward(self, x):
+                    B, T, E = x.size()
+                    q, k, v = self.c_attn(x).split(E, dim=2)
+                    k = k.view(B, T, H, E // H).transpose(1, 2)  # (B, nh, T, hs)
+                    q = q.view(B, T, H, E // H).transpose(1, 2)  # (B, nh, T, hs)
+                    v = v.view(B, T, H, E // H).transpose(1, 2)  # (B, nh, T, hs)
+
+                    y = attn_fn(q, k, v)
+
+                    return y.transpose(1, 2).contiguous().view(B, T, E)
+
+            m = M()
+            B = 1
+            T = 8
+
+            def _inp():
+                return torch.randn(B, T, E, requires_grad=True)
+
+            x = _inp()
+            y = m(x)
+            y.backward(torch.ones_like(y).contiguous())
+
+            self.assertEqual(1, len(ctx.tangent_strides))
+            self.assertEqual((128, 4, 16, 1), ctx.tangent_strides[0])
 
 
 # entries in here don't work and need to be fixed.
@@ -6745,6 +6880,7 @@ class TestEagerFusionModuleInfo(AOTTestCase):
 
 
 instantiate_parametrized_tests(TestAOTAutograd)
+instantiate_parametrized_tests(TestAOTModuleSimplified)
 only_for = "cpu"
 instantiate_device_type_tests(
     TestPythonKey,
