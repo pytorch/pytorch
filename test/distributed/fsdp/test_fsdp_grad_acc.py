@@ -40,6 +40,7 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
+device_type = torch.accelerator.current_accelerator().type
 
 @dataclass
 class _GradAccConfig:
@@ -134,7 +135,7 @@ class TestGradAcc(FSDPTest):
             deterministic=True,
             add_bn=False,  # disable BN since the test uses varying batch sizes
         )
-        device = torch.device("cuda")
+        device = torch.device(device_type)
         optim = torch.optim.SGD(
             fsdp_model.parameters(),
             lr=0.01,

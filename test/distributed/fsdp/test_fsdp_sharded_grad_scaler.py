@@ -76,7 +76,7 @@ subtest_name = functools.partial(subtest_name, test_name_mapping)
 
 class TestShardGradScaler(TestCase):
     @unittest.skipIf(
-        amp_definitely_not_available(), "no supported device (cuda, xla) found"
+        amp_definitely_not_available(), "no supported device (cuda, xla, xpu) found"
     )
     def test_grad_scaling(self):
         pg = DummyProcessGroup(0, 1)
@@ -92,7 +92,7 @@ class TestShardGradScaler(TestCase):
         self.assertTrue(scaler._scale.device == t1.device)
 
     @unittest.skipIf(
-        amp_definitely_not_available(), "no supported device (cuda, xla) found"
+        amp_definitely_not_available(), "no supported device (cuda, xla, xpu) found"
     )
     def test_scaling_unscaling_sparse(self):
         pg = DummyProcessGroup(0, 1)
@@ -137,7 +137,7 @@ class TestShardGradScaler(TestCase):
         self.assertEqual(found_inf, 1.0)
 
     @unittest.skipIf(
-        amp_definitely_not_available(), "no supported device (cuda, xla) found"
+        amp_definitely_not_available(), "no supported device (cuda, xla, xpu) found"
     )
     def test_inf_gradients_skip_optim_step(self):
         pg = DummyProcessGroup(0, 1)
@@ -258,9 +258,9 @@ class TestShardedGradScalerParityWithDDP(FSDPTest):
             use_orig_params=use_orig_params,
         )
         grad_scaler = ShardedGradScaler(init_scale=2.0)
-        ref_grad_scaler = torch.amp.GradScaler(device="cuda", init_scale=2.0)
+        ref_grad_scaler = torch.amp.GradScaler(device=device_type, init_scale=2.0)
         scaled_losses: list[torch.Tensor] = []
-        device = torch.device("cuda")
+        device = torch.device(device_type)
         torch.manual_seed(42 + self.rank + 1)
 
         for iter in range(10):

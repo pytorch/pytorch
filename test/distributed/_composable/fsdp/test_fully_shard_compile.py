@@ -53,15 +53,16 @@ def _is_fallback_op_in_snodes(snodes, op):
 
 orig_F_scaled_dot_product_attention = F.scaled_dot_product_attention
 
+device_type = torch.accelerator.current_accelerator().type
 
 class Mod(torch.nn.Module):
     def __init__(self):
         super().__init__()
 
         self.encoder = torch.nn.Sequential(
-            torch.nn.Linear(28 * 28, 1024, device="cuda"),
-            torch.nn.Linear(1024, 1024, device="cuda"),
-            torch.nn.Linear(1024, 4096, device="cuda"),
+            torch.nn.Linear(28 * 28, 1024, device=device_type),
+            torch.nn.Linear(1024, 1024, device=device_type),
+            torch.nn.Linear(1024, 4096, device=device_type),
         )
 
     def forward(self, x):
@@ -107,7 +108,7 @@ class TestFullyShardCompileCompute(FSDPTest):
         model = MLP(4)
         fully_shard(model)
         model.compile()
-        model(torch.randn((4, 4), device="cuda"))
+        model(torch.randn((4, 4), device=device_type))
         torch.distributed.barrier()
         torch._dynamo.config.skip_fsdp_hooks = original_skip_fsdp_hooks
         torch._dynamo.trace_rules.check = orig_trace_rules_check
@@ -127,7 +128,7 @@ class TestFullyShardCompile(FSDPTest):
     def skipTestForOldSm(self):
         # Assumption: This test class is only run on GPU. See `HAS_GPU` check at
         # the top of the class.
-        device = torch.device("cuda", self.rank % torch.cuda.device_count())
+        device = torch.device(device_type, self.rank % torch.accelerator.device_count())
         if not sm_is_or_higher_than(device, 8, 0):
             self.skipTest("bf16 requires sm >= 8.0")
 
@@ -140,7 +141,7 @@ class TestFullyShardCompile(FSDPTest):
             (torch.nn.Linear(1, 1),),  # module: Tuple[nn.Module, ...],
             None,  # mesh_info: FSDPMeshInfo,
             None,  # post_forward_mesh_info: Optional[FSDPMeshInfo],
-            torch.device("cuda"),  # device: torch.device,
+            torch.device(device_type),  # device: torch.device,
             None,  # shard_placement_fn: Optional[Callable],
             None,  # mp_policy: MixedPrecisionPolicy,
             None,  # offload_policy: OffloadPolicy,
@@ -594,11 +595,11 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             torch.manual_seed(self.rank)
             fsdp_config = {}
             model = nn.Sequential(
-                nn.Linear(hidden_dim, hidden_dim, device="cuda"),
+                nn.Linear(hidden_dim, hidden_dim, device=device_type),
                 nn.ReLU(),
-                nn.Linear(hidden_dim, hidden_dim, device="cuda"),
+                nn.Linear(hidden_dim, hidden_dim, device=device_type),
                 nn.ReLU(),
-                nn.Linear(hidden_dim, hidden_dim, device="cuda"),
+                nn.Linear(hidden_dim, hidden_dim, device=device_type),
             )
             fully_shard(model, reshard_after_forward=True, **fsdp_config)
             optim = torch.optim.SGD(model.parameters(), lr=1e-4)
@@ -606,7 +607,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
 
         def input_creation_fn():
             torch.manual_seed(self.rank)
-            inp = torch.randn((2, hidden_dim), device="cuda", requires_grad=False)
+            inp = torch.randn((2, hidden_dim), device=device_type, requires_grad=False)
             return inp
 
         return model_init_fn, input_creation_fn
@@ -643,11 +644,11 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 super().__init__()
                 self.param1 = nn.Parameter(
                     torch.zeros(
-                        hidden_dim, hidden_dim, dtype=torch.float, device="cuda"
+                        hidden_dim, hidden_dim, dtype=torch.float, device=device_type
                     )
                 )
                 self.param2 = nn.Parameter(
-                    torch.zeros(hidden_dim, dtype=torch.float, device="cuda")
+                    torch.zeros(hidden_dim, dtype=torch.float, device=device_type)
                 )
 
             def forward(self, x):
@@ -682,7 +683,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         def model_init_fn():
             torch.manual_seed(self.rank)
             fsdp_config = {}
-            mesh = init_device_mesh("cuda", (self.world_size,))
+            mesh = init_device_mesh(device_type, (self.world_size,))
             model = TestModule(n_layers=3)
             for mod in model.layers:
                 fully_shard(mod, mesh=mesh, reshard_after_forward=True, **fsdp_config)
@@ -694,7 +695,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
 
         def input_creation_fn():
             torch.manual_seed(self.rank)
-            inp = torch.randn((2, hidden_dim), device="cuda", requires_grad=False)
+            inp = torch.randn((2, hidden_dim), device=device_type, requires_grad=False)
             return inp
 
         return model_init_fn, input_creation_fn
@@ -854,7 +855,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         def model_init_fn():
             torch.manual_seed(self.rank)
             fsdp_config = {}
-            mesh = init_device_mesh("cuda", (self.world_size,))
+            mesh = init_device_mesh(device_type, (self.world_size,))
             model_args = ModelArgs(
                 vocab_size=vocab_size,
                 n_layers=n_layers,
@@ -883,7 +884,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         def input_creation_fn():
             torch.manual_seed(self.rank)
             inp = torch.randint(
-                0, vocab_size, (2, seq_len), device="cuda", requires_grad=False
+                0, vocab_size, (2, seq_len), device=device_type, requires_grad=False
             )
             return inp
 
@@ -1088,7 +1089,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 new_child = torch.compile(child)
                 setattr(m.encoder, name, new_child)
         m = FSDP(m, sharding_strategy=ShardingStrategy.FULL_SHARD, use_orig_params=True)
-        inp = torch.randn(32, 784, device="cuda")
+        inp = torch.randn(32, 784, device=device_type)
         m(inp)
 
 

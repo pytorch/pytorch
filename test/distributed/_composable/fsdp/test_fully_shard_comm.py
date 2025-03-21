@@ -47,7 +47,7 @@ from torch.testing._internal.common_fsdp import (
     patch_reshard,
     patch_unshard,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TEST_XPU
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
@@ -60,6 +60,7 @@ c10d_ops = torch.ops.c10d
 # For recording FSDP events like unshard or post-backward
 EventType = tuple[str, str, TrainingState]
 
+device_type = torch.accelerator.current_accelerator().type
 
 class TestFullyShardCollectiveOps(FSDPTestMultiThread):
     @property
@@ -68,7 +69,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
 
     @property
     def device(self) -> torch.device:
-        return torch.device("cuda:0")
+        return torch.device("{}:0".format(device_type))
 
     def _get_param_sizes(self) -> list[torch.Size]:
         # For world size 128, the fp32 all-gather and reduce-scatter testing
@@ -116,11 +117,11 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         fsdp_param_group.lazy_init()
         return fsdp_param_group
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "no cuda and no xpu")
     def test_all_gather_fp32(self):
         param_sizes = self._get_param_sizes()
-        default_stream = torch.cuda.current_stream()
-        stream1, stream2 = torch.cuda.Stream(), torch.cuda.Stream()
+        default_stream = torch.accelerator.current_stream()
+        stream1, stream2 = torch.get_device_module(device_type).Stream(), torch.get_device_module(device_type).Stream()
         for async_op, streams, reshard_after_forward in itertools.product(
             (False, True),
             ((default_stream, default_stream), (stream1, stream2)),
@@ -146,8 +147,8 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         param_sizes: list[torch.Size],
         reshard_after_forward: Union[bool, int],
         async_op: bool,
-        all_gather_copy_in_stream: torch.cuda.Stream,
-        all_gather_stream: torch.cuda.Stream,
+        all_gather_copy_in_stream: torch.Stream,
+        all_gather_stream: torch.Stream,
     ):
         def all_gather(fsdp_param_group: FSDPParamGroup, group: dist.ProcessGroup):
             all_gather_result = foreach_all_gather(
@@ -202,11 +203,11 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         )
         check_all_gathered_params(orig_params, module)
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "no cuda and no xpu")
     def test_reduce_scatter_fp32(self):
         param_sizes = self._get_param_sizes()
-        default_stream = torch.cuda.current_stream()
-        stream = torch.cuda.Stream()
+        default_stream = torch.accelerator.current_stream()
+        stream = torch.xpu.Stream() if device_type == "xpu" else torch.cuda.Stream()
         for reduce_scatter_stream in (default_stream, stream):
             self._test_reduce_scatter(
                 param_sizes,
@@ -214,11 +215,11 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
                 reduce_scatter_dtype=torch.float32,
             )
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "no cuda and no xpu")
     def test_reduce_scatter_fp16(self):
         param_sizes = self._get_param_sizes()
-        default_stream = torch.cuda.current_stream()
-        stream = torch.cuda.Stream()
+        default_stream = torch.accelerator.current_stream()
+        stream = torch.xpu.Stream() if device_type == "xpu" else torch.cuda.Stream()
         for reduce_scatter_stream in (default_stream, stream):
             self._test_reduce_scatter(
                 param_sizes,
@@ -229,7 +230,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
     def _test_reduce_scatter(
         self,
         param_sizes: list[torch.Size],
-        reduce_scatter_stream: torch.cuda.Stream,
+        reduce_scatter_stream: torch.Stream,
         reduce_scatter_dtype: torch.dtype,
     ):
         # Set up the reference parameters and construct the FSDP group
@@ -248,7 +249,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         unsharded_grads = [torch.ones_like(param) * self.rank for param in orig_params]
         group = fsdp_param_group.mesh_info.shard_process_group
         self.assertEqual(group.size(), self.world_size)
-        all_reduce_stream = torch.cuda.Stream()
+        all_reduce_stream = torch.xpu.Stream() if device_type == "xpu" else torch.cuda.Stream()
         (
             _,
             _,
@@ -271,7 +272,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             all_reduce_grads=True,
             partial_reduce_output=None,
         )
-        torch.cuda.current_stream().wait_event(post_reduce_event)
+        torch.accelerator.current_stream().wait_event(post_reduce_event)
 
         # Check reduce-scatter correctness
         predivide_factor, postdivide_factor = _get_gradient_divide_factors(
@@ -295,7 +296,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
 class TestFullyShardCommunication(FSDPTest):
     @property
     def world_size(self) -> int:
-        return min(4, torch.cuda.device_count())
+        return min(4, torch.accelerator.device_count())
 
     @skip_if_lt_x_gpu(2)
     def test_fully_shard_communication_count(self):
@@ -327,7 +328,7 @@ class TestFullyShardCommunication(FSDPTest):
         # We construct `num_blocks` plus 1 FSDP states/communication groups
 
         torch.manual_seed(42 + self.rank)
-        inp = torch.randint(0, model_args.vocab_size, (2, 16), device="cuda")
+        inp = torch.randint(0, model_args.vocab_size, (2, 16), device=device_type)
         with CommDebugMode() as fwd_comm_mode:
             loss = model(inp)
         fwd_comm_counts = fwd_comm_mode.get_comm_counts()
@@ -364,7 +365,7 @@ class TestFullyShardCommunication(FSDPTest):
         )
 
         torch.manual_seed(42 + self.rank)
-        inp = torch.randint(0, model_args.vocab_size, (2, 16), device="cuda")
+        inp = torch.randint(0, model_args.vocab_size, (2, 16), device=device_type)
         with CommDebugMode() as fwd_comm_mode:
             loss = model(inp)
         fwd_comm_counts = fwd_comm_mode.get_comm_counts()
@@ -395,7 +396,7 @@ class TestFullyShardCommunication(FSDPTest):
         torch.manual_seed(42)
         model_args = ModelArgs(dropout_p=0.0, weight_tying=False)
         model = Transformer(model_args)
-        ref_model = copy.deepcopy(model).cuda()
+        ref_model = copy.deepcopy(model).to(device=device_type)
         ref_optim = torch.optim.AdamW(ref_model.parameters(), lr=1e-2)
         for module in model.modules():
             if isinstance(module, TransformerBlock):
@@ -405,7 +406,7 @@ class TestFullyShardCommunication(FSDPTest):
         model.set_reduce_scatter_divide_factor(divide_factor)
 
         torch.manual_seed(42 + self.rank)
-        inp = torch.randint(0, model_args.vocab_size, (2, 16), device="cuda")
+        inp = torch.randint(0, model_args.vocab_size, (2, 16), device=device_type)
 
         for _ in range(10):
             ref_loss = ref_model(inp).sum()
@@ -459,7 +460,7 @@ class TestFullyShardCommunication(FSDPTest):
         )
 
         torch.manual_seed(42 + self.rank)
-        inp = torch.randint(0, model_args.vocab_size, (2, 16), device="cuda")
+        inp = torch.randint(0, model_args.vocab_size, (2, 16), device=device_type)
         with CommDebugMode() as fwd_comm_mode:
             loss = model(inp)
         fwd_comm_counts = fwd_comm_mode.get_comm_counts()
@@ -484,7 +485,7 @@ class TestFullyShardCommunication(FSDPTest):
 class TestFullyShardPrefetch(FSDPTest):
     @property
     def world_size(self) -> int:
-        return min(4, torch.cuda.device_count())
+        return min(4, torch.accelerator.device_count())
 
     @skip_if_lt_x_gpu(2)
     def test_fully_shard_backward_prefetch(self):
@@ -640,7 +641,7 @@ class TestFullyShardPrefetch(FSDPTest):
         fully_shard(model[1].lin1, reshard_after_forward=reshard_after_forward)
         fully_shard(model[1].lin2, reshard_after_forward=reshard_after_forward)
         fully_shard(model, reshard_after_forward=reshard_after_forward)
-        inp = torch.randn((4, dim), device="cuda")
+        inp = torch.randn((4, dim), device=device_type)
         events: list[EventType] = []
         unshard_with_record = self._get_unshard_with_record(
             FSDPParamGroup.unshard, events
@@ -901,7 +902,7 @@ class TestFullyShardPrefetch(FSDPTest):
             FSDPParamGroup.post_backward, events
         )
         inp = torch.randint(
-            0, model_args.vocab_size, (2, model_args.max_seq_len), device="cuda"
+            0, model_args.vocab_size, (2, model_args.max_seq_len), device=device_type
         )
         with patch_unshard(unshard_with_record), patch_post_backward(
             post_backward_with_record
@@ -981,7 +982,7 @@ class TestFullyShardPrefetch(FSDPTest):
         post_backward_with_record = self._get_post_backward_with_record(
             FSDPParamGroup.post_backward, events
         )
-        inp = torch.randn((2, 16), device="cuda")
+        inp = torch.randn((2, 16), device=device_type)
         with patch_unshard(unshard_with_record), patch_post_backward(
             post_backward_with_record
         ):
@@ -1019,7 +1020,7 @@ class TestFullyShardPrefetch(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_backward_misprefetch(self):
         torch.manual_seed(42)
-        model = MLP(dim=16, device="cuda")
+        model = MLP(dim=16, device=device_type)
         ref_model = copy.deepcopy(model)
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
         fully_shard(model.in_proj)
@@ -1033,7 +1034,7 @@ class TestFullyShardPrefetch(FSDPTest):
         model.in_proj.set_modules_to_backward_prefetch([model.out_proj])
 
         torch.manual_seed(self.rank + 1)
-        inp = torch.randn((2, 16), device="cuda")
+        inp = torch.randn((2, 16), device=device_type)
         for _ in range(3):
             ref_optim.zero_grad()
             ref_loss = ref_model(inp).sum()
@@ -1065,7 +1066,7 @@ class TestFullyShardPrefetch(FSDPTest):
         fully_shard(model, reshard_after_forward=reshard_after_forward)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
         inp = torch.randint(
-            0, model_args.vocab_size, (2, model_args.max_seq_len), device="cuda"
+            0, model_args.vocab_size, (2, model_args.max_seq_len), device=device_type
         )
         return model, optim, inp
 
@@ -1115,7 +1116,7 @@ class TestFullyShardPrefetch(FSDPTest):
 class TestFullyShardUnshardMultiProcess(FSDPTest):
     @property
     def world_size(self) -> int:
-        return min(torch.cuda.device_count(), 2)
+        return min(torch.accelerator.device_count(), 2)
 
     @skip_if_lt_x_gpu(2)
     def test_unshard_async(self):
@@ -1169,10 +1170,10 @@ class TestFullyShardUnshardMultiProcess(FSDPTest):
                     self.mlps.mlp3.unshard(async_op=True)
                 return self.mlps([y1, y2, y3], [work1, work2, work3])
 
-        mesh = init_device_mesh("cuda", (self.world_size,))
+        mesh = init_device_mesh(device_type, (self.world_size,))
         batch_size, dim = 2, 8
         torch.manual_seed(42)
-        ref_model = replicate(ReduceModel(dim, mesh).cuda())
+        ref_model = replicate(ReduceModel(dim, mesh).to(device=device_type))
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
         torch.manual_seed(42)
         model = ReduceModel(dim, mesh)
@@ -1180,10 +1181,10 @@ class TestFullyShardUnshardMultiProcess(FSDPTest):
         fully_shard(model.mlps.mlp2, reshard_after_forward=False)
         fully_shard(model.mlps.mlp3, reshard_after_forward=False)
         fully_shard(model.mlps)
-        replicate(model.cuda())
+        replicate(model.to(device=device_type))
         optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=True)
         torch.manual_seed(42 + self.rank + 1)
-        inp = torch.randn((batch_size, dim), device="cuda")
+        inp = torch.randn((batch_size, dim), device=device_type)
         for _ in range(10):
             losses: list[torch.Tensor] = []
             for _model, _optim in ((ref_model, ref_optim), (model, optim)):
@@ -1200,7 +1201,7 @@ class TestFullyShardUnshardMultiThread(FSDPTestMultiThread):
     def world_size(self) -> int:
         return 2
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "no cuda and no xpu")
     def test_unshard_no_param_group(self):
         # Check that we can call `unshard()` on a module with no parameter
         # group / no managed parameters without erroring
@@ -1211,7 +1212,7 @@ class TestFullyShardUnshardMultiThread(FSDPTestMultiThread):
         handle = model.unshard(async_op=True)
         handle.wait()
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "no cuda and no xpu")
     def test_unshard_without_lazy_init(self):
         torch.manual_seed(42)
         model = MLP(4)

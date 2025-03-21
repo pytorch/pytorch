@@ -50,9 +50,11 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     TEST_CUDA,
+    TEST_XPU,
     TestCase,
 )
 
+device_type = torch.accelerator.current_accelerator().type
 
 class BatchNormNet(nn.Module):
     def __init__(self) -> None:
@@ -132,14 +134,14 @@ class TestFSDPWrap(FSDPTest):
 
     class NestedSequentialModel:
         @staticmethod
-        def get_model(cuda=True):
+        def get_model(device_type, device=True):
             sequential = nn.Sequential(
                 nn.Linear(5, 5),
                 nn.Linear(5, 5),
                 nn.Sequential(nn.Linear(5, 5), nn.Linear(5, 5)),
             )
-            if cuda:
-                sequential = sequential.cuda()
+            if device:
+                sequential = sequential.to(device=device_type)
             return sequential
 
         @staticmethod
@@ -214,7 +216,7 @@ class TestFSDPWrap(FSDPTest):
             nested=nested, device_init_mode=device_init_mode
         )
         if device_init_mode == DEVICEInitMode.DEVICE_AFTER:
-            wrapped_fsdp = wrapped_fsdp.cuda()
+            wrapped_fsdp = wrapped_fsdp.to(device=device_type)
 
         wrapped_module_name = "lin1.1" if nested else "lin1"
         with self.assertRaisesRegex(
@@ -369,7 +371,7 @@ class TestFSDPWrap(FSDPTest):
             forward_prefetch=forward_prefetch,
         )
         if device_init_mode == DEVICEInitMode.DEVICE_AFTER:
-            wrapped_model = wrapped_model.cuda()
+            wrapped_model = wrapped_model.to(device=device_type)
 
         modules_in_fsdp_graph_order = [
             wrapped_model.module.lin1,
@@ -388,7 +390,7 @@ class TestFSDPWrap(FSDPTest):
 
         # Run model a few times for sanity check.
         optim = torch.optim.SGD(wrapped_model.parameters(), lr=1e-2, momentum=0.9)
-        inp = torch.ones(1).cuda()
+        inp = torch.ones(1).to(device=device_type)
         for _ in range(6):
             optim.zero_grad()
             loss = wrapped_model(inp).sum()
@@ -461,13 +463,13 @@ class TestAutoWrap(TestCase):
         self.assertEqual(layer.rank, 0)
         self.assertEqual(layer.world_size, 2)
 
-    @unittest.skipIf(not TEST_CUDA, "Test Requires CUDA")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "Test Requires CUDA or XPU")
     def test_always_wrap(self):
         """
         Test to ensure that if `always_wrap_policy` is
         passed into FSDP, all submodules are wrapped.
         """
-        seq = TestFSDPWrap.NestedSequentialModel.get_model(cuda=True)
+        seq = TestFSDPWrap.NestedSequentialModel.get_model(device_type, device=True)
         model = FSDP(
             seq, process_group=self.process_group, auto_wrap_policy=always_wrap_policy
         )
@@ -629,7 +631,7 @@ class TestAutoWrap(TestCase):
         Test to ensure with auto wrap, we wrap child modules correctly based on the min_num_params.
         ``nn.Linear(5, 5)`` does not exceed the bucket size, but combined they do.
         """
-        sequential = TestFSDPWrap.NestedSequentialModel.get_model(cuda=False)
+        sequential = TestFSDPWrap.NestedSequentialModel.get_model(device_type, device=False)
         my_auto_wrap_policy = functools.partial(
             size_based_auto_wrap_policy, min_num_params=40
         )
@@ -726,7 +728,7 @@ class TestAutoWrap(TestCase):
         self.assertTrue(isinstance(model.module[0], nn.Linear))
         self.assertTrue(isinstance(model.module[1], nn.ModuleList))
 
-    @unittest.skipIf(not TEST_CUDA, "Test Requires CUDA")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "Test Requires CUDA or XPU")
     @parametrize(
         "device_init_mode", [DEVICEInitMode.DEVICE_BEFORE, DEVICEInitMode.DEVICE_AFTER]
     )
@@ -743,10 +745,10 @@ class TestAutoWrap(TestCase):
         ):
             return
 
-        device = torch.device("cuda")
-        torch.cuda.set_device(0)
+        device = torch.device(device_type)
+        torch.accelerator.set_device_index(0)
         device_id = (
-            torch.device("cuda", torch.cuda.current_device()) if use_device_id else None
+            torch.device(device_type, torch.accelerator.current_device_index()) if use_device_id else None
         )
 
         # Random port in case the next test run quickly, same port would cause conflict.
@@ -761,12 +763,12 @@ class TestAutoWrap(TestCase):
             world_size=1,
         )
 
-        # NOTE: We move model to CUDA after init with FSDP to simulate real use
+        # NOTE: We move model to GPU after init with FSDP to simulate real use
         # cases where full model cannot be loaded onto GPU, but their shards can.
-        cuda_after_init = device_init_mode == DEVICEInitMode.DEVICE_AFTER
+        device_after_init = device_init_mode == DEVICEInitMode.DEVICE_AFTER
         try:
             sequential = TestFSDPWrap.NestedSequentialModel.get_model(
-                cuda=(not cuda_after_init)
+                device_type, device=(not device_after_init)
             )
             my_auto_wrap_policy = functools.partial(
                 size_based_auto_wrap_policy, min_num_params=40
@@ -778,8 +780,8 @@ class TestAutoWrap(TestCase):
                 device_id=device_id,
             )
             TestFSDPWrap.NestedSequentialModel.verify_model(self, model)
-            if cuda_after_init:
-                model = model.cuda()
+            if device_after_init:
+                model = model.to(device=device_type)
             input = torch.rand((1, 5), dtype=torch.float).to(device)
             output = model(input)
             loss = F.mse_loss(input, output)
@@ -795,7 +797,7 @@ class TestAutoWrap(TestCase):
     @unittest.skipIf(not TEST_MULTIGPU, "Requires at least 2 GPUs")
     @parametrize("wrap_method", [WrapMethod.FSDP_CTOR, WrapMethod.WRAP_API])
     def test_always_wrap_with_ignored_modules(self, wrap_method: WrapMethod):
-        sequential = TestFSDPWrap.NestedSequentialModel.get_model(cuda=False)
+        sequential = TestFSDPWrap.NestedSequentialModel.get_model(device_type, device=False)
         ignored_modules = [sequential[1], sequential[2][0]]
         fsdp_kwargs = {
             "process_group": self.process_group,
@@ -820,7 +822,7 @@ class TestAutoWrap(TestCase):
     @unittest.skipIf(not TEST_MULTIGPU, "Requires at least 2 GPUs")
     @parametrize("wrap_method", [WrapMethod.FSDP_CTOR, WrapMethod.WRAP_API])
     def test_auto_wrap_with_ignored_modules(self, wrap_method: WrapMethod):
-        sequential = TestFSDPWrap.NestedSequentialModel.get_model(cuda=False)
+        sequential = TestFSDPWrap.NestedSequentialModel.get_model(device_type, device=False)
         ignored_modules = [sequential[1], sequential[2][0]]
         my_auto_wrap_policy = functools.partial(
             size_based_auto_wrap_policy,
@@ -883,7 +885,7 @@ class TestAutoWrap(TestCase):
             self._test_frozen_params(use_orig_params, policy)
 
     def _test_frozen_params(self, use_orig_params: bool, policy: _Policy):
-        model = LoraModel().cuda()
+        model = LoraModel().to(device=device_type)
         msg = "layers.0.attn has both parameters with requires_grad=True and False. "
         if use_orig_params:
             msg += "We do not recommend wrapping such modules"

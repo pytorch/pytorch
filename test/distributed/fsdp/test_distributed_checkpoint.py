@@ -40,8 +40,8 @@ _DISTRIBUTED_STATE_DICT_IMPLS = {
 class TestDistributedCheckpoint(FSDPTest):
     @property
     def world_size(self):
-        if torch.cuda.is_available():
-            gpu_cnt = torch.cuda.device_count()
+        if torch.accelerator.is_available():
+            gpu_cnt = torch.accelerator.device_count()
             if gpu_cnt < 2:
                 return gpu_cnt
         return 2
@@ -89,7 +89,7 @@ class TestDistributedCheckpoint(FSDPTest):
         # TODO: add resharding test case.
 
 
-devices = ("cuda", "hpu")
-instantiate_device_type_tests(TestDistributedCheckpoint, globals(), only_for=devices)
+devices = ("cuda", "hpu", "xpu")
+instantiate_device_type_tests(TestDistributedCheckpoint, globals(), only_for=devices, allow_xpu=True)
 if __name__ == "__main__":
     run_tests()
