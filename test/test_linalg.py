@@ -4705,6 +4705,7 @@ class TestLinalg(TestCase):
                 pass
 
     @onlyCUDA
+    @skipCUDAIfNotRocm
     @dtypes(torch.half)
     def test_matmul_offline_tunableop(self, device, dtype):
         import os
@@ -5363,6 +5364,7 @@ class TestLinalg(TestCase):
             pass
 
     @onlyCUDA
+    @skipCUDAIfNotRocm
     @dtypes(torch.bfloat16)
     def test_gemm_bias_offline_tunableop(self, device, dtype):
         # This test is the offline version of test_gemm_bias_tunableop
