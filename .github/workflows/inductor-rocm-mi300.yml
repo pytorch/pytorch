@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - release/*
     tags:
       - ciflow/inductor-rocm/*
   workflow_dispatch:
