@@ -2117,6 +2117,47 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
         ):
             scan(fct_float_output, init, x, dim=0)
 
+    @parametrize("reverse", [False, True])
+    def test_scan_none_xs(self, reverse):
+        def add(x, y):
+            return x + y[0], None
+
+        x = torch.randn(3, 2, 2)
+        init = torch.ones(2, 2)
+
+        result_same = scan(
+            add,
+            init,
+            [x, x],
+            dim=0,
+            reverse=reverse,
+        )
+        expected_result = _fake_scan(
+            add,
+            init,
+            [x, x],
+            dim=0,
+            reverse=reverse,
+        )
+        self.assertEqual(result_same, expected_result)
+
+        def f(init, x):
+            return scan(add, init, [x, x])
+
+        gm = make_fx(f)(init, x)
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, init_1, x_1):
+    permute = torch.ops.aten.permute.default(x_1, [0, 1, 2])
+    permute_1 = torch.ops.aten.permute.default(x_1, [0, 1, 2]);  x_1 = None
+    scan_combine_graph_0 = self.scan_combine_graph_0
+    scan = torch.ops.higher_order.scan(scan_combine_graph_0, [init_1], [permute, permute_1], ());  scan_combine_graph_0 = init_1 = permute = permute_1 = None
+    getitem = scan[0]
+    getitem_1 = scan[1];  scan = getitem_1 = None
+    return (getitem, None)""",  # noqa: B950
+        )
+
     @requires_cuda
     @parametrize("reverse", [False, True])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])

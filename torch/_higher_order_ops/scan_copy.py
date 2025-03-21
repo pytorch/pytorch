@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import copy
 import functools
 import itertools
 from typing import Any, Callable
@@ -13,7 +14,6 @@ from torch._higher_order_ops.utils import (
     _has_potential_branch_input_mutation,
     _maybe_compile_and_run_fn,
     autograd_not_implemented,
-    check_meta_consistency,
     first_slice_copy,
     reenter_make_fx,
     unique_graph_id,
@@ -172,11 +172,30 @@ def scan(
     )
 
     if reverse:
-        out = pytree.tree_map(
-            lambda elem: elem.flip([0]) if elem is not None else elem, out
-        )
+        out = pytree.tree_map(lambda elem: elem.flip([0]), out)
 
     return carry, out
+
+
+def scan_layers(layers: torch.nn.ModuleList, init: pytree.PyTree):
+    assert len(layers) > 0, "Number of layers to scan over has to be > 0"
+
+    params = []
+    buffers = []
+    for layer in layers:
+        params.append(dict(layer.named_parameters()))
+        buffers.append(dict(layer.named_buffers()))
+
+    stacked_params = pytree.tree_map(lambda *t: torch.stack(t, dim=0), *params)
+    stacked_buffers = pytree.tree_map(lambda *t: torch.stack(t, dim=0), *buffers)
+
+    layer = copy.deepcopy(layers[0])
+
+    def scan_fn(carry, weights):
+        res = torch.func.functional_call(layer, weights, carry)
+        return res, weights
+
+    return scan(scan_fn, init, (stacked_params, stacked_buffers))
 
 
 class ScanOp(HigherOrderOperator):
@@ -245,6 +264,7 @@ def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
                 if e is not None
                 else [None, None]
                 for i, e in enumerate(dummy_out)
+                # if e is not None
             ]
         )
 
@@ -325,13 +345,20 @@ def trace_scan(
     assert outputs is not None
 
     carry, output = _extract_carry_and_out(outputs, len(init))
-    init_fake_tensors: list[torch.Tensor | torch.SymInt | int] = [
-        i.clone() for i in init
-    ]
-    carry_fake_tensors: list[torch.Tensor | torch.SymInt | int] = [
-        c.meta["val"] for c in carry
-    ]
-    check_meta_consistency(init_fake_tensors, carry_fake_tensors, "init", "carry")
+
+    for ini, ca in zip(init, carry):
+        ini_meta = ini
+        carry_meta = ca.meta["tensor_meta"]
+        carry_val = ca.meta["val"]
+        if (
+            carry_val.device != ini_meta.device
+            or carry_meta.dtype != ini_meta.dtype
+            or carry_meta.shape != ini_meta.shape
+        ):
+            raise RuntimeError(
+                f"Expected metadata of the combine_fn result {carry_meta} to be the same as "
+                + f"the metadata of init with {ini_meta}"
+            )
 
     _, combine_graph_name = unique_graph_id(proxy_mode, prefix="scan_combine_graph")
 
