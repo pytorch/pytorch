@@ -21,7 +21,6 @@ from torch.testing._internal.common_quantization import (
     skipIfNoArm,
     skipIfNoInductorSupport,
 )
-from torch.testing._internal.common_quantized import override_quantized_engine
 from torch.testing._internal.common_utils import skipIfTorchDynamo
 
 
@@ -306,6 +305,7 @@ class ArmInductorQuantTestCase(QuantizationTestCase):
         self.checkGraphModuleNodes(
             m, expected_node_occurrence=node_occurrence, expected_node_list=node_list
         )
+
         return export_model, prepare_model, convert_model
 
 
@@ -316,7 +316,7 @@ class TestQuantizePT2EArmInductor(ArmInductorQuantTestCase):
         """
         Test pattern of single conv2d with ArmInductorQuantizer.
         """
-        with override_quantized_engine("arm"), torch.no_grad():
+        with torch.no_grad():
             m = TestHelperModules.SingleConv2dModule().eval()
             example_inputs = (torch.randn(2, 3, 16, 16),)
             quantizer = ArmInductorQuantizer().set_global(
@@ -325,10 +325,10 @@ class TestQuantizePT2EArmInductor(ArmInductorQuantTestCase):
             node_occurrence = {
                 # one for input and weight of the conv
                 torch.ops.quantized_decomposed.quantize_per_tensor.default: 1,
-                torch.ops.quantized_decomposed.dequantize_per_tensor.default: 1,
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default: 2,
                 # note: quantize op for weights are const propagated
                 torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
-                torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
+                torch.ops.quantized_decomposed.dequantize_per_channel.default: 0,
             }
             node_list = [
                 torch.ops.quantized_decomposed.quantize_per_tensor.default,
@@ -354,7 +354,7 @@ class TestQuantizePT2EArmInductor(ArmInductorQuantTestCase):
         quantizer = ArmInductorQuantizer().set_global(
             armiq.get_default_arm_inductor_quantization_config()
         )
-        with override_quantized_engine("arm"), torch.no_grad():
+        with torch.no_grad():
             for conv2d_type in conv2d_type_list:
                 m = TestHelperModules.Conv2dAddModule(conv2d_type=conv2d_type).eval()
                 if conv2d_type != NodePosType.both:
@@ -362,10 +362,10 @@ class TestQuantizePT2EArmInductor(ArmInductorQuantTestCase):
                         # one for input and weight of the conv
                         # one for extra input node of add
                         torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
-                        torch.ops.quantized_decomposed.dequantize_per_tensor.default: 2,
+                        torch.ops.quantized_decomposed.dequantize_per_tensor.default: 3,
                         # quantize_per_channel for weights are const propagated
                         torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
-                        torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
+                        torch.ops.quantized_decomposed.dequantize_per_channel.default: 0,
                     }
                 else:
                     node_occurrence = {
@@ -374,10 +374,10 @@ class TestQuantizePT2EArmInductor(ArmInductorQuantTestCase):
                         # 2 conv will share same input quant/dequant
                         # one for extra input node of add
                         torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
-                        torch.ops.quantized_decomposed.dequantize_per_tensor.default: 3,
+                        torch.ops.quantized_decomposed.dequantize_per_tensor.default: 5,
                         # quantize_per_channel for weights are const propagated
                         torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
-                        torch.ops.quantized_decomposed.dequantize_per_channel.default: 2,
+                        torch.ops.quantized_decomposed.dequantize_per_channel.default: 0,
                     }
                 node_list = [
                     torch.ops.quantized_decomposed.quantize_per_tensor.default,
@@ -407,15 +407,15 @@ class TestQuantizePT2EArmInductor(ArmInductorQuantTestCase):
             armiq.get_default_arm_inductor_quantization_config()
         )
         inplace_add_list = [True, False]
-        with override_quantized_engine("arm"), torch.no_grad():
+        with torch.no_grad():
             for inplace_add in inplace_add_list:
                 m = TestHelperModules.Conv2dAddModule2(inplace_add=inplace_add).eval()
                 node_occurrence = {
                     torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
-                    torch.ops.quantized_decomposed.dequantize_per_tensor.default: 3,
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default: 5,
                     # quantize_per_channel for weights are const propagated
                     torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
-                    torch.ops.quantized_decomposed.dequantize_per_channel.default: 2,
+                    torch.ops.quantized_decomposed.dequantize_per_channel.default: 0,
                 }
                 node_list = [
                     torch.ops.quantized_decomposed.quantize_per_tensor.default,
@@ -466,7 +466,6 @@ class TestQuantizePT2EArmInductor(ArmInductorQuantTestCase):
             node_occurrence,
             node_list,
         )
-        # Check Maxpool2d has share observer at input and output
         for node in prepare_model.graph.nodes:
             if node.op == "call_function" and node.target is single_op:
                 single_op_node = node
@@ -493,7 +492,7 @@ class TestQuantizePT2EArmInductor(ArmInductorQuantTestCase):
         """
         Test pattern of single linear with ArmInductorQuantizer.
         """
-        with override_quantized_engine("arm"), torch.no_grad():
+        with torch.no_grad():
             for use_bias in [True, False]:
                 m = TestHelperModules.SingleLinearModule(use_bias).eval()
                 example_inputs = (torch.randn(2, 4),)
@@ -503,10 +502,10 @@ class TestQuantizePT2EArmInductor(ArmInductorQuantTestCase):
                 node_occurrence = {
                     # one for input and weight, one for output
                     torch.ops.quantized_decomposed.quantize_per_tensor.default: 1,
-                    torch.ops.quantized_decomposed.dequantize_per_tensor.default: 1,
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default: 2,
                     # quantize_per_channel for weights are const propagated
                     torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
-                    torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
+                    torch.ops.quantized_decomposed.dequantize_per_channel.default: 0,
                 }
                 node_list = [
                     torch.ops.quantized_decomposed.quantize_per_tensor.default,
@@ -539,7 +538,7 @@ class TestQuantizePT2EArmInductor(ArmInductorQuantTestCase):
         if post_op_algo_list is None:
             post_op_algo_list = [None]
         cases = itertools.product(use_bias_list, inplace_list, post_op_algo_list)
-        with override_quantized_engine("arm"), torch.no_grad():
+        with torch.no_grad():
             for use_bias, inplace, post_op_algo in cases:
                 if inplace and post_op_aten_inplace is None:
                     continue
@@ -569,10 +568,10 @@ class TestQuantizePT2EArmInductor(ArmInductorQuantTestCase):
                 node_occurrence = {
                     # one for input of the linear
                     quantize_per_tensor_op: 1,
-                    dequantize_per_tensor_op: 1,
+                    dequantize_per_tensor_op: 1 if is_dynamic else 2,
                     # quantize_per_channel for weights are const propagated
                     torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
-                    torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
+                    torch.ops.quantized_decomposed.dequantize_per_channel.default: 0,
                 }
                 node_list = [
                     quantize_per_tensor_op,
@@ -694,7 +693,7 @@ class TestQuantizePT2EArmInductor(ArmInductorQuantTestCase):
             else torch.ops.quantized_decomposed.dequantize_per_tensor.default
         )
         cases = itertools.product(linear_pos_list, inplace_add_list)
-        with override_quantized_engine("arm"), torch.no_grad():
+        with torch.no_grad():
             for linear_pos, inplace_add in cases:
                 m = TestHelperModules.LinearAddModule(
                     inplace_add=inplace_add, linear_pos=linear_pos
@@ -758,37 +757,36 @@ class TestQuantizePT2EArmInductor(ArmInductorQuantTestCase):
         """
         Test QAT pattern of conv2d_bn with ArmInductorQuantizer.
         """
-        with override_quantized_engine("arm"):
-            m = TestHelperModules.SingleConv2dModule(with_bn=True)
-            example_inputs = (torch.randn(2, 3, 16, 16),)
-            quantizer = ArmInductorQuantizer().set_global(
-                armiq.get_default_arm_inductor_quantization_config(is_qat=True)
-            )
-            node_occurrence = {
-                # one for input and weight of the conv, one for output for the conv
-                torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
-                torch.ops.quantized_decomposed.dequantize_per_tensor.default: 2,
-                # note: quantize op for weights are const propagated
-                torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
-                torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
-                # BN should be folded into Conv
-                torch.ops.aten._native_batch_norm_legit.default: 0,
-            }
-            node_list = [
-                torch.ops.quantized_decomposed.quantize_per_tensor.default,
-                torch.ops.quantized_decomposed.dequantize_per_tensor.default,
-                torch.ops.aten.conv2d.default,
-                torch.ops.quantized_decomposed.quantize_per_tensor.default,
-                torch.ops.quantized_decomposed.dequantize_per_tensor.default,
-            ]
-            self._test_quantizer(
-                m,
-                example_inputs,
-                quantizer,
-                node_occurrence,
-                node_list,
-                is_qat=True,
-            )
+        m = TestHelperModules.SingleConv2dModule(with_bn=True)
+        example_inputs = (torch.randn(2, 3, 16, 16),)
+        quantizer = ArmInductorQuantizer().set_global(
+            armiq.get_default_arm_inductor_quantization_config(is_qat=True)
+        )
+        node_occurrence = {
+            # one for input and weight of the conv, one for output for the conv
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 3,
+            # note: quantize op for weights are const propagated
+            torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
+            torch.ops.quantized_decomposed.dequantize_per_channel.default: 0,
+            # BN should be folded into Conv
+            torch.ops.aten._native_batch_norm_legit.default: 0,
+        }
+        node_list = [
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            torch.ops.aten.conv2d.default,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+        ]
+        self._test_quantizer(
+            m,
+            example_inputs,
+            quantizer,
+            node_occurrence,
+            node_list,
+            is_qat=True,
+        )
 
     @skipIfTorchDynamo("very slow")
     @skipIfNoArm
@@ -801,43 +799,40 @@ class TestQuantizePT2EArmInductor(ArmInductorQuantTestCase):
         quantizer = ArmInductorQuantizer().set_global(
             armiq.get_default_arm_inductor_quantization_config(is_qat=True)
         )
-        with override_quantized_engine("arm"):
-            for inplace_add in [True, False]:
-                m = TestHelperModules.Conv2dAddModule(
-                    inplace_add=inplace_add, with_bn=True
-                )
-                node_occurrence = {
-                    # one for input and weight of the conv
-                    # one for output for the add
-                    # one for extra input node of add
-                    torch.ops.quantized_decomposed.quantize_per_tensor.default: 3,
-                    torch.ops.quantized_decomposed.dequantize_per_tensor.default: 3,
-                    # quantize_per_channel for weights are const propagated
-                    torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
-                    torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
-                    # BN should be folded into Conv
-                    torch.ops.aten._native_batch_norm_legit.default: 0,
-                }
-                node_list = [
-                    torch.ops.quantized_decomposed.quantize_per_tensor.default,
-                    torch.ops.quantized_decomposed.dequantize_per_tensor.default,
-                    torch.ops.aten.conv2d.default,
-                    (
-                        torch.ops.aten.add_.Tensor
-                        if inplace_add
-                        else torch.ops.aten.add.Tensor
-                    ),
-                    torch.ops.quantized_decomposed.quantize_per_tensor.default,
-                    torch.ops.quantized_decomposed.dequantize_per_tensor.default,
-                ]
-                self._test_quantizer(
-                    m,
-                    example_inputs,
-                    quantizer,
-                    node_occurrence,
-                    node_list,
-                    is_qat=True,
-                )
+        for inplace_add in [True, False]:
+            m = TestHelperModules.Conv2dAddModule(inplace_add=inplace_add, with_bn=True)
+            node_occurrence = {
+                # one for input and weight of the conv
+                # one for output for the add
+                # one for extra input node of add
+                torch.ops.quantized_decomposed.quantize_per_tensor.default: 3,
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default: 4,
+                # quantize_per_channel for weights are const propagated
+                torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
+                torch.ops.quantized_decomposed.dequantize_per_channel.default: 0,
+                # BN should be folded into Conv
+                torch.ops.aten._native_batch_norm_legit.default: 0,
+            }
+            node_list = [
+                torch.ops.quantized_decomposed.quantize_per_tensor.default,
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+                torch.ops.aten.conv2d.default,
+                (
+                    torch.ops.aten.add_.Tensor
+                    if inplace_add
+                    else torch.ops.aten.add.Tensor
+                ),
+                torch.ops.quantized_decomposed.quantize_per_tensor.default,
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            ]
+            self._test_quantizer(
+                m,
+                example_inputs,
+                quantizer,
+                node_occurrence,
+                node_list,
+                is_qat=True,
+            )
 
     @skipIfTorchDynamo("very slow")
     @skipIfNoArm
@@ -854,15 +849,15 @@ class TestQuantizePT2EArmInductor(ArmInductorQuantTestCase):
             armiq.get_default_arm_inductor_quantization_config(is_qat=True)
         )
         inplace_add_list = [True, False]
-        with override_quantized_engine("arm"), torch.no_grad():
+        with torch.no_grad():
             for inplace_add in inplace_add_list:
                 m = TestHelperModules.Conv2dAddModule2(inplace_add=inplace_add)
                 node_occurrence = {
                     torch.ops.quantized_decomposed.quantize_per_tensor.default: 3,
-                    torch.ops.quantized_decomposed.dequantize_per_tensor.default: 4,
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default: 6,
                     # quantize_per_channel for weights are const propagated
                     torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
-                    torch.ops.quantized_decomposed.dequantize_per_channel.default: 2,
+                    torch.ops.quantized_decomposed.dequantize_per_channel.default: 0,
                     # BN should be folded into Conv
                     torch.ops.aten._native_batch_norm_legit.default: 0,
                 }
@@ -891,7 +886,7 @@ class TestQuantizePT2EArmInductor(ArmInductorQuantTestCase):
         """
         Test pattern of dynamic quantization of linear with ArmInductorQuantizer.
         """
-        with override_quantized_engine("arm"), torch.no_grad():
+        with torch.no_grad():
             m = TestHelperModules.SelfAttnLikeModule(input_dim=64).eval()
             example_inputs = (torch.randn(1, 4, 64),)
             quantizer = ArmInductorQuantizer().set_global(
@@ -903,7 +898,7 @@ class TestQuantizePT2EArmInductor(ArmInductorQuantTestCase):
                 torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: 1,
                 # quantize_per_channel for weights are const propagated
                 torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
-                torch.ops.quantized_decomposed.dequantize_per_channel.default: 3,
+                torch.ops.quantized_decomposed.dequantize_per_channel.default: 0,
             }
             node_list = [
                 torch.ops.quantized_decomposed.choose_qparams.tensor,
@@ -924,7 +919,7 @@ class TestQuantizePT2EArmInductor(ArmInductorQuantTestCase):
         """
         Test pattern of qat dynamic quantization of linear with ArmInductorQuantizer.
         """
-        with override_quantized_engine("arm"), torch.no_grad():
+        with torch.no_grad():
             m = TestHelperModules.SelfAttnLikeModule(input_dim=64).eval()
             example_inputs = (torch.randn(1, 4, 64),)
             quantizer = ArmInductorQuantizer().set_global(
@@ -938,7 +933,7 @@ class TestQuantizePT2EArmInductor(ArmInductorQuantTestCase):
                 torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: 1,
                 # quantize_per_channel for weights are const propagated
                 torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
-                torch.ops.quantized_decomposed.dequantize_per_channel.default: 3,
+                torch.ops.quantized_decomposed.dequantize_per_channel.default: 0,
             }
             node_list = [
                 torch.ops.quantized_decomposed.choose_qparams.tensor,
@@ -997,9 +992,9 @@ class TestQuantizePT2EArmInductor(ArmInductorQuantTestCase):
             torch.ops.aten.linear.default: 3,
             # quantize and dequantize the input of two linear layers from `sub`
             torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
-            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 2,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 4,
             # dequantize the weight of two linear layers from `sub`
-            torch.ops.quantized_decomposed.dequantize_per_channel.default: 2,
+            torch.ops.quantized_decomposed.dequantize_per_channel.default: 0,
         }
         node_list = [
             # first linear is not quantized
@@ -1059,7 +1054,7 @@ class TestQuantizePT2EArmInductor(ArmInductorQuantTestCase):
                     )
                     observer_instance = getattr(m, weight_observer_node.target)
                     self.assertEqual(
-                        observer_instance.qscheme, torch.per_channel_symmetric
+                        observer_instance.qscheme, torch.per_tensor_symmetric
                     )
                 else:
                     # For baz it should have no observer at all.
@@ -1103,9 +1098,9 @@ class TestQuantizePT2EArmInductor(ArmInductorQuantTestCase):
             torch.ops.aten.linear.default: 3,
             # quantize and dequantize the input of the last linear
             torch.ops.quantized_decomposed.quantize_per_tensor.default: 1,
-            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 1,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 2,
             # dequantize the weight of the last linear
-            torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
+            torch.ops.quantized_decomposed.dequantize_per_channel.default: 0,
         }
         node_list = [
             # first and second linear are not quantized
@@ -1156,9 +1151,9 @@ class TestQuantizePT2EArmInductor(ArmInductorQuantTestCase):
             torch.ops.aten.linear.default: 3,
             # quantize and dequantize the input and output of the first and second linear
             torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
-            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 2,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 4,
             # dequantize the weight of the first and second linear
-            torch.ops.quantized_decomposed.dequantize_per_channel.default: 2,
+            torch.ops.quantized_decomposed.dequantize_per_channel.default: 0,
         }
         node_list = [
             # Q/DQ for first lienar
@@ -1184,7 +1179,7 @@ class TestQuantizePT2EArmInductor(ArmInductorQuantTestCase):
     def test_set_module_name_qconfig_for_dynamic_quant(self):
         """Test that quantize a specific submodule for dynamic quantization."""
 
-        with override_quantized_engine("arm"), torch.no_grad():
+        with torch.no_grad():
             for is_qat in [False, True]:
                 m = TestHelperModules.SelfAttnLikeModule(input_dim=64).eval()
                 example_inputs = (torch.randn(1, 4, 64),)
@@ -1203,7 +1198,7 @@ class TestQuantizePT2EArmInductor(ArmInductorQuantTestCase):
                     torch.ops.quantized_decomposed.quantize_per_tensor.tensor: 1,
                     torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: 1,
                     # dequantize the weight of q_proj and v_proj
-                    torch.ops.quantized_decomposed.dequantize_per_channel.default: 2,
+                    torch.ops.quantized_decomposed.dequantize_per_channel.default: 0,
                 }
                 node_list = [
                     # quantize and dequantize the input
@@ -1232,7 +1227,7 @@ class TestQuantizePT2EArmInductor(ArmInductorQuantTestCase):
 
         The config for 'v_proj' will always be ignored and raise a warning.
         """
-        with override_quantized_engine("arm"), torch.no_grad():
+        with torch.no_grad():
             with self.assertWarns(UserWarning) as context:
                 for q_is_dynamic, v_is_dynamic, q_is_qat, v_is_qat in itertools.product(
                     [False, True], repeat=4
@@ -1269,9 +1264,9 @@ class TestQuantizePT2EArmInductor(ArmInductorQuantTestCase):
                     node_occurrence = {
                         # quantize and dequantize the input
                         quant_op: 1,
-                        dequant_op: 1,
+                        dequant_op: 1 if q_is_dynamic else 2,
                         # only `q_proj` was quantized, dequantize its weight
-                        torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
+                        torch.ops.quantized_decomposed.dequantize_per_channel.default: 0,
                     }
                     node_list = [
                         # quantize and dequantize the input
@@ -1338,9 +1333,9 @@ class TestQuantizePT2EArmInductor(ArmInductorQuantTestCase):
             torch.ops.aten.linear.default: 3,
             # quantize and dequantize the input of the last linear
             torch.ops.quantized_decomposed.quantize_per_tensor.default: 1,
-            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 1,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 2,
             # dequantize the weight of the last linear
-            torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
+            torch.ops.quantized_decomposed.dequantize_per_channel.default: 0,
         }
         node_list = [
             # first and second linear are not quantized
@@ -1360,43 +1355,11 @@ class TestQuantizePT2EArmInductor(ArmInductorQuantTestCase):
         )
 
     @skipIfNoArm
-    def test_filter_conv2d_recipe(self):
-        """
-        Test removing conv2d from default recipe of ArmInductorQuantizer.
-        """
-        with override_quantized_engine("arm"), torch.no_grad():
-            m = TestHelperModules.Conv2dUnaryModule(torch.nn.ReLU(inplace=False)).eval()
-            example_inputs = (torch.randn(2, 3, 16, 16),)
-            quantizer = ArmInductorQuantizer().set_global(
-                armiq.get_default_arm_inductor_quantization_config()
-            )
-            quantizer.set_module_type_qconfig(torch.nn.Conv2d, None)
-            node_occurrence = {
-                # one for input and weight of the conv
-                torch.ops.quantized_decomposed.quantize_per_tensor.default: 0,
-                torch.ops.quantized_decomposed.dequantize_per_tensor.default: 0,
-                # note: quantize op for weights are const propagated
-                torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
-                torch.ops.quantized_decomposed.dequantize_per_channel.default: 0,
-            }
-            node_list = [
-                torch.ops.aten.conv2d.default,
-                torch.ops.aten.relu.default,
-            ]
-            self._test_quantizer(
-                m,
-                example_inputs,
-                quantizer,
-                node_occurrence,
-                node_list,
-            )
-
-    @skipIfNoArm
     def test_filter_linear_recipe(self):
         """
         Test removing linear from default recipe of ArmInductorQuantizer.
         """
-        with override_quantized_engine("arm"), torch.no_grad():
+        with torch.no_grad():
             m = TestHelperModules.LinearUnaryModule(
                 use_bias=True,
                 postop=nn.ReLU,
@@ -1432,7 +1395,7 @@ class TestQuantizePT2EArmInductor(ArmInductorQuantTestCase):
         Test pattern of Attention like Block with ArmInductorQuantizer.
         """
         for annotate_matmul in [False, True]:
-            with override_quantized_engine("arm"), torch.no_grad():
+            with torch.no_grad():
                 m = TestHelperModules.SelfAttnLikeModule(
                     input_dim=64 * 16,
                     transpose_for_score=True,
@@ -1457,11 +1420,11 @@ class TestQuantizePT2EArmInductor(ArmInductorQuantTestCase):
                         5 if annotate_matmul else 1
                     ),
                     torch.ops.quantized_decomposed.dequantize_per_tensor.default: (
-                        7 if annotate_matmul else 3
+                        10 if annotate_matmul else 6
                     ),
                     # quantize_per_channel for weights are const propagated
                     torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
-                    torch.ops.quantized_decomposed.dequantize_per_channel.default: 3,
+                    torch.ops.quantized_decomposed.dequantize_per_channel.default: 0,
                 }
                 if annotate_matmul:
                     node_list = [

@@ -476,14 +476,14 @@ def skipIfNoX86(fn):
 def skipIfNoArm(fn):
     reason = 'Quantized operations require Arm.'
     if isinstance(fn, type):
-        if platform.processor() != "arm":
+        if platform.processor() != "aarch64":
             fn.__unittest_skip__ = True
             fn.__unittest_skip_why__ = reason
         return fn
 
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
-        if platform.processor() != "arm":
+        if platform.processor() != "aarch64":
             raise unittest.SkipTest(reason)
         else:
             fn(*args, **kwargs)
