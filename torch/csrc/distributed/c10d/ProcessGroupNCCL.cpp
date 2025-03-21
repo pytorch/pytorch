@@ -3169,6 +3169,7 @@ void ProcessGroupNCCL::startCoalescing() {
   // 'start' and 'end' coalescing region without doing an operation inbetween.
 
   coalescingState_.reset();
+  coalescingState_.active = true;
   groupStart();
 }
 
