@@ -170,6 +170,25 @@ def export(
 ) -> ONNXProgram | None:
     r"""Exports a model into ONNX format.
 
+    Setting ``dynamo=True`` enables the new ONNX export logic
+    which is based on :class:`torch.export.ExportedProgram` and a more modern
+    set of translation logic. This is the recommended way to export models
+    to ONNX.
+
+    When ``dynamo=True``:
+
+    The exporter tries the following strategies to get an ExportedProgram for conversion to ONNX.
+
+    #. If the model is already an ExportedProgram, it will be used as-is.
+    #. Use :func:`torch.export.export` and set ``strict=False``.
+    #. Use :func:`torch.export.export` and set ``strict=True``.
+    #. Use ``draft_export`` which removes some soundness guarantees in data-dependent
+       operations to allow export to proceed. You will get a warning if the exporter
+       encounters any unsound data-dependent operation.
+    #. Use :func:`torch.jit.trace` to trace the model then convert to ExportedProgram.
+       This is the most unsound strategy but may be useful for converting TorchScript
+       models to ONNX.
+
     Args:
         model: The model to be exported.
         args: Example positional inputs. Any non-Tensor arguments will be hard-coded into the
@@ -474,7 +493,7 @@ def dynamo_export(
                     rank = len(x.shape)
                     dynamic_shape = {}
                     for i in range(rank):
-                        dynamic_shape[i] = torch.export.Dim.AUTO  # type: ignore[attr-defined]
+                        dynamic_shape[i] = torch.export.Dim.AUTO
                     return dynamic_shape
                 else:
                     return None
