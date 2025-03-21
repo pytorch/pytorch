@@ -1,11 +1,12 @@
 ARG UBUNTU_VERSION
 
-FROM ubuntu:${UBUNTU_VERSION}
+# ========================================
+# Builder stage
+# ========================================
+FROM ubuntu:${UBUNTU_VERSION} AS builder
 
 ARG UBUNTU_VERSION
-
 ENV DEBIAN_FRONTEND noninteractive
-
 ARG CLANG_VERSION
 
 # Install common dependencies (so that this step can be cached separately)
@@ -47,7 +48,7 @@ RUN bash ./install_gcc.sh && rm install_gcc.sh
 
 # Install lcov for C++ code coverage
 COPY ./common/install_lcov.sh install_lcov.sh
-RUN  bash ./install_lcov.sh && rm install_lcov.sh
+RUN bash ./install_lcov.sh && rm install_lcov.sh
 
 # Install cuda and cudnn
 ARG CUDA_VERSION
@@ -169,19 +170,76 @@ COPY ./common/install_openmpi.sh install_openmpi.sh
 RUN if [ -n "${CUDA_VERSION}" ]; then bash install_openmpi.sh; fi
 RUN rm install_openmpi.sh
 
-# Include BUILD_ENVIRONMENT environment variable in image
-ARG BUILD_ENVIRONMENT
-ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
-
 # Install LLVM dev version (Defined in the pytorch/builder github repository)
 ARG SKIP_LLVM_SRC_BUILD_INSTALL
 COPY --from=pytorch/llvm:9.0.1 /opt/llvm /opt/llvm
 RUN if [ -n "${SKIP_LLVM_SRC_BUILD_INSTALL}" ]; then set -eu; rm -rf /opt/llvm; fi
 
-# AWS specific CUDA build guidance
+# ========================================
+# Final stage
+# ========================================
+FROM ubuntu:${UBUNTU_VERSION}
+
+# Pass all arguments from the command line to this stage
+ARG UBUNTU_VERSION
+ARG CLANG_VERSION
+ARG LLVMDEV
+ARG KATEX
+ARG ANACONDA_PYTHON_VERSION
+ARG CONDA_CMAKE
+ARG DOCS
+ARG GCC_VERSION
+ARG CUDA_VERSION
+ARG UCX_COMMIT
+ARG UCC_COMMIT
+ARG PROTOBUF
+ARG VISION
+ARG CMAKE_VERSION
+ARG NINJA_VERSION
+ARG INDUCTOR_BENCHMARKS
+ARG TRITON
+ARG TRITON_CPU
+ARG EXECUTORCH
+ARG HALIDE
+ARG ONNX
+ARG ACL
+ARG BUILD_ENVIRONMENT
+
+ENV DEBIAN_FRONTEND noninteractive
+ENV ANACONDA_PYTHON_VERSION=$ANACONDA_PYTHON_VERSION
+ENV PATH /opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/bin:/opt/conda/bin:$PATH
+ENV DOCS=$DOCS
+ENV DESIRED_CUDA ${CUDA_VERSION}
+ENV PATH /usr/local/nvidia/bin:/usr/local/cuda/bin:/opt/cache/bin:$PATH
+ENV UCX_COMMIT $UCX_COMMIT
+ENV UCC_COMMIT $UCC_COMMIT
+ENV UCX_HOME /usr
+ENV UCC_HOME /usr
+ENV INSTALLED_PROTOBUF ${PROTOBUF}
+ENV INSTALLED_VISION ${VISION}
+ENV OPENSSL_ROOT_DIR /opt/openssl
+ENV OPENSSL_DIR /opt/openssl
+ENV INSTALLED_ACL ${ACL}
+ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
 ENV TORCH_CUDA_ARCH_LIST Maxwell
 ENV TORCH_NVCC_FLAGS "-Xfatbin -compress-all"
 ENV CUDA_PATH /usr/local/cuda
 
+# Copy essential system directories and files from builder stage
+COPY --from=builder /etc/apt /etc/apt
+COPY --from=builder /usr/local /usr/local
+COPY --from=builder /opt /opt
+COPY --from=builder /usr/include /usr/include
+COPY --from=builder /usr/lib /usr/lib
+COPY --from=builder /usr/bin /usr/bin
+COPY --from=builder /usr/share /usr/share
+
+# Copy the user setup
+COPY --from=builder /etc/passwd /etc/passwd
+COPY --from=builder /etc/group /etc/group
+COPY --from=builder /etc/shadow /etc/shadow
+COPY --from=builder /etc/sudoers.d /etc/sudoers.d
+
+# Create and switch to jenkins user
 USER jenkins
 CMD ["bash"]
