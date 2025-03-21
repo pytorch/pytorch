@@ -179,10 +179,8 @@ html_theme_options = {
     "canonical_url": "https://pytorch.org/docs/stable/",
     "collapse_navigation": False,
     "display_version": True,
-    "logo": {
-        "text": "Home",
-    },
-     "icon_links": [
+    "logo": {"text": "Home"},
+    "icon_links": [
         {
             "name": "X",
             "url": "https://x.com/PyTorch",
@@ -194,8 +192,8 @@ html_theme_options = {
             "icon": "fa-brands fa-github",
         },
         {
-            "name": "Discourse",
-            "url": "https://dev-discuss.pytorch.org/",
+            "name": "PyTorch Forum",
+            "url": "https://discuss.pytorch.org/",
             "icon": "fa-brands fa-discourse",
         },
         {
@@ -217,7 +215,7 @@ html_context = {
     "doc_path": "docs/cpp/source",
     "library_links": theme_variables.get("library_links", []),
     "community_links": theme_variables.get("community_links", []),
-    "language_bindings_links": html_theme_options.get("language_bindings_links", []),
+    "language_bindings_links": theme_variables.get("language_bindings_links", []),
 }
 
 # NOTE: sharing python docs resources
