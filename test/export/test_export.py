@@ -6262,6 +6262,29 @@ def forward(self, x):
             if node.op == "placeholder":
                 self.assertTrue(isinstance(node.meta["val"], (Tensor, int)))
 
+    def test_size_input(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+
+            def forward(self, theta, size):
+                return torch.nn.functional.affine_grid(theta, size, align_corners=None)
+
+        model = Model()
+        theta = torch.ones((1, 2, 3))
+        size = torch.Size((1, 3, 24, 24))
+        inp = (theta, size)
+        eager_result = model(*inp)
+
+        ep = export(model, inp)
+
+        epm = ep.module()
+        ep_result = epm(*inp)
+        self.assertTrue(torch.allclose(ep_result, eager_result))
+
+        args, _kwargs = ep.example_inputs
+        self.assertTrue(torch.allclose(arg, i) for arg, i in zip(args, inp))
+
     def test_tensor_constant_with_wrapped_method(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -10235,6 +10258,45 @@ def forward(self, x, b_t, y):
     return (add_1,)""",
         )
 
+    def test_python_asserts_with_sym_int(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                y = x + 1
+                assert y.max().item() > 0
+                return y
+
+        model = Model()
+        ep = torch.export.export(model, (torch.zeros(4, dtype=torch.int),))
+
+        """
+        Graph should look like:
+        class GraphModule(torch.nn.Module):
+            def forward(self, x: "i32[4]"):
+                add: "i32[4]" = torch.ops.aten.add.Tensor(x, 1);  x = None
+
+                max_1: "i32[]" = torch.ops.aten.max.default(add)
+                item: "Sym(u0)" = torch.ops.aten.item.default(max_1);  max_1 = None
+                ge: "Sym(u0 >= 1)" = item >= 1
+                _assert_scalar_default = torch.ops.aten._assert_scalar.default(
+                    ge,
+                    "Runtime assertion failed for expression u0 >= 1 on node 'ge'"
+                );  ge = _assert_scalar_default = None
+
+                gt_1: "Sym(u0 > 0)" = item > 0;  item = None
+                _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(
+                    gt_1,
+                    "Runtime assertion failed for expression 0 < u0 on node 'gt_1'"
+                );  gt_1 = _assert_scalar_default_1 = None
+                return (add,)
+        """
+        inputs = (torch.ones(4, dtype=torch.int),)
+        self.assertEqual(ep.module()(*inputs), model(*inputs))
+        inputs = (-torch.ones(4, dtype=torch.int),)
+        with self.assertRaisesRegex(
+            RuntimeError, "Runtime assertion failed for expression"
+        ):
+            ep.module()(*inputs)
+
     def test_predispatch_grad_wrappers(self):
         class Model(torch.nn.Module):
             def forward(self, x, y):
@@ -10716,6 +10778,30 @@ def forward(self, x):
 
         # check that graph input names are as expected
         self.assertEqual(ep.graph_signature.user_inputs, ("x1", False, "x2"))
+
+    def test_kwarg_dynamic_shapes_diff_order(self):
+        class DummyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.ones(4, 4)
+
+            def forward(self, baba, *, start, end):
+                return baba.sum() + start.sum() + end.sum()
+
+        f = DummyModel()
+        kwargs = {
+            "end": torch.ones(4, 4, 4),
+            "start": torch.ones(4, 4),
+        }
+        dynamic_shapes = {
+            "baba": {0: torch.export.Dim("end_dim")},
+            "end": {0: torch.export.Dim("end_dim")},
+            "start": {0: torch.export.Dim("end_dim"), 1: torch.export.Dim("end_dim")},
+        }
+        ep = torch.export.export(
+            f, (torch.ones(4, 4),), kwargs, dynamic_shapes=dynamic_shapes
+        ).run_decompositions()
+        ep.module()(torch.ones(4, 4), **kwargs)
 
     def test_placeholder_naming_order_variadic(self):
         class Mod(torch.nn.Module):

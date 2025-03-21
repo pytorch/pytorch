@@ -5493,6 +5493,39 @@ class TestMPS(TestCaseMPS):
         helper_dtype_float32(3, 3, 3)
         helper_dtype_float32(1, 1, 1)
 
+    @parametrize("dtype", [torch.float32, torch.float16])
+    def test_nanmedian(self, dtype):
+        def helper(n1, n2, n3, dtype, add_nans=False):
+            cpu_x = torch.randn(n1, n2, n3, device='cpu', dtype=dtype)
+
+            if add_nans and dtype in [torch.float32, torch.float16]:
+                nan_mask = torch.rand(n1, n2, n3) < 0.2
+                cpu_x = cpu_x.clone()
+                cpu_x[nan_mask] = float('nan')
+
+            mps_x = cpu_x.clone().to('mps')
+
+            y_cpu = torch.nanmedian(cpu_x)
+            y_mps = torch.nanmedian(mps_x)
+            self.assertEqual(y_cpu, y_mps)
+
+        # test with no nans(to test the caching of the graph and behaviour when there are no nans)
+        helper(10, 10, 10, dtype)
+        helper(3, 3, 3, dtype)
+        helper(1, 1, 1, dtype)
+        helper(1, 2, 3, dtype)
+        # test with some random nans added
+        helper(10, 10, 10, dtype, add_nans=True)
+        helper(3, 3, 3, dtype, add_nans=True)
+        helper(2, 2, 3, dtype, add_nans=True)
+
+        # mix of NaNs and regular values where a median would output 3.0 while nanmedian outputs 2.0
+        cpu_x = torch.tensor([float('nan'), 1.0, 2.0, float('nan'), 3.0], device='cpu', dtype=dtype)
+        mps_x = cpu_x.detach().clone().to('mps')
+        y_cpu = torch.nanmedian(cpu_x)
+        y_mps = torch.nanmedian(mps_x)
+        self.assertEqual(y_cpu, y_mps)
+
     def test_any(self):
         def helper(shape):
             input_xs = []
