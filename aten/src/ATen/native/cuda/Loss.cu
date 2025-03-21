@@ -146,11 +146,7 @@ Tensor& binary_cross_entropy_backward_out_cuda(const Tensor& grad, const Tensor&
 namespace {
 
 int nll_loss_threads(int64_t nframe){
-#if defined(USE_ROCM)
   return std::clamp(1 << static_cast<int64_t>(std::round(std::log2(nframe/16))), 32, 1024);
-#else
-  return 32;
-#endif
 }
 
 // NOTE(crcrpar): `Byte` support was added for https://github.com/pytorch/pytorch/issues/59765.
