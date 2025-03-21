@@ -470,6 +470,11 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
 
         return wrapper()
 
+    def gen_schema(self, *args, **kwargs):
+        raise NotImplementedError(
+            f"HigherOrderOp {self._name} does not implement a gen_schema."
+        )
+
     # NOTE [HigherOrderOp Schema]
     # Each invocation of a HigherOrderOperator should have its own schema because
     # the subgraphs and the arguments can be different even for the same hop.

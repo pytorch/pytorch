@@ -250,6 +250,7 @@ std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema) {
     return_ss << returns.at(0);
     auto return_str = return_ss.str();
 
+    // Note [schema for signle return item with parenthesis]
     // enclosing the single return item with parenthesis if the return type
     // starts with a left parenthesis.
     //

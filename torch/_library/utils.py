@@ -254,7 +254,7 @@ def _hop_schema_from_inp_out(hop, example_inputs, example_output, mutated_inputs
     return FunctionSchemaGen.from_example(
         hop._name,
         tuple(bound_args.arguments.items()),
-        list(example_output),
+        tuple(example_output),
         mutated_inputs,
     )
 

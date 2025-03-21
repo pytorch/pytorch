@@ -678,7 +678,7 @@ def check_input_alias_and_mutation(
     return_outputs: bool = False,
 ) -> Union[
     tuple[list[int], dict[int, int], dict[int, int], dict[int, int]],
-    tuple[list[int], dict[int, int], dict[int, int], dict[int, int], list[FakeTensor]],
+    tuple[list[int], dict[int, int], dict[int, int], dict[int, int], list[Any]],
 ]:
     with disable_proxy_modes_tracing():
         """This function returns mutated inputs, inp-inp alias, inp-out alias, out-out alias

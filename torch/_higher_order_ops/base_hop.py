@@ -129,12 +129,14 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
             out = self(functionalized_subgraph, *unwrapped_operands, **kwargs)
         return ctx.wrap_tensors(out)
 
-    def gen_schema(self, subgraph, *operands, **kwargs):
-        from torchgen.gen_schema_utils import FunctionSchemaGen, HopArgumentInfo
+    def gen_schema(self, *args, **kwargs):
+        from torchgen.gen_schema_utils import FunctionSchemaGen, HopArgumentInfoGen
+
+        subgraph, *operands = args
 
         assert isinstance(
             subgraph, torch.fx.GraphModule
-        ), "NYI non GraphModule subgraph"
+        ), f"NYI non GraphModule subgraph got {subgraph}"
         fake_args = [
             ph.meta["example_value"]
             for ph in subgraph.graph.find_nodes(op="placeholder")
@@ -145,11 +147,11 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
         args = []
         for idx, arg in enumerate((subgraph, *operands, *kwargs.items())):
             if isinstance(arg, tuple):
-                arg_name, example = arg
-                default = example
+                arg_name, example_value = arg
+                default = example_value
             else:
                 arg_name = f"arg{idx}"
-                example = arg
+                example_value = arg
                 default = None
             if isinstance(default, str):
                 default = '"' + default + '"'
@@ -157,25 +159,21 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
             if idx - 1 in mutated_inp_idx:
                 is_mutated = True
             args.append(
-                HopArgumentInfo(
+                HopArgumentInfoGen.from_example(
+                    example_value=example_value,
                     name=arg_name,
-                    example_value=example,
                     default_value=default,
                     is_mutated=is_mutated,
                 )
             )
 
-        rets = []
-        for idx, out in enumerate(output):
-            rets.append(
-                HopArgumentInfo(
-                    name=f"out{idx}",
-                    example_value=out,
-                    default_value=None,
-                    is_mutated=False,
-                )
-            )
-        return FunctionSchemaGen.from_hop_argument_info(str(self), args, rets)
+        ret = HopArgumentInfoGen.from_example(
+            example_value=output,
+            name="out",
+            default_value=None,
+            is_mutated=False,
+        )
+        return FunctionSchemaGen.from_hop_argument_info(str(self), args, ret)
 
 
 class BaseHOPFunction(torch.autograd.Function):
