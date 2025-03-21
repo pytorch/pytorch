@@ -177,12 +177,33 @@ html_theme = "pytorch_sphinx_theme2"
 #
 html_theme_options = {
     "canonical_url": "https://pytorch.org/docs/stable/",
-    "pytorch_project": "docs",
     "collapse_navigation": False,
     "display_version": True,
     "logo": {
         "text": "Home",
-    }
+    },
+     "icon_links": [
+        {
+            "name": "X",
+            "url": "https://x.com/PyTorch",
+            "icon": "fa-brands fa-x-twitter",
+        },
+        {
+            "name": "GitHub",
+            "url": "https://github.com/pytorch/pytorch",
+            "icon": "fa-brands fa-github",
+        },
+        {
+            "name": "Discourse",
+            "url": "https://dev-discuss.pytorch.org/",
+            "icon": "fa-brands fa-discourse",
+        },
+        {
+            "name": "PyPi",
+            "url": "https://pypi.org/project/torch/",
+            "icon": "fa-brands fa-python",
+        },
+    ],
 }
 
 html_context = {
@@ -196,7 +217,6 @@ html_context = {
     "doc_path": "docs/cpp/source",
     "library_links": theme_variables.get("library_links", []),
     "community_links": theme_variables.get("community_links", []),
-    "pytorch_project": "docs",
     "language_bindings_links": html_theme_options.get("language_bindings_links", []),
 }
 

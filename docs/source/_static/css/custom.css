@@ -1,0 +1,10 @@
+/* Make logo work for dark and light mode */
+.navbar-brand img {
+    height: 40%;
+}
+
+.logo__image.only-dark {
+    filter: brightness(0) saturate(100%);
+    color: var(--bs-navbar-brand-color);
+    fill: var(--bs-navbar-brand-color);
+}
