@@ -43,6 +43,7 @@ RELEASE = os.environ.get("RELEASE", False)
 sys.path.insert(0, os.path.abspath(".."))
 import pytorch_sphinx_theme2
 
+
 html_theme = "pytorch_sphinx_theme2"
 html_theme_path = [pytorch_sphinx_theme2.get_html_theme_path()]
 
@@ -124,9 +125,7 @@ switcher_version = "main" if not RELEASE else version
 html_static_path = ["_static"]
 
 html_theme_options = {
-    "logo": {
-        "text": "Home",
-    },
+    "logo": {"text": "Home"},
     "analytics_id": "GTM-T8XT4PS",
     "canonical_url": "https://pytorch.org/docs/stable/",
     "switcher": {
@@ -153,8 +152,8 @@ html_theme_options = {
             "icon": "fa-brands fa-github",
         },
         {
-            "name": "Discourse",
-            "url": "https://dev-discuss.pytorch.org/",
+            "name": "PyTorch Forum",
+            "url": "https://discuss.pytorch.org/",
             "icon": "fa-brands fa-discourse",
         },
         {
@@ -186,7 +185,7 @@ html_context = {
     "github_version": "main",
     "pytorch_project": "docs",
     "doc_path": "docs/source",
-    "theme_variables": theme_variables,
+    "theme_variables": theme_variables,  # noqa: F601
     "library_links": theme_variables.get("library_links", []),
     "community_links": theme_variables.get("community_links", []),
     "language_bindings_links": theme_variables.get("language_bindings_links", []),
@@ -3587,7 +3586,11 @@ autodoc_docstring_signature = True
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
 
-html_css_files = ["css/jit.css", "css/custom.css"]
+html_css_files = [
+    "css/jit.css",
+    "css/custom.css",
+    "https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.css",
+]
 
 from sphinx.ext.coverage import CoverageBuilder
 

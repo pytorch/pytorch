@@ -170,7 +170,7 @@ html_theme_path = [pytorch_sphinx_theme2.get_html_theme_path()]
 # documentation.
 #
 html_theme_options = {
-     "icon_links": [
+    "icon_links": [
         {
             "name": "X",
             "url": "https://x.com/PyTorch",
@@ -182,8 +182,8 @@ html_theme_options = {
             "icon": "fa-brands fa-github",
         },
         {
-            "name": "Discourse",
-            "url": "https://dev-discuss.pytorch.org/",
+            "name": "PyTorch Forum",
+            "url": "https://discuss.pytorch.org/",
             "icon": "fa-brands fa-discourse",
         },
         {
@@ -197,9 +197,7 @@ html_theme_options = {
     "pytorch_project": "functorch",
     "navigation_with_keys": True,
     "analytics_id": "UA-117752657-2",
-    "logo": {
-        "text": "Home"
-    }
+    "logo": {"text": "Home"},
 }
 
 theme_variables = pytorch_sphinx_theme2.get_theme_variables()
@@ -225,7 +223,7 @@ html_static_path = ["_static"]
 
 html_css_files = [
     "css/custom.css",
-    "https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.css"
+    "https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.css",
 ]
 
 

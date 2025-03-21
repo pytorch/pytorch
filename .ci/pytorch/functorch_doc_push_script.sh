@@ -23,7 +23,7 @@ if [ "$version" == "main" ]; then
 fi
 
 git rm -rf "$version" || true
-rm -rf "$version"/*
+rm -rf "${version:?}/"*
 if [ -n "$(ls -A "$version" 2>/dev/null)" ]; then
   echo "Warning: $version directory is not empty after cleanup"
   ls -la "$version"
