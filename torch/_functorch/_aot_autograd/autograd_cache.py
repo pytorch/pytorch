@@ -127,12 +127,6 @@ def check_node_safe(node: Node):
         "einops.einops.rearrange",
     )
 
-    def is_autograd_function(function_name):
-        return function_name in (
-            "torch.autograd.function.FunctionCtx",
-            "torch.ops.higher_order.autograd_function_apply",
-        )
-
     def is_public_torch_api(target):
         # Don't blindly allow private functions in the torch namespace
         is_private = target.__name__.startswith("_")
@@ -144,8 +138,8 @@ def check_node_safe(node: Node):
     def is_safe_torch_function(target):
         """Allowlisted torch functions"""
         function_name = f"{target.__module__}.{target.__name__}"
-
-        if is_autograd_function(function_name):
+        # Allow torch.autograd.function.FunctionCtx if custom autograd functions are allowed
+        if function_name == "torch.autograd.function.FunctionCtx":
             return (
                 torch._functorch.config.autograd_cache_allow_custom_autograd_functions
             )
@@ -163,6 +157,10 @@ def check_node_safe(node: Node):
             return True
         if is_public_torch_api(target):
             return True
+        # Technically, FXGraphCache._check_for_hop already checks this,
+        # but better to error earlier anyway
+        if isinstance(target, torch._ops.HigherOrderOperator):
+            return target.cacheable()
         is_builtin_fun_or_type = type(target).__name__ == "builtin_function_or_method"
         if is_builtin_fun_or_type:
             return True
