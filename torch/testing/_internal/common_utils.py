@@ -101,6 +101,8 @@ try:
 except ImportError:
     has_pytest = False
 
+from thrift.py3.types import Enum as ThriftEnum
+
 
 MI300_ARCH = ("gfx942",)
 
@@ -2792,6 +2794,11 @@ class RelaxedNumberPair(NumberPair):
                 or (isinstance(expected, self._supported_types) and isinstance(actual, other_supported_types))
         ):
             self._inputs_not_supported()
+
+        # Because Thrift Enums have changed to have a base class of int, check if actual or expected are of type thrift enum and call inputs_not_supported.
+        if isinstance(actual, ThriftEnum) or isinstance(expected, ThriftEnum):
+            self._inputs_not_supported()
+
 
         return [self._to_number(input, id=id) for input in (actual, expected)]
 
