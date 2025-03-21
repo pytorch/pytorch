@@ -6262,6 +6262,29 @@ def forward(self, x):
             if node.op == "placeholder":
                 self.assertTrue(isinstance(node.meta["val"], (Tensor, int)))
 
+    def test_size_input(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+
+            def forward(self, theta, size):
+                return torch.nn.functional.affine_grid(theta, size, align_corners=None)
+
+        model = Model()
+        theta = torch.ones((1, 2, 3))
+        size = torch.Size((1, 3, 24, 24))
+        inp = (theta, size)
+        eager_result = model(*inp)
+
+        ep = export(model, inp)
+
+        epm = ep.module()
+        ep_result = epm(*inp)
+        self.assertTrue(torch.allclose(ep_result, eager_result))
+
+        args, _kwargs = ep.example_inputs
+        self.assertTrue(torch.allclose(arg, i) for arg, i in zip(args, inp))
+
     def test_tensor_constant_with_wrapped_method(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -6964,6 +6987,72 @@ def forward(self, b_a_buffer, x):
                 (torch.randn(10, 10), torch.randn(10, 10)),
                 dynamic_shapes={"x": (A, B), "y": (B, A)},
             )
+
+    def test_multinomial_dynamic(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.multinomial(x, y.shape[0])
+
+        model = Model()
+        DYNAMIC = torch.export.Dim.DYNAMIC
+
+        def exported_module(inputs):
+            dynamic_shapes = tuple(tuple(DYNAMIC for _ in inp.shape) for inp in inputs)
+            ep = export(model, inputs, dynamic_shapes=dynamic_shapes)
+            return ep.module()
+
+        def check(inputs, epm):
+            eager_result = model(*inputs)
+            ep_result = epm(*inputs)
+            self.assertEqual(ep_result.shape, eager_result.shape)
+
+        inputs = (
+            torch.tensor([0, 10, 3, 0], dtype=torch.float32),
+            torch.ones(2, dtype=torch.int64),
+        )
+        epm = exported_module(inputs)
+        # output shape is (2,), where n_sample 2 <= dist_size 4
+        check(inputs, epm)
+
+        inputs = (
+            torch.tensor([0, 10, 3, 7, 6, 0], dtype=torch.float32),
+            torch.ones(3, dtype=torch.int64),
+        )
+        # output shape is (3,), with n_sample 3 <= dist_size 6
+        check(inputs, epm)
+
+        inputs = (
+            torch.tensor([0, 10, 3, 0], dtype=torch.float32),
+            torch.ones(5, dtype=torch.int64),
+        )
+        with self.assertRaisesRegex(RuntimeError, "cannot sample"):
+            # n_sample 5 > dist_size 4
+            epm(*inputs)
+
+        inputs = (
+            torch.tensor([[4, 5], [6, 7], [8, 9]], dtype=torch.float32),
+            torch.ones(2, dtype=torch.int64),
+        )
+        epm = exported_module(inputs)
+        # output shape is (3, 2), with n_row 3 and n_sample 2 <= dist_size 2
+        check(inputs, epm)
+
+        inputs = (
+            torch.tensor([[4, 5], [6, 7], [8, 9], [10, 11]], dtype=torch.float32),
+            torch.ones(1, dtype=torch.int64),
+        )
+        epm = exported_module(inputs)
+        # output shape is (4, 1), with n_row 4 and n_sample 1 <= dist_size 2
+        check(inputs, epm)
+
+        inputs = (
+            torch.tensor([[4, 5], [6, 7], [8, 9]], dtype=torch.float32),
+            torch.ones(3, dtype=torch.int64),
+        )
+        epm = exported_module(inputs)
+        with self.assertRaisesRegex(RuntimeError, "cannot sample"):
+            # n_sample 3 > dist_size 2
+            epm(*inputs)
 
     def test_export_with_wrong_inputs(self):
         class MyModule(torch.nn.Module):
@@ -10169,6 +10258,45 @@ def forward(self, x, b_t, y):
     return (add_1,)""",
         )
 
+    def test_python_asserts_with_sym_int(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                y = x + 1
+                assert y.max().item() > 0
+                return y
+
+        model = Model()
+        ep = torch.export.export(model, (torch.zeros(4, dtype=torch.int),))
+
+        """
+        Graph should look like:
+        class GraphModule(torch.nn.Module):
+            def forward(self, x: "i32[4]"):
+                add: "i32[4]" = torch.ops.aten.add.Tensor(x, 1);  x = None
+
+                max_1: "i32[]" = torch.ops.aten.max.default(add)
+                item: "Sym(u0)" = torch.ops.aten.item.default(max_1);  max_1 = None
+                ge: "Sym(u0 >= 1)" = item >= 1
+                _assert_scalar_default = torch.ops.aten._assert_scalar.default(
+                    ge,
+                    "Runtime assertion failed for expression u0 >= 1 on node 'ge'"
+                );  ge = _assert_scalar_default = None
+
+                gt_1: "Sym(u0 > 0)" = item > 0;  item = None
+                _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(
+                    gt_1,
+                    "Runtime assertion failed for expression 0 < u0 on node 'gt_1'"
+                );  gt_1 = _assert_scalar_default_1 = None
+                return (add,)
+        """
+        inputs = (torch.ones(4, dtype=torch.int),)
+        self.assertEqual(ep.module()(*inputs), model(*inputs))
+        inputs = (-torch.ones(4, dtype=torch.int),)
+        with self.assertRaisesRegex(
+            RuntimeError, "Runtime assertion failed for expression"
+        ):
+            ep.module()(*inputs)
+
     def test_predispatch_grad_wrappers(self):
         class Model(torch.nn.Module):
             def forward(self, x, y):
@@ -10650,6 +10778,30 @@ def forward(self, x):
 
         # check that graph input names are as expected
         self.assertEqual(ep.graph_signature.user_inputs, ("x1", False, "x2"))
+
+    def test_kwarg_dynamic_shapes_diff_order(self):
+        class DummyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.ones(4, 4)
+
+            def forward(self, baba, *, start, end):
+                return baba.sum() + start.sum() + end.sum()
+
+        f = DummyModel()
+        kwargs = {
+            "end": torch.ones(4, 4, 4),
+            "start": torch.ones(4, 4),
+        }
+        dynamic_shapes = {
+            "baba": {0: torch.export.Dim("end_dim")},
+            "end": {0: torch.export.Dim("end_dim")},
+            "start": {0: torch.export.Dim("end_dim"), 1: torch.export.Dim("end_dim")},
+        }
+        ep = torch.export.export(
+            f, (torch.ones(4, 4),), kwargs, dynamic_shapes=dynamic_shapes
+        ).run_decompositions()
+        ep.module()(torch.ones(4, 4), **kwargs)
 
     def test_placeholder_naming_order_variadic(self):
         class Mod(torch.nn.Module):
@@ -11406,6 +11558,24 @@ graph():
         inp = torch.randn(4, 4)
         self.assertEqual(ep.module()(inp), mod(inp))
 
+        with torch.inference_mode():
+            ep = ep.run_decompositions({})
+
+        # There should be no subclases
+        self.assertExpectedInline(
+            str(ep.graph).strip(),
+            """\
+graph():
+    %b_parametrizations_buffer_original0 : [num_users=0] = placeholder[target=b_parametrizations_buffer_original0]
+    %b_parametrizations_buffer_original1 : [num_users=1] = placeholder[target=b_parametrizations_buffer_original1]
+    %x : [num_users=2] = placeholder[target=x]
+    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %b_parametrizations_buffer_original1), kwargs = {})
+    %add_4 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %add_1), kwargs = {})
+    return (add_4,)""",
+        )
+
+        self.assertEqual(ep.module()(inp), mod(inp))
+
         mod = Foo()
         ep = export(mod, (torch.randn(4, 4),)).run_decompositions({})
 
@@ -11695,6 +11865,36 @@ def forward(self, x):
     cos_1 = torch.ops.aten.cos.default(getitem_3)
     return (getitem_3, cos_1)""",
         )
+
+    def test_run_decompositions_keep_metadata(self):
+        """Make sure the metadata is kept after exported program run_decompositions."""
+
+        @torch.library.custom_op("mylib::add", mutates_args=())
+        def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            ...
+
+        @torch.library.register_fake("mylib::add")
+        def _(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            return torch.empty_like(x)
+
+        class TestModel(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.ops.mylib.add(x, y)
+
+        model = TestModel()
+        x_example = torch.randn(2, 3)
+        y_example = torch.randn(2, 3)
+        exported_program = export(model, (x_example, y_example))
+
+        for node in exported_program.graph.nodes:
+            node.meta["custom"] = {"my_field": "dummy"}
+
+        for node in exported_program.graph.nodes:
+            self.assertEqual(node.meta["custom"]["my_field"], "dummy")
+
+        decomposed_program = exported_program.run_decompositions()
+        for node in decomposed_program.graph.nodes:
+            self.assertEqual(node.meta["custom"]["my_field"], "dummy")
 
     def test_export_linear_preserve_dynamic_shape(self):
         class M(torch.nn.Module):
