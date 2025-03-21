@@ -8,10 +8,14 @@ Python polyfills for common builtins.
 
 # mypy: allow-untyped-defs
 
+import types
+from collections.abc import MutableMapping, Sequence
 from itertools import repeat as _repeat
-from typing import Any, Callable, List, Sequence, TYPE_CHECKING
+from typing import Any, Callable, TYPE_CHECKING
 
 import torch
+
+from ..utils import dict_keys
 
 
 if TYPE_CHECKING:
@@ -71,6 +75,8 @@ def radians(x):
 
 
 def accumulate_grad(x, new_grad):
+    if new_grad is None:
+        return
     new_grad = torch.clone(new_grad)
     if x.grad is None:
         x.grad = new_grad
@@ -78,11 +84,16 @@ def accumulate_grad(x, new_grad):
         x.grad.add_(new_grad)
 
 
+# This mirrors
+# https://github.com/python/cpython/blob/a1c52d1265c65bcf0d9edf87e143843ad54f9b8f/Objects/listobject.c#L3352-L3413
 def list_cmp(op: Callable[[Any, Any], bool], left: Sequence[Any], right: Sequence[Any]):
     """emulate `(1,2,3) > (1,2)` etc"""
+    # Apply `op` to the first pair that differ
     for a, b in zip(left, right):
         if a != b:
             return op(a, b)
+
+    # No more pairs to compare, so compare sizes.
     return op(len(left), len(right))
 
 
@@ -122,38 +133,6 @@ def set_difference(set1, set2):
     return difference_set
 
 
-def dropwhile(predicate, iterable):
-    # dropwhile(lambda x: x<5, [1,4,6,4,1]) -> 6 4 1
-    iterable = iter(iterable)
-    for x in iterable:
-        if not predicate(x):
-            yield x
-            break
-    yield from iterable
-
-
-def zip_longest(*iterables, fillvalue=None):
-    # Create a list of iterators from the input iterables
-    iterators = [iter(it) for it in iterables]
-    result = []
-    while True:
-        row = []
-        active = False
-        for it in iterators:
-            try:
-                # Try to get the next item from the iterator
-                value = next(it)
-                row.append(value)
-                active = True
-            except StopIteration:
-                # If the iterator is exhausted, use the fillvalue
-                row.append(fillvalue)
-        if not active:
-            break
-        result.append(tuple(row))
-    return result
-
-
 def getattr_and_trace(*args, **kwargs):
     wrapper_obj = args[0]
     attr_name = args[1]
@@ -178,9 +157,33 @@ def instantiate_user_defined_class_object(cls, /, *args, **kwargs):
     return obj
 
 
+# Used with something like dict(obj)
+def construct_dict(cls, /, *args, **kwargs):
+    dst = cls.__new__(cls)
+
+    if args:
+        src = args[0]
+
+        # Ensure that the overridden __iter__ method is invoked
+        if isinstance(src, (dict, MutableMapping)):
+            for key in src:
+                # This will inline the __getitem__ of the src object
+                dst[key] = src[key]
+        else:
+            # likely a sequence like tuple of pairs
+            for key, value in src:
+                dst[key] = value
+
+    if kwargs:
+        for key in kwargs:
+            dst[key] = kwargs[key]
+
+    return dst
+
+
 def foreach_map_fn(*args):
     op = args[0]
-    new_args: List[Any] = []
+    new_args: list[Any] = []
     at_least_one_list = False
     for arg in args[1:]:
         if not isinstance(arg, (list, tuple)):
@@ -224,14 +227,52 @@ def predicate(obj: Any) -> bool:
     return False
 
 
-def object_eq(self, other):
-    # Mirrors CPython implementation:
-    # https://github.com/python/cpython/blob/a1c52d1265c65bcf0d9edf87e143843ad54f9b8f/Objects/typeobject.c#L6228-L6233
-    return self is other
+def cmp_eq(a, b):
+    # Note that the commented `is` check should ideally be removed. This is a
+    # CPython optimization that skips the __eq__ checks it the obj id's are
+    # same. But, these lines adds many `is` nodes in the Fx graph for
+    # SymNodeVariable. For now, we can just skip this check. This is STILL
+    # correct because one of the __eq__ checks will pass later, just could be
+    # slow in some corner cases.
+    # if a is b:
+    #     return True
+    result = a.__eq__(b)
+    if result is NotImplemented:
+        result = b.__eq__(a)
+    return result is not NotImplemented and result
 
 
-def object_ne(self, other):
-    # Mirrors CPython implementation:
-    # https://github.com/python/cpython/blob/a1c52d1265c65bcf0d9edf87e143843ad54f9b8f/Objects/typeobject.c#L6235-L6255
-    # Using `==` is important because `self` might have a user-defined `__eq__`.
-    return not (self == other)
+def cmp_ne(a, b):
+    # Check if __ne__ is overridden
+    if isinstance(type(a).__ne__, types.FunctionType):
+        return a.__ne__(b)
+    return not cmp_eq(a, b)
+
+
+def cmp_lt(a, b):
+    result = a.__lt__(b)
+    if result is NotImplemented:
+        raise TypeError(f"{type(a)} does not support the < operator")
+    return result
+
+
+def cmp_le(a, b):
+    # Check if __le__ is overridden
+    if isinstance(type(a).__le__, types.FunctionType):
+        return a.__le__(b)
+    return cmp_eq(a, b) or cmp_lt(a, b)
+
+
+def cmp_gt(a, b):
+    # Check if __gt__ is overridden
+    if isinstance(type(a).__gt__, types.FunctionType):
+        return a.__gt__(b)
+    # a > b is equivalent to b < a
+    return cmp_lt(b, a)
+
+
+def cmp_ge(a, b):
+    # Check if __ge__ is overridden
+    if isinstance(type(a).__ge__, types.FunctionType):
+        return a.__ge__(b)
+    return cmp_eq(a, b) or cmp_gt(a, b)

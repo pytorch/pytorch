@@ -17,17 +17,18 @@ class TORCH_CUDA_CPP_API AOTIModelContainerRunnerCuda
       const std::string& model_so_path,
       size_t num_models = 1,
       const std::string& device_str = "cuda",
-      const std::string& cubin_dir = "");
+      const std::string& cubin_dir = "",
+      const bool run_single_threaded = false);
 
   ~AOTIModelContainerRunnerCuda() override;
 
-  std::vector<at::Tensor> run(
-      const std::vector<at::Tensor>& inputs,
-      void* stream_handle = nullptr) override;
+  std::vector<at::Tensor> run_impl(
+      std::vector<AtenTensorHandle>& input_handles,
+      void* stream_handle) override;
 
   std::vector<at::Tensor> run_with_cuda_stream(
       const std::vector<at::Tensor>& inputs,
-      at::cuda::CUDAStream cuda_stream);
+      const at::cuda::CUDAStream& cuda_stream);
 };
 
 } // namespace torch::inductor

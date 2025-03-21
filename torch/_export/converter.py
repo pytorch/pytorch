@@ -4,8 +4,9 @@ import logging
 import operator
 import typing
 import warnings
+from collections.abc import Sequence
 from contextlib import contextmanager
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union
+from typing import Any, Optional, Union
 
 import torch
 import torch.export._trace
@@ -13,6 +14,7 @@ from torch import _C
 from torch._export.passes.replace_quantized_ops_with_standard_ops_pass import (
     replace_quantized_ops_with_standard_ops,
 )
+from torch.export.dynamic_shapes import _tree_map_with_path, Dim
 from torch.export.exported_program import ExportedProgram
 from torch.export.graph_signature import (
     ConstantArgument,
@@ -71,7 +73,7 @@ def _trace_and_get_graph_from_model(model, args):
 
 def _create_jit_graph(
     model: Union[torch.nn.Module, torch.jit.ScriptFunction], args: Sequence[Any]
-) -> Tuple[torch.Graph, List["_C.IValue"], Any, Optional[torch.ScriptModule]]:
+) -> tuple[torch.Graph, list["_C.IValue"], Any, Optional[torch.ScriptModule]]:
     if isinstance(model, (torch.jit.ScriptFunction, torch.jit.ScriptModule)):
         flattened_args = tuple(torch.jit._flatten(tuple(args))[0])
         torch_out = None
@@ -262,7 +264,7 @@ def construct_fqn(ir, ref_map, name_map):
 
 def get_block_to_lifted_attrs(
     graph: torch._C.Graph,
-) -> Tuple[Dict[torch._C.Block, Set[str]], Dict[str, str]]:
+) -> tuple[dict[torch._C.Block, set[str]], dict[str, str]]:
     """
     Perform two passes to get a mapping of blocks to a set of FQNs of its lifted attributes.
     When a graph has control flow, the graph will be divided into multiple blocks. We want to convert
@@ -279,19 +281,19 @@ def get_block_to_lifted_attrs(
     """
 
     # A map from a block to its expected to be lifted arguments.
-    blocks_to_lifted_attrs: Dict[torch._C.Block, Set[str]] = {}
+    blocks_to_lifted_attrs: dict[torch._C.Block, set[str]] = {}
 
     # Reference map stores the input (i.e., src) and output (i.e., dest) IR of a
     # GetAttr node. By traversing this reference map, we can figure out the
     # full IR aliasing pass and figure out the FQN of an attribute.
     # E.g., %2 = GetAttr(linear)[%1] --> node_to_parent_map["%2"] = "%1"
-    node_to_parent_map: Dict[str, str] = {}
+    node_to_parent_map: dict[str, str] = {}
 
     # Used for reconstructing the FQN of an attribute based on the reference map.
     # In nutshell, for each GetAttr call, GetAttr(input IR, attribute name) -> output IR
     # This name map stores which attribute name is called for a src IR --> dest IR action.
     # E.g., %2 = GetAttr(linear)[%1] --> node_to_attr_name["%2"] = "linear"
-    node_to_attr_name: Dict[str, str] = {}
+    node_to_attr_name: dict[str, str] = {}
 
     def _dfs_get_attr_dependency(entry):
         """
@@ -314,7 +316,7 @@ def get_block_to_lifted_attrs(
         Walk the graph in a bottom-up fashion to build the expected to be
         lifted arguments for each block.
         """
-        arguments: Set[str] = set()
+        arguments: set[str] = set()
         for node in entry.nodes():
             for block in node.blocks():
                 # Recursively build.
@@ -341,7 +343,7 @@ def get_block_to_lifted_attrs(
 
 
 def get_attribute_fqn_from_ts_node(
-    name_to_attribute_fqn: Dict[str, str], node: torch._C.Node
+    name_to_attribute_fqn: dict[str, str], node: torch._C.Node
 ) -> str:
     def get_attr(name: str):
         if name in name_to_attribute_fqn:
@@ -391,12 +393,12 @@ class TS2FXGraphConverter:
     def __init__(
         self,
         ts_graph: Union[torch._C.Graph, torch._C.Block],
-        name_to_param: Dict[str, torch.Tensor],
-        name_to_buffer: Dict[str, torch.Tensor],
-        blocks_to_lifted_attrs: Dict[torch._C.Block, Set[str]],
-        name_to_non_tensor_attribute: Dict[str, Any],
-        name_to_constant: Dict[str, Any],
-        name_to_attribute_fqn: Dict[str, str],
+        name_to_param: dict[str, torch.Tensor],
+        name_to_buffer: dict[str, torch.Tensor],
+        blocks_to_lifted_attrs: dict[torch._C.Block, set[str]],
+        name_to_non_tensor_attribute: dict[str, Any],
+        name_to_constant: dict[str, Any],
+        name_to_attribute_fqn: dict[str, str],
     ):
         self.ts_graph = ts_graph
         # Mapping of parameter FQN to actual parameter value
@@ -405,19 +407,19 @@ class TS2FXGraphConverter:
         self.name_to_buffer = name_to_buffer
 
         self.fx_graph: torch.fx.Graph = torch.fx.Graph()
-        self.input_specs: List[InputSpec] = []
-        self.output_specs: List[OutputSpec] = []
+        self.input_specs: list[InputSpec] = []
+        self.output_specs: list[OutputSpec] = []
 
         # Mapping of TS node name to converted FX node
-        self.name_to_node: Dict[
-            str, Union[torch.fx.Node, List[torch.fx.Node], Dict[Any, torch.fx.Node]]
+        self.name_to_node: dict[
+            str, Union[torch.fx.Node, list[torch.fx.Node], dict[Any, torch.fx.Node]]
         ] = {}
         # Mapping of TS node name to constant value (int, str, TorchBind obj,
         # tensor constants ...)
-        self.name_to_constant: Dict[str, Any] = name_to_constant
+        self.name_to_constant: dict[str, Any] = name_to_constant
 
         # Mapping from torchscript node output name to attribute fully qualified name
-        self.name_to_attribute_fqn: Dict[str, str] = name_to_attribute_fqn
+        self.name_to_attribute_fqn: dict[str, str] = name_to_attribute_fqn
 
         # Mapping from fully qualified name to real values or a fx graph node
         # During convert, this represents the current value of a non-tensor attribute
@@ -427,14 +429,14 @@ class TS2FXGraphConverter:
         #        self.count += 1
         #        c2 = self.count
         #        return x + c1 + c2
-        self.name_to_non_tensor_attribute_node: Dict[str, Any] = {}
+        self.name_to_non_tensor_attribute_node: dict[str, Any] = {}
 
         # Mapping from fully qualified name to initial real values inputs
         # We separate it from self.name_to_non_tensor_attribute_node since
         # we need initial real value input when we construct fx.GraphModule
-        self.name_to_non_tensor_attribute: Dict[str, Any] = name_to_non_tensor_attribute
+        self.name_to_non_tensor_attribute: dict[str, Any] = name_to_non_tensor_attribute
 
-        self.subgraphs: Dict[str, torch.fx.GraphModule] = {}
+        self.subgraphs: dict[str, torch.fx.GraphModule] = {}
 
         # Mapping of block to list of attributes that need to be lifted for each
         # block
@@ -456,7 +458,7 @@ class TS2FXGraphConverter:
         # might have inplace updates to the variable defined in the parent fx graph. After
         # the execution of that sub-block, the variable defined in the parent fx graph also
         # needs to be updated.
-        self.name_update_from_subblock_to_parent: Set[str] = set()
+        self.name_update_from_subblock_to_parent: set[str] = set()
 
     def _is_get_attr_node(self, fqn):
         return (
@@ -468,7 +470,7 @@ class TS2FXGraphConverter:
             )
         )
 
-    def _convert_block_to_subgraph(self, node: torch._C.Node, arguments: List[str]):
+    def _convert_block_to_subgraph(self, node: torch._C.Node, arguments: list[str]):
         subgraph_nodes, subgraph_converters = [], []
         for block in node.blocks():
             subgraph_converter = TS2FXGraphConverter(
@@ -505,7 +507,7 @@ class TS2FXGraphConverter:
                 Block[x.1]
                     %2 = x.1 ...
         """
-        arguments: Set[str] = set()
+        arguments: set[str] = set()
         for block in entry.blocks():
             for block_node in block.nodes():
                 for block_node_in in block_node.inputs():
@@ -1331,12 +1333,12 @@ class ExplainTS2FXGraphConverter(TS2FXGraphConverter):
     def __init__(
         self,
         ts_graph: Union[torch._C.Graph, torch._C.Block],
-        name_to_param: Dict[str, torch.Tensor],
-        name_to_buffer: Dict[str, torch.Tensor],
-        blocks_to_lifted_attrs: Dict[torch._C.Block, Set[str]],
-        name_to_non_tensor_attribute: Dict[str, Any],
-        name_to_constant: Dict[str, Any],
-        name_to_attribute_fqn: Dict[str, str],
+        name_to_param: dict[str, torch.Tensor],
+        name_to_buffer: dict[str, torch.Tensor],
+        blocks_to_lifted_attrs: dict[torch._C.Block, set[str]],
+        name_to_non_tensor_attribute: dict[str, Any],
+        name_to_constant: dict[str, Any],
+        name_to_attribute_fqn: dict[str, str],
     ):
         super().__init__(
             ts_graph,
@@ -1349,7 +1351,7 @@ class ExplainTS2FXGraphConverter(TS2FXGraphConverter):
         )
 
         # Data to keep track of unsupported nodes.
-        self.unsupported_node_list: List[torch._C.Node] = []
+        self.unsupported_node_list: list[torch._C.Node] = []
 
         # Add mock to needed attributes.
         self.name_to_node = ExplainTS2FXGraphConverter._DictMock(
@@ -1393,8 +1395,8 @@ class TS2EPConverter:
     def __init__(
         self,
         ts_model: Union[torch.jit.ScriptModule, torch.jit.ScriptFunction],
-        sample_args: Tuple[Any, ...],
-        sample_kwargs: Optional[Dict[str, Any]] = None,
+        sample_args: tuple[Any, ...],
+        sample_kwargs: Optional[dict[str, Any]] = None,
     ):
         self.ts_model = ts_model
         self.ts_graph, self.params, _, _ = _create_jit_graph(ts_model, sample_args)
@@ -1402,8 +1404,8 @@ class TS2EPConverter:
         self.sample_args = sample_args
         self.sample_kwargs = sample_kwargs
 
-        self.name_to_param: Dict[str, torch.Tensor] = {}
-        self.name_to_buffer: Dict[str, torch.Tensor] = {}
+        self.name_to_param: dict[str, torch.Tensor] = {}
+        self.name_to_buffer: dict[str, torch.Tensor] = {}
         param_list = (
             list(self.ts_model.parameters())
             if not isinstance(self.ts_model, torch._C.ScriptFunction)
@@ -1421,8 +1423,8 @@ class TS2EPConverter:
                 else:
                     self.name_to_buffer[k] = tensor
 
-        self.name_to_non_tensor_attributes: Dict[str, Any] = {}
-        self.name_to_constant: Dict[str, Any] = {}
+        self.name_to_non_tensor_attributes: dict[str, Any] = {}
+        self.name_to_constant: dict[str, Any] = {}
 
         self.lift_get_attr()
 
@@ -1508,12 +1510,20 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
     def retrace_as_exported_program(
         self,
         gm: torch.fx.GraphModule,
-        name_to_constant: Dict[str, Any],
+        name_to_constant: dict[str, Any],
     ):
+        dynamic_shapes = _tree_map_with_path(
+            lambda path, x: (
+                [Dim.AUTO] * x.dim() if isinstance(x, torch.Tensor) else None  # type: ignore[attr-defined]
+            ),
+            self.sample_args,
+        )
+
         # TODO: adjust input orders to match GraphSignature convention
         ep = torch.export._trace._export(
             gm,
             self.sample_args,
+            dynamic_shapes=dynamic_shapes,
             strict=False,
             pre_dispatch=True,
         )
@@ -1539,6 +1549,7 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
                     name_to_constant[spec.target], torch.Tensor
                 ), f"{type(name_to_constant[spec.target])} has been erroneously marked as buffer"
                 spec.kind = InputKind.CONSTANT_TENSOR
+                spec.persistent = None
         ep.verifier().check(ep)
 
         return ep
@@ -1560,7 +1571,7 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
         # TS2FXGraphConverter since it gets attributes from self.ts_model
         # which is not accessable in TS2FXGraphConverter. It is similar to where
         # we collect self.name_to_param and self.name_to_buffer.
-        name_to_attribute_fqn: Dict[str, str] = {}
+        name_to_attribute_fqn: dict[str, str] = {}
 
         def get_attr(fqn: str):
             name = fqn.split(".")

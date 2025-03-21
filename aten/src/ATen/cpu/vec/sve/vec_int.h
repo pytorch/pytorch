@@ -4,8 +4,8 @@
 #include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/sve/sve_helper.h>
 
-namespace at {
-namespace vec {
+
+namespace at::vec {
 // Note [CPU_CAPABILITY namespace]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // This header, and all of its subheaders, will be compiled with
@@ -42,6 +42,15 @@ public:                                                                         
   operator svint##bit##_t() const {                                                                     \
     return values;                                                                                      \
   }                                                                                                     \
+  template <uint64_t mask>                                                                                      \
+  static Vectorized<int##bit##_t> blend(const Vectorized<int##bit##_t>& a, const Vectorized<int##bit##_t>& b) { \
+    __at_align__ int##bit##_t flag_arr[size()];                                                                 \
+    for (int i = 0; i < size(); ++i) {                                                                          \
+      flag_arr[i] = (i < 64 && (mask & (1ULL << i))) ? 1 : 0;                                                   \
+    }                                                                                                           \
+    svbool_t blend_mask = svcmpne_n_s##bit(svptrue_b##bit(), svld1_s##bit(svptrue_b##bit(), flag_arr), 0);      \
+    return Vectorized<int##bit##_t>(svsel_s##bit(blend_mask, b.values, a.values));                              \
+  }                                                                                                             \
   static Vectorized<int##bit##_t> blendv(const Vectorized<int##bit##_t>& a,                             \
                                         const Vectorized<int##bit##_t>& b,                             \
                                         const Vectorized<int##bit##_t>& mask_) {                       \
@@ -407,4 +416,4 @@ Vectorized<int8_t> inline operator>>(const Vectorized<int8_t>& a, const Vectoriz
 
 #endif // defined(CPU_CAPABILITY_SVE)
 
-}}}
+}}

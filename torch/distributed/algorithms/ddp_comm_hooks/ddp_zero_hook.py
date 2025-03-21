@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import weakref
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable, Optional
 
 import torch
 import torch.distributed as dist
@@ -38,20 +38,20 @@ def _perform_local_step(
     """
     overlap_info = zero._overlap_info
     bucket_index = bucket.index()
-    assert (
-        len(zero.optim.param_groups) == 1
-    ), "Overlapping DDP with ZeRO only supports a single parameter group"
+    assert len(zero.optim.param_groups) == 1, (
+        "Overlapping DDP with ZeRO only supports a single parameter group"
+    )
 
     # Construct the `gradients` input for the local optimizer step, which
     # expects `None` in a list position to indicate that the corresponding
     # parameter should not be updated
     num_local_optim_params = len(zero.optim.param_groups[0]["params"])
-    gradients: List[Optional[torch.Tensor]] = [
+    gradients: list[Optional[torch.Tensor]] = [
         _NO_PARAM_UPDATE for _ in range(num_local_optim_params)
     ]
-    assert (
-        bucket_index in overlap_info.offsets
-    ), f"Bucket index {bucket_index} was not assigned to rank {rank}"
+    assert bucket_index in overlap_info.offsets, (
+        f"Bucket index {bucket_index} was not assigned to rank {rank}"
+    )
     gradients_offset = overlap_info.offsets[bucket_index]
     bucket_assignment = zero._bucket_assignments_per_rank[rank][bucket_index]
     bucket_offset = bucket_assignment.offset
@@ -77,13 +77,13 @@ def _broadcast_bucket(
             :class:`ZeroRedundancyOptimizer` instance.
     """
     overlap_info = zero._overlap_info
-    assert (
-        len(overlap_info.assigned_ranks_per_bucket) > bucket_index
-    ), "`assigned_ranks_per_bucket` is not fully constructed"
+    assert len(overlap_info.assigned_ranks_per_bucket) > bucket_index, (
+        "`assigned_ranks_per_bucket` is not fully constructed"
+    )
     # Sort to ensure the same ordering across ranks
     assigned_ranks = sorted(overlap_info.assigned_ranks_per_bucket[bucket_index])
     assert len(assigned_ranks) > 0, (
-        f"Bucket {bucket_index} should be " "assigned to at least one rank"
+        f"Bucket {bucket_index} should be assigned to at least one rank"
     )
     for assigned_rank in assigned_ranks:
         bucket_assignments = zero._bucket_assignments_per_rank[assigned_rank]
@@ -273,9 +273,9 @@ def hook_with_zero_step(
         rank = zero.global_rank
 
         assert overlap_info.status == _OverlapStatus.INITIALIZED
-        assert (
-            len(overlap_info.assigned_ranks_per_bucket) > bucket_index
-        ), "`assigned_ranks_per_bucket` is not fully constructed"
+        assert len(overlap_info.assigned_ranks_per_bucket) > bucket_index, (
+            "`assigned_ranks_per_bucket` is not fully constructed"
+        )
         assigned_to_bucket = (
             rank in overlap_info.assigned_ranks_per_bucket[bucket_index]
         )
@@ -288,9 +288,9 @@ def hook_with_zero_step(
         # Check that buckets are indexed incrementally starting from 0 in the
         # order of their autograd hooks firing
         if len(overlap_info.bucket_indices_seen) > 0:
-            assert (
-                overlap_info.bucket_indices_seen[-1] == bucket_index - 1
-            ), "Bucket indices are not in incremental order"
+            assert overlap_info.bucket_indices_seen[-1] == bucket_index - 1, (
+                "Bucket indices are not in incremental order"
+            )
         else:
             assert bucket_index == 0, "Bucket indices do not start from 0"
         overlap_info.bucket_indices_seen.append(bucket_index)

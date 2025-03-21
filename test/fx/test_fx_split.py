@@ -1,7 +1,6 @@
 # Owner(s): ["module: fx"]
 
 from collections import defaultdict
-from typing import Dict, List, Tuple
 
 import torch
 from torch.fx.passes.split_utils import split_by_tags
@@ -63,8 +62,8 @@ class TestSplitByTags(TestCase):
 
     @staticmethod
     def trace_and_tag(
-        module: torch.nn.Module, tags: List[str]
-    ) -> Tuple[torch.fx.GraphModule, Dict[str, List[str]]]:
+        module: torch.nn.Module, tags: list[str]
+    ) -> tuple[torch.fx.GraphModule, dict[str, list[str]]]:
         """
         Test simple gm consists of nodes with tag (only show call_module nodes here):
             linear1 - tag: "red"
@@ -167,8 +166,8 @@ class TestSplitOutputType(TestCase):
 
     @staticmethod
     def trace_and_tag(
-        module: torch.nn.Module, inputs: torch.Tensor, tags: List[str]
-    ) -> Tuple[torch.fx.GraphModule, Dict[str, List[str]]]:
+        module: torch.nn.Module, inputs: torch.Tensor, tags: list[str]
+    ) -> tuple[torch.fx.GraphModule, dict[str, list[str]]]:
         """
         Test simple gm consists of nodes with tag (only show call_module nodes here):
             conv - tag: "red"
@@ -193,7 +192,9 @@ class TestSplitOutputType(TestCase):
                     relu
         """
         tag_node = defaultdict(list)
-        gm: torch.fx.GraphModule = torch.export.export(module, (inputs,)).module()
+        gm: torch.fx.GraphModule = torch.export.export(
+            module, (inputs,), strict=True
+        ).module()
         # Add tag to all nodes and build dictionary record tag to call_module nodes
         for node in gm.graph.nodes:
             if "conv" in node.name:
@@ -214,10 +215,8 @@ class TestSplitOutputType(TestCase):
 
         inputs = torch.randn((1, 3, 224, 224))
 
-        gm, tag_node = TestSplitOutputType.trace_and_tag(module, inputs, tags)
-        split_gm, orig_to_split_fqn_mapping = split_by_tags(
-            gm, tags, return_fqn_mapping=True
-        )
+        gm, _ = TestSplitOutputType.trace_and_tag(module, inputs, tags)
+        split_gm, _ = split_by_tags(gm, tags, return_fqn_mapping=True)
 
         gm_output = module(inputs)
         split_gm_output = split_gm(inputs)

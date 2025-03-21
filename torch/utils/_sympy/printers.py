@@ -7,6 +7,8 @@ from sympy.printing.str import StrPrinter
 
 
 INDEX_TYPE = "int64_t"
+INDEX_TYPE_MAX = (1 << 63) - 1
+INDEX_TYPE_MIN = -1 << 63
 
 
 # This printer contains rules that are supposed to be generic for both C/C++ and
@@ -44,6 +46,15 @@ class ExprPrinter(StrPrinter):
 
     def _print_Identity(self, expr: sympy.Expr) -> str:
         return self._print(expr.args[0])
+
+    def _print_Float(self, expr: sympy.Expr) -> str:
+        if expr._prec == 53:
+            # IEEE-754 double precision have 53 bits. SymPy prints them with
+            # 15 digits, but we need 17 for round-trip correctness
+            return str(sympy.Float(expr, dps=17))
+        else:
+            # We don't use other precisions in pytorch
+            return str(expr)
 
     # This must be implemented because sympy will collect x * x into Pow(x, 2), without
     # any explicit intervention.  We print it just like x * x, notably, we
@@ -119,7 +130,20 @@ class ExprPrinter(StrPrinter):
 class PythonPrinter(ExprPrinter):
     def _print_ToFloat(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
-        return f"float({self._print(expr.args[0])})"
+        # NB: We use sym_float here because the printer is used for cache
+        # serialization, and cache guards get evaluated with SymInt to
+        # propagate guards to the parent ShapeEnv.  However, this comes at a
+        # runtime cost for guards involving float.  If this is unacceptable
+        # overhead, what you want to do is have two separate printers for
+        # SymInt, one for when the inputs are guaranteed to be int, and
+        # another for when they could be SymInt.
+        #
+        # NB: sym_min/sym_max also have this problem, but I chose not to fix
+        # those.
+        #
+        # See https://github.com/pytorch/pytorch/issues/142507 for more
+        # context.
+        return f"torch.sym_float({self._print(expr.args[0])})"
 
     def _print_And(self, expr: sympy.Expr) -> str:
         return self.stringify(expr.args, " and ", precedence(expr))
@@ -253,9 +277,16 @@ class PythonPrinter(ExprPrinter):
 
 class CppPrinter(ExprPrinter):
     def _print_Integer(self, expr: sympy.Expr) -> str:
-        return (
-            f"{int(expr)}LL" if sys.platform in ["darwin", "win32"] else f"{int(expr)}L"
-        )
+        suffix = "LL" if sys.platform in ["darwin", "win32"] else "L"
+        i = int(expr)
+        if i > INDEX_TYPE_MAX or i < INDEX_TYPE_MIN:
+            raise OverflowError(f"{i} too big to convert to {INDEX_TYPE}")
+        elif i == INDEX_TYPE_MIN:
+            assert i == (-1) << 63
+            # Writing -9223372036854775808L makes the value overflow
+            # as it is parsed as -(9223372036854775808L) by the C/C++ compiler
+            return f"(-1{suffix} << 63)"
+        return f"{i}{suffix}"
 
     def _print_Where(self, expr: sympy.Expr) -> str:
         c, p, q = (
@@ -306,12 +337,11 @@ class CppPrinter(ExprPrinter):
         assert len(expr.args) == 1
         return f"static_cast<double>({self._print(expr.args[0])})"
 
-    # TODO: This is wrong if one of the inputs is negative.  This is hard to
-    # tickle though, as the inputs are typically positive (and if we can prove
-    # they are positive, we will have used Mod instead, for which this codegen
-    # is right).
     def _print_PythonMod(self, expr: sympy.Expr) -> str:
-        return self.stringify(expr.args, " % ", PRECEDENCE["Atom"] - 0.5)
+        x, div = expr.args
+        x = self.doprint(x)
+        div = self.doprint(div)
+        return f"c10::div_mod({x}, {div})"
 
     def _print_IntTrueDiv(self, expr: sympy.Expr) -> str:
         lhs, rhs = expr.args
@@ -457,3 +487,9 @@ class CppPrinter(ExprPrinter):
 
     def _print_BooleanFalse(self, expr: sympy.Expr) -> str:
         return "false"
+
+    def _print_Infinity(self, expr: sympy.Expr) -> str:
+        return "std::numeric_limits<double>::infinity()"
+
+    def _print_NegativeInfinity(self, expr: sympy.Expr) -> str:
+        return f"-{self._print_Infinity(expr)}"

@@ -126,12 +126,12 @@ class CondModels:
             def true_fn(x, y):
                 z1 = x + y
                 z2 = x - y
-                return z1[2:], z2[:, 4:]
+                return z1[2:], z2[:, 4:].contiguous()
 
             def false_fn(x, y):
                 z1 = x - y
                 z2 = x + y
-                return z1[2:], z2[:, 4:]
+                return z1[2:], z2[:, 4:].contiguous()
 
             return torch.cond(p, true_fn, false_fn, [a[:-1], b[:-1]])
 
@@ -182,6 +182,32 @@ class CondModels:
                 return y.sum(0) * 2.71
 
             return torch.cond(a.size(0) > b.size(0), true_fn, false_fn, [a, b])
+
+    class UnbackedSymIntClosure(torch.nn.Module):
+        def forward(self, p, x, y, z):
+            a = y.shape[0]
+            b = z.sum().to(torch.int64).item()
+
+            def true_fn(x):
+                return x + a
+
+            def false_fn(x):
+                return x + b * z
+
+            return torch.cond(x.shape[0] > 5, true_fn, false_fn, (x,))
+
+    class MismatchedOutputSize(torch.nn.Module):
+        def forward(self, p, x, y, z):
+            a = y.shape[0]
+            b = z.shape[0]
+
+            def true_fn(x):
+                return (x + a)[2:].sin()
+
+            def false_fn(x):
+                return (x + b * z)[:2].cos()
+
+            return y.sum() - torch.cond(x.sum() > 0, true_fn, false_fn, (x,))
 
 
 class CondTests(TestCase):
@@ -246,6 +272,22 @@ class CondTests(TestCase):
                 torch.randn(10, 20),
             ),
             device=device,
+        )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [False, True])
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_cond_unbacked_symint_closure(self, device, dynamic):
+        self._run_test(
+            model=CondModels.UnbackedSymIntClosure(),
+            inputs=(
+                torch.randn(10, 20),
+                torch.randn(10, 20),
+                torch.randn(10, 20),
+            ),
+            device=device,
+            dynamic=dynamic,
         )
 
     @requires_gpu
@@ -390,6 +432,7 @@ class CondTests(TestCase):
 
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
+    @torch._inductor.config.patch(size_asserts=False)
     def test_cond_unbacked_symint_inner(self, device):
         class Model(torch.nn.Module):
             def forward(self, p, a):
@@ -613,6 +656,21 @@ class CondTests(TestCase):
         self.assertEqual(counters["pre_grad"], 11)
         self.assertEqual(counters["post_grad"], 11)
 
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [True, False])
+    def test_cond_mismatched_branch_output_size(self, device, dynamic):
+        self._run_test(
+            model=CondModels.MismatchedOutputSize(),
+            inputs={
+                torch.randn(10, 20),
+                torch.randn(10, 20),
+                torch.randn(10, 20),
+            },
+            device=device,
+            dynamic=dynamic,
+        )
+
 
 class WhileLoopModels:
     class Simple(torch.nn.Module):
@@ -761,6 +819,159 @@ class WhileLoopModels:
                 cond_fn,
                 body_fn,
                 [c, a, b],
+            )
+
+    class InfiniteLoop(torch.nn.Module):
+        def forward(self, c, a):
+            a_view = a.view(-1, 1)
+
+            def cond_fn(c, a_view):
+                return a_view.size(-1) > 0
+
+            def body_fn(c, a_view):
+                return c - 1, a_view + 1
+
+            return torch._higher_order_ops.while_loop(
+                cond_fn,
+                body_fn,
+                [c, a_view],
+            )
+
+    class ZeroLoop(torch.nn.Module):
+        def forward(self, c, a):
+            a_view = torch.sin(a.view(-1, 1))
+
+            def cond_fn(c, a_view):
+                return a_view.size(-1) == 0
+
+            def body_fn(c, a_view):
+                return c - 1, a_view + 1
+
+            out1, out2 = torch._higher_order_ops.while_loop(
+                cond_fn,
+                body_fn,
+                [c, a_view],
+            )
+            return out1 + 1, out2 + 2
+
+    class ZeroLoop2(torch.nn.Module):
+        def forward(self, c, a):
+            a_view = torch.sin(a.view(-1, 1))
+
+            def cond_fn(c, a_view):
+                return False
+
+            def body_fn(c, a_view):
+                return c - 1, a_view + 1
+
+            out1, out2 = torch._higher_order_ops.while_loop(
+                cond_fn,
+                body_fn,
+                [c, a_view],
+            )
+            return out1 + 1, out2 + 2
+
+    class ZeroLoop3(torch.nn.Module):
+        def forward(self, c, a):
+            a_view = torch.sin(a.view(-1, 1))
+
+            def cond_fn(c, a_view):
+                return 0
+
+            def body_fn(c, a_view):
+                return c - 1, a_view + 1
+
+            out1, out2 = torch._higher_order_ops.while_loop(
+                cond_fn,
+                body_fn,
+                [c, a_view],
+            )
+            return out1 + 1, out2 + 2
+
+    class UnbackedSymIntClosure(torch.nn.Module):
+        def forward(self, c, a, b):
+            d = a.sum().to(torch.int64).item()
+            e = torch.nonzero(b).size(0)
+
+            def cond_fn(c, a, b):
+                return c > d + e + a.shape[0] - b.shape[0]
+
+            def body_fn(c, a, b):
+                return c - 1, a + e, b + d
+
+            return torch._higher_order_ops.while_loop(
+                cond_fn,
+                body_fn,
+                [c, a, b],
+            )
+
+    class SymExprCond(torch.nn.Module):
+        def forward(self, c, a, b):
+            d = a.sum().to(torch.int64).item()
+            e = torch.nonzero(b).size(0)
+
+            def cond_fn(c, a, b):
+                return d + e + a.shape[0] - b.shape[0] < 10
+
+            def body_fn(c, a, b):
+                return c + 1, a + e, b + d
+
+            return torch._higher_order_ops.while_loop(
+                cond_fn,
+                body_fn,
+                [c, a, b],
+            )
+
+    class MixedDevice(torch.nn.Module):
+        def forward(self, c, a, b):
+            # Force the loop idx on cpu
+            c = c.to(torch.device("cpu"))
+
+            def cond_fn(loop_idx, a, b):
+                return loop_idx < a.shape[0]
+
+            def body_fn(loop_idx, a, b):
+                return loop_idx + 1, a + b, a - b
+
+            return torch._higher_order_ops.while_loop(cond_fn, body_fn, (c, a, b))
+
+    class MixedDevice2(torch.nn.Module):
+        def forward(self, c, a, b):
+            # Force the loop idx on cpu
+            c.to(torch.device("cpu"))
+
+            def cond_fn(loop_idx, a, b):
+                return loop_idx < a.shape[0]
+
+            def body_fn(loop_idx, a, b):
+                return loop_idx + a.sum(), a + b, a - b
+
+            return torch._higher_order_ops.while_loop(cond_fn, body_fn, (c, a, b))
+
+    class Conv(torch.nn.Module):
+        def __init__(self, device):
+            super().__init__()
+            self.conv2d = torch.nn.Conv2d(
+                4,
+                4,
+                (3, 3),
+                stride=(1, 1),
+                padding=(1, 1),
+                device=device,
+                dtype=torch.float64,
+            )
+
+        def forward(self, c, x):
+            def cond_fn(loop_idx, x):
+                return loop_idx < x.size(0)
+
+            def body_fn(loop_idx, x):
+                return loop_idx + 1, self.conv2d(x) + 1
+
+            return torch._higher_order_ops.while_loop(
+                cond_fn,
+                body_fn,
+                (c, x),
             )
 
 
@@ -962,7 +1173,7 @@ class WhileLoopTests(TestCase):
     def test_while_loop_with_data_dependent_in_out_mismatch(self, dynamic):
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            r"while_loop doesn't work unless it is captured completely with torch.compile",
+            "Expected body_fn_output and carried_inputs to have same metadata but found",
         ):
             with torch._dynamo.config.patch(
                 {
@@ -980,6 +1191,108 @@ class WhileLoopTests(TestCase):
                     device="cpu",
                     dynamic=dynamic,
                 )
+
+    def test_while_loop_infinite_loop_error(self):
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "while_loop doesn't work unless it is captured completely",
+        ):
+            self._run_test(
+                model=WhileLoopModels.InfiniteLoop(),
+                inputs=(torch.tensor([1, 2, 3, 4, 5]),),
+                device="cpu",
+                dynamic=False,
+            )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [True, False])
+    def test_while_loop_zero_loop(self, device, dynamic):
+        for model in [
+            WhileLoopModels.ZeroLoop(),
+            WhileLoopModels.ZeroLoop2(),
+            WhileLoopModels.ZeroLoop3(),
+        ]:
+            self._run_test(
+                model=model,
+                inputs=(torch.tensor([1, 2, 3, 4, 5]),),
+                device=device,
+                dynamic=dynamic,
+            )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [True, False])
+    @torch._dynamo.config.patch(
+        {"capture_scalar_outputs": True, "capture_dynamic_output_shape_ops": True}
+    )
+    def test_while_loop_with_unbacked_symint_closure(self, device, dynamic):
+        self._run_test(
+            model=WhileLoopModels.UnbackedSymIntClosure(),
+            inputs=(
+                torch.randn(10, 20),
+                torch.randn(10, 20),
+            ),
+            device=device,
+            dynamic=dynamic,
+        )
+
+    @requires_gpu
+    @parametrize("device", [GPU_TYPE])
+    def test_while_loop_models_with_mixed_device(self, device):
+        self._run_test(
+            model=WhileLoopModels.MixedDevice(),
+            inputs=(
+                torch.randn(10, 20),
+                torch.randn(10, 20),
+            ),
+            device=device,
+            dynamic=True,
+        )
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "Expected body_fn_output and carried_inputs to have same metadata but found",
+        ):
+            # Error at front end because device are promoted to a different one
+            # after the first iteration
+            self._run_test(
+                model=WhileLoopModels.MixedDevice2(),
+                inputs=(
+                    torch.randn(10, 20),
+                    torch.randn(10, 20),
+                ),
+                device=device,
+                dynamic=True,
+            )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [True, False])
+    @torch._dynamo.config.patch(
+        {"capture_scalar_outputs": True, "capture_dynamic_output_shape_ops": True}
+    )
+    def test_while_loop_with_sym_expr_cond(self, device, dynamic):
+        self._run_test(
+            model=WhileLoopModels.SymExprCond(),
+            inputs=(
+                torch.randn(10, 20),
+                torch.randn(10, 20),
+            ),
+            device=device,
+            dynamic=dynamic,
+        )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [True, False])
+    def test_while_loop_with_conv(self, device, dynamic):
+        self._run_test(
+            model=WhileLoopModels.Conv(device),
+            inputs=(torch.randn(2, 4, 4, 4, dtype=torch.float64),),
+            device=device,
+            dynamic=dynamic,
+        )
 
 
 class AssociativeScanTests(TestCase):

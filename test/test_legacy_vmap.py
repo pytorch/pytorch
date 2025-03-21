@@ -1,4 +1,5 @@
 # Owner(s): ["module: vmap"]
+# ruff: noqa: F841
 
 import functools
 import itertools

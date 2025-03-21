@@ -6,7 +6,7 @@ import itertools
 import os
 import re
 from pathlib import Path
-from typing import Any, List, Tuple
+from typing import Any
 
 
 # We also check that there are [not] cxx11 symbols in libtorch
@@ -46,17 +46,17 @@ LIBTORCH_PRE_CXX11_PATTERNS = _apply_libtorch_symbols(PRE_CXX11_SYMBOLS)
 
 
 @functools.lru_cache(100)
-def get_symbols(lib: str) -> List[Tuple[str, str, str]]:
+def get_symbols(lib: str) -> list[tuple[str, str, str]]:
     from subprocess import check_output
 
     lines = check_output(f'nm "{lib}"|c++filt', shell=True)
     return [x.split(" ", 2) for x in lines.decode("latin1").split("\n")[:-1]]
 
 
-def grep_symbols(lib: str, patterns: List[Any]) -> List[str]:
+def grep_symbols(lib: str, patterns: list[Any]) -> list[str]:
     def _grep_symbols(
-        symbols: List[Tuple[str, str, str]], patterns: List[Any]
-    ) -> List[str]:
+        symbols: list[tuple[str, str, str]], patterns: list[Any]
+    ) -> list[str]:
         rc = []
         for _s_addr, _s_type, s_name in symbols:
             for pattern in patterns:
@@ -121,9 +121,9 @@ def main() -> None:
         else:
             install_root = Path(distutils.sysconfig.get_python_lib()) / "torch"
 
-    libtorch_cpu_path = install_root / "lib" / "libtorch_cpu.so"
-    pre_cxx11_abi = "cxx11-abi" not in os.getenv("DESIRED_DEVTOOLSET", "")
-    check_lib_symbols_for_abi_correctness(libtorch_cpu_path, pre_cxx11_abi)
+    libtorch_cpu_path = str(install_root / "lib" / "libtorch_cpu.so")
+    # NOTE: All binaries are built with cxx11abi now
+    check_lib_symbols_for_abi_correctness(libtorch_cpu_path, False)
 
 
 if __name__ == "__main__":

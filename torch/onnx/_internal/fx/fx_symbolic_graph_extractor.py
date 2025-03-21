@@ -2,13 +2,17 @@
 from __future__ import annotations
 
 import functools
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, TYPE_CHECKING
 
 import torch
 import torch.fx
 import torch.onnx
 import torch.onnx._internal.fx.passes as passes
 from torch.onnx._internal import _exporter_legacy, io_adapter
+
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
 
 
 # Functions directly wrapped to produce torch.fx.Proxy so that symbolic
@@ -149,7 +153,10 @@ class FXSymbolicTracer(_exporter_legacy.FXGraphExtractor):
                     return out
 
 
-                f = fx.symbolic_trace(f, concrete_args={"x": {"a": fx.PH, "b": fx.PH, "c": fx.PH}})
+                f = fx.symbolic_trace(
+                    f,
+                    concrete_args={"x": {"a": fx.PH, "b": fx.PH, "c": fx.PH}},
+                )
                 assert f({"a": 1, "b": 2, "c": 4}) == 7
     """
 

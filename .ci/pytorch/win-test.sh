@@ -18,6 +18,9 @@ export PYTORCH_FINAL_PACKAGE_DIR="${PYTORCH_FINAL_PACKAGE_DIR:-/c/w/build-result
 PYTORCH_FINAL_PACKAGE_DIR_WIN=$(cygpath -w "${PYTORCH_FINAL_PACKAGE_DIR}")
 export PYTORCH_FINAL_PACKAGE_DIR_WIN
 
+# enable debug asserts in serialization
+export TORCH_SERIALIZATION_DEBUG=1
+
 mkdir -p "$TMP_DIR"/build/torch
 
 export SCRIPT_HELPERS_DIR=$SCRIPT_PARENT_DIR/win-test-helpers

@@ -8,23 +8,24 @@ Hardware Prerequisite
    :widths: 50 50
    :header-rows: 1
 
-   * - Validated Hardware
-     - Supported OS
-   * - Intel® Data Center GPU Max Series
-     - Linux
-   * - Intel Client GPU
-     - Windows/Linux
+   * - Supported OS
+     - Validated Hardware
+   * - Linux
+     - Intel® Client GPUs / Intel® Data Center GPU Max Series
+   * - Windows
+     - Intel® Client GPUs
+   * - WSL2 (experimental feature)
+     - Intel® Client GPUs
 
-Intel GPUs support (Prototype) is ready in PyTorch* 2.5 for Intel® Data Center GPU Max Series and Intel® Client GPUs on both Linux and Windows, which brings Intel GPUs and the SYCL* software stack into the official PyTorch stack with consistent user experience to embrace more AI application scenarios.
+Intel GPUs support (Prototype) is ready in PyTorch* 2.6 for Intel® Client GPUs and Intel® Data Center GPU Max Series on both Linux and Windows, which brings Intel GPUs and the SYCL* software stack into the official PyTorch stack with consistent user experience to embrace more AI application scenarios.
 
 Software Prerequisite
 ---------------------
 
-Visit `PyTorch Installation Prerequisites for Intel GPUs <https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpus.html>`_ for more detailed information regarding:
+To use PyTorch on Intel GPUs, you need to install the Intel GPUs driver first. For installation guide, visit `Intel GPUs Driver Installation <https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu/2-6.html#driver-installation>`_.
 
-#. Intel GPU driver installation
-#. Intel support package installation
-#. Environment setup
+Please skip the Intel® Deep Learning Essentials installation section if you install from binaries. For building from source, please refer to  `PyTorch Installation Prerequisites for Intel GPUs <https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu/2-6.html>`_ for both Intel GPU Driver and Intel® Deep Learning Essentials Installation.
+
 
 Installation
 ------------
@@ -32,17 +33,13 @@ Installation
 Binaries
 ^^^^^^^^
 
-Platform Linux
-""""""""""""""
+Now that we have `Intel GPU Driver <https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu/2-6.html#driver-installation>`_ installed, use the following commands to install ``pytorch``, ``torchvision``, ``torchaudio`` on Linux.
 
-
-Now we have all the required packages installed and environment activated. Use the following commands to install ``pytorch``, ``torchvision``, ``torchaudio`` on Linux.
-
-For preview wheels
+For release wheels
 
 .. code-block::
 
-    pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/test/xpu
+    pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/xpu
 
 For nightly wheels
 
@@ -50,25 +47,12 @@ For nightly wheels
 
     pip3 install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/xpu
 
-Platform Windows
-""""""""""""""""
 
-Now we have all the required packages installed and environment activated. Use the following commands to install ``pytorch`` on Windows, build from source for ``torchvision`` and ``torchaudio``.
-
-For preview wheels
-
-.. code-block::
-
-    pip3 install torch --index-url https://download.pytorch.org/whl/test/xpu
-
-For nightly wheels
-
-.. code-block::
-
-    pip3 install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/xpu
 
 From Source
 ^^^^^^^^^^^
+
+Now that we have `Intel GPU Driver and Intel® Deep Learning Essentials <https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu/2-6.html>`_ installed. Follow guides to build ``pytorch``, ``torchvision``, ``torchaudio`` from source.
 
 Build from source for ``torch`` refer to `PyTorch Installation Build from source <https://github.com/pytorch/pytorch?tab=readme-ov-file#from-source>`_.
 
@@ -86,11 +70,7 @@ To check if your Intel GPU is available, you would typically use the following c
    import torch
    torch.xpu.is_available()  # torch.xpu is the API for Intel GPU support
 
-If the output is ``False``, double check following steps below.
-
-#. Intel GPU driver installation
-#. Intel support package installation
-#. Environment setup
+If the output is ``False``, double check driver installation for Intel GPUs.
 
 Minimum Code Change
 -------------------
@@ -183,22 +163,22 @@ Inference with ``torch.compile``
    model = model.to("xpu")
    data = data.to("xpu")
 
-    for i in range(ITERS):
-        start = time.time()
-        with torch.no_grad():
-            model(data)
-            torch.xpu.synchronize()
-        end = time.time()
-        print(f"Inference time before torch.compile for iteration {i}: {(end-start)*1000} ms")
+   for i in range(ITERS):
+       start = time.time()
+       with torch.no_grad():
+           model(data)
+           torch.xpu.synchronize()
+       end = time.time()
+       print(f"Inference time before torch.compile for iteration {i}: {(end-start)*1000} ms")
 
-    model = torch.compile(model)
-    for i in range(ITERS):
-        start = time.time()
-        with torch.no_grad():
-            model(data)
-            torch.xpu.synchronize()
-        end = time.time()
-        print(f"Inference time after torch.compile for iteration {i}: {(end-start)*1000} ms")
+   model = torch.compile(model)
+   for i in range(ITERS):
+       start = time.time()
+       with torch.no_grad():
+           model(data)
+           torch.xpu.synchronize()
+       end = time.time()
+       print(f"Inference time after torch.compile for iteration {i}: {(end-start)*1000} ms")
 
    print("Execution finished")
 
@@ -267,6 +247,8 @@ Train with FP32
 Train with AMP
 """"""""""""""
 
+Note: Training with ``GradScaler`` requires hardware support for ``FP64``. ``FP64`` is not natively supported by the Intel® Arc™ A-Series Graphics. If you run your workloads on Intel® Arc™ A-Series Graphics, please disable ``GradScaler``.
+
 .. code-block::
 
    import torch
@@ -297,7 +279,7 @@ Train with AMP
    model = torchvision.models.resnet50()
    criterion = torch.nn.CrossEntropyLoss()
    optimizer = torch.optim.SGD(model.parameters(), lr=LR, momentum=0.9)
-   scaler = torch.amp.GradScaler(enabled=use_amp)
+   scaler = torch.amp.GradScaler(device="xpu", enabled=use_amp)
 
    model.train()
    model = model.to("xpu")

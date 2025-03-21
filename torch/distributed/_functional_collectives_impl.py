@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import List, Optional
+from typing import Optional
 
 import torch
 import torch.distributed.distributed_c10d as c10d
@@ -60,7 +60,7 @@ def _reduce_scatter_tensor(
     input: torch.Tensor,
     reduce_op: str,
     tag: str,
-    ranks: List[int],
+    ranks: list[int],
     group_size: int,
 ):
     group_name = c10d._resolve_group_name_by_ranks_and_tag(ranks, tag)
@@ -73,10 +73,10 @@ def _reduce_scatter_tensor(
 
 
 def _reduce_scatter_tensor_coalesced(
-    inputs: List[torch.Tensor],
+    inputs: list[torch.Tensor],
     reduce_op: str,
     tag: str,
-    ranks: List[int],
+    ranks: list[int],
     group_size: int,
 ):
     group_name = c10d._resolve_group_name_by_ranks_and_tag(ranks, tag)
@@ -90,10 +90,10 @@ def _reduce_scatter_tensor_coalesced(
 
 def _all_to_all_single(
     input: torch.Tensor,
-    output_split_sizes: Optional[List[int]],
-    input_split_sizes: Optional[List[int]],
+    output_split_sizes: Optional[list[int]],
+    input_split_sizes: Optional[list[int]],
     tag: str,
-    ranks: List[int],
+    ranks: list[int],
     group_size: int,
 ):
     if output_split_sizes is None or input_split_sizes is None:

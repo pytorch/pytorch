@@ -225,8 +225,8 @@ class MultiKernelTest(TestCase):
         y = torch.randn(8, device=GPU_TYPE)
         y_ref = y.clone()
 
-        ref = f(x, y_ref)
-        act = torch.compile(f)(x, y)
+        ref = f(x, y_ref)  # noqa: F841
+        act = torch.compile(f)(x, y)  # noqa: F841
         self.assertEqual(y_ref, y)
 
     def test_reduction_scratch_buffer(self, force_multi_kernel=1):

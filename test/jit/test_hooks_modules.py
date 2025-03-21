@@ -88,7 +88,7 @@ class SubmoduleForwardTupleInput(torch.nn.Module):
         self.name = name
 
     def forward(self, input: Tuple[int]):
-        input_access = input[0]
+        input_access = input[0]  # noqa: F841
         return (1,)
 
 
@@ -99,7 +99,7 @@ class ModuleForwardTupleInput(torch.nn.Module):
         self.submodule = SubmoduleForwardTupleInput(submodule_name)
 
     def forward(self, input: Tuple[int]):
-        input_access = input[0]
+        input_access = input[0]  # noqa: F841
         return self.submodule((1,))
 
 

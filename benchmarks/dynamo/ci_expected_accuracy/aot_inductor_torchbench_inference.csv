@@ -150,6 +150,10 @@ hf_GPT2_large,pass_due_to_skip,0
 
 
 
+hf_Roberta_base,pass,0
+
+
+
 hf_T5,pass,0
 
 
@@ -191,6 +195,10 @@ maml,pass_due_to_skip,0
 
 
 maml_omniglot,pass,0
+
+
+
+microbench_unbacked_tolist_sum,fail_to_run,0
 
 
 
@@ -334,7 +342,7 @@ torch_multimodal_clip,pass,0
 
 
 
-tts_angular,fail_to_run,0
+tts_angular,pass,0
 
 
 
@@ -346,4 +354,4 @@ vision_maskrcnn,fail_to_run,0
 
 
 
-yolov3,fail_to_run,0
+yolov3,pass,0

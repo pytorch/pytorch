@@ -104,7 +104,6 @@ class TensorCreationOpsModule(torch.nn.Module):
 
     def tensor_creation_ops(self):
         i = torch.tensor([[0, 1, 1], [2, 0, 2]])
-        v = torch.tensor([3, 4, 5], dtype=torch.float32)
         real = torch.tensor([1, 2], dtype=torch.float32)
         imag = torch.tensor([3, 4], dtype=torch.float32)
         inp = torch.tensor([-1.5, 0.0, 2.0])

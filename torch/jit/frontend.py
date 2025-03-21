@@ -1,13 +1,12 @@
 # mypy: allow-untyped-defs
 import ast
+import copy
 import dataclasses
 import inspect
 import re
 import string
-import sys
 from collections import namedtuple
 from textwrap import dedent
-from typing import List, Tuple  # noqa: F401
 
 import torch
 import torch.jit.annotations
@@ -552,7 +551,7 @@ def build_ignore_context_manager(ctx, stmt):
             return_type_ann = " -> " + outputs[0].ann
             return_statement_str += outputs[0].name
         if len(outputs) > 1:
-            return_type_ann = " -> Tuple"
+            return_type_ann = " -> tuple"
             return_type_ann += "[" + ", ".join([var.ann for var in outputs]) + "]"
             return_statement_str += ", ".join([var.name for var in outputs])
         return return_type_ann, return_statement_str
@@ -582,10 +581,18 @@ def build_ignore_context_manager(ctx, stmt):
     return_stmt = ast.parse(return_stmt).body[0]
     ignore_function.body.append(return_stmt)  # type: ignore[attr-defined]
 
+    ignore_func_str = f"""\
+# Backward compat: These used to be imported into the outer global scope so some
+# code may still expect them.
+from typing import List, Dict, Tuple
+
+@torch.jit.ignore
+{astunparse.unparse(ignore_function)}
+"""
+    g = copy.copy(globals())
+    exec(ignore_func_str, g)  # noqa: P204
     # registers the custom function in the global context
-    ignore_func_str = "@torch.jit.ignore\n" + astunparse.unparse(ignore_function)
-    ignore_func_str += f'\nglobals()["{ignore_function_name}"] = {ignore_function_name}'
-    exec(ignore_func_str)  # noqa: P204
+    globals()[ignore_function_name] = g[ignore_function_name]
 
     # build the statements as:
     # <out_1>, <out_2>, ... = torch.jit.frontend.<func>(<in_1>, <in_2>)
@@ -1128,10 +1135,7 @@ class ExprBuilder(Builder):
             return Subscript(base, [build_SliceExpr(ctx, base, expr.slice)])
         elif sub_type is ast.ExtSlice:
             return Subscript(base, build_ExtSlice(ctx, base, expr.slice))
-        elif sys.version_info >= (
-            3,
-            9,
-        ):  # In Python3.9 array indicies are not wrapped in ast.Index
+        else:  # In Python3.9 array indicies are not wrapped in ast.Index
             if sub_type is ast.Tuple:
                 # N-dimensional indexing using Tuple: x[(i, j, k)] is equivalent to x[i, j, k]
                 indices = []
@@ -1150,8 +1154,6 @@ class ExprBuilder(Builder):
                     indices.append(tup)
                 return Subscript(base, indices)
             return Subscript(base, [build_expr(ctx, expr.slice)])
-        else:  # Ellipsis (can only happen in Python 2)
-            raise NotSupportedError(base.range(), "ellipsis is not supported")
 
     @staticmethod
     def build_List(ctx, expr):

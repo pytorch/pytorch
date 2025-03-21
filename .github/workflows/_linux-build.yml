@@ -69,13 +69,11 @@ on:
         required: false
         type: string
         default: ""
-      use_split_build:
+      max-jobs:
         description: |
-          [Experimental] Build a libtorch only wheel and build pytorch such that
-          are built from the libtorch wheel.
+          Overwrite the number of jobs to use for the build
         required: false
-        type: boolean
-        default: false
+        type: string
 
     secrets:
       HUGGING_FACE_HUB_TOKEN:
@@ -197,9 +195,9 @@ jobs:
           AWS_DEFAULT_REGION: us-east-1
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+          # Do not set SCCACHE_S3_KEY_PREFIX to share the cache between all build jobs
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
           SCCACHE_REGION: us-east-1
-          SCCACHE_S3_KEY_PREFIX: ${{ github.workflow }}
           XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
           PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
           TORCH_CUDA_ARCH_LIST: ${{ inputs.cuda-arch-list }}
@@ -210,12 +208,16 @@ jobs:
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
           SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
-          USE_SPLIT_BUILD: ${{ inputs.use_split_build }}
+          MAX_JOBS_OVERRIDE: ${{ inputs.max-jobs }}
         run: |
           START_TIME=$(date +%s)
           if [[ ${BUILD_ENVIRONMENT} == *"s390x"* ]]; then
             JENKINS_USER=
             USED_IMAGE="${DOCKER_IMAGE_S390X}"
+            # ensure that docker container cleanly exits in 12 hours
+            # if for some reason cleanup action doesn't stop container
+            # when job is cancelled
+            DOCKER_SHELL_CMD="sleep 12h"
 
             # since some steps are skipped on s390x, if they are necessary, run them here
             env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
@@ -223,26 +225,34 @@ jobs:
           else
             JENKINS_USER="--user jenkins"
             USED_IMAGE="${DOCKER_IMAGE}"
+            DOCKER_SHELL_CMD=
+          fi
+
+          if [[ ${MAX_JOBS_OVERRIDE} == "" ]]; then
+            MAX_JOBS="$(nproc --ignore=2)"
+          else
+            MAX_JOBS="${MAX_JOBS_OVERRIDE}"
           fi
 
           # Leaving 1GB for the runner and other things
           TOTAL_AVAILABLE_MEMORY_IN_GB=$(awk '/MemTotal/ { printf "%.3f \n", $2/1024/1024 - 1 }' /proc/meminfo)
-          # https://docs.docker.com/engine/containers/resource_constraints/#--memory-swap-details
-          TOTAL_MEMORY_WITH_SWAP=$(("${TOTAL_AVAILABLE_MEMORY_IN_GB%.*}" * 2))
+          # https://docs.docker.com/engine/containers/resource_constraints/#--memory-swap-details, the 3GB swap
+          # comes from https://github.com/pytorch/test-infra/pull/6058
+          TOTAL_MEMORY_WITH_SWAP=$(("${TOTAL_AVAILABLE_MEMORY_IN_GB%.*}" + 3))
 
           # detached container should get cleaned up by teardown_ec2_linux
-          # Used for JENKINS_USER, which can be empty
+          # Used for JENKINS_USER and DOCKER_SHELL_CMD, which can be empty
           # shellcheck disable=SC2086
           container_name=$(docker run \
             -e BUILD_ENVIRONMENT \
-            -e MAX_JOBS="$(nproc --ignore=2)" \
+            -e MAX_JOBS=${MAX_JOBS} \
+            -e MAX_JOBS_OVERRIDE \
             -e AWS_DEFAULT_REGION \
             -e PR_NUMBER \
             -e SHA1 \
             -e BRANCH \
             -e SCCACHE_BUCKET \
             -e SCCACHE_REGION \
-            -e SCCACHE_S3_KEY_PREFIX \
             -e XLA_CUDA \
             -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
             -e SKIP_SCCACHE_INITIALIZATION=1 \
@@ -262,7 +272,8 @@ jobs:
             ${JENKINS_USER} \
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
-            "${USED_IMAGE}"
+            "${USED_IMAGE}" \
+            ${DOCKER_SHELL_CMD}
           )
           docker exec -t "${container_name}" sh -c '.ci/pytorch/build.sh'
 
@@ -276,19 +287,9 @@ jobs:
 
       - name: Store PyTorch Build Artifacts on S3
         uses: seemethere/upload-artifact-s3@v5
-        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped' && !inputs.use_split_build && inputs.build-environment != 'linux-s390x-binary-manywheel'
+        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped' && inputs.build-environment != 'linux-s390x-binary-manywheel'
         with:
           name: ${{ inputs.build-environment }}
-          retention-days: 14
-          if-no-files-found: error
-          path: artifacts.zip
-          s3-bucket: ${{ inputs.s3-bucket }}
-
-      - name: Store PyTorch Build Artifacts on S3 for split build
-        uses: seemethere/upload-artifact-s3@v5
-        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped' && inputs.use_split_build && inputs.build-environment != 'linux-s390x-binary-manywheel'
-        with:
-          name: ${{ inputs.build-environment }}-experimental-split-build
           retention-days: 14
           if-no-files-found: error
           path: artifacts.zip
@@ -296,18 +297,9 @@ jobs:
 
       - name: Store PyTorch Build Artifacts for s390x
         uses: actions/upload-artifact@v4
-        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped' && !inputs.use_split_build && inputs.build-environment == 'linux-s390x-binary-manywheel'
+        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped' && inputs.build-environment == 'linux-s390x-binary-manywheel'
         with:
           name: ${{ inputs.build-environment }}
-          retention-days: 14
-          if-no-files-found: error
-          path: artifacts.zip
-
-      - name: Store PyTorch Build Artifacts for s390x for split build
-        uses: actions/upload-artifact@v4
-        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped' && inputs.use_split_build && inputs.build-environment == 'linux-s390x-binary-manywheel'
-        with:
-          name: ${{ inputs.build-environment }}-experimental-split-build
           retention-days: 14
           if-no-files-found: error
           path: artifacts.zip
@@ -328,6 +320,5 @@ jobs:
         shell: bash
         run: |
           # on s390x stop the container for clean worker stop
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
+          docker stop -a || true
+          docker kill -a || true

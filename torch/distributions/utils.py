@@ -1,11 +1,13 @@
 # mypy: allow-untyped-defs
 from functools import update_wrapper
-from numbers import Number
-from typing import Any, Dict
+from typing import Any, Callable, Generic, overload, Union
+from typing_extensions import TypeVar
 
 import torch
 import torch.nn.functional as F
+from torch import Tensor
 from torch.overrides import is_tensor_like
+from torch.types import _Number
 
 
 euler_constant = 0.57721566490153286060  # Euler Mascheroni Constant
@@ -26,24 +28,24 @@ def broadcast_all(*values):
     Given a list of values (possibly containing numbers), returns a list where each
     value is broadcasted based on the following rules:
       - `torch.*Tensor` instances are broadcasted as per :ref:`_broadcasting-semantics`.
-      - numbers.Number instances (scalars) are upcast to tensors having
+      - Number instances (scalars) are upcast to tensors having
         the same size and type as the first tensor passed to `values`.  If all the
         values are scalars, then they are upcasted to scalar Tensors.
 
     Args:
-        values (list of `numbers.Number`, `torch.*Tensor` or objects implementing __torch_function__)
+        values (list of `Number`, `torch.*Tensor` or objects implementing __torch_function__)
 
     Raises:
-        ValueError: if any of the values is not a `numbers.Number` instance,
+        ValueError: if any of the values is not a `Number` instance,
             a `torch.*Tensor` instance, or an instance implementing __torch_function__
     """
-    if not all(is_tensor_like(v) or isinstance(v, Number) for v in values):
+    if not all(is_tensor_like(v) or isinstance(v, _Number) for v in values):
         raise ValueError(
-            "Input arguments must all be instances of numbers.Number, "
+            "Input arguments must all be instances of Number, "
             "torch.Tensor or objects implementing __torch_function__."
         )
     if not all(is_tensor_like(v) for v in values):
-        options: Dict[str, Any] = dict(dtype=torch.get_default_dtype())
+        options: dict[str, Any] = dict(dtype=torch.get_default_dtype())
         for value in values:
             if isinstance(value, torch.Tensor):
                 options = dict(dtype=value.dtype, device=value.device)
@@ -130,7 +132,11 @@ def probs_to_logits(probs, is_binary=False):
     return torch.log(ps_clamped)
 
 
-class lazy_property:
+T = TypeVar("T", contravariant=True)
+R = TypeVar("R", covariant=True)
+
+
+class lazy_property(Generic[T, R]):
     r"""
     Used as a decorator for lazy loading of class attributes. This uses a
     non-data descriptor that calls the wrapped method to compute the property on
@@ -138,11 +144,21 @@ class lazy_property:
     attribute.
     """
 
-    def __init__(self, wrapped):
-        self.wrapped = wrapped
+    def __init__(self, wrapped: Callable[[T], R]) -> None:
+        self.wrapped: Callable[[T], R] = wrapped
         update_wrapper(self, wrapped)  # type:ignore[arg-type]
 
-    def __get__(self, instance, obj_type=None):
+    @overload
+    def __get__(
+        self, instance: None, obj_type: Any = None
+    ) -> "_lazy_property_and_property[T, R]": ...
+
+    @overload
+    def __get__(self, instance: T, obj_type: Any = None) -> R: ...
+
+    def __get__(
+        self, instance: Union[T, None], obj_type: Any = None
+    ) -> "R | _lazy_property_and_property[T, R]":
         if instance is None:
             return _lazy_property_and_property(self.wrapped)
         with torch.enable_grad():
@@ -151,32 +167,32 @@ class lazy_property:
         return value
 
 
-class _lazy_property_and_property(lazy_property, property):
+class _lazy_property_and_property(lazy_property[T, R], property):
     """We want lazy properties to look like multiple things.
 
     * property when Sphinx autodoc looks
     * lazy_property when Distribution validate_args looks
     """
 
-    def __init__(self, wrapped):
+    def __init__(self, wrapped: Callable[[T], R]) -> None:
         property.__init__(self, wrapped)
 
 
-def tril_matrix_to_vec(mat: torch.Tensor, diag: int = 0) -> torch.Tensor:
+def tril_matrix_to_vec(mat: Tensor, diag: int = 0) -> Tensor:
     r"""
     Convert a `D x D` matrix or a batch of matrices into a (batched) vector
     which comprises of lower triangular elements from the matrix in row order.
     """
     n = mat.shape[-1]
     if not torch._C._get_tracing_state() and (diag < -n or diag >= n):
-        raise ValueError(f"diag ({diag}) provided is outside [{-n}, {n-1}].")
+        raise ValueError(f"diag ({diag}) provided is outside [{-n}, {n - 1}].")
     arange = torch.arange(n, device=mat.device)
     tril_mask = arange < arange.view(-1, 1) + (diag + 1)
     vec = mat[..., tril_mask]
     return vec
 
 
-def vec_to_tril_matrix(vec: torch.Tensor, diag: int = 0) -> torch.Tensor:
+def vec_to_tril_matrix(vec: Tensor, diag: int = 0) -> Tensor:
     r"""
     Convert a vector or a batch of vectors into a batched `D x D`
     lower triangular matrix containing elements from the vector in row order.

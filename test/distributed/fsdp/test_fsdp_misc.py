@@ -8,7 +8,7 @@ from collections import namedtuple
 from contextlib import nullcontext
 from copy import deepcopy
 from itertools import chain
-from typing import Any, Tuple
+from typing import Any
 
 import torch
 import torch.distributed as dist
@@ -945,7 +945,7 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
             self._test_homogeneous_attributes,
         )
 
-    def _test_homogeneous_attributes(self, attr_name_and_values: Tuple[str, Any, Any]):
+    def _test_homogeneous_attributes(self, attr_name_and_values: tuple[str, Any, Any]):
         model = NestedWrappedModule.init(
             self.process_group,
             FSDPInitMode.NO_FSDP,

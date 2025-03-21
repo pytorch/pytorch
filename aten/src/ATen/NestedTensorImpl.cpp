@@ -71,7 +71,7 @@ c10::DispatchKeySet get_view_key_set(const at::Tensor& base) {
 
 namespace at::native {
 
-inline std::vector<int64_t> construct_opt_sizes(const at::Tensor& sizes) {
+inline static std::vector<int64_t> construct_opt_sizes(const at::Tensor& sizes) {
   // torch.tensor([]) is considered to have `dim() = 1` and `size(0) = 0`
   // torch.nested_tensor([]) should also has `dim() = 1` and `size(0) = 0`
   if (sizes.dim() == 0) {

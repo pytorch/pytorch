@@ -33,36 +33,60 @@ std::deque<
 
 thread_local std::unique_ptr<StreamId[]> current_streams = nullptr;
 
-// Note [StreamId assignment]
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~
-// How do we assign stream IDs?
-//
-// -- 56 bits --  -- 5 bits -----  -- 3 bits --  -- 1 bits --
-//     zeros      StreamIdIndex    StreamIdType  Ext/native stream
-//
-// Where StreamIdType:
-//  000 = normal priority queue
-//  001 = high priority queue
-//
-// for external stream, StreamID is a sycl::queue* pointer
-// this means that last bit will always be 0
-// so when constructing StreamId for a native stream we set last bit to 1
-// to distinguish between native and external streams
-//
-// StreamId is 64-bit, so we can just rely on regular promotion rules.
-// We rely on StreamIdIndex and StreamIdType being non-negative;
+/*
+ * Note [StreamId assignment]
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~
+ * How do we assign stream IDs?
+ *
+ * -- 55 bits --    -- 5 bits --     -- 3 bits --     -- 1 bit --
+ *     zeros       StreamIdIndex     StreamIdType    Ext/native stream
+ *                ignored for ext   ignored for ext
+ *
+ * Where StreamIdType:
+ *  000 = low priority queue
+ *  001 = normal priority queue
+ *  010 = high priority queue
+ *  111 = external queue
+ *
+ * For external stream, StreamID is a sycl::queue* pointer. This means that last
+ * bit will always be 0. So when constructing StreamId for a native stream we
+ * set last bit to 1 to distinguish between native and external streams. For
+ * more details, see Note [External XPU Stream].
+ *
+ * StreamId is 64-bit, so we can just rely on regular promotion rules.
+ * We rely on StreamIdIndex and StreamIdType being non-negative;
+ */
+
+/*
+ * Note [XPU Stream priorities]
+ * XPU stream priority levels are defined based on the following design
+ * principles:
+ *   1. Higher priority number indicates lower priority.
+ *   2. The default priority, `normal`, corresponds to a priority number of 0.
+ *   3. StreamIdType and priority number are inversely related.
+ *
+ * This relationship can be summarized as follows:
+ * -- priority type --    -- priority number --    -- type number --
+ *        low                     1                       0
+ *       normal                   0                       1
+ *        high                   -1                       2
+ */
 
 using StreamIdIndex = uint8_t;
 enum class StreamIdType : uint8_t {
-  // The higher the type number, the higher the priority.
-  // EXT is used for external streams, which we don't know the priority of.
-  NORMAL = 0x0,
-  HIGH = 0X1,
+  // The higher the type number, the higher the priority for the native stream.
+  LOW = 0x0,
+  NORMAL = 0x1,
+  HIGH = 0x2,
+  // For an external stream, the last bit of StreamId is 0, whose priority is
+  // queried at runtime.
   EXT = 0x7,
 };
 
 inline std::ostream& operator<<(std::ostream& stream, StreamIdType q) {
   switch (q) {
+    case StreamIdType::LOW:
+      return stream << "LOW";
     case StreamIdType::NORMAL:
       return stream << "NORMAL";
     case StreamIdType::HIGH:
@@ -76,15 +100,16 @@ inline std::ostream& operator<<(std::ostream& stream, StreamIdType q) {
 }
 
 inline StreamIdType streamIdType(StreamId s) {
-  // Externally allocated streams have their id being the sycl:queue* pointer
-  // so the last bit will be 0
-  if ((!(s & 1) && s)) {
+  // Externally allocated streams have their id being the sycl:queue* pointer.
+  // So the last bit will be 0.
+  if ((!(s & 1))) {
     return StreamIdType(StreamIdType::EXT);
   }
   int mask_for_type = (1 << kStreamTypeBits) - 1;
   auto st = static_cast<StreamIdType>((s >> 1) & mask_for_type);
   TORCH_CHECK(
-      st == StreamIdType::NORMAL || st == StreamIdType::HIGH,
+      st == StreamIdType::NORMAL || st == StreamIdType::HIGH ||
+          st == StreamIdType::LOW,
       "invalid StreamId: ",
       s);
   return st;
@@ -113,8 +138,12 @@ void initDeviceStreamState(DeviceIndex device) {
   using namespace sycl::ext::oneapi::property;
   // Need to align with StreamIdType.
   const std::vector<sycl::property_list> properties = {
+      {sycl::property::queue::in_order(), queue::priority_low()},
       {sycl::property::queue::in_order(), queue::priority_normal()},
       {sycl::property::queue::in_order(), queue::priority_high()}};
+  TORCH_CHECK(
+      properties.size() == max_compile_time_stream_priorities,
+      "The number of stream priorities should be equal to max_compile_time_stream_priorities");
   for (const auto p : c10::irange(max_compile_time_stream_priorities)) {
     for (const auto i : c10::irange(kStreamsPerPool)) {
       auto& stream = streams[device][p][i];
@@ -180,16 +209,22 @@ XPUStream XPUStreamForId(DeviceIndex device_index, StreamId stream_id) {
 int XPUStream::priority() const {
   StreamId stream_id = stream_.id();
   StreamIdType st = streamIdType(stream_id);
-  // For an external queue which is not created in XPUStream, we can not trace
-  // the priority. Workaround here since sycl doesn't support get priority from
-  // a sycl::queue, like cudaStreamGetPriority .
-  // TODO: remove this workaround when sycl supports get priority from a
-  // sycl::queue.
-  if (st == StreamIdType::EXT) {
-    st = StreamIdType::NORMAL;
+  if (C10_UNLIKELY(st == StreamIdType::EXT)) {
+    // Query external stream priority
+    using namespace sycl::ext::oneapi::property;
+    if (queue().has_property<queue::priority_normal>()) {
+      st = StreamIdType::NORMAL;
+    } else if (queue().has_property<queue::priority_high>()) {
+      st = StreamIdType::HIGH;
+    } else if (queue().has_property<queue::priority_low>()) {
+      st = StreamIdType::LOW;
+    } else {
+      // Default priority for SYCL queue is normal.
+      st = StreamIdType::NORMAL;
+    }
   }
-  // StreamIdType and priority number are inversely related.
-  return -static_cast<int>(st);
+  // See Note [XPU Stream priorities]
+  return -static_cast<int>(st) + 1;
 }
 
 // See Note [StreamId assignment]
@@ -199,11 +234,12 @@ sycl::queue& XPUStream::queue() const {
   StreamIdType st = streamIdType(stream_id);
   StreamIdIndex si = streamIdIndex(stream_id);
   switch (st) {
-    case StreamIdType::EXT:
-      return *(reinterpret_cast<sycl::queue*>(stream_id));
     case StreamIdType::NORMAL:
     case StreamIdType::HIGH:
       return *streams[device_index][static_cast<uint8_t>(st)][si];
+    // See Note [External XPU Stream]
+    case StreamIdType::EXT:
+      return *(reinterpret_cast<sycl::queue*>(stream_id));
     default:
       TORCH_CHECK(
           false,
@@ -225,14 +261,11 @@ XPUStream getStreamFromPool(const int priority, DeviceIndex device) {
     device = c10::xpu::current_device();
   }
   check_device_index(device);
-  TORCH_CHECK(
-      priority <= 0,
-      "Expected XPU stream priority to be less than or equal to 0, got ",
-      priority);
   // Initializes the stream pools (once)
   initDeviceStreamOnce(device);
+  // See Note [XPU Stream priorities]
   auto priority_idx =
-      std::min(-priority, max_compile_time_stream_priorities - 1);
+      std::clamp(-priority + 1, 0, max_compile_time_stream_priorities - 1);
   const auto idx = get_idx(priority_counters[device][priority_idx]);
   auto id_type = static_cast<StreamIdType>(priority_idx);
   return XPUStreamForId(device, makeStreamId(id_type, idx));
@@ -241,17 +274,59 @@ XPUStream getStreamFromPool(const int priority, DeviceIndex device) {
 XPUStream getStreamFromPool(const bool isHighPriority, DeviceIndex device) {
   initXPUStreamsOnce();
   // If isHighPriority is true, return the stream with the highest priority.
-  int priority = isHighPriority ? -max_compile_time_stream_priorities + 1 : 0;
+  // See Note [XPU Stream priorities]
+  int priority = isHighPriority ? -max_compile_time_stream_priorities + 2 : 0;
   return getStreamFromPool(priority, device);
 }
 
+/*
+ * Note [External XPU Stream]
+ *
+ * An external XPUStream is a wrapper around an external SYCL queue that was not
+ * created by PyTorch. This design enables interoperability with other libraries
+ * by allowing PyTorch to work seamlessly with SYCL queues created outside of
+ * its control.
+ *
+ * Key design requirements include:
+ *   1. Allowing retrieval of the its SYCL queue from the external XPUStream.
+ *   2. Supporting conversion between an external XPUStream and a `c10::Stream`.
+ *   3. Ensuring compatibility with the `get/setCurrentXPUStream` methods.
+ *   4. Enabling memory caching allocation through the external XPUStream.
+ *
+ * To address requirements (1) and (2), we associate the external SYCL queue
+ * pointer with the `stream_id`. It is the user's responsibility to ensure that
+ * the referenced SYCL queue remains alive while the corresponding XPUStream, or
+ * any c10::Stream derived from it, is in use.
+ *
+ * However, this approach introduces the following limitations:
+ *
+ *   1. Different SYCL queue pointers will result in distinct XPUStream
+ * instances, even if the SYCL queues they dereference are equivalent.
+ *   2. Memory blocks allocated by one external XPUStream CANNOT be reused by
+ * other non-equivalent XPUStreams, even if they originate from the same SYCL
+ * queue object.
+ */
+
 XPUStream getStreamFromExternal(
-    sycl::queue* ext_stream,
+    sycl::queue* ext_queue,
     DeviceIndex device_index) {
   // The sycl::queue* will be the actual id
 
-  TORCH_CHECK(ext_stream, "External stream must not be a nullptr.");
-  return XPUStreamForId(device_index, reinterpret_cast<int64_t>(ext_stream));
+  TORCH_CHECK(ext_queue, "External sycl::queue* must not be a nullptr.");
+  TORCH_CHECK(
+      ext_queue->is_in_order(), "External SYCL queue must be in-order.");
+  TORCH_CHECK(
+      ext_queue->get_context() == c10::xpu::get_device_context(),
+      "External SYCL queue must be created with the same context as the PyTorch XPU used.");
+  TORCH_CHECK(
+      ext_queue->get_device() == c10::xpu::get_raw_device(device_index),
+      "External SYCL queue doesn't match the given device index.");
+  StreamId stream_id = reinterpret_cast<StreamId>(ext_queue);
+  TORCH_CHECK(
+      !(stream_id & 1),
+      "External sycl::queue* must have the last bit set to 0. ",
+      "You can file an issue at https://github.com/pytorch/pytorch/issues to describe your use case.");
+  return XPUStreamForId(device_index, stream_id);
 }
 
 // Note: The stream pools will be initialized if needed, at the first invocation

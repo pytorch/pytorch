@@ -9,7 +9,6 @@
 
 import datetime
 from multiprocessing.pool import ThreadPool
-from typing import List
 from unittest import mock
 
 import torch.distributed as dist
@@ -40,7 +39,7 @@ class MockStore:
         self.ops.append(("get", key))
         return "value"
 
-    def multi_get(self, keys: List[str]) -> List[str]:
+    def multi_get(self, keys: list[str]) -> list[str]:
         self.ops.append(("multi_get", keys))
         return ["value"] * len(keys)
 
@@ -48,7 +47,7 @@ class MockStore:
         self.ops.append(("add", key, val))
         return 3
 
-    def wait(self, keys: List[str]) -> None:
+    def wait(self, keys: list[str]) -> None:
         self.ops.append(("wait", keys))
 
 
@@ -157,7 +156,7 @@ class StoreUtilTest(TestCase):
             return ""
 
         with ThreadPool(N - 1) as pool:
-            outputs: List[str] = pool.map(run_barrier_for_rank, range(N - 1))
+            outputs: list[str] = pool.map(run_barrier_for_rank, range(N - 1))
 
         self.assertTrue(any("missing_ranks=[Rank 2 host]" in msg for msg in outputs))
 

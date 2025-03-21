@@ -44,8 +44,16 @@
 // to symbol clashes at link time if libtorch is included in a DLL and binary
 // that depends on the DLL. As a short term fix, we don't export the symbols.
 // In the long term, this will need to be addressed when Windows is supported.
-// #define AOTI_TORCH_EXPORT __declspec(dllexport)
+#ifdef OVRSOURCE
+// Do not export AOTI on Windows for internal builds
 #define AOTI_TORCH_EXPORT
+#else /* OVRSOURCE */
+#ifdef EXPORT_AOTI_FUNCTIONS
+#define AOTI_TORCH_EXPORT __declspec(dllexport)
+#else
+#define AOTI_TORCH_EXPORT __declspec(dllimport)
+#endif
+#endif /* OVRSOURCE */
 #else // !_WIN32
 #define AOTI_TORCH_EXPORT
 #endif // _WIN32
@@ -96,6 +104,7 @@ using AOTITorchError = int32_t;
 // desired for perf reasons.)
 AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_cpu();
 AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_cuda();
+AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_meta();
 AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_xpu();
 AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_privateuse1();
 
@@ -133,6 +142,9 @@ AOTI_TORCH_EXPORT int32_t aoti_torch_memory_format_contiguous_format();
 AOTI_TORCH_EXPORT int32_t aoti_torch_memory_format_channels_last();
 AOTI_TORCH_EXPORT int32_t aoti_torch_memory_format_channels_last_3d();
 AOTI_TORCH_EXPORT int32_t aoti_torch_memory_format_preserve_format();
+
+// Get TORCH_ABI_VERSION of the built libtorch.so
+AOTI_TORCH_EXPORT uint64_t aoti_torch_abi_version();
 
 // Functions for converting a single-element tensor to a scalar value
 AOTI_TORCH_EXPORT AOTITorchError
@@ -201,6 +213,9 @@ aoti_torch_scalar_to_tensor_bool(bool value, AtenTensorHandle* ret_new_tensor);
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_scalar_to_tensor_complex64(
     c10::complex<float> value,
     AtenTensorHandle* ret_new_tensor);
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_scalar_to_tensor_complex128(
+    c10::complex<double> value,
+    AtenTensorHandle* ret_new_tensor);
 
 AOTI_TORCH_EXPORT bool aoti_torch_grad_mode_is_enabled();
 AOTI_TORCH_EXPORT void aoti_torch_grad_mode_set_enabled(bool enabled);
@@ -257,6 +272,10 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_storage_offset(
     AtenTensorHandle tensor,
     int64_t* ret_storage_offset);
 
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_new_tensor_handle(
+    AtenTensorHandle orig_handle,
+    AtenTensorHandle* new_handle);
+
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch__alloc_from_pool(
     AtenTensorHandle self,
     int64_t offset_bytes,
@@ -292,6 +311,12 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_empty_strided(
     int32_t device_index,
     AtenTensorHandle* ret_new_tensor // returns new reference
 );
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_as_strided(
+    AtenTensorHandle self,
+    const int64_t* sizes_ptr,
+    const int64_t* strides_ptr,
+    AtenTensorHandle* ret);
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_tensor_from_blob(
     void* data,
@@ -469,6 +494,9 @@ aoti_torch_assign_tensors_out(AtenTensorHandle src, AtenTensorHandle* ret_dst);
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_clone(AtenTensorHandle self, AtenTensorHandle* ret);
 
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_clone_preserve_strides(AtenTensorHandle self, AtenTensorHandle* ret);
+
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_addmm_out(
     AtenTensorHandle out,
     AtenTensorHandle self,
@@ -598,6 +626,66 @@ AOTI_TORCH_EXPORT void aoti_torch_save_tensor_handle(
     const char* launch_prefix,
     const char* kernel_name);
 
+// helpers for converting between StableIValue and actual IValues
+using StableIValue = uint64_t;
+
+class TorchLibraryOpaque;
+using TorchLibraryHandle = TorchLibraryOpaque*;
+
+// stable corollary to torch::Library constructor with Kind::IMPL
+// will create a new torch::Library object on the heap
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_library_init_impl(
+    const char* ns,
+    const char* k,
+    const char* file,
+    uint32_t line,
+    TorchLibraryHandle* ret_new_torch_lib);
+
+// stable corollary to torch::Library constructor with Kind::DEF
+// will create a new torch::Library object on the heap
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_library_init_def(
+    const char* ns,
+    const char* file,
+    uint32_t line,
+    TorchLibraryHandle* ret_new_torch_lib);
+
+// stable corollary to torch::Library constructor with Kind::FRAGMENT
+// will create a new torch::Library object on the heap
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_library_init_fragment(
+    const char* ns,
+    const char* file,
+    uint32_t line,
+    TorchLibraryHandle* ret_new_torch_lib);
+
+// stable corollary to torch::Library method m.impl(), should be
+// called from StableLibrary
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_library_impl(
+    TorchLibraryHandle self,
+    const char* name,
+    void (*fn)(StableIValue*, uint64_t, uint64_t));
+
+// stable corollary to torch::Library method m.def(), should be
+// called from StableLibrary
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_library_def(TorchLibraryHandle self, const char* schema);
+
+// the above stable constructors for torch::Library add Library objects
+// to the heap. if you are calling those functions directly, please use
+// this function to free the Library's memory. The more user friendly
+// alternative is to use StableLibrary, which will free its handle upon
+// destruction
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_delete_library_object(TorchLibraryHandle tlh);
+
+// calls the op overload defined by a given opName, overloadName, and a
+// stack of StableIValues. This call will populate any return values of the
+// op into the stack in their StableIValue form, with ret0 at index 0, ret1
+// at index 1, and so on.
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_call_dispatcher(
+    const char* opName,
+    const char* overloadName,
+    StableIValue* stack);
+
 #ifdef USE_CUDA
 
 struct CUDAGuardOpaque;
@@ -669,6 +757,20 @@ AOTI_TORCH_EXPORT void aoti_torch_check(
   }
 #endif
 
+AOTI_TORCH_EXPORT void aoti_torch_warn(
+    const char* func,
+    const char* file,
+    uint32_t line,
+    const char* msg);
+
+#ifdef DISABLE_WARN
+#define AOTI_TORCH_WARN(...) ((void)0);
+#else
+#define AOTI_TORCH_WARN(...) \
+  aoti_torch_warn(           \
+      __func__, __FILE__, static_cast<uint32_t>(__LINE__), #__VA_ARGS__);
+#endif
+
 #ifdef __cplusplus
 } // extern "C"
 
@@ -699,5 +801,4 @@ DEFINE_DTYPE_SPECIALIZATION(int64_t, int64)
 DEFINE_DTYPE_SPECIALIZATION(bool, bool)
 
 #endif
-
 #endif // AOTI_TORCH_SHIM

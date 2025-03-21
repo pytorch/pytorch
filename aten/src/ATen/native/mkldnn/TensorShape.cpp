@@ -15,8 +15,8 @@
 
 #if !AT_MKLDNN_ENABLED()
 
-namespace at {
-namespace native {
+
+namespace at::native {
 
 Tensor mkldnn_view(const Tensor& self, IntArrayRef size) {
   TORCH_CHECK(false, "mkldnn_reshape: ATen not compiled with MKLDNN support");
@@ -38,8 +38,8 @@ Tensor& mkldnn_transpose_(Tensor& self, int64_t dim0, int64_t dim1) {
   TORCH_CHECK(false, "mkldnn_transpose_: ATen not compiled with MKLDNN support");
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
+
 
 #else // AT_MKLDNN_ENABLED
 

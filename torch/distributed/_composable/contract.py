@@ -2,12 +2,17 @@
 import uuid
 from collections import OrderedDict
 from functools import wraps
-from typing import Callable, Dict, List, Optional, Sequence, Type, Union
+from typing import Callable, Generic, Optional, Protocol
+from typing_extensions import Concatenate, ParamSpec, TypeVar
 
 import torch
 import torch.nn as nn
 from torch.distributed._composable_state import _State
 from torch.distributed.utils import _get_root_modules
+
+
+_T = TypeVar("_T", covariant=True)
+_P = ParamSpec("_P")
 
 
 def generate_state_key(string="__composable_api_state_key"):
@@ -26,7 +31,22 @@ class RegistryItem:
     pass
 
 
-def contract(state_cls: Type[_State] = _State):
+_TState = TypeVar("_TState", bound="_State", covariant=True)
+_M = TypeVar("_M", nn.Module, list[nn.Module])
+
+
+class _ContractFn(Protocol, Generic[_P, _T, _TState]):
+    def __call__(self, *args: _P.args, **kwargs: _P.kwargs) -> _T: ...
+
+    def state(self, module: nn.Module) -> _TState: ...
+
+
+def contract(
+    state_cls: type[_TState] = _State,  # type: ignore[assignment]
+) -> Callable[
+    [Callable[Concatenate[_M, _P], _M]],
+    _ContractFn[Concatenate[_M, _P], _M, _TState],
+]:
     r"""
     Decorate a function as a composable distributed API, where the first
     argument of the function must be an :class:`nn.Module` instance or sequence
@@ -68,13 +88,18 @@ def contract(state_cls: Type[_State] = _State):
     """
 
     # wraps will make functions decorated with contract() pickleable - needed for integration with torch.package
-    @wraps(state_cls)
-    def inner(func):
+    @wraps(state_cls)  # type: ignore[arg-type]
+    def inner(
+        func: Callable[Concatenate[_M, _P], _M],
+    ) -> _ContractFn[Concatenate[_M, _P], _M, _TState]:
         @wraps(func)
         def wrapper(
-            module: Union[nn.Module, Sequence[nn.Module]], *args, **kwargs
-        ) -> Optional[nn.Module]:
+            module: _M,
+            *args: _P.args,
+            **kwargs: _P.kwargs,
+        ) -> _M:
             inp_module = module
+            modules: list[nn.Module]
             if isinstance(module, nn.Module):
                 modules = [module]
             else:
@@ -88,21 +113,21 @@ def contract(state_cls: Type[_State] = _State):
             # `func` is allowed to return different module instances than the
             # input modules as long as FQNs are preserved following the input
             # module order
-            all_orig_named_params: List[Dict[str, nn.Parameter]] = []
-            all_orig_named_buffers: List[Dict[str, torch.Tensor]] = []
-            all_orig_named_modules: List[Dict[str, nn.Module]] = []
+            all_orig_named_params: list[dict[str, nn.Parameter]] = []
+            all_orig_named_buffers: list[dict[str, torch.Tensor]] = []
+            all_orig_named_modules: list[dict[str, nn.Module]] = []
 
             for module in modules:
-                default_all_state: Dict[Callable, _State] = OrderedDict()
-                default_registry: Dict[str, RegistryItem] = OrderedDict()
-                all_state: Dict[Callable, _State] = module.__dict__.setdefault(  # type: ignore[call-overload]
+                default_all_state: dict[Callable, _State] = OrderedDict()
+                default_registry: dict[str, RegistryItem] = OrderedDict()
+                all_state: dict[Callable, _State] = module.__dict__.setdefault(  # type: ignore[call-overload]
                     STATE_KEY, default_all_state
                 )
                 if not isinstance(all_state, dict):
                     raise AssertionError(
                         f"Distributed composable API states corrupted: {all_state}"
                     )
-                registry: Dict[str, RegistryItem] = module.__dict__.setdefault(  # type: ignore[call-overload]
+                registry: dict[str, RegistryItem] = module.__dict__.setdefault(  # type: ignore[call-overload]
                     REGISTRY_KEY, default_registry
                 )
                 if not isinstance(registry, dict):
@@ -124,15 +149,16 @@ def contract(state_cls: Type[_State] = _State):
 
             updated = func(inp_module, *args, **kwargs)
             if updated is None:
-                updated = inp_module
+                updated = inp_module  # type: ignore[assignment]
+            updated_modules: list[nn.Module]
             if isinstance(updated, nn.Module):
                 updated_modules = [updated]
             else:
-                updated_modules = _get_root_modules(list(inp_module))  # type: ignore[arg-type]
+                updated_modules = _get_root_modules(list(inp_module))  # type: ignore[arg-type, call-overload]
 
-            all_new_named_params: List[Dict[str, nn.Parameter]] = []
-            all_new_named_buffers: List[Dict[str, torch.Tensor]] = []
-            all_new_named_modules: List[Dict[str, nn.Module]] = []
+            all_new_named_params: list[dict[str, nn.Parameter]] = []
+            all_new_named_buffers: list[dict[str, torch.Tensor]] = []
+            all_new_named_modules: list[dict[str, nn.Module]] = []
             for module in updated_modules:
                 all_new_named_params.append(OrderedDict(module.named_parameters()))
                 all_new_named_buffers.append(OrderedDict(module.named_buffers()))
@@ -147,7 +173,7 @@ def contract(state_cls: Type[_State] = _State):
                     f"Outputs: {num_new_modules} modules"
                 )
 
-            def check_fqn(orig_fqns: List[str], new_fqns: List[str], check_key: str):
+            def check_fqn(orig_fqns: list[str], new_fqns: list[str], check_key: str):
                 if orig_fqns == new_fqns:
                     return
 
@@ -200,22 +226,20 @@ def contract(state_cls: Type[_State] = _State):
 
             return updated
 
-        def get_state(module: nn.Module) -> Optional[_State]:
+        def get_state(module: nn.Module) -> _State:
             return module.__dict__.setdefault(  # type: ignore[call-overload]
                 STATE_KEY,
                 {},  # TODO(@yhcharles): this is a temporary fix, need a better way
-            ).get(
-                func
-            )  # type: ignore[call-overload]
+            ).get(func)  # type: ignore[call-overload]
 
         wrapper.state = get_state  # type: ignore[attr-defined]
 
-        return wrapper
+        return wrapper  # type: ignore[return-value]
 
-    return inner
+    return inner  # type: ignore[return-value]
 
 
-def _get_registry(module: nn.Module) -> Optional[Dict[str, RegistryItem]]:
+def _get_registry(module: nn.Module) -> Optional[dict[str, RegistryItem]]:
     r"""
     Get an ``OrderedDict`` of composable APIs that have been applied to the
     ``module``, indexed by the API name. If no API has been applied, then this

@@ -125,7 +125,8 @@ size_t parseChosenWorkspaceSize() {
   }
   /* 32MiB default, 128MiB for MI300 */
   cudaDeviceProp* properties = at::cuda::getCurrentDeviceProperties();
-  const bool gfx94 = properties != nullptr && properties->major == 9 && properties->minor == 4;
+  std::string device_arch = properties->gcnArchName;
+  const bool gfx94 = device_arch.find("gfx94") != std::string::npos;
   const size_t default_size = gfx94 ? 1024 * 128 * 1024 : 1024 * 32 * 1024;
 #else
   /* :4096:2:16:8 default, 32MiB for Hopper */

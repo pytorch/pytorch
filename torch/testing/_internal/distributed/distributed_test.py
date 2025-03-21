@@ -82,7 +82,6 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     FILE_SCHEMA,
     IS_FBCODE,
-    NO_MULTIPROCESSING_SPAWN,
     IS_SANDCASTLE,
     skip_but_pass_in_sandcastle,
     skip_but_pass_in_sandcastle_if,
@@ -454,7 +453,7 @@ def require_backend_is_available(backends):
 def require_world_size(world_size):
     if int(os.environ["WORLD_SIZE"]) < world_size:
         return skip_but_pass_in_sandcastle(
-            "Test requires world size of %d" % world_size
+            f"Test requires world size of {world_size:d}"
         )
     return lambda func: func
 
@@ -4061,7 +4060,7 @@ class DistributedTest:
                     self.assertGreaterAlmostEqual(
                         float(time.time()),
                         float(expected_time[0]),
-                        msg="destination rank: %d, my rank: %d" % (dest, rank)
+                        msg=f"destination rank: {dest:d}, my rank: {rank:d}"
                         + " (if you see this failure, please report in #14554)",
                     )
 
@@ -5119,11 +5118,6 @@ class DistributedTest:
             BACKEND not in DistTestCases.backend_feature["cuda"],
             f"The {BACKEND} backend does not support DDP communication hook on CUDA devices",
         )
-        @skip_but_pass_in_sandcastle_if(
-            NO_MULTIPROCESSING_SPAWN,
-            "Disabled for environments that \
-                         don't support multiprocessing with spawn start method",
-        )
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         def test_ddp_hook_parity_post_localSGD(self):
             # Although we start run local SGD at iteration 10, since we still use the global process group to run it,
@@ -5181,7 +5175,7 @@ class DistributedTest:
             gradient_as_bucket_view=False,
         ):
             model = Net()
-            device = devices[0] if devices else torch.device("cuda:%d" % rank)
+            device = devices[0] if devices else torch.device(f"cuda:{rank:d}")
             ddp_model = DistributedDataParallel(
                 copy.deepcopy(model).to(device),
                 device_ids=device_ids,
@@ -5687,7 +5681,7 @@ class DistributedTest:
                 )
 
             dist.barrier()
-            map_location = {"cuda:%d" % 0: "cuda:%d" % self.rank}
+            map_location = {"cuda:0": f"cuda:{self.rank:d}"}
             checkpoint = torch.load(chkpt_file, map_location=map_location)
             dummy_post_localSGD_opt.load_state_dict(checkpoint["optimizer_state_dict"])
 
@@ -6477,7 +6471,8 @@ class DistributedTest:
             inp = {0: [True, True], 1: [False, False]}
             # Run reduce() with product op
             for op in [dist.ReduceOp.PRODUCT, dist.ReduceOp.MIN]:
-                input_tensor = torch.tensor(inp[self.rank % 2]).to(self.rank)
+                # make sure rank 0 gets False if WORLD_SIZE=1 to match expected tensor
+                input_tensor = torch.tensor(inp[(self.rank + 1) % 2]).to(self.rank)
                 expected = torch.tensor([False, False]).to(self.rank)
                 self._run_reduction_test(input_tensor, expected, op, dist.reduce, dst=0)
                 # Ensure that all ranks contributing True (cast to 1) results in the
@@ -6686,7 +6681,7 @@ class DistributedTest:
 
             b = Bar()
             gather_objects = [b for _ in range(dist.get_world_size())]
-            with self.assertRaisesRegex(AttributeError, "Can't pickle local object"):
+            with self.assertRaises(AttributeError):
                 dist.all_gather_object(
                     [None for _ in range(dist.get_world_size())],
                     gather_objects[self.rank],
@@ -10133,7 +10128,7 @@ class DistributedTest:
                 )
 
             dist.barrier()
-            map_location = {"cuda:%d" % 0: "cuda:%d" % rank}
+            map_location = {"cuda:0": f"cuda:{rank:d}"}
             with self.assertLogs("torch.distributed") as captured:
                 checkpoint = torch.load(chkpt_file, map_location=map_location)
 

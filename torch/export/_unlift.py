@@ -1,11 +1,17 @@
 # mypy: allow-untyped-defs
 import copy
 import warnings
+from collections.abc import Sequence
 from itertools import chain
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Optional
 
 import torch
 import torch.utils._pytree as pytree
+from torch._export.non_strict_utils import (
+    _enter_enable_graph_inputs_of_type_nn_module,
+    _exit_enable_graph_inputs_of_type_nn_module,
+    _get_graph_inputs_of_type_nn_module,
+)
 from torch._export.utils import _check_input_constraints_for_graph
 from torch.export.unflatten import _assign_attr, _AttrKind
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
@@ -20,7 +26,7 @@ from .exported_program import (
 )
 
 
-def _check_inputs_match(args, kwargs, in_spec: pytree.TreeSpec) -> List:
+def _check_inputs_match(args, kwargs, in_spec: pytree.TreeSpec) -> list:
     reordered_kwargs = reorder_kwargs(kwargs, in_spec)
     flat_args_with_path, received_spec = pytree.tree_flatten_with_path(
         (args, reordered_kwargs)
@@ -56,7 +62,7 @@ def _check_input_constraints_pre_hook(self, args, kwargs):
 def _unlift_inputs_as_getattr(
     gm: torch.fx.GraphModule,
     lifted_inputs: Sequence[Optional[str]],
-) -> Tuple[Dict[str, torch.fx.Node], Dict[str, torch.fx.Node]]:
+) -> tuple[dict[str, torch.fx.Node], dict[str, torch.fx.Node]]:
     """
     Unlift inputs referring to params/buffers/constants as getattr nodes in the
     graph
@@ -85,8 +91,8 @@ def _unlift_inputs_as_getattr(
 def _insert_copy_for_mutations(
     gm: torch.fx.GraphModule,
     mutated_outputs: Sequence[Optional[str]],
-    unlifted_name_to_node: Dict[str, torch.fx.Node],
-    input_name_to_node: Dict[str, torch.fx.Node],
+    unlifted_name_to_node: dict[str, torch.fx.Node],
+    input_name_to_node: dict[str, torch.fx.Node],
 ) -> None:
     """
     Find the all the buffers and inputs that were mutated and insert copy_
@@ -139,7 +145,7 @@ def _insert_copy_for_mutations(
 def _get_codegen(
     in_spec: pytree.TreeSpec,
     out_spec: Optional[pytree.TreeSpec],
-    forward_arg_names: Optional[List[str]] = None,
+    forward_arg_names: Optional[list[str]] = None,
 ) -> _PyTreeCodeGen:
     """
     Create the codegen for the graph module based on the in/out specs
@@ -175,9 +181,9 @@ def _unlift(
     mutated_outputs: Sequence[Optional[str]],
     in_spec: pytree.TreeSpec,
     out_spec: Optional[pytree.TreeSpec],
-    state_dict: Dict[str, Any],
-    constants: Dict[str, Any],
-    forward_arg_names: Optional[List[str]] = None,
+    state_dict: dict[str, Any],
+    constants: dict[str, Any],
+    forward_arg_names: Optional[list[str]] = None,
 ):
     """
     Args:
@@ -209,8 +215,8 @@ def _unlift(
 def _register_attrs_to_new_gm(
     new_gm: torch.fx.GraphModule,
     graph_signature: ExportGraphSignature,
-    state_dict: Dict[str, Any],
-    constants: Dict[str, Any],
+    state_dict: dict[str, Any],
+    constants: dict[str, Any],
 ) -> None:
     non_persistent_buffers = set(graph_signature.non_persistent_buffers)
     for name in graph_signature.buffers:
@@ -233,7 +239,7 @@ def _register_attrs_to_new_gm(
         )
 
     # Technically this doesn't account for the aliased multiple constants but
-    # it is ok because we have a seperate pass later in the stack that populates
+    # it is ok because we have a separate pass later in the stack that populates
     # the final gm.
     for name in chain(
         graph_signature.lifted_custom_objs, graph_signature.lifted_tensor_constants
@@ -276,9 +282,7 @@ class _StatefulGraphModule(torch.fx.GraphModule, metaclass=_StatefulGraphModuleF
 def _create_stateful_graph_module(
     plain_graph_module: torch.fx.GraphModule,
     range_constraints,
-    # TODO(suo) this should not be optional, but is since we still have
-    # capture_pre_autograd_graph grr
-    ep: Optional[ExportedProgram] = None,
+    ep: ExportedProgram,
 ) -> _StatefulGraphModule:
     stateful_gm = _StatefulGraphModule._create(
         plain_graph_module,
@@ -286,12 +290,22 @@ def _create_stateful_graph_module(
         range_constraints=range_constraints,
     )
 
+    module_types = _get_graph_inputs_of_type_nn_module(ep.example_inputs)
+    stateful_gm.register_forward_pre_hook(
+        lambda *args, **kwargs: _enter_enable_graph_inputs_of_type_nn_module(
+            module_types
+        )
+    )
     stateful_gm.register_forward_pre_hook(
         _check_input_constraints_pre_hook, with_kwargs=True
     )
 
-    if ep is None:
-        return stateful_gm
+    stateful_gm.register_forward_hook(
+        lambda *args, **kwargs: _exit_enable_graph_inputs_of_type_nn_module(
+            module_types
+        ),
+        always_call=True,
+    )
 
     # When we have a constant that has requires_grad=True, we need to detach it
     # when we unlift as the tensors that require gradients should be registered
@@ -375,7 +389,7 @@ def _unlift_exported_program_lifted_states(ep: ExportedProgram) -> torch.nn.Modu
     forward_arg_names = (
         sig.forward_arg_names if (sig := ep.module_call_graph[0].signature) else None
     )
-    lifted_inputs: List[Optional[str]] = [
+    lifted_inputs: list[Optional[str]] = [
         (
             in_spec.target
             if in_spec.kind
@@ -390,7 +404,7 @@ def _unlift_exported_program_lifted_states(ep: ExportedProgram) -> torch.nn.Modu
         for in_spec in ep.graph_signature.input_specs
     ]
 
-    mutated_outputs: List[Optional[str]] = [
+    mutated_outputs: list[Optional[str]] = [
         (
             out_spec.target
             if out_spec.kind

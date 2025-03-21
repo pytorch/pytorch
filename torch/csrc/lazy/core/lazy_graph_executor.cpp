@@ -1073,4 +1073,16 @@ hash_t LazyGraphExecutor::GetGraphHash(
   return coll.hash;
 }
 
+void LazyGraphExecutor::ClearComputationCache() {
+  VLOG(4) << "Clearing the computation cache";
+  GetComputationCache()->Clear();
+}
+
+void LazyGraphExecutor::RemoveFromComputationCache(const hash_t& hash) {
+  VLOG(4) << "Removing computation cache for hash " << hash;
+  if (!GetComputationCache()->Erase(hash)) {
+    LOG(ERROR) << "There is no cached computation for hash " << hash << '\n';
+  }
+}
+
 } // namespace torch::lazy

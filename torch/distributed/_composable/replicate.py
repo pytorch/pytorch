@@ -1,7 +1,7 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import weakref
-from typing import Any, cast, Dict, Iterable, List, NoReturn, Optional, Set, Tuple
+from collections.abc import Iterable
+from typing import Any, NoReturn, Optional
 
 import torch
 import torch.nn as nn
@@ -15,6 +15,8 @@ _ROOT_MODULE_PREFIX = ""
 
 
 class _ReplicateState(_State):
+    _ddp_weakref: weakref.ref
+
     def __init__(self) -> None:
         super().__init__()
         self.module: nn.Module = nn.ParameterList()
@@ -23,17 +25,17 @@ class _ReplicateState(_State):
         # TODO(@fegin): this variable is originally create for testing, we
         # should remove this if possible.
         self._orig_module = self.module
-        self._param_names: List[str] = []
+        self._param_names: list[str] = []
         self._no_sync: bool = False
-        self._init_args: Optional[Tuple[Any, ...]] = None
-        self._init_kwargs: Dict[str, Any] = {}
-        self._comm_hook_args: List[Any] = []
+        self._init_args: Optional[tuple[Any, ...]] = None
+        self._init_kwargs: dict[str, Any] = {}
+        self._comm_hook_args: list[Any] = []
 
     def _collect_params(
         self,
         module: nn.Module,
-        ignored_modules: Set[nn.Module],
-        ignored_params: Set[nn.Parameter],
+        ignored_modules: set[nn.Module],
+        ignored_params: set[nn.Parameter],
         prefix: str = _ROOT_MODULE_PREFIX,
     ) -> None:
         # skip if managed by fully_sharded API
@@ -75,7 +77,7 @@ class _ReplicateState(_State):
     def init(
         self,
         module: nn.Module,
-        ignored_modules: Set[nn.Module],
+        ignored_modules: set[nn.Module],
         **kwargs,
     ) -> None:
         if self.has_initialized:
@@ -124,7 +126,7 @@ class _ReplicateState(_State):
         self._init_kwargs = kwargs
 
     def forward_pre_hook(
-        self, module: nn.Module, args: Tuple[Any, ...], kwargs: Dict[str, Any]
+        self, module: nn.Module, args: tuple[Any, ...], kwargs: dict[str, Any]
     ) -> Any:
         if self._init_args or self._init_kwargs:
             self.lazy_init()
@@ -134,7 +136,7 @@ class _ReplicateState(_State):
     def forward_post_hook(
         self,
         module: nn.Module,
-        input: Tuple[torch.Tensor],
+        input: tuple[torch.Tensor],
         output: torch.Tensor,
     ) -> torch.Tensor:
         return self._ddp._post_forward(output)
@@ -167,10 +169,10 @@ class DDP:
             requires_gradient_sync (bool): Whether to reduce gradients for the
                 module's parameters.
         """
-        replicate.state(self)._no_sync = not requires_gradient_sync
+        replicate.state(self)._no_sync = not requires_gradient_sync  # type: ignore[arg-type]
 
     def register_comm_hook(self, *args, **kwargs) -> None:
-        replicate.state(self)._comm_hook_args.append((args, kwargs))
+        replicate.state(self)._comm_hook_args.append((args, kwargs))  # type: ignore[arg-type]
 
 
 @contract(state_cls=_ReplicateState)
@@ -210,7 +212,7 @@ def replicate(
     else:
         ignored_modules = set(ignored_modules)
 
-    state = cast(_ReplicateState, replicate.state(module))
+    state = replicate.state(module)
     module.register_forward_pre_hook(state.forward_pre_hook, with_kwargs=True)
     device_mesh = kwargs.get("device_mesh", None)
     if device_mesh is not None:

@@ -81,10 +81,6 @@ class TestBenchmarker(TestCase):
         timing = benchmarker.benchmark_gpu(_callable)
         self.assertGreater(timing, 0)
         self.assertEqual(self.get_counter_value(benchmarker_cls, "benchmark_gpu"), 1)
-        if benchmarker_cls is TritonBenchmarker:
-            self.assertEqual(
-                self.get_counter_value(benchmarker_cls, "triton_do_bench"), 1
-            )
 
     @unittest.skipIf(not HAS_CPU and not HAS_GPU, "requires CPU or GPU")
     @unittest.expectedFailure

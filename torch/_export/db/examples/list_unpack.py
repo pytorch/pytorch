@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import List
 
 import torch
 
@@ -9,7 +8,7 @@ class ListUnpack(torch.nn.Module):
     erased after tracing.
     """
 
-    def forward(self, args: List[torch.Tensor]):
+    def forward(self, args: list[torch.Tensor]):
         """
         Lists are treated as static construct, therefore unpacking should be
         erased after tracing.

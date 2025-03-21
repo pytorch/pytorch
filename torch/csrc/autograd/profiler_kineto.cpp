@@ -527,10 +527,12 @@ void onFunctionExit(
         nullptr, &fallback->device_event_end_, nullptr);
   }
 
-  if (fn.scope() == at::RecordScope::USER_SCOPE) {
-    torch::profiler::impl::kineto::popUserCorrelationId();
-  } else {
-    torch::profiler::impl::kineto::popCorrelationId();
+  if (!config.experimental_config.disable_external_correlation) {
+    if (fn.scope() == at::RecordScope::USER_SCOPE) {
+      torch::profiler::impl::kineto::popUserCorrelationId();
+    } else {
+      torch::profiler::impl::kineto::popCorrelationId();
+    }
   }
 }
 
@@ -769,8 +771,9 @@ void enableProfiler(
   KinetoThreadLocalState::push(state_ptr);
 
   if (has_cpu) {
-    config.global() ? pushProfilingCallbacks</*global=*/true>(scopes)
-                    : pushProfilingCallbacks</*global=*/false>(scopes);
+    config.pushGlobalCallbacks()
+        ? pushProfilingCallbacks</*global=*/true>(scopes)
+        : pushProfilingCallbacks</*global=*/false>(scopes);
   }
 
   if (!config.global()) {
@@ -1033,6 +1036,7 @@ FORWARD_FROM_RESULT(startThreadId, start_tid_)
 FORWARD_FROM_RESULT(endThreadId, endTID())
 FORWARD_FROM_RESULT(activityType, kinetoType())
 FORWARD_FROM_RESULT(name, name())
+FORWARD_FROM_RESULT(overload_name, overload_name())
 FORWARD_FROM_RESULT(deviceType, deviceType())
 FORWARD_FROM_RESULT(startNs, start_time_ns_)
 FORWARD_FROM_RESULT(correlationId, correlationID())
