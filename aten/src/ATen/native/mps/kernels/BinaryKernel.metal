@@ -83,6 +83,7 @@ struct nextafter_functor {
   }
 };
 
+// Complex binary functors
 struct polar_functor {
   template <typename U>
   using ret_type = c10::metal::vec2type_t<U>;
@@ -99,6 +100,13 @@ struct make_complex_functor {
   template <typename T>
   inline ret_type<T> operator()(const T a, const T b) {
     return ret_type<T>(a, b);
+  }
+};
+
+struct complex_mul_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    return T(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
   }
 };
 
@@ -135,28 +143,5 @@ REGISTER_BINARY_INDEXING_OP(polar, float);
 REGISTER_BINARY_INDEXING_OP(polar, half);
 REGISTER_BINARY_INDEXING_OP(make_complex, float);
 REGISTER_BINARY_INDEXING_OP(make_complex, half);
-
-template <typename T>
-kernel void complex_mul(
-    constant void* input_ [[buffer(0)]],
-    constant void* other_ [[buffer(1)]],
-    device void* out_ [[buffer(2)]],
-    constant uint3* offsets [[buffer(3)]],
-    uint tid [[thread_position_in_grid]]) {
-  device T* out = (device T*)((device uint8_t*)out_ + offsets[tid].x);
-  constant T* input = (constant T*)((constant uint8_t*)input_ + offsets[tid].y);
-  constant T* other = (constant T*)((constant uint8_t*)other_ + offsets[tid].z);
-  out[0] = input[0] * other[0] - input[1] * other[1];
-  out[1] = input[0] * other[1] + input[1] * other[0];
-}
-
-#define REGISTER_BINARY_OP(NAME, DTYPE)                             \
-  template [[host_name(#NAME "_" #DTYPE)]] kernel void NAME<DTYPE>( \
-      constant void* input_,                                        \
-      constant void* other_,                                        \
-      device void* out_,                                            \
-      constant uint3* offsets,                                      \
-      uint tid)
-
-REGISTER_BINARY_OP(complex_mul, float);
-REGISTER_BINARY_OP(complex_mul, half);
+REGISTER_BINARY_INDEXING_OP(complex_mul, float2);
+REGISTER_BINARY_INDEXING_OP(complex_mul, half2);
