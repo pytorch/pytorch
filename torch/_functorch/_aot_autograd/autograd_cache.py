@@ -127,6 +127,12 @@ def check_node_safe(node: Node):
         "einops.einops.rearrange",
     )
 
+    def is_autograd_function(function_name):
+        return function_name in (
+            "torch.autograd.function.FunctionCtx",
+            "torch.ops.higher_order.autograd_function_apply",
+        )
+
     def is_public_torch_api(target):
         # Don't blindly allow private functions in the torch namespace
         is_private = target.__name__.startswith("_")
@@ -138,6 +144,12 @@ def check_node_safe(node: Node):
     def is_safe_torch_function(target):
         """Allowlisted torch functions"""
         function_name = f"{target.__module__}.{target.__name__}"
+
+        if is_autograd_function(function_name):
+            return (
+                torch._functorch.config.autograd_cache_allow_custom_autograd_functions
+            )
+
         # Functions in torch_non_c_binding_in_graph_functions
         # are guaranteed to be cache safe.
         # See NOTE: [Cacheability of in-graph torch functions]
@@ -264,7 +276,7 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
             super().__init__(gm, example_inputs, fx_config, [])
         except BypassFxGraphCache as e:
             # Sometimes inductor configs are unpickleable and can fail
-            raise BypassAOTAutogradCache from e
+            raise BypassAOTAutogradCache(str(e)) from e
 
 
 class AOTAutogradCachePickler(FxGraphCachePickler):
