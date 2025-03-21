@@ -22,6 +22,7 @@ from torch._higher_order_ops.utils import (
     _has_potential_branch_input_mutation,
     _maybe_run_with_interpreter,
     _set_compilation_env,
+    check_input_alias_and_mutation,
     reenter_make_fx,
     save_tensors_and_symints_for_backward,
     saved_tensors_and_symints,
@@ -59,6 +60,34 @@ class CondOp(HigherOrderOperator):
     def __call__(self, pred, true_fn, false_fn, operands):
         validate_subgraph_args_types(operands)
         return super().__call__(pred, true_fn, false_fn, operands)
+
+    def _gen_schema(
+        self,
+        pred,
+        true_fn: torch.fx.GraphModule,
+        false_fn: torch.fx.GraphModule,
+        operands,
+    ):
+        from torch._library.utils import _hop_schema_from_inp_out
+
+        assert isinstance(true_fn, torch.fx.GraphModule) and isinstance(
+            false_fn, torch.fx.GraphModule
+        )
+        mutated_input = set()
+        alias_maps = {}, {}, {}
+        for fn in (true_fn, false_fn):
+            mutated_inp, *maps, example_outputs = check_input_alias_and_mutation(
+                fn, operands
+            )
+            mutated_input.update(mutated_inp)
+            for map1, map2 in zip(alias_maps, maps):
+                map1.update(map2)
+
+        schema = _hop_schema_from_inp_out(
+            self, [pred, true_fn, false_fn, operands], example_outputs, mutated_input
+        )
+        str(schema)
+        return schema
 
 
 cond_op = CondOp()

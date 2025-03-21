@@ -3054,14 +3054,14 @@ class BaseHOPVariable(WrapHigherOrderVariable):
         )
         assert len(p_kwargs) == 0
 
-        from torch._higher_order_ops.utils import has_potential_input_alias_or_mutation
+        from torch._higher_order_ops.utils import _has_potential_branch_input_alias
 
         fake_inputs = [
             node.meta["example_value"]
             for node in body_gmod.graph.nodes
             if node.op == "placeholder"
         ]
-        if has_potential_input_alias_or_mutation(body_gmod, fake_inputs):
+        if _has_potential_branch_input_alias(body_gmod, fake_inputs):
             raise RuntimeError(
                 f"{self.value._name} where the inputs are mutated or the "
                 f"outputs are aliases of the inputs. Please ensure that this doesn't happen."

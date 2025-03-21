@@ -951,6 +951,7 @@ class ExportedProgram:
         if isinstance(root, torch.fx.GraphModule):
             self._graph_module.meta.update(root.meta)
 
+        print(self._graph_module)
         _common_getitem_elimination_pass(
             self._graph_module, graph_signature, module_call_graph
         )
