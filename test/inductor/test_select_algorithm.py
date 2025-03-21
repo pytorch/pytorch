@@ -357,6 +357,8 @@ class TestSelectAlgorithm(TestCase):
             extra_args=None,
             num_stages=None,
             num_warps=None,
+            num_consumer_groups=None,
+            num_buffers_warp_spec=None,
             input_tensor_meta=None,
             output_tensor_meta=None,
         )
@@ -366,6 +368,42 @@ class TestSelectAlgorithm(TestCase):
         caller_str = str(caller)
         self.assertEqual(caller_str, f"TritonTemplateCaller({module_path}, extra)")
 
+    def test_triton_template_kernel_warp_specialization():
+        """
+        Verify that TritonTemplateKernel correctly stores num_consumer_groups and num_buffers_warp_spec.
+        """
+
+        # Create mock inputs (since TritonTemplateKernel is usually instantiated within a larger codegen pipeline)
+        mock_meta = {"kernel_name": "test_kernel"}
+        mock_options = {
+            "num_warps": 4,
+            "num_stages": 2,
+            "num_consumer_groups": 2,  # Test value for warp specialization
+            "num_buffers_warp_spec": 3,  # Test value for warp specialization
+        }
+
+        # Instantiate the kernel with warp specialization parameters
+        kernel = select_algorithm.TritonTemplateKernel(meta=mock_meta, **mock_options)
+
+        # Assertions: Ensure the attributes are correctly set in the instance
+        assert kernel.num_consumer_groups == 2, "num_consumer_groups was not set correctly"
+        assert (
+            kernel.num_buffers_warp_spec == 3
+        ), "num_buffers_warp_spec was not set correctly"
+
+        # Check if the options are passed in kernel attributes
+        assert (
+            "num_consumer_groups" in kernel.kernel_options
+        ), "num_consumer_groups missing in kernel options"
+        assert (
+            "num_buffers_warp_spec" in kernel.kernel_options
+        ), "num_buffers_warp_spec missing in kernel options"
+        assert (
+            kernel.kernel_options["num_consumer_groups"] == 2
+        ), "num_consumer_groups value incorrect in kernel options"
+        assert (
+            kernel.kernel_options["num_buffers_warp_spec"] == 3
+        ), "num_buffers_warp_spec value incorrect in kernel options"
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_GPU and is_big_gpu():
