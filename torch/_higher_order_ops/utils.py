@@ -251,7 +251,7 @@ def _detect_input_mutation(gm: torch.fx.GraphModule) -> bool:
     example_inputs = [
         ph.meta.get("val", None) for ph in gm.graph.find_nodes(op="placeholder")
     ]
-    inp_mutation, _, _, _ = check_input_alias_and_mutation(gm, example_inputs)
+    inp_mutation, *_ = check_input_alias_and_mutation(gm, example_inputs)
     if len(inp_mutation) > 0:
         return True
 
@@ -267,7 +267,7 @@ def _detect_input_alias(gm: torch.fx.GraphModule) -> bool:
     example_inputs = [
         ph.meta.get("val", None) for ph in gm.graph.find_nodes(op="placeholder")
     ]
-    _, inp_inp_alias_map, inp_out_alias_map, _ = check_input_alias_and_mutation(
+    _, inp_inp_alias_map, inp_out_alias_map, *_ = check_input_alias_and_mutation(
         gm, example_inputs
     )
     if len(inp_out_alias_map) > 0 or len(inp_inp_alias_map) > 0:
@@ -675,7 +675,11 @@ def validate_subgraph_args_types(lifted_args: Union[tuple[Any, ...], list[Any]])
 def check_input_alias_and_mutation(
     gm: torch.fx.GraphModule,
     fake_args: list[FakeTensor],
-) -> tuple[list[int], dict[int, int], dict[int, int], dict[int, int]]:
+    return_outputs: bool = False,
+) -> Union[
+    tuple[list[int], dict[int, int], dict[int, int], dict[int, int]],
+    tuple[list[int], dict[int, int], dict[int, int], dict[int, int], list[FakeTensor]],
+]:
     with disable_proxy_modes_tracing():
         """This function returns mutated inputs, inp-inp alias, inp-out alias, out-out alias
         in the graph module gm. It checks whether input tensor versions have
@@ -738,4 +742,18 @@ def check_input_alias_and_mutation(
             for i, inp in enumerate(cloned)
             if isinstance(inp, torch.Tensor) and _tensor_storage(inp) in out_storage_map
         }
-        return mutated_inputs, inp_inp_alias_map, inp_out_alias_map, out_out_alias_map
+        if return_outputs:
+            return (
+                mutated_inputs,
+                inp_inp_alias_map,
+                inp_out_alias_map,
+                out_out_alias_map,
+                outputs,
+            )
+        else:
+            return (
+                mutated_inputs,
+                inp_inp_alias_map,
+                inp_out_alias_map,
+                out_out_alias_map,
+            )

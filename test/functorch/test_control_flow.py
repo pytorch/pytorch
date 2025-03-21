@@ -7976,6 +7976,36 @@ class TestHopSchema(TestCase):
         )
         self.assertEqual(schema.parse(str(schema)), schema)
 
+    def test_cond_with_mutation_schema_gen(self):
+        class Mod(torch.nn.Module):
+            def forward(self, x):
+                # mutates input
+                def true_fn(x):
+                    x.sin_()
+                    return x + 1
+
+                # doesn't mutate input
+                def false_fn(x):
+                    return x.cos() + 1
+
+                return torch.cond(x.sum() > 0, true_fn, false_fn, (x,))
+
+        out_gm: torch.fx.GraphModule = make_fx(Mod())(torch.randn(3, 3))
+        cond_node = out_gm.graph.find_nodes(
+            op="call_function", target=torch.ops.higher_order.cond
+        )[0]
+        fake_args = pytree.tree_map(
+            lambda arg: arg.meta["val"]
+            if not arg.op == "get_attr"
+            else getattr(out_gm, arg.target),
+            cond_node.args,
+        )
+        schema = torch.ops.higher_order.cond._gen_schema(*fake_args)
+        self.assertExpectedInline(
+            str(schema),
+            """cond(Tensor(!) pred, GraphModule true_fn, GraphModule false_fn, Tensor[1] operands) -> Tensor""",
+        )
+
 
 instantiate_parametrized_tests(TestHopSchema)
 instantiate_parametrized_tests(TestControlFlowTraced)

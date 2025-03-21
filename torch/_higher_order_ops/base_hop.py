@@ -6,7 +6,10 @@ import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._dispatch.python import suspend_functionalization
-from torch._higher_order_ops.utils import reenter_make_fx
+from torch._higher_order_ops.utils import (
+    check_input_alias_and_mutation,
+    reenter_make_fx,
+)
 from torch._ops import HigherOrderOperator
 from torch._subclasses import FakeTensorMode
 from torch._subclasses.functional_tensor import disable_functional_mode
@@ -125,6 +128,54 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
             )
             out = self(functionalized_subgraph, *unwrapped_operands, **kwargs)
         return ctx.wrap_tensors(out)
+
+    def gen_schema(self, subgraph, *operands, **kwargs):
+        from torchgen.gen_schema_utils import FunctionSchemaGen, HopArgumentInfo
+
+        assert isinstance(
+            subgraph, torch.fx.GraphModule
+        ), "NYI non GraphModule subgraph"
+        fake_args = [
+            ph.meta["example_value"]
+            for ph in subgraph.graph.find_nodes(op="placeholder")
+        ]
+        mutated_inp_idx, _, _, _, output = check_input_alias_and_mutation(
+            subgraph, fake_args, return_outputs=True
+        )
+        args = []
+        for idx, arg in enumerate((subgraph, *operands, *kwargs.items())):
+            if isinstance(arg, tuple):
+                arg_name, example = arg
+                default = example
+            else:
+                arg_name = f"arg{idx}"
+                example = arg
+                default = None
+            if isinstance(default, str):
+                default = '"' + default + '"'
+            is_mutated = False
+            if idx - 1 in mutated_inp_idx:
+                is_mutated = True
+            args.append(
+                HopArgumentInfo(
+                    name=arg_name,
+                    example_value=example,
+                    default_value=default,
+                    is_mutated=is_mutated,
+                )
+            )
+
+        rets = []
+        for idx, out in enumerate(output):
+            rets.append(
+                HopArgumentInfo(
+                    name=f"out{idx}",
+                    example_value=out,
+                    default_value=None,
+                    is_mutated=False,
+                )
+            )
+        return FunctionSchemaGen.from_hop_argument_info(str(self), args, rets)
 
 
 class BaseHOPFunction(torch.autograd.Function):

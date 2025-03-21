@@ -74,6 +74,42 @@ class GraphModule(torch.nn.Module):
         )
 
     @torch._dynamo.config.patch(assume_static_by_default=True)
+    def test_schema_gen(self):
+        import torch.utils._pytree as pytree
+
+        def inner(x, y):
+            x.add_(1)
+            return (x @ y).sin().cos()
+
+        x = torch.randn(3, 3, requires_grad=False)
+        y = torch.randn(3, 3, requires_grad=True)
+
+        backend = EagerAndRecordGraphs()
+
+        @torch.compile(backend=backend)
+        def f(x, y):
+            return invoke_quant_test(inner, x, y, scheme="nf4")
+
+        out = f(x.clone(), y)
+        self.assertEqual(out, inner(x.clone(), y))
+
+        assert len(backend.graphs) == 1
+        node = backend.graphs[0].graph.find_nodes(
+            op="call_function", target=torch.ops.higher_order.invoke_quant_test
+        )[0]
+        fake_args, fake_kwargs = pytree.tree_map_only(
+            torch.fx.Node,
+            lambda n: n.meta["example_value"],
+            (node.args[1:], node.kwargs),
+        )
+        subgraph = getattr(backend.graphs[0], node.args[0].target)
+        out = node.target.gen_schema(subgraph, *fake_args, **fake_kwargs)
+        self.assertExpectedInline(
+            str(out),
+            """invoke_quant_test(Any arg0, Tensor arg1, Tensor arg2, str scheme="\\"nf4\\"") -> Tensor out0""",
+        )
+
+    @torch._dynamo.config.patch(assume_static_by_default=True)
     def test_aot_eager(self):
         def inner(x, y):
             return (x @ y).sin_().cos()
