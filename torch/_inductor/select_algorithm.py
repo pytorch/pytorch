@@ -1199,7 +1199,7 @@ class TritonTemplate(KernelTemplate):
     # Those class fields are used for testing _generated_module_cache.
     # When this flag is on, we ensure that the cached results and the generated result if cache
     # was not used are the same.
-    test_cache = False
+    test_cache = True
     generated_module_cache_hit = 0
 
     def generate_and_load(
