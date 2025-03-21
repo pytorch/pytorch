@@ -197,8 +197,6 @@ S390X_BLOCKLIST = [
     "dynamo/test_dynamic_shapes",
     "test_quantization",
     "inductor/test_torchinductor_opinfo",
-    "test_binary_ufuncs",
-    "test_unary_ufuncs",
     # these tests fail when cuda is not available
     "inductor/test_aot_inductor",
     "inductor/test_cudacodecache",
