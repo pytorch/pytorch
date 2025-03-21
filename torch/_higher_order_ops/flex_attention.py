@@ -24,6 +24,11 @@ from torch.fx.experimental.proxy_tensor import (
     track_tensor_tree,
 )
 from torch.fx.graph_module import GraphModule
+from torch.utils.flop_counter import (
+    _FlopCounterMode,
+    sdpa_backward_flop_count,
+    sdpa_flop_count,
+)
 
 
 # Duplicate of _inductor/kernel/flex_attention.py to avoid circular import
@@ -756,11 +761,42 @@ def flex_attention_autograd(
     return out, logsumexp
 
 
+@flex_attention.py_impl(_FlopCounterMode)
+def flex_attention_flop_counter_mode(
+    mode: _FlopCounterMode,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    score_mod: Callable,
+    block_mask: tuple,
+    scale: float,
+    kernel_options: dict[str, Any],
+    score_mod_other_buffers: tuple = (),
+    mask_mod_other_buffers: tuple = (),
+) -> tuple[torch.Tensor, torch.Tensor]:
+    for par in set(mode.counter.mod_tracker.parents):
+        mode.counter.flop_counts[par]["flex_attention"] += sdpa_flop_count(
+            query.shape, key.shape, value.shape
+        )
+    out, lse = math_attention(
+        query,
+        key,
+        value,
+        score_mod,
+        block_mask,
+        scale,
+        kernel_options,
+        score_mod_other_buffers,
+        mask_mod_other_buffers,
+    )
+    out = _permute_strides(out, query.stride())
+    return out, lse
+
+
 # ---------------------------- Backward HOP Implementation ----------------------------
 
 
-@flex_attention_backward.py_impl(DispatchKey.CompositeExplicitAutograd)
-def sdpa_dense_backward(
+def sdpa_dense_backward_impl(
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
@@ -920,6 +956,43 @@ def sdpa_dense_backward(
         actual_grad_key,
         actual_grad_value,
         tuple(score_mod_other_buffer_grads),
+    )
+
+
+@flex_attention_backward.py_impl(DispatchKey.CompositeExplicitAutograd)
+def sdpa_dense_backward(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    out: torch.Tensor,
+    logsumexp: torch.Tensor,
+    grad_out: torch.Tensor,
+    grad_logsumexp: torch.Tensor,
+    fw_graph: Callable,  # GraphModule type hint?
+    joint_graph: Callable,
+    block_mask: tuple,
+    scale: float,
+    kernel_options: dict[str, Any],
+    score_mod_other_buffers: tuple,
+    mask_mod_other_buffers: tuple,
+) -> tuple[
+    torch.Tensor, torch.Tensor, torch.Tensor, tuple[Optional[torch.Tensor], ...]
+]:
+    return sdpa_dense_backward_impl(
+        query,
+        key,
+        value,
+        out,
+        logsumexp,
+        grad_out,
+        grad_logsumexp,
+        fw_graph,
+        joint_graph,
+        block_mask,
+        scale,
+        kernel_options,
+        score_mod_other_buffers,
+        mask_mod_other_buffers,
     )
 
 
@@ -1193,3 +1266,47 @@ def flex_attention_backward_fake_tensor_mode(
 flex_attention_backward.py_impl(DispatchKey.Autograd)(
     autograd_not_implemented(flex_attention_backward, deferred_error=True)
 )
+
+
+@flex_attention_backward.py_impl(_FlopCounterMode)
+def flex_attention_backward_flop_counter_mode(
+    mode: _FlopCounterMode,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    out: torch.Tensor,
+    logsumexp: torch.Tensor,
+    grad_out: torch.Tensor,
+    grad_logsumexp: torch.Tensor,
+    fw_graph: Union[Callable, GraphModule],
+    joint_graph: GraphModule,
+    block_mask: tuple,
+    scale: float,
+    kernel_options: dict[str, Any],
+    score_mod_other_buffers: tuple = (),
+    mask_mod_other_buffers: tuple = (),
+) -> tuple[
+    torch.Tensor, torch.Tensor, torch.Tensor, tuple[Optional[torch.Tensor], ...]
+]:
+    for par in set(mode.counter.mod_tracker.parents):
+        mode.counter.flop_counts[par][
+            "flex_attention_backward"
+        ] += sdpa_backward_flop_count(
+            grad_out.shape, query.shape, key.shape, value.shape
+        )
+    return sdpa_dense_backward_impl(
+        query,
+        key,
+        value,
+        out,
+        logsumexp,
+        grad_out,
+        grad_logsumexp,
+        fw_graph,
+        joint_graph,
+        block_mask,
+        scale,
+        kernel_options,
+        score_mod_other_buffers,
+        mask_mod_other_buffers,
+    )
