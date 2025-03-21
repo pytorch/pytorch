@@ -1373,12 +1373,32 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @patches
     @torch.no_grad
     @dtypes(torch.bfloat16)
-    @parametrize("batch_size", (32,))
-    @parametrize("in_features", (128, 144))
-    @parametrize("out_features", (64, 65))
+    @parametrize(
+        "batch_size",
+        (
+            1,
+            32,
+        ),
+    )
+    @parametrize(
+        "in_features",
+        (
+            128,
+            144,
+            4096,
+        ),
+    )
+    @parametrize(
+        "out_features",
+        (
+            64,
+            65,
+            4096,
+        ),
+    )
     def test_int8_woq_mm(self, dtype, batch_size, in_features, out_features):
         # x will be reshaped from 3d to 2d
-        second_dim_size = 8
+        second_dim_size = 1
 
         def _convert_weight_to_int8pack(w):
             scale, zp = _calculate_dynamic_per_channel_qparams(
@@ -1417,8 +1437,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         mod = M(w_int8pack).eval()
         self.common(mod, (x, w_scales))
         self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
-        vec_amx = VecAMX()
-        self._check_amx_counter(vec_amx)
+        if batch_size * second_dim_size >= 16:
+            vec_amx = VecAMX()
+            self._check_amx_counter(vec_amx)
 
     @unittest.skipIf(
         not torch._C._cpu._is_amx_tile_supported(), "AMX ISA support is required"
