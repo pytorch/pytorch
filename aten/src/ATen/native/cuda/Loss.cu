@@ -252,18 +252,20 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_2d(
 
   __syncthreads();
 
-  if (threadIdx.x == 0) {
-    accscalar_t output_acc = 0;
-    accscalar_t total_weight_acc = 0;
-    for (int i = 0; i < blockDim.x; ++i) {
-      output_acc += sh_inputs[i];
-      total_weight_acc += acc_weight[i];
+  for (int stride = blockDim.x/2; stride > 0; stride >>= 1) {
+    if (threadIdx.x < stride) {
+      sh_inputs[threadIdx.x] += sh_inputs[threadIdx.x + stride];
+      acc_weight[threadIdx.x] += acc_weight[threadIdx.x + stride];
     }
-    *total_weight = static_cast<scalar_t>(total_weight_acc);
+    __syncthreads();
+  }
+
+  if (threadIdx.x == 0) {
+    *total_weight = static_cast<scalar_t>(acc_weight[0]);
     if (size_average) {
-      *output = static_cast<scalar_t>(output_acc / total_weight_acc);
+      *output = static_cast<scalar_t>(sh_inputs[0] / acc_weight[0]);
     } else {
-      *output = static_cast<scalar_t>(output_acc);
+      *output = static_cast<scalar_t>(sh_inputs[0]);
     }
   }
 }
