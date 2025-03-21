@@ -859,9 +859,6 @@ class FakeTensor(Tensor):
     ) -> tuple[torch.device, bool]:
         # Returns: (common_device, has_scalar_only_inputs)
 
-        # cpu - zero-dim tensors can be called in cuda kernels,
-        # so overwrite the common_device if it the only existing
-        # device comes from a cpu zero-dim tensor
         common_device = None
         has_scalar_only_inputs = False
         is_cpu_zero_dim = None
@@ -879,19 +876,14 @@ class FakeTensor(Tensor):
 
         def merge_devices(t: object) -> None:
             nonlocal common_device
-            nonlocal is_cpu_zero_dim
             if not isinstance(t, FakeTensor):
                 return
 
             if common_device is None:
                 common_device = t.device
-                is_cpu_zero_dim = cpu_zero_dim(t)
                 return
 
-            t_is_cpu_zero_dim = cpu_zero_dim(t)
             if t.device == common_device:
-                if is_cpu_zero_dim:
-                    is_cpu_zero_dim = t_is_cpu_zero_dim
                 return
 
             # mismatching devices !
