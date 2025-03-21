@@ -2,7 +2,7 @@
 import functools
 from contextlib import contextmanager, ExitStack
 from dataclasses import dataclass
-from typing import Any, Callable, List, Optional, Tuple, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 import torch.fx.traceback as fx_traceback
@@ -10,8 +10,12 @@ import torch.utils._pytree as pytree
 from torch._guards import detect_fake_mode
 from torch._ops import OperatorBase
 from torch._subclasses.fake_tensor import FakeTensor
-from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing, make_fx
-from torch.fx.passes.shape_prop import TensorMetadata
+from torch.fx.experimental.proxy_tensor import (
+    _temp_remove_metadata_torch_function_mode,
+    disable_proxy_modes_tracing,
+    make_fx,
+)
+from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.multiprocessing.reductions import StorageWeakRef
 
 
@@ -81,6 +85,23 @@ def _maybe_run_with_interpreter(fn):
     return maybe_interpreted_fn
 
 
+def _maybe_compile_and_run_fn(fn, *args):
+    if not torch._dynamo.is_compiling():
+        from torch._dynamo.backends.debugging import (
+            make_eager_backend_with_torch_function_mode,
+        )
+
+        with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
+            with _temp_remove_metadata_torch_function_mode() as metadata_mode:
+                if metadata_mode:
+                    backend = make_eager_backend_with_torch_function_mode(metadata_mode)
+                else:
+                    backend = "eager"
+                return torch.compile(fn, backend=backend, fullgraph=True)(*args)
+    else:
+        return fn(*args)
+
+
 def reenter_make_fx(fn):
     from torch.fx.experimental.proxy_tensor import _CURRENT_MAKE_FX_TRACER
 
@@ -119,6 +140,88 @@ def _maybe_reenter_make_fx(fn):
             return wrapped
 
         return _maybe_make_fx_with_fake_mode(fn)
+
+
+def check_meta_consistency(
+    lhs_list: list[Union[torch.Tensor, torch.SymInt, int]],
+    rhs_list: list[Union[torch.Tensor, torch.SymInt, int]],
+    lhs_name: str,
+    rhs_name: str,
+) -> None:
+    def diff_meta_pairs(
+        lhs_list: list[Union[torch.Tensor, torch.SymInt, int]],
+        rhs_list: list[Union[torch.Tensor, torch.SymInt, int]],
+    ) -> list[str]:
+        def diff_meta(
+            lhs: Union[torch.Tensor, torch.SymInt, int],
+            rhs: Union[torch.Tensor, torch.SymInt, int],
+        ) -> str:
+            if isinstance(lhs, torch.Tensor) and isinstance(rhs, torch.Tensor):
+                return ", ".join(
+                    diff_tensor_meta(
+                        # We set include contiguity=False because we have vmap x cond tests, where if
+                        # include_contiguity=True will call t.is_contiguous inside of vmap and get an error
+                        # "querying is_contiguous inside of vmap for memory_format other than
+                        # torch.contiguous_format is not yet implemented". This is good for because stride
+                        # is still checked.
+                        _extract_tensor_metadata(lhs, include_contiguity=False),
+                        _extract_tensor_metadata(rhs, include_contiguity=False),
+                        check_grad=False,
+                    )
+                )
+            else:
+
+                def _both_int_types(lhs, rhs):
+                    return isinstance(lhs, (int, torch.SymInt)) and isinstance(
+                        rhs, (int, torch.SymInt)
+                    )
+
+                def _both_tensor(lhs, rhs):
+                    return isinstance(lhs, torch.Tensor) and isinstance(
+                        rhs, torch.Tensor
+                    )
+
+                if not _both_int_types(lhs, rhs) and not _both_tensor(lhs, rhs):
+                    return f"type: {lhs} vs {rhs}"
+
+            return ""
+
+        # Manually check the device of lhs and rhs as this field is currently not part of TensorMetadata
+        def diff_device(
+            lhs: Union[torch.Tensor, torch.SymInt, int],
+            rhs: Union[torch.Tensor, torch.SymInt, int],
+        ) -> str:
+            if isinstance(lhs, torch.Tensor) and isinstance(rhs, torch.Tensor):
+                if (
+                    rhs.device.type == lhs.device.type
+                    and rhs.device.index == lhs.device.index
+                ):
+                    return ""
+                else:
+                    return "device"
+            return ""
+
+        if len(lhs_list) != len(rhs_list):
+            raise torch._dynamo.exc.UncapturedHigherOrderOpError(
+                f"Expected {lhs_name} and {rhs_name} to have same number of outputs but got lhs:{lhs_list} and rhs:{rhs_list}"
+            )
+        all_diffs = []
+        for i, (lhs, rhs) in enumerate(zip(lhs_list, rhs_list)):
+            if diff := diff_meta(lhs, rhs):
+                all_diffs.append(
+                    f"pair[{i}] differ in {diff}, where lhs is {lhs} and rhs is {rhs}"
+                )
+            if diff := diff_device(lhs, rhs):
+                all_diffs.append(
+                    f"pair[{i}] differ in {diff}, where lhs is {lhs} and rhs is {rhs}"
+                )
+        return all_diffs
+
+    if all_diffs := diff_meta_pairs(lhs_list, rhs_list):
+        diff_str = "\n".join(all_diffs)
+        raise torch._dynamo.exc.UncapturedHigherOrderOpError(
+            f"Expected {lhs_name} and {rhs_name} to have same metadata but found:\n{diff_str}"
+        )
 
 
 @contextmanager
@@ -173,7 +276,7 @@ def _detect_input_alias(gm: torch.fx.GraphModule) -> bool:
 
 
 # The invariant here is that we always trace the branch with fake tensor
-def _maybe_fake_tracing(fn, inputs: List[Any], pre_dispatch):
+def _maybe_fake_tracing(fn, inputs: list[Any], pre_dispatch):
     fake_mode = detect_fake_mode(inputs)
     tracing_mode = "real"
     if fake_mode is None:
@@ -245,11 +348,17 @@ def unique_graph_id(proxy_mode, prefix):
     # There are probably better ways - I know that create_arg has some self incrementing name
     # magic to it, but since we explicitly have to get the name for register_module,
     # I was not sure how to do that. This kinda simulates it.
+    return unique_graph_name_with_root(proxy_mode.tracer.root, prefix)
+
+
+def unique_graph_name_with_root(
+    root: torch.fx.GraphModule, prefix: str
+) -> tuple[int, str]:
     next_name = None
     i = 0
     while not next_name:
         candidate = f"{prefix}_{i}"
-        if hasattr(proxy_mode.tracer.root, candidate):
+        if hasattr(root, candidate):
             i += 1
         else:
             next_name = candidate
@@ -337,6 +446,17 @@ def unmask_none_gradients(grads, operands):
             )
 
     return unmasked_grads
+
+
+def _maybe_fake_prop_ignore_unbacked(fn, args):
+    with ExitStack() as ctx_stack:
+        if (fake_mode := detect_fake_mode(args)) is not None:
+            ctx_stack.enter_context(fake_mode)
+            if fake_mode.shape_env is not None:
+                ctx_stack.enter_context(
+                    fake_mode.shape_env.ignore_fresh_unbacked_symbols()
+                )
+        return fn(*args)
 
 
 # TODO: The parameter use_output_and_grad_bw is required because some operations
@@ -554,8 +674,8 @@ def validate_subgraph_args_types(lifted_args: Union[tuple[Any, ...], list[Any]])
 
 def check_input_alias_and_mutation(
     gm: torch.fx.GraphModule,
-    fake_args: List[FakeTensor],
-) -> Tuple[List[int], dict[int, int], dict[int, int], dict[int, int]]:
+    fake_args: list[FakeTensor],
+) -> tuple[list[int], dict[int, int], dict[int, int], dict[int, int]]:
     with disable_proxy_modes_tracing():
         """This function returns mutated inputs, inp-inp alias, inp-out alias, out-out alias
         in the graph module gm. It checks whether input tensor versions have
@@ -578,18 +698,12 @@ def check_input_alias_and_mutation(
             # We need to temporarily turn inference_mode off because
             # under inference mode, tensor version counter is not tracked.
             ctx_stack.enter_context(torch.inference_mode(False))
-            if (fake_mode := detect_fake_mode(fake_args)) is not None:
-                ctx_stack.enter_context(fake_mode)
-                if fake_mode.shape_env is not None:
-                    ctx_stack.enter_context(
-                        fake_mode.shape_env.ignore_fresh_unbacked_symbols()
-                    )
             cloned = [
                 clone_preserve_strides(arg) if isinstance(arg, torch.Tensor) else arg
                 for arg in fake_args
             ]
             before = [_tensor_version(arg) for arg in cloned]
-            outputs = gm(*cloned)
+            outputs = _maybe_fake_prop_ignore_unbacked(gm, cloned)
             outputs = [outputs] if not isinstance(outputs, (list, tuple)) else outputs
             after = [_tensor_version(arg) for arg in cloned]
             mutated_inputs = [

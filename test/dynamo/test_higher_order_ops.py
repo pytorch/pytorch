@@ -6657,6 +6657,19 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(cnt.frame_count, 3)
         self.assertEqual(cnt.op_count, 18)
 
+    def test_vmap_out_dims_None(self):
+        # issue https://github.com/pytorch/pytorch/issues/149509
+        def fn(x, y):
+            return x, y * 2
+
+        def wrapper_fn(x, y):
+            return torch.func.vmap(fn, in_dims=(None, 0), out_dims=(None, 0))(x, y)
+
+        x, y = torch.randn(4), torch.randn(3, 4)
+        expected = wrapper_fn(x, y)
+        got = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=True)(x, y)
+        self.assertEqual(expected, got)
+
     def test_vmap_new_tensor_in_body(self):
         def fn(x):
             return x + torch.ones(3)
@@ -6961,11 +6974,9 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
             return torch.cond(x.sum() > 0, true_fn, false_fn)
 
         x = torch.randn(2, 3)
-        with self.assertRaises(torch._dynamo.exc.UncapturedHigherOrderOpError):
-            output_mismatch_test(x)
+        output_mismatch_test(x)
 
-        with self.assertRaises(torch._dynamo.exc.UncapturedHigherOrderOpError):
-            torch.compile(output_mismatch_test)(x)
+        torch.compile(output_mismatch_test, backend="eager")(x)
 
     def test_non_aliasing_util(self):
         from torch._dynamo.variables.higher_order_ops import _assert_tensors_nonaliasing

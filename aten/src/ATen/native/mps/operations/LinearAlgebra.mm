@@ -46,10 +46,10 @@ static auto& lib = MetalShaderLibrary::getBundledLibrary();
 Tensor& do_metal_mm(const Tensor& self, const Tensor& other, Tensor& output) {
   auto stream = getCurrentMPSStream();
   auto device = MPSDevice::getInstance()->device();
-  auto matmulPSO = lib.getPipelineStateForFunc("naive_matmul_" + mps::scalarToMetalTypeString(output));
+  auto matmulPSO = lib.getPipelineStateForFunc("matmul_" + mps::scalarToMetalTypeString(output));
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
-      getMPSProfiler().beginProfileKernel(matmulPSO, "naive_matmul", {self, other});
+      getMPSProfiler().beginProfileKernel(matmulPSO, "matmul", {self, other});
       auto computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:matmulPSO];
       std::array<uint32_t, 3> sizes = {static_cast<uint32_t>(self.size(0)),
@@ -57,8 +57,14 @@ Tensor& do_metal_mm(const Tensor& self, const Tensor& other, Tensor& output) {
                                        static_cast<uint32_t>(output.size(1))};
       std::array<int64_t, 6> strides = {
           self.stride(0), self.stride(1), other.stride(0), other.stride(1), output.stride(0), output.stride(1)};
+      constexpr uint32_t TILE_DIM = 16; // fastest performance from tests on multiple macs
+      uint32_t gridSizeX = (output.size(1) + TILE_DIM - 1) / TILE_DIM;
+      uint32_t gridSizeY = (self.size(0) + TILE_DIM - 1) / TILE_DIM;
+
+      MTLSize threadsPerThreadgroup = MTLSizeMake(TILE_DIM, TILE_DIM, 1);
+      MTLSize threadgroupsPerGrid = MTLSizeMake(gridSizeX, gridSizeY, 1);
       mtl_setArgs(computeEncoder, self, other, output, strides, sizes);
-      mtl_dispatch1DJob(computeEncoder, matmulPSO, output.numel());
+      [computeEncoder dispatchThreadgroups:threadgroupsPerGrid threadsPerThreadgroup:threadsPerThreadgroup];
       getMPSProfiler().endProfileKernel(matmulPSO);
     }
   });
@@ -87,8 +93,16 @@ Tensor& do_metal_bmm(const Tensor& batch1, const Tensor& batch2, Tensor& output)
                                         output.stride(2),
                                         output.stride(1),
                                         output.stride(0)};
+      constexpr uint32_t TILE_DIM = 16;
+      uint32_t gridSizeX = (output.size(2) + TILE_DIM - 1) / TILE_DIM;
+      uint32_t gridSizeY = (batch1.size(1) + TILE_DIM - 1) / TILE_DIM;
+      uint32_t gridSizeZ = output.size(0);
+
+      MTLSize threadsPerThreadgroup = MTLSizeMake(TILE_DIM, TILE_DIM, 1);
+      MTLSize threadgroupsPerGrid = MTLSizeMake(gridSizeX, gridSizeY, gridSizeZ);
+
       mtl_setArgs(computeEncoder, batch1, batch2, output, strides, sizes);
-      mtl_dispatch1DJob(computeEncoder, matmulPSO, output.numel());
+      [computeEncoder dispatchThreadgroups:threadgroupsPerGrid threadsPerThreadgroup:threadsPerThreadgroup];
       getMPSProfiler().endProfileKernel(matmulPSO);
     }
   });
@@ -1063,14 +1077,13 @@ static void linalg_cholesky_mps_impl(const Tensor& input,
   TORCH_CHECK(input.scalar_type() == at::ScalarType::Float, "linalg.cholesky: Input tensor must be float32");
   TORCH_CHECK(input.dim() >= 2, "linalg.cholesky: Input tensor must be at least 2D");
   TORCH_CHECK(input.size(-2) == input.size(-1), "linalg.cholesky: Input tensor must be square");
-
-  if (input.numel() == 0 || out.numel() == 0) {
-    out.zero_();
-    return;
-  }
   auto input_sizes = input.sizes();
   resize_output(out, input_sizes);
   resize_output(info, {input_sizes.begin(), input_sizes.end() - 2});
+  if (input.numel() == 0) {
+    info.zero_();
+    return;
+  }
   out.copy_(input);
 
   int64_t ndim = out.dim();

@@ -11,15 +11,15 @@ on:
       # Release candidate tags look like: v1.11.0-rc1
       - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
     paths:
+      - '.ci/docker/common/*'
       - '.ci/docker/manywheel/*'
       - '.ci/docker/manywheel/build_scripts/*'
-      - '.ci/docker/common/*'
       - .github/workflows/build-manywheel-images.yml
   pull_request:
     paths:
+      - '.ci/docker/common/*'
       - '.ci/docker/manywheel/*'
       - '.ci/docker/manywheel/build_scripts/*'
-      - '.ci/docker/common/*'
       - .github/workflows/build-manywheel-images.yml
 
 
@@ -43,51 +43,6 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
 
-  build-docker-cuda:
-    environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
-    needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.9xlarge.ephemeral"
-    strategy:
-      matrix:
-        cuda_version: ["12.8", "12.6", "12.4", "11.8"]
-    env:
-      GPU_ARCH_TYPE: cuda
-      GPU_ARCH_VERSION: ${{ matrix.cuda_version }}
-    steps:
-      - name: Purge tools folder (free space for build)
-        run: rm -rf /opt/hostedtoolcache
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
-        with:
-          submodules: false
-      - name: Calculate docker image
-        if: env.WITH_PUSH == 'false'
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
-        with:
-            docker-image-name: manylinux-builder-cuda${{matrix.cuda_version}}
-            docker-build-dir:  .ci/docker/manywheel
-            always-rebuild: true
-            push: true
-      - name: Authenticate if WITH_PUSH
-        if: env.WITH_PUSH == 'true'
-        env:
-          DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
-          DOCKER_ID: ${{ secrets.DOCKER_ID }}
-        run: |
-          if [[ "${WITH_PUSH}" == true ]]; then
-            echo "${DOCKER_TOKEN}" | docker login -u "${DOCKER_ID}" --password-stdin
-          fi
-      - name: Build Docker Image
-        if: env.WITH_PUSH == 'true'
-        uses: nick-fields/retry@v3.0.0
-        with:
-          shell: bash
-          timeout_minutes: 90
-          max_attempts: 3
-          retry_wait_seconds: 90
-          command: |
-            .ci/docker/manywheel/build.sh manylinux-builder:cuda${{matrix.cuda_version}}
-  # NOTE: manylinux_2_28 are still experimental, see https://github.com/pytorch/pytorch/issues/123649
   build-docker-cuda-manylinux_2_28:
     environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
     needs: get-label-type
@@ -138,7 +93,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.2xlarge.ephemeral"
     strategy:
       matrix:
-        cuda_version: ["12.8", "12.6"]
+        cuda_version: ["12.8"]
     env:
       GPU_ARCH_TYPE: cuda-aarch64
       GPU_ARCH_VERSION: ${{ matrix.cuda_version }}
@@ -214,42 +169,6 @@ jobs:
           retry_wait_seconds: 90
           command: |
             .ci/docker/manywheel/build.sh manylinux2_28-builder:rocm${{matrix.rocm_version}}
-  build-docker-cpu:
-    environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
-    needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.9xlarge.ephemeral"
-    steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
-        with:
-          submodules: false
-      - name: Calculate docker image
-        if: env.WITH_PUSH == 'false'
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
-        with:
-            docker-image-name: manylinux-builder-cpu
-            docker-build-dir:  .ci/docker/manywheel
-            always-rebuild: true
-            push: true
-      - name: Authenticate if WITH_PUSH
-        if: env.WITH_PUSH == 'true'
-        env:
-          DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
-          DOCKER_ID: ${{ secrets.DOCKER_ID }}
-        run: |
-          if [[ "${WITH_PUSH}" == true ]]; then
-            echo "${DOCKER_TOKEN}" | docker login -u "${DOCKER_ID}" --password-stdin
-          fi
-      - name: Build Docker Image
-        if: env.WITH_PUSH == 'true'
-        uses: nick-fields/retry@v3.0.0
-        with:
-          shell: bash
-          timeout_minutes: 90
-          max_attempts: 3
-          retry_wait_seconds: 90
-          command: |
-            .ci/docker/manywheel/build.sh manylinux-builder:cpu
   build-docker-cpu-manylinux_2_28:
     environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
     needs: get-label-type

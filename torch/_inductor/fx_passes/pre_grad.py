@@ -2,13 +2,14 @@
 import copy
 import itertools
 import logging
+import types
 from collections.abc import Sequence
 from typing import Optional
 
 import torch
 import torch.nn as nn
-from torch._dynamo.utils import counters, detect_fake_mode, optimus_scuba_log
-from torch._utils_internal import upload_graph
+from torch._dynamo.utils import counters, detect_fake_mode
+from torch._logging import trace_structured
 from torch.fx.experimental.optimization import (
     matches_module_pattern,
     replace_node_module,
@@ -73,6 +74,10 @@ def is_same_dict(inductor_dict, optimus_dict):
     return True
 
 
+def shape_prop(mod) -> None:
+    return None
+
+
 def normalize_node_kwargs_pass(graph):
     return None
 
@@ -83,6 +88,10 @@ def fuse_parallel_linear_pass(graph):
 
 def remove_split_ops(graph, shape_prop):
     return None
+
+
+def remove_split_ops_pass(graph):
+    remove_split_ops(graph.owning_module, shape_prop)
 
 
 def fuse_chunk_reshape_unsqueeze_concat_pass(graph):
@@ -109,6 +118,14 @@ def relu_nan_to_num(graph):
     return None
 
 
+def fuse_split_getitem_squeeze_cat(graph):
+    return None
+
+
+def use_triton_dot_compress(graph):
+    return None
+
+
 @init_once_fakemode
 def lazy_init():
     from . import efficient_conv_bn_eval, split_cat  # noqa: F401
@@ -117,8 +134,108 @@ def lazy_init():
         from . import fb  # type: ignore[attr-defined]  # noqa: F401
 
 
+def _get_pass_name_func(p):
+    if isinstance(p, PatternMatcherPass):
+        pass_name = p.pass_name
+        pass_func = p.apply
+    elif isinstance(p, types.FunctionType):
+        pass_name = p.__name__
+        pass_func = p
+    else:
+        pass_name = None
+        pass_func = None
+
+    return pass_name, pass_func
+
+
+def _run_pre_dispatch_passes(
+    gm: torch.fx.GraphModule,
+    example_inputs: Sequence[object] = (),
+    add_passes: Optional[str] = None,
+    remove_passes: Optional[str] = None,
+) -> None:
+    # order matters
+    default_pass_list = [
+        # normalize passes, must be called as the first passes
+        normalization_pass_aten,
+        normalize_node_kwargs_pass,
+        remove_noop_pass,
+        relu_nan_to_num,
+        fuse_chunk_reshape_concat_pass,
+        group_batch_fusion_passes,
+        normalize_node_kwargs_pass,
+        fuse_chunk_squeeze_cat_pass,
+        merge_concats_pass,
+        fuse_split_linear_add_pass,
+        remove_reshape_pass,
+        fuse_parallel_linear_pass,
+        remove_split_ops_pass,
+        stack_to_unsqueeze_pass,  # run before fuse_chunk_reshape_unsqueeze_concat_pass
+        fuse_chunk_reshape_unsqueeze_concat_pass,
+    ]
+
+    full_pass_list = default_pass_list + [
+        fuse_split_getitem_squeeze_cat,
+        use_triton_dot_compress,
+    ]
+
+    log.info(
+        f"pre_grad_passes: add_passes: {add_passes}, remove_pass: {remove_passes}"  # noqa: G004
+    )
+    add_passes_list = []
+    remove_passes_list = []
+    if add_passes:
+        add_passes_list = add_passes.split(",")
+    if remove_passes:
+        remove_passes_list = remove_passes.split(",")
+
+    shape_prop = lambda mod: ShapeProp(  # noqa: E731
+        gm=mod,
+        # pyre-fixme[16]: Module `torch._dynamo.utils` has no attribute `detect_fake_mode`
+        fake_mode=detect_fake_mode(example_inputs),
+    ).propagate(*tuple(example_inputs))
+
+    for p in default_pass_list:
+        pass_name, pass_func = _get_pass_name_func(p)
+        # should not happen
+        if pass_name is None or pass_func is None:
+            continue
+        if pass_name in remove_passes_list:
+            continue
+        pass_execution_and_save(
+            pass_func,
+            gm,
+            example_inputs,
+            f"[Pre grad(predispatch IR)] Apply {pass_name} pass",
+        )
+
+    for p in full_pass_list:
+        pass_name, pass_func = _get_pass_name_func(p)
+        if pass_name is None or pass_func is None:
+            continue
+        if pass_name in add_passes_list:
+            pass_execution_and_save(
+                pass_func,
+                gm,
+                example_inputs,
+                f"[Pre grad(predispatch IR)] Apply {pass_name} pass",
+            )
+
+    # Remove noops at the end, which may be generated other passes.
+    pass_execution_and_save(
+        remove_noop_pass,
+        gm,
+        example_inputs,
+        "[Pre grad(predispatch IR)]Apply remove_noop pass",
+    )
+    shape_prop(gm)
+
+
 def pre_grad_passes(
-    gm: torch.fx.GraphModule, example_inputs: Sequence[object] = ()
+    gm: torch.fx.GraphModule,
+    example_inputs: Sequence[object] = (),
+    add_passes: Optional[str] = None,
+    remove_passes: Optional[str] = None,
 ) -> torch.fx.GraphModule:
     """
     Apply passes on the input FX graph using Torch IR.
@@ -139,123 +256,23 @@ def pre_grad_passes(
             gm_before_fx_passes = gm.__copy__()
         # explicitly run with predispatch atenIR based passes
         if config.is_predispatch:
-
-            def shape_prop(mod) -> None:
-                ShapeProp(
-                    gm=mod,
-                    # pyre-fixme[16]: Module `torch._dynamo.utils` has no attribute `detect_fake_mode`
-                    fake_mode=detect_fake_mode(example_inputs),
-                ).propagate(*tuple(example_inputs))
-
-            # normalization pass
-            pass_execution_and_save(
-                normalization_pass_aten.apply,
-                gm,
-                example_inputs,
-                "[Pre grad(predispatch IR)]Apply normalization pass",
-            )
-            # normalize kwargs, must be called as the first pass
-            pass_execution_and_save(
-                normalize_node_kwargs_pass,
-                gm,
-                example_inputs,
-                "[Pre grad(predispatch IR)]Apply normalize_node_kwargs_pass",
-            )
-            pass_execution_and_save(
-                remove_noop_pass,
-                gm,
-                example_inputs,
-                "[Pre grad(predispatch IR)]Apply remove_noop pass",
-            )
-            pass_execution_and_save(
-                relu_nan_to_num,
-                gm,
-                example_inputs,
-                "[Pre grad(predispatch IR)]Apply relu_nan_to_num pass",
-            )
-            pass_execution_and_save(
-                fuse_chunk_reshape_concat_pass,
-                gm,
-                example_inputs,
-                "[Pre grad(predispatch IR)] Apply fuse_chunk_reshape_concat_pass",
-            )
-            pass_execution_and_save(
-                group_batch_fusion_passes,
-                gm,
-                example_inputs,
-                "[Pre grad(predispatch IR)] Apply group_batch_fusion",
-            )
-            pass_execution_and_save(
-                normalize_node_kwargs_pass,
-                gm,
-                example_inputs,
-                "[Pre grad(predispatch IR)]Apply normalize_node_kwargs_pass",
-            )
-            pass_execution_and_save(
-                fuse_chunk_squeeze_cat_pass.apply,
-                gm,
-                example_inputs,
-                "[Pre grad(predispatch IR)] Apply fuse_chunk_squeeze_cat_pass",
-            )
-            pass_execution_and_save(
-                merge_concats_pass,
-                gm,
-                example_inputs,
-                "[Pre grad(predispatch IR)] Apply merge_concats_pass",
-            )
-            pass_execution_and_save(
-                fuse_split_linear_add_pass.apply,
-                gm,
-                example_inputs,
-                "[Pre grad(predispatch IR)] Apply fuse_split_linear_add_pass",
-            )
-            pass_execution_and_save(
-                remove_reshape_pass.apply,
-                gm,
-                example_inputs,
-                "[Pre grad(predispatch IR)] Apply remove_reshape_pass",
-            )
-            pass_execution_and_save(
-                fuse_parallel_linear_pass,
-                gm,
-                example_inputs,
-                "[Pre grad(predispatch IR)] Apply fuse_parallel_linear_pass",
-            )
-            pass_execution_and_save(
-                lambda graph: remove_split_ops(graph.owning_module, shape_prop),
-                gm,
-                example_inputs,
-                "[Pre grad(predispatch IR)] Apply remove_split_ops",
-            )
-            # run before fuse_chunk_reshape_unsqueeze_concat_pass
-            pass_execution_and_save(
-                stack_to_unsqueeze_pass,
-                gm,
-                example_inputs,
-                "[Pre grad(predispatch IR)] Apply stack_to_unsqueeze_pass",
-            )
-            pass_execution_and_save(
-                fuse_chunk_reshape_unsqueeze_concat_pass,
-                gm,
-                example_inputs,
-                "[Pre grad(predispatch IR)] Apply fuse_chunk_reshape_unsqueeze_concat_pass",
-            )
-            # Remove noops at the end, which may be generated other passes.
-            pass_execution_and_save(
-                remove_noop_pass,
-                gm,
-                example_inputs,
-                "[Pre grad(predispatch IR)]Apply remove_noop pass",
-            )
-            shape_prop(gm)
-
+            _run_pre_dispatch_passes(gm, example_inputs, add_passes, remove_passes)
         else:
             # We only log the graph with changes to avoid the excessive compilation time
             # https://fb.workplace.com/groups/257735836456307/permalink/633533465543207/
             if example_inputs is not None:
                 gm = fuse_fx(gm, example_inputs)
             numpy_compat_normalization(gm.graph)
-            optimus_scuba_log["before_recompile_pre_grad"] = upload_graph(gm.graph)
+            trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "before_recompile_pre_grad",
+                    "encoding": "string",
+                },
+                payload_fn=lambda: gm.print_readable(
+                    print_output=False, include_stride=True, include_device=True
+                ),
+            )
             # We should always do the normalization_pass first
             if "normalization_pass" in config.pre_grad_fusion_options:
                 pattern_matcher_pass = PRE_GRAD_PATTERNS["normalization_pass"]
@@ -274,9 +291,16 @@ def pre_grad_passes(
                 for _ in range(counter):
                     pattern_matcher_pass.apply(gm.graph)  # type: ignore[arg-type]
                 if not is_same_dict(counters["inductor"], inductor_before_change):
-                    optimus_scuba_log[
-                        f"{pattern_matcher_pass.pass_name}_pre_grad"
-                    ] = upload_graph(gm.graph)
+                    trace_structured(
+                        "artifact",
+                        metadata_fn=lambda: {
+                            "name": f"{pattern_matcher_pass.pass_name}_pre_grad",
+                            "encoding": "string",
+                        },
+                        payload_fn=lambda: gm.print_readable(
+                            print_output=False, include_stride=True, include_device=True
+                        ),
+                    )
             # TODO: move efficient_conv_bn_eval_pass to the fusions dict too.
             efficient_conv_bn_eval_pass.apply(gm.graph)  # type: ignore[arg-type]
 
@@ -291,7 +315,16 @@ def pre_grad_passes(
 
     gm.graph.lint()
     gm.recompile()
-    optimus_scuba_log["after_recompile_pre_grad"] = upload_graph(gm.graph)
+    trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "after_recompile_pre_grad",
+            "encoding": "string",
+        },
+        payload_fn=lambda: gm.print_readable(
+            print_output=False, include_stride=True, include_device=True
+        ),
+    )
 
     if (
         config.pattern_matcher

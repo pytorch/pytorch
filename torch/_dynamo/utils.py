@@ -59,7 +59,6 @@ from typing import (
     Generic,
     Optional,
     overload,
-    Set,
     TypeVar,
     Union,
 )
@@ -372,7 +371,12 @@ class CompileEventLogger:
         )
 
     @staticmethod
-    def add_data(event_name: str, log_level: CompileEventLogLevel, **metadata: object):
+    def add_data(
+        event_name: str,
+        log_level: CompileEventLogLevel,
+        overwrite: bool = False,
+        **metadata: object,
+    ):
         """
         Centralized API for adding data to various events
         Log an event to a toplevel "dynamo" event or metrics context
@@ -409,11 +413,13 @@ class CompileEventLogger:
                 )
 
             # TODO: should we assert that the keys of metadata are in CompilationMetrics?
-            metrics_context.update(metadata)
+            metrics_context.update(metadata, overwrite)
             chromium_log.add_event_data(event_name, **metadata)
 
     @staticmethod
-    def add_toplevel(log_level: CompileEventLogLevel, **metadata: object):
+    def add_toplevel(
+        log_level: CompileEventLogLevel, overwrite: bool = False, **metadata: object
+    ):
         """
         Syntactic sugar for logging to the toplevel event
         """
@@ -422,7 +428,7 @@ class CompileEventLogger:
             raise RuntimeError(
                 "No toplevel event active. Please only call this function within a dynamo_timed context."
             )
-        CompileEventLogger.add_data(top_event, log_level, **metadata)
+        CompileEventLogger.add_data(top_event, log_level, overwrite, **metadata)
 
     @staticmethod
     def increment(
@@ -458,7 +464,7 @@ class CompileEventLogger:
     @staticmethod
     def increment_toplevel(
         key: str,
-        value: int,
+        value: int = 1,
         log_level: CompileEventLogLevel = CompileEventLogLevel.COMPILATION_METRIC,
     ):
         """
@@ -530,7 +536,7 @@ class CompileEventLogger:
         <event_name> should be the name of a timed event span passed to `dynamo_timed`.
         """
         CompileEventLogger.add_data(
-            event_name, CompileEventLogLevel.CHROMIUM, **metadata
+            event_name, CompileEventLogLevel.CHROMIUM, overwrite=False, **metadata
         )
 
     @staticmethod
@@ -543,11 +549,11 @@ class CompileEventLogger:
         with log_to_pt2_compile_events=True.
         """
         CompileEventLogger.add_data(
-            event_name, CompileEventLogLevel.PT2_COMPILE, **metadata
+            event_name, CompileEventLogLevel.PT2_COMPILE, overwrite=False, **metadata
         )
 
     @staticmethod
-    def compilation_metric(**metadata: object):
+    def compilation_metric(overwrite: bool = False, **metadata: object):
         """
         Add <metadata> to the CompilationMetrics context. Also logs to PT2 Compile Events
         and chromium.
@@ -555,7 +561,7 @@ class CompileEventLogger:
         a column in PT2 Compile Events and Dynamo Compile, with the corresponding kwarg value.
         """
         CompileEventLogger.add_toplevel(
-            CompileEventLogLevel.COMPILATION_METRIC, **metadata
+            CompileEventLogLevel.COMPILATION_METRIC, overwrite, **metadata
         )
 
     @staticmethod
@@ -590,7 +596,7 @@ def dynamo_timed(
     dynamo_compile_column_us: Optional[str] = None,
     dynamo_compile_runtime_column_us: Optional[str] = None,
     compile_id: Optional[CompileId] = None,
-    is_forward: Optional[bool] = None,
+    is_backward: Optional[bool] = None,
     log_waitcounter: bool = False,
 ) -> Generator[Any, None, None]:
     """
@@ -632,7 +638,8 @@ def dynamo_timed(
     - compile_id: In the typical case, this parameter should not be needed. Use to
       supply the compile_id for those cases where we want to log a compile_id where
       it's not naturally available, e.g., for runtime autotuning.
-    - is_forward: Optionally set an is_forward field for those logging destinations
+    - is_backward: Specify forward/backward directly when not available in a
+      CompileContext, e.g., during runtime autotuning.
       that support it.
     - log_waitcounter: If set, we'll log a waitcounter of the form "pytorch.dynamo_timed.{key}"
     """
@@ -658,8 +665,8 @@ def dynamo_timed(
         event_metadata.update(metadata)
     if fn_name:
         event_metadata.update({"fn_name": fn_name})
-    if is_forward is not None:
-        event_metadata.update({"is_backward": not is_forward})
+    if is_backward is not None:
+        event_metadata.update({"is_backward": is_backward})
 
     chromium_log: ChromiumEventLogger = get_chromium_event_logger()
     start_ns = time.time_ns()
@@ -701,22 +708,20 @@ def dynamo_timed(
                 extra={
                     "compile_id": compile_id,
                     "is_runtime": True,
-                    "is_forward": is_forward,
+                    "is_forward": not is_backward,
                 },
             )
             cumulative_time_spent_ns[event_name] += time_spent_ns
 
 
 @overload
-def compile_times(repr: Literal["str"], aggregate: bool = False) -> str:
-    ...
+def compile_times(repr: Literal["str"], aggregate: bool = False) -> str: ...
 
 
 @overload
 def compile_times(
     repr: Literal["csv"], aggregate: bool = False
-) -> tuple[list[str], list[object]]:
-    ...
+) -> tuple[list[str], list[object]]: ...
 
 
 def compile_times(repr="str", aggregate: bool = False):
@@ -916,20 +921,17 @@ class ExactWeakKeyDictionary:
 
 
 @overload
-def istype(obj: object, allowed_types: type[T]) -> TypeIs[T]:
-    ...
+def istype(obj: object, allowed_types: type[T]) -> TypeIs[T]: ...
 
 
 @overload
 def istype(
     obj: object, allowed_types: tuple[type[list[T]], type[tuple[T, ...]]]
-) -> TypeIs[T]:
-    ...
+) -> TypeIs[T]: ...
 
 
 @overload
-def istype(obj: object, allowed_types: Iterable[type]) -> bool:
-    ...
+def istype(obj: object, allowed_types: Iterable[type]) -> bool: ...
 
 
 def istype(obj, allowed_types):
@@ -1033,6 +1035,16 @@ cmp_name_to_op_mapping = {
 }
 
 
+cmp_name_to_op_str_mapping = {
+    "__eq__": "==",
+    "__ne__": "!=",
+    "__lt__": "<",
+    "__le__": "<=",
+    "__gt__": ">",
+    "__ge__": ">=",
+}
+
+
 def is_wrapper_or_member_descriptor(value):
     return isinstance(
         value,
@@ -1110,11 +1122,14 @@ def proxy_args_kwargs(args, kwargs):
         proxy_kwargs = {key: arg.as_proxy() for key, arg in kwargs.items()}
         return proxy_args, proxy_kwargs
     except NotImplementedError as e:
-        from .exc import unimplemented
+        from .exc import unimplemented_v2
         from .variables.base import typestr
 
-        unimplemented(
-            f"call_function args: {typestr(*args)} {typestr(*list(kwargs.values()))}",
+        unimplemented_v2(
+            gb_type="Failed to convert args/kwargs to proxy",
+            context=f"call_function args: {typestr(*args)} {typestr(*list(kwargs.values()))}",
+            explanation="Missing `as_proxy()` implementation for some arg/kwarg.",
+            hints=[],
             from_exc=e,
         )
 
@@ -1182,7 +1197,7 @@ class CompilationMetrics:
     inductor_cumulative_compile_time_us: Optional[int] = None
     inductor_code_gen_cumulative_compile_time_us: Optional[int] = None
     triton_compile_time_us: Optional[int] = None
-    runtime_cudagraphify_time_us: Optional[int] = None  # TODO: instrument
+    runtime_cudagraphify_time_us: Optional[int] = None
     runtime_triton_autotune_time_us: Optional[int] = None
     dynamo_compile_time_before_restart_us: Optional[int] = None
     cuda_synchronize_time_us: Optional[int] = None  # TODO: instrument
@@ -1214,6 +1229,11 @@ class CompilationMetrics:
     tensorify_float_failure: Optional[set[str]] = None
     guard_latency_us: Optional[float] = None
     recompile_reason: Optional[str] = None
+    num_graph_breaks: Optional[int] = None
+    triton_kernel_compile_times_us: Optional[str] = None
+    ir_count: Optional[int] = None
+    cudagraph_skip_reason: Optional[str] = None
+    python_version: Optional[str] = None
 
     @classmethod
     def create(cls, metrics: dict[str, Any]):
@@ -1243,6 +1263,14 @@ class CompilationMetrics:
                 return "<unknown>"
 
             return ",".join(safe_str(item) for item in sorted(metric))
+
+        def collection_to_json_str(metric: Optional[Any]) -> Optional[str]:
+            if metric is None:
+                return None
+            try:
+                return json.dumps(list(metric))
+            except Exception:
+                return "<unknown>"
 
         # TODO: The following are legacy fields, populated from the fields that replace
         # them. Remove these when we decide we can really deprecate them.
@@ -1282,6 +1310,9 @@ class CompilationMetrics:
         )
         all_metrics["inductor_fx_remote_cache_miss_keys"] = collection_to_str(
             all_metrics.get("inductor_fx_remote_cache_miss_keys")
+        )
+        all_metrics["triton_kernel_compile_times_us"] = collection_to_json_str(
+            all_metrics.get("triton_kernel_compile_times_us")
         )
         compile_id = all_metrics.get("compile_id")
         all_metrics["compile_id"] = str(compile_id) if compile_id else None
@@ -1393,7 +1424,7 @@ def _scrubbed_inductor_config_for_logging() -> Optional[str]:
             except Exception:
                 return "Value is not JSON serializable"
 
-    keys_to_scrub: Set[Any] = set()
+    keys_to_scrub: set[Any] = set()
     inductor_conf_str = None
     inductor_config_copy = (
         torch._inductor.config.get_config_copy() if torch._inductor.config else None
@@ -1464,6 +1495,7 @@ def record_compilation_metrics(
         "triton_version": triton.__version__ if has_triton() else "",
         "remote_cache_version": remote_cache_version,
         "inductor_fx_remote_cache_backend_type": inductor_fx_remote_cache_backend_type,
+        "python_version": sys.version,
     }
 
     compilation_metrics = CompilationMetrics.create({**common_metrics, **metrics})
@@ -2456,8 +2488,11 @@ def set_example_value(node, example_value):
     # the program was traced).
     node.meta["example_value"] = example_value
     shape_env = TracingContext.get().fake_mode.shape_env
-    if symbol_to_path := torch.fx.experimental.symbolic_shapes.compute_unbacked_bindings(
-        shape_env, example_value
+    if (
+        symbol_to_path
+        := torch.fx.experimental.symbolic_shapes.compute_unbacked_bindings(
+            shape_env, example_value
+        )
     ):
         node.meta["unbacked_bindings"] = symbol_to_path
 
@@ -2465,9 +2500,15 @@ def set_example_value(node, example_value):
 def _get_fake_tensor(vt):
     fake_tensor = vt.as_proxy().node.meta.get("example_value")
     if not is_fake(fake_tensor):
-        from .exc import unimplemented
+        from . import graph_break_hints
+        from .exc import unimplemented_v2
 
-        unimplemented("Cannot check Tensor object identity without its fake value")
+        unimplemented_v2(
+            gb_type="Cannot check Tensor object identity without its fake value",
+            context=str(fake_tensor),
+            explanation="TensorVariable is missing a fake example_value.",
+            hints=[*graph_break_hints.DYNAMO_BUG],
+        )
     return fake_tensor
 
 
@@ -2575,15 +2616,44 @@ def get_safe_global_name(tx, root, obj):
     return f"{root}_{id(obj)}_c{tx.output.compile_id}"
 
 
+def is_in(item: Any, *containers) -> bool:
+    for container in containers:
+        if item in container:
+            return True
+    return False
+
+
+def get_unique_name_wrt(prefix: str, *containers, requires_suffix=False) -> str:
+    """
+    Return a name that starts with `prefix` and is not in any of the
+    `containers` (e.g., map, set).
+    """
+    if not requires_suffix and not is_in(prefix, *containers):
+        return prefix
+
+    for i in itertools.count():
+        candidate = f"{prefix}_{i}"
+        if not is_in(candidate, *containers):
+            return candidate
+
+    raise AssertionError("unreachable")
+
+
 def wrap_fake_exception(fn):
     try:
         return fn()
     except UnsupportedFakeTensorException as e:
-        from .exc import unimplemented
+        from .exc import unimplemented_v2
 
-        msg = f"Unsupported: {e.reason} with fake tensor propagation."
+        msg = f"Encountered exception ({e.reason}) during fake tensor propagation."
         log.warning(msg)
-        unimplemented(msg, from_exc=e)
+        unimplemented_v2(
+            gb_type="Fake tensor propagation exception",
+            context=str(e.reason),
+            explanation=msg,
+            hints=[],
+            from_exc=e,
+        )
 
 
 def deepcopy_to_fake_tensor(obj, fake_mode):
@@ -2618,9 +2688,9 @@ def same(
     if isinstance(
         ref, (list, tuple, collections.deque, torch.nn.ParameterList, torch.Size)
     ):
-        assert isinstance(
-            res, (list, tuple, collections.deque)
-        ), f"type mismatch {type(ref)} {type(res)}"
+        assert isinstance(res, (list, tuple, collections.deque)), (
+            f"type mismatch {type(ref)} {type(res)}"
+        )
         if len(ref) != len(res):
             log_error("Length mismatch")
             return False
@@ -2661,9 +2731,9 @@ def same(
         )
     elif isinstance(ref, dict):
         assert isinstance(res, dict)
-        assert set(ref.keys()) == set(
-            res.keys()
-        ), f"keys mismatch {set(ref.keys())} == {set(res.keys())}"
+        assert set(ref.keys()) == set(res.keys()), (
+            f"keys mismatch {set(ref.keys())} == {set(res.keys())}"
+        )
         for k in sorted(ref.keys()):
             if not (
                 same(
@@ -2787,13 +2857,13 @@ def same(
                     )
 
                     if use_larger_multiplier_for_smaller_tensor and (
-                        fp64_ref.numel() <= 10 and tol >= 4 * 1e-2
+                        fp64_ref.numel() <= 10
                     ):
                         multiplier = 10.0
                     elif use_larger_multiplier_for_smaller_tensor and (
-                        fp64_ref.numel() <= 500 and tol >= 4 * 1e-2
+                        fp64_ref.numel() <= 500
                     ):
-                        multiplier = 5.0
+                        multiplier = 8.0
                     elif (
                         fp64_ref.numel() < 1000
                         or (ref.ndim == 4 and ref.shape[-1] == ref.shape[-2] == 1)
@@ -2957,9 +3027,16 @@ def extract_fake_example_value(node, required=True):
     if "example_value" in node.meta and is_fake(node.meta["example_value"]):
         return node.meta["example_value"]
     elif required:
-        from torch._dynamo.exc import unimplemented
+        from torch._dynamo.exc import unimplemented_v2
 
-        unimplemented("`FakeTensor` example value was required but not available")
+        from . import graph_break_hints
+
+        unimplemented_v2(
+            gb_type="Missing FakeTensor example value",
+            context=str(node),
+            explanation=f"`FakeTensor` example value was required for {node} but not available.",
+            hints=[*graph_break_hints.DYNAMO_BUG],
+        )
     else:
         return None
 
@@ -2975,6 +3052,12 @@ def get_fake_values_from_nodes(tx, nodes, allow_non_graph_fake):
             # fake tensor validity is checked inside get_fake_value using
             # ensure_graph_fake
             return get_fake_value(n, tx, allow_non_graph_fake)
+
+        elif n.op == "get_attr" and "example_value" not in n.meta:
+            assert n.target in tx.output.nn_modules
+            gm = tx.output.nn_modules[n.target]
+            assert isinstance(gm, torch.fx.GraphModule)
+            return gm
 
         out = n.meta["example_value"]
         if not allow_non_graph_fake and isinstance(out, torch.Tensor):
@@ -2997,7 +3080,7 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
 
     from .exc import (
         TorchRuntimeError,
-        unimplemented,
+        unimplemented_v2,
         Unsupported,
         UserError,
         UserErrorType,
@@ -3057,23 +3140,50 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         if isinstance(
             cause, torch._subclasses.fake_tensor.DataDependentOutputException
         ):
-            unimplemented(
-                f"data dependent operator: {cause.func}; "
-                "to enable, set torch._dynamo.config.capture_scalar_outputs = True"
+            # capture_scalar_outputs only works for these ops right now
+            # see torch/_subclasses/fake_impls.py
+            if cause.func in (
+                torch.ops.aten.item.default,
+                torch.ops.aten._local_scalar_dense.default,
+            ):
+                # does this actually get triggered?
+                hints = [
+                    "Enable tracing of data-dependent output operators with "
+                    "`torch._dynamo.config.capture_scalar_outputs = True`",
+                ]
+            else:
+                hints = [
+                    "Consider wrapping the operator into a PyTorch-understood custom operator "
+                    "(see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html)",
+                ]
+            unimplemented_v2(
+                gb_type="Data dependent operator",
+                context=str(cause.func),
+                explanation=f"Operator `{cause.func}` has a non-Tensor output "
+                "whose value is dependent on the data of Tensor inputs.",
+                hints=hints,
             )
         elif isinstance(
             cause, torch._subclasses.fake_tensor.DynamicOutputShapeException
         ):
             if not torch._dynamo.config.capture_dynamic_output_shape_ops:
-                unimplemented(
-                    f"dynamic shape operator: {cause.func}; "
-                    "to enable, set torch._dynamo.config.capture_dynamic_output_shape_ops = True"
+                unimplemented_v2(
+                    gb_type="Dynamic shape operator",
+                    context=str(cause.func),
+                    explanation=f"Operator `{cause.func}`'s output shape depends on input Tensor data.",
+                    hints=[
+                        "Enable tracing of dynamic shape operators with "
+                        "`torch._dynamo.config.capture_dynamic_output_shape_ops = True`",
+                    ],
                 )
             else:
-                unimplemented(
-                    f"dynamic shape operator: {cause.func}; "
-                    "Operator does not have a meta kernel that supports dynamic output shapes, "
-                    "please report an issue to PyTorch"
+                unimplemented_v2(
+                    gb_type="Dynamic shape operator (no meta kernel)",
+                    context=str(cause.func),
+                    explanation=f"Operator `{cause.func}` does not have a meta kernel that supports dynamic output shapes",
+                    hints=[
+                        "Please report an issue to PyTorch",
+                    ],
                 )
         elif isinstance(
             cause, torch._subclasses.fake_tensor.UnsupportedOperatorException
@@ -3091,10 +3201,15 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
                         f"module `{module}` and you may need to `import {module}`"
                         f"({ctx}), otherwise "
                     )
-            unimplemented(
-                f"unsupported operator: {cause.func} ({import_suggestion}see "
-                "https://docs.google.com/document/d/1GgvOe7C8_NVOMLOCwDaYV1mXXyHMXY7ExoewHqooxrs/edit#heading=h.64r4npvq0w0"
-                " for how to fix)"
+            unimplemented_v2(
+                gb_type="Operator does not support running with fake tensors",
+                context=f"unsupported operator: {cause.func}",
+                explanation="",
+                hints=[
+                    f"{import_suggestion}see "
+                    "https://docs.google.com/document/d/1GgvOe7C8_NVOMLOCwDaYV1mXXyHMXY7ExoewHqooxrs/edit#heading=h.64r4npvq0w0"
+                    " for how to fix",
+                ],
             )
         elif isinstance(
             cause, torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
@@ -3107,7 +3222,12 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         elif isinstance(cause, ValueRangeError):
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, e.args[0]) from e
         elif isinstance(cause, TypeError) and "argument" in str(cause):
-            unimplemented(f"TypeError {node.target}: {cause}")
+            unimplemented_v2(
+                gb_type="TypeError when making fake tensor call",
+                context=f"TypeError {node.target}: {cause}",
+                explanation="",
+                hints=[],
+            )
 
         raise TorchRuntimeError(str(e)).with_traceback(e.__traceback__) from None
 
@@ -3155,7 +3275,10 @@ def run_node(tracer, node, args, kwargs, nnmodule):
     with set_current_node(node):
 
         def make_error_message(e):
-            return f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n" + str(e)
+            return (
+                f"Dynamo failed to run FX node with fake tensors: {op} {node.target}(*{args}, **{kwargs}): got "
+                + repr(e)
+            )
 
         from .exc import Unsupported
 
@@ -3164,9 +3287,14 @@ def run_node(tracer, node, args, kwargs, nnmodule):
                 return node.target(*args, **kwargs)
             elif op == "call_method":
                 if not hasattr(args[0], node.target):
-                    from .exc import unimplemented
+                    from .exc import unimplemented_v2
 
-                    unimplemented(make_error_message("attribute not defined"))
+                    unimplemented_v2(
+                        gb_type="Missing attribute when running call_method node",
+                        context="",
+                        explanation=make_error_message("attribute not defined"),
+                        hints=[],
+                    )
                 return getattr(args[0], node.target)(*args[1:], **kwargs)
             elif op == "call_module":
                 assert nnmodule is not None
@@ -3179,9 +3307,21 @@ def run_node(tracer, node, args, kwargs, nnmodule):
 
         except (NotImplementedError, UnsupportedFakeTensorException) as e:
             # NB: mimic how wrap_fake_exception does it
-            from .exc import unimplemented
+            from .exc import unimplemented_v2
 
-            unimplemented(make_error_message(e), from_exc=e)
+            hints = []
+            if isinstance(e, NotImplementedError):
+                hints = [
+                    "If the op is a PyTorch op, please file an issue to PyTorch.",
+                ]
+
+            unimplemented_v2(
+                gb_type="NotImplementedError/UnsupportedFakeTensorException when running FX node",
+                context="",
+                explanation=make_error_message(e),
+                hints=hints,
+                from_exc=e,
+            )
         except Unsupported:
             raise
         except Exception as e:
@@ -3243,13 +3383,13 @@ def assert_no_fake_params_or_buffers(gm):
             return "Enable TORCH_FAKE_TENSOR_DEBUG=1 to get creation stack traces on fake tensors."
 
     for name, buffer in gm.named_buffers():
-        assert not is_fake(
-            buffer
-        ), f"Unexpected fake buffer {name} {stack_or_hint(buffer)}"
+        assert not is_fake(buffer), (
+            f"Unexpected fake buffer {name} {stack_or_hint(buffer)}"
+        )
     for name, param in gm.named_parameters():
-        assert not is_fake(
-            param
-        ), f"Unexpected fake param {name} {stack_or_hint(param)}"
+        assert not is_fake(param), (
+            f"Unexpected fake param {name} {stack_or_hint(param)}"
+        )
 
 
 def fqn(obj: Any):
@@ -3614,7 +3754,7 @@ def is_compile_supported(device_type):
     compile_supported = is_dynamo_supported()
     if device_type == "cpu":
         pass
-    elif device_type == "cuda" and compile_supported:
+    elif device_type in ["cuda", "xpu"] and compile_supported:
         compile_supported = has_triton()
     else:
         compile_supported = False
@@ -4312,3 +4452,65 @@ def set_feature_use(feature: str, usage: bool):
     # Note that sometimes (tests etc...) we're not in a context which we can record into
     if get_metrics_context().in_progress():
         get_metrics_context().set_key_value("feature_usage", feature, usage)
+
+
+_ddp_optimization_mode: tuple[str, ...] = (
+    "ddp_optimizer",
+    "python_reducer",  # experimental mode
+    "no_optimization",
+)
+
+
+def get_optimize_ddp_mode():
+    optimize_ddp = config.optimize_ddp
+    if isinstance(optimize_ddp, bool):
+        mode = "ddp_optimizer" if optimize_ddp else "no_optimization"
+    elif isinstance(optimize_ddp, str):
+        mode = optimize_ddp
+    else:
+        raise ValueError(
+            f"Invalid dynamo config optimize_ddp type {type(optimize_ddp)=}"
+        )
+
+    assert mode in _ddp_optimization_mode, (
+        f"Invalid dynamo config optimize_ddp value {mode=}"
+    )
+    return mode
+
+
+@contextmanager
+def maybe_disable_inference_mode() -> Generator[None, None, None]:
+    """
+    Disables torch.inference_mode for the compilation (still on at runtime).
+    This simplifies the compile stack where we can assume that inference_mode
+    will always be off.
+
+    Since inference_mode is equivalent to no_grad + some optimizations (version
+    counts etc), we turn on no_grad here. The other optimizations are not
+    relevant to torch.compile.
+    """
+    is_inference_mode_on = (
+        config.fake_tensor_disable_inference_mode and torch.is_inference_mode_enabled()
+    )
+    if is_inference_mode_on:
+        with (
+            torch.inference_mode(False),
+            torch.no_grad(),
+        ):
+            yield
+    else:
+        yield
+
+
+@contextmanager
+def maybe_disable_inference_mode_for_fake_prop() -> Generator[None, None, None]:
+    """
+    Turns off tracking of inference_mode for fake tensor propagation. With this
+    context manager, when a real tensor is converted to fake tensor, the fake
+    tensor looses its inference-ness.
+    """
+    if config.fake_tensor_disable_inference_mode:
+        with torch._subclasses.meta_utils.disable_inference_mode_for_fake_prop():
+            yield
+    else:
+        yield

@@ -160,6 +160,8 @@ class VecNEON(VecISA):
     _dtype_nelements = {torch.float: 4, torch.bfloat16: 8, torch.float16: 8}
 
     def __str__(self) -> str:
+        if config.is_fbcode():
+            return "neon"
         return "asimd"  # detects the presence of advanced SIMD on armv8-a kernels
 
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__
@@ -178,7 +180,22 @@ class VecSVE256(VecISA):
     _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
 
     def __str__(self) -> str:
+        if config.is_fbcode():
+            return "neon"
         return "asimd"
+
+    __hash__: Callable[[VecISA], Any] = VecISA.__hash__
+
+
+@dataclasses.dataclass
+class VecSVE256_BF16(VecSVE256):
+    _macro = [
+        "CPU_CAPABILITY_SVE",
+        "CPU_CAPABILITY_SVE256",
+        "AT_BUILD_ARM_VEC256_WITH_SLEEF",
+        "__ARM_FEATURE_BF16",
+    ]
+    _arch_flags = "-march=armv8-a+sve+bf16 -msve-vector-bits=256"
 
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__
 
@@ -328,7 +345,14 @@ def x86_isa_checker() -> list[str]:
 
 
 invalid_vec_isa = InvalidVecISA()
-supported_vec_isa_list = [VecAMX(), VecAVX512(), VecAVX2(), VecNEON(), VecSVE256()]
+supported_vec_isa_list = [
+    VecAMX(),
+    VecAVX512(),
+    VecAVX2(),
+    VecNEON(),
+    VecSVE256(),
+    VecSVE256_BF16(),
+]
 
 
 def get_isa_from_cpu_capability(
@@ -389,10 +413,13 @@ def valid_vec_isa_list() -> list[VecISA]:
     elif arch == "ppc64le":
         isa_list.append(VecVSX())
     elif arch == "aarch64":
-        if torch.backends.cpu.get_cpu_capability() == "SVE256":
+        if torch.backends.cpu.get_cpu_capability() == "SVE256_BF16":
+            isa_list.append(VecSVE256_BF16())
+        elif torch.backends.cpu.get_cpu_capability() == "SVE256":
             isa_list.append(VecSVE256())
         else:
             isa_list.append(VecNEON())
+
     elif arch in ["x86_64", "AMD64"]:
         """
         arch value is x86_64 on Linux, and the value is AMD64 on Windows.

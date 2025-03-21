@@ -26,7 +26,10 @@ from torch._guards import detect_fake_mode
 from torch._inductor.output_code import OutputCode
 from torch._inductor.utils import BoxedBool, InputType
 from torch._subclasses import FakeTensor, FakeTensorMode
-from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.proxy_tensor import (
+    _pytree_subclasses_that_lose_info,
+    make_fx,
+)
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
@@ -1031,6 +1034,8 @@ def _try_get_metadata_from_dynamo(
         aot_autograd_arg_pos_to_source.append(source)
 
     # Collect the dynamo graph inputs
+    # TODO(mlazos): Revisit if this is still needed. With Dynamo install ID
+    # matched tensors back into the Fx graph, this might not be necessary.
     static_input_indices = []
     for pos, node in enumerate(mod.graph.find_nodes(op="placeholder")):
         assert hasattr(node, "_dynamo_source")
@@ -1628,18 +1633,12 @@ def _detect_attribute_assignment(mod: torch.nn.Module):
         # return any attributes of a module that are not standard attributes
         return {k: v for k, v in mod.__dict__.items() if k not in STD_ATTRS}
 
-    def is_leaf(x):
-        # Ideally is_leaf should not be needed when mapping, but it seems that
-        # subclasses of a standard container X may sometimes map to X, which
-        # destroys information and can cause future mapping to fail.
-        known_subclasses_that_lose_info = (
-            torch.Size,
-            # add more here if needed
-        )
-        return isinstance(x, known_subclasses_that_lose_info)
-
     # save state of attributes before enter
-    snapshot = pytree.tree_map(lambda x: x, _get_attributes(mod), is_leaf=is_leaf)
+    snapshot = pytree.tree_map(
+        lambda x: x,
+        _get_attributes(mod),
+        is_leaf=lambda x: type(x) in _pytree_subclasses_that_lose_info,
+    )
     try:
         yield
     finally:
