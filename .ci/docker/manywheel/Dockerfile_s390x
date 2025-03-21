@@ -132,6 +132,9 @@ RUN pip3 install flatbuffers && \
   git clone https://github.com/microsoft/onnxruntime && \
   cd onnxruntime && git checkout v1.21.0 && \
   git submodule update --init --recursive && \
-  ./build.sh --config Release --parallel 0 --enable_pybind --build_wheel --enable_training --enable_training_apis --enable_training_ops --skip_tests --allow_running_as_root && \
+  ./build.sh --config Release --parallel 0 --enable_pybind \
+  --build_wheel --enable_training --enable_training_apis \
+  --enable_training_ops --skip_tests --allow_running_as_root \
+  --compile_no_warning_as_error && \
   pip3 install ./build/Linux/Release/dist/onnxruntime_training-*.whl && \
   cd .. && /bin/rm -rf ./onnxruntime
