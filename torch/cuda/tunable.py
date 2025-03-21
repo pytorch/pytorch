@@ -509,9 +509,11 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
     if all(item in [n, m, k] for item in [lda, ldb, ldc]):
         pass
     else:
-        raise NotImplementedError(
-            f"Submatrices are not supported in offline tuning: {untuned_gemm[1]} "
+        warnings.warn(
+            "Offline tuning is not supported on submatrices. Use online tuning instead. "
+            + f"Skipped tuning for: {untuned_gemm[1]}"
         )
+        return
 
     if op_sig == "GemmTunableOp":
         matA = (
