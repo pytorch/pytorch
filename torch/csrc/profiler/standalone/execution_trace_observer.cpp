@@ -676,6 +676,10 @@ static void recordOperatorStart(
     ExecutionTraceObserver& ob,
     FunctionCallContext& fc,
     const RecordFunction& fn) {
+  // get grid information
+  TORCH_INTERNAL_ASSERT(false, "This is a test");
+  printf("SHENGFU ************************************\n");
+
   auto tid = fn.threadId();
 
   try {
