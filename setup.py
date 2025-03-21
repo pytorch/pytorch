@@ -257,15 +257,31 @@ import time
 from collections import defaultdict
 
 import setuptools.command.build_ext
-import setuptools.command.install
 import setuptools.command.sdist
 from setuptools import Extension, find_packages, setup
+from setuptools.command.install import install
 from setuptools.dist import Distribution
 from tools.build_pytorch_libs import build_pytorch
 from tools.generate_torch_version import get_torch_version
 from tools.setup_helpers.cmake import CMake
 from tools.setup_helpers.env import build_type, IS_DARWIN, IS_LINUX, IS_WINDOWS
 from tools.setup_helpers.generate_linker_script import gen_linker_script
+
+
+class SetupToolsInstallOverride(install):
+    def run(self):
+        super().run()
+        if sys.platform == "win32":
+            self.remove_shebang_from_easy_install_generated_scripts()
+
+    def remove_shebang_from_easy_install_generated_scripts(self):
+        for script in self.get_outputs():
+            if script.endswith("-script.py"):
+                with open(script, "rb") as f:
+                    lines = f.readlines()
+                if len(lines) > 0 and lines[0].startswith(b"#!"):
+                    with open(script, "wb") as f:
+                        f.writelines(lines[1:])
 
 
 def _get_package_path(package_name):
@@ -1068,7 +1084,7 @@ def configure_extension_build():
         "bdist_wheel": wheel_concatenate,
         "build_ext": build_ext,
         "clean": clean,
-        "install": install,
+        "install": SetupToolsInstallOverride,
         "sdist": sdist,
     }
 
