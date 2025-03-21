@@ -7,6 +7,7 @@ import torch
 import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
 import torch.nn as nn
 from torch.ao.quantization import ObserverBase
+from torch.ao.quantization.pt2e.lowering import lower_pt2e_quantized_to_x86
 from torch.ao.quantization.quantize_pt2e import (
     convert_pt2e,
     prepare_pt2e,
@@ -551,6 +552,104 @@ class TestHelperModules:
             y = torch.cat([y, y], dim=-1)
             return y.transpose(1, 2)
 
+    class MiniResNet(nn.Module):
+        class BasicBlock(nn.Module):
+            expansion = 1
+
+            def __init__(self, in_channels, out_channels, stride=1, downsample=None):
+                super().__init__()
+                self.conv1 = nn.Conv2d(
+                    in_channels,
+                    out_channels,
+                    kernel_size=3,
+                    stride=stride,
+                    padding=1,
+                    bias=False,
+                )
+                self.bn1 = nn.BatchNorm2d(out_channels)
+                self.relu = nn.ReLU()
+                self.conv2 = nn.Conv2d(
+                    out_channels,
+                    out_channels,
+                    kernel_size=3,
+                    stride=1,
+                    padding=1,
+                    bias=False,
+                )
+                self.bn2 = nn.BatchNorm2d(out_channels)
+                self.downsample = downsample
+
+            def forward(self, x):
+                identity = x
+
+                out = self.conv1(x)
+                out = self.bn1(out)
+                out = self.relu(out)
+
+                out = self.conv2(out)
+                out = self.bn2(out)
+
+                if self.downsample is not None:
+                    identity = self.downsample(x)
+
+                out += identity
+                out = self.relu(out)
+
+                return out
+
+        def __init__(self, num_classes=10):
+            super().__init__()
+            self.in_channels = 16
+            self.conv1 = nn.Conv2d(
+                3, self.in_channels, kernel_size=3, stride=1, padding=1, bias=False
+            )
+            self.bn1 = nn.BatchNorm2d(self.in_channels)
+            self.relu = nn.ReLU()
+            self.layer1 = self._make_layer(16, 1)
+            self.layer2 = self._make_layer(32, 1, stride=2)
+            self.layer3 = self._make_layer(64, 1, stride=2)
+            self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+            self.fc = nn.Linear(64, num_classes)
+
+        def _make_layer(self, out_channels, blocks, stride=1):
+            downsample = None
+            if stride != 1 or self.in_channels != out_channels:
+                downsample = nn.Sequential(
+                    nn.Conv2d(
+                        self.in_channels,
+                        out_channels,
+                        kernel_size=1,
+                        stride=stride,
+                        bias=False,
+                    ),
+                    nn.BatchNorm2d(out_channels),
+                )
+
+            layers = []
+            layers.append(
+                self.BasicBlock(self.in_channels, out_channels, stride, downsample)
+            )
+            self.in_channels = out_channels
+            for _ in range(1, blocks):
+                layers.append(self.BasicBlock(self.in_channels, out_channels))
+
+            return nn.Sequential(*layers)
+
+        def forward(self, x):
+            x = self.conv1(x)
+            x = self.bn1(x)
+            x = self.relu(x)
+
+            x = self.layer1(x)
+            x = self.layer2(x)
+            x = self.layer3(x)
+
+            x = self.avgpool(x)
+            x = torch.flatten(x, 1)
+            x = self.fc(x)
+
+            return x
+
 
 class X86InductorQuantTestCase(QuantizationTestCase):
     def _test_quantizer(
@@ -562,6 +661,7 @@ class X86InductorQuantTestCase(QuantizationTestCase):
         expected_node_list=None,
         is_qat=False,
         debug=False,
+        lower=False,
     ):
         m_eager = model.train() if is_qat else model.eval()
 
@@ -582,6 +682,8 @@ class X86InductorQuantTestCase(QuantizationTestCase):
         convert_model = copy.deepcopy(m)
         if debug:
             convert_model.print_readable(True)
+        if lower:
+            m = lower_pt2e_quantized_to_x86(m, example_inputs)
         m(*example_inputs)
         node_occurrence = {
             ns.call_function(k): v for k, v in expected_node_occurrence.items()
@@ -2732,3 +2834,32 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     node_occurrence,
                     node_list,
                 )
+
+    @skipIfNoX86
+    def test_lowering_to_x86(self):
+        with override_quantized_engine("x86"), torch.no_grad():
+            m = TestHelperModules.MiniResNet().eval()
+            example_inputs = (torch.randn(2, 3, 16, 16),)
+            quantizer = X86InductorQuantizer().set_global(
+                xiq.get_default_x86_inductor_quantization_config()
+            )
+            node_occurrence = {
+                torch.ops.quantized_decomposed.quantize_per_tensor.default: 3,
+                torch.ops.onednn.qconv2d_pointwise.default: 6,
+                torch.ops.onednn.qconv2d_pointwise.binary: 3,
+                torch.ops.onednn.qlinear_pointwise.default: 1,
+            }
+            node_list = [
+                torch.ops.quantized_decomposed.quantize_per_tensor.default,
+                torch.ops.onednn.qconv2d_pointwise.default,
+                torch.ops.onednn.qconv2d_pointwise.binary,
+                torch.ops.onednn.qlinear_pointwise.default,
+            ]
+            self._test_quantizer(
+                m,
+                example_inputs,
+                quantizer,
+                node_occurrence,
+                node_list,
+                lower=True,
+            )
