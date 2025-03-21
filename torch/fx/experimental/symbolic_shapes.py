@@ -1248,7 +1248,7 @@ def statically_known_true(x: Union[bool, SymBool]) -> bool:
 
 
 def _guard_semantics(x: Union[bool, SymBool]) -> bool:
-    if has_free_unbacked_symbols(x):
+    if has_free_unbacked_symbols(x) or config.backed_size_oblivious:
         return statically_known_true(x)
     return guard_bool(x)
 

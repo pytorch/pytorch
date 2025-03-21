@@ -300,6 +300,38 @@ class TestDynamismExpression(TestCase):
                 dynamic_shapes={"x": {0: dim_x}},
             )
 
+    def test_contiguous_strides(self):
+        class Foo(torch.nn.Module):
+            def forward(self, xs):
+                u0, u1, u2 = xs.tolist()
+                for u in [u0, u1, u2]:
+                    torch._check_is_size(u)
+                x = torch.empty(u0, u1, u2)
+                y = x.contiguous()
+                return y + 2
+
+        ep = export(Foo(), (torch.tensor([2, 3, 4]),))
+
+        class Foo(torch.nn.Module):
+            def forward(self, xs, y):
+                from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+                
+                u0, u1, u2 = xs.tolist()
+                for u in [u0, u1, u2]:
+                    torch._check_is_size(u)
+                if guard_size_oblivious(u0*u1 > u0):
+                    y += 2
+                if u0*u1 % u1 == 0:
+                    y += 3
+                if u0*u1 % 1 == 0:
+                    y += 4
+                if torch.sym_max(u0, 1) % 1 == 0:
+                    y += 5
+                if u0*((u1)//2) % (u1//2) == 0:
+                    return y + 2
+
+        ep = export(Foo(), (torch.tensor([2,3,4]), torch.randn(2)))
+
     def test_export_slice_maxsize(self):
         class Slice(torch.nn.Module):
             def forward(self, *args):
