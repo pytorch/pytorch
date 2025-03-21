@@ -669,9 +669,9 @@ def _compile_fx_inner(
     static_inputs_log.debug("static input idxs compile_fx_inner: %s", static_input_idxs)
     inputs_to_check = get_input_idxs_to_check(example_inputs, static_input_idxs)
 
-    assert isinstance(next(iter(reversed(gm.graph.nodes))).args[0], (tuple, list)), (
-        f"inductor can only compile FX graphs which return a tuple/list, but got {gm.graph}"
-    )
+    assert isinstance(
+        next(iter(reversed(gm.graph.nodes))).args[0], (tuple, list)
+    ), f"inductor can only compile FX graphs which return a tuple/list, but got {gm.graph}"
 
     if (cudagraphs := graph_kwargs.get("cudagraphs")) is None:
         graph_kwargs["cudagraphs"] = cudagraphs = BoxedBool(config.triton.cudagraphs)
@@ -844,11 +844,19 @@ def _compile_fx_inner(
 
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
 
-    # This message is for printing overview information of inductor mm counts, shapes,etc after lowering
-    if log.isEnabledFor(logging.INFO):
+    # This message is for printing overview information of inductor mm counts, shapes, etc after lowering
+    if log.isEnabledFor(logging.INFO) and len(counters["aten_mm_info"].items()):
         mm_table_data = []
         for key, value in counters["aten_mm_info"].items():
-            name, m, n, k = key.split("_")
+            # example key 1: aten.mm_128_128_128
+            # example key 2: aten._scaled_mm.default_128_128_128
+            # below is a bit brittle, but should work
+            parts = key.split("_")
+            if len(parts) < 4:
+                log.info(f"Unable to parse key {key}")  # noqa: G004
+                continue
+            name = "_".join(parts[:-3])
+            m, n, k = parts[-3:]
             mm_table_data.append([name, m, n, k, value])
         log.info("Overview info of inductor aten mms: ")
         log.info(
@@ -1182,9 +1190,9 @@ class _InProcessFxCompile(FxCompile):
                         if graph.aot_mode:
                             from .codecache import AotCodeCompiler
 
-                            assert graph.cpp_wrapper, (
-                                "AOT mode only supports C++ wrapper"
-                            )
+                            assert (
+                                graph.cpp_wrapper
+                            ), "AOT mode only supports C++ wrapper"
                             wrapper_code, kernel_code = graph.codegen_with_cpp_wrapper()
                             output_code_log.debug(
                                 "Output wrapper code: \n%s", wrapper_code.value
@@ -1330,9 +1338,9 @@ def fx_codegen_and_compile(
         from .compile_fx_async import _AsyncFxCompile
         from .compile_fx_ext import _OutOfProcessFxCompile
 
-        assert isinstance(scheme, _OutOfProcessFxCompile), (
-            "async is only valid with an out-of-process compile mode"
-        )
+        assert isinstance(
+            scheme, _OutOfProcessFxCompile
+        ), "async is only valid with an out-of-process compile mode"
         scheme = _AsyncFxCompile(scheme)
 
     return scheme.codegen_and_compile(gm, example_inputs, inputs_to_check, graph_kwargs)
