@@ -320,7 +320,7 @@ def _extract_fwd_bwd_modules(
         "backward",
     )
 
-    distributed_enabled = torch.distributed.is_enabled()
+    distributed_enabled = torch.distributed.is_available()
 
     for node in bwd_graph.find_nodes(op="placeholder"):
         # This is to filter out saved values that don't actually end up being used by the backwards pass

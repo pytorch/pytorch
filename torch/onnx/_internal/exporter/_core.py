@@ -1255,14 +1255,17 @@ def export(
                 export_status.torch_export_non_strict = result.success
             elif strategy_class is _capture_strategies.TorchExportStrategy:
                 export_status.torch_export = result.success
+            elif strategy_class is _capture_strategies.TorchExportDraftExportStrategy:
+                export_status.torch_export_draft_export = result.success
             elif strategy_class is _capture_strategies.JitTraceConvertStrategy:
                 export_status.torch_jit = result.success
 
-            if result.exported_program is not None:
+            if result.exception is not None:
+                failed_results.append(result)
+            if result.success:
+                assert result.exported_program is not None
                 program = result.exported_program
                 break
-            else:
-                failed_results.append(result)
 
         assert result is not None
         capture_strategy = result.strategy
