@@ -2785,14 +2785,13 @@ class Scheduler:
             assert isinstance(multi_node, ir.MultiTemplateBuffer)
 
             # Eagerly compile and benchmark non-template nodes
+            choice_timings = multi_node.choice_timings
             _, ms1 = multi_node.get_min_choice()
             ms2, path2 = (
                 self.benchmark_fused_nodes(node_list_2)
                 if epilogue_fusion
                 else self.benchmark_fused_nodes(node_list_1)
             )
-            choice_timings = multi_node.choice_timings
-
 
             # Start compiling choices in parallel
             future_choices: list[tuple[Any, Optional[LambdaFuture], ModuleType]] = []
