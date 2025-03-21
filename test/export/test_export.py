@@ -12934,6 +12934,21 @@ def forward(self, x):
     return (add, add_1)""",
         )
 
+    def test_print_graph_signature(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(3))
+
+            def forward(self, x):
+                x.add_(1)
+                self.buf.add_(2)
+                return self.buf + x
+
+        ep = export(M(), (torch.ones(3),))
+        print(ep)
+        assert False
+
     @unittest.skipIf(not TEST_TRANSFORMERS, "No transformers")
     def test_hf_logging_logger(self):
         import transformers
