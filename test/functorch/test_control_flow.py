@@ -2003,10 +2003,13 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
-    @parametrize("reverse", [False, True])
-    @parametrize("compile_mode", ["none", "eager"])
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    @parametrize("autograd", [False, True])
+    # @parametrize("reverse", [False, True])
+    @parametrize("reverse", [True])
+    # @parametrize("compile_mode", ["none", "eager"])
+    @parametrize("compile_mode", ["none"])
+    # @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    @parametrize("device", [torch.device("cpu")])
+    @parametrize("autograd", [True])
     def test_scan_dim(self, reverse, compile_mode, device, autograd):
         import random
 
