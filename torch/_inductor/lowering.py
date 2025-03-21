@@ -4975,15 +4975,10 @@ def _fractional_pooling_offsets(samples, in_sz, out_sz, kernel_sz, dim, ndims):
         i_expr = ops.index_expr(i, samples.get_dtype())
         diff = ops.index_expr(in_sz - kernel_sz, torch.int64)
         out_sz_expr = ops.index_expr(out_sz - 1, torch.int64)
-        if isinstance(out_sz, int):
-            if out_sz == 1:
-                alpha = 0
-            else:
-                alpha = ops.floordiv(diff, out_sz_expr)
-        else:
-            alpha = ops.where(
-                ops.eq(out_sz_expr, 0), 0, ops.floordiv(diff, out_sz_expr)
-            )
+        alpha = ops.truediv(
+            ops.to_dtype(diff, torch.float64), ops.to_dtype(out_sz_expr, torch.float64)
+        )
+        alpha = ops.where(ops.eq(out_sz_expr, 0), 0, alpha)
         seq_i = ops.trunc((i_expr + sample) * alpha) - ops.trunc(sample * alpha)
         seq_i = ops.to_dtype(seq_i, torch.int64)
         mask = ops.lt(i_expr, out_sz_expr)
