@@ -522,6 +522,57 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         res, _ = fn(input)
         self.assertFalse(res)
 
+    def test_disable_all_torch_function(self):
+        @torch.compile(backend="eager")
+        def fn(x):
+            with torch._C.DisableTorchFunction():
+                torch._dynamo.graph_break()
+                return (
+                    torch._C._is_torch_function_enabled(),
+                    torch._C._is_torch_function_all_disabled(),
+                    torch.add(x, 1.0),
+                )
+
+        input = torch.ones(2, 2)
+        res1, res2, _ = fn(input)
+        self.assertFalse(res1)
+        self.assertTrue(res2)
+
+    def test_disable_all_torch_function_restore_values(self):
+        @torch.compile(backend="eager")
+        def fn(x):
+            with torch._C.DisableTorchFunction():
+                x = torch._C._is_torch_function_all_disabled()
+
+            return (
+                x,
+                torch._C._is_torch_function_all_disabled(),
+                torch.add(x, 1.0),
+            )
+
+        input = torch.ones(2, 2)
+        res1, res2, _ = fn(input)
+        self.assertTrue(res1)
+        self.assertFalse(res2)
+
+    def test_disable_all_torch_function_restore_values_graph_break(self):
+        @torch.compile(backend="eager")
+        def fn(x):
+            with torch._C.DisableTorchFunction():
+                torch._dynamo.graph_break()
+                x = torch._C._is_torch_function_all_disabled()
+
+            return (
+                x,
+                torch._C._is_torch_function_all_disabled(),
+                torch.add(x, 1.0),
+            )
+
+        input = torch.ones(2, 2)
+        res1, res2, _ = fn(input)
+        self.assertTrue(res1)
+        self.assertFalse(res2)
+
     def test_torch_function_state_nested(self):
         @torch.compile(backend="eager")
         def fn(x):
@@ -3218,12 +3269,7 @@ class GraphModule(torch.nn.Module):
             # varies based on the type of view
             guard_str = "\n".join(guards)
             if nt_view_name == "subclass_dense":
-                self.assertExpectedInline(
-                    guard_str,
-                    """\
-Eq(s4 - 1, s0)
-Eq(s3, s0)""",
-                )
+                self.assertExpectedInline(guard_str, """Eq(s3 - 1, s0)""")
             elif nt_view_name == "dense_subclass_dense_subclass":
                 self.assertExpectedInline(
                     guard_str,
@@ -3241,10 +3287,9 @@ Eq(s11, s9)""",
                 self.assertExpectedInline(
                     guard_str,
                     """\
-Eq(s5 - 1, s1)
-Eq(s4, s1)
-Eq(s14 - 1, s9)
-Eq(s13, s11)""",
+Eq(s4 - 1, s1)
+Eq(s13 - 1, s8)
+Eq(s12, s10)""",
                 )
             return gm
 

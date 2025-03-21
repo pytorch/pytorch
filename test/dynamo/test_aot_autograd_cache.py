@@ -100,7 +100,6 @@ class AOTAutogradCacheTests(InductorTestCase):
             eager_result = fn(a, b)
             compiled_result = compiled_fn(a, b)
             compiled_result.sum().backward()
-            del a._dynamo_weak_dynamic_indices  # a was an activation
             self.assertEqual(eager_result, compiled_result)
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
@@ -133,7 +132,6 @@ class AOTAutogradCacheTests(InductorTestCase):
             compiled_result = compiled_fn(a, b)
             self.assertEqual(eager_result, compiled_result)
             compiled_result.sum().backward()
-            del a._dynamo_weak_dynamic_indices  # a was an activation
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 4)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
             self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 0)
@@ -158,7 +156,6 @@ class AOTAutogradCacheTests(InductorTestCase):
             eager_result = fn(a, b)
             compiled_result = compiled_fn(a, b)
             compiled_result.sum().backward()
-            del a._dynamo_weak_dynamic_indices  # a was an activation
             self.assertEqual(eager_result, compiled_result)
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 4)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 2)
