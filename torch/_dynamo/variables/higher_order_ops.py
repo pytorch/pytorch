@@ -1604,7 +1604,10 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             # For the fake mode, we need to duplicate the init tensor along the dim
             # to have the same size as the xs arguments
             example_stacked_out = [
-                stack_y(y.node.meta["example_value"], scan_length) for y in y_proxies
+                stack_y(y.node.meta["example_value"], scan_length)
+                if y is not None
+                else y
+                for y in y_proxies
             ]
             out_meta = [*example_carry, *example_stacked_out]
 

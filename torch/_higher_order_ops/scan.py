@@ -172,7 +172,9 @@ def scan(
     )
 
     if reverse:
-        out = pytree.tree_map(lambda elem: elem.flip([0]), out)
+        out = pytree.tree_map(
+            lambda elem: elem.flip([0]) if elem is not None else elem, out
+        )
 
     return carry, out
 
@@ -240,6 +242,8 @@ def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
                     ),
                     torch.ones_like(e, dtype=torch.int64).unsqueeze(0),
                 ]
+                if e is not None
+                else [None, None]
                 for i, e in enumerate(dummy_out)
             ]
         )
@@ -247,6 +251,10 @@ def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
         def store_out_in_outs(out, ind):
             # Store the intermediate out in the outs matrix
             for o, x, idx in zip(outs, out, idxs):
+                if o is None or x is None or idx is None:
+                    assert o is None and x is None and idx is None
+                    return
+
                 # o: (num_elems, M, N ...)
                 # x: (M, N, ...) -> (1, M, N)
                 # ind * idx: (1, M, N,) with values to be ind
@@ -277,6 +285,8 @@ def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
 # eager semantic of scan, which stacks the outputs. The result is contiguous
 # as a result of the stack operation.
 def stack_y(y: torch.Tensor, scan_length: int) -> torch.Tensor:
+    if y is None:
+        return None
     return (
         y.unsqueeze(0)
         .repeat(*([scan_length] + [1] * y.ndim))
@@ -336,7 +346,7 @@ def trace_scan(
     with disable_proxy_modes_tracing():
         scan_length = xs[0].shape[0]
         fake_carry, fake_outputs = _extract_carry_and_out(
-            [o.meta["val"] for o in outputs], len(init)
+            [o.meta["val"] if o is not None else o for o in outputs], len(init)
         )
         out = (
             *fake_carry,
@@ -450,10 +460,13 @@ def _fake_scan(combine_fn, init, xs=None, dim=0, reverse=False):
         y, _ = pytree.tree_flatten(y)
         result_flat.append(y)
 
-    results = [
-        torch.stack([e[leave_ind] for e in op(result_flat)])
-        for leave_ind in range(num_leaves)
-    ]
+    def _stack_tensor(leave_ind):
+        tensors = [e[leave_ind] for e in op(result_flat) if e[leave_ind] is not None]
+        if len(tensors) == 0:
+            return None
+        return torch.stack(tensors)
+
+    results = [_stack_tensor(leave_ind) for leave_ind in range(num_leaves)]
     return (
         pytree.tree_unflatten(carry, carry_spec),
         pytree.tree_unflatten(results, dummy_out_spec),
