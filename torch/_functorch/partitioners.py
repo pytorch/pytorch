@@ -92,6 +92,8 @@ class NodeInfo:
     required_bw_nodes: OrderedSet[fx.Node]
     unclaimed_nodes: OrderedSet[fx.Node]
     fw_order: dict[fx.Node, int]
+    # Effectively maps to which of our primals are parameters
+    static_lifetime_input_nodes: OrderedSet[fx.Node]
 
     @functools.cached_property
     def required_fw_nodes(self) -> list[fx.Node]:
@@ -394,7 +396,11 @@ def _extract_fwd_bwd_modules(
 
 
 def default_partition(
-    joint_module: fx.GraphModule, _joint_inputs, *, num_fwd_outputs
+    joint_module: fx.GraphModule,
+    _joint_inputs,
+    *,
+    num_fwd_outputs,
+    static_lifetime_input_indices: Optional[list[int]] = None,
 ) -> tuple[fx.GraphModule, fx.GraphModule]:
     """
     Partitions the :attr:`joint_module` in a manner that closely resembles the
@@ -580,9 +586,7 @@ def reordering_to_mimic_autograd_engine(gm: fx.GraphModule) -> fx.GraphModule:
     for node in gm.graph.find_nodes(op="placeholder"):
         env[node] = new_graph.node_copy(node, lambda x: env[x])
 
-    order = {}
-    for idx, node in enumerate(gm.graph.nodes):
-        order[node] = idx
+    order = {node: idx for idx, node in enumerate(gm.graph.nodes)}
 
     def insert_node_in_graph(node):
         cur_nodes = [node]
@@ -920,6 +924,21 @@ def functionalize_rng_ops(
     return fw_module, bw_module
 
 
+def force_save_collectives(joint_module: fx.GraphModule) -> None:
+    """
+    By default, the partitioner is not allowed to recompute collectives
+    unless they come from a user-annotated AC region.
+    See Note [Recomputing collectives in the partitioner]
+    """
+    for node in joint_module.graph.nodes:
+        if (
+            isinstance(node.target, torch._ops.OpOverload)
+            and node.target.namespace == "_c10d_functional"
+            and not must_recompute(node)
+        ):
+            node.meta["recompute"] = CheckpointPolicy.MUST_SAVE
+
+
 def cleanup_recompute_tags(joint_module: fx.GraphModule) -> fx.GraphModule:
     """
     If there are two consecutive checkpointed blocks with no operator in
@@ -1102,7 +1121,12 @@ def solve_min_cut(
 
         return not all(is_fusible(node, user) for user in node.users)
 
-    def get_node_weight(node) -> float:
+    def get_node_weight(node, static_lifetime_input_nodes) -> float:
+        if (
+            config.treat_parameters_as_free_to_save
+            and node in static_lifetime_input_nodes
+        ):
+            return 0
         mem_sz = _size_of(node)
         if config.recompute_views and op_types.is_view(node):
             # If `config.recompute_views=True`, we don't save views. This is generally
@@ -1134,7 +1158,14 @@ def solve_min_cut(
         if op_types.is_view(node):
             return False
         if node in dont_ban:
-            return False
+            # collectives are *always* banned from recompute, overriding `dont_ban`
+            # (in particular, the activation memory budget logic is not allowed to recompute collectives)
+            is_collective = (
+                isinstance(node.target, torch._ops.OpOverload)
+                and node.target.namespace == "_c10d_functional"
+            )
+            if config.unsafe_allow_optimization_of_collectives or not is_collective:
+                return False
         # This bans recomputation of the node unless we've been forced not to by
         # user annotation
         if must_recompute(node):
@@ -1142,7 +1173,6 @@ def solve_min_cut(
 
         if "val" in node.meta and isinstance(node.meta["val"], torch.SymFloat):
             return False
-
         banned_nodes.add(node)
         # A node will only ever be recomputed if there is a path from an
         # ancestor of this node to the backwards path through this node that
@@ -1198,7 +1228,7 @@ def solve_min_cut(
                 0.0 if isinstance(node.meta.get("val"), BackwardState) else math.inf
             )
         else:
-            weight = get_node_weight(node)
+            weight = get_node_weight(node, node_info.static_lifetime_input_nodes)
         # Creates the weights on the "node" edge
         nx_graph.add_edge(node.name + "_in", node.name + "_out", capacity=weight)
         for user in node.users:
@@ -1884,6 +1914,7 @@ def min_cut_rematerialization_partition(
     compiler="inductor",
     *,
     num_fwd_outputs,
+    static_lifetime_input_indices: Optional[list[int]] = None,
 ) -> tuple[fx.GraphModule, fx.GraphModule]:
     """
     Partitions the joint graph such that the backward recomputes the forward.
@@ -1926,8 +1957,10 @@ def min_cut_rematerialization_partition(
     graph_has_recomputable_rng_ops = has_recomputable_rng_ops(joint_module)
     if graph_has_recomputable_ops:
         joint_module = cleanup_recompute_tags(joint_module)
+    if not config.unsafe_allow_optimization_of_collectives:
+        force_save_collectives(joint_module)
 
-    def classify_nodes(joint_module):
+    def classify_nodes(joint_module, static_lifetime_input_indices):
         name_to_node = get_name_to_node(joint_module.graph)
         required_bw_nodes: OrderedSet[fx.Node] = OrderedSet()
         for node in joint_module.graph.nodes:
@@ -1963,6 +1996,9 @@ def min_cut_rematerialization_partition(
             for node in joint_module.graph.nodes
             if node not in required_fw_nodes and node not in required_bw_nodes
         )
+        static_lifetime_input_nodes = OrderedSet(
+            p for i, p in enumerate(primal_inputs) if i in static_lifetime_input_indices
+        )
         fw_cnt = 0
         fw_order = {}
         for node in joint_module.graph.nodes:
@@ -1970,10 +2006,17 @@ def min_cut_rematerialization_partition(
                 fw_order[node] = fw_cnt
                 fw_cnt += 1
         return NodeInfo(
-            inputs, required_fw_nodes, required_bw_nodes, unclaimed_nodes, fw_order
+            inputs,
+            required_fw_nodes,
+            required_bw_nodes,
+            unclaimed_nodes,
+            fw_order,
+            static_lifetime_input_nodes,
         )
 
-    node_info = classify_nodes(joint_module)
+    if static_lifetime_input_indices is None:
+        static_lifetime_input_indices = []
+    node_info = classify_nodes(joint_module, static_lifetime_input_indices)
 
     # networkx blows up on graphs with no required backward nodes
     # Since there's nothing to partition anyway, and the default partitioner can "handle"
