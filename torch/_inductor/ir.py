@@ -4643,6 +4643,8 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
 
     def finalize_as_triton_caller(self, caller: TritonTemplateCallerBase) -> None:
         assert isinstance(caller, torch._inductor.select_algorithm.TritonTemplateCaller)
+        if self.get_size() != caller.layout.size:
+            import pdb; pdb.set_trace()
         assert self.get_size() == caller.layout.size
         assert self.get_stride() == caller.layout.stride
         self.make_kernel_render = caller.get_make_kernel_render()
