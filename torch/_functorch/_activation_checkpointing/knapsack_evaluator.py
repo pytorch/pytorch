@@ -237,6 +237,7 @@ class KnapsackEvaluator:
             float: Memory budget at the knee point.
         """
         import numpy as np
+
         results = self.evaluate_distribution_of_results_for_knapsack_algo(
             knapsack_algo=knapsack_algo,
             memory_budget_values=np.linspace(  # type: ignore[arg-type]
