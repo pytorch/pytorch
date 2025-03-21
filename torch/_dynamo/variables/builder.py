@@ -1520,21 +1520,17 @@ class VariableBuilder:
             params = [
                 p
                 for _, p in value.named_parameters(recurse=False, remove_duplicate=True)
+                if not torch.nn.parameter.is_lazy(p)
             ]
         except (AttributeError, TypeError):
             # Fails for weird things without params, and cpp_frontend_extension.cpp.Net, which doesn't support remove_duplicate
             params = []
         try:
-            initialized_params = [
-                p for p in params if not torch.nn.parameter.is_lazy(p)
-            ]
-            param_total_numel = sum(p.numel() for p in initialized_params)
-            param_total_nbytes = sum(p.nbytes for p in initialized_params)
-            param_count = len(params)
             metrics_context = get_metrics_context()
-            metrics_context.increment("param_numel", param_total_numel)
-            metrics_context.increment("param_bytes", param_total_nbytes)
-            metrics_context.increment("param_count", param_count)
+            for p in params:
+                metrics_context.increment("param_numel_addr", id(p.data), p.numel())
+                metrics_context.increment("param_bytes_addr", id(p.data), p.bytes())
+                metrics_context.increment("param_count_addr", id(p.data), 1)
         except RuntimeError:
             # Fails for sparse tensors, as well as expanded weights
             pass

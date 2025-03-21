@@ -1324,6 +1324,15 @@ class CompilationMetrics:
         compile_id = all_metrics.get("compile_id")
         all_metrics["compile_id"] = str(compile_id) if compile_id else None
 
+        all_metrics["param_numel"] = sum(
+            numel for _, numel in all_metrics["param_numel_addr"]
+        )
+        all_metrics["param_bytes"] = sum(b for _, b in all_metrics["param_bytes_addr"])
+        all_metrics["param_count"] = sum(c for _, c in all_metrics["param_count_addr"])
+        del all_metrics["param_numel_addr"]
+        del all_metrics["param_bytes_addr"]
+        del all_metrics["param_count_addr"]
+
         return cls(**all_metrics)
 
 
