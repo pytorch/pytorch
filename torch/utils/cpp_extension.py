@@ -578,7 +578,7 @@ class BuildExtension(build_ext):
         self.no_python_abi_suffix = kwargs.get("no_python_abi_suffix", False)
         self.use_ninja = kwargs.get('use_ninja', True)
 
-        filtered_kwargs = [kw for kw in kwargs if kw not in ["no_python_abi_suffix", "use_ninja"]]
+        filtered_kwargs = {kw: val for kw, val in kwargs.items() if kw not in ["no_python_abi_suffix", "use_ninja"]}
         super().__init__(*args, **filtered_kwargs)
 
         if self.use_ninja:
