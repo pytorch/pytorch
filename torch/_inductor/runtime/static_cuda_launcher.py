@@ -82,7 +82,6 @@ class StaticallyLaunchedCudaKernel:
         self.function: Optional[int] = (
             None  # Loaded by load_kernel(on the parent process)
         )
-        num_args = len(self.arg_tys)
         num_ctas = 1
         if hasattr(kernel, "num_ctas"):
             num_ctas = kernel.num_ctas
@@ -92,11 +91,6 @@ class StaticallyLaunchedCudaKernel:
         if num_ctas != 1:
             raise NotImplementedError(
                 "Static cuda launcher only supports num_ctas == 1"
-            )
-
-        if num_args > MAX_ARGS or num_args == 0:
-            raise NotImplementedError(
-                "No static cuda launcher available for %d arguments", num_args
             )
 
     def load_kernel(self) -> None:
@@ -214,7 +208,6 @@ class StaticallyLaunchedCudaKernel:
             args = (*args, None)
         else:
             arg_tys = self.arg_tys
-
         assert len(args) == len(arg_tys)
 
         # TODO: can handle grid functions here or in C++, so

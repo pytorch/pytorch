@@ -2103,7 +2103,7 @@ class CppCodeCache:
             **cls.cpp_compile_command_flags,
             "device_type": device_type,
             "extra_flags": extra_flags,
-            "use_relative_path": config.is_fbcode() and device_type == "cpu",
+            "use_relative_path": config.is_fbcode(),
             "vec_isa": pick_vec_isa(),
         }
 
@@ -2283,7 +2283,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
                 return NULL;
             }}
             #ifdef Py_GIL_DISABLED
-                PyUnstable_Module_SetGIL(mod, Py_MOD_GIL_NOT_USED);
+                PyUnstable_Module_SetGIL(module, Py_MOD_GIL_NOT_USED);
             #endif
             return module;
         }}
@@ -2989,6 +2989,8 @@ def _nvcc_compiler_options() -> list[str]:
     if arch == "90":
         # Required by cutlass compilation.
         arch = "90a"
+    if arch == "100":
+        arch = "100a"
     code = [f"sm_{arch}", f"compute_{arch}"]
     if config.cuda.enable_cuda_lto:
         code += [f"lto_{arch}"]
