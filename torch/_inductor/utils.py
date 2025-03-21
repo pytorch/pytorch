@@ -108,6 +108,8 @@ from .runtime.runtime_utils import ceildiv as runtime_ceildiv
 _IS_WINDOWS = sys.platform == "win32"
 
 log = logging.getLogger(__name__)
+# inductor graph partition on a custom op if it is registered here
+custom_op_partitions: OrderedSet[str] = OrderedSet()
 
 _T = TypeVar("_T")
 VarRanges = dict[sympy.Expr, sympy.Expr]
@@ -2756,3 +2758,21 @@ def get_triton_attrs_descriptor_version() -> TritonAttrsDescriptorVersion:
 
 def triton_version_uses_attrs_dict() -> bool:
     return get_triton_attrs_descriptor_version() == TritonAttrsDescriptorVersion.V4_DICT
+
+
+def register_custom_op_partition(
+    operator: torch._library.custom_ops.CustomOpDef,
+) -> None:
+    # register a custom op to be partitioned
+    names = [
+        "torch.ops",
+        operator._namespace,
+        operator._name,
+        operator._opoverload._overloadname,
+    ]
+    name = ".".join(names)
+    custom_op_partitions.add(name)
+
+
+def should_partition_custom_op(name: str) -> bool:
+    return name in custom_op_partitions

@@ -23,6 +23,7 @@ from torch._inductor.compile_fx import compile_fx_inner
 from torch._inductor.cudagraph_trees import cudagraphify_impl as tree_cudagraphify_impl
 from torch._inductor.cudagraph_utils import FunctionID
 from torch._inductor.test_case import TestCase as InductorTestCase
+from torch._inductor.utils import register_custom_op_partition
 from torch._ops import OpOverload
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.immutable_collections import immutable_dict
@@ -2793,6 +2794,146 @@ if HAS_CUDA:
 
             # 4 cudagraphs, due to (2 dynamic shapes) x (2 graph partitions)
             self.assertEqual(self.get_manager().new_graph_id().id, 4)
+
+        @config.patch(implicit_fallbacks=True)
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_custom_op(self):
+            @torch.library.custom_op("mylib::movement", mutates_args=())
+            def movement(pic: torch.Tensor) -> torch.Tensor:
+                img = pic.cpu()
+                cropped_img = (img + 1) * 2
+                return cropped_img.cuda() / 255.0
+
+            @movement.register_fake
+            def _(pic):
+                return torch.empty_like(pic)
+
+            @torch.library.custom_op("mylib::modify", mutates_args=())
+            def modify(pic: torch.Tensor) -> torch.Tensor:
+                pic1 = pic + 1
+                pic1_cpu = (pic1.cpu() + 1) * 2
+                return pic1_cpu.cuda() + pic
+
+            @modify.register_fake
+            def _(pic):
+                return torch.empty_like(pic)
+
+            @torch.library.custom_op("mylib::transform", mutates_args=())
+            def transform(pic: torch.Tensor) -> torch.Tensor:
+                return (pic + 1) * 2
+
+            @transform.register_fake
+            def _(pic):
+                return torch.empty_like(pic)
+
+            register_custom_op_partition(movement)
+            register_custom_op_partition(modify)
+
+            img = torch.randn(3, 64, 64, device="cuda")
+
+            def f(img):
+                x = (img + 10) * 2
+                y = movement(x)
+                z = y + 1
+                u = transform(z)
+                v = 2 * u + 1
+                out = modify(v)
+                return out + 1
+
+            compiled_f = torch.compile(f, fullgraph=True)
+
+            eager_out = f(img)
+            compiled_out = compiled_f(img)
+
+            self.assertEqual(eager_out, compiled_out)
+
+            compiled_f = torch.compile(f, mode="reduce-overhead", fullgraph=True)
+
+            eager_out = f(img)
+
+            for _ in range(3):
+                compiled_out = compiled_f(img)
+                self.assertEqual(eager_out, compiled_out)
+
+            # splitting on 2 custom gives 3 cudagraphs
+            self.assertEqual(self.get_manager().new_graph_id().id, 3)
+
+        @config.patch(implicit_fallbacks=True)
+        @config.patch("graph_partition", True)
+        def test_graph_partition_custom_op_mutation(self):
+            @torch.library.custom_op(
+                "mylib::mysin",
+                mutates_args=["out_list"],
+                schema="(Tensor x, Tensor(a!)[]? out_list) -> Tensor",
+            )
+            def mysin(x, out_list) -> torch.Tensor:
+                r = x.sin()
+                if out_list is not None:
+                    out_list[0].copy_(r)
+                return r
+
+            @mysin.register_fake
+            def _(x, out_list) -> torch.Tensor:
+                return torch.empty_like(x)
+
+            register_custom_op_partition(mysin)
+
+            def fn(x):
+                x = x * 3
+                s = [torch.empty_like(x)]
+                x = mysin(x, s)
+                x = x / 3
+                return x, s[0]
+
+            x = torch.randn(3, requires_grad=False, device="cuda")
+            expected = fn(x)
+            compiled_f = torch.compile(fn, mode="reduce-overhead", fullgraph=True)
+            for _ in range(3):
+                result = compiled_f(x)
+                self.assertEqual(result, expected)
+
+            # splitting on 1 custom gives 2 cudagraphs
+            self.assertEqual(self.get_manager().new_graph_id().id, 2)
+
+        @config.patch(implicit_fallbacks=True)
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_custom_op_dynamoc_shapes(self):
+            @torch.library.custom_op("mylib::movement", mutates_args=())
+            def movement(pic: torch.Tensor) -> torch.Tensor:
+                img = pic.cpu()
+                cropped_img = (img + 1) * 2
+                return cropped_img.cuda() / 255.0
+
+            @movement.register_fake
+            def _(pic):
+                return torch.empty_like(pic)
+
+            register_custom_op_partition(movement)
+
+            def f(img):
+                x = (img + 10) * 2
+                y = movement(x)
+                z = y + 1
+                v = 2 * z + 1
+                return v + 1
+
+            compiled_f = torch.compile(f, fullgraph=True)
+
+            compiled_f = torch.compile(f, mode="reduce-overhead", fullgraph=True)
+
+            def run(size):
+                img = torch.randn(3, size, size, device="cuda")
+                eager_out = f(img)
+                for _ in range(3):
+                    compiled_out = compiled_f(img)
+                    self.assertEqual(eager_out, compiled_out)
+
+            run(64)
+            run(17)
+            run(42)
+
+            # 2 (from splitting on 1 custom op) x 3 (dynamic shapes) = 6
+            self.assertEqual(self.get_manager().new_graph_id().id, 6)
 
     class TestSAC(TestCase):
         def _make_observer_mode(self):
