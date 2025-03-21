@@ -2314,7 +2314,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             torch.randn,
             (2, 2, 11, 4),
             device=self.device,
-            dtype=self.gold_dtype,
+            dtype=torch.float64,
             requires_grad=True,
         )
         query, key, value = make_tensor(), make_tensor(), make_tensor()
@@ -2361,7 +2361,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             torch.randn,
             (2, 2, 11, 4),
             device=self.device,
-            dtype=self.gold_dtype,
+            dtype=torch.float64,
             requires_grad=True,
         )
         query, key, value = make_tensor(), make_tensor(), make_tensor()
@@ -2516,13 +2516,13 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             torch.randn,
             (2, 2, 11, 4),
             device=self.device,
-            dtype=self.gold_dtype,
+            dtype=torch.float64,
             requires_grad=True,
         )
         query, key, value = make_tensor(), make_tensor(), make_tensor()
 
         func = torch.compile(flex_attention, backend=mode, fullgraph=True)
-        score_mod = captured_buffers_map[score_mod_name](self.gold_dtype)
+        score_mod = captured_buffers_map[score_mod_name](torch.float64)
 
         self.assertTrue(
             torch.autograd.gradcheck(
