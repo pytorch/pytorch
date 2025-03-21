@@ -2647,9 +2647,11 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
         proxy.node.target
         in [
             torch._C._are_functorch_transforms_active,
+            torch._C._get_deterministic_fill_uninitialized_memory,
             torch.backends.cuda.is_flash_attention_available,
             torch.backends.cuda.can_use_flash_attention,
             torch.backends.cuda.can_use_efficient_attention,
+            torch.is_deterministic_algorithms_warn_only_enabled,
             "is_integer",
         ]
         + list(supported_const_comparison_op_values.keys())
