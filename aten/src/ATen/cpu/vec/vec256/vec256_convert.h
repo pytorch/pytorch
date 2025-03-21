@@ -299,6 +299,46 @@ struct VecConvert<
 };
 #endif
 
+#if defined(CPU_CAPABILITY_SVE256) && defined(__ARM_FEATURE_BF16)
+
+template <>
+struct VecConvert<float, 1, BFloat16, 1> {
+  static inline VectorizedN<float, 1> apply(
+      const VectorizedN<BFloat16, 1>& src) {
+    VectorizedN<float, 1> res;
+    // Load 16-bit unsigned integers from src into an SVE vector
+    svuint16_t u16x4 = svld1_u16(svptrue_b16(), reinterpret_cast<const uint16_t*>(&src[0]));
+    // Zero-extend to 32-bit SVE does not have direct vmovl_u16 equivalent.
+    vls_uint32_t u32x4 = svreinterpret_u32_u16(svzip1_u16(svdup_n_u16(0), u16x4));
+    // Reinterpret as float32
+    vls_float32_t f32x4 = svreinterpret_f32_u32(u32x4);
+    res[0] = Vectorized<float>(f32x4);
+    return res;
+  }
+};
+
+template <>
+struct VecConvert<float, 2, BFloat16, 1> {
+  static inline VectorizedN<float, 2> apply(
+      const VectorizedN<BFloat16, 1>& src) {
+    VectorizedN<float, 2> res;
+    std::tie(res[0], res[1]) = convert_bfloat16_float(src[0]);
+    return res;
+  }
+};
+
+template <>
+struct VecConvert<BFloat16, 1, float, 2> {
+  static inline VectorizedN<BFloat16, 1> apply(
+      const VectorizedN<float, 2>& src) {
+    VectorizedN<BFloat16, 1> res;
+    res[0] = convert_float_bfloat16(src[0], src[1]);
+    return res;
+  }
+};
+
+#endif // defined(CPU_CAPABILITY_SVE256) && defined(__ARM_FEATURE_BF16)
+
 template <typename src_t>
 struct VecConvert<
     float,
