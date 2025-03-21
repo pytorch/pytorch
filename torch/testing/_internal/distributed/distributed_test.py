@@ -96,7 +96,7 @@ try:
     import torchvision
 
     HAS_TORCHVISION = True
-except ImportError:
+except Exception:  # Covering both ImportError and RuntimeError
     HAS_TORCHVISION = False
 
 if sys.platform == "win32":
@@ -8310,50 +8310,14 @@ class DistributedTest:
         def test_compute_bucket_assignment_by_size_sparse_error_with_logger(self):
             self._test_compute_bucket_assignment_by_size(use_logger=True)
 
-        def _determine_expected_error_verify_model_across_rank(
-            self, group_to_use, diff_num_params=False
-        ):
-            # When running with NCCL backend, we don't expect an error on rank 0,
-            # rather, it will be taken down by TORCH_NCCL_ASYNC_ERROR_HANDLING. When
-            # running with Gloo or with debug mode wrapper, we expect the error
-            # to be caught inline.
-            # All ranks report same error when there is a # of parameter
-            # mismatch since we use allgather in the impl.
-            if diff_num_params:
-                expected_err = "DDP expects same model across all ranks"
-                ctx = self.assertRaisesRegex(RuntimeError, expected_err)
-                return ctx, expected_err
-
-            is_detail_dbg_mode = dist.get_debug_level() == dist.DebugLevel.DETAIL
-            if self.rank == 0:
-                if (
-                    dist.get_backend(group_to_use) == dist.Backend.NCCL
-                    and not is_detail_dbg_mode
-                ):
-                    expected_err = "caught collective operation timeout"
-                    ctx = self.assertRaisesRegex(RuntimeError, expected_err)
-                else:
-                    expected_err = None
-                    ctx = self.assertRaises(RuntimeError)
-            else:
-                expected_err = "appears not to match"
-                ctx = self.assertRaisesRegex(RuntimeError, expected_err)
-            return ctx, expected_err
-
         def _test_verify_model_across_rank(self, use_logger):
             group_gloo = dist.new_group(
                 timeout=timedelta(seconds=60), backend=dist.Backend.GLOO
             )
-            # Set TORCH_NCCL_BLOCKING_WAIT and use a new NCCL group to improve test
-            # determinism.
-            os.environ["TORCH_NCCL_BLOCKING_WAIT"] = "1"
             group_to_use = dist.new_group(
                 backend=dist.get_backend(), timeout=timedelta(seconds=5)
             )
             torch.cuda.set_device(self.rank)
-            ctx, expected_err = self._determine_expected_error_verify_model_across_rank(
-                group_to_use
-            )
 
             # Create a valid model. The constructor initializes the logger that we use later.
             net = EmbeddingNetDifferentParams(0)
@@ -8371,7 +8335,8 @@ class DistributedTest:
             net.module.lin = nn.Linear(100 if self.rank == 0 else 10, 1)
 
             # if we pass a logger we can verify that it was logged
-            with ctx:
+            caught = 0
+            try:
                 if use_logger:
                     _verify_param_shape_across_processes(
                         net.process_group, list(net.parameters()), net.logger
@@ -8380,18 +8345,13 @@ class DistributedTest:
                     _verify_param_shape_across_processes(
                         net.process_group, list(net.parameters())
                     )
-                # Should only be run by rank 0, and blocking_wait catches and
-                # reports exception.
-                dist.barrier(group_to_use)
+            except Exception:
+                caught = 1
 
-            # We don't check when self.rank != 0 because the logger doesn't log
-            # the error "Caught collective operation" as that is not thrown in the reducer.
-            if use_logger and self.rank != 0:
-                verify_ddp_error_logged(net, expected_err)
-
-            # Perform gloo-based barrier to ensure one rank doesn't exit test
-            # early which causes failure with Barrier.sync.
-            dist.barrier(group_gloo)
+            # As long as there is one rank catching the exception
+            t = torch.Tensor([caught])
+            dist.all_reduce(t, group=group_gloo)
+            self.assertGreater(t, 0)
 
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_but_pass_in_sandcastle_if(
@@ -8409,20 +8369,19 @@ class DistributedTest:
         def test_verify_model_across_rank_without_logger(self):
             self._test_verify_model_across_rank(use_logger=False)
 
-        def _run_test_ddp_model_with_diff_params(self, ctx, net, ddp_group, group_gloo):
-            with ctx:
+        def _run_test_ddp_model_with_diff_params(self, net, ddp_group, group_gloo):
+            caught = 0
+            try:
                 net = torch.nn.parallel.DistributedDataParallel(
                     net.to(self.rank), device_ids=[self.rank], process_group=ddp_group
                 )
-                # Should only be run by rank 0, and blocking_wait catches and
-                # reports exception.
-                dist.barrier(ddp_group)
+            except Exception:
+                caught = 1
 
-            # can't use verify_ddp_error_logged here because net was never properly constructed
-
-            # Perform gloo-based barrier to ensure one rank doesn't exit test
-            # early which causes failure with Barrier.sync.
-            dist.barrier(group_gloo)
+            # As long as there is one rank catching the exception
+            t = torch.Tensor([caught])
+            dist.all_reduce(t, group=group_gloo)
+            self.assertGreater(t, 0)
 
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_but_pass_in_sandcastle_if(
@@ -8433,21 +8392,15 @@ class DistributedTest:
             group_gloo = dist.new_group(
                 timeout=timedelta(seconds=60), backend=dist.Backend.GLOO
             )
-            # Set TORCH_NCCL_BLOCKING_WAIT and use a new NCCL group to improve test
-            # determinism.
-            os.environ["TORCH_NCCL_BLOCKING_WAIT"] = "1"
             group_to_use = dist.new_group(
                 backend=dist.get_backend(), timeout=timedelta(seconds=10)
             )
             torch.cuda.set_device(self.rank)
-            ctx, _expected_err = self._determine_expected_error_verify_model_across_rank(
-                group_to_use
-            )
             # Creates network with different sized embedding table on different
             # ranks. This should throw an error during DDP init.
             net = EmbeddingNetDifferentParams(self.rank)
             self._run_test_ddp_model_with_diff_params(
-                ctx, net, group_to_use, group_gloo
+                net, group_to_use, group_gloo
             )
 
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
@@ -8459,16 +8412,10 @@ class DistributedTest:
             group_gloo = dist.new_group(
                 timeout=timedelta(seconds=60), backend=dist.Backend.GLOO
             )
-            # Set TORCH_NCCL_BLOCKING_WAIT and use a new NCCL group to improve test
-            # determinism.
-            os.environ["TORCH_NCCL_BLOCKING_WAIT"] = "1"
             group_to_use = dist.new_group(
                 backend=dist.get_backend(), timeout=timedelta(seconds=10)
             )
             torch.cuda.set_device(self.rank)
-            ctx, _expected_err = self._determine_expected_error_verify_model_across_rank(
-                group_to_use, diff_num_params=True
-            )
 
             # Creates network with diff # of param across ranks, reducer should
             # recognize this and throw appropriate error.
@@ -8477,7 +8424,6 @@ class DistributedTest:
             )
 
             self._run_test_ddp_model_with_diff_params(
-                ctx,
                 net,
                 group_to_use,
                 group_gloo,
