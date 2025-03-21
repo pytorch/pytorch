@@ -198,29 +198,6 @@ jobs:
         shell: cmd
         run: |
           "pytorch/.ci/pytorch/windows/arm64/bootstrap_git.bat"
-{%- else %}
-      !{{ common.setup_ec2_windows() }}
-      !{{ common.checkout(deep_clone=False, directory="pytorch") }}
-{%- endif %}
-      !{{ set_runner_specific_vars() }}
-      - uses: !{{ common.download_artifact_action }}
-        name: Download Build Artifacts
-        with:
-          name: !{{ config["build_name"] }}
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Populate binary env
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
-{%- if os == "windows-arm64" %}
-      - name: Git checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          path: "pytorch"
-      - name: Bootstrap Git
-        shell: cmd
-        run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_git.bat"
       - name: Remove Pytorch folder
         shell: cmd
         run: |
@@ -246,6 +223,21 @@ jobs:
         shell: cmd
         run: |
           "pytorch/.ci/pytorch/windows/arm64/bootstrap_rust.bat"
+{%- else %}
+      !{{ common.setup_ec2_windows() }}
+      !{{ common.checkout(deep_clone=False, directory="pytorch") }}
+{%- endif %}
+      !{{ set_runner_specific_vars() }}
+      - uses: !{{ common.download_artifact_action }}
+        name: Download Build Artifacts
+        with:
+          name: !{{ config["build_name"] }}
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
+      - name: Populate binary env
+        shell: bash
+        run: |
+          "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
+{%- if os == "windows-arm64" %}
       - name: Test PyTorch binary
         shell: bash
         run: |
