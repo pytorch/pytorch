@@ -10,7 +10,7 @@ from collections.abc import Sequence
 # targets fail to typecheck with:
 #     TypeError: Cannot create a consistent method resolution order (MRO) for
 #     bases Iterable, Generic
-from typing import cast, Generic, Iterable, Optional, TypeVar, Union  # noqa: UP035
+from typing import cast, Any, Generic, Iterable, Optional, TypeVar, Union  # noqa: UP035
 from typing_extensions import deprecated
 
 # No 'default_generator' in torch/__init__.pyi
@@ -417,6 +417,9 @@ class Subset(Dataset[_T_co]):
 
     def __len__(self):
         return len(self.indices)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.dataset, name)
 
 
 def random_split(
