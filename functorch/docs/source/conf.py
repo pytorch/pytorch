@@ -170,6 +170,28 @@ html_theme_path = [pytorch_sphinx_theme2.get_html_theme_path()]
 # documentation.
 #
 html_theme_options = {
+     "icon_links": [
+        {
+            "name": "X",
+            "url": "https://x.com/PyTorch",
+            "icon": "fa-brands fa-x-twitter",
+        },
+        {
+            "name": "GitHub",
+            "url": "https://github.com/pytorch/pytorch",
+            "icon": "fa-brands fa-github",
+        },
+        {
+            "name": "Discourse",
+            "url": "https://dev-discuss.pytorch.org/",
+            "icon": "fa-brands fa-discourse",
+        },
+        {
+            "name": "PyPi",
+            "url": "https://pypi.org/project/torch/",
+            "icon": "fa-brands fa-python",
+        },
+    ],
     "collapse_navigation": False,
     "display_version": True,
     "pytorch_project": "functorch",
@@ -193,7 +215,6 @@ html_context = {
     "doc_path": "functorch/docs/source",
     "library_links": theme_variables.get("library_links", []),
     "community_links": theme_variables.get("community_links", []),
-    "pytorch_project": "docs",
     "language_bindings_links": html_theme_options.get("language_bindings_links", []),
 }
 
