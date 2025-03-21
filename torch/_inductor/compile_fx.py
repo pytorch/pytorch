@@ -329,6 +329,7 @@ def _get_subgraph_names(gm: GraphModule) -> Generator[str, None, None]:
             gm.graph.find_nodes(
                 op="call_function", target=torch.ops.higher_order.while_loop
             ),
+            gm.graph.find_nodes(op="call_function", target=torch.ops.higher_order.scan),
         )
     ):
         if node.target == torch.ops.higher_order.cond:
@@ -341,6 +342,9 @@ def _get_subgraph_names(gm: GraphModule) -> Generator[str, None, None]:
             body_subgraph_name = node.args[1].name
             yield cond_subgraph_name
             yield body_subgraph_name
+        elif node.target == torch.ops.higher_order.scan:
+            combine_subgraph_name = node.args[0].name
+            yield combine_subgraph_name
 
 
 def _recursive_pre_grad_passes(
@@ -756,15 +760,6 @@ def _compile_fx_inner(
                 mb_compiled_graph._time_taken_ns = time.time_ns() - start_time
                 cache_key = key_info[0]
                 mb_compiled_graph._fx_graph_cache_key = cache_key
-                with dynamo_timed("save_compiled_kernels"):
-                    static_kernels = torch._inductor.async_compile.CompiledTritonKernels.get_statically_launchable_kernels()
-                    log.warning(
-                        "Saving %d compiled triton kernels", len(static_kernels)
-                    )
-                    if isinstance(mb_compiled_graph, CompiledFxGraph):
-                        mb_compiled_graph.static_compiled_triton_kernels = (
-                            static_kernels
-                        )
                 (
                     triton_bundle,
                     triton_bundler_meta,
