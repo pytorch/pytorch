@@ -12,6 +12,7 @@ import torch._C
 import torch._ops
 import torch._prims.executor
 import torch.fx
+import torch.onnx._internal._lazy_import
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx._compatibility import compatibility
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
@@ -726,9 +727,6 @@ class OrtBackendOptions:
     sub-graphs are compiled by ``OrtBackend``.
     """
 
-    export_options: Optional["torch.onnx.ExportOptions"] = None
-    """Options for the TorchDynamo-based ONNX exporter used by the ``OrtBackend``."""
-
     ort_session_options: Optional["onnxruntime.SessionOptions"] = None
     """Options for the ``onnxruntime.InferenceSession`` used by the ``OrtBackend``."""
 
@@ -773,11 +771,7 @@ class OrtBackend:
         # - self._resolved_onnx_exporter_options.onnx_registry records what
         #   aten/prim ops are supported by exporter and their exporters (type: callable).
         self._resolved_onnx_exporter_options = (
-            torch.onnx._internal._exporter_legacy.ResolvedExportOptions(
-                torch.onnx.ExportOptions()
-                if self._options.export_options is None
-                else self._options.export_options
-            )
+            torch.onnx._internal._exporter_legacy.ResolvedExportOptions()
         )
 
         #  Given DORT's computation flow:

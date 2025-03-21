@@ -102,7 +102,9 @@ class UpsampleBilinear2DDecompSkip(DecompSkip):
             cls.register_custom_op()
         torch._C._nn.upsample_bilinear2d = torch.ops.onnx_export.upsample_bilinear2d  # type: ignore[attr-defined]
         if export_options.onnx_registry is None:
-            export_options.onnx_registry = torch.onnx.OnnxRegistry()
+            from torch.onnx._internal._exporter_legacy import OnnxRegistry
+
+            export_options.onnx_registry = OnnxRegistry()
         registry = export_options.onnx_registry
         registry.register_op(
             function=cls.onnxscript_function,
@@ -140,7 +142,9 @@ class UpsampleTrilinear3DDecompSkip(DecompSkip):
             cls.register_custom_op()
         torch._C._nn.upsample_trilinear3d = torch.ops.onnx_export.upsample_trilinear3d  # type: ignore[attr-defined]
         if export_options.onnx_registry is None:
-            export_options.onnx_registry = torch.onnx.OnnxRegistry()
+            from torch.onnx._internal._exporter_legacy import OnnxRegistry
+
+            export_options.onnx_registry = OnnxRegistry()
         registry = export_options.onnx_registry
         registry.register_op(
             function=cls.onnxscript_function,
@@ -184,7 +188,9 @@ class InstanceNormDecompSkip(DecompSkip):
 
         torch.instance_norm = torch.ops.onnx_export.instance_norm  # type: ignore[attr-defined]
         if export_options.onnx_registry is None:
-            export_options.onnx_registry = torch.onnx.OnnxRegistry()
+            from torch.onnx._internal._exporter_legacy import OnnxRegistry
+
+            export_options.onnx_registry = OnnxRegistry()
         registry = export_options.onnx_registry
         registry.register_op(
             function=cls.onnxscript_function,

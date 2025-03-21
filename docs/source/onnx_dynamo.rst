@@ -2,13 +2,9 @@ TorchDynamo-based ONNX Exporter
 ===============================
 
 .. automodule:: torch.onnx
-  :noindex:
 
 .. contents:: :local:
-    :depth: 3
-
-.. warning::
-  The ONNX exporter for TorchDynamo is a rapidly evolving beta technology.
+    :depth: 1
 
 Overview
 --------
@@ -89,20 +85,6 @@ The ONNX model may then be serialized into a `Protobuf file <https://protobuf.de
 
   onnx_program.save("mlp.onnx")
 
-Two functions exist to export the model to ONNX based on TorchDynamo engine.
-They slightly differ in the way they produce the :class:`torch.export.ExportedProgram`.
-:func:`torch.onnx.dynamo_export` was introduced with PyTorch 2.1 and
-:func:`torch.onnx.export` was extended with PyTorch 2.5 to easily switch
-from TorchScript to TorchDynamo. To call the former function,
-the last line of the previous example can be replaced by the following one.
-
-.. note::
-    :func:`torch.onnx.dynamo_export` will be deprecated in the future. Please use :func:`torch.onnx.export` with the parameter ``dynamo=True`` instead.
-
-.. code-block:: python
-
-  onnx_program = torch.onnx.dynamo_export(model, tensor_x)
-
 Inspecting the ONNX model using GUI
 -----------------------------------
 
@@ -127,24 +109,18 @@ to resolve the issue.
 API Reference
 -------------
 
-.. autofunction:: torch.onnx.dynamo_export
-
+.. autofunction:: torch.onnx.export
 .. autoclass:: torch.onnx.ONNXProgram
     :members:
-
-.. autoclass:: torch.onnx.ExportOptions
-    :members:
-
-.. autofunction:: torch.onnx.enable_fake_mode
-
-.. autoclass:: torch.onnx.ONNXRuntimeOptions
-    :members:
-
+.. autofunction:: is_in_onnx_export
 .. autoclass:: torch.onnx.OnnxExporterError
     :members:
+.. autofunction:: torch.onnx.enable_fake_mode
 
-.. autoclass:: torch.onnx.OnnxRegistry
-    :members:
+Deprecated
+----------
 
-.. autoclass:: torch.onnx.DiagnosticOptions
-    :members:
+The following classes and functions are deprecated and will be removed.
+
+.. py:function:: torch.onnx.dynamo_export
+.. py:class:: torch.onnx.ExportOptions
