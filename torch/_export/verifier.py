@@ -145,11 +145,11 @@ class Verifier(metaclass=_VerifierMeta):
         return (OpOverload, HigherOrderOperator)
 
     def allowed_getattr_types(self) -> tuple[type[Any], ...]:
-        return (torch.fx.GraphModule, torch.utils._pytree.TreeSpec)
+        return (torch.fx.GraphModule,)
 
     def allowed_getattr_types_for_subgm(self) -> tuple[type[Any], ...]:
         # subgm in HOP's argument could has have getattr(weight) nodes, thus stateful
-        return (torch.fx.GraphModule, torch.nn.parameter.Parameter, torch.utils._pytree.TreeSpec)
+        return (torch.fx.GraphModule, torch.nn.parameter.Parameter)
 
     def check_valid_op(self, op):
         pass

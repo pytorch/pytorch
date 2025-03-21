@@ -2,7 +2,7 @@
 # mypy: disable-error-code="type-arg"
 from datetime import timedelta
 from enum import Enum
-from typing import Any, overload
+from typing import Any, Optional, overload
 
 import torch
 from torch import Tensor
@@ -139,6 +139,8 @@ class BroadcastOptions:
 class AllreduceOptions:
     reduceOp: ReduceOp
     timeout: timedelta
+    asyncOp: bool
+    sparseIndices: Optional[Tensor]
 
 class AllreduceCoalescedOptions(AllreduceOptions): ...
 
@@ -147,6 +149,7 @@ class ReduceOptions:
     rootRank: int
     rootTensor: int
     timeout: timedelta
+    asyncOp: bool
 
 class AllgatherOptions:
     timeout: timedelta
@@ -155,6 +158,7 @@ class AllgatherOptions:
 class GatherOptions:
     rootRank: int
     timeout: timedelta
+    asyncOp: bool
 
 class ScatterOptions:
     rootRank: int
@@ -170,9 +174,11 @@ class BarrierOptions:
     device_ids: list[int]
     device: torch.device
     timeout: timedelta
+    asyncOp: bool
 
 class AllToAllOptions:
     timeout: timedelta
+    asyncOp: bool
 
 class Store:
     def set(self, key: str, value: str): ...
@@ -295,8 +301,6 @@ class Backend:
     def supports_splitting(self) -> bool: ...
     @property
     def supports_coalescing(self) -> bool: ...
-    @property
-    def supports_time_estimate(self) -> bool: ...
     @property
     def options(self) -> Options: ...
     def rank(self) -> int: ...
@@ -605,8 +609,6 @@ class ProcessGroupNCCL(Backend):
     ) -> None: ...
     def _group_start(self) -> None: ...
     def _group_end(self) -> None: ...
-    def _start_time_estimate(self) -> None: ...
-    def _end_time_estimate(self) -> float: ...
     def _set_default_timeout(self, timeout) -> None: ...
     def perform_nocolor_split(self, device: torch.device) -> None: ...
     def register_mem_pool(self, pool: torch.cuda.MemPool) -> None: ...

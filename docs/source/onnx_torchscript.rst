@@ -701,6 +701,7 @@ Functions
 .. autofunction:: unregister_custom_op_symbolic
 .. autofunction:: select_model_mode_for_export
 .. autofunction:: is_in_onnx_export
+.. autofunction:: torch.onnx.verification.find_mismatch
 
 Classes
 ^^^^^^^
@@ -711,3 +712,5 @@ Classes
     :template: classtemplate.rst
 
     JitScalarType
+    verification.GraphInfo
+    verification.VerificationOptions

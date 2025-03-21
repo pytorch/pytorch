@@ -49,34 +49,3 @@ def my_abs(t) -> Tensor:
         a Tensor
     """
     return torch.ops.libtorch_agnostic.my_abs.default(t)
-
-
-def my_ones_like(tensor, device) -> Tensor:
-    """
-    Returns a new Tensor like the input tensor, but with all ones
-
-    Args:
-        tensor: any Tensor
-        device: a device string
-
-    Returns:
-        a ones Tensor with the same dtype and shape and other attributes
-        like the input tensor
-    """
-    return torch.ops.libtorch_agnostic.my_ones_like.default(tensor, device)
-
-
-def exp_neg_is_leaf(t1, t2, t3) -> tuple[Tensor, Tensor, bool]:
-    """
-    Returns a Tensor, Tensor, bool tuple corresponding to the respective inputs
-    t1, t2, and t3.
-
-    Args:
-        t1: Tensor
-        t2: Tensor
-        t3: Tensor
-
-    Returns:
-        (exp(t1), neg(t2), is_leaf(t3))
-    """
-    return torch.ops.libtorch_agnostic.exp_neg_is_leaf.default(t1, t2, t3)

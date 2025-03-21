@@ -41,7 +41,7 @@ class TestUtils(TestCase):
         self.assertFalse(
             utils.same(
                 a,
-                a * 9,
+                a * 6,
                 fp64_ref=fp64_ref,
                 use_larger_multiplier_for_smaller_tensor=True,
                 tol=tol,

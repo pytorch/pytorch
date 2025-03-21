@@ -375,7 +375,7 @@ class TestCutlassBackend(TestCase):
             expected = [model(*input) for input in inputs]
             if use_aoti:
                 actual = AOTIRunnerUtil.run_multiple(
-                    model, inputs, dynamic_shapes=dynamic_shapes
+                    "cuda", model, inputs, dynamic_shapes=dynamic_shapes
                 )
             else:
                 compiled_model = torch.compile(model, dynamic=dynamic)
@@ -437,7 +437,7 @@ class TestCutlassBackend(TestCase):
                 expected = [model(*input) for input in inputs]
                 if use_aoti:
                     actual = AOTIRunnerUtil.run_multiple(
-                        model, inputs, dynamic_shapes=None
+                        "cuda", model, inputs, dynamic_shapes=None
                     )
                 else:
                     compiled_model = torch.compile(model, dynamic=dynamic)
@@ -488,7 +488,9 @@ class TestCutlassBackend(TestCase):
         ):
             expected = [model(*input) for input in inputs]
             if use_aoti:
-                actual = AOTIRunnerUtil.run_multiple(model, inputs, dynamic_shapes=None)
+                actual = AOTIRunnerUtil.run_multiple(
+                    "cuda", model, inputs, dynamic_shapes=None
+                )
             else:
                 compiled_model = torch.compile(model, dynamic=dynamic)
                 actual = [compiled_model(*input) for input in inputs]
@@ -705,6 +707,7 @@ class TestCutlassBackend(TestCase):
             w = torch.randn(K, N).cuda().half()
 
             actual = AOTIRunnerUtil.run(
+                "cuda",
                 model,
                 (x, w),
                 dynamic_shapes=dynamic_shapes,
@@ -736,7 +739,7 @@ class TestCutlassBackend(TestCase):
             model = MyModel()
             M, N, K = 128, 64, 64
             dynamic_shapes = {
-                "x": {0: Dim.DYNAMIC},
+                "x": {0: Dim.DYNAMIC},  # type: ignore[attr-defined]
                 "w": None,
             }
 
@@ -744,6 +747,7 @@ class TestCutlassBackend(TestCase):
             w = torch.randn(K, N).cuda().half()
 
             actual = AOTIRunnerUtil.run(
+                "cuda",
                 model,
                 (x, w),
                 dynamic_shapes=dynamic_shapes,
@@ -775,6 +779,7 @@ class TestCutlassBackend(TestCase):
             w = torch.randn(K, N).cuda().half()
 
             actual = AOTIRunnerUtil.run(
+                "cuda",
                 model,
                 (x, w),
             )

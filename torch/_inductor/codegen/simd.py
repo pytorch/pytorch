@@ -424,14 +424,13 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             }
 
         grid_dims = ["x", "y", "z"]
-        pointwise_tensor_dims = list(reversed(grid_dims))
         reduction_dims = ["r0_", "r1_"]
         if no_x_dim:
             tensor_dims = reduction_dims
         elif no_r_dim:
-            tensor_dims = pointwise_tensor_dims
+            tensor_dims = grid_dims
         else:
-            tensor_dims = pointwise_tensor_dims + reduction_dims
+            tensor_dims = grid_dims + reduction_dims
 
         # Filter out unused tensor dims.
         # Convert to dicts for O(1) index lookup.
@@ -815,10 +814,17 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
 
         return self.codegen_indexing(simp_index)
 
-    def active_range_trees(self) -> list[IterationRangesRoot]:
-        return [
+    def active_range_trees(self, reorder: bool = False) -> list[IterationRangesRoot]:
+        trees = [
             t for t in self.range_trees if not t.is_reduction or self.inside_reduction
         ]
+        if reorder and len(trees) > 1:
+            count = sum(t.prefix in "xyz" for t in trees)
+            assert "".join(t.prefix for t in trees[:count]) == "zyx"[-count:], [
+                t.prefix for t in trees[:count]
+            ]
+            trees[:count] = reversed(trees[:count])
+        return trees
 
     def codegen_indexing(self, expr: sympy.Expr) -> sympy.Expr:
         expr = V.graph.sizevars.simplify_with_ranges(expr, self.var_ranges())

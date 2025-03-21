@@ -3481,7 +3481,7 @@ FBCODE_SKIP_DIRS_RE = re.compile(f".*({'|'.join(map(re.escape, FBCODE_SKIP_DIRS)
 # Remove this after fbcode is fully migrated to tracing through torchrec.
 FBCODE_SKIP_TORCHREC_DIRS = {
     "torchrec/distributed",
-    "torchrec/fb/distributed",
+    "trochrec/fb/distributed",
     "caffe2/torch/fb/sparsenn/pooled_embeddings_modules.py",
 }
 

@@ -549,15 +549,9 @@ def run_joint_graph_passes_on_hops(
                     joint_hop_gm, num_fw_inputs, num_fw_outputs
                 )
 
-                # TODO: invoke_subgraph should track which of its inputs static indices
-                # so it can propagate them to the partitioner (and use in cudagraphs)
-                static_lifetime_input_indices: list[int] = []
                 # Step 2) and 3) - Run joint graph passes and partitioner
                 new_fw_hop_gm, new_bw_hop_gm = aot_config.partition_fn(
-                    joint_hop_gm,
-                    [],
-                    num_fwd_outputs=num_fw_outputs,
-                    static_lifetime_input_indices=static_lifetime_input_indices,
+                    joint_hop_gm, [], num_fwd_outputs=num_fw_outputs
                 )
 
                 # Save the new forward and backward graph modules
@@ -843,12 +837,8 @@ def aot_dispatch_autograd(
             if fake_mode is not None and fake_mode.shape_env is not None:
                 tensorify_python_scalars(fx_g, fake_mode.shape_env, fake_mode)
 
-            static_lifetime_input_indices = fw_metadata.static_input_indices
             fw_module, bw_module = aot_config.partition_fn(
-                fx_g,
-                joint_inputs,
-                num_fwd_outputs=num_inner_fwd_outputs,
-                static_lifetime_input_indices=static_lifetime_input_indices,
+                fx_g, joint_inputs, num_fwd_outputs=num_inner_fwd_outputs
             )
             rng_states = [
                 n

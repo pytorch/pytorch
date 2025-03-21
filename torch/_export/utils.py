@@ -1111,16 +1111,16 @@ def _check_valid_to_preserve(op_overload: "OperatorBase"):
 
 @functools.lru_cache(maxsize=1)
 def _collect_all_valid_cia_ops_for_aten_namespace() -> set["OperatorBase"]:
-    return _collect_all_valid_cia_ops_for_namespace(torch.ops.aten)
+    return _collect_all_valid_cia_ops_for_namespace("aten")
 
 
-def _collect_all_valid_cia_ops_for_namespace(
-    op_namespace: torch._ops._OpNamespace,
-) -> set["OperatorBase"]:
+def _collect_all_valid_cia_ops_for_namespace(namespace: str) -> set["OperatorBase"]:
     # Step 1: Materialize all ops from C++ dispatcher
     _materialize_cpp_cia_ops()
 
     # Step 2: Query all ops from python dispatcher
+    assert hasattr(torch.ops, namespace)
+    op_namespace = getattr(torch.ops, namespace)
     cia_ops = set()
     for op in op_namespace:
         op_packet = getattr(op_namespace, op)
@@ -1150,10 +1150,7 @@ def _collect_all_valid_cia_ops() -> set["OperatorBase"]:
     for op_namespace_name in torch.ops._dir:
         # The reason we split here is because aten ops are safe to cache.
         if op_namespace_name != "aten":
-            assert hasattr(torch.ops, op_namespace_name)
-            op_namespace = getattr(torch.ops, op_namespace_name)
-            if isinstance(op_namespace, torch._ops._OpNamespace):
-                cia_ops |= _collect_all_valid_cia_ops_for_namespace(op_namespace)
+            cia_ops |= _collect_all_valid_cia_ops_for_namespace(op_namespace_name)
         else:
             cia_ops |= _collect_all_valid_cia_ops_for_aten_namespace()
     return cia_ops

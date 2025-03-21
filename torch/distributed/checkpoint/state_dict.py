@@ -154,6 +154,7 @@ class _StateDictInfo(StateDictOptions):
     fsdp_modules: list[nn.Module] = field(default_factory=list)
 
 
+@functools.cache
 def _get_fqns(
     model: nn.Module,
     name: str,
@@ -595,7 +596,8 @@ def _load_model_state_dict(
             )
         elif info.full_state_dict:
             _distribute_state_dict(state_dict, local_state_dict, device=devices.pop())
-        state_dict.update(local_state_dict)
+        for fqn, local_state in local_state_dict.items():
+            state_dict[fqn] = local_state
 
     with info.fsdp_context():
         return cast(

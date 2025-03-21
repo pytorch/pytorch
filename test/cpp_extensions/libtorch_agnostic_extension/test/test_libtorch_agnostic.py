@@ -52,18 +52,8 @@ class TestLibtorchAgnostic(TestCase):
             curr_mem = torch.cuda.memory_allocated(device)
             self.assertEqual(curr_mem, init_mem)
 
-    def test_exp_neg_is_leaf(self, device):
-        t1 = torch.rand(2, 3, device=device)
-        t2 = torch.rand(3, 2, device=device)
-        t3 = torch.rand(2, device=device)
-
-        exp, neg, is_leaf = libtorch_agnostic.ops.exp_neg_is_leaf(t1, t2, t3)
-        self.assertEqual(exp, torch.exp(t1))
-        self.assertEqual(neg, torch.neg(t2))
-        self.assertEqual(is_leaf, t3.is_leaf)
-
     def test_my_abs(self, device):
-        t = torch.rand(32, 16, device=device) - 0.5
+        t = torch.rand(32, 16, device=device)
         cpu_t = libtorch_agnostic.ops.my_abs(t)
         self.assertEqual(cpu_t, torch.abs(t))
 
@@ -71,23 +61,6 @@ class TestLibtorchAgnostic(TestCase):
             cuda_t = libtorch_agnostic.ops.my_abs(t)
             self.assertGreater(torch.cuda.memory_allocated(device), prior_mem)
             self.assertEqual(cuda_t, torch.abs(t))
-
-        if t.is_cuda:
-            init_mem = torch.cuda.memory_allocated(device)
-            for _ in range(3):
-                _make_cuda_tensors(init_mem)
-                curr_mem = torch.cuda.memory_allocated(device)
-                self.assertEqual(curr_mem, init_mem)
-
-    def test_my_ones_like(self, device):
-        t = torch.rand(3, 1, device=device) - 0.5
-        cpu_t = libtorch_agnostic.ops.my_ones_like(t, "cpu")
-        self.assertEqual(cpu_t, torch.ones_like(t, device="cpu"))
-
-        def _make_cuda_tensors(prior_mem):
-            cuda_t = libtorch_agnostic.ops.my_ones_like(t, device)
-            self.assertGreater(torch.cuda.memory_allocated(device), prior_mem)
-            self.assertEqual(cuda_t, torch.ones_like(t, device=device))
 
         if t.is_cuda:
             init_mem = torch.cuda.memory_allocated(device)

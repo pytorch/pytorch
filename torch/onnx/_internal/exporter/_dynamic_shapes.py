@@ -63,14 +63,15 @@ def from_dynamic_axes_to_dynamic_shapes(
                     "The axis in dynamic_axes must be in the form of: dict[int, str] or list[int]."
                 )
             dynamic_shapes[input_name] = {
-                k: torch.export.Dim.AUTO for k, _ in axes.items()
+                k: torch.export.Dim.AUTO  # type: ignore[attr-defined]
+                for k, _ in axes.items()
             }
         elif isinstance(axes, list):
             if any(not isinstance(k, int) for k in axes):
                 raise ValueError(
                     "The axis in dynamic_axes must be in the form of: dict[int, str] or list[int]."
                 )
-            dynamic_shapes[input_name] = {k: torch.export.Dim.AUTO for k in axes}
+            dynamic_shapes[input_name] = {k: torch.export.Dim.AUTO for k in axes}  # type: ignore[attr-defined]
         elif axes is None:
             dynamic_shapes[input_name] = None
         else:
@@ -202,7 +203,7 @@ def convert_str_to_export_dim(
             converted_axes_dict: dict[int, _Dim | _DimHint | None] = {}
             for axis, dim in axes.items():
                 if isinstance(dim, str):
-                    converted_axes_dict[axis] = torch.export.Dim.AUTO
+                    converted_axes_dict[axis] = torch.export.Dim.AUTO  # type: ignore[attr-defined]
                 else:
                     converted_axes_dict[axis] = dim
             dynamic_shapes_with_export_dim.append(converted_axes_dict)
@@ -210,7 +211,7 @@ def convert_str_to_export_dim(
             converted_axes_list: list[_Dim | _DimHint | None] = []
             for dim in axes:
                 if isinstance(dim, str):
-                    converted_axes_list.append(torch.export.Dim.AUTO)
+                    converted_axes_list.append(torch.export.Dim.AUTO)  # type: ignore[attr-defined]
                 else:
                     converted_axes_list.append(dim)
             dynamic_shapes_with_export_dim.append(converted_axes_list)

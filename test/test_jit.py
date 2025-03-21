@@ -1761,7 +1761,8 @@ graph(%Ra, %Rb):
         for node in g.nodes():
             n_ = g2.createClone(node, lambda x: g_to_g2[x])
             g2.appendNode(n_)
-            g_to_g2.update(zip(node.outputs(), n_.outputs()))
+            for o, no in zip(node.outputs(), n_.outputs()):
+                g_to_g2[o] = no
 
         for node in g.outputs():
             g2.registerOutput(g_to_g2[node])

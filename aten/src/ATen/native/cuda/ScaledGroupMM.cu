@@ -478,7 +478,7 @@ void f8f8bf16_grouped_gemm_impl_sm90(
        stride_A,
        (const DtypeB**)inputB_ptrs,
        stride_B},
-      {{{{inputB_scale_ptrs}, {{inputA_scale_ptrs}, {}, {}}, {}}, {}},
+      {{{{inputB_scale_ptrs}, {inputA_scale_ptrs}}},
        (const DtypeOutput**)output_ptrs,
        stride_output,
        output_ptrs,

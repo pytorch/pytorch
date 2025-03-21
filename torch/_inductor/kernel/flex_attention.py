@@ -1557,13 +1557,7 @@ def flex_attention(
         autotune_select_algorithm(
             "flex_attention",
             choices,
-            # Need to filter out symbols since there is an invariant
-            # that all input_nodes are of type IRNode
-            [
-                x
-                for x in inputs_for_autotuning
-                if isinstance(x, torch._inductor.ir.IRNode)
-            ],
+            inputs_for_autotuning,
             layout,
             input_gen_fns=input_gen_fns,
         ),

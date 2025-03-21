@@ -76,7 +76,7 @@ inline Backend dispatchKeyToBackend(DispatchKey t) {
     return Backend::VE;
   } else if (t == DispatchKey::FPGA) {
     return Backend::FPGA;
-  } else if (t == DispatchKey::MAIA || t == DispatchKey::AutogradMAIA) {
+  } else if (t == DispatchKey::MAIA) {
     return Backend::MAIA;
   } else if (t == DispatchKey::XLA || t == DispatchKey::AutogradXLA) {
     return Backend::XLA;

@@ -2,7 +2,7 @@
 
 # Template is at:    .github/templates/linux_binary_build_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: linux-binary-libtorch
+name: linux-binary-libtorch-cxx11-abi
 
 
 on:
@@ -23,7 +23,7 @@ env:
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
   AWS_DEFAULT_REGION: us-east-1
   BINARY_ENV_FILE: /tmp/env
-  BUILD_ENVIRONMENT: linux-binary-libtorch
+  BUILD_ENVIRONMENT: linux-binary-libtorch-cxx11-abi
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   PR_NUMBER: ${{ github.event.pull_request.number }}
   PYTORCH_FINAL_PACKAGE_DIR: /artifacts
@@ -31,7 +31,7 @@ env:
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
   SKIP_ALL_TESTS: 0
 concurrency:
-  group: linux-binary-libtorch-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: linux-binary-libtorch-cxx11-abi-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 jobs:
@@ -44,7 +44,7 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
-  libtorch-cpu-shared-with-deps-release-build:
+  libtorch-cpu-shared-with-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
@@ -56,17 +56,17 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu-main
-      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build_name: libtorch-cpu-shared-with-deps-release
-      build_environment: linux-binary-libtorch
+      build_name: libtorch-cpu-shared-with-deps-cxx11-abi
+      build_environment: linux-binary-libtorch-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  libtorch-cpu-shared-with-deps-release-test:  # Testing
+  libtorch-cpu-shared-with-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
-      - libtorch-cpu-shared-with-deps-release-build
+      - libtorch-cpu-shared-with-deps-cxx11-abi-build
       - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
@@ -77,20 +77,20 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu-main
-      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
-      build_name: libtorch-cpu-shared-with-deps-release
-      build_environment: linux-binary-libtorch
+      DESIRED_DEVTOOLSET: cxx11-abi
+      build_name: libtorch-cpu-shared-with-deps-cxx11-abi
+      build_environment: linux-binary-libtorch-cxx11-abi
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  libtorch-cpu-shared-with-deps-release-upload:  # Uploading
+  libtorch-cpu-shared-with-deps-cxx11-abi-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read
-    needs: libtorch-cpu-shared-with-deps-release-test
+    needs: libtorch-cpu-shared-with-deps-cxx11-abi-test
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: libtorch
@@ -99,14 +99,14 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu-main
-      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
-      build_name: libtorch-cpu-shared-with-deps-release
+      DESIRED_DEVTOOLSET: cxx11-abi
+      build_name: libtorch-cpu-shared-with-deps-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
 
-  libtorch-cuda11_8-shared-with-deps-release-build:
+  libtorch-cuda11_8-shared-with-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
@@ -119,17 +119,17 @@ jobs:
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.8-main
-      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build_name: libtorch-cuda11_8-shared-with-deps-release
-      build_environment: linux-binary-libtorch
+      build_name: libtorch-cuda11_8-shared-with-deps-cxx11-abi
+      build_environment: linux-binary-libtorch-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  libtorch-cuda11_8-shared-with-deps-release-test:  # Testing
+  libtorch-cuda11_8-shared-with-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
-      - libtorch-cuda11_8-shared-with-deps-release-build
+      - libtorch-cuda11_8-shared-with-deps-cxx11-abi-build
       - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
@@ -141,20 +141,20 @@ jobs:
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.8-main
-      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
-      build_name: libtorch-cuda11_8-shared-with-deps-release
-      build_environment: linux-binary-libtorch
+      DESIRED_DEVTOOLSET: cxx11-abi
+      build_name: libtorch-cuda11_8-shared-with-deps-cxx11-abi
+      build_environment: linux-binary-libtorch-cxx11-abi
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  libtorch-cuda11_8-shared-with-deps-release-upload:  # Uploading
+  libtorch-cuda11_8-shared-with-deps-cxx11-abi-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read
-    needs: libtorch-cuda11_8-shared-with-deps-release-test
+    needs: libtorch-cuda11_8-shared-with-deps-cxx11-abi-test
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: libtorch
@@ -164,14 +164,14 @@ jobs:
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.8-main
-      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
-      build_name: libtorch-cuda11_8-shared-with-deps-release
+      DESIRED_DEVTOOLSET: cxx11-abi
+      build_name: libtorch-cuda11_8-shared-with-deps-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
 
-  libtorch-cuda12_6-shared-with-deps-release-build:
+  libtorch-cuda12_6-shared-with-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
@@ -184,17 +184,17 @@ jobs:
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.6-main
-      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build_name: libtorch-cuda12_6-shared-with-deps-release
-      build_environment: linux-binary-libtorch
+      build_name: libtorch-cuda12_6-shared-with-deps-cxx11-abi
+      build_environment: linux-binary-libtorch-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  libtorch-cuda12_6-shared-with-deps-release-test:  # Testing
+  libtorch-cuda12_6-shared-with-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
-      - libtorch-cuda12_6-shared-with-deps-release-build
+      - libtorch-cuda12_6-shared-with-deps-cxx11-abi-build
       - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
@@ -206,20 +206,20 @@ jobs:
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.6-main
-      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
-      build_name: libtorch-cuda12_6-shared-with-deps-release
-      build_environment: linux-binary-libtorch
+      DESIRED_DEVTOOLSET: cxx11-abi
+      build_name: libtorch-cuda12_6-shared-with-deps-cxx11-abi
+      build_environment: linux-binary-libtorch-cxx11-abi
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge.nvidia.gpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  libtorch-cuda12_6-shared-with-deps-release-upload:  # Uploading
+  libtorch-cuda12_6-shared-with-deps-cxx11-abi-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read
-    needs: libtorch-cuda12_6-shared-with-deps-release-test
+    needs: libtorch-cuda12_6-shared-with-deps-cxx11-abi-test
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: libtorch
@@ -229,14 +229,14 @@ jobs:
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.6-main
-      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
-      build_name: libtorch-cuda12_6-shared-with-deps-release
+      DESIRED_DEVTOOLSET: cxx11-abi
+      build_name: libtorch-cuda12_6-shared-with-deps-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
 
-  libtorch-cuda12_8-shared-with-deps-release-build:
+  libtorch-cuda12_8-shared-with-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
@@ -249,17 +249,17 @@ jobs:
       GPU_ARCH_VERSION: 12.8
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.8-main
-      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build_name: libtorch-cuda12_8-shared-with-deps-release
-      build_environment: linux-binary-libtorch
+      build_name: libtorch-cuda12_8-shared-with-deps-cxx11-abi
+      build_environment: linux-binary-libtorch-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  libtorch-cuda12_8-shared-with-deps-release-test:  # Testing
+  libtorch-cuda12_8-shared-with-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
-      - libtorch-cuda12_8-shared-with-deps-release-build
+      - libtorch-cuda12_8-shared-with-deps-cxx11-abi-build
       - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
@@ -271,20 +271,20 @@ jobs:
       GPU_ARCH_VERSION: 12.8
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.8-main
-      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
-      build_name: libtorch-cuda12_8-shared-with-deps-release
-      build_environment: linux-binary-libtorch
+      DESIRED_DEVTOOLSET: cxx11-abi
+      build_name: libtorch-cuda12_8-shared-with-deps-cxx11-abi
+      build_environment: linux-binary-libtorch-cxx11-abi
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.g4dn.4xlarge.nvidia.gpu  # 12.8 build needs sm_70+ runner
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  libtorch-cuda12_8-shared-with-deps-release-upload:  # Uploading
+  libtorch-cuda12_8-shared-with-deps-cxx11-abi-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read
-    needs: libtorch-cuda12_8-shared-with-deps-release-test
+    needs: libtorch-cuda12_8-shared-with-deps-cxx11-abi-test
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: libtorch
@@ -294,14 +294,14 @@ jobs:
       GPU_ARCH_VERSION: 12.8
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.8-main
-      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
-      build_name: libtorch-cuda12_8-shared-with-deps-release
+      DESIRED_DEVTOOLSET: cxx11-abi
+      build_name: libtorch-cuda12_8-shared-with-deps-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
 
-  libtorch-rocm6_2_4-shared-with-deps-release-build:
+  libtorch-rocm6_2_4-shared-with-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
@@ -314,17 +314,17 @@ jobs:
       GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm6.2.4-main
-      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build_name: libtorch-rocm6_2_4-shared-with-deps-release
-      build_environment: linux-binary-libtorch
+      build_name: libtorch-rocm6_2_4-shared-with-deps-cxx11-abi
+      build_environment: linux-binary-libtorch-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  libtorch-rocm6_2_4-shared-with-deps-release-test:  # Testing
+  libtorch-rocm6_2_4-shared-with-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
-      - libtorch-rocm6_2_4-shared-with-deps-release-build
+      - libtorch-rocm6_2_4-shared-with-deps-cxx11-abi-build
       - get-label-type
     runs-on: linux.rocm.gpu
     timeout-minutes: 240
@@ -338,15 +338,15 @@ jobs:
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm6.2.4-main
-      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
-          name: libtorch-rocm6_2_4-shared-with-deps-release
+          name: libtorch-rocm6_2_4-shared-with-deps-cxx11-abi
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
@@ -371,12 +371,12 @@ jobs:
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
-  libtorch-rocm6_2_4-shared-with-deps-release-upload:  # Uploading
+  libtorch-rocm6_2_4-shared-with-deps-cxx11-abi-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read
-    needs: libtorch-rocm6_2_4-shared-with-deps-release-test
+    needs: libtorch-rocm6_2_4-shared-with-deps-cxx11-abi-test
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: libtorch
@@ -386,14 +386,14 @@ jobs:
       GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm6.2.4-main
-      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
-      build_name: libtorch-rocm6_2_4-shared-with-deps-release
+      DESIRED_DEVTOOLSET: cxx11-abi
+      build_name: libtorch-rocm6_2_4-shared-with-deps-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
 
-  libtorch-rocm6_3-shared-with-deps-release-build:
+  libtorch-rocm6_3-shared-with-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
@@ -406,17 +406,17 @@ jobs:
       GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm6.3-main
-      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build_name: libtorch-rocm6_3-shared-with-deps-release
-      build_environment: linux-binary-libtorch
+      build_name: libtorch-rocm6_3-shared-with-deps-cxx11-abi
+      build_environment: linux-binary-libtorch-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  libtorch-rocm6_3-shared-with-deps-release-test:  # Testing
+  libtorch-rocm6_3-shared-with-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
-      - libtorch-rocm6_3-shared-with-deps-release-build
+      - libtorch-rocm6_3-shared-with-deps-cxx11-abi-build
       - get-label-type
     runs-on: linux.rocm.gpu
     timeout-minutes: 240
@@ -430,15 +430,15 @@ jobs:
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm6.3-main
-      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
-          name: libtorch-rocm6_3-shared-with-deps-release
+          name: libtorch-rocm6_3-shared-with-deps-cxx11-abi
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
         uses: actions/checkout@v4
@@ -463,12 +463,12 @@ jobs:
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
-  libtorch-rocm6_3-shared-with-deps-release-upload:  # Uploading
+  libtorch-rocm6_3-shared-with-deps-cxx11-abi-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read
-    needs: libtorch-rocm6_3-shared-with-deps-release-test
+    needs: libtorch-rocm6_3-shared-with-deps-cxx11-abi-test
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: libtorch
@@ -478,9 +478,9 @@ jobs:
       GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm6.3-main
-      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
-      build_name: libtorch-rocm6_3-shared-with-deps-release
+      DESIRED_DEVTOOLSET: cxx11-abi
+      build_name: libtorch-rocm6_3-shared-with-deps-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml

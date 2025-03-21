@@ -21,7 +21,7 @@ from weakref import ref
 
 from torch import inf, Tensor
 
-from .optimizer import _to_scalar, Optimizer
+from .optimizer import Optimizer
 
 
 __all__ = [
@@ -204,7 +204,7 @@ class LRScheduler:
 
         for param_group, lr in zip(self.optimizer.param_groups, values):
             if isinstance(param_group["lr"], Tensor):
-                param_group["lr"].fill_(_to_scalar(lr))
+                param_group["lr"].fill_(lr)
             else:
                 param_group["lr"] = lr
 

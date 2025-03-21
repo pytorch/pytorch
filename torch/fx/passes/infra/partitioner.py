@@ -69,7 +69,7 @@ class CapabilityBasedPartitioner:
         )
         self.dependency_viewer = _DependencyViewer(graph_module)
 
-    def _is_node_supported(self, node: Node) -> bool:
+    def __is_node_supported(self, node: Node) -> bool:
         return self.operator_support.is_node_supported(
             dict(self.graph_module.named_modules()), node
         )
@@ -206,7 +206,7 @@ class CapabilityBasedPartitioner:
             #
             # I don't see a need to add a knob to disable horizontal fusion yet, we can short-cut
             # the fusion by adding an `else` block here to skip horizontal fusion.
-            if self._is_node_supported(node) and node not in assignment:
+            if self.__is_node_supported(node) and node not in assignment:
                 partition_id = next(new_partition_id)
                 nodes_order[node] = partition_id
                 partitions_order[partition_id] = partition_id

@@ -340,7 +340,8 @@ def _type_of(key: Optional[torch.dtype]) -> str:
         "uint64": "u64",
     }
     # reinterpret can create triton type
-    tys.update({v: v for v in list(tys.values())})
+    for v in list(tys.values()):
+        tys[v] = v
     return key if isinstance(key, str) else f"*{tys[dtype_str]}"
 
 
@@ -634,7 +635,9 @@ def get_kernel_metadata(
             single_graph = inductor_nodes[0].graph
             # create a map of idx -> node and cache it
             if not hasattr(single_graph, "_inductor_kernel_metadata_node_to_idx_map"):
-                node_to_idx_map = {n: idx for idx, n in enumerate(single_graph.nodes)}
+                node_to_idx_map = {}
+                for idx, n in enumerate(single_graph.nodes):
+                    node_to_idx_map[n] = idx
                 single_graph._inductor_kernel_metadata_node_to_idx_map = node_to_idx_map  # type: ignore[attr-defined]
             inductor_nodes.sort(
                 key=lambda n: single_graph._inductor_kernel_metadata_node_to_idx_map[n]  # type: ignore[attr-defined]
@@ -903,11 +906,7 @@ def unload_xpu_triton_pyds() -> None:
                     kernel, torch._inductor.runtime.triton_heuristics.CachingAutotuner
                 ):
                     for result in kernel.compile_results:
-                        if isinstance(
-                            result,
-                            torch._inductor.runtime.triton_heuristics.TritonCompileResult,
-                        ):
-                            result.kernel.run.mod.__del__()
+                        result.kernel.run.mod.__del__()
         del sys.modules[module_name]
 
     # unload spirv_utils.pyd
