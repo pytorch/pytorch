@@ -1352,7 +1352,7 @@ class TritonKernelOverrides(TritonOverrides):
 
         # Our sympy expr printing casts to the current kernel index dtype.
         # we only respect non int32-int64 dtypes and otherwise use current kernel indexing dtype
-        index_dtype = torch.int32 if V.kernel.index_dtype == "tl.int32" else torch.int64
+        index_dtype = V.kernel.get_index_dtype_as_torch_dtype()
         dtype = dtype if dtype not in (torch.int32, torch.int64) else index_dtype
 
         # after we emit this var we cast it to the correct dtype
@@ -1966,7 +1966,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 index_relative_to_xyr_index = sympy_subs(
                     index, {v: t.expr for v, t in self.range_tree_nodes.items()}
                 )
-                range_trees = self.active_range_trees(reorder=True)
+                range_trees = self.active_range_trees()
 
                 # Partition the index into subexpressions pertaining to each range tree.
                 # For example xindex * 5 + r0_index * 3 is partitioned to
@@ -2547,9 +2547,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     self.cse.generate(
                         self.compute,
                         f"tl.broadcast_to({reduction_range_prefix}index, {masked_value}.shape)",
-                        dtype=torch.int32
-                        if V.kernel.index_dtype == "tl.int32"
-                        else torch.int64,
+                        dtype=V.kernel.get_index_dtype_as_torch_dtype(),
                     )
                 )
                 root_op = {"argmax": "max", "argmin": "min"}[reduction_type]
