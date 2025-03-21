@@ -3235,17 +3235,16 @@ Eq(s11, s9)""",
             elif nt_view_name.startswith("base_is_nt_True"):
                 self.assertExpectedInline(
                     guard_str,
-                    """\
-Eq(s3 - 1, s0)
-Eq(s9, s0)""",
+                    """Eq(s3 - 1, s0)""",
                 )
             else:
                 self.assertExpectedInline(
                     guard_str,
                     """\
-Eq(s4 - 1, s1)
-Eq(s13 - 1, s8)
-Eq(s12, s10)""",
+Eq(s5 - 1, s1)
+Eq(s4, s1)
+Eq(s14 - 1, s9)
+Eq(s13, s11)""",
                 )
             return gm
 
