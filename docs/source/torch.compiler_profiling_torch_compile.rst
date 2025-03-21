@@ -6,7 +6,7 @@ What to use torch.profiler for:
 
 torch.profiler is helpful for understanding the performance of your program at a kernel-level granularity - for example, it can show graph breaks and resources utilization at the level of the program. The data provided by the profiler can often help users understand where to investigate further to understand model performance.
 
-To understand kernel-level performance, other tools exist, such as :ref:`Nvidia Nsight compute tool<https://developer.nvidia.com/nsight-compute>`, :ref:`AMD Omnitrace<https://rocm.docs.amd.com/projects/omnitrace/en/latest/>`,  Intel® VTune™ Profiler or :ref:`inductor's profiling tools <torchinductor-gpu-profiling>` can be used.
+To understand kernel-level performance, other tools exist, such as `Nvidia Nsight compute tool <https://developer.nvidia.com/nsight-compute>`, `AMD Omnitrace <https://rocm.docs.amd.com/projects/omnitrace/en/latest/>`,  Intel® VTune™ Profiler or :ref:`inductor's profiling tools <torchinductor-gpu-profiling>` can be used.
 
 See also the `general pytorch profiler guide <https://pytorch.org/tutorials/recipes/recipes/profiler_recipe.html>`_.
 
