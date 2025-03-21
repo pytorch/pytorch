@@ -478,8 +478,8 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
             torch.backends.cuda.matmul.allow_tf32 = False
 
     else:  # ScaledGEMM
-        count = untuned_gemm[0].count('_')
-        assert (count in [6, 7])
+        count = untuned_gemm[0].count("_")
+        assert count in [6, 7]
         untuned_gemm_temp = untuned_gemm[0].split("_")
         # dtypeC = might not be FP8 type, keep track
         # of the the number of underscores
@@ -499,17 +499,19 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
     untuned_gemm_temp = untuned_gemm[1].split("_")
     [n, m, k] = [int(g) for g in untuned_gemm_temp[1:4]]
     if op_sig == "GemmStridedBatchedTunableOp":
-        assert (untuned_gemm_temp[6] == "ld")
+        assert untuned_gemm_temp[6] == "ld"
         [ldb, lda, ldc] = [int(g) for g in untuned_gemm_temp[7:10]]
     else:
-        assert (untuned_gemm_temp[4] == "ld")
+        assert untuned_gemm_temp[4] == "ld"
         [ldb, lda, ldc] = [int(g) for g in untuned_gemm_temp[5:8]]
 
     # We cannot handle submatrices in offline tuning
     if all(item in [n, m, k] for item in [lda, ldb, ldc]):
         pass
     else:
-        raise NotImplementedError(f"Submatrices are not supported in offline tuning: {untuned_gemm[1]} ")
+        raise NotImplementedError(
+            f"Submatrices are not supported in offline tuning: {untuned_gemm[1]} "
+        )
 
     if op_sig == "GemmTunableOp":
         matA = (
