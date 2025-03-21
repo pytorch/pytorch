@@ -170,7 +170,7 @@ def export(
 ) -> ONNXProgram | None:
     r"""Exports a model into ONNX format.
 
-    Setting :param:`dynamo` to ``True`` enables the new ONNX export logic
+    Setting ``dynamo=True`` enables the new ONNX export logic
     which is based on :class:`torch.export.ExportedProgram` and a more modern
     set of translation logic. This is the recommended way to export models
     to ONNX.
