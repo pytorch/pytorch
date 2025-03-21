@@ -123,10 +123,6 @@ if RELEASE:
 switcher_version = "main" if not RELEASE else version
 html_static_path = ["_static"]
 
-from sphinx.application import Sphinx
-def setup(app: Sphinx):
-    app.add_config_value('language_bindings_links', [], 'html')
-
 html_theme_options = {
     "logo": {
         "text": "Home",
@@ -134,24 +130,10 @@ html_theme_options = {
     "analytics_id": "GTM-T8XT4PS",
     "canonical_url": "https://pytorch.org/docs/stable/",
     "switcher": {
-        "json_url": "https://svekars.github.io/doc-test/versions.json",
+        "json_url": "https://pytorch.org/docs/pytorch-versions.json",
         "version_match": switcher_version,
     },
     "navigation_with_keys": False,
-    "language_bindings_links": [
-        {
-            "url": "https://pytorch.org/docs/stable/cpp_index.html",
-            "name": "C++",
-        },
-        {
-            "url": "https://pytorch.org/javadoc/",
-            "name": "Javadoc",
-        },
-        {
-            "url": "https://github.com/pytorch/multipy",
-            "name": "torch.multiply",
-        },
-    ],
     "external_links": [
         {
             "name": "Tutorials",
@@ -207,7 +189,7 @@ html_context = {
     "theme_variables": theme_variables,
     "library_links": theme_variables.get("library_links", []),
     "community_links": theme_variables.get("community_links", []),
-    "language_bindings_links": html_theme_options.get("language_bindings_links", []),
+    "language_bindings_links": theme_variables.get("language_bindings_links", []),
 }
 
 napoleon_use_ivar = True
