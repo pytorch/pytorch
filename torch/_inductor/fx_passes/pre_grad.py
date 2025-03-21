@@ -122,6 +122,10 @@ def fuse_split_getitem_squeeze_cat(graph):
     return None
 
 
+def use_triton_dot_compress(graph):
+    return None
+
+
 @init_once_fakemode
 def lazy_init():
     from . import efficient_conv_bn_eval, split_cat  # noqa: F401
@@ -172,6 +176,7 @@ def _run_pre_dispatch_passes(
 
     full_pass_list = default_pass_list + [
         fuse_split_getitem_squeeze_cat,
+        use_triton_dot_compress,
     ]
 
     log.info(
