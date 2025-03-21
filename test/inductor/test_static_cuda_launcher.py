@@ -287,6 +287,7 @@ class TestStaticCudaLauncher(TestCase):
             x = tl.load(arg0)
             y = arg1
             tl.store(arg0, x + y)
+
         arg0 = torch.zeros(1, dtype=torch.int32, device="cuda")
         arg1 = 5
         args = (arg0, arg1)
@@ -302,7 +303,6 @@ class TestStaticCudaLauncher(TestCase):
         launcher.slow_launch_kernel = True
         launcher.run(1, 1, 1, stream, new_arg0, arg1)
         self.assertEqual(new_arg0, arg0)
-
 
     @skipIfRocm
     def test_kernel_empty_tensor(self):
