@@ -1,6 +1,7 @@
 #include <cstdint>
 #include <c10/util/typeid.h>
 #include <c10/util/Exception.h>
+#include <c10/util/SmallVector.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/ScalarType.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
@@ -16,6 +17,7 @@
 #include <ATen/native/Resize.h>
 #include <c10/util/MaybeOwned.h>
 #include <ATen/native/cuda/RowwiseScaledMM.h>
+#include <ATen/native/cuda/ScaledGroupMM.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -1385,6 +1387,84 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   return out;
 }
 
+namespace {
+  c10::SmallVector<int64_t, 3> compute_grouped_gemm_output_size(const Tensor& mat_a,
+  const Tensor& mat_b,
+  const std::optional<at::Tensor>& offs
+  ) {
+    const bool a_is_2d = mat_a.dim() == 2;
+    const bool b_is_2d = mat_b.dim() == 2;
+    if (a_is_2d) {
+      if (b_is_2d) {
+        return {offs->size(0), mat_a.size(0), mat_b.size(1)};
+      } else {
+        TORCH_CHECK(offs->size(0) == mat_b.size(0), "matrix batch sizes have to match");
+        return {mat_a.size(0), mat_b.size(-1)};
+      }
+    } else {
+      if (b_is_2d) {
+        // this case is not actually encountered for MoE gemms
+        TORCH_CHECK(offs->size(0) == mat_a.size(0), "matrix batch sizes have to match");
+        return {mat_a.size(1), mat_b.size(1)};
+      } else { // regular bmm
+        TORCH_CHECK(mat_a.size(0) == mat_b.size(0), "batched dimension has to match");
+        return {mat_a.size(0), mat_a.size(1), mat_b.size(-1)};
+      }
+    }
+  }
+
+  bool transposed(const Tensor& mat) {
+    IntArrayRef tensor_strides = mat.strides();
+    IntArrayRef tensor_sizes = mat.sizes();
+    int end_dim = mat.dim() - 1;
+    if ((tensor_strides[end_dim - 1] == 1) && (tensor_strides[end_dim] >= std::max<int64_t>(1, tensor_sizes[end_dim - 1]))) {
+      return true;
+    } else if ((tensor_strides[end_dim] == 1) && (tensor_strides[end_dim - 1] >= std::max<int64_t>(1, tensor_sizes[end_dim]))) {
+      return false;
+    } else {
+      TORCH_CHECK(false, "Tensor should not be self-overlapping");
+    }
+  }
+
+  void check_scale(const Tensor& mat, const Tensor& scale, const int dim, const int arg_idx, const int scale_multiplier=1) {
+    if (mat.dim() == 2) {
+      TORCH_CHECK(
+          scale.dim() == 1,
+          "scale must be a 1D tensor, but got ",
+          scale.dim(),
+          "D, arg ",
+          arg_idx);
+      TORCH_CHECK(
+          scale.is_contiguous(), "scale_a must be contiguous for arg ", arg_idx);
+      TORCH_CHECK(
+          scale.size(0) == mat.size(dim) * scale_multiplier,
+          "scale must have the same length as mat for arg ",
+          arg_idx);
+    } else {
+      TORCH_CHECK(
+          scale.dim() == 2,
+          "scale must be a 2D tensor, but got ",
+          scale.dim(),
+          "D for arg ",
+          arg_idx);
+      TORCH_CHECK(
+          scale.stride(1),
+          "scale_a must be contiguous in the last dimension for arg ",
+          arg_idx);
+      TORCH_CHECK(
+          scale.size(0) == mat.size(0),
+          "scale must have the same batch dimension as mat for arg ",
+          arg_idx);
+      TORCH_CHECK(
+          scale.size(1) == mat.size(1 + dim),
+          "scale must have the same first dimension as mat for arg ",
+          arg_idx);
+    }
+}
+
+
+}
+
 Tensor
 _scaled_mm_cuda(const Tensor& mat_a, const Tensor& mat_b,
           const Tensor& scale_a,
@@ -1397,5 +1477,83 @@ _scaled_mm_cuda(const Tensor& mat_a, const Tensor& mat_b,
   Tensor out = at::empty({0}, mat_a.options().dtype(out_dtype_));
   return _scaled_mm_out_cuda(mat_a, mat_b, scale_a, scale_b, bias, scale_result, out_dtype, use_fast_accum, out);
 }
+
+
+Tensor
+_scaled_grouped_mm_cuda(const Tensor& mat_a, const Tensor& mat_b,
+const Tensor& scale_a, const Tensor& scale_b,
+const std::optional<at::Tensor>& offs,
+const std::optional<at::Tensor>& bias,
+const std::optional<at::Tensor>& scale_result,
+std::optional<c10::ScalarType> out_dtype,
+bool use_fast_accum) {
+#ifndef USE_ROCM
+  bool allowed_device = _scaled_mm_allowed_device();
+  TORCH_CHECK(allowed_device, "torch._scaled_mm is only supported on CUDA devices with compute capability >= 9.0 or 8.9, or ROCm MI300+");
+
+  TORCH_CHECK(mat_a.dtype() == at::kFloat8_e4m3fn, "Expected mat_a to be Float8_e4m3 matrix got ", mat_a.scalar_type());
+  TORCH_CHECK(mat_b.dtype() == at::kFloat8_e4m3fn, "Expected mat_a to be Float8_e4m3 matrix got ", mat_b.scalar_type());
+  TORCH_CHECK(!transposed(mat_a), "Expected mat1 to not be transposed");
+  TORCH_CHECK(transposed(mat_b), "Expected mat2 to be transposed");
+  TORCH_CHECK(mat_a.dim() == 2 || mat_a.dim() == 3, "mat_a has to be 2 or 3d");
+  TORCH_CHECK(mat_b.dim() == 2 || mat_b.dim() == 3, "mat_b has to be 2 or 3d");
+  const bool a_is_2d = mat_a.dim() == 2;
+  const bool b_is_2d = mat_b.dim() == 2;
+  TORCH_CHECK(
+    mat_a.size(-1) % 16 == 0,
+    "Expected trailing dimension of mat_a to be divisible by 16 ",
+    "but got mat1 shape: (",
+    mat_a.sizes(),
+    ").");
+  TORCH_CHECK(mat_b.size(-2) % 16 == 0 && mat_b.size(-1) % 16 == 0,
+    "Expected mat_b shape to be divisible by 16 ",
+    "but got mat_b shape: (",
+    mat_b.sizes(),
+    ").");
+
+
+
+  TORCH_CHECK(offs.has_value() ==  (a_is_2d || b_is_2d), "Have to provide offsets if there is a 2d matrix");
+
+  if (offs.has_value()) {
+    TORCH_CHECK(offs->dim() == 1, "offs has to be 1D");
+    TORCH_CHECK(offs->dtype() == at::kInt, "Offsets have to be int32");
+  }
+
+  // Both Per-Tensor and Row-wise scaling expect fp32 tensors
+  TORCH_CHECK(
+      scale_a.scalar_type() == kFloat && scale_b.scalar_type() == kFloat,
+      "Both scale_a and scale_b must be float (fp32) tensors.");
+
+  const int scale_multiplier = (mat_a.dim() == 2 && mat_b.dim() == 2) ? offs->size(0) : 1;
+  check_scale(mat_a, scale_a, 0 ,0, scale_multiplier);
+  check_scale(mat_b, scale_b, 1, 1, scale_multiplier);
+
+  const auto out_dtype_ = out_dtype.value_or(mat_a.scalar_type());
+  TORCH_CHECK(out_dtype_ == kBFloat16, "Only bf16 high precision output types are supported for grouped gemm");
+  const auto out_size = compute_grouped_gemm_output_size(mat_a, mat_b, offs);
+  Tensor out = at::empty(out_size, mat_a.options().dtype(out_dtype_));
+
+
+  at::cuda::detail::f8f8bf16_grouped_mm(
+      mat_a,
+      mat_b,
+      scale_a,
+      scale_b,
+      offs,
+      bias,
+      use_fast_accum,
+      out);
+    return out;
+
+
+
+
+#else
+  TORCH_CHECK(false, "grouped gemm is not supported on ROCM")
+#endif
+
+}
+
 
 } // namespace at::native
