@@ -2773,9 +2773,6 @@ class Scheduler:
 
             return (fut, mod)
 
-        # After the succesful fusion with Template, we finalize its config.
-        # Subsequently we benchmark but dont update. Checking for SchedulerNode, instead of FusedSchedulerNode
-        # accomplishes this.
         if is_multi_template and any(
             n.get_template_node() is not None for n in (node1, node2)
         ):
@@ -2786,10 +2783,9 @@ class Scheduler:
                 else node2.get_template_node()
             )
             assert isinstance(multi_node, ir.MultiTemplateBuffer)
-            choice_timings = multi_node.choice_timings
-            _, ms1 = multi_node.get_min_choice()
 
             # Eagerly compile and benchmark non-template nodes
+            choice_timings = multi_node.choice_timings
             _, ms1 = multi_node.get_min_choice()
             ms2, path2 = (
                 self.benchmark_fused_nodes(node_list_2)
