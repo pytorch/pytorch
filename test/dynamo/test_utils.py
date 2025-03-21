@@ -41,7 +41,7 @@ class TestUtils(TestCase):
         self.assertFalse(
             utils.same(
                 a,
-                a * 6,
+                a * 9,
                 fp64_ref=fp64_ref,
                 use_larger_multiplier_for_smaller_tensor=True,
                 tol=tol,
@@ -300,6 +300,7 @@ class TestDynamoTimed(TestCase):
  'config_suppress_errors': False,
  'cuda_synchronize_time_us': None,
  'cuda_version': None,
+ 'cudagraph_skip_reason': None,
  'distributed_ephemeral_timeout_us': None,
  'duration_us': 0,
  'dynamo_compile_time_before_restart_us': 0,
@@ -385,6 +386,7 @@ class TestDynamoTimed(TestCase):
  'config_suppress_errors': None,
  'cuda_synchronize_time_us': None,
  'cuda_version': None,
+ 'cudagraph_skip_reason': None,
  'distributed_ephemeral_timeout_us': None,
  'duration_us': 0,
  'dynamo_compile_time_before_restart_us': None,

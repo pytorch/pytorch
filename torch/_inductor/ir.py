@@ -47,6 +47,7 @@ from torch._prims_common import (
 )
 from torch._subclasses.fake_tensor import get_schema_info
 from torch.fx.experimental.symbolic_shapes import (
+    _remove_effect_token_unbacked_bindings,
     compute_unbacked_bindings,
     free_unbacked_symbols,
     rebind_unbacked,
@@ -188,10 +189,14 @@ class GraphPartitionSignature:
     # we cannot get name from Expr.
     input_nodes: dict[str, Union[IRNode, sympy.Expr, TorchBindObject]]
     output_nodes: list[IRNode]
+
     # mapping from partition input name to a boolean for whether deallocating it
     # in the partition function
     input_deallocation: dict[str, bool]
     skip_cudagraph: bool
+
+    # name of constants read/written by the graph partition
+    constant_names: list[str]
 
 
 def validate_ir(node_or_nodes: Optional[_NodeOrNodes]) -> None:
@@ -1469,6 +1474,7 @@ class Reduction(Loops):
                 reduction_type,
                 split,
                 reduction_hint,
+                input_node,
             )
 
         return TensorBox.create(
@@ -1541,6 +1547,38 @@ class Reduction(Loops):
         return reduction_hint
 
     @classmethod
+    def check_for_split_dense_dim_reindexing(
+        cls, reduction_numel: _IntLike, input_node: Optional[IRNode]
+    ) -> Optional[int]:
+        """
+        If we are reducing over the full tensor, and it is non-dense in the last dimension,
+        reindex so we reduce over the dense dimension. initially just handle complete
+        reduction case
+        """
+        if input_node is None:
+            return None
+
+        if not V.graph.sizevars.statically_known_equals(
+            input_node.get_numel(), reduction_numel
+        ):
+            return None
+
+        input_node.realize()
+        try:
+            # finalize layout
+            as_storage_and_layout(input_node)
+        except NotImplementedError:
+            return None
+
+        strides = input_node.get_stride()
+
+        for i, s in enumerate(strides[:-1]):
+            if V.graph.sizevars.statically_known_equals(s, 1):
+                return i
+
+        return None
+
+    @classmethod
     def _multilayer_wrap_loader(
         cls,
         loader: Callable[..., OpsValue],
@@ -1549,8 +1587,14 @@ class Reduction(Loops):
         split: _IntLike,
         block_size: _IntLike,
         default: Union[_NumLike, Sequence[_NumLike]],
+        input_node: Optional[IRNode] = None,
     ) -> Callable[..., object]:
-        reindex = View.dynamic_reshape_indexer(reduction_ranges, [reduction_numel])
+        dense_index = cls.check_for_split_dense_dim_reindexing(
+            reduction_numel, input_node
+        )
+        reindex = View.dynamic_reshape_indexer(
+            reduction_ranges, [reduction_numel], dense_index
+        )
         need_mask = not V.graph.sizevars.is_expr_static_and_true(
             sympy.Eq(reduction_numel % split, 0)
         )
@@ -1681,6 +1725,7 @@ class Reduction(Loops):
         reduction_type: ReductionType,
         split: _IntLike,
         reduction_hint: ReductionHint,
+        input_node: Optional[IRNode] = None,
     ) -> TensorBox:
         """
         Break a large reduction up into multiple smaller reductions
@@ -1691,7 +1736,13 @@ class Reduction(Loops):
         block_size = FloorDiv(reduction_numel + (split - 1), split)
         default = cls.default_value(reduction_type, dst_dtype)
         wrapper_fn = cls._multilayer_wrap_loader(
-            inner_fn, reduction_ranges, reduction_numel, split, block_size, default
+            inner_fn,
+            reduction_ranges,
+            reduction_numel,
+            split,
+            block_size,
+            default,
+            input_node,
         )
 
         return cls.create_multilayer_helper(
@@ -2892,9 +2943,14 @@ class View(GenericView):
         return old_size, new_size
 
     @classmethod
-    def dynamic_reshape_indexer(cls, old_size, new_size):  # type: ignore[no-untyped-def]
+    def dynamic_reshape_indexer(
+        cls,
+        old_size: Sequence[_IntLike],
+        new_size: Sequence[_IntLike],
+        dense_dim: Optional[int] = None,  # type: ignore[no-untyped-def]
+    ) -> Callable[[Sequence[_T]], Sequence[_V]]:
         try:
-            reindex = cls._dynamic_reshape_indexer(old_size, new_size)
+            reindex = cls._dynamic_reshape_indexer(old_size, new_size, dense_dim)
         except (AssertionError, IndexError):
             # optimistic algorithm failed, lets do a fallback
             flat = [sympy_product(old_size)]
@@ -2904,7 +2960,7 @@ class View(GenericView):
         return reindex
 
     @staticmethod
-    def _dynamic_reshape_indexer(old_size, new_size):  # type: ignore[no-untyped-def]
+    def _dynamic_reshape_indexer(old_size, new_size, dense_dim: Optional[int] = None):  # type: ignore[no-untyped-def]
         """
         Perform a reshape entirely by modifying indexing math
         """
@@ -2917,6 +2973,17 @@ class View(GenericView):
 
         stack_new = list(zip(vars, new_size))
         stack_old = list(old_size)
+
+        # process the dense dim first
+        reordering_dense_dim = (
+            dense_dim is not None
+            and dense_dim != len(stack_old) - 1
+            and len(new_size) == 1
+        )
+        if reordering_dense_dim:
+            assert dense_dim is not None  # mypy
+            old_dim = stack_old.pop(dense_dim)
+            stack_old.append(old_dim)
 
         view_expr = []
         while stack_new and stack_old:
@@ -2960,7 +3027,14 @@ class View(GenericView):
             var, size_new = stack_new.pop()
             V.graph.sizevars.guard_equals(size_new, 1)
 
-        view_expr.reverse()
+        if dense_dim is not None and len(new_size) == 1:
+            view_expr.reverse()
+            # Move the last expression (dense dim) to its original position
+            dense_expr = view_expr.pop()
+            view_expr.insert(dense_dim, dense_expr)
+        else:
+            view_expr.reverse()
+
         assert len(view_expr) == len(old_size)
 
         def reindex(index):  # type: ignore[no-untyped-def]
@@ -5112,9 +5186,17 @@ class ExternKernel(InputsKernel):
 
         unbacked_bindings: Optional[dict[sympy.Symbol, pytree.KeyPath]] = None
         if shape_env := V.fake_mode.shape_env:
-            rebind_unbacked(shape_env, V.current_node, example_output)
+            node_meta_val = V.current_node.meta.get("val")
+            ctx = nullcontext()
+            if V.current_node.target == torch._higher_order_ops.effects.with_effects:
+                # remove the first effect token in meta["val"] and meta["unbacked_bindings"]
+                node_meta_val = node_meta_val[1]
+                ctx = _remove_effect_token_unbacked_bindings(V.current_node)  # type: ignore[assignment]
+
+            with ctx:
+                rebind_unbacked(shape_env, V.current_node, example_output)
             unbacked_bindings = compute_unbacked_bindings(
-                shape_env, example_output, V.current_node.meta.get("val")
+                shape_env, example_output, node_meta_val
             )
 
         example_out_li = (
@@ -7498,12 +7580,37 @@ class WhileLoop(ExternKernel):
         carried_inputs: list[Union[TensorBox, ShapeAsConstantBuffer]],
         additional_inputs: list[Union[TensorBox, ShapeAsConstantBuffer]],
     ):
-        carried_inputs = [cls.realize_input(x) for x in carried_inputs]
-        additional_inputs = [cls.realize_input(x) for x in additional_inputs]
-        all_inputs = carried_inputs + additional_inputs
+        def _require_exact_strides(
+            tensor_boxes: list[TensorBox | ShapeAsConstantBuffer],
+            fake_tensors: list[Union[int, torch.SymInt, torch.Tensor]],
+        ) -> list[TensorBox | ShapeAsConstantBuffer]:
+            assert len(tensor_boxes) == len(fake_tensors)
+            ret = []
+            for tb, fk in zip(tensor_boxes, fake_tensors):
+                if isinstance(fk, torch.Tensor):
+                    ret.append(
+                        ExternKernel.require_exact_strides(
+                            tb, fk.stride(), allow_padding=False
+                        )
+                    )
+                else:
+                    ret.append(tb)
+            return ret
 
-        fx_all_inputs = V.graph.current_node.args[-2] + V.graph.current_node.args[-1]  # type: ignore[operator]
+        fx_carried_inputs = V.graph.current_node.args[-2]
+        fx_additional_inputs = V.graph.current_node.args[-1]
+        fx_all_inputs = fx_carried_inputs + fx_additional_inputs  # type: ignore[operator]
         fake_all_inputs = [x.meta["val"] for x in fx_all_inputs]  # type: ignore[union-attr]
+        fake_carried_inputs = [x.meta["val"] for x in fx_carried_inputs]  # type: ignore[union-attr]
+        fake_additional_inputs = [x.meta["val"] for x in fx_additional_inputs]  # type: ignore[union-attr]
+
+        carried_inputs = [cls.realize_input(x) for x in carried_inputs]
+        carried_inputs = _require_exact_strides(carried_inputs, fake_carried_inputs)
+        additional_inputs = [cls.realize_input(x) for x in additional_inputs]
+        additional_inputs = _require_exact_strides(
+            additional_inputs, fake_additional_inputs
+        )
+        all_inputs = carried_inputs + additional_inputs
 
         for subgraph in (cond_fn, body_fn):
             if subgraph.graph is None:
@@ -7515,6 +7622,20 @@ class WhileLoop(ExternKernel):
                 )
                 with V.set_graph_handler(subgraph.graph):
                     subgraph.graph.run(*fake_all_inputs)
+                    # For body_fn, we require its output to have the exact same stride
+                    # as inputs because the previous output is the input of next iteration.
+                    #
+                    # This cannot be automatically done in graph lowering because body_fn's graph outputs
+                    # are not user-facing so the special handling for strides of user-facing output in graph
+                    # lowering is not applicable.
+                    if subgraph is body_fn:
+                        assert len(subgraph.graph.graph_outputs) == len(
+                            fake_carried_inputs
+                        )
+                        subgraph.graph.graph_outputs = _require_exact_strides(  # type: ignore[assignment]
+                            subgraph.graph.graph_outputs,  # type: ignore[arg-type]
+                            fake_carried_inputs,
+                        )
 
         cond_outputs = cond_fn.graph.graph_outputs  # type: ignore[union-attr]
         body_outputs = body_fn.graph.graph_outputs  # type: ignore[union-attr]
@@ -7538,13 +7659,14 @@ class WhileLoop(ExternKernel):
 
         device = all_inputs[0].get_device()
 
+        assert device is not None  # to make linter happy
         # make sure carried_inputs and body outputs are structurally equivalent
         assert len(carried_inputs) == len(body_outputs), (carried_inputs, body_outputs)
         for i, (op, bo) in enumerate(zip(carried_inputs, body_outputs)):
 
             def _guard_list_equals(
-                lhs_exprs: list[Union[int, sympy.expr]],
-                rhs_exprs: list[Union[int, sympy.expr]],
+                lhs_exprs: Sequence[Union[int, Any]],
+                rhs_exprs: Sequence[Union[int, Any]],
             ) -> None:
                 for lhs, rhs in zip(lhs_exprs, rhs_exprs):
                     V.graph.sizevars.guard_equals(lhs, rhs)

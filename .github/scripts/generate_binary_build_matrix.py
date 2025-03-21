@@ -17,6 +17,7 @@ from typing import Optional
 
 # NOTE: Also update the CUDA sources in tools/nightly.py when changing this list
 CUDA_ARCHES = ["11.8", "12.6", "12.8"]
+CUDA_STABLE = "12.6"
 CUDA_ARCHES_FULL_VERSION = {
     "11.8": "11.8.0",
     "12.6": "12.6.3",
@@ -67,7 +68,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-nccl-cu12==2.25.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux' and platform_machine == 'x86_64'"
@@ -76,14 +77,14 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cuda-nvrtc-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cuda-runtime-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cuda-cupti-cu12==12.8.57; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cudnn-cu12==9.7.1.26; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cudnn-cu12==9.8.0.87; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cublas-cu12==12.8.3.14; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cufft-cu12==11.3.3.41; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-curand-cu12==10.3.9.55; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cusolver-cu12==11.7.2.55; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cusparse-cu12==12.5.7.53; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-nccl-cu12==2.25.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-nccl-cu12==2.26.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-nvtx-cu12==12.8.55; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-nvjitlink-cu12==12.8.61; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cufile-cu12==1.13.0.11; platform_system == 'Linux' and platform_machine == 'x86_64'"
@@ -373,7 +374,7 @@ def generate_wheels_matrix(
                     }
                 )
                 # Special build building to use on Colab. Python 3.11 for 12.6 CUDA
-                if python_version == "3.11" and arch_version == "12.6":
+                if python_version == "3.11" and arch_version == CUDA_STABLE:
                     ret.append(
                         {
                             "python_version": python_version,
@@ -404,7 +405,10 @@ def generate_wheels_matrix(
                         "use_split_build": "True" if use_split_build else "False",
                         "devtoolset": (
                             "cxx11-abi"
-                            if (arch_version in ["cpu-cxx11-abi", "cpu-aarch64"])
+                            if (
+                                arch_version
+                                in ["cpu-cxx11-abi", "cpu-aarch64", "cpu-s390x"]
+                            )
                             or os == "linux"
                             else ""
                         ),
@@ -416,7 +420,7 @@ def generate_wheels_matrix(
                         "pytorch_extra_install_requirements": (
                             PYTORCH_EXTRA_INSTALL_REQUIREMENTS["xpu"]
                             if gpu_arch_type == "xpu"
-                            else PYTORCH_EXTRA_INSTALL_REQUIREMENTS["12.6"]
+                            else PYTORCH_EXTRA_INSTALL_REQUIREMENTS[CUDA_STABLE]
                             if os != "linux"
                             else ""
                         ),
