@@ -13,6 +13,7 @@ if(DEFINED ENV{SYCL_ROOT})
 elseif(DEFINED ENV{CMPLR_ROOT})
   set(SYCL_ROOT $ENV{CMPLR_ROOT})
 else()
+  # Use the default path to ensure proper linking with torch::xpurt when the user is working with libtorch.
   if(CMAKE_SYSTEM_NAME MATCHES "Linux")
     set(SYCL_ROOT "/opt/intel/oneapi/compiler/latest")
   elseif(CMAKE_SYSTEM_NAME MATCHES "Windows")
