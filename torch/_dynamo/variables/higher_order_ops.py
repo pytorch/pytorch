@@ -108,7 +108,7 @@ def check_meta_consistency_vt(
     lhs_name: str,
     rhs_name: str,
 ) -> None:
-    from torch._higher_order_ops.while_loop import check_meta_consistency
+    from torch._higher_order_ops.utils import check_meta_consistency
 
     from . import TensorVariable
 
@@ -1526,6 +1526,13 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             set_subgraph_inputs="flatten_manual",
         )
         combine_freevars_proxy = list(combine_lifted_freevars.keys())
+
+        # Ensure that the output of scan is a flattened list of elements,
+        # because downstream operations assume that the output of HOPs
+        # is flattened
+        output_node = combine_graph.find_nodes(op="output")[0]
+        output_node.args = (pytree.tree_leaves(output_node.args),)
+        combine_graph.lint()
 
         # Collect the results from the comnbine_fn
         results = combine_result.unpack_var_sequence(tx)

@@ -67,6 +67,7 @@ class TestExportTorchbind(TestCase):
         test.tq_size_counter = 0
         test.foo_add_tensor_counter = 0
 
+        # We need different fake classes, which update the counters
         @torch._library.register_fake_class("_TorchScriptTesting::_Foo")
         class FakeFoo:
             def __init__(self, x: int, y: int):
