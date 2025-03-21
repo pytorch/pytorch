@@ -11558,6 +11558,24 @@ graph():
         inp = torch.randn(4, 4)
         self.assertEqual(ep.module()(inp), mod(inp))
 
+        with torch.inference_mode():
+            ep = ep.run_decompositions({})
+
+        # There should be no subclases
+        self.assertExpectedInline(
+            str(ep.graph).strip(),
+            """\
+graph():
+    %b_parametrizations_buffer_original0 : [num_users=0] = placeholder[target=b_parametrizations_buffer_original0]
+    %b_parametrizations_buffer_original1 : [num_users=1] = placeholder[target=b_parametrizations_buffer_original1]
+    %x : [num_users=2] = placeholder[target=x]
+    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %b_parametrizations_buffer_original1), kwargs = {})
+    %add_4 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %add_1), kwargs = {})
+    return (add_4,)""",
+        )
+
+        self.assertEqual(ep.module()(inp), mod(inp))
+
         mod = Foo()
         ep = export(mod, (torch.randn(4, 4),)).run_decompositions({})
 
