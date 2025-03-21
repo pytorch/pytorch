@@ -25,7 +25,7 @@ import sys
 import threading
 import traceback
 from collections import Counter, defaultdict
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Generator, Iterator, Mapping, Sequence
 from contextlib import _GeneratorContextManager, contextmanager
 from dataclasses import asdict, dataclass, field
 from enum import Enum
@@ -3102,6 +3102,7 @@ class ShapeEnvSettings:
     duck_shape: bool
     prefer_deferred_runtime_asserts_over_guards: bool
     allow_complex_guards_as_runtime_asserts: bool
+    trace_asserts: bool
 
 
 @dataclass
@@ -3244,6 +3245,7 @@ class ShapeEnv:
         allow_complex_guards_as_runtime_asserts: bool = False,
         # XXX Add any new settings that could affect FakeTensor evaluation
         # to: torch._subclasses.fake_tensor._ShapeEnvSettings
+        trace_asserts: bool = False,
     ) -> None:
         if duck_shape is None:
             duck_shape = config.use_duck_shape
@@ -3258,6 +3260,7 @@ class ShapeEnv:
             duck_shape=duck_shape,
             prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
             allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
+            trace_asserts=trace_asserts,
         )
 
         self.guards: list[ShapeGuard] = []
@@ -3411,6 +3414,8 @@ class ShapeEnv:
         # could track this at the IR level using a higher order operator
         # with something like effect token tracking.
         self.unbacked_alloc_order: dict[sympy.Symbol, int] = {}
+
+        self.trace_asserts = trace_asserts
 
         from torch.fx.experimental.validator import translation_validation_enabled
 
@@ -6473,22 +6478,27 @@ class ShapeEnv:
                 stack_info=True if log.getEffectiveLevel() < logging.WARNING else False,
             )
 
+    def _get_user_frame(self) -> types.FrameType:
+        frame = inspect.currentframe()
+        while frame is not None:
+            if frame.f_code.co_filename not in uninteresting_files():
+                return frame
+            frame = frame.f_back
+        assert frame is not None
+        return frame
+
     def _get_stack_summary(
         self, is_debug: bool = False, framework_loc: Optional[str] = None
     ) -> tuple[SLoc, str]:
         floc: Optional[Union[str, traceback.FrameSummary]] = framework_loc
         if floc is None:
-            frame = inspect.currentframe()
+            frame = self._get_user_frame()
             try:
-                while frame is not None:
-                    if frame.f_code.co_filename not in uninteresting_files():
-                        floc = traceback.FrameSummary(
-                            frame.f_code.co_filename,
-                            frame.f_lineno,
-                            frame.f_code.co_name,
-                        )
-                        break
-                    frame = frame.f_back
+                floc = traceback.FrameSummary(
+                    frame.f_code.co_filename,
+                    frame.f_lineno,
+                    frame.f_code.co_name,
+                )
             finally:
                 del frame
 
@@ -6599,9 +6609,10 @@ class ShapeEnv:
             "guard_added",
             metadata_fn=lambda: {
                 "expr": str(g),
-                "stack": structured.from_traceback(
-                    CapturedTraceback.extract(skip=1).summary()
-                ),
+                "prefix": prefix,
+                "expr_node_id": self._expr_sym_node_id,
+                "user_stack": structured.get_user_stack(3),
+                "stack": structured.get_framework_stack(3),
                 "symbol_to_sources": {
                     str(v): k
                     for k, v in self.source_to_var.items()
@@ -6895,6 +6906,52 @@ class ShapeEnv:
                         transmute_into_runtime_assert = True
                         concrete_val = unsound_result
                         ok = True
+
+                    if not ok and self.trace_asserts:
+                        # Check if this boolean is used in an assertion, bytecode pattern for
+                        # assertions is pretty stable for Python 3.7--3.13, ported with minimal
+                        # changes from torch/fx/proxy.py
+                        # Bytecode pattern for `assert` statements:
+                        #     TO_BOOL / COMPARE_OP  # Only for Python >= 3.13
+                        #     POP_JUMP_IF_TRUE
+                        #     LOAD_ASSERTION_ERROR
+                        #     RAISE_VARARGS
+                        frame = self._get_user_frame()
+                        assert frame is not None
+
+                        insts = list(dis.get_instructions(frame.f_code))
+                        if sys.version_info >= (3, 11):
+                            # For Python >= 3.11, instructions can be 2-4 bytes long.
+                            from bisect import bisect_left
+
+                            cur = bisect_left(
+                                insts, frame.f_lasti, key=lambda x: x.offset
+                            )
+                        else:
+                            # For Pyhton <= 3.10, instructions are always 2 bytes.
+                            cur = frame.f_lasti // 2
+
+                        if sys.version_info >= (3, 13):
+                            if insts[cur].opname in ("TO_BOOL", "COMPARE_OP"):
+                                # Peek 1 instruction further.
+                                cur += 1
+                        inst = insts[cur]
+
+                        if inst.opname == "POP_JUMP_IF_TRUE" and inst.arg is not None:
+                            first = insts[cur + 1]
+
+                            starts_with_assert = (
+                                first.opname == "LOAD_GLOBAL"
+                                and first.argval == "AssertionError"
+                                or first.opname == "LOAD_ASSERTION_ERROR"
+                            )
+                            if (
+                                starts_with_assert
+                                and insts[cur + 2].opname == "RAISE_VARARGS"
+                            ):
+                                concrete_val = sympy.true
+                                transmute_into_runtime_assert = True
+                                ok = True
 
                     if not ok:
                         raise self._make_data_dependent_error(
@@ -7298,3 +7355,20 @@ def _suggest_fixes_for_data_dependent_error_non_strict(
         # add suggested torch.check()s based on `src_map` to the error message
         # replacing unbacked symints in the unresolved condition in the error
         _suggest_torch_checks(e, src_map)
+
+
+@contextmanager
+def _remove_effect_token_unbacked_bindings(
+    node: torch.fx.Node,
+) -> Generator[None, None, None]:
+    old_bindings = node.meta.get("unbacked_bindings", {})
+
+    # Remove the extra layer for effect token
+    new_bindings = {k: path[1:] if path else path for k, path in old_bindings.items()}
+
+    node.meta["unbacked_bindings"] = new_bindings
+
+    try:
+        yield
+    finally:
+        node.meta["unbacked_bindings"] = old_bindings
