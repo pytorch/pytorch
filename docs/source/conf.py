@@ -2447,6 +2447,8 @@ coverage_ignore_classes = [
     "DuplicateDQPass",
     # torch.ao.quantization.pt2e.port_metadata_pass
     "PortNodeMetaForQDQ",
+    # torch.ao.quantization.pt2e.lowering
+    "lower_pt2e_quantized_to_x86",
     # torch.ao.quantization.qconfig
     "QConfigDynamic",
     # torch.ao.quantization.quant_type
