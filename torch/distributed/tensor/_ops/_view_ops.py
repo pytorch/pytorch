@@ -21,6 +21,7 @@ from torch.distributed.tensor._ops.utils import (
     prod,
     register_op_strategy,
 )
+from torch.distributed.tensor._utils import compute_local_shape_and_global_offset
 from torch.distributed.tensor.placement_types import Placement, Replicate, Shard
 
 
@@ -35,6 +36,9 @@ class DimSpec:
 
     def inputs(self) -> Iterable["DimSpec"]:
         return ()
+
+    def concrete_shape(self, input_shape: Shape):
+        raise NotImplementedError
 
 
 # Rules that map each dimension of the output to dimensions of the input tensor
@@ -51,6 +55,9 @@ class InputDim(DimSpec):
     """Output dimension maps directly to an input dimension."""
 
     input_dim: int
+
+    def concrete_shape(self, input_shape: Shape):
+        return input_shape[self.input_dim]
 
 
 @dataclass
@@ -119,6 +126,9 @@ class Flatten(DimSpec):
 
     def inputs(self) -> Iterable[DimSpec]:
         return self.input_dims
+
+    def concrete_shape(self, input_shape: Shape) -> Shape:
+        return (prod(s.concrete_shape(input_shape) for s in self.input_dims),)
 
 
 @dataclass
@@ -253,9 +263,9 @@ def dim_movedim(
 
 def dim_repeat(ndim: int, sizes: Shape) -> DimMap:
     sizes = normalize_sizes(sizes)
-    assert len(sizes) >= ndim, (
-        f"Number of dimensions of repeat dims {sizes} can not be smaller than number of dimensions of tensor {ndim}."
-    )
+    assert (
+        len(sizes) >= ndim
+    ), f"Number of dimensions of repeat dims {sizes} can not be smaller than number of dimensions of tensor {ndim}."
     pad = len(sizes) - ndim
     return tuple(Repeat.new(Singleton(), s) for s in sizes[:pad]) + tuple(
         Repeat.new(InputDim(i), s) for i, s in enumerate(sizes[pad:])
@@ -274,9 +284,9 @@ def infer_size(total_size: int, sizes: Shape) -> Shape:
     if infers:
         size = -size
         missing_size = total_size // size
-        assert total_size % size == 0, (
-            f"size inferred for -1 is not integral {sizes} should have {total_size} elements."
-        )
+        assert (
+            total_size % size == 0
+        ), f"size inferred for -1 is not integral {sizes} should have {total_size} elements."
         return tuple(s if s != -1 else missing_size for s in sizes)
     assert size == total_size, f"sizes do not match {total_size} vs {size}"
     return sizes
@@ -442,6 +452,21 @@ def dim_reduction(
     )
 
 
+def compute_shape(input_shape: Shape, output_rules: DimMap) -> Shape:
+    """
+    Given a DimMap describing how each output dimension is created from given input dimensions, and a concrete
+    input shape, compute the concrete output shape
+    """
+    output_shape = []
+    for rule in output_rules:
+        new_dim_shape = rule.concrete_shape(input_shape)
+        assert (
+            len(new_dim_shape) == 1
+        ), f"top level output rules should describe a single dimension, but got {rule=}"
+        output_shape.append(new_dim_shape[0])
+    return Shape(output_shape)
+
+
 dim_maps: dict[Callable[..., torch.Tensor], Callable[..., DimMap]] = {
     torch.atleast_1d: lambda x: dim_pad_left(x.ndim, 1),
     torch.atleast_2d: lambda x: dim_pad_left(x.ndim, 2),
@@ -470,7 +495,7 @@ dim_maps: dict[Callable[..., torch.Tensor], Callable[..., DimMap]] = {
 
 def propagate_shape_and_sharding(
     input_src_placements: Sequence[Placement],
-    local_in_shape: Shape,
+    global_input_shape: Shape,
     rule: DimMap,
     mesh_sizes: Shape,
 ) -> tuple[Sequence[Placement], Sequence[Placement]]:
@@ -502,7 +527,7 @@ def propagate_shape_and_sharding(
 
     for cmd in rule:
         collect_used_inputs(cmd)
-    for dim in range(len(local_in_shape)):
+    for dim in range(len(global_input_shape)):
         shardable_dims[dim] = [dim in seen_input_dims] * mesh_ndim
 
     def get_in_dim_to_shard(cmd: DimSpec) -> Optional[InputDim]:
@@ -537,9 +562,9 @@ def propagate_shape_and_sharding(
                 for size, shard in zip(mesh_sizes, input_src_placements):
                     if isinstance(shard, Shard) and shard.dim == in_dim:
                         submesh_size *= size
-                assert out_size % submesh_size == 0, (
-                    f"Resulting dimension size {out_size} is not divisible by its mesh dimension {submesh_size}."
-                )
+                assert (
+                    out_size % submesh_size == 0
+                ), f"Resulting dimension size {out_size} is not divisible by its mesh dimension {submesh_size}."
 
             # we will only shard our first component of the split
             return in_dim if cmd.split_id == 0 else None
@@ -576,7 +601,16 @@ def register_op_strategy_map(
     aten_op_overload: torch._ops.OpOverload,
     local_op_name: Callable[..., torch.Tensor],
     schema_info: Optional[RuntimeSchemaInfo] = None,
+    strict_view: bool = False,
 ) -> None:
+    """
+    Helper that registers strategies for view-like operators that follow a pattern:
+      (1) define the way input dims are split/combined to form output dims (dim_maps)
+      (2) register a strategy for the op schema that uses the dim_map as a sharding prop rule
+
+    strict_view: if True, we will error out if the dim_map produces an illegal sharding (see https://pytorch.org/docs/stable/distributed.tensor.html) # TODO update to correct link
+       Currently, this should be set to 'true' for any "view" ops.  We could decide to diverge behavior for "reshape" ops which could perform a redistribute to correct illegal sharding.
+    """
     dim_map: Callable[..., DimMap] = dim_maps[local_op_name]
 
     @register_op_strategy(aten_op_overload, schema_info=schema_info)
@@ -592,12 +626,30 @@ def register_op_strategy_map(
         for input_placement_strategy in input_strategy.strategies:
             input_src_spec = input_placement_strategy.output_spec
 
+            expected_input_local_shape, _ = compute_local_shape_and_global_offset(
+                global_in_shape, mesh, input_src_spec.placements
+            )
+            new_global_shape = compute_shape(global_in_shape, rules)
+
             input_tgt_placements, output_placements = propagate_shape_and_sharding(
                 input_src_spec.placements,
                 tuple(global_in_shape),
                 rules,
                 mesh.shape,
             )
+            new_local_shape, _ = compute_local_shape_and_global_offset(
+                new_global_shape, mesh, output_placements
+            )
+            if new_local_shape != expected_input_local_shape:
+                if strict_view:
+                    raise RuntimeError(
+                        f"Invalid View operation, would require resharding to match existing local_tensor shape {expected_input_local_shape} with new local_tensor shape {new_local_shape}, but View ops are not allowed to perform resharding."
+                    )
+                else:
+                    raise NotImplementedError(
+                        "Resharding not yet implemented for non-view ops like reshape"
+                    )
+            print(f"{new_local_shape=}")
 
             # TODO: optimize this. we shouldn't simply blindly replicate
             #       unshardable dims ...
@@ -612,6 +664,7 @@ def register_op_strategy_map(
                 generate_redistribute_costs(input_strategy, input_tgt_spec)
             ]
 
+            # TODO(whc) should attach propagated tensor_meta. we now compute the new shape, so maybe its as simple as copying the rest of tensor_meta from old tensor and changing the shape?
             output_spec = DTensorSpec(mesh=mesh, placements=tuple(output_placements))
             output_strategy.strategies.append(
                 PlacementStrategy(
@@ -629,13 +682,16 @@ register_op_strategy_map(
     aten.squeeze.dim, torch.squeeze, schema_info=RuntimeSchemaInfo(1)
 )
 register_op_strategy_map(
-    aten.view.default, Tensor.view, schema_info=RuntimeSchemaInfo(1)
+    aten.view.default, Tensor.view, schema_info=RuntimeSchemaInfo(1, strict_view=True)
 )
 register_op_strategy_map(
     aten.reshape.default, torch.reshape, schema_info=RuntimeSchemaInfo(1)
 )
 register_op_strategy_map(
-    aten._unsafe_view.default, Tensor.view, schema_info=RuntimeSchemaInfo(1)
+    aten._unsafe_view.default,
+    Tensor.view,
+    schema_info=RuntimeSchemaInfo(1),
+    strict_view=True,
 )
 register_op_strategy_map(
     aten.unsqueeze.default, torch.unsqueeze, schema_info=RuntimeSchemaInfo(1)
