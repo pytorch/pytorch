@@ -3432,7 +3432,7 @@ MOD_SKIPLIST = [
     "torch.utils.copyreg",
     "torch.utils.cpp_backtrace",
     "torch.utils.data",
-    "torch.utils.deterministic",
+    # "torch.utils.deterministic",
     "torch.utils.dlpack",
     "torch.utils.generate_methods_for_privateuse1_backend",
     "torch.utils.get_cpp_backtrace",
