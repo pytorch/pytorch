@@ -499,10 +499,7 @@ class ExportGraphSignature:
     def __str__(self):
         input_specs = "\n".join(str(s) for s in self.input_specs)
         output_specs = "\n".join(str(s) for s in self.output_specs)
-        return (
-            f"\n# inputs\n{input_specs}\n"
-            f"\n# outputs\n{output_specs}\n"
-        )
+        return f"\n# inputs\n{input_specs}\n\n# outputs\n{output_specs}\n"
 
 
 def _immutable_dict(items):
