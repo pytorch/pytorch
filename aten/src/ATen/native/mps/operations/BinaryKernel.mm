@@ -3,8 +3,8 @@
 #include <ATen/TensorIndexing.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/BinaryOps.h>
-#include <ATen/native/TensorIterator.h>
 #include <ATen/native/TensorFactories.h>
+#include <ATen/native/TensorIterator.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/operations/BinaryKernel.h>
 // For MTLLanguageVersion_3_1
