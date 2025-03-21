@@ -44,7 +44,6 @@ if TYPE_CHECKING:
     import onnxscript
 
     from torch._subclasses import fake_tensor
-    from torch.onnx._internal.fx import diagnostics
 
 log = logging.getLogger(__name__)
 
@@ -278,28 +277,6 @@ class ResolvedExportOptions(ExportOptions):
     All unspecified options from :class:`ExportOptions` are assigned a default value.
     This is an internal class and its API may be changed at any time without notice.
     """
-
-    # Public attributes MUST be redefined below without ``Optional[]`` from ``ExportOptions``
-    dynamic_shapes: bool
-    diagnostic_options: DiagnosticOptions
-    fake_context: ONNXFakeContext
-    onnx_registry: OnnxRegistry
-
-    # Private only attributes
-    decomposition_table: dict[torch._ops.OpOverload, Callable]
-    """A dictionary that maps operators to their decomposition functions."""
-
-    onnxfunction_dispatcher: (
-        torch.onnx._internal.fx.onnxfunction_dispatcher.OnnxFunctionDispatcher
-    )
-    """The ONNX dispatcher used to dispatch ATen operators to ONNX functions."""
-
-    fx_tracer: FXGraphExtractor
-    """The FXGraphExtractor instance used to extract the FX graph from the model."""
-
-    diagnostic_context: diagnostics.DiagnosticContext
-    """The diagnostics context for the export. Responsible for recording diagnostics,
-    logging diagnostics, and generating the SARIF log."""
 
     def __init__(self):
         from torch.onnx._internal.fx import (
