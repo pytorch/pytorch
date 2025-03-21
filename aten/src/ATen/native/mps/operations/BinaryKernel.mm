@@ -122,7 +122,7 @@ Tensor& complex_out_mps(const Tensor& real, const Tensor& imag, Tensor& output) 
   auto output_as_real = at::view_as_real(output).select(output.dim(), 0);
   auto iter = TensorIteratorConfig().add_output(output_as_real).add_input(real).add_input(imag).build();
 
-  lib.exec_binary_kernel(iter, "complex_kernel", /*supports_dense=*/false);
+  lib.exec_binary_kernel(iter, "make_complex");
   return output;
 }
 } // namespace at::native
