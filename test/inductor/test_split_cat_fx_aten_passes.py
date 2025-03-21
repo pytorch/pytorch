@@ -135,6 +135,46 @@ class TestSplitCatPartial(torch.nn.Module):
         return cat
 
 
+class TestMoveViewAferCat(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+
+    def forward(self, x: torch.Tensor):
+        split_with_sizes_1 = torch.ops.aten.split_with_sizes.default(
+            x, [1, 1, 1, 1, 1, 1, 1]
+        )
+        getitem_71 = split_with_sizes_1[0]
+        getitem_72 = split_with_sizes_1[1]
+        getitem_73 = split_with_sizes_1[2]
+        getitem_74 = split_with_sizes_1[3]
+        getitem_75 = split_with_sizes_1[4]
+        getitem_76 = split_with_sizes_1[5]
+        getitem_77 = split_with_sizes_1[6]
+        view_1 = torch.ops.aten.view.default(getitem_71, [8, 96])
+        view_2 = torch.ops.aten.view.default(getitem_72, [8, 96])
+        view_3 = torch.ops.aten.view.default(getitem_73, [8, 96])
+        view_4 = torch.ops.aten.view.default(getitem_74, [8, 96])
+        view_5 = torch.ops.aten.view.default(getitem_75, [8, 96])
+        view_6 = torch.ops.aten.view.default(getitem_76, [8, 96])
+        view_7 = torch.ops.aten.view.default(getitem_77, [8, 96])
+        clone = torch.ops.aten.clone.default(view_1)
+
+        cat = torch.ops.aten.cat.default(
+            [
+                view_1,
+                view_2,
+                view_3,
+                view_4,
+                view_5,
+                view_6,
+                view_7,
+            ],
+            1,
+        )
+        cat_1 = torch.ops.aten.cat.default([clone, cat], 1)
+        return torch.cat([clone, cat_1], 1)
+
+
 class TestSelectCat(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
@@ -256,6 +296,30 @@ class TestSplitCatAten(TestCase):
         self.compare_pred(module, traced, inputs)
         self.assertEqual(counters["inductor"]["normalization_aten_pass"], 4)
         self.assertEqual(counters["inductor"]["select_cat_aten_pass"], 1)
+        self.assertEqual(ref, res, rtol=1e-8, atol=1e-8)
+        self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
+        counters.clear()
+
+    @requires_cuda
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={},
+        post_grad_fusion_options={
+            "normalization_aten_pass": {},
+            "move_view_after_cat_aten_pass": {},
+        },
+    )
+    def test_move_view_after_cat_aten(self):
+        counters.clear()
+        inputs = [
+            torch.randn(7, 8, 96, device=torch.device(device=GPU_TYPE)),
+        ]
+        module = TestMoveViewAferCat()
+        traced = torch.compile(module)
+        ref = module(*inputs)
+        res = traced(*inputs)
+        self.compare_pred(module, traced, inputs)
+        self.assertEqual(counters["inductor"]["normalization_aten_pass"], 4)
+        self.assertEqual(counters["inductor"]["move_view_after_cat_aten_pass"], 1)
         self.assertEqual(ref, res, rtol=1e-8, atol=1e-8)
         self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
         counters.clear()
