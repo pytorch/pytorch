@@ -174,7 +174,6 @@ def scan(
     if reverse:
         out = pytree.tree_map(
             lambda elem: elem.flip([0]) if elem is not None else elem, out
-        )
 
     return carry, out
 
@@ -460,10 +459,8 @@ def _fake_scan(combine_fn, init, xs=None, dim=0, reverse=False):
         y, _ = pytree.tree_flatten(y)
         result_flat.append(y)
 
-    res = op(result_flat)
-
     def _stack_tensor(leave_ind):
-        tensors = [e[leave_ind] for e in res if e[leave_ind] is not None]
+        tensors = [e[leave_ind] for e in op(result_flat) if e[leave_ind] is not None]
         if len(tensors) == 0:
             return None
         return torch.stack(tensors)
