@@ -92,6 +92,16 @@ struct polar_functor {
   }
 };
 
+// Constructs complex tensor from real and imaginary planes
+struct make_complex_functor {
+  template <typename U>
+  using ret_type = c10::metal::vec2type_t<U>;
+  template <typename T>
+  inline ret_type<T> operator()(const T a, const T b) {
+    return ret_type<T>(a, b);
+  }
+};
+
 REGISTER_BINARY_INDEXING_OP(copysign, long);
 REGISTER_BINARY_INDEXING_OP(copysign, int);
 REGISTER_BINARY_INDEXING_OP(copysign, float);
@@ -123,6 +133,8 @@ REGISTER_BINARY_INDEXING_OP(xlog1py, bfloat);
 // Complex binary functions
 REGISTER_BINARY_INDEXING_OP(polar, float);
 REGISTER_BINARY_INDEXING_OP(polar, half);
+REGISTER_BINARY_INDEXING_OP(make_complex, float);
+REGISTER_BINARY_INDEXING_OP(make_complex, half);
 
 template <typename T>
 kernel void complex_mul(
@@ -138,21 +150,6 @@ kernel void complex_mul(
   out[1] = input[0] * other[1] + input[1] * other[0];
 }
 
-// Constructs complex tensor from real and imaginary planes
-template <typename T>
-kernel void complex_kernel(
-    constant void* real_ [[buffer(0)]],
-    constant void* imag_ [[buffer(1)]],
-    device void* out_ [[buffer(2)]],
-    constant uint3* offsets [[buffer(3)]],
-    uint tid [[thread_position_in_grid]]) {
-  device T* out = (device T*)((device uint8_t*)out_ + offsets[tid].x);
-  constant T* real = (constant T*)((constant uint8_t*)real_ + offsets[tid].y);
-  constant T* imag = (constant T*)((constant uint8_t*)imag_ + offsets[tid].z);
-  out[0] = real[0];
-  out[1] = imag[0];
-}
-
 #define REGISTER_BINARY_OP(NAME, DTYPE)                             \
   template [[host_name(#NAME "_" #DTYPE)]] kernel void NAME<DTYPE>( \
       constant void* input_,                                        \
@@ -163,5 +160,3 @@ kernel void complex_kernel(
 
 REGISTER_BINARY_OP(complex_mul, float);
 REGISTER_BINARY_OP(complex_mul, half);
-REGISTER_BINARY_OP(complex_kernel, float);
-REGISTER_BINARY_OP(complex_kernel, half);
