@@ -1443,7 +1443,9 @@ class AOTInductorModelCache:
             with torch.no_grad():
                 package_path = torch._inductor.aoti_compile_and_package(ep)  # type: ignore[arg-type]
 
-            cls.cache[key] = torch._inductor.aoti_load_package(package_path)
+            cls.cache[key] = torch._inductor.aoti_load_package(
+                package_path, run_single_threaded=True
+            )
 
         return cls.cache[key]
 
