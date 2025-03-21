@@ -11,11 +11,7 @@ from torch._inductor.virtualized import V
 from .. import config as inductor_config
 from ..codegen.wrapper import PythonWrapperCodegen
 from ..ir import ChoiceCaller, Layout
-from ..utils import (
-    get_num_sms,
-    TMA_DESCRIPTOR_SIZE,
-    use_aten_gemm_kernels,
-)
+from ..utils import get_num_sms, TMA_DESCRIPTOR_SIZE, use_aten_gemm_kernels
 
 
 log = logging.getLogger(__name__)
