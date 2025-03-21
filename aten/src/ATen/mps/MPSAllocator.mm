@@ -2,8 +2,13 @@
 
 #include <ATen/CPUFunctions.h>
 #include <ATen/EmptyTensor.h>
+#include <ATen/detail/MPSHooksInterface.h>
 #include <ATen/mps/MPSAllocator.h>
+#include <ATen/mps/MPSDevice.h>
+#include <ATen/mps/MPSProfiler.h>
+#include <ATen/mps/MPSStream.h>
 #include <c10/core/Allocator.h>
+#include <c10/core/CPUAllocator.h>
 #include <c10/core/Storage.h>
 
 #include <iostream>
@@ -11,6 +16,49 @@
 namespace at::mps {
 
 C10_DEFINE_REGISTRY(MPSAllocatorCallbacksRegistry, IMpsAllocatorCallback)
+
+// TODO: This duplicates code from `mps/operations/Copy.mm`. I should
+// unduplicate it.
+static void* pageAlignedBlockPtr(const void* ptr, NSUInteger size, NSUInteger* alignedBlockSize) {
+  uintptr_t address = (uintptr_t)ptr;
+  uintptr_t alignedAddress = address & ~(PAGE_SIZE - 1);
+  uintptr_t alignedEnd = ((address + size) + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+  uint64_t alignedLength = alignedEnd - alignedAddress;
+
+  assert(address >= alignedAddress);
+  assert(address + size <= alignedAddress + alignedLength);
+
+  *alignedBlockSize = alignedLength;
+  return (void*)alignedAddress;
+}
+
+// TODO: This duplicates code from `mps/operations/Copy.mm`. I should
+// unduplicate it.
+static void copy_data_from_cpu_to_mps(void* dst, const void* src, std::size_t n) {
+  MPSStream* stream = getCurrentMPSStream();
+  id<MTLDevice> device = MPSDevice::getInstance()->device();
+  id<MTLBuffer> destBuffer = __builtin_bit_cast(id<MTLBuffer>, dst);
+
+  @autoreleasepool {
+    MTLResourceOptions options = MTLResourceCPUCacheModeDefaultCache | MTLResourceStorageModeShared;
+    NSUInteger alignedLength = 0;
+    NSUInteger sourceOffset = 0;
+
+    void* alignedPtr = pageAlignedBlockPtr(src, (NSUInteger)n, &alignedLength);
+    sourceOffset = uintptr_t(src) - uintptr_t(alignedPtr);
+    id<MTLBuffer> sourceBuffer = [device newBufferWithBytesNoCopy:alignedPtr
+                                                           length:alignedLength
+                                                          options:options
+                                                      deallocator:nil];
+
+    uint64_t profile_id = getMPSProfiler().beginProfileCopy(
+        sourceBuffer, destBuffer, OptionalTensorRef(), OptionalTensorRef(), n, /*non_blocking=*/false);
+
+    stream->copy_and_sync(
+        sourceBuffer, destBuffer, n, sourceOffset, /*dstOffset=*/0, /*non_blocking=*/false, profile_id);
+    [sourceBuffer release];
+  }
+}
 
 namespace HeapAllocator {
 
@@ -623,6 +671,11 @@ ssize_t MPSHeapAllocatorImpl::getUnalignedBufferSize(const void* ptr) {
   return -1;
 }
 
+bool MPSHeapAllocatorImpl::hasBuffer(const void* ptr) {
+  BufferBlock* buffer_block = get_allocated_buffer_block(ptr);
+  return buffer_block;
+}
+
 void MPSHeapAllocatorImpl::setBufferShape(const void* ptr, const IntArrayRef& shape) {
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
@@ -820,8 +873,24 @@ struct TORCH_API MPSAllocator final : public IMPSAllocator {
     return _getAllocImpl().format_size(size);
   }
 
-  void copy_data(void* dest, const void* src, std::size_t count) const final {
+  void copy_data(void* dest, const void* src, std::size_t count, bool sync = false) const final {
     default_copy_data(dest, src, count);
+    if (sync) {
+      at::detail::getMPSHooks().deviceSynchronize();
+    }
+  }
+
+  DataPtr clone_from_cpu(const void* data, std::size_t n) override {
+    DataPtr new_data = allocate(n);
+    void* dest = new_data.mutable_get();
+    copy_data_from_cpu_to_mps(dest, data, n);
+    return new_data;
+  }
+
+  DataPtr clone_to_cpu(const void* data, std::size_t n) override {
+    DataPtr new_data = c10::GetCPUAllocator()->allocate(n);
+    copy_data(new_data.mutable_get(), data, n, /*sync=*/true);
+    return new_data;
   }
 
  private:

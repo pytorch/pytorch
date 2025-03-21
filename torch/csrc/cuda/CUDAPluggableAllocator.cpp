@@ -1,3 +1,4 @@
+#include <c10/core/CPUAllocator.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <mutex>
@@ -365,9 +366,32 @@ std::string CUDAPluggableAllocator::name() {
 void CUDAPluggableAllocator::copy_data(
     void* dest,
     const void* src,
-    std::size_t count) const {
+    std::size_t count,
+    bool sync) const {
   C10_CUDA_CHECK(
       cudaMemcpy(dest, src, count, cudaMemcpyKind::cudaMemcpyDeviceToDevice));
+  if (sync) {
+    c10::cuda::device_synchronize();
+  }
+}
+
+c10::DataPtr CUDAPluggableAllocator::clone_from_cpu(
+    const void* data,
+    std::size_t n) {
+  c10::DataPtr new_data = allocate(n);
+  C10_CUDA_CHECK(cudaMemcpy(
+      new_data.mutable_get(), data, n, cudaMemcpyKind::cudaMemcpyHostToDevice));
+  c10::cuda::device_synchronize();
+  return new_data;
+}
+c10::DataPtr CUDAPluggableAllocator::clone_to_cpu(
+    const void* data,
+    std::size_t n) {
+  c10::DataPtr new_data = c10::GetCPUAllocator()->allocate(n);
+  C10_CUDA_CHECK(cudaMemcpy(
+      new_data.mutable_get(), data, n, cudaMemcpyKind::cudaMemcpyDeviceToHost));
+  c10::cuda::device_synchronize();
+  return new_data;
 }
 
 std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>
