@@ -1232,6 +1232,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Whether the coalesced calls are sync or async.
   bool coalescedAsync_;
 
+  // keeps track of input and output tensors when coalescing is in flight.  Will
+  // hand over these tensors to WorkNCCL's stash when coalescing is ended.
+  std::vector<at::Tensor> coalescedTensors_;
+
   // Whether or not wait() and synchronize() are blocking operations that wait
   // for the operation to complete.
   bool blockingWait_ = false;

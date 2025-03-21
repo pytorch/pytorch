@@ -3172,6 +3172,7 @@ void ProcessGroupNCCL::startCoalescing() {
 
   coalescedDevice_.set_index(-1);
   coalescedComm_ = nullptr;
+  coalescedTensors_.clear();
   coalescing_state_ |= CoalActive;
   groupStart();
 }
@@ -3217,6 +3218,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
   work->store_ = store_;
   assignTimeoutToWork(work, options_);
 
+  // Hand over references to tensors during coalescing to work's stash
+  work->stashTensors(coalescedTensors_);
+
   // Record start before ncclGroupEnd
   if (work->timingEnabled_) {
     work->ncclStartEvent_->record(ncclStream);
@@ -3239,6 +3243,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
   // Reset coalescing state
   coalescing_state_ = 0;
   coalescedComm_ = nullptr;
+  coalescedTensors_.clear();
   // If in async mode, return work; otherwise, kernel is enqueued on current
   // stream, no need to return work
   return coalescedAsync_ ? work : nullptr;
@@ -3325,8 +3330,15 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   // stream, we don't need to do anything for tensor lifetime management.
   // Otherwise, we need to stage the tensors will `work.wait()`.
   if (asyncOp) {
-    work->stashTensors(inputs);
-    work->stashTensors(outputs);
+    if (coalescing_state_) {
+      coalescedTensors_.insert(
+          coalescedTensors_.end(), inputs.begin(), inputs.end());
+      coalescedTensors_.insert(
+          coalescedTensors_.end(), outputs.begin(), outputs.end());
+    } else {
+      work->stashTensors(inputs);
+      work->stashTensors(outputs);
+    }
   }
 
   if (nanCheck) {
