@@ -62,6 +62,7 @@ class C10_API SymBool {
   bool guard_bool(const char* file, int64_t line) const;
   bool expect_true(const char* file, int64_t line) const;
   bool guard_size_oblivious(const char* file, int64_t line) const;
+  bool guard_or_false(const char* file, int64_t line) const;
 
   bool has_hint() const;
 
@@ -113,7 +114,24 @@ inline bool guard_size_oblivious(
   return b.guard_size_oblivious(file, line);
 }
 
+inline bool guard_or_false(
+    bool b,
+    const char* file [[maybe_unused]],
+    int64_t line [[maybe_unused]]) {
+  return b;
+}
+
+inline bool guard_semantics(
+    const c10::SymBool& b,
+    const char* file,
+    int64_t line) {
+  return b.guard_or_false(file, line);
+}
+
 #define TORCH_GUARD_SIZE_OBLIVIOUS(cond) \
   c10::guard_size_oblivious((cond), __FILE__, __LINE__)
+
+#define TORCH_GUARD_OR_FALSE(cond) \
+  c10::guard_or_false((cond), __FILE__, __LINE__)
 
 } // namespace c10
