@@ -3581,7 +3581,9 @@ def check_file(filename, is_inlined_call=False):
         filename.startswith(_module_dir(unittest))
         # and not torch._dynamo.config.enable_trace_unittest
     ):
-        if torch._dynamo.config.enable_trace_unittest and filename.endswith("case.py"):
+        if torch._dynamo.config.enable_trace_unittest and (
+            filename.endswith("case.py") or filename.endswith("util.py")
+        ):
             return SkipResult(False, "inlined by default")
         else:
             return SkipResult(True, "unittest")
