@@ -224,7 +224,7 @@ class FakeTensorTest(TestCase):
             x_conv = mode.from_tensor(x)
             y = torch.rand([4, 4], device="cuda")
             z = torch.rand([4, 4], device="cpu")
-            self.assertRaises(Exception, lambda: torch.lerp(x_conv, y, z))
+            self.assertRaisesRegex(RuntimeError, "Unhandled FakeTensor Device Propagation for .*", lambda: torch.lerp(x_conv, y, z))
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_type_as(self):
