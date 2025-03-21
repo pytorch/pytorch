@@ -538,15 +538,8 @@ fake_tensor_cache_crosscheck_enabled = (
 # the inference_mode is still respected.
 fake_tensor_disable_inference_mode = True
 
-# Enables the Compiled Autograd engine to trace autograd calls made under torch.compile().
-# Note: AOTAutograd will still trace and partition an AOT backward graph local to that
-# compiled region. But AOTAutograd traces without knowledge of backward hooks which are
-# coordinated by the Autograd engine, and under the hood, it uses the torch.autograd.grad
-# API, so it cannot capture gradient accumulation operations (AccumulateGrad).
-#
-# Compiled Autograd will trace all autograd operations as seen by the Autograd engine.
-# This flag will also lift certain restrictions during the forward trace such as
-# registering backward hooks on tensors contained within the compiled region.
+# Enables the Compiled Autograd engine to trace .backward() calls made under torch.compile().
+# Note: AOT Autograd will still trace joint graphs.
 compiled_autograd = False
 
 # Overrides torch.compile() kwargs for Compiled Autograd:
