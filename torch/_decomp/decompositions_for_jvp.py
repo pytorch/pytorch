@@ -19,7 +19,7 @@ aten = torch.ops.aten
 # The mechanism is in VariableType,
 #   IF any inputs have forward grad
 #      AND there is no forward AD formula implemented
-#      AND the functions are actually differentiable
+#      AND the functions is actually differentiable
 #   run the decomposition
 #      See run_jit_decomposition_with_args_for_jvp
 #      We currently use python decompositions that we torchscript.
@@ -34,7 +34,7 @@ aten = torch.ops.aten
 # (and possibly produce an unintelligible error) vs erroring out earlier and
 # printing that the forward AD formula is not implemented.
 #
-# The solution to this may be to have an explicitly white list control when
+# The solution to this may be to have a explicitly white list control when
 # to enable the decomposition.
 
 

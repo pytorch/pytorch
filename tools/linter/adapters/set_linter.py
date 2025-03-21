@@ -134,8 +134,6 @@ class TokenLine:
     def is_braced_set(self, begin: int, end: int) -> bool:
         if begin + 1 == end or self.tokens[begin].string != "{":
             return False
-        if begin and self.tokens[begin - 1].string == "in":
-            return False  # skip `x in {1, 2, 3}`
         i = begin + 1
         empty = True
         while i < end:

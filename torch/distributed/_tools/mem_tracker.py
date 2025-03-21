@@ -2,7 +2,6 @@ import math
 import os
 import re
 import warnings
-from contextlib import nullcontext
 from copy import deepcopy
 from enum import auto, Enum
 from functools import partial, wraps
@@ -10,17 +9,16 @@ from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 from typing_extensions import Self
 
 import torch
-import torch.distributed._tools.fake_collectives
 from torch import nn, optim
-from torch._guards import active_fake_mode
-from torch.distributed._tools.common_utils import get_untyped_storages
 from torch.distributed._tools.mod_tracker import ModTracker
-from torch.distributed.tensor import DTensor
 from torch.optim.optimizer import (
     register_optimizer_step_post_hook,
     register_optimizer_step_pre_hook,
 )
-from torch.utils._python_dispatch import TorchDispatchMode
+from torch.utils._python_dispatch import (
+    is_traceable_wrapper_subclass,
+    TorchDispatchMode,
+)
 from torch.utils._pytree import tree_flatten, tree_map_only
 from torch.utils.weak import WeakIdKeyDictionary, weakref
 
@@ -172,6 +170,35 @@ class _WeakRefInfo:
             self.mem_consumed = self._calculate_mem_consumed()
         return self.mem_consumed
 
+    @staticmethod
+    def get_untyped_storages(t: torch.Tensor) -> set[torch.UntypedStorage]:
+        """
+        Recursively extracts untyped storages from a tensor or its subclasses.
+
+        Args:
+            t (torch.Tensor): The tensor to extract storages from.
+
+        Returns:
+            set[torch.UntypedStorage]: A set of untyped storages.
+        """
+        unflattened_tensors = [t]
+        flattened_tensor_storages = set()
+        while len(unflattened_tensors) > 0:
+            obj = unflattened_tensors.pop()
+            if is_traceable_wrapper_subclass(obj):
+                attrs, _ = obj.__tensor_flatten__()  # type: ignore[attr-defined]
+                unflattened_tensors.extend([getattr(obj, attr) for attr in attrs])
+            else:
+                if not hasattr(obj, "untyped_storage"):
+                    warnings.warn(
+                        f"Expected a tensor or a traceable wrapper-subclass of tensor, but got {type(obj)}",
+                        category=UserWarning,
+                        stacklevel=2,
+                    )
+                else:
+                    flattened_tensor_storages.add(obj.untyped_storage())
+        return flattened_tensor_storages
+
     @classmethod
     def create_winfo(
         cls,
@@ -226,9 +253,7 @@ def _print_snapshot(snapshot: dict[torch.device, dict[str, int]], units: str) ->
         print(
             f"Device: {dev}",
             *(
-                f"\t{k.value}: {_rounding_fn(v, divisor, 2)} {units}"
-                if isinstance(k, _RefType)
-                else f"\t{k}: {_rounding_fn(v, divisor, 2)} {units}"
+                f"\t{k}: {_rounding_fn(v, divisor, 2)} {units}"
                 for k, v in dev_snap.items()
             ),
             sep="\n",
@@ -250,9 +275,7 @@ def _print_snapshot_tabular(
     divisor = _get_mem_divisor(units)
     table_data = []
     key_list = list(next(iter(snapshot.values())).keys())
-    headers = ["Device"] + [
-        f"{key.value}" if isinstance(key, _RefType) else f"{key}" for key in key_list
-    ]
+    headers = ["Device"] + [f"{key}" for key in key_list]
 
     for dev, dev_snap in snapshot.items():
         if _rounding_fn(dev_snap[_TOTAL_KEY], divisor, 2) <= 0:
@@ -267,7 +290,7 @@ def _print_state_snapshots(
     snapshots: dict[_State, list[dict[torch.device, dict[str, int]]]], units: str
 ) -> None:
     for state, snapshot_list in snapshots.items():
-        print(f"{state.value}")
+        print(f"{state}")
         for i, snapshot in enumerate(snapshot_list):
             print(f"# {i + 1}:")
             _print_snapshot(snapshot, units)
@@ -289,7 +312,7 @@ def _print_state_snapshots_tabular(
     divisor = _get_mem_divisor(units)
     for state, snapshot_list in snapshots.items():
         for i, snapshot in enumerate(snapshot_list):
-            state_call = f"{state.value} # {i + 1}"
+            state_call = f"{state} # {i + 1}"
             for dev, dev_snap in snapshot.items():
                 if _rounding_fn(dev_snap[_TOTAL_KEY], divisor, 2) <= 0:
                     continue
@@ -301,9 +324,7 @@ def _print_state_snapshots_tabular(
                 }
                 last_state_call = state_call
                 for k, v in dev_snap.items():
-                    row[f"{k.value}" if isinstance(k, _RefType) else f"{k}"] = (
-                        f"{_rounding_fn(v, divisor, 2)} {units}"
-                    )
+                    row[f"{k}"] = f"{_rounding_fn(v, divisor, 2)} {units}"
                 table_data.append(row)
     print(tabulate(table_data, headers="keys", tablefmt="rst"))
 
@@ -390,8 +411,6 @@ class MemTracker(TorchDispatchMode):
         # Weak references to the topmost AC module currently active
         self._ac_mod: Optional[weakref.ref] = None
         self._orig_resize = torch.UntypedStorage.resize_
-        self._orig_dtensor_dispatch = DTensor._op_dispatcher.dispatch
-        self._depth = 0
 
     def _update_snap(
         self,
@@ -443,7 +462,7 @@ class MemTracker(TorchDispatchMode):
         reftype: _RefType,
         update_existing: bool = False,
     ) -> set[_WeakRefInfo]:
-        sts = get_untyped_storages(t)
+        sts = _WeakRefInfo.get_untyped_storages(t)
         winfos = set()
         for st in sts:
             # Attempt to retrieve existing ``_WeakRefInfo`` and its weak reference from the tracking dictionary.
@@ -524,7 +543,7 @@ class MemTracker(TorchDispatchMode):
         # Get the storages of the tensor and check if we have already tracked them.
         # If yes, then check if the storage size has changed and update the current snapshot.
         # Else create a new ``_WeakRefInfo`` instance and add it to the dictionary.
-        sts = get_untyped_storages(t)
+        sts = _WeakRefInfo.get_untyped_storages(t)
         for st in sts:
             winfo, _ = self._WINFO.get(st, (None, None))
             if winfo is not None:
@@ -621,7 +640,7 @@ class MemTracker(TorchDispatchMode):
 
         def add_inps_or_outs(t: torch.Tensor) -> None:
             nonlocal input_or_output_memory
-            sts = get_untyped_storages(t)
+            sts = _WeakRefInfo.get_untyped_storages(t)
             for st in sts:
                 winfo, _ = self._WINFO.get(st, (None, None))
                 if winfo is not None:
@@ -675,7 +694,6 @@ class MemTracker(TorchDispatchMode):
             mod_stats = self.memory_tracking[module]
             state = _ModState.PRE_FW
             input_mem = self._track_inputs_or_outputs(inputs)
-            mod_stats.mod_fqn = mod_name
             mod_stats.input_mem = input_mem
 
         mem_snapshot = self.get_tracker_snapshot()
@@ -808,8 +826,6 @@ class MemTracker(TorchDispatchMode):
                 self._track_module_params_and_buffers(obj, install_grad_hooks=False)
             elif isinstance(obj, optim.Optimizer):
                 self._track_optimizer_states(_MemRefType.OPT, obj)
-            elif obj is None:
-                continue
             else:
                 raise TypeError(
                     f"Object of type {type(obj)} is not supported for tracking. "
@@ -875,65 +891,32 @@ class MemTracker(TorchDispatchMode):
         """
         self.memory_tracking.clear()
 
-    def _track_dtensor_dispatch(self) -> None:
-        def track_dtensor_dispatch(
-            op_call: torch._ops.OpOverload,
-            args: tuple[object, ...],
-            kwargs: dict[str, object],
-        ) -> object:
-            with (
-                self
-                if op_call in DTensor._op_dispatcher._custom_op_handlers
-                else nullcontext()
-            ):
-                return self._orig_dtensor_dispatch(op_call, args, kwargs)
-
-        DTensor._op_dispatcher.dispatch = track_dtensor_dispatch  # type: ignore[method-assign, assignment]
-
-    def _restore_dtensor_dispatch(self) -> None:
-        DTensor._op_dispatcher.dispatch = self._orig_dtensor_dispatch  # type: ignore[method-assign]
-
     def __enter__(self) -> "MemTracker":
-        if self._depth == 0:
-            self._register_global_optimizer_hook()
-            self._mod_tracker.register_user_hooks(
-                self._pre_fw_hook,
-                self._post_fw_hook,
-                self._pre_bw_hook,
-                self._post_bw_hook,
-            )
-            self._track_resize()
-            self._track_dtensor_dispatch()
-            self._peak_mem_snap = self.get_tracker_snapshot()
-            self._peak_mem = {
-                dev: dev_snap[_TOTAL_KEY]
-                for dev, dev_snap in self._peak_mem_snap.items()
-            }
-            self._mod_tracker.__enter__()
+        self._register_global_optimizer_hook()
+        self._mod_tracker.register_user_hooks(
+            self._pre_fw_hook,
+            self._post_fw_hook,
+            self._pre_bw_hook,
+            self._post_bw_hook,
+        )
+        self._track_resize()
+        self._peak_mem_snap = self.get_tracker_snapshot()
+        self._peak_mem = {
+            dev: dev_snap[_TOTAL_KEY] for dev, dev_snap in self._peak_mem_snap.items()
+        }
+        self._mod_tracker.__enter__()
         super().__enter__()
-        self._depth += 1
         return self
 
     def __exit__(self, *args: Any) -> None:
-        self._depth -= 1
-        if self._depth == 0:
-            self._deregister_param_and_optimizer_hooks()
-            self._mod_tracker.clear_user_hooks()
-            self._restore_resize()
-            self._restore_dtensor_dispatch()
-            self._mod_tracker.__exit__(*args)
+        self._deregister_param_and_optimizer_hooks()
+        self._mod_tracker.clear_user_hooks()
+        self._restore_resize()
         super().__exit__(*args)
+        self._mod_tracker.__exit__(*args)
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):  # type: ignore[no-untyped-def]
-        if (
-            func == torch.ops._c10d_functional.wait_tensor.default
-            and active_fake_mode()
-        ):
-            # N.B: This is a hacky way to override the Meta IMPL of wait_tensor. The original impl returns
-            # a new tensor which does not happen in eager mode, when a wait_tensor is called.
-            res = args[0]
-        else:
-            res = func(*args, **kwargs or {})
+        res = func(*args, **kwargs or {})
         # If we are tracking an optimizer state, we use the optimizer reference type.
         # If we are in backward region and not in AC region, we use the backward reference type.
         # Else we use the forward reference type.

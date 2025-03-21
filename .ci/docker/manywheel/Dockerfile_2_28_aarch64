@@ -38,12 +38,6 @@ RUN yum install -y \
   sudo \
   gcc-toolset-${GCCTOOLSET_VERSION}-toolchain
 
-# (optional) Install non-default Ninja version
-ARG NINJA_VERSION
-COPY ./common/install_ninja.sh install_ninja.sh
-RUN if [ -n "${NINJA_VERSION}" ]; then bash ./install_ninja.sh; fi
-RUN rm install_ninja.sh
-
 # Ensure the expected devtoolset is used
 ENV PATH=/opt/rh/gcc-toolset-${GCCTOOLSET_VERSION}/root/usr/bin:$PATH
 ENV LD_LIBRARY_PATH=/opt/rh/gcc-toolset-${GCCTOOLSET_VERSION}/root/usr/lib64:/opt/rh/gcc-toolset-${GCCTOOLSET_VERSION}/root/usr/lib:$LD_LIBRARY_PATH

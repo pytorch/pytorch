@@ -59,6 +59,9 @@ class ExportStrategiesTest(common_utils.TestCase):
         self.assertIsInstance(batch_dim_val, torch.SymInt)
 
     def test_jit_trace_supports_dynamic_shapes_as_dict(self):
+        # Since we wrap the model into one that takes flat inputs for JIT tracing,
+        # there is no way to expose the original forward function signature for
+        # torch.export, which is required for dynamic shapes when provided as a dict.
         class Model(torch.nn.Module):
             def forward(self, a, b):
                 c = torch.relu(a)

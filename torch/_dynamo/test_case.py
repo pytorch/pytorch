@@ -11,7 +11,6 @@ It includes:
 import contextlib
 import importlib
 import logging
-import os
 from typing import Union
 
 import torch
@@ -36,11 +35,7 @@ def run_tests(needs: Union[str, tuple[str, ...]] = ()) -> None:
     if TEST_WITH_TORCHDYNAMO or TEST_WITH_CROSSREF:
         return  # skip testing
 
-    if (
-        not torch.xpu.is_available()
-        and IS_WINDOWS
-        and os.environ.get("TORCHINDUCTOR_WINDOWS_TESTS", "0") == "0"
-    ):
+    if not torch.xpu.is_available() and IS_WINDOWS:
         return
 
     if isinstance(needs, str):

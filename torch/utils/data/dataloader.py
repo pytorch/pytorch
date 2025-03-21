@@ -672,8 +672,7 @@ class _BaseDataLoaderIter:
             # memory allocation for MPS is fixed.
             if (
                 self._pin_memory
-                and (acc := torch.accelerator.current_accelerator()) is not None
-                and acc.type == "mps"
+                and torch.accelerator.current_accelerator().type == "mps"
             ):
                 self._pin_memory = False
                 warn_msg = (

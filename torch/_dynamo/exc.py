@@ -28,7 +28,6 @@ Error Formatting:
 
 import logging
 import os
-import re
 import textwrap
 import typing
 from enum import auto, Enum
@@ -593,10 +592,6 @@ def get_exc_message(
     return filename, lineno
 
 
-def get_stack_above_dynamo() -> StackSummary:
-    return filter_stack(extract_stack())
-
-
 def get_real_stack(
     exc: Exception, frame: Optional[DynamoFrameType] = None
 ) -> Optional[StackSummary]:
@@ -622,7 +617,7 @@ def get_real_stack(
         # from where we are right now and rely on filter_stack to
         # get rid of all the dynamo frames.  For ease of testing
         # we apply this behavior to ALL Python versions
-        stack_above_dynamo = get_stack_above_dynamo()
+        stack_above_dynamo = filter_stack(extract_stack())
     else:
         stack_above_dynamo = StackSummary()
 
@@ -644,49 +639,6 @@ def filter_stack(stack: StackSummary) -> StackSummary:
         user_stack.append(frame)
 
     return user_stack
-
-
-def remove_resume_prefix(name: str) -> Optional[str]:
-    from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
-
-    match = re.match(f"{TORCH_DYNAMO_RESUME_IN_PREFIX}_(\\w+)_at_\\d+", name)
-    if match:
-        return match.group(1)
-    return None
-
-
-def collapse_resume_frames(stack: StackSummary) -> StackSummary:
-    """
-    When we graph break, we create a resume function and make a regular Python call
-    to it, which gets intercepted by Dynamo. This behavior is normally shown in the
-    traceback, which can be confusing to a user. So we can filter out resume frames
-    for better traceback clarity.
-
-    Example:
-    File "..." line 3, in f
-        <line 3>
-    File "..." line 5, in torch_dynamo_resume_in_f_at_80
-        <line 5>
-    File "..." line 10, in torch_dynamo_resume_in_f_at_120
-        <line 10>
-
-    becomes
-    File "..." line 10, in f
-        <line 10>
-    """
-
-    new_stack = StackSummary()
-    for frame in stack:
-        if frame.filename is None:
-            continue
-        name = remove_resume_prefix(frame.name)
-        if new_stack and name and new_stack[-1].name == name:
-            new_stack[-1] = frame
-            frame.name = name
-        else:
-            new_stack.append(frame)
-
-    return new_stack
 
 
 def format_error_msg_verbose(

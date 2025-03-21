@@ -191,12 +191,6 @@ class TestPyProcessGroup(TestCase):
         pg._set_group_desc("desc")
         self.assertEqual(pg.group_desc, "py:desc")
 
-    def test_abort_shutdown(self) -> None:
-        # verify this are noops
-        pg = DummyAttrProcessGroup(0, 1)
-        pg.abort()
-        pg.shutdown()
-
 
 if __name__ == "__main__":
     run_tests()

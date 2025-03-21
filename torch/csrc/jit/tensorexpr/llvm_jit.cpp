@@ -174,12 +174,8 @@ class TORCH_API PytorchLLVMJITImpl {
                 .setJITTargetMachineBuilder(
                     makeTargetMachineBuilder(triple, cpu, attrs))
 #if LLVM_VERSION_MAJOR >= 17
-                .setObjectLinkingLayerCreator([&](ExecutionSession& ES
-#if LLVM_VERSION_MAJOR < 21
-                                                  ,
-                                                  const Triple& TT
-#endif
-                                              ) {
+                .setObjectLinkingLayerCreator([&](ExecutionSession& ES,
+                                                  const Triple& TT) {
                   return std::make_unique<ObjectLinkingLayer>(
                       ES,
                       assertSuccess(jitlink::InProcessMemoryManager::Create()));

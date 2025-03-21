@@ -732,8 +732,6 @@ Graph Break Reason: Call to `torch._dynamo.graph_break()`
   Developer debug context: Called `torch._dynamo.graph_break()` with args `[]`, kwargs `{}`
 
 User code traceback:
-  File "test_error_messages.py", line N, in test_reconstruction_failure_gb
-    torch.compile(fn, backend="eager")()
   File "test_error_messages.py", line N, in fn
     torch._dynamo.graph_break()
 """,
@@ -828,8 +826,6 @@ Graph Break Reason: Data-dependent branching
   Developer debug context: attempted to jump with TensorVariable()
 
 User code traceback:
-  File "test_error_messages.py", line N, in test_data_dependent_branching_gb
-    torch.compile(fn, backend="eager")(torch.randn(3))
   File "test_error_messages.py", line N, in fn
     if x.sum() > 0:
 """,
@@ -931,149 +927,6 @@ from user code:
   File "test_error_messages.py", line N, in gn
     torch._dynamo.graph_break()
 
-""",
-        )
-
-    @make_logging_test(graph_breaks=True)
-    def test_nested_compile_user_frames(self, records):
-        def fn(x):
-            gn(x + 1)
-
-        def gn(x):
-            hn(x + 1)
-
-        def hn(x):
-            torch._dynamo.graph_break()  # 0
-            torch._dynamo.graph_break()  # 1
-
-        torch.compile(fn, backend="eager")(torch.randn(3))
-
-        # check the log for the 2nd torch._dynamo.graph_break()
-        self.assertExpectedInline(
-            munge_exc(records[-1].getMessage(), skip=0),
-            """\
-Graph break in user code at test_error_messages.py:N
-Graph Break Reason: Call to `torch._dynamo.graph_break()`
-  Explanation: User-inserted graph break. Message: None
-  Hint: Remove the `torch._dynamo.graph_break()` call.
-
-  Developer debug context: Called `torch._dynamo.graph_break()` with args `[]`, kwargs `{}`
-
-User code traceback:
-  File "test_error_messages.py", line N, in test_nested_compile_user_frames
-    torch.compile(fn, backend="eager")(torch.randn(3))
-  File "test_error_messages.py", line N, in fn
-    gn(x + 1)
-  File "test_error_messages.py", line N, in gn
-    hn(x + 1)
-  File "test_error_messages.py", line N, in hn
-    torch._dynamo.graph_break()  # 1
-""",
-        )
-
-    @torch._dynamo.config.patch(verbose=True)
-    @make_logging_test(graph_breaks=True)
-    def test_graph_break_traceback_above_dynamo_shows_user_code(self, records):
-        @torch.compile(backend="eager")
-        # NOTE: comments in this test are used to differentiate lines!
-        def f1(x):
-            torch._dynamo.graph_break()  # 0
-            torch._dynamo.graph_break()  # 1
-            torch._dynamo.graph_break()
-
-        @torch.compile(backend="eager")
-        def f2(x):
-            if x.sum() > 0:  # 0
-                x = x + 1
-            if x.sum() > 0:  # 1
-                x = x + 1
-            if x.sum() > 0:
-                x = x + 1
-
-        class Foo:
-            def __setattr__(self, name, value):
-                torch._dynamo.graph_break()
-
-        @torch.compile(backend="eager")
-        def f3(x):
-            Foo().attr = x  # 0
-            Foo().attr = x  # 1
-            Foo().attr = x
-
-        f1(torch.randn(3))
-        self.assertIn("torch._dynamo.graph_break()  # 0", records[-1].getMessage())
-        self.assertIn("torch._dynamo.graph_break()  # 1", records[-1].getMessage())
-        f2(torch.ones(3))
-        self.assertIn("if x.sum() > 0:  # 0", records[-1].getMessage())
-        self.assertIn("if x.sum() > 0:  # 1", records[-1].getMessage())
-        f3(torch.randn(3))
-        self.assertIn("Foo().attr = x  # 0", records[-1].getMessage())
-        self.assertIn("Foo().attr = x  # 1", records[-1].getMessage())
-
-        self.assertExpectedInline(
-            munge_exc(records[-1].getMessage(), skip=0),
-            """\
-Graph break in user code at test_error_messages.py:N
-Graph Break Reason: STORE_ATTR-caused graph break
-User code traceback:
-  File "test_error_messages.py", line N, in test_graph_break_traceback_above_dynamo_shows_user_code
-    f3(torch.randn(3))
-  File "test_error_messages.py", line N, in f3
-    Foo().attr = x  # 0
-  File "test_error_messages.py", line N, in torch_dynamo_resume_in_f3_at_999
-    Foo().attr = x  # 1
-
-========== most recent `torch.compile` tracing attempt started here ==========
-
-  File "test_error_messages.py", line N, in torch_dynamo_resume_in_f3_at_1000
-    Foo().attr = x
-
-NOTE: the most recent `torch.compile` tracing attempt might not be where you applied `torch.compile`! This is due to how graph breaks are implemented - the optimized code object returned by Dynamo will call another Dynamo-generated resume function and tracing is re-enabled by calling the resume function as a normal Python function, which Dynamo intercepts as a top-level frame.
-""",
-        )
-
-    @make_logging_test(graph_breaks=True)
-    def test_graph_break_traceback_collapsed_resume_frames(self, records):
-        @torch.compile(backend="eager")
-        def f1(x):
-            torch._dynamo.graph_break()
-            torch._dynamo.graph_break()
-            torch._dynamo.graph_break()
-            f2(x)
-
-        def f2(x):
-            torch._dynamo.graph_break()
-            torch._dynamo.graph_break()
-            torch._dynamo.graph_break()
-            f3(x)
-
-        def f3(x):
-            torch._dynamo.graph_break()
-            torch._dynamo.graph_break()
-            torch._dynamo.graph_break()  # correct
-            return x + 1
-
-        f1(torch.randn(3))
-
-        self.assertExpectedInline(
-            munge_exc(records[-1].getMessage(), skip=0),
-            """\
-Graph break in user code at test_error_messages.py:N
-Graph Break Reason: Call to `torch._dynamo.graph_break()`
-  Explanation: User-inserted graph break. Message: None
-  Hint: Remove the `torch._dynamo.graph_break()` call.
-
-  Developer debug context: Called `torch._dynamo.graph_break()` with args `[]`, kwargs `{}`
-
-User code traceback:
-  File "test_error_messages.py", line N, in test_graph_break_traceback_collapsed_resume_frames
-    f1(torch.randn(3))
-  File "test_error_messages.py", line N, in f1
-    f2(x)
-  File "test_error_messages.py", line N, in f2
-    f3(x)
-  File "test_error_messages.py", line N, in f3
-    torch._dynamo.graph_break()  # correct
 """,
         )
 

@@ -768,11 +768,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   c10::intrusive_ptr<intra_node_comm::IntraNodeComm> initIntraNodeComm();
 
   // Destroy (shutdown) this backend -- normal exit.
-  void shutdown() override;
+  void shutdown();
 
   // Provides an API to abort the ProcessGroup (similar to ncclCommAbort)
   // instead of relying on ProcessGroupNCCL destructor.
-  void abort() override;
+  void abort();
 
   void eagerConnectSingleDevice(at::Device device) override;
 

@@ -58,16 +58,11 @@ class TestKernelBenchmark(TestCase):
     def verify_compiled_kernels(self, GB_count=1):
         compiled_module = self.get_compiled_module()
         # now run the compiled module in subprocess and check its output
-        try:
-            bench_out = subprocess.check_output(
-                f"{sys.executable} {compiled_module.__file__} -kc".split(),
-                stderr=subprocess.STDOUT,
-                env={**os.environ, "PYTHONPATH": self.python_path},
-            ).decode()
-        except subprocess.CalledProcessError as e:
-            print("Failed when running output code", e)
-            print(e.output.decode())
-            raise e
+        bench_out = subprocess.check_output(
+            f"{sys.executable} {compiled_module.__file__} -kc".split(),
+            stderr=subprocess.STDOUT,
+            env={**os.environ, "PYTHONPATH": self.python_path},
+        ).decode()
 
         # make sure we have the bandwidth information in the output
         FileCheck().check_count(
@@ -116,16 +111,11 @@ class TestKernelBenchmark(TestCase):
 
     def check_bandwidth(self, compiled_module, num_gb):
         # now run the compiled module in subprocess and check its output
-        try:
-            bench_out = subprocess.check_output(
-                f"{sys.executable} {compiled_module.__file__} -k".split(),
-                stderr=subprocess.STDOUT,
-                env={**os.environ, "PYTHONPATH": self.python_path},
-            ).decode()
-        except subprocess.CalledProcessError as e:
-            print("Failed when running output code", e)
-            print(e.output.decode())
-            raise e
+        bench_out = subprocess.check_output(
+            f"{sys.executable} {compiled_module.__file__} -k".split(),
+            stderr=subprocess.STDOUT,
+            env={**os.environ, "PYTHONPATH": self.python_path},
+        ).decode()
 
         # make sure we have the bandwidth information in the output
         FileCheck().check_count(
@@ -164,7 +154,7 @@ class TestKernelBenchmark(TestCase):
         self.verify_compiled_kernels()
 
     @config.patch(
-        max_autotune=True, max_autotune_gemm_backends="TRITON", shape_padding=False
+        max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
     )
     @fresh_inductor_cache()
     def test_mm_triton_kernel_benchmark(self):
@@ -183,7 +173,28 @@ class TestKernelBenchmark(TestCase):
 
         f(a, b)
 
-        self.verify_compiled_kernels(GB_count=1)
+        GB_count = 3
+        # pad_mm is not enabled on XPU, so there is only one kernel.
+        if GPU_TYPE == "xpu":
+            GB_count = 1
+        self.verify_compiled_kernels(GB_count=GB_count)
+
+        # make sure we correctly generate the grid info
+        compiled_module = self.get_compiled_module()
+        with open(compiled_module.__file__) as f:
+            source_code = f.read()
+        lines = source_code.split("\n")
+        meta = [l for l in lines if "meta0 = {" in l]
+        scope = {}
+        from torch._inductor.kernel.mm_common import mm_grid
+
+        exec(meta[0], scope)
+        grid = mm_grid(M, N, scope["meta0"])
+        FileCheck().check_count(
+            f"grid={grid}",
+            2,
+            exactly=1,
+        ).run(source_code)
 
     def test_matmul_bandwidth_computation(self):
         """

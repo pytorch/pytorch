@@ -13,11 +13,11 @@ import torch._inductor as inductor
 import torch.utils._pytree as pytree
 from torch import fx
 from torch._decomp import register_decomposition
-from torch._dynamo.utils import counters
+from torch._dynamo.utils import counters, optimus_scuba_log
 from torch._inductor import comms
 from torch._inductor.virtualized import ops
-from torch._logging import trace_structured
 from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
+from torch._utils_internal import upload_graph
 from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 from torch.utils._ordered_set import OrderedSet
 
@@ -115,16 +115,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     if config.pattern_matcher:
         lazy_init()
-        trace_structured(
-            "artifact",
-            metadata_fn=lambda: {
-                "name": "before_recompile_post_grad",
-                "encoding": "string",
-            },
-            payload_fn=lambda: gm.print_readable(
-                print_output=False, include_stride=True, include_device=True
-            ),
-        )
+        optimus_scuba_log["before_recompile_post_grad"] = upload_graph(gm.graph)
         GraphTransformObserver(gm, "post_grad_custom_pre_pass").apply_graph_pass(
             functools.partial(group_batch_fusion_passes, pre_grad=False)
         )
@@ -148,15 +139,8 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
                 pattern_matcher_pass.apply
             )
             if not is_same_dict(counters["inductor"], inductor_before_change):
-                trace_structured(
-                    "artifact",
-                    metadata_fn=lambda: {
-                        "name": f"{pattern_matcher_pass.pass_name}_post_grad",
-                        "encoding": "string",
-                    },
-                    payload_fn=lambda: gm.print_readable(
-                        print_output=False, include_stride=True, include_device=True
-                    ),
+                optimus_scuba_log[f"{pattern_matcher_pass.pass_name}_post_grad"] = (
+                    upload_graph(gm.graph)
                 )
         if config.b2b_gemm_pass:
             B2B_GEMM_PASS.apply(gm.graph)  # type: ignore[arg-type]
@@ -202,16 +186,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     )
 
     gm.recompile()
-    trace_structured(
-        "artifact",
-        metadata_fn=lambda: {
-            "name": "after_recompile_post_grad",
-            "encoding": "string",
-        },
-        payload_fn=lambda: gm.print_readable(
-            print_output=False, include_stride=True, include_device=True
-        ),
-    )
+    optimus_scuba_log["after_recompile_post_grad"] = upload_graph(gm.graph)
     gm.graph.lint()
 
 

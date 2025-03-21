@@ -91,13 +91,7 @@ function(_OPENMP_FLAG_CANDIDATES LANG)
     unset(OpenMP_FLAG_CANDIDATES)
 
     set(OMP_FLAG_GNU "-fopenmp")
-    if(CMAKE_${LANG}_COMPILER_ID STREQUAL "Clang" AND CMAKE_${LANG}_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
-      # clang-cl specific flags
-      set(OMP_FLAG_Clang "-Xclang -fopenmp=libomp" "-Xclang -fopenmp=libiomp5" "-Xclang -fopenmp")
-    else()
-      # regular clang flags
-      set(OMP_FLAG_Clang "-fopenmp=libomp" "-fopenmp=libiomp5" "-fopenmp")
-    endif()
+    set(OMP_FLAG_Clang "-fopenmp=libomp" "-fopenmp=libiomp5" "-fopenmp")
 
     if(WIN32)
       # Prefer Intel OpenMP header which can be provided by CMAKE_INCLUDE_PATH.

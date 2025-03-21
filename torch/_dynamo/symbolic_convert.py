@@ -84,9 +84,7 @@ from .codegen import PyCodegen
 from .exc import (
     ArgsMismatchError,
     BackendCompilerFailed,
-    collapse_resume_frames,
     format_graph_break_message,
-    get_stack_above_dynamo,
     unimplemented_v2,
     Unsupported,
 )
@@ -109,7 +107,6 @@ from .utils import (
     counters,
     get_fake_value,
     get_instruction_source_311,
-    get_metrics_context,
     graph_break_dup_warning_checker,
     istype,
     LazyString,
@@ -492,6 +489,7 @@ def log_graph_break(code_options, reason="", exc_info=False, user_stack=None):
     if user_stack is None:
         user_stack = torch._guards.TracingContext.extract_stack()
 
+    # TODO: Also report the traceback from the parent frame
     try:
         frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
     except IndexError:
@@ -501,35 +499,16 @@ def log_graph_break(code_options, reason="", exc_info=False, user_stack=None):
             code_options["co_firstlineno"],
         )
 
-    stack_above_dynamo_formatted = ""
-    if config.verbose:
-        stack_above_dynamo = get_stack_above_dynamo()
-        stack_above_dynamo_formatted = "".join(
-            traceback.format_list(stack_above_dynamo)
-        )
-    else:
-        user_stack = get_stack_above_dynamo() + user_stack
-        user_stack = collapse_resume_frames(user_stack)
     user_stack_formatted = "".join(traceback.format_list(user_stack))
     user_stack_trace = (
-        f"Graph break in user code at {frame_loc[0]}:{frame_loc[1]}\n"
-        f"Graph Break Reason: {reason}\n"
-        "User code traceback:\n"
-    )
-
-    if config.verbose:
-        user_stack_trace += (
-            f"{stack_above_dynamo_formatted}\n"
-            "========== most recent `torch.compile` tracing attempt started here ==========\n\n"
-            f"{user_stack_formatted}\n"
-            "NOTE: the most recent `torch.compile` tracing attempt might not be where you applied `torch.compile`! "
-            "This is due to how graph breaks are implemented - the optimized code object returned by Dynamo will call another "
-            "Dynamo-generated resume function and tracing is re-enabled by calling the resume function as a normal Python "
-            "function, which Dynamo intercepts as a top-level frame.\n"
+        "Graph break in user code at %s:%s\nGraph Break Reason: %s\nUser code traceback:\n%s"  # noqa: UP031
+        % (
+            frame_loc[0],
+            frame_loc[1],
+            reason,
+            user_stack_formatted,
         )
-    else:
-        user_stack_trace += str(user_stack_formatted)
-
+    )
     torch._logging.trace_structured(
         "artifact",
         metadata_fn=lambda: {
@@ -623,9 +602,9 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             # 3.13 requires stack[-1] to be bool type
             self.output.add_output_instructions([create_instruction("TO_BOOL")])
 
-        jump_inst = create_instruction(inst.opname, target=if_jump[0])
-        jump_inst.copy_positions(inst)
-        self.output.add_output_instructions([jump_inst] + if_next + if_jump)
+        self.output.add_output_instructions(
+            [create_instruction(inst.opname, target=if_jump[0])] + if_next + if_jump
+        )
 
     def inner(self: "InstructionTranslatorBase", inst: Instruction):
         value: VariableTracker = self.pop()
@@ -893,9 +872,9 @@ def break_graph_if_unsupported(*, push):
                     self.output.add_output_instructions(
                         [create_instruction("KW_NAMES", argval=kw_names)]
                     )
-                call_insts = create_call_function(inst.arg, False)
-                call_insts[-1].copy_positions(inst)
-                self.output.add_output_instructions(call_insts)
+                self.output.add_output_instructions(
+                    create_call_function(inst.arg, False)
+                )
             else:
                 # copy instruction, but without exception table data
                 assert inst.target is None
@@ -976,7 +955,6 @@ class InstructionTranslatorBase(
     exn_vt_stack: list[VariableTracker]
     exec_recorder: Optional[ExecutionRecorder]
     strict_checks_fn: Optional[Callable[[VariableTracker], bool]]
-    start_point: Optional[int]
 
     def mark_inconsistent_side_effects(self):
         """
@@ -1235,7 +1213,6 @@ class InstructionTranslatorBase(
         with self.run_ctx_mgr():
             try:
                 self.output.push_tx(self)
-                self.start_point = self.instruction_pointer
                 while self.step():
                     pass
             except TensorifyScalarRestartAnalysis:
@@ -1559,13 +1536,7 @@ class InstructionTranslatorBase(
         self.load_builtin_from_argval(inst.argval)
 
     def jump(self, inst):
-        assert self.instruction_pointer is not None
-        assert self.start_point is not None
-        get_metrics_context().increment(
-            "ir_count", self.instruction_pointer - self.start_point
-        )
         self.instruction_pointer = self.indexof[inst.target]
-        self.start_point = self.instruction_pointer
 
     JUMP_FORWARD = jump
     JUMP_ABSOLUTE = jump
@@ -3072,7 +3043,6 @@ class InstructionTranslatorBase(
         self.symbolic_torch_function_state = symbolic_torch_function_state
         self.stack = []
         self.instruction_pointer = 0
-        self.start_point = None
         self.current_instruction = create_instruction("NOP")
         self.block_stack = []
         # states before SETUP_WITH for checkpointing and fallback
@@ -3506,11 +3476,6 @@ class InstructionTranslator(InstructionTranslatorBase):
 
     def _return(self, inst):
         self.replace_tos_if_return_is_generator()
-        assert self.instruction_pointer is not None
-        assert self.start_point is not None
-        get_metrics_context().increment(
-            "ir_count", self.instruction_pointer - self.start_point
-        )
 
         if (
             not config.allow_empty_graphs

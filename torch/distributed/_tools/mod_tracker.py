@@ -60,7 +60,6 @@ class ModTracker:
         self._known_modules: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
         self._seen_modules: weakref.WeakSet = weakref.WeakSet()
         self._has_callback = False
-        self._post_bw_callbacks_to_enqueue: list[Callable] = []
         self._user_pre_fw_hook = None
         self._user_post_fw_hook = None
         self._user_pre_bw_hook = None
@@ -70,10 +69,6 @@ class ModTracker:
         # This assumes no concurrent calls to backward
         if self._has_callback:
             return
-
-        for post_bw_callback in reversed(self._post_bw_callbacks_to_enqueue):
-            torch.autograd.Variable._execution_engine.queue_callback(post_bw_callback)
-        self._post_bw_callbacks_to_enqueue.clear()
 
         def callback():
             self.parents = {"Global"}
@@ -218,13 +213,8 @@ class ModTracker:
             self._user_pre_fw_hook(mod, input)
         args, _ = tree_flatten(input)
         tensors = [a for a in args if isinstance(a, torch.Tensor) and a.requires_grad]
-        if not self.is_bw:
-            if tensors:
-                register_multi_grad_hook(tensors, self._get_pop_fn(w_mod, name, True))
-            else:
-                self._post_bw_callbacks_to_enqueue.append(
-                    self._get_pop_fn(w_mod, name, True)
-                )
+        if not self.is_bw and tensors:
+            register_multi_grad_hook(tensors, self._get_pop_fn(w_mod, name, True))
 
     def _fw_post_hook(self, mod, input, output):
         name = self._get_mod_name(mod)
@@ -235,9 +225,7 @@ class ModTracker:
         args, _ = tree_flatten(output)
         tensors = [a for a in args if isinstance(a, torch.Tensor) and a.requires_grad]
         if not self.is_bw and tensors:
-            register_multi_grad_hook(
-                tensors, self._get_append_fn(w_mod, name, True), mode="any"
-            )
+            register_multi_grad_hook(tensors, self._get_append_fn(w_mod, name, True))
 
     def __enter__(self):
         self._fw_pre_handle = register_module_forward_pre_hook(self._fw_pre_hook)

@@ -897,18 +897,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     getDefaultBackend()->waitForPendingWorks();
   }
 
-  virtual void shutdown() {
-    for (auto& backend : backendTypeToBackend_) {
-      backend.second->shutdown();
-    }
-  }
-
-  virtual void abort() {
-    for (auto& backend : backendTypeToBackend_) {
-      backend.second->abort();
-    }
-  }
-
   bool hasHooks() const {
     // `getDefaultBackend` will throw today if the backend is set to `undefined`
     // (in case of `init_process_group(nothing)`)

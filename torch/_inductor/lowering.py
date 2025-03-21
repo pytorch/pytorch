@@ -74,7 +74,6 @@ from .utils import (
     is_dynamic,
     is_gpu,
     is_pointwise_use,
-    is_view,
     needs_fallback_due_to_atomic_add_limitations,
     pad_listlike,
     register_op_dtype_propagation_rules,
@@ -1921,7 +1920,7 @@ def _warn_complex_not_supported():
 
 # There are some types (CPU) which we accept as input but not as
 # output.
-def unsupported_input_tensor(t: torch.Tensor, parent=None, node=None):
+def unsupported_input_tensor(t: torch.Tensor, parent=None):
     "Do not support reading or writing to this tensor"
     if t.is_complex():
         # Complex views are supported with IR ComplexView
@@ -1932,26 +1931,10 @@ def unsupported_input_tensor(t: torch.Tensor, parent=None, node=None):
             return False
         _warn_complex_not_supported()
         return True
-
-    if t.dtype == torch.float8_e8m0fnu:
-        if not node:
-            return True
-
-        # allow bitcast, views, memory movement, but not arithmetic
-        # TODO: delete once triton adds native support
-        return not (
-            node.target
-            in (
-                aten.view.dtype,
-                aten.cat.default,
-            )
-            or is_view(node.target)
-        )
-
     return False
 
 
-def unsupported_output_tensor(t: torch.Tensor, parent=None, node=None):
+def unsupported_output_tensor(t: torch.Tensor, parent=None):
     "Do not support writing tensor but can read from it"
     if unsupported_input_tensor(t, parent):
         return True
@@ -1979,10 +1962,10 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
                 continue
 
             if is_output:
-                if unsupported_output_tensor(meta, parent, node):
+                if unsupported_output_tensor(meta, parent):
                     return True
             else:
-                if unsupported_input_tensor(meta, parent, node):
+                if unsupported_input_tensor(meta, parent):
                     return True
 
         return False

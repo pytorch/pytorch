@@ -12,7 +12,7 @@ from .. import config, ir
 from ..ir import FixedLayout, FlexibleLayout
 from ..lowering import empty, empty_strided, lowerings
 from ..runtime.runtime_utils import is_power_of_2, next_power_of_2
-from ..select_algorithm import autotune_select_algorithm, SymbolicGridFn, TritonTemplate
+from ..select_algorithm import autotune_select_algorithm, TritonTemplate
 from .flex_attention import (
     compute_forward_block_mn,
     compute_forward_inner,
@@ -30,7 +30,6 @@ aten = torch.ops.aten
 prims = torch.ops.prims
 
 
-@SymbolicGridFn
 def flex_decoding_grid(batch_size, kv_heads, gqa_group_size, n_keys, d_model, meta):
     """How is this kernel parallelized?
     We create a grid of (batch_size * kv_heads, SPLIT_KV, 1)
@@ -115,7 +114,9 @@ flex_decoding_template = TritonTemplate(
     SPARSE_HQ = {{size("KV_NUM_BLKS", 1)}}
 
     sparse_idx_z = off_z % SPARSE_Z
-    sparse_idx_h = off_hkv % SPARSE_HQ
+    # TODO: support masks not broadcasted along the head dimension.
+    tl.device_assert(SPARSE_HQ == 1)
+    sparse_idx_h = 0
 
     SPARSE_KV_MULTIPLE: tl.constexpr = (SPARSE_KV_BLOCK_SIZE // BLOCK_N)
     SPARSE_KV_BLOCK_CNT = tl.cdiv(KV_LEN, SPARSE_KV_BLOCK_SIZE)

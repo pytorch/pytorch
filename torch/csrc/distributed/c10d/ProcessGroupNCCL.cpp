@@ -2157,7 +2157,7 @@ void ProcessGroupNCCL::checkAndSetRemoteError() {
   }
 }
 
-// NCCL recommends to evenly distribute ncclUniqueIds across the ranks
+// NCCL recommends to evenly distribute ncclUniqueIds accross the ranks
 // https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/usage/communicators.html#init-rank-config
 // Let’s consider an example where:
 // nRanks = 10 (total ranks),
