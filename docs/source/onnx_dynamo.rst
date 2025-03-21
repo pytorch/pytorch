@@ -2,6 +2,7 @@ TorchDynamo-based ONNX Exporter
 ===============================
 
 .. automodule:: torch.onnx
+  :noindex:
 
 .. contents:: :local:
     :depth: 1

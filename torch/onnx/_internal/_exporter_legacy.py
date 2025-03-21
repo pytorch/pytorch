@@ -268,16 +268,18 @@ class ResolvedExportOptions(ExportOptions):
             onnxfunction_dispatcher,
         )
 
-        self.dynamic_shapes = True
-        self.diagnostic_options = DiagnosticOptions()
-        self.fx_tracer = dynamo_graph_extractor.DynamoExport()
+        self.dynamic_shapes: bool = True
+        self.diagnostic_options: DiagnosticOptions = DiagnosticOptions()
+        self.fx_tracer: dynamo_graph_extractor.DynamoExport = (
+            dynamo_graph_extractor.DynamoExport()
+        )
         self.fake_context = None
         self.diagnostic_context = diagnostics.DiagnosticContext(
             "torch.onnx.dynamo_export",
             torch.__version__,
             self.diagnostic_options,
         )
-        self.onnx_registry = OnnxRegistry()
+        self.onnx_registry: OnnxRegistry = OnnxRegistry()
         self.decomposition_table = (
             decomposition_table.create_onnx_friendly_decomposition_table(  # type: ignore[assignment]
                 self.onnx_registry
@@ -462,7 +464,7 @@ def common_pre_export_passes(
     module = passes.Decompose(
         diagnostic_context,
         fx_module,
-        options.decomposition_table,
+        options.decomposition_table,  # type: ignore[arg-type]
         enable_dynamic_axes=options.dynamic_shapes,
         allow_fake_constant=options.fake_context is not None,
     ).run(*fx_module_args)
