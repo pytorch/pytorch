@@ -29,8 +29,8 @@ SymNode SymInt::toSymNode() const {
 SymInt::SymInt(SymNode sin_sp) {
   TORCH_CHECK_ALWAYS_SHOW_CPP_STACKTRACE(
       sin_sp->is_int(), "SymInt::SymInt sin_sp->is_int()");
-  auto ptr =
-      static_cast<uint64_t>(reinterpret_cast<uintptr_t>(sin_sp.release()));
+  auto ptr = static_cast<uint64_t>(
+      reinterpret_cast<uintptr_t>(static_cast<void*>(sin_sp.release())));
   auto rep = (ptr & ~MASK) | IS_SYM;
   data_ = static_cast<int64_t>(rep);
 }

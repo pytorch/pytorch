@@ -143,9 +143,6 @@ AOTI_TORCH_EXPORT int32_t aoti_torch_memory_format_channels_last();
 AOTI_TORCH_EXPORT int32_t aoti_torch_memory_format_channels_last_3d();
 AOTI_TORCH_EXPORT int32_t aoti_torch_memory_format_preserve_format();
 
-// Get TORCH_ABI_VERSION of the built libtorch.so
-AOTI_TORCH_EXPORT uint64_t aoti_torch_abi_version();
-
 // Functions for converting a single-element tensor to a scalar value
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_item_float16(AtenTensorHandle tensor, c10::Half* ret_value);
@@ -741,4 +738,12 @@ DEFINE_DTYPE_SPECIALIZATION(int64_t, int64)
 DEFINE_DTYPE_SPECIALIZATION(bool, bool)
 
 #endif
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__weight_int4pack_mm_cpu_tensor(
+    AtenTensorHandle X,
+    AtenTensorHandle w,
+    AtenTensorHandle qGroupSize,
+    AtenTensorHandle qScaleAndZeros,
+    AtenTensorHandle* ret0);
+
 #endif // AOTI_TORCH_SHIM

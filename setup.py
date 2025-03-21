@@ -219,7 +219,7 @@
 #      Builds libtorch.so and its dependencies as a wheel
 #
 #   BUILD_PYTHON_ONLY
-#      Builds pytorch as a wheel using libtorch.so from a separate wheel
+#      Builds pytorch as a wheel using libtorch.so from a seperate wheel
 
 import os
 import sys

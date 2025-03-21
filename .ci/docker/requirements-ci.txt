@@ -294,7 +294,7 @@ ghstack==0.8.0
 #Pinned versions: 0.8.0
 #test that import:
 
-jinja2==3.1.6
+jinja2==3.1.5
 #Description: jinja2 template engine
 #Pinned versions: 3.1.4
 #test that import:

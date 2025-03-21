@@ -111,14 +111,6 @@ class PyProcessGroup : public ProcessGroup {
     );
   }
 
-  void abort() override {
-    PYBIND11_OVERRIDE(
-        void, /* Return type */
-        ProcessGroup, /* Parent class */
-        abort, /* Name of function in C++ */
-    );
-  }
-
   const std::string& getGroupName() const override {
     PYBIND11_OVERRIDE(
         const std::string&, /* Return type */

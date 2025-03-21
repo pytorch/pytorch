@@ -192,8 +192,6 @@ class TestModTracker(TestCase):
             ("post_fw", "Foo.linears.1", True, True),
             ("post_bw", "Foo.linears.1", True, True),
             ("pre_bw", "Foo.linears.0", True, True),
-            ("post_bw", "Foo.linears.0", True, True),
-            ("post_bw", "Foo", True, True),
         ]
         self.assertEqual(test_op, expected_op)
 

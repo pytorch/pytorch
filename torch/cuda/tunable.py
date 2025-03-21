@@ -530,7 +530,6 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
             if transA
             else torch.full((k, n), fillB, dtype=dtypeB, device=deviceid).t()
         )
-
         assert untuned_gemm_temp[8] == "rw"
         if untuned_gemm_temp[9] == "1":
             rowwise = True
@@ -543,23 +542,7 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
             scaleA = torch.tensor(0.8, device=deviceid)
             scaleB = torch.tensor(0.9, device=deviceid)
 
-        assert untuned_gemm_temp[10] == "bias"
-        if untuned_gemm_temp[11] == "None":  # no bias vector
-            torch._scaled_mm(
-                matA, matB, scale_a=scaleA, scale_b=scaleB, out_dtype=dtypeC
-            )
-        else:  # bias vector present
-            fillbias = 0.10
-            bias_dtype = dtype_dict.get(untuned_gemm_temp[11])
-            bias = (
-                torch.full((n,), fillbias, dtype=bias_dtype, device=deviceid)
-                if transA
-                else torch.full((m,), fillbias, dtype=bias_dtype, device=deviceid)
-            )
-            torch._scaled_mm(
-                matA, matB, scale_a=scaleA, scale_b=scaleB, out_dtype=dtypeC, bias=bias
-            )
-
+        torch._scaled_mm(matA, matB, scale_a=scaleA, scale_b=scaleB, out_dtype=dtypeC)
     elif op_sig == "GemmAndBiasTunableOp":
         # y = x*A^T + b
         assert transA != transB

@@ -6,8 +6,7 @@ namespace c10d {
 
 class FakeWork : public Work {
  public:
-  int seq_id = -1;
-  bool wait(std::chrono::milliseconds timeout = kNoTimeout) override {
+  bool wait(std::chrono::milliseconds timeout) override {
     return true;
   }
 
@@ -175,18 +174,6 @@ class FakeProcessGroup : public Backend {
   c10::intrusive_ptr<Work> recvAnysource(
       std::vector<at::Tensor>& /* tensors */,
       int /* tag */) override {
-    return c10::make_intrusive<FakeWork>();
-  }
-
-  void startCoalescing() override {
-    // No-op
-  }
-
-  c10::intrusive_ptr<Work> endCoalescing(OpType /* optype */) {
-    return c10::make_intrusive<FakeWork>();
-  }
-
-  c10::intrusive_ptr<Work> endCoalescing() override {
     return c10::make_intrusive<FakeWork>();
   }
 

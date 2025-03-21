@@ -8,8 +8,8 @@ from typing import Optional
 
 import torch
 import torch.nn as nn
-from torch._dynamo.utils import counters, detect_fake_mode
-from torch._logging import trace_structured
+from torch._dynamo.utils import counters, detect_fake_mode, optimus_scuba_log
+from torch._utils_internal import upload_graph
 from torch.fx.experimental.optimization import (
     matches_module_pattern,
     replace_node_module,
@@ -258,16 +258,7 @@ def pre_grad_passes(
             if example_inputs is not None:
                 gm = fuse_fx(gm, example_inputs)
             numpy_compat_normalization(gm.graph)
-            trace_structured(
-                "artifact",
-                metadata_fn=lambda: {
-                    "name": "before_recompile_pre_grad",
-                    "encoding": "string",
-                },
-                payload_fn=lambda: gm.print_readable(
-                    print_output=False, include_stride=True, include_device=True
-                ),
-            )
+            optimus_scuba_log["before_recompile_pre_grad"] = upload_graph(gm.graph)
             # We should always do the normalization_pass first
             if "normalization_pass" in config.pre_grad_fusion_options:
                 pattern_matcher_pass = PRE_GRAD_PATTERNS["normalization_pass"]
@@ -286,15 +277,8 @@ def pre_grad_passes(
                 for _ in range(counter):
                     pattern_matcher_pass.apply(gm.graph)  # type: ignore[arg-type]
                 if not is_same_dict(counters["inductor"], inductor_before_change):
-                    trace_structured(
-                        "artifact",
-                        metadata_fn=lambda: {
-                            "name": f"{pattern_matcher_pass.pass_name}_pre_grad",
-                            "encoding": "string",
-                        },
-                        payload_fn=lambda: gm.print_readable(
-                            print_output=False, include_stride=True, include_device=True
-                        ),
+                    optimus_scuba_log[f"{pattern_matcher_pass.pass_name}_pre_grad"] = (
+                        upload_graph(gm.graph)
                     )
             # TODO: move efficient_conv_bn_eval_pass to the fusions dict too.
             efficient_conv_bn_eval_pass.apply(gm.graph)  # type: ignore[arg-type]
@@ -310,16 +294,7 @@ def pre_grad_passes(
 
     gm.graph.lint()
     gm.recompile()
-    trace_structured(
-        "artifact",
-        metadata_fn=lambda: {
-            "name": "after_recompile_pre_grad",
-            "encoding": "string",
-        },
-        payload_fn=lambda: gm.print_readable(
-            print_output=False, include_stride=True, include_device=True
-        ),
-    )
+    optimus_scuba_log["after_recompile_pre_grad"] = upload_graph(gm.graph)
 
     if (
         config.pattern_matcher

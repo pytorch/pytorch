@@ -19,12 +19,11 @@ from typing import Any, Callable, Literal, NamedTuple, Optional, TYPE_CHECKING
 
 import torch
 import torch.utils._pytree as pytree
-from torch._C import _fx_map_arg as map_arg, _NodeIter
+from torch._C import _NodeIter
 
 from . import _pytree as fx_pytree
 from ._compatibility import compatibility
-from .immutable_collections import immutable_dict
-from .node import _get_qualified_name, _type_repr, Argument, Node, Target
+from .node import _get_qualified_name, _type_repr, Argument, map_arg, Node, Target
 
 
 __all__ = ["PythonCode", "CodeGen", "Graph"]
@@ -68,16 +67,11 @@ class _CustomBuiltin(NamedTuple):
     obj: Any
 
 
-# Combined dict of disallowed variable names so we can check with one lookup
-_illegal_names = {k: object() for k in keyword.kwlist}
-_illegal_names.update(builtins.__dict__)  # can't shadow a builtin name
-
 _custom_builtins: dict[str, _CustomBuiltin] = {}
 
 
 def _register_custom_builtin(name: str, import_str: str, obj: Any):
     _custom_builtins[name] = _CustomBuiltin(import_str, obj)
-    _illegal_names[name] = obj
 
 
 _register_custom_builtin("inf", "from math import inf", math.inf)
@@ -108,26 +102,16 @@ def _snake_case(s: str) -> str:
 # Replace occurrences where a lowercase letter is followed by an uppercase letter
 _snake_case_sub = functools.partial(re.compile(r"(?<=[a-z])([A-Z])").sub, r"_\1")
 
-# Find chars that can't be in a Python identifier
-_illegal_char_regex = re.compile("[^0-9a-zA-Z_]+")
-
-# Combined check for variable names:
-# 1) Checks name is not empty
-# 2) Checks first character is not a digit
-# 3) Checks name has no illegal characters (_illegal_char_regex)
-# 3) Splits off the number suffix (if present)
-_name_regex = re.compile(r"^([a-zA-Z_][0-9a-zA-Z_]*?)(?:_(\d+))?$")
-
-# starts with torch but does not start with torch._dynamo. or torch._inductor.
-_torch_but_not_dynamo = re.compile(
-    r"^torch(?:\.(?!_dynamo\.|_inductor\.)[^.]+)*$"
-).fullmatch
-
 
 def _is_from_torch(obj: Any) -> bool:
     module_name = getattr(obj, "__module__", None)
     if module_name is not None:
-        return _torch_but_not_dynamo(module_name) is not None
+        base_module = module_name.partition(".")[0]
+        return (
+            base_module == "torch"
+            and not module_name.startswith("torch._dynamo.")
+            and not module_name.startswith("torch._inductor.")
+        )
 
     name = getattr(obj, "__name__", None)
     # exclude torch because torch.torch.torch.torch works. idk mang
@@ -150,8 +134,12 @@ class _Namespace:
 
     def __init__(self):
         self._obj_to_name: dict[Any, str] = {}
+        self._unassociated_names = set()
         self._used_names: set[str] = set()
-        self._base_count: dict[str, int] = {}
+        self._base_count: dict[str, int] = defaultdict(int)
+
+        self._illegal_char_regex = re.compile("[^0-9a-zA-Z_]+")
+        self._name_suffix_regex = re.compile(r"(.*)_(\d+)$")
 
     def create_name(self, candidate: str, obj: Optional[Any]) -> str:
         """Create a unique name.
@@ -163,38 +151,36 @@ class _Namespace:
         if obj is not None and obj in self._obj_to_name:
             return self._obj_to_name[obj]
 
-        # optimistically check if candidate is already a valid name
-        match = _name_regex.match(candidate)
+        # delete all characters that are illegal in a Python identifier
+        candidate = self._illegal_char_regex.sub("_", candidate)
+
+        if not candidate:
+            candidate = "_unnamed"
+
+        if candidate[0].isdigit():
+            candidate = f"_{candidate}"
+
+        match = self._name_suffix_regex.match(candidate)
         if match is None:
-            # delete all characters that are illegal in a Python identifier
-            candidate = _illegal_char_regex.sub("_", candidate)
-
-            if not candidate:
-                candidate = "_unnamed"
-
-            if candidate[0].isdigit():
-                candidate = f"_{candidate}"
-
-            match = _name_regex.match(candidate)
-            assert match is not None
-
-        base, num = match.group(1, 2)
-        if num is None or candidate in self._used_names:
-            num = self._base_count.get(candidate, 0)
-            if _illegal_names.get(candidate, obj) is not obj:
-                num += 1
-                candidate = f"{base}_{num}"
-                # assume illegal names don't end in _\d so no need to check again
+            base = candidate
+            num = None
         else:
-            num = int(num)
+            base, num_str = match.group(1, 2)
+            num = int(num_str)
 
-        while candidate in self._used_names:
+        candidate = base if num is None else f"{base}_{num}"
+        if not num:
+            num = self._base_count[base]
+
+        while candidate in self._used_names or self._is_illegal_name(candidate, obj):
             num += 1
             candidate = f"{base}_{num}"
 
         self._used_names.add(candidate)
         self._base_count[base] = num
-        if obj is not None:
+        if obj is None:
+            self._unassociated_names.add(candidate)
+        else:
             self._obj_to_name[obj] = candidate
         return candidate
 
@@ -203,8 +189,25 @@ class _Namespace:
 
         Neither `name` nor `obj` should be associated already.
         """
-        maybe_existing = self._obj_to_name.setdefault(obj, name)
-        assert maybe_existing is name, "obj is already associated"
+        assert obj not in self._obj_to_name
+        assert name in self._unassociated_names
+        self._obj_to_name[obj] = name
+        self._unassociated_names.remove(name)
+
+    def _is_illegal_name(self, name: str, obj: Any) -> bool:
+        # 1. keywords are never allowed as names.
+        if name in keyword.kwlist:
+            return True
+
+        # 2. Can't shadow a builtin name, unless you *are* that builtin.
+        if name in builtins.__dict__:
+            return obj is not builtins.__dict__[name]
+
+        # 3. Can't shadow our custom builtins either
+        if name in _custom_builtins:
+            return obj is not _custom_builtins[name].obj
+
+        return False
 
     def _rename_object(self, obj: Any, name: str):
         assert obj in self._obj_to_name
@@ -221,7 +224,6 @@ dtype_abbrs = {
     torch.float8_e5m2: "f8e5m2",
     torch.float8_e4m3fnuz: "f8e4m3fnuz",
     torch.float8_e5m2fnuz: "f8e5m2fnuz",
-    torch.float8_e8m0fnu: "f8e8m0fnu",
     torch.complex32: "c32",
     torch.complex64: "c64",
     torch.complex128: "c128",
@@ -480,24 +482,38 @@ class CodeGen:
             # Common case: this is a regular module name like 'foo.bar.baz'
             return add_global(typename, o)
 
-        if colored:
-            red = _color_fns["red"]
-            dim_green = _color_fns["dim_green"]
-            dim = _color_fns["dim"]
-            dim_blue = _color_fns["dim_blue"]
-            blue = _color_fns["blue"]
-        else:
-            red = _identity
-            dim_green = _identity
-            dim = _identity
-            dim_blue = _identity
-            blue = _identity
+        codes = {
+            "yellow": "\033[33m",
+            "cyan": "\033[36m",
+            "green": "\033[32m",
+            "blue": "\033[34m",
+            "red": "\033[31m",
+            "dim": "\033[2m",
+            "dim_blue": "\033[2m\033[34m",
+            "dim_green": "\033[2m\033[32m",
+            "reset": "\033[0m",
+        }
+
+        def make_wrapper_func(name):
+            def f(s):
+                if colored:
+                    return f"{codes[name]}{s}{codes['reset']}"
+                return s
+
+            return f
+
+        yellow = make_wrapper_func("yellow")  # noqa: F841
+        cyan = make_wrapper_func("cyan")  # noqa: F841
+        red = make_wrapper_func("red")
+        green = make_wrapper_func("green")  # noqa: F841
+        dim_green = make_wrapper_func("dim_green")
+        dim = make_wrapper_func("dim")
+        dim_blue = make_wrapper_func("dim_blue")
+        blue = make_wrapper_func("blue")
 
         def _get_repr(arg: Any) -> str:
-            if isinstance(arg, Node):  # first because common
-                return repr(arg)
-            elif isinstance(arg, tuple) and hasattr(arg, "_fields"):
-                # Handle NamedTuples (if it has `_fields`) via add_global.
+            # Handle NamedTuples (if it has `_fields`) via add_global.
+            if isinstance(arg, tuple) and hasattr(arg, "_fields"):
                 qualified_name = _get_qualified_name(type(arg))
                 global_name = add_global(qualified_name, type(arg))
                 return f"{global_name}{repr(tuple(arg))}"
@@ -511,6 +527,8 @@ class CodeGen:
                 cls = arg.__class__
                 clsname = add_global(cls.__name__, cls)
                 return f"{clsname}.{arg.name}"
+            elif isinstance(arg, Node):
+                return repr(arg)
             elif isinstance(arg, torch.Tensor):
                 size = list(arg.size())
                 dtype = str(arg.dtype).split(".")[-1]
@@ -530,9 +548,11 @@ class CodeGen:
         def _format_args(
             args: tuple[Argument, ...], kwargs: dict[str, Argument]
         ) -> str:
-            res = [_get_repr(a) for a in args]
-            res.extend([f"{k} = {_get_repr(v)}" for k, v in kwargs.items()])
-            return ", ".join(res)
+            args_s = ", ".join(_get_repr(a) for a in args)
+            kwargs_s = ", ".join(f"{k} = {_get_repr(v)}" for k, v in kwargs.items())
+            if args_s and kwargs_s:
+                return f"{args_s}, {kwargs_s}"
+            return args_s or kwargs_s
 
         # Run through reverse nodes and record the first instance of a use
         # of a given node. This represents the *last* use of the node in the
@@ -547,8 +567,8 @@ class CodeGen:
                 user_to_last_uses.setdefault(user, []).append(n)
 
         for node in reversed(nodes):
-            for input_node in node._input_nodes:
-                register_last_uses(input_node, node)
+            map_arg(node.args, lambda n: register_last_uses(n, node))
+            map_arg(node.kwargs, lambda n: register_last_uses(n, node))
 
         def delete_unused_values(user: Node):
             """
@@ -587,22 +607,22 @@ class CodeGen:
             nonlocal prev_stacktrace
 
             if node.op not in {"placeholder", "output"}:
-                stack_trace = node.stack_trace
-                if stack_trace:
-                    if stack_trace != prev_stacktrace:
-                        prev_stacktrace = stack_trace
-                        if parsed_stack_trace := _parse_stack_trace(stack_trace):
+                if node.stack_trace:
+                    if node.stack_trace != prev_stacktrace:
+                        prev_stacktrace = node.stack_trace
+                        summary_str = ""
+
+                        if parsed_stack_trace := _parse_stack_trace(node.stack_trace):
                             summary_str = parsed_stack_trace.get_summary_str()
-                        else:
-                            summary_str = ""
-                        body.append(f'\n {dim(f"# {summary_str}")}\n')
+
+                        body.append(f'\n {dim("# " + summary_str)}\n')
                 elif prev_stacktrace != "":
                     prev_stacktrace = ""
                     no_stacktrace_msg = "# No stacktrace found for following nodes"
                     body.append(f"\n{dim(no_stacktrace_msg)}\n")
 
         def stringify_shape(shape: Iterable) -> str:
-            return f"[{', '.join([str(x) for x in shape])}]"
+            return f"[{', '.join(str(x) for x in shape)}]"
 
         def emit_node(node: Node):
             maybe_type_annotation = (
@@ -760,8 +780,8 @@ class CodeGen:
         new_lines: list[str] = []
         cur_idx = None
         for line in "".join(body).split("\n"):
-            counter = _counter_regexp.search(line)
-            if counter is not None:
+            counter = re.search(r"# COUNTER: (\d+)", line)
+            if counter and counter.group(1) is not None:
                 cur_idx = int(counter.group(1))
             else:
                 lineno_map[len(new_lines) + prologue_len] = cur_idx
@@ -1116,15 +1136,11 @@ class Graph:
 
             The newly-created and inserted node.
         """
-        # `target in _legal_ops` is checked in Node.__init__
-        if not args:
-            args = ()
-        else:
-            assert isinstance(args, tuple), "args must be a tuple"
-        if not kwargs:
-            kwargs = immutable_dict()
-        else:
-            assert isinstance(kwargs, dict), "kwargs must be a dict"
+        assert op in _legal_ops
+        args = () if args is None else args
+        kwargs = {} if kwargs is None else kwargs
+        assert isinstance(args, tuple), "args must be a tuple"
+        assert isinstance(kwargs, dict), "kwargs must be a dict"
 
         candidate = name if name is not None else self._target_to_str(target)
         name = self._graph_namespace.create_name(candidate, None)
@@ -1190,10 +1206,12 @@ class Graph:
 
         # Null out this Node's argument nodes so that the Nodes referred to
         # can update their ``users`` accordingly
-        to_erase._update_args_kwargs(
-            map_arg(to_erase._args, lambda n: None),
-            map_arg(to_erase._kwargs, lambda n: None),
-        )
+        new_args = map_arg(to_erase.args, lambda n: None)
+        assert isinstance(new_args, tuple)
+        to_erase.args = new_args
+        new_kwargs = map_arg(to_erase.kwargs, lambda n: None)
+        assert isinstance(new_kwargs, dict)
+        to_erase.kwargs = new_kwargs
 
     @compatibility(is_backward_compatible=True)
     def inserting_before(self, n: Optional[Node] = None):
@@ -1707,14 +1725,21 @@ class Graph:
         seen_names: set[str] = set()
         seen_values: set[Node] = set()
         for node in self.nodes:
-            if node.op not in _legal_ops:
+            if node.op not in [
+                "placeholder",
+                "call_method",
+                "call_module",
+                "call_function",
+                "get_attr",
+                "output",
+            ]:
                 raise RuntimeError(f"Node {node} had unknown opcode {node.op}!")
             if node.graph is not self:
                 raise RuntimeError(f"Node '{node}' does not belong to this Graph!")
             if node not in self._find_nodes_lookup_table:
                 raise RuntimeError(f"Node '{node}' is not added to the side table")
-            for arg in node._input_nodes:
-                check_arg(arg, node)
+            map_arg(node.args, lambda arg: check_arg(arg, node))
+            map_arg(node.kwargs, lambda arg: check_arg(arg, node))
             seen_values.add(node)
 
             if node.name in seen_names:
@@ -1931,32 +1956,6 @@ class Graph:
                 self._codegen._body_transformer = on_gen_code_old
 
         return on_generate_code_context_manager()
-
-
-def _identity(x):
-    return x
-
-
-def _make_color_fn(code):
-    def f(s):
-        reset = "\033[0m"
-        return f"{code}{s}{reset}"
-
-    return f
-
-
-_color_codes = {
-    "yellow": "\033[33m",
-    "cyan": "\033[36m",
-    "green": "\033[32m",
-    "blue": "\033[34m",
-    "red": "\033[31m",
-    "dim": "\033[2m",
-    "dim_blue": "\033[2m\033[34m",
-    "dim_green": "\033[2m\033[32m",
-}
-_color_fns = {k: _make_color_fn(v) for k, v in _color_codes.items()}
-_counter_regexp = re.compile(r"# COUNTER: (\d+)")
 
 
 reflectable_magic_methods = {

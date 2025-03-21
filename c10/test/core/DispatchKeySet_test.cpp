@@ -313,9 +313,7 @@ TEST(DispatchKeySet, IteratorBasicOps) {
   ASSERT_TRUE(full_set.begin() != full_set.end());
 
   // Increment Ops
-  // NOLINTNEXTLINE(bugprone-inc-dec-in-conditions)
   ASSERT_TRUE(full_set.begin() == full_set.begin()++);
-  // NOLINTNEXTLINE(bugprone-inc-dec-in-conditions)
   ASSERT_TRUE(full_set.begin() != ++full_set.begin());
 }
 
@@ -432,13 +430,9 @@ TEST(DispatchKeySet, TestFunctionalityDispatchKeyToString) {
         k == DispatchKey::StartOfAutogradFunctionalityBackends)
       continue;
     auto res = std::string(toString(k));
-    if (i > 0) {
-      ASSERT_TRUE(res.find("Unknown") == std::string::npos)
-          << i << " (before is " << toString(static_cast<DispatchKey>(i - 1))
-          << ")";
-    } else {
-      ASSERT_TRUE(res.find("Unknown") == std::string::npos) << i;
-    }
+    ASSERT_TRUE(res.find("Unknown") == std::string::npos)
+        << i << " (before is " << toString(static_cast<DispatchKey>(i - 1))
+        << ")";
     ASSERT_TRUE(seen_strings.count(res) == 0);
     seen_strings.insert(res);
   }
