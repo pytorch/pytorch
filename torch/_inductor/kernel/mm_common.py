@@ -471,6 +471,13 @@ def persistent_mm_grid(M: int, N: int, meta: dict[str, Any], *, cdiv, min):
         1,
     )
 
+@SymbolicGridFn
+def partition_k_mm_grid(m, n, k, meta, *, cdiv):
+    """
+    The CUDA grid size for matmul triton templates.
+    """
+    return (cdiv(m, meta["BLOCK_M"]) * cdiv(n, meta["BLOCK_N"]) * k, 1, 1)
+
 
 def acc_type(dtype):
     if dtype in (torch.float16, torch.bfloat16):
@@ -495,6 +502,7 @@ def mm_options(config, sym_m, sym_n, sym_k, layout):
         EVEN_K=even_k_symbolic,
         ALLOW_TF32=allow_tf32,
         ACC_TYPE=acc_type(layout.dtype),
+        PK=32,
         num_stages=config.num_stages,
         num_warps=config.num_warps,
         **config.kwargs,
@@ -518,6 +526,7 @@ def mm_args(
     out_dtype=None,
     use_4x2_dim=False,
     mat2_transposed=False,
+    partitionK=False,
 ):
     """
     Common arg processing for mm,bmm,addmm,etc
@@ -535,14 +544,23 @@ def mm_args(
     if layout is None:
         from torch._inductor.ir import FixedLayout
 
-        if out_dtype is None:
-            out_dtype = mat1.get_dtype()
+        if partitionK:
+            partitionK = 32
+            out_dtype = torch.float32
+            layout = FixedLayout(
+                mat1.get_device(),
+                out_dtype,
+                [*b, m, n, partitionK],
+            )
+        else:
+            if out_dtype is None:
+                out_dtype = mat1.get_dtype()
 
-        layout = FixedLayout(
-            mat1.get_device(),
-            out_dtype,
-            [*b, m, n],
-        )
+            layout = FixedLayout(
+                mat1.get_device(),
+                out_dtype,
+                [*b, m, n],
+            )
     else:
         assert out_dtype is None, "out_dtype is ignored if layout is specified."
     from ..lowering import expand
