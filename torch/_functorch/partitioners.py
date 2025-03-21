@@ -320,6 +320,8 @@ def _extract_fwd_bwd_modules(
         "backward",
     )
 
+    distributed_enabled = torch.distributed.is_enabled()
+
     for node in bwd_graph.find_nodes(op="placeholder"):
         # This is to filter out saved values that don't actually end up being used by the backwards pass
         if not node.users:
@@ -329,7 +331,7 @@ def _extract_fwd_bwd_modules(
         # but this dead activation is actually a collective,
         # then the collective will generally by followed by a wait_tensor() call.
         # we need to peak one node further to see if this wait_tensor is dead as well.
-        elif all(
+        elif distributed_enabled and all(
             n.target is torch.ops._c10d_functional.wait_tensor.default
             and len(n.users) == 0
             for n in node.users
