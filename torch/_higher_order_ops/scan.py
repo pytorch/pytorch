@@ -174,6 +174,7 @@ def scan(
     if reverse:
         out = pytree.tree_map(
             lambda elem: elem.flip([0]) if elem is not None else elem, out
+        )
 
     return carry, out
 
