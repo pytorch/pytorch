@@ -118,6 +118,7 @@ from .replay_record import ExecutionRecord
 from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
 from .symbolic_convert import (
     DistributedState,
+    ExceptionStack,
     InstructionTranslator,
     LocalState,
     SpeculationLog,
@@ -137,6 +138,8 @@ from .utils import (
     is_namedtuple,
     istype,
     LazyString,
+    maybe_disable_inference_mode,
+    maybe_disable_inference_mode_for_fake_prop,
     orig_code_map,
     reset_graph_break_dup_checker,
     setup_compile_debug,
@@ -226,11 +229,16 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     def _fn(*args: _P.args, **kwargs: _P.kwargs) -> _T:
         guards = GlobalStateGuard()
         prior_grad_mode = torch.is_grad_enabled()
+
         # Just in case we get left in a bad dispatch state we want to restore
         # it. This can happen because the dispatch bits aren't a true
         # stack/counter - so we can't just increment/decrement them as we enter
         # and leave.
-        with torch._C._PreserveDispatchKeyGuard():
+        with (
+            torch._C._PreserveDispatchKeyGuard(),
+            maybe_disable_inference_mode(),
+            maybe_disable_inference_mode_for_fake_prop(),
+        ):
             prior_inference_mode = torch.is_inference_mode_enabled()
             prior_deterministic = torch.are_deterministic_algorithms_enabled()
             prior_warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
@@ -689,6 +697,7 @@ def _compile(
         nonlocal output
         nonlocal tracer
         speculation_log.restart()
+        exn_vt_stack = ExceptionStack()
         tracer = InstructionTranslator(
             instructions,
             code,
@@ -704,6 +713,7 @@ def _compile(
             export_constraints,
             frame_state=frame_state,
             speculation_log=speculation_log,
+            exn_vt_stack=exn_vt_stack,
             distributed_state=distributed_state,
         )
 

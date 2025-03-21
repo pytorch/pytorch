@@ -1,6 +1,7 @@
 import collections
 import copy
 import dataclasses
+import functools
 import inspect
 import logging
 import threading
@@ -259,9 +260,24 @@ def generate_ttir(
             )
             # specialize_impl switched to create_specialize_impl in https://github.com/triton-lang/triton/pull/6099
             if hasattr(triton.runtime.jit, "create_specialize_impl"):
-                specialize_impl = triton.runtime.jit.create_specialize_impl()
+                try:
+                    # Latest versions of Triton take specialize_extra as an arg to create_specialize_impl
+                    specialize_impl = triton.runtime.jit.create_specialize_impl(
+                        specialize_extra=backend.get_arg_specialization
+                    )
+                except TypeError:  # Unknown arg `specialize_extra`
+                    # Older versions of Triton take specialize_extra as an arg to specialize_impl
+                    specialize_impl = functools.partial(
+                        triton.runtime.jit.create_specialize_impl(),
+                        specialize_extra=backend.get_arg_specialization,
+                    )
             else:
-                from triton.runtime.jit import specialize_impl  # type: ignore[no-redef]
+                from triton.runtime.jit import specialize_impl as specialize_impl_orig
+
+                specialize_impl = functools.partial(
+                    specialize_impl_orig,
+                    specialize_extra=backend.get_arg_specialization,
+                )
 
             from triton._utils import find_paths_if, get_iterable_path
 
@@ -273,7 +289,6 @@ def generate_ttir(
                 else:
                     spec = specialize_impl(
                         arg,
-                        specialize_extra=backend.get_arg_specialization,
                         is_const=kp.is_const,
                         specialize_value=not kp.do_not_specialize,
                         align=not kp.do_not_specialize_on_alignment,
