@@ -57,7 +57,7 @@ static void modified_bessel_k0_kernel_mps(TensorIteratorBase& iter) {
 }
 
 static void modified_bessel_k1_kernel_mps(TensorIteratorBase& iter) {
-  lib.exec_unary_kernel(iter, "modified_bessel_k0_forward");
+  lib.exec_unary_kernel(iter, "modified_bessel_k1_forward");
 }
 
 static void bessel_y0_kernel_mps(TensorIteratorBase& iter) {
