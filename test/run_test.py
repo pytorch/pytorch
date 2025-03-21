@@ -189,7 +189,6 @@ S390X_BLOCKLIST = [
     "profiler/test_profiler",
     "test_cpp_extensions_open_device_registration",
     "test_jit",
-    "inductor/test_cpu_cpp_wrapper",
     "inductor/test_inductor_freezing",
     "dynamo/test_utils",
     "test_nn",
