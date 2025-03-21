@@ -210,6 +210,13 @@ fi
 
 install_tlparse
 
+check_log_files() {
+  ls test/test-reports
+  pwd
+  find test/test-reports -name "*.log"
+  ls test/test-reports
+}
+
 # DANGER WILL ROBINSON.  The LD_PRELOAD here could cause you problems
 # if you're not careful.  Check this if you made some changes and the
 # ASAN test is not working
@@ -306,7 +313,7 @@ test_python_shard() {
   time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests $INCLUDE_CLAUSE --shard "$1" "$NUM_TEST_SHARDS" --verbose $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   pwd
   ls test/test-reports
-  find test/test-reports -name "*.log" -type f | grep -q . || (echo "No log files found" && exit 1)
+  check_log_files
 
   assert_git_not_dirty
 }
@@ -1647,14 +1654,10 @@ elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
   test_python_shard 1
   test_aten
-  pwd
-  ls test/test-reports
-  find test/test-reports -name "*.log" -type f | grep -q . || (echo "No log files found" && exit 1)
+  check_log_files
 
   test_libtorch 1
-  pwd
-  ls test/test-reports
-  find test/test-reports -name "*.log" -type f | grep -q . || (echo "No log files found" && exit 1)
+  check_log_files
 
   if [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
     test_xpu_bin
@@ -1662,42 +1665,28 @@ elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
 elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
   test_python_shard 2
-  pwd
-  ls test/test-reports
-  find test/test-reports -name "*.log" -type f | grep -q . || (echo "No log files found" && exit 1)
+  check_log_files
 
   test_libtorch 2
-  pwd
-  ls test/test-reports
-  find test/test-reports -name "*.log" -type f | grep -q . || (echo "No log files found" && exit 1)
+  check_log_files
 
   test_aot_compilation
-  pwd
-  ls test/test-reports
-  find test/test-reports -name "*.log" -type f | grep -q . || (echo "No log files found" && exit 1)
+  check_log_files
 
   test_custom_script_ops
-  pwd
-  ls test/test-reports
-  find test/test-reports -name "*.log" -type f | grep -q . || (echo "No log files found" && exit 1)
+  check_log_files
 
   test_custom_backend
-  pwd
-  ls test/test-reports
-  find test/test-reports -name "*.log" -type f | grep -q . || (echo "No log files found" && exit 1)
+  check_log_files
 
   test_torch_function_benchmark
-  pwd
-  ls test/test-reports
-  find test/test-reports -name "*.log" -type f | grep -q . || (echo "No log files found" && exit 1)
+  check_log_files
 
 elif [[ "${SHARD_NUMBER}" -gt 2 ]]; then
   # Handle arbitrary number of shards
   install_torchvision
   test_python_shard "$SHARD_NUMBER"
-  pwd
-  ls test/test-reports
-  find test/test-reports -name "*.log" -type f | grep -q . || (echo "No log files found" && exit 1)
+  check_log_files
 
 elif [[ "${BUILD_ENVIRONMENT}" == *vulkan* ]]; then
   test_vulkan
@@ -1725,6 +1714,4 @@ else
   test_torch_function_benchmark
   test_benchmarks
 fi
-pwd
-ls test/test-reports
-find test/test-reports -name "*.log" -type f | grep -q . || (echo "No log files found" && exit 1)
+check_log_files
