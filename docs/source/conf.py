@@ -201,7 +201,6 @@ html_context = {
     "doc_path": "docs/source",
     "theme_variables": theme_variables,
     "library_links": theme_variables.get("library_links", []),
-    "icon_links": theme_variables.get("icon_links", []),
     "community_links": theme_variables.get("community_links", []),
     "language_bindings_links": html_theme_options.get("language_bindings_links", []),
 }
