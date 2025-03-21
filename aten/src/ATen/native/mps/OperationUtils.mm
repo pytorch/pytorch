@@ -1010,9 +1010,7 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
   }
 }
 
-void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
-                                            const std::string& name,
-                                            const bool supports_dense) {
+void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter, const std::string& name) {
   TORCH_CHECK(iter.common_dtype() != at::kDouble, "float64 is not supported on MPS");
 
   Tensor input = iter.input(0);
@@ -1027,7 +1025,7 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       auto computeEncoder = mpsStream->commandEncoder();
-      if (supports_dense && iter.is_contiguous()) {
+      if (iter.is_contiguous()) {
         const auto kernel_name = fmt::format("{}_dense_{}", name, scalarToMetalTypeString(input));
         auto binaryPSO = getPipelineStateForFunc(kernel_name);
         [computeEncoder setComputePipelineState:binaryPSO];
