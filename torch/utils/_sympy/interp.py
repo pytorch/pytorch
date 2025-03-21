@@ -10,7 +10,7 @@ of a full handler, see torch.utils._sympy.value_ranges.ValueRangeAnalysis.
 
 import functools
 import logging
-from typing import Any, Dict, Union
+from typing import Any, Union
 
 import sympy
 from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
@@ -182,7 +182,7 @@ _nil = object()
 
 def sympy_interp(
     analysis,
-    env: Dict[sympy.Symbol, Any],
+    env: dict[sympy.Symbol, Any],
     expr: Union[sympy.Expr, SympyBoolean],
     *,
     index_dtype=torch.int64,

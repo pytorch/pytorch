@@ -119,13 +119,17 @@ def make_test_case(
                 _, code = test_torchinductor.run_and_get_cpp_code(
                     func, *func_inputs if func_inputs else []
                 )
-                self.assertEqual("CppWrapperCodeCache" in code, True)
-                self.assertTrue(
-                    all(
-                        code.count(string) == code_string_count[string]
-                        for string in code_string_count
+                # If a test generates no code, skip the remaining checks.  This can
+                # happen for tests validating build-dependent features (e.g. datatypes
+                # that are available on some platforms and not others).
+                if code:
+                    self.assertIn("CppWrapperCodeCache", code)
+                    self.assertTrue(
+                        all(
+                            code.count(string) == code_string_count[string]
+                            for string in code_string_count
+                        )
                     )
-                )
         finally:
             tests.tearDown()
             tests.tearDownClass()
@@ -207,7 +211,12 @@ if RUN_CPU:
         *[
             BaseTest(func, "", test_cpu_select_algorithm.TestSelectAlgorithmCPU())
             for func in dir(test_cpu_select_algorithm.TestSelectAlgorithmCPU())
-            if func.startswith("test_linear_with_pointwise")
+            if func.startswith(
+                (
+                    "test_linear_with_pointwise",
+                    "test_grouped_linear",
+                )
+            )
         ],
         BaseTest("test_polar"),
         BaseTest(
@@ -348,6 +357,9 @@ if RUN_CPU:
         ),  # multiple outputs, buffer clear
         BaseTest("test_view_as_complex"),
         BaseTest("test_view_as_real"),
+        BaseTest(
+            "test_woq_int4", "cpu", test_mkldnn_pattern_matcher.TestPatternMatcher()
+        ),
     ]:
         make_test_case(
             item.name,

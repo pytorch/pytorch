@@ -2,7 +2,6 @@
 import torch
 
 from torch.export import Dim
-from functorch.experimental.control_flow import cond
 
 x = torch.randn(3, 2)
 y = torch.randn(2)
@@ -24,7 +23,7 @@ class CondOperands(torch.nn.Module):
         def false_fn(x, y):
             return x - y
 
-        return cond(x.shape[0] > 2, true_fn, false_fn, [x, y])
+        return torch.cond(x.shape[0] > 2, true_fn, false_fn, [x, y])
 
 example_args = (x, y)
 tags = {

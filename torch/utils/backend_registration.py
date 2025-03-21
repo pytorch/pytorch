@@ -5,7 +5,7 @@ from torch.overrides import (
     has_torch_function_unary,
 )
 from torch._C import _rename_privateuse1_backend, _get_privateuse1_backend_name
-from typing import List, Optional, Union
+from typing import Optional, Union
 
 __all__ = ["rename_privateuse1_backend", "generate_methods_for_privateuse1_backend"]
 
@@ -223,7 +223,7 @@ def _generate_packed_sequence_methods_for_privateuse1_backend(custom_backend_nam
     setattr(torch.nn.utils.rnn.PackedSequence, custom_backend_name, wrap_module_to)
 
 def _generate_storage_methods_for_privateuse1_backend(custom_backend_name: str,
-                                                      unsupported_dtype: Optional[List[torch.dtype]] = None) -> None:
+                                                      unsupported_dtype: Optional[list[torch.dtype]] = None) -> None:
     # Attribute is registered in the _StorageBase class
     # and UntypedStorage obtains through inheritance.
     @property  # type: ignore[misc]
@@ -295,7 +295,7 @@ def _generate_storage_methods_for_privateuse1_backend(custom_backend_name: str,
 def generate_methods_for_privateuse1_backend(for_tensor: bool = True, for_module: bool = True,
                                              for_packed_sequence: bool = True,
                                              for_storage: bool = False,
-                                             unsupported_dtype: Optional[List[torch.dtype]] = None) -> None:
+                                             unsupported_dtype: Optional[list[torch.dtype]] = None) -> None:
     r"""
     Automatically generate attributes and methods for the custom backend after rename privateuse1 backend.
 

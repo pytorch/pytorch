@@ -17,6 +17,7 @@
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/python_cpp_function.h>
 #include <torch/csrc/autograd/python_hook.h>
+#include <torch/csrc/autograd/python_torch_functions.h>
 #include <torch/csrc/autograd/python_variable_indexing.h>
 #include <torch/csrc/autograd/utils/error_messages.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
@@ -317,7 +318,7 @@ PyObject* THPVariable_Wrap(const at::TensorBase& var) {
   return THPVariable_NewWithVar((PyTypeObject*)THPVariableClass, var, status);
 }
 
-bool isResurrectable(THPVariable* self) {
+static bool isResurrectable(THPVariable* self) {
   // We want to divide this check into 2 cases.
 
   // 1. C++ owns PyObject (in this case, self->cdata.unsafeIsBorrowed() is
@@ -406,19 +407,19 @@ static bool THPVariable_tryResurrect(THPVariable* self) {
   return true;
 }
 
-int THPFake_traverse(THPVariable* self, visitproc visit, void* arg) {
+static int THPFake_traverse(THPVariable* self, visitproc visit, void* arg) {
   TORCH_INTERNAL_ASSERT(
       false, "TensorBase tp_traverse function was not overriden properly");
   return 0;
 }
 
-int THPFake_clear(THPVariable* self) {
+static int THPFake_clear(THPVariable* self) {
   TORCH_INTERNAL_ASSERT(
       false, "TensorBase tp_clear function was not overriden properly");
   return 0;
 }
 
-PyObject* THPVariable_pynew(
+static PyObject* THPVariable_pynew(
     PyTypeObject* type,
     PyObject* args,
     PyObject* kwargs);
@@ -799,7 +800,9 @@ static PyObject* THPVariable_make_wrapper_subclass(
 using getter = PyObject* (*)(PyObject*, void*);
 using setter = int (*)(PyObject*, PyObject*, void*);
 
-PyObject* THPVariable_get_python_dispatch(THPVariable* self, void* unused) {
+static PyObject* THPVariable_get_python_dispatch(
+    THPVariable* self,
+    void* unused) {
   HANDLE_TH_ERRORS
   const auto& var = THPVariable_Unpack(self);
   return torch::autograd::utils::wrap(
@@ -881,7 +884,7 @@ struct PropertyImag : GetterBase<PropertyImag> {
   }
 };
 
-PyObject* THPVariable_get_cdata(THPVariable* self, void* unused) {
+static PyObject* THPVariable_get_cdata(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "_cdata");
@@ -891,7 +894,7 @@ PyObject* THPVariable_get_cdata(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPVariable_get_version(THPVariable* self, void* unused) {
+static PyObject* THPVariable_get_version(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "_version");
@@ -901,7 +904,7 @@ PyObject* THPVariable_get_version(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPVariable_get_grad_fn(THPVariable* self, void* unused) {
+static PyObject* THPVariable_get_grad_fn(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "grad_fn");
@@ -938,7 +941,10 @@ static PyObject* THPVariable_is_leaf(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-int THPVariable_set_data(THPVariable* self, PyObject* data, void* unused) {
+static int THPVariable_set_data(
+    THPVariable* self,
+    PyObject* data,
+    void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
     return handle_torch_function_setter(self, "data", data);
@@ -955,7 +961,10 @@ int THPVariable_set_data(THPVariable* self, PyObject* data, void* unused) {
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
-int THPVariable_set_grad(THPVariable* self, PyObject* py_grad, void* unused) {
+static int THPVariable_set_grad(
+    THPVariable* self,
+    PyObject* py_grad,
+    void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
     return handle_torch_function_setter(self, "grad", py_grad);
@@ -1013,7 +1022,7 @@ int THPVariable_set_grad(THPVariable* self, PyObject* py_grad, void* unused) {
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
-PyObject* THPVariable_get_volatile(THPVariable* self, void* unused) {
+static PyObject* THPVariable_get_volatile(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "volatile");
@@ -1026,7 +1035,10 @@ PyObject* THPVariable_get_volatile(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-int THPVariable_set_volatile(THPVariable* self, PyObject* obj, void* unused) {
+static int THPVariable_set_volatile(
+    THPVariable* self,
+    PyObject* obj,
+    void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
     return handle_torch_function_setter(self, "volatile", obj);
@@ -1038,7 +1050,7 @@ int THPVariable_set_volatile(THPVariable* self, PyObject* obj, void* unused) {
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
-PyObject* THPVariable_get_output_nr(THPVariable* self, void* unused) {
+static PyObject* THPVariable_get_output_nr(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "output_nr");
@@ -1049,7 +1061,9 @@ PyObject* THPVariable_get_output_nr(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPVariable_get_requires_grad(THPVariable* self, void* unused) {
+static PyObject* THPVariable_get_requires_grad(
+    THPVariable* self,
+    void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "requires_grad");
@@ -1062,7 +1076,7 @@ PyObject* THPVariable_get_requires_grad(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPVariable_retains_grad(THPVariable* self, void* unused) {
+static PyObject* THPVariable_retains_grad(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "retains_grad");
@@ -1075,7 +1089,7 @@ PyObject* THPVariable_retains_grad(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPVariable_get_ndim(THPVariable* self, void* unused) {
+static PyObject* THPVariable_get_ndim(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "ndim");
@@ -1084,7 +1098,7 @@ PyObject* THPVariable_get_ndim(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPVariable_get_names(PyObject* self, void* unused) {
+static PyObject* THPVariable_get_names(PyObject* self, void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function(self)) {
     return handle_torch_function_getter((THPVariable*)self, "names");
@@ -1122,7 +1136,10 @@ PyObject* THPVariable_get_names(PyObject* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-int THPVariable_set_names(PyObject* self, PyObject* names, void* unused) {
+static int THPVariable_set_names(
+    PyObject* self,
+    PyObject* names,
+    void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function(self)) {
     return handle_torch_function_setter((THPVariable*)self, "names", names);
@@ -1140,7 +1157,7 @@ int THPVariable_set_names(PyObject* self, PyObject* names, void* unused) {
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
-int THPVariable_set_requires_grad(
+static int THPVariable_set_requires_grad(
     THPVariable* self,
     PyObject* obj,
     void* unused) {
@@ -1167,7 +1184,7 @@ int THPVariable_set_requires_grad(
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
-PyObject* THPVariable_get_name(THPVariable* self, void* unused) {
+static PyObject* THPVariable_get_name(THPVariable* self, void* unused) {
   if (check_has_torch_function((PyObject*)self)) {
     HANDLE_TH_ERRORS
     return handle_torch_function_getter(self, "name");
@@ -1179,7 +1196,9 @@ PyObject* THPVariable_get_name(THPVariable* self, void* unused) {
   return THPUtils_packString(tensor.name().c_str());
 }
 
-PyObject* THPVariable_get_backwards_hooks(THPVariable* self, void* unused) {
+static PyObject* THPVariable_get_backwards_hooks(
+    THPVariable* self,
+    void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "_backward_hooks");
@@ -1192,7 +1211,7 @@ PyObject* THPVariable_get_backwards_hooks(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-int THPVariable_set_backwards_hooks(
+static int THPVariable_set_backwards_hooks(
     THPVariable* self,
     PyObject* obj,
     void* unused) {
@@ -1217,7 +1236,7 @@ int THPVariable_set_backwards_hooks(
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
-PyObject* THPVariable_get_post_accumulate_grad_hooks(
+static PyObject* THPVariable_get_post_accumulate_grad_hooks(
     THPVariable* self,
     void* unused) {
   HANDLE_TH_ERRORS
@@ -1232,7 +1251,7 @@ PyObject* THPVariable_get_post_accumulate_grad_hooks(
   END_HANDLE_TH_ERRORS
 }
 
-int THPVariable_set_post_accumulate_grad_hooks(
+static int THPVariable_set_post_accumulate_grad_hooks(
     THPVariable* self,
     PyObject* obj,
     void* unused) {
@@ -1257,7 +1276,7 @@ int THPVariable_set_post_accumulate_grad_hooks(
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
-PyObject* THPVariable_get_base(THPVariable* self, void* unused) {
+static PyObject* THPVariable_get_base(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "_base");
@@ -1270,7 +1289,7 @@ PyObject* THPVariable_get_base(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPVariable_get_shape(THPVariable* self, void* unused) {
+static PyObject* THPVariable_get_shape(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "shape");
@@ -1279,7 +1298,7 @@ PyObject* THPVariable_get_shape(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPVariable_is_cpu(THPVariable* self, void* unused) {
+static PyObject* THPVariable_is_cpu(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "is_cpu");
@@ -1289,7 +1308,7 @@ PyObject* THPVariable_is_cpu(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPVariable_is_cuda(THPVariable* self, void* unused) {
+static PyObject* THPVariable_is_cuda(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "is_cuda");
@@ -1299,7 +1318,7 @@ PyObject* THPVariable_is_cuda(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPVariable_is_mtia(THPVariable* self, void* unused) {
+static PyObject* THPVariable_is_mtia(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "is_mtia");
@@ -1309,7 +1328,7 @@ PyObject* THPVariable_is_mtia(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPVariable_is_xla(THPVariable* self, void* unused) {
+static PyObject* THPVariable_is_xla(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "is_xla");
@@ -1319,7 +1338,7 @@ PyObject* THPVariable_is_xla(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPVariable_is_ipu(THPVariable* self, void* unused) {
+static PyObject* THPVariable_is_ipu(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "is_ipu");
@@ -1329,7 +1348,7 @@ PyObject* THPVariable_is_ipu(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPVariable_is_xpu(THPVariable* self, void* unused) {
+static PyObject* THPVariable_is_xpu(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "is_xpu");
@@ -1339,7 +1358,7 @@ PyObject* THPVariable_is_xpu(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPVariable_is_sparse(THPVariable* self, void* unused) {
+static PyObject* THPVariable_is_sparse(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "is_sparse");
@@ -1349,7 +1368,7 @@ PyObject* THPVariable_is_sparse(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPVariable_is_sparse_csr(THPVariable* self, void* unused) {
+static PyObject* THPVariable_is_sparse_csr(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "is_sparse_csr");
@@ -1359,7 +1378,7 @@ PyObject* THPVariable_is_sparse_csr(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPVariable_is_mkldnn(THPVariable* self, void* unused) {
+static PyObject* THPVariable_is_mkldnn(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "is_mkldnn");
@@ -1369,7 +1388,7 @@ PyObject* THPVariable_is_mkldnn(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPVariable_is_mps(THPVariable* self, void* unused) {
+static PyObject* THPVariable_is_mps(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "is_mps");
@@ -1379,7 +1398,7 @@ PyObject* THPVariable_is_mps(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPVariable_is_maia(THPVariable* self, void* unused) {
+static PyObject* THPVariable_is_maia(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "is_maia");
@@ -1389,7 +1408,7 @@ PyObject* THPVariable_is_maia(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPVariable_is_vulkan(THPVariable* self, void* unused) {
+static PyObject* THPVariable_is_vulkan(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "is_vulkan");
@@ -1399,7 +1418,7 @@ PyObject* THPVariable_is_vulkan(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPVariable_is_quantized(THPVariable* self, void* unused) {
+static PyObject* THPVariable_is_quantized(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "is_quantized");
@@ -1409,7 +1428,7 @@ PyObject* THPVariable_is_quantized(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPVariable_is_meta(THPVariable* self, void* unused) {
+static PyObject* THPVariable_is_meta(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "is_meta");
@@ -1419,7 +1438,7 @@ PyObject* THPVariable_is_meta(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPVariable_is_complex(THPVariable* self, void* unused) {
+static PyObject* THPVariable_is_complex(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "is_complex");
@@ -1429,7 +1448,7 @@ PyObject* THPVariable_is_complex(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPVariable_is_nested(THPVariable* self, void* unused) {
+static PyObject* THPVariable_is_nested(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "is_nested");
@@ -1439,7 +1458,7 @@ PyObject* THPVariable_is_nested(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPVariable_has_symbolic_sizes_strides(
+static PyObject* THPVariable_has_symbolic_sizes_strides(
     THPVariable* self,
     void* unused) {
   HANDLE_TH_ERRORS
@@ -1496,7 +1515,7 @@ static PyObject* THPVariable_get_itemsize(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-int THPVariable_set_real(PyObject* self, PyObject* real, void* unused) {
+static int THPVariable_set_real(PyObject* self, PyObject* real, void* unused) {
   HANDLE_TH_ERRORS
   auto& self_ = THPVariable_Unpack(self);
   auto self_real = at::real(self_);
@@ -1509,7 +1528,7 @@ int THPVariable_set_real(PyObject* self, PyObject* real, void* unused) {
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
-int THPVariable_set_imag(PyObject* self, PyObject* imag, void* unused) {
+static int THPVariable_set_imag(PyObject* self, PyObject* imag, void* unused) {
   HANDLE_TH_ERRORS
   auto& self_ = THPVariable_Unpack(self);
   auto self_imag = at::imag(self_);
@@ -1522,7 +1541,7 @@ int THPVariable_set_imag(PyObject* self, PyObject* imag, void* unused) {
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
-PyObject* THPVariable__use_count(PyObject* self, PyObject* noargs) {
+static PyObject* THPVariable__use_count(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   const auto& t = THPVariable_Unpack(self);
   return THPUtils_packUInt64(t.use_count());
@@ -1687,9 +1706,12 @@ struct THPVariableMeta {
   PyHeapTypeObject base;
 };
 
-int THPVariableMetaType_init(PyObject* cls, PyObject* args, PyObject* kwargs);
+static int THPVariableMetaType_init(
+    PyObject* cls,
+    PyObject* args,
+    PyObject* kwargs);
 
-PyTypeObject THPVariableMetaType = {
+static PyTypeObject THPVariableMetaType = {
     PyVarObject_HEAD_INIT(DEFERRED_ADDRESS(&PyType_Type), 0)
     "torch._C._TensorMeta", /* tp_name */
     sizeof(THPVariableMeta), /* tp_basicsize */
@@ -1731,7 +1753,7 @@ PyTypeObject THPVariableMetaType = {
     nullptr, /* tp_new */
 };
 
-PyTypeObject THPVariableType = {
+static PyTypeObject THPVariableType = {
     PyVarObject_HEAD_INIT(&THPVariableMetaType, 0)
     "torch._C.TensorBase", /* tp_name */
     sizeof(THPVariable), /* tp_basicsize */
@@ -1852,7 +1874,7 @@ static int THPVariable_subclass_clear(THPVariable* self) {
     if (!self->cdata.unsafeIsBorrowed() &&
         tensor.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
             getPyInterpreter(), /*ignore_hermetic_tls=*/false) ==
-            std::make_optional((PyObject*)self)) {
+            (PyObject*)self) {
       // TODO: empirically, on OS X this assert appears to be untrue
       // In test_py_tensors_multi_async_call - ProcessGroupRpcTestWithSpawn
       // distributed/rpc/test_process_group_agent.py
@@ -1928,7 +1950,7 @@ static int THPVariable_subclass_clear(THPVariable* self) {
 // NB: this is not the tp_dealloc on THPVariable; instead, its the dealloc
 // on subclasses.  It's never valid to construct a THPVariable so it's not
 // necessary to implement the dealloc for that case
-void THPVariable_subclass_dealloc(PyObject* self) {
+static void THPVariable_subclass_dealloc(PyObject* self) {
   if (THPVariable_tryResurrect((THPVariable*)self))
     return;
 
@@ -2375,9 +2397,8 @@ namespace torch::autograd {
 
 // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 extern PyMethodDef variable_methods[];
-extern void initTorchFunctions(PyObject* module);
 
-void initTensorImplConversion(PyObject* module) {
+static void initTensorImplConversion(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
   m.def("_wrap_tensor_impl", [](void* ptr) {
     auto p = c10::intrusive_ptr<c10::TensorImpl, at::UndefinedTensorImpl>::

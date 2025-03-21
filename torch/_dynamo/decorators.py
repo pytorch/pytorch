@@ -1,11 +1,21 @@
 # mypy: allow-untyped-defs
 # ruff: noqa: TCH004
+
+"""
+This module provides decorators and utilities for controlling TorchDynamo's behavior during compilation.
+"""
+
 import functools
 import inspect
+import sys
+import weakref
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Type, TYPE_CHECKING, TypeVar
+from typing import Any, Callable, TYPE_CHECKING, TypeVar
+from typing_extensions import ParamSpec
 
 import torch
+from torch._environment import is_fbcode
+from torch._vendor.packaging.version import Version
 from torch.utils._contextlib import _DecoratorContextManager
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
@@ -17,6 +27,7 @@ from .eval_frame import (
     DynamoStance,
     innermost_fn,
     RunOnlyContext,
+    skip_code,
 )
 from .exc import IncorrectUsage
 from .external_utils import is_compiling
@@ -30,7 +41,6 @@ if TYPE_CHECKING:
         reset_code,
         set_eval_frame,
         set_guard_error_hook,
-        skip_code,
         unsupported,
     )
 
@@ -42,7 +52,8 @@ else:
         globals()[name] = getattr(torch._C._dynamo.eval_frame, name)
 
 
-_F = TypeVar("_F", bound=Callable[..., Any])
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
 
 def run(fn=None):
@@ -145,9 +156,58 @@ def allow_in_graph(fn):
         return [allow_in_graph(x) for x in fn]
     assert callable(fn), "allow_in_graph expects a callable"
     if trace_rules.lookup_callable(fn) != variables.TorchInGraphFunctionVariable:
-        trace_rules._disallowed_callable_ids.remove(id(fn))
-        trace_rules._allowed_callable_ids.add(id(fn))
+        fn_id = id(fn)
+        trace_rules._disallowed_callable_ids.remove(fn_id)
+        trace_rules._allowed_callable_ids.add(fn_id)
+
+        # Avoid id reuse which creates subtle bugs.
+        def deregister():
+            trace_rules._allowed_callable_ids.remove(fn_id)
+
+        weakref.finalize(fn, deregister)
     return fn
+
+
+def nonstrict_trace(traceable_fn):
+    # Like `allow_in_graph`, but with the following enhancements/differences:
+    #
+    # 1. Supports user-defined class as inputs, as long as the class has been
+    #    registered with pytree.
+    # 2. Reads to global/captured tensors forces the underlying graph to treat
+    #    those tensors as constant, and we _assume_ they will not be updated. This
+    #    is similar to FX tracing.
+    # 3. In the resulting Dynamo graph, the call to a `nonstrict_trace`-ed function
+    #    will be represented as a call to `torch._higher_order_ops.flat_apply`,
+    #    which takes in the `nonstrict_trace`-ed function and pytree-flattened
+    #    inputs.
+    # 4. Only the returned function is traceable, and the original function will
+    #    not be. Moreover, `nonstrict_trace` can be used inside a `torch.compile`
+    #    region.
+    #
+    # NOTE: like `allow_in_graph`, aliasing information is neither preserved
+    # between inputs themselves, nor between inputs and outputs.
+    assert callable(traceable_fn), "nonstrict_trace expects a callable"
+
+    @functools.wraps(traceable_fn)
+    def wrapped(*args, **kwargs):
+        return traceable_fn(*args, **kwargs)
+
+    wrapped_id = id(wrapped)
+
+    # This line allows us to reuse much of the `allow_in_graph` impl.
+    trace_rules._allowed_callable_ids.add(wrapped_id)
+
+    # This line allows us to diverge the impl from `allow_in_graph`.
+    trace_rules._nonstrict_trace_callable_ids.add(wrapped_id)
+
+    # Avoid id reuse which creates subtle bugs.
+    def deregister():
+        trace_rules._allowed_callable_ids.remove(wrapped_id)
+        trace_rules._nonstrict_trace_callable_ids.remove(wrapped_id)
+
+    weakref.finalize(wrapped, deregister)
+
+    return wrapped
 
 
 def _disallow_in_graph_helper(throw_if_not_allowed):
@@ -166,6 +226,7 @@ def _disallow_in_graph_helper(throw_if_not_allowed):
                 "Allowed callables means callables that TorchDynamo puts as-is in the extracted graph."
             )
         trace_rules._allowed_callable_ids.remove(id(fn))
+        trace_rules._nonstrict_trace_callable_ids.remove(id(fn))
         trace_rules._disallowed_callable_ids.add(id(fn))
         return fn
 
@@ -180,12 +241,14 @@ def disallow_in_graph(fn):
 
         torch._dynamo.disallow_in_graph(torch.sub)
 
+
         @torch._dynamo.optimize(...)
         def fn(a):
             x = torch.add(x, 1)
             x = torch.sub(x, 1)
             x = torch.add(x, 1)
             return x
+
 
         fn(...)
 
@@ -196,7 +259,7 @@ def disallow_in_graph(fn):
 
 
 @_disallow_in_graph_helper(throw_if_not_allowed=False)
-def graph_break():
+def graph_break(msg=""):
     """Force a graph break"""
 
 
@@ -216,13 +279,13 @@ def forbid_in_graph(fn):
 
 
 def substitute_in_graph(
-    original_fn: _F,
+    original_fn: Callable[_P, _R],
     *,
     can_constant_fold_through: bool = False,
     skip_signature_check: bool = False,
     # type that is embedded in the Python interpreter
     is_embedded_type: bool = False,  # internal use only
-) -> Callable[[_F], _F]:
+) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
     """
     Register a polyfill handler for a function, usually a C function from the C extension, to be
     used in place of the original function when inlining the original function in the graph.
@@ -288,7 +351,7 @@ def substitute_in_graph(
         if id(original_fn) in ITERTOOLS_TYPE_IDS:
             ITERTOOLS_POLYFILLED_TYPE_IDS.add(id(original_fn))
 
-    def wrapper(traceable_fn: _F) -> _F:
+    def wrapper(traceable_fn: Callable[_P, _R]) -> Callable[_P, _R]:
         if not is_function(traceable_fn):
             raise TypeError(
                 f"@substitute_in_graph(...) expects a function but got {type(traceable_fn)!r}"
@@ -361,14 +424,14 @@ def substitute_in_graph(
         if id(original_fn) in _polyfilled_function_ids:
             raise ValueError(f"Duplicate polyfilled object {original_fn}")
 
-        rule_map: Dict[Any, Type[VariableTracker]] = get_torch_obj_rule_map()
+        rule_map: dict[Any, type[VariableTracker]] = get_torch_obj_rule_map()
         if original_fn in rule_map:
             raise ValueError(
                 f"Duplicate object {original_fn} with different rules: "
                 f"{PolyfilledFunctionVariable}, {rule_map[original_fn]}"
             )
 
-        polyfill_handlers: Dict[Callable[..., Any], FunctionType]
+        polyfill_handlers: dict[Callable[..., Any], FunctionType]
         polyfill_handlers = PolyfilledFunctionVariable._get_polyfill_handlers()
         if original_fn in polyfill_handlers:
             raise ValueError(
@@ -379,10 +442,10 @@ def substitute_in_graph(
         # Need to wrap the function because we may cannot assign __torch_dynamo_polyfill__ to a
         # C++ function.
         @functools.wraps(traceable_fn)
-        def wrapped(*args, **kwargs):
+        def wrapped(*args: _P.args, **kwargs: _P.kwargs) -> _R:
             return original_fn(*args, **kwargs)
 
-        def dispatch_fn(self, value: _F) -> PolyfilledFunctionVariable:
+        def dispatch_fn(self, value: Callable[_P, _R]) -> PolyfilledFunctionVariable:
             return PolyfilledFunctionVariable(
                 value,
                 source=self.source,
@@ -432,19 +495,29 @@ class _DimRange:
 
 
 @forbid_in_graph
-def mark_unbacked(t, index):
+def mark_unbacked(t, index, strict=False):
     """
     Mark a tensor as having an unbacked dim.  This changes the semantics of operations,
     we will always report the size does not equal zero/one, we will turn asserts
     on this index into runtime asserts, and if you try to get the real value we will
     raise an exception.  In other words, we will treat this dimension as if it was
     data dependent (we do not know anything about its value.)
+
+    For historical reasons, by default if an unbacked dim is specialized, we will
+    happily specialize it and continue. If you want to error in these cases, pass
+    strict=True.
     """
     # You could have copied the mark_dynamic behavior but I'm not convinced
     # it's what you want
     assert not is_traceable_wrapper_subclass(t), "not implemented yet"
 
     if isinstance(index, int):
+        if strict:
+            if not hasattr(t, "_dynamo_strict_unbacked_indices"):
+                t._dynamo_strict_unbacked_indices = set()
+            t._dynamo_strict_unbacked_indices.add(index)
+            return
+
         if not hasattr(t, "_dynamo_unbacked_indices"):
             t._dynamo_unbacked_indices = set()
         t._dynamo_unbacked_indices.add(index)
@@ -608,27 +681,35 @@ def mark_static_address(t, guard=True):
 # Note: this carefully avoids eagerly import einops.
 # TODO: we should delete this whole _allow_in_graph_einops logic by approximately 2024 Q2
 def _allow_in_graph_einops():
-    import einops
+    mod = sys.modules.get("einops")
+    if mod is None:
+        return
+    else:
+        # version > 0.7.0 does allow_in_graph out of tree
+        # for BC we need to keep this in fbcode
+        # internal xref https://fb.workplace.com/groups/1026248852325474/permalink/1107135774236781/
+        if Version(mod.__version__) < Version("0.7.0") or is_fbcode():
+            import einops
 
-    try:
-        # requires einops > 0.6.1, torch >= 2.0
-        from einops._torch_specific import (  # type: ignore[attr-defined]  # noqa: F401
-            _ops_were_registered_in_torchdynamo,
-        )
+            try:
+                # requires einops > 0.6.1, torch >= 2.0
+                from einops._torch_specific import (  # type: ignore[attr-defined]  # noqa: F401
+                    _ops_were_registered_in_torchdynamo,
+                )
 
-        # einops > 0.6.1 will call the op registration logic as it is imported.
-    except ImportError:
-        # einops <= 0.6.1
-        allow_in_graph(einops.rearrange)
-        allow_in_graph(einops.reduce)
-        if hasattr(einops, "repeat"):
-            allow_in_graph(einops.repeat)  # available since einops 0.2.0
-        if hasattr(einops, "einsum"):
-            allow_in_graph(einops.einsum)  # available since einops 0.5.0
-        if hasattr(einops, "pack"):
-            allow_in_graph(einops.pack)  # available since einops 0.6.0
-        if hasattr(einops, "unpack"):
-            allow_in_graph(einops.unpack)  # available since einops 0.6.0
+                # einops > 0.6.1 will call the op registration logic as it is imported.
+            except ImportError:
+                # einops <= 0.6.1
+                allow_in_graph(einops.rearrange)
+                allow_in_graph(einops.reduce)
+                if hasattr(einops, "repeat"):
+                    allow_in_graph(einops.repeat)  # available since einops 0.2.0
+                if hasattr(einops, "einsum"):
+                    allow_in_graph(einops.einsum)  # available since einops 0.5.0
+                if hasattr(einops, "pack"):
+                    allow_in_graph(einops.pack)  # available since einops 0.6.0
+                if hasattr(einops, "unpack"):
+                    allow_in_graph(einops.unpack)  # available since einops 0.6.0
 
 
 trace_rules.add_module_init_func("einops", _allow_in_graph_einops)

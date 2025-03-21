@@ -19,18 +19,14 @@
 #include <torch/csrc/onnx/back_compat.h>
 #include <torch/csrc/onnx/onnx.h>
 #include <torch/version.h>
-#include <optional>
 
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wnewline-eof")
 #include <onnx/checker.h>
-C10_DIAGNOSTIC_POP()
 #include <onnx/onnx_pb.h>
 #include <onnx/proto_utils.h>
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wsuggest-override")
 #include <onnx/shape_inference/implementation.h>
-C10_DIAGNOSTIC_POP()
 
 #include <memory>
+#include <optional>
 #include <regex>
 #include <set>
 #include <sstream>
@@ -418,7 +414,7 @@ class GraphEncoder {
   static constexpr size_t ParamSizeThresholdForExternalStorage = 1024;
 };
 
-onnx::TensorProto_DataType ATenTypeToOnnxType(at::ScalarType at_type) {
+static onnx::TensorProto_DataType ATenTypeToOnnxType(at::ScalarType at_type) {
   switch (at_type) {
     case at::kDouble:
       return onnx::TensorProto_DataType_DOUBLE;
@@ -463,7 +459,7 @@ onnx::TensorProto_DataType ATenTypeToOnnxType(at::ScalarType at_type) {
   }
 }
 
-onnx::AttributeProto_AttributeType ATenAttributeKindToOnnxAttributeType(
+static onnx::AttributeProto_AttributeType ATenAttributeKindToOnnxAttributeType(
     AttributeKind at_kind,
     const jit::Symbol name) {
   switch (at_kind) {

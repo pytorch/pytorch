@@ -108,8 +108,7 @@ void DistEngine::globalCpuThread(
 }
 
 DistEngine::DistEngine()
-    : initializedContextIds_(),
-      engine_(Engine::get_default_engine()),
+    : engine_(Engine::get_default_engine()),
       global_cpu_ready_queue_(std::make_shared<ReadyQueue>()),
       global_cpu_thread_(
           &DistEngine::globalCpuThread,

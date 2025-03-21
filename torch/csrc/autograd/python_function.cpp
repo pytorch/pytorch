@@ -30,6 +30,7 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/profiler/api.h>
+#include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/tensor_dtypes.h>
 
@@ -136,6 +137,7 @@ namespace torch::autograd {
 // NOTE: this function is written in a way that assumes it's only called for
 // backward; it's used by engine.cpp.  This is responsible for forwarding a call
 // from C++'s Node::apply to a Python method "apply".
+// NOLINTNEXTLINE(*-rvalue-reference*)
 auto PyNode::apply(variable_list&& inputs) -> variable_list {
   pybind11::gil_scoped_acquire gil;
   at::OptionalDeviceGuard _device_guard;
@@ -183,9 +185,9 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
   return to_variable_list(r.get(), is_variable_input);
 }
 
-auto PyNode::defer_to_dynamo(
-    variable_list&& inputs,
-    const std::optional<PyObject*>& compiler) -> variable_list {
+auto PyNode::apply_with_saved_impl(
+    const variable_list& inputs,
+    const SwapSavedVariables& saved) -> variable_list {
   pybind11::gil_scoped_acquire gil;
   at::OptionalDeviceGuard _device_guard;
   THPFunction* py_fn = (THPFunction*)obj;
@@ -233,19 +235,26 @@ auto PyNode::defer_to_dynamo(
   }
   THPObjectPtr saved_tensors(unpack_saved_variables(
       py_fn, [](const Variable& var) { return THPVariable_Wrap(var); }));
-  TORCH_INTERNAL_ASSERT(
-      _backward_idx.has_value(),
-      "indices should already be set by compiled_args, called before apply_with_saved");
-  TORCH_INTERNAL_ASSERT(!_backward_state_idx.has_value());
+
+  auto [bwd_idx, maybe_bwd_state_idx] = saved.retrieve_pynode_objs(this);
+
+  PyObject* backward_state_idx = Py_None;
+  if (maybe_bwd_state_idx.has_value()) {
+    backward_state_idx = THPUtils_packUInt64(maybe_bwd_state_idx.value());
+    // this might be simplifiable now that we no longer inline
+    Py_CLEAR(py_fn->compiled_autograd_backward_state);
+  }
   THPObjectPtr r(PyObject_CallMethod(
       // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-      compiler.value(),
+      saved.get_py_compiler(),
       "proxy_call_backward",
-      "OOOi",
+      "OOOiOO",
       pyInputs.get(),
       fwdInputMetadatas.get(),
       saved_tensors.get(),
-      *_backward_idx));
+      bwd_idx,
+      obj,
+      backward_state_idx));
 
   if (!r)
     throw_python_error();
@@ -287,15 +296,12 @@ auto PyNode::name() const -> std::string {
   return name;
 }
 
-auto PyNode::compiled_autograd_should_lift() const -> bool {
-  pybind11::gil_scoped_acquire gil;
-  static PyObject* attr_name =
-      PyUnicode_InternFromString("_compiled_autograd_should_lift");
-  THPObjectPtr should_lift(PyObject_GetAttr(obj, attr_name));
-  return PyObject_IsTrue(should_lift.get()) == 1;
+bool PyNode::is_aot_backward() const {
+  py::handle handle(obj);
+  return py::hasattr(py::getattr(handle, "_forward_cls"), "_aot_id");
 }
 
-void PyNode::compiled_args(CompiledNodeArgs& args) {
+void PyNode::compiled_args(CompiledNodeArgs& args) const {
   static PyObject* method_name =
       PyUnicode_InternFromString("_compiled_autograd_key");
   THPObjectPtr pykey(PyObject_CallMethodObjArgs(obj, method_name, nullptr));
@@ -339,55 +345,29 @@ void PyNode::compiled_args(CompiledNodeArgs& args) {
   args.collect(f->output_info);
   args.collect(f->input_info);
 
-  if (compiled_autograd_should_lift()) {
-    Py_INCREF(obj);
-    _backward_idx =
-        args.add_backward(c10::SafePyObject(obj, getPyInterpreter()));
-  }
-
+  Py_INCREF(obj);
+  c10::SafePyObject backward_obj(obj, getPyInterpreter());
+  std::optional<c10::SafePyObject> backward_state_obj;
   PyObject* bw_state = f->compiled_autograd_backward_state;
   if (args.cond(bw_state != nullptr)) {
     Py_INCREF(bw_state);
-    _backward_state_idx = args.add_backward_state(
-        c10::SafePyObject(bw_state, getPyInterpreter()));
+    backward_state_obj = c10::SafePyObject(bw_state, getPyInterpreter());
   }
+  args.collect_pynode_objs(
+      this, std::move(backward_obj), std::move(backward_state_obj));
 }
 
 variable_list PyNode::apply_with_saved(
     const variable_list& inputs,
     SwapSavedVariables& saved) {
   auto f = (THPFunction*)obj;
-  TORCH_INTERNAL_ASSERT(!f->compiled_autograd_tracing);
   saved.before(f->compiled_autograd_symints);
   saved.before(f->saved_variables);
   saved.before(f->needs_input_grad);
   saved.before(f->materialize_non_diff_grads);
   saved.before(f->output_info);
   saved.before(f->input_info);
-  f->compiled_autograd_tracing = true;
-  variable_list result;
-  if (!compiled_autograd_should_lift()) {
-    if (_backward_state_idx.has_value()) {
-      PyObject* r = PyObject_CallMethod(
-          saved.get_py_compiler(),
-          "bind_backward_state",
-          "i",
-          *_backward_state_idx);
-      if (r == nullptr) {
-        throw python_error();
-      }
-      THPObjectPtr prior(f->compiled_autograd_backward_state);
-      f->compiled_autograd_backward_state = r;
-      result = apply(variable_list(inputs));
-      Py_CLEAR(f->compiled_autograd_backward_state);
-      f->compiled_autograd_backward_state = prior.release();
-    } else {
-      result = apply(variable_list(inputs));
-    }
-  } else {
-    result = defer_to_dynamo(variable_list(inputs), saved.get_py_compiler());
-  }
-  f->compiled_autograd_tracing = false;
+  variable_list result = apply_with_saved_impl(variable_list(inputs), saved);
   saved.after(f->compiled_autograd_symints);
   saved.after(f->saved_variables);
   saved.after(f->needs_input_grad);
@@ -526,7 +506,7 @@ static void THPFunction_dealloc(THPFunction* self) {
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
-PyObject* THPFunction_new(
+static PyObject* THPFunction_new(
     PyTypeObject* type,
     PyObject* args,
     PyObject* kwargs) {
@@ -544,7 +524,6 @@ PyObject* THPFunction_new(
   new (&self->is_variable_input) std::vector<bool>();
   self->materialize_grads = true;
   self->materialize_non_diff_grads = true;
-  self->compiled_autograd_tracing = false;
   return obj;
 }
 
@@ -875,6 +854,7 @@ struct InputFlags {
   std::vector<bool> is_variable_input;
 };
 
+namespace {
 template <bool enforce_variables>
 std::pair<UnpackedInput, InputFlags> unpack_input(PyObject* args) {
   UnpackedInput unpacked;
@@ -938,7 +918,7 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject* args) {
 // value is assigned by the prim::PythonOp node and helps to eventually route
 // the outputs of the subgraph correctly This newly created subgraph is then
 // added to the prim::PythonOp node as a subgraph attribute
-static void _append_subgraph(
+void _append_subgraph(
     torch::jit::Node* node,
     torch::jit::Graph* graph,
     std::vector<torch::jit::Value*> trace_outputs,
@@ -980,7 +960,7 @@ static void _append_subgraph(
   }
 }
 
-static torch::jit::Node* _trace_pre_record(
+torch::jit::Node* _trace_pre_record(
     PyObject* op_obj,
     PyObject* input_objects,
     const variable_list& input_vars) {
@@ -1011,7 +991,7 @@ static torch::jit::Node* _trace_pre_record(
       std::move(pyobj), arg_types, input_vars, std::move(scalar_args));
 }
 
-static void _trace_post_record(
+void _trace_post_record(
     torch::jit::Node* node,
     PyObject* op_obj,
     const variable_list& input_vars,
@@ -1090,6 +1070,7 @@ PyObject* process_outputs(
     THPFunction* grad_fn,
     const UnpackedInput& unpacked,
     PyObject* inputs,
+    // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
     THPObjectPtr&& raw_output,
     bool is_executable,
     torch::jit::Node* node,
@@ -1218,8 +1199,6 @@ PyObject* THPFunction_maybe_clear_saved_tensors(
   END_HANDLE_TH_ERRORS
 }
 
-namespace {
-
 THPObjectPtr make_ctx_input_tuple(
     THPFunction* ctx,
     const UnpackedInput& unpacked_input,
@@ -1252,8 +1231,6 @@ THPObjectPtr make_ctx_input_output_tuple(
   PyTuple_SET_ITEM(result.get(), 2, output);
   return result;
 }
-
-} // namespace
 
 static PyObject* THPFunction_setup_context = nullptr;
 
@@ -1519,18 +1496,6 @@ PyObject* THPFunction_saved_variables(THPFunction* self, void* _unused) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPFunction_is_compiled_autograd_tracing(
-    PyObject* self,
-    PyObject* _unused) {
-  HANDLE_TH_ERRORS
-  if (((THPFunction*)self)->compiled_autograd_tracing) {
-    Py_RETURN_TRUE;
-  } else {
-    Py_RETURN_FALSE;
-  }
-  END_HANDLE_TH_ERRORS
-}
-
 PyObject* THPFunction_get_compiled_autograd_symints(
     PyObject* _self,
     PyObject* _unused) {
@@ -1652,6 +1617,7 @@ PyObject* THPFunction_metadata(THPFunction* self, void* _unused) {
   return metadata;
   END_HANDLE_TH_ERRORS
 }
+} // namespace
 
 using getter = PyObject* (*)(PyObject*, void*);
 using setter = int (*)(PyObject*, PyObject*, void*);
@@ -1786,10 +1752,6 @@ static struct PyMethodDef THPFunction_methods[] = {
      nullptr},
     {(char*)"register_hook", THPFunction_register_hook, METH_O, nullptr},
     {(char*)"register_prehook", THPFunction_register_prehook, METH_O, nullptr},
-    {(char*)"_is_compiled_autograd_tracing",
-     THPFunction_is_compiled_autograd_tracing,
-     METH_NOARGS,
-     nullptr},
     {(char*)"_get_compiled_autograd_symints",
      THPFunction_get_compiled_autograd_symints,
      METH_NOARGS,

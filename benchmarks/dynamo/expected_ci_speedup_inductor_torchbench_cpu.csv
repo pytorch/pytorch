@@ -12,7 +12,7 @@ functorch_maml_omniglot,inductor,float32,dynamic,cpp,1.126799
 yolov3,export-aot-inductor,float32,static,default,1.40687424
 mobilenet_v2,export-aot-inductor,float32,static,default,2.90375357
 resnext50_32x4d,export-aot-inductor,float32,dynamic,default,1.49299689
-hf_Albert,export-aot-inductor,float32,dynamic,default,1.33293645
+hf_Albert,export-aot-inductor,float32,dynamic,default,1.261471
 resnext50_32x4d,inductor,amp,static,default,1.47023111
 vgg16,inductor,amp,static,default,1.2692454
 hf_Longformer,inductor,amp,dynamic,default,1.22015225

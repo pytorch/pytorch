@@ -4,9 +4,9 @@
 #include <ATen/DynamicLibrary.h>
 #include <stdexcept>
 
-namespace at {
-namespace cuda {
-namespace detail {
+
+
+namespace at::cuda::detail {
 namespace _stubs {
 
 at::DynamicLibrary& getCUDALibrary() {
@@ -156,6 +156,7 @@ NVRTC_STUB2(nvrtcGetProgramLogSize,nvrtcProgram, size_t*)
 NVRTC_STUB2(nvrtcGetProgramLog, nvrtcProgram, char *)
 NVRTC_STUB3(nvrtcGetLoweredName, nvrtcProgram, const char *, const char **)
 
+CUDA_STUB2(cuModuleLoad, CUmodule*, const char*)
 CUDA_STUB2(cuModuleLoadData, CUmodule *, const void *)
 CUDA_STUB3(cuModuleGetFunction, CUfunction *, CUmodule, const char *)
 CUDA_STUB4(cuOccupancyMaxActiveBlocksPerMultiprocessor, int *, CUfunction, int, size_t)
@@ -169,6 +170,8 @@ CUDA_STUB4(cuLinkCreate, unsigned int, CUjit_option *, void **, CUlinkState *)
 CUDA_STUB3(cuLinkComplete, CUlinkState, void **, size_t *)
 CUDA_STUB3(cuFuncSetAttribute, CUfunction, CUfunction_attribute, int)
 CUDA_STUB3(cuFuncGetAttribute, int*, CUfunction_attribute, CUfunction)
+CUDA_STUB3(cuPointerGetAttribute, void*, CUpointer_attribute, CUdeviceptr)
+
 
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 12000
 CUresult CUDAAPI
@@ -293,6 +296,4 @@ NVRTC lazyNVRTC = {
   AT_FORALL_NVRTC(_REFERENCE_MEMBER)
 #undef _REFERENCE_MEMBER
 };
-} // namespace detail
-} // namespace cuda
-} // namespace at
+} // namespace at::cuda::detail

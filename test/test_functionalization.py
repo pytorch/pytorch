@@ -1,4 +1,5 @@
 # Owner(s): ["module: codegen"]
+# ruff: noqa: F841
 
 import unittest
 from contextlib import nullcontext

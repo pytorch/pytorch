@@ -1,3 +1,18 @@
+"""
+This module provides functionality for tracking and managing regions in computational graphs.
+It supports graph optimization by identifying and grouping similar regions based on their
+structure and behavior. The module implements algorithms for:
+
+1. Tracking nodes and their relationships in the computational graph
+2. Identifying identical or similar regions across the graph
+3. Managing graph regions for optimization purposes
+4. Supporting deduplication and other graph transformation passes
+
+The core functionality revolves around the GraphRegionTracker class which maintains
+mappings between nodes and their duplicates, enabling efficient graph analysis and
+optimization operations.
+"""
+
 import copyreg
 import io
 import logging
@@ -5,18 +20,7 @@ import math
 import pickle
 from collections import defaultdict, deque
 from dataclasses import fields
-from typing import (
-    Any,
-    Callable,
-    Deque,
-    Dict,
-    List,
-    Optional,
-    Set,
-    Tuple,
-    TYPE_CHECKING,
-    TypeVar,
-)
+from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar
 
 import torch._logging
 import torch.fx
@@ -32,9 +36,9 @@ if TYPE_CHECKING:
 
 
 Node = torch.fx.Node
-Region = List[Node]
-IdenticalNodes = List[Node]
-GlobalStateKey = Tuple[bool, bool, int, bool, bool, torch.dtype, bool, bool, bool, bool]
+Region = list[Node]
+IdenticalNodes = list[Node]
+GlobalStateKey = tuple[bool, bool, int, bool, bool, torch.dtype, bool, bool, bool, bool]
 
 log = logging.getLogger(__name__)
 graph_expansion_log = torch._logging.getArtifactLogger(
@@ -48,7 +52,7 @@ def debug_log(msg: str, *args) -> None:  # type: ignore[no-untyped-def]
 
 def _extract_tensor_metadata_for_node_hash(
     x: torch.Tensor,
-) -> Tuple[Callable[[T], T], Tuple[Any, ...]]:
+) -> tuple[Callable[[T], T], tuple[Any, ...]]:
     from torch._inductor.codecache import _ident, extract_tensor_metadata_for_cache_key
 
     out = []
@@ -104,7 +108,7 @@ def _extract_tensor_arg(arg: Any) -> Any:
 
 def _normalize_args(
     node: Node,
-) -> Tuple[Tuple[str, ...], Tuple[Optional[Any], ...]]:
+) -> tuple[tuple[str, ...], tuple[Optional[Any], ...]]:
     flat_args, _ = tree_flatten(node.args)
     sorted_kwargs = sorted(node.kwargs.items(), key=lambda x: x[0])
     sorted_keys = tuple(sorted(node.kwargs.keys()))
@@ -138,7 +142,7 @@ def get_global_state_key() -> GlobalStateKey:
 class BackwardBfsArgIter:
     def __init__(self, origin: Node) -> None:
         self._cur: Optional[Node] = origin
-        self._queue: Deque[Optional[Node]] = deque()
+        self._queue: deque[Optional[Node]] = deque()
 
     @staticmethod
     def create(origin: Node) -> "BackwardBfsArgIter":
@@ -188,8 +192,8 @@ class GraphRegionTracker:
     """
 
     def __init__(self) -> None:
-        self.hash_to_duplicates: Dict[str, IdenticalNodes] = defaultdict(list)
-        self.node_to_duplicates: Dict[Node, IdenticalNodes] = {}
+        self.hash_to_duplicates: dict[str, IdenticalNodes] = defaultdict(list)
+        self.node_to_duplicates: dict[Node, IdenticalNodes] = {}
         self.input_pickler = InputPickler()
 
     def _hash_node(
@@ -231,7 +235,7 @@ class GraphRegionTracker:
         except NodeHashException as e:
             log.debug("Unable to hash node %s with exception %s", node, e)
 
-    def get_identical_regions(self, graph: torch.fx.Graph) -> List[List[Region]]:
+    def get_identical_regions(self, graph: torch.fx.Graph) -> list[list[Region]]:
         """
         This function is responsible for extracting the largest regions of identical nodes from the given graph.
         **Note**: This function assumes the nodes that have been tracked with track_node are in the provided graph argument.
@@ -258,10 +262,13 @@ class GraphRegionTracker:
                 region_group = []
                 min_rank = math.inf
                 for node in group:
-                    min_rank = min(min_rank, topological_ranking[node])
-                    region_group.append([node])
+                    # some nodes aren't in the topo ranking?
+                    if node in topological_ranking:
+                        min_rank = min(min_rank, topological_ranking[node])
+                        region_group.append([node])
 
-                region_groups_with_rank.append((region_group, min_rank))
+                if len(region_group) > 1:
+                    region_groups_with_rank.append((region_group, min_rank))
 
         region_groups_with_rank.sort(key=lambda rg: -rg[1])
         region_groups = [rg for rg, _ in region_groups_with_rank]
@@ -269,9 +276,12 @@ class GraphRegionTracker:
         # We start from regions later in the graph and expand them earlier
         # as a result, we will create the largest regions first and they won't
         # overlap.
-        seen_nodes: Set[Node] = set()
+        seen_nodes: set[Node] = set()
         for region_group in region_groups:
             fully_expand_region_group(region_group, seen_nodes, self._is_identical)
+            # sort topologically
+            for region in region_group:
+                region.sort(key=lambda n: topological_ranking[n])
 
         return [
             region_group for region_group in region_groups if len(region_group[0]) > 1
@@ -282,8 +292,8 @@ class GraphRegionTracker:
 
 
 def fully_expand_region_group(
-    regions: List[Region],
-    seen_nodes: Set[Node],
+    regions: list[Region],
+    seen_nodes: set[Node],
     is_identical_fn: Callable[[Node, Node], bool],
 ) -> None:
     debug_log("--------------------------------------------------")
@@ -296,7 +306,7 @@ def fully_expand_region_group(
         (origin,) = region  # Only works for 1 element sets
         region_iters.append(BackwardBfsArgIter.create(origin))
 
-    nodes_to_add: List[Node] = []
+    nodes_to_add: list[Node] = []
 
     # we already have the origin node in each region
     for region_it in region_iters:
@@ -326,6 +336,7 @@ def fully_expand_region_group(
                 add_node &= (
                     node not in seen_nodes
                     and node not in nodes_to_add_set
+                    and node.op != "placeholder"
                     and is_identical_fn(node, current_node)
                 )
                 nodes_to_add.append(node)

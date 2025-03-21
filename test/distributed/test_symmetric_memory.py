@@ -72,8 +72,9 @@ class SymmetricMemoryTest(MultiProcessTestCase):
     def device(self) -> torch.device:
         return torch.device(f"cuda:{self.rank}")
 
-    def _init_process(self):
-        torch.cuda.set_device(self.device)
+    def _init_process(self, set_device: bool = True):
+        if set_device:
+            torch.cuda.set_device(self.device)
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
             backend="nccl",
@@ -142,8 +143,9 @@ class SymmetricMemoryTest(MultiProcessTestCase):
 
     @skipIfRocm
     @skip_if_lt_x_gpu(2)
-    def test_empty_strided_p2p(self) -> None:
-        self._init_process()
+    @parametrize("set_device", [True, False])
+    def test_empty_strided_p2p(self, set_device: bool) -> None:
+        self._init_process(set_device)
         enable_symm_mem_for_group(dist.group.WORLD.group_name)
 
         alloc_args = self._get_test_alloc_args()
@@ -160,8 +162,9 @@ class SymmetricMemoryTest(MultiProcessTestCase):
 
     @skipIfRocm
     @skip_if_lt_x_gpu(2)
-    def test_empty_strided_p2p_persistent(self) -> None:
-        self._init_process()
+    @parametrize("set_device", [True, False])
+    def test_empty_strided_p2p_persistent(self, set_device: bool) -> None:
+        self._init_process(set_device)
         enable_symm_mem_for_group(dist.group.WORLD.group_name)
 
         alloc_args = self._get_test_alloc_args()
@@ -366,6 +369,8 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         os.environ["TORCH_SYMM_MEM_ENABLE_NATIVE_ASYNC_TP"] = "1"
         self._init_process()
 
+        # See _should_use_fused_all_gather_matmul_native() for the algo
+        # selection criteria of _fused_all_gather_matmul_native().
         M = 4096
         N = 1024
         K = 1024
@@ -403,6 +408,47 @@ class SymmetricMemoryTest(MultiProcessTestCase):
 
         self.assertTrue(
             any("PersistentAsyncInputScheduler" in event.key for event in prof.events())
+        )
+
+        torch.testing.assert_close(ag_target, ag_baseline)
+        torch.testing.assert_close(mm_target[0], mm_baseline[0])
+
+        dist.destroy_process_group()
+
+    @skipIfRocm
+    @skip_if_lt_x_gpu(2)
+    @requires_multicast_support()
+    def test_multimem_all_gather_matmul(self) -> None:
+        self._init_process()
+
+        # See _should_use_multimem_all_gather_matmul() for the algo
+        # selection criteria of _multimem_gather_matmul().
+        M = 1024
+        N = 1024
+        K = 1024
+        group_name = dist.group.WORLD.group_name
+
+        torch.manual_seed(42 + self.rank)
+        A_shard = torch.rand(
+            M // self.world_size, K, dtype=torch.bfloat16, device="cuda"
+        )
+
+        B = torch.rand(K, N, dtype=torch.bfloat16, device="cuda")
+
+        ag_baseline, mm_baseline = _fused_all_gather_matmul_fallback(
+            A_shard, [B], gather_dim=0, group_name=group_name, return_A=False
+        )
+        with torch.profiler.profile(
+            activities=[
+                torch.profiler.ProfilerActivity.CUDA,
+            ],
+        ) as prof:
+            ag_target, mm_target = torch.ops.symm_mem.fused_all_gather_matmul(
+                A_shard, [B], gather_dim=0, group_name=group_name, return_A=False
+            )
+
+        self.assertTrue(
+            any("multimem_all_gather_kernel" in event.key for event in prof.events())
         )
 
         torch.testing.assert_close(ag_target, ag_baseline)
@@ -724,9 +770,10 @@ class SubgroupTest(MultiProcessTestCase):
             self.assertTrue(buf.eq(peer_rank + world.size() // 2).all())
 
 
+@skipIfRocm
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
-class SymmMemAllReduceTest(MultiProcessTestCase):
+class SymmMemCollectiveTest(MultiProcessTestCase):
     def setUp(self) -> None:
         super().setUp()
         self._spawn_processes()
@@ -811,6 +858,7 @@ class SymmMemAllReduceTest(MultiProcessTestCase):
 
         dist.destroy_process_group()
 
+    @skipIfRocm
     @skip_if_lt_x_gpu(4)
     @parametrize("dtype", [torch.float, torch.bfloat16])
     @parametrize("align_bytes", [4, 8, 16])
@@ -831,6 +879,7 @@ class SymmMemAllReduceTest(MultiProcessTestCase):
 
         dist.destroy_process_group()
 
+    @skipIfRocm
     @skip_if_lt_x_gpu(4)
     @parametrize("dtype", [torch.float, torch.bfloat16])
     @parametrize("align_bytes", [4, 8, 16])
@@ -875,6 +924,32 @@ class SymmMemAllReduceTest(MultiProcessTestCase):
         torch.testing.assert_close(
             gathered_inps.sum(dim=0), res, rtol=1e-01, atol=1e-01
         )
+
+    @skip_if_lt_x_gpu(4)
+    @parametrize("align_bytes", [4, 8, 16])
+    def test_multimem_all_gather(self, align_bytes: int) -> None:
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+
+        input_numel = 32
+        shift = align_bytes // 4
+        input = torch.zeros(shift + input_numel, device=self.device)[shift:].fill_(
+            self.rank
+        )
+
+        out = symm_mem.empty(
+            shift + input_numel * self.world_size, device=self.device
+        ).zero_()[shift:]
+        symm_mem.rendezvous(out, group=group_name)
+
+        torch.ops.symm_mem.multimem_all_gather_out(input, group_name, out)
+        ref = torch.ops._c10d_functional.all_gather_into_tensor(
+            input, self.world_size, group_name
+        )
+        ref = torch.ops._c10d_functional.wait_tensor(ref)
+
+        self.assertTrue(out.eq(ref).all())
+        dist.destroy_process_group()
 
 
 @instantiate_parametrized_tests

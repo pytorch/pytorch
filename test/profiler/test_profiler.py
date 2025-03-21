@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: profiler"]
+# ruff: noqa: F841
 
 import collections
 import gc
@@ -16,7 +17,7 @@ import threading
 import time
 import unittest
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Optional, TYPE_CHECKING
 from unittest.mock import patch
 
 import expecttest
@@ -69,6 +70,10 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TestCase,
 )
+
+
+if TYPE_CHECKING:
+    from torch.autograd.profiler_util import FunctionEvent
 
 
 # if tqdm is not shutdown properly, it will leave the monitor thread alive.
@@ -288,8 +293,7 @@ class TestProfiler(TestCase):
                     )
                 )
 
-        # TODO: https://github.com/pytorch/kineto/issues/617
-        if kineto_available() and not IS_WINDOWS:
+        if kineto_available():
             with TemporaryFileName(mode="w+") as fname:
                 p.export_chrome_trace(fname)
                 with open(fname) as f:
@@ -844,7 +848,7 @@ class TestProfiler(TestCase):
                 super().__init__(*args, **kwargs)
 
         def train():
-            for _, data in enumerate(dataloader):
+            for data in dataloader:
                 x, y = data[0], data[1]
                 y_pred = model(x)
                 loss = criterion(y_pred, y)
@@ -949,6 +953,8 @@ class TestProfiler(TestCase):
         )
         self.assertIn("Total MFLOPs", profiler_output)
 
+    @patch.dict(os.environ, {"KINETO_USE_DAEMON": "1"})
+    @patch.dict(os.environ, {"KINETO_DAEMON_INIT_DELAY_S": "1"})
     def test_kineto_profiler_api(self):
         called_num = [0]
 
@@ -1033,6 +1039,8 @@ class TestProfiler(TestCase):
         for step in range(len(test_schedule_expected_outputs)):
             self.assertEqual(test_schedule(step), test_schedule_expected_outputs[step])
 
+    @patch.dict(os.environ, {"KINETO_USE_DAEMON": "1"})
+    @patch.dict(os.environ, {"KINETO_DAEMON_INIT_DELAY_S": "1"})
     def test_kineto_profiler_multiple_steppers(self):
         niters = 8
         use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
@@ -1281,8 +1289,9 @@ class TestProfiler(TestCase):
 
     def test_profiler_fwd_bwd_link(self):
         with _profile(use_kineto=True) as prof:
-            t1, t2 = torch.ones(1, requires_grad=True), torch.ones(
-                1, requires_grad=True
+            t1, t2 = (
+                torch.ones(1, requires_grad=True),
+                torch.ones(1, requires_grad=True),
             )
             z = torch.add(t1, t2)
             y = torch.ones(1)
@@ -1336,8 +1345,9 @@ class TestProfiler(TestCase):
             torch._C._profiler._set_fwd_bwd_enabled_val(False)
 
             with _profile(use_kineto=True) as prof:
-                t1, t2 = torch.ones(1, requires_grad=True), torch.ones(
-                    1, requires_grad=True
+                t1, t2 = (
+                    torch.ones(1, requires_grad=True),
+                    torch.ones(1, requires_grad=True),
                 )
                 z = torch.add(t1, t2)
                 y = torch.ones(1)
@@ -1355,11 +1365,7 @@ class TestProfiler(TestCase):
         finally:
             torch._C._profiler._set_fwd_bwd_enabled_val(True)
 
-    # This test is broken on Windows, the likely reason is that kineto/CUPTI
-    # is not supported that particular environment. Once the CI stabilizes
-    # we can narrow the condition so Windows is checked as well (TODO)
     @unittest.skipIf(not kineto_available(), "Kineto is required")
-    @unittest.skipIf(IS_WINDOWS, "Test does not work on Windows")
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     def test_profiler_cuda_sync_events(self):
         device = torch.device("cuda:0")
@@ -2122,6 +2128,117 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
         for step in range(len(test_schedule_expected_outputs)):
             self.assertEqual(test_schedule(step), test_schedule_expected_outputs[step])
 
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_disable_external_correlation(self):
+        cuda_external_id_events = {"cuda_runtime", "gpu_memcpy", "kernel"}
+        activities = [ProfilerActivity.CPU, ProfilerActivity.CUDA]
+
+        def check_correlations(event, disable_external_correlation):
+            if "cat" in event and event["cat"] in cuda_external_id_events:
+                if disable_external_correlation:
+                    self.assertTrue("External id" not in event["args"])
+                elif event["name"] != "cudaDeviceSynchronize":
+                    self.assertTrue("External id" in event["args"])
+                    self.assertTrue(event["args"]["External id"] > 0)
+
+        def validate_json(prof, disable_external_correlation):
+            with TemporaryFileName(mode="w+") as fname:
+                prof.export_chrome_trace(fname)
+                with open(fname) as f:
+                    events = json.load(f)["traceEvents"]
+                    seen_event_types = set()
+                    for event in events:
+                        check_correlations(event, disable_external_correlation)
+                        if "cat" in event:
+                            seen_event_types.add(event["cat"])
+                    self.assertTrue(cuda_external_id_events.issubset(seen_event_types))
+
+        # Run with External Id for CUDA events on and off
+        for disable_external_correlation in [False, True]:
+            with profile(
+                activities=activities,
+                experimental_config=torch._C._profiler._ExperimentalConfig(
+                    disable_external_correlation=disable_external_correlation
+                ),
+            ) as prof:
+                self.payload(use_cuda=True)
+            validate_json(prof, disable_external_correlation)
+
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_profile_all_threads(self):
+        profiling_started = threading.Event()
+        profiling_ended = threading.Event()
+        n_rep = 5
+
+        def prep_inputs():
+            return [torch.randn(1024, 1024, device="cuda") for _ in range(2)]
+
+        def main_thread_fn(profile_all_threads, returned_events):
+            x, y = prep_inputs()
+            experimental_config = torch._C._profiler._ExperimentalConfig(
+                profile_all_threads=profile_all_threads
+            )
+            with torch.profiler.profile(
+                experimental_config=experimental_config, record_shapes=True
+            ) as p:
+                profiling_started.set()
+                for _ in range(n_rep):
+                    _ = x @ y
+                profiling_ended.wait()
+            returned_events.append(p.events())
+
+        def side_thread_fn():
+            x, y = prep_inputs()
+            profiling_started.wait()
+            for _ in range(n_rep):
+                _ = x @ y
+            profiling_ended.set()
+
+        def main_with_thread_fn(profile_all_threads):
+            x, y = prep_inputs()
+            experimental_config = torch._C._profiler._ExperimentalConfig(
+                profile_all_threads=profile_all_threads
+            )
+            with torch.profiler.profile(
+                experimental_config=experimental_config, record_shapes=True
+            ) as p:
+                side_thread = threading.Thread(target=side_thread_fn)
+                side_thread.start()
+                for _ in range(n_rep):
+                    _ = x @ y
+                side_thread.join()
+            return p.events()
+
+        for profile_all_threads in (True, False):
+            returned_events = []
+            main_thread = threading.Thread(
+                target=main_thread_fn, args=(profile_all_threads, returned_events)
+            )
+            side_thread = threading.Thread(target=side_thread_fn)
+            main_thread.start()
+            side_thread.start()
+            main_thread.join()
+            side_thread.join()
+
+            def verify_events(events):
+                mm_events = collections.defaultdict(int)
+                for e in events:
+                    if e.name == "aten::mm":
+                        mm_events[e.thread] += 1
+                        self.assertEqual(e.input_shapes, [[1024, 1024], [1024, 1024]])
+                self.assertEqual(len(mm_events), 1 + int(profile_all_threads))
+                for v in mm_events.values():
+                    self.assertEqual(v, n_rep)
+
+            verify_events(returned_events[0])
+            # test spawning thread from within the profiled region
+            events = main_with_thread_fn(profile_all_threads)
+            verify_events(events)
+
 
 class SimpleNet(nn.Module):
     def __init__(self) -> None:
@@ -2165,7 +2282,7 @@ class MockProfilerEvent:
     start_time_ns: int
     duration_time_ns: int
     correlation_id: int = 0
-    children: List["MockProfilerEvent"] = field(default_factory=list)
+    children: list["MockProfilerEvent"] = field(default_factory=list)
     parent: Optional["MockProfilerEvent"] = None
 
     @property
@@ -2189,7 +2306,7 @@ class MockNode:
 
 @unittest.skipIf(sys.version_info >= (3, 13), "segfaults")
 class TestExperimentalUtils(TestCase):
-    def make_tree(self) -> List[MockNode]:
+    def make_tree(self) -> list[MockNode]:
         tree = {
             "root_0": {
                 "1": {"2": {}},
@@ -2350,8 +2467,9 @@ class TestExperimentalUtils(TestCase):
 
     def test_utils_compute_self_time(self):
         with profile() as prof:
-            t1, t2 = torch.ones(1, requires_grad=True), torch.ones(
-                1, requires_grad=True
+            t1, t2 = (
+                torch.ones(1, requires_grad=True),
+                torch.ones(1, requires_grad=True),
             )
             z = torch.add(t1, t2)
             y = torch.ones(1)
@@ -2809,6 +2927,72 @@ aten::mm""",
         addr2line = torch._C._profiler.symbolize_addresses(addrs, "addr2line")
         self.assertEqual(len(fast), len(addrs))
         self.assertEqual(len(addr2line), len(fast))
+
+    def test_profiler_overload_names(self):
+        from torch.library import _scoped_library, fallthrough_kernel
+
+        def validate_json(prof):
+            print()
+            with TemporaryFileName(mode="w+") as fname:
+                prof.export_chrome_trace(fname)
+                with open(fname) as f:
+                    events = json.load(f)["traceEvents"]
+                    self.assertTrue(
+                        any("aten::add.Tensor" in e["name"] for e in events)
+                    )
+                    self.assertTrue(any("aten::add.out" in e["name"] for e in events))
+
+        with _scoped_library("aten", "IMPL") as my_lib:
+            my_lib.impl("add.Tensor", fallthrough_kernel, "CPU")
+            experimental_config = torch._C._profiler._ExperimentalConfig(
+                capture_overload_names=True
+            )
+            with profile(
+                experimental_config=experimental_config,
+                activities=[ProfilerActivity.CPU],
+            ) as prof:
+                torch.add(1, 5)
+
+            # The following execution trace is expected
+            #
+            # Dispatch trace:
+            # [call] op=[aten::add.Tensor], key=[AutogradCPU]
+            #   [redispatch] op=[aten::add.Tensor], key=[Undefined]
+            #     [call] op=[aten::empty.memory_format], key=[BackendSelect]
+            #       [redispatch] op=[aten::empty.memory_format], key=[CPU]
+            #     [call] op=[aten::add.out], key=[CPU]
+            #
+            # prof.table()
+            # ---------------  ---------------  ------------  ------------  ------------  ------------  ------------  ------------
+            #            Name    Overload Name    Self CPU %      Self CPU   CPU total %     CPU total  CPU time avg    # of Calls
+            # ---------------  ---------------  ------------  ------------  ------------  ------------  ------------  ------------
+            #       aten::add           Tensor        71.97%     130.887us       100.00%     181.873us     181.873us             1
+            #     aten::empty    memory_format         8.52%      15.489us         8.52%      15.489us      15.489us             1
+            #       aten::add              out        19.52%      35.497us        19.52%      35.497us      35.497us             1
+            # ---------------  ---------------  ------------  ------------  ------------  ------------  ------------  ------------
+
+            # aten::add.out and aten::empty.memory_format are children of aten::add.Tensor
+            aten_add_parent: list[FunctionEvent] = [
+                event for event in prof.events() if len(event.cpu_children) == 2
+            ]
+            assert len(aten_add_parent) == 1
+            aten_add_parent = aten_add_parent[0]
+            assert aten_add_parent.overload_name == "Tensor"
+
+            aten_add_out_event = [
+                c for c in aten_add_parent.cpu_children if c.overload_name == "out"
+            ]
+            assert len(aten_add_out_event) == 1
+
+            # Without group_by_overload_name, the overload name is ignored in the key averages
+            key_averages = prof.key_averages()
+            assert len(key_averages) == 2
+            assert "Overload Name" not in key_averages.table()
+
+            key_averages = prof.key_averages(group_by_overload_name=True)
+            assert len(key_averages) == 3
+            assert "Overload Name" in key_averages.table()
+            validate_json(prof)
 
 
 if __name__ == "__main__":

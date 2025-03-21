@@ -1,18 +1,42 @@
 # mypy: ignore-errors
 
+"""
+This module implements variable tracking for PyTorch nn.Module instances during Dynamo tracing.
+
+It provides specialized handling for different types of nn.Module instances through several key classes:
+
+- NNModuleVariable: Handles instance-specific module tracing, specializing on module id() and placing
+  parameters directly on the torch.fx.GraphModule. This creates one graph per module instance.
+
+- UnspecializedNNModuleVariable: Provides class-level module tracing, treating nn.Modules like other
+  user-defined objects and passing parameters as inputs to the FX graph. This creates one graph per
+  module class.
+
+- UnspecializedBuiltinNNModuleVariable: Specifically handles built-in PyTorch modules (e.g. nn.Linear)
+  with appropriate optimizations.
+
+- FSDPManagedNNModuleVariable: Special handling for FSDP-wrapped modules with modified guarding behavior
+  and parameter handling.
+
+The module integrates with Dynamo's broader tracing functionality to handle module method calls,
+parameter access, hooks, and other nn.Module behaviors while maintaining proper scoping and guarding
+of module state.
+"""
+
 import functools
 import inspect
 import itertools
 import types
 from contextlib import contextmanager, nullcontext
-from typing import Dict, List, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torch.nn
 
-from .. import trace_rules, variables
+from .. import graph_break_hints, trace_rules, variables
 from ..exc import (
     raise_observed_exception,
     unimplemented,
+    unimplemented_v2,
     UnspecializeRestartAnalysis,
     Unsupported,
 )
@@ -21,6 +45,7 @@ from ..mutation_guard import GenerationTracker
 from ..source import (
     AttrSource,
     ConstDictKeySource,
+    DictGetItemSource,
     FSDPNNModuleSource,
     GetItemSource,
     NNModuleSource,
@@ -192,7 +217,9 @@ class NNModuleVariable(VariableTracker):
             )
         return result
 
-    def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslator", name: str
+    ) -> "VariableTracker":
         mod = tx.output.get_submodule(self.module_key)
         result = hasattr(mod, name)
         install_guard(
@@ -285,8 +312,11 @@ class NNModuleVariable(VariableTracker):
                 )
                 if result is not None:
                     return result
-                # if we can't find a __getattr__, just raise the AttributeError
-                raise
+                # if we can't find a __getattr__, we can't parse this, raise attribute error
+                raise_observed_exception(
+                    AttributeError,
+                    tx,
+                )
 
         if name == "forward":
             guard_to_detect_forward_monkeypatching(self.source, base)
@@ -333,8 +363,16 @@ class NNModuleVariable(VariableTracker):
                 # Support possibly common cases of class members
                 return VariableTracker.build(tx, subobj, NNModuleSource(source))
             else:
-                unimplemented(
-                    f"class property {name} - {typestr(base)} {typestr(subobj)}"
+                unimplemented_v2(
+                    gb_type="Unsupported nn.Module attribute type",
+                    context=f"nn.Module subclass: {typestr(base)}, name: {name}, attribute type: {typestr(subobj)}",
+                    explanation=f"Dynamo does not support tracing nn.Module attributes of type `{typestr(subobj)}`",
+                    hints=[
+                        f"Refactor your code so that `{name}` (type `{typestr(subobj)}`) is not an attribute of `{typestr(base)}`",
+                        "Currently supported attribute types are methods, classmethods, staticmethods, "
+                        "properties, constants, and tensors.",
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
                 )
 
         return variables.GetAttrVariable(self, name, source=source)
@@ -342,8 +380,8 @@ class NNModuleVariable(VariableTracker):
     def call_function(
         self,
         tx,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         mod = tx.output.get_submodule(self.module_key)
 
@@ -362,9 +400,9 @@ class NNModuleVariable(VariableTracker):
                     self.convert_to_unspecialized(tx)
 
                 # Unroll sequential
-                assert (
-                    not is_lazy
-                ), "Expected lazy sequential isn't a valid combination?"
+                assert not is_lazy, (
+                    "Expected lazy sequential isn't a valid combination?"
+                )
                 assert not kwargs
                 (arg,) = args
                 # TODO: Use named_children when it supports remove_duplicate=False.
@@ -450,8 +488,8 @@ class NNModuleVariable(VariableTracker):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
         constant=False,
     ) -> "VariableTracker":
         from . import ConstantVariable, ListIteratorVariable, TupleVariable
@@ -851,8 +889,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         mod = self.value
         # see comment on lazy module handling in NNModuleVariable.call_function for context
@@ -919,8 +957,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name in ["_call_impl", "_wrapped_call_impl"]:
             fn = getattr(self.value_type, name)
@@ -1038,7 +1076,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         # However, ConstDictVariable guards on keys. This can cause recompiles when the same hook is installed for
         # differnt nn module instances, because the key keeps changing (look more into RemovableHandle to understand why
         # key changes - also related https://github.com/pytorch/pytorch/issues/125836). Here, we carefully craft a
-        # ConstDictVariable to avoid any guard on the keys.
+        # NNModuleHooksDictVariable (a subclass of ConstDictVariable) to avoid any guard on the keys.
         if (
             self.source
             and name
@@ -1060,7 +1098,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 # Instead of using dict[key] to access the value, use a dict[dict.keys()[index]] to access the
                 # value. This removes the reliance on the actual key value.
                 source_key = ConstDictKeySource(hooks_dict_source, i)
-                source_value = GetItemSource(hooks_dict_source, source_key)
+                source_value = DictGetItemSource(hooks_dict_source, source_key)
                 value = LazyVariableTracker.create(v, source_value)
                 return key, value
 
@@ -1068,7 +1106,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 build_key_value(i, k, v) for i, (k, v) in enumerate(hooks_dict.items())
             )
 
-            return variables.ConstDictVariable(
+            return variables.NNModuleHooksDictVariable(
                 result, type(hooks_dict), source=hooks_dict_source
             )
         return super().var_getattr(tx, name)
@@ -1116,9 +1154,9 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
 
     def __init__(self, value, **kwargs) -> None:
         source = kwargs.get("source", None)
-        assert (
-            source is not None
-        ), "FSDPManagedNNModule depends on having an accurate source to control guarding."
+        assert source is not None, (
+            "FSDPManagedNNModule depends on having an accurate source to control guarding."
+        )
 
         super().__init__(value=value, **kwargs)
         self.source = source

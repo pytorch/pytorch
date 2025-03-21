@@ -1,11 +1,19 @@
 # mypy: allow-untyped-defs
-from typing import Any, Callable, List, TypeVar
+from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar
+from typing_extensions import ParamSpec
 
 import torch
+
+from . import config
+
+
+if TYPE_CHECKING:
+    from ._cache import CacheInfo
 
 
 __all__ = [
     "compile",
+    "config",
     "assume_constant_result",
     "reset",
     "allow_in_graph",
@@ -17,10 +25,14 @@ __all__ = [
     "wrap_numpy",
     "is_compiling",
     "is_dynamo_compiling",
+    "is_exporting",
+    "save_cache_artifacts",
+    "load_cache_artifacts",
 ]
 
 
-_F = TypeVar("_F", bound=Callable[..., Any])
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
 
 def compile(*args, **kwargs):
@@ -123,11 +135,11 @@ def allow_in_graph(fn):
 
 
 def substitute_in_graph(
-    original_fn: _F,
+    original_fn: Callable[_P, _R],
     *,
     can_constant_fold_through: bool = False,
     skip_signature_check: bool = False,
-) -> Callable[[_F], _F]:
+) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
     """
     Register a polyfill handler for a function, usually a C function from the C extension, to be
     used in place of the original function when inlining the original function in the graph.
@@ -185,7 +197,7 @@ def substitute_in_graph(
     )
 
 
-def list_backends(exclude_tags=("debug", "experimental")) -> List[str]:
+def list_backends(exclude_tags=("debug", "experimental")) -> list[str]:
     """
     Return valid strings that can be passed to `torch.compile(..., backend="name")`.
 
@@ -200,7 +212,7 @@ def list_backends(exclude_tags=("debug", "experimental")) -> List[str]:
 def assume_constant_result(fn):
     """
     This function is used to mark a function `fn` as having a constant result.
-    This allows the compiler to optimize away your function
+    This allows the compiler to optimize away your function.
     Returns The same function `fn`
 
     Args:
@@ -218,8 +230,8 @@ def assume_constant_result(fn):
 
 def disable(fn=None, recursive=True):
     """
-    This function provides a decorator to disable compilation on a function
-    It also provides the option of recursively disabling called functions
+    This function provides a decorator to disable compilation on a function.
+    It also provides the option of recursively disabling called functions.
 
     Args:
         fn (optional): The function to disable
@@ -362,6 +374,7 @@ def wrap_numpy(fn):
 
 
 _is_compiling_flag: bool = False
+_is_exporting_flag: bool = False
 
 
 def is_compiling() -> bool:
@@ -402,3 +415,52 @@ def is_dynamo_compiling() -> bool:
         >>>     # ...rest of the function...
     """
     return False
+
+
+def is_exporting() -> bool:
+    """
+    Indicated whether we're under exporting.
+
+    It's stricter than is_compiling() flag, as it would only be set to True when
+    torch.export is used.
+
+    Example::
+
+        >>> def forward(self, x):
+        >>>     if not torch.compiler.is_exporting():
+        >>>        pass # ...logic that is not needed in export...
+        >>>
+        >>>     # ...rest of the function...
+    """
+    return _is_exporting_flag
+
+
+def save_cache_artifacts() -> Optional[tuple[bytes, "CacheInfo"]]:
+    """
+    Serializes all the cache artifacts that were created during the compilation
+
+    Example:
+
+    - Execute torch.compile
+    - Call torch.compiler.save_cache_artifacts()
+    """
+    from ._cache import CacheArtifactManager, CacheInfo
+
+    return CacheArtifactManager.serialize()
+
+
+def load_cache_artifacts(serialized_artifacts: bytes) -> Optional["CacheInfo"]:
+    """
+    Hot loads cache artifacts that were previously serialized via
+    save_cache_artifacts
+
+    Example:
+
+    # From a previous invocation
+    artifacts = torch.compiler.save_cache_artifacts()
+
+    torch.compiler.load_cache_artifacts(artifacts[0])
+    """
+    from ._cache import CacheArtifactManager, CacheInfo
+
+    return CacheArtifactManager.deserialize(serialized_artifacts)

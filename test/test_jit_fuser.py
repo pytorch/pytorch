@@ -32,7 +32,7 @@ def strip_profiling_nodes(nodes):
 
 def warmup_forward(f, *args):
     profiling_count = 2
-    for i in range(profiling_count):
+    for _ in range(profiling_count):
         results = f(*args)
 
     return results
@@ -94,7 +94,7 @@ class TestFuser(JitTestCase):
         sin = torch.zeros(0, device="cuda")
         cos = torch.zeros(0, device="cuda")
         inputs = [sin, cos]
-        ge = self.checkScript(decode, inputs)
+        self.checkScript(decode, inputs)
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_arg_configurations_smoke_cuda(self):
@@ -587,7 +587,7 @@ class TestFuser(JitTestCase):
             return p * (x * x + x)
 
         scripted = torch.jit.script(fn_test_scalar_arg_requires_grad)
-        out = scripted(x, p)
+        scripted(x, p)
         self.assertAllFused(scripted.graph_for(x, p), except_for=("aten::size", "prim::BroadcastSizes",
                                                                   "aten::_size_if_not_equal"))
 

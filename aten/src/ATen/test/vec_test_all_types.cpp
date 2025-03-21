@@ -113,7 +113,7 @@ namespace {
     TYPED_TEST_SUITE(Pow, RealFloatTestedTypes);
     TYPED_TEST_SUITE(RealTests, RealFloatTestedTypes);
     TYPED_TEST_SUITE(RangeFactories, FloatIntTestedTypes);
-    TYPED_TEST_SUITE(BitwiseFloatsAdditional, RealFloatTestedTypes);
+    TYPED_TEST_SUITE(BitwiseFloatsAdditional, RealFloatReducedFloatTestedTypes);
     TYPED_TEST_SUITE(BitwiseFloatsAdditional2, FloatTestedTypes);
     TYPED_TEST_SUITE(QuantizationTests, QuantTestedTypes);
     TYPED_TEST_SUITE(InfiniteTests, RealFloatTestedTypes);
@@ -851,7 +851,7 @@ namespace {
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN VT test_vals[vec::size()];
         //all sets will be within 0  2^(n-1)
-        auto power_sets = 1 << (vec::size());
+        auto power_sets = 1UL << (vec::size());
         for (const auto expected : c10::irange(power_sets)) {
             // generate test_val based on expected
             for (int i = 0; i < vec::size(); ++i)
@@ -1077,9 +1077,6 @@ namespace {
         blend_init(a, b);
         test_blendv<vec, VT, 0, vec::size()>(expected_val, a, b, mask);
     }
-// NOTE: In this test, blend<mask> is not required to implement SVE Vectorized::set.
-// so, this test is disabled for SVE.
-#if !defined(CPU_CAPABILITY_SVE)
     TYPED_TEST(BitwiseFloatsAdditional2, Blend) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -1093,7 +1090,6 @@ namespace {
         constexpr int64_t power_sets = 1LL << (vec::size());
         test_blend<vec, VT, power_sets - 1>(expected_val, a, b);
     }
-#endif
     template<typename vec, typename VT>
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
     void test_set(VT expected_val[vec::size()], VT a[vec::size()], VT b[vec::size()], int64_t count){

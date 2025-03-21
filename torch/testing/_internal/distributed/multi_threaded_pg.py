@@ -3,7 +3,7 @@
 import sys
 import threading
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Optional, Union
 from functools import partial, reduce
 
 import torch
@@ -93,7 +93,7 @@ class AllToAllBase:
                     input_buffer[input_indexes[dest_rank]:input_indexes[dest_rank + 1]]
                 )
 
-    def _size_cumsum(self, buf_size: int, sizes: Union[torch.Tensor, List[int], None], world_size: int) -> torch.Tensor:
+    def _size_cumsum(self, buf_size: int, sizes: Union[torch.Tensor, list[int], None], world_size: int) -> torch.Tensor:
         if sizes is None or len(sizes) == 0:
             sizes = torch.full(
                 (world_size,), buf_size // world_size, dtype=torch.int64
@@ -316,8 +316,8 @@ class ProcessLocalGroup(dist.ProcessGroup):
         self,
         output_buffer: torch.Tensor,
         input_buffer: torch.Tensor,
-        output_split_sizes: Optional[List[int]],
-        input_split_sizes: Optional[List[int]],
+        output_split_sizes: Optional[list[int]],
+        input_split_sizes: Optional[list[int]],
         opts=AllToAllOptions()
     ) -> torch.Tensor:
         coll = ProcessLocalGroup._start_coll(AllToAllBase(), self)
@@ -455,14 +455,14 @@ dist.Backend.register_backend("threaded", _create_threaded_pg, devices=["cpu", "
 @dataclass
 class WorldData:
     default_pg: dist.ProcessGroup
-    pg_map: Dict[dist.ProcessGroup, Tuple[str, Optional[Store]]]
-    pg_names: Dict[dist.ProcessGroup, str]
-    pg_group_ranks: Dict[dist.ProcessGroup, Dict[int, int]]
-    pg_backend_config: Dict[dist.ProcessGroup, str]
+    pg_map: dict[dist.ProcessGroup, tuple[str, Optional[Store]]]
+    pg_names: dict[dist.ProcessGroup, str]
+    pg_group_ranks: dict[dist.ProcessGroup, dict[int, int]]
+    pg_backend_config: dict[dist.ProcessGroup, str]
     group_count: int
-    tags_to_pg: Dict[str, List[dist.ProcessGroup]]
-    pg_to_tag: Dict[dist.ProcessGroup, str]
-    pg_coalesce_state: Dict[dist.ProcessGroup, List[Union[_CollOp, P2POp]]]
+    tags_to_pg: dict[str, list[dist.ProcessGroup]]
+    pg_to_tag: dict[dist.ProcessGroup, str]
+    pg_coalesce_state: dict[dist.ProcessGroup, list[Union[_CollOp, P2POp]]]
 
 
 class ThreadLocalWorld:
@@ -514,7 +514,7 @@ class ThreadLocalWorld:
         return self._get_world().pg_to_tag
 
     @property
-    def pg_coalesce_state(self) -> Dict[dist.ProcessGroup, List[Union[_CollOp, P2POp]]]:
+    def pg_coalesce_state(self) -> dict[dist.ProcessGroup, list[Union[_CollOp, P2POp]]]:
         return self._get_world().pg_coalesce_state
 
 

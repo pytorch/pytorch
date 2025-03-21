@@ -241,7 +241,7 @@ uint8_t storage_get(const at::Storage& self, ptrdiff_t idx) {
 }
 
 template class THPPointer<THPStorage>;
-
+// NOLINTBEGIN(misc-use-internal-linkage)
 namespace torch::gdb {
 /* ~~~ misc debugging utilities ~~~
  *
@@ -324,6 +324,7 @@ std::string dispatch_keyset_string(c10::DispatchKeySet keyset) {
 }
 
 } // namespace torch::gdb
+// NOLINTEND(misc-use-internal-linkage)
 
 namespace pybind11::detail {
 

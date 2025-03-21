@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 from typing import *  # noqa: F403
-from typing import Tuple
 
 import torch
 from torch._C import DispatchKey, DispatchKeySet
@@ -69,8 +68,8 @@ class NestedTensor(torch.Tensor):
     # We also use nested ints to represent the strides of this tensor.
     # For example, a jagged tensor with shape [B, x, D] can be strided in two
     # ways: [xD, D, 1] and [x, 1, sum(x)], where xD represents x multiplied by D
-    _size: Tuple[int, ...]
-    _strides: Tuple[int, ...]
+    _size: tuple[int, ...]
+    _strides: tuple[int, ...]
     # Indicates that the nth dimension is ragged
     _ragged_idx: int
     _metadata_cache: Dict[str, Any]
@@ -326,10 +325,17 @@ class NestedTensor(torch.Tensor):
 
         # Poor man's redispatch for composite ops. This becomes relevant under inference
         # mode, where disabling autograd key dispatch prevents decomposition.
-        dk = torch._C.DispatchKey.CompositeImplicitAutogradNestedTensor
-        if torch._C._dispatch_has_kernel_for_dispatch_key(func.name(), dk):
-            with torch.overrides.enable_reentrant_dispatch():
-                return func._op_dk(dk, *args, **kwargs)
+        all_dks = (
+            # We want to handle both the cases where NestedTensor overrides the
+            # composite implicit autograd kernel, and the case where it doesn't.
+            # Prioritize calling into NestedTensor's kernel if it exists.
+            torch._C.DispatchKey.CompositeImplicitAutogradNestedTensor,
+            torch._C.DispatchKey.CompositeImplicitAutograd,
+        )
+        for dk in all_dks:
+            if torch._C._dispatch_has_kernel_for_dispatch_key(func.name(), dk):
+                with torch.overrides.enable_reentrant_dispatch():
+                    return func._op_dk(dk, *args, **kwargs)
 
         raise NotImplementedError(func)
 
@@ -417,7 +423,7 @@ def jagged_from_list(
     offsets: Optional[torch.Tensor],
     dtype=None,
     device=None,
-) -> Tuple[NestedTensor, torch.Tensor]:
+) -> tuple[NestedTensor, torch.Tensor]:
     """Constructs a NestedTensor backed by jagged layout from a list of tensors"""
 
     if len(tensors) == 0:
@@ -500,7 +506,7 @@ def jagged_from_list(
 
 def jagged_from_tensor_and_lengths(
     tensor: torch.Tensor, starts: torch.Tensor, lengths: torch.Tensor
-) -> Tuple[NestedTensor, torch.Tensor, Optional[torch.Tensor]]:
+) -> tuple[NestedTensor, torch.Tensor, Optional[torch.Tensor]]:
     """Constructs a NestedTensor backed by jagged layout from a tensor, starts of sequences, and sequence lengths"""
     batch_size = tensor.shape[0]
     if is_expandable_to(starts.shape, (batch_size,)) and is_expandable_to(

@@ -21,11 +21,9 @@ on:
 env:
   # Needed for conda builds
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
-  ANACONDA_USER: pytorch
   AWS_DEFAULT_REGION: us-east-1
   BINARY_ENV_FILE: /tmp/env
   BUILD_ENVIRONMENT: linux-binary-libtorch-cxx11-abi
-  BUILDER_ROOT: /builder
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   PR_NUMBER: ${{ github.event.pull_request.number }}
   PYTORCH_FINAL_PACKAGE_DIR: /artifacts
@@ -52,7 +50,6 @@ jobs:
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -74,7 +71,6 @@ jobs:
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -97,7 +93,6 @@ jobs:
     needs: libtorch-cpu-shared-with-deps-cxx11-abi-test
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -109,8 +104,6 @@ jobs:
       build_name: libtorch-cpu-shared-with-deps-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   libtorch-cuda11_8-shared-with-deps-cxx11-abi-build:
@@ -119,7 +112,6 @@ jobs:
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -142,7 +134,6 @@ jobs:
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -166,7 +157,6 @@ jobs:
     needs: libtorch-cuda11_8-shared-with-deps-cxx11-abi-test
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -179,78 +169,6 @@ jobs:
       build_name: libtorch-cuda11_8-shared-with-deps-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
-    uses: ./.github/workflows/_binary-upload.yml
-
-  libtorch-cuda12_4-shared-with-deps-cxx11-abi-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: libtorch
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu124
-      GPU_ARCH_VERSION: 12.4
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.4-main
-      LIBTORCH_VARIANT: shared-with-deps
-      DESIRED_DEVTOOLSET: cxx11-abi
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build_name: libtorch-cuda12_4-shared-with-deps-cxx11-abi
-      build_environment: linux-binary-libtorch-cxx11-abi
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  libtorch-cuda12_4-shared-with-deps-cxx11-abi-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs:
-      - libtorch-cuda12_4-shared-with-deps-cxx11-abi-build
-      - get-label-type
-    uses: ./.github/workflows/_binary-test-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: libtorch
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu124
-      GPU_ARCH_VERSION: 12.4
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.4-main
-      LIBTORCH_VARIANT: shared-with-deps
-      DESIRED_DEVTOOLSET: cxx11-abi
-      build_name: libtorch-cuda12_4-shared-with-deps-cxx11-abi
-      build_environment: linux-binary-libtorch-cxx11-abi
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.4xlarge.nvidia.gpu
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  libtorch-cuda12_4-shared-with-deps-cxx11-abi-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    permissions:
-      id-token: write
-      contents: read
-    needs: libtorch-cuda12_4-shared-with-deps-cxx11-abi-test
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: libtorch
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu124
-      GPU_ARCH_VERSION: 12.4
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.4-main
-      LIBTORCH_VARIANT: shared-with-deps
-      DESIRED_DEVTOOLSET: cxx11-abi
-      build_name: libtorch-cuda12_4-shared-with-deps-cxx11-abi
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   libtorch-cuda12_6-shared-with-deps-cxx11-abi-build:
@@ -259,7 +177,6 @@ jobs:
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -282,7 +199,6 @@ jobs:
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -306,7 +222,6 @@ jobs:
     needs: libtorch-cuda12_6-shared-with-deps-cxx11-abi-test
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -319,105 +234,71 @@ jobs:
       build_name: libtorch-cuda12_6-shared-with-deps-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
-  libtorch-rocm6_1-shared-with-deps-cxx11-abi-build:
+  libtorch-cuda12_8-shared-with-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.1
-      GPU_ARCH_VERSION: 6.1
-      GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm6.1-main
+      DESIRED_CUDA: cu128
+      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.8-main
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build_name: libtorch-rocm6_1-shared-with-deps-cxx11-abi
+      build_name: libtorch-cuda12_8-shared-with-deps-cxx11-abi
       build_environment: linux-binary-libtorch-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  libtorch-rocm6_1-shared-with-deps-cxx11-abi-test:  # Testing
+  libtorch-cuda12_8-shared-with-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
-      - libtorch-rocm6_1-shared-with-deps-cxx11-abi-build
+      - libtorch-cuda12_8-shared-with-deps-cxx11-abi-build
       - get-label-type
-    runs-on: linux.rocm.gpu
-    timeout-minutes: 240
-    env:
+    uses: ./.github/workflows/_binary-test-linux.yml
+    with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.1
-      GPU_ARCH_VERSION: 6.1
-      GPU_ARCH_TYPE: rocm
-      SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm6.1-main
+      DESIRED_CUDA: cu128
+      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.8-main
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
-    steps:
-      - name: Setup ROCm
-        uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v4.1.7
-        name: Download Build Artifacts
-        with:
-          name: libtorch-rocm6_1-shared-with-deps-cxx11-abi
-          path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          quiet-checkout: true
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: ROCm set GPU_FLAG
-        run: |
-          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
-      - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
-        with:
-          docker-image: pytorch/libtorch-cxx11-builder:rocm6.1-main
-      - name: Test Pytorch binary
-        uses: ./pytorch/.github/actions/test-pytorch-binary
-      - name: Teardown ROCm
-        uses: ./.github/actions/teardown-rocm
-  libtorch-rocm6_1-shared-with-deps-cxx11-abi-upload:  # Uploading
+      build_name: libtorch-cuda12_8-shared-with-deps-cxx11-abi
+      build_environment: linux-binary-libtorch-cxx11-abi
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runs_on: linux.g4dn.4xlarge.nvidia.gpu  # 12.8 build needs sm_70+ runner
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+  libtorch-cuda12_8-shared-with-deps-cxx11-abi-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read
-    needs: libtorch-rocm6_1-shared-with-deps-cxx11-abi-test
+    needs: libtorch-cuda12_8-shared-with-deps-cxx11-abi-test
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.1
-      GPU_ARCH_VERSION: 6.1
-      GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm6.1-main
+      DESIRED_CUDA: cu128
+      GPU_ARCH_VERSION: 12.8
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.8-main
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
-      build_name: libtorch-rocm6_1-shared-with-deps-cxx11-abi
+      build_name: libtorch-cuda12_8-shared-with-deps-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
   libtorch-rocm6_2_4-shared-with-deps-cxx11-abi-build:
@@ -426,7 +307,6 @@ jobs:
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -450,7 +330,6 @@ jobs:
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -470,12 +349,12 @@ jobs:
           name: libtorch-rocm6_2_4-shared-with-deps-cxx11-abi
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -500,7 +379,6 @@ jobs:
     needs: libtorch-rocm6_2_4-shared-with-deps-cxx11-abi-test
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -513,6 +391,96 @@ jobs:
       build_name: libtorch-rocm6_2_4-shared-with-deps-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
+    uses: ./.github/workflows/_binary-upload.yml
+
+  libtorch-rocm6_3-shared-with-deps-cxx11-abi-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm6.3
+      GPU_ARCH_VERSION: 6.3
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm6.3-main
+      LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      build_name: libtorch-rocm6_3-shared-with-deps-cxx11-abi
+      build_environment: linux-binary-libtorch-cxx11-abi
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+  libtorch-rocm6_3-shared-with-deps-cxx11-abi-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs:
+      - libtorch-rocm6_3-shared-with-deps-cxx11-abi-build
+      - get-label-type
+    runs-on: linux.rocm.gpu
+    timeout-minutes: 240
+    env:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm6.3
+      GPU_ARCH_VERSION: 6.3
+      GPU_ARCH_TYPE: rocm
+      SKIP_ALL_TESTS: 1
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm6.3-main
+      LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
+    steps:
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
+      - uses: actions/download-artifact@v4.1.7
+        name: Download Build Artifacts
+        with:
+          name: libtorch-rocm6_3-shared-with-deps-cxx11-abi
+          path: "${{ runner.temp }}/artifacts/"
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: ROCm set GPU_FLAG
+        run: |
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+      - name: Pull Docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: pytorch/libtorch-cxx11-builder:rocm6.3-main
+      - name: Test Pytorch binary
+        uses: ./pytorch/.github/actions/test-pytorch-binary
+      - name: Teardown ROCm
+        uses: ./.github/actions/teardown-rocm
+  libtorch-rocm6_3-shared-with-deps-cxx11-abi-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: libtorch-rocm6_3-shared-with-deps-cxx11-abi-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm6.3
+      GPU_ARCH_VERSION: 6.3
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm6.3-main
+      LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
+      build_name: libtorch-rocm6_3-shared-with-deps-cxx11-abi
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml

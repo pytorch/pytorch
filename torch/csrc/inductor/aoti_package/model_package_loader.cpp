@@ -70,7 +70,7 @@ namespace torch::inductor {
 namespace {
 const nlohmann::json& load_json_file(std::string json_path) {
   if (!file_exists(json_path)) {
-    throw std::runtime_error("File found: " + json_path);
+    throw std::runtime_error("File not found: " + json_path);
   }
 
   std::ifstream json_file(json_path);
@@ -91,47 +91,60 @@ std::tuple<std::string, std::string> get_cpp_compile_command(
   std::string compiler = compile_options["compiler"].get<std::string>();
   bool compile_only = compile_options["compile_only"].get<bool>();
 
-  std::string source_args = "";
+  std::string source_args;
   for (const std::string& source : sources) {
     source_args += source + " ";
   }
 
   std::string file_ext = compile_only ? ".o" : ".so";
   std::string target_file = output_dir + filename + file_ext;
+  std::string target_dir = output_dir;
+  if (target_dir.empty()) {
+    size_t parent_path_idx = filename.find_last_of(k_separator);
+    target_dir = filename.substr(0, parent_path_idx);
+  }
 
-  std::string cflags_args = "";
+  std::string cflags_args;
   for (auto& arg : compile_options["cflags"]) {
     cflags_args += "-" + arg.get<std::string>() + " ";
   }
 
-  std::string definitions_args = "";
+  std::string definitions_args;
   for (auto& arg : compile_options["definitions"]) {
     definitions_args += "-D " + arg.get<std::string>() + " ";
   }
 
-  std::string include_dirs_args = "";
+  std::string include_dirs_args;
   for (auto& arg : compile_options["include_dirs"]) {
     include_dirs_args += "-I" + arg.get<std::string>() + " ";
   }
 
-  std::string ldflags_args = "";
+  std::string ldflags_args;
   for (auto& arg : compile_options["ldflags"]) {
     ldflags_args += "-" + arg.get<std::string>() + " ";
   }
 
-  std::string libraries_dirs_args = "";
+  std::string libraries_dirs_args;
   for (auto& arg : compile_options["libraries_dirs"]) {
     libraries_dirs_args += "-L" + arg.get<std::string>() + " ";
   }
 
-  std::string libraries_args = "";
+  std::string libraries_args;
   for (auto& arg : compile_options["libraries"]) {
     libraries_args += "-l" + arg.get<std::string>() + " ";
   }
 
-  std::string passthrough_parameters_args = "";
+  std::string passthrough_parameters_args;
   for (auto& arg : compile_options["passthrough_args"]) {
-    passthrough_parameters_args += arg.get<std::string>() + " ";
+    std::string arg_str = arg.get<std::string>();
+    std::string target = "script.ld";
+    std::string replacement = target_dir;
+    replacement.append(k_separator).append(target);
+    size_t pos = arg_str.find(target);
+    if (pos != std::string::npos) {
+      arg_str.replace(pos, target.length(), replacement);
+    }
+    passthrough_parameters_args += arg_str + " ";
   }
 
   std::string compile_only_arg = compile_only ? "-c" : "";
@@ -326,12 +339,22 @@ void AOTIModelPackageLoader::load_metadata(const std::string& cpp_filename) {
 }
 
 AOTIModelPackageLoader::AOTIModelPackageLoader(
-    const std::string& model_package_path)
-    : AOTIModelPackageLoader(model_package_path, "model") {}
-
-AOTIModelPackageLoader::AOTIModelPackageLoader(
     const std::string& model_package_path,
-    const std::string& model_name = "model") {
+    const std::string& model_name,
+    const bool run_single_threaded,
+    const size_t num_runners) {
+  if (run_single_threaded) {
+    if (num_runners != 1) {
+      throw std::runtime_error(
+          "num_runners must be 1 when run_single_threaded is true");
+    }
+  } else {
+    if (num_runners < 1) {
+      throw std::runtime_error(
+          "num_runners must be >=1 when run_single_threaded is false");
+    }
+  }
+
   // Extract all files within the zipfile to a temporary directory
   mz_zip_archive zip_archive;
   memset(&zip_archive, 0, sizeof(zip_archive));
@@ -343,10 +366,10 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
   }
 
   temp_dir_ = create_temp_dir();
-  std::string so_filename = "";
-  std::string cpp_filename = "";
-  std::string consts_filename = "";
-  std::string found_filenames = ""; // Saving for bookkeeping
+  std::string so_filename;
+  std::string cpp_filename;
+  std::string consts_filename;
+  std::string found_filenames; // Saving for bookkeeping
   std::string model_directory =
       "data" + k_separator + "aotinductor" + k_separator + model_name;
 
@@ -379,7 +402,7 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
             "Failed to find parent path in " + output_path_str);
       }
       std::string parent_path = output_path_str.substr(0, parent_path_idx);
-      if (!recursive_mkdir(parent_path.c_str())) {
+      if (!recursive_mkdir(parent_path)) {
         throw std::runtime_error(fmt::format(
             "Failed to create directory {}: {}",
             parent_path,
@@ -444,7 +467,8 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
   }
 
   std::string cubin_dir = temp_dir_ + k_separator + model_directory;
-  runner_ = registered_aoti_runner[device](so_path, 1, device, cubin_dir);
+  runner_ = registered_aoti_runner[device](
+      so_path, num_runners, device, cubin_dir, run_single_threaded);
 }
 
 AOTIModelPackageLoader::~AOTIModelPackageLoader() {
@@ -462,6 +486,12 @@ std::vector<at::Tensor> AOTIModelPackageLoader::run(
     const std::vector<at::Tensor>& inputs,
     void* stream_handle) {
   return runner_->run(inputs, stream_handle);
+}
+
+std::vector<at::Tensor> AOTIModelPackageLoader::boxed_run(
+    std::vector<at::Tensor>&& inputs,
+    void* stream_handle) {
+  return runner_->boxed_run(std::move(inputs), stream_handle);
 }
 
 std::unordered_map<std::string, std::string> AOTIModelPackageLoader::
@@ -501,6 +531,7 @@ std::vector<std::string> AOTIModelPackageLoader::get_constant_fqns() {
   std::unordered_map<std::string, std::string> constant_name_to_fqn =
       runner_->getConstantNamesToOriginalFQNs();
   std::vector<std::string> constant_fqns;
+  constant_fqns.reserve(constant_name_to_fqn.size());
   for (const auto& it : constant_name_to_fqn) {
     constant_fqns.push_back(it.second);
   }

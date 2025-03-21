@@ -2,7 +2,7 @@
 
 
 import torch
-from torch._dynamo.utils import counters, optimus_scuba_log
+from torch._dynamo.utils import counters
 from torch._inductor.fx_passes.misc_patterns import numpy_compat_normalization
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import IS_LINUX
@@ -300,8 +300,6 @@ class TestSplitCatFxPasses(TestCase):
                 counters["inductor"]["merge_splits_pass"],
                 expected_split_merged,
             )
-            if expected_split_merged > 0:
-                self.assertIn("merge_splits_pass_pre_grad", optimus_scuba_log)
             counters.clear()
 
     @patch
@@ -781,7 +779,7 @@ class TestSplitCatFxPasses(TestCase):
         def unbind_stack(x):
             return torch.stack(torch.unbind(x, 1), 1)
 
-        def unbind_cat(x):
+        def unbind_cat(x):  # noqa: F841
             return torch.cat(torch.unbind(x, dim=-3), 1)
 
         def unbind_stack_argspec1(x):

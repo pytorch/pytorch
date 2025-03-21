@@ -4,7 +4,7 @@ import math
 import numbers
 import warnings
 import weakref
-from typing import List, Optional, overload, Tuple
+from typing import Optional, overload
 from typing_extensions import deprecated
 
 import torch
@@ -106,7 +106,7 @@ class RNNBase(Module):
         self.dropout = float(dropout)
         self.bidirectional = bidirectional
         self.proj_size = proj_size
-        self._flat_weight_refs: List[Optional[weakref.ReferenceType[Parameter]]] = []
+        self._flat_weight_refs: list[Optional[weakref.ReferenceType[Parameter]]] = []
         num_directions = 2 if bidirectional else 1
 
         if (
@@ -172,7 +172,7 @@ class RNNBase(Module):
                 # Second bias vector included for CuDNN compatibility. Only one
                 # bias vector is needed in standard definition.
                 b_hh = Parameter(torch.empty(gate_size, **factory_kwargs))
-                layer_params: Tuple[Tensor, ...] = ()
+                layer_params: tuple[Tensor, ...] = ()
                 if self.proj_size == 0:
                     if bias:
                         layer_params = (w_ih, w_hh, b_ih, b_hh)
@@ -317,7 +317,7 @@ class RNNBase(Module):
 
     def get_expected_hidden_size(
         self, input: Tensor, batch_sizes: Optional[Tensor]
-    ) -> Tuple[int, int, int]:
+    ) -> tuple[int, int, int]:
         if batch_sizes is not None:
             mini_batch = int(batch_sizes[0])
         else:
@@ -340,7 +340,7 @@ class RNNBase(Module):
     def check_hidden_size(
         self,
         hx: Tensor,
-        expected_hidden_size: Tuple[int, int, int],
+        expected_hidden_size: tuple[int, int, int],
         msg: str = "Expected hidden size {}, got {}",
     ) -> None:
         if hx.size() != expected_hidden_size:
@@ -451,7 +451,7 @@ class RNNBase(Module):
         ]
 
     @property
-    def all_weights(self) -> List[List[Parameter]]:
+    def all_weights(self) -> list[list[Parameter]]:
         return [
             [getattr(self, weight) for weight in weights]
             for weights in self._all_weights
@@ -639,14 +639,14 @@ class RNN(RNNBase):
     @torch._jit_internal._overload_method  # noqa: F811
     def forward(
         self, input: Tensor, hx: Optional[Tensor] = None
-    ) -> Tuple[Tensor, Tensor]:
+    ) -> tuple[Tensor, Tensor]:
         pass
 
     @overload
     @torch._jit_internal._overload_method  # noqa: F811
     def forward(
         self, input: PackedSequence, hx: Optional[Tensor] = None
-    ) -> Tuple[PackedSequence, Tensor]:
+    ) -> tuple[PackedSequence, Tensor]:
         pass
 
     def forward(self, input, hx=None):  # noqa: F811
@@ -978,7 +978,7 @@ class LSTM(RNNBase):
 
     def get_expected_cell_size(
         self, input: Tensor, batch_sizes: Optional[Tensor]
-    ) -> Tuple[int, int, int]:
+    ) -> tuple[int, int, int]:
         if batch_sizes is not None:
             mini_batch = int(batch_sizes[0])
         else:
@@ -996,7 +996,7 @@ class LSTM(RNNBase):
     def check_forward_args(
         self,
         input: Tensor,
-        hidden: Tuple[Tensor, Tensor],  # type: ignore[override]
+        hidden: tuple[Tensor, Tensor],  # type: ignore[override]
         batch_sizes: Optional[Tensor],
     ):
         self.check_input(input, batch_sizes)
@@ -1014,9 +1014,9 @@ class LSTM(RNNBase):
     # Same as above, see torch/nn/modules/module.py::_forward_unimplemented
     def permute_hidden(  # type: ignore[override]
         self,
-        hx: Tuple[Tensor, Tensor],
+        hx: tuple[Tensor, Tensor],
         permutation: Optional[Tensor],
-    ) -> Tuple[Tensor, Tensor]:
+    ) -> tuple[Tensor, Tensor]:
         if permutation is None:
             return hx
         return _apply_permutation(hx[0], permutation), _apply_permutation(
@@ -1027,16 +1027,16 @@ class LSTM(RNNBase):
     @overload  # type: ignore[override]
     @torch._jit_internal._overload_method  # noqa: F811
     def forward(
-        self, input: Tensor, hx: Optional[Tuple[Tensor, Tensor]] = None
-    ) -> Tuple[Tensor, Tuple[Tensor, Tensor]]:  # noqa: F811
+        self, input: Tensor, hx: Optional[tuple[Tensor, Tensor]] = None
+    ) -> tuple[Tensor, tuple[Tensor, Tensor]]:  # noqa: F811
         pass
 
     # Same as above, see torch/nn/modules/module.py::_forward_unimplemented
     @overload
     @torch._jit_internal._overload_method  # noqa: F811
     def forward(
-        self, input: PackedSequence, hx: Optional[Tuple[Tensor, Tensor]] = None
-    ) -> Tuple[PackedSequence, Tuple[Tensor, Tensor]]:  # noqa: F811
+        self, input: PackedSequence, hx: Optional[tuple[Tensor, Tensor]] = None
+    ) -> tuple[PackedSequence, tuple[Tensor, Tensor]]:  # noqa: F811
         pass
 
     def forward(self, input, hx=None):  # noqa: F811
@@ -1319,14 +1319,14 @@ class GRU(RNNBase):
     @torch._jit_internal._overload_method  # noqa: F811
     def forward(
         self, input: Tensor, hx: Optional[Tensor] = None
-    ) -> Tuple[Tensor, Tensor]:  # noqa: F811
+    ) -> tuple[Tensor, Tensor]:  # noqa: F811
         pass
 
     @overload
     @torch._jit_internal._overload_method  # noqa: F811
     def forward(
         self, input: PackedSequence, hx: Optional[Tensor] = None
-    ) -> Tuple[PackedSequence, Tensor]:  # noqa: F811
+    ) -> tuple[PackedSequence, Tensor]:  # noqa: F811
         pass
 
     def forward(self, input, hx=None):  # noqa: F811
@@ -1679,8 +1679,8 @@ class LSTMCell(RNNCellBase):
         super().__init__(input_size, hidden_size, bias, num_chunks=4, **factory_kwargs)
 
     def forward(
-        self, input: Tensor, hx: Optional[Tuple[Tensor, Tensor]] = None
-    ) -> Tuple[Tensor, Tensor]:
+        self, input: Tensor, hx: Optional[tuple[Tensor, Tensor]] = None
+    ) -> tuple[Tensor, Tensor]:
         if input.dim() not in (1, 2):
             raise ValueError(
                 f"LSTMCell: Expected input to be 1D or 2D, got {input.dim()}D instead"

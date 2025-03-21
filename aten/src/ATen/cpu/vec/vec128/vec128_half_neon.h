@@ -572,12 +572,7 @@ Vectorized<c10::Half> inline fmadd(
 #ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
   return Vectorized<c10::Half>(vfmaq_f16(c, a, b));
 #else
-  const auto [a_float_low, a_float_high] = convert_half_float(a);
-  const auto [b_float_low, b_float_high] = convert_half_float(b);
-  const auto [c_float_low, c_float_high] = convert_half_float(c);
-  return convert_float_half(
-      fmadd(a_float_low, b_float_low, c_float_low),
-      fmadd(a_float_high, b_float_high, c_float_high));
+  return a * b + c;
 #endif
 }
 
@@ -589,12 +584,7 @@ Vectorized<c10::Half> inline fmsub(
 #ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
   return Vectorized<c10::Half>(vfmsq_f16(c, a, b));
 #else
-  const auto [a_float_low, a_float_high] = convert_half_float(a);
-  const auto [b_float_low, b_float_high] = convert_half_float(b);
-  const auto [c_float_low, c_float_high] = convert_half_float(c);
-  return convert_float_half(
-      fmsub(a_float_low, b_float_low, c_float_low),
-      fmsub(a_float_high, b_float_high, c_float_high));
+  return a * b - c;
 #endif
 }
 #endif // !defined(C10_MOBILE) && defined(__aarch64__)

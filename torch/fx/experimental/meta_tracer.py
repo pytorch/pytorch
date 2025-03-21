@@ -2,7 +2,7 @@
 import builtins
 import functools
 import warnings
-from typing import Any, Callable, Dict, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 import torch.fx
@@ -40,7 +40,7 @@ def torch_abs_override(input, *, out=None):
     return input
 
 
-manual_meta_overrides: Dict[Callable, Callable] = {
+manual_meta_overrides: dict[Callable, Callable] = {
     torch.nn.Embedding: embedding_override,
     torch.nn.LayerNorm: nn_layernorm_override,
     torch.relu: torch_relu_override,
@@ -274,7 +274,7 @@ class MetaTracer(torch.fx.Tracer):
     def proxy(self, node):
         return MetaProxy(node, self)
 
-    def trace(self, root, meta_args: Dict[str, torch.Tensor], concrete_args=None):  # type: ignore[override]
+    def trace(self, root, meta_args: dict[str, torch.Tensor], concrete_args=None):  # type: ignore[override]
         assert isinstance(meta_args, dict)
         self.meta_args = meta_args
 
@@ -299,8 +299,8 @@ class MetaTracer(torch.fx.Tracer):
 
 def symbolic_trace(
     root: Union[torch.nn.Module, Callable[..., Any]],
-    meta_args: Optional[Dict[str, torch.Tensor]] = None,
-    concrete_args: Optional[Dict[str, Any]] = None,
+    meta_args: Optional[dict[str, torch.Tensor]] = None,
+    concrete_args: Optional[dict[str, Any]] = None,
 ) -> torch.fx.GraphModule:
     tracer = MetaTracer()
     graph = tracer.trace(root, meta_args, concrete_args)  # type: ignore[arg-type]

@@ -2,7 +2,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import contextlib
 import warnings
-from typing import Dict, List, Optional, Union
+from typing import Optional, Union
 
 import torch
 import torch.distributed as dist
@@ -68,19 +68,18 @@ def manual_seed(seed: int, device_mesh: DeviceMesh) -> None:
         ``manual_seed`` will throw an error.
         Current implementation only supports a GPU device mesh.
     """
-    device_handle = _get_device_handle(device_mesh.device_type)
-    if not device_handle:
-        raise NotImplementedError(
-            f"DTensor randomness only supports cuda/cuda-like device type, but got {device_mesh.device_type}"
+    if not is_rng_supported_mesh(device_mesh):
+        warnings.warn(
+            "DTensor manual_seed() may not have complete support "
+            f"on {device_mesh.device_type} device mesh"
         )
+        return
 
     # instantiate a RNG tracker if haven't. By default DTensor uses an
     # OffsetBasedRNGTracker to perform random operators.
     global _rng_tracker
     if not _rng_tracker:
-        _rng_tracker = OffsetBasedRNGTracker(
-            device_mesh.device_type, run_state_sync=False
-        )
+        _rng_tracker = OffsetBasedRNGTracker(device_mesh, run_state_sync=False)
 
     # the current rank is in mesh
     if device_mesh.get_coordinate() is not None:
@@ -102,20 +101,20 @@ class _RNGStateTracker:
     a random op (an operator that calls RNG).
     """
 
-    def __init__(self, device_type: str = "cuda"):
-        self._device_type = device_type
-        self._device_handle = _get_device_handle(device_type)
+    def __init__(self, device: torch.device):
+        self._device = device
+        self._device_handle = _get_device_handle(self._device.type)
         if not (self._device_handle and self._device_handle.is_available()):
             raise RuntimeError(
-                f"{self.__class__.__name__} instantiation requires the presence of CUDA/CUDA-like device"
+                f"{self.__class__.__name__} instantiation requires the presence of "
+                f"{device.type} device but couldn't find."
             )
 
-        self._states: Dict[str, Tensor] = {}
-        self._devices = [self._device_handle.current_device()]
+        self._states: dict[str, Tensor] = {}
         self._use_distribute_region = True
 
     @property
-    def rng_states(self) -> Dict[str, Tensor]:
+    def rng_states(self) -> dict[str, Tensor]:
         return self._states
 
     @property
@@ -159,11 +158,25 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
     This subclass of ``_RNGStateTracker`` defines the default policy of how RNG states
     should be shared and synchronized among all ranks to respect the semantics of DTensor
     random operators.
+
+    note: _RNGStateTracker only supports cuda/cuda-like device
     """
 
-    def __init__(self, device_type: str = "cuda", run_state_sync: bool = True):
-        super().__init__(device_type)
-        rng_state = self._device_handle.get_rng_state().to(device_type)
+    def __init__(
+        self,
+        device_mesh: DeviceMesh,
+        run_state_sync: bool = True,
+    ):
+        super().__init__(_resolve_device(device_mesh=device_mesh))
+        assert self._device_handle is not None
+        # DTensor RNG tracker so far only supports CUDA/CUDA-like devices
+        if self._device.type != "cuda":
+            raise RuntimeError(
+                f"{self.__class__.__name__} instantiation requires the presence of "
+                f"CUDA/CUDA-like device. Got {self._device.type} instead."
+            )
+
+        rng_state = self._device_handle.get_rng_state().to(self._device)
         if run_state_sync:
             # synchronize RNG state using rank 0's current one
             dist.broadcast(rng_state, 0)
@@ -185,7 +198,8 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         if self.distribute_region_enabled:
             old_offset = self.get_offset("parallel-rng")
             self._set_pre_op_offset(spec)
-            with torch.random.fork_rng(self._devices, device_type=self._device_type):
+            with torch.random.fork_rng(devices=[self._device]):
+                assert self._device_handle is not None
                 self._device_handle.set_rng_state(self.rng_states["parallel-rng"])
                 try:
                     yield  # execute the region code
@@ -267,7 +281,7 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         mesh = spec.mesh
         # note: dim_map does not allow double sharding which is the FSDP(fully_shard)+TP
         # case. Replace the custom logic with dim_map once we support it.
-        dim_map: List[Union[int, List[int]]] = [-1] * spec.ndim
+        dim_map: list[Union[int, list[int]]] = [-1] * spec.ndim
         for i, placement in enumerate(spec.placements):
             if isinstance(placement, Shard):
                 shard_dim = placement.dim
@@ -275,7 +289,7 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
                     dim_map[shard_dim] = [i]
                 else:
                     mesh_dim_list = dim_map[shard_dim]
-                    assert isinstance(mesh_dim_list, List)
+                    assert isinstance(mesh_dim_list, list)
                     mesh_dim_list.append(i)
 
         # Compute shard coordinate:
@@ -291,7 +305,7 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
             shard_idx = 0
             total_num_shards = 1
             # the tensor dim is sharded on more than 1 mesh dim
-            if isinstance(mesh_dim, List):
+            if isinstance(mesh_dim, list):
                 rank_coord = [mesh_coordinate[d] for d in mesh_dim]
                 num_shards = [mesh_size[d] for d in mesh_dim]
                 # compute the shard idx and total number of shards
@@ -356,7 +370,7 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         self.set_offset("parallel-rng", old_offset + numel)
 
     def _calc_shard_linear_idx(
-        self, shard_coord: List[int], shard_size: List[int]
+        self, shard_coord: list[int], shard_size: list[int]
     ) -> int:
         # compute shard linear index
         shard_linear_idx = 0
@@ -366,3 +380,11 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
             shard_coord_stride *= size
 
         return shard_linear_idx
+
+
+def _resolve_device(device_mesh: DeviceMesh) -> torch.device:
+    device_type = device_mesh.device_type
+    device_handle = _get_device_handle(device_type)
+    assert device_handle is not None
+    device_idx = device_mesh.get_rank() % device_handle.device_count()
+    return torch.device(f"{device_type}:{device_idx:d}")

@@ -3863,6 +3863,8 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
         ("CUDA_C_64I", ("HIP_C_64I", CONV_TYPE, API_RUNTIME)),
         ("CUDA_R_64U", ("HIP_R_64U", CONV_TYPE, API_RUNTIME)),
         ("CUDA_C_64U", ("HIP_C_64U", CONV_TYPE, API_RUNTIME)),
+        ("CUDA_R_8F_E4M3", ("HIP_R_8F_E4M3", CONV_TYPE, API_RUNTIME)),
+        ("CUDA_R_8F_E5M2", ("HIP_R_8F_E5M2", CONV_TYPE, API_RUNTIME)),
         (
             "MAJOR_VERSION",
             ("hipLibraryMajorVersion", CONV_TYPE, API_RUNTIME, HIP_UNSUPPORTED),
@@ -4049,6 +4051,23 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
             ("hipMemset3DAsync", CONV_MEM, API_RUNTIME, HIP_UNSUPPORTED),
         ),
         ("cudaMemGetInfo", ("hipMemGetInfo", CONV_MEM, API_RUNTIME)),
+        ("cudaDeviceGetDefaultMemPool", ("hipDeviceGetDefaultMemPool", CONV_MEM, API_RUNTIME)),
+        ("cudaMemAccessDesc", ("hipMemAccessDesc", CONV_MEM, API_RUNTIME)),
+        ("cudaMemAccessFlagsProtReadWrite", ("hipMemAccessFlagsProtReadWrite", CONV_MEM, API_RUNTIME)),
+        ("cudaMemLocationTypeDevice", ("hipMemLocationTypeDevice", CONV_MEM, API_RUNTIME)),
+        ("cudaMemPoolAttrReleaseThreshold", ("hipMemPoolAttrReleaseThreshold", CONV_MEM, API_RUNTIME)),
+        ("cudaMemPoolAttrReservedMemCurrent", ("hipMemPoolAttrReservedMemCurrent", CONV_MEM, API_RUNTIME)),
+        ("cudaMemPoolAttrReservedMemHigh", ("hipMemPoolAttrReservedMemHigh", CONV_MEM, API_RUNTIME)),
+        ("cudaMemPoolAttrUsedMemCurrent", ("hipMemPoolAttrUsedMemCurrent", CONV_MEM, API_RUNTIME)),
+        ("cudaMemPoolAttrUsedMemHigh", ("hipMemPoolAttrUsedMemHigh", CONV_MEM, API_RUNTIME)),
+        ("cudaMemPoolGetAttribute", ("hipMemPoolGetAttribute", CONV_MEM, API_RUNTIME)),
+        ("cudaMemPoolReuseAllowInternalDependencies", ("hipMemPoolReuseAllowInternalDependencies", CONV_MEM, API_RUNTIME)),
+        ("cudaMemPoolReuseAllowOpportunistic", ("hipMemPoolReuseAllowOpportunistic", CONV_MEM, API_RUNTIME)),
+        ("cudaMemPoolReuseFollowEventDependencies", ("hipMemPoolReuseFollowEventDependencies", CONV_MEM, API_RUNTIME)),
+        ("cudaMemPoolSetAccess", ("hipMemPoolSetAccess", CONV_MEM, API_RUNTIME)),
+        ("cudaMemPoolSetAttribute", ("hipMemPoolSetAttribute", CONV_MEM, API_RUNTIME)),
+        ("cudaMemPoolTrimTo", ("hipMemPoolTrimTo", CONV_MEM, API_RUNTIME)),
+        ("cudaMemPool_t", ("hipMemPool_t", CONV_MEM, API_RUNTIME)),
         (
             "cudaArrayGetInfo",
             ("hipArrayGetInfo", CONV_MEM, API_RUNTIME, HIP_UNSUPPORTED),
@@ -7293,6 +7312,10 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
             ("HIPBLAS_COMPUTE_32F", CONV_MATH_FUNC, API_BLAS)
         ),
         (
+            "CUBLAS_COMPUTE_32F_FAST_TF32",
+            ("HIPBLAS_COMPUTE_32F_FAST_TF32", CONV_MATH_FUNC, API_BLAS)
+        ),
+        (
             "CUBLAS_COMPUTE_64F",
             ("HIPBLAS_COMPUTE_64F", CONV_MATH_FUNC, API_BLAS)
         ),
@@ -8422,6 +8445,8 @@ CUDA_SPECIAL_MAP = collections.OrderedDict(
 PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
     [
         ("USE_CUDA", ("USE_ROCM", API_PYTORCH)),
+        ("TORCH_CUDA_CPP_API", ("TORCH_HIP_CPP_API", API_PYTORCH)),
+        ("TORCH_CUDA_CU_API", ("TORCH_HIP_API", API_PYTORCH)),
         ("CUDA_VERSION", ("TORCH_HIP_VERSION", API_PYTORCH)),
         ("cudaHostAllocator", ("hipHostAllocator", API_PYTORCH)),
         ("cudaDeviceAllocator", ("hipDeviceAllocator", API_PYTORCH)),
@@ -8583,6 +8608,7 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
 CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict(
     [
         ("PYTORCH_NO_CUDA_MEMORY_CACHING", ("PYTORCH_NO_CUDA_MEMORY_CACHING", API_CAFFE2)),
+        ("PYTORCH_CUDA_ALLOC_CONF", ("PYTORCH_CUDA_ALLOC_CONF", API_CAFFE2)),
         ("cuda_stream", ("hip_stream", API_CAFFE2)),
         # if the header is a native hip folder (under hip directory),
         # there is no need to add a hip path to it; the trie in hipify script

@@ -2,9 +2,10 @@
 To run the example, use the following command:
 torchrun --standalone --nnodes=1 --nproc-per-node=4 comm_mode_features_example.py -e MLP_operation_tracing
 """
+
 import argparse
 import os
-from typing import Callable, Dict, Union
+from typing import Callable, Union
 
 import torch
 import torch.nn as nn
@@ -713,7 +714,7 @@ def run_example(world_size: int, rank: int, example_name: str) -> None:
     # intializing class with all of the functions
     instantiated_example = CommDebugModeExample(world_size, rank)
     # dict that stores example code function names
-    name_to_example_code: Dict[str, Callable[[], None]] = {
+    name_to_example_code: dict[str, Callable[[], None]] = {
         "MLP_distributed_sharding_display": instantiated_example.example_MLP_distributed_sharding_display,
         "MLPStacked_distributed_sharding_display": instantiated_example.example_MLPStacked_distributed_sharding_display,
         "MLP_module_tracing": instantiated_example.example_MLP_module_tracing,

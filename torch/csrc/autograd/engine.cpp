@@ -59,9 +59,8 @@ static void forked_autograd_child() {
 // Should be called before unsafe for forks (thread pool) calls
 static void track_bad_autograd_forks() {
 #if !defined(WIN32)
-  static c10::once_flag flag;
-  c10::call_once(
-      flag, [&] { pthread_atfork(nullptr, nullptr, forked_autograd_child); });
+  static auto result [[maybe_unused]] =
+      pthread_atfork(nullptr, nullptr, forked_autograd_child);
 #endif
 }
 
@@ -869,7 +868,7 @@ void set_device(int device) {
 
 // Given an Edge or optional<InputMetdata>, return the InputMetadata
 template <typename T>
-const InputMetadata& get_input_metadata(const T& thing);
+const static InputMetadata& get_input_metadata(const T& thing);
 
 template <>
 const InputMetadata& get_input_metadata<std::optional<InputMetadata>>(
@@ -885,7 +884,7 @@ const InputMetadata& get_input_metadata<Edge>(const Edge& thing) {
 
 // Given an Edge or optional<InputMetdata>, return if there is an InputMetadata.
 template <typename T>
-bool has_input_metadata(const T& thing);
+static bool has_input_metadata(const T& thing);
 
 template <>
 bool has_input_metadata<std::optional<InputMetadata>>(
@@ -898,11 +897,24 @@ bool has_input_metadata<Edge>(const Edge& thing) {
   return thing.is_valid();
 }
 
+std::vector<std::optional<InputMetadata>> collect_input_metadata(
+    const edge_list& edges) {
+  std::vector<std::optional<InputMetadata>> input_metadata;
+  for (const auto& edge : edges) {
+    if (!edge.is_valid()) {
+      input_metadata.emplace_back(std::nullopt);
+      continue;
+    }
+    input_metadata.emplace_back(edge.function->input_metadata(edge.input_nr));
+  }
+  return input_metadata;
+}
+
 // Given an vector<Edge> or vector<optional<InputMetdata>>, validate the
 // outputs. This involves using the InputMetadata to check the outputs and also
 // potentially calling .sum_to on the outputs.
 template <typename T>
-void validate_outputs_impl(
+static void validate_outputs_impl(
     const std::vector<T>& input_metadata_container,
     variable_list& grads,
     const std::function<std::string(const std::string&)>& format_error) {
@@ -1322,6 +1334,7 @@ auto Engine::execute(
         !AnomalyMode::is_enabled(),
         "compiled_autograd does not support AnomalyMode")
     GraphTaskGuard guard(graph_task);
+    CheckpointValidGuard cpvguard(graph_task);
     return (*compiled_autograd)(
         graph_root, *graph_task, accumulate_grad, outputs);
   }
@@ -1359,8 +1372,11 @@ void Engine::initialize_device_threads_pool() {
       !in_bad_autograd_fork,
       "Unable to handle autograd's threading in combination with fork-based multiprocessing. "
       "See https://github.com/pytorch/pytorch/wiki/Autograd-and-Fork");
-  c10::call_once(
-      start_device_threads_flag_, &Engine::start_device_threads, this);
+  // Ensures device_ready_queues_ are initialized only once
+  static bool start_device_threads_flag_ [[maybe_unused]] = [this]() {
+    this->start_device_threads();
+    return true;
+  }();
 }
 
 c10::intrusive_ptr<at::ivalue::Future> Engine::execute_with_graph_task(
@@ -1447,7 +1463,7 @@ Engine& Engine::get_base_engine() {
   return engine;
 }
 
-std::atomic<EngineStub> engine_stub(Engine::get_base_engine);
+static std::atomic<EngineStub> engine_stub(Engine::get_base_engine);
 
 void set_default_engine_stub(EngineStub stub) {
   engine_stub.store(stub);

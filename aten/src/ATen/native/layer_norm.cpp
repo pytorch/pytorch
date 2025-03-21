@@ -26,6 +26,11 @@
 #include <ATen/ops/zeros_like_native.h>
 #endif
 
+#ifdef USE_MPS
+#include <ATen/native/mps/operations/RMSNorm.h>
+#include <c10/core/GradMode.h>
+#endif
+
 #include <array>
 #include <tuple>
 #include <vector>
@@ -266,6 +271,21 @@ Tensor rms_norm_symint(
   const Tensor& weight = *weight_maybe_owned;
   _check_rms_norm_inputs_symint(input, normalized_shape, weight);
 
+#ifdef USE_MPS
+  if (input.device().type() == DeviceType::MPS && weight_opt.has_value()) {
+    const Tensor weight = weight_opt.value();
+    const bool any_nested = input.is_nested() || weight.is_nested();
+    const bool any_inputs_require_grad = input.requires_grad() || weight.requires_grad();
+    const bool is_input_fp = isFloatingType(input.scalar_type());
+    const bool is_weight_fp = isFloatingType(weight.scalar_type());
+
+    if (!(GradMode::is_enabled() && any_inputs_require_grad) && !any_nested && is_input_fp && is_weight_fp) {
+      auto eps_val = eps.value_or(std::numeric_limits<double>::epsilon());
+      return mps::rms_norm_mps_kernel(input.contiguous(), normalized_shape, weight.contiguous(), eps_val);
+    }
+  }
+#endif
+
   std::vector<int64_t> dims_to_reduce;
   for (const auto i : c10::irange(normalized_shape.size())) {
     dims_to_reduce.push_back(input.dim() - i - 1);
@@ -278,28 +298,33 @@ Tensor rms_norm_symint(
         input.scalar_type(),
         "rms_norm",
         [&] {
-    scalar_t eps_val;
-    if (!eps.has_value()) {
-      eps_val = std::numeric_limits<at::scalar_value_type<scalar_t>::type>::epsilon();
-    } else {
-      eps_val = eps.value();
-    }
-
     // upcast is needed for fp16 and bf16
     c10::ScalarType opmath_t = toOpMathType(input.scalar_type());
     Tensor upcasted_input = input.to(opmath_t);
 
-    auto rqrst_input = rsqrt(at::pow(upcasted_input, 2).mean(dims_to_reduce_ref, /*keepdim=*/true).add_(eps_val));
-    Tensor result = upcasted_input.mul(rqrst_input).type_as(input);
+    Tensor rqrst_input;
 
-    if (weight_opt.has_value()) {
-      result = result.mul(weight_opt.value());
+    // opmath_t would be one of [Double, Float, ComplexFloat, ComplexDouble]
+    if (opmath_t == at::ScalarType::Float || opmath_t == at::ScalarType::ComplexFloat) {
+      using limits = std::numeric_limits<float>;
+      float eps_val = eps.value_or(limits::epsilon());
+      rqrst_input = rsqrt(at::pow(upcasted_input, 2).mean(dims_to_reduce_ref, /*keepdim=*/true).add_(eps_val));
+    } else {
+      using limits = std::numeric_limits<double>;
+      double eps_val = eps.value_or(limits::epsilon());
+      rqrst_input = rsqrt(at::pow(upcasted_input, 2).mean(dims_to_reduce_ref, /*keepdim=*/true).add_(eps_val));
     }
 
-    return result;
+    Tensor upcasted_result = upcasted_input.mul(rqrst_input);
+
+    if (weight_opt.has_value()) {
+      upcasted_result = upcasted_result.mul(weight_opt.value());
+    }
+
+    return upcasted_result;
   });
 
-  return result;
+  return result.type_as(input);
 
 }
 } // namespace at::native

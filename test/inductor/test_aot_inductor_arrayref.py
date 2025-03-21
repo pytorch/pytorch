@@ -34,7 +34,7 @@ try:
             copy_tests,
             TestFailure,
         )
-except (unittest.SkipTest, ImportError) as e:
+except (unittest.SkipTest, ImportError):
     if __name__ == "__main__":
         sys.exit(0)
     raise
@@ -71,6 +71,15 @@ CPU_TEST_FAILURES = {
     "test_cond_with_parameters": fail_minimal_arrayref_interface(),
     "test_cond_with_reinterpret_view_inputs_outputs": fail_minimal_arrayref_interface(),
     "test_cond_share_predicte": fail_stack_allocation(is_skip=True),
+    "test_cond_unbacked_symint_closure_dynamic_True": fail_minimal_arrayref_interface(),
+    "test_while_loop_with_unbacked_symint_closure_dynamic_True": fail_minimal_arrayref_interface(),
+    "test_while_loop_with_unbacked_symint_closure_dynamic_False": fail_minimal_arrayref_interface(),
+    "test_while_loop_with_mixed_device_dynamic_True": fail_stack_allocation(),
+    "test_while_loop_with_mixed_device_dynamic_False": fail_stack_allocation(),
+    "test_while_loop_with_sym_expr_cond_dynamic_True": fail_minimal_arrayref_interface(),
+    "test_while_loop_with_sym_expr_cond_dynamic_False": fail_minimal_arrayref_interface(),
+    "test_while_loop_with_conv_dynamic_True": fail_minimal_arrayref_interface(),
+    "test_while_loop_with_conv_dynamic_False": fail_minimal_arrayref_interface(),
     "test_while_loop_with_parameters": fail_minimal_arrayref_interface(),
     "test_while_loop_with_pytree_inputs": fail_stack_allocation(),
     # FIXME: failed with Segfault while exiting the Python runtime
@@ -136,6 +145,12 @@ CPU_TEST_FAILURES = {
     ),
     # same issue as https://github.com/pytorch/pytorch/issues/122990
     "test_cond_non_tensor_predicates_dynamic_True": fail_stack_allocation(is_skip=True),
+    "test_cond_mismatched_branch_output_dynamic_True": fail_stack_allocation(
+        is_skip=True
+    ),
+    "test_cond_mismatched_branch_output_dynamic_False": fail_stack_allocation(
+        is_skip=True
+    ),
     # https://github.com/pytorch/pytorch/issues/122991
     "test_runtime_checks_complex": fail_stack_allocation(is_skip=True),
     "test_runtime_checks_fp8": fail_stack_allocation(is_skip=True),
@@ -154,8 +169,6 @@ CPU_TEST_FAILURES = {
     "test_symbool_item": fail_minimal_arrayref_interface(is_skip=True),
     # TODO: AttributeError: 'ShapeAsConstantBuffer' object has no attribute 'dtype'
     "test_symfloat_item": fail_minimal_arrayref_interface(is_skip=True),
-    "test_update_constant_buffer": fail_stack_allocation(is_skip=True),
-    "test_so_without_weight": fail_stack_allocation(is_skip=True),
 }
 
 

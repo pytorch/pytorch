@@ -4,7 +4,7 @@ import enum
 import logging
 import re
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Optional, Union
 
 from ... import ir
 from ...config import cuda as inductor_cuda_config
@@ -37,7 +37,7 @@ GEMM_TEMPLATE_CUTLASS_3X = r"""
 extern "C" {
 PT_EXPORT {{kernel_call_signature}} {
   try {
-  int64_t B = {{kernel.size(Y, 0, -3, default_value=1)}};
+  int B = {{kernel.size(Y, 0, -3, default_value=1)}};
   using ElementComputeEpilogue = {{instance_type}}::ElementAccumulator;
   using coord_t = cutlass::gemm::GemmCoord::Index;
   static cutlass::KernelHardwareInfo hw_info;
@@ -88,6 +88,8 @@ PT_EXPORT {{kernel_call_signature}} {
   return 0;
 }
 }
+
+// configuration name: {{op_conf_name}}
 """
 
 # Jinja template for Cutlass 3.x GEMM Kernel arguments, used by the CUTLASSGemmTemplate class below.
@@ -118,6 +120,7 @@ GEMM_ARGS_CUTLASS_3X = r"""
     {{epilogue_arguments}},
     hw_info
   };
+  arguments.scheduler.max_swizzle_size = swizzle;
 """
 
 # Jinja template for Cutlass 3.x GEMM Kernel arguments if epilogue fusion is applied,
@@ -151,10 +154,7 @@ GEMM_TEMPLATE_CUTLASS_2X = r"""
 extern "C" {
 PT_EXPORT {{kernel_call_signature}} {
   try {
-  int64_t B = {{kernel.size(Y, 0, -3, default_value=1)}};
-  int64_t M = {{kernel.size(X, -2)}};
-  int64_t K = {{kernel.size(W, -2)}};
-  int64_t N = {{kernel.size(W, -1)}};
+  int B = {{kernel.size(Y, 0, -3, default_value=1)}};
   using ElementComputeEpilogue = {{instance_type}}::ElementAccumulator;
   using coord_t = cutlass::gemm::GemmCoord::Index;
   static cutlass::KernelHardwareInfo hw_info;
@@ -173,13 +173,6 @@ PT_EXPORT {{kernel_call_signature}} {
 
   // check for null pointers after workspace size, since querying workspace size doesn't require valid data pointers
 #ifndef CUTLASS_BACKEND_DISABLE_CHECKS
-  {{kernel.check_not_null(X)}}
-  {{kernel.check_not_null(W)}}
-  {{kernel.check_not_null(Bias)}}
-  {{kernel.check_not_null(Meta)}}
-  {{kernel.check_not_null(Y)}}
-
-
   {
     auto status = gemm_op.can_implement(arguments);
     CUTLASS_CHECK(status);
@@ -273,9 +266,9 @@ GEMM_ARGS_SPARSE_CUTLASS_2X = r"""
   // Initialize GemmSparse arguments.
   arguments = {
     {
-      static_cast<coord_t>({{M}}),
-      static_cast<coord_t>({{N}}),
-      static_cast<coord_t>(K),
+      static_cast<coord_t>(M),
+      static_cast<coord_t>(N),
+      static_cast<coord_t>(2 * K),
     },  // GemmCoord problem_size
     X_ref,  // TensorRef<ElementA const, LayoutA> ref_A
     W_ref,  // TensorRef<ElementB const, LayoutB> ref_B
@@ -311,20 +304,44 @@ bool initialize_block(
   if (block.size()<=0) return false;
   Element scope_max(static_cast<Element>(max)), scope_min(static_cast<Element>(min));
   cutlass::reference::device::BlockFillRandomUniform(
-    block.get(), block.size(), seed, scope_max, scope_min, 0);
+    (Element*)block.get(), block.size(), seed, scope_max, scope_min);
 
   return true;
 }
+
+{% if Meta is defined and Meta is not none %}
+template <class Element>
+bool initialize_block_meta(
+  cutlass::DeviceAllocation<Element>& block,
+  uint64_t seed) {
+  if (block.size()<=0) return false;
+  cutlass::reference::device::BlockFillRandomSparseMeta(
+    (Element*)block.get(), block.size(), seed, {{instance_type}}::kMetaSizeInBits);
+  return true;
+}
+{% endif %}
 
 extern "C" int run_standalone(uint64_t seed, int repetitions) {
     std::cout << "Starting GEMM Standalone test run with seed " << seed << std::endl;
     size_t workspace_size = 0;
     size_t* workspace_size_ptr = &workspace_size;
 
+    int M = {{kernel.get_layout_args()[0]}};
+    int N = {{kernel.get_layout_args()[1]}};
+    int K = {{kernel.get_layout_args()[2]}};
+    int lda = {{kernel.get_layout_args()[3]}};
+    int ldb = {{kernel.get_layout_args()[4]}};
+    int ldc = {{kernel.get_layout_args()[5]}};
+    int ldd = {{kernel.get_layout_args()[6]}};
+    uint8_t swizzle = {{kernel.runtime_arg_values[0]}};
+
     using ElementA = {{kernel.cutlass_dtype(X)}};
     using ElementB = {{kernel.cutlass_dtype(W)}};
     using ElementC = {{kernel.cutlass_dtype(Bias, default_dtype='uint8_t')}}; // may not be void
     using ElementD = {{kernel.cutlass_dtype(Y)}};
+    {% if Meta is defined and Meta is not none %}
+    using ElementE = {{kernel.cutlass_dtype(Meta)}};
+    {% endif %}
 
     cutlass::DeviceAllocation<ElementA> X_data({{kernel.max_valid_index(X)+1}});
     initialize_block(X_data, seed++);
@@ -333,6 +350,10 @@ extern "C" int run_standalone(uint64_t seed, int repetitions) {
     cutlass::DeviceAllocation<ElementC> Bias_data({{kernel.max_valid_index(Bias)+1}});
     initialize_block(Bias_data, seed++);
     cutlass::DeviceAllocation<ElementD> Y_data({{kernel.max_valid_index(Y)+1}});
+    {% if Meta is defined and Meta is not none %}
+    cutlass::DeviceAllocation<ElementE> Meta_data({{kernel.max_valid_index(Meta)+1}});
+    initialize_block_meta(Meta_data, seed++);
+    {% endif %}
 
     cutlass::DeviceAllocation<uint8_t> workspace_data;
     // Call once with workspace_size_ptr set to get workspace size
@@ -377,11 +398,11 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
     def __init__(
         self,
-        input_nodes: List[Buffer],
+        input_nodes: list[Buffer],
         layout: Layout,
         alpha: float,
         beta: float,
-        input_reorder: Optional[List[int]] = None,
+        input_reorder: Optional[list[int]] = None,
     ) -> None:
         """
         Args:
@@ -403,19 +424,19 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
     @staticmethod
     @abstractmethod
     def add_cutlass_gemm_choices(
-        choices: List[ChoiceCaller],
+        choices: list[ChoiceCaller],
         layout: ir.Layout,
-        input_nodes: List[Buffer],
+        input_nodes: list[Buffer],
         alpha: Union[float, int] = 1,
         beta: Union[float, int] = 0,
-        input_reorder: Optional[List[int]] = None,
+        input_reorder: Optional[list[int]] = None,
         **extra_kwargs,
     ) -> None:
         raise NotImplementedError
 
     @staticmethod
     @abstractmethod
-    def _get_supported_ops() -> "List[cutlass_library.gemm_operation.GemmOperation]":  # type: ignore[name-defined]  # noqa: F821
+    def _get_supported_ops() -> "list[cutlass_library.gemm_operation.GemmOperation]":  # type: ignore[name-defined]  # noqa: F821
         raise NotImplementedError
 
     @staticmethod
@@ -431,11 +452,11 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
     def _get_template_args(
         self,
         op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
-    ) -> Tuple[str, Optional[str]]:
+    ) -> tuple[str, Optional[str]]:
         raise NotImplementedError
 
     @abstractmethod
-    def _are_inputs_layout_compatible(self, layouts: List[Layout]) -> bool:
+    def _are_inputs_layout_compatible(self, layouts: list[Layout]) -> bool:
         raise NotImplementedError
 
     @abstractmethod
@@ -463,24 +484,32 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
     def _define_gemm_instance(
         self,
         op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
-    ) -> Tuple[str, str]:
+    ) -> tuple[str, str]:
         raise NotImplementedError
 
     @abstractmethod
     def _get_extra_inputs_and_names(
         self,
         op: "cutlass_gemm_op.GemmOperation" = None,  # type: ignore[name-defined]  # noqa: F821
-    ) -> Tuple[Optional[Buffer], List[Optional[Buffer]], List[str]]:
+    ) -> tuple[Optional[Buffer], list[Optional[Buffer]], list[str]]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def _update_arg_names_for_test_call_statement(
+        self,
+        arg_names: list[str],
+        input_nodes: list[Buffer],
+    ) -> list[str]:
         raise NotImplementedError
 
     def _add_cutlass_gemm_choices(
         self,
-        choices: List[ChoiceCaller],
+        choices: list[ChoiceCaller],
         layout: ir.Layout,
-        input_nodes: List[Buffer],
+        input_nodes: list[Buffer],
         alpha: Union[float, int] = 1,
         beta: Union[float, int] = 0,
-        input_reorder: Optional[List[int]] = None,
+        input_reorder: Optional[list[int]] = None,
         **extra_kwargs,
     ) -> None:
         """
@@ -501,11 +530,11 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
         ops = self.gen_ops()
         for name, op in ops:
-            self.maybe_append_choice(
-                choices,
-                description=name,
-                op=op,
-            )
+            for swizzle in inductor_cuda_config.cutlass_max_profiling_swizzle_options:
+                description = f"{name} swizzle={swizzle}"
+                self.maybe_append_choice(
+                    choices, description=description, op=op, swizzle=swizzle
+                )
         if len(ops) == 0:
             input_layouts = [node.get_layout() for node in input_nodes]
             input_strides = [node.get_stride() for node in input_nodes]
@@ -709,6 +738,35 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             new_op.D.layout = CUTLASSGemmTemplate.cutlass_layout(d_layout)
         return new_op
 
+    def _dtype_match(
+        self,
+        op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
+    ) -> bool:
+        """
+        Checking dtypes of A, B, acc, D here.
+
+        Empirically speaking, CUTLASS2x ops have same dtype for C and D.
+        """
+        X = self.input_nodes[0]
+        W = self.input_nodes[1]
+
+        accumulator_torch_dtype = cutlass_utils.get_accumulator_dtype(
+            [X.get_dtype(), W.get_dtype()],
+        )
+        if not (
+            cutlass_utils.dtype_match(X.get_dtype(), op.A.element)
+            and cutlass_utils.dtype_match(W.get_dtype(), op.B.element)
+            and cutlass_utils.dtype_match(
+                self.output_node.get_layout().dtype, op.D.element
+            )
+            and cutlass_utils.dtype_match(
+                accumulator_torch_dtype, op.accumulator_type()
+            )
+        ):
+            return False
+
+        return True
+
     def filter_op(
         self,
         op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
@@ -727,7 +785,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         """
 
         assert cutlass_utils.try_import_cutlass()
-        import cutlass_library.library as cutlass_lib
+        import cutlass_library.library as cutlass_lib  # type: ignore[import]
 
         # Skip simt kernels
         if (
@@ -747,19 +805,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             return None
 
         # Filter ops by dtypes.
-        accumulator_torch_dtype = cutlass_utils.get_accumulator_dtype(
-            [X.get_dtype(), W.get_dtype()],
-        )
-        if not (
-            cutlass_utils.dtype_match(X.get_dtype(), op.A.element)
-            and cutlass_utils.dtype_match(W.get_dtype(), op.B.element)
-            and cutlass_utils.dtype_match(
-                self.output_node.get_layout().dtype, op.C.element
-            )
-            and cutlass_utils.dtype_match(
-                accumulator_torch_dtype, op.accumulator_type()
-            )
-        ):
+        if not self._dtype_match(op):
             return None
 
         # Filter ops by input layouts.
@@ -771,6 +817,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
         # Filter ops by alignment.
         if not self._alignment_match(op):
+            log.debug(
+                "Skipping due to alignment mismatch. op: %s", op.configuration_name()
+            )
             return None
 
         # Update op.
@@ -780,16 +829,28 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         op.D.layout = CUTLASSGemmTemplate.cutlass_layout(self.output_node.get_layout())
 
         # Filter ops by alignments and set alignments.
-        if not (
+        status = (
             self.set_alignment(X.get_layout(), op.A)
             and self.set_alignment(W.get_layout(), op.B)
             and self.set_alignment(self.output_node.get_layout(), op.D)
-        ):
+        )
+        if not status:
+            log.debug("Skipping due to alignment setting failure. op: %s", op)
             return None
 
         # Set epilogue.
         # TODO: update epilogue functor according to epilogues.
         op.element_epilogue = op.accumulator_type()
+
+        # Set bias layout and alignment.
+        status = self._set_bias_layout_and_alignment(op)
+        if not status:
+            log.debug(
+                "Skipping due to bias layout and alignment setting failure. op: %s", op
+            )
+            return None
+
+        # Apply regex filters at the end when configuration name doesn't change anymore
         if inductor_cuda_config.cutlass_op_allowlist_regex is not None:
             if not re.search(
                 inductor_cuda_config.cutlass_op_allowlist_regex, op.configuration_name()
@@ -801,13 +862,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             ):
                 return None
 
-        # Set bias layout and alignment.
-        if not self._set_bias_layout_and_alignment(op):
-            return None
-
         return op
 
-    def gen_ops(self) -> "List[Tuple[str, cutlass_gemm_op.GemmOperation]]":  # type: ignore[name-defined]  # noqa: F821
+    def gen_ops(self) -> "list[tuple[str, cutlass_gemm_op.GemmOperation]]":  # type: ignore[name-defined]  # noqa: F821
         """
         Creates a list of Cutlass GemmOperation instances that match the operation this template is designed to represent.
         The matching is carried out with respect to the input and output specifications of the operation.
@@ -823,7 +880,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         import cutlass_library.library as cutlass_lib
 
         ops = cutlass_utils.gen_ops()[cutlass_lib.OperationKind.Gemm]
-        res: Dict[str, cutlass_gemm_op.GemmOperation] = {}
+        res: dict[str, cutlass_gemm_op.GemmOperation] = {}
         for op_dict in ops.values():
             for op_list in op_dict.values():
                 for op in op_list:
@@ -831,11 +888,22 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                     filter_res = self.filter_op(op)
                     if (
                         filter_res is not None
+                        and filter_res.configuration_name() != op.configuration_name()
+                    ):
+                        log.debug(
+                            "Detected change in configuration name. Original "
+                            "name: %s, filtered configuration name: %s",
+                            op.configuration_name(),
+                            filter_res.configuration_name(),
+                        )
+                    if (
+                        filter_res is not None
                         and res.get(filter_res.configuration_name(), None) is None
                     ):
                         res[filter_res.configuration_name()] = filter_res
-        log.debug("Got cutlass configs: total number of ops: %d, ", len(res))
-        return list(res.items())[: inductor_cuda_config.cutlass_max_profiling_configs]
+        log.info("Got cutlass configs: total number of ops: %d, ", len(res))
+        sorted_res = sorted(res.items())
+        return sorted_res[: inductor_cuda_config.cutlass_max_profiling_configs]
 
     def gemm_mode(self) -> str:
         """
@@ -884,9 +952,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         import cutlass_library.gemm_operation as cutlass_gemm_op
         import cutlass_library.library as cutlass_lib
 
-        assert isinstance(
-            op, cutlass_gemm_op.GemmOperation
-        ), "op argument is required and has to be an instance of GemmOperation"
+        assert isinstance(op, cutlass_gemm_op.GemmOperation), (
+            "op argument is required and has to be an instance of GemmOperation"
+        )
 
         assert len(self.input_nodes) >= 2 and self.output_node is not None
         X, W = self.input_nodes[0], self.input_nodes[1]
@@ -903,8 +971,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
         # Define Kernel call signature
         # Important: This step also populates Kernel name to node mapping data structures,
-        # which are required further below ( for example by CutlassEVTEpilogueArgumentFormatter and
-        # the template renderer )
+        # which are required further below ( for example by the template renderer )
         inputs = [X, W, Bias, *extra_inputs]
         names = ["X", "W", "Bias", *extra_names] + ["Y"]
         names_str = ",".join(names)
@@ -913,7 +980,10 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         else:
             input_reorder = None
         kernel_call_signature = kernel.def_kernel(
-            inputs=inputs, outputs=[Y], names_str=names_str, input_reorder=input_reorder  # type: ignore[arg-type]
+            inputs=inputs,  # type: ignore[arg-type]
+            outputs=[Y],
+            names_str=names_str,
+            input_reorder=input_reorder,
         )
         test_call_statement = self.test_call_statement(kernel, inputs, names_str)
         # The layouts might have changed between autotuning and this call if they were FlexibleLayout
@@ -961,6 +1031,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             input_reorder=self.input_reorder,
             epilogue_args=epilogue_args,
             test_call_statement=test_call_statement,
+            op_conf_name=op.configuration_name(),
         )
         options.update(dict(zip(extra_names, extra_inputs)))
         res = self._template_from_string(self._get_template()).render(**options)
@@ -986,34 +1057,35 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         """
         _, __, arg_types = kernel.args.cpp_argdefs()
         arg_names = [name.strip() for name in names_str.strip().split(",")]
-        if input_nodes[2] is None:
-            del arg_names[2]
+        arg_names = self._update_arg_names_for_test_call_statement(
+            arg_names, input_nodes
+        )
         arguments = [
             f"(({arg_type}){arg_name}_data.get())"
             for arg_type, arg_name in zip(arg_types, arg_names)
         ]
-        return f"{kernel.kernel_name}({', '.join(arguments)}, workspace_size_ptr, (uint8_t*)workspace_data.get(), 0);"
+        return f"{kernel.kernel_name}({', '.join(arguments)}, M, N, K, lda, ldb, ldc, ldd, swizzle, workspace_size_ptr, (uint8_t*)workspace_data.get(), 0);"  # noqa: B950
 
 
 class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
     def __init__(
         self,
-        input_nodes: List[Buffer],
+        input_nodes: list[Buffer],
         layout: Layout,
         alpha: float,
         beta: float,
-        input_reorder: Optional[List[int]] = None,
+        input_reorder: Optional[list[int]] = None,
     ):
         super().__init__(input_nodes, layout, alpha, beta, input_reorder)
 
     @staticmethod
     def add_cutlass_gemm_choices(
-        choices: List[ChoiceCaller],
+        choices: list[ChoiceCaller],
         layout: ir.Layout,
-        input_nodes: List[Buffer],
+        input_nodes: list[Buffer],
         alpha: Union[float, int] = 1,
         beta: Union[float, int] = 0,
-        input_reorder: Optional[List[int]] = None,
+        input_reorder: Optional[list[int]] = None,
         **extra_kwargs,
     ) -> None:
         template = CUTLASS3xGemmTemplate(
@@ -1024,7 +1096,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         )
 
     @staticmethod
-    def _get_supported_ops() -> "List[cutlass_library.gemm_operation.GemmOperation]":  # type: ignore[name-defined]  # noqa: F821
+    def _get_supported_ops() -> "list[cutlass_library.gemm_operation.GemmOperation]":  # type: ignore[name-defined]  # noqa: F821
         import cutlass_library.library as cutlass_lib
 
         return [cutlass_lib.GemmKind.Universal3x]
@@ -1035,7 +1107,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
     def _get_template_args(
         self,
         op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
-    ) -> Tuple[str, Optional[str]]:
+    ) -> tuple[str, Optional[str]]:
         return (GEMM_ARGS_CUTLASS_3X, GEMM_ARGS_CUTLASS_3X_EPILOGUE)
 
     @staticmethod
@@ -1052,7 +1124,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
             result = epilogue_schedule_str.lower().startswith("tma")
         return result
 
-    def _are_inputs_layout_compatible(self, layouts: List[Layout]) -> bool:
+    def _are_inputs_layout_compatible(self, layouts: list[Layout]) -> bool:
         """
         Evaluates whether input layouts are compatible for General Matrix Multiply (GEMM).
 
@@ -1130,8 +1202,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         self,
         op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
     ) -> bool:
-        X, W = self.input_nodes[0], self.input_nodes[1]
-        return X.get_size()[1] == W.get_size()[0]
+        return True
 
     def _alignment_match(
         self,
@@ -1145,28 +1216,33 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
     ) -> bool:
         import cutlass_library.library as cutlass_lib
 
-        if len(self.input_nodes) >= 3 and self.input_nodes[2] is not None:
+        has_bias = len(self.input_nodes) >= 3 and self.input_nodes[2] is not None
+        if has_bias:
             Bias = self.input_nodes[2]
+            # bias dtype
+            op.C.element = cutlass_utils.torch_dtype_to_cutlass_type(
+                Bias.get_layout().dtype
+            )
+            assert op.C.element == op.D.element, (
+                f"Expect C and D to have the same dtype, found {op.C.element} and {op.D.element}"
+            )
+
+            # Bias layout
             bias_layout = CUTLASSGemmTemplate.cutlass_layout(Bias.get_layout())
-            if op.gemm_kind != cutlass_lib.GemmKind.Universal3x:
-                if bias_layout != op.D.layout:
-                    # For cutlass2, bias and output layout must match
-                    return False
-            else:
-                op.C.layout = bias_layout
-            if not self.set_alignment(Bias.get_layout(), op.C):
+            op.C.layout = bias_layout
+
+            # Bias alignment
+            status = self.set_alignment(Bias.get_layout(), op.C)
+            if not status:
                 return False
         else:
-            if op.gemm_kind == cutlass_lib.GemmKind.Universal3x:
-                op.C.element = cutlass_lib.DataType.void
-            else:
-                op.C.layout = op.D.layout
+            op.C.element = cutlass_lib.DataType.void
         return True
 
     def _define_gemm_instance(
         self,
         op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
-    ) -> Tuple[str, str]:
+    ) -> tuple[str, str]:
         """Defines and renders the Cutlass / CUDA C++ code for a given GEMM operation instance.
 
         This function uses the Cutlass library to generate key parts of the codegen process. General Matrix Multiply
@@ -1206,11 +1282,26 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
     def _get_extra_inputs_and_names(
         self,
         op: "cutlass_gemm_op.GemmOperation" = None,  # type: ignore[name-defined]  # noqa: F821
-    ) -> Tuple[Optional[Buffer], List[Optional[Buffer]], List[str]]:
+    ) -> tuple[Optional[Buffer], list[Optional[Buffer]], list[str]]:
         Bias = None if len(self.input_nodes) == 2 else self.input_nodes[2]
-        inputs: List[Optional[Buffer]] = []
-        names: List[str] = []
+        inputs: list[Optional[Buffer]] = []
+        names: list[str] = []
         return (Bias, inputs, names)
+
+    def _update_arg_names_for_test_call_statement(
+        self,
+        arg_names: list[str],
+        input_nodes: list[Buffer],
+    ) -> list[str]:
+        if input_nodes[2] is None:
+            del arg_names[2]
+        else:
+            # Reorder them as Bias, A, B
+            if self.input_reorder is not None:
+                arg_names[0 : len(self.input_reorder)] = [
+                    arg_names[i] for i in self.input_reorder
+                ]
+        return arg_names
 
     def render_gemm_arguments(
         self,
@@ -1306,22 +1397,22 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
 class CUTLASS2xGemmTemplate(CUTLASSGemmTemplate):
     def __init__(
         self,
-        input_nodes: List[Buffer],
+        input_nodes: list[Buffer],
         layout: Layout,
         alpha: float,
         beta: float,
-        input_reorder: Optional[List[int]] = None,
+        input_reorder: Optional[list[int]] = None,
     ):
         super().__init__(input_nodes, layout, alpha, beta, input_reorder)
 
     @staticmethod
     def add_cutlass_gemm_choices(
-        choices: List[ChoiceCaller],
+        choices: list[ChoiceCaller],
         layout: ir.Layout,
-        input_nodes: List[Buffer],
+        input_nodes: list[Buffer],
         alpha: Union[float, int] = 1,
         beta: Union[float, int] = 0,
-        input_reorder: Optional[List[int]] = None,
+        input_reorder: Optional[list[int]] = None,
         **extra_kwargs,
     ) -> None:
         template = CUTLASS2xGemmTemplate(
@@ -1332,7 +1423,7 @@ class CUTLASS2xGemmTemplate(CUTLASSGemmTemplate):
         )
 
     @staticmethod
-    def _get_supported_ops() -> "List[cutlass_library.gemm_operation.GemmOperation]":  # type: ignore[name-defined]  # noqa: F821
+    def _get_supported_ops() -> "list[cutlass_library.gemm_operation.GemmOperation]":  # type: ignore[name-defined]  # noqa: F821
         import cutlass_library.library as cutlass_lib
 
         return [cutlass_lib.GemmKind.Universal, cutlass_lib.GemmKind.Sparse]
@@ -1347,7 +1438,7 @@ class CUTLASS2xGemmTemplate(CUTLASSGemmTemplate):
     def _get_template_args(
         self,
         op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
-    ) -> Tuple[str, Optional[str]]:
+    ) -> tuple[str, Optional[str]]:
         import cutlass_library.library as cutlass_lib
 
         if op.gemm_kind == cutlass_lib.GemmKind.Sparse:
@@ -1355,7 +1446,7 @@ class CUTLASS2xGemmTemplate(CUTLASSGemmTemplate):
 
         return (GEMM_ARGS_CUTLASS_2X, None)
 
-    def _are_inputs_layout_compatible(self, layouts: List[Layout]) -> bool:
+    def _are_inputs_layout_compatible(self, layouts: list[Layout]) -> bool:
         """
         Evaluates whether input layouts are compatible for set of operations supported by this class.
 
@@ -1376,7 +1467,7 @@ class CUTLASS2xGemmTemplate(CUTLASSGemmTemplate):
         A_size = [int(i) for i in A_layout.size]
         B_size = [int(i) for i in B_layout.size]
         K = max(A_size[1], B_size[0])
-        return (K == A_size[1] or K == 2 * A_size[0]) and K == B_size[0]
+        return (K == A_size[1] or K == 2 * A_size[1]) and K == B_size[0]
 
     def _shape_match(
         self,
@@ -1433,7 +1524,7 @@ class CUTLASS2xGemmTemplate(CUTLASSGemmTemplate):
     def _define_gemm_instance(
         self,
         op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
-    ) -> Tuple[str, str]:
+    ) -> tuple[str, str]:
         """Defines and renders the Cutlass / CUDA C++ code for a given GEMM operation instance.
 
         This function uses the Cutlass library to generate key parts of the codegen process. General Matrix Multiply
@@ -1473,7 +1564,7 @@ class CUTLASS2xGemmTemplate(CUTLASSGemmTemplate):
     def _get_extra_inputs_and_names(
         self,
         op: "cutlass_gemm_op.GemmOperation" = None,  # type: ignore[name-defined]  # noqa: F821
-    ) -> Tuple[Optional[Buffer], List[Optional[Buffer]], List[str]]:
+    ) -> tuple[Optional[Buffer], list[Optional[Buffer]], list[str]]:
         import cutlass_library.library as cutlass_lib
 
         if op.gemm_kind == cutlass_lib.GemmKind.Sparse:
@@ -1485,6 +1576,17 @@ class CUTLASS2xGemmTemplate(CUTLASSGemmTemplate):
         inputs = [Meta]
         names = ["Meta"]
         return (Bias, inputs, names)
+
+    def _update_arg_names_for_test_call_statement(
+        self,
+        arg_names: list[str],
+        input_nodes: list[Buffer],
+    ) -> list[str]:
+        if input_nodes[3] is None:
+            del arg_names[3]
+        if input_nodes[2] is None:
+            del arg_names[2]
+        return arg_names
 
     def render_gemm_arguments(
         self,

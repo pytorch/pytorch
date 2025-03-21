@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Callable, cast, List, Optional, Union
+from typing import Any, Callable, cast, Optional, Union
 
 import torch
 import torch._dynamo
@@ -153,7 +153,7 @@ if HAS_TABULATE:
         for backend in torch._dynamo.list_backends():
 
             if backend == "inductor":
-                mode_options = cast(List[Optional[str]], list(torch._inductor.list_mode_options().keys())) + [None]
+                mode_options = cast(list[Optional[str]], list(torch._inductor.list_mode_options().keys())) + [None]
                 for mode in mode_options:
                     if mode == "default":
                         continue

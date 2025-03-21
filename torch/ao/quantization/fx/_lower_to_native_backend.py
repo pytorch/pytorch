@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import operator
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 import torch.ao.nn.intrinsic as nni
@@ -83,7 +83,7 @@ def is_default_node(node, modules):
         torch.nn.functional.leaky_relu,
         torch.nn.functional.dropout,
     ]
-    method_list: List[Any] = []
+    method_list: list[Any] = []
     module_type_list = [
         nnqr.ConvTranspose1d,
         nnqr.ConvTranspose2d,
@@ -194,8 +194,8 @@ def is_other_node(node, modules):
     func_list = [
         torch.cat,
     ]
-    method_list: List[Any] = []
-    module_type_list: List[Any] = []
+    method_list: list[Any] = []
+    module_type_list: list[Any] = []
     return _is_node_in_list(node, modules, func_list, method_list, module_type_list)
 
 
@@ -235,7 +235,7 @@ def is_get_tensor_info_node(node):
     return node.op == "call_method" and node.target in ["shape", "size"]
 
 
-def should_skip_lowering(op: torch.fx.node.Node, qconfig_map: Dict[str, QConfigAny]):
+def should_skip_lowering(op: torch.fx.node.Node, qconfig_map: dict[str, QConfigAny]):
     """
     Return True if the op is configured with a None qconfig, False otherwise.
     Note: maybe need to generalize this to also check for the dtype, and we
@@ -246,7 +246,7 @@ def should_skip_lowering(op: torch.fx.node.Node, qconfig_map: Dict[str, QConfigA
 
 
 # Mapping from reference module class to the replacement static quantized module class for lowering
-STATIC_LOWER_MODULE_MAP: Dict[Type[nn.Module], Type[WeightedQuantizedModule]] = {
+STATIC_LOWER_MODULE_MAP: dict[type[nn.Module], type[WeightedQuantizedModule]] = {
     nnqr.Linear: nnq.Linear,
     nnqr.Conv1d: nnq.Conv1d,
     nnqr.Conv2d: nnq.Conv2d,
@@ -254,7 +254,7 @@ STATIC_LOWER_MODULE_MAP: Dict[Type[nn.Module], Type[WeightedQuantizedModule]] = 
 }
 
 # Mapping from reference module class to the replacement dynamic quantized module class for lowering
-DYNAMIC_LOWER_MODULE_MAP: Dict[Type[nn.Module], Type[nn.Module]] = {
+DYNAMIC_LOWER_MODULE_MAP: dict[type[nn.Module], type[nn.Module]] = {
     nnqr.Linear: nnqd.Linear,
     nnqr.GRUCell: nnqd.GRUCell,
     nnqr.LSTMCell: nnqd.LSTMCell,
@@ -265,7 +265,7 @@ DYNAMIC_LOWER_MODULE_MAP: Dict[Type[nn.Module], Type[nn.Module]] = {
 
 # Mapping from reference module class to the replacement weight only quantized module class for lowering
 # TODO: correct the namespace for these modules
-WEIGHT_ONLY_LOWER_MODULE_MAP: Dict[Type[nn.Module], Type[nn.Module]] = {
+WEIGHT_ONLY_LOWER_MODULE_MAP: dict[type[nn.Module], type[nn.Module]] = {
     nnqr.Embedding: nnq.Embedding,
     nnqr.EmbeddingBag: nnq.EmbeddingBag,
 }
@@ -295,8 +295,8 @@ SPECIAL_PATTERN_LOWER_MODULE_MAP = {
 # Mapping from fused module class to a 2-tuple of:
 #   1) The inner reference module class
 #   2) The replacement static quantized module class for lowering
-STATIC_LOWER_FUSED_MODULE_MAP: Dict[
-    Type[nn.Module], Tuple[Type[nn.Module], Type[WeightedQuantizedModule]]
+STATIC_LOWER_FUSED_MODULE_MAP: dict[
+    type[nn.Module], tuple[type[nn.Module], type[WeightedQuantizedModule]]
 ] = {
     nni.LinearReLU: (nnqr.Linear, nniq.LinearReLU),
     # TODO: LinearLeakyReLU is registered as global but it is only fused and
@@ -314,8 +314,8 @@ STATIC_LOWER_FUSED_MODULE_MAP: Dict[
 # Mapping from fused module class to a 2-tuple of:
 #   1) The inner reference module class
 #   2) The replacement static quantized module class for lowering
-STATIC_LOWER_FUSED_MODULE_TWO_INPUTS_MAP: Dict[
-    Type[nn.Module], Tuple[Type[nn.Module], Type[WeightedQuantizedModule]]
+STATIC_LOWER_FUSED_MODULE_TWO_INPUTS_MAP: dict[
+    type[nn.Module], tuple[type[nn.Module], type[WeightedQuantizedModule]]
 ] = {
     nni.ConvAdd2d: (nnqr.Conv2d, nniq.ConvAdd2d),
     nni.ConvAddReLU2d: (nnqr.Conv2d, nniq.ConvAddReLU2d),
@@ -324,8 +324,8 @@ STATIC_LOWER_FUSED_MODULE_TWO_INPUTS_MAP: Dict[
 # Mapping from fused module class to a 2-tuple of:
 #   1) The inner reference module class
 #   2) The replacement dynamic quantized module class for lowering
-DYNAMIC_LOWER_FUSED_MODULE_MAP: Dict[
-    Type[nn.Module], Tuple[Type[nn.Module], Type[nn.Module]]
+DYNAMIC_LOWER_FUSED_MODULE_MAP: dict[
+    type[nn.Module], tuple[type[nn.Module], type[nn.Module]]
 ] = {
     nni.LinearReLU: (nnqr.Linear, nniqd.LinearReLU),
 }
@@ -333,7 +333,7 @@ DYNAMIC_LOWER_FUSED_MODULE_MAP: Dict[
 # Mapping from a functional to lower to a 2-tuple of
 #   1) The quantized version of the op
 #   2) The quantized version of the op fused with relu, if it exists, else None
-STATIC_LOWER_FUNCTIONAL_MAP: Dict[Callable, Tuple[Callable, Optional[Callable]]] = {
+STATIC_LOWER_FUNCTIONAL_MAP: dict[Callable, tuple[Callable, Optional[Callable]]] = {
     F.linear: (torch.ops.quantized.linear, torch.ops.quantized.linear_relu),
     F.conv1d: (torch.ops.quantized.conv1d, torch.ops.quantized.conv1d_relu),
     F.conv2d: (torch.ops.quantized.conv2d, torch.ops.quantized.conv2d_relu),
@@ -343,7 +343,7 @@ STATIC_LOWER_FUNCTIONAL_MAP: Dict[Callable, Tuple[Callable, Optional[Callable]]]
     F.conv_transpose3d: (torch.ops.quantized.conv_transpose3d, None),
 }
 
-WEIGHT_PREPACK_OPS: Set[Callable] = {
+WEIGHT_PREPACK_OPS: set[Callable] = {
     torch._ops.ops.quantized.linear_prepack,
     torch._ops.ops.quantized.linear_prepack_fp16,
     torch._ops.ops.quantized.conv1d_prepack,
@@ -358,8 +358,8 @@ WEIGHT_PREPACK_OPS: Set[Callable] = {
 # (input_activation_dtype, weight_dtype) and the value is a 2-tuple of
 #   1) The dynamically quantized version of the op
 #   2) The dynamically quantized version of the op fused with relu, if it exists, else None
-DYNAMIC_LOWER_FUNCTIONAL_MAP: Dict[
-    Callable, Dict[Tuple[torch.dtype, torch.dtype], Tuple[Callable, Optional[Callable]]]
+DYNAMIC_LOWER_FUNCTIONAL_MAP: dict[
+    Callable, dict[tuple[torch.dtype, torch.dtype], tuple[Callable, Optional[Callable]]]
 ] = {
     F.linear: {
         (torch.quint8, torch.qint8): (
@@ -383,20 +383,20 @@ DYNAMIC_LOWER_FUNCTIONAL_MAP: Dict[
     },
 }
 
-CONV_FUNCTIONAL_OPS: Set[Callable] = {
+CONV_FUNCTIONAL_OPS: set[Callable] = {
     F.conv1d,
     F.conv2d,
     F.conv3d,
 }
 
-CONV_TRANSPOSE_FUNCTIONAL_OPS: Set[Callable] = {
+CONV_TRANSPOSE_FUNCTIONAL_OPS: set[Callable] = {
     F.conv_transpose1d,
     F.conv_transpose2d,
     F.conv_transpose3d,
 }
 
 # TODO: add tests for lowering these ops
-QBIN_OP_MAPPING: Dict[Union[Callable, str], Callable] = {
+QBIN_OP_MAPPING: dict[Union[Callable, str], Callable] = {
     operator.add: torch.ops.quantized.add,
     torch.add: torch.ops.quantized.add,
     operator.mul: torch.ops.quantized.mul,
@@ -404,7 +404,7 @@ QBIN_OP_MAPPING: Dict[Union[Callable, str], Callable] = {
     torch.mul: torch.ops.quantized.mul,
     torch.matmul: torch.ops.quantized.matmul,
 }
-QBIN_RELU_OP_MAPPING: Dict[Union[Callable, str], Callable] = {
+QBIN_RELU_OP_MAPPING: dict[Union[Callable, str], Callable] = {
     operator.add: torch.ops.quantized.add_relu,
     torch.add: torch.ops.quantized.add_relu,
     operator.mul: torch.ops.quantized.mul_relu,
@@ -443,7 +443,9 @@ def _load_packed_weight(
 
 
 def fold_weight(
-    quantized_model: GraphModule, node_name_to_scope: Dict[str, Tuple[str, type]]
+    quantized_model: GraphModule,
+    node_name_to_scope: dict[str, tuple[str, type]],
+    keep_original_weights: bool = False,
 ) -> GraphModule:
     """
     Trace back from the weight node util we hit getattr, reconstruct the
@@ -453,6 +455,8 @@ def fold_weight(
     packed_weights = {}
     # map from folded node name to the prepacked weight name
     folded_nodes = {}
+    original_weights_lookup: dict[str, list] = {}
+    lookup_counter = 0
     # get packed weights
     for node in quantized_model.graph.nodes:
         if node.op == "call_function" and node.target in WEIGHT_PREPACK_OPS:
@@ -466,10 +470,20 @@ def fold_weight(
                 )
                 packed_weight = prepacking_module()
                 packed_weights[node.name] = packed_weight
+                if keep_original_weights:
+                    original_weights = list(prepacking_module.state_dict().values())
+                    original_weights_lookup[str(lookup_counter)] = sorted(
+                        original_weights, key=lambda x: x.numel(), reverse=True
+                    )
+                    if len(original_weights_lookup[str(lookup_counter)]) == 1:
+                        # bias is None
+                        original_weights_lookup[str(lookup_counter)].append(None)
+                    lookup_counter += 1
+    lookup_counter = 0
 
     # remove folded nodes and replace the prepacking node with getattr
     folded_graph = Graph()
-    env: Dict[Any, Any] = {}
+    env: dict[Any, Any] = {}
 
     def load_arg(a):
         return map_arg(a, lambda node: env[node.name])
@@ -490,6 +504,19 @@ def fold_weight(
             env[node.name] = folded_graph.create_node(
                 "get_attr", packed_weight_name, (), {}
             )
+            if keep_original_weights:
+                key_name = (
+                    packed_weight_name.replace(":", "_")
+                    .replace("/", "_")
+                    .replace("|", "_")
+                    .replace(" ", "")
+                    .lower()
+                )
+                original_weights_lookup[key_name] = original_weights_lookup[
+                    str(lookup_counter)
+                ]
+                del original_weights_lookup[str(lookup_counter)]
+                lookup_counter += 1
         elif prepack_node is not None:
             # remove the foled node
             continue
@@ -500,10 +527,16 @@ def fold_weight(
     quantized_model = GraphModule(quantized_model, folded_graph)
     quantized_model._register_state_dict_hook(_save_packed_weight)
     quantized_model.register_load_state_dict_pre_hook(_load_packed_weight)
+
+    if keep_original_weights:
+        setattr(  # noqa: B010
+            quantized_model, "original_weights_lookup", original_weights_lookup
+        )
+
     return quantized_model
 
 
-def _get_module(node: Node, modules: Dict[str, nn.Module]) -> Optional[nn.Module]:
+def _get_module(node: Node, modules: dict[str, nn.Module]) -> Optional[nn.Module]:
     """
     Return the `torch.nn.Module` that corresponds to the specified node's target.
     If no such node exists, return None.
@@ -516,11 +549,11 @@ def _get_module(node: Node, modules: Dict[str, nn.Module]) -> Optional[nn.Module
 
 def _match_static_pattern(
     node: Node,
-    modules: Dict[str, nn.Module],
-    qconfig_map: Dict[str, QConfigAny],
-    matching_modules_or_ops: List[Callable],
-    dequantize_node_arg_indices: List[int],
-) -> Union[Tuple[Node, Node, Node], Tuple[None, None, None]]:
+    modules: dict[str, nn.Module],
+    qconfig_map: dict[str, QConfigAny],
+    matching_modules_or_ops: list[Callable],
+    dequantize_node_arg_indices: list[int],
+) -> Union[tuple[Node, Node, Node], tuple[None, None, None]]:
     """
     Match the pattern (dequantize - ref node - quantize) against the node provided.
 
@@ -594,10 +627,10 @@ def _match_static_pattern(
 
 def _match_static_pattern_with_two_inputs(
     node: Node,
-    modules: Dict[str, nn.Module],
-    qconfig_map: Dict[str, QConfigAny],
-    matching_modules_or_ops: List[Callable],
-) -> Union[Tuple[Node, Node], Tuple[None, None]]:
+    modules: dict[str, nn.Module],
+    qconfig_map: dict[str, QConfigAny],
+    matching_modules_or_ops: list[Callable],
+) -> Union[tuple[Node, Node], tuple[None, None]]:
     """
                       (dequantize \
     Match the pattern (dequantize - ref node - quantize) against the node provided.
@@ -652,7 +685,7 @@ def _match_static_pattern_with_two_inputs(
 
 
 def _lower_static_weighted_ref_module(
-    model: GraphModule, qconfig_map: Dict[str, QConfigAny]
+    model: GraphModule, qconfig_map: dict[str, QConfigAny]
 ):
     """
     Traverse the graph and find dequantize - ref module - quantize patterns
@@ -705,7 +738,7 @@ def _lower_static_weighted_ref_module(
 
 
 def _lower_static_weighted_ref_module_with_two_inputs(
-    model: GraphModule, qconfig_map: Dict[str, QConfigAny]
+    model: GraphModule, qconfig_map: dict[str, QConfigAny]
 ):
     """
     Traverse the graph and find patterns
@@ -841,7 +874,7 @@ def _lower_weight_only_weighted_ref_module(model: GraphModule):
 
 
 def _lower_static_weighted_ref_functional(
-    model: GraphModule, qconfig_map: Dict[str, QConfigAny]
+    model: GraphModule, qconfig_map: dict[str, QConfigAny]
 ):
     """
     Traverse the graph and replace functional reference patterns with their quantized versions.
@@ -940,7 +973,7 @@ def _lower_static_weighted_ref_functional(
 
 
 def _lower_dynamic_weighted_ref_functional(
-    model: GraphModule, qconfig_map: Dict[str, QConfigAny]
+    model: GraphModule, qconfig_map: dict[str, QConfigAny]
 ):
     """
     Traverse the graph and replace functional reference patterns with their dynamically
@@ -1070,8 +1103,8 @@ def _lower_dynamic_weighted_ref_functional(
             model.graph.erase_node(relu_node)
 
 
-def _lower_quantized_binary_op(model: GraphModule, qconfig_map: Dict[str, QConfigAny]):
-    binary_ops_to_lower: List[Callable] = [
+def _lower_quantized_binary_op(model: GraphModule, qconfig_map: dict[str, QConfigAny]):
+    binary_ops_to_lower: list[Callable] = [
         operator.add,
         torch.add,
         operator.mul,
@@ -1212,7 +1245,7 @@ def special_pattern_replacement(model: GraphModule):
                 setattr(modules[parent_name], module_name, qmodule)
 
         # reroute around dq node:
-        dq_nodes: List[Node] = []
+        dq_nodes: list[Node] = []
         if isinstance(dq_node_or_nodes, Node):
             dq_nodes = [dq_node_or_nodes]
         elif isinstance(dq_node_or_nodes, (tuple, list)):
@@ -1294,8 +1327,9 @@ def _lower_get_tensor_info_op(model: GraphModule):
 
 def _lower_to_native_backend(
     model: GraphModule,
-    qconfig_map: Dict[str, QConfigAny],
-    node_name_to_scope: Dict[str, Tuple[str, type]],
+    qconfig_map: dict[str, QConfigAny],
+    node_name_to_scope: dict[str, tuple[str, type]],
+    keep_original_weights: bool = False,
 ) -> GraphModule:
     """Lower a quantized reference model (with reference quantized operator patterns)
     to the native backend in PyTorch (fbgemm/qnnpack), both backends shares the same
@@ -1312,7 +1346,7 @@ def _lower_to_native_backend(
     _lower_get_tensor_info_op(model)
     special_pattern_replacement(model)
     model.graph.eliminate_dead_code()
-    model = fold_weight(model, node_name_to_scope)
+    model = fold_weight(model, node_name_to_scope, keep_original_weights)
     model.graph.eliminate_dead_code()
     model.recompile()
     model.graph.lint()

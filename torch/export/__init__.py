@@ -2,31 +2,21 @@ import builtins
 import copy
 import dataclasses
 import inspect
-import io
 import os
 import sys
 import typing
 import warnings
 import zipfile
+from collections.abc import Iterator
 from enum import auto, Enum
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Iterator,
-    List,
-    Optional,
-    Tuple,
-    Type,
-    TYPE_CHECKING,
-    Union,
-)
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch.utils._pytree as pytree
 from torch.fx._compatibility import compatibility
 from torch.fx.passes.infra.pass_base import PassResult
 from torch.fx.passes.infra.pass_manager import PassManager
+from torch.types import FileLike
 from torch.utils._pytree import (
     FlattenFunc,
     FromDumpableContextFn,
@@ -64,6 +54,8 @@ __all__ = [
     "UnflattenedModule",
 ]
 
+# To make sure export specific custom ops are loaded
+import torch.export.custom_ops
 
 from .decomp_utils import CustomDecompTable
 from .dynamic_shapes import Constraint, Dim, dims, ShapesCollection
@@ -82,12 +74,12 @@ PassType = Callable[[torch.fx.GraphModule], Optional[PassResult]]
 
 def export_for_training(
     mod: torch.nn.Module,
-    args: Tuple[Any, ...],
-    kwargs: Optional[Dict[str, Any]] = None,
+    args: tuple[Any, ...],
+    kwargs: Optional[dict[str, Any]] = None,
     *,
-    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
+    dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
     strict: bool = True,
-    preserve_module_call_signature: Tuple[str, ...] = (),
+    preserve_module_call_signature: tuple[str, ...] = (),
 ) -> ExportedProgram:
     """
     :func:`export_for_training` takes any nn.Module along with example inputs, and produces a traced graph representing
@@ -177,13 +169,13 @@ def export_for_training(
 
 def export_for_inference(
     mod: torch.nn.Module,
-    args: Tuple[Any, ...],
-    kwargs: Optional[Dict[str, Any]] = None,
+    args: tuple[Any, ...],
+    kwargs: Optional[dict[str, Any]] = None,
     *,
-    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
+    dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
     strict: bool = True,
-    preserve_module_call_signature: Tuple[str, ...] = (),
-    decomp_table: Optional[Dict["OpOverload", Optional[Callable]]] = None,
+    preserve_module_call_signature: tuple[str, ...] = (),
+    decomp_table: Optional[dict["OpOverload", Optional[Callable]]] = None,
 ) -> ExportedProgram:
     """
     :func:`export_for_inference` takes any nn.Module along with example inputs, and produces a traced graph representing
@@ -262,12 +254,12 @@ def export_for_inference(
 
 def export(
     mod: torch.nn.Module,
-    args: Tuple[Any, ...],
-    kwargs: Optional[Dict[str, Any]] = None,
+    args: tuple[Any, ...],
+    kwargs: Optional[dict[str, Any]] = None,
     *,
-    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
-    strict: bool = True,
-    preserve_module_call_signature: Tuple[str, ...] = (),
+    dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
+    strict: bool = False,
+    preserve_module_call_signature: tuple[str, ...] = (),
 ) -> ExportedProgram:
     """
     :func:`export` takes any nn.Module along with example inputs, and produces a traced graph representing
@@ -330,15 +322,15 @@ def export(
          are denoted by None. Arguments that are dicts or tuples / lists of tensors are
          recursively specified by using mappings or sequences of contained specifications.
 
-        strict: When enabled (default), the export function will trace the program through
-         TorchDynamo which will ensure the soundness of the resulting graph. Otherwise, the
-         exported program will not validate the implicit assumptions baked into the graph and
-         may cause behavior divergence between the original model and the exported one. This is
-         useful when users need to workaround bugs in the tracer, or simply want incrementally
-         enable safety in their models. Note that this does not affect the resulting IR spec
-         to be different and the model will be serialized in the same way regardless of what value
+        strict: When disabled (default), the export function will trace the program through
+         Python runtime, which by itself will not validate some of the implicit assumptions
+         baked into the graph. It will still validate most critical assumptions like shape
+         safety. When enabled (by setting ``strict=True``), the export function will trace
+         the program through TorchDynamo which will ensure the soundness of the resulting
+         graph. TorchDynamo has limited Python feature coverage, thus you may experience more
+         errors. Note that toggling this argument does not affect the resulting IR spec to be
+         different and the model will be serialized in the same way regardless of what value
          is passed here.
-         WARNING: This option is experimental and use this at your own risk.
 
     Returns:
         An :class:`ExportedProgram` containing the traced callable.
@@ -376,12 +368,16 @@ def export(
     )
 
 
+DEFAULT_PICKLE_PROTOCOL = 2
+
+
 def save(
     ep: ExportedProgram,
-    f: Union[str, os.PathLike, io.BytesIO],
+    f: FileLike,
     *,
-    extra_files: Optional[Dict[str, Any]] = None,
-    opset_version: Optional[Dict[str, int]] = None,
+    extra_files: Optional[dict[str, Any]] = None,
+    opset_version: Optional[dict[str, int]] = None,
+    pickle_protocol: int = DEFAULT_PICKLE_PROTOCOL,
 ) -> None:
     """
 
@@ -395,7 +391,7 @@ def save(
     Args:
         ep (ExportedProgram): The exported program to save.
 
-        f (Union[str, os.PathLike, io.BytesIO): A file-like object (has to
+        f (str | os.PathLike[str] | IO[bytes]) A file-like object (has to
          implement write and flush) or a string containing a file name.
 
         extra_files (Optional[Dict[str, Any]]): Map from filename to contents
@@ -404,6 +400,7 @@ def save(
         opset_version (Optional[Dict[str, int]]): A map of opset names
          to the version of this opset
 
+        pickle_protocol: can be specified to override the default protocol
 
     Example::
 
@@ -436,7 +433,7 @@ def save(
     from torch._export.serde.schema import SCHEMA_VERSION
     from torch._export.serde.serialize import serialize, SerializedArtifact
 
-    artifact: SerializedArtifact = serialize(ep, opset_version)
+    artifact: SerializedArtifact = serialize(ep, opset_version, pickle_protocol)
 
     if isinstance(f, (str, os.PathLike)):
         f = os.fspath(f)
@@ -459,10 +456,10 @@ def save(
 
 
 def load(
-    f: Union[str, os.PathLike, io.BytesIO],
+    f: FileLike,
     *,
-    extra_files: Optional[Dict[str, Any]] = None,
-    expected_opset_version: Optional[Dict[str, int]] = None,
+    extra_files: Optional[dict[str, Any]] = None,
+    expected_opset_version: Optional[dict[str, int]] = None,
 ) -> ExportedProgram:
     """
 
@@ -474,9 +471,7 @@ def load(
     :func:`torch.export.save <torch.export.save>`.
 
     Args:
-        ep (ExportedProgram): The exported program to save.
-
-        f (Union[str, os.PathLike, io.BytesIO): A file-like object (has to
+        f (str | os.PathLike[str] | IO[bytes]): A file-like object (has to
          implement write and flush) or a string containing a file name.
 
         extra_files (Optional[Dict[str, Any]]): The extra filenames given in
@@ -574,7 +569,7 @@ def load(
 
 
 def register_dataclass(
-    cls: Type[Any],
+    cls: type[Any],
     *,
     serialized_type_name: Optional[str] = None,
 ) -> None:

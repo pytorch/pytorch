@@ -12,7 +12,7 @@ import unittest
 import warnings
 from contextlib import ContextDecorator, nullcontext
 from functools import partial, wraps
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Optional, Union
 from unittest.mock import patch
 
 from common_utils import decorate, decorateForModules, skip, skipOps, xfail
@@ -74,7 +74,6 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     TestCase,
     xfail_inherited_tests,
-    xfailIfS390X,
     xfailIfTorchDynamo,
 )
 from torch.testing._internal.custom_tensor import ConstantExtraMetadataTensor
@@ -319,8 +318,8 @@ class TestAOTAutograd(AOTTestCase):
     def run_autograd(
         self,
         f: Callable,
-        fw_graph_cell: List[Optional[Callable]],
-        decompositions: Optional[Dict],
+        fw_graph_cell: list[Optional[Callable]],
+        decompositions: Optional[dict],
         keep_input_mutations: bool,
         dynamic: bool,
     ):
@@ -358,11 +357,11 @@ class TestAOTAutograd(AOTTestCase):
     def verify_aot_autograd(
         self,
         f,
-        inp_: Union[Callable, List[Any]],
+        inp_: Union[Callable, list[Any]],
         *,
         test_mutation: bool = False,
         keep_inp_mutations: bool = False,
-        decompositions: Optional[Dict] = None,
+        decompositions: Optional[dict] = None,
         dynamic: bool = False,
         # Only active when inp_ is Callable.
         # TODO: probably consolidate all tests to make inp a Callable.
@@ -697,7 +696,7 @@ def forward(self, primals_1, primals_2):
         with self.assertRaisesRegex(
             AssertionError, "but the input has other mutations that we cannot"
         ):
-            fw_graph = self.verify_aot_autograd(
+            self.verify_aot_autograd(
                 f, inp, test_mutation=True, keep_inp_mutations=True
             )
 
@@ -756,8 +755,8 @@ def forward(self, primals_1):
         test = torch.ones(4, requires_grad=True) + 0
         test_view = test[0::2]
 
-        out_ref = f(ref_view)
-        out_test = f_compiled(test_view)
+        out_ref = f(ref_view)  # noqa: F841
+        out_test = f_compiled(test_view)  # noqa: F841
         self.assertEqual(ref, test)
 
     def test_input_mutation_modifies_autograd_meta_of_aliases(self):
@@ -1087,6 +1086,46 @@ def forward(self, arg0_1, arg1_1):
         self.verify_aot_autograd(f, create_inp(True), test_mutation=True)
         self.verify_aot_autograd(f, create_inp(False), test_mutation=True)
 
+    @parametrize("backend", ["aot_eager", "inductor"])
+    @parametrize("view_replay_for_aliased_outputs", [False, True])
+    @parametrize("dynamic_shapes", [False, True])
+    def test_alias_of_intermediate_detach(
+        self, backend, view_replay_for_aliased_outputs, dynamic_shapes
+    ):
+        with patch(
+            "torch._functorch.config.view_replay_for_aliased_outputs",
+            view_replay_for_aliased_outputs,
+        ):
+
+            def fn(x):
+                x = x + 1
+                a = x.transpose(0, 1)
+                return a.detach(), a
+
+            def inp_fn():
+                t = torch.ones(3, 3, requires_grad=True)
+                if dynamic_shapes:
+                    torch._dynamo.mark_dynamic(t, 0)
+                    torch._dynamo.mark_dynamic(t, 1)
+                return t
+
+            x_ref = inp_fn()
+            y_ref = fn(x_ref)
+
+            x = inp_fn()
+            y = torch.compile(fn, backend=backend, fullgraph=True)(x)
+            self.assertEqual(y_ref, y)
+            y0, y1 = y
+            self.assertFalse(y0.requires_grad)
+            self.assertTrue(y1.requires_grad)
+            # Check that detach and diff view points to the same intermediate tensor storage
+            self.assertEqual(y0.data_ptr(), y1.data_ptr())
+            self.assertTrue(y1._is_view())
+
+            sum(y_ref).sum().backward()
+            sum(y).sum().backward()
+            self.assertEqual(x_ref.grad, x.grad)
+
     def test_input_mutation_storage_resize_up(self):
         def f(a):
             torch.ops.inductor.resize_storage_bytes_(a, 32)
@@ -1110,7 +1149,7 @@ def forward(self, arg0_1, arg1_1):
             keep_inference_input_mutations=True,
             dynamic=False,
         )
-        out = compiled_f(inp)
+        compiled_f(inp)
         # Final functionalized graph has two mutation ops:
         # (1) a resize_() to resize input tensor up
         # (2) a copy_() to fill in the resized input with valid data
@@ -1145,7 +1184,7 @@ def forward(self, primals_1):
             keep_inference_input_mutations=True,
             dynamic=False,
         )
-        out = compiled_f(inp)
+        compiled_f(inp)
         # Final functionalized graph has one mutation ops:
         # (1) a resize_() to resize input tensor down
         # Even though there was technically a "data mutation" on the input (from a.copy_()),
@@ -1200,6 +1239,11 @@ def forward(self, primals_1):
     #     return [sin, copy]""",
     #         )
 
+    # skipped after confirming with @yf225 and @bdhirsh
+    @unittest.skipIf(
+        True,
+        "using set_ unsafely and PT2 FSDP2 no longer uses set_ as used in this test",
+    )
     def test_input_mutation_storage_resize_down_and_set_(self):
         # Meant to mimic ppFSDP
         class TracableCreateParameter(torch.autograd.Function):
@@ -1217,7 +1261,7 @@ def forward(self, primals_1):
             with torch.no_grad():
                 allgather_param = torch.cat([param_shard, param_shard])
             # simulate propagating grad state through dummy param, using data of allgather param
-            dummy_param_with_grad_state = TracableCreateParameter.apply(
+            dummy_param_with_grad_state = TracableCreateParameter.apply(  # noqa: F841
                 allgather_param, dummy_param
             )
             out = dummy_param.sin()
@@ -1242,7 +1286,7 @@ def forward(self, primals_1):
             keep_inference_input_mutations=True,
             dynamic=False,
         )
-        out = compiled_f(dummy_param, param_shard)
+        compiled_f(dummy_param, param_shard)
         # Important stuff to point out:
         # (1) We save cat for backward (input to the sin()).
         #     While the original code was dummy_param.sin(),
@@ -1276,7 +1320,7 @@ def forward(self, primals_1, primals_2):
             keep_inference_input_mutations=True,
             dynamic=False,
         )
-        out = compiled_f(inp)
+        compiled_f(inp)
 
     # def test_input_mutation_storage_resize_not_supported(self):
     #     def f(a):
@@ -1412,7 +1456,7 @@ def forward(self, arg0_1):
             return a + 5
 
         inp = [torch.ones(4, requires_grad=True)]
-        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True)
+        self.verify_aot_autograd(f, inp, test_mutation=True)
 
     def test_input_mutation_metadata2(self):
         def f(a):
@@ -1482,7 +1526,7 @@ def forward(self, arg0_1):
         )
         inp = torch.ones(4, 4, 4, 4)
         with torch.no_grad():
-            out = compiled_m(inp)
+            compiled_m(inp)
         # expectation: there are no copy_() calls in the decomposed batch norm when running under training=False (eval mode)
         code = fw_graph_cell[0].code.strip()
         self.assertTrue("copy_" not in str(code))
@@ -1670,16 +1714,16 @@ def forward(self, primals_1):
             inp2.mul_(2)
             # In eager mode, if we mutate a tensor, any multi-output-view aliases
             # get their grad_fn replaced with error nodes, so accessing grad_fn should error
-            grad_fn = out_test2[0].grad_fn
+            out_test2[0].grad_fn
 
         with self.assertRaisesRegex(
             RuntimeError, "Such functions do not allow the output views"
         ):
-            out_test3 = f1_compiled(inp3)
+            f1_compiled(inp3)
             out_test1[0].detach().mul_(2)
             # The above case also applies to detached aliases (they turn the multi-output-view
             # alias's grad_fns into error nodes)
-            grad_fn = out_test2[0].grad_fn
+            out_test2[0].grad_fn
 
     def test_output_aliases_input_multi_output_view(self):
         # All aliased outs are from multi-output views, so AOTAutograd will hide the aliasing from autograd.
@@ -1890,7 +1934,7 @@ def forward(self, primals_1, primals_2):
         inp = [torch.ones(3, 3, requires_grad=False)]
         self.verify_aot_autograd(f, inp, test_mutation=True)
         inp = [torch.ones(3, 3, requires_grad=True)]
-        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True)
+        self.verify_aot_autograd(f, inp, test_mutation=True)
 
     def test_output_aliases_intermediate_multiple(self):
         def f(a):
@@ -1982,8 +2026,6 @@ def forward(self, primals_1):
             out.t_()
             return out
 
-        inp = [torch.ones(2, 4, requires_grad=True)]
-
         # TODO: fix this test.
         # See https://github.com/pytorch/pytorch/issues/90507
         # self.verify_aot_autograd(f, inp, test_mutation=True)
@@ -2020,7 +2062,7 @@ def forward(self, primals_1):
             out_view2 = out.unsqueeze(0)
             return out_view, out, out_view2
 
-        inp = [torch.ones(2, 4, requires_grad=True)]
+        inp = [torch.ones(2, 4, requires_grad=True)]  # noqa: F841
 
         # TODO: fix this test.
         # See <github issue link>
@@ -2351,11 +2393,18 @@ def forward(self, primals_1, primals_2):
             torch.ones(3, 3, requires_grad=True),
             torch.ones(3, 3, requires_grad=True),
         ]
+        inp_grad_ref = [
+            torch.ones(3, 3, requires_grad=True),
+            torch.ones(3, 3, requires_grad=True),
+        ]
+
         f_compiled = aot_function(f, nop)
-        with self.assertRaisesRegex(
-            AssertionError, "input to the backward that was mutated during the backward"
-        ):
-            out = f_compiled(*inp_grad)
+        out = f_compiled(*inp_grad)
+        out.mul(2).sum().backward()
+        out_ref = f(*inp_grad_ref)
+        out_ref.mul(2).sum().backward()
+        self.assertEqual(inp_grad[0].grad, inp_grad_ref[0].grad)
+        self.assertEqual(inp_grad[1].grad, inp_grad_ref[1].grad)
 
     def test_backward_mutation_forward_inputs(self):
         @torch.library.custom_op("_test::_clone", mutates_args={})
@@ -2954,7 +3003,7 @@ def forward(self, primals_1, primals_2, primals_3):
             # detach() so that none of the inputs have a ._base attribute.
             a = base[0].detach()
             b = base[1].detach()
-            base2 = torch.ones(2, 2, requires_grad=True)
+            base2 = torch.ones(2, 2, requires_grad=True)  # noqa: F841
             return [base], [a, b]
 
         self.verify_aot_autograd(f, inp_callable, test_mutation=True)
@@ -3499,7 +3548,6 @@ def forward(self, tangents_1):
         b.masked_fill_(c, 0) **also** mutates a (because b and a are aliased)
         The autograd engine yells at us if we save "a" for backward, and then try to mutate it.
         """
-        inp = torch.randn(2, 2, requires_grad=True)
 
         def f(a):
             b = a[0]
@@ -3963,6 +4011,10 @@ class TestMod(torch.nn.Module):
 
 
 class TestAOTExport(AOTTestCase):
+    def setUp(self):
+        super().setUp()
+        torch._dynamo.reset()
+
     def test_aot_export_ban_dropout_mut_pre_dispatch(self):
         def fn(p, x):
             y = torch.ops.aten.dropout.default(x, 0.1, train=False)
@@ -3990,7 +4042,7 @@ def forward(self, arg0_1, arg1_1):
         fw_graph_cell = [None]
         bw_graph_cell = [None]
 
-        compiled_outs = aot_function(
+        aot_function(
             fn,
             fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell),
             bw_compiler=partial(extract_graph, graph_cell=bw_graph_cell),
@@ -3999,7 +4051,6 @@ def forward(self, arg0_1, arg1_1):
             dynamic=True,
         )(*inp)
         fw_graph = fw_graph_cell[0]
-        bw_graph = bw_graph_cell[0]
 
         self.assertExpectedInline(
             str(fw_graph.code).strip(),
@@ -4560,7 +4611,7 @@ def forward(self, arg0_1):
         mod = ConvBatchnormRelu()
         mod.train()
         inp = torch.randn(1, 1, 3, 3)
-        o_ref = mod(inp)
+        mod(inp)
         fx_g, signature = aot_export_module(
             mod, [inp], trace_joint=True, output_loss_index=0
         )
@@ -5265,7 +5316,7 @@ class TestPartitioning(AOTTestCase):
         aot_fn = aot_function(generate, nop, inference_compiler=inference_compiler)
         # Even though x requires grad, we should still get an inference graph
         x = torch.randn(4, requires_grad=True)
-        res = aot_fn(x)
+        aot_fn(x)
         self.assertTrue(inference_graph_cell[0] is not None)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
@@ -5914,7 +5965,7 @@ class TestAOTModuleSimplified(AOTTestCase):
         x = torch.randn(2, 512, 40, 59)  # NB: must not require grad
         inputs = [x]
         fake_inputs = [fake_mode.from_tensor(x) for x in inputs]
-        compiled_f = aot_module_simplified(mod, fake_inputs, nop)
+        aot_module_simplified(mod, fake_inputs, nop)
 
     def test_aot_module_simplified_preserves_stack_trace(self):
         class MockModule(torch.nn.Module):
@@ -6332,6 +6383,53 @@ metadata incorrectly.
         out.sum().backward()
         self.assertEqual(ref_x.grad, x.grad)
 
+    def test_subclass_parameters_torture_case(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p1 = torch.nn.Parameter(torch.ones(3, 4))
+                self.p2 = torch.nn.Parameter(
+                    TwoTensor(
+                        TwoTensor(
+                            torch.ones(3, 4),
+                            TwoTensor(torch.randn(3, 4), torch.randn(3, 4)),
+                        ),
+                        TwoTensor(
+                            TwoTensor(torch.randn(3, 4), torch.randn(3, 4)),
+                            TwoTensor(torch.ones(3, 4), torch.randn(3, 4)),
+                        ),
+                    )
+                )
+
+            def forward(self, x):
+                return x + 2 * self.p1 + self.p2.a.b
+
+        m = M()
+        ref_x = torch.randn(3, 4)
+        ref_out = m(ref_x)
+        ref_out.sum().backward()
+        m.zero_grad()
+
+        from torch._functorch._aot_autograd.subclass_parametrization import (
+            unwrap_tensor_subclass_parameters,
+        )
+
+        unwrap_tensor_subclass_parameters(m)
+
+        ref_x2 = ref_x.detach().clone()
+        ref_out2 = m(ref_x2)
+        self.assertEqual(ref_out2, ref_out)
+        ref_out2.sum().backward()
+        self.assertEqual(ref_x2.grad, ref_x.grad)
+        m.zero_grad()
+
+        x = ref_x.detach().clone()
+        comp_fn = torch.compile(m, backend="aot_eager", fullgraph=True)
+        out = comp_fn(x)
+        self.assertEqual(ref_out, out)
+        out.sum().backward()
+        self.assertEqual(ref_x.grad, x.grad)
+
     def test_rrelu_with_noise_mutation(self):
         def fn_functional(x):
             noise = torch.ones_like(x)
@@ -6386,7 +6484,6 @@ aot_autograd_failures = {
     skip("as_strided", "partial_views"),  # flaky
     # Given input size: (s0xs1x2). Calculated output size: ...
     skip("max_pool2d_with_indices_backward"),
-    skip("nn.functional.nll_loss", ""),  # UBSAN failure!
     # Misc
     xfail("to_sparse"),
     xfail("corrcoef"),
@@ -6454,33 +6551,11 @@ symbolic_aot_autograd_failures = {
     xfail(
         "nn.functional.group_norm", ""
     ),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail(
-        "nn.functional.nll_loss", ""
-    ),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail("trace", ""),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail(
-        "_upsample_bilinear2d_aa"
-    ),  # RuntimeError: isIntList() INTERNAL ASSERT FAILED  Expected IntList but got GenericList
     decorate(
         "linalg.householder_product",
         decorator=unittest.skipIf(IS_MACOS and IS_X86, "flaky"),
     ),
-    # many complex operators incorrect striding, metadata
-    xfail("fft.fft", ""),
-    xfail("fft.hfft2", ""),
-    xfail("fft.hfft", ""),
-    xfail("fft.hfftn", ""),
-    xfail("fft.ifft", ""),
-    xfail("fft.ihfft2", ""),
-    xfail("fft.ihfft", ""),
-    xfail("fft.ihfftn", ""),
-    xfail("fft.irfft2", ""),
-    xfail("fft.irfft", ""),
-    xfail("fft.irfftn", ""),
-    xfail("fft.rfft2", ""),
-    xfail("fft.rfft", ""),
-    xfail("fft.rfftn", ""),
-    xfail("stft", ""),  # Cannot call sizes() on tensor with symbolic sizes/strides
 }
 
 
@@ -6605,7 +6680,6 @@ class TestEagerFusionOpInfo(AOTTestCase):
     def test_aot_autograd_exhaustive(self, device, dtype, op):
         _test_aot_autograd_helper(self, device, dtype, op)
 
-    @xfailIfS390X
     @ops(op_db + hop_db, allowed_dtypes=(torch.float,))
     @patch("functorch.compile.config.debug_assert", True)
     @skipOps(
@@ -6652,13 +6726,11 @@ symbolic_aot_autograd_module_failures = {
 
 
 class TestEagerFusionModuleInfo(AOTTestCase):
-    @xfailIfS390X
     @modules(module_db, allowed_dtypes=(torch.float,))
     @decorateForModules(unittest.expectedFailure, aot_autograd_module_failures)
     def test_aot_autograd_module_exhaustive(self, device, dtype, training, module_info):
         _test_aot_autograd_module_helper(self, device, dtype, training, module_info)
 
-    @xfailIfS390X
     @modules(module_db, allowed_dtypes=(torch.float,))
     @decorateForModules(
         unittest.expectedFailure,
@@ -6708,8 +6780,8 @@ class TestAOTAutogradWithDynamo(TestAOTAutograd):
     def run_autograd(
         self,
         f: Callable,
-        fw_graph_cell: List[Optional[Callable]],
-        decompositions: Optional[Dict],
+        fw_graph_cell: list[Optional[Callable]],
+        decompositions: Optional[dict],
         keep_input_mutations: bool,
         dynamic: bool,
     ):
@@ -6840,8 +6912,8 @@ class TestAOTAutogradWithCache(TestAOTAutogradWithDynamo):
     def run_autograd(
         self,
         f: Callable,
-        fw_graph_cell: List[Optional[Callable]],
-        decompositions: Optional[Dict],
+        fw_graph_cell: list[Optional[Callable]],
+        decompositions: Optional[dict],
         keep_input_mutations: bool,
         dynamic: bool,
     ):
@@ -6864,11 +6936,11 @@ class TestAOTAutogradWithCache(TestAOTAutogradWithDynamo):
     def verify_aot_autograd(
         self,
         f,
-        inp_: Union[Callable, List[Any]],
+        inp_: Union[Callable, list[Any]],
         *,
         test_mutation: bool = False,
         keep_inp_mutations: bool = False,
-        decompositions: Optional[Dict] = None,
+        decompositions: Optional[dict] = None,
         dynamic: bool = False,
         # Only active when inp_ is Callable.
         # TODO: probably consolidate all tests to make inp a Callable.

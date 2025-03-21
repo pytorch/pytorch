@@ -3,17 +3,8 @@ import functools
 import math
 import operator
 import sys
-from typing import (
-    Any,
-    Callable,
-    Iterable,
-    List,
-    Optional,
-    SupportsFloat,
-    Tuple,
-    TypeVar,
-    Union,
-)
+from typing import Callable, Optional, SupportsFloat, TYPE_CHECKING, TypeVar, Union
+from typing_extensions import TypeVarTuple, Unpack
 
 import sympy
 from sympy import S
@@ -31,7 +22,12 @@ from sympy.utilities.iterables import sift
 from .numbers import int_oo
 
 
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+
 _T = TypeVar("_T", bound=SupportsFloat)
+_Ts = TypeVarTuple("_Ts")
 
 # Portions of this file are adapted from the Sympy codebase, which was
 # licensed as follows:
@@ -101,9 +97,11 @@ def _is_symbols_binary_summation(expr: sympy.Expr) -> bool:
     )
 
 
-def _keep_float(f: Callable[..., _T]) -> Callable[..., Union[_T, sympy.Float]]:
+def _keep_float(
+    f: Callable[[Unpack[_Ts]], _T]
+) -> Callable[[Unpack[_Ts]], Union[_T, sympy.Float]]:
     @functools.wraps(f)
-    def inner(*args: Any) -> Union[_T, sympy.Float]:
+    def inner(*args: Unpack[_Ts]) -> Union[_T, sympy.Float]:
         r: Union[_T, sympy.Float] = f(*args)
         if any(isinstance(a, sympy.Float) for a in args) and not isinstance(
             r, sympy.Float
@@ -138,7 +136,7 @@ def simple_floordiv_gcd(p: sympy.Basic, q: sympy.Basic) -> sympy.Basic:
     """
 
     def integer_coefficient(x: sympy.Basic) -> int:
-        integer_coefficients: List[int] = [
+        integer_coefficients: list[int] = [
             abs(int(arg))
             for arg in sympy.Mul.make_args(x)
             if isinstance(arg, (int, sympy.Integer))
@@ -154,10 +152,10 @@ def simple_floordiv_gcd(p: sympy.Basic, q: sympy.Basic) -> sympy.Basic:
     gcd: int = math.gcd(integer_factor(p), integer_factor(q))
     p, q = p / gcd, q / gcd  # type: ignore[operator, assignment]  # remove in py3.12
 
-    base_splits: List[Tuple[sympy.Basic, ...]] = list(
+    base_splits: list[tuple[sympy.Basic, ...]] = list(
         map(sympy.Mul.make_args, sympy.Add.make_args(p))
     )
-    divisor_split: Tuple[sympy.Basic, ...] = sympy.Mul.make_args(q)
+    divisor_split: tuple[sympy.Basic, ...] = sympy.Mul.make_args(q)
     for x in divisor_split:
         if all(x in base_split for base_split in base_splits):
             gcd = gcd * x  # type: ignore[operator]  # remove in py3.12
@@ -191,7 +189,7 @@ class FloorDiv(sympy.Function):
     NB: This is Python-style floor division, round to -Inf
     """
 
-    nargs: Tuple[int, ...] = (2,)
+    nargs: tuple[int, ...] = (2,)
     precedence: int = 35  # lower precedence than add
     is_integer: bool = True
 
@@ -204,8 +202,8 @@ class FloorDiv(sympy.Function):
         return self.args[1]
 
     def _sympystr(self, printer: sympy.printing.StrPrinter) -> str:
-        base = printer.parenthesize(self.base, self.precedence)
-        divisor = printer.parenthesize(self.divisor, self.precedence)
+        base = printer.parenthesize(self.base, PRECEDENCE["Atom"] - 0.5)
+        divisor = printer.parenthesize(self.divisor, PRECEDENCE["Atom"] - 0.5)
         return f"({base}//{divisor})"
 
     # Automatic evaluation.
@@ -293,13 +291,18 @@ class FloorDiv(sympy.Function):
 
         return None
 
+    def _ccode(self, printer):
+        base = printer.parenthesize(self.base, PRECEDENCE["Atom"] - 0.5)
+        divisor = printer.parenthesize(self.divisor, PRECEDENCE["Atom"] - 0.5)
+        return f"floor({base}/{divisor})"
+
 
 class ModularIndexing(sympy.Function):
     """
     ModularIndexing(a, b, c) => (a // b) % c where % is the C modulus
     """
 
-    nargs: Tuple[int, ...] = (3,)
+    nargs: tuple[int, ...] = (3,)
     is_integer: bool = True
     precedence: int = 35  # lower precedence than add
 
@@ -330,7 +333,7 @@ class ModularIndexing(sympy.Function):
             pass  # https://github.com/pytorch/pytorch/issues/108276
 
         if isinstance(base, sympy.Add):
-            new_terms: List[sympy.Integer] = []
+            new_terms: list[sympy.Integer] = []
             all_positive: bool = True
             for term in base.args:
                 if sympy.gcd(term, modulus * divisor) != modulus * divisor:
@@ -370,7 +373,7 @@ class Where(sympy.Function):
     Good ol' ternary operator
     """
 
-    nargs: Tuple[int, ...] = (3,)
+    nargs: tuple[int, ...] = (3,)
     precedence: int = 35  # lower precedence than add
 
     def _eval_is_integer(self) -> Optional[bool]:
@@ -399,7 +402,7 @@ class Where(sympy.Function):
 
 # Python-style modulus: take sign from RHS
 class PythonMod(sympy.Function):
-    nargs: Tuple[int, ...] = (2,)
+    nargs: tuple[int, ...] = (2,)
 
     precedence: int = 35  # lower precedence than add
     is_integer: bool = True
@@ -538,11 +541,12 @@ class FloorToInt(sympy.Function):
 
     @classmethod
     def eval(cls, number):
-        # assert number.is_integer is not True, number
         if number in (sympy.oo, int_oo):
             return int_oo
         if number in (-sympy.oo, int_oo):
             return -int_oo
+        if isinstance(number, sympy.Integer):
+            return number
         if isinstance(number, sympy.Number):
             return sympy.Integer(math.floor(float(number)))
 
@@ -580,7 +584,7 @@ class RShift(sympy.Function):
     def eval(cls, base, shift):
         if shift < 0:
             raise ValueError("negative shift count")
-        return base // 2**shift
+        return FloorDiv(base, 2**shift)
 
 
 class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
@@ -1286,6 +1290,10 @@ class Identity(sympy.Function):
 
     def _eval_is_integer(self):
         return self.args[0].is_integer  # type: ignore[attr-defined]
+
+    def _eval_expand_identity(self, **hints):
+        # Removes the identity op.
+        return self.args[0]
 
 
 def make_opaque_unary_fn(name):

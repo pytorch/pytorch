@@ -111,12 +111,12 @@ class TestTypes(TestCase):
                 assert_equal(
                     c_scalar.dtype,
                     c_array.dtype,
-                    "error with types (%d/'%s' + %d/'%s')"
-                    % (k, np.dtype(atype).name, l, np.dtype(btype).name),
+                    "error with types "
+                    f"({k:d}/'{np.dtype(atype).name}' + {l:d}/'{np.dtype(btype).name}')",
                 )
 
     def test_type_create(self):
-        for k, atype in enumerate(types):
+        for atype in types:
             a = np.array([1, 2, 3], atype)
             b = atype([1, 2, 3])
             assert_equal(a, b)
@@ -125,7 +125,7 @@ class TestTypes(TestCase):
     def test_leak(self):
         # test leak of scalar objects
         # a leak would show up in valgrind as still-reachable of ~2.6MB
-        for i in range(200000):
+        for _ in range(200000):
             np.add(1, 1)
 
 
@@ -250,7 +250,7 @@ class TestPower(TestCase):
                 a = t1(3)
                 b = t2(2)
                 result = a**b
-                msg = f"error with {t1!r} and {t2!r}:" f"got {result!r}, expected {9!r}"
+                msg = f"error with {t1!r} and {t2!r}:got {result!r}, expected {9!r}"
                 if np.issubdtype(np.dtype(result), np.integer):
                     assert_(result == 9, msg)
                 else:

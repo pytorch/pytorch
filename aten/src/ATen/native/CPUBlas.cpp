@@ -322,6 +322,24 @@ void gemm(
    const float beta,
    at::BFloat16 *c, int64_t ldc) {
    internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
+#if AT_MKLDNN_ENABLED()
+#ifdef __aarch64__
+   // MKLDNN also supports ARM for bf16, and the bypass is only
+   // currently intended for x86/x86_64.
+   const bool use_bf16_gemv_trans = false;
+#elif defined(__powerpc__)
+   const bool use_bf16_gemv_trans = false;
+#else
+   const bool bf16_gemv_trans_would_be_faster = cpuinfo_initialize() &&
+     !cpuinfo_has_x86_avx512bf16();
+   const bool use_bf16_gemv_trans = bf16_gemv_trans_would_be_faster &&
+     transa == TransposeType::Transpose &&
+     transb == TransposeType::NoTranspose && n == 1 && alpha == 1.0;
+#endif
+   if (!use_bf16_gemv_trans && mkldnn_bf16_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
+     return;
+   }
+#endif
 #if AT_BUILD_WITH_BLAS() && defined(BLAS_HAS_SBGEMM)
    if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
       int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
@@ -343,22 +361,6 @@ void gemm(
       return;
    }
 #endif
-#if AT_MKLDNN_ENABLED()
-#ifdef __aarch64__
-   // MKLDNN also supports ARM for bf16, and the bypass is only
-   // currently intended for x86/x86_64.
-   const bool use_bf16_gemv_trans = false;
-#else
-   const bool bf16_gemv_trans_would_be_faster = cpuinfo_initialize() &&
-     !cpuinfo_has_x86_avx512bf16();
-   const bool use_bf16_gemv_trans = bf16_gemv_trans_would_be_faster &&
-     transa == TransposeType::Transpose &&
-     transb == TransposeType::NoTranspose && n == 1 && alpha == 1.0;
-#endif
-   if (!use_bf16_gemv_trans && mkldnn_bf16_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
-     return;
-   }
-#endif
    gemm_stub(
       at::kCPU, at::kBFloat16,
       transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
@@ -378,8 +380,12 @@ void gemm(
    // we should not bother checking for !cpuinfo_has_x86_avx512fp16() here,
    // because "onednn (mkldnn) won't use avx512fp16 to compute gemms by default
    // because the avx512fp16 fma would incur accuracy loss".
+#if defined(__powerpc__)
+   const bool fp16_gemv_trans_would_be_faster = false;
+#else
    const bool fp16_gemv_trans_would_be_faster = cpuinfo_initialize() &&
      cpuinfo_has_x86_f16c();
+#endif
    const bool use_fp16_gemv_trans = fp16_gemv_trans_would_be_faster &&
      transa == TransposeType::Transpose &&
      transb == TransposeType::NoTranspose && n == 1 && alpha == 1.0;
@@ -946,6 +952,8 @@ inline dnnl::memory::data_type get_dnnl_dtype(ScalarType dtype) {
     return dnnl::memory::data_type::bf16;
   } else if (dtype == ScalarType::Half) {
     return dnnl::memory::data_type::f16;
+  } else if (dtype == ScalarType::Int) {
+    return dnnl::memory::data_type::s32;
   } else if (dtype == ScalarType::Byte) {
     return dnnl::memory::data_type::u8;
   } else if (dtype == ScalarType::Char) {
@@ -1091,7 +1099,7 @@ struct Brgemm : public KernelCache <BrgemmKey, GemmHelper> {
           M,
           N,
           K,
-          1,
+          int64_t(1),
           ld_a,
           ld_b,
           ld_c,
@@ -1131,6 +1139,12 @@ struct Brgemm : public KernelCache <BrgemmKey, GemmHelper> {
     } else if (dtype == ScalarType::BFloat16) {
       static bool bf16_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core;
       return bf16_support;
+    } else if (dtype == ScalarType::Byte) {
+      static bool u8_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_amx;
+      return u8_support;
+    } else if (dtype == ScalarType::Char) {
+      static bool s8_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_vnni;
+      return s8_support;
     }
     return false;
   }
@@ -1181,6 +1195,9 @@ struct Pack : public KernelCache <PackKey, pack_t> {
     } else if (dtype == ScalarType::BFloat16) {
       static bool bf16_pack = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_amx;
       return bf16_pack;
+    } else if (dtype == ScalarType::Byte || dtype == ScalarType::Char) {
+      static bool bit8_pack = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_amx;
+      return bit8_pack;
     }
     return false;
   }
@@ -1280,6 +1297,54 @@ void brgemm(
     N, M, K, 1,
     B, ld_b, A, ld_a,
     beta, C, ld_c);
+}
+
+void brgemm(
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t ld_a,
+    int64_t ld_b,
+    int64_t ld_c,
+    const bool add_C,
+    const unsigned char* A,
+    const unsigned char* B,
+    int32_t* C,
+    bool is_vnni) {
+#if defined(ONEDNN_UKERNEL_ENABLED)
+  if (is_vnni && Brgemm::device_check(ScalarType::Byte)) {
+    Brgemm::call<unsigned char, unsigned char, int32_t>(
+      M, N, K, ld_a, ld_b, ld_c, add_C, A, B, C);
+    return;
+  }
+#endif
+  // raise an error if the path is not supported
+  TORCH_CHECK(false,
+    "U8 Brgemm is only supported on X64 when oneDNN ukernel is enabled and `amx` is supported");
+}
+
+void brgemm(
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t ld_a,
+    int64_t ld_b,
+    int64_t ld_c,
+    const bool add_C,
+    const unsigned char* A,
+    const signed char* B,
+    int32_t* C,
+    bool is_vnni) {
+#if defined(ONEDNN_UKERNEL_ENABLED)
+  if (is_vnni && Brgemm::device_check(ScalarType::Char)) {
+    Brgemm::call<unsigned char, signed char, int32_t>(
+      M, N, K, ld_a, ld_b, ld_c, add_C, A, B, C);
+    return;
+  }
+#endif
+  // raise an error if the path is not supported
+  TORCH_CHECK(false,
+    "I8 Brgemm is only supported on X64 when oneDNN ukernel is enabled and `amx` is supported");
 }
 
 void brgemm_release(bool is_vnni) {

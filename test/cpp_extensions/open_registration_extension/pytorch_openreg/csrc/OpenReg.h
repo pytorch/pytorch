@@ -5,7 +5,7 @@
 
 namespace openreg {
 
-    void set_impl_registry(PyObject* registry);
+    void set_impl_factory(PyObject* factory);
     py::function get_method(const char* name);
 
 }
