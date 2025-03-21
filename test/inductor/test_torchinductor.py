@@ -128,6 +128,8 @@ from torch.testing._internal.inductor_utils import (
     HAS_GPU,
     HAS_MULTIGPU,
     requires_gpu,
+    RUN_CPU,
+    RUN_GPU,
     skipCPUIf,
     skipCUDAIf,
 )
@@ -780,41 +782,41 @@ def is_cpp_backend(device):
 
 def skip_if_cpu(fn):
     @functools.wraps(fn)
-    def wrapper(self):
+    def wrapper(self, *args, **kwargs):
         if self.device == "cpu":
             raise unittest.SkipTest("cpu not supported")
-        return fn(self)
+        return fn(self, *args, **kwargs)
 
     return wrapper
 
 
 def skip_if_halide(fn):
     @functools.wraps(fn)
-    def wrapper(self):
+    def wrapper(self, *args, **kwargs):
         if is_halide_backend(self.device):
             raise unittest.SkipTest("halide not supported")
-        return fn(self)
+        return fn(self, *args, **kwargs)
 
     return wrapper
 
 
 def xfail_if_mps(fn):
     @functools.wraps(fn)
-    def wrapper(self):
+    def wrapper(self, *args, **kwargs):
         if not is_mps_backend(self.device):
-            return fn(self)
+            return fn(self, *args, **kwargs)
         with self.assertRaises(Exception):
-            return fn(self)
+            return fn(self, *args, **kwargs)
 
     return wrapper
 
 
 def skip_if_triton(fn):
     @functools.wraps(fn)
-    def wrapper(self):
+    def wrapper(self, *args, **kwargs):
         if is_triton_backend(self.device):
             raise unittest.SkipTest("triton not supported")
-        return fn(self)
+        return fn(self, *args, **kwargs)
 
     return wrapper
 
@@ -831,10 +833,10 @@ def skip_if_not_triton(fn):
 
 def skip_if_dynamic(fn):
     @functools.wraps(fn)
-    def wrapper(self):
+    def wrapper(self, *args, **kwargs):
         if ifdynstaticdefault(True, False) or torch._dynamo.config.dynamic_shapes:
             raise unittest.SkipTest("associtaive_scan doesn's support lifted SymInts.")
-        return fn(self)
+        return fn(self, *args, **kwargs)
 
     return wrapper
 
@@ -890,13 +892,13 @@ def xfail_if_triton_cpu(fn):
 
 def skip_if_gpu_halide(fn):
     @functools.wraps(fn)
-    def wrapper(self):
+    def wrapper(self, *args, **kwargs):
         if (
             is_halide_backend(self.device)
             and getattr(self.device, "type", self.device) == "cuda"
         ):
             raise unittest.SkipTest("halide not supported")
-        return fn(self)
+        return fn(self, *args, **kwargs)
 
     return wrapper
 
@@ -905,12 +907,12 @@ class skip_if_cpp_wrapper:
     def __init__(self, reason: str = "") -> None:
         self.reason = reason
 
-    def __call__(self, fn):
+    def __call__(self, fn, *args, **kwargs):
         @functools.wraps(fn)
         def wrapper(test_self):
             if config.cpp_wrapper:
                 raise unittest.SkipTest(f"cpp wrapper bug to be fixed: {self.reason}")
-            return fn(test_self)
+            return fn(test_self, *args, **kwargs)
 
         return wrapper
 
@@ -1424,6 +1426,10 @@ class CommonTemplate:
         )
         real_input = torch.tensor([-1.0, 0.0, 1.0, float("nan")])
         interger_real_input = torch.tensor([-1, 0, 1])
+        # Complex are not supported on MacOS-13
+        if self.device == "mps" and MACOS_VERSION < 14.0:
+            self.common(fn, (complex_input.real, real_input, interger_real_input))
+            return
         self.common(fn, (complex_input, real_input, interger_real_input))
 
     def test_sgn(self):
@@ -1680,6 +1686,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(1024),))
 
+    @xfailIfS390X
     @config.patch(debug_index_asserts=False)
     @config.patch("cpp.enable_tiling_heuristics", False)
     def test_neg_index(self):
@@ -1989,7 +1996,6 @@ class CommonTemplate:
 
     @skip_if_gpu_halide
     @skipCPUIf(IS_MACOS, "fails on macos")
-    @xfailIfS390X
     def test_multilayer_var(self):
         def fn(a):
             return torch.var(a)
@@ -2009,7 +2015,7 @@ class CommonTemplate:
 
     @skipCPUIf(IS_MACOS, "fails on macos")
     @skip_if_halide  # accuracy 4.7% off
-    @xfailIfS390X
+    @xfailIfS390X  # accuracy failure
     def test_multilayer_var_lowp(self):
         def fn(a):
             return torch.var(a)
@@ -4001,7 +4007,7 @@ class CommonTemplate:
             _, code = run_and_get_code(foo, grouped_conv, input_tensor)
             # no to channels last permuting before kernel
             if config.cpp_wrapper:
-                FileCheck().check_not("launchKernel(triton").check("_convolution(").run(
+                FileCheck().check_not("  call_triton").check("_convolution(").run(
                     code[0]
                 )
             else:
@@ -4429,7 +4435,7 @@ class CommonTemplate:
         gemm_opt(x1, y1)
         self.assertTrue(failed_guard is not None)
         self.assertTrue(
-            "tensor 'L['x']' Tensor device index mismatch. Expected device index to be"
+            "tensor 'x' Tensor device index mismatch. Expected device index to be"
             in failed_guard.reason
         )
 
@@ -9689,7 +9695,6 @@ class CommonTemplate:
         "TODO: debug this with asan",
     )
     @skip_if_gpu_halide
-    @xfailIfS390X
     def test_tmp_not_defined_issue2(self):
         def forward(arg38_1, arg81_1, getitem_17, new_zeros_default_4):
             div_tensor_7 = torch.ops.aten.div.Tensor(getitem_17, arg81_1)
@@ -10209,6 +10214,13 @@ class CommonTemplate:
 
         # Constant must not get matched as constant
         self.common(fn, [torch.randn(3, 1, 1, 1, 1), 9132])
+
+    def test_float_repr_dynamic_shapes(self):
+        @torch.compile(dynamic=True)
+        def fn(x):
+            return F.interpolate(x, scale_factor=1 / 300, mode="linear")
+
+        self.common(fn, [torch.randn(1, 8, 396 * 300)])
 
     def test_sqrt_dynamic_shapes(self):
         # TIMM convit_base model: https://github.com/pytorch/pytorch/issues/97877.
@@ -10891,8 +10903,8 @@ class CommonTemplate:
     # Calling div only torch.SymInt arguments is not yet supported.
     # To support this behavior, we need to allow const-propping tensors that store symint data.
     # For now, dynamo will explicitly graph break when it encounters user code with this behavior.
-    @xfailIfS390X
     @expectedFailureCodegenDynamic
+    @xfailIfS390X
     @skip_if_gpu_halide  # accuracy error
     def test_AllenaiLongformerBase_repro(self):
         def fn(query, scores, window_overlap):
@@ -12870,7 +12882,7 @@ def copy_tests(
         other_cls.is_dtype_supported = my_cls.is_dtype_supported
 
 
-if HAS_CPU:
+if RUN_CPU:
 
     class SweepInputsCpuTest(SweepInputs2, TestCase):
         gen = InputGen(10, "cpu")
@@ -12883,7 +12895,7 @@ if HAS_CPU:
 
     copy_tests(CommonTemplate, CpuTests, "cpu")
 
-if HAS_GPU:
+if RUN_GPU:
 
     class SweepInputsGPUTest(SweepInputs2, TestCase):
         gen = InputGen(10, GPU_TYPE)
@@ -14126,7 +14138,7 @@ if HAS_GPU:
 
             if not config.cpp_wrapper:
                 FileCheck().check("def partition_0(args):").check(
-                    "(buf0, buf1) = self.partitions[0](partition0_args)"
+                    "(buf0, buf1, arg0_1, arg1_1) = self.partitions[0](partition0_args)"
                 ).check("recursively_apply_fns = runner.recursively_apply_fns").run(
                     code[0]
                 )
@@ -14235,6 +14247,26 @@ if HAS_GPU:
 
             self.assertEqual(eager_out, compiled_out)
 
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_fused_scheduler_node(self):
+            def foo(x):
+                x = x * 20
+                x_alias = x[0]
+                y = x * 10
+                y_alias = y[0]
+                torch._dynamo.graph_break()
+                ind = torch.tensor(4, device=GPU_TYPE)
+                x_alias2 = x[ind:]
+                y_alias2 = y[ind:]
+                return x, x_alias, x_alias2, y_alias, y_alias2
+
+            foo = torch.compile(foo)
+            x = torch.rand([20, 20], device=GPU_TYPE)
+            _, code = run_and_get_code(foo, x)
+
+            if not config.cpp_wrapper:
+                FileCheck().check("def partition_0(args):").run(code[0])
+
     class RNNTest(TestCase):
         device_type = GPU_TYPE
 
@@ -14285,7 +14317,7 @@ if HAS_GPU:
                 torch.compile(f)(x)
 
 
-if HAS_CPU:
+if RUN_CPU:
 
     class TestFull(TestCase):
         def test_full_dtype(self):
@@ -14349,5 +14381,5 @@ def _run_and_get_stripped_kernels(
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CPU or HAS_GPU:
+    if RUN_CPU or RUN_GPU:
         run_tests(needs="filelock")
