@@ -977,7 +977,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             true_node,
             false_node,
             # We pick true_shared but it shouldn't matter
-            true_shared + unique_true + unique_false,
+            tuple(true_shared + unique_true + unique_false),
         )
 
         return _call_function_and_unflatten_output(
