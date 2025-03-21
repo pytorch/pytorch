@@ -1321,7 +1321,7 @@ inline float modified_bessel_k0_forward(T x) {
 } // modified_bessel_k0_forward(T x)
 
 template <typename T>
-float modified_bessel_k1_forward(T x) {
+inline float modified_bessel_k1_forward(T x) {
   constexpr float A[] = {
       -7.02386347938628759343e-18,
       -2.42744985051936593393e-15,
