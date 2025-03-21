@@ -669,9 +669,9 @@ def _compile_fx_inner(
     static_inputs_log.debug("static input idxs compile_fx_inner: %s", static_input_idxs)
     inputs_to_check = get_input_idxs_to_check(example_inputs, static_input_idxs)
 
-    assert isinstance(
-        next(iter(reversed(gm.graph.nodes))).args[0], (tuple, list)
-    ), f"inductor can only compile FX graphs which return a tuple/list, but got {gm.graph}"
+    assert isinstance(next(iter(reversed(gm.graph.nodes))).args[0], (tuple, list)), (
+        f"inductor can only compile FX graphs which return a tuple/list, but got {gm.graph}"
+    )
 
     if (cudagraphs := graph_kwargs.get("cudagraphs")) is None:
         graph_kwargs["cudagraphs"] = cudagraphs = BoxedBool(config.triton.cudagraphs)
@@ -1190,9 +1190,9 @@ class _InProcessFxCompile(FxCompile):
                         if graph.aot_mode:
                             from .codecache import AotCodeCompiler
 
-                            assert (
-                                graph.cpp_wrapper
-                            ), "AOT mode only supports C++ wrapper"
+                            assert graph.cpp_wrapper, (
+                                "AOT mode only supports C++ wrapper"
+                            )
                             wrapper_code, kernel_code = graph.codegen_with_cpp_wrapper()
                             output_code_log.debug(
                                 "Output wrapper code: \n%s", wrapper_code.value
@@ -1338,9 +1338,9 @@ def fx_codegen_and_compile(
         from .compile_fx_async import _AsyncFxCompile
         from .compile_fx_ext import _OutOfProcessFxCompile
 
-        assert isinstance(
-            scheme, _OutOfProcessFxCompile
-        ), "async is only valid with an out-of-process compile mode"
+        assert isinstance(scheme, _OutOfProcessFxCompile), (
+            "async is only valid with an out-of-process compile mode"
+        )
         scheme = _AsyncFxCompile(scheme)
 
     return scheme.codegen_and_compile(gm, example_inputs, inputs_to_check, graph_kwargs)
