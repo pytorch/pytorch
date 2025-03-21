@@ -441,7 +441,9 @@ def pointwise_strategy(op_schema: OpSchema, linearity: bool = False) -> OpStrate
 
             arg_max_shards = arg_strategy.max_num_shards()
             arg_max_ndim = arg_strategy.ndim
-            if (arg_max_shards > max_shards) or (arg_max_shards == max_shards and arg_max_ndim > max_ndim):
+            if (arg_max_shards > max_shards) or (
+                arg_max_shards == max_shards and arg_max_ndim > max_ndim
+            ):
                 max_shards_strategy_index = idx
                 max_shards = arg_max_shards
                 max_ndim = arg_max_ndim
