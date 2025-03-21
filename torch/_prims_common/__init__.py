@@ -1638,15 +1638,14 @@ def make_contiguous_strides_for(
     if not shape:
         return ()
 
-    from torch.fx.experimental.symbolic_shapes import is_nested_int
+    from torch.fx.experimental.symbolic_shapes import is_nested_int, _guard_or_false
 
     multiplier: Union[_IntLikeT, int] = 1
     strides = []
     for l in reversed(shape):
         strides.append(multiplier)
-        multiplier *= (
-            l if is_nested_int(l) else sym_max(l, 1)
-        )  # type:ignore[assignment]
+        if is_nested_int(l) or not _guard_or_false(l <= 0):
+            multiplier *= l  # type:ignore[assignment]
 
     result = tuple(reversed(strides))
 
