@@ -5,7 +5,9 @@ ENV LC_ALL=C.UTF-8
 ENV LANG=C.UTF-8
 ENV LANGUAGE=C.UTF-8
 
-ARG DEVTOOLSET_VERSION=13
+# there is a bugfix in gcc >= 14 for precompiled headers and s390x vectorization interaction.
+# with earlier gcc versions test/inductor/test_cpu_cpp_wrapper.py will fail.
+ARG DEVTOOLSET_VERSION=14
 # Installed needed OS packages. This is to support all
 # the binary builds (torch, vision, audio, text, data)
 RUN yum -y install epel-release
