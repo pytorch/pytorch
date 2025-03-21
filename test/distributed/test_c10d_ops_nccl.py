@@ -735,6 +735,17 @@ class ProcessGroupNCCLOpTest(MultiProcContinousTest):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_reduce_scatter_v(self):
+        device = torch.device("cuda", self.rank_to_GPU[self.rank][0])
+        input_list = [torch.ones(i, device=device) for i in range(self.world_size)]
+        output = torch.zeros(self.rank, device=device)
+        work = c10d.reduce_scatter(output, input_list, group=self.pg, async_op=True)
+        expected = torch.ones(self.rank, device=device) * self.world_size
+        work.wait()
+        self.assertEqual(expected, output)
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_reduce_scatter_ops(self):
         pg = self.pg
         local_device_ids = self.rank_to_GPU[self.rank]
