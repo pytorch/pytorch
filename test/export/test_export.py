@@ -10760,7 +10760,9 @@ def forward(self, x):
             def forward(self, x):
                 return torch.ops.aten.is_nonzero(x)
 
-        with self.assertRaisesRegex(RuntimeError, "Can't call is_nonzero"):
+        with self.assertRaisesRegex(
+            RuntimeError, "Boolean value of Tensor with more than"
+        ):
             export(Foo(), (torch.randn(4, 4),), strict=False)
 
     def test_placeholder_naming_collisions(self):

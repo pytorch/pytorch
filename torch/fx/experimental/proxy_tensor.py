@@ -810,7 +810,7 @@ def proxy_call(
 
             if guard_size_oblivious(args[0].numel() != 1):  # type: ignore[attr-defined]
                 raise RuntimeError(
-                    "Can't call is_nonzero on a tensor of elements more than one"
+                    "Boolean value of Tensor with more than one value is ambiguous"
                 )
             return (args[0] != 0).item()  # type: ignore[attr-defined]
 

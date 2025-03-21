@@ -551,7 +551,7 @@ def check_model(
 
         # generate random unit norm gradients
         grads = [
-            torch.randn_like(r)
+            torch.rand(r.shape, device=r.device, dtype=r.dtype)
             for r in correct_flat
             if isinstance(r, torch.Tensor) and r.requires_grad
         ]
