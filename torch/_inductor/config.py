@@ -872,6 +872,19 @@ enable_linear_binary_folding = (
 annotate_training: bool = os.environ.get("TORCHINDUCTOR_ANNOTATE_TRAINING", "0") == "1"
 
 
+class AutoChunker:
+    enable = os.environ.get("TORCHINDUCTOR_AUTO_CHUNKER") == "1"
+
+    # If an op has too small input tensors, we skip chunking it.
+    input_size_threshold = 1024
+
+    # Apply auto chunker if an op amplifies input by more than amplify_threshold
+    # times.
+    amplify_ratio_threshold = 8
+
+    num_chunk = int(os.environ.get("TORCHINDUCTOR_CHUNKER_NUM_CHUNKS")) if os.environ.get("TORCHINDUCTOR_CHUNKER_NUM_CHUNKS") is not None else  None  # If not None, use this to force number of chunks
+
+
 # config specific to codegen/cpp.py
 class cpp:
     # set to torch.get_num_threads()
