@@ -183,7 +183,6 @@ def aot_dispatch_base(
     ) = functionalized_rng_wrapper.pre_compile(
         fw_module, updated_flat_args, aot_config, fw_metadata=fw_metadata
     )
-    assert isinstance(fw_module, GraphModule)
 
     if aot_config.enable_log:
         trace_structured(
@@ -215,6 +214,7 @@ def aot_dispatch_base(
         with TracingContext.report_output_strides() as fwd_output_strides:
             fake_mode = detect_fake_mode()
             if fake_mode is not None and fake_mode.shape_env is not None:
+                assert isinstance(fw_module, GraphModule)
                 tensorify_python_scalars(fw_module, fake_mode.shape_env, fake_mode)
             compiled_fw = compiler(fw_module, updated_flat_args)
 
@@ -878,29 +878,13 @@ def aot_dispatch_autograd(
             # the user forward might have returned in its own output
             fw_outs_saved_for_bw = fw_outs[num_inner_fwd_outputs:]
             num_fw_outs_saved_for_bw = len(fw_outs_saved_for_bw)
-            symint_outs_saved_for_bw = []
-            for idx, node in enumerate(fw_outs_saved_for_bw):
-                if is_sym_node(node):
-                    symint_outs_saved_for_bw.append(node)
-                elif (
-                    isinstance(node, torch.fx.Node)
-                    and "val" in getattr(node, "meta", {})
-                    and isinstance(node.meta["val"], FakeTensor)
-                ):
-                    # record dynamic tensor activations
-                    dynamic_dims: set[int] = {
-                        dim
-                        for dim, size in enumerate(node.meta["val"].shape)
-                        if not isinstance(size, int)
-                    }
-                    if dynamic_dims:
-                        fw_metadata.dynamic_tensors_saved_for_backward[
-                            idx
-                        ] = dynamic_dims
-
+            symint_outs_saved_for_bw = [
+                n for n in fw_outs_saved_for_bw if is_sym_node(n)
+            ]
             fw_metadata.num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
             inner_meta.num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
             num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
+
             if torch._functorch.config.donated_buffer:
                 fw_metadata.bw_donated_idxs = collect_bw_donated_buffer_idxs(
                     fw_module,
