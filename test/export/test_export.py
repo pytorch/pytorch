@@ -12946,8 +12946,30 @@ def forward(self, x):
                 return self.buf + x
 
         ep = export(M(), (torch.ones(3),))
-        print(ep)
-        assert False
+        self.assertExpectedInline(
+            str(ep.graph_signature).strip(),
+            """\
+# inputs
+b_buf: BUFFER target='buf' persistent=True
+x: USER_INPUT
+
+# outputs
+add: USER_OUTPUT""",
+        )
+
+        ep = ep.run_decompositions({})
+        self.assertExpectedInline(
+            str(ep.graph_signature).strip(),
+            """\
+# inputs
+b_buf: BUFFER target='buf' persistent=True
+x: USER_INPUT
+
+# outputs
+add_1: BUFFER_MUTATION target='buf'
+add: USER_INPUT_MUTATION target='x'
+add_2: USER_OUTPUT""",
+        )
 
     @unittest.skipIf(not TEST_TRANSFORMERS, "No transformers")
     def test_hf_logging_logger(self):

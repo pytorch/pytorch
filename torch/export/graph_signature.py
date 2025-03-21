@@ -112,7 +112,7 @@ class InputSpec:
         ), f"got {type(self.arg)}"
 
     def __str__(self):
-        target = "" if self.target is None else f" target={self.target}"
+        target = "" if self.target is None else f" target='{self.target}'"
         persistent = "" if self.persistent is None else f" persistent={self.persistent}"
         return f"{str(self.arg.name)}: {str(self.kind.name)}{target}{persistent}"
 
@@ -148,7 +148,7 @@ class OutputSpec:
         ), self.arg
 
     def __str__(self):
-        target = "" if self.target is None else f" target={self.target}"
+        target = "" if self.target is None else f" target='{self.target}'"
         return f"{str(self.arg.name)}: {str(self.kind.name)}{target}"
 
 
@@ -497,11 +497,11 @@ class ExportGraphSignature:
         return _
 
     def __str__(self):
-        input_specs = "\n        ".join(str(s) for s in self.input_specs)
-        output_specs = "\n        ".join(str(s) for s in self.output_specs)
+        input_specs = "\n".join(str(s) for s in self.input_specs)
+        output_specs = "\n".join(str(s) for s in self.output_specs)
         return (
-            f"\n    inputs:\n        {input_specs}"
-            f"\n    outputs:\n        {output_specs}"
+            f"\n# inputs\n{input_specs}\n"
+            f"\n# outputs\n{output_specs}\n"
         )
 
 
