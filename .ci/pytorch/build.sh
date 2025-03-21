@@ -27,7 +27,7 @@ cmake --version
 echo "Environment variables:"
 env
 
-export USE_NCCL=0
+export USE_SYSTEM_NCCL=1
 
 if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   # Use jemalloc during compilation to mitigate https://github.com/pytorch/pytorch/issues/116289
