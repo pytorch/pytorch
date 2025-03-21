@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 from typing import Any, Callable, cast, Optional, Union
+from typing_extensions import ParamSpec
 
 import torch
 import torch._dynamo
@@ -71,15 +72,18 @@ if HAS_TABULATE:
         avg_time = result.mean * 1000
         return round(avg_time, 2)
 
+
+    _P = ParamSpec("_P")
+
     def benchmark_compile(
-        model: Union[torch.nn.Module, Callable],
+        model: Union[torch.nn.Module, Callable[_P, Any]],
         sample_input: Union[torch.Tensor, Any],
         num_iters: int = 5,
         backend: Optional[str] = None,
         mode: Optional[str] = "default",
         optimizer: Optional[torch.optim.Optimizer] = None,
         loss_fn : Union[torch.nn.Module, Callable, None] = None,
-        **compile_kwargs: Any,
+        **compile_kwargs: _P.kwargs,
     ):
         """
         Use this utility to benchmark torch.compile
