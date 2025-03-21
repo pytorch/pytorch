@@ -3586,7 +3586,6 @@ def check_file(filename, is_inlined_call=False):
         ):
             return SkipResult(False, "inlined by default")
         else:
-            breakpoint()
             return SkipResult(True, "unittest")
 
     if bool(SKIP_DIRS_RE.match(filename)):
