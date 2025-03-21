@@ -2432,8 +2432,7 @@ TEST_F(ModulesTest, ELU) {
       ASSERT_EQ(y.ndimension(), 3);
       ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
       auto y_exp = torch::max(torch::zeros_like(x_orig), x_orig) +
-          torch::min(torch::zeros_like(x_orig),
-                     alpha * (torch::expm1(x_orig)));
+          torch::min(torch::zeros_like(x_orig), alpha * (torch::expm1(x_orig)));
       ASSERT_TRUE(torch::allclose(y, y_exp));
       if (inplace) {
         ASSERT_TRUE(torch::allclose(x, y_exp));
