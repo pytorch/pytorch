@@ -31,6 +31,7 @@ import numpy as np
 
 import torch
 import torch._dynamo.testing
+import torch._inductor.config
 import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils._pytree as python_pytree
@@ -3245,6 +3246,26 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertTrue(same(obj1, obj2))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 9)
+
+    def test_nesteduserfunction_setattr(self):
+        x = 0
+
+        def update(y):
+            def wrapper():
+                x += y
+
+            return wrapper
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            w = update(123)
+            w.__wrapped__ = x
+            return t.sin(), w
+
+        t = torch.randn(2)
+        y, w = fn(t)
+        self.assertEqual(y, t.sin())
+        self.assertEqual(w.__wrapped__, x)
 
     def test_object_setattr(self):
         @dataclasses.dataclass
@@ -10318,8 +10339,8 @@ def ___make_guard_fn():
 ShapeEnv not equal: field values don't match:
 
 ==> settings: values don't match.
-  >  Left: ShapeEnvSettings(allow_scalar_outputs=False, allow_dynamic_output_shape_ops=True, assume_static_by_default=False, specialize_zero_one=True, duck_shape=True, prefer_deferred_runtime_asserts_over_guards=False, allow_complex_guards_as_runtime_asserts=False)
-  > Right: ShapeEnvSettings(allow_scalar_outputs=True, allow_dynamic_output_shape_ops=True, assume_static_by_default=False, specialize_zero_one=True, duck_shape=True, prefer_deferred_runtime_asserts_over_guards=False, allow_complex_guards_as_runtime_asserts=False)
+  >  Left: ShapeEnvSettings(allow_scalar_outputs=False, allow_dynamic_output_shape_ops=True, assume_static_by_default=False, specialize_zero_one=True, duck_shape=True, prefer_deferred_runtime_asserts_over_guards=False, allow_complex_guards_as_runtime_asserts=False, trace_asserts=False)
+  > Right: ShapeEnvSettings(allow_scalar_outputs=True, allow_dynamic_output_shape_ops=True, assume_static_by_default=False, specialize_zero_one=True, duck_shape=True, prefer_deferred_runtime_asserts_over_guards=False, allow_complex_guards_as_runtime_asserts=False, trace_asserts=False)
 """,
         )
         self._replay_and_check(main)
@@ -10625,6 +10646,10 @@ ShapeEnv not equal: field values don't match:
 
     @skipIfWindows(
         msg="AssertionError: False is not true : Encountered an unexpected fallback to 'aten pow' in dynamo compiled code"
+    )
+    @unittest.skipIf(
+        torch._inductor.config.cpu_backend != "cpp",
+        "Skip for non cpp backend CPU as comments contain 'aten.pow' ",
     )
     def test_torch_dynamo_codegen_pow(self):
         def pow(x):
