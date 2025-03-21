@@ -122,17 +122,27 @@ at::Tensor _scaled_dot_product_int8_cpu(
     "_scaled_dot_product_int8_cpu: Attention mask dim in {2, 4}");
 
   // fallback math path
-  at::Tensor output = sdpa_int8_math_impl(query, key, value,
+  // at::Tensor output = sdpa_int8_math_impl(query, key, value,
+  //   attn_mask, scale, dropout_p, is_causal,
+  //   q_zp, q_scale,
+  //   k_zp, k_scale,
+  //   v_zp, v_scale,
+  //   a_zp, a_scale,
+  //   o_zp, o_scale).transpose(1, 2).contiguous().transpose(1, 2);
+
+  // TODO @Valentine233: add flash attention int8 impl
+  at::Tensor output = at::empty_like(query, query.options()).transpose(1, 2);
+  sdpa_int8_kernel(kCPU, output,
+    query, key, value,
     attn_mask, scale, dropout_p, is_causal,
     q_zp, q_scale,
     k_zp, k_scale,
     v_zp, v_scale,
     a_zp, a_scale,
-    o_zp, o_scale).transpose(1, 2).contiguous().transpose(1, 2);
+    o_zp, o_scale);
 
-  // TODO @Valentine233: add flash attention int8 impl
-
-  return output;
+  output = output.transpose(1, 2);
+  return std::move(output);
 }
 
 } // namespace at::native

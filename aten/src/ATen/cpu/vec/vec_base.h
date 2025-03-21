@@ -297,7 +297,7 @@ public:
     }
     return ret;
   }
-  T reduce(T (*const f)(T)) const {
+  T reduce(T (*const f)(T, T)) const {
     T ret = 0;
     for (int64_t i = 0; i < size(); i++) {
       ret = f(ret, values[i]);
@@ -314,7 +314,7 @@ public:
     }
     return ret;
   }
-  T reduce(T (*const f)(T)) const {
+  T reduce(T (*const f)(T, T)) const {
     T ret = 0;
     for (int64_t i = 0; i != size(); i++) {
       ret = f(ret, values[i]);
@@ -329,7 +329,7 @@ public:
     }
     return ret;
   }
-  T reduce(T (*const f)(const T &)) const {
+  T reduce(T (*const f)(const T &, const T &)) const {
     T ret = 0;
     for (int64_t i = 0; i != size(); i++) {
       ret = f(ret, values[i]);
@@ -615,7 +615,7 @@ public:
     return reduce([](T x, T y) -> T { return x + y; });
   }
   T reduce_max() const {
-    return reduce(std::max);
+    return reduce([](T x, T y) -> T { return std::max(x, y); });
   }
 private:
   template <typename Op>
