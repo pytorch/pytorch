@@ -748,6 +748,44 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
         self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 1)
 
+        # After forward passes, record the current counter values
+        base_miss = counters["inductor"]["fxgraph_cache_miss"]
+        base_hit = counters["inductor"]["fxgraph_cache_hit"]
+
+        # First backward call
+        self.reset()  # Still reset the caches but not counters
+        a2, b2, c2 = (
+            torch.randn(1, 4, 512, 64).cuda().requires_grad_(True) for _ in range(3)
+        )
+
+        out1 = compiled_fn(a2, b2, c2)
+        grad_output = torch.randn_like(out1)
+        out1.backward(grad_output)
+
+        # Check the incremental counts
+        self.assertEqual(
+            counters["inductor"]["fxgraph_cache_miss"] - base_miss, 1, "miss"
+        )
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"] - base_hit, 0, "hit")
+
+        # Update base counters for next test
+        base_miss = counters["inductor"]["fxgraph_cache_miss"]
+        base_hit = counters["inductor"]["fxgraph_cache_hit"]
+
+        # Second backward with different inputs
+        self.reset()
+        a3, b3, c3 = (
+            torch.randn(1, 4, 512, 64).cuda().requires_grad_(True) for _ in range(3)
+        )
+        out2 = compiled_fn(a3, b3, c3)
+        out2.backward(grad_output)
+
+        # Check incremental counts again
+        self.assertEqual(
+            counters["inductor"]["fxgraph_cache_miss"] - base_miss, 0, "miss"
+        )
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"] - base_hit, 1, "hit")
+
     @requires_gpu()
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
