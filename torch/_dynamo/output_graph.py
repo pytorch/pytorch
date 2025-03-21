@@ -2324,6 +2324,11 @@ class SubgraphTracer(fx.Tracer):
             else:
                 self.input_name_to_proxy[name] = proxy
 
+            # For placeholder nodes, `name` is passed as a str to the target,
+            # and then torch.fx decides the node.name. So, record the `target`
+            # name as well in the _used_names to prevent any collision.
+            self._used_names.add(name)
+
             # NOTE: [Auto lift basic free symbols when create_graph_input]
             # Whenever we call create_graph_input, we try to also lift the basic symbols in example values
             # as graph input.
