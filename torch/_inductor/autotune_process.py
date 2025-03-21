@@ -2,8 +2,6 @@
 from __future__ import annotations
 
 import atexit
-import sys
-import contextlib
 import ctypes
 import dataclasses
 import functools
@@ -13,19 +11,19 @@ import pickle
 import queue
 import selectors
 import subprocess
+import sys
 import time
 import warnings
 from collections.abc import Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from ctypes import byref, c_size_t, c_void_p, CDLL
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union, IO
+from typing import Any, Callable, IO, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.testing import rand_strided
 from torch._inductor import ir
-from torch._inductor.utils import get_ld_library_path
 from torch._inductor.codecache import (
     CppCodeCache,
     CUDACodeCache,
@@ -33,7 +31,7 @@ from torch._inductor.codecache import (
     get_hash,
     PyCodeCache,
 )
-from torch._inductor.utils import get_gpu_type, is_gpu
+from torch._inductor.utils import get_gpu_type, get_ld_library_path, is_gpu
 from torch._logging import getArtifactLogger
 from torch.utils._ordered_set import OrderedSet
 
@@ -54,7 +52,6 @@ from .virtualized import V
 CUDA_VISIBLE_DEVICES = "CUDA_VISIBLE_DEVICES"
 
 autotuning_log = getArtifactLogger(__name__, "autotuning")
-log = logging.getLogger(__name__)
 
 
 class NonzeroWorkspaceNotSupportedError(Exception):
@@ -76,26 +73,23 @@ class TuningProcess:
             os.getpid(),
             os.environ.get(CUDA_VISIBLE_DEVICES),
         )
+        def workloop():
+            while True:
+                job = TuningProcess.recv(read_pipe)
+                if job is None:
+                    # None is a sentinel for the child to shut down
+                    break
+                try:
+                    result = job()
+                except Exception as e:
+                    result = e
+                TuningProcess.send(result, write_pipe)
+
         try:
-            TuningProcess.workloop(read_pipe, write_pipe)
+            workloop()
         except EOFError:
             # The parent closed the pipe
             pass
-        except Exception:
-            autotuning_log.exception("Exception in TuningProcess")
-
-    @staticmethod
-    def workloop(read_pipe: IO[bytes], write_pipe: IO[bytes]) -> None:
-        """
-        Work loop for the benchmarking subprocess.
-        """
-        while True:
-            job = TuningProcess.recv(read_pipe)
-            if job is None:
-                # None is a sentinel for the child to shut down
-                break
-
-            TuningProcess.send(job(), write_pipe)
 
     @staticmethod
     def send(obj: Any, write_pipe: IO[bytes]) -> None:
@@ -108,6 +102,7 @@ class TuningProcess:
 
     def __init__(self, device: Optional[int]):
         self.device = device
+        self.start()
 
     def start(self):
         """
@@ -120,8 +115,8 @@ class TuningProcess:
         self.write_pipe = os.fdopen(write_fd, "wb")
         self.read_pipe = os.fdopen(read_fd, "rb")
 
-        self.sel = selectors.DefaultSelector()
-        self.sel.register(self.read_pipe, selectors.EVENT_READ)
+        self.selector = selectors.DefaultSelector()
+        self.selector.register(self.read_pipe, selectors.EVENT_READ)
 
         cmd = [
             sys.executable,
@@ -139,19 +134,21 @@ class TuningProcess:
             # Some internal usages need a modified LD_LIBRARY_PATH.
             "LD_LIBRARY_PATH": get_ld_library_path(),
         }
-        if self.device:
+        if self.device is not None:
             extra_env[CUDA_VISIBLE_DEVICES] = str(self.device)
         self.process = subprocess.Popen(
             cmd,
             env={**os.environ, **extra_env},
             pass_fds=(subproc_read_fd, subproc_write_fd),
         )
+        os.close(subproc_read_fd)
+        os.close(subproc_write_fd)
 
     def alive(self) -> bool:
         """
         True if the subprocess is still running.
         """
-        return self.process.poll() is None
+        return self.process is not None and self.process.poll() is None
 
     def put(self, req: Any) -> None:
         """
@@ -161,23 +158,41 @@ class TuningProcess:
             self.start()
         TuningProcess.send(req, self.write_pipe)
 
-    def get(self, timeout=120.0) -> Any:
+    def get(self, timeout: float = 120.0) -> Any:
         """
-        Get a response from the child process. Raises TimeoutError on timeout.
+        Get a response from the child process. Raises TimeoutError on timeout;
+        raises EOFError if the subprocess crashes.
         """
-        if not self.sel.select(timeout):
+        try:
+            if not self.selector.select(timeout):
+                raise TimeoutError(f"Timeout in autotune subprocess {self.process.pid}")
+            result = TuningProcess.recv(self.read_pipe)
+        except TimeoutError:
             self.kill()
-            raise TimeoutError("Timeout in autotune subprocess")
+            raise
+        except EOFError:
+            # The subprocess crashed
+            self.close()
+            raise
+        except Exception:
+            autotuning_log.exception(
+                f"Unexpected exception in autotune subprocess {self.process.pid}"
+            )
+            self.kill()
+            raise
 
-        return TuningProcess.recv(self.read_pipe)
+        if isinstance(result, Exception):
+            raise result
+        return result
 
-    def shutdown(self) -> None:
+    def shutdown(self, wait: bool = True) -> None:
         """
-        Signal the child process to shut down gracefully. Does not wait for the
-        child to exit.
+        Signal the child process to shut down gracefully.
         """
         if self.alive():
             TuningProcess.send(None, self.write_pipe)
+        if wait:
+            self.wait()
 
     def wait(self) -> None:
         """
@@ -189,10 +204,12 @@ class TuningProcess:
 
     def close(self) -> None:
         """
-        Close the pipes.
+        Close resources.
         """
+        self.selector.close()
         self.read_pipe.close()
         self.write_pipe.close()
+        self.process = None
 
     def kill(self) -> None:
         """
@@ -227,13 +244,12 @@ class TuningProcessPool:
             return
 
         devices = self.get_device_list()
-        log.debug("Sub-process autotune device list: %s", devices)
+        autotuning_log.debug("Sub-process autotune device list: %s", devices)
 
         # Launch the child processes.
         self.processes = queue.Queue()
         for device in devices:
             p = TuningProcess(device=device)
-            p.start()
             self.processes.put(p)
 
         # Use a thread pool to manage distributing work to the subprocesses.
@@ -271,7 +287,7 @@ class TuningProcessPool:
 
         if self.processes is not None:
             for p in self.processes.queue:
-                p.shutdown()
+                p.shutdown(wait=False)
             for p in self.processes.queue:
                 p.wait()
             self.processes = None
@@ -291,12 +307,19 @@ class TuningProcessPool:
             return process.get(
                 config.max_autotune_subproc_result_timeout_seconds,
             )
-        except queue.Empty:
+        except TimeoutError:
+            warnings.warn(
+                f"Timed out benchmarking choice '{choice}'. It will be ignored. "
+                "Please debug the root cause in case the choice can bring perf gains."
+            )
+            # Set to INF so this choice will be ignored
+            return float("inf")
+        except Exception:
             warnings.warn(
                 f"Failed to benchmark choice '{choice}'. It will be ignored. "
                 "Please debug the root cause in case the choice can bring perf gains."
             )
-            # set to INF so this choice will be ignored
+            # Set to INF so this choice will be ignored
             return float("inf")
         finally:
             self.processes.put(process)
@@ -477,22 +500,38 @@ class BenchmarkRequest:
         return out
 
 
-# BUGBUG: delete me?
-class TestBenchmarkRequest(BenchmarkRequest):
+class _TestBenchmarkRequest(BenchmarkRequest):
     """
-    Supports unit testing. Defined in this file so that the TuningProcess
-    sub-process knows how to unpickle these objects.
+    Supports unit testing. Defined in this file instead of the test file so the
+    TuningProcess sub-process can unpickle these objects.
     """
 
-    def __init__(self, value: Optional[float] = None) -> None:
-        self.value = value
+    def __init__(
+        self,
+        result: float = 0.0,
+        device: Optional[int] = None,
+        sleep: Optional[float] = None,
+        exc: Optional[Exception] = None,
+        crash: bool = False,
+    ):
+        self.result = result
+        self.device = device
+        self.sleep = sleep
+        self.exc = exc
+        self.crash = crash
 
     def benchmark(
         self, *input_tensors: torch.Tensor, output_tensor: Optional[torch.Tensor] = None
     ) -> float:
-        if self.value is None:
-            raise Exception("Failed to run")  # noqa: TRY002
-        return self.value
+        if self.device:
+            assert os.environ.get(CUDA_VISIBLE_DEVICES, None) == str(self.device)
+        if self.sleep:
+            time.sleep(self.sleep)
+        if self.exc:
+            raise self.exc
+        if self.crash:
+            sys.exit(1)
+        return self.result
 
 
 class GPUDeviceBenchmarkMixin:

@@ -20,7 +20,6 @@ from typing_extensions import Never, ParamSpec
 # justknobs, e.g., in the Triton compiler. For internal, the import installs
 # functionality to destroy singletons before forking and re-enable them after.
 import torch._thread_safe_fork  # noqa: F401
-from torch._inductor import config
 from torch._inductor.compile_worker.utils import _async_compile_initializer
 from torch._inductor.utils import get_ld_library_path
 
