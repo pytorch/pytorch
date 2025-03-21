@@ -324,7 +324,13 @@ def register_onednn_fusion_ops():
                         trans_w=True,
                         epilogue_creator=epilogue_creator,
                     )
-                    kwargs["input_indices"] = [0, 2, 1] if b is None else [3, 0, 2, 1]
+                    # reorder the inputs index to match the cpp template
+                    # note when y is x, the input_indices is also different
+                    # see https://github.com/pytorch/pytorch/issues/149475
+                    if x == y:
+                        kwargs["input_indices"] = [0, 1] if b is None else [2, 0, 1]
+                    else:
+                        kwargs["input_indices"] = [0, 2, 1] if b is None else [3, 0, 2, 1]
                     CppGemmTemplate.add_choices(
                         choices,
                         layout,
