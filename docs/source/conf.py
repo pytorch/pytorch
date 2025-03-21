@@ -122,6 +122,11 @@ if RELEASE:
 
 switcher_version = "main" if not RELEASE else version
 html_static_path = ["_static"]
+
+from sphinx.application import Sphinx
+def setup(app: Sphinx):
+    app.add_config_value('language_bindings_links', [], 'html')
+
 html_theme_options = {
     "logo": {
         "text": "Home",
@@ -216,10 +221,6 @@ templates_path = [
 # TODO: document these and remove them from here.
 
 html_domain_indices = False
-
-from sphinx.application import Sphinx
-def setup(app: Sphinx):
-    app.add_config_value('language_bindings_links', [], 'html')
 
 coverage_ignore_functions = [
     # torch
