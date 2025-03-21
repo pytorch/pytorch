@@ -1,26 +1,31 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
+import atexit
+import sys
 import contextlib
 import ctypes
 import dataclasses
 import functools
 import logging
 import os
+import pickle
 import queue
+import selectors
+import subprocess
 import time
 import warnings
 from collections.abc import Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from ctypes import byref, c_size_t, c_void_p, CDLL
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union, IO
 
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
-from torch import multiprocessing
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.testing import rand_strided
 from torch._inductor import ir
+from torch._inductor.utils import get_ld_library_path
 from torch._inductor.codecache import (
     CppCodeCache,
     CUDACodeCache,
@@ -34,8 +39,6 @@ from torch.utils._ordered_set import OrderedSet
 
 
 if TYPE_CHECKING:
-    from multiprocessing.process import BaseProcess
-    from multiprocessing.queues import Queue
     from types import ModuleType
 
     from torch._inductor.select_algorithm import TritonTemplateCaller
@@ -49,236 +52,161 @@ from .virtualized import V
 
 
 CUDA_VISIBLE_DEVICES = "CUDA_VISIBLE_DEVICES"
-EXIT_HANDLER_REGISTERED = False
 
 autotuning_log = getArtifactLogger(__name__, "autotuning")
 log = logging.getLogger(__name__)
-
-
-# Used to synchronize between parent and child processes
-class Ping:
-    pass
-
-
-class Pong:
-    pass
 
 
 class NonzeroWorkspaceNotSupportedError(Exception):
     pass
 
 
-@contextlib.contextmanager
-def set_cuda_visible_device(device: Optional[int]):
-    """
-    Context manager to set the CUDA_VISIBLE_DEVICES environment variable to the
-    specified single device. If device is None, don't manipulate the environment.
-    """
-    if device is None:
-        yield
-        return
-
-    current = os.environ.get(CUDA_VISIBLE_DEVICES)
-    os.environ[CUDA_VISIBLE_DEVICES] = str(device)
-    try:
-        yield
-    finally:
-        if current is None:
-            del os.environ[CUDA_VISIBLE_DEVICES]
-        else:
-            os.environ[CUDA_VISIBLE_DEVICES] = current
-
-
-@dataclasses.dataclass
 class TuningProcess:
     """
-    Abstraction for launching a helper process to benchmark kernels. Spawns
-    the parent process and uses multiprocessing queues to send benchmark
-    requests and return results.
+    Class to launch and interact with a benchmarking subprocess.
     """
 
-    device: Optional[int] = None
-    process: Optional[BaseProcess] = None
-    request_queue: Optional[Queue[Any]] = None
-    response_queue: Optional[Queue[Any]] = None
-
     @staticmethod
-    def process_main(
-        request_queue: Queue[Any],
-        response_queue: Queue[Any],
-    ) -> None:
+    def process_main(read_pipe: IO[bytes], write_pipe: IO[bytes]) -> None:
         """
         Entry point for the child process.
         """
         autotuning_log.debug(
-            "Entering TuningProcess child. Visible devices = %s",
+            "Entering TuningProcess pid = %s. Visible devices = %s",
+            os.getpid(),
             os.environ.get(CUDA_VISIBLE_DEVICES),
         )
         try:
-            TuningProcess.workloop(request_queue, response_queue)
+            TuningProcess.workloop(read_pipe, write_pipe)
+        except EOFError:
+            # The parent closed the pipe
+            pass
         except Exception:
             autotuning_log.exception("Exception in TuningProcess")
 
     @staticmethod
-    def workloop(request_queue: Queue[Any], response_queue: Queue[Any]) -> None:
+    def workloop(read_pipe: IO[bytes], write_pipe: IO[bytes]) -> None:
         """
         Work loop for the benchmarking subprocess.
         """
         while True:
-            obj = request_queue.get()
+            job = TuningProcess.recv(read_pipe)
+            if job is None:
+                # None is a sentinel for the child to shut down
+                break
 
-            if obj is None:
-                break  # None is a sentinel for the child to terminate
-            elif isinstance(obj, Ping):
-                response_queue.put(Pong())
-            elif isinstance(obj, BenchmarkRequest):
-                response_queue.put(obj.benchmark())
-            else:
-                raise RuntimeError(f"Invalid request type {type(obj)}")
+            TuningProcess.send(job(), write_pipe)
 
-    def valid(self) -> bool:
+    @staticmethod
+    def send(obj: Any, write_pipe: IO[bytes]) -> None:
+        pickle.dump(obj, write_pipe)
+        write_pipe.flush()
+
+    @staticmethod
+    def recv(read_pipe: IO[bytes]) -> Any:
+        return pickle.load(read_pipe)
+
+    def __init__(self, device: Optional[int]):
+        self.device = device
+
+    def start(self):
         """
-        True if the sub-process has been initialized.
+        Start the benchmarking subprocess.
         """
-        return (
-            self.process is not None
-            and self.request_queue is not None
-            and self.response_queue is not None
+        entry = os.path.join(os.path.dirname(__file__), "__autotune_main__.py")
+
+        subproc_read_fd, write_fd = os.pipe()
+        read_fd, subproc_write_fd = os.pipe()
+        self.write_pipe = os.fdopen(write_fd, "wb")
+        self.read_pipe = os.fdopen(read_fd, "rb")
+
+        self.sel = selectors.DefaultSelector()
+        self.sel.register(self.read_pipe, selectors.EVENT_READ)
+
+        cmd = [
+            sys.executable,
+            entry,
+            f"--parent={os.getpid()}",
+            f"--read-fd={str(subproc_read_fd)}",
+            f"--write-fd={str(subproc_write_fd)}",
+        ]
+        extra_env = {
+            # We need to set the PYTHONPATH so the subprocess can find torch.
+            "PYTHONPATH": os.pathsep.join(sys.path),
+            # We shouldn't be using the Triton async compile subprocess pool,
+            # but as a precaution set the env var that disables its creation.
+            "TORCH_WARM_POOL": "0",
+            # Some internal usages need a modified LD_LIBRARY_PATH.
+            "LD_LIBRARY_PATH": get_ld_library_path(),
+        }
+        if self.device:
+            extra_env[CUDA_VISIBLE_DEVICES] = str(self.device)
+        self.process = subprocess.Popen(
+            cmd,
+            env={**os.environ, **extra_env},
+            pass_fds=(subproc_read_fd, subproc_write_fd),
         )
 
-    def clear(self) -> None:
+    def alive(self) -> bool:
         """
-        Reset to an uninitialized state.
+        True if the subprocess is still running.
         """
-        self.process = self.request_queue = self.response_queue = None
+        return self.process.poll() is None
 
-    def initialize(self) -> None:
-        """
-        Create child process, request/response queues, and do the warm up.
-        Set the environment to make only the provided GPU device visible
-        to the process.
-        """
-        if self.valid():
-            return
-
-        # cuda runtime does not work with "fork", use "spawn" to start processes.
-        ctx = multiprocessing.get_context("spawn")
-        self.request_queue = ctx.Queue()
-        self.response_queue = ctx.Queue()
-
-        self.process = ctx.Process(
-            target=self.process_main,
-            args=(
-                self.request_queue,
-                self.response_queue,
-            ),
-        )
-        assert self.process is not None
-        with set_cuda_visible_device(self.device):
-            self.process.start()
-
-    def put(self, obj: Any) -> None:
+    def put(self, req: Any) -> None:
         """
         Push a work item to the child process.
         """
-        # In case of a prior crash, ensure the subprocess is running
-        self.initialize()
-        assert self.request_queue is not None
-        self.request_queue.put(obj)
+        if not self.alive():
+            self.start()
+        TuningProcess.send(req, self.write_pipe)
 
-    def get(
-        self, result_timeout=120.0, graceful_timeout=3.0, terminate_timeout=1.0
-    ) -> Any:
+    def get(self, timeout=120.0) -> Any:
         """
-        Get a response from the child process. Raises queue.Empty on timeout
-        or if the process dies.
-
-        This method is (so far) only used by TuningProcessPool, where torch._inductor.config entries are being used
-        to populate the timeouts:
-
-        Arguments:
-
-            @param result_timeout: Timeout in seconds, defaults to 120.0 or to
-                                   config.max_autotune_subproc_result_timeout_seconds when called by TuningProcessPool
-            @param graceful_timeout: Timeout in seconds to allow graceful shutdown (SIGTERM is sent after this time).
-                                    Defaults to 3.0 or to config.max_autotune_subproc_graceful_timeout_seconds
-            @param terminate_timeout: Timeout in seconds after SIGTERM, until we send SIGKILL if the process
-                                      remains alive. Defaults to 1.0 or to
-                                      config.max_autotune_subproc_terminate_timeout_seconds.
-        Returns:
-            A response from the child process (Any type)
+        Get a response from the child process. Raises TimeoutError on timeout.
         """
-        assert self.process is not None
-        assert self.response_queue is not None
-        while True:
-            try:
-                remaining_timeout = result_timeout
-                res = None
-                while remaining_timeout is not None and remaining_timeout >= 1.0:
-                    remaining_timeout -= 0.5
-                    try:
-                        res = self.response_queue.get(timeout=0.5)
-                        break
-                    except queue.Empty:
-                        if not self.process.is_alive():
-                            raise  # is being caught a few lines below
-                if res is None:
-                    res = self.response_queue.get(timeout=remaining_timeout)
-                return res
-            except queue.Empty:
-                status = self.process.exitcode
-                if status is None:
-                    self.kill(
-                        graceful_timeout=graceful_timeout,
-                        terminate_timeout=terminate_timeout,
-                    )
-                else:
-                    # child process crashed
-                    self.clear()
-                raise
+        if not self.sel.select(timeout):
+            self.kill()
+            raise TimeoutError("Timeout in autotune subprocess")
 
-    def terminate(self) -> None:
+        return TuningProcess.recv(self.read_pipe)
+
+    def shutdown(self) -> None:
         """
-        Signal the child process to terminate.
+        Signal the child process to shut down gracefully. Does not wait for the
+        child to exit.
         """
-        if self.valid():
-            assert self.process is not None
-            assert self.request_queue is not None
-            self.request_queue.put(None)
+        if self.alive():
+            TuningProcess.send(None, self.write_pipe)
 
     def wait(self) -> None:
         """
         Wait for the child process to exit.
         """
-        if self.process is not None:
-            self.process.join()
-            self.clear()
+        if self.alive():
+            self.process.wait()
+        self.close()
 
-    def kill(self, graceful_timeout=5.0, terminate_timeout=1.0) -> None:
-        # Tries to kill the process, using a graceful_timeout in which the process
-        # is allowed to exit gracefully. If the process is still alive,
-        # it will be terminated. If that is not sufficient to end it
-        # within terminate_timeout seconds, it will be killed.
-        if self.process is not None:
-            self.terminate()
-            self.process.join(timeout=graceful_timeout)
-            if self.process.is_alive():
-                autotuning_log.warning(
-                    "Sending SIGTERM to process with PID %d",
-                    self.process.pid,
-                )
-                self.process.terminate()
-                self.process.join(timeout=terminate_timeout)
-                if self.process.is_alive():
-                    autotuning_log.error(
-                        "Sending SIGKILL to process with PID %d",
-                        self.process.pid,
-                    )
-                    self.process.kill()  # This should definitely end the process
-            self.clear()
+    def close(self) -> None:
+        """
+        Close the pipes.
+        """
+        self.read_pipe.close()
+        self.write_pipe.close()
+
+    def kill(self) -> None:
+        """
+        Send a SIGKILL to the child process.
+        """
+        if self.alive():
+            autotuning_log.error(
+                "Sending SIGKILL to process with PID %d",
+                self.process.pid,
+            )
+            self.process.kill()
+        self.close()
 
 
-@dataclasses.dataclass
 class TuningProcessPool:
     """
     Maintains a pool of TuningProcesses to benchmark kernels in parallel
@@ -286,8 +214,9 @@ class TuningProcessPool:
     set the sub-process environment to make only that device visible.
     """
 
-    processes: Optional[queue.Queue[TuningProcess]] = None
-    executor: Optional[ThreadPoolExecutor] = None
+    def __init__(self) -> None:
+        self.processes: Optional[queue.Queue[TuningProcess]] = None
+        self.executor: Optional[ThreadPoolExecutor] = None
 
     def initialize(self) -> None:
         """
@@ -300,31 +229,17 @@ class TuningProcessPool:
         devices = self.get_device_list()
         log.debug("Sub-process autotune device list: %s", devices)
 
-        # Launch the child processes and push a msg to "warm up"
+        # Launch the child processes.
         self.processes = queue.Queue()
         for device in devices:
             p = TuningProcess(device=device)
-            p.initialize()
-            p.put(Ping())
+            p.start()
             self.processes.put(p)
-
-        # Wait for the initialization to finish
-        for p in self.processes.queue:
-            assert isinstance(p.get(result_timeout=None), Pong)
 
         # Use a thread pool to manage distributing work to the subprocesses.
         # Threads block on an available process, so it makes sense to match
         # the number of threads with the number of devices.
         self.executor = ThreadPoolExecutor(max_workers=len(devices))
-
-        # Register the exit handler for the parent process so it will terminate
-        # the child processes.
-        global EXIT_HANDLER_REGISTERED
-        if not EXIT_HANDLER_REGISTERED:
-            EXIT_HANDLER_REGISTERED = True
-            import atexit
-
-            atexit.register(self.terminate)
 
     def get_device_list(self) -> Sequence[Optional[int]]:
         """
@@ -346,9 +261,9 @@ class TuningProcessPool:
 
         return list(range(count))
 
-    def terminate(self) -> None:
+    def shutdown(self) -> None:
         """
-        Signal all child processes to terminate.
+        Signal all child processes to exit.
         """
         if self.executor is not None:
             self.executor.shutdown()
@@ -356,7 +271,7 @@ class TuningProcessPool:
 
         if self.processes is not None:
             for p in self.processes.queue:
-                p.terminate()
+                p.shutdown()
             for p in self.processes.queue:
                 p.wait()
             self.processes = None
@@ -371,12 +286,10 @@ class TuningProcessPool:
         assert self.processes is not None
 
         process = self.processes.get()
-        process.put(choice.bmreq)
+        process.put(choice.bmreq.benchmark)
         try:
             return process.get(
                 config.max_autotune_subproc_result_timeout_seconds,
-                config.max_autotune_subproc_graceful_timeout_seconds,
-                config.max_autotune_subproc_terminate_timeout_seconds,
             )
         except queue.Empty:
             warnings.warn(
@@ -406,6 +319,7 @@ class TuningProcessPool:
 
 
 tuning_pool = TuningProcessPool()
+atexit.register(tuning_pool.shutdown)
 
 
 LayoutOrBuffer = Union[ir.Layout, ir.Buffer]
@@ -563,6 +477,7 @@ class BenchmarkRequest:
         return out
 
 
+# BUGBUG: delete me?
 class TestBenchmarkRequest(BenchmarkRequest):
     """
     Supports unit testing. Defined in this file so that the TuningProcess

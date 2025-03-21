@@ -1235,63 +1235,63 @@ class _TestTritonTemplateCaller(TritonTemplateCaller):
 
 
 class TestTuningProcess(TestCase):
+    # Use only one device/subprocess so we test the process restarts
+    # and is usable after a "crash".
+    @config.patch({"autotune_multi_device": False}):
     def test_tuning_pool_crash(self):
-        # Use only one device/subprocess so we test the process restarts
-        # and is usable after a "crash".
-        with config.patch({"autotune_multi_device": False}):
-            tuning_pool = TuningProcessPool()
-            tuning_pool.initialize()
+        tuning_pool = TuningProcessPool()
+        tuning_pool.initialize()
 
-            # First force the tuning process to "crash" by setting a bogus
-            # string for the expected visible devices.
-            bmreq = _TestBenchmarkRequest(3.14, False, "invalid")
-            choice = _TestTritonTemplateCaller(bmreq)
+        # First force the tuning process to "crash" by setting a bogus
+        # string for the expected visible devices.
+        bmreq = _TestBenchmarkRequest(3.14, False, "invalid")
+        choice = _TestTritonTemplateCaller(bmreq)
 
-            timings = tuning_pool.benchmark([choice])
-            self.assertTrue(choice in timings)
-            self.assertEqual(timings[choice], float("inf"))
+        timings = tuning_pool.benchmark([choice])
+        self.assertTrue(choice in timings)
+        self.assertEqual(timings[choice], float("inf"))
 
-            # Then send another request and make sure the sub-process
-            # has restarted and is operational. 'valid_devices' expected
-            # to be None because autotune_multi_device is off.
-            choice.bmreq.parent_visible_devices = os.environ.get(CUDA_VISIBLE_DEVICES)
+        # Then send another request and make sure the sub-process
+        # has restarted and is operational. 'valid_devices' expected
+        # to be None because autotune_multi_device is off.
+        choice.bmreq.parent_visible_devices = os.environ.get(CUDA_VISIBLE_DEVICES)
 
-            timings = tuning_pool.benchmark([choice])
-            self.assertTrue(choice in timings)
-            self.assertEqual(timings[choice], bmreq.value)
+        timings = tuning_pool.benchmark([choice])
+        self.assertTrue(choice in timings)
+        self.assertEqual(timings[choice], bmreq.value)
 
-            tuning_pool.terminate()
+        tuning_pool.shutdown()
 
     # XPU have to enable XPU_VISIBLE_DEVICES to control devices visibility.
     @skipIfXpu
+    @config.patch({"autotune_multi_device": True}):
     def test_tuning_pool_multiple_devices(self):
-        with config.patch({"autotune_multi_device": True}):
-            # Adapt the test to the available devices (and whether CUDA_VISIBLE_DEVICES
-            # is already set in the environment); use a subset of the available devices
-            # to ensure only the subset are visible to the sub-processes.
-            if CUDA_VISIBLE_DEVICES in os.environ:
-                visible_devices = os.environ[CUDA_VISIBLE_DEVICES].split(",")
-            else:
-                visible_devices = [str(d) for d in range(torch.cuda.device_count())]
+        # Adapt the test to the available devices (and whether CUDA_VISIBLE_DEVICES
+        # is already set in the environment); use a subset of the available devices
+        # to ensure only the subset are visible to the sub-processes.
+        if CUDA_VISIBLE_DEVICES in os.environ:
+            visible_devices = os.environ[CUDA_VISIBLE_DEVICES].split(",")
+        else:
+            visible_devices = [str(d) for d in range(torch.cuda.device_count())]
 
-            parent_visible_devices = ",".join(visible_devices[-2:])
-            os.environ[CUDA_VISIBLE_DEVICES] = parent_visible_devices
+        parent_visible_devices = ",".join(visible_devices[-2:])
+        os.environ[CUDA_VISIBLE_DEVICES] = parent_visible_devices
 
-            tuning_pool = TuningProcessPool()
-            tuning_pool.initialize()
+        tuning_pool = TuningProcessPool()
+        tuning_pool.initialize()
 
-            choice1 = _TestTritonTemplateCaller(
-                _TestBenchmarkRequest(3.14, True, parent_visible_devices),
-            )
-            choice2 = _TestTritonTemplateCaller(
-                _TestBenchmarkRequest(2.718, True, parent_visible_devices),
-            )
+        choice1 = _TestTritonTemplateCaller(
+            _TestBenchmarkRequest(3.14, True, parent_visible_devices),
+        )
+        choice2 = _TestTritonTemplateCaller(
+            _TestBenchmarkRequest(2.718, True, parent_visible_devices),
+        )
 
-            timings = tuning_pool.benchmark([choice1, choice2])
-            self.assertEqual(timings[choice1], choice1.bmreq.value)
-            self.assertEqual(timings[choice2], choice2.bmreq.value)
+        timings = tuning_pool.benchmark([choice1, choice2])
+        self.assertEqual(timings[choice1], choice1.bmreq.value)
+        self.assertEqual(timings[choice2], choice2.bmreq.value)
 
-            tuning_pool.terminate()
+        tuning_pool.shutdown()
 
 
 @instantiate_parametrized_tests
