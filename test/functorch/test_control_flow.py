@@ -1308,275 +1308,6 @@ def forward(self, pred_1, x_1):
 
         return cond_outputs, cond_inputs
 
-    @skipIfTorchDynamo("don't test compile on compile")
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
-    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
-    def test_cond_autograd_zeros_unused_branch(self, compile_mode):
-        from torch._higher_order_ops.cond import create_fw_bw_graph_branches
-
-        device = torch.device("cuda")
-        cond_fct = compile_mode_helper(torch.cond, compile_mode)
-
-        def true_fn(x, w1, w2):
-            return (w1 * x,)
-
-        def false_fn(x, w1, w2):
-            return (w2 * x,)
-
-        def pred_fn(x, w1, w2):
-            return x > 0
-
-        x = torch.ones((), device=device, requires_grad=False)
-        w1 = torch.zeros((), device=device, requires_grad=True)
-        w2 = torch.zeros((), device=device, requires_grad=True)
-        operands = [x, w1, w2]
-
-        cond_outputs, cond_inputs = self._test_cond_autograd(
-            cond_fct, pred_fn, true_fn, false_fn, operands
-        )
-
-        def f():
-            return torch.autograd.grad(cond_outputs, cond_inputs, allow_unused=True)
-
-        gm = make_fx(f)()
-
-        if compile_mode == "eager" or compile_mode == "none":
-            self.assertExpectedInline(
-                gm.code.strip(),
-                """\
-def forward(self):
-    _tensor_constant0 = self._tensor_constant0
-    ones_like = torch.ops.aten.ones_like.default(_tensor_constant0, pin_memory = False, memory_format = torch.preserve_format);  _tensor_constant0 = None
-    _tensor_constant1 = self._tensor_constant1
-    true_graph_0 = self.true_graph_0
-    false_graph_0 = self.false_graph_0
-    _tensor_constant2 = self._tensor_constant2
-    _tensor_constant3 = self._tensor_constant3
-    _tensor_constant4 = self._tensor_constant4
-    cond = torch.ops.higher_order.cond(_tensor_constant1, true_graph_0, false_graph_0, (_tensor_constant2, _tensor_constant3, _tensor_constant4, ones_like));  _tensor_constant1 = true_graph_0 = false_graph_0 = _tensor_constant2 = _tensor_constant3 = _tensor_constant4 = ones_like = None
-    getitem = cond[0];  getitem = None
-    getitem_1 = cond[1]
-    getitem_2 = cond[2];  cond = None
-    return (getitem_1, getitem_2)""",  # noqa: B950
-            )
-        else:
-            self.assertExpectedInline(
-                gm.code.strip(),
-                """\
-def forward(self):
-    _tensor_constant0 = self._tensor_constant0
-    ones_like = torch.ops.aten.ones_like.default(_tensor_constant0, pin_memory = False,\
- memory_format = torch.preserve_format);  _tensor_constant0 = ones_like = None
-    _tensor_constant1 = self._tensor_constant1
-    _tensor_constant2 = self._tensor_constant2
-    return (_tensor_constant1, _tensor_constant2)""",
-            )
-
-        (
-            fw_true_graph,
-            fw_false_graph,
-            joint_true_graph,
-            joint_false_graph,
-        ) = create_fw_bw_graph_branches(true_fn, false_fn, *(x, w1, w2))
-
-        # Check that the joint_true_graph and the joint_false_graph do not return Nones
-        self.assertExpectedInline(
-            joint_true_graph.code.strip(),
-            """\
-def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
-    mul = torch.ops.aten.mul.Tensor(arg2_1, arg1_1);  arg2_1 = mul = None
-    mul_1 = torch.ops.aten.mul.Tensor(arg0_1, arg1_1);  arg0_1 = None
-    zeros_like = torch.ops.aten.zeros_like.default(arg1_1, pin_memory = False);  arg1_1 = None
-    zeros_like_1 = torch.ops.aten.zeros_like.default(arg3_1, pin_memory = False);  arg3_1 = None
-    return [zeros_like, mul_1, zeros_like_1]""",
-        )
-
-        self.assertExpectedInline(
-            joint_false_graph.code.strip(),
-            """\
-def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
-    mul = torch.ops.aten.mul.Tensor(arg3_1, arg1_1);  arg3_1 = mul = None
-    mul_1 = torch.ops.aten.mul.Tensor(arg0_1, arg1_1);  arg0_1 = None
-    zeros_like = torch.ops.aten.zeros_like.default(arg1_1, pin_memory = False);  arg1_1 = None
-    zeros_like_1 = torch.ops.aten.zeros_like.default(arg2_1, pin_memory = False);  arg2_1 = None
-    return [zeros_like, zeros_like_1, mul_1]""",
-        )
-
-    # TODO: The compile_mode = `compile_dynamic_shape` raises the Error
-    # torch._inductor.exc.LoweringException: NotImplementedError: get_size() is not
-    # implemented by <class 'torch._inductor.ir.NoneAsConstantBuffer'>!
-    @skipIfTorchDynamo("don't test compile on compile")
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
-    @parametrize("compile_mode", ["none", "eager", "compile"])
-    def test_cond_autograd_zeros_unused_branch_complex(self, compile_mode):
-        from torch._higher_order_ops.cond import create_fw_bw_graph_branches
-
-        device = torch.device("cuda")
-        cond_fct = compile_mode_helper(torch.cond, compile_mode)
-
-        autograd = [False, True, True, True, True]
-        x = torch.randn(4, 5, device=device, requires_grad=bool(autograd[0]))
-        w1 = torch.randn(2, 4, device=device, requires_grad=bool(autograd[1]))
-        b1 = torch.randn(2, 1, device=device, requires_grad=bool(autograd[2]))
-        w2 = torch.randn(2, 4, device=device, requires_grad=bool(autograd[3]))
-        b2 = torch.randn(1, 5, device=device, requires_grad=bool(autograd[4]))
-        operands = [x, w1, b1, w2, b2]
-
-        def true_fn(x, w1, b1, w2, b2):
-            return ((w1 @ x + b1).sum(),)
-
-        def false_fn(x, w1, b1, w2, b2):
-            return ((w2 @ x + b2).sum(),)
-
-        def pred_fn(x, w1, b1, w2, b2):
-            return x.mean() > 0
-
-        cond_outputs, cond_inputs = self._test_cond_autograd(
-            cond_fct, pred_fn, true_fn, false_fn, operands
-        )
-
-        def f():
-            return torch.autograd.grad(cond_outputs, cond_inputs, allow_unused=True)
-
-        gm = make_fx(f)()
-
-        if compile_mode == "eager" or compile_mode == "none":
-            self.assertExpectedInline(
-                normalize_gm(gm.print_readable(print_output=False)),
-                """\
-class f(torch.nn.Module):
-    def forward(self):
-        _tensor_constant0 = self._tensor_constant0
-        ones_like: "f32[]" = torch.ops.aten.ones_like.default(_tensor_constant0, pin_memory = False, memory_format = torch.preserve_format);  _tensor_constant0 = None
-        _tensor_constant1 = self._tensor_constant1
-        true_graph_0 = self.true_graph_0
-        false_graph_0 = self.false_graph_0
-        _tensor_constant2 = self._tensor_constant2
-        _tensor_constant3 = self._tensor_constant3
-        _tensor_constant4 = self._tensor_constant4
-        _tensor_constant5 = self._tensor_constant5
-        _tensor_constant6 = self._tensor_constant6
-        cond = torch.ops.higher_order.cond(_tensor_constant1, true_graph_0, false_graph_0, (_tensor_constant2, _tensor_constant3, _tensor_constant4, _tensor_constant5, _tensor_constant6, ones_like));  _tensor_constant1 = true_graph_0 = false_graph_0 = _tensor_constant2 = _tensor_constant3 = _tensor_constant4 = _tensor_constant5 = _tensor_constant6 = ones_like = None
-        getitem: "f32[4, 5]" = cond[0];  getitem = None
-        getitem_1: "f32[2, 4]" = cond[1]
-        getitem_2: "f32[2, 1]" = cond[2]
-        getitem_3: "f32[2, 4]" = cond[3]
-        getitem_4: "f32[1, 5]" = cond[4];  cond = None
-        return (getitem_1, getitem_2, getitem_3, getitem_4)
-
-    class true_graph_0(torch.nn.Module):
-        def forward(self, arg0_1: "f32[4, 5]", arg1_1: "f32[2, 4]", arg2_1: "f32[2, 1]", arg3_1: "f32[2, 4]", arg4_1: "f32[1, 5]", arg5_1: "f32[]"):
-            mm: "f32[2, 5]" = torch.ops.aten.mm.default(arg1_1, arg0_1);  arg1_1 = None
-            add: "f32[2, 5]" = torch.ops.aten.add.Tensor(mm, arg2_1);  mm = arg2_1 = None
-            sum_1: "f32[]" = torch.ops.aten.sum.default(add);  add = sum_1 = None
-            expand: "f32[2, 5]" = torch.ops.aten.expand.default(arg5_1, [2, 5]);  arg5_1 = None
-            sum_2: "f32[2, 1]" = torch.ops.aten.sum.dim_IntList(expand, [1], True)
-            t: "f32[5, 4]" = torch.ops.aten.t.default(arg0_1)
-            mm_1: "f32[2, 4]" = torch.ops.aten.mm.default(expand, t);  expand = t = None
-            zeros_like: "f32[4, 5]" = torch.ops.aten.zeros_like.default(arg0_1, pin_memory = False);  arg0_1 = None
-            zeros_like_1: "f32[2, 4]" = torch.ops.aten.zeros_like.default(arg3_1, pin_memory = False);  arg3_1 = None
-            zeros_like_2: "f32[1, 5]" = torch.ops.aten.zeros_like.default(arg4_1, pin_memory = False);  arg4_1 = None
-            return [zeros_like, mm_1, sum_2, zeros_like_1, zeros_like_2]
-
-    class false_graph_0(torch.nn.Module):
-        def forward(self, arg0_1: "f32[4, 5]", arg1_1: "f32[2, 4]", arg2_1: "f32[2, 1]", arg3_1: "f32[2, 4]", arg4_1: "f32[1, 5]", arg5_1: "f32[]"):
-            mm: "f32[2, 5]" = torch.ops.aten.mm.default(arg3_1, arg0_1);  arg3_1 = None
-            add: "f32[2, 5]" = torch.ops.aten.add.Tensor(mm, arg4_1);  mm = arg4_1 = None
-            sum_1: "f32[]" = torch.ops.aten.sum.default(add);  add = sum_1 = None
-            expand: "f32[2, 5]" = torch.ops.aten.expand.default(arg5_1, [2, 5]);  arg5_1 = None
-            sum_2: "f32[1, 5]" = torch.ops.aten.sum.dim_IntList(expand, [0], True)
-            t: "f32[5, 4]" = torch.ops.aten.t.default(arg0_1)
-            mm_1: "f32[2, 4]" = torch.ops.aten.mm.default(expand, t);  expand = t = None
-            zeros_like: "f32[4, 5]" = torch.ops.aten.zeros_like.default(arg0_1, pin_memory = False);  arg0_1 = None
-            zeros_like_1: "f32[2, 4]" = torch.ops.aten.zeros_like.default(arg1_1, pin_memory = False);  arg1_1 = None
-            zeros_like_2: "f32[2, 1]" = torch.ops.aten.zeros_like.default(arg2_1, pin_memory = False);  arg2_1 = None
-            return [zeros_like, zeros_like_1, zeros_like_2, mm_1, sum_2]
-""",  # noqa: B950
-            )
-        else:
-            self.assertExpectedInline(
-                gm.code.strip(),
-                """\
-def forward(self):
-    _tensor_constant0 = self._tensor_constant0
-    ones_like = torch.ops.aten.ones_like.default(_tensor_constant0, pin_memory = False,\
- memory_format = torch.preserve_format);  _tensor_constant0 = ones_like = None
-    _tensor_constant1 = self._tensor_constant1
-    _tensor_constant2 = self._tensor_constant2
-    _tensor_constant3 = self._tensor_constant3
-    mm = torch.ops.aten.mm.out(_tensor_constant1, _tensor_constant2, out = _tensor_constant3);\
-  _tensor_constant1 = _tensor_constant2 = _tensor_constant3 = None
-    _tensor_constant4 = self._tensor_constant4
-    _tensor_constant5 = self._tensor_constant5
-    _tensor_constant6 = self._tensor_constant6
-    return (_tensor_constant4, _tensor_constant5, mm, _tensor_constant6)""",
-            )
-
-        (
-            fw_true_graph,
-            fw_false_graph,
-            joint_true_graph,
-            joint_false_graph,
-        ) = create_fw_bw_graph_branches(true_fn, false_fn, *(x, w1, b1, w2, b2))
-
-        # Check that the joint_true_graph and the joint_false_graph do not return Nones
-        self.assertExpectedInline(
-            joint_true_graph.code.strip(),
-            """\
-def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
-    mm = torch.ops.aten.mm.default(arg2_1, arg1_1);  arg2_1 = None
-    add = torch.ops.aten.add.Tensor(mm, arg3_1);  mm = arg3_1 = None
-    sum_1 = torch.ops.aten.sum.default(add);  add = sum_1 = None
-    expand = torch.ops.aten.expand.default(arg0_1, [2, 5]);  arg0_1 = None
-    sum_2 = torch.ops.aten.sum.dim_IntList(expand, [1], True)
-    t = torch.ops.aten.t.default(arg1_1)
-    mm_1 = torch.ops.aten.mm.default(expand, t);  expand = t = None
-    zeros_like = torch.ops.aten.zeros_like.default(arg1_1, pin_memory = False);  arg1_1 = None
-    zeros_like_1 = torch.ops.aten.zeros_like.default(arg4_1, pin_memory = False);  arg4_1 = None
-    zeros_like_2 = torch.ops.aten.zeros_like.default(arg5_1, pin_memory = False);  arg5_1 = None
-    return [zeros_like, mm_1, sum_2, zeros_like_1, zeros_like_2]""",
-        )
-
-        self.assertExpectedInline(
-            joint_false_graph.code.strip(),
-            """\
-def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
-    mm = torch.ops.aten.mm.default(arg4_1, arg1_1);  arg4_1 = None
-    add = torch.ops.aten.add.Tensor(mm, arg5_1);  mm = arg5_1 = None
-    sum_1 = torch.ops.aten.sum.default(add);  add = sum_1 = None
-    expand = torch.ops.aten.expand.default(arg0_1, [2, 5]);  arg0_1 = None
-    sum_2 = torch.ops.aten.sum.dim_IntList(expand, [0], True)
-    t = torch.ops.aten.t.default(arg1_1)
-    mm_1 = torch.ops.aten.mm.default(expand, t);  expand = t = None
-    zeros_like = torch.ops.aten.zeros_like.default(arg1_1, pin_memory = False);  arg1_1 = None
-    zeros_like_1 = torch.ops.aten.zeros_like.default(arg2_1, pin_memory = False);  arg2_1 = None
-    zeros_like_2 = torch.ops.aten.zeros_like.default(arg3_1, pin_memory = False);  arg3_1 = None
-    return [zeros_like, zeros_like_1, zeros_like_2, mm_1, sum_2]""",
-        )
-
-        trials = 5
-        for _ in range(trials):
-            autograd = torch.randint(0, 2, (5,), dtype=torch.bool)
-            x = torch.randn(4, 5, device=device, requires_grad=bool(autograd[0]))
-            w1 = torch.randn(2, 4, device=device, requires_grad=bool(autograd[1]))
-            b1 = torch.randn(2, 1, device=device, requires_grad=bool(autograd[2]))
-            w2 = torch.randn(2, 4, device=device, requires_grad=bool(autograd[3]))
-            b2 = torch.randn(1, 5, device=device, requires_grad=bool(autograd[4]))
-            operands = [x, w1, b1, w2, b2]
-
-            def true_fn(x, w1, b1, w2, b2):
-                return ((w1 @ x + b1).sum(),)
-
-            def false_fn(x, w1, b1, w2, b2):
-                return ((w2 @ x + b2).sum(),)
-
-            def pred(x, w1, b1, w2, b2):
-                return x.mean() > 0
-
-            self._test_cond_autograd(cond_fct, pred, true_fn, false_fn, operands)
-
     # TODO: The compile_mode = `compile_dynamic_shape` raises the Error
     # torch._inductor.exc.LoweringException: NotImplementedError: get_size() is not
     # implemented by <class 'torch._inductor.ir.NoneAsConstantBuffer'>!
@@ -5059,7 +4790,7 @@ def forward(self, L_pred_ : torch.Tensor, L_x_ : torch.Tensor):
     l_x_ = L_x_
     cond_true_0 = self.cond_true_0
     cond_false_0 = self.cond_false_0
-    cond = torch.ops.higher_order.cond(l_pred_, cond_true_0, cond_false_0, [l_x_]);  l_pred_ = cond_true_0 = cond_false_0 = l_x_ = None
+    cond = torch.ops.higher_order.cond(l_pred_, cond_true_0, cond_false_0, (l_x_,));  l_pred_ = cond_true_0 = cond_false_0 = l_x_ = None
     result = cond[0];  cond = None
     grad_out = torch.ones_like(result)
     return (result, grad_out)""",  # noqa: B950
@@ -5075,7 +4806,7 @@ class GraphModule(torch.nn.Module):
 
         cond_true_0 = self.cond_true_0
         cond_false_0 = self.cond_false_0
-        cond = torch.ops.higher_order.cond(l_ctx_pred, cond_true_0, cond_false_0, [l_args_1_, l_ctx_saved_tensors_0_]);  l_ctx_pred = cond_true_0 = cond_false_0 = l_args_1_ = l_ctx_saved_tensors_0_ = None
+        cond = torch.ops.higher_order.cond(l_ctx_pred, cond_true_0, cond_false_0, (l_args_1_, l_ctx_saved_tensors_0_));  l_ctx_pred = cond_true_0 = cond_false_0 = l_args_1_ = l_ctx_saved_tensors_0_ = None
         getitem: "f32[4]" = cond[0];  cond = None
         return (getitem,)
 
@@ -7481,7 +7212,7 @@ def forward(self, s0 : torch.SymInt, L_a_ : torch.Tensor, L_b_ : torch.Tensor, L
     tensor = torch.tensor([True])
     cond_true_0 = self.cond_true_0
     cond_false_0 = self.cond_false_0
-    cond = torch.ops.higher_order.cond(tensor, cond_true_0, cond_false_0, [l_a_, l_b_, l_self_num, s0]);  tensor = cond_true_0 = cond_false_0 = l_a_ = l_b_ = l_self_num = s0 = None
+    cond = torch.ops.higher_order.cond(tensor, cond_true_0, cond_false_0, (l_a_, l_b_, l_self_num, s0));  tensor = cond_true_0 = cond_false_0 = l_a_ = l_b_ = l_self_num = s0 = None
     getitem = cond[0];  cond = None
     return (getitem,)""",  # noqa: B950
         )
@@ -8199,7 +7930,7 @@ class GraphModule(torch.nn.Module):
         a, b1, b2, c, = fx_pytree.tree_flatten_spec(([a, b1, b2, c], {}), self._in_spec)
         true_graph_0 = self.true_graph_0
         false_graph_0 = self.false_graph_0
-        cond = torch.ops.higher_order.cond(a, true_graph_0, false_graph_0, [c, b1, b2]);  a = true_graph_0 = false_graph_0 = c = b1 = b2 = None
+        cond = torch.ops.higher_order.cond(a, true_graph_0, false_graph_0, (c, b1, b2));  a = true_graph_0 = false_graph_0 = c = b1 = b2 = None
         getitem: "f32[10]" = cond[0];  cond = None
 
         mul: "f32[10]" = torch.ops.aten.mul.Tensor(getitem, 2);  getitem = None
@@ -8261,7 +7992,7 @@ class GraphModule(torch.nn.Module):
 
         true_graph_0 = self.true_graph_0
         false_graph_0 = self.false_graph_0
-        cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [x, sym_size_int_4, sym_size_int_3, z]);  gt = true_graph_0 = false_graph_0 = x = sym_size_int_4 = sym_size_int_3 = z = None
+        cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, (x, sym_size_int_4, sym_size_int_3, z));  gt = true_graph_0 = false_graph_0 = x = sym_size_int_4 = sym_size_int_3 = z = None
         getitem: "f32[s0, 3]" = cond[0];  cond = None
         return pytree.tree_unflatten((getitem,), self._out_spec)
 
@@ -8447,7 +8178,7 @@ class GraphModule(torch.nn.Module):
 
         cond_true_0 = self.cond_true_0
         cond_false_0 = self.cond_false_0
-        cond = torch.ops.higher_order.cond(gt, cond_true_0, cond_false_0, [l_x_, s1, s0, s0, l_z_]);  gt = cond_true_0 = cond_false_0 = l_x_ = s1 = s0 = l_z_ = None
+        cond = torch.ops.higher_order.cond(gt, cond_true_0, cond_false_0, (l_x_, s1, s0, s0, l_z_));  gt = cond_true_0 = cond_false_0 = l_x_ = s1 = s0 = l_z_ = None
 
         getitem_5: "f32[u0, s1]" = cond[0]
         sym_size_int: "Sym(u0)" = torch.ops.aten.sym_size.int(getitem_5, 0);  getitem_5 = None
