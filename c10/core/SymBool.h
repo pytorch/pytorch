@@ -121,7 +121,7 @@ inline bool guard_or_false(
   return b;
 }
 
-inline bool guard_semantics(
+inline bool guard_or_false(
     const c10::SymBool& b,
     const char* file,
     int64_t line) {
