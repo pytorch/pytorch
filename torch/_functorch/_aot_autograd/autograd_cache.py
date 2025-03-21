@@ -138,6 +138,12 @@ def check_node_safe(node: Node):
     def is_safe_torch_function(target):
         """Allowlisted torch functions"""
         function_name = f"{target.__module__}.{target.__name__}"
+        # Allow torch.autograd.function.FunctionCtx if custom autograd functions are allowed
+        if function_name == "torch.autograd.function.FunctionCtx":
+            return (
+                torch._functorch.config.autograd_cache_allow_custom_autograd_functions
+            )
+
         # Functions in torch_non_c_binding_in_graph_functions
         # are guaranteed to be cache safe.
         # See NOTE: [Cacheability of in-graph torch functions]
@@ -151,6 +157,10 @@ def check_node_safe(node: Node):
             return True
         if is_public_torch_api(target):
             return True
+        # Technically, FXGraphCache._check_for_hop already checks this,
+        # but better to error earlier anyway
+        if isinstance(target, torch._ops.HigherOrderOperator):
+            return target.cacheable()
         is_builtin_fun_or_type = type(target).__name__ == "builtin_function_or_method"
         if is_builtin_fun_or_type:
             return True
@@ -264,7 +274,7 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
             super().__init__(gm, example_inputs, fx_config, [])
         except BypassFxGraphCache as e:
             # Sometimes inductor configs are unpickleable and can fail
-            raise BypassAOTAutogradCache from e
+            raise BypassAOTAutogradCache(str(e)) from e
 
 
 class AOTAutogradCachePickler(FxGraphCachePickler):
