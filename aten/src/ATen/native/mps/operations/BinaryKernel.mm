@@ -42,13 +42,11 @@ void complex_mul_out(const Tensor& input, const Tensor& other, const Tensor& out
     return;
   }
   auto common_dtype = output.scalar_type();
-  auto output_as_real = at::view_as_real(output).select(output.dim(), 0);
-  auto input_as_real = at::view_as_real(input.to(kMPS, common_dtype)).select(input.dim(), 0);
-  auto other_as_real = at::view_as_real(other.to(kMPS, common_dtype)).select(other.dim(), 0);
-  auto iter =
-      TensorIteratorConfig().add_output(output_as_real).add_input(input_as_real).add_input(other_as_real).build();
+  auto input_cast = input.to(kMPS, common_dtype);
+  auto other_cast = other.to(kMPS, common_dtype);
+  auto iter = TensorIteratorConfig().add_output(output).add_input(input_cast).add_input(other_cast).build();
 
-  lib.exec_binary_kernel(iter, "complex_mul", /*supports_dense=*/false);
+  lib.exec_binary_kernel(iter, "complex_mul");
 }
 
 } // namespace mps
@@ -115,8 +113,7 @@ Tensor& complex_out_mps(const Tensor& real, const Tensor& imag, Tensor& output) 
   if (!output.sizes().equals(new_size)) {
     output.resize_(new_size);
   }
-  uint32_t length = output.numel();
-  if (length == 0) {
+  if (output.numel() == 0) {
     return output;
   }
   auto output_as_real = at::view_as_real(output).select(output.dim(), 0);
