@@ -1471,9 +1471,8 @@ AOTITorchError aoti_torch_call_dispatcher(
     const char* overloadName,
     StableIValue* stack) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    static auto op =
+    const auto op =
         c10::Dispatcher::singleton().findSchemaOrThrow(opName, overloadName);
-
     const auto& schema = op.schema();
     const auto num_returns = schema.returns().size();
     const auto num_arguments = schema.arguments().size();
