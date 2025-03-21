@@ -26,7 +26,6 @@ from typing import Optional, TYPE_CHECKING, Union
 
 import torch
 import torch.utils._pytree as pytree
-from torch._dynamo.eval_frame import _NullDecorator, _TorchDynamoContext
 from torch._dynamo.external_utils import (
     call_backward,
     call_hook,
@@ -1188,9 +1187,7 @@ in_compiled_autograd_region = False
 
 
 @contextlib.contextmanager
-def _enable(
-    compiler_fn: Union[_TorchDynamoContext, _NullDecorator], dynamic: bool = True
-):
+def _enable(compiler_fn, dynamic: bool = True):
     # The entrypoint to enable CA.
     # It is recommended to enable via `torch._dynamo.config.compiled_autograd = True` rather
     # than using this context manager directly. If you are torch.compiling the corresponding
