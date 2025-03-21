@@ -1172,22 +1172,7 @@ class OrtBackend:
             if a.ort_session_options is not None or b.ort_session_options is not None:
                 return False
 
-            if a.export_options is b.export_options:
-                return True
-
-            # Similarly, some objects in ExportOptions are too stateful to use for
-            # caching. We should revisit this.
-            if a.export_options is not None and b.export_options is not None:
-                return (
-                    a.export_options.dynamic_shapes == b.export_options.dynamic_shapes
-                    and a.export_options.diagnostic_options
-                    == b.export_options.diagnostic_options
-                    and a.export_options.onnx_registry is b.export_options.onnx_registry
-                    and a.export_options.fake_context is b.export_options.fake_context
-                )
-
-            # We can't account for how the two option sets may differ, so it's not safe to reuse.
-            return False
+            return True
 
         if not isinstance(options, OrtBackendOptions):
             options = OrtBackendOptions(**(options or {}))

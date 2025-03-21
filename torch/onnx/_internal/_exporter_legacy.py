@@ -237,27 +237,10 @@ class ExportOptions:
         onnx_registry: The ONNX registry used to register ATen operators to ONNX functions.
     """
 
-    dynamic_shapes: bool | None = None
-    """Shape information hint for input/output tensors.
-
-    - ``None``: the exporter determines the most compatible setting.
-    - ``True``: all input shapes are considered dynamic.
-    - ``False``: all input shapes are considered static.
-    """
-
-    diagnostic_options: DiagnosticOptions
-    """The diagnostic options for the exporter."""
-
-    fake_context: ONNXFakeContext | None = None
-    """The fake context used for symbolic tracing."""
-
-    onnx_registry: OnnxRegistry | None = None
-    """The ONNX registry used to register ATen operators to ONNX functions."""
-
     def __init__(
         self,
         *,
-        dynamic_shapes: bool | None = None,
+        dynamic_shapes: bool | None = True,
         fake_context: ONNXFakeContext | None = None,
         onnx_registry: OnnxRegistry | None = None,
         diagnostic_options: DiagnosticOptions | None = None,
@@ -285,7 +268,7 @@ class ResolvedExportOptions(ExportOptions):
             onnxfunction_dispatcher,
         )
 
-        self.dynamic_shapes = False
+        self.dynamic_shapes = True
         self.diagnostic_options = DiagnosticOptions()
         self.fx_tracer = dynamo_graph_extractor.DynamoExport()
         self.fake_context = None
