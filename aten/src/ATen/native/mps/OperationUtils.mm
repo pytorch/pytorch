@@ -1022,30 +1022,29 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter, const std:
   const uint32_t nDim = iter.ndim();
   constexpr uint32_t nOffsets = 3;
   const uint32_t numThreads = iter.numel();
+  const auto suffix = iter.is_contiguous() ? "dense" : "strided";
+  const auto kernel_name = fmt::format("{}_{}_{}", name, suffix, scalarToMetalTypeString(input));
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       auto computeEncoder = mpsStream->commandEncoder();
-      if (iter.is_contiguous()) {
-        const auto kernel_name = fmt::format("{}_dense_{}", name, scalarToMetalTypeString(input));
-        auto binaryPSO = getPipelineStateForFunc(kernel_name);
-        [computeEncoder setComputePipelineState:binaryPSO];
-        mtl_setArgs(computeEncoder, input, other, out);
-        mtl_dispatch1DJob(computeEncoder, binaryPSO, numThreads);
-        return;
-      }
-      const auto kernel = fmt::format("{}_{}", name, scalarToMetalTypeString(input));
-      auto kernelDataOffsets = generateKernelDataOffsets(computeEncoder, iter);
-
-      auto binaryPSO = getPipelineStateForFunc(kernel);
-
+      auto binaryPSO = getPipelineStateForFunc(kernel_name);
       // this function call is a no-op if MPS Profiler is not enabled
-      getMPSProfiler().beginProfileKernel(binaryPSO, kernel, {input, other});
-
+      getMPSProfiler().beginProfileKernel(binaryPSO, kernel_name, {input, other});
       [computeEncoder setComputePipelineState:binaryPSO];
-      mtl_setArgs(computeEncoder, input, other, out);
-      [computeEncoder setBuffer:kernelDataOffsets offset:0 atIndex:3];
+      if (iter.is_contiguous()) {
+        mtl_setArgs(computeEncoder, input, other, out);
+      } else {
+        mtl_setArgs(computeEncoder,
+                    input,
+                    other,
+                    out,
+                    out.sizes(),
+                    input.strides(),
+                    other.strides(),
+                    out.strides(),
+                    out.ndimension());
+      }
       mtl_dispatch1DJob(computeEncoder, binaryPSO, numThreads);
-
       getMPSProfiler().endProfileKernel(binaryPSO);
     }
   });
