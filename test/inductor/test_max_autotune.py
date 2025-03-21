@@ -17,7 +17,6 @@ from torch._dynamo.utils import same
 from torch._inductor import config
 from torch._inductor.autotune_process import (
     _TestBenchmarkRequest,
-    BenchmarkRequest,
     CUDA_VISIBLE_DEVICES,
     TuningProcess,
     TuningProcessPool,
@@ -1323,7 +1322,9 @@ class TestTuningProcessPool(TestCase):
             visible_devices = [str(d) for d in range(torch.cuda.device_count())]
 
         cuda_visible_devices = ",".join(visible_devices[-2:])
-        with unittest.mock.patch.dict(os.environ, {CUDA_VISIBLE_DEVICES: cuda_visible_devices}):
+        with unittest.mock.patch.dict(
+            os.environ, {CUDA_VISIBLE_DEVICES: cuda_visible_devices}
+        ):
             tuning_pool = TuningProcessPool()
             tuning_pool.initialize()
 

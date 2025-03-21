@@ -69,10 +69,11 @@ class TuningProcess:
         Entry point for the child process.
         """
         autotuning_log.debug(
-            "Entering TuningProcess pid = %s. Visible devices = %s",
+            "Started autotune subprocess %s. Visible devices: %s",
             os.getpid(),
             os.environ.get(CUDA_VISIBLE_DEVICES),
         )
+
         def workloop():
             while True:
                 job = TuningProcess.recv(read_pipe)
@@ -144,11 +145,13 @@ class TuningProcess:
         os.close(subproc_read_fd)
         os.close(subproc_write_fd)
 
+        self.running = True
+
     def alive(self) -> bool:
         """
         True if the subprocess is still running.
         """
-        return self.process is not None and self.process.poll() is None
+        return self.running and self.process.poll() is None
 
     def put(self, req: Any) -> None:
         """
@@ -176,7 +179,7 @@ class TuningProcess:
             raise
         except Exception:
             autotuning_log.exception(
-                f"Unexpected exception in autotune subprocess {self.process.pid}"
+                "Unexpected exception in autotune subprocess %s", self.process.pid
             )
             self.kill()
             raise
@@ -209,7 +212,7 @@ class TuningProcess:
         self.selector.close()
         self.read_pipe.close()
         self.write_pipe.close()
-        self.process = None
+        self.running = False
 
     def kill(self) -> None:
         """
@@ -217,7 +220,7 @@ class TuningProcess:
         """
         if self.alive():
             autotuning_log.error(
-                "Sending SIGKILL to process with PID %d",
+                "Sending SIGKILL to autotune subprocess %d",
                 self.process.pid,
             )
             self.process.kill()

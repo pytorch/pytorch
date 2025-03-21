@@ -425,9 +425,9 @@ autotune_in_subproc = os.environ.get("TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC") == "1"
 # Max time that a valid benchmark result may take during autotuning
 max_autotune_subproc_result_timeout_seconds = 60.0
 # DEPRECATED. This setting is ignored.
-max_autotune_subproc_graceful_timeout_seconds = None
+max_autotune_subproc_graceful_timeout_seconds = 0.0
 # DEPRECATED. This setting is ignored.
-max_autotune_subproc_terminate_timeout_seconds = None
+max_autotune_subproc_terminate_timeout_seconds = 0.0
 
 # If autotuning in subprocess, whether to use multiple devices
 autotune_multi_device = os.environ.get("TORCHINDUCTOR_AUTOTUNE_MULTI_DEVICE") == "1"
