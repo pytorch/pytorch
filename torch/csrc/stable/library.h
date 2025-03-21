@@ -4,23 +4,12 @@
 
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 
-#include <optional>
-
 // use anonymous namespace to avoid collisions between differing
 // versions of this file that may be included by different sources
 namespace {
 
-namespace detail {
-// utility functions to detect optional
-template <typename V>
-struct is_optional : std::false_type {};
-template <typename V>
-struct is_optional<std::optional<V>> : std::true_type {};
-} // namespace detail
-
-template <
-    typename T,
-    std::enable_if_t<!detail::is_optional<T>::value, bool> = true>
+// helpers for converting between StableIValue and actual IValues
+template <typename T>
 StableIValue from(T val) {
   static_assert(
       sizeof(T) <= sizeof(StableIValue),
@@ -28,85 +17,9 @@ StableIValue from(T val) {
   return *reinterpret_cast<StableIValue*>(&val);
 }
 
-// Specialization for std::nullopt_t
-template <>
-StableIValue from(std::nullopt_t val) {
-  return from(nullptr);
-}
-
-// Specialization for std::optional
-// [Handling std::optional]
-// When the schema is represented by an optional type, say int?, then we
-// expect the custom extension representation to be a std::optional<int>
-// (critically NOT int!). In order for all parameters to be stably parsed and
-// handled by our dispatcher, we liaison custom extension parameters through
-// boxed kernels, meaning that every value will make its way to be an IValue:
-//
-// custom extension value --(from)-> StableIValue --(to_ivalue)-> IValue
-//
-// When the custom extension value is a literal that can be trivially
-// casted to StableIValue, e.g., an int, a float, a pointer, this route is
-// ...trivial. The below specialization is for a case when the custom
-// extension value would NOT fit within a StableIValue: a std::optional.
-//
-// If the std::optional has no value, it is treated as std::nullopt,
-// whose StableIValue representation is from(nullptr). Otherwise, we:
-// 1. unwrap the std::optional<T>
-// 2. recursively convert its value of type T to a StableIValue
-// 3. allocate heap space for said StableIValue
-// 4. convert the resulting StableIValue* into a StableIValue
-//
-// note that this allocates heap memory! which we expect to be cleaned
-// up in the to_ivalue() function defined in shim_common.cpp. We
-// purposefully hide this implementation detail from the user so that
-// all the user needs to know is:
-//
-// The schema requests an optional (T?) so I must call `from` on a
-// std::optional<T> or a std::nullopt.
 template <typename T>
-StableIValue from(std::optional<T> val) {
-  if (!val.has_value()) {
-    return from(std::nullopt);
-  }
-  StableIValue* heap_val = new StableIValue(from(val.value()));
-  return from(heap_val);
-}
-
-template <
-    typename T,
-    std::enable_if_t<!detail::is_optional<T>::value, bool> = true>
 T to(StableIValue val) {
   return *reinterpret_cast<T*>(&val);
-}
-
-template <
-    typename T,
-    std::enable_if_t<std::is_same_v<T, std::nullopt_t>, bool> = true>
-T to(StableIValue val) {
-  // val should be equivalent to from(nullptr)
-  return std::nullopt;
-}
-
-// Specialization for std::optional, see [Handling std::optional] above
-// as the semantic is the same but in reverse direction as we go from
-// IValue --(from_ivalue)-> StableIValue --(to<T>)-> T in custom extension
-template <
-    typename T,
-    std::enable_if_t<detail::is_optional<T>::value, bool> = true>
-T to(StableIValue val) {
-  using V = typename T::value_type;
-  auto sivp = to<StableIValue*>(val);
-
-  // sivp is either nullptr or a pointer to a StableIValue
-  if (sivp == nullptr) {
-    return {};
-  }
-  auto inner_val = to<V>(*sivp);
-
-  // free the memory associated with StableIValue* sivp
-  delete sivp;
-
-  return std::make_optional(inner_val);
 }
 // end to helpers for converting between StableIValue and actual IValues
 

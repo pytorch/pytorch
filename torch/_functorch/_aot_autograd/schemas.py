@@ -7,8 +7,7 @@ input/output types, metadata, config, function signatures etc.
 import collections
 import dataclasses
 import functools
-import itertools
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, NewType, Optional, Union
@@ -157,46 +156,9 @@ class InputAliasInfo:
 
 
 @dataclass
-class MemoryFormatMeta:
-    # For static shapes we assume tangents have the same strideness as outputs
-    size: Optional[Sequence[int]] = None
-    stride: Optional[Sequence[int]] = None
-
-    # For dynamic shapes we assume the same memory format: contiguous, channels_last etc.
-    memory_format: Optional[torch.memory_format] = None
-
-    @staticmethod
-    def from_tensor(t: torch.Tensor) -> Optional["MemoryFormatMeta"]:
-        # We only memorize expected memory format for
-        # 1. Traceable wrapper subclasses
-        # We can not create restrided subclass tensor, as torch.empty_strided works only with dense tensors.
-        # 2. Dynamic shape tensors
-        # Support for symbolic shapes is not implemented yet.
-        use_memory_format: bool = is_traceable_wrapper_subclass(t)
-        if not use_memory_format:
-            is_static_shape = True
-            for s in itertools.chain(t.shape, t.stride()):
-                if not isinstance(s, int):
-                    is_static_shape = False
-                    break
-
-            use_memory_format = not is_static_shape
-
-        if use_memory_format:
-            return MemoryFormatMeta(
-                memory_format=torch._prims_common.suggest_memory_format(t),
-            )
-
-        return MemoryFormatMeta(
-            size=t.size(),
-            stride=t.stride(),
-        )
-
-
-@dataclass
 class PlainTensorMeta:
     unwrapped_idx: int
-    memory_format: Optional[MemoryFormatMeta] = None
+    memory_format: Optional[torch.memory_format] = None
 
 
 @dataclass
@@ -242,7 +204,7 @@ class SubclassCreationMeta:
 
     # Used at runtime to determine the subclass type, so we don't need to save the original subclass
     original_subclass_type: Optional[type] = None
-    memory_format: Optional[MemoryFormatMeta] = None
+    memory_format: Optional[torch.memory_format] = None
 
     def compute_outer_size_and_stride(
         self,

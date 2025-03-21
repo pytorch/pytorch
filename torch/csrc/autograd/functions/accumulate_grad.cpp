@@ -89,12 +89,11 @@ variable_list AccumulateGrad::apply_with_saved(
   saved.before(variable_copy);
   saved.before(grad_copy);
   variable_copy.mutable_grad() = grad_copy;
-
-  // proxy a call to torch.ops.inductor.accumulate_grad_.default
-  const auto& pyinterface = torch::dynamo::autograd::getPyCompilerInterface();
-  pyinterface->call_accumulate_grad(
-      saved.get_py_compiler(), variable_copy, grads[0]);
-
+  // op is intentionally static
+  static auto op = c10::Dispatcher::singleton()
+                       .findSchemaOrThrow("inductor::accumulate_grad_", "")
+                       .typed<void(const at::Tensor&, const at::Tensor&)>();
+  op.call(variable_copy, grads[0]);
   auto& hook = tensor_post_acc_grad_hooks();
   if (hook != nullptr) {
     hook->apply_with_saved(variable_copy, saved);

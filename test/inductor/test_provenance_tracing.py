@@ -5,14 +5,12 @@ import logging
 import re
 import shutil
 import tempfile
-import unittest
 from pathlib import Path
 
 import torch
 from torch._inductor import config
 from torch._inductor.debug import create_node_mapping
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.testing._internal.triton_utils import requires_cuda
 
 
@@ -33,6 +31,7 @@ class Model(torch.nn.Module):
         return z
 
 
+@requires_cuda
 @config.patch("trace.enabled", True)
 class TestProvenanceTracingArtifact(TestCase):
     """
@@ -40,7 +39,6 @@ class TestProvenanceTracingArtifact(TestCase):
     corresponding "inductor triton kernel node" is expected.
     """
 
-    @requires_cuda
     def _check_provenance_tracing_artifact(self, filepath):
         self.assertTrue(filepath.is_dir())
         filename = Path(filepath) / "inductor_triton_kernel_to_post_grad_nodes.json"
@@ -115,7 +113,6 @@ class TestProvenanceTracingArtifact(TestCase):
         ]
         self.assertEqual(sorted(actual_data.items()), sorted(expected_data))
 
-    @requires_cuda
     def test_triton_kernel_to_post_grad_tracing(self):
         a = torch.randn(10, 20, device="cuda")
         b = torch.randn(20, 30, device="cuda")
@@ -123,6 +120,9 @@ class TestProvenanceTracingArtifact(TestCase):
         example_inputs = (a, b, c)
 
         model = Model()
+        ep = torch.export._trace._export(model, example_inputs)
+        gm = ep.module()
+
         for backend in ["aot_inductor", "inductor"]:
             try:
                 with config.patch(
@@ -136,10 +136,11 @@ class TestProvenanceTracingArtifact(TestCase):
                         level=logging.WARNING,
                     ) as cm:
                         if backend == "aot_inductor":
-                            AOTIRunnerUtil.run(model, example_inputs)
+                            so_path = torch._inductor.aot_compile(gm, example_inputs)
+                            optimized = AOTIRunnerUtil.load("cuda", so_path)
+                            optimized(*example_inputs)
                         else:
-                            ep = torch.export._trace._export(model, example_inputs)
-                            compiled = torch.compile(ep.module(), backend=backend)
+                            compiled = torch.compile(gm, backend=backend)
                             compiled(*example_inputs)
                     self.assertEqual(len(cm.output), 1)
                     m = re.match(r"WARNING.* debug trace: (.*)", cm.output[0])
@@ -148,58 +149,6 @@ class TestProvenanceTracingArtifact(TestCase):
                     self._check_provenance_tracing_artifact(filepath)
             finally:
                 shutil.rmtree(filepath)
-
-    @unittest.skipIf(HAS_GPU, "the test is only for cpu")
-    def test_triton_kernel_to_post_grad_tracing_cpu(self):
-        a = torch.randn(10, 20, device="cpu")
-        b = torch.randn(20, 30, device="cpu")
-        c = torch.randn(10, 30, device="cpu")
-        example_inputs = (a, b, c)
-
-        model = Model()
-        ep = torch.export._trace._export(model, example_inputs)
-        gm = ep.module()
-        filepath = None
-
-        for backend in ["aot_inductor", "inductor"]:
-            try:
-                with config.patch(
-                    {
-                        "trace.debug_dir": tempfile.mkdtemp(),
-                        "force_disable_caches": True,
-                    }
-                ):
-                    with self.assertLogs(
-                        logging.getLogger("torch._inductor.debug"),
-                        level=logging.WARNING,
-                    ) as cm:
-                        if backend == "aot_inductor":
-                            AOTIRunnerUtil.run(model, example_inputs)
-                        else:
-                            compiled = torch.compile(gm, backend=backend)
-                            compiled(*example_inputs)
-                    self.assertEqual(len(cm.output), 1)
-                    m = re.match(r"WARNING.* debug trace: (.*)", cm.output[0])
-                    self.assertTrue(m)
-                    filepath = Path(m.group(1))
-                    filename = (
-                        Path(filepath)
-                        / "inductor_triton_kernel_to_post_grad_nodes.json"
-                    )
-                    with open(filename) as f:
-                        actual_data = json.load(f)
-                    # check the inductor kernel to post grad nodes mapping is expected for cpu
-                    expected_data = {
-                        "cpp_fused_mul_0": ["mul"],
-                        "cpp_fused_gelu_1": ["mul_3", "mul_1", "add", "erf", "mul_2"],
-                    }
-                    self.assertEqual(
-                        sorted(actual_data.items()), sorted(expected_data.items())
-                    )
-
-            finally:
-                if filepath:
-                    shutil.rmtree(filepath)
 
 
 class TestProvenanceTracingNodeMapping(TestCase):

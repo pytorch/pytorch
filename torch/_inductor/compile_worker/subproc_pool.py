@@ -21,7 +21,7 @@ from typing_extensions import Never, ParamSpec
 # functionality to destroy singletons before forking and re-enable them after.
 import torch._thread_safe_fork  # noqa: F401
 from torch._inductor import config
-from torch._inductor.compile_worker.utils import _async_compile_initializer
+from torch._inductor.compile_worker.watchdog import _async_compile_initializer
 
 
 log = logging.getLogger(__name__)
@@ -308,11 +308,15 @@ class SubprocMain:
                 self.pool = self._new_pool(self.nprocs, False)
 
     def _submit_inner(self, job_id: int, data: bytes) -> None:
-        def callback(fut: Future[Any]) -> None:
+        future = self.pool.submit(
+            functools.partial(SubprocMain.do_job, self.pickler, data)
+        )
+
+        def callback(_: Future[Any]) -> None:
             if not self.running:
                 return
             try:
-                result = fut.result()
+                result = future.result()
             except Exception as e:
                 log.exception("Error in subprocess")
                 result = self.pickler.dumps(e)
@@ -322,9 +326,6 @@ class SubprocMain:
                     _send_msg(self.write_pipe, job_id, result)
             return
 
-        future = self.pool.submit(
-            functools.partial(SubprocMain.do_job, self.pickler, data)
-        )
         future.add_done_callback(callback)
 
     @staticmethod

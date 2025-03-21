@@ -2931,17 +2931,6 @@ aten::mm""",
     def test_profiler_overload_names(self):
         from torch.library import _scoped_library, fallthrough_kernel
 
-        def validate_json(prof):
-            print()
-            with TemporaryFileName(mode="w+") as fname:
-                prof.export_chrome_trace(fname)
-                with open(fname) as f:
-                    events = json.load(f)["traceEvents"]
-                    self.assertTrue(
-                        any("aten::add.Tensor" in e["name"] for e in events)
-                    )
-                    self.assertTrue(any("aten::add.out" in e["name"] for e in events))
-
         with _scoped_library("aten", "IMPL") as my_lib:
             my_lib.impl("add.Tensor", fallthrough_kernel, "CPU")
             experimental_config = torch._C._profiler._ExperimentalConfig(
@@ -2992,7 +2981,6 @@ aten::mm""",
             key_averages = prof.key_averages(group_by_overload_name=True)
             assert len(key_averages) == 3
             assert "Overload Name" in key_averages.table()
-            validate_json(prof)
 
 
 if __name__ == "__main__":

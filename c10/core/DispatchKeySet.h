@@ -663,7 +663,6 @@ constexpr DispatchKeySet autocast_dispatch_keyset = DispatchKeySet({
     DispatchKey::AutocastXLA,
     DispatchKey::AutocastPrivateUse1,
     DispatchKey::AutocastMTIA,
-    DispatchKey::AutocastMAIA,
 });
 
 // See Note [TLS Initialization]
@@ -682,7 +681,6 @@ constexpr DispatchKeySet default_excluded_set = DispatchKeySet({
     DispatchKey::AutocastXLA,
     DispatchKey::AutocastPrivateUse1,
     DispatchKey::AutocastMTIA,
-    DispatchKey::AutocastMAIA,
 });
 
 constexpr DispatchKeySet autograd_dispatch_keyset_with_ADInplaceOrView =
@@ -708,6 +706,7 @@ constexpr DispatchKeySet autogradother_backends =
         // Technically, HIP will now redispatch to its own custom AutogradHIP
         // slot in the runtime table.
         {DispatchKey::FPGA,
+         DispatchKey::MAIA,
          DispatchKey::Vulkan,
          DispatchKey::Metal,
          DispatchKey::CustomRNGKeyId,
@@ -757,7 +756,6 @@ constexpr auto inplace_or_view_ks =
 constexpr auto autograd_cpu_ks = DispatchKeySet(DispatchKey::AutogradCPU);
 constexpr auto autograd_ipu_ks = DispatchKeySet(DispatchKey::AutogradIPU);
 constexpr auto autograd_mtia_ks = DispatchKeySet(DispatchKey::AutogradMTIA);
-constexpr auto autograd_maia_ks = DispatchKeySet(DispatchKey::AutogradMAIA);
 constexpr auto autograd_xpu_ks = DispatchKeySet(DispatchKey::AutogradXPU);
 constexpr auto autograd_cuda_ks = DispatchKeySet(DispatchKey::AutogradCUDA);
 constexpr auto autograd_xla_ks = DispatchKeySet(DispatchKey::AutogradXLA);
@@ -837,8 +835,6 @@ inline DispatchKeySet getAutogradRelatedKeySetFromBackend(BackendComponent t) {
       return inplace_or_view_ks | autograd_ipu_ks;
     case BackendComponent::MTIABit:
       return inplace_or_view_ks | autograd_mtia_ks;
-    case BackendComponent::MAIABit:
-      return inplace_or_view_ks | autograd_maia_ks;
     case BackendComponent::XPUBit:
       return inplace_or_view_ks | autograd_xpu_ks;
     case BackendComponent::CUDABit:
@@ -868,7 +864,6 @@ inline DispatchKeySet getAutogradRelatedKeySetFromBackend(BackendComponent t) {
 inline DispatchKeySet getAutocastRelatedKeySetFromBackend(BackendComponent t) {
   constexpr auto autocast_cpu_ks = DispatchKeySet(DispatchKey::AutocastCPU);
   constexpr auto autocast_mtia_ks = DispatchKeySet(DispatchKey::AutocastMTIA);
-  constexpr auto autocast_maia_ks = DispatchKeySet(DispatchKey::AutocastMAIA);
   constexpr auto autocast_xpu_ks = DispatchKeySet(DispatchKey::AutocastXPU);
   constexpr auto autocast_ipu_ks = DispatchKeySet(DispatchKey::AutocastIPU);
   constexpr auto autocast_hpu_ks = DispatchKeySet(DispatchKey::AutocastHPU);
@@ -882,8 +877,6 @@ inline DispatchKeySet getAutocastRelatedKeySetFromBackend(BackendComponent t) {
       return autocast_cpu_ks;
     case BackendComponent::MTIABit:
       return autocast_mtia_ks;
-    case BackendComponent::MAIABit:
-      return autocast_maia_ks;
     case BackendComponent::XPUBit:
       return autocast_xpu_ks;
     case BackendComponent::IPUBit:

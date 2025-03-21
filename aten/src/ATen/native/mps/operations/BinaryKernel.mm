@@ -23,13 +23,54 @@
 #endif
 
 namespace at::native {
+namespace mps {
+
 #ifndef PYTORCH_JIT_COMPILE_SHADERS
-static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
+static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #else
 #include <ATen/native/mps/BinaryKernel_metallib.h>
 #endif
 
-namespace mps {
+static void binary_mps_impl(TensorIteratorBase& iter, const std::string func_name, bool supports_dense = true) {
+  TORCH_CHECK(iter.common_dtype() != at::kDouble, "float64 is not supported on MPS");
+
+  Tensor input = iter.input(0);
+  Tensor other = iter.input(1);
+  Tensor out = iter.output();
+
+  id<MTLDevice> device = MPSDevice::getInstance()->device();
+  MPSStream* mpsStream = getCurrentMPSStream();
+  const uint32_t nDim = iter.ndim();
+  constexpr uint32_t nOffsets = 3;
+  const uint32_t numThreads = iter.numel();
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
+    @autoreleasepool {
+      auto computeEncoder = mpsStream->commandEncoder();
+      if (supports_dense && iter.is_contiguous()) {
+        const auto kernel_name = fmt::format("{}_dense_{}", func_name, scalarToMetalTypeString(input));
+        auto binaryPSO = lib.getPipelineStateForFunc(kernel_name);
+        [computeEncoder setComputePipelineState:binaryPSO];
+        mtl_setArgs(computeEncoder, input, other, out);
+        mtl_dispatch1DJob(computeEncoder, binaryPSO, numThreads);
+        return;
+      }
+      const std::string kernel = func_name + "_" + scalarToMetalTypeString(input);
+      auto kernelDataOffsets = generateKernelDataOffsets(computeEncoder, iter);
+
+      id<MTLComputePipelineState> binaryPSO = lib.getPipelineStateForFunc(kernel);
+
+      // this function call is a no-op if MPS Profiler is not enabled
+      getMPSProfiler().beginProfileKernel(binaryPSO, kernel, {input, other});
+
+      [computeEncoder setComputePipelineState:binaryPSO];
+      mtl_setArgs(computeEncoder, input, other, out);
+      [computeEncoder setBuffer:kernelDataOffsets offset:0 atIndex:3];
+      mtl_dispatch1DJob(computeEncoder, binaryPSO, numThreads);
+
+      getMPSProfiler().endProfileKernel(binaryPSO);
+    }
+  });
+}
 
 void complex_mul_out(const Tensor& input, const Tensor& other, const Tensor& output) {
   TORCH_INTERNAL_ASSERT(c10::isComplexType(input.scalar_type()) || c10::isComplexType(other.scalar_type()));
@@ -48,43 +89,43 @@ void complex_mul_out(const Tensor& input, const Tensor& other, const Tensor& out
   auto iter =
       TensorIteratorConfig().add_output(output_as_real).add_input(input_as_real).add_input(other_as_real).build();
 
-  lib.exec_binary_kernel(iter, "complex_mul", /*supports_dense=*/false);
+  mps::binary_mps_impl(iter, "complex_mul", false);
 }
 
 } // namespace mps
 
 static void fmax_mps_kernel(TensorIteratorBase& iter) {
   if (isFloatingType(iter.common_dtype())) {
-    lib.exec_binary_kernel(iter, "fmax");
+    mps::binary_mps_impl(iter, "fmax");
   } else {
     at::maximum_out(const_cast<Tensor&>(iter.output()), iter.input(0), iter.input(1));
   }
 }
 static void fmin_mps_kernel(TensorIteratorBase& iter) {
   if (isFloatingType(iter.common_dtype())) {
-    lib.exec_binary_kernel(iter, "fmin");
+    mps::binary_mps_impl(iter, "fmin");
   } else {
     at::minimum_out(const_cast<Tensor&>(iter.output()), iter.input(0), iter.input(1));
   }
 }
 
 static void copysign_mps_kernel(TensorIteratorBase& iter) {
-  lib.exec_binary_kernel(iter, "copysign");
+  mps::binary_mps_impl(iter, "copysign");
 }
 
 static void nextafter_mps_kernel(TensorIteratorBase& iter) {
   TORCH_CHECK_TYPE(isFloatingType(iter.common_dtype()), "nextafter_mps not implemented for non-floating types");
-  lib.exec_binary_kernel(iter, "nextafter");
+  mps::binary_mps_impl(iter, "nextafter");
 }
 
 static void zeta_mps_kernel(TensorIteratorBase& iter) {
   TORCH_CHECK_TYPE(isFloatingType(iter.common_dtype()), "zeta_mps not implemented for non-floating types");
-  lib.exec_binary_kernel(iter, "zeta");
+  mps::binary_mps_impl(iter, "zeta");
 }
 
 static void xlog1py_mps_kernel(TensorIteratorBase& iter) {
   TORCH_CHECK_TYPE(isFloatingType(iter.common_dtype()), "xlog1py_mps not implemented for non-floating types");
-  lib.exec_binary_kernel(iter, "xlog1py");
+  mps::binary_mps_impl(iter, "xlog1py");
 }
 
 REGISTER_DISPATCH(fmax_stub, &fmax_mps_kernel)
@@ -106,7 +147,7 @@ Tensor& polar_out_mps(const Tensor& abs, const Tensor& angle, Tensor& output) {
   auto output_as_real = at::view_as_real(output).select(output.dim(), 0);
   auto iter = TensorIteratorConfig().add_output(output_as_real).add_input(abs).add_input(angle).build();
 
-  lib.exec_binary_kernel(iter, "polar");
+  mps::binary_mps_impl(iter, "polar");
   return output;
 }
 
@@ -122,7 +163,7 @@ Tensor& complex_out_mps(const Tensor& real, const Tensor& imag, Tensor& output) 
   auto output_as_real = at::view_as_real(output).select(output.dim(), 0);
   auto iter = TensorIteratorConfig().add_output(output_as_real).add_input(real).add_input(imag).build();
 
-  lib.exec_binary_kernel(iter, "complex_kernel", /*supports_dense=*/false);
+  mps::binary_mps_impl(iter, "complex_kernel", false);
   return output;
 }
 } // namespace at::native

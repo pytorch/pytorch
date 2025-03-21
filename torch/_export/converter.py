@@ -1514,7 +1514,7 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
     ):
         dynamic_shapes = _tree_map_with_path(
             lambda path, x: (
-                [Dim.AUTO] * x.dim() if isinstance(x, torch.Tensor) else None
+                [Dim.AUTO] * x.dim() if isinstance(x, torch.Tensor) else None  # type: ignore[attr-defined]
             ),
             self.sample_args,
         )

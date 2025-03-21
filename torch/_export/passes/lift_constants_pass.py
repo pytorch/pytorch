@@ -169,15 +169,6 @@ def lift_constants_pass(
     for node in gm.graph.nodes:
         if node.op == "get_attr":
             constant_val = _get_attr(gm, node.target)
-            # These are not hashable and not gonna be lifted
-            # so we can skip them earlier
-            if isinstance(constant_val, torch.fx.GraphModule):
-                continue
-            if "LoweredBackendModule" in type(constant_val).__name__:
-                continue
-            if isinstance(constant_val, torch.utils._pytree.TreeSpec):
-                continue
-
             if constant_val in lifted_objs:
                 # We already lifted this constant elsewhere. Just rewrite uses
                 # of this get_attr to point to the already-existing placeholder
@@ -232,7 +223,10 @@ def lift_constants_pass(
                         constant_name = f"lifted_tensor_{num_tensor_constants}"
                         constant_fqn = get_constant_fqn(node, constant_name)
                     num_tensor_constants += 1
-
+            elif isinstance(constant_val, torch.fx.GraphModule):
+                continue
+            elif "LoweredBackendModule" in type(constant_val).__name__:
+                continue
             else:
                 raise SpecViolationError(
                     f"getattr node {node} referencing unsupported type {type(constant_val)}"

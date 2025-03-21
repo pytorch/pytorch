@@ -64,7 +64,7 @@ from ..utils import (
     istype,
     make_cell,
 )
-from .base import AttributeMutationNew, typestr, ValueMutationNew, VariableTracker
+from .base import typestr, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 
 
@@ -1013,8 +1013,6 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         wrapped_fn=None,
         **kwargs,
     ) -> None:
-        if kwargs.get("mutation_type") is None:
-            kwargs.update(mutation_type=AttributeMutationNew())
         super().__init__(**kwargs)
         assert isinstance(fn_name.as_python_constant(), str)
         assert isinstance(code.as_python_constant(), types.CodeType)
@@ -1060,20 +1058,6 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             assert isinstance(annotations, dict)
             func.__annotations__ = annotations
         return func
-
-    def call_setattr(
-        self,
-        tx: "InstructionTranslator",
-        name_var: VariableTracker,
-        val: VariableTracker,
-    ):
-        tx.output.side_effects.store_attr(self, name_var.value, val)
-        return ConstantVariable(None)
-
-    def call_method(self, tx, name, args, kwargs):
-        if name == "__setattr__":
-            return self.call_setattr(tx, *args)
-        return super().call_method(tx, name, args, kwargs)
 
     def has_closure(self):
         return self.closure is not None
@@ -1152,19 +1136,6 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             codegen.extend_output(create_call_function(1, False))
             codegen.extend_output(create_rot_n(2))
             codegen.extend_output(create_call_function(1, True))
-
-        # codegen attributes
-        from torch._dynamo.symbolic_convert import InstructionTranslator
-
-        tx = InstructionTranslator.current_tx()
-        if tx.output.side_effects.has_pending_mutation(self):
-            for name, value in tx.output.side_effects.store_attr_mutations[
-                self
-            ].items():
-                codegen.dup_top()
-                codegen(value)
-                codegen.extend_output(create_rot_n(2))
-                codegen.store_attr(name)
 
 
 class SkipFunctionVariable(VariableTracker):

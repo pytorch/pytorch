@@ -2533,7 +2533,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_float_$is_traceable, m) {
             # compiled autograd and dynamo both support symfloat, but not backend
             self.check_output_and_recompiles(fn, [1, 4])
             # 1 restart analysis due to specialize_float=False
-            self.assertEqual(counters["stats"]["unique_graphs"], 4)
+            self.assertEqual(counters["stats"]["unique_graphs"], 3)
         else:
             self.check_output_and_recompiles(
                 fn, count=[1, 3], compiler_fn=make_compiler_fn(fullgraph=False)
@@ -3041,6 +3041,24 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
 
         expected_logs = [
             "code: CompiledFunctionBackward (NodeCall 2)",
+            "code: CompiledFunctionBackward0 (NodeCall 2)",
+            "aot0_primals_3",
+            "aot0_relu",
+            "aot0_le",
+            "aot0_permute_2",
+            "aot0_full_default",
+            "aot0_where",
+            "aot0_mm",
+            "aot0_permute_3",
+            "aot0_mm_1",
+            "aot0_sum_1",
+            "aot0_view",
+            "aot0_le_1",
+            "aot0_where_1",
+            "aot0_permute_6",
+            "aot0_mm_2",
+            "aot0_sum_2",
+            "aot0_view_1",
         ]
 
         found = 0
@@ -3370,11 +3388,11 @@ class CompiledAutograd0(torch.nn.Module):
         validate_outputs_2 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_36, getitem_37], [((None, None, device(type='cpu'), 6, 0, None), [getitem_21, getitem_22], False), ((None, None, device(type='cpu'), 6, 0, None), [getitem_23, getitem_24], False)]);  getitem_36 = getitem_37 = getitem_21 = getitem_22 = getitem_23 = getitem_24 = None
         getitem_39 = validate_outputs_2[0]
 
-        accumulate_grad__default_1 = torch.ops.inductor.accumulate_grad_.default(getitem_4, getitem_39);  getitem_4 = getitem_39 = accumulate_grad__default_1 = None
+        accumulate_grad__1 = torch.ops.inductor.accumulate_grad_.default(getitem_4, getitem_39);  getitem_4 = getitem_39 = accumulate_grad__1 = None
 
         getitem_40 = validate_outputs_2[1];  validate_outputs_2 = None
 
-        accumulate_grad__default = torch.ops.inductor.accumulate_grad_.default(getitem_3, getitem_40);  getitem_3 = getitem_40 = accumulate_grad__default = None
+        accumulate_grad_ = torch.ops.inductor.accumulate_grad_.default(getitem_3, getitem_40);  getitem_3 = getitem_40 = accumulate_grad_ = None
 
         _exec_final_callbacks_stub = torch__dynamo_external_utils__exec_final_callbacks_stub();  _exec_final_callbacks_stub = None
         return []
@@ -3623,7 +3641,7 @@ class CompiledAutograd0(torch.nn.Module):
         validate_outputs_4 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_31], [((None, None, device(type='cpu'), 6, 0, None), [getitem_12, getitem_13], False)]);  getitem_31 = getitem_12 = getitem_13 = None
         getitem_32 = validate_outputs_4[0];  validate_outputs_4 = None
 
-        accumulate_grad__default = torch.ops.inductor.accumulate_grad_.default(getitem_1, getitem_32);  getitem_1 = getitem_32 = accumulate_grad__default = None
+        accumulate_grad_ = torch.ops.inductor.accumulate_grad_.default(getitem_1, getitem_32);  getitem_1 = getitem_32 = accumulate_grad_ = None
         _exec_final_callbacks_stub = torch__dynamo_external_utils__exec_final_callbacks_stub();  _exec_final_callbacks_stub = None
         return []
 """,  # noqa: B950
@@ -3703,7 +3721,7 @@ class CompiledAutograd1(torch.nn.Module):
         validate_outputs_3 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_14], [((None, None, device(type='cpu'), 6, 0, None), [getitem_4], False)]);  getitem_14 = getitem_4 = None
         getitem_15 = validate_outputs_3[0];  validate_outputs_3 = None
 
-        accumulate_grad__default = torch.ops.inductor.accumulate_grad_.default(getitem_1, getitem_15);  getitem_1 = getitem_15 = accumulate_grad__default = None
+        accumulate_grad_ = torch.ops.inductor.accumulate_grad_.default(getitem_1, getitem_15);  getitem_1 = getitem_15 = accumulate_grad_ = None
         _exec_final_callbacks_stub = torch__dynamo_external_utils__exec_final_callbacks_stub();  _exec_final_callbacks_stub = None
         return []
 """,  # noqa: B950
@@ -3783,7 +3801,7 @@ class CompiledAutograd1(torch.nn.Module):
         validate_outputs_2 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_11], [((None, None, device(type='cpu'), 6, 0, None), [getitem_3], False)]);  getitem_11 = getitem_3 = None
         getitem_12 = validate_outputs_2[0];  validate_outputs_2 = None
 
-        accumulate_grad__default = torch.ops.inductor.accumulate_grad_.default(getitem_1, getitem_12);  getitem_1 = getitem_12 = accumulate_grad__default = None
+        accumulate_grad_ = torch.ops.inductor.accumulate_grad_.default(getitem_1, getitem_12);  getitem_1 = getitem_12 = accumulate_grad_ = None
         _exec_final_callbacks_stub = torch__dynamo_external_utils__exec_final_callbacks_stub();  _exec_final_callbacks_stub = None
         return []
 """,  # noqa: B950
@@ -3906,35 +3924,6 @@ class CompiledAutograd1(torch.nn.Module):
             fn, count=[1, 5], compiler_fn=make_compiler_fn(fullgraph=False)
         )
 
-    def test_dont_dce_side_effects(self):
-        class SideEffectfulBackward(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, x):
-                return x
-
-            @staticmethod
-            def backward(ctx, gO):
-                torch.randn(10, 10)
-                return gO
-
-        x = torch.randn(10, 10, requires_grad=True)
-
-        @torch.compile(backend="aot_eager")
-        def fn(x):
-            return SideEffectfulBackward.apply(x).sum()
-
-        gm = None
-
-        def extract(ca_gm):
-            nonlocal gm
-            gm = ca_gm
-            return ca_gm
-
-        with compiled_autograd._enable(extract):
-            fn(x).backward()
-
-        self.assertTrue("aten.randn" in str(gm))
-
 
 def load_test_module(name):
     testdir = Path(__file__).absolute().parent.parent
@@ -4041,8 +4030,6 @@ known_graph_breaks_tests = {
     "test_checkpointing_without_reentrant_input_requires_grad_False",  # reentrant .backward
     "test_checkpointing_without_reentrant_input_requires_grad_True",  # reentrant .backward
     "test_checkpointing_without_reentrant_memory_savings",  # reentrant .backward
-    "test_dtensor_basic",  # torch._dynamo.exc.Unsupported: Failed to convert args/kwargs to proxy
-    "test_dtensor_contiguous_dtensor_noncontiguous_local_as_tangent",  # subclass constructor
 }
 
 test_contexts = {
@@ -4149,10 +4136,6 @@ known_failing_tests = {
     "test_checkpointing_without_reentrant_input_requires_grad_False",  # takes very very long
     "test_checkpointing_without_reentrant_input_requires_grad_True",  # takes very very long
     "test_checkpointing_without_reentrant_memory_savings",  # takes very very long
-    "test_dtensor_different_gradient_placement",  # Dynamo failed to run FX node with fake tensors
-    "test_dtensor_noncontiguous_output",  # Dynamo failed to run FX node with fake tensors
-    "test_dtensor_partial_placement_graph_output",  # Dynamo failed to run FX node with fake tensors
-    "test_unwrap_async_collective_tensor_tangent",  # AttributeError: 'PlainTensorMeta' object has no attribute 'attrs'
     # Category: Inductor (pass on backend="aot_eager")
     "test_input_buffer_accum",  # does not support sparse_grad=True: https://github.com/pytorch/pytorch/issues/120267
     "test_graph_save_on_cpu",  # does not support pin_memory: https://github.com/pytorch/pytorch/issues/134173
@@ -4166,6 +4149,14 @@ known_failing_tests = {
     "test_autograd_node_isinstance",  # backward ctx is a fake cls and not directly a Node instance
     "test_backward_hook_relative_ordering",  # compiled autograd collects breadth first, and module backward hook not supported
     "test_checkpointing_without_reentrant_custom_function_works",  # ctx.saved_tensors are cached by CA
+    # Category: Subclasses
+    "test_dtensor_basic",
+    "test_dtensor_contiguous_dtensor_noncontiguous_local_as_tangent",
+    "test_dtensor_different_gradient_placement",
+    "test_dtensor_noncontiguous_output",
+    "test_dtensor_partial_placement_graph_output",
+    "test_tp_compile_comm_reordering",
+    "test_unwrap_async_collective_tensor_tangent",
     # Uncategorized
     "test_not_implemented_grad",  # Dynamo changes the types of exceptions
 }

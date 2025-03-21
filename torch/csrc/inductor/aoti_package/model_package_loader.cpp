@@ -341,20 +341,7 @@ void AOTIModelPackageLoader::load_metadata(const std::string& cpp_filename) {
 AOTIModelPackageLoader::AOTIModelPackageLoader(
     const std::string& model_package_path,
     const std::string& model_name,
-    const bool run_single_threaded,
-    const size_t num_runners) {
-  if (run_single_threaded) {
-    if (num_runners != 1) {
-      throw std::runtime_error(
-          "num_runners must be 1 when run_single_threaded is true");
-    }
-  } else {
-    if (num_runners < 1) {
-      throw std::runtime_error(
-          "num_runners must be >=1 when run_single_threaded is false");
-    }
-  }
-
+    const bool run_single_threaded) {
   // Extract all files within the zipfile to a temporary directory
   mz_zip_archive zip_archive;
   memset(&zip_archive, 0, sizeof(zip_archive));
@@ -468,7 +455,7 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
 
   std::string cubin_dir = temp_dir_ + k_separator + model_directory;
   runner_ = registered_aoti_runner[device](
-      so_path, num_runners, device, cubin_dir, run_single_threaded);
+      so_path, 1, device, cubin_dir, run_single_threaded);
 }
 
 AOTIModelPackageLoader::~AOTIModelPackageLoader() {
@@ -538,12 +525,5 @@ std::vector<std::string> AOTIModelPackageLoader::get_constant_fqns() {
   return constant_fqns;
 }
 
-void AOTIModelPackageLoader::update_constant_buffer(
-    std::unordered_map<std::string, at::Tensor>& tensor_map,
-    bool use_inactive,
-    bool validate_full_updates) {
-  runner_->update_constant_buffer(
-      tensor_map, use_inactive, validate_full_updates);
-}
 } // namespace torch::inductor
 #endif

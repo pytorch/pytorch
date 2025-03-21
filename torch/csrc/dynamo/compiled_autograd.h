@@ -75,12 +75,6 @@ struct TORCH_API PyCompilerInterface {
       size_t hook_input_id) const {
     TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
   }
-  virtual void call_accumulate_grad(
-      PyObject* py_compiler,
-      const at::Tensor& variable,
-      const at::Tensor& grad) const {
-    TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
-  }
 };
 
 TORCH_API const std::unique_ptr<PyCompilerInterface>& getPyCompilerInterface();

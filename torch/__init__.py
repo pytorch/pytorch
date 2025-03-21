@@ -12,7 +12,6 @@ on an NVIDIA GPU with compute capability >= 3.0.
 
 import builtins
 import ctypes
-import functools
 import glob
 import importlib
 import inspect
@@ -2532,14 +2531,9 @@ def compile(
     _C._log_api_usage_once("torch.compile")
     if sys.version_info >= (3, 14):
         raise RuntimeError("torch.compile is not supported on Python 3.14+")
-    elif sysconfig.get_config_var("Py_GIL_DISABLED") == 1 and sys.version_info < (
-        3,
-        13,
-        3,
-    ):
+    elif sysconfig.get_config_var("Py_GIL_DISABLED") == 1:
         raise RuntimeError(
-            "torch.compile is not supported on Python < 3.13.3 built with GIL disabled. "
-            "Please use Python 3.13.3+."
+            "torch.compile is not supported on Python built with GIL disabled"
         )
 
     # Decorator mode
@@ -2696,7 +2690,6 @@ else:
         raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
 
-@functools.cache
 def get_device_module(device: _Optional[_Union[torch.device, str]] = None):
     """
     Returns the module associated with a given device(e.g., torch.device('cuda'), "mtia:0", "xpu", ...).

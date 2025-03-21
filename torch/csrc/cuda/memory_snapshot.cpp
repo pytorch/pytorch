@@ -124,8 +124,7 @@ void _record_memory_history(
     bool record_context,
     int64_t trace_alloc_max_entries,
     bool trace_alloc_record_context,
-    bool record_cpp_context,
-    bool clearHistory) {
+    bool record_cpp_context) {
   c10::cuda::CUDACachingAllocator::CreateContextFn recorder = gather;
   if (enabled && record_cpp_context &&
       (trace_alloc_record_context || record_context)) {
@@ -142,7 +141,7 @@ void _record_memory_history(
   at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
   _initRecordAnnotations();
   c10::cuda::CUDACachingAllocator::recordHistory(
-      enabled, recorder, trace_alloc_max_entries, when, clearHistory);
+      enabled, recorder, trace_alloc_max_entries, when);
 }
 
 static void checkOptionIn(
@@ -157,8 +156,7 @@ void _record_memory_history(
     std::optional<std::string> enabled,
     std::optional<std::string> context,
     const std::string& stacks,
-    size_t max_entries,
-    bool clearHistory) {
+    size_t max_entries) {
   if (enabled) {
     checkOptionIn(
         *enabled,
@@ -194,7 +192,7 @@ void _record_memory_history(
   at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
   _initRecordAnnotations();
   c10::cuda::CUDACachingAllocator::recordHistory(
-      enabled.has_value(), recorder, max_entries, when, clearHistory);
+      enabled.has_value(), recorder, max_entries, when);
 }
 
 std::string _memory_snapshot_pickled() {

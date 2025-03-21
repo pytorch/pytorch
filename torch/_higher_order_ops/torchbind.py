@@ -46,10 +46,9 @@ class CallTorchBind(HigherOrderOperator):
             "call_torchbind(" + str(schema.arguments[0].real_type) + " obj,"
         )
         first_comma_index = schema_str.find(",")
-        if first_comma_index == -1:
-            # If no comma is found, find the last closing parenthesis
-            first_comma_index = schema_str.rfind(") ->")
-        new_schema_str = new_schema_str + " str method" + schema_str[first_comma_index:]
+        new_schema_str = (
+            new_schema_str + " str method," + schema_str[first_comma_index + 1 :]
+        )
         new_schema = torch._C.parse_schema(new_schema_str)
         return new_schema
 

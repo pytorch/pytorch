@@ -523,19 +523,3 @@ AOTITorchError aoti_torch_cpu__mkl_linear(
 #endif // AT_MKL_ENABLED
 
 #endif // AT_MKLDNN_ENABLED()
-
-AOTITorchError aoti_torch_cpu__weight_int4pack_mm_cpu_tensor(
-    AtenTensorHandle X,
-    AtenTensorHandle w,
-    AtenTensorHandle qGroupSize,
-    AtenTensorHandle qScaleAndZeros,
-    AtenTensorHandle* ret0) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    auto tmp_result = at::native::_weight_int4pack_mm_cpu_tensor(
-        *tensor_handle_to_tensor_pointer(X),
-        *tensor_handle_to_tensor_pointer(w),
-        *tensor_handle_to_tensor_pointer(qGroupSize),
-        *tensor_handle_to_tensor_pointer(qScaleAndZeros));
-    *ret0 = new_tensor_handle(std::move(tmp_result));
-  });
-}

@@ -44,18 +44,6 @@ static void bessel_j1_kernel_mps(TensorIteratorBase& iter) {
   lib.exec_unary_kernel(iter, "bessel_j1_forward");
 }
 
-static void modified_bessel_i0_kernel_mps(TensorIteratorBase& iter) {
-  lib.exec_unary_kernel(iter, "modified_bessel_i0_forward");
-}
-
-static void modified_bessel_i1_kernel_mps(TensorIteratorBase& iter) {
-  lib.exec_unary_kernel(iter, "modified_bessel_i1_forward");
-}
-
-static void modified_bessel_k0_kernel_mps(TensorIteratorBase& iter) {
-  lib.exec_unary_kernel(iter, "modified_bessel_k0_forward");
-}
-
 static void bessel_y0_kernel_mps(TensorIteratorBase& iter) {
   lib.exec_unary_kernel(iter, "bessel_y0_forward");
 }
@@ -70,9 +58,6 @@ REGISTER_DISPATCH(special_i1_stub, &i1_kernel_mps)
 REGISTER_DISPATCH(special_i1e_stub, &i1e_kernel_mps)
 REGISTER_DISPATCH(special_bessel_j0_stub, &bessel_j0_kernel_mps)
 REGISTER_DISPATCH(special_bessel_j1_stub, &bessel_j1_kernel_mps)
-REGISTER_DISPATCH(special_modified_bessel_i0_stub, &modified_bessel_i0_kernel_mps)
-REGISTER_DISPATCH(special_modified_bessel_i1_stub, &modified_bessel_i1_kernel_mps)
-REGISTER_DISPATCH(special_modified_bessel_k0_stub, &modified_bessel_k0_kernel_mps)
 REGISTER_DISPATCH(special_bessel_y0_stub, &bessel_y0_kernel_mps)
 REGISTER_DISPATCH(special_bessel_y1_stub, &bessel_y1_kernel_mps)
 REGISTER_DISPATCH(special_spherical_bessel_j0_stub, &spherical_bessel_j0_kernel_mps)
