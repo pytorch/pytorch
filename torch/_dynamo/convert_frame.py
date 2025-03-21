@@ -422,7 +422,7 @@ def cprofile_wrapper(func: Callable[_P, _T]) -> Callable[_P, _T]:
         ps = pstats.Stats(prof)
         try:
             prof.dump_stats(profile_path)
-        except PermissionError:
+        except OSError:
             log.exception("Cannot write to %s", profile_path)
         log.warning("Raw profile at %s", profile_path)
         svg_path = profile_path.with_suffix(".svg")
