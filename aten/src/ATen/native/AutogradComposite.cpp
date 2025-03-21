@@ -2,6 +2,7 @@
 #include <ATen/core/Tensor.h>
 #include <c10/util/SmallBuffer.h>
 #include <c10/core/impl/COW.h>
+#include <c10/core/DispatchKey.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -13,6 +14,7 @@
 #include <ATen/ops/_unpack_dual_native.h>
 #include <ATen/ops/_lazy_clone_native.h>
 #include <ATen/ops/alias.h>
+#include <ATen/ops/empty.h>
 #include <ATen/ops/zeros.h>
 #endif
 
@@ -91,14 +93,25 @@ bool _has_same_storage_numel(const at::Tensor& base, const at::Tensor& other) {
   return base.storage().sym_nbytes() / base.itemsize() == other.storage().sym_nbytes() / other.itemsize();
 }
 
-Tensor _lazy_clone(Tensor const& self) {
+Tensor _lazy_clone(Tensor const& self, optional<c10::Device> device_opt) {
+  optional<c10::Allocator*> allocator_opt = nullopt;
+  if (device_opt.has_value()) {
+    allocator_opt = at::empty({}, at::TensorOptions().device(device_opt.value())).storage().allocator();
+  }
   c10::StorageImpl* self_storage = self.storage().unsafeGetStorageImpl();
   c10::intrusive_ptr<c10::StorageImpl> storage =
-    c10::impl::cow::lazy_clone_storage(*self_storage);
+    c10::impl::cow::lazy_clone_storage(*self_storage, device_opt, allocator_opt);
   TORCH_CHECK(storage != nullptr);
+  c10::DispatchKeySet key_set = self.key_set();
+  // If the target device differs, then we must change the key set
+  if (device_opt.has_value() && device_opt.value().type() != self.device().type()) {
+    c10::BackendComponent old_backend = c10::toBackendComponent(self.device().type());
+    c10::BackendComponent new_backend = c10::toBackendComponent(device_opt.value().type());
+    key_set = key_set.remove_backend(old_backend) | c10::DispatchKeySet(new_backend);
+  }
   auto tensor = c10::make_intrusive<c10::TensorImpl>(
       c10::Storage(std::move(storage)),
-      self.key_set(),
+      key_set,
       self.dtype());
   tensor->set_sizes_and_strides(self.sym_sizes(),
                                 self.sym_strides(),
