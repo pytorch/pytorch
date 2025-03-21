@@ -2,27 +2,43 @@
 
 set -ex
 
-install_ubuntu() {
-  echo "Preparing to build sccache from source"
+SCCACHE_VERSION="0.9.1"
+
+CARGO_FLAGS=""
+
+install_prereqs_ubuntu() {
   apt-get update
   # libssl-dev will not work as it is upgraded to libssl3 in Ubuntu-22.04.
   # Instead use lib and headers from OpenSSL1.1 installed in `install_openssl.sh``
   apt-get install -y cargo
-  echo "Checking out sccache repo"
-  git clone https://github.com/mozilla/sccache -b v0.9.1
-  cd sccache
-  echo "Building sccache"
-  cargo build --release
-  cp target/release/sccache /opt/cache/bin
-  echo "Cleaning up"
-  cd ..
-  rm -rf sccache
-  apt-get remove -y cargo rustc
-  apt-get autoclean && apt-get clean
+
+  # cleanup after ourselves
+  trap 'cleanup_ubuntu' EXIT
 
   echo "Downloading old sccache binary from S3 repo for PCH builds"
   curl --retry 3 https://s3.amazonaws.com/ossci-linux/sccache -o /opt/cache/bin/sccache-0.2.14a
   chmod 755 /opt/cache/bin/sccache-0.2.14a
+}
+
+cleanup_ubuntu() {
+  rm -rf sccache
+  apt-get remove -y cargo rustc
+  apt-get autoclean && apt-get clean
+}
+
+install_prereqs_almalinux() {
+  dnf install -y cargo
+  # use vendored openssl, we're not going to use the dist-server anyways
+  CARGO_FEATURES="--bin sccache --features openssl/vendored"
+}
+
+build_and_install_sccache() {
+  # modern version of git don't like openssl1.1
+  wget -q -O sccache.tar.gz "https://github.com/mozilla/sccache/archive/refs/tags/v${SCCACHE_VERSION}.tar.gz"
+  tar xzf sccache.tar.gz
+  pushd "sccache-${SCCACHE_VERSION}"
+  cargo build --release ${CARGO_FEATURES}
+  cp target/release/sccache /opt/cache/bin
 }
 
 install_binary() {
@@ -35,8 +51,21 @@ mkdir -p /opt/cache/lib
 sed -e 's|PATH="\(.*\)"|PATH="/opt/cache/bin:\1"|g' -i /etc/environment
 export PATH="/opt/cache/bin:$PATH"
 
-# Setup compiler cache
-install_ubuntu
+echo "Preparing to build sccache from source"
+DIST_ID=$(. /etc/os-release && echo "$ID")
+case ${DIST_ID} in
+  ubuntu)
+    install_prereqs_ubuntu
+    ;;
+  almalinux)
+    install_prereqs_almalinux
+    ;;
+  *)
+    echo "ERROR: Unknown distribution ${DIST_ID}"
+    exit 1
+    ;;
+esac
+build_and_install_sccache
 chmod a+x /opt/cache/bin/sccache
 
 function write_sccache_stub() {

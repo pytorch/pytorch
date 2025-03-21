@@ -206,6 +206,9 @@ public:
     Vectorized vector;
     int_same_size_t<T> buffer[size()];
     mask.store(buffer);
+#if defined(__clang__) && __ARM_FEATURE_SVE
+    #pragma clang loop vectorize(disable)
+#endif
     for (const auto i : c10::irange(size())) {
       if (buffer[i] & 0x01)
        {
@@ -1065,7 +1068,7 @@ inline Vectorized<IntType> convert_to_int_of_same_size(const Vectorized<T>& src)
   static_assert(sizeof(T) == sizeof(IntType));
   static constexpr int size = Vectorized<T>::size();
 
-  std::array<T, size> src_arr;
+  std::array<T, size> src_arr = {};
   src.store(static_cast<void*>(src_arr.data()));
   std::array<IntType, size> buffer;
   std::transform(src_arr.cbegin(), src_arr.cend(), buffer.begin(),

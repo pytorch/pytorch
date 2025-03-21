@@ -128,9 +128,9 @@ class DefaultSavePlanner(SavePlanner):
     def _create_global_plan(
         self, all_plans: list[SavePlan]
     ) -> tuple[list[SavePlan], Metadata]:
-        all_plans = dedup_save_plans(all_plans, self.dedup_save_to_lowest_rank)
+        deduped_plans = dedup_save_plans(all_plans, self.dedup_save_to_lowest_rank)
 
-        global_plan, metadata = create_default_global_save_plan(all_plans)
+        global_plan, metadata = create_default_global_save_plan(deduped_plans)
 
         if self.flatten_state_dict:
             # | does not work for Python 3.8 or older version.
@@ -156,6 +156,7 @@ class DefaultSavePlanner(SavePlanner):
         global_plan_delta: list[SavePlan] = []
 
         if self._cached_plans_key not in SavePlanner._cached_all_plans:
+            # Cache the all_plans
             SavePlanner._cached_all_plans[self._cached_plans_key] = all_plans
             global_plan, metadata = self._create_global_plan(all_plans)
             SavePlanner._cached_global_plan[self._cached_plans_key] = global_plan
@@ -167,6 +168,9 @@ class DefaultSavePlanner(SavePlanner):
         merged_plans = _merge_delta_local_plans(
             SavePlanner._cached_all_plans[self._cached_plans_key], all_plans
         )
+        # Cache the merged_plans
+        SavePlanner._cached_all_plans[self._cached_plans_key] = merged_plans
+
         global_plan, metadata = self._create_global_plan(merged_plans)
 
         if self._cached_plans_key in self._cached_global_plan:
