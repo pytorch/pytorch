@@ -217,6 +217,10 @@ templates_path = [
 
 html_domain_indices = False
 
+from sphinx.application import Sphinx
+def setup(app: Sphinx):
+    app.add_config_value('language_bindings_links', [], 'html')
+
 coverage_ignore_functions = [
     # torch
     "typename",
