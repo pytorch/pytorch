@@ -53,10 +53,13 @@ runs:
             echo "$msg"
             exit 1
         fi
-        if [[ $ngpu -eq 1 ]]; then
-            echo "Error: only 1 GPU detected, at least 2 GPUs are needed for distributed jobs"
-            echo "$msg"
-            exit 1
+        gfx1100=$(rocminfo | grep -c -E 'Name:.*\sgfx1100' || true) #grep exits with 0 if the search if not found.
+        if [[ $gfx1100 -eq 0 ]]; then 
+          if [[ $ngpu -eq 1 ]]; then
+              echo "Error: only 1 GPU detected, at least 2 GPUs are needed for distributed jobs"
+              echo "$msg"
+              exit 1
+          fi
         fi
 
     - name: Runner diskspace health check

@@ -103,7 +103,7 @@ except ImportError:
 
 
 MI300_ARCH = ("gfx942",)
-
+NAVI_ARCH = ("gfx1030", "gfx1100", "gfx1101", "gfx1200", "gfx1201")
 
 def freeze_rng_state(*args, **kwargs):
     return torch.testing._utils.freeze_rng_state(*args, **kwargs)
@@ -1878,15 +1878,20 @@ def skipIfRocm(func=None, *, msg="test doesn't currently work on the ROCm stack"
         return dec_fn(func)
     return dec_fn
 
+def getGpuArchName(device_index: int = 0):
+    return torch.cuda.get_device_properties(device_index).gcnArchName
+
+def isGpuArchAnyOf(arch: tuple[str, ...]):
+    gcnArch = getGpuArchName()
+    return any(x in gcnArch for x in arch)
+
 def skipIfRocmArch(arch: tuple[str, ...]):
     def dec_fn(fn):
         @wraps(fn)
         def wrap_fn(self, *args, **kwargs):
-            if TEST_WITH_ROCM:
-                prop = torch.cuda.get_device_properties(0)
-                if prop.gcnArchName.split(":")[0] in arch:
-                    reason = f"skipIfRocm: test skipped on {arch}"
-                    raise unittest.SkipTest(reason)
+            if TEST_WITH_ROCM and isGpuArchAnyOf(arch):
+                reason = f"skipIfRocm: test skipped on {arch}"
+                raise unittest.SkipTest(reason)
             return fn(self, *args, **kwargs)
         return wrap_fn
     return dec_fn
@@ -1904,11 +1909,9 @@ def runOnRocmArch(arch: tuple[str, ...]):
     def dec_fn(fn):
         @wraps(fn)
         def wrap_fn(self, *args, **kwargs):
-            if TEST_WITH_ROCM:
-                prop = torch.cuda.get_device_properties(0)
-                if prop.gcnArchName.split(":")[0] not in arch:
-                    reason = f"skipIfRocm: test only runs on {arch}"
-                    raise unittest.SkipTest(reason)
+            if TEST_WITH_ROCM and not isGpuArchAnyOf(arch):
+                reason = f"skipIfRocm: test only runs on {arch}"
+                raise unittest.SkipTest(reason)
             return fn(self, *args, **kwargs)
         return wrap_fn
     return dec_fn

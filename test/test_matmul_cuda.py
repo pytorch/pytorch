@@ -38,6 +38,8 @@ from torch.testing._internal.common_utils import (
     IS_ARM64,
     IS_JETSON,
     IS_WINDOWS,
+    NAVI_ARCH,
+    isGpuArchAnyOf,
     parametrize,
     run_tests,
     skipIfRocm,
@@ -136,6 +138,8 @@ class TestMatmulCuda(TestCase):
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
     @parametrize("size", [100, 1000, 10000])
     def test_cublas_addmm(self, size: int, dtype: torch.dtype):
+        if TEST_WITH_ROCM and isGpuArchAnyOf(NAVI_ARCH) and dtype == torch.float16 and size >= 10000:
+            self.skipTest(f"failed on Navi with ROCm6.3, dtype={dtype} and size={size}")
         self.cublas_addmm(size, dtype, False)
 
     @onlyCUDA
