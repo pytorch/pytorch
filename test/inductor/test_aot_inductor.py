@@ -56,7 +56,6 @@ from torch.utils._triton import has_triton_tma
 
 if HAS_GPU:
     import triton  # @manual
-    from triton import language as tl
 
     from torch.testing._internal.triton_utils import (
         add_kernel,
@@ -70,6 +69,7 @@ if HAS_GPU:
         add_kernel_with_tma_2d,
         mul2_inplace_kernel,
     )
+    from triton import language as tl
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
@@ -1822,7 +1822,9 @@ class AOTInductorTestsTemplate:
         with config.patch(
             {"freezing": True, "aot_inductor.force_mmap_weights": True}
         ), torch.no_grad():
-            exported_model = export_for_training(model, example_inputs).module()
+            exported_model = export_for_training(
+                model, example_inputs, strict=True
+            ).module()
             quantizer = X86InductorQuantizer()
             quantizer.set_global(
                 xiq.get_default_x86_inductor_quantization_config(reduce_range=True)

@@ -122,12 +122,12 @@ def _insert_stage_symbolic_backward(
             # In the forward pass, only emit placeholder, module calls, and
             # getitem calls. If we have a target other than getitem in this
             # (forward-only) code, there is a bug.
-            assert node.target == operator.getitem, (
-                "Found non-getitem call in forward pass. Please report a bug to PiPPy"
-            )
-            assert len(node.args) == 2, (
-                "Found malformed getitem call. Please report a bug to PiPPy"
-            )
+            assert (
+                node.target == operator.getitem
+            ), "Found non-getitem call in forward pass. Please report a bug to PiPPy"
+            assert (
+                len(node.args) == 2
+            ), "Found malformed getitem call. Please report a bug to PiPPy"
             indexed_value, node_idx = tuple(node.args)
 
             # indexed_value is a collection that we are indexing into. It could
@@ -817,9 +817,9 @@ class Pipe(torch.nn.Module):
 
             # Get submodule
             callee = root.get_submodule(callee_name)
-            assert not hasattr(callee, param_fqn), (
-                f"Module {callee_name} already has a parameter named {param_fqn}"
-            )
+            assert not hasattr(
+                callee, param_fqn
+            ), f"Module {callee_name} already has a parameter named {param_fqn}"
 
             # Assign the parameter to the submodule
             if is_buffer:
@@ -1003,9 +1003,7 @@ class Pipe(torch.nn.Module):
         logger.info("Tracing model ...")
         try:
             ep = torch.export.export_for_training(
-                mod,
-                example_args,
-                example_kwargs,
+                mod, example_args, example_kwargs, strict=True
             )
         except Exception as e:
             raise RuntimeError(
