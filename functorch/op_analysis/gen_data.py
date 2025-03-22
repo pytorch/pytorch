@@ -1,8 +1,7 @@
 import csv
 from collections import defaultdict
-
+from pathlib import Path
 import yaml
-
 import torch
 
 
@@ -25,15 +24,14 @@ def gen_data(special_op_lists, analysis_name):
     composite_ops = get_ops_for_key("CompositeImplicitAutograd")
     noncomposite_ops = all_ops - composite_ops
 
-    ops = yaml.load(
-        open("../../aten/src/ATen/native/native_functions.yaml").read(),
-        Loader=yaml.CLoader,
-    )
+    # Consider using pathlib here for file I/O as well
+    ops_path = Path("../../aten/src/ATen/native/native_functions.yaml")
+    with ops_path.open("r") as f:
+        ops = yaml.load(f.read(), Loader=yaml.CLoader)
 
-    annotated_ops = {
-        a.strip(): b.strip() for a, b in list(csv.reader(open("annotated_ops")))
-    }
-    from collections import defaultdict
+    annotated_ops_path = Path("annotated_ops")
+    with annotated_ops_path.open("r") as csv_file:
+        annotated_ops = {a.strip(): b.strip() for a, b in csv.reader(csv_file)}
 
     uniq_ops = []
     uniq_names = set()
@@ -44,13 +42,13 @@ def gen_data(special_op_lists, analysis_name):
         name = func_str[: func_str.index("(")]
         if "." in name:
             uniq_name = name[: name.index(".")]
-            overload_types[name[name.index(".") + 1 :]].append(name)
+            overload_types[name[name.index(".") + 1:]].append(name)
         else:
             uniq_name = name
         op["name"] = uniq_name
         full_name = func_str[: func_str.index("(")]
         op["full_name"] = full_name
-        ret_type = func_str[func_str.index("->") + 3 :]
+        ret_type = func_str[func_str.index("->") + 3:]
         op["ret_type"] = ret_type
         cnt += 1
         if uniq_name in uniq_names:
@@ -113,14 +111,17 @@ def gen_data(special_op_lists, analysis_name):
         return categorization
 
     annotate_ops(ops, is_unique=False)
-    with open(f"{analysis_name}", "w") as f:
+
+    analysis_path = Path(analysis_name)
+    with analysis_path.open("w", newline="") as f:
+        writer = csv.writer(f)
         for op in ops:
             info = [
                 op["full_name"],
                 op["meta"],
                 op["full_name"] not in noncomposite_ops,
             ] + [check(op) for check in special_op_lists]
-            f.write(",".join([str(i) for i in info]) + "\n")
+            writer.writerow(info)
 
 
 def name_check(lst):
@@ -131,10 +132,6 @@ def full_name_check(lst):
     return lambda x: x["full_name"] in lst
 
 
-# Generates batching rule data
-gen_data([full_name_check(get_ops_for_key("FuncTorchBatched"))], "vmap.txt")
-
-
 def remove_suffix(input_string, suffix):
     if suffix and input_string.endswith(suffix):
         return input_string[: -len(suffix)]
@@ -143,11 +140,15 @@ def remove_suffix(input_string, suffix):
 
 def remove_prefix(input_string, prefix):
     if prefix and input_string.startswith(prefix):
-        return input_string[len(prefix) :]
+        return input_string[len(prefix):]
     return input_string
 
 
-if True:
+def main():
+    # Generates batching rule data
+    gen_data([full_name_check(get_ops_for_key("FuncTorchBatched"))], "vmap.txt")
+
+    # Process opinfo files and generate decompositions data
     with open("run_ops.txt") as f:
         opinfo_ops = [remove_suffix(i.strip(), ".default") for i in f]
     with open("count_ops.txt") as f:
@@ -181,3 +182,7 @@ if True:
         ],
         "decompositions.txt",
     )
+
+
+if __name__ == "__main__":
+    main()
