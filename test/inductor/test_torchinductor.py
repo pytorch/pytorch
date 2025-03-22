@@ -8096,6 +8096,31 @@ class CommonTemplate:
         b = torch.empty(0)
         self.common(fn, [a, b])
 
+    def test_slice_scatter_types_promotion(self):
+        torch.manual_seed(0)
+
+        def fn(x, y):
+            return torch.slice_scatter(y, x, 0)
+
+        compiled = torch.compile(fn)
+        for dtype in (torch.uint8, torch.uint16, torch.uint32, torch.uint64):
+            x = torch.randn([5]).to(dtype)
+            y = torch.randn([5])
+            out_inductor = compiled(x, y)
+            out_eager = fn(x, y)
+            self.assertTrue(torch.allclose(out_inductor, out_eager))
+            expected_dtype = torch.promote_types(x.dtype, y.dtype)
+            self.assertEqual(
+                out_inductor.dtype,
+                expected_dtype,
+                f"Expected dtype {expected_dtype}, but got {out_inductor.dtype}",
+            )
+            self.assertEqual(
+                out_eager.dtype,
+                expected_dtype,
+                f"Expected dtype {expected_dtype}, but got {out_eager.dtype}",
+            )
+
     @with_tf32_off
     def test_slice_scatter_reinplace(self):
         class M(nn.Module):
