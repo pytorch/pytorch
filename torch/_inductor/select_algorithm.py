@@ -14,6 +14,7 @@ import re
 import sys
 import textwrap
 import time
+from collections.abc import Sequence
 from concurrent.futures import as_completed, ThreadPoolExecutor
 from io import StringIO
 from types import ModuleType
@@ -1054,72 +1055,68 @@ def _jinja2_env():
 class GeneratedModulesCacheEntry(NamedTuple):
     mod: ModuleType
     extra: str
-    normalized_kernel_args_input_buffers_keys: list[int]
-    normalized_prologue_supported_inputs: list[int]
+    normalized_kernel_args_input_buffers_keys: Sequence[int]
+    normalized_prologue_supported_inputs: Sequence[int]
     args_sizevars_keys: tuple[sympy.Expr, ...]
     code: str
 
 
-class GeneratedModulesCache(dict[str, GeneratedModulesCacheEntry]):
+class GeneratedModulesCache:
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+        self._cache: dict[str, GeneratedModulesCacheEntry] = {}
 
     def cache_clear(self) -> None:
-        super().clear()
+        self._cache.clear()
 
     # We omit input nodes names from the cache, to make the cache insensitive to the input nodes names.
-    # note that the generated code is indepenent on input names, except for some meta data, namely;
+    # Note that the generated code is independent on input names, except for some meta data, namely;
     # kernel.prologue_supported_inputs and kernel.args.input_buffers.
 
     # To address that, we do normalization using input_name_to_index and index_to_input_name:
     # Each input name is mapped to its index in the inputs list, for example for inputs
-    # (x, y, x) we generate {x->0, y->1, x->2}. We also generate the inverse mapping {2->x, 1->y}.
+    # (x, y, x) we generate {x->x, y->1} we also generate the inverse mapping {0->x, 1->y, 2->x}.
 
-    # After running the codegen, for the outputs kernel.args.input_buffers.keys() and
-    # if we do cache the result we cache the indices of the inputs instrea.
-    # for example if kernel.args.input_buffers.keys() was (x, y, x) we would cache (2, 1, 2).
-    # see get_entry and put_entry for details.
-
+    # After running the codegen, if we do cache the results, we cache the indices of the inputs instead.
+    # For example if kernel.args.input_buffers.keys() was (x, y, x) we would cache (2, 1, 2).
     # if this is called again and we get a cache hit with another inputs (m, h, m) then we can
     # use that indexing to regenerate the kernel.args.input_buffers.keys() it would be (m, h, m).
+    # see get_entry and put_entry for details.
 
     # TODO Normalize symbols in input_nodes so that inputs
     # [s0, s2] * [s2, s3] and [s4, s5] * [s6, s7] would cache hit.
     def make_key(
         self,
-        input_nodes,
-        num_stages,
-        num_warps,
-        call_sizes,
-        prefix_args,
-        suffix_args,
-        epilogue_fn,
-        subgraphs,
-        workspace_arg,
-        layout,
-        kwargs,
+        input_nodes: tuple[ir.StorageBox],
+        num_stages: int,
+        num_warps: int,
+        call_sizes: Optional[list[sympy.core.symbol.Symbol]],
+        prefix_args: int,
+        suffix_args: int,
+        epilogue_fn: Optional[Callable[..., Any]],  # has to be identity to cache
+        subgraphs: Optional[list[ir.Buffer]],  # has to be none to cache
+        workspace_arg: Optional[WorkspaceArg],  # has to be none to cache
+        layout: ir.Layout,
+        kwargs: dict[str, Any],
     ) -> Optional[str]:
-        def input_key(input):
-            return (
-                input.get_size(),
-                input.get_stride(),
-                input.get_dtype(),
-                input.get_device().type,
-            )
-
-        if (
-            epilogue_fn == identity
-            and subgraphs is None
-            and call_sizes == layout.size
-            and workspace_arg is None
-        ):
+        if epilogue_fn == identity and subgraphs is None and workspace_arg is None:
             cache_key = repr(
                 {
-                    "input_nodes": [input_key(name) for name in input_nodes],
+                    "input_nodes": [
+                        [
+                            input.get_size(),
+                            input.get_stride(),
+                            input.get_dtype(),
+                            input.get_device(),
+                        ]
+                        for input in input_nodes
+                    ],
                     "num_stages": num_stages,
                     "num_warps": num_warps,
                     "prefix_args": prefix_args,
                     "suffix_args": suffix_args,
+                    "call_sizes": call_sizes
+                    if call_sizes == layout.size
+                    else "layout.size",
                     "layout": layout,
                     "kwargs": kwargs,
                 }
@@ -1127,11 +1124,22 @@ class GeneratedModulesCache(dict[str, GeneratedModulesCacheEntry]):
             return cache_key
         return None
 
-    def get_entry(self, cache_key, input_nodes):
+    def get_entry(
+        self, cache_key: Optional[str], input_nodes: tuple[ir.StorageBox]
+    ) -> Optional[
+        tuple[
+            ModuleType,
+            str,
+            tuple[str, ...],
+            OrderedSet[str],
+            tuple[sympy.core.symbol.Symbol, ...],
+            str,
+        ]
+    ]:
         if cache_key is None:
-            return
+            return None
 
-        entry = super().get(cache_key, None)
+        entry = self._cache.get(cache_key, None)
         if entry is None:
             return None
 
@@ -1179,7 +1187,7 @@ class GeneratedModulesCache(dict[str, GeneratedModulesCacheEntry]):
             code,
         )
 
-        super().update({cache_key: entry})
+        self._cache.update({cache_key: entry})
 
 
 class TritonTemplate(KernelTemplate):
@@ -1204,18 +1212,20 @@ class TritonTemplate(KernelTemplate):
 
     def generate_and_load(
         self,
-        input_nodes,
-        num_stages,
-        num_warps,
-        call_sizes,
-        prefix_args,
-        suffix_args,
-        epilogue_fn,
+        input_nodes: tuple[ir.StorageBox],
+        num_stages: int,
+        num_warps: int,
+        call_sizes: Optional[list[sympy.core.symbol.Symbol]],
+        prefix_args: int,
+        suffix_args: int,
+        epilogue_fn: Optional[Callable[..., Any]],
         subgraphs,
-        workspace_arg,
-        layout,
-        kwargs,
-    ):
+        workspace_arg: Optional[WorkspaceArg],
+        layout: ir.Layout,
+        kwargs: dict[str, Any],
+    ) -> Optional[
+        tuple[ModuleType, str, tuple[str, ...], OrderedSet[str], Any, dict[str, Any]]
+    ]:
         """Generate the python code and load it into the current process"""
         cache_key = self._generated_module_cache.make_key(
             input_nodes,
@@ -1369,14 +1379,7 @@ class TritonTemplate(KernelTemplate):
         if call_sizes is None:
             call_sizes = layout.size
 
-        (
-            mod,
-            extra,
-            input_call_args,
-            prologue_supported_inputs,
-            args_sizevars_keys,
-            kernel_options,
-        ) = self.generate_and_load(
+        result = self.generate_and_load(
             input_nodes,
             num_stages,
             num_warps,
@@ -1389,6 +1392,17 @@ class TritonTemplate(KernelTemplate):
             layout,
             kwargs,
         )
+
+        if result is None:
+            return None
+        (
+            mod,
+            extra,
+            input_call_args,
+            prologue_supported_inputs,
+            args_sizevars_keys,
+            kernel_options,
+        ) = result
 
         expected_input_args = tuple(unique(x.get_name() for x in input_nodes))
         # We expect the input_buffer order to be [*input_nodes, *captured_buffers]
