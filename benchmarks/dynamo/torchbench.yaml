@@ -53,6 +53,7 @@ tolerance:
     - doctr_reco_predictor
     - drq
     - hf_Whisper
+    - timm_efficientnet
 
   freezing:
     # Similar logic to timm_models.py:get_tolerance_and_cosine_flag
