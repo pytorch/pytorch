@@ -265,6 +265,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     )
     @dtypes(torch.float, torch.bfloat16, torch.half)
     @torch.fx.experimental._config.patch(use_duck_shape=False)
+    @torch._dynamo.config.patch(specialize_float=True)
     def test_linear_with_pointwise(
         self, batch_size, in_features, out_features, bias, epilogue, dtype
     ):
