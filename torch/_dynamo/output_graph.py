@@ -1768,6 +1768,14 @@ class OutputGraph:
                 self.remove_node(node)
 
     def normalize_intermediate_node_names(self) -> None:
+        # At a high level this pass ensures that name indexes are monotonically
+        # increasing. There are some inconsistencies in how names are done
+        # across different fx passes, operators, etc. For example, sometimes the node name
+        # will be named some_op and other times it will be some_op_0. It's non trivial to
+        # audit all callsites so for now we allow both to exist but maintain the invariant
+        # that subsequent `some_op` names must have a motonically increasing index.
+        # eg. some_op_2, some_op_1 will be normalized to some_op_2, some_op_3`
+
         base_name_counter: dict[str, int] = collections.defaultdict(int)
 
         for node in self.graph.nodes:
