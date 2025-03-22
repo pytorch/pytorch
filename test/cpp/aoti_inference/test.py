@@ -7,10 +7,10 @@ torch.manual_seed(1337)
 
 
 class Net(torch.nn.Module):
-    def __init__(self, device):
+    def __init__(self, device, size=4):
         super().__init__()
-        self.w_pre = torch.randn(4, 4, device=device)
-        self.w_add = torch.randn(4, 4, device=device)
+        self.w_pre = torch.randn(size, size, device=device)
+        self.w_add = torch.randn(size, size, device=device)
 
     def forward(self, x):
         w_transpose = torch.transpose(self.w_pre, 0, 1)
@@ -30,6 +30,7 @@ class NetWithTensorConstants(torch.nn.Module):
 
 
 data = {}
+large_data = {}
 data_with_tensor_constants = {}
 
 
@@ -84,6 +85,39 @@ def generate_basic_tests():
             )
 
 
+def generate_large_tests():
+    device = "cuda"
+    model = Net(device, size=4096).to(device=device)
+    x = torch.randn((4096, 4096), device=device)
+    with torch.no_grad():
+        ref_output = model(x)
+
+    torch._dynamo.reset()
+    with torch.no_grad():
+        model_so_path = aot_compile(
+            model,
+            (x,),
+        )
+        # Also store a .pt2 file using the aoti_compile_and_package API
+        pt2_package_path = torch._inductor.aoti_compile_and_package(
+            torch.export.export(
+                model,
+                (x,),
+            ),
+        )
+
+    large_data.update(
+        {  # noqa: F541
+            "model_so_path": model_so_path,
+            "pt2_package_path": pt2_package_path,
+            "inputs": [x],
+            "outputs": [ref_output],
+            "w_pre": model.w_pre,
+            "w_add": model.w_add,
+        }
+    )
+
+
 # AOTI model which will create additional tensors during autograd.
 def generate_test_with_additional_tensors():
     if not torch.cuda.is_available():
@@ -115,6 +149,7 @@ def generate_test_with_additional_tensors():
 
 
 generate_basic_tests()
+generate_large_tests()
 generate_test_with_additional_tensors()
 
 
@@ -127,6 +162,7 @@ class Serializer(torch.nn.Module):
 
 
 torch.jit.script(Serializer(data)).save("data.pt")
+torch.jit.script(Serializer(large_data)).save("large_data.pt")
 torch.jit.script(Serializer(data_with_tensor_constants)).save(
     "data_with_tensor_constants.pt"
 )
