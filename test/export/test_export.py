@@ -358,6 +358,19 @@ class TestDynamismExpression(TestCase):
         # Being able to export means shape is preserved as static
         export(branch_on_shape, inp)
 
+    def test_contiguous_unbacked_strides(self):
+        class Foo(torch.nn.Module):
+            def forward(self, xs):
+                u0, u1, u2 = xs.tolist()
+                return torch.empty(u0, u1, u2).contiguous()
+
+        ep = export(Foo(), (torch.tensor([2, 3, 4]),))
+        node = [node for node in ep.graph.nodes][-2]
+        val = node.meta["val"]
+        u0, u1, u2 = val.shape
+        self.assertEqual(val.stride(0), u1*u2)
+        self.assertEqual(val.stride(1), u2)
+    
     def test_export_strict_narrow_unbacked_expr(self):
         # Tests that we are able to handle 0/1 specialization on sizes represented
         # by unbacked int expressions by transforming them into an unbacked int.
