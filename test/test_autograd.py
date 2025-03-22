@@ -553,17 +553,17 @@ class TestAutograd(TestCase):
             def forward(ctx, x):
                 ctx.save_for_backward(x)
                 return x.clone()
-                
+
             @staticmethod
             def backward(ctx, grad_output):
                 raise NotImplementedError("the derivative for CustomFunctionWithoutGrad is not implemented")
-        
+
         # Use our custom function
         x = torch.rand(5, 2, requires_grad=True)
         y = CustomFunctionWithoutGrad.apply(x).sum()
-        
+
         print(f"Backward function: {y.grad_fn}")
-        
+
         with self.assertRaisesRegex(
             NotImplementedError, "the derivative for .* is not implemented"
         ):
