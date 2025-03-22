@@ -1727,11 +1727,6 @@ def check_max_block(cfg: dict[str, int]):
 
 
 def _num_warps(num_warps, max_num_warps=8, min_num_warps=2, register_intensive=False):
-    # On AMD GPU each warp has 64 lanes which is double the size on NV GPU,
-    # therefore using half the number of warps here correspondingly.
-    if torch.version.hip:
-        max_num_warps = (max_num_warps + 1) // 2
-        min_num_warps = (min_num_warps + 1) // 2
     # persistent reduction is register intensive
     if register_intensive:
         max_num_warps = max_num_warps // 2
@@ -1829,7 +1824,7 @@ def triton_config(
     # given that this is a rare situation, don't expect this to affect perf
     # in general
     # see https://github.com/pytorch/pytorch/pull/97950
-    if conditional_product(x, y, z) >= 128 and not torch.version.hip:
+    if conditional_product(x, y, z) >= 128:
         num_warps = max(num_warps, 4)
     xnumel = size_hints["x"]
     ynumel = size_hints.get("y")
@@ -1850,6 +1845,9 @@ def triton_config(
         cfg["YBLOCK"] = y
     if z:
         cfg["ZBLOCK"] = z
+
+    cfg["waves_per_eu"] = int(8 // num_warps)
+
     check_max_block(cfg)
     check_config(cfg, xnumel=xnumel, ynumel=ynumel, znumel=znumel)
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
@@ -1940,6 +1938,8 @@ def triton_config_reduction(
                 break
             rnumels[prefix] //= 2
 
+    cfg["waves_per_eu"] = int(8 // num_warps)
+
     cfg = _get_config({"x": x, **rnumels})
     check_max_block(cfg)
     check_config(cfg, xnumel=size_hints["x"])
@@ -1985,6 +1985,8 @@ def triton_config_tiled_reduction(size_hints, x, y, r, num_stages=1):
 
     cfg = _get_config({"x": x, "y": y, **rnumels})
     num_warps = _num_warps(total_numel() // 256, min_num_warps=1)
+    
+    cfg["waves_per_eu"] = int(8 // num_warps)
     check_config(cfg, xnumel=size_hints[0], ynumel=size_hints[1])
     check_max_block(cfg)
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
