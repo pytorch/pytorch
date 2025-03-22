@@ -511,7 +511,7 @@ def compute_elementwise_output_logical_to_physical_perm(
                 return False
             if _guard_semantics(b == 0):
                 return True
-            return a % b == 0
+            return _guard_semantics(a % b == 0)
 
         for tensor in tensors:
             stride_a = tensor.stride()[idx_a]
