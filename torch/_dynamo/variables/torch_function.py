@@ -530,9 +530,7 @@ def build_torch_function_fn(tx: "InstructionTranslator", cls_or_obj, source):
 
     func_source = None
     if source:
-        func_source = AttrSource(
-            AttrSource(source, "__torch_function__"), "__func__"
-        )
+        func_source = AttrSource(AttrSource(source, "__torch_function__"), "__func__")
     return VariableTracker.build(tx, func, func_source)
 
 

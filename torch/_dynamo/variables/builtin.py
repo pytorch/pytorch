@@ -1977,11 +1977,16 @@ class BuiltinVariable(VariableTracker):
                     # This handles options prop, guards and ends with a clone
                     # Step 4 - replace all reference to the current object with the new one
                     return out
-
-                # Attribute like `torch.Tensor.real` has special setters we
-                # don't yet support; it's not as simple adding an entry to the
-                # side effect mapping.
+                elif name in ("_grad", "grad"):
+                    # _grad and grad share the same setter/getter, see
+                    # THPVariable_properties, and here we make sure setting one
+                    # enables reading `val` from the other.
+                    tx.output.side_effects.store_attr(obj, "grad", val)
+                    tx.output.side_effects.store_attr(obj, "_grad", val)
                 elif is_tensor_getset_descriptor(name):
+                    # Attribute like `torch.Tensor.real` has special setters we
+                    # don't yet support; it's not as simple adding an entry to
+                    # the side effect mapping.
                     unimplemented_v2(
                         gb_type="Failed to set tensor attribute",
                         context=f"setattr({obj}, {name}, {val})",
@@ -1993,14 +1998,7 @@ class BuiltinVariable(VariableTracker):
                     )
 
             tx.output.side_effects.store_attr(obj, name, val)
-            if name == "_grad":
-                tx.output.side_effects.store_attr(obj, "grad", val)
-
             return val
-        elif isinstance(obj, variables.UserDefinedObjectVariable):
-            unimplemented(
-                f"setattr(UserDefinedObjectVariable) {type(obj.value).__setattr__}"
-            )
         elif isinstance(obj, variables.NNModuleVariable):
             if not tx.output.is_root_tracer():
                 raise AttributeMutationError(
