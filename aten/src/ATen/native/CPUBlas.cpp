@@ -344,7 +344,6 @@ void gemm(
    if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
       int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
       char transa_ = to_blas(transa), transb_ = to_blas(transb);
-      float alpha_ = alpha, beta_ = beta;
       int c_size = n_ * ldc_;
       // C matrix in OpenBLAS sbgemm are of type "float" so we have to convert, copy and copy back.
       std::vector<float> float_v(c, c + c_size);
@@ -423,6 +422,14 @@ void gemm(
       return;
    }
 #endif
+#if defined(__aarch64__) && AT_MKLDNN_ENABLED()
+// TODO: aditew01
+// add support for non-aarch64 CPU's
+// add heuristic based on shape to dispatch to sbgemm_ vs MKLDNN
+   if (mkldnn_bf16f32_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
+     return;
+   }
+#endif
 #ifdef MKL_HAS_SBGEMM
   if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
     int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
@@ -430,6 +437,7 @@ void gemm(
     return;
   }
 #endif
+
   // for the fallback path, first compute gemm with beta = 0,
   // and then add c in full precision.
   int64_t c_size = n * m;
