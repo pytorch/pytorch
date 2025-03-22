@@ -4172,19 +4172,7 @@ known_failing_tests = {
     "test_return_duplicate",  # gradient batching rule not implemented for aten::sym_size.int
     "test_return_duplicate_inplace",  # gradient batching rule not implemented for aten::sym_size.int
     "test_setitem",  # CopySlices accuracy error
-    "test_save_on_cpu_and_checkpoint",  # https://github.com/pytorch/pytorch/issues/147565
-    "test_checkpoint_detects_non_determinism",  # different error
-    "test_checkpointing_non_reentrant_autocast_cpu",  # saved != recompute
-    "test_checkpointing_non_reentrant_autocast_gpu",  # saved != recompute
     "test_checkpointing_without_reentrant_saved_object_identity",  # same as https://github.com/pytorch/pytorch/issues/136193
-    "test_saved_variable_packing_unpacking_did_not_save_original_with_hooks",  # register_hooks multiple times
-    "test_saved_variable_saved_original_inplace_detach",  # RuntimeError not raised
-    "test_access_saved_tensor_twice_without_recomputation_works",  # saved != recompute
-    "test_checkpointing_without_reentrant_dataparallel",  # https://github.com/pytorch/pytorch/issues/127115
-    "test_checkpointing",  # takes very very long
-    "test_checkpointing_without_reentrant_input_requires_grad_False",  # takes very very long
-    "test_checkpointing_without_reentrant_input_requires_grad_True",  # takes very very long
-    "test_checkpointing_without_reentrant_memory_savings",  # takes very very long
     "test_dtensor_different_gradient_placement",  # Dynamo failed to run FX node with fake tensors
     "test_dtensor_noncontiguous_output",  # Dynamo failed to run FX node with fake tensors
     "test_dtensor_partial_placement_graph_output",  # Dynamo failed to run FX node with fake tensors
