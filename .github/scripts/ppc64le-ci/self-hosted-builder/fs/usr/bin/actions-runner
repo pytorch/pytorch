@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+
+set -e -u
+
+# first import docker image
+if [ -f ./manywheel-ppc64le.tar ] ; then
+        docker image load --input manywheel-ppc64le.tar
+        docker image tag docker.io/pytorch/manylinuxppc64le-builder:cpu-ppc64le docker.io/pytorch/manylinuxppc64le-builder:cpu-ppc64le-main
+        rm -f manywheel-ppc64le.tar
+fi
+
+token_file=registration-token.json
+
+# Fetch GitHub access token
+if [ ! -f /run/runner_secret ]; then
+    echo "Error: Access token file not found at /run/runner_secret."
+    exit 1
+fi
+
+
+ACCESS_TOKEN="$(cat /run/runner_secret)"
+
+# Generate registration token
+curl \
+        -X POST \
+        -H "Accept: application/vnd.github.v3+json" \
+        -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+        "https://api.github.com/orgs/${ORG}/actions/runners/registration-token" \
+        -o "$token_file"
+ 
+unset ACCESS_TOKEN
+
+sudo umount /run/runner_secret
+sudo rm -f /run/runner_secret
+
+# register runner as ephemeral runner
+# it does one job, stops and unregisters
+registration_token=$(jq --raw-output .token "$token_file")
+
+./config.sh \
+        --unattended \
+        --ephemeral \
+        --url "https://github.com/${ORG}" \
+        --token "${registration_token}" \
+        --name "${NAME}" \
+        --no-default-labels \
+        --labels self-hosted,linux.ppc64le
+
+unset registration_token
+rm -f "$token_file"
+
+# Run one job.
+./run.sh
+
+echo "Ephemeral runner workflow completed."
