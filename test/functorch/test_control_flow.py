@@ -2009,7 +2009,44 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
                 )
             ]
         )
+        result = scan(
+            get_scan_combine_fn("s5_operator", False),
+            init,
+            elements,
+            dim=0,
+            reverse=reverse,
+        )
+        expected_result = _fake_scan(
+            get_scan_combine_fn("s5_operator", False),
+            init=init,
+            xs=elements,
+            dim=0,
+            reverse=reverse,
+        )
+        self.assertEqual(result, expected_result)
 
+    @requires_cuda
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    @parametrize("dtype", [torch.complex64, torch.complex128])
+    def test_scan_binary_operator_complex(self, reverse, device, dtype):
+        A = torch.randn(10, 3, 10, dtype=dtype, device=device)
+        projected_inputs = torch.ones_like(A) * 0.9 + torch.ones_like(A) * 0.08j
+        elements = (A, projected_inputs)
+        init = tuple(
+            [
+                torch.ones_like(
+                    torch._ops.ops.aten.slice(elements[0], 0, 0, 1, 1),
+                    requires_grad=True,
+                )
+            ]
+            + [
+                torch.zeros_like(
+                    torch._ops.ops.aten.slice(projected_inputs, 0, 0, 1, 1),
+                    requires_grad=True,
+                )
+            ]
+        )
         result = scan(
             get_scan_combine_fn("s5_operator", False),
             init,
@@ -3802,6 +3839,44 @@ class AssociativeScanTests(TestCase):
         )
         A = torch.randn(state_dim, requires_grad=True, device=device)
         elements = (A.repeat((timesteps, 1)), projected_inputs)
+
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": get_scan_combine_fn("s5_operator", True),
+            "combine_mode": combine_mode,
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        self._run_test(
+            model=AssociativeScanModels.CombineFn(**kwargs),
+            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
+            inputs=elements,
+        )
+
+    @skipIfRocm(msg="Unsupported on ROCM yet")
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("combine_mode", ["pointwise", "generic"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    @parametrize("dtype", [torch.complex64, torch.complex128])
+    # Skipping the combination of combine_mode=pointwise and device=cpu
+    # as the current implementation of pointwise does only support CUDA device
+    @decorateIf(
+        unittest.skip,
+        lambda params: (
+            params["combine_mode"] == "pointwise"
+            and (params["device"] == torch.device("cpu") or torch.version.hip)
+        ),
+    )
+    def test_associative_scan_binary_operator_complex(
+        self, compile_mode, combine_mode, reverse, device, dtype
+    ):
+        A = torch.randn(10, 3, 10, dtype=dtype, device=device)
+        projected_inputs = torch.ones_like(A) * 0.9 + torch.ones_like(A) * 0.08j
+        elements = (A, projected_inputs)
 
         kwargs = {
             "dim": 0,
