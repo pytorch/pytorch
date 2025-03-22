@@ -1936,9 +1936,10 @@ def load_inline(name,
             function. This redirection might cause issues in obscure cases
             of cpp. This flag should be set to ``False`` when this redirect
             causes issues.
-        no_implicit_headers: If ``True``, skips automatically adding headers, most notably ``#include <torch/extension.h>``
-            and ``#include <torch/types.h>`` lines. Use this option to improve cold start times
-            when you already include the necessary headers in your source code. Default: ``False``.
+        no_implicit_headers: If ``True``, skips automatically adding headers, most notably
+            ``#include <torch/extension.h>`` and ``#include <torch/types.h>`` lines.
+            Use this option to improve cold start times when you
+            already include the necessary headers in your source code. Default: ``False``.
 
     Example:
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CPP_EXT)
