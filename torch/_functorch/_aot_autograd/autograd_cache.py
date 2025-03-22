@@ -207,6 +207,14 @@ def check_cacheable(gm: torch.fx.GraphModule):
     Checks that the graph module only uses supported operators
     """
     nodes = gm.graph.nodes
+    if (
+        torch._dynamo.config.compiled_autograd
+        and not torch._dynamo.compiled_autograd.in_compiled_autograd_region
+    ):
+        raise BypassAOTAutogradCache(
+            "Cannot cache a backward graph that might be later compiled by compiled autograd"
+        )
+
     if torch._inductor.config.freezing:
         raise BypassAOTAutogradCache("Cannot cache a graph with freezing enabled")
 

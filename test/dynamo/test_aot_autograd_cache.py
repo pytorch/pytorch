@@ -305,20 +305,36 @@ class AOTAutogradCacheTests(InductorTestCase):
     )
     @dynamo_config.patch("compiled_autograd", True)
     def test_compiled_autograd_bypass(self):
-        # Need to make the compiled autograd graph serializable
-        def fn(a, b):
+        def forward(a, b):
             out = a.cos() + b
             loss = out.sum()
-            ga, gb = torch.autograd.grad(loss, inputs=[a, b])
+            return loss
+
+        def backward(loss, a, b):
+            return torch.autograd.grad(loss, inputs=[a, b])
 
         a = torch.randn(25, requires_grad=True)
         b = torch.randn(25, requires_grad=True)
-        compiled_fn = torch.compile(fn, backend="inductor")
+        compiled_forward = torch.compile(forward)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.BackendCompilerFailed,
+            "BypassAOTAutogradCache: Cannot cache a backward graph that might be later compiled by compiled autograd",
+        ):
+            compiled_forward(a, b)
+
+        loss = forward(a, b)
+        compiled_backward = torch.compile(backward)
+        # TODO: Need to make the compiled autograd graph serializable
         with self.assertRaisesRegex(
             torch._dynamo.exc.BackendCompilerFailed,
             "BypassAOTAutogradCache: Unsupported call_function target torch._dynamo.compiled_autograd.ops.validate_outputs",
         ):
-            compiled_fn(a, b)
+            compiled_backward(loss, a, b)
+
+        # x = torch.randn(25)
+        # y = torch.randn(25)
+        # compiled_forward = torch.compile(forward)
+        # compiled_forward(x, y)
 
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
