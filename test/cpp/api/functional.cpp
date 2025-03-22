@@ -1063,7 +1063,7 @@ TEST_F(FunctionalTest, ELU) {
       x_bf16.resize_({size, size, size});
 
       auto y_exp = torch::max(torch::zeros_like(x), x) +
-          torch::min(torch::zeros_like(x), alpha * (torch::exp(x) - 1.0));
+          torch::min(torch::zeros_like(x), alpha * (torch::expm1(x)));
       auto y = F::elu(x, F::ELUFuncOptions().alpha(alpha).inplace(inplace));
       auto y_bf16 =
           F::elu(x_bf16, F::ELUFuncOptions().alpha(alpha).inplace(inplace));
@@ -1090,8 +1090,7 @@ TEST_F(FunctionalTest, SELU) {
       auto input_bf16 = input.clone().to(torch::kBFloat16);
       auto expected = scale *
           (torch::max(torch::zeros_like(input), input) +
-           torch::min(
-               torch::zeros_like(input), alpha * (torch::exp(input) - 1)));
+           torch::min(torch::zeros_like(input), alpha * (torch::expm1(input))));
       auto output = F::selu(input, inplace);
       auto output_bf16 = F::selu(input_bf16, inplace);
 
@@ -1711,8 +1710,7 @@ TEST_F(FunctionalTest, CELU) {
       x.resize_({size, size, size});
       auto x_bf16 = x.clone().to(torch::kBFloat16);
       auto y_exp = torch::max(torch::zeros_like(x), x) +
-          torch::min(torch::zeros_like(x),
-                     alpha * (torch::exp(x / alpha) - 1.0));
+          torch::min(torch::zeros_like(x), alpha * (torch::expm1(x / alpha)));
       auto y = F::celu(x, F::CELUFuncOptions().alpha(alpha).inplace(inplace));
       auto y_bf16 =
           F::celu(x_bf16, F::CELUFuncOptions().alpha(alpha).inplace(inplace));
@@ -1737,7 +1735,7 @@ TEST_F(FunctionalTest, CELUDefaultOptions) {
   x.resize_({size, size, size});
   auto x_bf16 = x.clone().to(torch::kBFloat16);
   auto y_exp = torch::max(torch::zeros_like(x), x) +
-      torch::min(torch::zeros_like(x), alpha * (torch::exp(x / alpha) - 1.0));
+      torch::min(torch::zeros_like(x), alpha * (torch::expm1(x / alpha)));
   auto y = F::celu(x);
   auto y_bf16 = F::celu(x_bf16);
 
