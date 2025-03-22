@@ -1234,6 +1234,13 @@ class CompilationMetrics:
     ir_count: Optional[int] = None
     cudagraph_skip_reason: Optional[str] = None
     python_version: Optional[str] = None
+    # The number of elements within paramaters. This is classically what people think of when they think of paramaters
+    # in a ML model.
+    param_numel: Optional[int] = None
+    # The number of elements counted by bytes - i.e. a float32 is 4 bytes, per element.
+    param_bytes: Optional[int] = None
+    # The number of paramaters count by fields. This mostly is a proxy for number of distinct type of params
+    param_count: Optional[int] = None
 
     @classmethod
     def create(cls, metrics: dict[str, Any]):
@@ -1316,6 +1323,19 @@ class CompilationMetrics:
         )
         compile_id = all_metrics.get("compile_id")
         all_metrics["compile_id"] = str(compile_id) if compile_id else None
+
+        all_metrics["param_numel"] = sum(
+            all_metrics.get("param_numel_addr", {}).values()
+        )
+        all_metrics["param_bytes"] = sum(
+            all_metrics.get("param_bytes_addr", {}).values()
+        )
+        all_metrics["param_count"] = sum(
+            all_metrics.get("param_count_addr", {}).values()
+        )
+        all_metrics.pop("param_numel_addr", None)
+        all_metrics.pop("param_bytes_addr", None)
+        all_metrics.pop("param_count_addr", None)
 
         return cls(**all_metrics)
 
