@@ -737,6 +737,44 @@ class BaseSchedulerNode:
         return buf_byte_accesses
 
     @cache_on_self
+    def estimate_flops(self) -> int | None:
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.utils.flop_counter import FlopCounterMode
+
+        op = kernel_name_to_op.get(getattr(self.node, "python_kernel_name", ""), None)
+
+        if op is not None:
+            if self.node is None:
+                return None
+            if any(
+                len(free_unbacked_symbols(n.get_numel())) > 0 for n in self.node.inputs
+            ):
+                # Tensor has unbacked symints, we don't know how to estimate
+                # runtime for that today
+                return None
+
+            with (
+                FakeTensorMode() as fake_mode,
+                FlopCounterMode(display=False) as flop_counter_mode,
+                V.set_current_node(self.node.fx_node),
+                V.set_fake_mode(fake_mode),
+            ):
+                from .ir import ir_node_to_tensor
+
+                fake_inputs = [
+                    ir_node_to_tensor(input, guard_shape=False)
+                    for input in self.node.inputs
+                ]
+                cls = self.node.__class__
+                cls.process_kernel(op, *fake_inputs, **self.node.kwargs)
+
+                ret = flop_counter_mode.get_total_flops()
+                with open("flops", "a") as file:
+                    file.write(str(self.node) + " " + str(ret) + "\n")
+                return ret
+        return None
+
+    @cache_on_self
     def get_estimated_runtime(self) -> float:
         """
         Returns estimated op runtime in nanoseconds (ns)
@@ -778,47 +816,27 @@ class BaseSchedulerNode:
 
         if isinstance(self, ExternKernelSchedulerNode):
             assert isinstance(self.node, ir.ExternKernel), f"{type(self.node)=}"
-            op = kernel_name_to_op.get(
-                getattr(self.node, "python_kernel_name", ""), None
-            )
+            if self.node is None:
+                return 0
 
             # if there is a resolved op, dry-run using fake mode and record flop count
-            if op is not None:
-                from torch._subclasses.fake_tensor import FakeTensorMode
-                from torch.utils.flop_counter import FlopCounterMode
+            if any(
+                len(free_unbacked_symbols(n.get_numel())) > 0 for n in self.node.inputs
+            ):
+                # Tensor has unbacked symints, we don't know how to estimate
+                # runtime for that today
+                return 0
 
-                if any(
-                    len(free_unbacked_symbols(n.get_numel())) > 0
-                    for n in self.node.inputs
-                ):
-                    # Tensor has unbacked symints, we don't know how to estimate
-                    # runtime for that today
-                    return 0
+            counted_flops = self.estimate_flops()
+            # TODO(xmfan): find a better heuristic to model FLOPS/latency relationship
+            factor = 1.0
+            counted_bytes = self.get_read_write_buffers_sizes()
+            counted_bytes = 0 if counted_bytes is None else counted_bytes
+            compute_time = (factor * counted_flops / gpu_flops) * 1e9
+            transfer_time = counted_bytes / gpu_memory_bandwidth
 
-                with (
-                    FakeTensorMode() as fake_mode,
-                    FlopCounterMode(display=False) as flop_counter_mode,
-                    V.set_current_node(self.node.fx_node),
-                    V.set_fake_mode(fake_mode),
-                ):
-                    from .ir import ir_node_to_tensor
-
-                    fake_inputs = [
-                        ir_node_to_tensor(input, guard_shape=False)
-                        for input in self.node.inputs
-                    ]
-                    cls = self.node.__class__
-                    cls.process_kernel(op, *fake_inputs, **self.node.kwargs)
-
-                    # TODO(xmfan): find a better heuristic to model FLOPS/latency relationship
-                    factor = 1.0
-                    counted_flops = flop_counter_mode.get_total_flops()
-                    counted_bytes = self.get_read_write_buffers_sizes()
-                    compute_time = (factor * counted_flops / gpu_flops) * 1e9
-                    transfer_time = counted_bytes / gpu_memory_bandwidth
-
-                    # Return estimated runtime in nanoseconds
-                    return max(compute_time, transfer_time)
+            # Return estimated runtime in nanoseconds
+            return max(compute_time, transfer_time)
 
         elif isinstance(self, FusedSchedulerNode) or isinstance(
             self.node, ComputedBuffer

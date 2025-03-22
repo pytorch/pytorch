@@ -896,6 +896,14 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             return tuple(map(fn, value))
         return fn(value)
 
+    def estimate_flops(self) -> int:
+        # self.features.node_schedule
+        f = [
+            node.estimate_flops()
+            for node in NodeScheduleMarker.only_nodes(self.features.node_schedule)
+        ]
+        return sum(filter(None, f))
+
     def estimate_kernel_num_bytes(self):
         """
         Try the best to estimate the total size (in bytes) of the

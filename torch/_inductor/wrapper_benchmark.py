@@ -1,5 +1,6 @@
 import dataclasses
 import datetime
+import json
 import tempfile
 from collections import defaultdict
 from types import ModuleType
@@ -294,6 +295,78 @@ def parse_profile_event_list(
     report()
 
 
+PROFILE_PATH = f"{tempfile.gettempdir()}/compiled_module_profile.json"
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class KernelStats:
+    flops: int
+    bw: int
+
+
+def diff_profiles(diff_path: str) -> None:
+    from collections import defaultdict
+
+    def parse(data):
+        name_map: defaultdict[str, OrderedSet(KernelStats)] = defaultdict(OrderedSet)
+        for event in data["traceEvents"]:
+            if (
+                "args" in event
+                and "kernel_flops" in event["args"]
+                and "kernel_bandwidth" in event["args"]
+            ):
+                name_map[event["name"]].add(
+                    KernelStats(
+                        event["args"]["kernel_flops"], event["args"]["kernel_bandwidth"]
+                    )
+                )
+        return name_map
+
+    def combine_name_maps(filename1, name_map1, filename2, name_map2):
+        from tabulate import tabulate
+
+        combined_table = {}
+
+        # Get all unique names from both name maps
+        all_names = OrderedSet(list(name_map1.keys()) + list(name_map2.keys()))
+
+        for name in all_names:
+            stats1 = name_map1.get(name, OrderedSet())
+            stats2 = name_map2.get(name, OrderedSet())
+
+            flops_avg1 = (
+                sum(stat.flops for stat in stats1) / len(stats1) if stats1 else 0
+            )
+            bw_avg1 = sum(stat.bw for stat in stats1) / len(stats1) if stats1 else 0
+
+            flops_avg2 = (
+                sum(stat.flops for stat in stats2) / len(stats2) if stats2 else 0
+            )
+            bw_avg2 = sum(stat.bw for stat in stats2) / len(stats2) if stats2 else 0
+
+            combined_table[name] = [flops_avg1, bw_avg1, flops_avg2, bw_avg2]
+
+        headers = [
+            "Kernel Name",
+            f"{filename1} FLOPS",
+            f"{filename1} Bandwidth",
+            f"{filename2} FLOPS",
+            f"{filename2} Bandwidth",
+        ]
+        table = [[name] + values for name, values in combined_table.items()]
+        print(tabulate(table, headers=headers, tablefmt="grid"))
+
+    def parse_helper(filename):
+        with open(filename) as f:
+            data = json.load(f)
+        return parse(data)
+
+    other_nm = parse_helper(PROFILE_PATH)
+    diff_nm = parse_helper(diff_path)
+    combine_name_maps(PROFILE_PATH, other_nm, diff_path, diff_nm)
+
+
 def perf_profile(
     wall_time_ms: float,
     times: int,
@@ -408,6 +481,12 @@ def compiled_module_main(
         help="Whether to profile the compiled module",
     )
     parser.add_argument(
+        "--diff",
+        "-d",
+        type=str,
+        help="Another json trace to compare with",
+    )
+    parser.add_argument(
         "--cuda-memory-snapshot",
         action="store_true",
         help="""
@@ -448,5 +527,7 @@ def compiled_module_main(
                 benchmark_name,
                 benchmark_compiled_module_fn,
             )
+        if args.diff:
+            diff_profiles(args.diff)
         if args.ncu:
             ncu_analyzer(benchmark_name, benchmark_compiled_module_fn)
