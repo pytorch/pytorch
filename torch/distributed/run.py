@@ -370,8 +370,11 @@ utility
 import os
 import sys
 import uuid
+import logging
+import subprocess
 from argparse import ArgumentParser, REMAINDER
 from importlib import metadata
+import importlib.resources
 from typing import Callable, Optional, Union
 
 import torch
@@ -607,7 +610,14 @@ def get_args_parser() -> ArgumentParser:
         help="torchrun.logs_specs group entrypoint name, value must be type of LogsSpecs. "
         "Can be used to override custom logging behavior.",
     )
-
+    parser.add_argument(
+        "--numa-binding",
+        "--numa_binding",
+        action=env,
+        type=str,
+        default=None,
+        help="Mentioning the NUMA Binding Option to bind rank-processes to cpu-cores (Options: node, socket, core-complex, exclusive)",
+    )
     #
     # Positional arguments.
     #
@@ -688,6 +698,25 @@ def determine_local_world_size(nproc_per_node: str):
             device_type,
         )
         return num_proc
+
+
+def exit_with_error(command_to_print,exit_code=None):
+    print("*** torchrun error:{} ".format(command_to_print))
+    if exit_code is not None:
+        sys.exit(exit_code)
+    else:
+        sys.exit(1)
+
+def update_with_numa_binding_pytorch(binding_option):
+    if binding_option is None:
+        return ""
+    #Check if nvidia-smi is supported else fail
+    completedProc = subprocess.run("nvidia-smi &> /dev/null",shell=True)
+    if completedProc.returncode:
+        exit_with_error("--binding option is only supported on NVIDIA GPUs")
+    numa_binding=importlib.resources.files("torch.distributed").joinpath("numa_binding.py")
+    pycmd_binding = f"{numa_binding} --affinity {binding_option}"
+    return pycmd_binding
 
 
 def get_rdzv_endpoint(args):
@@ -823,12 +852,22 @@ def config_from_args(args) -> tuple[LaunchConfig, Union[Callable, str], list[str
     cmd: Union[Callable, str]
     cmd_args = []
     use_env = get_use_env(args)
+    numa_cmd = None
+    py_executable = os.getenv("PYTHON_EXEC", sys.executable)
+    if args.numa_binding:
+        numa_cmd = update_with_numa_binding_pytorch(args.numa_binding)
+        if not args.no_python:
+            numa_cmd = f"{numa_cmd} {py_executable}"
+        numa_cmd = numa_cmd.split()
+
     if args.run_path:
         cmd = run_script_path
         cmd_args.append(args.training_script)
     else:
         if with_python:
-            cmd = os.getenv("PYTHON_EXEC", sys.executable)
+            if numa_cmd:
+                cmd_args = list(numa_cmd)
+            cmd = py_executable
             cmd_args.append("-u")
             if args.module:
                 cmd_args.append("-m")
@@ -839,11 +878,15 @@ def config_from_args(args) -> tuple[LaunchConfig, Union[Callable, str], list[str
                     "Don't use both the '--no-python' flag"
                     " and the '--module' flag at the same time."
                 )
-            cmd = args.training_script
+            if args.numa_binding:
+                cmd = py_executable
+                cmd_args = list(numa_cmd)
+                cmd_args.append(args.training_script)
+            else:
+                cmd = args.training_script
     if not use_env:
         cmd_args.append(f"--local-rank={macros.local_rank}")
     cmd_args.extend(args.training_script_args)
-
     return config, cmd, cmd_args
 
 
