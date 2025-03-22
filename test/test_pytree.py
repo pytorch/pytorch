@@ -1179,6 +1179,39 @@ if "optree" in sys.modules:
         self.assertEqual(point.x, torch.tensor(1))
         self.assertEqual(point.y, torch.tensor(2))
 
+        py_pytree._deregister_pytree_node(Point)
+
+        with self.assertRaisesRegex(
+            AssertionError, "field_names does not include all dataclass fields"
+        ):
+            py_pytree.register_dataclass(Point, field_names=["x"])
+
+        with self.assertRaisesRegex(
+            AssertionError, "field_names does not include all dataclass fields"
+        ):
+            py_pytree.register_dataclass(Point, field_names=["x", "z"])
+
+        py_pytree.register_dataclass(Point, field_names=["y", "x"])
+        point = Point(torch.tensor(0), torch.tensor(1))
+        point = py_pytree.tree_map(lambda x: x + 1, point)
+        self.assertEqual(point.x, torch.tensor(1))
+        self.assertEqual(point.y, torch.tensor(2))
+
+    def test_register_dataclass_class(self):
+        class CustomClass:
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+        with self.assertRaisesRegex(AssertionError, "field_names must be specified"):
+            py_pytree.register_dataclass(CustomClass)
+
+        py_pytree.register_dataclass(CustomClass, field_names=["x", "y"])
+        c = CustomClass(torch.tensor(0), torch.tensor(1))
+        mapped = py_pytree.tree_map(lambda x: x + 1, c)
+        self.assertEqual(mapped.x, torch.tensor(1))
+        self.assertEqual(mapped.y, torch.tensor(2))
+
     def test_constant(self):
         # Either use `frozen=True` or `unsafe_hash=True` so we have a
         # non-default `__hash__`.
