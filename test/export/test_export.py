@@ -2371,6 +2371,76 @@ graph():
         ):
             export(Foo(), inputs, dynamic_shapes=shapes)
 
+    def test_dim_hint_ranges(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        inputs = (
+            torch.randn(6, 4),
+            torch.randn(6, 4),
+        )
+        shapes = {
+            "x": (Dim.AUTO(min=4), Dim.AUTO),
+            "y": (Dim.DYNAMIC(max=16), Dim.AUTO(max=32)),
+        }
+        ep = export(Foo(), inputs, dynamic_shapes=shapes)
+        ep.module()(torch.randn(8, 5), torch.randn(8, 5))
+        with self.assertRaisesRegex(
+            RuntimeError, "Expected input at .* to be >= 4, but got 3"
+        ):
+            ep.module()(torch.randn(3, 5), torch.randn(3, 5))
+        with self.assertRaisesRegex(
+            RuntimeError, "Expected input at .* to be <= 16, but got 17"
+        ):
+            ep.module()(torch.randn(17, 5), torch.randn(17, 5))
+        with self.assertRaisesRegex(
+            RuntimeError, "Expected input at .* to be <= 32, but got 33"
+        ):
+            ep.module()(torch.randn(9, 33), torch.randn(9, 33))
+
+    def test_dim_hint_range_violations(self):
+        class Foo(torch.nn.Module):
+            def forward(self, xs):
+                x, y = xs["data"][0]
+                assert y.shape[0] <= 32
+                return x[6:], y + 2
+
+        x, y = torch.randn(8), torch.randn(8)
+
+        # conflict with lower bound
+        shapes = torch.export.ShapesCollection()
+        shapes[x] = [Dim.DYNAMIC(max=5)]
+        with self.assertRaisesRegex(
+            ValueError,
+            r"Received user-specified .* \[None, 5\], which conflicted with the inferred .*"
+            r"\[6, int_oo\] .*, for inputs\['xs'\]\['data'\]\[0\]\[0\]\.shape\[0\]",
+        ):
+            export(Foo(), ({"data": [[x, y]]},), dynamic_shapes=shapes)
+
+        # conflict with upper bound
+        shapes = torch.export.ShapesCollection()
+        shapes[y] = [Dim.AUTO(min=48, max=62)]
+        with self.assertRaisesRegex(
+            ValueError,
+            r"Received user-specified .* \[48, 62\], which conflicted with the inferred .*"
+            r"\[2, 32\] .*, for inputs\['xs'\]\['data'\]\[0\]\[1\]\.shape\[0\]",
+        ):
+            export(Foo(), ({"data": [[x, y]]},), dynamic_shapes=shapes)
+
+        class Bar(torch.nn.Module):
+            def forward(self, x):
+                return x + 2
+
+        # conflict with static range
+        shapes = {"x": [Dim.STATIC(min=6, max=8)]}
+        with self.assertRaisesRegex(
+            ValueError,
+            r"Received user-specified .* \[6, 8\], which conflicted with the inferred .*"
+            r"\[4, 4\] .*, for inputs\['x'\].shape\[0\]",
+        ):
+            export(Bar(), (torch.randn(4),), dynamic_shapes=shapes)
+
     def test_torch_fn(self):
         class M1(torch.nn.Module):
             def __init__(self) -> None:
