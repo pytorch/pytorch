@@ -247,8 +247,8 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
-{%- endif %}
       !{{ common.wait_and_kill_ssh_windows('pytorch') }}
+{%- endif %}
   {%- if branches == "nightly" %}
   !{{ upload.upload_binaries(config, True) }}
   {%- endif %}
