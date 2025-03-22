@@ -62,6 +62,7 @@ if TYPE_CHECKING:
 
     from torch._inductor import metrics
     from torch._inductor.graph import GraphLowering
+    from torch._library.fake_class_registry import FakeScriptObject
 
     from .compile_fx import _CompileFxKwargs
     from .triton_bundler import TritonKernelArtifacts
@@ -393,7 +394,7 @@ class CompiledFxGraph(OutputCode):
     mutated_input_idxs: OrderedSet[int]
     constants: Optional[dict[str, torch.Tensor]]
     frozen_param_names: dict[str, str]
-    torchbind_constants: dict[str, torch._C.ScriptObject]
+    torchbind_constants: dict[str, torch._C.ScriptObject | FakeScriptObject]
     output_strides: Optional[list[Optional[tuple[_StrideExprStr, ...]]]]
     disabled_cudagraphs_reason: Optional[str]
     metrics_deltas: metrics.CachedMetricsDeltas

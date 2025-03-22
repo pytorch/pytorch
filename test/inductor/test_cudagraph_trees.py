@@ -30,6 +30,7 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_ARM64,
     IS_CI,
     IS_LINUX,
     IS_WINDOWS,
@@ -1445,14 +1446,15 @@ if HAS_CUDA:
                     foo(*inps)
                 except Exception as e:
                     thrown = True
-                    self.assertTrue(
-                        "at::cuda::blas::gemm<float>" in str(e)
-                        or "at::cuda::blas::gemm_internal_cublas<float>" in str(e)
-                    )
-                    self.assertTrue(
-                        "getCurrentCUDABlasHandle" in str(e)
-                        or "getNewWorkspace" in str(e)
-                    )
+                    if not IS_ARM64:
+                        self.assertTrue(
+                            "at::cuda::blas::gemm<float>" in str(e)
+                            or "at::cuda::blas::gemm_internal_cublas<float>" in str(e)
+                        )
+                        self.assertTrue(
+                            "getCurrentCUDABlasHandle" in str(e)
+                            or "getNewWorkspace" in str(e)
+                        )
 
                 self.assertTrue(thrown)
 

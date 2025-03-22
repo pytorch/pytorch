@@ -3,6 +3,7 @@
 #include <ATen/TensorIndexing.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/BinaryOps.h>
+#include <ATen/native/TensorFactories.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/operations/BinaryKernel.h>
@@ -23,54 +24,13 @@
 #endif
 
 namespace at::native {
-namespace mps {
-
 #ifndef PYTORCH_JIT_COMPILE_SHADERS
-static auto& lib = MetalShaderLibrary::getBundledLibrary();
+static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
 #else
 #include <ATen/native/mps/BinaryKernel_metallib.h>
 #endif
 
-static void binary_mps_impl(TensorIteratorBase& iter, const std::string func_name, bool supports_dense = true) {
-  TORCH_CHECK(iter.common_dtype() != at::kDouble, "float64 is not supported on MPS");
-
-  Tensor input = iter.input(0);
-  Tensor other = iter.input(1);
-  Tensor out = iter.output();
-
-  id<MTLDevice> device = MPSDevice::getInstance()->device();
-  MPSStream* mpsStream = getCurrentMPSStream();
-  const uint32_t nDim = iter.ndim();
-  constexpr uint32_t nOffsets = 3;
-  const uint32_t numThreads = iter.numel();
-  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
-    @autoreleasepool {
-      auto computeEncoder = mpsStream->commandEncoder();
-      if (supports_dense && iter.is_contiguous()) {
-        const auto kernel_name = fmt::format("{}_dense_{}", func_name, scalarToMetalTypeString(input));
-        auto binaryPSO = lib.getPipelineStateForFunc(kernel_name);
-        [computeEncoder setComputePipelineState:binaryPSO];
-        mtl_setArgs(computeEncoder, input, other, out);
-        mtl_dispatch1DJob(computeEncoder, binaryPSO, numThreads);
-        return;
-      }
-      const std::string kernel = func_name + "_" + scalarToMetalTypeString(input);
-      auto kernelDataOffsets = generateKernelDataOffsets(computeEncoder, iter);
-
-      id<MTLComputePipelineState> binaryPSO = lib.getPipelineStateForFunc(kernel);
-
-      // this function call is a no-op if MPS Profiler is not enabled
-      getMPSProfiler().beginProfileKernel(binaryPSO, kernel, {input, other});
-
-      [computeEncoder setComputePipelineState:binaryPSO];
-      mtl_setArgs(computeEncoder, input, other, out);
-      [computeEncoder setBuffer:kernelDataOffsets offset:0 atIndex:3];
-      mtl_dispatch1DJob(computeEncoder, binaryPSO, numThreads);
-
-      getMPSProfiler().endProfileKernel(binaryPSO);
-    }
-  });
-}
+namespace mps {
 
 void complex_mul_out(const Tensor& input, const Tensor& other, const Tensor& output) {
   TORCH_INTERNAL_ASSERT(c10::isComplexType(input.scalar_type()) || c10::isComplexType(other.scalar_type()));
@@ -83,49 +43,55 @@ void complex_mul_out(const Tensor& input, const Tensor& other, const Tensor& out
     return;
   }
   auto common_dtype = output.scalar_type();
-  auto output_as_real = at::view_as_real(output).select(output.dim(), 0);
-  auto input_as_real = at::view_as_real(input.to(kMPS, common_dtype)).select(input.dim(), 0);
-  auto other_as_real = at::view_as_real(other.to(kMPS, common_dtype)).select(other.dim(), 0);
-  auto iter =
-      TensorIteratorConfig().add_output(output_as_real).add_input(input_as_real).add_input(other_as_real).build();
+  auto input_cast = input.to(kMPS, common_dtype);
+  auto other_cast = other.to(kMPS, common_dtype);
+  auto iter = TensorIteratorConfig().add_output(output).add_input(input_cast).add_input(other_cast).build();
 
-  mps::binary_mps_impl(iter, "complex_mul", false);
+  lib.exec_binary_kernel(iter, "complex_mul");
 }
 
 } // namespace mps
 
 static void fmax_mps_kernel(TensorIteratorBase& iter) {
   if (isFloatingType(iter.common_dtype())) {
-    mps::binary_mps_impl(iter, "fmax");
+    lib.exec_binary_kernel(iter, "fmax");
   } else {
     at::maximum_out(const_cast<Tensor&>(iter.output()), iter.input(0), iter.input(1));
   }
 }
 static void fmin_mps_kernel(TensorIteratorBase& iter) {
   if (isFloatingType(iter.common_dtype())) {
-    mps::binary_mps_impl(iter, "fmin");
+    lib.exec_binary_kernel(iter, "fmin");
   } else {
     at::minimum_out(const_cast<Tensor&>(iter.output()), iter.input(0), iter.input(1));
   }
 }
 
 static void copysign_mps_kernel(TensorIteratorBase& iter) {
-  mps::binary_mps_impl(iter, "copysign");
+  lib.exec_binary_kernel(iter, "copysign");
 }
 
 static void nextafter_mps_kernel(TensorIteratorBase& iter) {
   TORCH_CHECK_TYPE(isFloatingType(iter.common_dtype()), "nextafter_mps not implemented for non-floating types");
-  mps::binary_mps_impl(iter, "nextafter");
+  lib.exec_binary_kernel(iter, "nextafter");
 }
 
 static void zeta_mps_kernel(TensorIteratorBase& iter) {
   TORCH_CHECK_TYPE(isFloatingType(iter.common_dtype()), "zeta_mps not implemented for non-floating types");
-  mps::binary_mps_impl(iter, "zeta");
+  lib.exec_binary_kernel(iter, "zeta");
 }
 
 static void xlog1py_mps_kernel(TensorIteratorBase& iter) {
   TORCH_CHECK_TYPE(isFloatingType(iter.common_dtype()), "xlog1py_mps not implemented for non-floating types");
-  mps::binary_mps_impl(iter, "xlog1py");
+  lib.exec_binary_kernel(iter, "xlog1py");
+}
+
+static void polar_mps_kernel(TensorIterator& iter) {
+  lib.exec_binary_kernel(iter, "polar");
+}
+
+static void complex_mps_kernel(TensorIterator& iter) {
+  lib.exec_binary_kernel(iter, "make_complex");
 }
 
 REGISTER_DISPATCH(fmax_stub, &fmax_mps_kernel)
@@ -134,36 +100,6 @@ REGISTER_DISPATCH(copysign_stub, &copysign_mps_kernel)
 REGISTER_DISPATCH(nextafter_stub, &nextafter_mps_kernel)
 REGISTER_DISPATCH(zeta_stub, &zeta_mps_kernel)
 REGISTER_DISPATCH(xlog1py_stub, &xlog1py_mps_kernel)
-
-Tensor& polar_out_mps(const Tensor& abs, const Tensor& angle, Tensor& output) {
-  auto new_size = at::infer_size(abs.sizes(), angle.sizes());
-  if (!output.sizes().equals(new_size)) {
-    output.resize_(new_size);
-  }
-  uint32_t length = output.numel();
-  if (length == 0) {
-    return output;
-  }
-  auto output_as_real = at::view_as_real(output).select(output.dim(), 0);
-  auto iter = TensorIteratorConfig().add_output(output_as_real).add_input(abs).add_input(angle).build();
-
-  mps::binary_mps_impl(iter, "polar");
-  return output;
-}
-
-Tensor& complex_out_mps(const Tensor& real, const Tensor& imag, Tensor& output) {
-  auto new_size = at::infer_size(real.sizes(), imag.sizes());
-  if (!output.sizes().equals(new_size)) {
-    output.resize_(new_size);
-  }
-  uint32_t length = output.numel();
-  if (length == 0) {
-    return output;
-  }
-  auto output_as_real = at::view_as_real(output).select(output.dim(), 0);
-  auto iter = TensorIteratorConfig().add_output(output_as_real).add_input(real).add_input(imag).build();
-
-  mps::binary_mps_impl(iter, "complex_kernel", false);
-  return output;
-}
+REGISTER_DISPATCH(polar_stub, &polar_mps_kernel);
+REGISTER_DISPATCH(complex_stub, &complex_mps_kernel);
 } // namespace at::native
