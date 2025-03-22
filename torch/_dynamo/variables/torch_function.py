@@ -516,17 +516,23 @@ def call_torch_function(
     return tx.inline_user_function_return(torch_function_var, tf_args, {})
 
 
-def build_torch_function_fn(tx: "InstructionTranslator", cls, cls_source):
+def build_torch_function_fn(tx: "InstructionTranslator", cls_or_obj, source):
     from types import FunctionType
 
-    func = cls.__torch_function__.__func__
+    # If we reach here, the target `__torch_function__` should have been
+    # annotated with `@classmethod`, so accessing it always yield a bound
+    # method, and the actual `__torch_function__` impl is inside the bound
+    # `__func__`.
+    func = cls_or_obj.__torch_function__.__func__
 
     if not isinstance(func, FunctionType):
         unimplemented("Builtin/C++ torch function implementations NYI")
 
-    func_source = cls_source and AttrSource(
-        AttrSource(cls_source, "__torch_function__"), "__func__"
-    )
+    func_source = None
+    if source:
+        func_source = AttrSource(
+            AttrSource(source, "__torch_function__"), "__func__"
+        )
     return VariableTracker.build(tx, func, func_source)
 
 
