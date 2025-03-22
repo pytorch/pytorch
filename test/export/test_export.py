@@ -10817,6 +10817,16 @@ def forward(self, x):
         )
         self.assertEqual(ep.graph_signature.user_inputs, ("a", "c", "b", "d"))
 
+    def test_isnonzero(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.aten.is_nonzero(x)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Boolean value of Tensor with more than"
+        ):
+            export(Foo(), (torch.randn(4, 4),), strict=False)
+
     def test_placeholder_naming_collisions(self):
         # test collisions between nested user inputs
         class Foo(torch.nn.Module):

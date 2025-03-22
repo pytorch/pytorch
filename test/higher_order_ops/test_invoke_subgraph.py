@@ -639,11 +639,11 @@ class GraphModule(torch.nn.Module):
         l_x_ = L_x_
 
         invoke_subgraph_0 = self.invoke_subgraph_0
-        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(invoke_subgraph_0, 'invoke_subgraph_0', (l_x_,));  invoke_subgraph_0 = None
-        getitem: "f32[8, 8]" = invoke_subgraph[0];  invoke_subgraph = None
-        invoke_subgraph_1 = self.invoke_subgraph_0
-        invoke_subgraph_2 = torch.ops.higher_order.invoke_subgraph(invoke_subgraph_1, 'invoke_subgraph_0', (l_x_,));  invoke_subgraph_1 = None
-        getitem_1: "f32[8, 8]" = invoke_subgraph_2[0];  invoke_subgraph_2 = None
+        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(invoke_subgraph_0, 'invoke_subgraph_0', (l_x_,));  invoke_subgraph_0 = None
+        getitem: "f32[8, 8]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
+        invoke_subgraph_2 = self.invoke_subgraph_0
+        invoke_subgraph_3 = torch.ops.higher_order.invoke_subgraph(invoke_subgraph_2, 'invoke_subgraph_0', (l_x_,));  invoke_subgraph_2 = None
+        getitem_1: "f32[8, 8]" = invoke_subgraph_3[0];  invoke_subgraph_3 = None
 
         mul: "f32[8, 8]" = getitem * getitem_1;  getitem = getitem_1 = None
         add: "f32[8, 8]" = l_x_ + mul;  mul = None

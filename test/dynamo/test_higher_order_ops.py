@@ -5383,9 +5383,9 @@ class GraphModule(torch.nn.Module):
         _wrap_for_grad: "f32[4, 3]" = torch._C._functorch._wrap_for_grad(l_x_, 2);  l_x_ = _wrap_for_grad = None
         _wrap_for_grad_1: "f32[3, 4]" = torch._C._functorch._wrap_for_grad(l_y_, 2);  l_y_ = None
 
-        child_2: "f32[3, 4]" = _wrap_for_grad_1.sin();  _wrap_for_grad_1 = None
+        child_4: "f32[3, 4]" = _wrap_for_grad_1.sin();  _wrap_for_grad_1 = None
 
-        _unpack_dual = torch._unpack_dual(child_2, level = 0);  child_2 = None
+        _unpack_dual = torch._unpack_dual(child_4, level = 0);  child_4 = None
         primal: "f32[3, 4]" = _unpack_dual[0];  _unpack_dual = None
 
         tangent: "f32[3, 4]" = torch.zeros_like(primal)
@@ -5394,28 +5394,28 @@ class GraphModule(torch.nn.Module):
         primal_1: "f32[4, 3]" = _unpack_dual_1[0]
         dual: "f32[4, 3]" = _unpack_dual_1[1];  _unpack_dual_1 = None
 
-        child_4: "f32[3, 4]" = torch._C._functorch._unwrap_for_grad(primal, 2);  primal = child_4 = None
-        child_5: "f32[4, 3]" = torch._C._functorch._unwrap_for_grad(primal_1, 2);  primal_1 = child_5 = None
+        child_5: "f32[3, 4]" = torch._C._functorch._unwrap_for_grad(primal, 2);  primal = child_5 = None
+        child_6: "f32[4, 3]" = torch._C._functorch._unwrap_for_grad(primal_1, 2);  primal_1 = child_6 = None
 
-        child_6: "f32[3, 4]" = torch._C._functorch._unwrap_for_grad(tangent, 2);  tangent = None
-        child_7: "f32[4, 3]" = torch._C._functorch._unwrap_for_grad(dual, 2);  dual = None
+        child_7: "f32[3, 4]" = torch._C._functorch._unwrap_for_grad(tangent, 2);  tangent = None
+        child_8: "f32[4, 3]" = torch._C._functorch._unwrap_for_grad(dual, 2);  dual = None
 
         _exit_dual_level = torch._C._exit_dual_level(0);  _exit_dual_level = None
         _set_fwd_grad_enabled_1 = torch._C._set_fwd_grad_enabled(True);  _set_fwd_grad_enabled_1 = None
         _jvp_decrement_nesting = torch._C._functorch._jvp_decrement_nesting();  _jvp_decrement_nesting = None
 
-        child_8: "f32[12, 3, 4]" = torch._C._functorch._remove_batch_dim(child_6, 1, 12, 0);  child_6 = None
-        child_9: "f32[12, 4, 3]" = torch._C._functorch._remove_batch_dim(child_7, 1, 12, 0);  child_7 = None
+        child_9: "f32[12, 3, 4]" = torch._C._functorch._remove_batch_dim(child_7, 1, 12, 0);  child_7 = None
+        child_10: "f32[12, 4, 3]" = torch._C._functorch._remove_batch_dim(child_8, 1, 12, 0);  child_8 = None
 
         _vmap_decrement_nesting = torch._C._functorch._vmap_decrement_nesting();  _vmap_decrement_nesting = None
 
-        movedim: "f32[3, 4, 12]" = child_8.movedim(0, -1);  child_8 = None
+        movedim: "f32[3, 4, 12]" = child_9.movedim(0, -1);  child_9 = None
         split = movedim.split((12,), dim = -1);  movedim = None
         jac_out_in: "f32[3, 4, 12]" = split[0];  split = None
 
         unflatten: "f32[3, 4, 4, 3]" = jac_out_in.unflatten(-1, (4, 3));  jac_out_in = None
 
-        movedim_1: "f32[4, 3, 12]" = child_9.movedim(0, -1);  child_9 = None
+        movedim_1: "f32[4, 3, 12]" = child_10.movedim(0, -1);  child_10 = None
         split_1 = movedim_1.split((12,), dim = -1);  movedim_1 = None
         jac_out_in_1: "f32[4, 3, 12]" = split_1[0];  split_1 = None
 
