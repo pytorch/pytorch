@@ -631,8 +631,12 @@ class GuardsSet:
                 self.add(g, skip=1)
 
     def remove_guards_with_source(self, source):
-        """Delete all guards with a given source"""
-        self.inner = {g for g in self.inner if g.originating_source != source}
+        """Delete all guards that contains a given source"""
+        from ._dynamo.source import is_from_source
+
+        self.inner = {
+            g for g in self.inner if not is_from_source(g.originating_source, source)
+        }
 
 
 class GuardsContext(Checkpointable[GuardsCheckpointState]):

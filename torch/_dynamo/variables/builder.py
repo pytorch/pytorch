@@ -605,9 +605,7 @@ class VariableBuilder:
             return id_dispatch(self, value)
 
         # Everything else (NB: order matters!)
-        if is_traceable_wrapper_subclass(value) or istype(
-            value, config.traceable_tensor_subclasses
-        ):
+        if is_traceable_wrapper_subclass(value):
             return self.wrap_tensor(value)
         elif is_namedtuple(value):
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
@@ -923,9 +921,9 @@ class VariableBuilder:
                 value,
                 source=self.source,
             )
-        elif (
-            isinstance(value, torch._C._TensorMeta)
-            and value in config.traceable_tensor_subclasses
+        elif isinstance(value, torch._C._TensorMeta) and value not in (
+            torch.Tensor,
+            torch.nn.Parameter,
         ):
             return TensorSubclassVariable(value, source=self.source)
         elif (
@@ -1703,7 +1701,22 @@ class VariableBuilder:
                 # Guards are added inside register_attr_or_module
             )
 
-        if type(value) in config.traceable_tensor_subclasses:
+        # NB: this just says we accessed a tensor from the same source again
+        # (e.g., a tensor lives in a global foo, and we LOAD_GLOBAL it twice).
+        # This is distinct from two distinct sources mapping to the same
+        # Tensor (per id())!  No guard is necessary here.  See below for the
+        # other case.
+        is_duplicate_tensor = source in self.tx.output.input_source_to_var
+        if is_duplicate_tensor:
+            return self.tx.output.input_source_to_var[source]
+
+        options = {}
+        if type(value) in (
+            torch.Tensor,
+            torch.nn.Parameter,
+            torch._subclasses.fake_tensor.FakeTensor,
+            torch._subclasses.functional_tensor.FunctionalTensor,
+        ) or is_traceable_wrapper_subclass(value):
             # Ordinarily, we would fakeify a tensor so that it can get dynamic
             # shapes and be computed on without triggering actual operations.
             # However, how can we fakeify a tensor subclass?  Ordinary
@@ -1721,37 +1734,19 @@ class VariableBuilder:
             # To simplify things for now, the __dict__ tracking bits haven't
             # been implemented yet, but they can be added into this design at
             # a later point in time.
-            subclass_type = type(value)
-        else:
-            assert type(value) in (
-                torch.Tensor,
-                torch.nn.Parameter,
-                torch._subclasses.fake_tensor.FakeTensor,
-                torch._subclasses.functional_tensor.FunctionalTensor,
-            ) or is_traceable_wrapper_subclass(value), type(value)
             subclass_type = None
-
-        # NB: this just says we accessed a tensor from the same source again
-        # (e.g., a tensor lives in a global foo, and we LOAD_GLOBAL it twice).
-        # This is distinct from two distinct sources mapping to the same
-        # Tensor (per id())!  No guard is necessary here.  See below for the
-        # other case.
-        is_duplicate_tensor = source in self.tx.output.input_source_to_var
-        if is_duplicate_tensor:
-            return self.tx.output.input_source_to_var[source]
+        else:
+            subclass_type = type(value)
+            options["torch_function_fn"] = build_torch_function_fn(
+                self.tx, value, self.source
+            )
+            self.install_guards(GuardBuilder.TYPE_MATCH)
 
         if get_static_address_type(value) == "guarded":
             self.install_guards(GuardBuilder.ID_MATCH)
 
         # By this point, we should have deduplicated all tensors
         self.assert_not_wrapped_by_this_graph(value)
-
-        options = {}
-        if type(value) in config.traceable_tensor_subclasses:
-            options["torch_function_fn"] = build_torch_function_fn(
-                self.tx, value, self.source
-            )
-            self.install_guards(GuardBuilder.TYPE_MATCH)
 
         if (
             isinstance(value, torch.Tensor)
