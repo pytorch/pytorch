@@ -4215,18 +4215,18 @@ class GraphModule(torch.nn.Module):
 
         set_inplace_requires_grad_allowed_1 = torch._C._functorch.set_inplace_requires_grad_allowed(False);  set_inplace_requires_grad_allowed_1 = None
 
-        child_1: "f32[5]" = child.sin()
-        child_2: "f32[5]" = child.cos();  child = None
+        child_4: "f32[5]" = child.sin()
+        child_5: "f32[5]" = child.cos();  child = None
 
-        value: "f32[5]" = torch._C._functorch._unwrap_for_grad(child_1, 1)
-        value_1: "f32[5]" = torch._C._functorch._unwrap_for_grad(child_2, 1)
+        value: "f32[5]" = torch._C._functorch._unwrap_for_grad(child_4, 1)
+        value_1: "f32[5]" = torch._C._functorch._unwrap_for_grad(child_5, 1)
 
         _grad_decrement_nesting = torch._C._functorch._grad_decrement_nesting();  _grad_decrement_nesting = None
         _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable();  _saved_tensors_hooks_enable = None
 
-        child_4: "f32[5]" = l_v_.sin()
+        child_6: "f32[5]" = l_v_.sin()
 
-        _autograd_grad = torch._functorch.eager_transforms._autograd_grad([child_1, child_2], [child_3], [l_v_, child_4], retain_graph = True, create_graph = True);  child_1 = child_2 = child_3 = l_v_ = child_4 = None
+        _autograd_grad = torch._functorch.eager_transforms._autograd_grad([child_4, child_5], [child_3], [l_v_, child_6], retain_graph = True, create_graph = True);  child_4 = child_5 = child_3 = l_v_ = child_6 = None
         getitem: "f32[5]" = _autograd_grad[0];  _autograd_grad = None
         return (value, value_1, getitem)
 """,
