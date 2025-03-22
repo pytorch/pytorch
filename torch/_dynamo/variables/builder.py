@@ -1795,6 +1795,7 @@ class VariableBuilder:
         example_value = wrap_to_fake_tensor_and_record(
             value, tx=self.tx, is_tensor=True, source=source
         )
+
         tensor_proxy = self.tx.output.root_tracer.create_graph_input(
             re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
             type(value),
@@ -2491,7 +2492,14 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
             isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor)
             and example_value.fake_mode is tx.fake_mode
         ):
-            tensor_type = subclass_type if subclass_type else torch.Tensor
+            if subclass_type:
+                tensor_type = subclass_type
+            elif isinstance(example_value, torch.nn.Parameter):
+                tensor_type = torch.nn.Parameter
+            elif isinstance(example_value, torch.nn.Buffer):
+                tensor_type = torch.nn.Buffer
+            else:
+                tensor_type = torch.Tensor
             specialized_props["class_type"] = tensor_type
 
         options.update(specialized_props)
@@ -2637,6 +2645,7 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
         proxy.node.target
         in [
             torch._C._are_functorch_transforms_active,
+            torch._C._functorch.is_batchedtensor,
             torch.backends.cuda.is_flash_attention_available,
             torch.backends.cuda.can_use_flash_attention,
             torch.backends.cuda.can_use_efficient_attention,
@@ -3020,6 +3029,7 @@ def wrap_to_fake_tensor_and_record(
             symbolic_context,
             type(e),
         )
+
         fake_e = wrap_fake_exception(
             lambda: tx.fake_mode.from_tensor(
                 e,
