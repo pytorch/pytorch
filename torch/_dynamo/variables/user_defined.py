@@ -82,6 +82,7 @@ from ..utils import (
 )
 from .base import AttributeMutationExisting, ValueMutationNew, VariableTracker
 from .dicts import DefaultDictVariable
+from .lists import SizeVariable
 
 
 try:
@@ -579,6 +580,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 assert all(x is not None for x in items)
 
             return variables.NamedTupleVariable(items, self.value)
+        elif self.value is torch.Size:
+            # This simulates `THPSize_pynew`, the C impl for `Size.__new__`.
+            tup = variables.BuiltinVariable(tuple).call_function(tx, args, kwargs)
+            return SizeVariable(tup.items)
         elif is_frozen_dataclass(self.value) and self.is_standard_new():
             fields = dataclasses.fields(self.value)
             items = list(args)
