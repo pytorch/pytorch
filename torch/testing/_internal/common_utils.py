@@ -2793,6 +2793,14 @@ class RelaxedNumberPair(NumberPair):
         ):
             self._inputs_not_supported()
 
+        # Check if the object is a Thrift enum by checking its metaclass
+        def is_thrift_enum(obj):
+            return type(type(obj)).__name__ == "EnumMeta" and type(obj).__module__.endswith(".types")
+        # Because Thrift Enums have changed to have a base class of int, check if actual or expected are of type thrift enum and call inputs_not_supported.
+        if is_thrift_enum(actual) or is_thrift_enum(expected):
+            self._inputs_not_supported()
+
+
         return [self._to_number(input, id=id) for input in (actual, expected)]
 
     def _to_number(self, number_like, *, id):
@@ -2810,8 +2818,9 @@ class RelaxedNumberPair(NumberPair):
                 number = int(number)
 
             return number
-        elif isinstance(number_like, Enum):
-            return int(number_like)  # type: ignore[call-overload]
+        # handling enum.Enum and Enum-like classes
+        elif hasattr(number_like, "value") and isinstance(number_like.value, int):
+            return number_like.value # type: ignore[call-overload]
         else:
             return super()._to_number(number_like, id=id)
 
