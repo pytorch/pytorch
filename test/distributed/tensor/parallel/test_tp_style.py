@@ -81,6 +81,71 @@ class TensorParallelStyleTest(DTensorTestBase):
             self.assertEqual(comm_mode.get_total_counts(), 2)
 
     @with_comms
+    def test_colwise_parallel_fused_qkv_linear(self):
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+
+        comm_mode = CommDebugMode()
+        tensor = torch.rand(8, 16, device=self.device_type, requires_grad=True)
+        fused_qkv_linear = nn.Linear(16, 16 * 3, device=self.device_type)
+
+        separate_linear_layer_weights = fused_qkv_linear.weight.split(
+            (16, 16, 16), dim=0
+        )
+
+        default_col_parallel = ColwiseParallel(fused_linear_weight_splits=(16, 16, 16))
+        colwise_fused_qkv = parallelize_module(
+            deepcopy(fused_qkv_linear), mesh, default_col_parallel
+        )
+
+        # assert that sharding performed as expected according to the fused_linear_weight_splits
+        sharded_fused_weights = [
+            torch.chunk(weight, self.world_size, dim=0)[mesh.get_local_rank()]
+            for weight in separate_linear_layer_weights
+        ]
+        combined_sharded_weight = torch.cat(sharded_fused_weights, dim=0).detach()
+        self.assertEqual(
+            colwise_fused_qkv.weight.to_local().detach(), combined_sharded_weight
+        )
+
+        # assert that communications in fwd/bwd passes as expected
+        with comm_mode:
+            out = colwise_fused_qkv(tensor)
+            # ensure output shard on the last dim
+            self.assertEqual(out.shape, (8, 16 * 3 // self.world_size))
+            # ensure no communication happened in fwd
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+
+            out.sum().backward()
+            # allreduce in bwd
+            self.assertEqual(comm_mode.get_comm_counts()[c10d_functional.all_reduce], 1)
+            self.assertEqual(comm_mode.get_total_counts(), 1)
+
+        sharded_col_parallel = ColwiseParallel(
+            input_layouts=Shard(0), fused_linear_weight_splits=(16, 16, 16)
+        )
+        colwise_fused_qkv = parallelize_module(
+            deepcopy(fused_qkv_linear), mesh, sharded_col_parallel
+        )
+        with comm_mode:
+            out = colwise_fused_qkv(tensor)
+            # ensure output shard on the last dim
+            self.assertEqual(
+                out.shape, (8 * self.world_size, 16 * 3 // self.world_size)
+            )
+            # allgather in fwd
+            self.assertEqual(
+                comm_mode.get_comm_counts()[c10d_functional.all_gather_into_tensor], 1
+            )
+            self.assertEqual(comm_mode.get_total_counts(), 1)
+
+            out.sum().backward()
+            # reduce_scatter in bwd
+            self.assertEqual(
+                comm_mode.get_comm_counts()[c10d_functional.reduce_scatter_tensor], 1
+            )
+            self.assertEqual(comm_mode.get_total_counts(), 2)
+
+    @with_comms
     def test_colwise_parallel_embedding(self):
         mesh = init_device_mesh(self.device_type, (self.world_size,))
 
