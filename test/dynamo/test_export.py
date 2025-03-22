@@ -1907,8 +1907,8 @@ def forward(self, x):
     sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(sym_size_int_1);  sym_constrain_range_for_size_default = None
     ge = sym_size_int_1 >= 2;  sym_size_int_1 = None
     _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 2 on node 'ge'");  ge = _assert_scalar_default = None
-    getitem_2 = cond[0];  cond = None
-    return pytree.tree_unflatten([getitem_2], self._out_spec)""",  # noqa: B950
+    getitem_4 = cond[0];  cond = None
+    return pytree.tree_unflatten([getitem_4], self._out_spec)""",  # noqa: B950
             )
             self.assertExpectedInline(
                 out_graph.cond_true_0.code.strip(),
