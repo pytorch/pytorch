@@ -285,7 +285,7 @@ def out_wrapper(
         is_factory_fn = all(p in sig.parameters for p in factory_kwargs)
 
         @wraps(fn)
-        def _fn(*args: _P.args, out=None, **kwargs: _P.kwargs):
+        def _fn(*args, out=None, **kwargs):  # type: ignore[no-untyped-def]
             if is_factory_fn and out is not None:
                 for k in factory_kwargs:
                     out_attr = getattr(out, k)
