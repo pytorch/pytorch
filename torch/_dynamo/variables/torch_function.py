@@ -633,7 +633,9 @@ class TensorWithTFOverrideVariable(TensorVariable):
                 " subclass with a __torch_function__ override is not supported"
             )
 
-        if tx.output.torch_function_enabled and hasattr(torch.Tensor, name):
+        if tx.symbolic_torch_function_state.torch_function_subclass_enabled and hasattr(
+            torch.Tensor, name
+        ):
             if self.source:
                 install_guard(
                     AttrSource(AttrSource(self.source, "__class__"), name).make_guard(
@@ -672,7 +674,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
     ) -> "VariableTracker":
         # This code block implements inlining the __torch_function__ override
         # of `call_method`.
-        if tx.output.torch_function_enabled:
+        if tx.symbolic_torch_function_state.torch_function_subclass_enabled:
             import torch
 
             if _is_attr_overidden(tx, self, name):
