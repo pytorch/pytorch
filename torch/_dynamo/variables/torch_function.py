@@ -24,9 +24,6 @@ Supported features:
 
 See https://docs.google.com/document/d/1WBxBSvW3NXhRp9ncmtokJloMLCtF4AYNhJaffvHe8Kw/edit#heading=h.vacn73lozd9w
 for more information on the design.
-
-To enable subclass behavior, add your tensor subclass type to traceable_tensor_subclasses
-in torch/_dynamo/config.py
 """
 
 import collections
@@ -520,6 +517,8 @@ def call_torch_function(
 def build_torch_function_fn(tx: "InstructionTranslator", cls_or_obj, source):
     from types import FunctionType
 
+    if cls_or_obj.__torch_function__ is torch._C._disabled_torch_function_impl:
+        unimplemented("torch._C._disabled_torch_function_impl as torch function")
     # If we reach here, the target `__torch_function__` should have been
     # annotated with `@classmethod`, so accessing it always yield a bound
     # method, and the actual `__torch_function__` impl is inside the bound
@@ -531,9 +530,7 @@ def build_torch_function_fn(tx: "InstructionTranslator", cls_or_obj, source):
 
     func_source = None
     if source:
-        func_source = AttrSource(
-            AttrSource(source, "__torch_function__"), "__func__"
-        )
+        func_source = AttrSource(AttrSource(source, "__torch_function__"), "__func__")
     return VariableTracker.build(tx, func, func_source)
 
 
