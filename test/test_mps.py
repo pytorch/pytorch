@@ -664,7 +664,6 @@ def mps_ops_modifier(ops):
         'special.laguerre_polynomial_l': None,
         'special.log_ndtr': None,
         'special.ndtri': None,
-        'special.scaled_modified_bessel_k1': None,
         'svd_lowrank': None,
         'symeig': None,
         'take': None,
