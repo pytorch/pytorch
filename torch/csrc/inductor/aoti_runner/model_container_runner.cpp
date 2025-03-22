@@ -78,7 +78,7 @@ AOTIModelContainerRunner::AOTIModelContainerRunner(
     var = reinterpret_cast<decltype(var)>(model_so_->sym(name_str));                 \
   } catch (const at::DynamicLibraryError& e) {                                       \
     std::cerr                                                                        \
-        << "Could not dlsym " << name_str                                            \
+        << "[WARNING] Could not dlsym " << name_str                                  \
         << ". This is okay if you don't need functionality from " << name_str        \
         << ". Otherwise consider rebuilding your model with the latest AOTInductor." \
         << std::endl;                                                                \
