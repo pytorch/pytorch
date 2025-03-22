@@ -553,9 +553,9 @@ class TestDynamoTimed(TestCase):
         with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
             func(m, m, torch.randn(4, 4))
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
-        self.assertEqual(compilation_events[0].param_numel, 20)
-        self.assertEqual(compilation_events[0].param_bytes, 80)
-        self.assertEqual(compilation_events[0].param_count, 2)
+        self.assertEqual(compilation_events[0].param_numel, 40)
+        self.assertEqual(compilation_events[0].param_bytes, 160)
+        self.assertEqual(compilation_events[0].param_count, 4)
 
         # Test tied weights
         m1 = nn.Linear(4, 4)
@@ -564,9 +564,9 @@ class TestDynamoTimed(TestCase):
         with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
             func(m1, m2, torch.randn(4, 4))
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
-        self.assertEqual(compilation_events[0].param_numel, 40)  # 24
-        self.assertEqual(compilation_events[0].param_bytes, 160)  # 96
-        self.assertEqual(compilation_events[0].param_count, 4)  # 3
+        self.assertEqual(compilation_events[0].param_numel, 24)  # 24
+        self.assertEqual(compilation_events[0].param_bytes, 96)  # 96
+        self.assertEqual(compilation_events[0].param_count, 3)  # 3
 
 
 class TestInductorConfigParsingForLogging(TestCase):

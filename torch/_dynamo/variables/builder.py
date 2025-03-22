@@ -1516,7 +1516,9 @@ class VariableBuilder:
     def wrap_module(self, value: torch.nn.Module):
         from ..eval_frame import OptimizedModule
 
-        if config.profile_params:
+        #if config.profile_params:
+        metrics_context = get_metrics_context()
+        if metrics_context.in_progress():
             try:
                 params = (
                     p
@@ -1527,10 +1529,11 @@ class VariableBuilder:
                 )
                 metrics_context = get_metrics_context()
                 for p in params:
-                    metrics_context.increment("param_numel_addr", id(p.data), p.numel())
-                    metrics_context.increment("param_bytes_addr", id(p.data), p.bytes())
-                    metrics_context.increment("param_count_addr", id(p.data), 1)
-            except (AttributeError, TypeError, RuntimeError):
+                    metrics_context.set_key_value("param_numel_addr", id(p), p.numel())
+                    metrics_context.set_key_value("param_bytes_addr", id(p), p.nbytes)
+                    metrics_context.set_key_value("param_count_addr", id(p), 1)
+            except (AttributeError, TypeError, RuntimeError) as e:
+                print(e)
                 # Fails for weird things without params, and cpp_frontend_extension.cpp.Net, which doesn't support remove_duplicate
                 # Fails for sparse tensors, as well as expanded weights
                 pass
