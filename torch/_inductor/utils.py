@@ -2727,12 +2727,12 @@ def set_kernel_post_grad_provenance_tracing(
     from .codegen.simd_kernel_features import DisableReduction, EnableReduction
     from .virtualized import V
 
-    for node in node_schedule:
-        if node not in (EnableReduction, DisableReduction):
-            if node.node is not None:
+    for snode in node_schedule:
+        if snode not in (EnableReduction, DisableReduction):
+            if snode.node is not None:
                 V.debug._inductor_triton_kernel_to_post_grad_node_info[kernel_name] = [
                     origin.name
-                    for origin in node.node.origins  # type: ignore[attr-defined]
+                    for origin in snode.node.origins  # type: ignore[attr-defined]
                 ]
 
 
