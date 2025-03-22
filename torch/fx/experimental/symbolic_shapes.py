@@ -6535,7 +6535,7 @@ class ShapeEnv:
         sloc, _ = self._get_stack_summary(framework_loc=framework_loc)
         return sloc
 
-    def _generate_unique_id(self, source_name) -> int:
+    def _generate_unique_id(self, source_name: str) -> int:
         attempt = int(hashlib.sha256(source_name.encode()).hexdigest(), 16) % 100
         while attempt in self.unique_ids:
             attempt += 1

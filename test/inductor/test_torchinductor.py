@@ -11812,7 +11812,7 @@ class CommonTemplate:
                 # 'i1 + 3 * i0' is cached.
                 self.assertTrue(
                     "i0 + 2 * i1" in mul_buf.data.inner_fn_str()
-                    or "i0 + i1 * s1" in mul_buf.data.inner_fn_str()
+                    or "i0 + i1 * s64" in mul_buf.data.inner_fn_str()
                 )
 
         with add_scheduler_init_hook(hook_fn):
@@ -12560,7 +12560,7 @@ class CommonTemplate:
         code = run_and_get_triton_code(f, x)
 
         if is_dynamic_shape_enabled():
-            FileCheck().check("assert_size_stride(buf1, (s0, s1), (s1, 1))").check(
+            FileCheck().check("assert_size_stride(buf1, (s77, s27), (s27, 1))").check(
                 "assert_size_stride(buf2, (s77, s27), (s27, 1))"
             ).run(code)
         else:

@@ -2703,7 +2703,7 @@ def forward(self, x):
                 for node in ebar.graph_module.graph.nodes
                 if node.op == "placeholder"
             ],
-            ["torch.Size([s0, s1, s1])", "torch.Size([s0, s1, s1])"],
+            ["torch.Size([s17, s27, s27])", "torch.Size([s17, s27, s27])"],
         )
 
     @torch._dynamo.config.patch(

@@ -4959,10 +4959,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1, arg7_1
 def forward(self, a_1, b_1):
     sum_1 = torch.ops.aten.sum.default(a_1)
     gt = torch.ops.aten.gt.Scalar(sum_1, 0);  sum_1 = None
-    sym_size_int = torch.ops.aten.sym_size.int(a_1, 0)
-    sym_size_int_1 = torch.ops.aten.sym_size.int(a_1, 1)
-    sym_size_int_2 = torch.ops.aten.sym_size.int(b_1, 0)
-    sym_size_int_3 = torch.ops.aten.sym_size.int(b_1, 1)
+    sym_size_int = torch.ops.aten.sym_size.int(a_1, 1)
+    sym_size_int_1 = torch.ops.aten.sym_size.int(b_1, 0)
+    sym_size_int_2 = torch.ops.aten.sym_size.int(b_1, 1)
+    sym_size_int_3 = torch.ops.aten.sym_size.int(a_1, 0)
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
     cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [a_1, b_1, sym_size_int, sym_size_int_1, sym_size_int_2, sym_size_int_3]);  gt = true_graph_0 = false_graph_0 = a_1 = b_1 = sym_size_int = sym_size_int_1 = sym_size_int_2 = sym_size_int_3 = None

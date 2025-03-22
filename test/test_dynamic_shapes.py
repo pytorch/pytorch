@@ -2846,8 +2846,8 @@ class TestGuardsExpressions(TestCase):
             ],
         )
 
-        self.assertEqual(f"{x.stride()}", "(s1, 1)")
-        self.assertEqual(f"{x.shape}", "torch.Size([s0, s1])")
+        self.assertEqual(f"{x.stride()}", "(s49, 1)")
+        self.assertEqual(f"{x.shape}", "torch.Size([s26, s49])")
 
         x_clean = _remove_symbols_without_guarding(x, 4096)
 
