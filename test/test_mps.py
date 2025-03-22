@@ -50,6 +50,16 @@ import operator
 test_consistency_op_db = copy.deepcopy(op_db)
 test_error_inputs_op_db = copy.deepcopy(op_db)
 
+# Add bicubic2d_aa to test_consistency_op_db
+for op in op_db:
+    if op.name != "_upsample_bilinear2d_aa":
+        continue
+    op = copy.deepcopy(op)
+    op.name = "_upsample_bicubic2d_aa"
+    op.op = torch.ops.aten._upsample_bicubic2d_aa
+    test_consistency_op_db.append(op)
+    break
+
 # Copied from `test_ops.py` for the purposes of duplicating `test_numpy_ref`
 _ref_test_ops = tuple(
     filter(
@@ -82,6 +92,7 @@ def mps_ops_grad_modifier(ops):
         '_segment_reduce': [torch.float16, torch.float32],
         '_chunk_cat': [torch.float16, torch.float32],
         '_upsample_bilinear2d_aa': None,  # `_upsample_bilinear2d_aa_backward_out` not implemented for MPS
+        '_upsample_bicubic2d_aa': None,  # `_upsample_bilinear2d_aa_backward_out` not implemented for MPS
         'sparse.mmreduce': [torch.float32],  # csr not supported
         'unique_consecutive': [torch.float16, torch.float32],
         'scalar_tensor': [torch.float16, torch.float32],
@@ -652,11 +663,7 @@ def mps_ops_modifier(ops):
         'special.hermite_polynomial_he': None,
         'special.laguerre_polynomial_l': None,
         'special.log_ndtr': None,
-        'special.modified_bessel_i1': None,
-        'special.modified_bessel_k0': None,
-        'special.modified_bessel_k1': None,
         'special.ndtri': None,
-        'special.scaled_modified_bessel_k0': None,
         'special.scaled_modified_bessel_k1': None,
         'svd_lowrank': None,
         'symeig': None,
@@ -667,6 +674,7 @@ def mps_ops_modifier(ops):
         'vdot': None,
         'segment_reduce_': None,
         '_upsample_bilinear2d_aa': [torch.uint8],  # uint8 is for CPU only
+        '_upsample_bicubic2d_aa': [torch.uint8],  # uint8 is for CPU only
         'geometric' : None,
         'geometric_': None,
         'log_normal_': None,
@@ -5483,6 +5491,39 @@ class TestMPS(TestCaseMPS):
         helper_dtype_float32(3, 3, 3)
         helper_dtype_float32(1, 1, 1)
 
+    @parametrize("dtype", [torch.float32, torch.float16])
+    def test_nanmedian(self, dtype):
+        def helper(n1, n2, n3, dtype, add_nans=False):
+            cpu_x = torch.randn(n1, n2, n3, device='cpu', dtype=dtype)
+
+            if add_nans and dtype in [torch.float32, torch.float16]:
+                nan_mask = torch.rand(n1, n2, n3) < 0.2
+                cpu_x = cpu_x.clone()
+                cpu_x[nan_mask] = float('nan')
+
+            mps_x = cpu_x.clone().to('mps')
+
+            y_cpu = torch.nanmedian(cpu_x)
+            y_mps = torch.nanmedian(mps_x)
+            self.assertEqual(y_cpu, y_mps)
+
+        # test with no nans(to test the caching of the graph and behaviour when there are no nans)
+        helper(10, 10, 10, dtype)
+        helper(3, 3, 3, dtype)
+        helper(1, 1, 1, dtype)
+        helper(1, 2, 3, dtype)
+        # test with some random nans added
+        helper(10, 10, 10, dtype, add_nans=True)
+        helper(3, 3, 3, dtype, add_nans=True)
+        helper(2, 2, 3, dtype, add_nans=True)
+
+        # mix of NaNs and regular values where a median would output 3.0 while nanmedian outputs 2.0
+        cpu_x = torch.tensor([float('nan'), 1.0, 2.0, float('nan'), 3.0], device='cpu', dtype=dtype)
+        mps_x = cpu_x.detach().clone().to('mps')
+        y_cpu = torch.nanmedian(cpu_x)
+        y_mps = torch.nanmedian(mps_x)
+        self.assertEqual(y_cpu, y_mps)
+
     def test_any(self):
         def helper(shape):
             input_xs = []
@@ -9257,7 +9298,6 @@ class TestNNMPS(NNTestCase):
         # This used to crash with MPSNDArrayConvolutionA14.mm:4352: failed assertion
         y2.sum().backward()
 
-    @unittest.skipIf(MACOS_VERSION < 13.2, "Skipped on macOS 12")
     def test_conv3d_backward_collision(self):
         # Conv3D is only available from MacOS 13.2 onwards
         x = torch.rand(1, 1, 10, 10, 20, device="mps", requires_grad=True)
@@ -11021,7 +11061,6 @@ class TestConvolutionMPS(TestCaseMPS):
             x_gpu = conv_gpu(y_gpu)
             self.assertEqual(x_cpu, x_gpu.cpu(), rtol=1e-03, atol=1e-05)
 
-    @unittest.skipIf(MACOS_VERSION < 13.2, "Skipped on macOS 12")
     def test_conv3d_single_stride(self):
         # Conv3d is only available from MacOS 13.2 onwards
         y_cpu = torch.randn(2, 2, 3, 6)
@@ -12602,11 +12641,10 @@ class TestConsistency(TestCaseMPS):
                 # in slight numerical differences
                 atol, rtol = 1, 0
 
-            if op.name == "_upsample_bilinear2d_aa" and cpu_kwargs.get("scale_factors") == [1.7, 0.9]:
+            if op.name in ["_upsample_bilinear2d_aa", "_upsample_bicubic2d_aa"] and cpu_kwargs.get("scale_factors") == [1.7, 0.9]:
                 # Similar to the above, float vs double precision aresults in slight error
                 atol, rtol = 2e-5, 2e-6
             self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
-
 
     @ops(mps_ops_grad_modifier(copy.deepcopy(test_consistency_op_db)), allowed_dtypes=MPS_GRAD_DTYPES)
     def test_output_grad_match(self, device, dtype, op):
