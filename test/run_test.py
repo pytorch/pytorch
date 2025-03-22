@@ -1627,6 +1627,8 @@ def handle_log_file(
         f"{test}_{os.urandom(8).hex()}_.log"
     )
     os.rename(file_path, REPO_ROOT / new_file)
+    # assert that the file was renamed
+    assert os.path.exists(REPO_ROOT / new_file), f"Failed to rename {file_path} to {new_file}"
 
     if not failed and not was_rerun and "=== RERUNS ===" not in full_text:
         # If success + no retries (idk how else to check for test level retries
@@ -1638,12 +1640,14 @@ def handle_log_file(
             if re.search("Running .* items in this shard:", line):
                 print_to_stderr(line.rstrip())
         print_to_stderr("")
+        count_log_files()
         return
 
     # otherwise: print entire file
     print_to_stderr(f"\nPRINTING LOG FILE of {test} ({new_file})")
     print_to_stderr(full_text)
     print_to_stderr(f"FINISHED PRINTING LOG FILE of {test} ({new_file})\n")
+    count_log_files()
 
 
 def get_pytest_args(options, is_cpp_test=False, is_distributed_test=False):
@@ -1693,6 +1697,7 @@ def run_ci_sanity_check(test: ShardedTest, test_directory, options):
     )
     ret_code = run_test(test, test_directory, options, print_log=False)
     # This test should fail
+    count_log_files()
     if ret_code != 1:
         return 1
     test_reports_dir = str(REPO_ROOT / "test/test-reports")
@@ -2392,6 +2397,13 @@ def check_pip_packages() -> None:
             sys.exit(1)
 
 
+def count_log_files() -> None:
+    """Count the number of log files in test/test-reports"""
+    test_reports_dir = str(REPO_ROOT / "test/test-reports")
+    num = len([f for f in os.listdir(test_reports_dir) if f.endswith(".log")])
+    print_to_stderr(f"There are {num} log files in {REPO_ROOT / 'test/test-reports'}")
+
+
 def main():
     check_pip_packages()
 
@@ -2522,6 +2534,7 @@ def main():
             gen_additional_test_failures_file(
                 [test.test_file for test, _ in all_failures]
             )
+    count_log_files()
 
     if len(all_failures):
         for _, err in all_failures:
