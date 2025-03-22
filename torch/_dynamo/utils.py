@@ -1233,6 +1233,7 @@ class CompilationMetrics:
     triton_kernel_compile_times_us: Optional[str] = None
     ir_count: Optional[int] = None
     cudagraph_skip_reason: Optional[str] = None
+    python_version: Optional[str] = None
 
     @classmethod
     def create(cls, metrics: dict[str, Any]):
@@ -1494,6 +1495,7 @@ def record_compilation_metrics(
         "triton_version": triton.__version__ if has_triton() else "",
         "remote_cache_version": remote_cache_version,
         "inductor_fx_remote_cache_backend_type": inductor_fx_remote_cache_backend_type,
+        "python_version": sys.version,
     }
 
     compilation_metrics = CompilationMetrics.create({**common_metrics, **metrics})
@@ -2861,7 +2863,7 @@ def same(
                     elif use_larger_multiplier_for_smaller_tensor and (
                         fp64_ref.numel() <= 500
                     ):
-                        multiplier = 5.0
+                        multiplier = 8.0
                     elif (
                         fp64_ref.numel() < 1000
                         or (ref.ndim == 4 and ref.shape[-1] == ref.shape[-2] == 1)
@@ -4474,3 +4476,41 @@ def get_optimize_ddp_mode():
         f"Invalid dynamo config optimize_ddp value {mode=}"
     )
     return mode
+
+
+@contextmanager
+def maybe_disable_inference_mode() -> Generator[None, None, None]:
+    """
+    Disables torch.inference_mode for the compilation (still on at runtime).
+    This simplifies the compile stack where we can assume that inference_mode
+    will always be off.
+
+    Since inference_mode is equivalent to no_grad + some optimizations (version
+    counts etc), we turn on no_grad here. The other optimizations are not
+    relevant to torch.compile.
+    """
+    is_inference_mode_on = (
+        config.fake_tensor_disable_inference_mode and torch.is_inference_mode_enabled()
+    )
+    if is_inference_mode_on:
+        with (
+            torch.inference_mode(False),
+            torch.no_grad(),
+        ):
+            yield
+    else:
+        yield
+
+
+@contextmanager
+def maybe_disable_inference_mode_for_fake_prop() -> Generator[None, None, None]:
+    """
+    Turns off tracking of inference_mode for fake tensor propagation. With this
+    context manager, when a real tensor is converted to fake tensor, the fake
+    tensor looses its inference-ness.
+    """
+    if config.fake_tensor_disable_inference_mode:
+        with torch._subclasses.meta_utils.disable_inference_mode_for_fake_prop():
+            yield
+    else:
+        yield
