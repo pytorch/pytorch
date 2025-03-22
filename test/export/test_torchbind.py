@@ -561,6 +561,40 @@ def forward(self, token, obj_attr, x):
     return (getitem_3, add_1)""",  # noqa: B950
         )
 
+    @parametrize("pre_dispatch", [True, False])
+    def test_custom_obj_unbacked_symint(self, pre_dispatch):
+        class MyModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.attr = torch.classes._TorchScriptTesting._Foo(2, 3)
+
+            def forward(self, x):
+                a = torch.ops._TorchScriptTesting.takes_foo_tensor_return(self.attr, x)
+                return a
+
+        input = torch.ones(2, 3)
+        ep = self._test_export_same_as_eager(
+            MyModule(), (input,), strict=False, pre_dispatch=pre_dispatch
+        )
+        gm = ep.module()
+        foo_node = next(
+            n
+            for n in gm.graph.nodes
+            if n.target == torch.ops._TorchScriptTesting.takes_foo_tensor_return.default
+        )
+        unbacked_bindings = foo_node.meta["unbacked_bindings"]
+        self.assertEqual(len(unbacked_bindings), 2)
+        u = next(iter(unbacked_bindings.keys()))
+        path = unbacked_bindings[u]
+        # the unbacked bindings should be CallMethodKey(name='size'), SequenceKey(idx=0)
+        # it should not include the effect token in the path
+        self.assertEqual(
+            type(u).__name__, "Symbol"
+        )  # check binding is symbol, not expr
+        self.assertEqual(len(path), 2)
+        self.assertEqual(path[0].name, "size")
+        self.assertEqual(path[1].idx, 0)
+
     @parametrize("make_fx_tracing_mode", ["fake", "symbolic"])
     def test_make_fx_tensor_queue_methods(self, make_fx_tracing_mode):
         test = self
@@ -1066,6 +1100,36 @@ graph():
 class TestCompileTorchbind(TestCase):
     def setUp(self):
         init_torchbind_implementations()
+
+        @torch._library.register_fake_class("_TorchScriptTesting::_TensorQueue")
+        class FakeTensorQueue:
+            def __init__(self, queue):
+                self.queue = queue
+
+            @classmethod
+            def __obj_unflatten__(cls, flattened_ctx):
+                return cls(**dict(flattened_ctx))
+
+            def push(self, x):
+                self.queue.append(x)
+
+            def pop(self):
+                return self.queue.pop(0)
+
+            def size(self):
+                return len(self.queue)
+
+        @torch._library.register_fake_class("_TorchScriptTesting::_FlattenWithTensorOp")
+        class FakeFlatten:
+            def __init__(self, t):
+                self.t = t
+
+            def get(self):
+                return self.t
+
+            @classmethod
+            def __obj_unflatten__(cls, flattened_ctx):
+                return cls(**dict(flattened_ctx))
 
         torch._dynamo.reset()
 

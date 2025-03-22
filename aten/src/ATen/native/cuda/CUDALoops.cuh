@@ -610,9 +610,6 @@ void gpu_kernel_impl(TensorIteratorBase& iter, const func_t& f) {
     // that enables interleaving.
     using float_map = c10::CppTypeToScalarType<float>;
     using bfloat16_map = c10::CppTypeToScalarType<BFloat16>;
-    int64_t grid =
-        (numel + vectorized_templated_config::block_work_size() - 1) /
-        vectorized_templated_config::block_work_size();
     if (iter.ninputs() == 2 && iter.input_dtype(0) == float_map::value &&
         iter.input_dtype(1) == bfloat16_map::value &&
         memory::can_vectorize_up_to<func_t>(data) > 1) {
