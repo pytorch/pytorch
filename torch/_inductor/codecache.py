@@ -1761,6 +1761,10 @@ class AotCodeCompiler:
             for custom_obj_idx, (name, constant) in enumerate(
                 graph.torchbind_constants.items()
             ):
+                if isinstance(
+                    constant, torch._library.fake_class_registry.FakeScriptObject
+                ):
+                    constant = constant.real_obj
                 assert isinstance(constant, torch._C.ScriptObject)
                 custom_obj_name = f"{CUSTOM_OBJ_FILENAME_PREFIX}{custom_obj_idx}"
 
@@ -2103,7 +2107,7 @@ class CppCodeCache:
             **cls.cpp_compile_command_flags,
             "device_type": device_type,
             "extra_flags": extra_flags,
-            "use_relative_path": config.is_fbcode() and device_type == "cpu",
+            "use_relative_path": config.is_fbcode(),
             "vec_isa": pick_vec_isa(),
         }
 
@@ -2989,6 +2993,8 @@ def _nvcc_compiler_options() -> list[str]:
     if arch == "90":
         # Required by cutlass compilation.
         arch = "90a"
+    if arch == "100":
+        arch = "100a"
     code = [f"sm_{arch}", f"compute_{arch}"]
     if config.cuda.enable_cuda_lto:
         code += [f"lto_{arch}"]

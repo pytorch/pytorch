@@ -903,7 +903,11 @@ def unload_xpu_triton_pyds() -> None:
                     kernel, torch._inductor.runtime.triton_heuristics.CachingAutotuner
                 ):
                     for result in kernel.compile_results:
-                        result.kernel.run.mod.__del__()
+                        if isinstance(
+                            result,
+                            torch._inductor.runtime.triton_heuristics.TritonCompileResult,
+                        ):
+                            result.kernel.run.mod.__del__()
         del sys.modules[module_name]
 
     # unload spirv_utils.pyd
@@ -2620,10 +2624,24 @@ def register_op_dtype_propagation_rules(
     )
 
 
+def get_current_backend() -> str:
+    from torch._inductor.virtualized import V
+
+    device_str = V.graph.get_current_device_or_throw().type
+    if device_str == "cpu":
+        return config.cpu_backend
+    elif device_str == "mps":
+        return "mps"
+    else:
+        return config.cuda_backend
+
+
 def upcast_compute_type(dtype: torch.dtype) -> torch.dtype:
     """Maybe upcast [b]float16 to float32"""
-    if config.triton.codegen_upcast_to_fp32 and (
+    if (
         dtype in (torch.float16, torch.bfloat16)
+        and config.triton.codegen_upcast_to_fp32
+        and get_current_backend() == "triton"
     ):
         return torch.float32
     return dtype
