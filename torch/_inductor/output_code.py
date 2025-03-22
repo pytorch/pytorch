@@ -137,10 +137,12 @@ def complex_memory_overlap(t: torch.Tensor) -> bool:
     return False
 
 
-def maybe_handle_backward_generation(compiled_graph: CompiledFxGraph) -> None:
+def maybe_handle_backward_generation(
+    compiled_graph: CompiledFxGraph,
+    boxed_forward_device_index: Optional[BoxedDeviceIndex],
+) -> None:
     assert compiled_graph.current_callable is not None
     is_backward = compiled_graph.fx_kwargs["is_backward"]
-    boxed_forward_device_index = compiled_graph.boxed_forward_device_index
 
     # See [Backward Generation Handling]
     # if cudagraph'd the forward and set the device, we need to let the cudagraph manager
@@ -164,7 +166,9 @@ def maybe_handle_backward_generation(compiled_graph: CompiledFxGraph) -> None:
 
 
 def prepare_cudagraph_post_compile(
-    compiled_graph: CompiledFxGraph, example_inputs: Sequence[InputType]
+    compiled_graph: CompiledFxGraph,
+    example_inputs: Sequence[InputType],
+    boxed_forward_device_index: Optional[BoxedDeviceIndex],
 ) -> None:
     if not config.triton.cudagraph_trees:
         # Force specialize all inputs so that CUDA graphs will work
@@ -172,7 +176,6 @@ def prepare_cudagraph_post_compile(
             if isinstance(t, torch.SymInt):
                 int(t)  # guard
 
-    boxed_forward_device_index = compiled_graph.boxed_forward_device_index
     is_inference = compiled_graph.fx_kwargs["is_inference"]
     is_backward = compiled_graph.fx_kwargs["is_backward"]
     if boxed_forward_device_index is not None and not is_inference and not is_backward:
@@ -205,7 +208,9 @@ def cudagraph_post_compile(
         placeholders = cached_info.placeholders
         stack_traces = cached_info.stack_traces
 
-        prepare_cudagraph_post_compile(compiled_graph, example_inputs)
+        prepare_cudagraph_post_compile(
+            compiled_graph, example_inputs, boxed_forward_device_index
+        )
 
         from .compile_fx import cudagraphify
 
@@ -225,7 +230,7 @@ def cudagraph_post_compile(
 
     else:
         BoxedBool.disable(cudagraphs)
-        maybe_handle_backward_generation(compiled_graph)
+        maybe_handle_backward_generation(compiled_graph, boxed_forward_device_index)
 
         if "cuda" in compiled_graph.device_types:
             # prefer better disable_cudagraphs_reason bc stack trace
@@ -245,6 +250,7 @@ def cudagraph_partition_post_compile(
     compiled_graph: CompiledFxGraph,
     cudagraphs: BoxedBool,
     constants: dict[str, torch.Tensor],
+    boxed_forward_device_index: Optional[BoxedDeviceIndex],
 ) -> None:
     """
     Cudagraphify each partition functions, which first prepares the necessary
@@ -263,7 +269,7 @@ def cudagraph_partition_post_compile(
     ):
         # cudagraphify is not called if there are no partitions
         BoxedBool.disable(cudagraphs)
-        maybe_handle_backward_generation(compiled_graph)
+        maybe_handle_backward_generation(compiled_graph, boxed_forward_device_index)
         return
 
     from .compile_fx import cudagraphify
@@ -284,7 +290,9 @@ def cudagraph_partition_post_compile(
         constants,
     )
 
-    prepare_cudagraph_post_compile(compiled_graph, example_inputs)
+    prepare_cudagraph_post_compile(
+        compiled_graph, example_inputs, boxed_forward_device_index
+    )
 
     # cudagraphify each partition function, assuming every graph partition function
     # is cudagraphable. Non-cudagraphable ops (e.g., cpu ops) are inlined into
@@ -585,25 +593,6 @@ class CompiledFxGraph(OutputCode):
                     counters["inductor"]["cudagraph_skips"] += 1
                 BoxedBool.disable(cudagraphs)
             else:
-<<<<<<< HEAD
-                if config.graph_partition:
-                    # with graph_partition=True, we skip some cudagraph checks if it's supported
-                    # with partition. So we have to use cudagraph_partition_post_compile.
-                    cudagraph_partition_post_compile(
-                        example_inputs,
-                        self,
-                        cudagraphs,
-                        constants.unwrap(self),
-                    )
-                else:
-                    cudagraph_post_compile(
-                        example_inputs,
-                        self,
-                        cudagraphs,
-                        constants.unwrap(self),
-                    )
-
-=======
                 if is_backward:
                     assert "boxed_forward_device_index" in graph_kwargs
                     boxed_forward_device_index = graph_kwargs[
@@ -615,14 +604,25 @@ class CompiledFxGraph(OutputCode):
                     boxed_forward_device_index = graph_kwargs.get(
                         "boxed_forward_device_index", None
                     )
-                cudagraph_post_compile(
-                    example_inputs,
-                    self,
-                    cudagraphs,
-                    constants.unwrap(self),
-                    boxed_forward_device_index,
-                )
->>>>>>> 5302cb5f72c (Use correct boxed_forward_device_index when running CompileFXGraph post compile)
+
+                if config.graph_partition:
+                    # with graph_partition=True, we skip some cudagraph checks if it's supported
+                    # with partition. So we have to use cudagraph_partition_post_compile.
+                    cudagraph_partition_post_compile(
+                        example_inputs,
+                        self,
+                        cudagraphs,
+                        constants.unwrap(self),
+                        boxed_forward_device_index,
+                    )
+                else:
+                    cudagraph_post_compile(
+                        example_inputs,
+                        self,
+                        cudagraphs,
+                        constants.unwrap(self),
+                        boxed_forward_device_index,
+                    )
         inputs_to_check = self.inputs_to_check
         # cudagraphs could have been disabled from the earlier conditions
         # so we still need to realign inputs if that happens
