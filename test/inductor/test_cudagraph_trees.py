@@ -2552,6 +2552,53 @@ if HAS_CUDA:
             self.assertEqual(self.get_manager().new_graph_id().id, 2)
 
         @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_padded_tensor(self):
+            try:
+                from . import padded_tensor
+            except ImportError:
+                import padded_tensor  # @manual
+
+            PaddedTensor = padded_tensor.PaddedTensor
+
+            def f(x):
+                x1 = x + 1
+                return x1 * 2
+
+            compiled_f = torch.compile(f, mode="reduce-overhead")
+
+            def run(shape):
+                x = torch.randn(*shape, device="cuda")
+                pad_x = PaddedTensor.from_tensor(x, multipliers={0: 4, 1: 4})
+                assert hasattr(pad_x, "multipliers"), breakpoint()
+                eager_out = f(pad_x)
+
+                for _ in range(3):
+                    compiled_out = compiled_f(pad_x)
+                compiled_out = compiled_f(pad_x)
+
+                assert eager_out.shape == compiled_out.shape
+                assert eager_out.tensor.shape == compiled_out.tensor.shape
+                assert torch.allclose(eager_out.tensor, compiled_out.tensor)
+
+            # static shape. record a NEW cudagraph
+            run((2, 3))
+            # outer shape is dynamic, leading to a new dynamo graph
+            # this new dynamo graph forces a NEW cudagraph
+            run((3, 4))
+            # outer shape changed but inner shape does not change
+            # so NO new cudagraph is recorded
+            run((2, 2))
+            # inner shape is dynamic now, leading to a new dynamo graph
+            # this new dynamo graph forces a NEW cudagraph
+            run((5, 6))
+            # does NOT record a new cudagraph
+            run((7, 8))
+            # record a NEW cudagraph
+            run((10, 11))
+
+            self.assertEqual(self.get_manager().new_graph_id().id, 4)
+
+        @torch._inductor.config.patch("graph_partition", True)
         @torch._inductor.config.patch("triton.cudagraphs", False)
         def test_graph_partition_reduce_overhead_mode_effectiveness(self):
             # test that `mode="reduce-overhead"` still controls whether
@@ -2709,6 +2756,43 @@ if HAS_CUDA:
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
             new_id = self.get_manager().new_graph_id().id
             self.assertEqual(new_id, 1)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_dynamic_shapes(self):
+            def foo(x):
+                return x + 1
+
+            compiled_foo = torch.compile(foo, mode="reduce-overhead", fullgraph=True)
+
+            for input_shape in range(1, 4):
+                for _ in range(3):
+                    compiled_foo(torch.randn(input_shape, device="cuda"))
+
+            # 3 cudagraphs for 3 input shapes
+            self.assertEqual(self.get_manager().new_graph_id().id, 3)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_cpu_op_and_dynamic_shapes(self):
+            def f(x, y):
+                x1 = x + 1
+                y1 = y + 1
+                y_cpu = y1.cpu() + 1
+                z = x @ y
+                return x1 + y1 + z + y_cpu.cuda()
+
+            f_compiled = torch.compile(f)
+            x, y = torch.ones(3, 3, device="cuda"), torch.randn(3, 3, device="cuda")
+            for _ in range(3):
+                compiled_out = f_compiled(x, y)
+                self.assertEqual(compiled_out, f(x, y))
+
+            x, y = torch.ones(4, 4, device="cuda"), torch.randn(4, 4, device="cuda")
+            for _ in range(3):
+                compiled_out = f_compiled(x, y)
+                self.assertEqual(compiled_out, f(x, y))
+
+            # 4 cudagraphs, due to (2 dynamic shapes) x (2 graph partitions)
+            self.assertEqual(self.get_manager().new_graph_id().id, 4)
 
     class TestSAC(TestCase):
         def _make_observer_mode(self):
