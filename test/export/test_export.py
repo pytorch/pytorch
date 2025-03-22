@@ -4237,8 +4237,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             fixes=[
                 # Could not guard on data-dependent expression Eq((u0//2), 0)
                 "torch._check((i // 2) != 0)",
-                # Could not guard on data-dependent expression Eq((u0//2), 1)
-                "torch._check((i // 2) != 1)",
             ],
         )
 
@@ -11081,9 +11079,10 @@ def forward(self, x):
                 self.max_num_tiles = max_num_tiles
                 scale = 32**-0.5
                 self.embedding = torch.nn.Parameter(
-                    scale * torch.randn(max_num_tiles, max_num_tiles, 1, 32)
+                    scale * torch.randn(max_num_tiles, max_num_tiles, 1, 32),
+                    requires_grad=False,
                 )
-                self.gate = torch.nn.Parameter(torch.zeros(1))
+                self.gate = torch.nn.Parameter(torch.zeros(1), requires_grad=False)
 
             def forward(self, x, y):
                 n_tiles_h, n_tiles_w = y[0]
