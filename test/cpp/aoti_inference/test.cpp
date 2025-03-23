@@ -14,6 +14,7 @@
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cpu.h>
 #if defined(USE_CUDA)
 #include <cuda_runtime.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 #endif
 #if defined(USE_CUDA) || defined(USE_ROCM)
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cuda.h>
@@ -327,8 +328,10 @@ void test_aoti_double_buffering_with_tensor_constants() {
   ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
 }
 
-void test_aoti_free_buffer() {
+void test_aoti_free_buffer(bool use_runtime_constant_folding) {
   torch::NoGradGuard no_grad;
+  size_t allocated, reserved, active;
+  c10::cuda::CUDACachingAllocator::DeviceStats stats = c10::cuda::CUDACachingAllocator::getDeviceStats(0);
 
   std::string data_path =
       (std::filesystem::path(
@@ -338,9 +341,13 @@ void test_aoti_free_buffer() {
   // Memory information variable
   cudaError_t cudaStatus;
   size_t DATASIZE = 128 * 1024 * 1024; // We have 128MB of weight data.
+  size_t FOLDEDDATASIZE = use_runtime_constant_folding ? 64 * 1024 * 1024 : 0; // We have 64MB of folded data.
 
   torch::jit::script::Module data_loader = torch::jit::load(data_path);
   std::string path_attr = "model_so_path";
+  if (use_runtime_constant_folding) {
+    path_attr += std::string("_use_runtime_constant_folding");
+  }
   std::string inputs_attr = "inputs";
   std::string outputs_attr = "outputs";
   std::string weights_attr = "w_pre";
@@ -365,7 +372,8 @@ void test_aoti_free_buffer() {
   runner = std::make_unique<torch::inductor::AOTIModelContainerRunnerCuda>(
       model_so_path);
 
-  // We extract the initial memory here.
+  // We extract the initial free memory here.
+  // This should contain one set of weight (128MB) loaded from .so
   size_t initMemory = 0;
   size_t totalMemory = 0;
   cudaStatus = cudaMemGetInfo(&initMemory, &totalMemory);
@@ -382,7 +390,19 @@ void test_aoti_free_buffer() {
   }
   ASSERT_EQ(initMemory - DATASIZE, updateMemory2);
 
+  // Call run, this should run const_fold and create the folded constant in #2 (64MB).
+  if (use_runtime_constant_folding) {
+    runner->run_const_fold(/* use_inactive = */ true);
+    size_t constFoldMemory = 0;
+    cudaStatus = cudaMemGetInfo(&constFoldMemory, &totalMemory);
+    if (cudaStatus != cudaSuccess) {
+      throw std::runtime_error("cudaMemGetInfo failed!");
+    }
+    ASSERT_EQ(initMemory - DATASIZE - FOLDEDDATASIZE, constFoldMemory);
+  }
+
   // We swap and free the inactive buffer. (Use #2 and free #1)
+  // Note that buffer #1 do not include folded-const
   runner->swap_constant_buffer();
   runner->free_inactive_constant_buffer();
   size_t postFreeMemory = 0;
@@ -390,26 +410,38 @@ void test_aoti_free_buffer() {
   if (cudaStatus != cudaSuccess) {
     throw std::runtime_error("cudaMemGetInfo failed!");
   }
-  // We should only have one set of buffer (#2), memory used should equal
-  // initial memory.
-  ASSERT_EQ(initMemory, postFreeMemory);
+  // We should only have one set of buffer (#2), available memory should equal
+  // initial memory minus the folded constants. 
+  ASSERT_EQ(initMemory - FOLDEDDATASIZE, postFreeMemory);
 
-  // We update random weights to buffer #1.
+  // We update random weights to buffer #1 and run const fold.
+  // We will have 2 full set of data plus 2 set of const-folded data.
   runner->update_inactive_constant_buffer(rand_map);
+  runner->run_const_fold(/* use_inactive = */ true);
   size_t updateMemory1 = 0;
   cudaStatus = cudaMemGetInfo(&updateMemory1, &totalMemory);
   if (cudaStatus != cudaSuccess) {
     throw std::runtime_error("cudaMemGetInfo failed!");
   }
-  ASSERT_EQ(initMemory - DATASIZE, updateMemory1);
+  ASSERT_EQ(initMemory - DATASIZE - 2 * FOLDEDDATASIZE, updateMemory1);
 
-  // Test if we directly free the buffer #1.
+  // We directly free the buffer #1. This would free the DATASIZE weight.
+  // If folded constant exists, it will not directly free the cudaMalloc, but lower the active buffer in CachingAllocator instead.
+  size_t active1, active2;
+  size_t allocated1, allocated2;
+  stats = c10::cuda::CUDACachingAllocator::getDeviceStats(0);
+  active1 = stats.active_bytes[0].current;
+  allocated1 = stats.allocated_bytes[0].current;
   runner->free_inactive_constant_buffer();
   cudaStatus = cudaMemGetInfo(&updateMemory1, &totalMemory);
   if (cudaStatus != cudaSuccess) {
     throw std::runtime_error("cudaMemGetInfo failed!");
   }
-  ASSERT_EQ(initMemory, updateMemory1);
+  stats = c10::cuda::CUDACachingAllocator::getDeviceStats(0);
+  active2 = stats.active_bytes[0].current;
+  allocated2 = stats.allocated_bytes[0].current;
+  ASSERT_EQ(initMemory - 2 * FOLDEDDATASIZE, updateMemory1);
+  ASSERT_EQ(FOLDEDDATASIZE, active1 - active2);
 
   // Free buffer #1 again, since #1 is freed, nothing should change.
   runner->free_inactive_constant_buffer();
@@ -417,7 +449,21 @@ void test_aoti_free_buffer() {
   if (cudaStatus != cudaSuccess) {
     throw std::runtime_error("cudaMemGetInfo failed!");
   }
-  ASSERT_EQ(initMemory, updateMemory1);
+  ASSERT_EQ(initMemory - 2 * FOLDEDDATASIZE, updateMemory1);
+  ASSERT_EQ(FOLDEDDATASIZE, active1 - active2);
+
+  // Swap and free #2, no data should exist in memory now.
+  // However, the folded constants still occupies the CUDA memory in CachedAllocator.
+  runner->swap_constant_buffer();
+  runner->free_inactive_constant_buffer();
+  stats = c10::cuda::CUDACachingAllocator::getDeviceStats(0);
+  active2 = stats.active_bytes[0].current;
+  cudaStatus = cudaMemGetInfo(&updateMemory1, &totalMemory);
+  if (cudaStatus != cudaSuccess) {
+    throw std::runtime_error("cudaMemGetInfo failed!");
+  }
+  ASSERT_EQ(initMemory + DATASIZE - 2 * FOLDEDDATASIZE, updateMemory1);
+  ASSERT_EQ(2 * FOLDEDDATASIZE, active1 - active2);
 }
 
 class ThreadPool {
@@ -612,7 +658,11 @@ TEST(AotInductorTest, UpdateInactiveConstantsWithTensorConstantsCuda) {
 }
 
 TEST(AotInductorTest, FreeInactiveConstantBufferCuda) {
-  test_aoti_free_buffer();
+  test_aoti_free_buffer(false);
+}
+
+TEST(AotInductorTest, FreeInactiveConstantBufferRuntimeConstantFoldingCuda) {
+  test_aoti_free_buffer(true);
 }
 
 TEST(AotInductorTest, MultiStreamTestCuda) {
