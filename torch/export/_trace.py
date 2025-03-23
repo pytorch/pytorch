@@ -1,6 +1,7 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import dataclasses
+import sys
 import functools
 import inspect
 import logging
@@ -1096,6 +1097,13 @@ def _log_export_wrapper(fn):
                     message=str(e),
                     flags=_EXPORT_FLAGS,
                 )
+
+            if hasattr(e, 'partial_fx_graph'):
+                print(
+                    e.partial_fx_graph,
+                    file=sys.stderr,
+                )
+
             raise e
         finally:
             _EXPORT_FLAGS = None
