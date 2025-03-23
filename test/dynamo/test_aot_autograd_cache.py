@@ -195,7 +195,6 @@ class AOTAutogradCacheTests(InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
 
-
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
