@@ -1658,8 +1658,7 @@
 
 - func: complex.out(Tensor real, Tensor imag, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA: complex_out
-    MPS: complex_out_mps
+    CPU, CUDA, MPS: complex_out
 
 - func: polar(Tensor abs, Tensor angle) -> Tensor
   variants: function
@@ -1668,8 +1667,7 @@
 
 - func: polar.out(Tensor abs, Tensor angle, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA: polar_out
-    MPS: polar_out_mps
+    CPU, CUDA, MPS: polar_out
 
 - func: constant_pad_nd(Tensor self, SymInt[] pad, Scalar value=0) -> Tensor
   variants: function
@@ -11799,7 +11797,7 @@
   structured_delegate: elu.out
   device_check: NoCheck   # TensorIterator
   python_module: nn
-  tags: pointwise
+  tags: [core, pointwise]
 
 - func: elu_backward.grad_input(Tensor grad_output, Scalar alpha, Scalar scale, Scalar input_scale, bool is_result, Tensor self_or_result, *, Tensor(a!) grad_input) -> Tensor(a!)
   structured: True
@@ -15501,7 +15499,7 @@
 
 - func: special_scaled_modified_bessel_k0.out(Tensor x, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA: special_scaled_modified_bessel_k0_out
+    CPU, CUDA, MPS: special_scaled_modified_bessel_k0_out
   python_module: special
   structured_inherits: TensorIteratorBase
   structured: True

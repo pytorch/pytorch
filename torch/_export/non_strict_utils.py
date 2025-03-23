@@ -3,6 +3,7 @@ import contextlib
 import inspect
 import logging
 from collections import defaultdict
+from collections.abc import Sequence
 from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import torch
@@ -533,7 +534,7 @@ def _fakify_module_inputs(
 @contextlib.contextmanager
 def _fakify_script_objects(
     mod: torch.nn.Module,
-    args: tuple[Any],
+    args: Sequence[Any],
     kwargs: dict[Any, Any],
     fake_mode: torch._subclasses.fake_tensor.FakeTensorMode,
 ):
