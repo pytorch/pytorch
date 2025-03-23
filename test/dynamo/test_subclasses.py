@@ -1388,21 +1388,21 @@ class GraphModule(torch.nn.Module):
         # During fakeifying, we end up allocating a separate symint
         # for the outer and inner tensor (in this test, s0 is unused).
         expected_var_to_val = {
-            "s0": 8,
-            "s1": 4,
+            "s50": 4,
+            "s77": 8,
         }
         expected_var_to_sources = {
-            "s0": "L['x'].size()[0]",
-            "s1": "L['x'].inner_elem.size()[0]",
+            "s50": "L['x'].inner_elem.size()[0]",
+            "s77": "L['x'].size()[0]",
         }
         self.assertEqual(curr_var_to_val, expected_var_to_val)
         self.assertEqual(curr_var_to_sources, expected_var_to_sources)
         self.assertExpectedInline(
             "\n".join(guards),
             """\
-Eq(2*s1, s0)
-2*s1 < 13
-s1 > 3""",
+Eq(2*s50, s77)
+2*s50 < 13
+s50 > 3""",
         )
 
     def test_wrapper_subclass_with_same_sized_inner_tensor(self):

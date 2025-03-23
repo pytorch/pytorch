@@ -4953,7 +4953,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 for node in efoo.graph_module.graph.nodes
                 if node.op == "placeholder"
             ],
-            ["torch.Size([s0, 2, 3])", "torch.Size([s0, 3, 4])"],
+            ["torch.Size([s64, 2, 3])", "torch.Size([s64, 3, 4])"],
         )
 
     @testing.expectedFailureCppSerDes

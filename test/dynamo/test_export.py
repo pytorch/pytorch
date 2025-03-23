@@ -3480,23 +3480,23 @@ def forward(self, x):
         true_graph = """\
 class GraphModule(torch.nn.Module):
     def forward(self, pred, x):
-        arg1: "f32[s1, s2]";
+        arg1: "f32[s77, s27]";
 
         arg0, arg1, = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
         l_x_ = arg1
 
-        sin: "f32[s1, s2]" = l_x_.sin();  l_x_ = None
+        sin: "f32[s77, s27]" = l_x_.sin();  l_x_ = None
         return pytree.tree_unflatten([sin], self._out_spec)
 """
         false_graph = """\
 class GraphModule(torch.nn.Module):
     def forward(self, pred, x):
-        arg1: "f32[s1, s2]";
+        arg1: "f32[s77, s27]";
 
         arg0, arg1, = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
         l_x_ = arg1
 
-        cos: "f32[s1, s2]" = l_x_.cos();  l_x_ = None
+        cos: "f32[s77, s27]" = l_x_.cos();  l_x_ = None
         return pytree.tree_unflatten([cos], self._out_spec)
 """
         true_guard_code = [

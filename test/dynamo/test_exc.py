@@ -251,39 +251,39 @@ translation validation failed.
 
 Model:
   ==> L['shape'][0]: 0
-  ==> L['shape'][1]: 1
-  ==> L['shape'][2]: 1
+  ==> L['shape'][1]: 0
+  ==> L['shape'][2]: 0
   ==> L['x'].size()[0]: 3
   ==> L['x'].storage_offset(): 0
   ==> L['x'].stride()[0]: 1
-  ==> s0: 3
-  ==> s1: 0
-  ==> s2: 1
-  ==> s3: 1
+  ==> s3: 0
+  ==> s52: 0
+  ==> s77: 3
+  ==> s86: 0
 
 Assertions:
   ==> (== 0 L['x'].storage_offset())
   ==> (== 1 L['x'].stride()[0])
-  ==> (== L['shape'][0] s1)
-  ==> (== L['shape'][1] s2)
+  ==> (== L['shape'][0] s86)
+  ==> (== L['shape'][1] s52)
   ==> (== L['shape'][2] s3)
-  ==> (== L['x'].size()[0] s0)
-  ==> (> s0 1)
+  ==> (== L['x'].size()[0] s77)
+  ==> (> s77 1)
 
 Target Expressions:
-  ==> (!= (+ s1 s2 s3) s0)
-  ==> (<= 0 s1)
-  ==> (<= 0 s2)
+  ==> (!= (+ s3 s52 s86) s77)
   ==> (<= 0 s3)
-  ==> (<= 2 s0)
+  ==> (<= 0 s52)
+  ==> (<= 0 s86)
+  ==> (<= 2 s77)
   ==> (== 0 L['x'].storage_offset())
   ==> (== 1 L['x'].stride()[0])
-  ==> (== L['shape'][0] s1)
-  ==> (== L['shape'][1] s2)
+  ==> (== L['shape'][0] s86)
+  ==> (== L['shape'][1] s52)
   ==> (== L['shape'][2] s3)
-  ==> (== L['x'].size()[0] s0)
-  ==> (> s0 0)
-  ==> (>= 0 s1)
+  ==> (== L['x'].size()[0] s77)
+  ==> (> s77 0)
+  ==> (>= 0 s86)
 
 Failed Source Expressions:
   ==> (== (+ L['shape'][0] L['shape'][1] L['shape'][2]) L['x'].size()[0])""",
@@ -309,45 +309,45 @@ Failed Source Expressions:
             BisectValidationException,
             lambda: fn(torch.randn(20), (5, 10, 5)),
             """\
-translation validation failed when evaluating: Eq(s1 + s2 + s3, s0)
+translation validation failed when evaluating: Eq(s3 + s52 + s86, s77)
 
 Failure occurred while running node:
     %split : [num_users=3] = call_method[target=split](args = (%l_x_, (%l_shape_0_, %l_shape_1_, %l_shape_2_)), kwargs = {})
 
 Model:
-  ==> L['shape'][0]: 1
-  ==> L['shape'][1]: 1
+  ==> L['shape'][0]: 0
+  ==> L['shape'][1]: 0
   ==> L['shape'][2]: 0
   ==> L['x'].size()[0]: 3
   ==> L['x'].storage_offset(): 0
   ==> L['x'].stride()[0]: 1
-  ==> s0: 3
-  ==> s1: 1
-  ==> s2: 1
   ==> s3: 0
+  ==> s52: 0
+  ==> s77: 3
+  ==> s86: 0
 
 Assertions:
   ==> (== 0 L['x'].storage_offset())
   ==> (== 1 L['x'].stride()[0])
-  ==> (== L['shape'][0] s1)
-  ==> (== L['shape'][1] s2)
+  ==> (== L['shape'][0] s86)
+  ==> (== L['shape'][1] s52)
   ==> (== L['shape'][2] s3)
-  ==> (== L['x'].size()[0] s0)
-  ==> (> s0 1)
+  ==> (== L['x'].size()[0] s77)
+  ==> (> s77 1)
 
 Target Expressions:
-  ==> (!= (+ s1 s2 s3) s0)
-  ==> (<= 0 s1)
-  ==> (<= 0 s2)
+  ==> (!= (+ s3 s52 s86) s77)
   ==> (<= 0 s3)
-  ==> (<= 2 s0)
+  ==> (<= 0 s52)
+  ==> (<= 0 s86)
+  ==> (<= 2 s77)
   ==> (== 0 L['x'].storage_offset())
   ==> (== 1 L['x'].stride()[0])
-  ==> (== L['shape'][0] s1)
-  ==> (== L['shape'][1] s2)
+  ==> (== L['shape'][0] s86)
+  ==> (== L['shape'][1] s52)
   ==> (== L['shape'][2] s3)
-  ==> (== L['x'].size()[0] s0)
-  ==> (> s0 0)
+  ==> (== L['x'].size()[0] s77)
+  ==> (> s77 0)
 
 Failed Source Expressions:
   ==> (== (+ L['shape'][0] L['shape'][1] L['shape'][2]) L['x'].size()[0])""",

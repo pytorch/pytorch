@@ -539,8 +539,8 @@ def forward(self, x):
         ep.range_constraints[symint] = ValueRanges(lower=lower_range, upper=upper_range)
 
         serialized = ExportedProgramSerializer().serialize(ep)
-        self.assertEqual(serialized.exported_program.range_constraints["s0"].min_val, 2)
-        self.assertEqual(serialized.exported_program.range_constraints["s0"].max_val, 3)
+        self.assertEqual(serialized.exported_program.range_constraints["s77"].min_val, 2)
+        self.assertEqual(serialized.exported_program.range_constraints["s77"].max_val, 3)
 
     def test_kwargs_default(self) -> None:
         """
