@@ -5467,7 +5467,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             if node.op == "placeholder"
         ]
         self.assertEqual(len(input_shapes), 9)
-        self.assertTrue(all(shape == "torch.Size([s0])" for shape in input_shapes))
+        self.assertTrue(all(shape == "torch.Size([s3])" for shape in input_shapes))
 
     def test_error_does_not_reference_eager_fallback(self):
         class Module(torch.nn.Module):
