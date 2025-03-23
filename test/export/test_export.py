@@ -5097,10 +5097,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
         for node in efoo.graph_module.graph.nodes:
             if node.op == "placeholder":
-                self.assertEqual(
-                    node.meta["val"].shape[1],
-                    node.meta["val"].shape[2]
-                )
+                self.assertEqual(node.meta["val"].shape[1], node.meta["val"].shape[2])
         self.assertEqual(efoo.module()(*inputs).shape, foo(*inputs).shape)
 
         # pass dynamic shapes of inputs [multiple, mostly distinct]
