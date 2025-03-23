@@ -281,29 +281,27 @@ COMMON_HIPCC_FLAGS = [
     '-D__HIP_NO_HALF_CONVERSIONS__=1',
 ]
 
-_COMMON_SYCL_FLAGS = [
-    '-fsycl',
-]
-
-def _get_sycl_arch_flags():
+def _get_sycl_arch_list():
+    if 'TORCH_XPU_ARCH_LIST' in os.environ:
+        return os.environ.get('TORCH_XPU_ARCH_LIST')
     arch_list = torch.xpu.get_arch_list()
     # Dropping dg2* archs since they lack hardware support for fp64 and require
     # special consideration from the user. If needed these platforms can
     # be requested thru TORCH_XPU_ARCH_LIST environment variable.
     arch_list = [x for x in arch_list if not x.startswith('dg2')]
-    if len(arch_list) == 0:
-        return []
-    else:
-        return ['-fsycl-targets=spir64_gen,spir64',
-                '-flink-huge-device-code',
-                f'-Xs "-device {",".join(arch_list)}"']
+    return ','.join(arch_list)
+
+_COMMON_SYCL_FLAGS = [
+    '-fsycl',
+    '-fsycl-targets=spir64_gen,spir64' if _get_sycl_arch_list() != '' else '',
+]
 
 _SYCL_DLINK_FLAGS = [
     *_COMMON_SYCL_FLAGS,
     '-fsycl-link',
     '--offload-compress',
+    f'-Xs "-device {_get_sycl_arch_list()}"' if _get_sycl_arch_list() != '' else '',
 ]
-_SYCL_DLINK_FLAGS += _get_sycl_arch_flags()
 
 JIT_EXTENSION_VERSIONER = ExtensionVersioner()
 
