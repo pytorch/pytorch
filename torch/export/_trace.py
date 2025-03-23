@@ -1,11 +1,11 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import dataclasses
-import sys
 import functools
 import inspect
 import logging
 import re
+import sys
 import time
 import warnings
 from contextlib import contextmanager, nullcontext
@@ -1098,7 +1098,7 @@ def _log_export_wrapper(fn):
                     flags=_EXPORT_FLAGS,
                 )
 
-            if hasattr(e, 'partial_fx_graph'):
+            if hasattr(e, "partial_fx_graph"):
                 print(
                     e.partial_fx_graph,
                     file=sys.stderr,

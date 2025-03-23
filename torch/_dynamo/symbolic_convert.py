@@ -1347,7 +1347,7 @@ class InstructionTranslatorBase(
                     ).print_readable(
                         print_output=False, include_stride=True, include_device=True
                     )
-                    e.partial_fx_graph = readable_graph
+                    e.partial_fx_graph = readable_graph  # type: ignore[attr-defined]
                     raise
 
                 raise

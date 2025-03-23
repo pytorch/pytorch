@@ -846,7 +846,7 @@ class Tracer(TracerBase):
                     root_module="self",
                     verbose=True,
                 ).src
-                e.partial_fx_graph = partial_fx_graph
+                e.partial_fx_graph = partial_fx_graph  # type: ignore[attr-defined]
                 raise
 
             raise
