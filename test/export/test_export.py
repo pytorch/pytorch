@@ -5112,10 +5112,10 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             dynamic_shapes={"x": (batch, M, K), "y": (batch, K, N)},
         )
         placeholders = [
-            node.meta["val"].shape,
+            node.meta["val"].shape
             for node in efoo.graph_module.graph.nodes
             if node.op == "placeholder"
-        ],
+        ]
         self.assertEqual(
             placeholders[0][2],
             placeholders[1][1],
