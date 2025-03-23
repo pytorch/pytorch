@@ -7048,7 +7048,7 @@ class ShapeEnv:
             # If you're here because of this assert, read Note [Backwards runtime asserts]
             # in torch/_inductor/graph.py
             if self.runtime_asserts_frozen:
-                log.warning("runtime_asserts_frozen but then got %s", expr)
+                log.debug("runtime_asserts_frozen but then got %s", expr)
             self._check_frozen(expr, sympy.true)
             # eliminate symbols on equality tests / refine ranges
             if isinstance(expr, sympy.Rel):
