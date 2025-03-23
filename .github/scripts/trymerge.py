@@ -485,7 +485,7 @@ def get_check_run_name_prefix(workflow_run: Any) -> str:
     if workflow_run is None:
         return ""
     else:
-        return f'{workflow_run["workflow"]["name"]} / '
+        return f"{workflow_run['workflow']['name']} / "
 
 
 def is_passing_status(status: Optional[str]) -> bool:
@@ -545,7 +545,7 @@ def add_workflow_conclusions(
                     if not isinstance(checkrun_node, dict):
                         warn(f"Expected dictionary, but got {type(checkrun_node)}")
                         continue
-                    checkrun_name = f'{get_check_run_name_prefix(workflow_run)}{checkrun_node["name"]}'
+                    checkrun_name = f"{get_check_run_name_prefix(workflow_run)}{checkrun_node['name']}"
                     existing_checkrun = workflow_obj.jobs.get(checkrun_name)
                     if existing_checkrun is None or not is_passing_status(
                         existing_checkrun.status
@@ -819,10 +819,9 @@ class GitHubPR:
                     cursor=info["reviews"]["pageInfo"]["startCursor"],
                 )
                 info = rc["data"]["repository"]["pullRequest"]
-        reviews = {}
-        for author, state in self._reviews:
-            if state != "COMMENTED":
-                reviews[author] = state
+        reviews = {
+            author: state for author, state in self._reviews if state != "COMMENTED"
+        }
         return list(reviews.items())
 
     def get_approved_by(self) -> list[str]:
@@ -1224,9 +1223,17 @@ class GitHubPR:
         if not self.is_ghstack_pr():
             msg = self.gen_commit_message()
             pr_branch_name = f"__pull-request-{self.pr_num}__init__"
-            repo.fetch(f"pull/{self.pr_num}/head", pr_branch_name)
+            repo.fetch(self.last_commit()["oid"], pr_branch_name)
             repo._run_git("merge", "--squash", pr_branch_name)
             repo._run_git("commit", f'--author="{self.get_author()}"', "-m", msg)
+
+            # Did the PR change since we started the merge?
+            pulled_sha = repo.show_ref(pr_branch_name)
+            latest_pr_status = GitHubPR(self.org, self.project, self.pr_num)
+            if pulled_sha != latest_pr_status.last_commit()["oid"]:
+                raise RuntimeError(
+                    "PR has been updated since CI checks last passed. Please rerun the merge command."
+                )
             return []
         else:
             return self.merge_ghstack_into(
@@ -2274,7 +2281,8 @@ def merge(
         except MandatoryChecksMissingError as ex:
             last_exception = str(ex)
             print(
-                f"Merge of https://github.com/{pr.org}/{pr.project}/pull/{pr.pr_num} failed due to: {ex}. Retrying in 5 min"
+                f"Merge of https://github.com/{pr.org}/{pr.project}/pull/{pr.pr_num} failed due to: {ex}. Retrying in 5 min",
+                flush=True,
             )
             time.sleep(5 * 60)
     # Finally report timeout back

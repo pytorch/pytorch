@@ -1006,9 +1006,9 @@ def latency_experiment_summary(suite_name, args, model, timings, **kwargs):
         row,
     )
     c_headers, c_data = torch._dynamo.utils.compile_times(repr="csv", aggregate=True)
-    assert (
-        output_filename.find(".csv") > 0
-    ), f"expected output_filename to be a .csv, but got {output_filename}"
+    assert output_filename.find(".csv") > 0, (
+        f"expected output_filename to be a .csv, but got {output_filename}"
+    )
     write_outputs(
         output_filename[:-4] + "_compilation_metrics.csv",
         first_headers + c_headers,
@@ -1182,9 +1182,9 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         row,
     )
     c_headers, c_data = torch._dynamo.utils.compile_times(repr="csv", aggregate=True)
-    assert (
-        output_filename.find(".csv") > 0
-    ), f"expected output_filename to be a .csv, but got {output_filename}"
+    assert output_filename.find(".csv") > 0, (
+        f"expected output_filename to be a .csv, but got {output_filename}"
+    )
     write_outputs(
         output_filename[:-4] + "_compilation_metrics.csv",
         first_headers + c_headers,
@@ -1408,7 +1408,7 @@ class AOTInductorModelCache:
     def load(cls, model, example_inputs):
         import torch._inductor
         import torch.export._trace
-        from torch.export.dynamic_shapes import _tree_map_with_path
+        from torch.export.dynamic_shapes import _combine_args, _tree_map_with_path
 
         key = weakref.ref(model)
         if key not in cls.cache:
@@ -1428,7 +1428,7 @@ class AOTInductorModelCache:
             else:
                 _register_dataclass_output_as_pytree(example_outputs)
 
-            combined_args = tuple(example_args) + tuple(example_kwargs.values())
+            combined_args = _combine_args(model, example_args, example_kwargs)
             dynamic_shapes = _tree_map_with_path(
                 _produce_dynamic_shapes_for_export, combined_args
             )
@@ -1449,13 +1449,13 @@ class AOTInductorModelCache:
 
 
 def export(model, example_inputs):
-    from torch.export.dynamic_shapes import _tree_map_with_path
+    from torch.export.dynamic_shapes import _combine_args, _tree_map_with_path
 
     example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
     example_outputs = model(*example_args, **example_kwargs)
     _register_dataclass_output_as_pytree(example_outputs)
 
-    combined_args = tuple(example_args) + tuple(example_kwargs.values())
+    combined_args = _combine_args(model, example_args, example_kwargs)
     dynamic_shapes = _tree_map_with_path(
         _produce_dynamic_shapes_for_export, combined_args
     )
@@ -1825,6 +1825,14 @@ class BenchmarkRunner:
         return set()
 
     @property
+    def skip_models_due_to_export_not_supported(self):
+        return set()
+
+    @property
+    def disable_cudagraph_models(self):
+        return set()
+
+    @property
     def guard_on_nn_module_models(self):
         return set()
 
@@ -1997,16 +2005,16 @@ class BenchmarkRunner:
     def deepcopy_and_maybe_parallelize(self, model):
         model = self.deepcopy_model(model)
         if self.args.ddp:
-            assert (
-                torch.distributed.is_available()
-            ), "Can't use DDP without a distributed enabled build"
+            assert torch.distributed.is_available(), (
+                "Can't use DDP without a distributed enabled build"
+            )
             from torch.nn.parallel import DistributedDataParallel as DDP
 
             model = DDP(model, find_unused_parameters=True)
         elif self.args.fsdp:
-            assert (
-                torch.distributed.is_available()
-            ), "Can't use FSDP without a distributed enabled build"
+            assert torch.distributed.is_available(), (
+                "Can't use FSDP without a distributed enabled build"
+            )
             from torch.distributed.fsdp import (
                 FullyShardedDataParallel as FSDP,
                 MixedPrecision,
@@ -2375,9 +2383,9 @@ class BenchmarkRunner:
         self, name, model, example_inputs, optimize_ctx, experiment, tag=None
     ):
         "Run performance test in non-alternately."
-        assert (
-            experiment.func is latency_experiment
-        ), "Must run with latency_experiment."
+        assert experiment.func is latency_experiment, (
+            "Must run with latency_experiment."
+        )
 
         def warmup(fn, model, example_inputs, mode, niters=10):
             peak_mem = 0
@@ -2386,6 +2394,8 @@ class BenchmarkRunner:
                 if current_device == "cuda":
                     torch.cuda.reset_peak_memory_stats()
                     empty_gpu_cache(current_device)
+                elif current_device == "hpu":
+                    torch.hpu.reset_peak_memory_stats()
                 t0 = time.perf_counter()
                 for _ in range(niters):
                     fn(model, example_inputs)
@@ -2393,6 +2403,8 @@ class BenchmarkRunner:
                 latency = t1 - t0
                 if current_device == "cuda":
                     peak_mem = get_peak_memory()
+                elif current_device == "hpu":
+                    peak_mem = torch.hpu.max_memory_allocated() / 10**9
                 elif current_device == "cpu":
                     total = psutil.virtual_memory().total
                     percentage = psutil.Process(os.getpid()).memory_percent()
@@ -2543,6 +2555,8 @@ class BenchmarkRunner:
                 if current_device == "cuda":
                     torch.cuda.reset_peak_memory_stats()
                     empty_gpu_cache(current_device)
+                elif current_device == "hpu":
+                    torch.hpu.reset_peak_memory_stats()
                 t0 = time.perf_counter()
                 for _ in range(niters):
                     fn(model, example_inputs)
@@ -2550,6 +2564,8 @@ class BenchmarkRunner:
                 latency = t1 - t0
                 if current_device == "cuda":
                     peak_mem = get_peak_memory()
+                elif current_device == "hpu":
+                    peak_mem = torch.hpu.max_memory_allocated() / 10**9
                 elif current_device == "cpu":
                     total = psutil.virtual_memory().total
                     percentage = psutil.Process(os.getpid()).memory_percent()
@@ -2870,7 +2886,7 @@ def parse_args(args=None):
         help="ID of the benchmark suite partition to be run. Used to divide CI tasks",
     )
     parser.add_argument(
-        "--devices", "--device", "-d", action="append", help="cpu or cuda"
+        "--devices", "--device", "-d", action="append", help="cpu, cuda or hpu"
     )
     parser.add_argument("--device-index", help="CUDA device index")
     parser.add_argument(
@@ -3576,6 +3592,16 @@ def run(runner, args, original_dir=None):
             # some of the models do not support use_deterministic_algorithms
             torch.use_deterministic_algorithms(True)
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
+        # TODO(eqy): revisit when cuBLASLt workspace size is bumped
+        # if args.only is not None and args.only in {
+        #     "DebertaForQuestionAnswering",
+        #     "RobertaForQuestionAnswering",
+        #     "nvidia_deeprecommender",
+        #     "volo_d1_224",
+        # }:
+        #     # These seem unhappy with numerics of larger cuBLASLt workspace
+        #     # sizes following #145130 (due to enabling split-k?)
+        #     torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.allow_tf32 = False
         torch.backends.cudnn.benchmark = False
@@ -3765,6 +3791,7 @@ def run(runner, args, original_dir=None):
 
             # AOTInductor doesn't support control flow yet
             runner.skip_models.update(runner.skip_models_due_to_control_flow)
+            runner.skip_models.update(runner.skip_models_due_to_export_not_supported)
         elif args.backend == "torchao":
             assert "cuda" in args.devices, "Quantization requires CUDA device."
             assert args.bfloat16, "Quantization requires dtype bfloat16."
@@ -3816,6 +3843,9 @@ def run(runner, args, original_dir=None):
         )
         experiment = coverage_experiment
         output_filename = "coverage.csv"
+
+    if args.only in runner.disable_cudagraph_models:
+        args.disable_cudagraphs = True
 
     if args.inductor or args.backend == "inductor" or args.export_aot_inductor:
         inductor_config.triton.cudagraphs = not args.disable_cudagraphs

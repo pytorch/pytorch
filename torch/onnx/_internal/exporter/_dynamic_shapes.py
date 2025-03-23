@@ -63,15 +63,14 @@ def from_dynamic_axes_to_dynamic_shapes(
                     "The axis in dynamic_axes must be in the form of: dict[int, str] or list[int]."
                 )
             dynamic_shapes[input_name] = {
-                k: torch.export.Dim.AUTO  # type: ignore[attr-defined]
-                for k, _ in axes.items()
+                k: torch.export.Dim.AUTO for k, _ in axes.items()
             }
         elif isinstance(axes, list):
             if any(not isinstance(k, int) for k in axes):
                 raise ValueError(
                     "The axis in dynamic_axes must be in the form of: dict[int, str] or list[int]."
                 )
-            dynamic_shapes[input_name] = {k: torch.export.Dim.AUTO for k in axes}  # type: ignore[attr-defined]
+            dynamic_shapes[input_name] = {k: torch.export.Dim.AUTO for k in axes}
         elif axes is None:
             dynamic_shapes[input_name] = None
         else:
@@ -160,7 +159,12 @@ def _any_str_or_dim_in_dynamic_shapes(
 ) -> bool:
     """Check if there is any string or _Dim in the dynamic_shapes."""
     flat_dynamic_shapes, _ = _flatten_dynamic_shapes_to_axes(dynamic_shapes)
-    if any(not isinstance(axes, (dict, list, tuple)) for axes in flat_dynamic_shapes):
+    # This indicates the dynamic_shapes includes something we don't support in axes, and it's flattened
+    # to itself. Otherwise, flat_dynamic_shapes should be a list of dict/list/tuple (or None).
+    if any(
+        not isinstance(axes, (dict, list, tuple)) and axes is not None
+        for axes in flat_dynamic_shapes
+    ):
         return False
     # both str and _Dim can provide custom names
     for axes in flat_dynamic_shapes:
@@ -198,7 +202,7 @@ def convert_str_to_export_dim(
             converted_axes_dict: dict[int, _Dim | _DimHint | None] = {}
             for axis, dim in axes.items():
                 if isinstance(dim, str):
-                    converted_axes_dict[axis] = torch.export.Dim.AUTO  # type: ignore[attr-defined]
+                    converted_axes_dict[axis] = torch.export.Dim.AUTO
                 else:
                     converted_axes_dict[axis] = dim
             dynamic_shapes_with_export_dim.append(converted_axes_dict)
@@ -206,7 +210,7 @@ def convert_str_to_export_dim(
             converted_axes_list: list[_Dim | _DimHint | None] = []
             for dim in axes:
                 if isinstance(dim, str):
-                    converted_axes_list.append(torch.export.Dim.AUTO)  # type: ignore[attr-defined]
+                    converted_axes_list.append(torch.export.Dim.AUTO)
                 else:
                     converted_axes_list.append(dim)
             dynamic_shapes_with_export_dim.append(converted_axes_list)

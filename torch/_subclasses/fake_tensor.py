@@ -8,6 +8,7 @@ import functools
 import logging
 import math
 import os
+import threading
 import traceback
 import typing
 import weakref
@@ -126,6 +127,18 @@ class UnsupportedOperatorException(RuntimeError):
 @dataclass
 class MetadataMismatchError(RuntimeError):
     reason: str
+
+
+class FakeTensorTLS(threading.local):
+    # Default to None, otherwise it'll be used to override _all_
+    # `FakeTensorMode.allow_non_fake_inputs` in this thread.
+    allow_non_fake_inputs_override: Optional[bool]
+
+    def __init__(self) -> None:
+        self.allow_non_fake_inputs_override = None
+
+
+fake_tensor_tls = FakeTensorTLS()
 
 
 def ordered_set(*items: T) -> dict[T, Literal[True]]:
@@ -2107,6 +2120,7 @@ class FakeTensorMode(TorchDispatchMode):
             and len(flat_arg_fake_tensors) != 0
             and not has_symbolic_sizes
             and not avoiding_device_init
+            and func is not aten._nested_tensor_from_tensor_list.default
         ):
             const_flat_args = [
                 a.constant if self.is_our_fake(a) else a for a in flat_args
@@ -2188,7 +2202,17 @@ class FakeTensorMode(TorchDispatchMode):
                     func, real_flat_args, args_spec
                 )
 
-            real_out = func(*real_args, **real_kwargs)
+            try:
+                real_out = func(*real_args, **real_kwargs)
+            except ZeroDivisionError as exc:
+                # we shouldn't broadly catch all errors here;
+                # some come from real-kernel mutation/aliasing checks we want to run.
+                # add more exception types as needed.
+                log.debug(
+                    "real-tensor fallback failed for %s: %s; silently ignoring",
+                    func,
+                    exc,
+                )
 
             if not is_builtin:
                 mutation_checker.check()  # type: ignore[possibly-undefined]
@@ -2466,7 +2490,12 @@ class FakeTensorMode(TorchDispatchMode):
                     raise AssertionError(
                         f"Can't call metadata mutating ops on non-Fake Tensor inputs. Found in {render_call(func, args, kwargs)}"
                     )
-                if not self.allow_non_fake_inputs:
+                allow_non_fake_inputs = (
+                    self.allow_non_fake_inputs
+                    if fake_tensor_tls.allow_non_fake_inputs_override is None
+                    else fake_tensor_tls.allow_non_fake_inputs_override
+                )
+                if not allow_non_fake_inputs:
                     if isinstance(x, FakeTensor) and x.fake_mode is not self:
                         raise AssertionError("Mixing fake modes NYI")
                     args, kwargs = pytree.tree_unflatten(flat_args, args_spec)

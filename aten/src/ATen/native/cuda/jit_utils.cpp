@@ -928,7 +928,7 @@ void initializeCudaContext() {
   if (!pctx) {
     std::unique_lock<std::mutex> cudaFreeMutexLock(
         *(c10::cuda::getFreeMutex()));
-    cudaFree(nullptr);
+    AT_CUDA_CHECK(cudaFree(nullptr));
   }
 }
 

@@ -44,6 +44,7 @@ from ..utils import (
     boolean_ops,
     DeferredLineBase,
     generate_assert,
+    get_current_backend,
     IndentedBuffer,
     ir_dataclass,
     ScopedDict,
@@ -287,6 +288,10 @@ class DeviceOpOverrides:
     def tma_descriptor_helpers(self) -> str:
         raise NotImplementedError
 
+    def cpp_global_scratch(self, idx: int) -> Optional[tuple[str, str]]:
+        # optionally return (scratch definition, arg name)
+        raise NotImplementedError
+
 
 device_op_overrides_dict: dict[str, DeviceOpOverrides] = {}
 
@@ -337,7 +342,7 @@ class BackendFeature(Enum):
 
 
 def get_backend_features(
-    device: Union[torch.device, str, None]
+    device: Union[torch.device, str, None],
 ) -> OrderedSet[BackendFeature]:
     if device is None:
         return OrderedSet()
@@ -547,6 +552,31 @@ def deduce_output_dtype_by_name(
     elif op_name == "to_dtype_bitcast":
         return kwargs["dtype"] if "dtype" in kwargs else args[-2]
     return None
+
+
+def check_dtype(
+    buffer: IndentedBuffer, var: CSEVariableType, dtype: torch.dtype
+) -> None:
+    backend = get_current_backend()
+    if config.test_configs.runtime_triton_dtype_assert and backend == "triton":
+        buffer.writeline(f"tl.static_assert({var}.dtype == {triton_type(dtype)})")
+    elif config.test_configs.static_cpp_dtype_assert and backend == "cpp":
+        from .cpp_utils import CppCSEVariable, DTYPE_TO_CPP
+
+        assert isinstance(var, CppCSEVariable)
+        if dtype == torch.bool:
+            if var.is_vec:
+                is_same_dt = f"IsVecMaskType<decltype({var})>::value"
+            else:
+                # operator&(bool, bool) returns int and it can be used as boolean in C++
+                is_same_dt = f"std::is_same_v<decltype({var}), bool> || std::is_same_v<decltype({var}), int>"
+        else:
+            c_var_type = f"decltype({var})"
+            if var.is_vec:
+                c_var_type = f"typename {c_var_type}::value_type"
+            is_same_dt = f"std::is_same_v<{c_var_type}, {DTYPE_TO_CPP[dtype]}>"
+
+        buffer.writeline(f"static_assert({is_same_dt});")
 
 
 class DataTypePropagation:
@@ -982,9 +1012,9 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
                 if cls._is_unimplemented(funcname):
                     setattr(cls, funcname, cls._unimplemented(funcname))
             else:
-                assert (
-                    funcname not in cls.__dict__
-                ), f"multiple definitions of {funcname} on {cls.__name__}"
+                assert funcname not in cls.__dict__, (
+                    f"multiple definitions of {funcname} on {cls.__name__}"
+                )
                 impl.__name__ = funcname
                 setattr(cls, funcname, staticmethod(impl))
 
@@ -1232,6 +1262,18 @@ pointwise_overrides_data: dict[str, OverridesData] = dict(
 )
 
 
+def is_buffer_removed(name: str) -> bool:
+    return any(
+        name in x
+        for x in (
+            V.graph.removed_buffers,
+            V.kernel.removed_buffers,
+            V.graph.inplaced_to_remove,
+            V.kernel.inplaced_to_remove,
+        )
+    )
+
+
 class DeferredLine(DeferredLineBase):
     """A line that can be 'unwritten' by adding name to V.graph.removed_buffers"""
 
@@ -1241,15 +1283,7 @@ class DeferredLine(DeferredLineBase):
         assert not isinstance(line, DeferredLineBase)
 
     def __call__(self) -> Optional[str]:
-        if all(
-            self.name not in x
-            for x in (
-                V.graph.removed_buffers,
-                V.kernel.removed_buffers,
-                V.graph.inplaced_to_remove,
-                V.kernel.inplaced_to_remove,
-            )
-        ):
+        if not is_buffer_removed(self.name):
             return self.line
         return None
 
@@ -1542,7 +1576,7 @@ class KernelArgs:
 
     def python_argdefs(
         self,
-    ) -> tuple[list[ArgName], list[str], list[KernelArgType], list[torch.dtype]]:
+    ) -> tuple[list[ArgName], list[str], list[KernelArgType], list[Any]]:
         arg_defs: list[ArgName] = []
         call_args: list[str] = []
         arg_types: list[torch.dtype] = []
@@ -1798,13 +1832,17 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
                         line = f"{expr}{self.suffix}"
                     buffer.writeline(line)
 
+                    # cpp backend cannot determin is_vec at this point
                     if (
                         assignment
-                        and config.test_configs.runtime_triton_dtype_assert
+                        and (
+                            config.test_configs.runtime_triton_dtype_assert
+                            or config.test_configs.static_cpp_dtype_assert
+                        )
                         and dtype is not None
+                        and get_current_backend() != "cpp"
                     ):
-                        assert_line = f"tl.static_assert({self.prefix}{var}.dtype == {triton_type(dtype)})"
-                        buffer.writeline(assert_line)
+                        check_dtype(buffer, var, dtype)
 
         else:
             var.bounds = var.bounds.tighten(bounds)
@@ -2221,7 +2259,7 @@ class KernelTemplate:
 
     @staticmethod
     def _fake_get_dtype(
-        fake_outs: Union[list[Buffer], Buffer]
+        fake_outs: Union[list[Buffer], Buffer],
     ) -> Callable[[str], torch.dtype]:
         _get_dtype_real = V.graph.get_dtype
         if isinstance(fake_outs, (list, tuple)):
@@ -2288,34 +2326,38 @@ class CSEProxy(DefaultHandler):
         value = getattr(self.parent_handler, name)(*args, **kwargs)  # type: ignore[has-type]
         dtype_handler = DtypePropagationOpsHandler()
 
+        backend = get_current_backend()
+
+        output_dtype = None
+        if name == "masked" and backend == "triton":
+            output_dtype = value.dtype
+        elif name == "masked" and backend == "cpp":
+            output_dtype = V.interpreter.current_node.meta.get(
+                OptimizationContext.key, None
+            ).dtype
+        elif backend in ("triton", "cpp"):
+            dtype_op = getattr(dtype_handler, name)
+            output_dtype = dtype_op(*args, **kwargs)
+
+        if backend in ("triton", "cpp"):
+            # maybe there are some exceptions on mps?
+            assert output_dtype is not None
+
         output_idx = 0
 
         def do_cse(v: str) -> CSEVariable:
-            # cpp backend doesnt set current device - TODO: fix
-            if V.graph.current_device is not None:
-                device_str = V.graph.get_current_device_or_throw().type
-                triton_backend = (
-                    config.cpu_backend == "triton"
-                    if device_str == "cpu"
-                    else config.cuda_backend == "triton"
-                    if device_str != "mps"
-                    else False
-                )
-            else:
-                triton_backend = False
+            # we tree_map over the output, so we need to fetch corresponding dtype
+            nonlocal output_idx
+            var_dtype: torch.dtype = (
+                output_dtype[output_idx]  # type: ignore[assignment]
+                if isinstance(output_dtype, (list, tuple))
+                else output_dtype
+            )
+            output_idx += 1
 
-            # only triton backend tracks dtype currently
-            if triton_backend:
-                if name == "masked":
-                    output_dtype = value.dtype
-                else:
-                    output_dtype = getattr(
-                        dtype_handler,
-                        name,
-                    )(*args, **kwargs)
-            else:
-                # cpp backend doesnt track dtype yet
-                output_dtype = None
+            # some cpp op implementations don't set the dtype
+            if backend == "cpp" and isinstance(v, CSEVariable) and v.dtype is None:
+                v.dtype = var_dtype
 
             csevar = V.kernel.cse.generate(
                 V.kernel.compute,
@@ -2324,21 +2366,13 @@ class CSEProxy(DefaultHandler):
                 dtype=output_dtype,
             )
 
-            nonlocal output_idx
-            if config.test_configs.runtime_triton_dtype_assert and triton_backend:
-                from torch._inductor.codegen.triton import triton_type
-
-                # we tree_map over the output, so we need to fetch corresponding dtype
-                if isinstance(output_dtype, (list, tuple)):
-                    output_dtype = output_dtype[output_idx]
-
-                V.kernel.compute.writeline(
-                    f"tl.static_assert({csevar}.dtype == {triton_type(output_dtype)})"
-                )
-            output_idx += 1
-
             csevar.update_on_args(name, args, kwargs)
 
+            if (
+                config.test_configs.runtime_triton_dtype_assert
+                or config.test_configs.static_cpp_dtype_assert
+            ):
+                check_dtype(V.kernel.compute, csevar, var_dtype)
             return csevar
 
         return pytree.tree_map(do_cse, value)

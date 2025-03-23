@@ -230,6 +230,7 @@ class SLoc:
 class ShapeGuard(NamedTuple):
     expr: sympy.logic.boolalg.Boolean
     sloc: SLoc
+    size_oblivious: bool
 
 
 @dataclass_slots
@@ -1016,6 +1017,12 @@ class ChainedSource(Source):
 
     def is_ephemeral(self):
         return self.base.is_ephemeral()
+
+    def get_base(self) -> Source:
+        current: Source = self
+        while isinstance(current, ChainedSource):
+            current = current.base
+        return current
 
 
 def detect_fake_mode(inputs: Any = None):

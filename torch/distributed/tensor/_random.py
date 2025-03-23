@@ -68,19 +68,18 @@ def manual_seed(seed: int, device_mesh: DeviceMesh) -> None:
         ``manual_seed`` will throw an error.
         Current implementation only supports a GPU device mesh.
     """
-    device_handle = _get_device_handle(device_mesh.device_type)
-    if not device_handle:
-        raise NotImplementedError(
-            f"DTensor randomness only supports cuda/cuda-like device type, but got {device_mesh.device_type}"
+    if not is_rng_supported_mesh(device_mesh):
+        warnings.warn(
+            "DTensor manual_seed() may not have complete support "
+            f"on {device_mesh.device_type} device mesh"
         )
+        return
 
     # instantiate a RNG tracker if haven't. By default DTensor uses an
     # OffsetBasedRNGTracker to perform random operators.
     global _rng_tracker
     if not _rng_tracker:
-        _rng_tracker = OffsetBasedRNGTracker(
-            device_mesh.device_type, run_state_sync=False
-        )
+        _rng_tracker = OffsetBasedRNGTracker(device_mesh, run_state_sync=False)
 
     # the current rank is in mesh
     if device_mesh.get_coordinate() is not None:
@@ -102,16 +101,16 @@ class _RNGStateTracker:
     a random op (an operator that calls RNG).
     """
 
-    def __init__(self, device_type: str = "cuda"):
-        self._device_type = device_type
-        self._device_handle = _get_device_handle(device_type)
+    def __init__(self, device: torch.device):
+        self._device = device
+        self._device_handle = _get_device_handle(self._device.type)
         if not (self._device_handle and self._device_handle.is_available()):
             raise RuntimeError(
-                f"{self.__class__.__name__} instantiation requires the presence of CUDA/CUDA-like device"
+                f"{self.__class__.__name__} instantiation requires the presence of "
+                f"{device.type} device but couldn't find."
             )
 
         self._states: dict[str, Tensor] = {}
-        self._devices = [self._device_handle.current_device()]
         self._use_distribute_region = True
 
     @property
@@ -159,11 +158,25 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
     This subclass of ``_RNGStateTracker`` defines the default policy of how RNG states
     should be shared and synchronized among all ranks to respect the semantics of DTensor
     random operators.
+
+    note: _RNGStateTracker only supports cuda/cuda-like device
     """
 
-    def __init__(self, device_type: str = "cuda", run_state_sync: bool = True):
-        super().__init__(device_type)
-        rng_state = self._device_handle.get_rng_state().to(device_type)
+    def __init__(
+        self,
+        device_mesh: DeviceMesh,
+        run_state_sync: bool = True,
+    ):
+        super().__init__(_resolve_device(device_mesh=device_mesh))
+        assert self._device_handle is not None
+        # DTensor RNG tracker so far only supports CUDA/CUDA-like devices
+        if self._device.type != "cuda":
+            raise RuntimeError(
+                f"{self.__class__.__name__} instantiation requires the presence of "
+                f"CUDA/CUDA-like device. Got {self._device.type} instead."
+            )
+
+        rng_state = self._device_handle.get_rng_state().to(self._device)
         if run_state_sync:
             # synchronize RNG state using rank 0's current one
             dist.broadcast(rng_state, 0)
@@ -185,7 +198,8 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         if self.distribute_region_enabled:
             old_offset = self.get_offset("parallel-rng")
             self._set_pre_op_offset(spec)
-            with torch.random.fork_rng(self._devices, device_type=self._device_type):
+            with torch.random.fork_rng(devices=[self._device]):
+                assert self._device_handle is not None
                 self._device_handle.set_rng_state(self.rng_states["parallel-rng"])
                 try:
                     yield  # execute the region code
@@ -366,3 +380,11 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
             shard_coord_stride *= size
 
         return shard_linear_idx
+
+
+def _resolve_device(device_mesh: DeviceMesh) -> torch.device:
+    device_type = device_mesh.device_type
+    device_handle = _get_device_handle(device_type)
+    assert device_handle is not None
+    device_idx = device_mesh.get_rank() % device_handle.device_count()
+    return torch.device(f"{device_type}:{device_idx:d}")
