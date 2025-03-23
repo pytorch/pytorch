@@ -1134,6 +1134,7 @@ class MemPool(_MemPool):
 
     def __init__(self, allocator: Optional[_cuda_CUDAAllocator] = None):
         super().__init__(allocator, True)
+        self._device = torch.cuda.current_device()
 
     @property
     def id(self) -> tuple[int, int]:
@@ -1184,6 +1185,7 @@ def use_mem_pool(pool: MemPool, device: Union[Device, int] = None):
     device_index = (
         torch.cuda.current_device() if device is None else _get_device_index(device)
     )
+    assert device_index == pool._device, "MemPool can only be used in the same device as the one it was allocated"
     _cuda_beginAllocateToPool(device_index, pool.id)
     try:
         yield
