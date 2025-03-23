@@ -76,7 +76,7 @@ if HAS_TABULATE:
     _P = ParamSpec("_P")
 
     def benchmark_compile(
-        model: Union[torch.nn.Module, Callable[_P, Any]],
+        model: Union[torch.nn.Module, Callable[[_P.kwargs], Any]],
         sample_input: Union[torch.Tensor, Any],
         num_iters: int = 5,
         backend: Optional[str] = None,
