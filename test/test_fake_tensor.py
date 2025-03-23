@@ -201,17 +201,12 @@ class FakeTensorTest(TestCase):
         self.assertEqual(torch.ones([10]), out[0])
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
-<<<<<<< HEAD
     def test_throw_in_zero_dim_tensor(self):
-=======
-    def test_no_zero_dim(self):
->>>>>>> 626ae16d04 (removed zero dim cpu tensor logic from fake_tensor.py)
         #eager mode doesn't consider zero dim cpu tensor case, so this test case is to block addition of that case.
         with FakeTensorMode() as mode, self.assertRaisesRegex(RuntimeError, "Unhandled FakeTensor Device Propagation for .*") as exc:
             x = torch.tensor(0.0)
             y = torch.rand([4, 4], device="cuda")
             out = x + y
-<<<<<<< HEAD
 
     @expectedFailurePropagateRealTensors
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
@@ -229,8 +224,23 @@ class FakeTensorTest(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Unhandled FakeTensor Device Propagation for .*") as exc:
             model = torch.compile(model)
             outputs = model(x)
-=======
->>>>>>> 626ae16d04 (removed zero dim cpu tensor logic from fake_tensor.py)
+
+    @expectedFailurePropagateRealTensors
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_compile_throw_in_zero_dim_tensor(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+
+            def forward(self, x):
+                x = torch.nextafter(x, torch.tensor(1.0))
+                return x
+
+        model = Model().cuda()
+        x = torch.randn(1).cuda()
+        with  self.assertRaisesRegex(RuntimeError, "Unhandled FakeTensor Device Propagation for .*") as exc:
+            model = torch.compile(model)
+            outputs = model(x)
 
     def test_nan_to_num(self):
         with FakeTensorMode():
