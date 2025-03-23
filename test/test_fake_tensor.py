@@ -222,6 +222,7 @@ class FakeTensorTest(TestCase):
 
         model = Model().cuda()
         x = torch.randn(1).cuda()
+
         with self.assertRaisesRegex(RuntimeError, "Unhandled FakeTensor Device Propagation for .*") as exc:
             model = torch.compile(model)
             outputs = model(x)
