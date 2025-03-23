@@ -37,12 +37,8 @@ __all__ = [
     "unregister_custom_op_symbolic",
     # Base error
     "OnnxExporterError",
-    # Dynamo Exporter
-    "DiagnosticOptions",
     "ExportOptions",
     "ONNXProgram",
-    "ONNXRuntimeOptions",
-    "OnnxRegistry",
     "dynamo_export",
     "enable_fake_mode",
     # DORT / torch.compile
@@ -427,7 +423,7 @@ def export(
     "torch.onnx.dynamo_export is deprecated since 2.7.0. Please use torch.onnx.export(..., dynamo=True) instead."
 )
 class ExportOptions:
-    """Options to influence the TorchDynamo ONNX exporter.
+    """Options for dynamo_export.
 
     .. deprecated:: 2.7
         Please use ``torch.onnx.export(..., dynamo=True)`` instead.
@@ -437,9 +433,6 @@ class ExportOptions:
             When ``None``, the exporter determines the most compatible setting.
             When ``True``, all input shapes are considered dynamic.
             When ``False``, all input shapes are considered static.
-        diagnostic_options: The diagnostic options for the exporter.
-        fake_context: The fake context used for symbolic tracing.
-        onnx_registry: The ONNX registry used to register ATen operators to ONNX functions.
     """
 
     def __init__(self, *, dynamic_shapes: bool | None = None):
@@ -473,7 +466,6 @@ def dynamo_export(
 
     import warnings
 
-    from torch.onnx import _flags
     from torch.onnx._internal.exporter import _compat
     from torch.utils import _pytree
 

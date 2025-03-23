@@ -123,5 +123,5 @@ Deprecated
 
 The following classes and functions are deprecated and will be removed.
 
-.. py:function:: torch.onnx.dynamo_export
-.. py:class:: torch.onnx.ExportOptions
+.. autofunction:: torch.onnx.dynamo_export
+.. autoclass:: torch.onnx.ExportOptions
