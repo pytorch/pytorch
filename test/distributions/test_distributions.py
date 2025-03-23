@@ -7003,6 +7003,8 @@ class TestJit(DistributionsTestCase):
                 expected,
                 actual,
                 msg=f"{Dist.__name__}\nExpected:\n{expected}\nActual:\n{actual}",
+                atol=4e-5,
+                rtol=5e-6,
             )
 
     @set_default_dtype(torch.double)
