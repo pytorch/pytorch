@@ -4949,11 +4949,14 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         )
         self.assertEqual(
             [
-                str(node.meta["val"].shape)
+                # First dimension varies across strict and non-strict
+                # since the source names are different, resulting in
+                # different symbol names.
+                str(node.meta["val"].shape[1:])
                 for node in efoo.graph_module.graph.nodes
                 if node.op == "placeholder"
             ],
-            ["torch.Size([s64, 2, 3])", "torch.Size([s64, 3, 4])"],
+            ["torch.Size([2, 3])", "torch.Size([3, 4])"],
         )
 
     @testing.expectedFailureCppSerDes
@@ -5091,14 +5094,13 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 "y": (batch, size, size),
             },
         )
-        self.assertEqual(
-            [
-                str(node.meta["val"].shape)
-                for node in efoo.graph_module.graph.nodes
-                if node.op == "placeholder"
-            ],
-            ["torch.Size([s0, s1, s1])", "torch.Size([s0, s1, s1])"],
-        )
+
+        for node in efoo.graph_module.graph.nodes:
+            if node.op == "placeholder":
+                self.assertEqual(
+                    node.meta["val"].shape[1],
+                    node.meta["val"].shape[2]
+                )
         self.assertEqual(efoo.module()(*inputs).shape, foo(*inputs).shape)
 
         # pass dynamic shapes of inputs [multiple, mostly distinct]
@@ -5109,13 +5111,14 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             inputs,
             dynamic_shapes={"x": (batch, M, K), "y": (batch, K, N)},
         )
+        placeholders = [
+            node.meta["val"].shape,
+            for node in efoo.graph_module.graph.nodes
+            if node.op == "placeholder"
+        ],
         self.assertEqual(
-            [
-                str(node.meta["val"].shape)
-                for node in efoo.graph_module.graph.nodes
-                if node.op == "placeholder"
-            ],
-            ["torch.Size([s0, s1, s2])", "torch.Size([s0, s2, s5])"],
+            placeholders[0][2],
+            placeholders[1][1],
         )
         self.assertEqual(efoo.module()(*inputs).shape, foo(*inputs).shape)
 
@@ -5132,11 +5135,14 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         )
         self.assertEqual(
             [
-                str(node.meta["val"].shape)
+                # First dimension varies across strict and non-strict
+                # since the source names are different, resulting in
+                # different symbol names.
+                str(node.meta["val"].shape[1:])
                 for node in efoo.graph_module.graph.nodes
                 if node.op == "placeholder"
             ],
-            ["torch.Size([s0, 2, 3])", "torch.Size([s0, 3, 4])"],
+            ["torch.Size([2, 3])", "torch.Size([3, 4])"],
         )
         self.assertEqual(efoo.module()(*inputs).shape, foo(*inputs).shape)
 
@@ -5153,11 +5159,14 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         )
         self.assertEqual(
             [
-                str(node.meta["val"].shape)
+                # First dimension varies across strict and non-strict
+                # since the source names are different, resulting in
+                # different symbol names.
+                str(node.meta["val"].shape[1:])
                 for node in efoo.graph_module.graph.nodes
                 if node.op == "placeholder"
             ],
-            ["torch.Size([s0, 2, 3])", "torch.Size([s0, 3, 4])"],
+            ["torch.Size([2, 3])", "torch.Size([3, 4])"],
         )
         self.assertEqual(efoo.module()(*inputs).shape, foo(*inputs).shape)
 
