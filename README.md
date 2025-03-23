@@ -69,7 +69,7 @@ Elaborating Further:
 
 ### A GPU-Ready Tensor Library
 
-If you use NumPy, then you have used Tensors (a.k.a. ndarray).
+If you use NumPy, then you have used Tensors (a.k.a. ndarray).” to “If you use NumPy, then you have used Tensors (a.k.a. n-dimensional array).
 
 ![Tensor illustration](./docs/source/_static/img/tensor_illustration.png)
 
