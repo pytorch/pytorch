@@ -50,6 +50,10 @@ enable_autograd_cache: bool = Config(
     default=True,
 )
 
+autograd_cache_allow_custom_autograd_functions: bool = Config(
+    env_name_force="TORCHINDUCTOR_AUTOGRAD_CACHE_ALLOW_CUSTOM_AUTOGRAD", default=False
+)
+
 
 def remote_autograd_cache_default() -> Optional[bool]:
     if os.environ.get("TORCHINDUCTOR_AUTOGRAD_REMOTE_CACHE") == "1":
