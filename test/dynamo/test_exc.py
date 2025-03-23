@@ -315,16 +315,16 @@ Failure occurred while running node:
     %split : [num_users=3] = call_method[target=split](args = (%l_x_, (%l_shape_0_, %l_shape_1_, %l_shape_2_)), kwargs = {})
 
 Model:
-  ==> L['shape'][0]: 0
-  ==> L['shape'][1]: 0
+  ==> L['shape'][0]: 1
+  ==> L['shape'][1]: 1
   ==> L['shape'][2]: 0
   ==> L['x'].size()[0]: 3
   ==> L['x'].storage_offset(): 0
   ==> L['x'].stride()[0]: 1
   ==> s3: 0
-  ==> s52: 0
+  ==> s52: 1
   ==> s77: 3
-  ==> s86: 0
+  ==> s86: 1
 
 Assertions:
   ==> (== 0 L['x'].storage_offset())
