@@ -1559,10 +1559,6 @@ static void median_out_mps_common(const Tensor& input_t,
     return;
   }
 
-  if (values.numel() == 0) {
-    return;
-  }
-
   if (input_t.numel() == 1 && input_t.dim() == 0) {
     values.fill_(input_t);
     indices.fill_(0);
