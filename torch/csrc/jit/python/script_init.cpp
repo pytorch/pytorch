@@ -1909,10 +1909,10 @@ void initJitScriptBindings(PyObject* module) {
   m.def("_test_only_populate_upgraders", &test_only_populate_upgraders);
   m.def("_test_only_remove_upgraders", &test_only_remove_upgraders);
 
-  m.def("create_argument", &createArgument);
-  m.def("create_function_schema", &createFunctionSchema);
-  m.def("create_alias_info", &createAliasInfo);
-  m.def("create_tuple_type", &createTupleType);
+  m.def("_create_argument", &createArgument);
+  m.def("_create_function_schema", &createFunctionSchema);
+  m.def("_create_alias_info", &createAliasInfo);
+  m.def("_create_tuple_type", &createTupleType);
   m.def("merge_type_from_type_comment", &mergeTypesFromTypeComment);
   m.def("_get_max_operator_version", &getMaxOperatorVersion);
   m.def("_get_operator_version_map", &get_operator_version_map);

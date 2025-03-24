@@ -328,7 +328,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         try:
             return type(self.as_python_constant())
         except NotImplementedError:
-            breakpoint()
             raise NotImplementedError(f"{self} has no type") from None
 
     def python_type_name(self):

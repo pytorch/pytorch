@@ -84,17 +84,10 @@ class FunctionSchemaGen:
         op_name: str,
         example_inputs: tuple[tuple[str, Any], ...],
         example_outputs: tuple[Any, ...],
-        mutated_inputs: Optional[set[int]] = None,
     ) -> FunctionSchema:
-        mutated_inputs = mutated_inputs if mutated_inputs is not None else set()
         args = []
         for i, (name, inp) in enumerate(example_inputs):
-            annotation = None
-            if i in mutated_inputs:
-                annotation = Annotation(
-                    alias_set=tuple(), is_write=True, alias_set_after=tuple()
-                )
-            args.append(ArgumentGen.from_example(name, inp, None, annotation))
+            args.append(ArgumentGen.from_example(name, inp, None, None))
         # ignore the annotations and other attributes for now, we could add more when needed.
         arguments = Arguments(
             tuple(), None, tuple(args), tuple(), None, tuple(), tuple()
@@ -102,8 +95,8 @@ class FunctionSchemaGen:
         returns = tuple(
             ReturnGen.from_example(None, out, None) for out in example_outputs
         )
-        name = OperatorName(BaseOperatorName(op_name, False, False, False), "")
-        return FunctionSchema(name, arguments, returns)
+        op_name = OperatorName(BaseOperatorName(op_name, False, False, False), "")
+        return FunctionSchema(op_name, arguments, returns)
 
 
 @dataclass(frozen=True)
@@ -159,7 +152,7 @@ class CTypeGen:
         elif isinstance(obj, torch.SymBool):
             return (torch._C.SymBoolType.get(),)
         elif isinstance(obj, tuple):
-            return torch._C.create_tuple_type(
+            return torch._C._create_tuple_type(
                 tuple(CTypeGen.from_example(arg) for arg in obj)
             )
         elif obj is None:
@@ -173,13 +166,13 @@ class CTypeGen:
 class CArgumentGen:
     @staticmethod
     def from_hop_argument_info(arg_info: HopArgumentInfo) -> Any:
-        return torch._C.create_argument(
+        return torch._C._create_argument(
             arg_info.name,
             CTypeGen.from_example(arg_info.example_value),
             None,
             arg_info.default_value,
             False,
-            torch._C.create_alias_info(arg_info.is_mutated),
+            torch._C._create_alias_info(arg_info.is_mutated),
         )
 
 
@@ -238,7 +231,7 @@ class CFunctionSchemaGen:
         )
         ret = CArgumentGen.from_hop_argument_info(out_argument_info)
 
-        return torch._C.create_function_schema(
+        return torch._C._create_function_schema(
             op_name,
             "",
             args,
