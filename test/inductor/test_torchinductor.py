@@ -4277,7 +4277,7 @@ class CommonTemplate:
         prims = torch.ops.prims
 
         def fn(x):
-            kernel_size = [3] * dim
+            kernel_size = [3, 3] if dim == 2 else [3, 3, 2]
             stride = [2] * dim
             padding = [1] * dim
             ceil_mode = False
