@@ -2,7 +2,7 @@ ARG UBUNTU_VERSION
 ARG CUDA_VERSION
 ARG IMAGE_NAME
 
-FROM ${IMAGE_NAME}
+FROM ${IMAGE_NAME} as base
 
 ARG UBUNTU_VERSION
 ARG CUDA_VERSION
@@ -90,14 +90,24 @@ RUN if [ -n "${CMAKE_VERSION}" ]; then bash ./install_cmake.sh; fi
 RUN rm install_cmake.sh
 
 ARG TRITON
+
+# Make assumptions about where pip packages are installed
+ENV PIP_PACKAGE_PATH /opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/lib/python$ANACONDA_PYTHON_VERSION/site-packages
+# Create a separate stage for building Triton
+FROM base as triton-builder
 # Install triton, this needs to be done before sccache because the latter will
 # try to reach out to S3, which docker build runners don't have access
 COPY ./common/install_triton.sh install_triton.sh
 COPY ./common/common_utils.sh common_utils.sh
 COPY ci_commit_pins/triton.txt triton.txt
 COPY triton_version.txt triton_version.txt
-RUN if [ -n "${TRITON}" ]; then bash ./install_triton.sh; fi
+RUN if [ -n "${TRITON}" ]; then bash ./install_triton.sh; else echo "Skipping Triton build"; mkdir -p $PIP_PACKAGE_PATH/triton; fi
 RUN rm install_triton.sh common_utils.sh triton.txt triton_version.txt
+
+FROM base as final
+COPY --chown=jenkins:jenkins --from=triton-builder $PIP_PACKAGE_PATH/triton $PIP_PACKAGE_PATH/triton
+# Clean up triton directory if arg is not set
+RUN if [ -z "${TRITON}" ]; then rm -rf $PIP_PACKAGE_PATH/triton; fi
 
 ARG HALIDE
 # Build and install halide
