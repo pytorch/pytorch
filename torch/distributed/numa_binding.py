@@ -13,7 +13,7 @@ from argparse import ArgumentParser, REMAINDER
 from collections import defaultdict
 import re
 import shutil
-from torch.distributed.elastic.utils.logging import get_logger
+import logging
 import pynvml
 
 # Commands/Paths to get system-level information
@@ -27,8 +27,7 @@ SOCKET_CMD = "/sys/devices/system/node/node{value}/cpulist"
 PHYSICAL_PACKAGE_ID_CMD = "/sys/devices/system/cpu/cpu{value}/topology/physical_package_id"
 POSSIBLE_NODES_CMD = "/sys/devices/system/node/possible"
 
-logger = get_logger(__name__)
-
+logging.basicConfig(level=logging.INFO)
 
 class System:
     """
@@ -511,6 +510,7 @@ def main():
     elif args.affinity == "exclusive":
         numa = Exclusive(local_rank, system)
     elif args.affinity == "core-complex":
+        logging.info("Note: core-complex option might not achieve optimal performance on architectures featuring a single L3 cache per socket.")
         numa = CoreComplex(local_rank, system)
     elif args.affinity == "socket":
         numa = Socket(local_rank, system)
@@ -520,7 +520,7 @@ def main():
     numactlargs = numa.get_numactl_args()
     cmd = get_cmd(args, numactlargs, local_rank, is_rank_required)
     print(socket.gethostname(), "Local Rank:", local_rank, "Binding:", cmd)
-    logger.info("%s.Local Rank:%s Binding:%s", socket.gethostname(), local_rank, cmd)
+    logging.info("%s.Local Rank:%s Binding:%s", socket.gethostname(), local_rank, cmd)
     run_cmd(cmd, current_env)
 
 
