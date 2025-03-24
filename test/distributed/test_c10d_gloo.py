@@ -701,6 +701,27 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             self.assertTrue(torch.allclose(output, expect))
 
     @requires_gloo()
+    def test_reduce_scatter(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend="gloo",
+            store=store,
+            rank=self.rank,
+            world_size=self.world_size,
+        )
+        torch.manual_seed(42)
+
+        # variable size per rank
+        inputs = [torch.rand(i) for i in range(self.world_size)]
+        output = torch.empty(self.rank)
+
+        work = dist.reduce_scatter(output, inputs, async_op=True)
+        work.wait()
+
+        expect = inputs[self.rank] * self.world_size
+        self.assertTrue(torch.allclose(output, expect))
+
+    @requires_gloo()
     def test_reduce_scatter_tensor(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
