@@ -1012,6 +1012,7 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
 
 void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter, const std::string& name) {
   TORCH_CHECK(iter.common_dtype() != at::kDouble, "float64 is not supported on MPS");
+  TORCH_CHECK(iter.can_use_32bit_indexing(), "Can't be indexed using 32-bit iterator");
 
   Tensor input = iter.input(0);
   Tensor other = iter.input(1);
@@ -1031,17 +1032,22 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter, const std:
       // this function call is a no-op if MPS Profiler is not enabled
       getMPSProfiler().beginProfileKernel(binaryPSO, kernel_name, {input, other});
       [computeEncoder setComputePipelineState:binaryPSO];
+      // Iterator is contiguous if all of its elements are dense in storage,
+      // i.e. it's true for both row-first and column-first tensors
       if (iter.is_contiguous()) {
-        mtl_setArgs(computeEncoder, input, other, out);
+        mtl_setArgs(computeEncoder, out, input, other);
       } else {
+        // Please note that shapes and strides of the iterator might be
+        // different than that of its operands, for example binary op
+        // between 4x4 tensor and scalar will result in 1D 16 element iterator
         mtl_setArgs(computeEncoder,
+                    out,
                     input,
                     other,
-                    out,
                     iter.shape(),
+                    iter.strides(0),
                     iter.strides(1),
                     iter.strides(2),
-                    iter.strides(0),
                     iter.ndim());
       }
       mtl_dispatch1DJob(computeEncoder, binaryPSO, numThreads);

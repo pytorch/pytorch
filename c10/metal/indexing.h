@@ -115,13 +115,13 @@ inline device T& ref_at_offs(device void* ptr, long offs) {
 
 template <typename T, typename F>
 kernel void binary_strided(
-    constant void* input [[buffer(0)]],
-    constant void* other [[buffer(1)]],
-    device void* output [[buffer(2)]],
+    device void* output [[buffer(0)]],
+    constant void* input [[buffer(1)]],
+    constant void* other [[buffer(2)]],
     constant long* sizes [[buffer(3)]],
-    constant long* input_strides [[buffer(4)]],
-    constant long* other_strides [[buffer(5)]],
-    constant long* output_strides [[buffer(6)]],
+    constant long* output_strides [[buffer(4)]],
+    constant long* input_strides [[buffer(5)]],
+    constant long* other_strides [[buffer(6)]],
     constant uint& ndim [[buffer(7)]],
     uint index [[thread_position_in_grid]]) {
   F f;
@@ -137,9 +137,9 @@ kernel void binary_strided(
 
 template <typename T, typename F>
 kernel void binary_dense(
-    constant T* input [[buffer(0)]],
-    constant T* other [[buffer(1)]],
-    device result_of<F, T, T>* out [[buffer(2)]],
+    device result_of<F, T, T>* out [[buffer(0)]],
+    constant T* input [[buffer(1)]],
+    constant T* other [[buffer(2)]],
     uint tid [[thread_position_in_grid]]) {
   F f;
   out[tid] = f(input[tid], other[tid]);
@@ -148,20 +148,20 @@ kernel void binary_dense(
 #define REGISTER_BINARY_INDEXING_OP(NAME, DTYPE)                               \
   template [[host_name(#NAME "_strided_" #DTYPE)]] kernel void ::c10::metal::  \
       binary_strided<DTYPE, NAME##_functor>(                                   \
+          device void* out,                                                    \
           constant void* input,                                                \
           constant void* other,                                                \
-          device void* out,                                                    \
           constant long* sizes,                                                \
-          constant long* input_strides,                                        \
           constant long* output_strides,                                       \
+          constant long* input_strides,                                        \
           constant long* other_strides,                                        \
           constant uint& ndim,                                                 \
           uint tid);                                                           \
   template [[host_name(#NAME "_dense_" #DTYPE)]] kernel void ::c10::metal::    \
       binary_dense<DTYPE, NAME##_functor>(                                     \
+          device ::c10::metal::result_of<NAME##_functor, DTYPE, DTYPE> * out_, \
           constant DTYPE * input_,                                             \
           constant DTYPE * other_,                                             \
-          device ::c10::metal::result_of<NAME##_functor, DTYPE, DTYPE> * out_, \
           uint tid)
 } // namespace metal
 } // namespace c10
