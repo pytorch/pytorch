@@ -993,10 +993,12 @@ class SchedulerNode(BaseSchedulerNode):
         recompute_sizes_body_func: Optional[Callable[..., Any]] = None,
     ) -> None:
         assert isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer))
-        self._sizes, self._body = self.node.simplify_and_reorder(
+        self._sizes, body = self.node.simplify_and_reorder(
             extra_indexing_constraints=extra_indexing_constraints,
             recompute_sizes_body_func=recompute_sizes_body_func,
         )
+        assert body is not None
+        self._body = body
 
         device = self.node.get_device_or_error()
         group_fn = self.scheduler.get_backend(device).group_fn

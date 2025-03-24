@@ -493,10 +493,12 @@ def build_subgraph_buffer(
                     "The output node for B2B-GEMM's subgraph must be a StorageBox, but got: ",
                     type(output_buffer),
                 )
+                device = output_buffer.data.get_device()
+                assert device is not None
                 subgraph_buffer = ComputedBuffer(
                     name=None,
                     layout=FlexibleLayout(
-                        device=output_buffer.data.get_device(),
+                        device=device,
                         dtype=output_buffer.data.get_dtype(),
                         size=output_buffer.data.get_size(),
                     ),

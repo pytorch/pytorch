@@ -2603,7 +2603,7 @@ class BaseView(DataNode):
         return self.data.is_extern()
 
     def is_module_buffer(self) -> bool:
-        assert isinstance(self.data, DataNode), type(self.data)
+        assert isinstance(self.data, BaseView), type(self.data)
         return self.data.is_module_buffer()
 
     def get_read_names(self) -> OrderedSet[str]:
@@ -7204,12 +7204,12 @@ class TensorBox(MutableBox):
 
 
 class StorageBox(MutableBox):
-    def is_input_buffer(self):  # type: ignore[no-untyped-def]
+    def is_input_buffer(self) -> bool:
         if isinstance(self.data, (InputBuffer, ReinterpretView)):
             return self.data.get_name() in V.graph.graph_inputs
         return False
 
-    def is_module_buffer(self):  # type: ignore[no-untyped-def]
+    def is_module_buffer(self) -> bool:
         return (
             isinstance(self.data, (ConstantBuffer))
             and self.data.get_name() in V.graph.constants
@@ -7232,10 +7232,12 @@ class StorageBox(MutableBox):
         )
         origin_node = self.data.get_origin_node()
         traceback = self.data.get_traceback()
+        device = self.data.get_device()
+        assert device is not None
         self.data = ComputedBuffer(
             name=None,
             layout=FlexibleLayout(
-                device=self.data.get_device(),
+                device=device,
                 dtype=self.data.get_dtype(),
                 size=self.data.get_size(),
             ),

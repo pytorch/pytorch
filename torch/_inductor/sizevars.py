@@ -3,7 +3,7 @@ import functools
 import itertools
 import logging
 from collections.abc import Iterable, Sequence
-from typing import Any, Callable, cast, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, cast, Optional, Sequence, TYPE_CHECKING, Union
 
 import sympy
 from sympy import Expr
@@ -662,7 +662,7 @@ class SizeVarAllocator:
         }
         return expr.subs(size_dict)
 
-    def offset_var(self, index: Expr, vars: list[sympy.Symbol]) -> Expr:
+    def offset_var(self, index: Expr, vars: Sequence[sympy.Symbol]) -> Expr:
         """Extract offset part of an indexing expression"""
         index = self.simplify(index)
         return sympy_subs(index, {v: sympy.S.Zero for v in vars if v != 0})
