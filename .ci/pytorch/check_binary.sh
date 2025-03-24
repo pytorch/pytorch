@@ -311,6 +311,6 @@ if [[ "$(uname)" == 'Linux' &&  "$PACKAGE_TYPE" == 'manywheel' ]]; then
   # Per https://gcc.gnu.org/onlinedocs/gcc/C_002b_002b-Dialect-Options.html gcc-11 is ABI16
   # Though manylinux_2.28 should have been build with gcc-14, per
   # https://github.com/pypa/manylinux?tab=readme-ov-file#manylinux_2_28-almalinux-8-based
-  python -c "import torch; exit(0 if torch._C._PYBIND11_BUILD_ABI == '_cxxabi1016' else 1))"
+  python -c "import torch; exit(0 if torch._C._PYBIND11_BUILD_ABI == '_cxxabi1016' else 1)"
   popd
 fi
