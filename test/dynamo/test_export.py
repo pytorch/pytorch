@@ -1873,7 +1873,7 @@ def forward(self, x, y):
                     return x + x
 
                 def false_fn(x):
-                    return x[:2]
+                    return x[:2].clone()
 
                 return cond(x.shape[0] <= 2, true_fn, false_fn, [x])
 
@@ -1883,7 +1883,7 @@ def forward(self, x, y):
                     return x + x
 
                 def false_fn(x):
-                    return x[:2]
+                    return x[:2].clone()
 
                 return cond(x.shape[0] <= 2, true_fn, false_fn, (x,))
 
@@ -1924,7 +1924,8 @@ def forward(self, l_x_):
 def forward(self, l_x_):
     l_x__1 = l_x_
     getitem = l_x__1[slice(None, 2, None)];  l_x__1 = None
-    return (getitem,)""",
+    clone = getitem.clone();  getitem = None
+    return (clone,)""",
             )
             # We could successfully export branches that return different sizes
             torch._dynamo.export(mod)(torch.randn(3, 2))
@@ -3302,7 +3303,12 @@ def forward(self, x):
 
     def test_cond_raise_user_error_on_branch_return_multiple_tensors(self):
         def f_branch_return_multiple_tensors(pred, x, y):
-            return cond(pred, lambda x: (x, x), lambda x: (x, x), [y])
+            return cond(
+                pred,
+                lambda x: (x.clone(), x.clone()),
+                lambda x: (x.clone(), x.clone()),
+                [y],
+            )
 
         example_inputs = (torch.tensor(True), torch.randn(4), torch.randn(2))
         gm, _ = torch._dynamo.export(
@@ -3324,10 +3330,10 @@ def forward(self, x):
 
     def test_cond_raise_user_error_on_mismatch_return_length(self):
         def true_fn(x):
-            return x
+            return x.clone()
 
         def false_fn(x):
-            return (x, x)
+            return (x.clone(), x.clone())
 
         def f_mismatch_return_length(x):
             return cond(torch.tensor(100), true_fn, false_fn, [x])
@@ -3856,7 +3862,7 @@ def forward(self, pred, x):
         self.assertExpectedInline(
             out_graph.cond_true_0.code.strip(),
             """\
-def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
+def forward(self, a, b, l_x_, d_cond_true, c_cond_false):
     a_1 = a
     b_1 = b
     l_x__1 = l_x_
@@ -3865,7 +3871,7 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
     add_1 = add + cos;  add = cos = None
     cos_1 = b_1.cos();  b_1 = None
     add_2 = add_1 + cos_1;  add_1 = cos_1 = None
-    cos_2 = d_true_branch.cos();  d_true_branch = None
+    cos_2 = d_cond_true.cos();  d_cond_true = None
     add_3 = add_2 + cos_2;  add_2 = cos_2 = None
     return (add_3,)""",
         )
@@ -3873,7 +3879,7 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
         self.assertExpectedInline(
             out_graph.cond_false_0.code.strip(),
             """\
-def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
+def forward(self, a, b, l_x_, d_cond_true, c_cond_false):
     a_1 = a
     b_1 = b
     l_x__1 = l_x_
@@ -3882,7 +3888,7 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
     add = mul + sin;  mul = sin = None
     sin_1 = b_1.sin();  b_1 = None
     add_1 = add + sin_1;  add = sin_1 = None
-    sin_2 = c_false_branch.sin();  c_false_branch = None
+    sin_2 = c_cond_false.sin();  c_cond_false = None
     add_2 = add_1 + sin_2;  add_1 = sin_2 = None
     return (add_2,)""",
         )

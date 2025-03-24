@@ -6,7 +6,7 @@ import unittest
 import torch
 import torch.utils._pytree as pytree
 from functorch.experimental import control_flow
-from functorch.experimental.control_flow import cond, UnsupportedAliasMutationException
+from functorch.experimental.control_flow import cond
 from torch._dynamo.testing import normalize_gm
 from torch._higher_order_ops.associative_scan import (
     _fake_associative_scan,
@@ -940,10 +940,10 @@ def forward(self, pred_1):
     @skipIfTorchDynamo("Skip due to graph break when run with dynamo")
     def test_cond_autograd_same_pytree_output(self):
         def true_fn(x):
-            return {"res": [x["t"][0], (x["t"][2][0],)]}
+            return {"res": [x["t"][0].clone(), (x["t"][2][0].clone(),)]}
 
         def false_fn(x):
-            return {"res": [x["t"][1]["b"], (x["t"][2][0],)]}
+            return {"res": [x["t"][1]["b"].clone(), (x["t"][2][0].clone(),)]}
 
         a = torch.randn(4, requires_grad=True)
         b = torch.randn(4, requires_grad=True)
@@ -981,9 +981,7 @@ def forward(self, pred_1):
     cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (_tensor_constant0, _tensor_constant1, _tensor_constant2));  pred_1 = true_graph_0 = false_graph_0 = _tensor_constant0 = _tensor_constant1 = _tensor_constant2 = None
     getitem = cond[0]
     getitem_1 = cond[1];  cond = None
-    view = torch.ops.aten.view.default(getitem, [4]);  getitem = None
-    view_1 = torch.ops.aten.view.default(getitem_1, [4]);  getitem_1 = None
-    return {'res': [view, (view_1,)]}""",  # noqa: B950
+    return {'res': [getitem, (getitem_1,)]}""",  # noqa: B950
         )
 
     @skipIfTorchDynamo("Skip due to graph break when run with dynamo")
@@ -2074,12 +2072,15 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
                 {
                     "i": x["i"] * y["j"][0][0],
                     "k": torch.tensor(0.0),
-                    "j": ([x["j"][1][0]["o"]], [{"o": torch.sin(x["i"])}]),
+                    "j": (
+                        [x["j"][1][0]["o"].clone()],
+                        [{"o": torch.sin(x["i"])}],
+                    ),
                 },
                 {
                     "i": x["i"] * y["j"][0][0],
                     "k": torch.tensor(0.0),
-                    "j": ([x["j"][1][0]["o"]], [{"o": torch.sin(x["i"])}]),
+                    "j": ([x["j"][1][0]["o"].clone()], [{"o": torch.sin(x["i"])}]),
                 },
             )
 
@@ -2564,8 +2565,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
         init = torch._ops.ops.aten.slice(x, dim, 0, 1, 1)
 
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Expected init and carry to have same metadata.*",
+            torch._dynamo.exc.InternalTorchDynamoError,
+            "Combine_fn might be aliasing the input or the output.*",
         ):
             scan_fct(wrong_carry_shape, init, x, dim=dim)
 
@@ -2745,7 +2746,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
                     ),
                 },
                 (
-                    y["i"],
+                    y["i"].clone(),
                     {
                         "o": x["i"] * y["i"],
                         "j": (
@@ -2761,13 +2762,13 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
                 {
                     "i": x["i"] * y["i"],
                     "j": (
-                        x["i"],
+                        x["i"].clone(),
                         [x["j"][1][0] * y["j"][0][0]],
                         [{"o": x["j"][2][0]["o"] + y["j"][1][0]["o"]}],
                     ),
                 },
                 (
-                    y["i"],
+                    y["i"].clone(),
                     {
                         "o": x["i"] * y["i"] + x["j"][0][0],
                         "j": (
@@ -2929,7 +2930,7 @@ class GraphModule(torch.nn.Module):
             b_hh = torch.ones((7), device=device)
             c_new = y @ W_ih + b_ih
             h_new = torch.tanh(c_new + x @ W_hh + b_hh)
-            return h_new, h_new
+            return h_new, h_new.clone()
 
         expected_result = rnn(
             torch.permute(x, (1, 0, 2)), torch.unsqueeze(h[:, 0, :], 0)
@@ -3010,6 +3011,104 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
     out_1 = out.flip([0]);  out = None
     return (carry, out_1)""",  # noqa: B950
         )
+
+    @requires_cuda
+    def test_scan_input_mutation(self):
+        device = torch.device("cuda")
+
+        def fct_input_mutation(x, y):
+            x.add_(1)
+            return x + y, x + y + 2
+
+        x = torch.randn(3, 2, 2, device=device)
+        init = torch.randn(2, 2, device=device)
+
+        with self.assertRaisesRegex(
+            # Should be
+            RuntimeError,
+            "Combine_fn might be modifying the input!",
+        ):
+            scan(fct_input_mutation, init, x, dim=0)
+
+    @requires_cuda
+    def test_scan_input_carry_alias(self):
+        device = torch.device("cuda")
+
+        def fct_input_output_alias(x, y):
+            return (x[0], x[1] + y[1]), (x[1] + y[1] + 1, x[1] + y[1] + 2)
+
+        x = torch.randn(3, 2, 2, device=device)
+        y = torch.randn(3, 2, 2, device=device)
+        inp = (x, y)
+        init = (torch.randn(2, 2, device=device), torch.randn(2, 2, device=device))
+
+        with self.assertRaisesRegex(
+            # Should be
+            RuntimeError,
+            "Combine_fn might be aliasing the input.*",
+        ):
+            scan(fct_input_output_alias, init, inp, dim=0)
+
+    @requires_cuda
+    def test_scan_input_output_alias(self):
+        device = torch.device("cuda")
+
+        def fct_input_output_alias(x, y):
+            return (x[0] + 1, x[1] + y[1]), (x[1], x[1] + y[1] + 2)
+
+        x = torch.randn(3, 2, 2, device=device)
+        y = torch.randn(3, 2, 2, device=device)
+        inp = (x, y)
+        init = (torch.randn(2, 2, device=device), torch.randn(2, 2, device=device))
+
+        with self.assertRaisesRegex(
+            # Should be
+            RuntimeError,
+            "Combine_fn might be aliasing the input.*",
+        ):
+            scan(fct_input_output_alias, init, inp, dim=0)
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    def test_scan_carry_carry_alias(self):
+        device = torch.device("cuda")
+
+        def fct_carry_carry_alias(x, y):
+            c = x[0] + y[1]
+            return (c, c), (x[0] + y[1], x[0] + y[1] + 1)
+
+        x = torch.randn(3, 2, 2, device=device)
+        y = torch.randn(3, 2, 2, device=device)
+        inp = (x, y)
+        init = (torch.randn(2, 2, device=device), torch.randn(2, 2, device=device))
+
+        with self.assertRaisesRegex(
+            # Should be:
+            RuntimeError,
+            "Combine_fn might be aliasing the input.*",
+        ):
+            scan(fct_carry_carry_alias, init, inp, dim=0)
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    def test_scan_carry_output_alias(self):
+        device = torch.device("cuda")
+
+        def fct_carry_output_alias(x, y):
+            c = x[0] + y[1]
+            return (x[0] + y[1], c), (c, x[0] + y[1] + 1)
+
+        x = torch.randn(3, 2, 2, device=device)
+        y = torch.randn(3, 2, 2, device=device)
+        inp = (x, y)
+        init = (torch.randn(2, 2, device=device), torch.randn(2, 2, device=device))
+
+        with self.assertRaisesRegex(
+            # Should be:
+            RuntimeError,
+            "Combine_fn might be aliasing the input.*",
+        ):
+            scan(fct_carry_output_alias, init, inp, dim=0)
 
 
 class AssociativeScanModels:
@@ -4304,9 +4403,29 @@ class AssociativeScanTests(TestCase):
         with self.assertRaisesRegex(
             # Should be
             RuntimeError,
-            "Combine_fn might be aliasing the input!",
+            "Combine_fn might be aliasing the input.*",
         ):
             associative_scan(fct_input_output_alias, inp, 0)
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    def test_associative_scan_output_output_alias(self):
+        device = torch.device("cuda")
+
+        def fct_output_output_alias(x, y):
+            c = x[0] + y[1]
+            return c, c
+
+        x = torch.randn(3, 2, 2, device=device)
+        y = torch.randn(3, 2, 2, device=device)
+        inp = (x, y)
+
+        with self.assertRaisesRegex(
+            # Should be:
+            RuntimeError,
+            "Combine_fn might be aliasing the input.*",
+        ):
+            associative_scan(fct_output_output_alias, inp, 0)
 
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
@@ -5097,8 +5216,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
         graph_module = make_fx(torch.func.functionalize(f))(*example_inputs)
         self.assertEqual(graph_module(*example_inputs), f(*example_inputs))
 
-    # https://github.com/pytorch/pytorch/issues/126988
-    def test_cond_functionalized_input_mutation_on_true_brancte(self):
+    def test_cond_functionalized_input_mutation_on_true_branch(self):
         def true_fn(x):
             view_x = x.view(x.shape)
             view_x.add_(1)
@@ -5132,13 +5250,13 @@ def forward(self, x_1):
         # torch.cond triggers the check of the branches because the predicate
         # is a SymBool.
         with self.assertRaisesRegex(
-            torch._dynamo.exc.TorchRuntimeError, "One of torch.cond branch"
+            torch._dynamo.exc.InternalTorchDynamoError,
+            "cond_true might be modifying the input!",
         ):
             make_fx(torch.func.functionalize(f), tracing_mode="symbolic")(
                 *example_inputs
             )
 
-    # https://github.com/pytorch/pytorch/issues/126988
     def test_cond_functionalized_input_mutation_on_false_branch(self):
         def true_fn(x):
             return x.sin().sum()
@@ -5173,16 +5291,16 @@ def forward(self, x_1):
         # torch.cond triggers the check of the branches because the predicate
         # is a SymBool.
         with self.assertRaisesRegex(
-            torch._dynamo.exc.TorchRuntimeError, "One of torch.cond branch"
+            torch._dynamo.exc.InternalTorchDynamoError,
+            "cond_false might be modifying the input!",
         ):
             make_fx(torch.func.functionalize(f), tracing_mode="symbolic")(
                 *example_inputs
             )
 
-    # https://github.com/pytorch/pytorch/issues/126988
     def test_cond_functionalized_output_alias_input(self):
         def true_fn(x):
-            return x
+            return x.clone()
 
         def false_fn(x):
             view_x = x.view(x.shape)
@@ -5207,13 +5325,13 @@ def forward(self, x_1):
         # torch.cond triggers the check of the branches because the predicate
         # is a SymBool.
         with self.assertRaisesRegex(
-            torch._dynamo.exc.TorchRuntimeError, "One of torch.cond branch"
+            torch._dynamo.exc.InternalTorchDynamoError,
+            "cond_false might be aliasing the input or the output!",
         ):
             make_fx(torch.func.functionalize(f), tracing_mode="symbolic")(
                 *example_inputs
             )
 
-    # https://github.com/pytorch/pytorch/issues/126988
     def test_cond_functionalized_nested_input_mutation(self):
         def true_true_fn(x):
             x.add_(4)
@@ -5235,13 +5353,13 @@ def forward(self, x_1):
 
         example_inputs = (torch.ones(4, 5),)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.TorchRuntimeError, "One of torch.cond branch"
+            torch._dynamo.exc.InternalTorchDynamoError,
+            "cond_true might be modifying the input!",
         ):
             make_fx(torch.func.functionalize(f), tracing_mode="symbolic")(
                 *example_inputs
             )
 
-    # https://github.com/pytorch/pytorch/issues/126988
     def test_cond_functionalized_nested_input_mutation_with_aot_func(self):
         def true_true_fn(x):
             x.add_(4)
@@ -5268,7 +5386,8 @@ def forward(self, x_1):
             f(example_input_func)
 
             with self.assertRaisesRegex(
-                torch._dynamo.exc.TorchRuntimeError, "One of torch.cond branch"
+                torch._dynamo.exc.InternalTorchDynamoError,
+                "cond_true might be modifying the input!",
             ):
                 make_fx(f, tracing_mode="symbolic")(example_input_func)
         finally:
@@ -5286,7 +5405,8 @@ def forward(self, x_1):
             return wrapper
 
         with self.assertRaisesRegex(
-            torch._dynamo.exc.TorchRuntimeError, "One of torch.cond branch"
+            torch._dynamo.exc.InternalTorchDynamoError,
+            "cond_true might be modifying the input!",
         ):
             make_fx(f_wrapper(f), tracing_mode="symbolic")(example_input_func)
 
@@ -5307,8 +5427,8 @@ def forward(self, x_1):
             example_input_func = to_fun_old(example_input)
             torch._enable_functionalization(reapply_views=False)
             with self.assertRaisesRegex(
-                torch._dynamo.exc.TorchRuntimeError,
-                "One of torch.cond branch might be aliasing",
+                torch._dynamo.exc.InternalTorchDynamoError,
+                "cond_true might be aliasing the input or the output!",
             ):
                 f(example_input_func)
         finally:
@@ -5338,8 +5458,8 @@ def forward(self, x_1):
             return wrapper
 
         with self.assertRaisesRegex(
-            torch._dynamo.exc.TorchRuntimeError,
-            "One of torch.cond branch might be aliasing",
+            torch._dynamo.exc.InternalTorchDynamoError,
+            "cond_true might be aliasing the input or the output!",
         ):
             make_fx(f_wrapper(f), tracing_mode="symbolic")(example_input)
 
@@ -5474,8 +5594,8 @@ def forward(self, arg0_1):
 
         x = torch.randn(4)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.TorchRuntimeError,
-            "Unmatched output spec from torch.cond branches",
+            torch._dynamo.exc.InternalTorchDynamoError,
+            "cond_false might be aliasing the input or the output!",
         ):
             make_fx(f)(x, torch.tensor(False))
 
@@ -5647,8 +5767,8 @@ def forward(self, arg0_1):
 
         x = torch.randn(4)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.TorchRuntimeError,
-            "Unmatched output spec from torch.cond branches",
+            torch._dynamo.exc.InternalTorchDynamoError,
+            "cond_false might be aliasing the input or the output!",
         ):
             make_fx(f, tracing_mode="fake")(x, torch.tensor(False))
 
@@ -5933,7 +6053,8 @@ def forward(self, arg0_1):
         example_inputs = (torch.ones(3, 2, 4), torch.ones(4))
         functional_f = torch.func.functionalize(f)
         with self.assertRaisesRegex(
-            UnsupportedAliasMutationException, "torch.map is mutating the input!"
+            RuntimeError,
+            "torch.map might be modifying the input!",
         ):
             functional_f(*example_inputs)
 
@@ -5950,7 +6071,8 @@ def forward(self, arg0_1):
         example_inputs = (torch.ones(3, 2, 4), torch.ones(4))
         functional_f = torch.func.functionalize(f)
         with self.assertRaisesRegex(
-            UnsupportedAliasMutationException, "torch.map is mutating the input!"
+            RuntimeError,
+            "torch.map might be modifying the input!",
         ):
             functional_f(*example_inputs)
 
@@ -5990,7 +6112,8 @@ def forward(self, arg0_1):
         example_inputs = (torch.ones(3, 2, 4),)
         functional_f = torch.func.functionalize(f)
         with self.assertRaisesRegex(
-            UnsupportedAliasMutationException, "torch.map is aliasing the input!"
+            RuntimeError,
+            "torch.map might be aliasing the input or the output!",
         ):
             functional_f(*example_inputs)
 
@@ -6588,7 +6711,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             return torch.cond(
                 pred=torch.tensor([True]),
                 true_fn=lambda x: x + 100,
-                false_fn=lambda x: x,
+                false_fn=lambda x: x.clone(),
                 operands=(x,),
             )
 
@@ -6602,7 +6725,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             return torch.cond(
                 pred=x.sum() < y.sum(),
                 true_fn=lambda x, y: x + 100,
-                false_fn=lambda x, y: y,
+                false_fn=lambda x, y: y.clone(),
                 operands=(x, y),
             )
 
@@ -6661,7 +6784,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 return torch.cond(
                     pred=torch.tensor([True]),
                     true_fn=lambda x: (x + c, x - c),
-                    false_fn=lambda x: (x, x),
+                    false_fn=lambda x: (x.clone(), x.clone()),
                     operands=(x,),
                 )
 
@@ -6671,7 +6794,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 return torch.cond(
                     pred=torch.tensor([True]),
                     true_fn=lambda x: (x + 1, x - 1),
-                    false_fn=lambda x: (x, x),
+                    false_fn=lambda x: (x.clone(), x.clone()),
                     operands=(x,),
                 )
 
@@ -6867,8 +6990,6 @@ def forward(self, s0 : torch.SymInt, L_a_ : torch.Tensor, L_b_ : torch.Tensor, L
             functional_f(example_init, example_inputs), f(example_init, example_inputs)
         )
 
-    # https://github.com/pytorch/pytorch/issues/126988
-    @xfailIfTorchDynamo
     def test_scan_functionalized_elem_mutation(self):
         def add1(x, y):
             x.add_(4)
@@ -6881,7 +7002,7 @@ def forward(self, s0 : torch.SymInt, L_a_ : torch.Tensor, L_b_ : torch.Tensor, L
         example_init = torch.ones(5, 4)
         functional_f = torch.func.functionalize(f)
         with self.assertRaisesRegex(
-            UnsupportedAliasMutationException,
+            torch._dynamo.exc.InternalTorchDynamoError,
             "Combine_fn might be modifying the input!",
         ):
             functional_f(example_init, example_inputs)
@@ -6895,13 +7016,11 @@ def forward(self, s0 : torch.SymInt, L_a_ : torch.Tensor, L_b_ : torch.Tensor, L
 
         functional_f = torch.func.functionalize(f)
         with self.assertRaisesRegex(
-            UnsupportedAliasMutationException,
-            "Combine_fn might be modifying the input!",
+            torch._dynamo.exc.InternalTorchDynamoError,
+            "Combine_fn might be modifying the input",
         ):
             functional_f(example_init, example_inputs)
 
-    # https://github.com/pytorch/pytorch/issues/126988
-    @xfailIfTorchDynamo
     def test_scan_functionalized_elem_alias(self):
         def add(x, y):
             return x, x
@@ -6913,7 +7032,8 @@ def forward(self, s0 : torch.SymInt, L_a_ : torch.Tensor, L_b_ : torch.Tensor, L
         example_init = torch.ones(5, 4)
         functional_f = torch.func.functionalize(f)
         with self.assertRaisesRegex(
-            UnsupportedAliasMutationException, "Combine_fn might be aliasing the input!"
+            torch._dynamo.exc.InternalTorchDynamoError,
+            "Combine_fn might be aliasing the input or the output!",
         ):
             functional_f(example_init, example_inputs)
 
@@ -7420,7 +7540,8 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(2, 2)
         for f in ALIAS_FN:
             with self.assertRaisesRegex(
-                torch._dynamo.exc.BackendCompilerFailed, "might be aliasing the input"
+                torch._dynamo.exc.InternalTorchDynamoError,
+                "cond_true might be aliasing the input or the output!",
             ):
                 torch.compile(fn)(f, x)
 
@@ -7436,7 +7557,8 @@ class GraphModule(torch.nn.Module):
         # as a result of auto lifting.
         for view_f in ALIAS_FN[1:]:
             with self.assertRaisesRegex(
-                torch._dynamo.exc.BackendCompilerFailed, "might be aliasing the input"
+                torch._dynamo.exc.InternalTorchDynamoError,
+                "cond_true might be aliasing the input or the output!",
             ):
                 torch.compile(fn)(view_f, x)
 
@@ -7453,12 +7575,14 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(2, 2)
         for f in ALIAS_FN:
             with self.assertRaisesRegex(
-                torch._dynamo.exc.BackendCompilerFailed, "might be modifying the input"
+                torch._dynamo.exc.InternalTorchDynamoError,
+                "cond_true might be modifying the input!",
             ):
                 torch.compile(fn)(f, x)
 
             with self.assertRaisesRegex(
-                torch._dynamo.exc.BackendCompilerFailed, "might be modifying the input"
+                torch._dynamo.exc.InternalTorchDynamoError,
+                "cond_true might be modifying the input!",
             ):
                 with torch.inference_mode(inference_mode):
                     torch.compile(fn)(f, x)
@@ -7787,21 +7911,21 @@ class GraphModule(torch.nn.Module):
         return (sub,)
 
     class cond_true_0(torch.nn.Module):
-        def forward(self, l_x_, s1, s0_true_branch, getitem_2_false_branch, l_z__false_branch):
+        def forward(self, l_x_, s1, s0_cond_true, getitem_2_cond_false, l_z__cond_false):
             l_x__1 = l_x_
             s1_1 = s1
 
-            add: "f32[s0, s1]" = l_x__1 + s0_true_branch;  l_x__1 = s0_true_branch = None
+            add: "f32[s0, s1]" = l_x__1 + s0_cond_true;  l_x__1 = s0_cond_true = None
             getitem: "f32[s0 - 2, s1]" = add[slice(2, None, None)];  add = None
             clone: "f32[s0 - 2, s1]" = getitem.clone();  getitem = None
             return (clone,)
 
     class cond_false_0(torch.nn.Module):
-        def forward(self, l_x_, s1, s0_true_branch, getitem_2_false_branch, l_z__false_branch):
+        def forward(self, l_x_, s1, s0_cond_true, getitem_2_cond_false, l_z__cond_false):
             l_x__1 = l_x_
             s1_1 = s1
 
-            mul: "f32[s0, s1]" = getitem_2_false_branch * l_z__false_branch;  getitem_2_false_branch = l_z__false_branch = None
+            mul: "f32[s0, s1]" = getitem_2_cond_false * l_z__cond_false;  getitem_2_cond_false = l_z__cond_false = None
             add: "f32[s0, s1]" = l_x__1 + mul;  l_x__1 = mul = None
             getitem: "f32[2, s1]" = add[slice(None, 2, None)];  add = None
             clone: "f32[2, s1]" = getitem.clone();  getitem = None

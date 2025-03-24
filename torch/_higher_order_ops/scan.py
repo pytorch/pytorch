@@ -9,15 +9,13 @@ import torch._subclasses.functional_tensor
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import (
-    _has_potential_branch_input_alias,
-    _has_potential_branch_input_mutation,
     _maybe_compile_and_run_fn,
+    _maybe_run_with_interpreter,
     autograd_not_implemented,
     check_meta_consistency,
     first_slice_copy,
     reenter_make_fx,
     unique_graph_id,
-    UnsupportedAliasMutationException,
     validate_subgraph_args_types,
 )
 from torch._ops import HigherOrderOperator
@@ -384,11 +382,15 @@ def scan_fake_tensor_mode(mode, combine_fn, init, xs, additional_inputs):
 
 @scan_op.py_functionalize_impl
 def scan_functionalize(ctx, combine_fn, init, xs, additional_inputs):
+    from torch._dynamo.variables.higher_order_ops import _check_mutation_and_alias
+
     unwrapped_xs = ctx.unwrap_tensors(xs)
     unwrapped_init = ctx.unwrap_tensors(init)
     unwrapped_additional_inputs = ctx.unwrap_tensors(additional_inputs)
     with ctx.redispatch_to_next():
-        functional_combine_fn = ctx.functionalize(combine_fn)
+        functional_combine_fn = ctx.functionalize(
+            _maybe_run_with_interpreter(combine_fn)
+        )
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
         sample_unwrapped_xs_sliced = [first_slice_copy(inp) for inp in unwrapped_xs]
         sample_inputs = list(
@@ -398,18 +400,7 @@ def scan_functionalize(ctx, combine_fn, init, xs, additional_inputs):
                 unwrapped_additional_inputs,
             )
         )
-        if _has_potential_branch_input_mutation(
-            combine_fn, sample_inputs, pre_dispatch=pre_dispatch
-        ):
-            raise UnsupportedAliasMutationException(
-                "Combine_fn might be modifying the input!"
-            )
-        if _has_potential_branch_input_alias(
-            combine_fn, sample_inputs, pre_dispatch=pre_dispatch
-        ):
-            raise UnsupportedAliasMutationException(
-                "Combine_fn might be aliasing the input!"
-            )
+        _check_mutation_and_alias(combine_fn, sample_inputs, "Combine_fn", pre_dispatch)
         ret = scan_op(
             functional_combine_fn,
             unwrapped_init,

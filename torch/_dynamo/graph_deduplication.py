@@ -129,10 +129,19 @@ def _replace_region_with_subgraph(
     invoke_args = (get_subgraph_node, subgraph_name, tuple(sub_args))
     fake_inputs = [node.meta["example_value"] for node in sub_args]
 
-    if has_potential_input_alias_or_mutation(sub_gm, fake_inputs):
+    aliases, input_mutations = has_potential_input_alias_or_mutation(
+        sub_gm, fake_inputs
+    )
+    if aliases:
         log.debug(
-            "NYI: Failed to substitute region %s due to input alias or mutation",
-            region,
+            f"NYI: Failed to substitute region {region} due to aliases."  # noqa: G004
+            f"In particular, these nodes are aliasing the inputs {[el for el in aliases]}."  # noqa: G004, C416
+        )
+        return
+    if input_mutations:
+        log.debug(
+            f"NYI: Failed to substitute region {region} due to input mutations."  # noqa: G004
+            f"In particular, these nodes are mutating the inputs {[el for el in input_mutations]}."  # noqa: G004, C416
         )
         return
 
