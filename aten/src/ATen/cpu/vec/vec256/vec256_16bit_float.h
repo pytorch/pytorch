@@ -133,7 +133,7 @@ template <typename T, typename std::enable_if_t<is_reduced_floating_point_v<T>, 
 inline void cvt_to_fp32(const __m128i& a, __m256& o);
 template <> inline void cvt_to_fp32<BFloat16>(const __m128i& a, __m256& o) {
   cvtbf16_fp32(a, o);
-};
+}
 template <> inline void cvt_to_fp32<Half>(const __m128i& a, __m256& o) {
   cvtfp16_fp32(a, o);
 }

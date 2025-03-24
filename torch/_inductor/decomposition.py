@@ -990,7 +990,7 @@ def _max_pool_with_indices(
     # We fallback when using non-default dilation or when the window size is too large
     if (
         torch._inductor.lowering.should_fallback_max_pool_with_indices(
-            kernel_size, dim=dim
+            kernel_size, n_dim=dim
         )
         or window_size > torch.iinfo(torch.int8).max
     ):

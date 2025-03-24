@@ -54,6 +54,7 @@ from .schemas import AOTAutogradCacheInfo, AOTConfig, ViewAndMutationMeta  # noq
 
 if TYPE_CHECKING:
     from torch._inductor.compile_fx import _CompileFxKwargs
+    from torch._inductor.cudagraph_utils import BoxedDeviceIndex
     from torch._inductor.output_code import CompiledFxGraph
     from torch._inductor.remote_cache import JsonDataTy, RemoteCache
     from torch._inductor.utils import BoxedBool
@@ -207,10 +208,6 @@ def check_cacheable(gm: torch.fx.GraphModule):
     Checks that the graph module only uses supported operators
     """
     nodes = gm.graph.nodes
-    if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
-        raise BypassAOTAutogradCache(
-            "Cannot cache a graph with compiled autograd enabled"
-        )
     if torch._inductor.config.freezing:
         raise BypassAOTAutogradCache("Cannot cache a graph with freezing enabled")
 
@@ -349,10 +346,10 @@ def autograd_cache_key(
 class FXGraphCacheLoadable:
     fx_graph_cache_key: str
 
-    def is_backward(self):
+    def is_backward(self) -> bool:
         return False
 
-    def load(self, example_inputs, fx_config: _CompileFxKwargs) -> CompiledFxGraph:
+    def load(self, example_inputs) -> CompiledFxGraph:
         # [Note: AOTAutogradCache and FXGraphCache Guard interactions]
         # As mentioned, AOTAutograd takes in the symint inputs from dynamo's list of arguments.
         # FXGraphCache serializes guards that are needed in the shape_env based on these symint inputs to the graph.
@@ -361,6 +358,9 @@ class FXGraphCacheLoadable:
         # (This does not mean that the tensor values passed in are the same: only that their symints are).
         # That is, AOTAutograd and Inductor never create new guards based on symints with different sources
         # than those passed to it by inductor.
+
+        # We pass the post compile function, which sets various fx_config boxed values,
+        # so we can call it only after we're sure both forward and backward have
 
         # TODO: We don't cache debug lines for now, but we should for improved debugging
         remote_cache = None
@@ -379,6 +379,15 @@ class FXGraphCacheLoadable:
         )
         if result is None:
             log.info("FXGraphCache cache miss for key %s", self.fx_graph_cache_key)
+            torch._logging.trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "fx_graph_cache_miss",  # always a hit
+                    "encoding": "json",
+                },
+                payload_fn=lambda: json.dumps(cache_info),
+            )
+
             raise FXGraphCacheMiss
 
         # No need to log chromium event because AOTAutograd will log that immediately for us
@@ -390,9 +399,17 @@ class FXGraphCacheLoadable:
             },
             payload_fn=lambda: json.dumps(cache_info),
         )
+        self.example_inputs = example_inputs
+        self.constants = constants
+        return result
 
-        # TODO: How come cudagraphs could be None here?
-        result.post_compile(example_inputs, fx_config["cudagraphs"], constants)  # type: ignore[arg-type]
+    def post_compile(
+        self, result: CompiledFxGraph, fx_config: _CompileFxKwargs
+    ) -> CompiledFxGraph:
+        """
+        Called after FXGraphCacheLoadable.load, mutates fx_config
+        """
+        result.post_compile(self.example_inputs, self.constants, fx_config)
         return result
 
 
@@ -402,7 +419,7 @@ class CompiledForward(FXGraphCacheLoadable):
     Cacheable entry for a forward function
     """
 
-    def is_backward(self):
+    def is_backward(self) -> bool:
         return False
 
 
@@ -416,7 +433,7 @@ class CompiledBackward(FXGraphCacheLoadable):
     backward_state_indices: list[int]
     num_symints_saved_for_bw_: int
 
-    def is_backward(self):
+    def is_backward(self) -> bool:
         return True
 
 
@@ -521,18 +538,43 @@ class AOTAutogradCacheEntry:
                     "aot_backward_graph", payload_fn=lambda: self.aot_backward_graph_str
                 )
 
-        compiled_fw_func = self.compiled_fw.load(args, fx_config)
+        compiled_fw_func = self.compiled_fw.load(args)
         compiled_bw_func = None
         if self.compiled_bw is not None:
-            compiled_bw_func = self.compiled_bw.load(args, fx_config)
+            compiled_bw_func = self.compiled_bw.load(args)
             needs_autograd = True
             CompileEventLogger.try_add_pt2_compile(
                 "backend_compile", dispatch_mode="autograd"
             )
+            # Now that we've loaded forward and backward, call post compile on both
+            # This avoids setting things like BoxedBools in fx_config until
+            # after both forward and backward cache hit
+            fw_fx_config: _CompileFxKwargs = {
+                **fx_config,
+                "is_backward": False,
+            }
+            bw_fx_config: _CompileFxKwargs = {
+                **fx_config,
+                "is_backward": True,
+            }
+            compiled_fw_func = self.compiled_fw.post_compile(
+                compiled_fw_func, fw_fx_config
+            )
+            compiled_bw_func = self.compiled_bw.post_compile(
+                compiled_bw_func, bw_fx_config
+            )
         else:
+            inference_fx_config: _CompileFxKwargs = {
+                **fx_config,
+                "is_backward": False,
+            }
+
             needs_autograd = False
             CompileEventLogger.try_add_pt2_compile(
                 "backend_compile", dispatch_mode="inference"
+            )
+            compiled_fw_func = self.compiled_fw.post_compile(
+                compiled_fw_func, inference_fx_config
             )
 
         # Wrap the forward function in post compile wrappers
@@ -679,6 +721,7 @@ class AOTAutogradCache:
         args,
         aot_config: AOTConfig,
         cudagraphs: BoxedBool,
+        boxed_forward_device_index: Optional[BoxedDeviceIndex],
         local: bool,
         remote: bool,
     ) -> Callable:
@@ -694,7 +737,10 @@ class AOTAutogradCache:
             debug_lines: list[str] = []
             cache_event_time = time.time_ns()
             cache_state = None
-            fx_config: _CompileFxKwargs = {"cudagraphs": cudagraphs}
+            fx_config: _CompileFxKwargs = {
+                "cudagraphs": cudagraphs,
+                "boxed_forward_device_index": boxed_forward_device_index,
+            }
             try:
                 cache_key, debug_lines = autograd_cache_key(
                     gm, args, aot_config, fx_config
