@@ -188,9 +188,7 @@ class CompiledTritonKernels:
         key = CompiledTritonKernels.key(kernel_src)
 
         # Delete the LambdaFuture if there is one
-        if key in CompiledTritonKernels._cache and isinstance(
-            CompiledTritonKernels._cache[key], LambdaFuture
-        ):
+        if key in CompiledTritonKernels._cache:
             del CompiledTritonKernels._cache[key]
 
 
