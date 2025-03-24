@@ -39,7 +39,7 @@ import types
 import warnings
 import weakref
 from collections.abc import MutableMapping
-from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING, Union, Iterator
+from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING, Union
 
 import sympy
 
@@ -383,6 +383,10 @@ ITERTOOLS_TYPE_IDS: frozenset[int] = frozenset(
 )
 # Will be updated later in substitute_in_graph in torch/_dynamo/polyfills/itertools.py
 ITERTOOLS_POLYFILLED_TYPE_IDS: set[int] = set()
+
+# Capture fn pointer at import time
+og_module_named_buffers_fn_ptr = torch.nn.Module.named_buffers
+og_module_named_parameters_fn_ptr = torch.nn.Module.named_parameters
 
 
 class VariableBuilder:
@@ -1582,17 +1586,17 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.TYPE_MATCH)
             if torch._dynamo.config.inline_inbuilt_nn_modules:
                 freezing = is_parameter_freezing()
-                for p in value.parameters():
-                    self.mark_static_input(p, guard=freezing)
+                # Guard against the case where user may overwrite named parameters
+                # / named buffers
+                # NOTE: This is not likely to happen but worth guarding to avoid
+                # exception
+                if value.named_parameters == og_module_named_parameters_fn_ptr:
+                    for _, p in value.named_parameters():
+                        self.mark_static_input(p, guard=freezing)
 
-                # nn buffers is frequently overriden; this check validates
-                # the fn has semantics matching nn.Module expectation
-                # which is callable, and returning iterator of Tensor
-                # Otherwise, we will skip trying to modify buffers
-                if callable(value.named_buffers) and isinstance(value.named_buffers(), Iterator):
-                        for _, b in value.named_buffers():
-                            self.mark_static_input(b, guard=freezing)
-                # else, buffers has been overriden by user, so skip marking these
+                if value.named_buffers == og_module_named_buffers_fn_ptr:
+                    for _, b in value.named_buffers():
+                        self.mark_static_input(b, guard=freezing)
 
                 if freezing:
                     # we need to add the module to tracing context
