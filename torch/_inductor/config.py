@@ -601,8 +601,10 @@ debug_index_asserts = False
 # Inductor's behavior should be closer to fp64 ref numerics.  However, with
 # this knob you can ensure the downcast-upcast are preserved so that you can
 # emulate the eager numerics.
-emulate_precision_casts = (
-    os.environ.get("TORCHINDUCTOR_EMULATE_PRECISION_CASTS", "0") == "1"
+emulate_precision_casts: bool = Config(
+    justknob="pytorch/compiler:emulate_precision_casts",
+    env_name_force="TORCHINDUCTOR_EMULATE_PRECISION_CASTS",
+    default=False,
 )
 
 # warnings intended for PyTorch developers, disable for point releases
