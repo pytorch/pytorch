@@ -3503,7 +3503,8 @@ def forward(self, x):
         # Since symbol names are based on hash of source names, and these differ across inference and
         # training, we do range comparisons instead.
         self.assertEqual(
-            str(ep_for_training.range_constraints.values()), str(ep_for_real.range_constraints.values())
+            str(ep_for_training.range_constraints.values()),
+            str(ep_for_real.range_constraints.values()),
         )
 
     def test_export_for_training_with_container_type(self):
