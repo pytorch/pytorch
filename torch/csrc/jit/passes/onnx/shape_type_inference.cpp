@@ -12,8 +12,6 @@
 #include <torch/csrc/jit/serialization/onnx.h>
 #include <torch/csrc/utils/python_strings.h>
 
-#include <torch/csrc/onnx/diagnostics/diagnostics.h>
-
 #include <onnx/shape_inference/implementation.h>
 #include <algorithm>
 #include <cmath>
@@ -84,7 +82,6 @@ void MergeInferredTypeAndSetMap(
 namespace {
 namespace onnx_torch = ::torch::onnx;
 namespace onnx = ::ONNX_NAMESPACE;
-namespace diagnostics = ::torch::onnx::diagnostics;
 
 // SymbolDimMap is a Torch-to-ONNX shape look-up. This is built so it can be
 // returned by the export function. During the export however, when we come
@@ -1997,11 +1994,6 @@ void UpdateReliable(
         output->node()->kind().toDisplayString(),
         " type is missing, so it may result in wrong shape inference for the exported graph. ",
         "Please consider adding it in symbolic function.");
-    // Experimental, nothing sent to stdout nor stderr.
-    diagnostics::Diagnose(
-        diagnostics::Rule::kNodeMissingOnnxShapeInference,
-        diagnostics::Level::kWarning,
-        {{"op_name", output->node()->kind().toDisplayString()}});
   }
   auto reliable = false;
   if (inferred) {

@@ -23,7 +23,7 @@ import torch.serialization
 from torch import _C
 from torch.onnx import _constants, errors, symbolic_helper  # noqa: F401
 from torch.onnx._globals import GLOBALS
-from torch.onnx._internal import diagnostics, jit_utils, onnx_proto_utils, registration
+from torch.onnx._internal import jit_utils, onnx_proto_utils, registration
 
 
 if typing.TYPE_CHECKING:
@@ -177,9 +177,8 @@ def exporter_context(model, mode: _C_onnx.TrainingMode, verbose: bool):
         select_model_mode_for_export(model, mode) as mode_ctx,
         disable_apex_o2_state_dict_hook(model) as apex_ctx,
         setup_onnx_logging(verbose) as log_ctx,
-        diagnostics.create_export_diagnostic_context() as diagnostic_ctx,
     ):
-        yield (mode_ctx, apex_ctx, log_ctx, diagnostic_ctx)
+        yield (mode_ctx, apex_ctx, log_ctx)
 
 
 def _get_torch_export_args(
