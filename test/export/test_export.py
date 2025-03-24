@@ -1554,7 +1554,7 @@ graph():
             )
             with self.assertRaisesRegex(
                 error_type,
-                r"Real tensor propagation found an output size mismatch between fake shape s16 and real shape 4, "
+                r"Real tensor propagation found an output size mismatch between fake shape s\d+ and real shape 4, "
                 r"at output\.size\(0\), for func: mylib.foo.default",
             ):
                 export(
