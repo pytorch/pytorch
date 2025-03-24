@@ -204,6 +204,7 @@ NON_STRICT_SUFFIX = "_nonstrict"
 STRICT_SUFFIX = "_strict"
 RETRACEABILITY_STRICT_SUFFIX = "_retraceability_strict"
 RETRACEABILITY_NON_STRICT_SUFFIX = "_retraceability_nonstrict"
+SERDES_SUFFIX = "serdes"
 SERDES_STRICT_SUFFIX = "_serdes_strict"
 SERDES_NON_STRICT_SUFFIX = "_serdes_nonstrict"
 PREDISPATCH_SUFFIX = "_pre_dispatch"
@@ -235,6 +236,10 @@ def is_serdes_test(test_name):
     return test_name.endswith(SERDES_STRICT_SUFFIX) or test_name.endswith(
         SERDES_NON_STRICT_SUFFIX
     )
+
+
+def need_serdes_test(test_name):
+    return SERDES_SUFFIX in test_name
 
 
 def is_training_ir_test(test_name):
@@ -6673,9 +6678,11 @@ def forward(self, x):
             str(schema),
             """cond(SymBool pred, GraphModule true_fn, GraphModule false_fn, Tensor[2] operands) -> Tensor[1]""",
         )
-        self.assertExpectedInline(
-            ep.graph_module.code.strip(),
-            """\
+        # serdes deserailizes tuple as list
+        if need_serdes_test(self._testMethodName):
+            self.assertExpectedInline(
+                ep.graph_module.code.strip(),
+                """\
 def forward(self, b_a_buffer, x):
     sym_size_int_1 = torch.ops.aten.sym_size.int(x, 0)
     gt = sym_size_int_1 > 4;  sym_size_int_1 = None
@@ -6684,7 +6691,21 @@ def forward(self, b_a_buffer, x):
     cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [x, b_a_buffer]);  gt = true_graph_0 = false_graph_0 = x = b_a_buffer = None
     getitem = cond[0];  cond = None
     return (getitem,)""",
-        )
+            )
+
+        else:
+            self.assertExpectedInline(
+                ep.graph_module.code.strip(),
+                """\
+def forward(self, b_a_buffer, x):
+    sym_size_int_1 = torch.ops.aten.sym_size.int(x, 0)
+    gt = sym_size_int_1 > 4;  sym_size_int_1 = None
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, (x, b_a_buffer));  gt = true_graph_0 = false_graph_0 = x = b_a_buffer = None
+    getitem = cond[0];  cond = None
+    return (getitem,)""",
+            )
         self.assertTrue(
             torch.allclose(ep.module()(torch.ones(6, 4)), Foo()(torch.ones(6, 4)))
         )
@@ -10073,7 +10094,7 @@ def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
     gt = torch.ops.aten.gt.Scalar(sum_1, 4);  sum_1 = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [p_bar_linear_bias, p_bar_linear_weight, x]);  gt = true_graph_0 = false_graph_0 = p_bar_linear_bias = p_bar_linear_weight = x = None
+    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, (p_bar_linear_bias, p_bar_linear_weight, x));  gt = true_graph_0 = false_graph_0 = p_bar_linear_bias = p_bar_linear_weight = x = None
     getitem = cond[0];  cond = None
     add = torch.ops.aten.add.Tensor(cos, getitem);  cos = getitem = None
     return (add,)""",
@@ -10233,7 +10254,7 @@ def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
 def forward(self, b_pred, b_t, x, y):
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(b_pred, true_graph_0, false_graph_0, [b_t, x, y]);  b_pred = true_graph_0 = false_graph_0 = b_t = x = y = None
+    cond = torch.ops.higher_order.cond(b_pred, true_graph_0, false_graph_0, (b_t, x, y));  b_pred = true_graph_0 = false_graph_0 = b_t = x = y = None
     getitem = cond[0];  cond = None
     return (getitem,)""",
         )  # noqa: B950
