@@ -581,7 +581,7 @@ def index_vars_no_squeeze(
 
 def index_vars_squeeze(
     *argsizes: Sequence[sympy.Expr], prefix: str = "d"
-) -> tuple[list[list[sympy.Expr]], VarRanges]:
+) -> tuple[list[Sequence[sympy.Expr]], VarRanges]:
     from .ir import SqueezeView
 
     var_ranges, add_var = var_builder(prefix)
@@ -607,7 +607,7 @@ def extract_read_writes(
 
     if isinstance(fn, LoopBody):
         inner = extract_loop_body_with_args(
-            fn, [*args, *hidden_args], var_ranges, normalize
+            fn, [*args, *hidden_args], var_ranges, normalize  # type: ignore[list-item]
         )
     else:
         # Slow path tracing the function

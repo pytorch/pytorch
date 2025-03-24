@@ -23,7 +23,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import assert_never, Never, TypeAlias
+from typing_extensions import assert_never, Never, Self, TypeAlias
 from unittest.mock import patch
 
 import sympy
@@ -2539,6 +2539,8 @@ class DataNode(IRNode):
 
 @ir_dataclass
 class BaseView(DataNode):
+    data: IRNode
+
     def get_unbacked_symbol_uses(self) -> OrderedSet[Symbol]:
         return self.data.get_unbacked_symbol_uses()
 
@@ -3530,25 +3532,6 @@ class Layout(OutputSpec):
         return compute_required_storage_length(self.size, self.stride, self.offset)
 
 
-def _fixed_indexer(
-    size: Sequence[Expr],
-    stride: Optional[Sequence[Expr]] = None,
-    offset: Expr = Integer(0),
-) -> Callable[[Sequence[Expr]], Expr]:
-    """A closure containing math to read a given element"""
-
-    def indexer(index: Sequence[int]) -> int:
-        assert stride is not None and len(index) == len(stride)
-        assert len(index) == len(size)
-        result = offset
-        for idx, st, sz in zip(index, stride, size):
-            if sz != 1:
-                result = result + idx * st
-        return result
-
-    return indexer
-
-
 class FixedLayout(Layout):
     """A Tensor layout we cannot change"""
 
@@ -3841,7 +3824,9 @@ class MutationLayoutSHOULDREMOVE(Layout):
         return result
 
     def real_layout(self) -> Layout:
-        return cast(Layout, self.get_buffer().layout)
+        layout = self.get_buffer().layout
+        assert isinstance(layout, Layout)
+        return layout
 
     @classmethod
     def realize_into(
@@ -7069,6 +7054,8 @@ class MutableBox(DataNode):
     """
     TensorBox / StorageBox allow in-place mutation of Tensors
     """
+
+    data: IRNode
 
     def has_exceeded_max_reads(self) -> bool:
         return self.data.has_exceeded_max_reads()
