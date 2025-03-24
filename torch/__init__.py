@@ -167,6 +167,7 @@ if sys.platform == "win32":
         usebase_path = os.path.join(
             sysconfig.get_config_var("userbase"), "Library", "bin"
         )
+        py_root_bin_path = os.path.join(sys.exec_prefix, "bin")
 
         # When users create a virtualenv that inherits the base environment,
         # we will need to add the corresponding library directory into
@@ -179,7 +180,13 @@ if sys.platform == "win32":
 
         dll_paths = [
             p
-            for p in (th_dll_path, py_dll_path, base_py_dll_path, usebase_path)
+            for p in (
+                th_dll_path,
+                py_dll_path,
+                base_py_dll_path,
+                usebase_path,
+                py_root_bin_path,
+            )
             if os.path.exists(p)
         ]
 
@@ -2532,9 +2539,14 @@ def compile(
     _C._log_api_usage_once("torch.compile")
     if sys.version_info >= (3, 14):
         raise RuntimeError("torch.compile is not supported on Python 3.14+")
-    elif sysconfig.get_config_var("Py_GIL_DISABLED") == 1:
+    elif sysconfig.get_config_var("Py_GIL_DISABLED") == 1 and sys.version_info < (
+        3,
+        13,
+        3,
+    ):
         raise RuntimeError(
-            "torch.compile is not supported on Python built with GIL disabled"
+            "torch.compile is not supported on Python < 3.13.3 built with GIL disabled. "
+            "Please use Python 3.13.3+."
         )
 
     # Decorator mode
