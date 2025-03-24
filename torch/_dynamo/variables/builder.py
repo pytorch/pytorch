@@ -385,6 +385,8 @@ ITERTOOLS_TYPE_IDS: frozenset[int] = frozenset(
 ITERTOOLS_POLYFILLED_TYPE_IDS: set[int] = set()
 
 # Capture fn pointer at import time
+# This is to guard against trying to mark the iterated tensors
+# as static in case user overrides fn ptr
 og_module_named_buffers_fn_ptr = torch.nn.Module.named_buffers
 og_module_named_parameters_fn_ptr = torch.nn.Module.named_parameters
 
