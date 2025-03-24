@@ -417,7 +417,7 @@ Tensor internal_new_from_data(
             " or an UntypedStorage, but got ",
             storage_scalar_type);
         tensor = at::empty(
-            {0},
+            {0},  // sizes. Storage will be set later.
             at::initialTensorOptions()
                 .dtype(
                     is_typed_storage ? storage_scalar_type
