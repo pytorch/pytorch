@@ -1,14 +1,19 @@
 """Internal flags for ONNX export."""
 
 from __future__ import annotations
+
 import functools
-from typing import Callable
+from typing import Any, Callable, cast, TypeVar
+
 
 _is_onnx_exporting = False
 
-def set_onnx_exporting_flag(func: Callable) -> Callable:
+TCallable = TypeVar("TCallable", bound=Callable[..., Any])
+
+
+def set_onnx_exporting_flag(func: TCallable) -> TCallable:
     @functools.wraps(func)
-    def wrapper(*args, **kwargs):
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
         global _is_onnx_exporting
         _is_onnx_exporting = True
         try:
@@ -16,4 +21,5 @@ def set_onnx_exporting_flag(func: Callable) -> Callable:
         finally:
             # Ensure it resets even if an exception occurs
             _is_onnx_exporting = False
-    return wrapper
+
+    return cast(TCallable, wrapper)
