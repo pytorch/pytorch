@@ -159,6 +159,7 @@ from .dicts import (
     ConstDictVariable,
     DefaultDictVariable,
     DictKeySetVariable,
+    EasyDictVariable,
     FrozensetVariable,
     MappingProxyVariable,
     SetVariable,
@@ -269,6 +270,10 @@ try:
 except ModuleNotFoundError:
     np = None
 
+try:
+    from easydict import EasyDict as edict
+except ModuleNotFoundError:
+    edict = None
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
@@ -396,7 +401,7 @@ class VariableBuilder:
 
     def __init__(
         self,
-        tx,
+        tx: "InstructionTranslator",
         source: Source,
     ) -> None:
         assert source is not None, (
@@ -628,7 +633,9 @@ class VariableBuilder:
                 output, tuple_cls=type(value), source=self.source
             )
             return result
-        elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
+        elif istype(
+            value, (dict, collections.defaultdict, collections.OrderedDict)
+        ) or (edict is not None and istype(value, edict)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             all_const = all(ConstantVariable.is_literal(k) for k in value.keys())
 
@@ -689,6 +696,8 @@ class VariableBuilder:
                     ),
                     source=self.source,
                 )
+            elif istype(value, edict):
+                result = EasyDictVariable(result, source=self.source)
             else:
                 result = ConstDictVariable(
                     result, user_cls=type(value), source=self.source
