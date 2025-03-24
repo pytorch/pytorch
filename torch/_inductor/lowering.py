@@ -228,6 +228,7 @@ add_needs_realized_inputs(
         aten.convolution,
         aten.convolution_backward,
         aten.max_pool2d_with_indices,
+        aten.max_pool3d_with_indices,
         aten.max_pool2d_with_indices_backward,
         aten.mm,
         aten.upsample_nearest2d,
@@ -4347,57 +4348,62 @@ def pooling_size(x, i, kernel_size, stride, padding, ceil_mode, *, dilation=None
     return x_out, ceil_mode
 
 
-def should_fallback_max_pool2d_with_indices(kernel_size):
-    kernel_size = pad_listlike(kernel_size, 2)
-    window_size = kernel_size[0] * kernel_size[1]
+def should_fallback_max_pool_with_indices(kernel_size, *, n_dim):
+    kernel_size = pad_listlike(kernel_size, n_dim)
+    window_size = functools.reduce(operator.mul, kernel_size)
     return window_size > 25
 
 
-def max_pool2d_checks(
-    x, kernel_size, stride, padding, dilation, *, assert_fallback=None
+def max_pool_checks(
+    x, kernel_size, stride, padding, dilation, n_dim, *, assert_fallback=None
 ):
     if padding == 0:
-        padding = [0, 0]
+        padding = [0] * n_dim
     if dilation == 1:
-        dilation = [1, 1]
+        dilation = [1] * n_dim
     if not stride:
         stride = kernel_size
 
-    kernel_size = pad_listlike(kernel_size, 2)
-    stride = pad_listlike(stride, 2)
-    padding = pad_listlike(padding, 2)
-    dilation = pad_listlike(dilation, 2)
+    kernel_size = pad_listlike(kernel_size, n_dim)
+    stride = pad_listlike(stride, n_dim)
+    padding = pad_listlike(padding, n_dim)
+    dilation = pad_listlike(dilation, n_dim)
 
     assert isinstance(x, TensorBox)
-    assert len(kernel_size) == 2
-    assert len(stride) == 2
-    assert len(padding) == 2
-    assert len(dilation) == 2
-    assert len(x.get_size()) in (3, 4)
+    assert len(kernel_size) == n_dim
+    assert len(stride) == n_dim
+    assert len(padding) == n_dim
+    assert len(dilation) == n_dim
+    assert len(x.get_size()) in (n_dim + 1, n_dim + 2)
 
-    use_fallback = should_fallback_max_pool2d_with_indices(kernel_size)
+    use_fallback = should_fallback_max_pool_with_indices(kernel_size, n_dim=n_dim)
     if assert_fallback is not None:
         assert use_fallback == assert_fallback
 
     return kernel_size, stride, padding, dilation, use_fallback
 
 
-def _max_pool2d_with_offsets(
+def _max_pool_with_offsets(
     x,
     kernel_size,
     stride,
     padding,
     dilation,
-    ceil_mode=False,
+    ceil_mode,
+    *,
+    n_dim,
 ):
     x.realize_hint()
-    *batch, h, w = x.get_size()
+    batch = x.shape[:-n_dim]
+    dhw = x.shape[-n_dim:]
 
-    h_out, ceil_mode1 = pooling_size(
-        h, 0, kernel_size, stride, padding, ceil_mode, dilation=dilation
-    )
-    w_out, ceil_mode2 = pooling_size(
-        w, 1, kernel_size, stride, padding, ceil_mode, dilation=dilation
+    dhw_out, ceil_mode = zip(
+        *[
+            pooling_size(
+                dhw[d], d, kernel_size, stride, padding, ceil_mode, dilation=dilation
+            )
+            for d in range(n_dim)
+        ]
     )
 
     dtype = x.dtype
@@ -4407,27 +4413,18 @@ def _max_pool2d_with_offsets(
         else (float("-inf") if dtype.is_floating_point else torch.iinfo(dtype).min)
     )
 
-    new_size = list(batch) + [h_out, w_out]
-    if (
-        padding[0]
-        or padding[1]
-        or ceil_mode1
-        or ceil_mode2
-        or (dilation[0] > 1)
-        or (dilation[1] > 1)
-    ):
-        x_loader = constant_boundary_condition(x, min_value, dim=2)
+    new_size = list(batch) + list(dhw_out)
+    if any(padding) or any(ceil_mode) or any(d > 1 for d in dilation):
+        x_loader = constant_boundary_condition(x, min_value, dim=n_dim)
     else:
         x_loader = x.make_loader()
 
-    dim = 2
-
     def fn_inner(idx, reduction_idx):
-        prefix = idx[:-dim]
-        bh = idx[-dim:]
+        prefix = idx[:-n_dim]
+        bh = idx[-n_dim:]
         ih = [
             (bh[i] * stride[i]) + (reduction_idx[i] * dilation[i]) - padding[i]
-            for i in range(dim)
+            for i in range(n_dim)
         ]
         return x_loader([*prefix, *ih])
 
@@ -4461,8 +4458,8 @@ def _max_pool2d_with_offsets(
     return result, offsets
 
 
-@register_lowering(prims._low_memory_max_pool2d_with_offsets, type_promotion_kind=None)
-def _low_memory_max_pool2d_with_offsets(
+@register_lowering(prims._low_memory_max_pool_with_offsets, type_promotion_kind=None)
+def _low_memory_max_pool_with_offsets(
     x,
     kernel_size,
     stride,
@@ -4470,24 +4467,28 @@ def _low_memory_max_pool2d_with_offsets(
     dilation,
     ceil_mode=False,
 ):
+    n_dim = len(kernel_size)
+
     # assert we are not on a fallback path, the inductor decomp should have guaranteed this
-    kernel_size, stride, padding, dilation, _ = max_pool2d_checks(
+    kernel_size, stride, padding, dilation, _ = max_pool_checks(
         x,
         kernel_size,
         stride,
         padding,
         dilation,
+        n_dim,
         assert_fallback=False,
     )
 
     with config.patch(unroll_reductions_threshold=25):
-        result, offsets = _max_pool2d_with_offsets(
+        result, offsets = _max_pool_with_offsets(
             x,
             kernel_size,
             stride,
             padding,
             dilation,
             ceil_mode,
+            n_dim=n_dim,
         )
         return result, to_dtype(offsets, torch.int8)
 
@@ -4527,7 +4528,7 @@ def _low_memory_max_pool_offsets_to_indices(
     def increments_to_index(idx, reduction_idx):
         bh = idx[-n_dim:]
         return [
-            bh[i] * stride[i] + reduction_idx[i] * dilation[i] - padding[i]
+            (bh[i] * stride[i]) + (reduction_idx[i] * dilation[i]) - padding[i]
             for i in range(n_dim)
         ]
 
@@ -4546,11 +4547,11 @@ def _max_pool_with_indices(
     n_dim,
 ):
     kernel_size, stride, padding, dilation, _ = max_pool_checks(
-        x, kernel_size, stride, padding, dilation, n_dim=dim
+        x, kernel_size, stride, padding, dilation, n_dim=n_dim
     )
 
     out, offsets = _max_pool_with_offsets(
-        x, kernel_size, stride, padding, dilation, ceil_mode, n_dim=dim
+        x, kernel_size, stride, padding, dilation, ceil_mode, n_dim=n_dim
     )
 
     indices = _low_memory_max_pool_offsets_to_indices(
@@ -4575,19 +4576,24 @@ def max_pool2d_with_indices(
     dilation=1,
     ceil_mode=False,
 ):
-    kernel_size, stride, padding, dilation, _ = max_pool2d_checks(
-        x, kernel_size, stride, padding, dilation
+    return _max_pool_with_indices(
+        x, kernel_size, stride, padding, dilation, ceil_mode, n_dim=2
     )
 
-    out, offsets = _max_pool2d_with_offsets(
-        x, kernel_size, stride, padding, dilation, ceil_mode
-    )
 
-    indices = _low_memory_max_pool2d_offsets_to_indices(
-        offsets, kernel_size[-1], x.shape[-1], stride, padding, dilation
+# Fallback when we do not decompose to the low-memory path.
+@register_lowering(aten.max_pool3d_with_indices, type_promotion_kind=None)
+def max_pool3d_with_indices(
+    x,
+    kernel_size,
+    stride=None,
+    padding=0,
+    dilation=1,
+    ceil_mode=False,
+):
+    return _max_pool_with_indices(
+        x, kernel_size, stride, padding, dilation, ceil_mode, n_dim=3
     )
-
-    return out, indices
 
 
 fallback_max_pool2d_with_indices_backward = fallback_handler(
@@ -5064,17 +5070,17 @@ def _fractional_pooling_offsets(samples, in_sz, out_sz, kernel_sz, dim, ndims):
 
 @register_lowering(aten.fractional_max_pool2d)
 def fractional_max_pool2d(x, kernel_size, output_size, random_samples):
-    return _fractional_max_pool(x, kernel_size, output_size, random_samples, dim=2)
+    return _fractional_max_pool(x, kernel_size, output_size, random_samples, n_dim=2)
 
 
 @register_lowering(aten.fractional_max_pool3d)
 def fractional_max_pool3d(x, kernel_size, output_size, random_samples):
-    return _fractional_max_pool(x, kernel_size, output_size, random_samples, dim=3)
+    return _fractional_max_pool(x, kernel_size, output_size, random_samples, n_dim=3)
 
 
-def _fractional_max_pool(x, kernel_size, output_size, random_samples, dim):
+def _fractional_max_pool(x, kernel_size, output_size, random_samples, n_dim):
     x.realize_hint()
-    batch, inp_dhw = x.shape[:-dim], x.shape[-dim:]
+    batch, inp_dhw = x.shape[:-n_dim], x.shape[-n_dim:]
 
     with config.patch(unroll_reductions_threshold=25):
         dhw_index_fn = [
@@ -5083,23 +5089,24 @@ def _fractional_max_pool(x, kernel_size, output_size, random_samples, dim):
                 in_sz=inp_dhw,
                 out_sz=output_size,
                 kernel_sz=kernel_size,
-                ndims=dim,
+                ndims=n_dim,
                 dim=d,
             )
-            for d in range(dim)
+            for d in range(n_dim)
         ]
 
         x_loader = x.make_loader()
 
         def fn_inner(idx, reduction_idx):
-            prefix = idx[:-dim]
+            prefix = idx[:-n_dim]
             return x_loader([*prefix, *increments_to_index(idx, reduction_idx)])
 
         def increments_to_index(idx, reduction_idx):
-            prefix = idx[:-dim]
-            bdhw = idx[-dim:]
+            prefix = idx[:-n_dim]
+            bdhw = idx[-n_dim:]
             return [
-                dhw_index_fn[d](prefix, bdhw[d]) + reduction_idx[d] for d in range(dim)
+                dhw_index_fn[d](prefix, bdhw[d]) + reduction_idx[d]
+                for d in range(n_dim)
             ]
 
         new_size = list(batch) + list(output_size)
