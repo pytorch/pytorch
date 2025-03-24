@@ -13,8 +13,8 @@
 #include <torch/csrc/inductor/aoti_package/model_package_loader.h>
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cpu.h>
 #if defined(USE_CUDA)
-#include <cuda_runtime.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <cuda_runtime.h>
 #endif
 #if defined(USE_CUDA) || defined(USE_ROCM)
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cuda.h>
@@ -331,7 +331,8 @@ void test_aoti_double_buffering_with_tensor_constants() {
 void test_aoti_free_buffer(bool use_runtime_constant_folding) {
   torch::NoGradGuard no_grad;
   size_t allocated, reserved, active;
-  c10::cuda::CUDACachingAllocator::DeviceStats stats = c10::cuda::CUDACachingAllocator::getDeviceStats(0);
+  c10::cuda::CUDACachingAllocator::DeviceStats stats =
+      c10::cuda::CUDACachingAllocator::getDeviceStats(0);
 
   std::string data_path =
       (std::filesystem::path(
@@ -341,7 +342,9 @@ void test_aoti_free_buffer(bool use_runtime_constant_folding) {
   // Memory information variable
   cudaError_t cudaStatus;
   size_t DATASIZE = 128 * 1024 * 1024; // We have 128MB of weight data.
-  size_t FOLDEDDATASIZE = use_runtime_constant_folding ? 64 * 1024 * 1024 : 0; // We have 64MB of folded data.
+  size_t FOLDEDDATASIZE = use_runtime_constant_folding
+      ? 64 * 1024 * 1024
+      : 0; // We have 64MB of folded data.
 
   torch::jit::script::Module data_loader = torch::jit::load(data_path);
   std::string path_attr = "model_so_path";
@@ -390,7 +393,8 @@ void test_aoti_free_buffer(bool use_runtime_constant_folding) {
   }
   ASSERT_EQ(initMemory - DATASIZE, updateMemory2);
 
-  // Call run, this should run const_fold and create the folded constant in #2 (64MB).
+  // Call run, this should run const_fold and create the folded constant in #2
+  // (64MB).
   if (use_runtime_constant_folding) {
     runner->run_const_fold(/* use_inactive = */ true);
     size_t constFoldMemory = 0;
@@ -411,8 +415,8 @@ void test_aoti_free_buffer(bool use_runtime_constant_folding) {
     throw std::runtime_error("cudaMemGetInfo failed!");
   }
   // We should only have one set of buffer (#2), available memory should equal
-  // initial memory minus the folded constants. 
-  ASSERT_EQ(initMemory - FOLDEDDATASIZE, postFreeMemory);
+  // initial memory minus the folded constants.
+  SSERT_EQ(initMemory - FOLDEDDATASIZE, postFreeMemory);
 
   // We update random weights to buffer #1 and run const fold.
   // We will have 2 full set of data plus 2 set of const-folded data.
@@ -426,7 +430,8 @@ void test_aoti_free_buffer(bool use_runtime_constant_folding) {
   ASSERT_EQ(initMemory - DATASIZE - 2 * FOLDEDDATASIZE, updateMemory1);
 
   // We directly free the buffer #1. This would free the DATASIZE weight.
-  // If folded constant exists, it will not directly free the cudaMalloc, but lower the active buffer in CachingAllocator instead.
+  // If folded constant exists, it will not directly free the cudaMalloc, but
+  // decrease the active buffer in CachingAllocator instead.
   size_t active1, active2;
   size_t allocated1, allocated2;
   stats = c10::cuda::CUDACachingAllocator::getDeviceStats(0);
@@ -453,7 +458,8 @@ void test_aoti_free_buffer(bool use_runtime_constant_folding) {
   ASSERT_EQ(FOLDEDDATASIZE, active1 - active2);
 
   // Swap and free #2, no data should exist in memory now.
-  // However, the folded constants still occupies the CUDA memory in CachedAllocator.
+  // However, the folded constants still occupies the CUDA memory in
+  // CachedAllocator.
   runner->swap_constant_buffer();
   runner->free_inactive_constant_buffer();
   stats = c10::cuda::CUDACachingAllocator::getDeviceStats(0);
