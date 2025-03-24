@@ -63,6 +63,7 @@ class BinaryBuildWorkflow:
     use_split_build: bool = False
 
     def __post_init__(self) -> None:
+        # Append release type (debug/release) to the build environment for seperate libtorch workflows on Windows
         if(
             self.package_type == "libtorch" and
             self.os in [ OperatingSystem.WINDOWS, OperatingSystem.WINDOWS_ARM64 ] and
