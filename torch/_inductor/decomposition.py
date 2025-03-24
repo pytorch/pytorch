@@ -2,7 +2,6 @@
 import functools
 import logging
 import math
-import operator
 import sys
 import typing
 from typing import Any, Callable, Optional, TypeVar, Union
@@ -963,58 +962,6 @@ def index_reduce(
     )
 
 
-def _max_pool_with_indices(
-    x: torch.Tensor,
-    kernel_size: list[int],
-    stride: Optional[Union[int, list[int]]],
-    padding: Union[int, list[int]],
-    dilation: Union[int, list[int]],
-    ceil_mode: bool,
-    dim: int,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    if dilation == 1:
-        dilation = [1] * dim
-
-    if padding == 0:
-        padding = [0] * dim
-
-    if not stride:
-        stride = kernel_size
-
-    kernel_size = pad_listlike(kernel_size, dim)
-    dilation = pad_listlike(dilation, dim)
-    padding = pad_listlike(padding, dim)
-    stride = pad_listlike(stride, dim)
-
-    window_size = functools.reduce(operator.mul, kernel_size)
-    # We fallback when using non-default dilation or when the window size is too large
-    if (
-        torch._inductor.lowering.should_fallback_max_pool_with_indices(
-            kernel_size, dim=dim
-        )
-        or window_size > torch.iinfo(torch.int8).max
-    ):
-        return NotImplemented
-
-    vals, offsets = prims._low_memory_max_pool_with_offsets(
-        x,
-        kernel_size,
-        stride,
-        padding,
-        dilation,
-        ceil_mode,
-    )
-    indices = prims._low_memory_max_pool_offsets_to_indices(
-        offsets,
-        kernel_size,
-        x.shape[-dim:],
-        stride,
-        padding,
-        dilation,
-    )
-    return vals, indices
-
-
 @register_decomposition(aten.max_pool2d_with_indices)
 def max_pool2d_with_indices(
     x: torch.Tensor,
@@ -1024,23 +971,45 @@ def max_pool2d_with_indices(
     dilation: Union[int, list[int]] = 1,
     ceil_mode: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    return _max_pool_with_indices(
-        x, kernel_size, stride, padding, dilation, ceil_mode, dim=2
-    )
+    if dilation == 1:
+        dilation = [1, 1]
 
+    if padding == 0:
+        padding = [0, 0]
 
-@register_decomposition(aten.max_pool3d_with_indices)
-def max_pool3d_with_indices(
-    x: torch.Tensor,
-    kernel_size: list[int],
-    stride: Optional[Union[int, list[int]]] = None,
-    padding: Union[int, list[int]] = 0,
-    dilation: Union[int, list[int]] = 1,
-    ceil_mode: bool = False,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    return _max_pool_with_indices(
-        x, kernel_size, stride, padding, dilation, ceil_mode, dim=3
+    if not stride:
+        stride = kernel_size
+
+    kernel_size = pad_listlike(kernel_size, 2)
+    dilation = pad_listlike(dilation, 2)
+    padding = pad_listlike(padding, 2)
+    stride = pad_listlike(stride, 2)
+
+    window_size = kernel_size[0] * kernel_size[1]
+    # We fallback when the window size is too large
+    if (
+        torch._inductor.lowering.should_fallback_max_pool2d_with_indices(kernel_size)
+        or window_size > torch.iinfo(torch.int8).max
+    ):
+        return NotImplemented
+
+    vals, offsets = prims._low_memory_max_pool2d_with_offsets(
+        x,
+        kernel_size,
+        stride,
+        padding,
+        dilation,
+        ceil_mode,
     )
+    indices = prims._low_memory_max_pool2d_offsets_to_indices(
+        offsets,
+        kernel_size[1],
+        x.size(-1),
+        stride,
+        padding,
+        dilation,
+    )
+    return vals, indices
 
 
 @register_decomposition(aten.adaptive_max_pool2d)
