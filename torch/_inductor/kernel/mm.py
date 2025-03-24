@@ -224,6 +224,9 @@ mm_template = TritonTemplate(
     {{store_output(("idx_m", "idx_n"), "acc", "mask")}}
 """
     ),
+    define_args =["A", "B"],
+    # Write now those are all loaded inputs in the template above.
+    prologue_supported_arg_names = ["A", "B"],
 )
 
 persistent_tma_mm_template = TritonTemplate(
@@ -386,7 +389,6 @@ aten_bias_addmm = ExternKernelChoice(bias_addmm, None)
 def tuned_mm(mat1, mat2, *, layout=None):
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
     name = "mm"
-
     # below is for getting an overview logging info of inductor mms
     counters["aten_mm_info"][f"aten.mm_{m}_{n}_{k}"] += 1
     log.info(

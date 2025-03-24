@@ -25,6 +25,7 @@ from unittest.mock import patch
 import sympy
 
 import torch
+from torch._C import NoneType
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.testing import rand_strided
@@ -480,6 +481,7 @@ class TritonTemplateKernel(TritonKernel):
 
     def gen_defines(self):
         return self.defines
+
 
     def def_kernel(self, *argnames):
         """
@@ -1055,8 +1057,6 @@ def _jinja2_env():
 class GeneratedModulesCacheEntry(NamedTuple):
     mod: ModuleType
     extra: str
-    normalized_kernel_args_input_buffers_keys: Sequence[int]
-    normalized_prologue_supported_inputs: Sequence[int]
     args_sizevars_keys: tuple[sympy.Expr, ...]
     code: str
 
@@ -1126,72 +1126,27 @@ class GeneratedModulesCache:
 
     def get_entry(
         self, cache_key: Optional[str], input_nodes: tuple[ir.StorageBox]
-    ) -> Optional[
-        tuple[
-            ModuleType,
-            str,
-            tuple[str, ...],
-            OrderedSet[str],
-            tuple[sympy.core.symbol.Symbol, ...],
-            str,
-        ]
-    ]:
+    ) -> Optional[ GeneratedModulesCacheEntry]:
         if cache_key is None:
             return None
 
         entry = self._cache.get(cache_key, None)
-        if entry is None:
-            return None
-
-        index_to_input_name: dict[int, str] = {
-            index: value.get_name() for index, value in enumerate(input_nodes)
-        }
-
-        return (
-            entry.mod,
-            entry.extra,
-            tuple(
-                index_to_input_name[i]
-                for i in entry.normalized_kernel_args_input_buffers_keys
-            ),
-            OrderedSet(
-                [
-                    index_to_input_name[i]
-                    for i in entry.normalized_prologue_supported_inputs
-                ]
-            ),
-            entry.args_sizevars_keys,
-            entry.code,
-        )
+        return entry
 
     def put_entry(
         self,
         cache_key: Optional[str],
-        input_nodes: tuple[ir.StorageBox],
         mod: ModuleType,
         extra: str,
         code: str,
-        kernel: Any,
+        kernel_args_sizevars_keys: tuple[sympy.core.symbol.Symbol, ...],
     ) -> None:
         if cache_key is None:
             return
-        input_name_to_index: dict[str, int] = {
-            value.get_name(): index for index, value in enumerate(input_nodes)
-        }
-
-        normalized_kernel_args_input_buffers_keys = [
-            input_name_to_index[n] for n in kernel.args.input_buffers.keys()
-        ]
-        normalized_prologue_supported_inputs = [
-            input_name_to_index[n] for n in kernel.prologue_supported_inputs
-        ]
-
         entry = GeneratedModulesCacheEntry(
             mod,
             extra,
-            normalized_kernel_args_input_buffers_keys,
-            normalized_prologue_supported_inputs,
-            tuple(kernel.args.sizevars.keys()),
+            kernel_args_sizevars_keys,
             code,
         )
 
@@ -1202,13 +1157,27 @@ class TritonTemplate(KernelTemplate):
     index_counter = itertools.count()
     all_templates: dict[str, "TritonTemplate"] = {}
 
-    def __init__(self, name: str, grid: Any, source: str, debug=False) -> None:
+
+    def __init__(self, name: str, grid: Any, source: str, debug=False, define_args:Optional[Sequence[str]]=None, prologue_supported_arg_names:Optional[Sequence[str]]= None) -> None:
         super().__init__(name)
         self.grid = grid
         self.template = self._template_from_string(source)
         assert name not in self.all_templates, "duplicate template name"
         TritonTemplate.all_templates[name] = self
         self.debug = debug
+
+        # A list of arg names passed to def_kernel in the template. For {{def_kernel("A", "B")}}
+        # it will be []"A", "B"]
+        self.define_args = define_args
+        
+        # A list of arg names that supports prologue_supported_arg_names, as of the time of this comment. 
+        # prologue_supported_arg_names are kernal args passed to load_input exampel B in this case {{load_input("B",...}}.
+        self.prologue_supported_arg_names = prologue_supported_arg_names
+        
+        # define_args and prologue_supported_arg_names are used to generate the outputs of generate_and_load in case 
+        # of a cache hit with out needing to to do the template expansion. _generated_module_cache is only used for
+        # templates that have them defined.
+
         self._generated_module_cache: GeneratedModulesCache = GeneratedModulesCache()
         clear_on_fresh_inductor_cache(self._generated_module_cache)
 
@@ -1280,17 +1249,6 @@ class TritonTemplate(KernelTemplate):
             "subgraphs": subgraphs,
         }
 
-        cache_result = self._generated_module_cache.get_entry(cache_key, input_nodes)
-
-        if cache_result is not None:
-            TritonTemplate.generated_module_cache_hit = (
-                TritonTemplate.generated_module_cache_hit + 1
-            )
-
-            if not TritonTemplate.test_cache:
-                # exclude code from the result
-                return cache_result[:-1] + (kernel_options,)
-
         with (
             patch.object(V.graph, "get_dtype", self._fake_get_dtype(fake_out)),
             V.graph.set_current_device(layout.device),
@@ -1302,6 +1260,22 @@ class TritonTemplate(KernelTemplate):
                 **kernel_options,
             ) as kernel,
         ):
+            cache_result = None
+            if self.define_args is not None and self.prologue_supported_arg_names is not None:
+                cache_result = self._generated_module_cache.get_entry(cache_key, input_nodes)
+
+                if cache_result is not None:
+                    TritonTemplate.generated_module_cache_hit += 1
+                    
+                    # Used to populate input_buffers.
+                    kernel.def_kernel(*self.define_args)
+                    input_call_args = tuple(kernel.args.input_buffers.keys())
+                    prologue_supported_inputs =OrderedSet([kernel.named_input_nodes[x].get_name() for x in self.prologue_supported_arg_names])
+
+                    cache_result = (cache_result.mod ,cache_result.extra, input_call_args,prologue_supported_inputs, cache_result.args_sizevars_keys, cache_result.code)
+                    if not TritonTemplate.test_cache:
+                        # exclude code from the result
+                        return cache_result[:-1] + (kernel_options,)
             try:
                 template = kernel.render(self.template, kwargs)
                 with kernel.set_subgraph_body("<STORE_OUTPUT>"):
@@ -1326,16 +1300,21 @@ class TritonTemplate(KernelTemplate):
             )
             mod = PyCodeCache.load(code, extra)
 
-            self._generated_module_cache.put_entry(
-                cache_key, input_nodes, mod, extra, code, kernel
-            )
+            input_call_args = tuple(kernel.args.input_buffers.keys())
+            prologue_supported_inputs =  kernel.prologue_supported_inputs.copy()
+            kernel_args_sizevars_keys = tuple(kernel.args.sizevars.keys())
+            
+            if self.define_args is not None and self.prologue_supported_arg_names is not None:
+                self._generated_module_cache.put_entry(
+                    cache_key, mod, extra, code, kernel_args_sizevars_keys
+                )
 
             result = (
                 mod,
                 extra,
-                tuple(kernel.args.input_buffers.keys()),
-                kernel.prologue_supported_inputs.copy(),
-                tuple(kernel.args.sizevars.keys()),
+                input_call_args,
+                prologue_supported_inputs,
+                kernel_args_sizevars_keys,
                 code,
             )
 
