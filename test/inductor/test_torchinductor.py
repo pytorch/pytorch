@@ -4272,11 +4272,11 @@ class CommonTemplate:
         )
 
     @parametrize("dilation", (1, 2))
-    def test_low_memory_max_pool(self, dilation: int):
+    @parametrize("dim", (2, 3))
+    def test_low_memory_max_pool(self, dilation: int, dim: int):
         prims = torch.ops.prims
 
         def fn(x):
-            dim = 2
             kernel_size = [3] * dim
             stride = [2] * dim
             padding = [1] * dim
@@ -4300,7 +4300,7 @@ class CommonTemplate:
             )
             return vals, indices, offsets
 
-        self.common(fn, (torch.randn(1, 3, 10, 10),))
+        self.common(fn, (torch.randn(1, 3, *[10]*dim),))
 
     @xfail_if_mps
     def test_to_dtype(self):
