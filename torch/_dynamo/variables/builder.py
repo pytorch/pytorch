@@ -1592,11 +1592,18 @@ class VariableBuilder:
                 # / named buffers
                 # NOTE: This is not likely to happen but worth guarding to avoid
                 # exception
-                if value.named_parameters == og_module_named_parameters_fn_ptr:
+                if (
+                    callable(value.named_parameters)
+                    and value.named_parameters.__func__
+                    == og_module_named_parameters_fn_ptr
+                ):
                     for _, p in value.named_parameters():
                         self.mark_static_input(p, guard=freezing)
 
-                if value.named_buffers == og_module_named_buffers_fn_ptr:
+                if (
+                    callable(value.named_buffers)
+                    and value.named_buffers.__func__ == og_module_named_buffers_fn_ptr
+                ):
                     for _, b in value.named_buffers():
                         self.mark_static_input(b, guard=freezing)
 
