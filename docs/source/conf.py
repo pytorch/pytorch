@@ -71,7 +71,11 @@ extensions = [
     "myst_parser",
     "sphinx.ext.linkcode",
     "sphinxcontrib.mermaid",
+    "sphinxext.opengraph",
 ]
+
+ogp_site_url = "http://pytorch.org/"
+ogp_image = "https://pytorch.org/docs/stable/_static/img/pytorch-logo-dark.svg"
 
 myst_enable_extensions = [
     "colon_fence",
@@ -172,7 +176,6 @@ html_theme_options = {
     "pytorch_project": "docs",
 }
 
-# html_logo = "_static/img/house-solid-light.svg"
 theme_variables = pytorch_sphinx_theme2.get_theme_variables()
 
 html_context = {
