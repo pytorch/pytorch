@@ -1795,6 +1795,7 @@ class VariableBuilder:
         example_value = wrap_to_fake_tensor_and_record(
             value, tx=self.tx, is_tensor=True, source=source
         )
+
         tensor_proxy = self.tx.output.root_tracer.create_graph_input(
             re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
             type(value),
@@ -2088,7 +2089,10 @@ class VariableBuilder:
             # python test/inductor/test_compiled_optimizers.py CompiledOptimizerTests.test_rmsprop_weight_decay_maximize_capturable_cuda # noqa: B950
             or torch._inductor.config.triton.cudagraphs
             or justknobs_check("pytorch/compiler:unspecialize_float_killswitch", False)
-            or frame_state_entry.scalar is not auto_dynamic
+            or (
+                config.assume_static_by_default
+                and frame_state_entry.scalar is not auto_dynamic
+            )
         ):
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return ConstantVariable.create(value=value, source=self.source)
@@ -2646,6 +2650,7 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
         proxy.node.target
         in [
             torch._C._are_functorch_transforms_active,
+            torch._C._functorch.is_batchedtensor,
             torch.backends.cuda.is_flash_attention_available,
             torch.backends.cuda.can_use_flash_attention,
             torch.backends.cuda.can_use_efficient_attention,
@@ -3029,6 +3034,7 @@ def wrap_to_fake_tensor_and_record(
             symbolic_context,
             type(e),
         )
+
         fake_e = wrap_fake_exception(
             lambda: tx.fake_mode.from_tensor(
                 e,
