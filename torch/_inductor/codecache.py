@@ -53,6 +53,7 @@ from torch._inductor.codegen.rocm.compile_command import (
     rocm_compile_command,
     rocm_compiler,
 )
+from torch._inductor.compile_worker.utils import in_toplevel_process
 from torch._inductor.cpp_builder import (
     _LINKER_SCRIPT,
     _set_gpu_runtime_env,
@@ -68,10 +69,7 @@ from torch._inductor.cpp_builder import (
 from torch._inductor.cpu_vec_isa import pick_vec_isa
 from torch._inductor.custom_graph_pass import CustomGraphPass, CustomGraphPassType
 from torch._inductor.freezing_utils import has_frozen_params, is_frozen_param
-from torch._inductor.runtime.compile_tasks import (
-    _reload_python_module,
-    _reload_python_module_in_subproc,
-)
+from torch._inductor.runtime.compile_tasks import _reload_python_module
 from torch._inductor.runtime.runtime_utils import cache_dir, default_cache_dir
 from torch._inductor.utils import (
     ALIGN_BYTES,
@@ -1763,6 +1761,10 @@ class AotCodeCompiler:
             for custom_obj_idx, (name, constant) in enumerate(
                 graph.torchbind_constants.items()
             ):
+                if isinstance(
+                    constant, torch._library.fake_class_registry.FakeScriptObject
+                ):
+                    constant = constant.real_obj
                 assert isinstance(constant, torch._C.ScriptObject)
                 custom_obj_name = f"{CUSTOM_OBJ_FILENAME_PREFIX}{custom_obj_idx}"
 
@@ -1777,12 +1779,13 @@ class AotCodeCompiler:
                 write_atomic(custom_obj_path, custom_obj_bytes, True)
                 generated_files.append(custom_obj_path)
 
-            constants_config_json = os.path.join(
-                wrapper_path_operator.parent, "custom_objs_config.json"
-            )
-            with open(constants_config_json, "w") as f:
-                f.write(json.dumps(qual_name_to_id))
-            generated_files.append(constants_config_json)
+            if qual_name_to_id:
+                constants_config_json = os.path.join(
+                    wrapper_path_operator.parent, "custom_objs_config.json"
+                )
+                with open(constants_config_json, "w") as f:
+                    f.write(json.dumps(qual_name_to_id))
+                generated_files.append(constants_config_json)
 
             gpu_codecache: Union[ROCmCodeCache, CUDACodeCache] = (
                 ROCmCodeCache() if torch.version.hip else CUDACodeCache()
@@ -2104,7 +2107,7 @@ class CppCodeCache:
             **cls.cpp_compile_command_flags,
             "device_type": device_type,
             "extra_flags": extra_flags,
-            "use_relative_path": config.is_fbcode() and device_type == "cpu",
+            "use_relative_path": config.is_fbcode(),
             "vec_isa": pick_vec_isa(),
         }
 
@@ -2284,7 +2287,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
                 return NULL;
             }}
             #ifdef Py_GIL_DISABLED
-                PyUnstable_Module_SetGIL(mod, Py_MOD_GIL_NOT_USED);
+                PyUnstable_Module_SetGIL(module, Py_MOD_GIL_NOT_USED);
             #endif
             return module;
         }}
@@ -2862,21 +2865,19 @@ class PyCodeCache:
         if linemap is None:
             linemap = []
 
-        mod = _reload_python_module(key, path)
+        in_toplevel = in_toplevel_process()
+        mod = _reload_python_module(key, path, set_sys_modules=in_toplevel)
 
         # unzip into separate lines/nodes lists
-        cls.linemaps[path] = list(zip(*linemap))
+        if in_toplevel:
+            cls.linemaps[path] = list(zip(*linemap))
 
         if attrs is not None:
             for k, v in attrs.items():
                 setattr(mod, k, v)
 
-        if not (linemap or attrs):
-            mod._reload_in_subproc = functools.partial(  # type: ignore[attr-defined]
-                _reload_python_module_in_subproc, key, path
-            )
-
-        cls.modules.append(mod)
+        if in_toplevel:
+            cls.modules.append(mod)
         return mod
 
     @classmethod
@@ -2992,6 +2993,8 @@ def _nvcc_compiler_options() -> list[str]:
     if arch == "90":
         # Required by cutlass compilation.
         arch = "90a"
+    if arch == "100":
+        arch = "100a"
     code = [f"sm_{arch}", f"compute_{arch}"]
     if config.cuda.enable_cuda_lto:
         code += [f"lto_{arch}"]

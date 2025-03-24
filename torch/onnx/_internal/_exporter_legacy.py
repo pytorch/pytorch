@@ -6,10 +6,7 @@ __all__ = [
     "DiagnosticOptions",
     "ExportOptions",
     "ONNXRuntimeOptions",
-    "InvalidExportOptionsError",
     "OnnxRegistry",
-    "UnsatisfiedDependencyError",
-    "dynamo_export",
     "enable_fake_mode",
 ]
 
@@ -20,17 +17,15 @@ import dataclasses
 import logging
 import warnings
 from collections import defaultdict
-from typing import Any, Callable, TYPE_CHECKING, TypeVar
+from typing import Any, Callable, TYPE_CHECKING
 from typing_extensions import deprecated
 
 import torch
 import torch._ops
-import torch.utils._pytree as pytree
-from torch.onnx import errors
 from torch.onnx._internal import io_adapter
-from torch.onnx._internal._lazy_import import onnxscript_apis, onnxscript_ir as ir
+from torch.onnx._internal._lazy_import import onnxscript_apis
 from torch.onnx._internal.diagnostics import infra
-from torch.onnx._internal.exporter import _constants, _onnx_program
+from torch.onnx._internal.exporter import _constants
 from torch.onnx._internal.fx import (
     decomposition_table,
     patcher as patcher,
@@ -49,14 +44,6 @@ if TYPE_CHECKING:
     import onnxscript
 
     from torch._subclasses import fake_tensor
-    from torch.onnx._internal.fx import diagnostics
-
-_PYTORCH_GITHUB_ISSUES_URL = "https://github.com/pytorch/pytorch/issues"
-"""The URL to the PyTorch GitHub issues page."""
-
-_DEFAULT_FAILED_EXPORT_SARIF_LOG_PATH = "report_dynamo_export.sarif"
-"""The default path to write the SARIF log to if the export fails."""
-
 
 log = logging.getLogger(__name__)
 
@@ -250,27 +237,10 @@ class ExportOptions:
         onnx_registry: The ONNX registry used to register ATen operators to ONNX functions.
     """
 
-    dynamic_shapes: bool | None = None
-    """Shape information hint for input/output tensors.
-
-    - ``None``: the exporter determines the most compatible setting.
-    - ``True``: all input shapes are considered dynamic.
-    - ``False``: all input shapes are considered static.
-    """
-
-    diagnostic_options: DiagnosticOptions
-    """The diagnostic options for the exporter."""
-
-    fake_context: ONNXFakeContext | None = None
-    """The fake context used for symbolic tracing."""
-
-    onnx_registry: OnnxRegistry | None = None
-    """The ONNX registry used to register ATen operators to ONNX functions."""
-
     def __init__(
         self,
         *,
-        dynamic_shapes: bool | None = None,
+        dynamic_shapes: bool | None = True,
         fake_context: ONNXFakeContext | None = None,
         onnx_registry: OnnxRegistry | None = None,
         diagnostic_options: DiagnosticOptions | None = None,
@@ -291,91 +261,34 @@ class ResolvedExportOptions(ExportOptions):
     This is an internal class and its API may be changed at any time without notice.
     """
 
-    # Public attributes MUST be redefined below without ``Optional[]`` from ``ExportOptions``
-    dynamic_shapes: bool
-    diagnostic_options: DiagnosticOptions
-    fake_context: ONNXFakeContext
-    onnx_registry: OnnxRegistry
-
-    # Private only attributes
-    decomposition_table: dict[torch._ops.OpOverload, Callable]
-    """A dictionary that maps operators to their decomposition functions."""
-
-    onnxfunction_dispatcher: (
-        torch.onnx._internal.fx.onnxfunction_dispatcher.OnnxFunctionDispatcher
-    )
-    """The ONNX dispatcher used to dispatch ATen operators to ONNX functions."""
-
-    fx_tracer: FXGraphExtractor
-    """The FXGraphExtractor instance used to extract the FX graph from the model."""
-
-    diagnostic_context: diagnostics.DiagnosticContext
-    """The diagnostics context for the export. Responsible for recording diagnostics,
-    logging diagnostics, and generating the SARIF log."""
-
-    def __init__(
-        self,
-        options: ExportOptions | ResolvedExportOptions,
-        model: torch.nn.Module | Callable | None = None,  # type: ignore[name-defined]
-    ):
-        from torch.onnx._internal.fx import (  # TODO: Prevent circular dep
+    def __init__(self):
+        from torch.onnx._internal.fx import (
             diagnostics,
             dynamo_graph_extractor,
+            onnxfunction_dispatcher,
         )
 
-        if isinstance(options, ResolvedExportOptions):
-            self.dynamic_shapes = options.dynamic_shapes
-            self.diagnostic_options = options.diagnostic_options
-            self.fake_context = options.fake_context
-            self.fx_tracer = options.fx_tracer
-            self.onnx_registry = options.onnx_registry
-            self.onnxfunction_dispatcher = options.onnxfunction_dispatcher
-            self.decomposition_table = options.decomposition_table
-            self.diagnostic_context = options.diagnostic_context
-        else:
-            T = TypeVar("T")
-
-            def resolve(value: T | None, fallback: T | Callable[[], T]) -> T:
-                if value is not None:
-                    return value
-                if callable(fallback):
-                    return fallback()
-                return fallback
-
-            self.dynamic_shapes = resolve(options.dynamic_shapes, False)
-
-            self.diagnostic_options = resolve(
-                options.diagnostic_options, DiagnosticOptions()
+        self.dynamic_shapes: bool = True
+        self.diagnostic_options: DiagnosticOptions = DiagnosticOptions()
+        self.fx_tracer: dynamo_graph_extractor.DynamoExport = (
+            dynamo_graph_extractor.DynamoExport()
+        )
+        self.fake_context = None
+        self.diagnostic_context = diagnostics.DiagnosticContext(
+            "torch.onnx.dynamo_export",
+            torch.__version__,
+            self.diagnostic_options,
+        )
+        self.onnx_registry: OnnxRegistry = OnnxRegistry()
+        self.decomposition_table = (
+            decomposition_table.create_onnx_friendly_decomposition_table(  # type: ignore[assignment]
+                self.onnx_registry
             )
-
-            self.fx_tracer = dynamo_graph_extractor.DynamoExport()
-
-            self.fake_context = resolve(options.fake_context, None)  # type: ignore[arg-type]
-            self.diagnostic_context = diagnostics.DiagnosticContext(
-                "torch.onnx.dynamo_export",
-                torch.__version__,
-                self.diagnostic_options,
-            )
-
-            self.onnx_registry = resolve(options.onnx_registry, OnnxRegistry())
-            self.decomposition_table = (
-                decomposition_table.create_onnx_friendly_decomposition_table(  # type: ignore[assignment]
-                    self.onnx_registry
-                )
-            )
-
-            from torch.onnx._internal.fx import onnxfunction_dispatcher
-
-            self.onnxfunction_dispatcher = (
-                onnxfunction_dispatcher.OnnxFunctionDispatcher(
-                    self.onnx_registry,
-                    self.diagnostic_context,
-                )
-            )
-
-            for key in dir(options):
-                if not key.startswith("_"):  # skip private attributes
-                    assert hasattr(self, key), f"Unresolved option '{key}'"
+        )
+        self.onnxfunction_dispatcher = onnxfunction_dispatcher.OnnxFunctionDispatcher(
+            self.onnx_registry,
+            self.diagnostic_context,
+        )
 
 
 @contextlib.contextmanager
@@ -536,296 +449,6 @@ class FXGraphExtractor(abc.ABC):
         ...
 
 
-class Exporter:
-    def __init__(
-        self,
-        options: ResolvedExportOptions,
-        model: torch.nn.Module | Callable,
-        model_args: Sequence[Any],
-        model_kwargs: Mapping[str, Any],
-    ):
-        self.options = options
-        assert self.options is not None
-
-        self.model = model
-        self.model_args = model_args
-        self.model_kwargs = model_kwargs
-
-        # TODO: https://github.com/pytorch/pytorch/issues/107714
-        # NOTE: FXSymbolicTracer would fail in this assert, as it does not use `enable_fake_mode`
-        from torch.onnx._internal.fx import fx_symbolic_graph_extractor
-
-        if not isinstance(
-            self.options.fx_tracer, fx_symbolic_graph_extractor.FXSymbolicTracer
-        ):
-            self._assert_fake_tensor_mode()
-
-    def export(self) -> _onnx_program.ONNXProgram:
-        from torch.export._trace import (  # TODO: Prevent circular dependency
-            DEFAULT_EXPORT_DYNAMO_CONFIG,
-        )
-
-        # TODO: Defer `import onnxscript` out of `import torch` path
-        # https://github.com/pytorch/pytorch/issues/103764
-        from torch.onnx._internal.fx import decomposition_skip
-
-        with (
-            self.options.diagnostic_context,
-            decomposition_skip.enable_decomposition_skips(self.options),
-            torch._dynamo.config.patch(
-                dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)
-            ),
-        ):
-            graph_module = self.options.fx_tracer.generate_fx(
-                self.options, self.model, self.model_args, self.model_kwargs
-            )
-            # TODO: Defer `import onnxscript` out of `import torch` path
-            # https://github.com/pytorch/pytorch/issues/103764
-            from torch.onnx._internal.fx import fx_onnx_interpreter
-
-            fx_interpreter = fx_onnx_interpreter.FxOnnxInterpreter(
-                diagnostic_context=self.options.diagnostic_context
-            )
-            onnxscript_graph = fx_interpreter.run(
-                fx_graph_module=graph_module,
-                onnxfunction_dispatcher=self.options.onnxfunction_dispatcher,
-            )
-
-            # NOTE: Filter out the initializers with fake tensors when it's fake_mode exporting.
-            # Otherwise, the ONNX exporter will fail: RuntimeError: basic_string::_M_construct null
-            # not valid.
-            # Concrete data is expected to be filled for those initializers later during `ONNXProgram.save`.
-            if self.options.fake_context is not None:
-                initializers_with_real_tensors: dict[str, torch.Tensor] = {}
-                for (
-                    initializer_name,
-                    initializer,
-                ) in onnxscript_graph.initializers.items():
-                    if not isinstance(initializer, torch._subclasses.FakeTensor):
-                        initializers_with_real_tensors[initializer_name] = initializer
-                onnxscript_graph.initializers = initializers_with_real_tensors
-
-            # Export TorchScript graph to ONNX ModelProto.
-            onnx_model = onnxscript_graph.to_model_proto(
-                self.options.onnx_registry.opset_version,
-            )
-            ir_model = ir.serde.deserialize_model(onnx_model)
-
-            try:
-                ir_model = onnxscript_apis.optimize(ir_model)
-            except Exception as e:
-                warnings.warn(
-                    "ONNXScript optimizer failed. Skipping optimization. "
-                    "\n\nPLEASE REPORT A BUG AT https://github.com/microsoft/onnxscript/issues "
-                    f"\n\nDetail:\n{e}"
-                )
-
-            return _onnx_program.ONNXProgram(ir_model, None)
-
-    def _assert_fake_tensor_mode(self):
-        """Asserts that the model and its input do not contain fake tensors."""
-
-        # Case 1: Model with fake inputs/weights and without enabling fake mode
-        has_any_fake_tensor = pytree.tree_any(
-            lambda x: isinstance(x, torch._subclasses.FakeTensor),
-            (self.model_args, self.model_kwargs),
-        )
-        has_any_fake_param_or_buffer = False
-        if isinstance(self.model, torch.nn.Module):
-            has_any_fake_param_or_buffer = pytree.tree_any(
-                lambda x: isinstance(x, torch._subclasses.FakeTensor),
-                (self.model.parameters(), self.model.buffers()),
-            )
-        if (
-            has_any_fake_tensor or has_any_fake_param_or_buffer
-        ) and not self.options.fake_context:
-            raise RuntimeError(
-                "Cannot export a model with fake inputs/weights without enabling fake mode.",
-            )
-        # Case 2: Model with non fake inputs/weights and enabled fake mode
-        has_any_non_fake_tensors = pytree.tree_any(
-            lambda x: isinstance(x, torch.Tensor)
-            and not isinstance(x, torch._subclasses.FakeTensor),
-            (self.model_args, self.model_kwargs),
-        )
-        has_any_non_fake_param_or_buffer = False
-        if isinstance(self.model, torch.nn.Module):
-            has_any_non_fake_param_or_buffer = pytree.tree_any(
-                lambda x: isinstance(x, torch.Tensor)
-                and not isinstance(x, torch._subclasses.FakeTensor),
-                (self.model.parameters(), self.model.buffers()),
-            )
-        if (
-            has_any_non_fake_tensors or has_any_non_fake_param_or_buffer
-        ) and self.options.fake_context:
-            raise RuntimeError(
-                "Cannot export a model with non fake inputs/weights and enabled fake mode.",
-            )
-
-
-class UnsatisfiedDependencyError(RuntimeError):
-    """Raised when an ONNX exporter dependency cannot be satisfied."""
-
-    def __init__(self, package_name: str, message: str):
-        super().__init__(message)
-        self.package_name = package_name
-
-
-class InvalidExportOptionsError(RuntimeError):
-    """Raised when user specified an invalid value for the :class:`ExportOptions`."""
-
-
-def _assert_dependencies(export_options: ResolvedExportOptions):
-    opset_version = export_options.onnx_registry.opset_version
-
-    def missing_package(package_name: str, exc_info: logging._ExcInfoType):
-        message = (
-            f"Please install the `{package_name}` package "
-            f"(e.g. `python -m pip install {package_name}`)."
-        )
-        log.fatal(message, exc_info=exc_info)
-        return UnsatisfiedDependencyError(package_name, message)
-
-    def missing_opset(package_name: str):
-        message = (
-            f"The installed `{package_name}` does not support the specified ONNX opset "
-            f"version {opset_version}. Install a newer `{package_name}` package or "
-            f"specify an older opset version."
-        )
-        log.fatal(message)
-        return UnsatisfiedDependencyError(package_name, message)
-
-    try:
-        import onnx
-    except ImportError as e:
-        raise missing_package("onnx", e) from e
-
-    if onnx.defs.onnx_opset_version() < opset_version:
-        raise missing_opset("onnx")
-
-    try:
-        # PyTorch runs lintrunner in CI without onnxscript installed
-        import onnxscript  # type: ignore[import]
-    except ImportError as e:
-        raise missing_package("onnxscript", e) from e
-
-    if not isinstance(
-        onnxscript.onnx_opset.all_opsets[("", opset_version)],
-        onnxscript.values.Opset,
-    ):
-        raise missing_opset("onnxscript")
-
-
-def dynamo_export(
-    model: torch.nn.Module | Callable,
-    /,
-    *model_args,
-    export_options: ExportOptions | None = None,
-    **model_kwargs,
-) -> _onnx_program.ONNXProgram:
-    """Export a torch.nn.Module to an ONNX graph.
-
-    .. deprecated:: 2.7
-        Please use ``torch.onnx.export(..., dynamo=True)`` instead.
-
-    Args:
-        model: The PyTorch model to be exported to ONNX.
-        model_args: Positional inputs to ``model``.
-        model_kwargs: Keyword inputs to ``model``.
-        export_options: Options to influence the export to ONNX.
-
-    Returns:
-        An in-memory representation of the exported ONNX model.
-
-    **Example 1 - Simplest export**
-    ::
-
-        class MyModel(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.linear = torch.nn.Linear(2, 2)
-
-            def forward(self, x, bias=None):
-                out = self.linear(x)
-                out = out + bias
-                return out
-
-
-        model = MyModel()
-        kwargs = {"bias": 3.0}
-        args = (torch.randn(2, 2, 2),)
-        onnx_program = torch.onnx.dynamo_export(model, *args, **kwargs).save(
-            "my_simple_model.onnx"
-        )
-
-    **Example 2 - Exporting with dynamic shapes**
-    ::
-
-        # The previous model can be exported with dynamic shapes
-        export_options = torch.onnx.ExportOptions(dynamic_shapes=True)
-        onnx_program = torch.onnx.dynamo_export(
-            model, *args, **kwargs, export_options=export_options
-        )
-        onnx_program.save("my_dynamic_model.onnx")
-
-
-    By printing input dynamic dimensions we can see the input shape is no longer (2,2,2)
-    ::
-
-        >>> print(onnx_program.model_proto.graph.input[0])
-        name: "arg0"
-        type {
-          tensor_type {
-            elem_type: 1
-            shape {
-              dim {
-                dim_param: "arg0_dim_0"
-              }
-              dim {
-                dim_param: "arg0_dim_1"
-              }
-              dim {
-                dim_param: "arg0_dim_2"
-              }
-            }
-          }
-        }
-    """
-
-    if export_options is not None:
-        resolved_export_options = (
-            export_options
-            if isinstance(export_options, ResolvedExportOptions)
-            else ResolvedExportOptions(export_options, model=model)
-        )
-    else:
-        resolved_export_options = ResolvedExportOptions(ExportOptions(), model=model)
-
-    _assert_dependencies(resolved_export_options)
-
-    try:
-        from torch._dynamo import config as _dynamo_config
-
-        with _dynamo_config.patch(do_not_emit_runtime_asserts=True):
-            return Exporter(
-                options=resolved_export_options,
-                model=model,
-                model_args=model_args,
-                model_kwargs=model_kwargs,
-            ).export()
-    except Exception as e:
-        sarif_report_path = _DEFAULT_FAILED_EXPORT_SARIF_LOG_PATH
-        resolved_export_options.diagnostic_context.dump(sarif_report_path)
-        message = (
-            f"Failed to export the model to ONNX. Generating SARIF report at '{sarif_report_path}'. "
-            "SARIF is a standard format for the output of static analysis tools. "
-            "SARIF logs can be loaded in VS Code SARIF viewer extension, "
-            "or SARIF web viewer (https://microsoft.github.io/sarif-web-component/). "
-            f"Please report a bug on PyTorch Github: {_PYTORCH_GITHUB_ISSUES_URL}"
-        )
-        raise errors.OnnxExporterError(message) from e
-
-
 def common_pre_export_passes(
     options: ResolvedExportOptions,
     original_model: torch.nn.Module | Callable,
@@ -841,7 +464,7 @@ def common_pre_export_passes(
     module = passes.Decompose(
         diagnostic_context,
         fx_module,
-        options.decomposition_table,
+        options.decomposition_table,  # type: ignore[arg-type]
         enable_dynamic_axes=options.dynamic_shapes,
         allow_fake_constant=options.fake_context is not None,
     ).run(*fx_module_args)

@@ -30,6 +30,7 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_ARM64,
     IS_CI,
     IS_LINUX,
     IS_WINDOWS,
@@ -666,6 +667,49 @@ if HAS_CUDA:
 
             # we should not have cudagraph'd anything
             assert self.get_manager() is None
+
+        @torch._functorch.config.patch("enable_autograd_cache", True)
+        @torch._inductor.config.patch("fx_graph_cache", True)
+        @torch._inductor.config.patch("fx_graph_remote_cache", False)
+        # Currently fx graph cache is turned off for specialize_float=False
+        @torch._dynamo.config.patch("specialize_float", True)
+        @requires_multigpu()
+        def test_cached_boxed_forward_device_index(self):
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return x * x * x
+
+            # Run with device index 1 so that we can see
+            # on a cache hit we stay on device index 1
+            with torch.cuda._DeviceGuard(1):
+                torch.cuda.set_device(1)
+
+                inp = torch.rand([20, 20], device="cuda", requires_grad=True)
+                out = foo(inp)
+                self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+                # Compile the backward and save to cache
+                back_inp = torch.empty_strided([20, 20], [0, 1], device="cuda")
+                out.backward(back_inp)
+                self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+                # Reset dynamo and rerun a few times
+                for i in range(3):
+                    torch._dynamo.reset()
+
+                    inp = torch.rand([20, 20], device="cuda", requires_grad=True)
+                    out = foo(inp)
+                    # Should cache hit each time; boxed_forward_device_index should still be set properly to 1
+                    self.assertEqual(
+                        counters["aot_autograd"]["autograd_cache_hit"], i + 1
+                    )
+                    back_inp = torch.empty_strided([20, 20], [0, 1], device="cuda")
+                    out.backward(back_inp)
+
+            # After everything, we should have cudagraphs on device 1
+            self.assertTrue(self.get_manager(device_index=0) is None)
+            self.assertFalse(self.get_manager(device_index=1) is None)
 
         @torch._functorch.config.patch("enable_autograd_cache", True)
         @torch._inductor.config.patch("fx_graph_cache", True)
@@ -1402,14 +1446,15 @@ if HAS_CUDA:
                     foo(*inps)
                 except Exception as e:
                     thrown = True
-                    self.assertTrue(
-                        "at::cuda::blas::gemm<float>" in str(e)
-                        or "at::cuda::blas::gemm_internal_cublas<float>" in str(e)
-                    )
-                    self.assertTrue(
-                        "getCurrentCUDABlasHandle" in str(e)
-                        or "getNewWorkspace" in str(e)
-                    )
+                    if not IS_ARM64:
+                        self.assertTrue(
+                            "at::cuda::blas::gemm<float>" in str(e)
+                            or "at::cuda::blas::gemm_internal_cublas<float>" in str(e)
+                        )
+                        self.assertTrue(
+                            "getCurrentCUDABlasHandle" in str(e)
+                            or "getNewWorkspace" in str(e)
+                        )
 
                 self.assertTrue(thrown)
 
