@@ -1164,7 +1164,15 @@ class GeneratedModulesCache:
             entry.code,
         )
 
-    def put_entry(self, cache_key, input_nodes, mod, extra, code, kernel) -> None:
+    def put_entry(
+        self,
+        cache_key: Optional[str],
+        input_nodes: tuple[ir.StorageBox],
+        mod: ModuleType,
+        extra: str,
+        code: str,
+        kernel: Any,
+    ) -> None:
         if cache_key is None:
             return
         input_name_to_index: dict[str, int] = {
