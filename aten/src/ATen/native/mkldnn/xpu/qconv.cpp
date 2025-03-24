@@ -29,7 +29,16 @@ static at::Tensor qconv_prepack_xpu(
     torch::List<int64_t> dilation,
     int64_t groups,
     std::optional<torch::List<int64_t>> input_shape) {
-  // XPU has no prepack at present
+  weight = at::native::onednn::qconv_prepack_onednn(
+      weight,
+      weight_scales,
+      input_scale,
+      input_zero_point,
+      stride,
+      padding,
+      dilation,
+      groups,
+      input_shape);
   return weight;
 }
 

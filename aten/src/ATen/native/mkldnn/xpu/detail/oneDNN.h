@@ -170,4 +170,16 @@ void gpu_float_sdpa(
     bool is_causal,
     float softmax_scale,
     const Tensor& output);
+
+at::Tensor qconv_prepack_onednn(
+    at::Tensor weight,
+    at::Tensor weight_scales,
+    double input_scale,
+    int64_t input_zero_point,
+    torch::List<int64_t> stride,
+    torch::List<int64_t> padding,
+    torch::List<int64_t> dilation,
+    int64_t groups,
+    std::optional<torch::List<int64_t>> input_shape);
+
 } // namespace at::native::onednn
