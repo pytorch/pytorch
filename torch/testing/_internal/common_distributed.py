@@ -194,7 +194,7 @@ def import_transformers_or_skip():
 
 
 def at_least_x_gpu(x):
-    return torch.cuda.is_available() and torch.cuda.device_count() >= x
+    return torch.accelerator.is_available() and torch.accelerator.device_count() >= x
 
 
 def skip_if_lt_x_gpu(x):
