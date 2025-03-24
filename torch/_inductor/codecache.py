@@ -3359,10 +3359,12 @@ class StaticAutotunerFuture(CodeCacheFuture):
         # since it can be very large.
         self.reload_kernel_from_src: Optional[Callable[[], Any]] = None
 
-    def result(self) -> Callable[..., Any]:
+    def result(self) -> CachingAutotuner:
         assert self.reload_kernel_from_src is not None
         with dynamo_timed("StaticAutotunerFuture.warm_precompile"):
             self.static_autotuner.precompile(  # type: ignore[union-attr]
-                warm_cache_only=False, reload_kernel=self.reload_kernel_from_src
+                warm_cache_only=False,
+                reload_kernel=self.reload_kernel_from_src,
+                static_triton_bundle_key=None,  # no need to save again
             )
             return self.static_autotuner

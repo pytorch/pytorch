@@ -177,8 +177,7 @@ class CompiledTritonKernels:
     @staticmethod
     def get(kernel_src: str) -> Optional[CodeCacheFuture]:
         key = CompiledTritonKernels.key(kernel_src)
-        result = CompiledTritonKernels._cache.get(key, None)
-        return result
+        return CompiledTritonKernels._cache.get(key, None)
 
     @staticmethod
     def cache_clear():
@@ -297,13 +296,6 @@ class AsyncCompile:
             with dynamo_timed("reload_kernel_in_parent"):
                 return load_kernel()
 
-        if (future := CompiledTritonKernels.get(source_code)) is not None:
-            counters["inductor"]["async_compile_cache_hit"] += 1
-            # Set reload_kernel_from_src properly based on source_code
-            if isinstance(future, StaticAutotunerFuture):
-                future.reload_kernel_from_src = reload_kernel_in_parent
-            return future
-
         counters["inductor"]["async_compile_cache_miss"] += 1
 
         kernel_code_log.info("Triton Kernel:\n%s", source_code)
@@ -320,9 +312,17 @@ class AsyncCompile:
         compile_id = torch._guards.CompileContext.current_compile_id()
         is_backward = getattr(V.graph, "is_backward", False)
 
-        if is_parallel:
-            from torch._inductor.triton_bundler import TritonBundler
+        if (future := CompiledTritonKernels.get(source_code)) is not None:
+            counters["inductor"]["async_compile_cache_hit"] += 1
+            # Set reload_kernel_from_src properly based on source_code
+            if isinstance(future, StaticAutotunerFuture):
+                future.reload_kernel_from_src = reload_kernel_in_parent
+            if is_parallel:
+                return future
+            else:
+                return future.result()
 
+        if is_parallel:
             # We want to support changing these env vars after (and while) the
             # process pool is running, so pass them to the subprocess to reset.
             env_vars = ["TORCHINDUCTOR_CACHE_DIR", "TRITON_CACHE_DIR"]
@@ -340,14 +340,10 @@ class AsyncCompile:
                 # so it can't be used again
                 kernel.set_compile_info(compile_id, is_backward)
                 CompiledTritonKernels.remove_future(source_code)
-                # If the kernel is statically launchable and therefore serializable,
-                # store it in the TritonBundler cache
-                if kernel.is_statically_launchable():
-                    TritonBundler.put_static_autotuner(
-                        CompiledTritonKernels.key(source_code), kernel
-                    )
                 kernel.precompile(
-                    warm_cache_only=False, reload_kernel=reload_kernel_in_parent
+                    warm_cache_only=False,
+                    reload_kernel=reload_kernel_in_parent,
+                    static_triton_bundle_key=CompiledTritonKernels.key(source_code),
                 )
                 get_metrics_context().add_top_n(
                     "triton_kernel_compile_times_us", kernel_name, elapsed_us
@@ -368,7 +364,10 @@ class AsyncCompile:
                 _set_triton_ptxas_path()
                 kernel = load_kernel()
                 kernel.set_compile_info(compile_id, is_backward)
-                kernel.precompile(warm_cache_only=False)
+                kernel.precompile(
+                    warm_cache_only=False,
+                    static_triton_bundle_key=CompiledTritonKernels.key(source_code),
+                )
                 elapsed_us = (time_ns() - start_ns) // 1000
                 get_metrics_context().add_top_n(
                     "triton_kernel_compile_times_us", kernel_name, elapsed_us

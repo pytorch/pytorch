@@ -93,6 +93,7 @@ class TestFxGraphCache(TestCase):
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
+    @config.patch({"compile_threads": 1})  # Can't config.patch() if there are workers
     @parametrize("device", (GPU_TYPE, "cpu"))
     @parametrize("dtype", (torch.float32, torch.bfloat16))
     @parametrize("dynamic", (False, True))
@@ -268,6 +269,7 @@ class TestFxGraphCache(TestCase):
     @parametrize("dynamic", (False, True))
     @parametrize("bundle_triton", (False, True))
     @parametrize("use_static_cuda_launcher", (False, True))
+    @config.patch({"compile_threads": 1})  # Can't config.patch() if there are workers
     def test_remote_cache_load_function(
         self, device, dtype, dynamic, bundle_triton, use_static_cuda_launcher
     ):
@@ -790,6 +792,7 @@ class TestFxGraphCache(TestCase):
     @config.patch({"fx_graph_remote_cache": False})
     @parametrize("bundle_triton", (False, True))
     @parametrize("use_static_cuda_launcher", (False, True))
+    @config.patch({"compile_threads": 1})  # Can't config.patch() if there are workers
     def test_higher_order_op_bypass(self, bundle_triton, use_static_cuda_launcher):
         """
         Verify that we bypass the cache when we have a higher order ops
@@ -975,6 +978,7 @@ class TestFxGraphCache(TestCase):
     @config.patch({"fx_graph_remote_cache": False})
     @parametrize("bundle_triton", (False, True))
     @parametrize("use_static_cuda_launcher", (False, True))
+    @config.patch({"compile_threads": 1})  # Can't config.patch() if there are workers
     def test_triton_op(self, bundle_triton, use_static_cuda_launcher):
         libname = "my_cool_namespace"
         opname = "my_triton_operator"

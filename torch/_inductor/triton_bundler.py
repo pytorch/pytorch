@@ -166,13 +166,25 @@ class TritonBundler:
     @classmethod
     def put_static_autotuner(cls, key: str, kernel: "CachingAutotuner") -> None:  # type: ignore[name-defined] # noqa: F821
         if (entries := cls._static_autotuners) is not None:
+            # Clear a bunch of unpicklable values and make a copy to save
+            # for FXGraphCache
+            old_values = kernel.prepare_for_pickle()
+            new_kernel = copy.deepcopy(kernel)
             entries.append(
                 StaticallyLaunchedAutotuner(
                     key,
-                    kernel.inductor_meta.get("kernel_name", "unknown_kernel"),
-                    copy.copy(kernel),
+                    new_kernel.inductor_meta.get("kernel_name", "unknown_kernel"),
+                    new_kernel,
                 )
             )
+            # Put the values back since we need it to use now
+            (
+                kernel.fn.fn,
+                kernel.fn.__globals__,
+                kernel.fn.used_global_vals,
+                kernel.fn.repr,
+                kernel.launchers,
+            ) = old_values
 
     @classmethod
     def collect_static_autotuners(
