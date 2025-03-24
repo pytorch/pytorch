@@ -5,8 +5,10 @@
 #include <atomic>
 #include <cmath>
 #include <cstdlib>
+#include <limits>
 #include <map>
 #include <memory>
+#include <optional>
 
 // WARNING: be extra careful when including more ATen/c10 header files here!
 // Because AOTInductor generated code will copy-paste this cpp_prefix.h for
@@ -37,9 +39,6 @@
 #endif
 
 #if INDUCTOR_USE_VECTOR_TYPES()
-#include <limits>
-#include <optional>
-
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #else
@@ -66,23 +65,48 @@ struct Welford {
 template <typename T>
 struct IsVecType : std::false_type {};
 
+template <typename T>
+struct IsVecMaskType : std::false_type {};
+
 #if INDUCTOR_USE_VECTOR_TYPES()
 template <typename T>
 struct IsVecType<at::vec::Vectorized<T>> : std::true_type {};
+template <typename T, int N>
+struct IsVecType<at::vec::VectorizedN<T, N>> : std::true_type {};
+
+template <typename T, int N>
+struct IsVecMaskType<at::vec::VecMask<T, N>> : std::true_type {};
 #endif
 
-template <typename T>
-struct WeightRecp {
-  using scalar_t = typename T::value_type;
-  std::vector<scalar_t> weight_recps;
-  WeightRecp(uint64_t N) {
-    weight_recps.reserve(N);
-    for (const auto i : c10::irange(N)) {
-      weight_recps.push_back(
-          scalar_t(static_cast<double>(1) / static_cast<double>(i + 1)));
-    }
+template <typename T, uint64_t kChunkSize>
+struct WelfordHelper {
+  // A data struct to help welford reduction:
+  // 1. Save the reciprocal of weights to avoid redundant divisions.
+  // 2. Save the welford stack, which is used to combine welford reduction
+  //    with cascade summation to improve numerical stability.
+  static std::vector<typename T::value_type> weight_recps;
+  std::vector<Welford<T>> welford_stk{};
+  uint64_t depth{0}; // depth of welford_stk.
+  uint64_t num_chunks{0}; // number of chunks stored in welford_stk.
+  WelfordHelper() = default;
+  WelfordHelper(uint64_t N) {
+    uint64_t m = (N + kChunkSize - 1) / kChunkSize; // div up
+    depth =
+        m > 0 ? static_cast<uint64_t>(ceil(log2(static_cast<double>(m)))) : 0;
+    welford_stk.assign(depth, Welford<T>());
   }
 };
+
+template <typename T, uint64_t kChunkSize>
+std::vector<typename T::value_type> WelfordHelper<T, kChunkSize>::weight_recps =
+    []() {
+      using scalar_t = typename T::value_type;
+      std::vector<scalar_t> temp(kChunkSize);
+      for (const auto i : c10::irange(kChunkSize)) {
+        temp[i] = scalar_t(static_cast<double>(1) / static_cast<double>(i + 1));
+      }
+      return temp;
+    }();
 
 template <typename T>
 Welford<T> welford_combine(
@@ -113,11 +137,32 @@ Welford<T> welford_combine(
   return result;
 }
 
-template <typename T>
+template <typename T, uint64_t kChunkSize = 0>
 Welford<T> welford_combine(
-    const Welford<T>& acc,
-    const T& data,
-    const WeightRecp<T>* w = nullptr) {
+    Welford<T>& acc,
+    T& data,
+    WelfordHelper<T, kChunkSize>* w = nullptr) {
+  // Combine welford reduction with cascade summation to improve numerical
+  // stability.
+  // https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance
+  // https://en.wikipedia.org/wiki/Pairwise_summation
+  if constexpr (IsVecType<T>::value) {
+    if (w != nullptr && w->depth > 0 && acc.index == kChunkSize) {
+      w->welford_stk[0] = welford_combine(w->welford_stk[0], acc);
+      w->num_chunks += 1;
+      acc.mean = T(0);
+      acc.m2 = T(0);
+      acc.weight = T(0);
+      acc.index = 0;
+      uint64_t mask = w->num_chunks;
+      for (uint64_t j = 1; j < w->depth && (mask & 1) == 0; ++j) {
+        w->welford_stk[j] =
+            welford_combine(w->welford_stk[j], w->welford_stk[j - 1]);
+        w->welford_stk[j - 1] = Welford<T>();
+        mask >>= 1;
+      }
+    }
+  }
   // Add a single data point
   uint64_t new_index = acc.index + 1;
   auto new_weight = acc.weight + T(1);
@@ -138,6 +183,14 @@ Welford<T> welford_combine(
   return result;
 }
 
+template <typename T, uint64_t kChunkSize = 0>
+Welford<T> welford_combine(Welford<T>& acc, WelfordHelper<T, kChunkSize>* w) {
+  for (const auto i : c10::irange(w->depth)) {
+    acc = welford_combine(acc, w->welford_stk[i]);
+  }
+  return acc;
+}
+
 template <typename T>
 struct IndexValue {
   int64_t index{};
@@ -147,12 +200,12 @@ struct IndexValue {
 };
 
 #if INDUCTOR_USE_VECTOR_TYPES()
-template <typename T>
+template <typename T, uint64_t kChunkSize>
 Welford<T> welford_combine(
-    const Welford<T>& acc,
-    const T& data,
-    const int64_t tail_size,
-    const WeightRecp<T>* w = nullptr) {
+    Welford<T>& acc,
+    T& data,
+    int64_t tail_size,
+    WelfordHelper<T, kChunkSize>* w = nullptr) {
   auto out = welford_combine(acc, data, w);
   return Welford<T>{
       T::set(acc.mean, out.mean, tail_size),
@@ -951,6 +1004,7 @@ inline void mm_get_thread_blocking(
   }
 }
 
+// NOLINTBEGIN(*-narrowing-conversions)
 template <typename X_t, typename W_t>
 void _mm_get_cache_blocking(
     int num_threads,
@@ -972,11 +1026,11 @@ void _mm_get_cache_blocking(
   // algorithm.
   // TODO(jgong5): cache cache blocking results
   // TODO: tune the factor here
-  constexpr double L1_limit_factor = 0.8;
-  constexpr double L2_limit_factor = 0.5;
+  float L1_limit_factor = 0.8;
+  float L2_limit_factor = 0.5;
 
-  const auto L1 = static_cast<uint32_t>(L1_cache_size * L1_limit_factor);
-  const auto L2 = static_cast<uint32_t>(L2_cache_size * L2_limit_factor);
+  auto L1 = L1_cache_size * L1_limit_factor;
+  auto L2 = L2_cache_size * L2_limit_factor;
 
   constexpr size_t num_byte_A = sizeof(X_t);
   constexpr size_t num_byte_B = sizeof(W_t);
@@ -987,38 +1041,29 @@ void _mm_get_cache_blocking(
     Kc_blocks = (int64_t)std::floor(L1 / (Kr * Nr * num_byte_B));
   }
 
-  constexpr double min_Mc_ratio = 2.0;
-  int64_t min_Mc_blocks = std::ceil(
-      min_Mc_ratio * static_cast<double>(Mr) / static_cast<double>(Nr));
+  float min_Mc_ratio = 2;
+  int64_t min_Mc_blocks = std::ceil(min_Mc_ratio * Mr / Nr);
   auto Kt_bytes = Kt_blocks * Kr * num_byte_A;
   if (min_Mc_blocks * Mr * Kt_bytes < L2) {
     Mc_blocks = std::min(Mt_blocks, (int64_t)std::floor(L2 / (Mr * Kt_bytes)));
     Nc_blocks = 1;
   } else {
     Mc_blocks = Mt_blocks;
-    Nc_blocks = std::min(
-        static_cast<int64_t>(std::ceil(
-            static_cast<double>(Mc_blocks) * static_cast<double>(Mr) /
-            static_cast<double>(Nr))),
-        Nt_blocks);
+    Nc_blocks =
+        std::min((int64_t)std::ceil((float)Mc_blocks * Mr / Nr), Nt_blocks);
     auto Nc_bytes = Nc_blocks * Nr * 4;
     auto Kc_bytes = Kc_blocks * Kr * num_byte_A;
     if (Mc_blocks * Mr * (Kc_bytes + Nc_bytes) > L2) {
-      auto M_max = static_cast<int64_t>(
-          (std::sqrt(Kc_bytes * Kc_bytes + static_cast<size_t>(16 * L2)) -
-           static_cast<double>(Kc_bytes)) /
-          8);
+      auto M_max = (std::sqrt(Kc_bytes * Kc_bytes + 16 * L2) - Kc_bytes) / 8;
       if (M_max < Mc_blocks * Mr) {
-        Mc_blocks = static_cast<int64_t>(std::floor(M_max / Mr));
-        Nc_blocks = std::min(
-            static_cast<int64_t>(std::ceil(
-                static_cast<double>(Mc_blocks) * static_cast<double>(Mr) /
-                static_cast<double>(Nr))),
-            Nt_blocks);
+        Mc_blocks = (int64_t)std::floor(M_max / Mr);
+        Nc_blocks =
+            std::min((int64_t)std::ceil((float)Mc_blocks * Mr / Nr), Nt_blocks);
       }
     }
   }
 }
+// NOLINTEND(*-narrowing-conversions)
 
 template <typename X_t, typename W_t>
 void mm_get_cache_blocking(
