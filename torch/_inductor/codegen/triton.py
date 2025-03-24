@@ -31,7 +31,7 @@ from ...utils._sympy.symbol import free_symbol_is_type, prefix_str, symbol_is_ty
 from ...utils._sympy.value_ranges import ValueRanges
 from .. import config, ir, metrics
 from ..async_compile import AsyncCompile
-from ..codecache import code_hash, get_path, PyCodeCache
+from ..codecache import code_hash, get_path, PyCodeCache, write_atomic
 from ..ops_handler import DefaultHandler
 from ..runtime import triton_heuristics
 from ..runtime.benchmarking import benchmarker
@@ -2543,17 +2543,19 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 masked_value = _mask_value(value, default)
 
             if reduction_type in ("argmax", "argmin"):
+                accumulator_dtype = V.kernel.get_index_dtype_as_torch_dtype()
                 accumulator_index = str(
                     self.cse.generate(
                         self.compute,
                         f"tl.broadcast_to({reduction_range_prefix}index, {masked_value}.shape)",
-                        dtype=V.kernel.get_index_dtype_as_torch_dtype(),
+                        dtype=accumulator_dtype,
                     )
                 )
                 root_op = {"argmax": "max", "argmin": "min"}[reduction_type]
                 final_argreduce(
                     self.compute, result_var, masked_value, accumulator_index
                 )
+                result_var.dtype = accumulator_dtype
             elif reduction_type == "welford_reduce":
                 if self.cooperative_reduction:
                     # cooperative reductions require full welford for correctness
@@ -4182,8 +4184,7 @@ class TritonScheduling(SIMDScheduling):
 
             def store_cache():
                 path = cache_file_path()
-                with open(path, "w") as fd:
-                    fd.write(str(ms))  # type: ignore[has-type]
+                write_atomic(path, str(ms))
 
             def load_cache():
                 path = cache_file_path()
@@ -4360,8 +4361,7 @@ class TritonScheduling(SIMDScheduling):
 
         def store_cache():
             path = cache_file_path()
-            with open(path, "w") as fd:
-                fd.write(str(ms) + " " + str(ms_clone))
+            write_atomic(path, str(ms) + " " + str(ms_clone))
 
         total_ms, file_list = 0, []
         total_clone_ms: float = 0.0
