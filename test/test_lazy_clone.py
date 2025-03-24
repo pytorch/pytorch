@@ -55,14 +55,13 @@ class TestLazyCloneDeviceType(TestCase):
     @parametrize("materialize_first", ("src", "dest"))
     def test_lazy_clone_to_device(self, device, src, dest, materialize_first):
         device_type = torch.device(device).type
-
         src_device = self.get_device_str(src, device_type)
         dest_device = self.get_device_str(dest, device_type)
-
         src_device_check = torch.empty(0, device=src_device).device
         dest_device_check = torch.empty(0, device=dest_device).device
+        pin_memory = src_device_check.type == "cpu" and dest_device_check.type == "mps"
 
-        a = torch.randn(10, device=src_device)
+        a = torch.randn(10, device=src_device, pin_memory=pin_memory)
         orig_data_ptr = a.data_ptr()
         b = a._lazy_clone(device=dest_device)
 
@@ -146,13 +145,13 @@ class TestLazyCloneDeviceType(TestCase):
     )
     def test_lazy_clone_to_device_readable(self, device, src, dest):
         device_type = torch.device(device).type
-
         src_device = self.get_device_str(src, device_type)
         dest_device = self.get_device_str(dest, device_type)
         src_device_check = torch.empty(0, device=src_device).device
         dest_device_check = torch.empty(0, device=dest_device).device
+        pin_memory = src_device_check.type == "cpu" and dest_device_check.type == "mps"
 
-        a = torch.randn(10, device=src_device)
+        a = torch.randn(10, device=src_device, pin_memory=pin_memory)
         orig_data_ptr = a.data_ptr()
         b = a._lazy_clone(device=dest_device)
 
