@@ -851,6 +851,9 @@ if(MSVC)
   append_cxx_flag_if_supported("/utf-8" CMAKE_CXX_FLAGS)
 endif()
 
+configure_file(${PROJECT_SOURCE_DIR}/cmake/public/cuda.cmake.in
+               ${PROJECT_BINARY_DIR}/cmake/public/cuda.cmake @ONLY)
+
 # Note for ROCM platform: 1. USE_ROCM is always ON until
 # include(cmake/Dependencies.cmake) 2. USE_CUDA will become OFF during
 # re-configuration Truth Table: CUDA 1st pass: USE_CUDA=True;USE_ROCM=True,
@@ -1283,9 +1286,6 @@ if(USE_CUDA OR USE_ROCM)
   # interface as well.
 
 endif()
-
-configure_file(${PROJECT_SOURCE_DIR}/cmake/public/cuda.cmake.in
-               ${PROJECT_BINARY_DIR}/cmake/public/cuda.cmake @ONLY)
 
 # Note(jiayq): when building static libraries, all PRIVATE dependencies will
 # also become interface libraries, and as a result if there are any dependency
