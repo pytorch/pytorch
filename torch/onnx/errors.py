@@ -32,11 +32,23 @@ class UnsupportedOperatorError(OnnxExporterError):
     # Clean up when the torchscript exporter is removed
     def __init__(self, name: str, version: int, supported_version: int | None):
         if supported_version is not None:
-            msg = f"Exporting the operator '{name}' to ONNX opset version {version} is not supported. Support for this operator was added in version {supported_version}, try exporting with this version"
+            msg = (
+                f"Exporting the operator '{name}' to ONNX opset version {version} "
+                "is not supported. Support for this operator was added in version "
+                f"{supported_version}, try exporting with this version"
+            )
         elif name.startswith(("aten::", "prim::", "quantized::")):
-            msg = f"Exporting the operator '{name}' to ONNX opset version {version} is not supported"
+            msg = (
+                f"Exporting the operator '{name}' to ONNX opset version {version} "
+                "is not supported"
+            )
         else:
-            msg = "ONNX export failed on an operator with unrecognized namespace {op_name}. If you are trying to export a custom operator, make sure you registered it with the right domain and version."
+            msg = (
+                "ONNX export failed on an operator with unrecognized namespace {op_name}. "
+                "If you are trying to export a custom operator, make sure you registered it with "
+                "the right domain and version."
+            )
+
         super().__init__(msg)
 
 
