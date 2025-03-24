@@ -348,7 +348,9 @@ class GraphLowering(torch.fx.Interpreter):
         self.constants: dict[str, torch.Tensor] = (
             const_module.constants if const_module else {}
         )
-        self.torchbind_constants: dict[str, torch._C.ScriptObject] = {}
+        self.torchbind_constants: dict[
+            str, Union[torch._C.ScriptObject, FakeScriptObject]
+        ] = {}
         self.seen_subgraphs: dict[str, ir.Subgraph] = {}
         self.constant_reprs: dict[str, str] = {}
         self.removed_operations = OrderedSet[str]()
@@ -1237,9 +1239,9 @@ class GraphLowering(torch.fx.Interpreter):
             self.constant_reprs[target] = ""
             return TorchBindObject(name=target, value=value)
         elif isinstance(value, FakeScriptObject):
-            self.torchbind_constants[target] = value.real_obj
+            self.torchbind_constants[target] = value
             self.constant_reprs[target] = ""
-            return TorchBindObject(name=target, value=value.real_obj)
+            return TorchBindObject(name=target, value=value)
 
         assert isinstance(value, torch.Tensor)
         if (
