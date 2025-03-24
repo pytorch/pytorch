@@ -607,7 +607,10 @@ def extract_read_writes(
 
     if isinstance(fn, LoopBody):
         inner = extract_loop_body_with_args(
-            fn, [*args, *hidden_args], var_ranges, normalize  # type: ignore[list-item]
+            fn,
+            [*args, *hidden_args],  # type: ignore[list-item]
+            var_ranges,
+            normalize
         )
     else:
         # Slow path tracing the function

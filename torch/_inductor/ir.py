@@ -5441,7 +5441,7 @@ class ExternKernel(InputsKernel):
             return x
         if (
             isinstance(x, TensorBox)
-            and isinstance(x.data, DataNode)
+            and isinstance(x.data, BaseView)
             and not isinstance(x.data, ReinterpretView)
             and is_storage_and_layout(x.unwrap_view())
             and not isinstance(x.unwrap_view().data, ExternKernelAlloc)  # type: ignore[attr-defined]
