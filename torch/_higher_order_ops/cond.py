@@ -363,7 +363,7 @@ class CondAutogradOp(torch.autograd.Function):
         operands = saved_tensors_and_symints(ctx)
         args = operands + flat_grads
         # TODO: we need to materialize the bw graphs because dynamo is unable to
-        # trace through the joint funcion when torch.compile torch.autograd.grad.
+        # trace through the joint function when torch.compile torch.autograd.grad.
         true_bw_gm = materialize_as_graph(
             ctx._true_bw_fn,
             args,
@@ -378,6 +378,9 @@ class CondAutogradOp(torch.autograd.Function):
             ctx._fw_exclude_key_set,
             force_enable_grad=True,
         )
+        import pdb
+
+        pdb.set_trace()
         grads = cond_op(
             ctx._pred,
             true_bw_gm,

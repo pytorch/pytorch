@@ -433,8 +433,7 @@ def prepare_fw_with_masks_all_requires_grad(fn):
         # of autograd. Function, where if any one of the inputs requires grad
         # all output will be require grad. This also makes the downstream
         # require_gradness reasoning much easier.
-        # if pytree.tree_any_only(torch.Tensor, lambda t: t.requires_grad, args):
-        if False and pytree.tree_any_only(torch.Tensor, lambda t: not t.requires_grad, args):
+        if pytree.tree_any_only(torch.Tensor, lambda t: t.requires_grad, args):
             fw_out = pytree.tree_map_only(
                 torch.Tensor, lambda x: x.requires_grad_(True), fw_out
             )

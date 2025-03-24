@@ -1552,14 +1552,19 @@ def forward(self, pred_1, x_1):
     @skipIfTorchDynamo("don't test compile on compile")
     @requires_cuda
     @parametrize("reverse", [False, True])
+    # @parametrize("reverse", [False])
     @parametrize("compile_mode", ["none", "eager"])
+    # @parametrize("compile_mode", ["none"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    # @parametrize("device", [torch.device("cuda")])
     @parametrize("autograd", [False, True])
+    # @parametrize("autograd", [True])
     def test_scan_compile(self, reverse, compile_mode, device, autograd):
         def add2(x: torch.Tensor, y: torch.Tensor):
             return x * y, x + y
 
         x = torch.randn(3, 10, 2, device=device, requires_grad=autograd)
+        # x = torch.randn(1, 3, 2, device=device, requires_grad=autograd)
 
         scan_fct = compile_mode_helper(scan, compile_mode)
 
@@ -1568,11 +1573,13 @@ def forward(self, pred_1, x_1):
                 get_scan_combine_fn("add", False),
                 torch.cumsum,
                 torch.zeros(10, 2, device=device, requires_grad=autograd),
+                # torch.zeros(3, 2, device=device, requires_grad=autograd),
             ),
             (
                 get_scan_combine_fn("mul", False),
                 torch.cumprod,
                 torch.ones(10, 2, device=device, requires_grad=autograd),
+                # torch.ones(3, 2, device=device, requires_grad=autograd),
             ),
         ]:
             result = scan_fct(op, init, x, dim=0, reverse=reverse)
@@ -2339,7 +2346,6 @@ def forward(self, pred_1, x_1):
         dim = 1
 
         # Init wrong pytree
-        inp = torch._ops.ops.aten.slice(x, dim, 1, None, 1)
         init = (
             torch._ops.ops.aten.slice(x, dim, 0, 1, 1),
             torch._ops.ops.aten.slice(x, dim, 0, 1, 1),
@@ -2567,7 +2573,7 @@ def forward(self, pred_1, x_1):
             # RuntimeError,
             # "The number of leaves of the pytree of the new carry produced by the operator.*",
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "scan must be captured completely with.*"
+            "scan must be captured completely with.*",
         ):
             scan(
                 fct_pointwise_carry_wrong_pytree,
@@ -2892,9 +2898,7 @@ class GraphModule(torch.nn.Module):
         W_hh = torch.randn(7, 7, device=device, requires_grad=autograd)
         b_hh = torch.randn(7, device=device, requires_grad=autograd)
 
-        with self.assertRaisesRegex(
-            RuntimeError, "All xs leaves must at least have.*"
-        ):
+        with self.assertRaisesRegex(RuntimeError, "All xs leaves must at least have.*"):
             scan(
                 get_scan_combine_fn("RNN", True, parameters=[W_ih, b_ih, W_hh, b_hh]),
                 h,
@@ -3296,7 +3300,10 @@ class GraphModule(torch.nn.Module):
             return scan(fct, init, xs, dim=0, reverse=True)
 
         # Wrong number of returns from function
-        with self.assertRaisesRegex(torch._dynamo.exc.UncapturedHigherOrderOpError, "scan must be captured completely with.*"):
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "scan must be captured completely with.*",
+        ):
             make_fx(f, tracing_mode="symbolic")(
                 get_scan_combine_fn("add", True), init, x
             )
@@ -3315,7 +3322,8 @@ class GraphModule(torch.nn.Module):
         # Wrong carry shape
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Expected init and carry to have same metadata.*",):
+            "Expected init and carry to have same metadata.*",
+        ):
             make_fx(f, tracing_mode="symbolic")(add_wrong_carry, init, x)
 
     @skipIfNoDynamoSupport
@@ -3357,6 +3365,7 @@ class GraphModule(torch.nn.Module):
 def forward(self, fct_1, init_1, xs_1):
     permute = torch.ops.aten.permute.default(xs_1, [0, 1, 2])
     flip = torch.ops.aten.flip.default(permute, [0]);  permute = None
+    select = torch.ops.aten.select.int(flip, 0, 0);  select = None
     sym_size_int_1 = torch.ops.aten.sym_size.int(init_1, 1)
     sym_size_int_2 = torch.ops.aten.sym_size.int(init_1, 2)
     sym_size_int_3 = torch.ops.aten.sym_size.int(xs_1, 1)
@@ -3364,8 +3373,9 @@ def forward(self, fct_1, init_1, xs_1):
     scan_combine_graph_0 = self.scan_combine_graph_0
     scan = torch.ops.higher_order.scan(scan_combine_graph_0, [init_1], [flip], (sym_size_int_1, sym_size_int_2, sym_size_int_3, sym_size_int_4));  scan_combine_graph_0 = init_1 = flip = sym_size_int_1 = sym_size_int_2 = sym_size_int_3 = sym_size_int_4 = None
     getitem = scan[0]
-    getitem_1 = scan[1];  scan = None
-    flip_1 = torch.ops.aten.flip.default(getitem_1, [0]);  getitem_1 = None
+    getitem_1 = scan[1];  getitem_1 = None
+    getitem_2 = scan[2];  scan = None
+    flip_1 = torch.ops.aten.flip.default(getitem_2, [0]);  getitem_2 = None
     return (getitem, flip_1)""",  # noqa: B950
         )
 

@@ -200,6 +200,8 @@ def create_joint(fn: Callable, *, aot_config: AOTConfig) -> Any:
         outs_to_grad = [
             o for needs_tangent, o in zip(tangent_mask, outs) if needs_tangent
         ]
+        if len(outs_to_grad) != len(tangents):
+            print("Fail")
         assert len(outs_to_grad) == len(tangents)
 
         # Get the inputs that need gradients
