@@ -5,6 +5,7 @@ import itertools
 import operator
 from collections.abc import Iterable, Sequence
 from typing import Callable, cast, Optional, TypeVar, Union
+from typing_extensions import ParamSpec
 
 import torch
 from torch.distributed.tensor._api import DTensor
@@ -25,7 +26,6 @@ from torch.distributed.tensor.placement_types import (
     Replicate,
     Shard,
 )
-from typing_extensions import ParamSpec
 
 
 _T = TypeVar("_T")

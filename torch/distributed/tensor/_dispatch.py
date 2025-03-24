@@ -380,9 +380,9 @@ class OpDispatcher:
                 kwargs_schema[k] = v
                 local_kwargs[k] = v
 
-        assert (
-            compute_mesh is not None
-        ), f"found no DeviceMesh from dtensor args for {op_call}!"
+        assert compute_mesh is not None, (
+            f"found no DeviceMesh from dtensor args for {op_call}!"
+        )
         op_info = OpInfo(
             compute_mesh,
             OpSchema(
@@ -406,18 +406,18 @@ class OpDispatcher:
     def wrap(res: object, spec: OutputSpecType) -> object:
         if isinstance(res, torch.Tensor):
             if spec is not None:
-                assert isinstance(
-                    spec, DTensorSpec
-                ), f"output spec does not match with output! Expected DTensorSpec, got {spec}."
+                assert isinstance(spec, DTensorSpec), (
+                    f"output spec does not match with output! Expected DTensorSpec, got {spec}."
+                )
                 return dtensor.DTensor(res, spec, requires_grad=res.requires_grad)
             else:
                 # if output does not have a DTensorSpec due to specific ops, it must be a scalar tensor
                 assert res.ndim == 0, "output tensor should be scalar!"
                 return res
         elif isinstance(res, (list, tuple)):
-            assert spec is not None and isinstance(
-                spec, (list, tuple)
-            ), f"output spec does not match with output! Expected list/tuple, got {spec}."
+            assert spec is not None and isinstance(spec, (list, tuple)), (
+                f"output spec does not match with output! Expected list/tuple, got {spec}."
+            )
             res_list = []
             for e, s in zip(res, spec):
                 res_list.append(OpDispatcher.wrap(e, s))

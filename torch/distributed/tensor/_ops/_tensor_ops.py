@@ -249,8 +249,9 @@ def gen_select_strategy(op_schema: OpSchema) -> StrategyType:
     input_strategy = op_schema.args_schema[0]
     assert isinstance(input_strategy, OpStrategy)
     assert len(op_schema.args_schema) == 3
-    selected_dim, index = cast(int, op_schema.args_schema[1]), cast(
-        int, op_schema.args_schema[2]
+    selected_dim, index = (
+        cast(int, op_schema.args_schema[1]),
+        cast(int, op_schema.args_schema[2]),
     )
     input_shape = input_strategy.shape
     input_ndim = input_strategy.ndim
