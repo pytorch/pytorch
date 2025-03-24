@@ -1160,6 +1160,8 @@ def _get_math_sdp_allow_fp16_bf16_reduction() -> _bool: ...  # THPModule_allowFP
 def _set_math_sdp_allow_fp16_bf16_reduction(arg: _bool) -> None: ...  # THPModule_setAllowFP16BF16ReductionMathSDP
 def _get_overrideable_sdp_enabled() -> _bool: ...  # THPModule_userEnabledOverrideableSDP
 def _set_sdp_use_overrideable(arg: _bool) -> None: ...  # THPModule_setSDPUseOverrideable
+def _get_sdp_priority_order() -> List[_int]: ... #THPModule_getSDPPriorityOrder
+def _set_sdp_priority_order(arg: List[_int]) -> None: ... #THPModule_setSDPPriorityOrder
 def _get_cudnn_sdp_enabled() -> _bool: ...  # THPModule_userEnabledMathSDP
 def _set_sdp_use_cudnn(arg: _bool) -> None: ...  # THPModule_setSDPUseMath
 def _get_mkldnn_enabled() -> _bool: ...  # THPModule_userEnabledMkldnn
@@ -1281,6 +1283,15 @@ def _set_blas_preferred_backend(arg: torch._C._BlasBackend): ...
 class _BlasBackend:
     Cublas: _BlasBackend
     Cublaslt: _BlasBackend
+    Ck: _BlasBackend
+
+def _get_rocm_fa_preferred_backend() -> torch._C._ROCmFABackend: ...
+def _set_rocm_fa_preferred_backend(arg: torch._C._ROCmFABackend): ...
+
+class _ROCmFABackend:
+    Default: _ROCmFABackend
+    AOTriton: _ROCmFABackend
+    Ck: _ROCmFABackend
 
 class ConvBackend(Enum): ...
 

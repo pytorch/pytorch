@@ -115,24 +115,18 @@ prepare_philox_arguments(float p_dropout, int64_t counter_offset) {
 #define CHECK_CONTIGUOUS(x) TORCH_CHECK(x.is_contiguous(), #x " must be contiguous")
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor>
-mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head_size
-        const at::Tensor &k,         // batch_size x seqlen_k x num_heads_k x head_size
-        const at::Tensor &v,         // batch_size x seqlen_k x num_heads_k x head_size
-        std::optional<at::Tensor> &out_,             // batch_size x seqlen_q x num_heads x head_size
-        std::optional<at::Tensor> &alibi_slopes_, // num_heads or batch_size x num_heads
-        const float p_dropout,
-        const float softmax_scale,
-        bool is_causal,
-        int window_size_left,
-        int window_size_right,
-        const bool return_softmax,
-        std::optional<at::Generator> gen_) {
-  // Otherwise the kernel will be launched from cuda:0 device
-  // Cast to char to avoid compiler warning about narrowing
-  // [ROCM specific]: must be at the beginning of the function
-  // Otherwise check_gpu_arch() checks cuda:0 device.
-  at::hip::HIPGuardMasqueradingAsCUDA device_guard{(char)q.get_device()};
-
+mha_fwd_aot(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head_size
+            const at::Tensor &k,         // batch_size x seqlen_k x num_heads_k x head_size
+            const at::Tensor &v,         // batch_size x seqlen_k x num_heads_k x head_size
+            std::optional<at::Tensor> &out_,             // batch_size x seqlen_q x num_heads x head_size
+            std::optional<at::Tensor> &alibi_slopes_, // num_heads or batch_size x num_heads
+            const float p_dropout,
+            const float softmax_scale,
+            bool is_causal,
+            int window_size_left,
+            int window_size_right,
+            const bool return_softmax,
+            std::optional<at::Generator> gen_) {
   auto stream = at::hip::getCurrentHIPStreamMasqueradingAsCUDA().stream();
   check_gpu_arch(stream);
 
@@ -253,7 +247,7 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
 }
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor>
-mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q := \sum_{i=0}^{b} s_i
+mha_varlen_fwd_aot(const at::Tensor &q,  // total_q x num_heads x head_size, total_q := \sum_{i=0}^{b} s_i
                const at::Tensor &k,  // total_k x num_heads_k x head_size, total_k := \sum_{i=0}^{b} s_i
                const at::Tensor &v,  // total_k x num_heads_k x head_size, total_k := \sum_{i=0}^{b} s_i
                std::optional<at::Tensor> &out_, // total_q x num_heads x head_size, total_k := \sum_{i=0}^{b} s_i
@@ -419,7 +413,7 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
 }
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor>
-mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_size_og
+mha_bwd_aot(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_size_og
         const at::Tensor &q,   // batch_size x seqlen_q x num_heads x head_size
         const at::Tensor &k,   // batch_size x seqlen_k x num_heads_k x head_size
         const at::Tensor &v,   // batch_size x seqlen_k x num_heads_k x head_size
@@ -581,7 +575,7 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
 }
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor>
-mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
+mha_varlen_bwd_aot(const at::Tensor &dout,  // total_q x num_heads, x head_size
                const at::Tensor &q,   // total_q x num_heads x head_size, total_q := \sum_{i=0}^{b} s_i
                const at::Tensor &k,   // total_k x num_heads_k x head_size, total_k := \sum_{i=0}^{b} s_i
                const at::Tensor &v,   // total_k x num_heads_k x head_size, total_k := \sum_{i=0}^{b} s_i
@@ -769,7 +763,6 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
 
   return { dq, dk, dv, softmax_d };
 }
+} // namespace pytorch_flash
 
-} // namespace pytorch_fmha
-
-#endif
+#endif  // USE_FLASH_ATTENTION

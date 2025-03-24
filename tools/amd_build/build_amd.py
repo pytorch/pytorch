@@ -99,7 +99,6 @@ includes = [
     "aten/src/ATen/native/transformers/cuda/mem_eff_attention/debug_utils.h",
     "aten/src/ATen/native/transformers/cuda/mem_eff_attention/gemm_kernel_utils.h",
     "aten/src/ATen/native/transformers/cuda/mem_eff_attention/pytorch_utils.h",
-    "aten/src/ATen/native/transformers/cuda/flash_attn/flash_api.h",
     "aten/src/THC/*",
     "aten/src/ATen/test/*",
     # CMakeLists.txt isn't processed by default, but there are a few
@@ -199,6 +198,7 @@ for hip_platform_file in hip_platform_files:
                 for line in newlines:
                     sources.write(line)
             print(f"{hip_platform_file} updated")
+
 
 hipify_python.hipify(
     project_directory=proj_dir,

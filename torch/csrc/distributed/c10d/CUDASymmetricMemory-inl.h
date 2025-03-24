@@ -5,7 +5,9 @@
 #endif
 
 #include <ATen/ATen.h>
-
+#if !defined(USE_ROCM)
+#include <cuda_bf16.h>
+#endif
 namespace c10d::symmetric_memory {
 
 constexpr size_t max_num_threads_per_block = 1024;

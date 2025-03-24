@@ -68,14 +68,17 @@ def _raise_kernel_warnings(params: SDPAParams) -> None:
 
 
 @contextlib.contextmanager
-def sdpa_kernel(backends: Union[List[SDPBackend], SDPBackend]):
+def sdpa_kernel(
+    backends: Union[List[SDPBackend], SDPBackend], set_priority: bool = False
+):
     r"""
     Context manager to select which backend to use for scaled dot product attention.
 
     .. warning:: This function is beta and subject to change.
 
     Args:
-        backend (Union[List[SDPBackend], SDPBackend]): A backend or list of backends for scaled dot product attention.
+        backends (Union[List[SDPBackend], SDPBackend]): A backend or list of backends for scaled dot product attention.
+        set_priority_order (bool=False): Whether the ordering of the backends is interpreted as their priority order.
 
     Example:
 
@@ -101,27 +104,35 @@ def sdpa_kernel(backends: Union[List[SDPBackend], SDPBackend]):
     if isinstance(backends, SDPBackend):
         backends = [backends]
 
-    backends = set(backends)
-    previous_cudnn: bool = cudnn_sdp_enabled()
-    previous_flash: bool = flash_sdp_enabled()
-    previous_mem_efficient: bool = mem_efficient_sdp_enabled()
-    previous_math: bool = math_sdp_enabled()
-    try:
-        enable_cudnn = SDPBackend.CUDNN_ATTENTION in backends
-        enable_flash = SDPBackend.FLASH_ATTENTION in backends
-        enable_mem_efficient = SDPBackend.EFFICIENT_ATTENTION in backends
-        enable_math = SDPBackend.MATH in backends
+    backends_set = set(backends)
+    user_priority = None
+    previous_priority = None
 
-        enable_cudnn_sdp(enable_cudnn)
-        enable_flash_sdp(enable_flash)
-        enable_mem_efficient_sdp(enable_mem_efficient)
-        enable_math_sdp(enable_math)
+    if set_priority:
+        user_priority = [
+            int(x) for idx, x in enumerate(backends) if backends.index(x) == idx  # type: ignore[call-overload]
+        ]
+        previous_priority = torch._C._get_sdp_priority_order()
+        for backend in previous_priority:
+            if backend not in user_priority:
+                user_priority.append(int(backend))
+    previous_backends = _cur_sdpa_kernel_backends()
+    try:
+        if set_priority:
+            torch._C._set_sdp_priority_order(user_priority)  # type: ignore[arg-type]
+        _sdpa_kernel(backends_set)
         yield {}
     finally:
-        enable_cudnn_sdp(previous_cudnn)
-        enable_flash_sdp(previous_flash)
-        enable_mem_efficient_sdp(previous_mem_efficient)
-        enable_math_sdp(previous_math)
+        _sdpa_kernel(previous_backends)
+        if set_priority:
+            torch._C._set_sdp_priority_order(previous_priority)  # type: ignore[arg-type]
+
+
+# variadic version of sdpa_kernel for dynamo to use while reconstructing
+@contextlib.contextmanager
+def _sdpa_kernel_variadic(*backends: SDPBackend):
+    with sdpa_kernel(list(backends)):
+        yield
 
 
 def _get_flash_version() -> str:

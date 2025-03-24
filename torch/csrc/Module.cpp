@@ -15,6 +15,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/LegacyVmapMode.h>
 #include <ATen/LinalgBackend.h>
+
 #include <ATen/Parallel.h>
 #include <ATen/Utils.h>
 #include <ATen/core/Vitals.h>
@@ -103,6 +104,7 @@
 #include <sstream>
 
 #ifdef USE_CUDA
+#include <ATen/ROCmFABackend.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/native/transformers/cuda/sdp_utils.h>
 #ifdef __HIP_PLATFORM_AMD__
@@ -686,7 +688,30 @@ PyObject* THPModule_float32MatmulPrecision(
   }
   return THPUtils_packString(s);
 }
-PyObject* THPModule_setSDPUseFlash(PyObject* _unused, PyObject* arg) {
+static PyObject* THPModule_setSDPPriorityOrder(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  auto priority_order = THPUtils_unpackLongs(arg);
+  at::globalContext().setSDPPriorityOrder(priority_order);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+static PyObject* THPModule_sDPPriorityOrder(
+    PyObject* _unused,
+    PyObject* noargs) {
+  auto ordervec = at::globalContext().sDPPriorityOrder();
+  auto order =
+      THPObjectPtr(PyList_New(static_cast<Py_ssize_t>(ordervec.size())));
+  for (const auto i : c10::irange(ordervec.size())) {
+    PyObject* i64 = THPUtils_packInt64(static_cast<int64_t>(ordervec[i]));
+    if (!i64)
+      return nullptr;
+    PyList_SET_ITEM(order.get(), i, i64);
+  }
+  return order.release();
+}
+static PyObject* THPModule_setSDPUseFlash(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       PyBool_Check(arg),
@@ -1366,6 +1391,11 @@ static PyMethodDef TorchMethods[] = { // NOLINT
      nullptr},
     {"_get_flash_sdp_enabled",
      THPModule_userEnabledFlashSDP,
+     METH_NOARGS,
+     nullptr},
+    {"_set_sdp_priority_order", THPModule_setSDPPriorityOrder, METH_O, nullptr},
+    {"_get_sdp_priority_order",
+     THPModule_sDPPriorityOrder,
      METH_NOARGS,
      nullptr},
     {"_set_sdp_use_flash", THPModule_setSDPUseFlash, METH_O, nullptr},
@@ -2073,13 +2103,26 @@ Call this whenever a new thread is created in order to propagate values from
 
   py::enum_<at::BlasBackend>(py_module, "_BlasBackend")
       .value("Cublas", at::BlasBackend::Cublas)
-      .value("Cublaslt", at::BlasBackend::Cublaslt);
+      .value("Cublaslt", at::BlasBackend::Cublaslt)
+      .value("Ck", at::BlasBackend::Ck);
 
   py_module.def("_set_blas_preferred_backend", [](at::BlasBackend b) {
     at::globalContext().setBlasPreferredBackend(b);
   });
   py_module.def("_get_blas_preferred_backend", []() {
     return at::globalContext().blasPreferredBackend();
+  });
+
+  py::enum_<at::ROCmFABackend>(py_module, "_ROCmFABackend")
+      .value("Default", at::ROCmFABackend::Default)
+      .value("AOTriton", at::ROCmFABackend::AOTriton)
+      .value("Ck", at::ROCmFABackend::Ck);
+
+  py_module.def("_set_rocm_fa_preferred_backend", [](at::ROCmFABackend b) {
+    at::globalContext().setROCmFAPreferredBackend(b);
+  });
+  py_module.def("_get_rocm_fa_preferred_backend", []() {
+    return at::globalContext().getROCmFAPreferredBackend();
   });
 
   py_module.def(

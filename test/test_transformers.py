@@ -2840,6 +2840,35 @@ class TestSDPACudaOnly(NNTestCase):
             with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION, SDPBackend.MATH]):
                 assert torch._fused_sdp_choice(query, key, value) == SDPBackend.EFFICIENT_ATTENTION.value
 
+    @skipIfRocm
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Platform does not support fused SDPA")
+    def test_fused_sdp_priority_order(self, device):
+        q = torch.randn(64, 8, 1024, 64, dtype=torch.half, device='cuda')
+        default_order = torch._C._get_sdp_priority_order()
+        orders = [[SDPBackend.CUDNN_ATTENTION, SDPBackend.MATH, SDPBackend.EFFICIENT_ATTENTION],
+                  [SDPBackend.MATH, SDPBackend.CUDNN_ATTENTION, SDPBackend.EFFICIENT_ATTENTION],
+                  [SDPBackend.EFFICIENT_ATTENTION, SDPBackend.CUDNN_ATTENTION, SDPBackend.MATH],
+                  [SDPBackend.FLASH_ATTENTION, SDPBackend.CUDNN_ATTENTION, SDPBackend.MATH]]
+        import time
+        times = list()
+        for order in orders:
+            with sdpa_kernel(order, set_priority=True):
+                scaled_dot_product_attention(q, q, q)
+            torch.cuda.synchronize()
+            t0 = time.perf_counter()
+            with sdpa_kernel(order, set_priority=True):
+                scaled_dot_product_attention(q, q, q)
+            torch.cuda.synchronize()
+            t1 = time.perf_counter()
+            times.append(t1 - t0)
+        self.assertTrue(times[0] < times[1], "expected cuDNN SDPA to be faster than Math backend.")
+        self.assertTrue(times[1] > times[2], "expected Eff Attn backend to faster than Math backend.")
+        self.assertTrue(times[3] < times[2], "expected Flash Attn backend to faster than Math backend.")
+        reset_order = torch._C._get_sdp_priority_order()
+        self.assertEqual(default_order, reset_order, "expected SDPA context manager to reset priority order.")
+
     @skipIfRocm  # Missing deterministic algo
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("fused_kernel", PLATFORM_SPECIFIC_SDPA)
@@ -3152,6 +3181,10 @@ class TestSDPACudaOnly(NNTestCase):
         if max(seq_len_q, seq_len_k) >= 2048 and torch.cuda.get_device_properties('cuda').total_memory < 40 * 2**30:
             unittest.skip("Reference implementation OOM")
             return
+        if TEST_WITH_ROCM and dropout_p != 0:
+            self.skipTest("CK does not support tensor format dropout masks")
+        if TEST_WITH_ROCM and head_dim > 128:
+            self.skipTest("CK does not support head dims over 128")
 
         scale = scale if scale is None else (1 / head_dim)
         num_heads_q = num_heads_kv = 4
