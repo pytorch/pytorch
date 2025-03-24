@@ -44,7 +44,7 @@ from torch._guards import TracingContext
 from torch._logging import warning_once
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 
-from .. import config, polyfills, variables
+from .. import config, graph_break_hints, polyfills, variables
 from ..codegen import PyCodegen
 from ..create_parameter_op import (
     can_convert_to_tracable_parameter,
@@ -52,7 +52,7 @@ from ..create_parameter_op import (
     tracable_create_parameter,
 )
 from ..device_interface import get_registered_device_interfaces
-from ..exc import unimplemented
+from ..exc import unimplemented, unimplemented_v2
 from ..guards import GuardBuilder, install_guard
 from ..source import CallFunctionNoArgsSource, SyntheticLocalSource
 from ..utils import (
@@ -105,6 +105,7 @@ supported_ctx_manager_classes = dict.fromkeys(
         torch.autograd.profiler.profile,
         torch.autograd.profiler.record_function,
         torch._C.DisableTorchFunctionSubclass,
+        torch._C.DisableTorchFunction,
         torch._functorch.vmap.vmap_increment_nesting,
         torch._functorch.eager_transforms.grad_increment_nesting,
         torch._functorch.eager_transforms.jvp_increment_nesting,
@@ -342,9 +343,14 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
         ):
             warning_once(log, "Profiler function %s will be ignored", self.value)
             return ProfilerContextVariable()
-        elif self.value is torch._C.DisableTorchFunctionSubclass:
+        elif (
+            self.value is torch._C.DisableTorchFunctionSubclass
+            or self.value is torch._C.DisableTorchFunction
+        ):
             assert not (args or kwargs)
-            return TorchFunctionDisableVariable.create(tx)
+            return TorchFunctionDisableVariable.create(
+                tx, only_subclass=self.value is torch._C.DisableTorchFunctionSubclass
+            )
         elif self.value is torch._functorch.vmap.vmap_increment_nesting:
             assert len(args) == 2
             return VmapIncrementNestingCtxManagerVariable.create(
@@ -519,6 +525,18 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     VariableTracker.build(tx, polyfills.radians), args, kwargs
                 )
 
+        @register(torch.is_inference_mode_enabled)
+        def handle_is_inference_mode_enabled(self, tx: "InstructionTranslator"):
+            unimplemented_v2(
+                gb_type="Encountered torch.is_inference_mode_enabled during tracing",
+                context="",
+                explanation="torch.is_inference_mode_enabled() is not supported",
+                hints=[
+                    *graph_break_hints.FUNDAMENTAL,
+                    *graph_break_hints.INFERENCE_MODE,
+                ],
+            )
+
         @register(torch.is_tensor, torch.overrides.is_tensor_like)
         def handle_is_tensor(self, tx: "InstructionTranslator", arg):
             if isinstance(arg, TensorVariable) or (
@@ -596,7 +614,18 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         @register(torch._C._is_torch_function_enabled)
         def handle_is_torch_function_enabled(self, tx):
             install_guard(TorchFunctionDisableVariable._guards_singleton)
-            return ConstantVariable.create(tx.output.torch_function_enabled)
+            # see comment on SymbolicTorchFunctionState class as to why
+            # this is not a bug
+            return ConstantVariable.create(
+                tx.symbolic_torch_function_state.torch_function_subclass_enabled
+            )
+
+        @register(torch._C._is_torch_function_all_disabled)
+        def handle_is_torch_function_all_disabled(self, tx):
+            install_guard(TorchFunctionDisableVariable._guards_singleton)
+            return ConstantVariable.create(
+                not tx.symbolic_torch_function_state.torch_function_mode_enabled
+            )
 
         @register(
             torch.overrides.has_torch_function,

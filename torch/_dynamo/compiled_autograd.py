@@ -760,16 +760,11 @@ class AutogradCompilerInstance:
         assert i == len(_graph_placeholders) - 1
 
         def is_impure(node):
-            return (
-                node in unpack_nodes
-                or node.op == "placeholder"
-                or node.op == "output"
-                or (node.op == "call_function" and node.target in _impure_targets)
-                or (
-                    node.op == "call_function"
-                    and node.target in torch.fx.node._side_effectful_functions
-                )
-            )
+            if node in unpack_nodes or (
+                node.op == "call_function" and node.target in _impure_targets
+            ):
+                return True
+            return node.is_impure()
 
         before = len(self.fx_tracer.graph.nodes)
         self.fx_tracer.graph.eliminate_dead_code(is_impure)
@@ -1192,7 +1187,27 @@ in_compiled_autograd_region = False
 
 
 @contextlib.contextmanager
-def _enable(compiler_fn, dynamic=True):
+def _enable(compiler_fn, dynamic: bool = True):
+    # The entrypoint to enable CA.
+    # It is recommended to enable via `torch._dynamo.config.compiled_autograd = True` rather
+    # than using this context manager directly. If you are torch.compiling the corresponding
+    # forward pass, make sure they are wrapped under this context as well.
+    #
+    # Example:
+    #   def train(model, inputs, target):
+    #     compiled_model = torch.compile(model)
+    #     pred = compiled_model(data)
+    #     loss = compute_loss(pred, target)
+    #     loss.backward()
+    #
+    #   with _enable(compiler_fn):
+    #      train(model, inputs, target)
+    #
+    # Inputs:
+    # - compiler_fn: The wrapper that will consume the compiled autograd graph, e.g. `torch.compile`
+    # - dynamic: Whether compiled autograd will treat tensors in the autograd graph (params, activations) as dynamic.
+    #   This doesn't affect the dynamic configuration of the compilation wrapper.
+
     if dynamic:
         assert type(dynamic) is bool
 
