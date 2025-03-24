@@ -78,47 +78,7 @@ fi
 
 echo "Checking that the gcc ABI is what we expect"
 if [[ "$(uname)" != 'Darwin' ]]; then
-  function is_expected() {
-    if [[ "$1" -gt 0 || "$1" == "ON " ]]; then
-      echo 1
-    fi
-  }
-
-  # First we check that the env var in TorchConfig.cmake is correct
-
-  # We search for D_GLIBCXX_USE_CXX11_ABI=1 in torch/TorchConfig.cmake
-  torch_config="${install_root}/share/cmake/Torch/TorchConfig.cmake"
-  if [[ ! -f "$torch_config" ]]; then
-    echo "No TorchConfig.cmake found!"
-    ls -lah "$install_root/share/cmake/Torch"
-    exit 1
-  fi
-  echo "Checking the TorchConfig.cmake"
-  cat "$torch_config"
-
-  # The sed call below is
-  #   don't print lines by default (only print the line we want)
-  # -n
-  #   execute the following expression
-  # e
-  #   replace lines that match with the first capture group and print
-  # s/.*D_GLIBCXX_USE_CXX11_ABI=\(.\)".*/\1/p
-  #   any characters, D_GLIBCXX_USE_CXX11_ABI=, exactly one any character, a
-  #   quote, any characters
-  #   Note the exactly one single character after the '='. In the case that the
-  #     variable is not set the '=' will be followed by a '"' immediately and the
-  #     line will fail the match and nothing will be printed; this is what we
-  #     want.  Otherwise it will capture the 0 or 1 after the '='.
-  # /.*D_GLIBCXX_USE_CXX11_ABI=\(.\)".*/
-  #   replace the matched line with the capture group and print
-  # /\1/p
-  actual_gcc_abi="$(sed -ne 's/.*D_GLIBCXX_USE_CXX11_ABI=\(.\)".*/\1/p' < "$torch_config")"
-  if [[ "$(is_expected "$actual_gcc_abi")" != 1 ]]; then
-    echo "gcc ABI $actual_gcc_abi not as expected."
-    exit 1
-  fi
-
-  # We also check that there are [not] cxx11 symbols in libtorch
+  # We also check that there are cxx11 symbols in libtorch
   #
   echo "Checking that symbols in libtorch.so have the right gcc abi"
   python3 "$(dirname ${BASH_SOURCE[0]})/smoke_test/check_binary_symbols.py"

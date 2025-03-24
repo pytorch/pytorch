@@ -655,7 +655,6 @@ class BuildExtension(build_ext):
                     if val is not None and not IS_WINDOWS:
                         self._add_compile_flag(extension, f'-DPYBIND11_{name}="{val}"')
             self._define_torch_extension_name(extension)
-            self._add_gnu_cpp_abi_flag(extension)
 
             if 'nvcc_dlink' in extension.extra_compile_args:
                 assert self.use_ninja, f"With dlink=True, ninja is required to build cuda extension {extension.name}."
@@ -1112,10 +1111,6 @@ class BuildExtension(build_ext):
         name = names[-1]
         define = f'-DTORCH_EXTENSION_NAME={name}'
         self._add_compile_flag(extension, define)
-
-    def _add_gnu_cpp_abi_flag(self, extension):
-        # use the same CXX ABI as what PyTorch was compiled with
-        self._add_compile_flag(extension, '-D_GLIBCXX_USE_CXX11_ABI=' + str(int(torch._C._GLIBCXX_USE_CXX11_ABI)))
 
 
 def CppExtension(name, sources, *args, **kwargs):
@@ -1688,10 +1683,6 @@ def _get_pybind11_abi_build_flags():
             abi_cflags.append(f'-DPYBIND11_{pname}=\\"{pval}\\"')
     return abi_cflags
 
-def _get_glibcxx_abi_build_flags():
-    glibcxx_abi_cflags = ['-D_GLIBCXX_USE_CXX11_ABI=' + str(int(torch._C._GLIBCXX_USE_CXX11_ABI))]
-    return glibcxx_abi_cflags
-
 def check_compiler_is_gcc(compiler):
     if not IS_LINUX:
         return False
@@ -1822,7 +1813,6 @@ def _check_and_build_extension_h_precompiler_headers(
 
     common_cflags += ['-std=c++17', '-fPIC']
     common_cflags += [f"{x}" for x in _get_pybind11_abi_build_flags()]
-    common_cflags += [f"{x}" for x in _get_glibcxx_abi_build_flags()]
     common_cflags_str = listToString(common_cflags)
 
     pch_cmd = format_precompiler_header_cmd(compiler, head_file, head_file_pch, common_cflags_str, torch_include_dirs_str, extra_cflags_str, extra_include_paths_str)
@@ -2643,8 +2633,6 @@ def _write_ninja_file_to_build_library(path,
     else:
         common_cflags += [f'-I{shlex.quote(include)}' for include in user_includes]
         common_cflags += [f'-isystem {shlex.quote(include)}' for include in system_includes]
-
-    common_cflags += [f"{x}" for x in _get_glibcxx_abi_build_flags()]
 
     if IS_WINDOWS:
         cflags = common_cflags + ['/std:c++17'] + extra_cflags
