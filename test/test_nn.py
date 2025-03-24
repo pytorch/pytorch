@@ -4345,8 +4345,9 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 # Check that backward does not cause a hard error
                 outs[0].sum().backward()
 
-    @skipIfRocm("fails because ROCm doesn't support 'dropout' in RNN")
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
+    @skipIfRocm(msg="ROCm doesn't support 'dropout' for RNN "
+                "(WIP to enable dropout https://github.com/pytorch/pytorch/pull/144572)")
     def test_RNN_dropout_state(self):
         for p in (0, 0.1234):
             for train in (True, False):
