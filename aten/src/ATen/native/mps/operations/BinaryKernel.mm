@@ -3,6 +3,7 @@
 #include <ATen/TensorIndexing.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/BinaryOps.h>
+#include <ATen/native/TensorFactories.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/operations/BinaryKernel.h>
@@ -42,13 +43,11 @@ void complex_mul_out(const Tensor& input, const Tensor& other, const Tensor& out
     return;
   }
   auto common_dtype = output.scalar_type();
-  auto output_as_real = at::view_as_real(output).select(output.dim(), 0);
-  auto input_as_real = at::view_as_real(input.to(kMPS, common_dtype)).select(input.dim(), 0);
-  auto other_as_real = at::view_as_real(other.to(kMPS, common_dtype)).select(other.dim(), 0);
-  auto iter =
-      TensorIteratorConfig().add_output(output_as_real).add_input(input_as_real).add_input(other_as_real).build();
+  auto input_cast = input.to(kMPS, common_dtype);
+  auto other_cast = other.to(kMPS, common_dtype);
+  auto iter = TensorIteratorConfig().add_output(output).add_input(input_cast).add_input(other_cast).build();
 
-  lib.exec_binary_kernel(iter, "complex_mul", /*supports_dense=*/false);
+  lib.exec_binary_kernel(iter, "complex_mul");
 }
 
 } // namespace mps
@@ -87,42 +86,20 @@ static void xlog1py_mps_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "xlog1py");
 }
 
+static void polar_mps_kernel(TensorIterator& iter) {
+  lib.exec_binary_kernel(iter, "polar");
+}
+
+static void complex_mps_kernel(TensorIterator& iter) {
+  lib.exec_binary_kernel(iter, "make_complex");
+}
+
 REGISTER_DISPATCH(fmax_stub, &fmax_mps_kernel)
 REGISTER_DISPATCH(fmin_stub, &fmin_mps_kernel)
 REGISTER_DISPATCH(copysign_stub, &copysign_mps_kernel)
 REGISTER_DISPATCH(nextafter_stub, &nextafter_mps_kernel)
 REGISTER_DISPATCH(zeta_stub, &zeta_mps_kernel)
 REGISTER_DISPATCH(xlog1py_stub, &xlog1py_mps_kernel)
-
-Tensor& polar_out_mps(const Tensor& abs, const Tensor& angle, Tensor& output) {
-  auto new_size = at::infer_size(abs.sizes(), angle.sizes());
-  if (!output.sizes().equals(new_size)) {
-    output.resize_(new_size);
-  }
-  uint32_t length = output.numel();
-  if (length == 0) {
-    return output;
-  }
-  auto output_as_real = at::view_as_real(output).select(output.dim(), 0);
-  auto iter = TensorIteratorConfig().add_output(output_as_real).add_input(abs).add_input(angle).build();
-
-  lib.exec_binary_kernel(iter, "polar");
-  return output;
-}
-
-Tensor& complex_out_mps(const Tensor& real, const Tensor& imag, Tensor& output) {
-  auto new_size = at::infer_size(real.sizes(), imag.sizes());
-  if (!output.sizes().equals(new_size)) {
-    output.resize_(new_size);
-  }
-  uint32_t length = output.numel();
-  if (length == 0) {
-    return output;
-  }
-  auto output_as_real = at::view_as_real(output).select(output.dim(), 0);
-  auto iter = TensorIteratorConfig().add_output(output_as_real).add_input(real).add_input(imag).build();
-
-  lib.exec_binary_kernel(iter, "complex_kernel", /*supports_dense=*/false);
-  return output;
-}
+REGISTER_DISPATCH(polar_stub, &polar_mps_kernel);
+REGISTER_DISPATCH(complex_stub, &complex_mps_kernel);
 } // namespace at::native
