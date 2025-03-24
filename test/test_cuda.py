@@ -99,7 +99,9 @@ TEST_CUDAMALLOCASYNC = TEST_CUDA and (
 TEST_LARGE_TENSOR = TEST_CUDA
 TEST_MEDIUM_TENSOR = TEST_CUDA
 TEST_BF16 = False
-TEST_PYNVML = torch.cuda._HAS_PYNVML and not IS_JETSON # nvml not fully supported on jetson
+TEST_PYNVML = (
+    torch.cuda._HAS_PYNVML and not IS_JETSON
+)  # nvml not fully supported on jetson
 if TEST_CUDA:
     TEST_LARGE_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 12e9
     TEST_MEDIUM_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 6e9
