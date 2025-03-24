@@ -695,6 +695,25 @@ class GraphModule(torch.nn.Module):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_pending_unbacked(self):
+        @mark_compile_region
+        def gn(x):
+            u = x[0].item()
+            return x * u
+
+        def fn(x):
+            return gn(x)
+
+        x = torch.randn(8)
+        torch._dynamo.mark_dynamic(x, 0)
+        ref = fn(x)
+        torch._dynamo.config.capture_scalar_outputs = True
+        opt_fn = torch.compile(
+            fn, backend="eager", fullgraph=True
+        )  # Inductor fails with cpp compilation error
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
     def test_bwd_partitioning(self):
         @mark_compile_region
         def gn(x, y):
@@ -848,7 +867,6 @@ class GraphModule(torch.nn.Module):
         self.assertTrue(torch.allclose(ep.module()(x, y), M()(x, y)))
         self.assertEqual(len(list(ep.graph_module.named_modules())), 2)
 
-    @unittest.expectedFailure
     def test_pending_unbacked(self):
         class M(torch.nn.Module):
             @mark_compile_region
