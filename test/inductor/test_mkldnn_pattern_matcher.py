@@ -988,9 +988,12 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 super().__init__()
                 self.conv = torch.nn.Conv2d(3, 128, kernel_size=3, stride=1)
                 self.conv2 = torch.nn.Conv2d(128, 128, kernel_size=3, stride=1)
+                self.conv3 = torch.nn.Conv2d(
+                    128, 128, kernel_size=3, stride=1, groups=4
+                )
 
             def forward(self, x):
-                return self.conv2(self.conv(x))
+                return self.conv3(self.conv2(self.conv(x)))
 
         mod = M().eval().to(device=device)
         v = (
@@ -1005,14 +1008,14 @@ class TestPatternMatcher(TestPatternMatcherBase):
             #    int8_mixed_bf16: [dequant_node, optional(convert_element_type_4),
             #     dequantize_per_channel, optional(convert_element_type_3), clone, convolution]
             self.assertEqual(
-                counters["inductor"]["qconv2d_weight_prepack_matcher_count"], 2
+                counters["inductor"]["qconv2d_weight_prepack_matcher_count"], 3
             )
             self.assertEqual(
                 counters["inductor"]["qconv2d_weight_prepack_matcher_nodes"],
-                12 if int8_mixed_bf16 else 8,
+                18 if int8_mixed_bf16 else 12,
             )
             self.assertEqual(
-                counters["inductor"]["qconv2d_unary_lower_count"], 0 if TEST_ACL else 2
+                counters["inductor"]["qconv2d_unary_lower_count"], 0 if TEST_ACL else 3
             )
 
         self._test_common(
@@ -2655,11 +2658,12 @@ class TestPatternMatcher(TestPatternMatcherBase):
             lambda x, y: y.add_(x),
         ]
         fake_quant_x2_list = [False, True] if int8_mixed_bf16 else [False]
-        cases = itertools.product(add_fn_list, fake_quant_x2_list)
-        for add_fn, fq_x2 in cases:
+        shape_list = [(4, 4), [4, 4, 4]]
+        cases = itertools.product(add_fn_list, fake_quant_x2_list, shape_list)
+        for add_fn, fq_x2, shape in cases:
             mod = M(add_fn, use_relu, fq_x2).eval().to(device=device)
             v = torch.randn(
-                (4, 4), dtype=torch.float32, requires_grad=False, device=device
+                shape, dtype=torch.float32, requires_grad=False, device=device
             ).add(1)
 
             def matcher_check_fn():
@@ -2669,6 +2673,10 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 )
                 # pattern = [dequant_per_tensor, (convert_dtype), dequant_per_channel, (convert_dtype), permute, addmm]
                 nodes_per_match = 6 if int8_mixed_bf16 else 4
+                if len(shape) == 3:
+                    # pattern = [dequant_per_tensor, (convert_dtype), (view), \
+                    #   dequant_per_channel, (convert_dtype), (view), permute, addmm]
+                    nodes_per_match += 2
                 self.assertEqual(
                     counters["inductor"]["qlinear_weight_prepack_matcher_nodes"],
                     4 * nodes_per_match,
@@ -3827,7 +3835,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             include_ops = [
                 "aoti_torch_cpu__weight_int4pack_mm_cpu_tensor"
                 if torch._inductor.config.cpp_wrapper
-                else "extern_kernels.int4mm_packed_weight_cpu"
+                else "torch.ops.quantized.int4mm_packed_weight_cpu.default"
             ]
             self._test_code_common(
                 m,
@@ -4111,7 +4119,17 @@ class TestPatternMatcher(TestPatternMatcherBase):
             self.assertEqual(counters["inductor"]["qlinear_binary_matcher_count"], 1)
 
 
-@dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
+# When testing kernel counts, unspecializing float causes wobbling of our tests because
+# we end up reusing the same compiled region across tests. Thus we purposely specialize floats
+# here since we primarily care about number of kernels generated in the absence of compile
+# caching.
+@dynamo_config.patch(
+    {
+        "dynamic_shapes": True,
+        "assume_static_by_default": False,
+        "specialize_float": True,
+    }
+)
 class TestDynamicPatternMatcher(TestPatternMatcherBase):
     _test_conv_unary_cpu_base = TestPatternMatcher._test_conv_unary_cpu_base
     test_conv2d_unary_dynamic_shapes = TestPatternMatcher.test_conv2d_unary_cpu
