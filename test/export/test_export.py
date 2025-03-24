@@ -1554,7 +1554,7 @@ graph():
             )
             with self.assertRaisesRegex(
                 error_type,
-                r"Real tensor propagation found an output size mismatch between fake shape s1 and real shape 4, "
+                r"Real tensor propagation found an output size mismatch between fake shape s16 and real shape 4, "
                 r"at output\.size\(0\), for func: mylib.foo.default",
             ):
                 export(
@@ -4379,7 +4379,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         em.module()(torch.randn(4, 3))
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Runtime assertion failed for expression Eq\(Mod\(s0\*s1, s0 \- 1\), 0\)",
+            r"Runtime assertion failed for expression Eq\(Mod\(s27\*s77, s77 \- 1\), 0\)",
         ):
             em.module()(torch.randn(4, 5))
 
@@ -4390,7 +4390,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         x = torch.randn(3, 5)
         with self.assertRaisesRegex(
             RuntimeError,
-            "Expected.*shape\\[1\\] = 5 to be of the form 2\\*s1, where s1 is an integer",
+            "Expected.*shape\\[1\\] = 5 to be of the form 2\\*s33, where s33 is an integer",
         ):
             em.module()(x)
 
