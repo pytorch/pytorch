@@ -4271,7 +4271,8 @@ class CommonTemplate:
             (torch.randn([2, 2, 10]),),
         )
 
-    def test_low_memory_max_pool(self):
+    @parametrize("dilation", (1, 2))
+    def test_low_memory_max_pool(self, dilation: int):
         prims = torch.ops.prims
 
         def fn(x):
@@ -4279,7 +4280,6 @@ class CommonTemplate:
             kernel_size = [3] * dim
             stride = [2] * dim
             padding = [1] * dim
-            dilation = [1] * dim
             ceil_mode = False
 
             vals, offsets = prims._low_memory_max_pool_with_offsets(
@@ -4287,7 +4287,7 @@ class CommonTemplate:
                 kernel_size,
                 stride,
                 padding,
-                dilation,
+                [dilation] * dim,
                 ceil_mode,
             )
             indices = prims._low_memory_max_pool_offsets_to_indices(
@@ -4296,7 +4296,7 @@ class CommonTemplate:
                 x.shape[-dim:],
                 stride,
                 padding,
-                dilation=dilation,
+                dilation=[dilation] * dim,
             )
             return vals, indices, offsets
 
@@ -4751,16 +4751,18 @@ class CommonTemplate:
         )
 
     def test_fractional_max_pool2d2(self):
-        # large kernel size without unrolling
+        # fallback for larger kernel size
 
         def fn(x, samples):
             return aten.fractional_max_pool2d(x, (6, 5), (3, 3), samples)
 
+        torch._inductor.metrics.generated_kernel_count = 0
         self.common(
             fn,
             (torch.randn(2, 4, 36, 36), torch.rand(2, 4, 2)),
             check_lowp=False,
         )
+        assertGeneratedKernelCountEqual(self, 0)
 
     def test_fractional_max_pool2d3(self):
         def fn(x, samples):
@@ -5044,10 +5046,13 @@ class CommonTemplate:
         )
 
     @skip_if_gpu_halide  # slow
-    def test_max_pool2d6(self):
+    @parametrize("dilation", (1, 2))
+    def test_max_pool2d6(self, dilation: int):
         # Big kernel size
         def fn(x):
-            return aten.max_pool2d_with_indices(x, [13, 13], [])
+            return aten.max_pool2d_with_indices(
+                x, [13, 13], [], dilation=[dilation] * 2
+            )
 
         self.common(
             fn,
@@ -5069,7 +5074,7 @@ class CommonTemplate:
 
     # From https://github.com/pytorch/pytorch/issues/93384
     def test_max_pool2d8(self):
-        # dialtion is not 1, use fallback
+        # dilation is not 1
         def fn(x):
             return aten.max_pool2d_with_indices(x, [3, 2], [2, 1], [1, 1], [1, 2])
 

@@ -2617,6 +2617,7 @@ def sdpa_constraint(fx_node, *args, **kwargs):
 # WIP
 make_fallback(aten._adaptive_avg_pool3d)  # @isuruf
 make_fallback(aten.adaptive_max_pool3d)  # @isuruf
+make_fallback(aten.fractional_max_pool3d)  # @isuruf
 
 
 # 1) Easy
@@ -4423,7 +4424,7 @@ def _max_pool_with_offsets(
         prefix = idx[:-n_dim]
         bh = idx[-n_dim:]
         ih = [
-            bh[i] * stride[i] + reduction_idx[i] * dilation[i] - padding[i]
+            (bh[i] * stride[i]) + (reduction_idx[i] * dilation[i]) - padding[i]
             for i in range(n_dim)
         ]
         return x_loader([*prefix, *ih])
@@ -4493,29 +4494,6 @@ def _low_memory_max_pool_with_offsets(
         return result, to_dtype(offsets, torch.int8)
 
 
-def _pool_offsets_to_indices(offsets, kernel_size, input_size, increments_to_index):
-    n_dim = len(kernel_size)
-    offsets_loader = offsets.make_loader()
-    window_size = sympy.sympify(functools.reduce(operator.mul, kernel_size))
-
-    def offsets_to_indices(idx):
-        offset = offsets_loader(idx)
-        offset_sympy = ops.indirect_indexing(offset, window_size)
-        reduction_idx = inductor_prims._flattened_index_to_nd(offset_sympy, kernel_size)
-        idhw = increments_to_index(idx, reduction_idx)
-        return ops.index_expr(
-            inductor_prims._flatten_index(idhw, input_size[-n_dim:]), torch.int64
-        )
-
-    indices = Pointwise.create(
-        device=offsets.get_device(),
-        dtype=torch.int64,
-        inner_fn=offsets_to_indices,
-        ranges=offsets.get_size(),
-    )
-    return indices
-
-
 @register_lowering(
     prims._low_memory_max_pool_offsets_to_indices, type_promotion_kind=None
 )
@@ -4524,17 +4502,34 @@ def _low_memory_max_pool_offsets_to_indices(
 ):
     # TODO: Generalize to other max pooling flavors
     n_dim = len(kernel_size)
+    offsets_loader = offsets.make_loader()
 
-    def increments_to_index(idx, reduction_idx):
-        bh = idx[-n_dim:]
-        return [
-            bh[i] * stride[i] + reduction_idx[i] * dilation[i] - padding[i]
-            for i in range(n_dim)
+    def increments_to_index(dhw_inc, bh):
+        w_in = [ops.index_expr(input_size[d], torch.int64) for d in range(n_dim)]
+        hbase = [
+            ops.index_expr(bh[d] * stride[d] - padding[d], torch.int64)
+            for d in range(n_dim)
         ]
+        idhw = [
+            hbase[d] + dhw_inc[d] * ops.constant(dilation[d], torch.int64)
+            for d in range(n_dim)
+        ]
+        return inductor_prims._flatten_index(idhw, w_in)
 
-    return _pool_offsets_to_indices(
-        offsets, kernel_size, input_size, increments_to_index
+    def offsets_to_indices(idx):
+        bh = idx[-n_dim:]
+        offset = offsets_loader(idx)
+        k_const = [ops.constant(kernel_size[d], torch.int32) for d in range(n_dim)]
+        dhw_inc = inductor_prims._flattened_index_to_nd(offset, k_const)
+        return increments_to_index(dhw_inc, bh)
+
+    indices = Pointwise.create(
+        device=offsets.get_device(),
+        dtype=torch.int64,
+        inner_fn=offsets_to_indices,
+        ranges=offsets.get_size(),
     )
+    return indices
 
 
 def _max_pool_with_indices(
@@ -5040,6 +5035,11 @@ def adaptive_max_pool2d(x, output_size):
     return rv, ri
 
 
+fallback_fractional_max_pool2d = fallback_handler(
+    aten.fractional_max_pool2d.default, add_to_fallback_set=False
+)
+
+
 def _fractional_pooling_offsets(samples, in_sz, out_sz, kernel_sz, dim, ndims):
     out_sz = out_sz[dim]
     in_sz = in_sz[dim]
@@ -5060,87 +5060,80 @@ def _fractional_pooling_offsets(samples, in_sz, out_sz, kernel_sz, dim, ndims):
             i_expr,
             ops.index_expr(out_sz - 1, torch.int64),
         )
-        return ops.indirect_indexing(
-            ops.where(mask, seq_i, ops.index_expr(in_sz - kernel_sz, torch.int64)),
-            sympy.sympify(in_sz),
-        )
+        return ops.where(mask, seq_i, ops.index_expr(in_sz - kernel_sz, torch.int64))
 
     return load
 
 
 @register_lowering(aten.fractional_max_pool2d)
 def fractional_max_pool2d(x, kernel_size, output_size, random_samples):
-    return _fractional_max_pool(x, kernel_size, output_size, random_samples, n_dim=2)
-
-
-@register_lowering(aten.fractional_max_pool3d)
-def fractional_max_pool3d(x, kernel_size, output_size, random_samples):
-    return _fractional_max_pool(x, kernel_size, output_size, random_samples, n_dim=3)
-
-
-def _fractional_max_pool(x, kernel_size, output_size, random_samples, n_dim):
     x.realize_hint()
-    batch, inp_dhw = x.shape[:-n_dim], x.shape[-n_dim:]
+    *batch, inp_h, inp_w = x.get_size()
+    kernel_h, kernel_w = kernel_size
+    h_out, w_out = output_size
 
-    with config.patch(unroll_reductions_threshold=25):
-        dhw_index_fn = [
-            _fractional_pooling_offsets(
-                samples=random_samples,
-                in_sz=inp_dhw,
-                out_sz=output_size,
-                kernel_sz=kernel_size,
-                ndims=n_dim,
-                dim=d,
-            )
-            for d in range(n_dim)
-        ]
-
-        x_loader = x.make_loader()
-
-        def fn_inner(idx, reduction_idx):
-            prefix = idx[:-n_dim]
-            return x_loader([*prefix, *increments_to_index(idx, reduction_idx)])
-
-        def increments_to_index(idx, reduction_idx):
-            prefix = idx[:-n_dim]
-            bdhw = idx[-n_dim:]
-            return [
-                dhw_index_fn[d](prefix, bdhw[d]) + reduction_idx[d] for d in range(n_dim)
-            ]
-
-        new_size = list(batch) + list(output_size)
-        dtype = x.get_dtype()
-        result = Reduction.create(
-            reduction_type="max",
-            input_node=x,
-            device=x.get_device(),
-            dst_dtype=dtype,
-            src_dtype=dtype,
-            inner_fn=fn_inner,
-            ranges=new_size,
-            reduction_ranges=kernel_size,
+    if kernel_h * kernel_w >= 25:
+        return fallback_fractional_max_pool2d(
+            x, kernel_size, output_size, random_samples
         )
-        offsets = Reduction.create(
-            reduction_type="argmax",
-            input_node=x,
-            device=x.get_device(),
-            dst_dtype=torch.int64,
-            src_dtype=dtype,
-            inner_fn=fn_inner,
-            ranges=new_size,
-            reduction_ranges=kernel_size,
-        )
-        if isinstance(result.data.data, Reduction):  # type: ignore[attr-defined]
-            # Only realize if reduction isn't unrolled
-            result.realize()
-        if isinstance(offsets.data.data, Reduction):  # type: ignore[attr-defined]
-            # Only realize if reduction isn't unrolled
-            offsets.realize()
 
-        indices = _pool_offsets_to_indices(
-            offsets, kernel_size, x.shape, increments_to_index
-        )
-        return result, indices
+    gen_offsets_for_dim = functools.partial(
+        _fractional_pooling_offsets,
+        samples=random_samples,
+        in_sz=[inp_h, inp_w],
+        out_sz=output_size,
+        kernel_sz=kernel_size,
+        ndims=2,
+    )
+
+    h_index_fn = gen_offsets_for_dim(dim=0)
+    w_index_fn = gen_offsets_for_dim(dim=1)
+    x_loader = x.make_loader()
+
+    def fn(idx, return_index):
+        *prefix, bh, bw = idx
+
+        h_start_index = ops.indirect_indexing(h_index_fn(prefix, bh), inp_h)
+        w_start_index = ops.indirect_indexing(w_index_fn(prefix, bw), inp_w)
+
+        maxval = None
+        maxindex = None
+        for ih, iw in itertools.product(range(kernel_size[0]), range(kernel_size[1])):
+            val = x_loader([*prefix, h_start_index + ih, w_start_index + iw])
+            if return_index:
+                index = ops.index_expr(
+                    (h_start_index + ih) * inp_w + w_start_index + iw, torch.int64
+                )
+                if maxindex is None:
+                    maxindex = index
+                else:
+                    maxindex = ops.where(
+                        ops.or_(ops.gt(val, maxval), ops.isnan(val)), index, maxindex
+                    )
+            if maxval is None:
+                maxval = val
+            else:
+                maxval = ops.maximum(val, maxval)
+        if return_index:
+            return maxindex
+        else:
+            return maxval
+
+    new_size = list(batch) + [h_out, w_out]
+    rv = Pointwise.create(
+        device=x.get_device(),
+        dtype=x.get_dtype(),
+        inner_fn=functools.partial(fn, return_index=False),
+        ranges=new_size,
+    )
+
+    ri = Pointwise.create(
+        device=x.get_device(),
+        dtype=torch.int64,
+        inner_fn=functools.partial(fn, return_index=True),
+        ranges=new_size,
+    )
+    return rv, ri
 
 
 @register_lowering(aten.upsample_nearest2d_backward.default)
