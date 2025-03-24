@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 
 
+from contextlib import nullcontext
 from typing import Optional, Union
 
 import torch
@@ -171,10 +172,21 @@ def create_fw_bw_graph(subgraph, operands, grad_outputs=None):
             # args are functional tensors, generate some example tensors
             fw_inputs = pytree.tree_map(_from_fun, operands)
 
+            from torch._guards import detect_fake_mode
+
+            fake_mode = detect_fake_mode(fw_inputs)
+            context = (
+                nullcontext()
+                if fake_mode is None or fake_mode.shape_env is None
+                else fake_mode.shape_env.ignore_fresh_unbacked_symbols()
+            )
+
             if grad_outputs is None:
                 # Infer grad_outputs to be the same properties as the fw_outputs
-                # if they're not passed in.
-                grad_outputs = pytree.tree_map(_from_fun, subgraph(*fw_inputs))
+                # if they're not passed in
+                with context:
+                    grad_outputs = pytree.tree_map(_from_fun, subgraph(*fw_inputs))
+
             if any(
                 not isinstance(out, torch.Tensor)
                 for out in grad_outputs
@@ -303,7 +315,7 @@ def _(ctx, subgraph, identifier, operands):
 @invoke_subgraph.py_impl(FakeTensorMode)
 def _(mode, subgraph, identifier, operands):
     # TODO(anijain2305) - Implement fake tensor caching.
-    with mode:
+    with mode, mode.shape_env.ignore_fresh_unbacked_symbols():
         return subgraph(*operands)
 
 
