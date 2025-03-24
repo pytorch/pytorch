@@ -3731,7 +3731,7 @@ class AssociativeScanTests(TestCase):
         unittest.skip,
         lambda params: (params["combine_mode"] == "pointwise"),
     )
-    def test_associative_scan_freevars_simple(
+    def test_associative_scan_freevars_simple1111(
         self, compile_mode, combine_mode, reverse, device
     ):
         H = torch.rand(2, device=device)

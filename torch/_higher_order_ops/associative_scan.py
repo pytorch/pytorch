@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 import itertools
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 import torch
 import torch._prims_common as utils
@@ -9,12 +9,15 @@ import torch._subclasses.functional_tensor
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._dispatch.python import suspend_functionalization
+from torch._higher_order_ops.cond import create_bw_fn, materialize_as_graph
 from torch._higher_order_ops.utils import (
     _maybe_run_with_interpreter,
     _set_compilation_env,
     check_meta_consistency,
     first_slice_copy,
     reenter_make_fx,
+    save_tensors_and_symints_for_backward,
+    saved_tensors_and_symints,
     unique_graph_id,
     validate_subgraph_args_types,
 )
@@ -72,6 +75,24 @@ def safe_map(f, *args):
         return f(*a)
 
     return list(map(nf, zip(*args)))
+
+
+def get_tensor_mask(tensor_list: list[Any]) -> list[bool]:
+    # Returns a mask whether a list element is a tensor or not
+    return [True if isinstance(v, torch.Tensor) else False for v in tensor_list]
+
+
+def mask_list(
+    mask: list[bool], inp: list[Any], other: Optional[list[Any]] = None
+) -> list[Any]:
+    # Masks elements on an `inp` list.
+    # If other is None, then the elements of the `inp` list where the mask is False are removed
+    # If other is not None, then the elements of the `inp` list where the mask is False are
+    # replaced with the elements of the `other` list
+    if other is not None:
+        return [i if m else o for m, i, o in zip(mask, inp, other)]
+    else:
+        return [i for m, i in zip(mask, inp) if m]
 
 
 def create_fw_bw_graph_combinefn(combine_fn, xs, additional_inputs):
@@ -453,27 +474,60 @@ def associative_scan_op_dense(combine_fn, xs, additional_inputs):
 
 
 class AssociativeScanAutogradOp(torch.autograd.Function):
+    
+    @staticmethod
+    def first_slice_copy_with_grad(li):
+        slc = [x[0] for x in li]
+        return slc
+    
     @staticmethod
     def forward(
         ctx,
-        fw_graph,
-        joint_graph,
-        num_leaves_xs,
-        *flat_args,
+        combine_fn,
+        num_xs,
+        *operands,
     ):
-        ctx._num_leaves_xs = num_leaves_xs
-        xs, additional_inputs = flat_args[:num_leaves_xs], flat_args[num_leaves_xs:]
-        ctx._joint_graph = joint_graph
-        num_xs = len(xs)
         ctx._num_xs = num_xs
+        xs, additional_inputs = operands[:num_xs], operands[num_xs:]
 
         scan_length = xs[0].shape[0]
         ctx._scan_length = scan_length
-        ctx._mapped_joint_graph = torch.vmap(joint_graph, 0, 0)
+
+        # First_slice_copy does not keep the original requires_grad flag,
+        # but we need it here in order to compute the correcte gradients
+        xs_slice_1 = [first_slice_copy(x).requires_grad_(x.requires_grad) for x in xs]
+        xs_slice_2 = [first_slice_copy(x).requires_grad_(x.requires_grad) for x in xs]
+
+        ctx._combine_fn_bw = create_bw_fn(
+            combine_fn,
+            [*xs_slice_1,
+             *xs_slice_2,
+             *additional_inputs],
+        )
+        
+        # We snapshot the dispatch keys in forward for materializing the
+        # the bw_graph in backward.
+        ctx._fw_include_key_set = torch._C._dispatch_tls_local_include_set()
+        ctx._fw_exclude_key_set = torch._C._dispatch_tls_local_exclude_set()
 
         with torch._C._AutoDispatchBelowAutograd():
-            outs = associative_scan_op(fw_graph, xs, additional_inputs)
-            ctx.save_for_backward(*(*xs, *outs, *additional_inputs))
+            outs = associative_scan_op(combine_fn, xs, additional_inputs)
+            save_tensors_and_symints_for_backward(ctx, list(operands) + list(outs))
+        
+        # # TODO: we need to materialize the bw graphs because dynamo is unable to
+        # # trace through the joint function when torch.compile torch.autograd.grad.
+        # combine_fn_bw_gm = materialize_as_graph(
+        #     ctx._combine_fn_bw,
+        #     (
+        #         *xs_slice_1,
+        #         *xs_slice_2,
+        #         *additional_inputs,
+        #         *[first_slice_copy(o) for o in outs],
+        #     ),
+        #     ctx._fw_include_key_set,
+        #     ctx._fw_exclude_key_set,
+        #     force_enable_grad=True,
+        # )
 
         return (*outs,)
 
@@ -577,16 +631,36 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
         num_xs = ctx._num_xs
 
         # Extract the inputs to the forward path and outputs from the forward path
-        flat_args = ctx.saved_tensors
+        flat_args = saved_tensors_and_symints(ctx)
         xs, outs, additional_inputs = (
             flat_args[:num_xs],
             flat_args[num_xs : 2 * num_xs],
             flat_args[2 * num_xs :],
         )
         ndim = outs[0].ndim
+        
+        # First_slice_copy does not keep the original requires_grad flag,
+        # but we need it here in order to compute the correcte gradients
+        xs_slice_1 = [first_slice_copy(x).requires_grad_(x.requires_grad) for x in xs]
+        xs_slice_2 = [first_slice_copy(x).requires_grad_(x.requires_grad) for x in xs]
+        
+        # TODO: we need to materialize the bw graphs because dynamo is unable to
+        # trace through the joint function when torch.compile torch.autograd.grad.
+        combine_fn_bw_gm = materialize_as_graph(
+            ctx._combine_fn_bw,
+            (
+                *xs_slice_1,
+                *xs_slice_2,
+                *additional_inputs,
+                *[first_slice_copy(o) for o in outs],
+            ),
+            ctx._fw_include_key_set,
+            ctx._fw_exclude_key_set,
+            force_enable_grad=True,
+        )
 
         # vmap joint graph over scan dimension
-        mapped_joint_graph = ctx._mapped_joint_graph
+        mapped_combine_fn_bw_gm = torch.vmap(combine_fn_bw_gm, 0, 0)
 
         with torch._C._AutoDispatchBelowAutograd():
 
@@ -618,9 +692,11 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
 
             # For the assoc. op A(x, y), get the derivatives dA(x_i, y_{i-1})/dy_{i-1} and
             # dA(x_i,y_{i-1})/dx_i for all i, with invalid index values giving derivatives equal to 1.
-            grads = mapped_joint_graph(
-                *(torch.ones_like(x) for x in xs), *(o.roll(1, dim) for o in outs), *xs
+            grads = mapped_combine_fn_bw_gm(
+                # *(torch.ones_like(x) for x in xs), *(o.roll(1, dim) for o in outs), *xs
+                *(o.roll(1, dim) for o in outs), *xs, *(torch.ones_like(x) for x in xs)
             )
+            
             op_bwd_y, op_bwd_x = grads[:num_xs], grads[num_xs:]
 
             def compute_grad(bwd_x, bwd_y, fg):
@@ -636,62 +712,21 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
 
             op_bwd_x = torch.stack(op_bwd_x)
             op_bwd_y = torch.stack(op_bwd_y)
-            # flat_grads = torch.stack([fg for fg in flat_grads])
             flat_grads = torch.stack(flat_grads)
 
             grads = compute_grad_mapped(op_bwd_x, op_bwd_y, flat_grads)
 
-            return *[None] * 3, *grads, *additional_inputs
+            return *[None] * 2, *grads, *additional_inputs
 
 
 @associative_scan_op.py_impl(DispatchKey.Autograd)
 def associative_scan_autograd(combine_fn, xs, additional_inputs):
-    # Currently additional_inputs are not implemented
-    if len(additional_inputs) > 0:
-        raise RuntimeError("additional_inputs are not supported")
-
-    # A shortcut for the case where all inputs don't require gradient,
-    # we skip tracing the forward and backward graph.
-    # TODO: Figure out how to do this in dispatcher so that we don't have to do this check here
-    if pytree.tree_all_only(
-        torch.Tensor,
-        lambda t: not t.requires_grad,  # type: ignore[union-attr]
-        (xs),
-    ):
-        with torch._C._AutoDispatchBelowAutograd():
-            return associative_scan_op(combine_fn, xs, additional_inputs)
-
-    # TODO: Support partial Autograd for associative_scan later
-    if pytree.tree_any(
-        lambda t: not t.requires_grad,  # type: ignore[union-attr]
-        (xs),
-    ):
-        raise RuntimeError(
-            "associative_scan currently only supports Autograd if all xs require gradients."
-        )
-
-    # TODO: The create_fw_bw is always invoked twice:
-    # Once in the forward path and
-    # once in the backward path, where it should only be invoked for the grad grad case.
-    # We don't support this currently
-    if not torch.is_grad_enabled():
-        # This clause is hit in the case of double backward.
-        # Currently scan does not support this and thus we just dummy call another scan
-        with torch._C._AutoDispatchBelowAutograd():
-            return associative_scan_op(combine_fn, xs, additional_inputs)
-
-    num_leaves_xs = len(xs)
-
-    (
-        fw_graph,
-        joint_graph,
-    ) = create_fw_bw_graph_combinefn(combine_fn, xs, additional_inputs)
+    num_xs = len(xs)
 
     flat_out = AssociativeScanAutogradOp.apply(
-        fw_graph,
-        joint_graph,
-        num_leaves_xs,
-        *(tuple(xs) + additional_inputs),
+        combine_fn,
+        num_xs,
+        *(tuple(xs) + additional_inputs)
     )
     return (*flat_out,)
 
