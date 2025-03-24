@@ -164,7 +164,8 @@ SGD.__doc__ = (
             &\hspace{5mm}\textbf{if} \: \textit{maximize}:                                       \\
             &\hspace{10mm}g_t           \leftarrow   -\nabla_{\theta} f_t (\theta_{t-1})         \\
             &\hspace{5mm}\textbf{else}                                                           \\
-            &\hspace{10mm}g_t           \leftarrow   \nabla_{\theta} f_t (\theta_{t-1})          \\            &\hspace{5mm}\textbf{if} \: \lambda \neq 0                                           \\
+            &\hspace{10mm}g_t           \leftarrow   \nabla_{\theta} f_t (\theta_{t-1})          \\
+            &\hspace{5mm}\textbf{if} \: \lambda \neq 0                                           \\
             &\hspace{10mm} g_t \leftarrow g_t + \lambda  \theta_{t-1}                            \\
             &\hspace{5mm}\textbf{if} \: \mu \neq 0                                               \\
             &\hspace{10mm}\textbf{if} \: t > 1                                                   \\
