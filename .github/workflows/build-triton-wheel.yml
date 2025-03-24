@@ -14,6 +14,7 @@ on:
       - .github/ci_commit_pins/triton.txt
       - .ci/docker/ci_commit_pins/triton.txt
       - .ci/docker/ci_commit_pins/triton-xpu.txt
+  workflow_dispatch:
   pull_request:
     paths:
       - .github/workflows/build-triton-wheel.yml
