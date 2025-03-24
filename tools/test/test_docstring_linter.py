@@ -7,12 +7,8 @@ import tempfile
 from pathlib import Path
 from unittest import mock
 
-from tools.linter.adapters.docstring_linter import (
-    DocstringLinter,
-    file_summary,
-    make_recursive,
-    make_terse,
-)
+from tools.linter.adapters._linter.file_summary import _make_terse, file_summary
+from tools.linter.adapters.docstring_linter import DocstringLinter
 
 
 _PARENT = Path(__file__).parent.absolute()
@@ -69,31 +65,14 @@ class TestDocstringLinter(LinterTestCase):
         self.assertExpected(TEST_FILE, actual, "report.json")
 
     def test_terse(self):
-        terse = make_terse(_data(), index_by_line=False)
+        terse = _make_terse(_data(), index_by_line=False)
         actual = _dumps(terse)
         self.assertExpected(TEST_FILE, actual, "terse.json")
 
     def test_terse_line(self):
-        terse = make_terse(_data(), index_by_line=True)
+        terse = _make_terse(_data(), index_by_line=True)
         actual = _dumps(terse)
         self.assertExpected(TEST_FILE, actual, "terse.line.json")
-
-    def test_recursive(self):
-        recursive = make_recursive(_data())
-        actual = _dumps(recursive)
-        self.assertExpected(TEST_FILE, actual, "recursive.json")
-
-    def test_terse_recursive(self):
-        recursive = make_recursive(_data())
-        terse = make_terse(recursive, index_by_line=False)
-        actual = _dumps(terse)
-        self.assertExpected(TEST_FILE, actual, "recursive.terse.json")
-
-    def test_terse_line_recursive(self):
-        recursive = make_recursive(_data())
-        terse = make_terse(recursive, index_by_line=True)
-        actual = _dumps(terse)
-        self.assertExpected(TEST_FILE, actual, "recursive.terse.line.json")
 
     def test_file_summary(self):
         actual = _dumps(file_summary(_data(), report_all=True))

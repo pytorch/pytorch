@@ -1,23 +1,12 @@
 from __future__ import annotations
 
-import argparse
-import dataclasses as dc
-import json
-import logging
-import sys
 import token
-from abc import ABC, abstractmethod
-from argparse import Namespace
-from enum import Enum
-from functools import cached_property
 from pathlib import Path
-from tokenize import generate_tokens
-from typing import Any, Generic, get_args, TYPE_CHECKING
-from typing_extensions import Never, Self, TypeVar
+from typing import Any, TYPE_CHECKING
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Sequence
+    from collections.abc import Sequence
     from tokenize import TokenInfo
 
 
@@ -26,6 +15,7 @@ __all__ = (
     "bracket_pairs",
     "EMPTY_TOKENS",
     "FileLinter",
+    "file_summary",
     "LineWithSets",
     "LintResult",
     "ParseError",
@@ -55,6 +45,7 @@ class ParseError(ValueError):
 from .block import Block
 from .bracket_pairs import bracket_pairs
 from .file_linter import FileLinter
+from .file_summary import file_summary
 from .messages import LintResult
 from .python_file import PythonFile
 from .sets import LineWithSets
