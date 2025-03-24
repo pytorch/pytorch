@@ -1,4 +1,7 @@
 # mypy: allow-untyped-defs
+import torch.distributed as dist
+import torch._guards
+import torch._utils_internal
 import functools
 import hashlib
 import importlib.util
@@ -1049,14 +1052,14 @@ class LazyTraceHandler(logging.StreamHandler):
         self._builtin_open = open
 
     # cloned from FileHandler in cpython
-    def close(self, append_right_square_bracket=False):
+    def close(self, append_text=None):
         self.acquire()
         try:
             try:
                 if self.stream:
                     try:
-                        if append_right_square_bracket:
-                            self.stream.write("\n]")
+                        if append_text:
+                            self.stream.write(append_text)
                         self.flush()
                     finally:
                         stream = self.stream
@@ -1317,11 +1320,6 @@ def dtrace_structured(
         )
 
 
-import torch._guards
-import torch._utils_internal
-import torch.distributed as dist
-
-
 class TritonLazyTraceHandler(LazyTraceHandler):
     """A specialized LazyTraceHandler for Triton compilation tracing that outputs JSON."""
 
@@ -1330,34 +1328,40 @@ class TritonLazyTraceHandler(LazyTraceHandler):
     ):
         super().__init__(root_dir)
         self.prefix = prefix
+        self.stream = None
 
     def emit(self, record):
-        if self.stream is None:
-            if self.root_dir is not None:
-                os.makedirs(self.root_dir, exist_ok=True)
-                ranksuffix = ""
-                if dist.is_available() and dist.is_initialized():
-                    ranksuffix = f"rank_{dist.get_rank()}_"
+        # Create a new file for each emit call
+        if self.root_dir is not None:
+            os.makedirs(self.root_dir, exist_ok=True)
+            ranksuffix = ""
+            if dist.is_available() and dist.is_initialized():
+                ranksuffix = f"rank_{dist.get_rank()}_"
 
-                # Create a unique filename
-                unique_id = f"_{int(time.time())}"
-                self.stream = tempfile.NamedTemporaryFile(
-                    mode="w+",
-                    suffix=".json",  # Use JSON extension
-                    prefix=f"{self.prefix}{ranksuffix}{unique_id}_",
-                    dir=self.root_dir,
-                    delete=False,
-                )
+            # Close previous file (if exists)
+            if self.stream is not None:
+                self.close(append_right_square_bracket=True)
 
-                # Write the opening bracket for a JSON array
-                self.stream.write("[\n")
-                self.first_record = True
+            # Create a unique filename for each call using timestamp
+            timestamp = time.strftime("%Y%m%d_%H%M%S")  # Format: YYYYMMDD_HHMMSS
+            unique_id = f"_{timestamp}"
+            self.stream = tempfile.NamedTemporaryFile(
+                mode="w+",
+                suffix=".json",
+                prefix=f"{self.prefix}{ranksuffix}{unique_id}_",
+                dir=self.root_dir,
+                delete=False,
+            )
 
-                log.info("TritonLazyTraceHandler: logging to %s", self.stream.name)
-            else:
-                # If root_dir is not set, handle it the same way as the parent class
-                trace_log.removeHandler(self)
-                return
+            # Write the beginning of the JSON array
+            self.stream.write("[\n")
+            self.first_record = True
+
+            log.info("TritonLazyTraceHandler: logging to %s", self.stream.name)
+        else:
+            # If root_dir is not set, handle as in parent class
+            trace_log.removeHandler(self)
+            return
 
         if self.stream:
             # Add comma between records (except for the first one)
@@ -1371,8 +1375,8 @@ class TritonLazyTraceHandler(LazyTraceHandler):
             self.stream.write(formatted)
             self.flush()
 
-    def close(self, append_right_square_bracket=True):
-        super().close(append_right_square_bracket)
+    def close(self, append_text='\n]'):
+        super().close(append_text)
 
 
 class TritonJsonFormatter(logging.Formatter):
@@ -1450,6 +1454,7 @@ def trace_structured_triton(
     grid_size: Optional[tuple] = None,
     compile_time_ms: Optional[float] = None,
     suppress_context: bool = False,
+    new_file: bool = True,  # Whether to create a new log file for this call
 ):
     """
     Record structured trace information for Triton kernel compilation
@@ -1461,14 +1466,19 @@ def trace_structured_triton(
         kernel_name: Triton kernel name
         grid_size: Grid size
         compile_time_ms: Compile time in milliseconds
+        new_file: Whether to create a new log file for this call
     """
     # Ensure triton trace logging system is initialized
     if not triton_trace_log.handlers:
         _init_triton_trace_logging()
 
-    # If no handlers, return immediately
-    if not triton_trace_log.handlers:
-        return
+    # If requesting to create a new file, reset the handler
+    if new_file and TRITON_TRACE_HANDLER and TRITON_TRACE_HANDLER.stream is not None:
+        # Close existing file
+        TRITON_TRACE_HANDLER.close()
+        # Ensure a new file is created on next emit
+        TRITON_TRACE_HANDLER.stream = None
+
     record: dict[str, object] = {}
     metadata = metadata_fn()
 
@@ -1495,15 +1505,11 @@ def trace_structured_triton(
         if compile_time_ms is not None:
             record["compile_time_ms"] = compile_time_ms
 
-        # Add context information
         if dist.is_available() and dist.is_initialized():
             record["rank"] = dist.get_rank()
 
-        # Add current process and thread information
         record["pid"] = os.getpid()
-        # record["thread_id"] = threading.get_ident()
 
-        # Get trace ID and compile ID (if available)
         trace_id = torch._guards.CompileContext.current_trace_id()
         if trace_id is not None:
             cid = trace_id.compile_id
@@ -1515,18 +1521,19 @@ def trace_structured_triton(
                 if cid.frame_compile_id is not None:
                     record["frame_compile_id"] = cid.frame_compile_id
             record["attempt"] = trace_id.attempt
-        record["stack"] = [
-            {
-                "line": frame.lineno,
-                "name": frame.name,
-                "filename": torch._logging.structured.intern_string(
-                    frame.filename, is_triton=True
-                ),
-                "loc": frame.line,
-            }
-            for frame in CapturedTraceback.extract(skip=1).summary()
-        ]
-        # Get payload
+        sourcecode_table: dict[str, int] = {}
+        record["stack"] = []
+        for frame in CapturedTraceback.extract(skip=1).summary():
+            if frame.filename not in sourcecode_table:
+                r = len(sourcecode_table)
+                sourcecode_table[frame.filename] = r
+            record["stack"].append(
+                {
+                    "line": frame.lineno,
+                    "name": frame.name,
+                    "filename": (frame.filename, sourcecode_table[frame.filename]),
+                    "loc": frame.line,
+                }
+            )
     payload = payload_fn()
-    # Log the record
     triton_trace_log.debug("", extra={"metadata": record, "payload": payload})

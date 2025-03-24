@@ -16,18 +16,17 @@ INTERN_TABLE: dict[str, int] = {}
 DUMPED_FILES: set[str] = set()
 
 
-def intern_string(s: Optional[str], is_triton: bool = False) -> int:
+def intern_string(s: Optional[str]) -> int:
     if s is None:
         return -1
-    if is_triton:
-        trace_structured_func = torch._logging._internal.trace_structured_triton
-    else:
-        trace_structured_func = torch._logging._internal.trace_structured
+
     r = INTERN_TABLE.get(s, None)
     if r is None:
         r = len(INTERN_TABLE)
         INTERN_TABLE[s] = r
-        trace_structured_func("str", lambda: (s, r), suppress_context=True)
+        torch._logging._internal.trace_structured(
+            "str", lambda: (s, r), suppress_context=True
+        )
     return r
 
 
