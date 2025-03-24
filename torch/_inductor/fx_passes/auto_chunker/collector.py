@@ -9,28 +9,18 @@ from typing import Sequence, Set
 from torch.fx import Graph, Node
 from torch._inductor import config
 import itertools
+from .utils import get_args_of_node_type, use_tangent, get_fake_tensor_from_node_arg, compute_tensor_size
+from .core import CantChunk, find_amplifier_node
 
 aten = torch.ops.aten
 prims = torch.ops.prims
-
-class CantChunk(RuntimeError):
-    pass
-
-def get_fake_tensor_from_node(node: torch.fx.Node) -> torch.Tensor:
-    if (
-        not hasattr(node, "meta")
-        or ("val" not in node.meta)
-        or not isinstance(node.meta["val"], torch.Tensor)
-    ):
-        return None
-    return node.meta["val"]
 
 
 def print_non_selected_nodes(graph: Graph, filter_set: Set):
     print("Remaining nodes:")
     for idx, node in enumerate(graph.nodes):
         if node not in filter_set:
-            fake_tensor = get_fake_tensor_from_node(node)
+            fake_tensor = get_fake_tensor_from_node_arg(node)
             shape = list(fake_tensor.shape) if fake_tensor is not None else "?"
             print(f"  {idx:3}: {shape} {node.format_node()}")
 
@@ -79,70 +69,8 @@ def maybe_permuted(downstream_node, upstream_node):
 def node_is_returned(node):
     return any(n.op == "output" for n in node.users)
 
-def get_args_of_node_type(node):
-    return [x for x in tree_flatten((node.args, node.kwargs))[0]
-        if isinstance(x, torch.fx.Node)]
-
-def use_tangent(node: torch.fx.Node) -> bool:
-    """
-    Whether the fx node uses tangent input.
-    """
-
-    return any(
-        arg.op == "placeholder" and "tangent" in arg.target
-        for arg in get_args_of_node_type(node)
-    )
-
-
-def compute_tensor_size(*args, count_bytes=True, **kwargs):
-    flat_args, _ = tree_flatten((args, kwargs))
-    tot = 0
-    for arg in flat_args:
-        if (fake_tensor := get_fake_tensor_from_node(arg)) is None:
-            continue
-        tot += fake_tensor.numel() * (fake_tensor.dtype.itemsize if count_bytes else 1)
-    return tot
 
 class Collector:
-    @staticmethod
-    def collect_source_users(graph: Graph) -> Sequence[Node]:
-        r"""
-        Find all candidate nodes for chunking in the forward part of the
-        graph.
-
-        The candidates are sorted in decreasing order of the amplification
-        ratio.
-        """
-        # A source user is the user of a source node that we want to
-        # chunk. The source node is node we start chunking.
-        source_users = []
-        for node in graph.nodes:
-            if use_tangent(node):
-                # enter backward part of the graph
-                break
-
-            # Only chunk a small set of source nodes like matmul for now
-            if node.op != "call_function" or node.target not in eligible_source_node_op_to_idx:
-                continue
-
-            argidx = eligible_source_node_op_to_idx[node.target]
-    
-            input_size = compute_tensor_size(node.args, node.kwargs)
-            output_size = compute_tensor_size(node)
-    
-            if (
-                compute_tensor_size(node.args[argidx]) > config.AutoChunker.input_size_threshold
-                and output_size / input_size > config.AutoChunker.amplify_ratio_threshold
-            ):
-                source_users.append((node, output_size / input_size))
-            else:
-                # print(f"{node.format_node()} {output_size=} {input_size=} {compute_tensor_size(node.args[argidx])=}")
-                pass
-   
-        source_users = sorted(source_users, key=lambda x: x[1], reverse=True)
-        return tuple(map(lambda x: x[0], source_users))
-
-
     @classmethod
     def collect_source_user(cls, graph: Graph):
         """ 
@@ -150,12 +78,11 @@ class Collector:
         But an alternative reasonable strategy is to pick the one
         closest to the bwd part
         """
-        source_nodes = cls.collect_source_users(graph)
-
-        if len(source_nodes) == 0:
+        amplifier_node = find_amplifier_node(graph)
+        if amplifier_node is None:
             raise CantChunk("No source nodes found.")
 
-        return source_nodes[0]
+        return amplifier_node
 
     @classmethod
     def collect_source_node(cls, graph: Graph):

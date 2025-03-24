@@ -18,7 +18,7 @@ from .collector import get_args_of_node_type
 from .collector import Collector, CantChunk
 from .partitioner import Partitioner
 from .propagator import Propagator, format_node_with_chunking_meta
-from .collector import get_fake_tensor_from_node, maybe_permuted, get_tangent_nodes
+from .collector import get_fake_tensor_from_node_arg, maybe_permuted, get_tangent_nodes
 from .applier import ChunkingApplier
 
 aten = torch.ops.aten

@@ -6,7 +6,7 @@ import copy
 from torch.utils import _pytree
 
 from .propagator import get_chunking_meta
-from .collector import get_fake_tensor_from_node
+from .collector import get_fake_tensor_from_node_arg
 from torch._dynamo.utils import detect_fake_mode
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 
@@ -23,7 +23,7 @@ def fake_tensor_prop(gm):
     inputs = []
     for node in gm.graph.nodes:
         if node.op == "placeholder":
-            fake_tensor = get_fake_tensor_from_node(node)
+            fake_tensor = get_fake_tensor_from_node_arg(node)
             if fake_tensor is not None:
                 inputs.append(fake_tensor)
             else:

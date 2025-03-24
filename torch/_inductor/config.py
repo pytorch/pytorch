@@ -875,11 +875,10 @@ annotate_training: bool = os.environ.get("TORCHINDUCTOR_ANNOTATE_TRAINING", "0")
 class AutoChunker:
     enable = os.environ.get("TORCHINDUCTOR_AUTO_CHUNKER") == "1"
 
-    # If an op has too small input tensors, we skip chunking it.
-    input_size_threshold = 1024
+    # Don't chunk from a node if the output size is not large enough
+    output_size_threshold = 1024 * 1024
 
-    # Apply auto chunker if an op amplifies input by more than amplify_threshold
-    # times.
+    # Don't chunk from a node if it does not 'amplify' the inputs a lot
     amplify_ratio_threshold = 8
 
     num_chunk = int(os.environ.get("TORCHINDUCTOR_CHUNKER_NUM_CHUNKS")) if os.environ.get("TORCHINDUCTOR_CHUNKER_NUM_CHUNKS") is not None else  None  # If not None, use this to force number of chunks

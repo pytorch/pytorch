@@ -3,7 +3,7 @@ from torch.utils._pytree import tree_flatten
 from torch.fx import Graph
 from torch.utils._ordered_set import OrderedSet
 
-from .collector import get_args_of_node_type, get_fake_tensor_from_node
+from .collector import get_args_of_node_type, get_fake_tensor_from_node_arg
 from .chunking_subgraph import ChunkingSubgraph
 
 class Partitioner:
@@ -33,7 +33,7 @@ class Partitioner:
         post_chunking_nodes = []
 
         def _copy_node(typestr, node):
-            fake_tensor = get_fake_tensor_from_node(node)
+            fake_tensor = get_fake_tensor_from_node_arg(node)
             shape = list(fake_tensor.shape) if fake_tensor is not None else "?"
             print(f" - {typestr}: {shape} {node.format_node()}")
             env[node] = new_graph.node_copy(node, lambda x: env[x]) 
