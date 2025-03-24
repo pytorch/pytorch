@@ -1208,9 +1208,9 @@ class _TestTritonTemplateCaller(TritonTemplateCaller):
 
 
 class TestTuningProcess(TestCase):
-    def check_healthy(self, p: TuningProcess):
+    def check_healthy(self, p: TuningProcess, device: Optional[int] = None):
         result = random.random()
-        bmreq = _TestBenchmarkRequest(result, device=0)
+        bmreq = _TestBenchmarkRequest(result, device=device)
         p.put(bmreq.benchmark)
         self.assertEqual(p.get(), result)
 
@@ -1255,6 +1255,13 @@ class TestTuningProcess(TestCase):
         p.kill()
         self.check_healthy(p)
         p.shutdown()
+
+    def test_visible_devices(self):
+        device_list = TuningProcessPool.get_device_list()
+        for device in device_list:
+            p = TuningProcess(device)
+            self.check_healthy(p, device=device)
+            p.shutdown()
 
 
 class TestTuningProcessPool(TestCase):

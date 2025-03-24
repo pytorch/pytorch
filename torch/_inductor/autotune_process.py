@@ -260,7 +260,8 @@ class TuningProcessPool:
         # the number of threads with the number of devices.
         self.executor = ThreadPoolExecutor(max_workers=len(devices))
 
-    def get_device_list(self) -> Sequence[Optional[int]]:
+    @staticmethod
+    def get_device_list() -> Sequence[Optional[int]]:
         """
         Gather the list of devices to be used in the pool.
         """
@@ -526,7 +527,7 @@ class _TestBenchmarkRequest(BenchmarkRequest):
     def benchmark(
         self, *input_tensors: torch.Tensor, output_tensor: Optional[torch.Tensor] = None
     ) -> float:
-        if self.device:
+        if self.device is not None:
             assert os.environ.get(CUDA_VISIBLE_DEVICES, None) == str(self.device)
         if self.sleep:
             time.sleep(self.sleep)
