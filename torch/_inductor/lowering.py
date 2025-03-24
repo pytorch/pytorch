@@ -4428,7 +4428,7 @@ def _max_pool2d_with_offsets(
         prefix = idx[:-dim]
         bh = idx[-dim:]
         ih = [
-            bh[i] * stride[i] + reduction_idx[i] * dilation[i] - padding[i]
+            (bh[i] * stride[i]) + (reduction_idx[i] * dilation[i]) - padding[i]
             for i in range(dim)
         ]
         return x_loader([*prefix, *ih])
@@ -4508,8 +4508,8 @@ def _low_memory_max_pool2d_offsets_to_indices(
         w_in = ops.index_expr(input_width, torch.int64)
         hbase = ops.index_expr(bh * stride[0] - padding[0], torch.int64)
         wbase = ops.index_expr(bw * stride[1] - padding[1], torch.int64)
-        ih = hbase + h_inc * ops.index_expr(dilation[0], torch.int64)
-        iw = wbase + w_inc * ops.index_expr(dilation[1], torch.int64)
+        ih = hbase + h_inc * ops.constant(dilation[0], torch.int64)
+        iw = wbase + w_inc * ops.constant(dilation[1], torch.int64)
         return ih * w_in + iw
 
     def offsets_to_indices(idx):
