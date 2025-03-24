@@ -63,7 +63,10 @@ class BinaryBuildWorkflow:
     use_split_build: bool = False
 
     def __post_init__(self) -> None:
-        self.build_environment = f"{self.os}-binary-{self.package_type}"
+        if self.package_type == "libtorch" and self.os in [OperatingSystem.WINDOWS_ARM64, OperatingSystem.WINDOWS]:
+            self.build_environment = f"{self.os}-binary-{self.package_type}-{self.build_configs[0]['libtorch_config']}"
+        else:
+            self.build_environment = f"{self.os}-binary-{self.package_type}"
         if self.use_split_build:
             # added to distinguish concurrency groups
             self.build_environment += "-split"
