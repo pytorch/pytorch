@@ -948,13 +948,13 @@ def _nested_mod_func_adapter(
         )
 
         # Use searchsorted to find the index for each position
-        # NB: This assumes offsets[0] to offsets[-1] spans the packed dim of values.
-        # If we ever loosen this restriction, this logic will need to be updated.
         seq_idx = torch.searchsorted(offsets, range_tensor, right=True) - 1
         return seq_idx
 
     q_offsets = q_nt._offsets  # type: ignore[attr-defined]
     kv_offsets = kv_nt._offsets  # type: ignore[attr-defined]
+    q_lengths = q_nt._lengths  # type: ignore[attr-defined]
+    kv_lengths = kv_nt._lengths  # type: ignore[attr-defined]
     q_seq_idx = _build_seq_idx(q_offsets, q_nt._values.shape[q_nt._ragged_idx - 1])  # type: ignore[attr-defined]
     if q_nt is kv_nt:
         kv_seq_idx = q_seq_idx
@@ -962,6 +962,9 @@ def _nested_mod_func_adapter(
         # cross attention case
         kv_seq_idx = _build_seq_idx(kv_offsets, kv_nt._values.shape[kv_nt._ragged_idx - 1])  # type: ignore[attr-defined]
 
+    torch.set_printoptions(profile="full")
+    print(q_seq_idx, q_offsets, q_lengths)
+    print(kv_seq_idx, kv_offsets, kv_lengths)
     # Converts q_idx / kv_idx from [0, total_length) -> [0, S), where S refers
     # to the sequence length for each sequence in the NJT, for use in given
     # score_mod. This allows the user to write a score_mod as if it were
@@ -974,8 +977,14 @@ def _nested_mod_func_adapter(
             q_nested = q_idx - q_offsets[q_seq_idx[q_idx]]
             kv_nested = kv_idx - kv_offsets[kv_seq_idx[kv_idx]]
             is_same_sequence = q_seq_idx[q_idx] == kv_seq_idx[kv_idx]
+            # don't allow attn in holes for non-contiguous nested tensors
+            is_within_sequence = True
+            if q_lengths is not None:
+                is_within_sequence = is_within_sequence and (q_seq_idx[q_idx] < q_lengths.size(0)) and (q_nested < q_lengths[q_seq_idx[q_idx]])
+            if kv_lengths is not None:
+                is_within_sequence = is_within_sequence and (kv_seq_idx[kv_idx] < kv_lengths.size(0)) and (kv_nested < kv_lengths[kv_seq_idx[kv_idx]])
             return torch.where(
-                is_same_sequence,
+                is_same_sequence and is_within_sequence,
                 orig_mod_func(score, b_nested, h, q_nested, kv_nested),  # type: ignore[call-arg]
                 # don't allow inter-sequence attention
                 float("-inf"),
@@ -990,7 +999,13 @@ def _nested_mod_func_adapter(
             kv_nested = kv_idx - kv_offsets[kv_seq_idx[kv_idx]]
             # don't allow inter-sequence attention
             is_same_sequence = q_seq_idx[q_idx] == kv_seq_idx[kv_idx]
-            return orig_mod_func(b_nested, h, q_nested, kv_nested) & is_same_sequence  # type: ignore[call-arg]
+            # don't allow attn in holes for non-contiguous nested tensors
+            is_within_sequence = True
+            if q_lengths is not None:
+                is_within_sequence = is_within_sequence and (q_seq_idx[q_idx] < q_lengths.size(0)) and (q_nested < q_lengths[q_seq_idx[q_idx]])
+            if kv_lengths is not None:
+                is_within_sequence = is_within_sequence and (kv_seq_idx[kv_idx] < kv_lengths.size(0)) and (kv_nested < kv_lengths[kv_seq_idx[kv_idx]])
+            return orig_mod_func(b_nested, h, q_nested, kv_nested) & is_same_sequence & is_within_sequence # type: ignore[call-arg]
 
         return nt_mask_mod
 
@@ -1147,15 +1162,15 @@ def _validate_nestedness(query: Tensor, key: Tensor, value: Tensor):
             "Please file an issue requesting this if it is important to you."
         )
 
-    if (
-        (query.is_nested and query._lengths is not None)  # type: ignore[attr-defined]
-        or (key.is_nested and key._lengths is not None)  # type: ignore[attr-defined]
-        or (value.is_nested and value._lengths is not None)  # type: ignore[attr-defined]
-    ):
-        raise ValueError(
-            "FlexAttention does not support nested tensors that are non-contiguous with holes. "
-            "Please file an issue requesting this if it is important to you."
-        )
+    # if (
+    #     (query.is_nested and query._lengths is not None)  # type: ignore[attr-defined]
+    #     or (key.is_nested and key._lengths is not None)  # type: ignore[attr-defined]
+    #     or (value.is_nested and value._lengths is not None)  # type: ignore[attr-defined]
+    # ):
+    #     raise ValueError(
+    #         "FlexAttention does not support nested tensors that are non-contiguous with holes. "
+    #         "Please file an issue requesting this if it is important to you."
+    #     )
 
 
 def flex_attention(

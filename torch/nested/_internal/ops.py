@@ -1895,7 +1895,7 @@ def index_put_(func, *args, **kwargs):
     else:
         lengths = inp.lengths()
     torch._assert_async(
-        torch.all(indices[inp._ragged_idx] < lengths),
+        torch.all(indices[inp._ragged_idx] < lengths[indices[0]]),
         "Some indices in the ragged dimension are out of bounds!",
     )
 
