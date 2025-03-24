@@ -424,6 +424,26 @@ def prepare_fw_with_masks(fn):
     return fw_with_masks
 
 
+def prepare_fw_with_masks_all_requires_grad(fn):
+    def fw_with_masks(*args):
+        fw_out = fn(*args)
+        # Note [force all outputs to be require grad]
+        # Instead of using the original fn, we set the output of original
+        # fn to all require grad. This is consistent with the behavior
+        # of autograd.Function, where if any one of the inputs requires grad
+        # all output will be require grad. This also makes the downstream
+        # require_gradness reasoning much easier.
+        if pytree.tree_any_only(torch.Tensor, lambda t: t.requires_grad, args):
+            fw_out = pytree.tree_map_only(
+                torch.Tensor, lambda x: x.requires_grad_(True), fw_out
+            )
+        return fw_out, pytree.tree_map_only(
+            torch.Tensor, lambda x: x.requires_grad, fw_out
+        )
+
+    return fw_with_masks
+
+
 # This function replaces None gradients with all-zero gradients.
 # `None` gradients are problematic for CUDA graphs. Those gradients are
 # replaced with an all-zero tensor for better optimization
@@ -675,10 +695,25 @@ def validate_subgraph_args_types(lifted_args: Union[tuple[Any, ...], list[Any]])
 def check_input_alias_and_mutation(
     gm: torch.fx.GraphModule,
     fake_args: list[FakeTensor],
-    return_outputs: bool = False,
-) -> Union[
-    tuple[list[int], dict[int, int], dict[int, int], dict[int, int]],
-    tuple[list[int], dict[int, int], dict[int, int], dict[int, int], list[Any]],
+) -> tuple[list[int], dict[int, int], dict[int, int], dict[int, int]]:
+    (
+        mutated_inputs,
+        inp_inp_alias_map,
+        inp_out_alias_map,
+        out_out_alias_map,
+    ) = check_input_alias_and_mutation_return_ouputs(gm, fake_args)[:-1]
+    return mutated_inputs, inp_inp_alias_map, inp_out_alias_map, out_out_alias_map
+
+
+def check_input_alias_and_mutation_return_ouputs(
+    gm: torch.fx.GraphModule,
+    fake_args: list[FakeTensor],
+) -> tuple[
+    list[int],
+    dict[int, int],
+    dict[int, int],
+    dict[int, int],
+    Union[tuple[Any, ...], list[Any]],
 ]:
     with disable_proxy_modes_tracing():
         """This function returns mutated inputs, inp-inp alias, inp-out alias, out-out alias
@@ -742,18 +777,10 @@ def check_input_alias_and_mutation(
             for i, inp in enumerate(cloned)
             if isinstance(inp, torch.Tensor) and _tensor_storage(inp) in out_storage_map
         }
-        if return_outputs:
-            return (
-                mutated_inputs,
-                inp_inp_alias_map,
-                inp_out_alias_map,
-                out_out_alias_map,
-                outputs,
-            )
-        else:
-            return (
-                mutated_inputs,
-                inp_inp_alias_map,
-                inp_out_alias_map,
-                out_out_alias_map,
-            )
+        return (
+            mutated_inputs,
+            inp_inp_alias_map,
+            inp_out_alias_map,
+            out_out_alias_map,
+            outputs,
+        )

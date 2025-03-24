@@ -7,7 +7,7 @@ import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._dispatch.python import suspend_functionalization
 from torch._higher_order_ops.utils import (
-    check_input_alias_and_mutation,
+    check_input_alias_and_mutation_return_ouputs,
     reenter_make_fx,
 )
 from torch._ops import HigherOrderOperator
@@ -130,7 +130,7 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
         return ctx.wrap_tensors(out)
 
     def gen_schema(self, *args, **kwargs):
-        from torchgen.gen_schema_utils import FunctionSchemaGen, HopArgumentInfoGen
+        from torchgen.gen_schema_utils import CFunctionSchemaGen, HopArgumentInfoGen
 
         subgraph, *operands = args
 
@@ -141,8 +141,8 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
             ph.meta["example_value"]
             for ph in subgraph.graph.find_nodes(op="placeholder")
         ]
-        mutated_inp_idx, _, _, _, output = check_input_alias_and_mutation(
-            subgraph, fake_args, return_outputs=True
+        mutated_inp_idx, _, _, _, output = check_input_alias_and_mutation_return_ouputs(
+            subgraph, fake_args
         )
         args = []
         for idx, arg in enumerate((subgraph, *operands, *kwargs.items())):
@@ -173,7 +173,7 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
             default_value=None,
             is_mutated=False,
         )
-        return FunctionSchemaGen.from_hop_argument_info(str(self), args, ret)
+        return CFunctionSchemaGen.from_hop_argument_info(str(self), args, ret)
 
 
 class BaseHOPFunction(torch.autograd.Function):

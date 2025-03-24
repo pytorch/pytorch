@@ -78,6 +78,34 @@ class ArgumentGen:
         )
 
 
+class FunctionSchemaGen:
+    @staticmethod
+    def from_example(
+        op_name: str,
+        example_inputs: tuple[tuple[str, Any], ...],
+        example_outputs: tuple[Any, ...],
+        mutated_inputs: Optional[set[int]] = None,
+    ) -> FunctionSchema:
+        mutated_inputs = mutated_inputs if mutated_inputs is not None else set()
+        args = []
+        for i, (name, inp) in enumerate(example_inputs):
+            annotation = None
+            if i in mutated_inputs:
+                annotation = Annotation(
+                    alias_set=tuple(), is_write=True, alias_set_after=tuple()
+                )
+            args.append(ArgumentGen.from_example(name, inp, None, annotation))
+        # ignore the annotations and other attributes for now, we could add more when needed.
+        arguments = Arguments(
+            tuple(), None, tuple(args), tuple(), None, tuple(), tuple()
+        )
+        returns = tuple(
+            ReturnGen.from_example(None, out, None) for out in example_outputs
+        )
+        name = OperatorName(BaseOperatorName(op_name, False, False, False), "")
+        return FunctionSchema(name, arguments, returns)
+
+
 @dataclass(frozen=True)
 class HopArgumentInfo:
     # Could give a name to the operand by default it's empty string.
@@ -155,33 +183,7 @@ class CArgumentGen:
         )
 
 
-class FunctionSchemaGen:
-    @staticmethod
-    def from_example(
-        op_name: str,
-        example_inputs: tuple[tuple[str, Any], ...],
-        example_outputs: tuple[Any, ...],
-        mutated_inputs: Optional[set[int]] = None,
-    ) -> FunctionSchema:
-        mutated_inputs = mutated_inputs if mutated_inputs is not None else set()
-        args = []
-        for i, (name, inp) in enumerate(example_inputs):
-            annotation = None
-            if i in mutated_inputs:
-                annotation = Annotation(
-                    alias_set=tuple(), is_write=True, alias_set_after=tuple()
-                )
-            args.append(ArgumentGen.from_example(name, inp, None, annotation))
-        # ignore the annotations and other attributes for now, we could add more when needed.
-        arguments = Arguments(
-            tuple(), None, tuple(args), tuple(), None, tuple(), tuple()
-        )
-        returns = tuple(
-            ReturnGen.from_example(None, out, None) for out in example_outputs
-        )
-        name = OperatorName(BaseOperatorName(op_name, False, False, False), "")
-        return FunctionSchema(name, arguments, returns)
-
+class CFunctionSchemaGen:
     """
     Note: [HigherOrderOperator schema generation]
     Each invocation of a HigherOrderOperator will have a different schema.

@@ -951,7 +951,6 @@ class ExportedProgram:
         if isinstance(root, torch.fx.GraphModule):
             self._graph_module.meta.update(root.meta)
 
-        print(self._graph_module)
         _common_getitem_elimination_pass(
             self._graph_module, graph_signature, module_call_graph
         )
@@ -1309,10 +1308,11 @@ class ExportedProgram:
         graph_module = self.graph_module.print_readable(
             print_output=False, colored=False
         ).replace("\n", "\n    ")
+        graph_signature = str(self.graph_signature).replace("\n", "\n    ")
         string = (
             "ExportedProgram:\n"
             f"    {graph_module}\n"
-            f"Graph signature: {self.graph_signature}\n"
+            f"Graph signature: {graph_signature}\n"
             f"Range constraints: {self.range_constraints}\n"
         )
         return string

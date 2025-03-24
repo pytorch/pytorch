@@ -274,6 +274,26 @@ inline Vectorized<scalar_t> div_floor_floating_vec(
   return floordiv;
 }
 
+#if defined(CPU_CAPABILITY_SVE256) && defined(__ARM_FEATURE_BF16)
+
+// Since sve lacks sufficient bf16 intrinsics, do the calculations in f32 to
+// avoid rounding errors. This should not cause performance issues as
+// most of the used instructions would be cast to f32 vectors anyway.
+template<>
+inline Vectorized<c10::BFloat16> div_floor_floating_vec(
+  const Vectorized<c10::BFloat16>& a,
+  const Vectorized<c10::BFloat16>& b) {
+  auto [a1, a2] = convert_bfloat16_float(a);
+  auto [b1, b2] = convert_bfloat16_float(b);
+
+  auto res1 = div_floor_floating_vec(a1, b1);
+  auto res2 = div_floor_floating_vec(a2, b2);
+
+  return convert_float_bfloat16(res1, res2);
+}
+
+#endif
+
 void div_floor_kernel(TensorIteratorBase& iter) {
   const auto dtype = iter.common_dtype();
   if (dtype == kByte) {

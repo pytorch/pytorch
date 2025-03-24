@@ -556,6 +556,7 @@ inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
   // real_type versus fake_type: in order to be compatible with FunctionSchema
   // parser, printing an argument with either MemoryFormat or Layout type should
   // give us the original schema string, hence printing out real_type.
+  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   auto type = arg.real_type();
   bool is_opt = type->kind() == OptionalType::Kind;
   auto unopt_type = is_opt ? type->castRaw<OptionalType>()->getElementType() : type;
@@ -569,6 +570,7 @@ inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
     }
     std::string N;
     if (arg.N()) {
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
         N = std::to_string(*arg.N());
     }
     out << "[" << N << "]";
@@ -591,9 +593,12 @@ inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
 
   if (arg.default_value()) {
     out << "=";
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     if ((type->kind() == c10::TypeKind::StringType ||
         unopt_type->kind() == c10::TypeKind::StringType) &&
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
         arg.default_value().value().isString()) {
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       printQuotedString(out, arg.default_value().value().toStringRef());
     } else if (type->kind() == TypeKind::ListType && type->castRaw<ListType>()->getElementType()->kind() == c10::TypeKind::IntType) {
       // We want to faithfully replicate JIT schema.
@@ -601,6 +606,7 @@ inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
       //   int[2] stride=1
       // instead of
       //   int[2] stride=[1, 1]
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       auto default_val = arg.default_value().value().toIntList();
       if (default_val.size() > 1) {
         auto all_defaults_the_same = true;
@@ -613,6 +619,7 @@ inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
           out << arg.default_value().value();
         }
       } else {
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
         out << arg.default_value().value();
       }
     } else {
