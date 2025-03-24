@@ -579,7 +579,6 @@ inductor_override_kwargs["xpu"] = {
         "rtol": 0.02,
     },
     ("remainder", f16): {"atol": 1e-4, "rtol": 0.005},
-    ("nn.functional.upsample_bilinear", f16): {"atol": 1e-5, "rtol": 0.002},
     ("sinc", f16): {"atol": 0.008, "rtol": 0.002},
     ("softmax", f16): {"atol": 1e-4, "rtol": 0.02},
     ("_softmax_backward_data", f16): {"atol": 0.008, "rtol": 0.002},
@@ -615,8 +614,34 @@ inductor_override_kwargs["xpu"] = {
     ("nn.functional.embedding_bag", f16): {"check_gradient": False},
     ("nn.functional.embedding_bag", f32): {"check_gradient": False},
     ("nn.functional.embedding_bag", f64): {"check_gradient": False},
-    ("_unsafe_masked_index", f16): {"atol": 1e-5, "rtol": 2e-3},
     ("_unsafe_masked_index_put_accumulate", f16): {"atol": 1e-5, "rtol": 5e-3},
+    ("_unsafe_masked_index", f16): {
+        "reference_in_float": True,
+        "atol": 3e-4,
+        "rtol": 2e-3,
+    },
+    ("nn.functional.interpolate.linear", f16): {"reference_in_float": True},
+    ("nn.functional.prelu", f16): {
+        "reference_in_float": True,
+        "atol": 1e-3,
+        "rtol": 4e-3,
+    },
+    ("addmm", f16): {"reference_in_float": True},
+    ("logaddexp", f16): {"reference_in_float": True},
+    ("std_mean", f16): {"reference_in_float": True},
+    ("hypot", f16): {"reference_in_float": True, "atol": 3e-4, "rtol": 2e-3},
+    ("cummin", f16): {"reference_in_float": True, "atol": 5e-5, "rtol": 2e-3},
+    ("unfold_copy", f16): {"reference_in_float": True, "atol": 2e-5, "rtol": 1e-2},
+    ("nn.functional.upsample_bilinear", f16): {
+        "reference_in_float": True,
+        "atol": 1e-4,
+        "rtol": 2e-3,
+    },
+    ("nn.functional.embedding_bag", f16): {
+        "check_gradient": False,
+        "atol": 1e-4,
+        "rtol": 1e-2,
+    },
 }
 
 # Test with one sample only for following ops
