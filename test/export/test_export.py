@@ -11681,6 +11681,16 @@ graph():
             "torch.testing._internal.two_tensor.TwoTensor", 2, exactly=True
         ).run(gm_torch_ir.code)
 
+    def test_sym_float_operators(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                return -(x.max().item() / 2) + x
+
+        m = Module()
+        args = (torch.ones(4),)
+        ep = export(m, args)
+        self.assertEqual(ep.module()(*args), m(*args))
+
     def test_cse_for_symint(self):
         class Foo(torch.nn.Module):
             # check sym ops only get computed once
