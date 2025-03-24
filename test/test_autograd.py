@@ -550,7 +550,7 @@ class TestAutograd(TestCase):
         # Test that built-in functions with unimplemented gradients raise appropriate errors
         a = torch.rand(2, requires_grad=True)
         y = torch.acosh_(a.clone()).sum()
-        
+
         with self.assertRaisesRegex(
             NotImplementedError, "the derivative for .* is not implemented"
         ):
