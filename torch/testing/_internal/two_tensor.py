@@ -8,6 +8,10 @@ from torch.utils._python_dispatch import return_and_correct_aliasing
 
 # A simple tensor subclass that holds two tensors internally, and runs every op on both tensors.
 class TwoTensor(torch.Tensor):
+    # TODO
+    # 1. Dynamo doesn't support tracing `a.storage_offset`.
+    # 2. `_make_wrapper_subclass` should support more kwargs by just passing
+    #    them into `TensorVariable` __init__.
     @staticmethod
     def __new__(cls, a, b, outer_size=None, outer_stride=None):
         if outer_size is None:
