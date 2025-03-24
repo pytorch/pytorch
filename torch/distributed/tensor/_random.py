@@ -171,7 +171,8 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         assert self._device_handle is not None
         # DTensor RNG tracker so far only supports CUDA/CUDA-like devices
         if self._device.type != "cuda" and (
-            not hasattr(self._device_handle, "set_rng_state")
+            self._device.type == "cpu"
+            or not hasattr(self._device_handle, "set_rng_state")
             or not hasattr(self._device_handle, "get_rng_state")
         ):
             raise RuntimeError(
