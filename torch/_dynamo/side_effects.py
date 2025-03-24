@@ -574,14 +574,16 @@ class SideEffects:
         return [var for var in self.id_to_variable.values() if self.is_modified(var)]
 
     def codegen_save_tempvars(self, cg: PyCodegen):
-        # Make sure we codegen these modified VT to their source by default, so
-        # that mutation and aliasing are properly accounted for. Since newly
-        # constructed objects don't have a source, we manually codegen their
-        # construction and store them to a newly assigned local source.
+        # We must codegen modified VT to their source by default, so that
+        # mutation and aliasing are properly accounted for.
+        #
+        # Since newly constructed objects don't have a source, we manually
+        # codegen their construction and store them to a newly assigned local
+        # source. Note that `ValueMutationNew` isn't tracked by SideEffects.
         for var in self._get_modified_vars():
-            if var.source is not None:
+            if not isinstance(var.mutation_type, AttributeMutationNew):
+                assert var.source is not None
                 continue
-            assert isinstance(var.mutation_type, AttributeMutationNew)
 
             if isinstance(var, variables.CellVariable):
                 # Cells created in the root frame are created either by
