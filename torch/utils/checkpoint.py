@@ -1107,6 +1107,7 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
                     frame.x_metadatas.append(frame.metadata_fn(x))
             return holder
 
+        @torch._dynamo.disable
         def unpack_hook(holder):
             gid = torch._C._current_graph_task_id()
             if gid == -1:
