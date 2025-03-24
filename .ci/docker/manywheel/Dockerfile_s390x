@@ -86,11 +86,20 @@ ADD ./common/install_cpython.sh /build_scripts/install_cpython.sh
 ENV SSL_CERT_FILE=
 RUN bash build_scripts/build.sh && rm -r build_scripts
 
+FROM base as cache
+# Install sccache
+ADD ./common/install_cache.sh install_cache.sh
+RUN bash ./install_cache.sh && rm install_cache.sh
+
 FROM base as final
 COPY --from=python             /opt/python                           /opt/python
 COPY --from=python             /opt/_internal                        /opt/_internal
 COPY --from=python             /opt/python/cp39-cp39/bin/auditwheel  /usr/local/bin/auditwheel
 COPY --from=patchelf           /usr/local/bin/patchelf               /usr/local/bin/patchelf
+COPY --from=cache              /opt/cache                            /opt/cache
+
+# Ensure sccache is included in the path
+ENV PATH /opt/cache/bin:$PATH
 
 RUN alternatives --set python /usr/bin/python3.12
 RUN alternatives --set python3 /usr/bin/python3.12
