@@ -461,21 +461,24 @@ class TestFakeTensorExport(common_utils.TestCase):
         )
 
     def test_is_in_onnx_export(self):
-        test_self = self
-
-        class MyModule(torch.nn.Module):
+        class Mod(torch.nn.Module):
             def forward(self, x):
-                test_self.assertTrue(torch.onnx.is_in_onnx_export())
-                raise ValueError
-                return x + 1
+                def f(x):
+                    return x.sin() if torch.onnx.is_in_onnx_export() else x.cos()
 
-        x = torch.randn(3, 4)
-        try:
-            torch.onnx.export(MyModule(), (x,), dynamo=True, fallback=False)
-        except torch.onnx.errors.OnnxExporterError:
-            # Because TorchScript is the last strategy, it will raise
-            # an OnnxExporterError.
-            self.assertFalse(torch.onnx.is_in_onnx_export())
+                return f(x)
+
+        self.assertFalse(torch.onnx.is_in_onnx_export())
+        onnx_program = torch.onnx.export(
+            Mod(),
+            (torch.randn(3, 4),),
+            dynamo=True,
+            fallback=False,
+        )
+        self.assertFalse(torch.onnx.is_in_onnx_export())
+
+        node_names = [n.op_type for n in onnx_program.model.graph]
+        self.assertIn("Sin", node_names)
 
 
 if __name__ == "__main__":

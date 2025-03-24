@@ -10,7 +10,6 @@ from collections.abc import Mapping, Sequence
 from typing import Any, Callable, TYPE_CHECKING
 
 import torch
-from torch.onnx._globals import GLOBALS
 from torch.onnx._internal._lazy_import import onnxscript_apis, onnxscript_ir as ir
 from torch.onnx._internal.exporter import (
     _constants,
@@ -118,9 +117,6 @@ def export_compat(
                 # so we reverse the list to maintain the order of the custom ops provided
                 registry.register_op(torch_op, op, is_complex=False)
     try:
-        assert GLOBALS.in_onnx_export is False
-        GLOBALS.in_onnx_export = True
-
         onnx_program = _core.export(
             model,
             args,
@@ -138,8 +134,6 @@ def export_compat(
         )
 
     except Exception as e:
-        # reset the in_onnx_export flag to False for the next export
-        GLOBALS.in_onnx_export = False
         if fallback:
             if verbose is not False:
                 print(
@@ -178,9 +172,6 @@ def export_compat(
             return onnx_program
         else:
             raise
-    finally:
-        # reset the in_onnx_export flag to False for the next export
-        GLOBALS.in_onnx_export = False
 
     if need_axis_mapping and dynamic_shapes is not None:
         onnx_program._rename_dynamic_axes(dynamic_shapes)

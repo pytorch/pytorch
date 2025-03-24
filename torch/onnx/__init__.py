@@ -68,7 +68,6 @@ from .errors import OnnxExporterError
 from .utils import (
     _run_symbolic_function,
     _run_symbolic_method,
-    is_in_onnx_export,
     register_custom_op_symbolic,
     select_model_mode_for_export,
     unregister_custom_op_symbolic,
@@ -95,6 +94,7 @@ from . import (  # usort: skip. Keep the order instead of sorting lexicographica
     symbolic_opset19,
     symbolic_opset20,
     utils,
+    _globals,
 )
 
 
@@ -504,3 +504,10 @@ def dynamo_export(
         return dynamo_export(
             model, *model_args, export_options=export_options, **model_kwargs
         )
+
+
+def is_in_onnx_export() -> bool:
+    """Returns whether it is in the middle of ONNX export."""
+    from torch.onnx._internal.exporter import _flags
+
+    return _globals.GLOBALS.in_onnx_export or _flags._is_onnx_exporting
