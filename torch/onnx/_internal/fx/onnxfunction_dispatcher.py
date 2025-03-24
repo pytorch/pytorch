@@ -557,8 +557,7 @@ class _OnnxSchemaChecker:
             score += 1 if one input/attribute type is in the type constraints.
 
         Limitations:
-            None/NoeType/[] could result in zero matches, and the same score of overloads,
-            which will be recorded in SARIF.
+            None/NoeType/[] could result in zero matches, and the same score of overloads.
 
         Args:
             inputs: The input arguments.
