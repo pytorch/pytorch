@@ -550,7 +550,7 @@ def check_model(
 
         # generate random unit norm gradients
         grads = [
-            torch.rand(r.shape, device=r.device, dtype=r.dtype)
+            torch.randn_like(r)
             for r in correct_flat
             if isinstance(r, torch.Tensor) and r.requires_grad
         ]
@@ -781,41 +781,41 @@ def is_cpp_backend(device):
 
 def skip_if_cpu(fn):
     @functools.wraps(fn)
-    def wrapper(self):
+    def wrapper(self, *args, **kwargs):
         if self.device == "cpu":
             raise unittest.SkipTest("cpu not supported")
-        return fn(self)
+        return fn(self, *args, **kwargs)
 
     return wrapper
 
 
 def skip_if_halide(fn):
     @functools.wraps(fn)
-    def wrapper(self):
+    def wrapper(self, *args, **kwargs):
         if is_halide_backend(self.device):
             raise unittest.SkipTest("halide not supported")
-        return fn(self)
+        return fn(self, *args, **kwargs)
 
     return wrapper
 
 
 def xfail_if_mps(fn):
     @functools.wraps(fn)
-    def wrapper(self):
+    def wrapper(self, *args, **kwargs):
         if not is_mps_backend(self.device):
-            return fn(self)
+            return fn(self, *args, **kwargs)
         with self.assertRaises(Exception):
-            return fn(self)
+            return fn(self, *args, **kwargs)
 
     return wrapper
 
 
 def skip_if_triton(fn):
     @functools.wraps(fn)
-    def wrapper(self):
+    def wrapper(self, *args, **kwargs):
         if is_triton_backend(self.device):
             raise unittest.SkipTest("triton not supported")
-        return fn(self)
+        return fn(self, *args, **kwargs)
 
     return wrapper
 
@@ -832,10 +832,10 @@ def skip_if_not_triton(fn):
 
 def skip_if_dynamic(fn):
     @functools.wraps(fn)
-    def wrapper(self):
+    def wrapper(self, *args, **kwargs):
         if ifdynstaticdefault(True, False) or torch._dynamo.config.dynamic_shapes:
             raise unittest.SkipTest("associtaive_scan doesn's support lifted SymInts.")
-        return fn(self)
+        return fn(self, *args, **kwargs)
 
     return wrapper
 
@@ -891,13 +891,13 @@ def xfail_if_triton_cpu(fn):
 
 def skip_if_gpu_halide(fn):
     @functools.wraps(fn)
-    def wrapper(self):
+    def wrapper(self, *args, **kwargs):
         if (
             is_halide_backend(self.device)
             and getattr(self.device, "type", self.device) == "cuda"
         ):
             raise unittest.SkipTest("halide not supported")
-        return fn(self)
+        return fn(self, *args, **kwargs)
 
     return wrapper
 
@@ -906,12 +906,12 @@ class skip_if_cpp_wrapper:
     def __init__(self, reason: str = "") -> None:
         self.reason = reason
 
-    def __call__(self, fn):
+    def __call__(self, fn, *args, **kwargs):
         @functools.wraps(fn)
         def wrapper(test_self):
             if config.cpp_wrapper:
                 raise unittest.SkipTest(f"cpp wrapper bug to be fixed: {self.reason}")
-            return fn(test_self)
+            return fn(test_self, *args, **kwargs)
 
         return wrapper
 
@@ -1425,6 +1425,10 @@ class CommonTemplate:
         )
         real_input = torch.tensor([-1.0, 0.0, 1.0, float("nan")])
         interger_real_input = torch.tensor([-1, 0, 1])
+        # Complex are not supported on MacOS-13
+        if self.device == "mps" and MACOS_VERSION < 14.0:
+            self.common(fn, (complex_input.real, real_input, interger_real_input))
+            return
         self.common(fn, (complex_input, real_input, interger_real_input))
 
     def test_sgn(self):
@@ -1681,6 +1685,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(1024),))
 
+    @xfailIfS390X
     @config.patch(debug_index_asserts=False)
     @config.patch("cpp.enable_tiling_heuristics", False)
     def test_neg_index(self):
@@ -1990,7 +1995,6 @@ class CommonTemplate:
 
     @skip_if_gpu_halide
     @skipCPUIf(IS_MACOS, "fails on macos")
-    @xfailIfS390X
     def test_multilayer_var(self):
         def fn(a):
             return torch.var(a)
@@ -2010,7 +2014,7 @@ class CommonTemplate:
 
     @skipCPUIf(IS_MACOS, "fails on macos")
     @skip_if_halide  # accuracy 4.7% off
-    @xfailIfS390X
+    @xfailIfS390X  # accuracy failure
     def test_multilayer_var_lowp(self):
         def fn(a):
             return torch.var(a)
@@ -4266,14 +4270,14 @@ class CommonTemplate:
             (torch.randn([2, 2, 10]),),
         )
 
-    def test_low_memory_max_pool(self):
+    @parametrize("dilation", (1, 2))
+    def test_low_memory_max_pool(self, dilation: int):
         prims = torch.ops.prims
 
         def fn(x):
             kernel_size = [3, 3]
             stride = [2, 2]
             padding = [1, 1]
-            dilation = [1, 1]
             ceil_mode = False
 
             vals, offsets = prims._low_memory_max_pool2d_with_offsets(
@@ -4281,7 +4285,7 @@ class CommonTemplate:
                 kernel_size,
                 stride,
                 padding,
-                dilation,
+                [dilation] * 2,
                 ceil_mode,
             )
             indices = prims._low_memory_max_pool2d_offsets_to_indices(
@@ -4290,6 +4294,7 @@ class CommonTemplate:
                 x.size(-1),
                 stride,
                 padding,
+                dilation=[dilation] * 2,
             )
             return vals, indices, offsets
 
@@ -5039,10 +5044,13 @@ class CommonTemplate:
         )
 
     @skip_if_gpu_halide  # slow
-    def test_max_pool2d6(self):
+    @parametrize("dilation", (1, 2))
+    def test_max_pool2d6(self, dilation: int):
         # Big kernel size
         def fn(x):
-            return aten.max_pool2d_with_indices(x, [13, 13], [])
+            return aten.max_pool2d_with_indices(
+                x, [13, 13], [], dilation=[dilation] * 2
+            )
 
         self.common(
             fn,
@@ -5064,16 +5072,14 @@ class CommonTemplate:
 
     # From https://github.com/pytorch/pytorch/issues/93384
     def test_max_pool2d8(self):
-        # dialtion is not 1, use fallback
+        # dilation is not 1
         def fn(x):
             return aten.max_pool2d_with_indices(x, [3, 2], [2, 1], [1, 1], [1, 2])
 
-        torch._inductor.metrics.generated_kernel_count = 0
         self.common(
             fn,
             (torch.randn([2, 2, 3, 6]),),
         )
-        assertGeneratedKernelCountEqual(self, 0)
 
     def test_avg_pool2d1(self):
         def fn(x):
@@ -9687,7 +9693,6 @@ class CommonTemplate:
         "TODO: debug this with asan",
     )
     @skip_if_gpu_halide
-    @xfailIfS390X
     def test_tmp_not_defined_issue2(self):
         def forward(arg38_1, arg81_1, getitem_17, new_zeros_default_4):
             div_tensor_7 = torch.ops.aten.div.Tensor(getitem_17, arg81_1)
@@ -10207,6 +10212,13 @@ class CommonTemplate:
 
         # Constant must not get matched as constant
         self.common(fn, [torch.randn(3, 1, 1, 1, 1), 9132])
+
+    def test_float_repr_dynamic_shapes(self):
+        @torch.compile(dynamic=True)
+        def fn(x):
+            return F.interpolate(x, scale_factor=1 / 300, mode="linear")
+
+        self.common(fn, [torch.randn(1, 8, 396 * 300)])
 
     def test_sqrt_dynamic_shapes(self):
         # TIMM convit_base model: https://github.com/pytorch/pytorch/issues/97877.
@@ -10889,8 +10901,8 @@ class CommonTemplate:
     # Calling div only torch.SymInt arguments is not yet supported.
     # To support this behavior, we need to allow const-propping tensors that store symint data.
     # For now, dynamo will explicitly graph break when it encounters user code with this behavior.
-    @xfailIfS390X
     @expectedFailureCodegenDynamic
+    @xfailIfS390X
     @skip_if_gpu_halide  # accuracy error
     def test_AllenaiLongformerBase_repro(self):
         def fn(query, scores, window_overlap):
