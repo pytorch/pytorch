@@ -340,7 +340,8 @@ class AsyncCompile:
                 # so it can't be used again
                 kernel.set_compile_info(compile_id, is_backward)
                 CompiledTritonKernels.remove_future(source_code)
-                # If the kernel is statically launchable, store it in the cache
+                # If the kernel is statically launchable and therefore serializable,
+                # store it in the TritonBundler cache
                 if kernel.is_statically_launchable():
                     TritonBundler.put_static_autotuner(
                         CompiledTritonKernels.key(source_code), kernel
