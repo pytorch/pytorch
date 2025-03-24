@@ -1552,19 +1552,14 @@ def forward(self, pred_1, x_1):
     @skipIfTorchDynamo("don't test compile on compile")
     @requires_cuda
     @parametrize("reverse", [False, True])
-    # @parametrize("reverse", [False])
     @parametrize("compile_mode", ["none", "eager"])
-    # @parametrize("compile_mode", ["none"])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    # @parametrize("device", [torch.device("cuda")])
     @parametrize("autograd", [False, True])
-    # @parametrize("autograd", [True])
     def test_scan_compile(self, reverse, compile_mode, device, autograd):
         def add2(x: torch.Tensor, y: torch.Tensor):
             return x * y, x + y
 
         x = torch.randn(3, 10, 2, device=device, requires_grad=autograd)
-        # x = torch.randn(1, 3, 2, device=device, requires_grad=autograd)
 
         scan_fct = compile_mode_helper(scan, compile_mode)
 
@@ -1573,13 +1568,11 @@ def forward(self, pred_1, x_1):
                 get_scan_combine_fn("add", False),
                 torch.cumsum,
                 torch.zeros(10, 2, device=device, requires_grad=autograd),
-                # torch.zeros(3, 2, device=device, requires_grad=autograd),
             ),
             (
                 get_scan_combine_fn("mul", False),
                 torch.cumprod,
                 torch.ones(10, 2, device=device, requires_grad=autograd),
-                # torch.ones(3, 2, device=device, requires_grad=autograd),
             ),
         ]:
             result = scan_fct(op, init, x, dim=0, reverse=reverse)
@@ -1741,13 +1734,10 @@ def forward(self, pred_1, x_1):
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
-    # @parametrize("reverse", [False, True])
-    @parametrize("reverse", [True])
-    # @parametrize("compile_mode", ["none", "eager"])
-    @parametrize("compile_mode", ["none"])
-    # @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    @parametrize("device", [torch.device("cpu")])
-    @parametrize("autograd", [True])
+    @parametrize("reverse", [False, True])
+    @parametrize("compile_mode", ["none", "eager"])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    @parametrize("autograd", [False, True])
     def test_scan_dim(self, reverse, compile_mode, device, autograd):
         import random
 

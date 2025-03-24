@@ -378,9 +378,6 @@ class CondAutogradOp(torch.autograd.Function):
             ctx._fw_exclude_key_set,
             force_enable_grad=True,
         )
-        import pdb
-
-        pdb.set_trace()
         grads = cond_op(
             ctx._pred,
             true_bw_gm,

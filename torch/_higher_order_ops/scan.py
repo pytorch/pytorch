@@ -56,16 +56,6 @@ def _extract_carry_and_out(flat_out: list[Any], num_carry: int):
     return flat_out[:num_carry], flat_out[num_carry:]
 
 
-def get_gradient_mask(tensor_list: list[Any]) -> list[bool]:
-    # Helper function to determine whether an element of a tensor_list requires gradients
-    # Gradient masks are used during the backward path to
-    # return gradients for elements with requires_grad=True and None for others
-    return [
-        True if isinstance(v, torch.Tensor) and v.requires_grad else False
-        for v in tensor_list
-    ]
-
-
 def get_tensor_mask(tensor_list: list[Any]) -> list[bool]:
     # Returns a mask whether a list element is a tensor or not
     return [True if isinstance(v, torch.Tensor) else False for v in tensor_list]
@@ -256,7 +246,6 @@ def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
 
         # Compute dummy shapes for the pre-allocation
         num_init_leaves = len(init)
-
         dummy_carry, dummy_out = _extract_carry_and_out(
             call_operator(
                 operator,
