@@ -2153,9 +2153,9 @@ class LocalRankTest(MultiProcessTestCase):
 
 
 if __name__ == "__main__":
-    mod = torch.get_device_module(torch.accelerator.current_accelerator().type)
+    device = torch.accelerator.current_accelerator()
     assert (
-        not mod._initialized
+        device is not None and not torch.get_device_module(device)._initialized
     ), "test_distributed must not have initialized accelerator context on main process"
 
     run_tests()

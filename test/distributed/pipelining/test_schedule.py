@@ -8,6 +8,7 @@ import os
 from model_registry import MultiMLP
 
 import torch
+import torch.distributed as c10d
 from torch.distributed.pipelining import (
     Schedule1F1B,
     ScheduleGPipe,
@@ -38,18 +39,20 @@ from torch.distributed.pipelining.schedules import (
     W,
 )
 from torch.distributed.pipelining.stage import _PipelineStageBase, PipelineStage
-from torch.testing._internal.common_distributed import requires_nccl
 from torch.testing._internal.common_utils import (
     check_leaked_tensors,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skip_but_pass_in_sandcastle_if,
     TestCase,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
 ARTIFACTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "artifacts")
+device = torch.accelerator.current_accelerator()
+backend = c10d.get_default_backend_for_device(device) if device is not None else "None"
 
 logger = logging.getLogger(__name__)
 torch.manual_seed(0)
@@ -657,7 +660,10 @@ class TestScheduleLowering(TestCase):
         # print(_format_pipeline_order(simulated_schedule))
         self.assertEqual(num_steps, 113)
 
-    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(
+        not c10d.is_backend_available(backend),
+        f"c10d was not compiled with the NCCL {backend}",
+    )
     def test_grad_with_v_schedule(self):
         """
         We have a special case for V schedules where 2 adjacent stages are on the same rank.
@@ -677,7 +683,6 @@ class TestScheduleLowering(TestCase):
         d_hid = 512
         batch_size = 256
         n_stages = 2
-        device = "cuda"
         full_mod = MultiMLP(d_hid, n_layers=n_stages)
         full_mod.to(device)
 
@@ -776,7 +781,10 @@ class TestScheduleLowering(TestCase):
 
         torch.distributed.destroy_process_group()
 
-    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(
+        not c10d.is_backend_available(backend),
+        f"c10d was not compiled with the {backend}",
+    )
     def test_grad_with_split_b_w(self):
         """
         Ensure that separate dInput and dWeight computations are correctly executed.
@@ -789,7 +797,6 @@ class TestScheduleLowering(TestCase):
         d_hid = 512
         batch_size = 256
         n_stages = 1
-        device = "cuda"
         full_mod = MultiMLP(d_hid, n_layers=n_stages)
         full_mod.to(device)
 
