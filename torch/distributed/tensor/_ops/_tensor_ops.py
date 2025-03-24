@@ -236,6 +236,80 @@ def gen_bucketize_strategy(op_schema: OpSchema) -> StrategyType:
     return bucketize_strategy
 
 
+@register_op_strategy(aten.select.int, schema_info=RuntimeSchemaInfo(1))
+def gen_select_strategy(op_schema: OpSchema) -> StrategyType:
+    """
+    It contains three cases:
+    1. input is replicated, output is replicated
+    2. input is sharded, and shard_dim == selected_dim, first replicate the tensor
+       across the mesh, and do the select. The output is replicated.
+    3. input is sharded, and shard_dim != selected_dim, the output is sharded. Need to
+       figure out the output_shard_dim.
+    """
+    input_strategy = op_schema.args_schema[0]
+    assert isinstance(input_strategy, OpStrategy)
+    assert len(op_schema.args_schema) == 3
+    selected_dim, index = cast(int, op_schema.args_schema[1]), cast(
+        int, op_schema.args_schema[2]
+    )
+    input_shape = input_strategy.shape
+    input_ndim = input_strategy.ndim
+    selected_dim = normalize_dim(selected_dim, input_ndim)
+    index = normalize_dim(index, input_shape[selected_dim])
+
+    select_strategy = OpStrategy([])
+    for arg_strategy in input_strategy.strategies:
+        arg_spec = arg_strategy.output_spec
+        placements = arg_spec.placements
+
+        if arg_spec.is_sharded():
+            # shard_dim == selected_dim, R() -> R()
+            if is_tensor_dim_sharded(arg_spec, dim=selected_dim):
+                # if the input is sharded on the split dim, we need to unshard it
+                placements = replicate_tensor_dim(arg_spec.placements, dim=selected_dim)
+                input_specs = DTensorSpec(arg_spec.mesh, placements)  # R
+                output_specs = DTensorSpec(arg_spec.mesh, placements)  # R
+            else:
+                # shard_dim != selected_dim, need to figure out the placement dim
+                input_specs = arg_spec
+                shard_dims = []
+                for placement in arg_spec.placements:
+                    if placement.is_shard():
+                        shard_dims.append(cast(Shard, placement).dim)
+
+                if input_specs.tensor_meta is None:
+                    raise ValueError(
+                        f"Could not find tensor_meta for {input_specs} in {input_strategy}"
+                    )
+                tensor_shape = list(input_specs.tensor_meta.shape)
+                for shard_dim in shard_dims:
+                    tensor_shape[shard_dim] = 1
+                del tensor_shape[selected_dim]
+
+                output_shard_dim = None
+                for i in range(len(tensor_shape)):
+                    if tensor_shape[i] == 1:
+                        output_shard_dim = i
+                        break
+                assert output_shard_dim is not None
+                output_specs = DTensorSpec(
+                    arg_spec.mesh, placements=(Shard(dim=output_shard_dim),)
+                )  # Shard
+
+        else:
+            # input_spec is R, output_spec is R
+            input_specs = arg_spec
+            output_specs = arg_spec
+
+        select_strategy.strategies.append(
+            PlacementStrategy(
+                output_specs=output_specs,
+                input_specs=(input_specs,),
+            )
+        )
+    return select_strategy
+
+
 @register_op_strategy(aten.slice.Tensor, schema_info=RuntimeSchemaInfo(1))
 def gen_slice_strategy(op_schema: OpSchema) -> StrategyType:
     """Forward all shardings except the slice dimension."""

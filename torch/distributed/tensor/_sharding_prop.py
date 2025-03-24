@@ -492,9 +492,9 @@ class ShardingPropagator:
 
         strategy_costs: list[float] = []
         for strtg in strategy.strategies:
-            assert strtg.redistribute_cost is not None, (
-                "must set redistribute cost each strategy!"
-            )
+            assert (
+                strtg.redistribute_cost is not None
+            ), "must set redistribute cost each strategy!"
             redistribute_cost = sum(chain.from_iterable(strtg.redistribute_cost))
             strategy_costs.append(redistribute_cost)
 
