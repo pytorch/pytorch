@@ -223,7 +223,7 @@ size_t AllocatorConfig::parseRoundUpPower2Divisions(
   return i;
 }
 
-size_t AllocatorConfig::parseAllocatorConfig(
+size_t AllocatorConfig::parseAllocatorBackendConfig(
     const std::vector<std::string>& config,
     size_t i,
     bool& used_MallocAsync) {
@@ -313,7 +313,7 @@ void AllocatorConfig::parseArgs(const char* env) {
   max_split_size_ = std::numeric_limits<size_t>::max();
   roundup_power2_divisions_.assign(kRoundUpPowerOfTwoIntervals, 0);
   garbage_collection_threshold_ = 0;
-  bool used_cudaMallocAsync = false;
+  bool used_MallocAsync = false;
   bool used_native_specific_option = false;
 
   if (env == nullptr) {
@@ -342,7 +342,7 @@ void AllocatorConfig::parseArgs(const char* env) {
       i = parseRoundUpPower2Divisions(config, i);
       used_native_specific_option = true;
     } else if (config_item_view == "backend") {
-      i = parseAllocatorConfig(config, i, used_cudaMallocAsync);
+      i = parseAllocatorBackendConfig(config, i, used_MallocAsync);
     } else if (config_item_view == "expandable_segments") {
       used_native_specific_option = true;
       consumeToken(config, ++i, ':');
@@ -355,12 +355,8 @@ void AllocatorConfig::parseArgs(const char* env) {
       config_item_view = config[i];
       expandable_segments_ = (config_item_view == "True");
     } else if (
-        // ROCm build's hipify step will change "cuda" to "hip", but for ease of
-        // use, accept both. We must break up the string to prevent hipify here.
-        config_item_view == "release_lock_on_hipmalloc" ||
         config_item_view ==
-            "release_lock_on_c"
-            "udamalloc") {
+        ("release_lock_on_" + c10::DeviceTypeName(device_type_) + "malloc")) {
       used_native_specific_option = true;
       consumeToken(config, ++i, ':');
       ++i;
@@ -368,16 +364,15 @@ void AllocatorConfig::parseArgs(const char* env) {
           i < config.size() &&
               (std::string_view(config[i]) == "True" ||
                std::string_view(config[i]) == "False"),
-          "Expected a single True/False argument for release_lock_on_cudamalloc");
+          "Expected a single True/False argument for release_lock_on_",
+          device_type_,
+          "malloc");
       config_item_view = config[i];
       release_lock_on_device_malloc_ = (config_item_view == "True");
     } else if (
-        // ROCm build's hipify step will change "cuda" to "hip", but for ease of
-        // use, accept both. We must break up the string to prevent hipify here.
-        config_item_view == "pinned_use_hip_host_register" ||
         config_item_view ==
-            "pinned_use_c"
-            "uda_host_register") {
+        ("pinned_use_" + c10::DeviceTypeName(device_type_) +
+         "_host_register")) {
       i = parsePinnedUseHostRegister(config, i);
       used_native_specific_option = true;
     } else if (config_item_view == "pinned_num_register_threads") {
@@ -396,9 +391,11 @@ void AllocatorConfig::parseArgs(const char* env) {
     }
   }
 
-  if (used_cudaMallocAsync && used_native_specific_option) {
+  if (used_MallocAsync && used_native_specific_option) {
     TORCH_WARN(
-        "backend:cudaMallocAsync ignores max_split_size_mb,"
+        "backend:",
+        device_type_,
+        "MallocAsync ignores max_split_size_mb,"
         "roundup_power2_divisions, and garbage_collect_threshold.");
   }
 }
