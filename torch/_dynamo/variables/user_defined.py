@@ -86,6 +86,11 @@ from .lists import SizeVariable
 
 
 try:
+    from easydict import EasyDict as edict
+except ModuleNotFoundError:
+    edict = None
+
+try:
     import numpy as np
 except ModuleNotFoundError:
     np = None
@@ -388,6 +393,18 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.ConstDictVariable(
                 {}, collections.OrderedDict, mutation_type=ValueMutationNew()
             )
+        elif (
+            name == "__new__"
+            and edict
+            and self.value is edict
+            and isinstance(args[0], UserDefinedClassVariable)
+            and args[0].value is edict
+        ):
+            assert len(args) == 1
+            assert len(kwargs) == 0
+            return variables.ConstDictVariable(
+                {}, edict, mutation_type=ValueMutationNew()
+            )
         elif name == "__new__" and UserDefinedClassVariable.is_supported_new_method(
             self.value.__new__
         ):
@@ -424,7 +441,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             from .ctx_manager import NullContextVariable
 
             return NullContextVariable()
-        elif self.value is collections.OrderedDict:
+        elif self.value is collections.OrderedDict or (edict and self.value is edict):
             return tx.inline_user_function_return(
                 VariableTracker.build(tx, polyfills.construct_dict),
                 [self, *args],

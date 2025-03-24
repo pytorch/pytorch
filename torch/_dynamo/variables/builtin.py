@@ -1920,6 +1920,7 @@ class BuiltinVariable(VariableTracker):
                 variables.UserDefinedObjectVariable,
                 variables.NestedUserFunctionVariable,
                 variables.ExceptionVariable,
+                variables.ConstDictVariable,
             ),
         ):
             return obj.call_method(tx, "__setattr__", [name_var, val], {})

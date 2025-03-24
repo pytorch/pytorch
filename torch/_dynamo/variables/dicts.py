@@ -43,6 +43,11 @@ from .base import ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 
 
+try:
+    from easydict import EasyDict as edict
+except ModuleNotFoundError:
+    edict = None
+
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
@@ -515,8 +520,13 @@ class ConstDictVariable(VariableTracker):
             self.items.pop(key)
             self.items[key] = val
             return ConstantVariable.create(None)
-        else:
-            return super().call_method(tx, name, args, kwargs)
+        elif edict and self.user_cls is edict:
+            if name == "__setattr__":
+                return self.call_method(tx, "__setitem__", args, kwargs)
+            elif name == "__getattr__":
+                return self.call_method(tx, "__getitem__", args, kwargs)
+
+        return super().call_method(tx, name, args, kwargs)
 
     def unpack_var_sequence(self, tx):
         self.install_dict_keys_match_guard()
@@ -530,6 +540,14 @@ class ConstDictVariable(VariableTracker):
                 return ConstantVariable.create(True)
             return ConstantVariable.create(False)
         unimplemented(f"hasattr on {self.user_cls} is not supported")
+
+    def var_getattr(self, tx: "InstructionTranslator", name):
+        if edict and self.user_cls is edict:
+            name_vt = ConstantVariable.build(tx, name)
+            if self.maybe_getitem_const(name_vt):
+                return self.call_method(tx, "__getitem__", args=[name_vt], kwargs={})
+
+        return super().var_getattr(tx, name)
 
     def clone(self, **kwargs):
         self.install_dict_keys_match_guard()

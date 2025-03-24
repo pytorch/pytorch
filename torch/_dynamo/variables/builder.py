@@ -274,6 +274,10 @@ try:
 except ModuleNotFoundError:
     np = None
 
+try:
+    from easydict import EasyDict as edict
+except ModuleNotFoundError:
+    edict = None
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
@@ -652,6 +656,7 @@ class VariableBuilder:
                 output, tuple_cls=type(value), source=self.source
             )
             return result
+        # elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)) or (edict and istype(value, edict)):
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             all_const = all(ConstantVariable.is_literal(k) for k in value.keys())
