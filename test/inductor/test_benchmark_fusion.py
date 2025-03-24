@@ -64,7 +64,10 @@ class BenchmarkFusionTestTemplate:
 
     @slowTest
     def test_resnet18(self):
-        import torchvision
+        try:
+            import torchvision
+        except ImportError:
+            self.skipTest("TorchVision not available")
 
         model = torchvision.models.resnet18()
         model.eval()

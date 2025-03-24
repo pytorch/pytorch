@@ -265,6 +265,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     )
     @dtypes(torch.float, torch.bfloat16, torch.half)
     @torch.fx.experimental._config.patch(use_duck_shape=False)
+    @torch._dynamo.config.patch(specialize_float=True)
     def test_linear_with_pointwise(
         self, batch_size, in_features, out_features, bias, epilogue, dtype
     ):
@@ -1809,7 +1810,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         with verify(dtype) as (atol, rtol), torch.no_grad():
             expected = mod(v)
             actual = test_aot_inductor_utils.AOTIRunnerUtil.run(
-                "cpu",
                 mod,
                 (v,),
             )
@@ -2045,7 +2045,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         with verify(dtype) as (atol, rtol), torch.no_grad():
             expected = mod(v)
             actual = test_aot_inductor_utils.AOTIRunnerUtil.run(
-                "cpu",
                 mod,
                 (v,),
             )
@@ -2420,7 +2419,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         with verify(dtype) as (atol, rtol), torch.no_grad():
             expected = mod(x, w)
             actual = test_aot_inductor_utils.AOTIRunnerUtil.run(
-                "cpu",
                 mod,
                 (x, w),
             )
@@ -2477,7 +2475,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 x,
             )
             actual = test_aot_inductor_utils.AOTIRunnerUtil.run(
-                "cpu",
                 mod,
                 (x,),
             )

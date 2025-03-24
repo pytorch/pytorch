@@ -493,8 +493,9 @@ class _LocalAutotuneCacheBackend(RemoteCacheBackend[bytes]):
     @override
     def _put(self, key: str, data: bytes) -> None:
         os.makedirs(os.path.dirname(key), exist_ok=True)
-        with open(key, "wb") as fd:
-            fd.write(data)
+        from torch._inductor import codecache
+
+        codecache.write_atomic(key, data)
 
 
 class LocalAutotuneCache(RemoteCache[JsonDataTy]):

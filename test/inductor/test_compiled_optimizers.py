@@ -496,9 +496,7 @@ def make_test(
                 opt_compiled.state,
             )
 
-            # In cpp_wrapper mode, cudagraphs doesn't run, but we leave it "enabled" to
-            # make sure no errors occur when the two configs are enabled simultaneously.
-            if run_cudagraphs and not config.cpp_wrapper:
+            if run_cudagraphs:
                 self.check_cudagraphs_ran()
 
             if self.check_kernel_count:
