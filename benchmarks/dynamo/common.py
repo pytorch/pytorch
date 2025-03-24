@@ -1408,7 +1408,7 @@ class AOTInductorModelCache:
     def load(cls, model, example_inputs):
         import torch._inductor
         import torch.export._trace
-        from torch.export.dynamic_shapes import _tree_map_with_path
+        from torch.export.dynamic_shapes import _combine_args, _tree_map_with_path
 
         key = weakref.ref(model)
         if key not in cls.cache:
@@ -1428,7 +1428,7 @@ class AOTInductorModelCache:
             else:
                 _register_dataclass_output_as_pytree(example_outputs)
 
-            combined_args = tuple(example_args) + tuple(example_kwargs.values())
+            combined_args = _combine_args(model, example_args, example_kwargs)
             dynamic_shapes = _tree_map_with_path(
                 _produce_dynamic_shapes_for_export, combined_args
             )
@@ -1449,13 +1449,13 @@ class AOTInductorModelCache:
 
 
 def export(model, example_inputs):
-    from torch.export.dynamic_shapes import _tree_map_with_path
+    from torch.export.dynamic_shapes import _combine_args, _tree_map_with_path
 
     example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
     example_outputs = model(*example_args, **example_kwargs)
     _register_dataclass_output_as_pytree(example_outputs)
 
-    combined_args = tuple(example_args) + tuple(example_kwargs.values())
+    combined_args = _combine_args(model, example_args, example_kwargs)
     dynamic_shapes = _tree_map_with_path(
         _produce_dynamic_shapes_for_export, combined_args
     )
@@ -1822,6 +1822,10 @@ class BenchmarkRunner:
 
     @property
     def skip_models_due_to_control_flow(self):
+        return set()
+
+    @property
+    def skip_models_due_to_export_not_supported(self):
         return set()
 
     @property
@@ -3588,15 +3592,6 @@ def run(runner, args, original_dir=None):
             # some of the models do not support use_deterministic_algorithms
             torch.use_deterministic_algorithms(True)
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
-        if args.only is not None and args.only in {
-            "DebertaForQuestionAnswering",
-            "RobertaForQuestionAnswering",
-            "nvidia_deeprecommender",
-            "volo_d1_224",
-        }:
-            # These seem unhappy with numerics of larger cuBLASLt workspace
-            # sizes following #145130 (due to enabling split-k?)
-            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.allow_tf32 = False
         torch.backends.cudnn.benchmark = False
@@ -3786,6 +3781,7 @@ def run(runner, args, original_dir=None):
 
             # AOTInductor doesn't support control flow yet
             runner.skip_models.update(runner.skip_models_due_to_control_flow)
+            runner.skip_models.update(runner.skip_models_due_to_export_not_supported)
         elif args.backend == "torchao":
             assert "cuda" in args.devices, "Quantization requires CUDA device."
             assert args.bfloat16, "Quantization requires dtype bfloat16."

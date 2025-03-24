@@ -940,7 +940,7 @@ def _register_quantization_maxpool2d():
             *max_pool2d_args,
         )
         dequantize_lowmem_maxpool2d_pattern = CallFunction(
-            prims._low_memory_max_pool_with_offsets.default,
+            prims._low_memory_max_pool2d_with_offsets.default,
             get_dequantize_per_tensor_activation_pattern(),
             KeywordArg("kernel_size"),
             *max_pool2d_args,
@@ -1071,6 +1071,10 @@ def _register_quantization_reshape():
 def _is_valid_woq_optimization_pattern():
     def fn(match):
         assert all(k in match.kwargs for k in ("x", "weight", "scales"))
+        if not all(
+            hasattr(match.kwargs[key], "meta") for key in ["x", "weight", "scales"]
+        ):
+            return False
         x = match.kwargs["x"].meta["val"]
         weight = match.kwargs["weight"].meta["val"]
         scales = match.kwargs["scales"].meta["val"]
@@ -1387,10 +1391,8 @@ def _is_valid_dequant_conv2d_pattern(dtype):
                 meta_value is None
                 or (meta_value.device.type != "cpu" and meta_value.device.type != "xpu")
                 or meta_value.dim() != 4
-                or (meta_value.device.type == "xpu" and match.kwargs["groups"] != 1)
             ):
                 # Only support conv2d now
-                # Grouped quantized convolution is not supported at XPU backend
                 return False
 
         assert dtype in [torch.float32, torch.bfloat16]
