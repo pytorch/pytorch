@@ -103,11 +103,21 @@ kernel void unary_strided(
     }                                                                           \
   }
 
+template <typename T>
+inline constant T& ref_at_offs(constant void* ptr, long offs) {
+  return *reinterpret_cast<constant T*>(
+      static_cast<constant char*>(ptr) + offs);
+}
+template <typename T>
+inline device T& ref_at_offs(device void* ptr, long offs) {
+  return *reinterpret_cast<device T*>(static_cast<device char*>(ptr) + offs);
+}
+
 template <typename T, typename F>
 kernel void binary_strided(
-    constant T* input [[buffer(0)]],
-    constant T* other [[buffer(1)]],
-    device result_of<F, T, T>* output [[buffer(2)]],
+    constant void* input [[buffer(0)]],
+    constant void* other [[buffer(1)]],
+    device void* output [[buffer(2)]],
     constant long* sizes [[buffer(3)]],
     constant long* input_strides [[buffer(4)]],
     constant long* other_strides [[buffer(5)]],
@@ -117,10 +127,12 @@ kernel void binary_strided(
   F f;
   int pos[max_ndim];
   pos_from_thread_index(int(index), pos, sizes, ndim);
-  const auto input_offs = offset_from_coord(pos, input_strides, ndim) / sizeof(T);
-  const auto other_offs = offset_from_coord(pos, other_strides, ndim) / sizeof(T);
-  const auto output_offs = offset_from_coord(pos, output_strides, ndim) / sizeof(result_of<F, T, T>);
-  output[output_offs] = f(input[input_offs], other[other_offs]);
+  const auto input_offs = offset_from_coord(pos, input_strides, ndim);
+  const auto other_offs = offset_from_coord(pos, other_strides, ndim);
+  const auto output_offs = offset_from_coord(pos, output_strides, ndim);
+  const auto a = ref_at_offs<T>(input, input_offs);
+  const auto b = ref_at_offs<T>(other, other_offs);
+  ref_at_offs<result_of<F, T, T>>(output, output_offs) = f(a, b);
 }
 
 template <typename T, typename F>
@@ -136,9 +148,9 @@ kernel void binary_dense(
 #define REGISTER_BINARY_INDEXING_OP(NAME, DTYPE)                               \
   template [[host_name(#NAME "_strided_" #DTYPE)]] kernel void ::c10::metal::  \
       binary_strided<DTYPE, NAME##_functor>(                                   \
-          constant DTYPE * input,                                              \
-          constant DTYPE * other,                                              \
-          device ::c10::metal::result_of<NAME##_functor, DTYPE, DTYPE> * out_, \
+          constant void* input,                                                \
+          constant void* other,                                                \
+          device void* out,                                                    \
           constant long* sizes,                                                \
           constant long* input_strides,                                        \
           constant long* output_strides,                                       \
