@@ -27,8 +27,8 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
-BACKEND = dist.Backend.NCCL
-WORLD_SIZE = min(4, max(2, torch.cuda.device_count()))
+BACKEND = dist.Backend.default_device_backend_map[torch.accelerator.current_accelerator().type]
+WORLD_SIZE = min(4, max(2, torch.accelerator.device_count()))
 
 
 def with_comms(func=None):
@@ -39,7 +39,8 @@ def with_comms(func=None):
 
     @wraps(func)
     def wrapper(self, *args, **kwargs):
-        if BACKEND == dist.Backend.NCCL and torch.cuda.device_count() < self.world_size:
+        if BACKEND == (BACKEND == dist.Backend.NCCL or BACKEND == dist.Backend.XCCL) \
+          and torch.accelerator.device_count() < self.world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
         self.dist_init()
         func(self)
@@ -59,7 +60,7 @@ class C10dErrorLoggerTest(MultiProcessTestCase):
     def device(self):
         return (
             torch.device(self.rank)
-            if BACKEND == dist.Backend.NCCL
+            if (BACKEND == dist.Backend.NCCL or BACKEND == dist.Backend.XCCL)
             else torch.device("cpu")
         )
 
@@ -84,9 +85,9 @@ class C10dErrorLoggerTest(MultiProcessTestCase):
             init_method=f"file://{self.file_name}",
         )
 
-        # set device for nccl pg for collectives
-        if BACKEND == "nccl":
-            torch.cuda.set_device(self.rank)
+        # set device for nccl or xccl pg for collectives
+        if BACKEND in ["nccl", "xccl"]:
+            torch.accelerator.set_device_index(self.rank)
 
     def test_get_or_create_logger(self):
         self.assertIsNotNone(_c10d_logger)
@@ -117,7 +118,7 @@ class C10dErrorLoggerTest(MultiProcessTestCase):
                 re.search("({.+})", captured.output[0]).group(0).replace("'", '"')
             )
 
-            self.assertEqual(len(error_msg_dict), 9)
+            self.assertEqual(len(error_msg_dict), 8 if BACKEND == "xccl" else 9)
 
             self.assertIn("pg_name", error_msg_dict.keys())
             self.assertEqual("None", error_msg_dict["pg_name"])
@@ -126,13 +127,16 @@ class C10dErrorLoggerTest(MultiProcessTestCase):
             self.assertEqual("broadcast", error_msg_dict["func_name"])
 
             self.assertIn("backend", error_msg_dict.keys())
-            self.assertEqual("nccl", error_msg_dict["backend"])
 
-            self.assertIn("nccl_version", error_msg_dict.keys())
-            nccl_ver = torch.cuda.nccl.version()
-            self.assertEqual(
-                ".".join(str(v) for v in nccl_ver), error_msg_dict["nccl_version"]
-            )
+            if BACKEND == "nccl":
+                self.assertEqual("nccl", error_msg_dict["backend"])
+                self.assertIn("nccl_version", error_msg_dict.keys())
+                nccl_ver = torch.cuda.nccl.version()
+                self.assertEqual(
+                    ".".join(str(v) for v in nccl_ver), error_msg_dict["nccl_version"]
+                )
+            else:
+                self.assertEqual("xccl", error_msg_dict["backend"])
 
             # In this test case, group_size = world_size, since we don't have multiple processes on one node.
             self.assertIn("group_size", error_msg_dict.keys())

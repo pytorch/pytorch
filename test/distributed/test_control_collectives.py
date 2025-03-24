@@ -207,8 +207,9 @@ class TestCollectives(TestCase):
 
 
 if __name__ == "__main__":
+    mod = torch.get_device_module(torch.accelerator.current_accelerator().type)
     assert (
-        not torch.cuda._initialized
-    ), "test_distributed must not have initialized CUDA context on main process"
+        not mod._initialized
+    ), "test_distributed must not have initialized accelerator context on main process"
 
     run_tests()
