@@ -86,6 +86,12 @@ static void xlog1py_mps_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "xlog1py");
 }
 
+static void chebyshev_polynomial_t_mps_kernel(TensorIteratorBase& iter) {
+  TORCH_CHECK_TYPE(isFloatingType(iter.common_dtype()),
+                   "chebyshev_polynomial_t_mps not implemented for non-floating types");
+  lib.exec_binary_kernel(iter, "chebyshev_polynomial_t");
+}
+
 static void polar_mps_kernel(TensorIterator& iter) {
   lib.exec_binary_kernel(iter, "polar");
 }
@@ -100,6 +106,7 @@ REGISTER_DISPATCH(copysign_stub, &copysign_mps_kernel)
 REGISTER_DISPATCH(nextafter_stub, &nextafter_mps_kernel)
 REGISTER_DISPATCH(zeta_stub, &zeta_mps_kernel)
 REGISTER_DISPATCH(xlog1py_stub, &xlog1py_mps_kernel)
+REGISTER_DISPATCH(chebyshev_polynomial_t_stub, &chebyshev_polynomial_t_mps_kernel)
 REGISTER_DISPATCH(polar_stub, &polar_mps_kernel);
 REGISTER_DISPATCH(complex_stub, &complex_mps_kernel);
 } // namespace at::native

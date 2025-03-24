@@ -1523,5 +1523,43 @@ inline float scaled_modified_bessel_k1_forward(T x) {
   return (0.5 * (b - p) / ::metal::precise::sqrt(x));
 }
 
+template <typename T>
+float chebyshev_polynomial_t_forward(T x, int64_t n) {
+  if (n < 0) {
+    return 0.0;
+  }
+
+  if (::metal::fabs(x) == 1.0) {
+    if (x > 0.0 || n % 2 == 0) {
+      return 1.0;
+    }
+
+    return -1.0;
+  }
+
+  if ((n > 6) && (::metal::precise::fabs(x) < 1.0)) {
+    return ::metal::precise::cos(n * ::metal::precise::acos(x));
+  }
+
+  if (n == 0) {
+    return 1.0;
+  }
+
+  if (n == 1) {
+    return x;
+  }
+
+  float p = 1.0;
+  float q = x;
+  float r;
+
+  for (int64_t k = 2; k <= n; k++) {
+    r = (x + x) * q - p;
+    p = q;
+    q = r;
+  }
+  return r;
+}
+
 } // namespace metal
 } // namespace c10
