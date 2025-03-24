@@ -1038,11 +1038,11 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter, const std:
                     input,
                     other,
                     out,
-                    out.sizes(),
-                    input.strides(),
-                    other.strides(),
-                    out.strides(),
-                    out.ndimension());
+                    iter.shape(),
+                    iter.strides(1),
+                    iter.strides(2),
+                    iter.strides(0),
+                    iter.ndim());
       }
       mtl_dispatch1DJob(computeEncoder, binaryPSO, numThreads);
       getMPSProfiler().endProfileKernel(binaryPSO);

@@ -117,9 +117,9 @@ kernel void binary_strided(
   F f;
   int pos[max_ndim];
   pos_from_thread_index(int(index), pos, sizes, ndim);
-  const auto input_offs = offset_from_coord(pos, input_strides, ndim);
-  const auto other_offs = offset_from_coord(pos, other_strides, ndim);
-  const auto output_offs = offset_from_coord(pos, output_strides, ndim);
+  const auto input_offs = offset_from_coord(pos, input_strides, ndim) / sizeof(T);
+  const auto other_offs = offset_from_coord(pos, other_strides, ndim) / sizeof(T);
+  const auto output_offs = offset_from_coord(pos, output_strides, ndim) / sizeof(result_of<F, T, T>);
   output[output_offs] = f(input[input_offs], other[other_offs]);
 }
 
