@@ -245,8 +245,7 @@ class GraphModule(torch.nn.Module):
         with self.assertRaisesRegex(RuntimeError, "aliases of the inputs"):
             f(inner, x, y)
 
-        with self.assertRaisesRegex(RuntimeError, "inputs are mutated"):
-            f(inner2, x, y)
+        f(inner2, x, y)
 
     def test_eager_call(self):
         def inner(x, y):

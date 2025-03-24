@@ -579,7 +579,7 @@ inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
   }
 
   // print alias info if it has beforeSets or isWrite is True.
-  if (arg.alias_info() && (!arg.alias_info()->beforeSets().empty() || arg.alias_info()->isWrite())) {
+  if (arg.alias_info() && !arg.alias_info()->beforeSets().empty()) {
     out << *arg.alias_info();
   }
 

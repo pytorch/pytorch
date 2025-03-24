@@ -318,8 +318,11 @@ TypePtr createTupleType(std::vector<TypePtr> types) {
   return TupleType::create(types);
 }
 
-AliasInfo createAliasInfo(bool is_write) {
+AliasInfo createAliasInfo(std::string arg_name, bool is_write) {
   auto alias_info = AliasInfo();
+  // This follows the schema parser implmentation
+  alias_info.addBeforeSet(
+        Symbol::fromQualString("alias::$" + arg_name));
   alias_info.setIsWrite(is_write);
   return alias_info;
 }
