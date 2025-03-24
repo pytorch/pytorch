@@ -123,7 +123,7 @@ class GeneralizedPareto(Distribution):
         valid = concentration < 1
         safe_conc = torch.where(valid, concentration, 0.5)
         result = self.loc + self.scale / (1 - safe_conc)
-        return torch.where(valid, result, torch.full_like(result, nan))
+        return torch.where(valid, result, nan)
 
     @property
     def variance(self):
@@ -131,7 +131,7 @@ class GeneralizedPareto(Distribution):
         valid = concentration < 0.5
         safe_conc = torch.where(valid, concentration, 0.25)
         result = self.scale**2 / ((1 - safe_conc) ** 2 * (1 - 2 * safe_conc))
-        return torch.where(valid, result, torch.full_like(result, nan))
+        return torch.where(valid, result, nan)
 
     def entropy(self):
         ans = torch.log(self.scale) + self.concentration + 1
@@ -143,11 +143,8 @@ class GeneralizedPareto(Distribution):
 
     @constraints.dependent_property(is_discrete=False, event_dim=0)
     def support(self):
-        neg_conc = self.concentration < 0
         upper = torch.where(
-            neg_conc,
-            self.loc - self.scale / self.concentration,
-            torch.full_like(self.loc, inf),
+            self.concentration < 0, self.loc - self.scale / self.concentration, inf
         )
         lower = self.loc
         return constraints.interval(lower, upper)
