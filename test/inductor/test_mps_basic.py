@@ -98,6 +98,9 @@ class MPSBasicTests(TestCase):
         "modified_bessel_i0",
         "modified_bessel_i1",
         "modified_bessel_k0",
+        "modified_bessel_k1",
+        "scaled_modified_bessel_k0",
+        "scaled_modified_bessel_k1",
         "entr",
     ]
 
