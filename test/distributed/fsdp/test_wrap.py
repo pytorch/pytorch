@@ -55,6 +55,8 @@ from torch.testing._internal.common_utils import (
 )
 
 device_type = torch.accelerator.current_accelerator().type
+import torch.distributed as dist
+backend = dist.get_default_backend_for_device(device_type)
 
 class BatchNormNet(nn.Module):
     def __init__(self) -> None:
@@ -757,7 +759,7 @@ class TestAutoWrap(TestCase):
 
         file_name = tempfile.NamedTemporaryFile(delete=False).name
         torch.distributed.init_process_group(
-            backend="nccl",
+            backend=backend,
             init_method=f"{FILE_SCHEMA}_{file_name}",
             rank=0,
             world_size=1,

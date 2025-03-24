@@ -35,7 +35,7 @@ device_type = torch.accelerator.current_accelerator().type
 
 # bfloat16 is only supported by CUDA 11+ or XPU
 BFLOAT16_AVAILABLE = ( torch.cuda.is_available() or torch.xpu.is_available() ) and (
-    torch.version.cuda is not None or torch.version.hip is not None
+    torch.version.cuda is not None or torch.version.hip is not None or torch.version.xpu is not None
 )
 
 
@@ -402,7 +402,7 @@ class TestCommunicationHooks(FSDPTest):
             state, hook, sharding_strategy, torch.float16, has_wrapping
         )
 
-    @requires_nccl()
+    @requires_nccl_or('xccl')
     @requires_nccl_version((2, 10), "Need NCCL 2.10+ for BF16_COMPRESS")
     @skip_but_pass_in_sandcastle_if(
         not BFLOAT16_AVAILABLE,

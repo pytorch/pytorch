@@ -9,7 +9,7 @@ from typing import Optional
 
 import torch
 from torch import distributed as dist
-from torch.cuda.amp.common import amp_definitely_not_available
+
 from torch.distributed.fsdp import CPUOffload, MixedPrecision
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     FullyShardedDataParallel as FSDP,
@@ -51,6 +51,14 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
+device_type = torch.accelerator.current_accelerator().type
+
+if device_type == "xpu":
+    def amp_definitely_not_available():
+        return False
+else:
+    from torch.cuda.amp.common import amp_definitely_not_available
+
 
 params = "cpu_offload,sharding_strategy,mixed_precision,use_orig_params"
 cpu_offload_config = [CPUOffload(offload_params=True), CPUOffload(offload_params=False)]
@@ -80,7 +88,7 @@ class TestShardGradScaler(TestCase):
     )
     def test_grad_scaling(self):
         pg = DummyProcessGroup(0, 1)
-        scaler = ShardedGradScaler(init_scale=2.0, process_group=pg, enabled=True)
+        scaler = ShardedGradScaler(device=device_type, init_scale=2.0, process_group=pg, enabled=True)
         t0 = torch.full((1,), 4.0, dtype=torch.float32, device="cpu")
         t1 = torch.full((1,), 8.0, dtype=torch.float32, device="cpu")
         outputs = [t1.clone(), (t0.clone(), t1.clone()), [t0.clone(), t1.clone()]]
@@ -96,7 +104,7 @@ class TestShardGradScaler(TestCase):
     )
     def test_scaling_unscaling_sparse(self):
         pg = DummyProcessGroup(0, 1)
-        scaler = ShardedGradScaler(init_scale=2.0, process_group=pg, enabled=True)
+        scaler = ShardedGradScaler(device=device_type, init_scale=2.0, process_group=pg, enabled=True)
         inv_scale = torch.full((1,), 0.5, dtype=torch.float, device="cpu")
         found_inf = torch.full((1,), 0, dtype=torch.float, device="cpu")
 
@@ -141,7 +149,7 @@ class TestShardGradScaler(TestCase):
     )
     def test_inf_gradients_skip_optim_step(self):
         pg = DummyProcessGroup(0, 1)
-        scaler = ShardedGradScaler(init_scale=2.0, process_group=pg, enabled=True)
+        scaler = ShardedGradScaler(device=device_type, init_scale=2.0, process_group=pg, enabled=True)
         loss = torch.full((1,), 4.0, dtype=torch.float32, device="cpu")
         t0 = torch.tensor([float("inf")], dtype=torch.float32, device="cpu")
         t0.grad = t0.clone()
@@ -228,8 +236,9 @@ class TestShardedGradScalerParityWithDDP(FSDPTest):
                 {
                     TransformerEncoderLayer,
                     TransformerDecoderLayer,
-                }
+                },
             ),
+            "device_id": self.rank,
         }
         model = FSDP(model, **fsdp_kwargs)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
@@ -257,7 +266,7 @@ class TestShardedGradScalerParityWithDDP(FSDPTest):
             cpu_offload=cpu_offload,
             use_orig_params=use_orig_params,
         )
-        grad_scaler = ShardedGradScaler(init_scale=2.0)
+        grad_scaler = ShardedGradScaler(device=device_type, init_scale=2.0)
         ref_grad_scaler = torch.amp.GradScaler(device=device_type, init_scale=2.0)
         scaled_losses: list[torch.Tensor] = []
         device = torch.device(device_type)

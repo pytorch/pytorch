@@ -61,6 +61,7 @@ if TEST_WITH_DEV_DBG_ASAN:
     sys.exit(0)
 
 device_type = torch.accelerator.current_accelerator().type
+
 class MyModel(nn.Module):
     def __init__(self) -> None:
         super().__init__()
@@ -93,7 +94,7 @@ class TestFSDPMiscMultiProcess(FSDPTest):
           without specifying a device ID (i.e. ``torch.device("cuda")``) warns
         """
         dev_id = (
-            torch.cuda.current_device()
+            torch.accelerator.current_device_index()
             if use_index
             else torch.device(device_type, torch.accelerator.current_device_index())
         )
@@ -197,7 +198,7 @@ class TestFSDPMiscMultiProcess(FSDPTest):
 
         seed = self.rank + 20231010
         torch.manual_seed(seed)
-        torch.cuda.manual_seed(seed)
+        torch.get_device_module(device_type).manual_seed(seed)
 
         losses = []
         grads = []
@@ -207,7 +208,7 @@ class TestFSDPMiscMultiProcess(FSDPTest):
             for model, opt in ((fsdp_model, fsdp_opt), (ddp_model, ddp_opt)):
                 seed = self.rank + i
                 torch.manual_seed(seed)
-                torch.cuda.manual_seed(seed)
+                torch.get_device_module(device_type).manual_seed(seed)
                 loss = model(x, y).sum()
                 losses.append(loss)
                 loss.backward()
@@ -237,7 +238,7 @@ class TestFSDPMiscMultiProcess(FSDPTest):
             for model, opt in ((fsdp_model, fsdp_opt), (ddp_model, ddp_opt)):
                 seed = self.rank + i
                 torch.manual_seed(seed)
-                torch.cuda.manual_seed(seed)
+                torch.get_device_module(device_type).manual_seed(seed)
                 loss = model(x, y).sum()
                 losses.append(loss)
                 loss.backward()
@@ -272,7 +273,7 @@ class TestFSDPMiscMultiProcess(FSDPTest):
                     return out1
 
         fsdp = FSDP(
-            MyModel().cuda(),
+            MyModel().to(device=device_type),
             sharding_strategy=sharding_strategy,
             auto_wrap_policy=always_wrap_policy,
         )
@@ -336,7 +337,7 @@ class TestFSDPMiscMultiProcess(FSDPTest):
                     torch.testing.assert_close(p1, p2)
 
         fsdp_ctor = functools.partial(FSDP, sharding_strategy=sharding_strategy)
-        m = MyModule().cuda()
+        m = MyModule().to(device=device_type)
         m_local = deepcopy(m)
         local_m = m_local
         prev_params = [p.clone() for p in m_local.parameters()]
@@ -385,7 +386,7 @@ class TestFSDPMiscMultiProcess(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_fsdp_optim_overlap_no_use_orig_params_error(self):
         fsdp_overlap = FSDP(
-            MyModel().cuda(),
+            MyModel().to(device=device_type),
             auto_wrap_policy=always_wrap_policy,
             use_orig_params=False,
         )
@@ -409,16 +410,16 @@ class TestFSDPMiscMultiProcess(FSDPTest):
         torch.manual_seed(0)
         for cpu_offload in [True, False]:
             offload = CPUOffload(offload_params=cpu_offload)
-            model = MyModel().cuda()
+            model = MyModel().to(device=device_type)
             model_overlap = deepcopy(model)
             fsdp = FSDP(
-                model.cuda(),
+                model.to(device=device_type),
                 auto_wrap_policy=always_wrap_policy,
                 use_orig_params=True,
                 cpu_offload=offload,
             )
             fsdp_overlap = FSDP(
-                model_overlap.cuda(),
+                model_overlap.to(device=device_type),
                 auto_wrap_policy=always_wrap_policy,
                 use_orig_params=True,
                 cpu_offload=offload,
@@ -546,7 +547,7 @@ class TestFSDPMiscMultiProcess(FSDPTest):
         """Tests that passing a CPU module to FSDP preserves that the wrapped
         module is on CPU after FSDP initialization, albeit after logging a
         warning, and that FSDP moves CPU input to GPU before the forward."""
-        torch.cuda.set_device(self.rank)
+        torch.accelerator.set_device_index(self.rank)
         regex = "passed-in `module` is on CPU"
         context = self.assertWarnsRegex(
             expected_warning=UserWarning, expected_regex=regex
@@ -561,7 +562,7 @@ class TestFSDPMiscMultiProcess(FSDPTest):
         devices = {p.device for p in fsdp_model.parameters()}
         self.assertEqual(1, len(devices))
         self.assertEqual(torch.device("cpu"), devices.pop())
-        fsdp_model = fsdp_model.cuda()
+        fsdp_model = fsdp_model.to(device=device_type)
         # Ensure fwd + backward can be performed after moving to CUDA.
         # CPU input also tests that input is correctly moved to appropriate
         # CUDA device.
@@ -606,7 +607,7 @@ class TestFSDPMiscMultiProcess(FSDPTest):
             nested_wrapped_module,
             self.process_group,
             auto_wrap_policy=ModuleWrapPolicy({nn.Linear}),
-            device_id=torch.cuda.current_device(),
+            device_id=torch.accelerator.current_device_index(),
             sync_module_states=True,
         )
         # Each rank's buffers should be 0s since rank 0 is the source, and they
@@ -683,7 +684,7 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
             auto_wrap_policy = ModuleWrapPolicy(module_classes)
         fsdp_kwargs = {
             "auto_wrap_policy": auto_wrap_policy,
-            "device_id": torch.cuda.current_device(),
+            "device_id": torch.accelerator.current_device(),
         }
         fsdp_model = TransformerWithSharedParams.init(
             self.process_group,
@@ -729,7 +730,7 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
             model,
             auto_wrap_policy=auto_wrap_policy,
             cpu_offload=CPUOffload(offload_params=True),
-            device_id=torch.cuda.current_device(),
+            device_id=torch.accelerator.current_device_index(),
             use_orig_params=use_orig_params,
         )
         cpu_device = torch.device("cpu")
@@ -742,12 +743,20 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
         module that does not match the GPU device ID raises an error."""
         # TODO: override FSDP MT Thread _run to set this instead of here for
         # every test.
-        torch.cuda.set_device(self.rank)
-        context = (
-            self.assertRaisesRegex(ValueError, f"cuda:{self.rank} vs cuda:0")
-            if self.rank != 0
-            else nullcontext()
-        )
+        torch.accelerator.set_device_index(self.rank)
+        
+        if device_type == "xpu":
+            context = (
+                self.assertRaisesRegex(ValueError, f"xpu:{self.rank} vs xpu:0")
+                if self.rank != 0
+                else nullcontext()
+            )
+        else:
+            context = (
+                self.assertRaisesRegex(ValueError, f"cuda:{self.rank} vs cuda:0")
+                if self.rank != 0
+                else nullcontext()
+            )
         with context:
             NestedWrappedModule.init(
                 self.process_group,
@@ -764,18 +773,18 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
         """Tests a CPU + GPU module supported if device_id is passed
         in, errors if device_id is not.
         """
-        torch.cuda.set_device(self.rank)
+        torch.accelerator.set_device_index(self.rank)
 
         class CPUGPUModule(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.a = nn.Linear(1, 1).cuda()
+                self.a = nn.Linear(1, 1).to(device=device_type)
                 self.b = nn.Linear(1, 1)
 
         cpu_gpu = CPUGPUModule()
-        fsdp = FSDP(cpu_gpu, device_id=torch.cuda.current_device())
+        fsdp = FSDP(cpu_gpu, device_id=torch.accelerator.current_device_index())
         for param in fsdp.parameters():
-            self.assertEqual(param.device, torch.device(torch.cuda.current_device()))
+            self.assertEqual(param.device, torch.device(torch.accelerator.current_device_index()))
 
         # without device_id, we hit an error
         with self.assertRaisesRegex(RuntimeError, "please pass in device_id"):
@@ -783,7 +792,7 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
 
     @skip_if_lt_x_gpu(2)
     def test_fsdp_ignored_module_meta(self):
-        torch.cuda.set_device(self.rank)
+        torch.accelerator.set_device_index(self.rank)
 
         class CPUGPUModule(nn.Module):
             def __init__(self) -> None:
@@ -802,11 +811,11 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
             m = CPUGPUModule()
         m = FSDP(
             m,
-            device_id=torch.cuda.current_device(),
+            device_id=torch.accelerator.current_device_index(),
             ignored_modules=[m.a],
             use_orig_params=True,
             param_init_fn=lambda m: m.to_empty(
-                device=torch.cuda.current_device(), recurse=False
+                device=torch.accelerator.current_device_index(), recurse=False
             ),
         )
         self.assertEqual(meta_device, next(m.a.parameters()).device)
@@ -854,20 +863,20 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
         """
         # TODO: override FSDP MT Thread _run to set this instead of here for
         # every test.
-        torch.cuda.set_device(self.rank)
+        torch.accelerator.set_device_index(self.rank)
         # Test CPU
         no_params = nn.ReLU()
         FSDP(no_params)
         # Test CUDA
-        no_params = nn.ReLU().cuda()
+        no_params = nn.ReLU().to(device=device_type)
         FSDP(no_params)
         # Test CPU + device_id
         no_params = nn.ReLU()
-        FSDP(no_params, device_id=torch.cuda.current_device())
+        FSDP(no_params, device_id=torch.accelerator.current_device_index())
         # For modules with no params, wrong device_id will raise error about
         # inconsistency between compute_device and device_id, since compute_device
         # is computed as torch.cuda.current_device when there are no params.
-        no_params = nn.ReLU().cuda()
+        no_params = nn.ReLU().to(device=device_type)
         context = (
             (
                 self.assertRaisesRegex(
@@ -892,11 +901,11 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
                 super().__init__()
                 # Seed via rank to make model different across ranks
                 torch.manual_seed(rank)
-                torch.cuda.manual_seed(rank)
+                torch.get_device_module(device_type).manual_seed(rank)
                 self.lin = nn.Linear(10, 10, bias=False)
                 self.buffer = nn.Buffer(torch.ones(1) * rank)
 
-        m = MyModel(self.rank).cuda()
+        m = MyModel(self.rank).to(device=device_type)
         _assert_module_states(
             m, process_group=self.process_group, assert_fn=self.assertNotEqual
         )
@@ -913,7 +922,7 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
             m, process_group=self.process_group, assert_fn=self.assertNotEqual
         )
         # Passing sync_module_states into FSDP makes model the same during init.
-        fsdp = FSDP(m, device_id=torch.cuda.current_device(), sync_module_states=True)
+        fsdp = FSDP(m, device_id=torch.accelerator.current_device_index(), sync_module_states=True)
         with fsdp.summon_full_params(fsdp):
             _assert_module_states(
                 fsdp, process_group=self.process_group, assert_fn=self.assertEqual
@@ -1000,7 +1009,7 @@ class TestFSDPMiscWorldSize1(FSDPTestMultiThread):
         # warning
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")  # trigger all warnings
-            FSDP(nn.Linear(3, 3).cuda(), sharding_strategy=ShardingStrategy.NO_SHARD)
+            FSDP(nn.Linear(3, 3).to(device=device_type), sharding_strategy=ShardingStrategy.NO_SHARD)
             for warning in w:
                 self.assertTrue(
                     warning.category != UserWarning
@@ -1014,16 +1023,16 @@ class TestFSDPMiscWorldSize1(FSDPTestMultiThread):
             warning_prefix + " " + str(ShardingStrategy.FULL_SHARD) + warning_suffix
         )
         with self.assertWarnsRegex(UserWarning, expected_regex_full_shard):
-            FSDP(nn.Linear(3, 3).cuda(), sharding_strategy=ShardingStrategy.FULL_SHARD)
+            FSDP(nn.Linear(3, 3).to(device=device_type), sharding_strategy=ShardingStrategy.FULL_SHARD)
         with self.assertWarnsRegex(UserWarning, expected_regex_full_shard):
-            FSDP(nn.Linear(3, 3).cuda())
+            FSDP(nn.Linear(3, 3).to(device=device_type))
         # - Pass `SHARD_GRAD_OP`
         expected_regex_shard_grad_op = (
             warning_prefix + " " + str(ShardingStrategy.SHARD_GRAD_OP) + warning_suffix
         )
         with self.assertWarnsRegex(UserWarning, expected_regex_shard_grad_op):
             FSDP(
-                nn.Linear(3, 3).cuda(), sharding_strategy=ShardingStrategy.SHARD_GRAD_OP
+                nn.Linear(3, 3).to(device=device_type), sharding_strategy=ShardingStrategy.SHARD_GRAD_OP
             )
 
     @skip_if_lt_x_gpu(1)

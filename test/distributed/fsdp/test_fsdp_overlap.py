@@ -9,7 +9,7 @@ from unittest.mock import patch
 import torch
 import torch.nn as nn
 from torch import distributed as dist
-from torch.cuda import Event
+
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -34,6 +34,10 @@ if TEST_WITH_DEV_DBG_ASAN:
     sys.exit(0)
 
 device_type = torch.accelerator.current_accelerator().type
+if device_type == "xpu":
+    from torch.xpu import Event
+else:
+    from torch.cuda import Event
 
 class Layer(nn.Module):
     def __init__(self, compute_cycles, has_params: bool):
@@ -51,7 +55,8 @@ class Layer(nn.Module):
         # Record the fake forward compute time.
         self.e1.record()
         if self.sleep_cycles > 0:
-            torch.get_device_module(device_type)._sleep(self.sleep_cycles)
+            if torch.cuda.is_available():
+                torch.cuda._sleep(self.sleep_cycles)
         if self.optional_param is not None:
             x = x + self.optional_param  # force the param to be part of the graph
         self.e2.record()
@@ -138,7 +143,8 @@ class TestForwardOverlapWorldSizeOne(FSDPTest):
                 def _delayed_all_gather(*args, **kwargs):
                     nonlocal all_gather_called
                     all_gather_called = True
-                    torch.get_device_module(device_type)._sleep(all_gather_cycles)
+                    if torch.cuda.is_available():
+                       torch.cuda._sleep(all_gather_cycles)
                     assert orig_all_gather
                     return orig_all_gather(*args, **kwargs)
 
