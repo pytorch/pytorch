@@ -39,7 +39,7 @@ import types
 import warnings
 import weakref
 from collections.abc import MutableMapping
-from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING, Union, Iterator
 
 import sympy
 
@@ -1585,8 +1585,14 @@ class VariableBuilder:
                 for p in value.parameters():
                     self.mark_static_input(p, guard=freezing)
 
-                for b in value.buffers():
-                    self.mark_static_input(b, guard=freezing)
+                # nn buffers is frequently overriden; this check validates
+                # the fn has semantics matching nn.Module expectation
+                # which is callable, and returning iterator of Tensor
+                # Otherwise, we will skip trying to modify buffers
+                if callable(value.named_buffers) and isinstance(value.named_buffers(), Iterator):
+                        for _, b in value.named_buffers():
+                            self.mark_static_input(b, guard=freezing)
+                # else, buffers has been overriden by user, so skip marking these
 
                 if freezing:
                     # we need to add the module to tracing context
