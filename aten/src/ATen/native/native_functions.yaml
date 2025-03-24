@@ -4011,6 +4011,7 @@
   dispatch:
     CPU: nanmedian_out_cpu
     CUDA: nanmedian_out_cuda
+    MPS: nanmedian_out_mps
 
 - func: nanmedian.names_dim(Tensor self, Dimname dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   variants: function, method
@@ -15514,7 +15515,7 @@
 
 - func: special_scaled_modified_bessel_k1.out(Tensor x, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA: special_scaled_modified_bessel_k1_out
+    CPU, CUDA, MPS: special_scaled_modified_bessel_k1_out
   python_module: special
   structured_inherits: TensorIteratorBase
   structured: True

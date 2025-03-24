@@ -3,7 +3,7 @@
 set -ex
 
 NCCL_VERSION=v2.26.2-1
-CUDNN_VERSION=9.8.0.87
+CUDNN_VERSION=9.5.1.17
 
 function install_cusparselt_040 {
     # cuSparseLt license: https://docs.nvidia.com/cuda/cusparselt/license.html
@@ -240,6 +240,7 @@ function prune_126 {
 }
 
 function install_128 {
+  CUDNN_VERSION=9.8.0.87
   echo "Installing CUDA 12.8.0 and cuDNN ${CUDNN_VERSION} and NCCL ${NCCL_VERSION} and cuSparseLt-0.6.3"
   rm -rf /usr/local/cuda-12.8 /usr/local/cuda
   # install CUDA 12.8.0 in the same container
