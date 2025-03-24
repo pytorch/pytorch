@@ -102,10 +102,10 @@ class C10_API AllocatorConfig {
   virtual size_t parseRoundUpPower2Divisions(
       const std::vector<std::string>& config,
       size_t i);
-  virtual size_t parseAllocatorConfig(
+  virtual size_t parseAllocatorBackendConfig(
       const std::vector<std::string>& config,
       size_t i,
-      bool& used_cudaMallocAsync);
+      bool& used_MallocAsync);
   virtual size_t parsePinnedUseHostRegister(
       const std::vector<std::string>& config,
       size_t i);
