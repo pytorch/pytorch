@@ -251,13 +251,13 @@ translation validation failed.
 
 Model:
   ==> L['shape'][0]: 0
-  ==> L['shape'][1]: 0
-  ==> L['shape'][2]: 0
+  ==> L['shape'][1]: 1
+  ==> L['shape'][2]: 1
   ==> L['x'].size()[0]: 3
   ==> L['x'].storage_offset(): 0
   ==> L['x'].stride()[0]: 1
-  ==> s3: 0
-  ==> s52: 0
+  ==> s3: 1
+  ==> s52: 1
   ==> s77: 3
   ==> s86: 0
 
