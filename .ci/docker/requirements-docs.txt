@@ -11,6 +11,10 @@ sphinxcontrib.katex==0.8.6
 #Description: This is used to generate PyTorch docs
 #Pinned versions: 0.8.6
 
+sphinxext-opengraph==0.9.1
+#Description: This is used to generate PyTorch docs
+#Pinned versions: 0.9.1
+
 matplotlib==3.5.3
 #Description: This is used to generate PyTorch docs
 #Pinned versions: 3.5.3
