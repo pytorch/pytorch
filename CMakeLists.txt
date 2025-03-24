@@ -1284,6 +1284,9 @@ if(USE_CUDA OR USE_ROCM)
 
 endif()
 
+configure_file(${PROJECT_SOURCE_DIR}/cmake/public/cuda.cmake.in
+               ${PROJECT_BINARY_DIR}/cmake/public/cuda.cmake @ONLY)
+
 # Note(jiayq): when building static libraries, all PRIVATE dependencies will
 # also become interface libraries, and as a result if there are any dependency
 # libraries that are not exported, the following install export script will
@@ -1298,7 +1301,7 @@ if(BUILD_SHARED_LIBS)
     DESTINATION share/cmake/Caffe2
     COMPONENT dev)
   install(
-    FILES ${PROJECT_SOURCE_DIR}/cmake/public/cuda.cmake
+    FILES ${PROJECT_BINARY_DIR}/cmake/public/cuda.cmake
           ${PROJECT_SOURCE_DIR}/cmake/public/xpu.cmake
           ${PROJECT_SOURCE_DIR}/cmake/public/glog.cmake
           ${PROJECT_SOURCE_DIR}/cmake/public/gflags.cmake
