@@ -1,10 +1,12 @@
 # mypy: allow-untyped-defs
 import warnings
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Optional, Union
 
 import torch
+import torch._library.utils as library_utils
 import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._C import DispatchKey
@@ -32,7 +34,7 @@ class ViewInfo(ABC):
         self.base_index = base_index
 
     @abstractmethod
-    def regenerate_view(self, bases_list: List[Tensor]):
+    def regenerate_view(self, bases_list: list[Tensor]):
         pass
 
 
@@ -48,7 +50,7 @@ class AsStridedViewInfo(ViewInfo):
         self.stride = stride
         self.storage_offset = storage_offset
 
-    def regenerate_view(self, bases_list: List[Tensor]):
+    def regenerate_view(self, bases_list: list[Tensor]):
         return torch.as_strided(
             bases_list[self.base_index],
             self.size,
@@ -69,7 +71,7 @@ class SliceViewInfo(ViewInfo):
         self.start = start
         self.end = end
 
-    def regenerate_view(self, bases_list: List[Tensor]):
+    def regenerate_view(self, bases_list: list[Tensor]):
         return torch.ops.aten.slice.Tensor(
             bases_list[self.base_index], self.dim, self.start, self.end
         )
@@ -80,7 +82,7 @@ class AliasViewInfo(ViewInfo):
     def __init__(self, base_index):
         super().__init__(base_index)
 
-    def regenerate_view(self, bases_list: List[Tensor]):
+    def regenerate_view(self, bases_list: list[Tensor]):
         return torch.ops.aten.alias.default(bases_list[self.base_index])
 
 
@@ -89,7 +91,7 @@ class NotView(ViewInfo):
     def __init__(self, base_index):
         super().__init__(base_index)
 
-    def regenerate_view(self, bases_list: List[Tensor]):
+    def regenerate_view(self, bases_list: list[Tensor]):
         return bases_list[self.base_index]
 
 
@@ -137,10 +139,10 @@ def try_use_slice(base, tensor):
 
 
 def write_view_information_to_args(
-    mutable_arg_names: List[str],
-    mutable_arg_types: List[torch.Type],
-    kwargs: Dict[str, Any],
-    arg_to_base_index: Dict[str, Any],
+    mutable_arg_names: list[str],
+    mutable_arg_types: list[torch.Type],
+    kwargs: dict[str, Any],
+    arg_to_base_index: dict[str, Any],
 ):
     """
     This function writes the view information into kwargs. It reads mutable_args from kwargs.
@@ -193,17 +195,17 @@ def write_view_information_to_args(
 
     for arg_name, arg_type in zip(mutable_arg_names, mutable_arg_types):
         arg = kwargs[arg_name]
-        if isinstance(arg_type, torch.ListType):
+        if library_utils.is_tensorlist_like_type(arg_type):
             if arg is None:
                 kwargs[f"_{arg_name}_length"] = None
+            else:
+                kwargs[f"_{arg_name}_length"] = len(arg)
+                for i, elem in enumerate(arg):
+                    write_single_view(
+                        f"_{arg_name}_{i}", elem, arg_to_base_index[arg_name][i]
+                    )
 
-            kwargs[f"_{arg_name}_length"] = len(arg)
-            for i, elem in enumerate(arg):
-                write_single_view(
-                    f"_{arg_name}_{i}", elem, arg_to_base_index[arg_name][i]
-                )
-
-        elif isinstance(arg_type, (torch.TensorType, torch.OptionalType)):
+        elif library_utils.is_tensor_like_type(arg_type):
             write_single_view(
                 f"_{arg_name}",
                 kwargs[arg_name],
@@ -215,10 +217,10 @@ def write_view_information_to_args(
 
 # Returns a dict of arg_name -> ViewInfo | [ViewInfo]
 def read_view_information_from_args(
-    mutable_arg_names: List[str],
-    mutable_arg_types: List[torch.Type],
-    kwargs: Dict[str, Any],
-    all_bases: List[Tensor],
+    mutable_arg_names: list[str],
+    mutable_arg_types: list[torch.Type],
+    kwargs: dict[str, Any],
+    all_bases: list[Tensor],
 ):
     """
     This reads the view information added by `write_view_information_to_args` from kwargs, pop them,
@@ -254,9 +256,9 @@ def read_view_information_from_args(
             # This means that the argument is the base tensor
             return NotView(base_index)
 
-    args_view_info: Dict[str, Any] = {}
+    args_view_info: dict[str, Any] = {}
     for arg_name, arg_type in zip(mutable_arg_names, mutable_arg_types):
-        if isinstance(arg_type, torch.ListType):
+        if library_utils.is_tensorlist_like_type(arg_type):
             length = get_arg(f"_{arg_name}_length")
             if length is None:
                 # The whole list is None.
@@ -266,7 +268,7 @@ def read_view_information_from_args(
                     read_single_view(f"_{arg_name}_{i}") for i in range(length)
                 ]
 
-        elif isinstance(arg_type, (torch.TensorType, torch.OptionalType)):
+        elif library_utils.is_tensor_like_type(arg_type):
             args_view_info[arg_name] = read_single_view(f"_{arg_name}")
         else:
             raise RuntimeError(f"Unsupported type {arg_type}")
@@ -321,7 +323,7 @@ class AutoFunctionalized(HigherOrderOperator):
         /,
         _mutable_op: OpOverload,
         **kwargs: Any,
-    ) -> Tuple[Any, Tuple[Tensor, ...]]:
+    ) -> tuple[Any, tuple[Tensor, ...]]:
         assert can_auto_functionalize(_mutable_op)
         assert isinstance(kwargs, dict)
         return super().__call__(_mutable_op, **kwargs)
@@ -350,7 +352,7 @@ class AutoFunctionalizedV2(HigherOrderOperator):
         /,
         _mutable_op: OpOverload,
         **kwargs: Any,
-    ) -> Tuple[Any, Tuple[Tensor, ...]]:
+    ) -> tuple[Any, tuple[Tensor, ...]]:
         assert can_auto_functionalize(_mutable_op)
         assert isinstance(kwargs, dict)
         return super().__call__(_mutable_op, **kwargs)
@@ -381,20 +383,10 @@ def can_auto_functionalize(op: OperatorBase) -> bool:
             continue
         if not arg.alias_info.is_write:
             continue
-        if type(arg.type) is torch.TensorType:
+        if torch._library.utils.is_tensor_like_type(arg.type):
             continue
-        if (
-            type(arg.type) is torch.OptionalType
-            and type(arg.type.getElementType()) is torch.TensorType
-        ):
+        if torch._library.utils.is_tensorlist_like_type(arg.type):
             continue
-        if (
-            type(arg.type) is torch.ListType
-            and type(arg.type.getElementType()) is torch.TensorType
-        ):
-            continue
-        # Not yet supported: other Tensor types. This includes things like
-        # Tensor?[], Tensor[]?.
         return False
 
     if len(schema.returns) == 1 and isinstance(schema.returns[0].type, torch.NoneType):
@@ -411,7 +403,7 @@ def can_auto_functionalize(op: OperatorBase) -> bool:
     return True
 
 
-def get_mutable_args(op: OpOverload) -> Tuple[List[str], List[torch.Type]]:
+def get_mutable_args(op: OpOverload) -> tuple[list[str], list[torch.Type]]:
     """
     Returns the list of argument names that get mutated according to the
     schema and their types.
@@ -431,9 +423,10 @@ def get_mutable_args(op: OpOverload) -> Tuple[List[str], List[torch.Type]]:
 
 
 def do_auto_functionalize(
+    mode: "torch._subclasses.functional_tensor.FunctionalTensorMode",
     op: OpOverload,
-    args: Tuple[Any, ...],
-    kwargs: Dict[str, Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
 ) -> Any:
     """Functionalizes a call to op(*args, **kwargs) by emitting a call to
     `outs = auto_functionalized(op, normalized_kwargs)`
@@ -444,7 +437,7 @@ def do_auto_functionalize(
     """
     from torch._subclasses.functional_tensor import PythonFunctionalizeAPI
 
-    ctx = PythonFunctionalizeAPI()
+    ctx = PythonFunctionalizeAPI(mode=mode)
 
     # All of the (args, kwargs), but all as kwargs. The names for the
     # args come from the schema. This makes it easier for us to work with them.
@@ -476,7 +469,7 @@ def do_auto_functionalize(
     # List of the name of args that get mutated (according to the schema)
     mutable_args_names, _ = get_mutable_args(op)
 
-    unwrapped_actual_out: Union[Any, Tuple[Any]] = unwrapped_outs[
+    unwrapped_actual_out: Union[Any, tuple[Any]] = unwrapped_outs[
         : -len(mutable_args_names)
     ]
     unwrapped_mutable_out = unwrapped_outs[-len(mutable_args_names) :]
@@ -520,13 +513,14 @@ def do_auto_functionalize(
 
 
 def do_auto_functionalize_v2(
+    mode: "torch._subclasses.functional_tensor.FunctionalTensorMode",
     op: OpOverload,
-    args: Tuple[Any, ...],
-    kwargs: Dict[str, Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
 ) -> Any:
     from torch._subclasses.functional_tensor import PythonFunctionalizeAPI
 
-    ctx = PythonFunctionalizeAPI()
+    ctx = PythonFunctionalizeAPI(mode=mode)
 
     # All of the (args, kwargs), but all as kwargs. The names for the
     # args come from the schema. This makes it easier for us to work with them.
@@ -553,7 +547,7 @@ def do_auto_functionalize_v2(
     all_bases_addresses: list[int] = []
 
     # Map arg_name to the index of its base in all_bases.
-    arg_to_base_index: Dict[str, Any] = {}
+    arg_to_base_index: dict[str, Any] = {}
 
     def update_dict(tensor, arg_name, index=None):
         base = tensor if get_base(tensor) is None else get_base(tensor)
@@ -613,7 +607,7 @@ def do_auto_functionalize_v2(
             op, **dict(unwrapped_kwargs, _all_bases=all_basis_unwrapped)  # type: ignore[arg-type]
         )
 
-    unwrapped_actual_out: Union[Any, Tuple[Any]] = (
+    unwrapped_actual_out: Union[Any, tuple[Any]] = (
         unwrapped_outs if len(all_bases) == 0 else unwrapped_outs[: -len(all_bases)]
     )
 
@@ -661,9 +655,9 @@ def do_auto_functionalize_v2(
 @auto_functionalized.py_impl(DispatchKey.CompositeExplicitAutograd)
 def auto_functionalized_dense(
     _mutable_op: OpOverload,
-    _only_clone_these_tensors: Optional[Tuple[str, ...]] = None,
+    _only_clone_these_tensors: Optional[tuple[str, ...]] = None,
     **kwargs: Any,
-) -> Tuple[Any, Tuple[Tensor, ...]]:
+) -> tuple[Any, tuple[Tensor, ...]]:
     new_kwargs = dict(**kwargs)
     result = []
 
@@ -698,7 +692,7 @@ def auto_functionalized_fake(
     mode,
     _mutable_op: OpOverload,
     **kwargs: Any,
-) -> Tuple[Any, Tuple[Tensor, ...]]:
+) -> tuple[Any, tuple[Tensor, ...]]:
     with mode:
         result = auto_functionalized_dense(
             _mutable_op, _only_clone_these_tensors=None, **kwargs
@@ -711,7 +705,7 @@ def auto_functionalized_proxy(
     mode,
     _mutable_op: OpOverload,
     **kwargs: Any,
-) -> Tuple[Any, Tuple[Tensor, ...]]:
+) -> tuple[Any, tuple[Tensor, ...]]:
     with disable_proxy_modes_tracing():
         out = auto_functionalized(_mutable_op, **kwargs)
 
@@ -738,10 +732,10 @@ def auto_functionalized_func(ctx, _mutable_op, **kwargs):
 @auto_functionalized_v2.py_impl(DispatchKey.CompositeExplicitAutograd)
 def auto_functionalized_v2_dense(
     _mutable_op: OpOverload,
-    _only_clone_these_bases: Optional[Tuple[int, ...]] = None,
+    _only_clone_these_bases: Optional[tuple[int, ...]] = None,
     **kwargs: Any,
-) -> Tuple[Any, Tuple[Tensor, ...]]:
-    all_bases: List[Tensor] = kwargs.pop("_all_bases", [])
+) -> tuple[Any, tuple[Tensor, ...]]:
+    all_bases: list[Tensor] = kwargs.pop("_all_bases", [])
     mutable_args_names, mutable_args_types = get_mutable_args(_mutable_op)
     args_view_info = read_view_information_from_args(
         mutable_args_names, mutable_args_types, kwargs, all_bases
@@ -794,8 +788,8 @@ def auto_functionalized_v2_dense(
 def auto_functionalized_v2_fake(
     mode,
     _mutable_op: OpOverload,
-    **kwargs: Dict[str, Any],
-) -> Tuple[Any, Tuple[Tensor, ...]]:
+    **kwargs: dict[str, Any],
+) -> tuple[Any, tuple[Tensor, ...]]:
     with mode:
         result = auto_functionalized_v2_dense(
             _mutable_op, _only_clone_these_bases=None, **kwargs
@@ -807,8 +801,8 @@ def auto_functionalized_v2_fake(
 def auto_functionalized_v2_proxy(
     mode,
     _mutable_op: OpOverload,
-    **kwargs: Dict[str, Any],
-) -> Tuple[Any, Tuple[Tensor, ...]]:
+    **kwargs: dict[str, Any],
+) -> tuple[Any, tuple[Tensor, ...]]:
     with disable_proxy_modes_tracing():
         out = auto_functionalized_v2(_mutable_op, **kwargs)
 

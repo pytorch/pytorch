@@ -5,7 +5,7 @@ import importlib
 import logging
 import os
 import sys
-from typing import Type, TypeVar
+from typing import TypeVar
 
 from torch._inductor.async_compile import pre_fork_setup
 from torch._inductor.compile_worker.subproc_pool import (
@@ -32,7 +32,7 @@ except ImportError:
     pass
 
 
-def _lookup_and_create_type(base: Type[_T], qname: str) -> _T:
+def _lookup_and_create_type(base: type[_T], qname: str) -> _T:
     """
     Given a base type and qualified name: import & lookup that name, check
     that it's of the given type and then instantiate it.

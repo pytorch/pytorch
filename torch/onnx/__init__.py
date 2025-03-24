@@ -48,7 +48,8 @@ __all__ = [
     "is_onnxrt_backend_supported",
 ]
 
-from typing import Any, Callable, Collection, Mapping, Sequence, TYPE_CHECKING
+from typing import Any, Callable, TYPE_CHECKING
+from typing_extensions import deprecated
 
 import torch
 from torch import _C
@@ -107,6 +108,7 @@ from ._internal._exporter_legacy import (  # usort: skip. needs to be last to av
 
 if TYPE_CHECKING:
     import os
+    from collections.abc import Collection, Mapping, Sequence
 
 # Set namespace for exposed private names
 DiagnosticOptions.__module__ = "torch.onnx"
@@ -151,7 +153,7 @@ def export(
     custom_translation_table: dict[Callable, Callable | Sequence[Callable]]
     | None = None,
     report: bool = False,
-    optimize: bool = False,
+    optimize: bool = True,
     verify: bool = False,
     profile: bool = False,
     dump_exported_program: bool = False,
@@ -164,7 +166,6 @@ def export(
     custom_opsets: Mapping[str, int] | None = None,
     export_modules_as_functions: bool | Collection[type[torch.nn.Module]] = False,
     autograd_inlining: bool = True,
-    **_: Any,  # ignored options
 ) -> ONNXProgram | None:
     r"""Exports a model into ONNX format.
 
@@ -289,7 +290,7 @@ def export(
         report: Whether to generate a markdown report for the export process. This option
             is only valid when dynamo is True.
         optimize: Whether to optimize the exported model. This option
-            is only valid when dynamo is True.
+            is only valid when dynamo is True. Default is True.
         verify: Whether to verify the exported model using ONNX Runtime. This option
             is only valid when dynamo is True.
         profile: Whether to profile the export process. This option
@@ -342,6 +343,18 @@ def export(
         autograd_inlining: Deprecated.
             Flag used to control whether to inline autograd functions.
             Refer to https://github.com/pytorch/pytorch/pull/74765 for more details.
+
+    Returns:
+        :class:`torch.onnx.ONNXProgram` if dynamo is True, otherwise None.
+
+    .. versionchanged:: 2.6
+        *training* is now deprecated. Instead, set the training mode of the model before exporting.
+        *operator_export_type* is now deprecated. Only ONNX is supported.
+        *do_constant_folding* is now deprecated. It is always enabled.
+        *export_modules_as_functions* is now deprecated.
+        *autograd_inlining* is now deprecated.
+    .. versionchanged:: 2.7
+        *optimize* is now True by default.
     """
     if dynamo is True or isinstance(model, torch.export.ExportedProgram):
         from torch.onnx._internal.exporter import _compat
@@ -402,6 +415,9 @@ def export(
         return None
 
 
+@deprecated(
+    "torch.onnx.dynamo_export is deprecated since 2.6.0. Please use torch.onnx.export(..., dynamo=True) instead."
+)
 def dynamo_export(
     model: torch.nn.Module | Callable | torch.export.ExportedProgram,  # type: ignore[name-defined]
     /,
@@ -411,6 +427,9 @@ def dynamo_export(
 ) -> ONNXProgram:
     """Export a torch.nn.Module to an ONNX graph.
 
+    .. deprecated:: 2.7
+        Please use ``torch.onnx.export(..., dynamo=True)`` instead.
+
     Args:
         model: The PyTorch model to be exported to ONNX.
         model_args: Positional inputs to ``model``.
@@ -419,40 +438,8 @@ def dynamo_export(
 
     Returns:
         An in-memory representation of the exported ONNX model.
-
-    **Example 1 - Simplest export**
-    ::
-
-        class MyModel(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.linear = torch.nn.Linear(2, 2)
-
-            def forward(self, x, bias=None):
-                out = self.linear(x)
-                out = out + bias
-                return out
-
-
-        model = MyModel()
-        kwargs = {"bias": 3.0}
-        args = (torch.randn(2, 2, 2),)
-        onnx_program = torch.onnx.dynamo_export(model, *args, **kwargs).save(
-            "my_simple_model.onnx"
-        )
-
-    **Example 2 - Exporting with dynamic shapes**
-    ::
-
-        # The previous model can be exported with dynamic shapes
-        export_options = torch.onnx.ExportOptions(dynamic_shapes=True)
-        onnx_program = torch.onnx.dynamo_export(
-            model, *args, **kwargs, export_options=export_options
-        )
-        onnx_program.save("my_dynamic_model.onnx")
     """
 
-    # NOTE: The new exporter is experimental and is not enabled by default.
     import warnings
 
     from torch.onnx import _flags
@@ -476,7 +463,7 @@ def dynamo_export(
                 "You are using an experimental ONNX export logic, which currently only supports dynamic shapes. "
                 "For a more comprehensive set of export options, including advanced features, please consider using "
                 "`torch.onnx.export(..., dynamo=True)`. ",
-                category=FutureWarning,
+                category=DeprecationWarning,
             )
 
         if export_options is not None and export_options.dynamic_shapes:

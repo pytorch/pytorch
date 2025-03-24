@@ -5,7 +5,9 @@ import collections
 import functools
 import typing
 from enum import auto, Enum
-from typing import Dict, List, Optional, Union
+from typing import Optional, Union
+
+from torch.utils._triton import has_triton_package
 
 
 # The following maximums only apply to runtime autotuning, when using FixedTritonConfig one may see larger values
@@ -32,21 +34,14 @@ class TileHint(Enum):
     DEFAULT = 1
 
 
-def _is_triton_available() -> bool:
-    try:
-        import triton  # noqa: F401
-
-        return True
-    except ImportError:
-        return False
-
-
 # Define `AttrsDescriptorWrapper` function with clear conditional handling
-if _is_triton_available():
+if has_triton_package():
+    import triton
     import triton.backends.compiler
     import triton.compiler.compiler
 
     if hasattr(triton.backends.compiler, "AttrsDescriptor"):
+        # Triton 3.2.0 - the second implementation
         from triton.backends.compiler import AttrsDescriptor
 
         def AttrsDescriptorWrapper(
@@ -67,7 +62,8 @@ if _is_triton_available():
             assert res.property_values["tt.equal_to"] == 1
             return res
 
-    else:
+    elif hasattr(triton.compiler.compiler, "AttrsDescriptor"):
+        # Triton 3.0.0 - the original implementation
         from triton.compiler.compiler import AttrsDescriptor
 
         def AttrsDescriptorWrapper(
@@ -82,6 +78,18 @@ if _is_triton_available():
 
             # Instantiate AttrsDescriptor with the prepared arguments
             return AttrsDescriptor(**kwargs)
+
+    else:
+        # Triton in 2025:
+        # note: there's also a range of triton commits not currently supported
+        # from ~Dec 9, 2024 to Jan 1 2025, in which AttrsDescriptors are still
+        # used, but the contents are different.
+
+        def AttrsDescriptorWrapper(
+            divisible_by_16=None,
+            equal_to_1=None,
+        ):
+            return {(x,): [["tt.divisibility", 16]] for x in divisible_by_16}
 
 else:
     # Define a namedtuple as a fallback when AttrsDescriptor is not available
@@ -167,8 +175,8 @@ class DeviceProperties(typing.NamedTuple):
 class HalideInputSpec(typing.NamedTuple):
     ctype: str
     name: str
-    shape: Optional[List[str]] = None
-    stride: Optional[List[str]] = None
+    shape: Optional[list[str]] = None
+    stride: Optional[list[str]] = None
     offset: Optional[str] = None
     alias_of: Optional[str] = None
 
@@ -192,13 +200,13 @@ class HalideInputSpec(typing.NamedTuple):
 
 
 class HalideMeta(typing.NamedTuple):
-    argtypes: List[HalideInputSpec]
+    argtypes: list[HalideInputSpec]
     target: str
     scheduler: Optional[str] = None
-    scheduler_flags: Optional[Dict[str, Union[int, str]]] = None
+    scheduler_flags: Optional[dict[str, Union[int, str]]] = None
     cuda_device: Optional[int] = None
 
-    def args(self) -> List[str]:
+    def args(self) -> list[str]:
         """Command line args to pass to halide generator"""
         args = [f"target={self.target}"]
         if self.scheduler:

@@ -102,7 +102,11 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
         for event in events:
             if event.name == "triton_poi_fused_add_cos_sin_0":
                 event_found = True
-                self.assertTrue(event.input_shapes == [[4, 4], [4, 4], [4, 4], []])
+                # Note: depending on the triton version, we might get 4 or 5 args
+                # (including / not including the constexpr args). The last two are
+                # both empty args, so we just truncate the event.input_shapes to the
+                # first 4.
+                self.assertEqual(event.input_shapes[:4], [[4, 4], [4, 4], [4, 4], []])
         self.assertTrue(event_found)
 
     @unittest.skipIf(not HAS_TRITON, "requires cuda & triton")
@@ -235,7 +239,7 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
                 prof.step()
 
         prof.export_chrome_trace(fp.name)
-        print("Trace written to {fp.name}, set debug=True to retain file.")
+        print(f"Trace written to {fp.name}, set debug=True to retain file.")
 
         triton_events = []
         with open(fp.name) as f:
@@ -271,6 +275,11 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
             self.assertTrue("kernel_hash" in args, msg=f"event = {e}")
             self.assertEqual(
                 args["kernel_hash"], get_hash(kernel_file), msg=f"event = {e}"
+            )
+
+            self.assertTrue("kernel_kwargs" in args, msg=f"event = {e}")
+            self.assertTrue(
+                args["kernel_kwargs"].startswith("XBLOCK="), msg=f"event = {e}"
             )
 
         for e in triton_events:

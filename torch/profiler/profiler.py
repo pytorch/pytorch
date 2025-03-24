@@ -5,9 +5,10 @@ import os
 import shutil
 import tempfile
 from abc import ABC, abstractmethod
+from collections.abc import Iterable
 from enum import Enum
 from functools import partial
-from typing import Any, Callable, Dict, Iterable, List, Optional
+from typing import Any, Callable, Optional
 from typing_extensions import Self
 from warnings import warn
 
@@ -163,11 +164,13 @@ class _KinetoProfile:
             self.use_device = "xpu"
         elif ProfilerActivity.MTIA in self.activities:
             self.use_device = "mtia"
+        elif ProfilerActivity.HPU in self.activities:
+            self.use_device = "hpu"
         elif ProfilerActivity.PrivateUse1 in self.activities:
             self.use_device = _get_privateuse1_backend_name()
 
         # user-defined metadata to be amended to the trace
-        self.preset_metadata: Dict[str, str] = {}
+        self.preset_metadata: dict[str, str] = {}
 
     def start(self):
         self.prepare_trace()
@@ -301,17 +304,22 @@ class _KinetoProfile:
         self.profiler.toggle_collection_dynamic(enable, activities)
 
     def key_averages(
-        self, group_by_input_shape: bool = False, group_by_stack_n: int = 0
+        self,
+        group_by_input_shape: bool = False,
+        group_by_stack_n: int = 0,
+        group_by_overload_name: bool = False,
     ):
-        """Averages events, grouping them by operator name and (optionally) input shapes and
-        stack.
+        """Averages events, grouping them by operator name and (optionally) input shapes, stack
+        and overload name.
 
         .. note::
             To use shape/stack functionality make sure to set record_shapes/with_stack
             when creating profiler context manager.
         """
         assert self.profiler
-        return self.profiler.key_averages(group_by_input_shape, group_by_stack_n)
+        return self.profiler.key_averages(
+            group_by_input_shape, group_by_stack_n, group_by_overload_name
+        )
 
     def events(self):
         """
@@ -723,8 +731,8 @@ class profile(_KinetoProfile):
         self.current_action = self.schedule(self.step_num)
         self.step_rec_fn: Optional[prof.record_function] = None
 
-        self.action_map: Dict[
-            tuple[ProfilerAction, Optional[ProfilerAction]], List[Any]
+        self.action_map: dict[
+            tuple[ProfilerAction, Optional[ProfilerAction]], list[Any]
         ] = {
             # key is (prev_action, current_action), value is action list corresponding to the state pair.
             (ProfilerAction.NONE, ProfilerAction.NONE): [],
@@ -887,6 +895,7 @@ class ExecutionTraceObserver(_ITraceObserver):
         self.extra_resources_collection = False
         self.resources_dir: str = ""
         self.output_file_path: str = ""
+        self.output_file_path_observer: str = ""
 
     def __del__(self):
         """
@@ -941,8 +950,17 @@ class ExecutionTraceObserver(_ITraceObserver):
         Adds ET observer to record function callbacks. The data will be
         written to output_file_path.
         """
+
+        def get_temp_uncompressed_file() -> str:
+            fp = tempfile.NamedTemporaryFile("w+b", suffix=".json", delete=False)
+            fp.close()
+            return fp.name
+
         if not self._registered:
             self.output_file_path = output_file_path
+            if output_file_path.endswith(".gz"):
+                output_file_path = get_temp_uncompressed_file()
+            self.output_file_path_observer = output_file_path
             self._registered = _add_execution_trace_observer(output_file_path)
         return self
 
@@ -996,7 +1014,7 @@ class ExecutionTraceObserver(_ITraceObserver):
         Removes ET observer from record function callbacks.
         """
 
-        def _save_triton_kernels():
+        def _save_triton_kernels() -> None:
             try:
                 resource_dir = self.get_resources_dir()
             except Exception as e:
@@ -1023,13 +1041,25 @@ class ExecutionTraceObserver(_ITraceObserver):
                 dst = os.path.join(resource_dir, name)
                 shutil.copyfile(kernel_file, dst)
 
+        def _save_gz_file(uncompressed_file: str, output_file: str) -> None:
+            print(f"Execution Trace: compressing {uncompressed_file} to {output_file}")
+            with open(uncompressed_file, "rb") as fin:
+                with gzip.open(output_file, "wb") as fout:
+                    fout.writelines(fin)
+            os.remove(uncompressed_file)
+
         if self._registered:
             self.stop()
+
             try:
                 _save_triton_kernels()
             except Exception as e:
                 warn(f"Execution trace failed to save kernels: {e}")
+
             _remove_execution_trace_observer()
+            if self.output_file_path.endswith("gz"):
+                _save_gz_file(self.output_file_path_observer, self.output_file_path)
+
             self._registered = False
 
     @property

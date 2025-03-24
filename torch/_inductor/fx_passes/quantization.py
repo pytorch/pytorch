@@ -705,7 +705,8 @@ def _is_valid_quantized_op_binary_optimization_pattern(
             if "other" in match.kwargs
             else (
                 match.kwargs["accum"]
-                if output_dtype == torch.uint8 or (not extra_input_from_dequant)
+                if (output_dtype in [torch.uint8, torch.int8])
+                or (not extra_input_from_dequant)
                 else match.kwargs["accum_after_dequant"]
             )
         )
@@ -762,9 +763,9 @@ def _register_quantized_conv_binary_lowering(
         accum.realize()
         from .mkldnn_fusion import _can_be_inplace
 
-        assert _can_be_inplace(
-            accum
-        ), "QConv Binary Inplace Fusion requires accum is not an alias or mutation."
+        assert _can_be_inplace(accum), (
+            "QConv Binary Inplace Fusion requires accum is not an alias or mutation."
+        )
 
         computation_args = (
             x,
@@ -1070,6 +1071,10 @@ def _register_quantization_reshape():
 def _is_valid_woq_optimization_pattern():
     def fn(match):
         assert all(k in match.kwargs for k in ("x", "weight", "scales"))
+        if not all(
+            hasattr(match.kwargs[key], "meta") for key in ["x", "weight", "scales"]
+        ):
+            return False
         x = match.kwargs["x"].meta["val"]
         weight = match.kwargs["weight"].meta["val"]
         scales = match.kwargs["scales"].meta["val"]
@@ -1306,9 +1311,9 @@ def _register_dequant_promotion_pass(pattern, pass_number, dtype=torch.float32):
         def clone_to_new_node(graph, source_node, user_node):
             # Clone the source_node to a new node
             # Replace user_node's input from source_node to new_node
-            assert (
-                source_node.op == "call_function"
-            ), "clone_to_new_node only support node.op call_function"
+            assert source_node.op == "call_function", (
+                "clone_to_new_node only support node.op call_function"
+            )
             with graph.inserting_before(user_node):
                 new_node = graph.call_function(
                     source_node.target,
@@ -1342,9 +1347,9 @@ def _register_dequant_promotion_pass(pattern, pass_number, dtype=torch.float32):
                 # For a dequant pattern, we expect the start node is a dequantize_per_tensor node
                 return _node
             else:
-                assert (
-                    len(_node.args) >= 1
-                ), "In in dequant pattern, each node should have more than 1 arg."
+                assert len(_node.args) >= 1, (
+                    "In in dequant pattern, each node should have more than 1 arg."
+                )
                 return _find_first_node_in_dequant_pattern(_node.args[0])
 
         dequant_pattern_start_node = _find_first_node_in_dequant_pattern(
@@ -1386,10 +1391,8 @@ def _is_valid_dequant_conv2d_pattern(dtype):
                 meta_value is None
                 or (meta_value.device.type != "cpu" and meta_value.device.type != "xpu")
                 or meta_value.dim() != 4
-                or (meta_value.device.type == "xpu" and match.kwargs["groups"] != 1)
             ):
                 # Only support conv2d now
-                # Grouped quantized convolution is not supported at XPU backend
                 return False
 
         assert dtype in [torch.float32, torch.bfloat16]
@@ -2553,7 +2556,7 @@ def _register_smooth_quant_int_mm_pattern():
                     packed_weight_op, args=packed_weight_inputs
                 )
 
-                dummy_zp = match.graph.call_function(aten.empty, args=([0],))
+                dummy_zp = None
                 w_scale = match.graph.call_function(
                     prims.convert_element_type.default, args=(w_scale, torch.float32)
                 )
@@ -2753,13 +2756,19 @@ def _register_qconv_post_op_fusion_pass(
             else:
                 accum = (
                     kwargs["accum"]
-                    if output_dtype == torch.uint8
+                    if output_dtype in [torch.uint8, torch.int8]
                     else kwargs["accum_after_dequant"]
                 )
                 accum_scale = (
-                    kwargs["accum_scale"] if output_dtype == torch.uint8 else 1.0
+                    kwargs["accum_scale"]
+                    if output_dtype in [torch.uint8, torch.int8]
+                    else 1.0
                 )
-                accum_zp = kwargs["accum_zp"] if output_dtype == torch.uint8 else 0
+                accum_zp = (
+                    kwargs["accum_zp"]
+                    if output_dtype in [torch.uint8, torch.int8]
+                    else 0
+                )
                 computation_args = (
                     x,
                     x_scale,
@@ -3071,8 +3080,14 @@ def _register_qlinear_post_op_fusion_pass(
         b = kwargs["b"] if "b" in kwargs else None
 
         # Output QParams
-        o_inv_scale = kwargs["o_inv_scale"] if output_dtype == torch.uint8 else 1.0
-        o_zero_point = kwargs["o_zp"] if output_dtype == torch.uint8 else 0
+        o_inv_scale = (
+            kwargs["o_inv_scale"]
+            if (output_dtype in [torch.uint8, torch.int8])
+            else 1.0
+        )
+        o_zero_point = (
+            kwargs["o_zp"] if (output_dtype in [torch.uint8, torch.int8]) else 0
+        )
         assert (
             kwargs["postop_name"] == "none"
         )  # Expected no post op fused in weight prepack phase

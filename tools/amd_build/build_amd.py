@@ -145,13 +145,11 @@ ignores = [os.path.join(proj_dir, ignore) for ignore in ignores]
 
 
 # Check if the compiler is hip-clang.
+#
+# This used to be a useful function but now we can safely always assume hip-clang.
+# Leaving the function here avoids bc-linter errors.
 def is_hip_clang() -> bool:
-    try:
-        hip_path = os.getenv("HIP_PATH", "/opt/rocm/hip")
-        with open(hip_path + "/lib/.hipInfo") as f:
-            return "HIP_COMPILER=clang" in f.read()
-    except OSError:
-        return False
+    return True
 
 
 # TODO Remove once the following submodules are updated
@@ -201,12 +199,14 @@ for hip_platform_file in hip_platform_files:
                     sources.write(line)
             print(f"{hip_platform_file} updated")
 
+
 hipify_python.hipify(
     project_directory=proj_dir,
     output_directory=out_dir,
     includes=includes,
     ignores=ignores,
     extra_files=[
+        "torch/_inductor/codegen/cuda/device_op_overrides.py",
         "torch/_inductor/codegen/cpp_wrapper_cpu.py",
         "torch/_inductor/codegen/cpp_wrapper_gpu.py",
         "torch/_inductor/codegen/wrapper.py",

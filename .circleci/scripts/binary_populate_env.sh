@@ -31,9 +31,9 @@ fi
 export DOCKER_IMAGE=${DOCKER_IMAGE:-}
 if [[ -z "$DOCKER_IMAGE" ]]; then
   if [[ "$DESIRED_CUDA" == cpu ]]; then
-    export DOCKER_IMAGE="pytorch/manylinux:cpu"
+    export DOCKER_IMAGE="pytorch/manylinux2_28:cpu"
   else
-    export DOCKER_IMAGE="pytorch/manylinux-builder:${DESIRED_CUDA:2}"
+    export DOCKER_IMAGE="pytorch/manylinux2_28-builder:${DESIRED_CUDA:2}"
   fi
 fi
 

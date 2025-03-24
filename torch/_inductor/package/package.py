@@ -2,19 +2,19 @@ import io
 import json
 import logging
 import os
-import shlex
-import subprocess
 import tempfile
 import zipfile
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Any, IO, Optional, Union
+from typing_extensions import Self
 
 import torch
 import torch._inductor
 import torch.utils._pytree as pytree
-from torch._inductor import exc
+from torch._inductor import config
 from torch._inductor.cpp_builder import BuildOptionsBase, CppBuilder
 from torch.export._tree_utils import reorder_kwargs
+from torch.types import FileLike
 
 from .pt2_archive_constants import AOTINDUCTOR_DIR, ARCHIVE_VERSION
 
@@ -23,11 +23,11 @@ log = logging.getLogger(__name__)
 
 
 class PT2ArchiveWriter:
-    def __init__(self, archive_path: Union[str, io.BytesIO]) -> None:
-        self.archive_path: Union[str, io.BytesIO] = archive_path
+    def __init__(self, archive_path: FileLike) -> None:
+        self.archive_path: FileLike = archive_path
         self.archive_file: Optional[zipfile.ZipFile] = None
 
-    def __enter__(self) -> "PT2ArchiveWriter":
+    def __enter__(self) -> Self:
         assert self.archive_file is None
         self.archive_file = zipfile.ZipFile(
             self.archive_path, "w", compression=zipfile.ZIP_STORED
@@ -62,7 +62,7 @@ class PT2ArchiveReader:
         self.archive_path: str = archive_path
         self.archive_file: Optional[zipfile.ZipFile] = None
 
-    def __enter__(self) -> "PT2ArchiveReader":
+    def __enter__(self) -> Self:
         self.archive_file = zipfile.ZipFile(
             self.archive_path, "r", compression=zipfile.ZIP_STORED
         )
@@ -85,20 +85,12 @@ class PT2ArchiveReader:
         assert self.archive_file is not None
         self.archive_file.extractall(path)
 
-    def get_file_names(self) -> List[str]:
+    def get_file_names(self) -> list[str]:
         assert self.archive_file is not None
         return self.archive_file.namelist()
 
 
-def _run_command_and_check(cmd: str) -> None:
-    cmd = shlex.split(cmd)
-    try:
-        subprocess.run(cmd, check=True)
-    except subprocess.CalledProcessError as e:
-        raise exc.CppCompileError(cmd, e.output) from e
-
-
-def compile_so(aoti_dir: str, aoti_files: List[str], so_path: str) -> str:
+def compile_so(aoti_dir: str, aoti_files: list[str], so_path: str) -> str:
     def get_aoti_file_with_suffix(suffix: str) -> str:
         for file in aoti_files:
             if file.endswith(suffix):
@@ -115,32 +107,32 @@ def compile_so(aoti_dir: str, aoti_files: List[str], so_path: str) -> str:
     with open(file_name + "_compile_flags.json") as f:
         compile_flags = json.load(f)
 
-    compile_options = BuildOptionsBase(**compile_flags)
+    compile_options = BuildOptionsBase(
+        **compile_flags, use_relative_path=config.is_fbcode()
+    )
     object_builder = CppBuilder(
         name=file_name,
         sources=cpp_file,
         BuildOption=compile_options,
     )
-    compile_cmd = object_builder.get_command_line()
     output_o = object_builder.get_target_file_path()
-
-    _run_command_and_check(compile_cmd)
+    object_builder.build()
 
     # Parse linker flags and build the .so file
     with open(file_name + "_linker_flags.json") as f:
         linker_flags = json.load(f)
 
-    linker_options = BuildOptionsBase(**linker_flags)
+    linker_options = BuildOptionsBase(
+        **linker_flags, use_relative_path=config.is_fbcode()
+    )
     so_builder = CppBuilder(
         name=os.path.split(so_path)[-1],
         sources=[output_o, consts_o],
         BuildOption=linker_options,
         output_dir=so_path,
     )
-    link_cmd = so_builder.get_command_line()
     output_so = so_builder.get_target_file_path()
-
-    _run_command_and_check(link_cmd)
+    so_builder.build()
 
     # mmapped weights
     serialized_weights_filename = file_name + "_serialized_weights.bin"
@@ -158,9 +150,9 @@ def compile_so(aoti_dir: str, aoti_files: List[str], so_path: str) -> str:
 
 
 def package_aoti(
-    archive_file: Union[str, io.BytesIO],
-    aoti_files: Union[List[str], Dict[str, List[str]]],
-) -> Union[str, io.BytesIO]:
+    archive_file: FileLike,
+    aoti_files: Union[list[str], dict[str, list[str]]],
+) -> FileLike:
     """
     Saves the AOTInductor generated files to the PT2Archive format.
 
@@ -179,9 +171,16 @@ def package_aoti(
         "files. You can get this list of files through calling "
         "`torch._inductor.aot_compile(..., options={aot_inductor.package=True})`"
     )
-    assert isinstance(archive_file, io.BytesIO) or (
-        isinstance(archive_file, str) and archive_file.endswith(".pt2")
-    ), f"Expect archive file to be a file ending in .pt2, or is a buffer. Instead got {archive_file}"
+    assert (
+        isinstance(archive_file, (io.IOBase, IO))
+        and archive_file.writable()
+        and archive_file.seekable()
+    ) or (
+        isinstance(archive_file, (str, os.PathLike))
+        and os.fspath(archive_file).endswith(".pt2")
+    ), (
+        f"Expect archive file to be a file ending in .pt2, or is a buffer. Instead got {archive_file}"
+    )
 
     # Save using the PT2 packaging format
     # (https://docs.google.com/document/d/1jLPp8MN8Whs0-VW9PmJ93Yg02W85tpujvHrTa1pc5x8/edit#heading=h.v2y2jgnwc56a)
@@ -222,7 +221,7 @@ def package_aoti(
                     file,
                 )
 
-    if isinstance(archive_file, io.BytesIO):
+    if isinstance(archive_file, (io.IOBase, IO)):
         archive_file.seek(0)
     return archive_file
 
@@ -244,12 +243,12 @@ class AOTICompiledModel:
         flat_outputs = self.loader.boxed_run(flat_inputs)  # type: ignore[attr-defined]
         return pytree.tree_unflatten(flat_outputs, out_spec)
 
-    def get_metadata(self) -> Dict[str, str]:
+    def get_metadata(self) -> dict[str, str]:
         return self.loader.get_metadata()  # type: ignore[attr-defined]
 
     def load_constants(
         self,
-        constants_map: Dict[str, torch.Tensor],
+        constants_map: dict[str, torch.Tensor],
         *,
         check_full_update: bool,
     ) -> None:
@@ -265,24 +264,39 @@ class AOTICompiledModel:
         """
         self.loader.load_constants(constants_map, False, check_full_update)  # type: ignore[attr-defined]
 
-    def get_constant_fqns(self) -> List[str]:
+    def get_constant_fqns(self) -> list[str]:
         return self.loader.get_constant_fqns()  # type: ignore[attr-defined]
 
+    def __deepcopy__(self, memo: Optional[dict[Any, Any]]) -> "AOTICompiledModel":
+        log.warning(
+            "AOTICompiledModel deepcopy warning: AOTICompiledModel.loader is not deepcopied."
+        )
+        return AOTICompiledModel(self.loader)  # type: ignore[attr-defined]
 
-def load_package(path: Union[str, io.BytesIO], model_name: str = "model") -> AOTICompiledModel:  # type: ignore[type-arg]
-    assert isinstance(path, io.BytesIO) or (
-        isinstance(path, str) and path.endswith(".pt2")
-    ), f"Unable to load package. Path must be a buffer or a file ending in .pt2. Instead got {path}"
 
-    if isinstance(path, io.BytesIO):
+def load_package(
+    path: FileLike, model_name: str = "model", run_single_threaded: bool = False
+) -> AOTICompiledModel:  # type: ignore[type-arg]
+    assert (
+        isinstance(path, (io.IOBase, IO)) and path.readable() and path.seekable()
+    ) or (isinstance(path, (str, os.PathLike)) and os.fspath(path).endswith(".pt2")), (
+        f"Unable to load package. Path must be a buffer or a file ending in .pt2. Instead got {path}"
+    )
+
+    if isinstance(path, (io.IOBase, IO)):
         with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
             # TODO(angelayi): We shouldn't need to do this -- miniz should
             # handle reading the buffer. This is just a temporary workaround
             f.write(path.read())
             path.seek(0)
             log.debug("Writing buffer to tmp file located at %s.", f.name)
-            loader = torch._C._aoti.AOTIModelPackageLoader(f.name, model_name)  # type: ignore[call-arg]
+            loader = torch._C._aoti.AOTIModelPackageLoader(
+                f.name, model_name, run_single_threaded
+            )  # type: ignore[call-arg]
             return AOTICompiledModel(loader)
 
-    loader = torch._C._aoti.AOTIModelPackageLoader(path, model_name)  # type: ignore[call-arg]
+    path = os.fspath(path)  # AOTIModelPackageLoader expects (str, str)
+    loader = torch._C._aoti.AOTIModelPackageLoader(
+        path, model_name, run_single_threaded
+    )  # type: ignore[call-arg]
     return AOTICompiledModel(loader)

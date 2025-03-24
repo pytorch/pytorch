@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
-""" Triton Implementation of the flex_attention Kernel for short query length (FlexDecoding)"""
-from typing import Any, List
+"""Triton Implementation of the flex_attention Kernel for short query length (FlexDecoding)"""
+
+from typing import Any
 
 import sympy
 
@@ -18,6 +19,9 @@ from .flex_attention import (
     compute_next_offset_func,
     create_indices_fake,
     create_num_blocks_fake_generator,
+    get_bounded_indices_func,
+    load_checked_2d,
+    load_checked_block,
     maybe_realize,
 )
 
@@ -120,7 +124,7 @@ flex_decoding_template = TritonTemplate(
     # initialize pointer to m and l
     m_i = tl.zeros([BLOCK_M], dtype=tl.float32) - float("inf")
     l_i = tl.zeros([BLOCK_M], dtype=tl.float32)
-    acc = tl.zeros([BLOCK_M, V_HEAD_DIM], dtype=tl.float32)
+    acc = tl.zeros([BLOCK_M, V_HEAD_DIM_ROUNDED], dtype=tl.float32)
 
     # initialize offsets
     tl.device_assert(BLOCK_M % G == 0)
@@ -130,11 +134,11 @@ flex_decoding_template = TritonTemplate(
     offs_hq = offs_g + off_hkv * G
     off_m = tl.arange(0, BLOCK_M_PER_HQ)                                    # [BLOCK_M_PER_HQ]
     offs_m = tl.ravel(tl.broadcast_to(off_m[None, :], [G, BLOCK_M_PER_HQ])) # [BLOCK_M]
-    offs_d = tl.arange(0, QK_HEAD_DIM)
-    offs_vd = tl.arange(0, V_HEAD_DIM)
+    offs_d = tl.arange(0, QK_HEAD_DIM_ROUNDED)
+    offs_vd = tl.arange(0, V_HEAD_DIM_ROUNDED)
 
     # Get HZ offsets for KV_NUM_BLKS and KV_IDX
-    stride_block_z, stride_block_h, stride_block_row, stride_block_col = {{stride("KV_NUM_BLKS")}}
+    stride_block_z, stride_block_h, stride_block_row = {{stride("KV_NUM_BLKS")}}
     sparse_block_hz_offset = sparse_idx_z * stride_block_z + sparse_idx_h * stride_block_h
     stride_kv_z, stride_kv_h, stride_kv_row, stride_kv_col = {{stride("KV_IDX")}}
     sparse_idx_hz_offset = sparse_idx_z * stride_kv_z + sparse_idx_h * stride_kv_h
@@ -145,13 +149,16 @@ flex_decoding_template = TritonTemplate(
 
     q_range = stride_qg * off_g[:, None, None] + stride_qm * off_m[None, :, None] + stride_qk * offs_d[None, None, :]
 
-    if SAFE_M_BOUNDARY:
-        q = tl.load(Q + q_offset + q_range)
+    if not SAFE_M_BOUNDARY and not SAFE_HEAD_DIM:
+        q = tl.load(Q + q_offset + q_range, mask=(offs_d[None, None, :] < QK_HEAD_DIM) & (off_m[None, :, None] < Q_LEN))
+    elif SAFE_M_BOUNDARY and not SAFE_HEAD_DIM:
+        q = tl.load(Q + q_offset + q_range, mask=offs_d[None, None, :] < QK_HEAD_DIM)
+    elif not SAFE_M_BOUNDARY and SAFE_HEAD_DIM:
+        q = tl.load(Q + q_offset + q_range, mask=off_m[None, :, None] < Q_LEN)
     else:
-        mask = off_m[None, :, None] < Q_LEN
-        q = tl.load(Q + q_offset + q_range, mask)
+        q = tl.load(Q + q_offset + q_range)
 
-    q = tl.reshape(q, [BLOCK_M, QK_HEAD_DIM])
+    q = tl.reshape(q, [BLOCK_M, QK_HEAD_DIM_ROUNDED])
 
 
     # ~~~~~~~~~~~~~~ normal blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -174,7 +181,7 @@ flex_decoding_template = TritonTemplate(
         shape=(QK_HEAD_DIM, KV_LEN),                # (d, N)
         strides=(stride_kk, stride_kn),
         offsets=(0, off_n),
-        block_shape=(QK_HEAD_DIM, BLOCK_N),
+        block_shape=(QK_HEAD_DIM_ROUNDED, BLOCK_N),
         order=(0, 1)
     )
     V_block_ptr = tl.make_block_ptr(
@@ -182,7 +189,7 @@ flex_decoding_template = TritonTemplate(
         shape=(KV_LEN, V_HEAD_DIM),
         strides=(stride_vn, stride_vk),
         offsets=(off_n, 0),
-        block_shape=(BLOCK_N, V_HEAD_DIM),
+        block_shape=(BLOCK_N, V_HEAD_DIM_ROUNDED),
         order=(1, 0)
     )
     offs_n = tl.arange(0, BLOCK_N) + off_n
@@ -223,7 +230,7 @@ flex_decoding_template = TritonTemplate(
             shape=(QK_HEAD_DIM, KV_LEN),                # (d, N)
             strides=(stride_kk, stride_kn),
             offsets=(0, off_n),
-            block_shape=(QK_HEAD_DIM, BLOCK_N),
+            block_shape=(QK_HEAD_DIM_ROUNDED, BLOCK_N),
             order=(0, 1)
         )
         V_block_ptr = tl.make_block_ptr(
@@ -231,7 +238,7 @@ flex_decoding_template = TritonTemplate(
             shape=(KV_LEN, V_HEAD_DIM),
             strides=(stride_vn, stride_vk),
             offsets=(off_n, 0),
-            block_shape=(BLOCK_N, V_HEAD_DIM),
+            block_shape=(BLOCK_N, V_HEAD_DIM_ROUNDED),
             order=(1, 0)
         )
         offs_n = tl.arange(0, BLOCK_N) + off_n
@@ -287,11 +294,14 @@ flex_decoding_template = TritonTemplate(
     idx_m = off_m[None, :, None]
     idx_d = offs_vd[None, None, :]
 
-    mask = (idx_m < Q_LEN)
+    mask = (idx_m < Q_LEN) & (idx_d < V_HEAD_DIM)
     acc = acc.reshape(G, BLOCK_M_PER_HQ, V_HEAD_DIM)
     {{store_output(("idx_z", "idx_t", "idx_hq", "idx_m", "idx_d"), "acc", "mask")}}
  """
     + compute_forward_inner
+    + get_bounded_indices_func
+    + load_checked_block
+    + load_checked_2d
     + compute_next_offset_func
     + compute_forward_block_mn,
 )
@@ -325,6 +335,8 @@ def _get_decoding_default_config(key) -> tuple[int, int, int]:
 
 
 def create_flex_decoding_kernel(*args, **kwargs):
+    from .flex_attention import set_head_dim_values
+
     (
         query,
         key,
@@ -356,9 +368,9 @@ def create_flex_decoding_kernel(*args, **kwargs):
     Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
 
-    assert V.graph.sizevars.evaluate_expr(
-        sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)
-    ), f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
+    assert V.graph.sizevars.evaluate_expr(sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)), (
+        f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
+    )
 
     B = Bq
     kernel_options = dict(kernel_options)
@@ -415,8 +427,8 @@ def create_flex_decoding_kernel(*args, **kwargs):
     score_mod_other_buffers = maybe_realize(score_mod_other_buffers)
     mask_mod_other_buffers = maybe_realize(mask_mod_other_buffers)
 
-    choices: List[Any] = []
-    configs: List[tuple[int, int, int]] = []
+    choices: list[Any] = []
+    configs: list[tuple[int, int, int]] = []
     configs.append(_get_decoding_default_config(key))
     # Note: max_autotune is not supported yet. Causes error in lowering the dynamic shape in reduction ops.
     if config.max_autotune:
@@ -459,8 +471,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
         FlexibleLayout.contiguous_strides(buf_ACC_shape),
     )
 
-    kernel_options.setdefault("QK_HEAD_DIM", qk_head_dim)
-    kernel_options.setdefault("V_HEAD_DIM", v_head_dim)
+    set_head_dim_values(kernel_options, qk_head_dim, v_head_dim, V.graph.sizevars)
 
     kernel_options.setdefault(
         "BLOCK_M",
@@ -471,7 +482,8 @@ def create_flex_decoding_kernel(*args, **kwargs):
             max(
                 next_power_of_2(
                     V.graph.sizevars.size_hint(
-                        seq_len_q, fallback=torch._inductor.config.unbacked_symint_fallback  # type: ignore[arg-type]
+                        seq_len_q,
+                        fallback=torch._inductor.config.unbacked_symint_fallback,  # type: ignore[arg-type]
                     )
                     * gqa_shared_heads
                 ),

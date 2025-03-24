@@ -19,6 +19,7 @@ import torch.cuda
 import torch.nn as nn
 import torch.utils.cpp_extension
 import torch.utils.data
+from torch._utils import try_import
 from torch.autograd._functions.utils import check_onnx_broadcast
 from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
@@ -1002,85 +1003,6 @@ class TestStandaloneCPPJIT(TestCase):
             shutil.rmtree(build_dir)
 
 
-class DummyPrivateUse1Module:
-    @staticmethod
-    def is_available():
-        return True
-
-    @staticmethod
-    def is_autocast_enabled():
-        return True
-
-    @staticmethod
-    def get_autocast_dtype():
-        return torch.float16
-
-    @staticmethod
-    def set_autocast_enabled(enable):
-        pass
-
-    @staticmethod
-    def set_autocast_dtype(dtype):
-        pass
-
-    @staticmethod
-    def get_amp_supported_dtype():
-        return [torch.float16]
-
-
-class TestExtensionUtils(TestCase):
-    def tearDown(self):
-        # Clean up
-        backend_name = torch._C._get_privateuse1_backend_name()
-        if hasattr(torch, backend_name):
-            delattr(torch, backend_name)
-        if f"torch.{backend_name}" in sys.modules:
-            del sys.modules[f"torch.{backend_name}"]
-
-    def test_external_module_register(self):
-        # Built-in module
-        with self.assertRaisesRegex(RuntimeError, "The runtime module of"):
-            torch._register_device_module("cuda", torch.cuda)
-
-        # Wrong device type
-        with self.assertRaisesRegex(RuntimeError, "Expected one of cpu"):
-            torch._register_device_module("dummmy", DummyPrivateUse1Module)
-
-        with self.assertRaises(AttributeError):
-            torch.privateuseone.is_available()  # type: ignore[attr-defined]
-
-        torch._register_device_module("privateuseone", DummyPrivateUse1Module)
-
-        torch.privateuseone.is_available()  # type: ignore[attr-defined]
-
-        # No supporting for override
-        with self.assertRaisesRegex(RuntimeError, "The runtime module of"):
-            torch._register_device_module("privateuseone", DummyPrivateUse1Module)
-
-    def test_external_module_register_with_renamed_backend(self):
-        torch.utils.rename_privateuse1_backend("foo")
-        with self.assertRaisesRegex(RuntimeError, "has already been set"):
-            torch.utils.rename_privateuse1_backend("dummmy")
-
-        custom_backend_name = torch._C._get_privateuse1_backend_name()
-        self.assertEqual(custom_backend_name, "foo")
-
-        with self.assertRaises(AttributeError):
-            torch.foo.is_available()  # type: ignore[attr-defined]
-
-        with self.assertRaisesRegex(AssertionError, "Tried to use AMP with the"):
-            with torch.autocast(device_type=custom_backend_name):
-                pass
-        torch._register_device_module("foo", DummyPrivateUse1Module)
-
-        torch.foo.is_available()  # type: ignore[attr-defined]
-        with torch.autocast(device_type=custom_backend_name):
-            pass
-
-        self.assertEqual(torch._utils._get_device_index("foo:1"), 1)
-        self.assertEqual(torch._utils._get_device_index(torch.device("foo:2")), 2)
-
-
 class TestRenderUtils(TestCase):
     def test_basic(self):
         self.assertExpectedInline(
@@ -1240,6 +1162,24 @@ def f(x):
         rs = CapturedTraceback.format_all([tb, CapturedTraceback.extract()])
         self.assertEqual(len(rs), 2)
         self.assertIn("test_captured_traceback_format_all", "".join(rs[0]))
+
+
+class TestTryImport(TestCase):
+    def test_import_imported(self):
+        self.assertIn("os", sys.modules)
+        os_module = try_import("os")
+        self.assertIs(os_module, os)
+
+    def test_import_existing(self):
+        self.assertNotIn("imaplib", sys.modules)
+        imaplib_module = try_import("imaplib")
+        self.assertIsNotNone(imaplib_module)
+        self.assertFalse(hasattr(imaplib_module, "not_attribute"))
+        self.assertTrue(hasattr(imaplib_module, "IMAP4"))
+
+    def test_import_missing(self):
+        missing_module = try_import("missing_module")
+        self.assertIsNone(missing_module)
 
 
 if __name__ == "__main__":

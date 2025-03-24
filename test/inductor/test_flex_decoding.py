@@ -3,7 +3,7 @@
 
 import functools
 from collections import namedtuple
-from typing import Callable, Optional, Tuple, Union
+from typing import Callable, Optional, Union
 from unittest import expectedFailure, skipUnless
 from unittest.mock import patch
 
@@ -645,7 +645,7 @@ class TestFlexDecoding(InductorTestCase):
         self,
         dtype: torch.dtype,
         score_mod: Callable,
-        head_dims: Tuple[int, int],
+        head_dims: tuple[int, int],
         page_size: int,
     ):
         Hq, Hkv = head_dims
@@ -681,7 +681,7 @@ class TestFlexDecoding(InductorTestCase):
         self,
         dtype: torch.dtype,
         score_mod: Callable,
-        BLOCK_SIZE: Union[int, Tuple[int, int]],
+        BLOCK_SIZE: Union[int, tuple[int, int]],
     ):
         block_mask = create_block_mask(noop_mask, B, 1, 1, S, BLOCK_SIZE=BLOCK_SIZE)
         self.run_test(score_mod, dtype, block_mask=block_mask)
@@ -763,8 +763,8 @@ class TestFlexDecoding(InductorTestCase):
     def test_kv_batch_broadcast(
         self,
         dtype: torch.dtype,
-        head_dims: Tuple[int, int],
-        batch_dims: Tuple[int, int],
+        head_dims: tuple[int, int],
+        batch_dims: tuple[int, int],
         score_mod: Callable,
     ):
         Hq, Hkv = head_dims
@@ -1068,6 +1068,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         ADD = False
         self.run_test(score_mod_scale, dtype)
         self.run_test_with_paged_attention(score_mod_scale, dtype)
+
+    @supported_platform
+    @common_utils.parametrize("head_dim", [17, 24, 94, 121])
+    @common_utils.parametrize("dtype", test_dtypes_fast)
+    def test_non_pow_2_headdim(self, dtype, head_dim):
+        self.run_test(_rel_bias, dtype, B, Hq, S, head_dim, B, Hkv, S, head_dim)
 
     @supported_platform
     @expectedFailure  # If we capture a tensor then we can perform a reduction on it, and that shouldn't be allowed

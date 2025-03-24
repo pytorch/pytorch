@@ -1,20 +1,21 @@
+import functools
 import logging
-from typing import Any, Dict, List, Optional, Sequence
+from collections.abc import Sequence
+from typing import Any, Optional
 
 import sympy
 
 import torch
+from torch._dynamo.utils import counters
 from torch._inductor.codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from torch.utils._triton import has_triton_tma_device
 
-from .. import config as inductor_config
 from ..config import triton as triton_config
 from ..ir import _IntLike, ChoiceCaller, Layout, StorageBox, TensorBox
 from ..lowering import add_layout_constraint, constrain_to_fx_strides, register_lowering
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
-    NoValidChoicesError,
     realize_inputs,
     TritonTemplate,
 )
@@ -33,6 +34,7 @@ from .mm_common import (
     persistent_mm_grid,
     scaled_mm_configs,
     scaled_persistent_mm_configs,
+    should_fallback_to_aten,
 )
 
 
@@ -257,8 +259,6 @@ scaled_mm_template = TritonTemplate(
         else:
             a = tl.load(A, mask=rk[None, :] < k, other=0.)
             b = tl.load(B, mask=rk[:, None] < k, other=0.)
-        if B_PROLOGUE_CAST_TYPE is not None:
-            b = b.to(B_PROLOGUE_CAST_TYPE)
         if USE_FAST_ACCUM:
             acc = tl.dot(a, b, acc, out_dtype=ACC_TYPE)
         else:
@@ -339,8 +339,6 @@ scaled_mm_bias_template = TritonTemplate(
         else:
             a = tl.load(A, mask=rk[None, :] < k, other=0.)
             b = tl.load(B, mask=rk[:, None] < k, other=0.)
-        if B_PROLOGUE_CAST_TYPE is not None:
-            b = b.to(B_PROLOGUE_CAST_TYPE)
         if USE_FAST_ACCUM:
             acc = tl.dot(a, b, acc, out_dtype=ACC_TYPE)
         else:
@@ -427,8 +425,7 @@ def scaled_mm_options_device_tma(  # type: ignore[no-untyped-def]
     scale_a: StorageBox,
     scale_b: StorageBox,
     use_fast_accum: bool,
-    b_prologue_cast_type: Optional[str] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     even_k_symbolic = (
         sympy.gcd(sym_k, config.kwargs["BLOCK_K"]) == config.kwargs["BLOCK_K"]
     )
@@ -442,7 +439,6 @@ def scaled_mm_options_device_tma(  # type: ignore[no-untyped-def]
         GROUP_M=8,
         EVEN_K=even_k_symbolic,
         ACC_TYPE="tl.float32",
-        B_PROLOGUE_CAST_TYPE=b_prologue_cast_type,
         USE_FAST_ACCUM=use_fast_accum,
         num_stages=config.num_stages,
         num_warps=config.num_warps,
@@ -463,8 +459,7 @@ def scaled_mm_options(  # type: ignore[no-untyped-def]
     scale_a: StorageBox,
     scale_b: StorageBox,
     use_fast_accum: bool,
-    b_prologue_cast_type: Optional[str] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     even_k_symbolic = (
         sympy.gcd(sym_k, config.kwargs["BLOCK_K"]) == config.kwargs["BLOCK_K"]
     )
@@ -478,7 +473,6 @@ def scaled_mm_options(  # type: ignore[no-untyped-def]
         GROUP_M=8,
         EVEN_K=even_k_symbolic,
         ACC_TYPE="tl.float32",
-        B_PROLOGUE_CAST_TYPE=b_prologue_cast_type,
         USE_FAST_ACCUM=use_fast_accum,
         num_stages=config.num_stages,
         num_warps=config.num_warps,
@@ -514,6 +508,17 @@ def tuned_scaled_mm(
     m, n, k, layout, mat_a, mat_b = mm_args(
         mat_a, mat_b, layout=layout, out_dtype=out_dtype
     )
+    # below is for getting an overview logging info of inductor mms
+    counters["aten_mm_info"][f"aten._scaled_mm.default_{m}_{n}_{k}"] += 1
+    log.info(
+        "Tuned aten._scaled_mm.default: m=%s, n=%s, k=%s, mat1_dtype=%s, mat2_dtype=%s, output_layout=%s",
+        m,
+        n,
+        k,
+        mat_a.get_dtype(),
+        mat_b.get_dtype(),
+        layout,
+    )
 
     check_supported_striding(mat_a, mat_b)
 
@@ -533,7 +538,7 @@ def tuned_scaled_mm(
         input_nodes, layout, out_dtype=out_dtype, use_fast_accum=use_fast_accum
     )
 
-    choices: List[ChoiceCaller] = []
+    choices: list[ChoiceCaller] = []
     if use_aten_gemm_kernels():
         choices.append(aten_choice)
 
@@ -560,6 +565,12 @@ def tuned_scaled_mm(
             for config in scaled_mm_configs(m, n, k):
                 if k == 16 and config.kwargs["BLOCK_M"] >= 64:
                     continue  # Triton crashes in this case
+
+                # On NVIDIA B200 GPUs, K dim must be >= 32 for tcgen05.mma.kind::f8f6f4.* PTX instruction to be valid
+                # source: https://docs.nvidia.com/cuda/parallel-thread-execution/#tcgen05-matrix-shape
+                if using_b200() and k < 32:
+                    continue
+
                 kwargs = scaled_mm_options(
                     config, m, n, k, layout, scale_a, scale_b, use_fast_accum
                 )
@@ -574,20 +585,17 @@ def tuned_scaled_mm(
     if is_nonzero and use_ck_gemm_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, input_nodes)
 
-    if (
-        len(choices) == 0
-        and not use_aten_gemm_kernels()
-        and inductor_config.autotune_fallback_to_aten
-    ):
-        log.warning("No choices for scaled_mm, using ATen backend as fallback")
+    if should_fallback_to_aten(choices):
         return aten_choice.output_node()
 
-    try:
-        return autotune_select_algorithm("scaled_mm", choices, input_nodes, layout)
-    except NoValidChoicesError:
-        if not inductor_config.autotune_fallback_to_aten:
-            raise
-        log.warning(
-            "All choices for scaled_mm were invalid, using ATen backend as fallback"
-        )
-        return aten_choice.output_node()
+    return autotune_select_algorithm("scaled_mm", choices, input_nodes, layout)
+
+
+@functools.lru_cache
+def using_b200() -> bool:
+    """Returns true if the device is a NVIDIA B200, otherwise returns false."""
+    if not torch.cuda.is_available():
+        return False
+    # compute capability 10.0 or 10.0a is NVIDIA B200
+    device_properties = torch.cuda.get_device_properties(torch.cuda.current_device())
+    return device_properties.major == 10

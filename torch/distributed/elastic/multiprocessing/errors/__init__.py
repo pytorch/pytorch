@@ -54,12 +54,11 @@ import os
 import signal
 import socket
 import time
-import warnings
 from dataclasses import dataclass, field
 from datetime import datetime
 from functools import wraps
 from string import Template
-from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar
+from typing import Any, Callable, Optional, TypeVar
 
 from torch.distributed.elastic.utils.logging import get_logger
 
@@ -78,7 +77,7 @@ __all__ = [
 logger = get_logger(__name__)
 
 
-JSON = Dict
+JSON = dict
 
 _EMPTY_ERROR_DATA = {"message": "<NONE>"}
 _NOT_AVAILABLE = "<N/A>"
@@ -143,7 +142,7 @@ class ProcessFailure:
             else:
                 self.message = "To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html"
 
-    def _get_error_data(self, error_file_data: Dict[str, Any]) -> tuple[str, int]:
+    def _get_error_data(self, error_file_data: dict[str, Any]) -> tuple[str, int]:
         message = error_file_data["message"]
         if isinstance(message, str):
             timestamp = int(error_file_data.get("timestamp", 0))
@@ -231,7 +230,7 @@ class ChildFailedError(Exception):
     of trainer 1's error file to the scheduler's init process.
     """
 
-    def __init__(self, name: str, failures: Dict[GlobalRank, ProcessFailure]):
+    def __init__(self, name: str, failures: dict[GlobalRank, ProcessFailure]):
         self.name = name
         self.failures = failures
         assert (
@@ -248,7 +247,7 @@ class ChildFailedError(Exception):
         root_rank, _root_failure = self.get_first_failure()
 
         root_failure_fmt: str = ""
-        other_failures_fmt: List[str] = []
+        other_failures_fmt: list[str] = []
         width = len(title)
         for idx, (rank, failure) in enumerate(self.failures.items()):
             fmt, w = self._format_failure(idx, rank, failure)
@@ -319,14 +318,14 @@ def record(
      error_handler = get_error_handler()
      error_handler.initialize()
      try:
-        foobar()
+         foobar()
      except ChildFailedError as e:
-        _, failure = e.get_first_failure()
-        error_handler.dump_error_file(failure.error_file, failure.exitcode)
-        raise
+         _, failure = e.get_first_failure()
+         error_handler.dump_error_file(failure.error_file, failure.exitcode)
+         raise
      except Exception as e:
-        error_handler.record(e)
-        raise
+         error_handler.record_exception(e)
+         raise
 
     .. important:: use this decorator once per process at the top level method,
                    typically this is the main method.
@@ -339,8 +338,9 @@ def record(
      def main():
          pass
 
-     if __name__=="__main__":
-        main()
+
+     if __name__ == "__main__":
+         main()
 
     """
     if not error_handler:

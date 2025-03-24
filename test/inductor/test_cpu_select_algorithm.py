@@ -10,6 +10,7 @@ import torch
 import torch._dynamo.config
 import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
+import torch._inductor.cpu_vec_isa
 import torch._inductor.select_algorithm as select_algorithm
 from torch._dynamo.utils import counters
 from torch._inductor import test_operators
@@ -176,9 +177,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             or counters["inductor"]["decompose_addmm"] > 0
         ):
             # This is a special case where we go directly with vectorized codegen
-            self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 0)
+            self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 0)
         else:
-            self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+            self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
 
     @inductor_config.patch({"freezing": True})
     @patches
@@ -207,7 +208,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         v = torch.LongTensor([[1, 2, 4, 5], [4, 3, 2, 9]])
         with verify(dtype) as (atol, rtol):
             self.common(mod, (v,), atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
 
     @inductor_config.patch({"freezing": True})
     @patches
@@ -234,7 +235,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         v = torch.randn(in_features, batch_size).to(dtype=dtype)
         self.common(mod, (v.transpose(0, 1),))
         # TODO(jgong5): support transposed input
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 0)
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 0)
 
     @inductor_config.patch({"freezing": True})
     @patches
@@ -282,7 +283,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         mod = M(bias=bias, epilogue=epilogue, other=u).to(dtype=dtype).eval()
         with verify(dtype) as (atol, rtol):
             self.common(mod, (v,), atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
         if (
             (
                 (
@@ -360,7 +361,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         mod = M(bias=bias, epilogue=epilogue, other=other).to(dtype=dtype).eval()
         with verify(dtype) as (atol, rtol):
             self.common(mod, (v, u), atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
         self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
 
     @inductor_config.patch({"freezing": True})
@@ -462,7 +463,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 atol=atol,
                 rtol=rtol,
             )
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 2)
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 2)
         self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 2)
 
     @inductor_config.patch({"freezing": True})
@@ -533,8 +534,8 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         mod = M(bias=bias).to(dtype=dtype).eval()
         with verify(dtype) as (atol, rtol):
             self.common(mod, (v,), atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
         self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
 
     @inductor_config.patch({"freezing": True})
     @patches
@@ -661,7 +662,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 atol=atol,
                 rtol=rtol,
             )
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 2)
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 2)
         # TODO: change cpp_epilogue_fusion_counter to 1 once supported
         self.assertEqual(
             counters["inductor"]["cpp_epilogue_fusion_counter"], 1 if epilogue else 0
@@ -708,8 +709,8 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         mod = M(bias=bias, unary=unary, binary=binary, other=u).to(dtype=dtype).eval()
         with verify(dtype) as (atol, rtol):
             self.common(mod, (v,), atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
         self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
 
     @inductor_config.patch({"freezing": True})
     @patches
@@ -743,7 +744,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         mod = M(bias=bias, binary=binary, other=u).to(dtype=dtype).eval()
         with verify(dtype) as (atol, rtol):
             self.common(mod, (v,), atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
 
     @inductor_config.patch({"freezing": True})
     @patches
@@ -796,9 +797,12 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         mod = M(bias=bias).to(dtype=dtype).eval()
         with verify(dtype) as (atol, rtol):
             self.common(mod, (v,), atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 3)
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 3)
         self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 2)
 
+    @unittest.skipIf(
+        not torch._C._cpu._is_amx_tile_supported(), "AMX ISA support is required"
+    )
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
@@ -821,7 +825,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         mod = M(bias=bias).to(dtype=dtype).eval()
         with verify(dtype) as (atol, rtol):
             self.common(mod, (v,), atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
         vec_amx = VecAMX()
         # Currently brgemm config is only added for half
         if dtype == torch.half:
@@ -918,7 +922,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 atol=atol,
                 rtol=rtol,
             )
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
         self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 2)
 
     @inductor_config.patch({"freezing": True})
@@ -948,7 +952,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         mod = M(bias=bias).eval()
         with verify(dtype) as (atol, rtol):
             self.common(mod, (idx, x), atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
         self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
 
     @inductor_config.patch({"freezing": True})
@@ -1005,7 +1009,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 atol=atol,
                 rtol=rtol,
             )
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
         self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
 
     @inductor_config.patch({"freezing": True})
@@ -1295,7 +1299,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 atol=atol,
                 rtol=rtol,
             )
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 2)
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 2)
         self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 2)
 
     @inductor_config.patch({"freezing": True})
@@ -1362,7 +1366,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 equal_nan=True,
                 exact_dtype=True,
             )
-            self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 2)
+            self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 2)
             self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 0)
 
     @inductor_config.patch({"freezing": True})
@@ -1412,9 +1416,138 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         w_int8pack, w_scales = _convert_weight_to_int8pack(w)
         mod = M(w_int8pack).eval()
         self.common(mod, (x, w_scales))
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
         vec_amx = VecAMX()
         self._check_amx_counter(vec_amx)
+
+    @unittest.skipIf(
+        not torch._C._cpu._is_amx_tile_supported(), "AMX ISA support is required"
+    )
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    # We set allow_ignore_mark_dynamic to True because Dynamo may end up specializing M dimension
+    # despite it being marked as dynamic with mark_dynamic.
+    @dynamo_config.patch({"allow_ignore_mark_dynamic": True})
+    @parametrize("has_bias", [True, False])
+    @parametrize("dtype", [torch.float, torch.bfloat16])
+    @parametrize("per_channel_quant", [True, False])
+    @parametrize("reshape_a", [True, False])
+    @parametrize("expand_a_scale", [True, False])
+    @parametrize("dynamic", [True, False])
+    @parametrize("M", [1, 32])
+    def test_da8w8_sym_act_sym_wgt_with_int_mm(
+        self, has_bias, dtype, per_channel_quant, reshape_a, expand_a_scale, dynamic, M
+    ):
+        r"""
+        This testcase check if we can match the int8_dynamic_activation_int8_weight int8 linear pattern from torchao,
+        when activation is symmetrically quantized dynamically & weights are symmetrically quantized (statically)
+        The pattern is:
+            (no bias) _int_mm -> convert_element_type -> ([maybe_expand_a_scale] -> mul) -> mul
+        or
+            (with bias) pattern_no_bias -> add
+        Expansion of the scale of activation is optional.
+        The pattern depiction doesn't mean that convert_element_type output is fed into expand_a as input,
+        but simply that activation scale may be applied after an expand operation on it.
+        """
+        if dtype == torch.bfloat16 and not torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            return
+        in_feature = 48
+        out_feature = 64
+        q_min, q_max = -32, 31
+
+        class Mod(torch.nn.Module):
+            def __init__(self, dtype: torch.dtype, has_bias: bool):
+                super().__init__()
+                self.dtype = dtype
+                self.has_bias = has_bias
+                self.b = torch.randint(
+                    q_min, q_max, [in_feature, out_feature], dtype=torch.int8
+                )
+                self.per_channel_quant = per_channel_quant
+                a_scale_per_tensor = torch.rand([1], dtype=dtype) * 0.01 + 0.01
+                a_scale_per_channel = torch.rand([M, 1], dtype=dtype) * 0.01 + 0.01
+                self.a_scale = (
+                    a_scale_per_channel if per_channel_quant else a_scale_per_tensor
+                )
+                self.b_scale = torch.rand([out_feature]) * 0.01 + 0.01
+                self.b_scale = self.b_scale.to(dtype)
+                self.bias = torch.rand([out_feature], dtype=dtype) if has_bias else None
+
+            def forward(self, a):
+                if reshape_a:
+                    a_reshaped = a.reshape(-1, a.size(-1))
+                else:
+                    a_reshaped = a
+                c = torch._int_mm(a_reshaped, self.b)
+                c = c.to(self.dtype)
+                if not expand_a_scale:
+                    a_scale = self.a_scale
+                else:
+                    a_scale = self.a_scale.expand(c.shape)
+                c = c * a_scale
+                c = c * self.b_scale
+                if self.has_bias:
+                    c = c + self.bias
+                return c
+
+        mod = Mod(dtype, has_bias).eval()
+        a = torch.randint(q_min, q_max, [M, in_feature], dtype=torch.int8)
+        if dynamic:
+            torch._dynamo.mark_dynamic(a, 0)
+            torch._dynamo.mark_static(a, 1)
+        self.common(
+            mod,
+            (a,),
+            atol=1e-2 if dtype is torch.bfloat16 else None,
+            rtol=1e-2 if dtype is torch.bfloat16 else None,
+        )
+
+        vec_amx = VecAMX()
+        self._check_amx_counter(vec_amx)
+        if torch._C._cpu._is_amx_tile_supported():
+            # Only AMX ISA based micro-kernel is currently supported for da8w8
+            self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
+
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    @dtypes(torch.bfloat16)
+    @parametrize("batch_size", (32,))
+    @parametrize("in_features", (128, 256))
+    @parametrize("out_features", (64, 128))
+    @parametrize("group_size", (32, 64))
+    def test_int4_woq_mm_avx512(
+        self, dtype, batch_size, in_features, out_features, group_size
+    ):
+        class M(torch.nn.Module):
+            def __init__(self, K, N, group_size):
+                super().__init__()
+                self.linear_weight = torch.randint(
+                    0, 15, (N, K // 2), dtype=torch.uint8
+                )
+                self.qscale_and_zeros = torch.rand(K // group_size, N, 2, dtype=dtype)
+                self.group_size = group_size
+
+            def forward(self, x):
+                x_shape = x.shape
+                x = x.reshape(-1, x_shape[-1])
+                y = torch._weight_int4pack_mm_for_cpu(
+                    x, self.linear_weight, self.group_size, self.qscale_and_zeros
+                )
+                return y.reshape(*x_shape[:-1], out_features)
+
+        counters.clear()
+        seq_len = 8
+        x = torch.rand((batch_size, seq_len, in_features), dtype=dtype)
+        mod = M(in_features, out_features, group_size).eval()
+        self.common(mod, (x,), reference_in_float=False)
+        available_isa = torch._inductor.cpu_vec_isa.pick_vec_isa()
+        avx512_available = "avx512" in str(available_isa)
+        autotune_count = 1 if avx512_available else 0
+        self.assertEqual(
+            counters["inductor"]["select_algorithm_autotune"], autotune_count
+        )
 
     @inductor_config.patch({"freezing": True})
     @patches
@@ -1499,15 +1632,15 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 equal_nan=True,
                 exact_dtype=True,
             )
-            self.assertEqual(
-                counters["inductor"]["select_algorithm_autotune"],
-                2,
-            )
+            self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 2)
             self.assertEqual(
                 counters["inductor"]["cpp_epilogue_fusion_counter"],
                 0,
             )
 
+    @unittest.skipIf(
+        not torch._C._cpu._is_amx_tile_supported(), "AMX ISA support is required"
+    )
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
@@ -1534,7 +1667,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         atol, rtol = 1e-2, 1e-2
         with patch.object(select_algorithm, "VERIFY", dict(atol=atol, rtol=rtol)):
             self.common(ref_quantized_mod, (v,), atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
         vec_amx = VecAMX()
         self._check_amx_counter(vec_amx)
 
@@ -1573,7 +1706,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         mod = M(bias=bias, epilogue=epilogue, other=u).to(dtype=dtype).eval()
         with verify(dtype) as (atol, rtol):
             self.common(mod, (v,), atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
 
     @inductor_config.patch({"freezing": True})
     @inductor_config.patch({"cpp.gemm_cache_blocking": "2,2,2"})
@@ -1602,7 +1735,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         mod = M(bias=bias).to(dtype=dtype).eval()
         with verify(dtype) as (atol, rtol):
             self.common(mod, (v,), atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
 
     @inductor_config.patch({"freezing": True})
     @inductor_config.patch({"cpp.gemm_thread_factors": "4,2,7"})
@@ -1631,7 +1764,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         mod = M(bias=bias).to(dtype=dtype).eval()
         with verify(dtype) as (atol, rtol):
             self.common(mod, (v,), atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
 
     @inductor_config.patch({"freezing": False})
     @patches
@@ -1681,7 +1814,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 (v,),
             )
             self.assertEqual(actual, expected, atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
 
     @inductor_config.patch({"freezing": True})
     @inductor_config.patch({"cpp.enable_grouped_gemm_template": True})
@@ -1728,7 +1861,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 self.common(mod, (v,), atol=atol, rtol=rtol)
             # gemm_num independent template instead of grouped gemm template
             self.assertEqual(
-                counters["inductor"]["select_algorithm_autotune"], gemm_num
+                counters["inductor"]["cpp_templated_kernel_counter"], gemm_num
             )
             self.assertEqual(counters["inductor"]["cpp_grouped_gemm_template"], 0)
 
@@ -1917,7 +2050,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 (v,),
             )
             self.assertEqual(actual, expected, atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
 
     @inductor_config.patch({"freezing": True})
     @inductor_config.patch({"coordinate_descent_tuning": True})
@@ -1940,7 +2073,56 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         counters.clear()
         with verify(torch.bfloat16) as (atol, rtol), torch.autocast(device_type="cpu"):
             self.common(mod, (v,), atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
+
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("batch_size", (2,))
+    @parametrize("in_features", (128,))
+    @parametrize("out_features", (64,))
+    @parametrize("bias", (True, False))
+    def test_linear_to_lowp_fp(self, batch_size, in_features, out_features, bias):
+        class M(torch.nn.Module):
+            def __init__(self, bias):
+                super().__init__()
+                self.linear = torch.nn.Linear(in_features, out_features, bias)
+
+            def forward(self, x):
+                return self.linear(x).to(torch.float16)
+
+        counters.clear()
+        dtype = torch.float32
+        mod = M(bias=bias).to(dtype=dtype).eval()
+        B = (batch_size,)
+        v = torch.randn(*B, in_features).to(dtype=dtype)
+        with verify(dtype) as (atol, rtol):
+            self.common(mod, (v,), atol=atol, rtol=rtol)
+            self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
+
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    def test_cpp_weight_prune(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(32, 128, bias=False)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        v = torch.randn(2, 32).to(torch.bfloat16)
+        mod = M().eval().to(torch.bfloat16)
+        torch._dynamo.reset()
+        torch._inductor.metrics.reset()
+        counters.clear()
+        with verify(torch.bfloat16) as (atol, rtol):
+            self.common(mod, (v,), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
+        self.assertEqual(counters["inductor"]["select_algorithm_weight_prune"], 1)
 
     @patches
     @torch.no_grad
@@ -1964,7 +2146,37 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         mod = M().to(dtype=dtype).eval()
         with verify(dtype) as (atol, rtol):
             self.common(mod, (u, v), atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
+
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("bs", (2,))
+    @parametrize("Mdim", (16, 32))
+    @parametrize("Kdim", (32,))
+    @parametrize("Ndim", (3, 16, 32, 48, 128, 1024, 1025))
+    @dtypes(torch.bfloat16, torch.half)
+    def test_bmm_amx(self, dtype, bs, Mdim, Kdim, Ndim):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                return x @ y
+
+        counters.clear()
+        u = torch.randn(bs, Mdim, Kdim).to(dtype=dtype)
+        v = torch.randn(bs, Kdim, Ndim).to(dtype=dtype)
+        mod = M().to(dtype=dtype).eval()
+        with verify(dtype) as (atol, rtol):
+            self.common(mod, (u, v), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
+        vec_amx = VecAMX()
+        # Currently brgemm config is only added for half
+        if dtype == torch.half:
+            self._check_brgemm_counter(vec_amx)
+        else:
+            self._check_amx_counter(vec_amx)
 
     @patches
     @torch.no_grad
@@ -1988,7 +2200,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         mod = M().to(dtype=dtype).eval()
         with verify(dtype) as (atol, rtol), torch.amp.autocast("cpu"):
             self.common(mod, (u, v), atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
 
     @inductor_config.patch({"freezing": True})
     @patches
@@ -2014,7 +2226,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         mod = M(v).to(dtype=dtype).eval()
         with verify(dtype) as (atol, rtol):
             self.common(mod, (u,), atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
 
     @patches
     @torch.no_grad
@@ -2033,7 +2245,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @dtypes(torch.float, torch.bfloat16, torch.half)
     def test_bmm_2d_permute(self, Ndim, order, dtype):
         # TODO: Support bmm with transposed X
-        dtype = torch.float
         bs = 12
         Mdim = 10
         Kdim = 62
@@ -2064,7 +2275,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         with verify(dtype) as (atol, rtol):
             self.common(mod, (u, v), atol=atol, rtol=rtol)
         self.assertEqual(
-            counters["inductor"]["select_algorithm_autotune"],
+            counters["inductor"]["cpp_templated_kernel_counter"],
             1 if order[0] == (0, 1, 2) else 0,
         )
 
@@ -2088,7 +2299,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         mod = M().to(dtype=dtype).eval()
         with verify(dtype) as (atol, rtol):
             self.common(mod, (u,), atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
 
     @patches
     @torch.no_grad
@@ -2109,7 +2320,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         mod = M().to(dtype=dtype).eval()
         with verify(dtype) as (atol, rtol):
             self.common(mod, (u,), atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
 
     @patches
     @torch.no_grad
@@ -2145,7 +2356,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         mod = M(epilogue, other).to(dtype=dtype).eval()
         with verify(dtype) as (atol, rtol):
             self.common(mod, (x, w), atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
         self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
 
     @patches
@@ -2178,8 +2389,126 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         mod = M().to(dtype=dtype).eval()
         with verify(dtype) as (atol, rtol):
             self.common(mod, (x, w), atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
         self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
+
+    @patches
+    @torch.no_grad
+    @dtypes(torch.float)
+    def test_aoti_bmm_unique_identifiers(self, dtype):
+        try:
+            try:
+                from . import test_aot_inductor_utils
+            except ImportError:
+                import test_aot_inductor_utils
+        except Exception:
+            # skip this UT if import failed
+            return
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, w):
+                y = x @ w
+                return y @ w
+
+        counters.clear()
+        x = torch.randn(3, 64, 64).to(dtype=dtype)
+        w = torch.randn(3, 64, 64).to(dtype=dtype)
+        mod = M().to(dtype=dtype).eval()
+        with verify(dtype) as (atol, rtol), torch.no_grad():
+            expected = mod(x, w)
+            actual = test_aot_inductor_utils.AOTIRunnerUtil.run(
+                "cpu",
+                mod,
+                (x, w),
+            )
+            self.assertEqual(actual, expected, atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 2)
+
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @set_num_threads(1)  # avoid k_slicing to make the test deterministic
+    @parametrize(
+        "out_features1",
+        (
+            8,
+            16,
+            24,
+            32,
+            48,
+        ),
+    )
+    @dtypes(torch.float)
+    def test_local_and_global_accumulator(self, out_features1, dtype):
+        batch_size = 256
+        in_features = 64
+        out_features = 129
+        in_features1 = 128
+        bias = True
+        try:
+            try:
+                from . import test_aot_inductor_utils
+            except ImportError:
+                import test_aot_inductor_utils
+        except Exception:
+            # skip this UT if import failed
+            return
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+                self.linear = torch.nn.Linear(in_features, out_features, bias)
+                self.linear1 = torch.nn.Linear(in_features1, out_features1, bias)
+
+            def forward(self, x):
+                y = self.linear(x)
+                view = torch.ops.aten.view.default(y, [-1, in_features1])
+                return self.linear1(view)
+
+        counters.clear()
+        x = torch.randn(batch_size, in_features).to(dtype=dtype)
+        mod = M().to(dtype=dtype).eval()
+        with verify(dtype) as (atol, rtol), torch.no_grad():
+            expected = mod(
+                x,
+            )
+            actual = test_aot_inductor_utils.AOTIRunnerUtil.run(
+                "cpu",
+                mod,
+                (x,),
+            )
+            self.assertEqual(actual, expected, atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 2)
+
+    @patches
+    @inductor_config.patch(freezing=True)
+    @unittest.skipIf(not torch._C._has_mkldnn, "MKLDNN is not enabled")
+    def test_bmm_flexible_layout(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, u, v):
+                view_3 = torch.ops.aten.reshape.default(u, [-1, 512, 64])
+                clone_1 = torch.ops.aten.clone.default(
+                    v, memory_format=torch.contiguous_format
+                )
+                view_7 = torch.ops.aten.reshape.default(clone_1, [-1, 512, 64])
+                permute_6 = torch.ops.aten.permute.default(view_7, [0, 2, 1])
+                div = torch.ops.aten.div.Tensor(permute_6, 8.0)
+                # view_3 is a ReinterpretView and div is a FlexibleLayout which will become FixedLayout
+                bmm = torch.ops.aten.bmm.default(view_3, div)
+                return bmm
+
+        mod = M().eval()
+        u = torch.randn(2, 24, 512, 64)
+        v = torch.randn(48, 512, 64)
+        with verify(u.dtype) as (atol, rtol):
+            self.common(mod, (u, v))
 
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
@@ -2251,7 +2580,7 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
         mod = M().to(dtype=dtype).eval()
         with verify(dtype) as (atol, rtol):
             self.common(mod, (u, v), atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
         self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
 
     @patches
@@ -2287,7 +2616,7 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
         mod = M().to(dtype=dtype).eval()
         with verify(dtype) as (atol, rtol):
             self.common(mod, (u, v, noise), atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
         self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
 
     @patches
@@ -2347,7 +2676,7 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
         mod = M().to(dtype=dtype).eval()
         with verify(dtype) as (atol, rtol):
             self.common(mod, (u, v, arg5), atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
         self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
 
     @patches
@@ -2377,7 +2706,7 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
         mod = M().to(dtype=dtype).eval()
         with verify(dtype) as (atol, rtol):
             self.common(mod, (u, v), atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
 
 
 instantiate_device_type_tests(TestSelectAlgorithm, globals(), only_for="cpu")

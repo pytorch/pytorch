@@ -9,7 +9,7 @@ import operator
 import random
 import sys
 import unittest
-from typing import NamedTuple, List
+from typing import NamedTuple
 
 import torch
 from torch import _VF
@@ -25,7 +25,7 @@ hu.assert_deadline_disabled()
 
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_utils import TestCase
-from torch.testing._internal.common_utils import IS_PPC, TEST_WITH_UBSAN, IS_MACOS, IS_SANDCASTLE, IS_FBCODE, IS_ARM64
+from torch.testing._internal.common_utils import IS_PPC, IS_MACOS, IS_SANDCASTLE, IS_FBCODE, IS_ARM64
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM, skipIfNoQNNPACK, skipIfNoONEDNN
 from torch.testing._internal.common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
     override_quantized_engine, supported_qengines, override_qengines, _snr
@@ -54,7 +54,7 @@ class PointwisePostOp(NamedTuple):
     binary_attr : str = "none"
     alpha : float = 1.0
     unary_attr : str = "none"
-    scalars : List = []
+    scalars : list = []
     algorithm : str = ""
 
 # Make sure we won't have overflows from vpmaddubsw instruction used in FBGEMM.
@@ -3698,7 +3698,7 @@ class TestDynamicQuantizedOps(TestCase):
         # The goal here is to show that the dynamic op is the same as
         # calc params->quantize_input->quantized op->dequantize output
 
-        if qengine_is_qnnpack() and (IS_PPC or TEST_WITH_UBSAN):
+        if qengine_is_qnnpack() and IS_PPC:
             return  # not supported by QNNPACK
 
         if qengine_is_qnnpack():
@@ -5720,7 +5720,7 @@ class TestQuantizedConv(TestCase):
     def test_qconv_transpose1d(self):
         if not qengine_is_qnnpack():
             return  # Currently only the QNNPACK is supported
-        if qengine_is_qnnpack() and (IS_PPC or TEST_WITH_UBSAN):
+        if qengine_is_qnnpack() and IS_PPC:
             return  # QNNPACK doesn't support these
         batch_size = 2
         input_channels_per_group_list = [2, 32]
@@ -5865,7 +5865,7 @@ class TestQuantizedConv(TestCase):
             Y_scale,
             Y_zero_point,
             use_bias):
-        if qengine_is_qnnpack() and (IS_PPC or TEST_WITH_UBSAN):
+        if qengine_is_qnnpack() and IS_PPC:
             return  # QNNPACK doesn't support these
         # ONEDNN does not support output paddings
         if qengine_is_onednn() and (o_pad_h, o_pad_w) != (0, 0):

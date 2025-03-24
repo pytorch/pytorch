@@ -289,7 +289,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
         port = common.find_free_port()
 
         err_msg_reg = f"^The server socket has failed to listen on any local .*{port}"
-        with self.assertRaisesRegex(RuntimeError, err_msg_reg):
+        with self.assertRaisesRegex(dist.DistNetworkError, err_msg_reg):
             # Use noqa to silence flake8.
             # Need to store in an unused variable here to ensure the first
             # object is not destroyed before the second object is created.
@@ -520,6 +520,38 @@ class TCPStoreTest(TestCase, StoreTestBase):
     def test_world_size_0_raises(self):
         with self.assertRaisesRegex(ValueError, "TCPStore world size cannot be 0"):
             dist.TCPStore("localhost", 0, world_size=0, is_master=False)
+
+    def test_agent_store(self) -> None:
+        store = self._create_store()
+
+        with self.assertRaisesRegex(
+            dist.DistNetworkError,
+            "The server socket has failed to listen on any local network address",
+        ):
+            dist.TCPStore(
+                host_name="localhost",
+                port=store.port,
+                world_size=1,
+                is_master=True,
+                use_libuv=self._use_libuv,
+            )
+
+        USE_AGENT_STORE = "TORCHELASTIC_USE_AGENT_STORE"
+        MASTER_PORT = "MASTER_PORT"
+
+        os.environ[USE_AGENT_STORE] = "1"
+        os.environ[MASTER_PORT] = str(store.port)
+        second_server = dist.TCPStore(
+            host_name="localhost",
+            port=store.port,
+            world_size=1,
+            is_master=True,
+            use_libuv=self._use_libuv,
+        )
+        del os.environ[USE_AGENT_STORE]
+        del os.environ[MASTER_PORT]
+
+        self.assertEqual(second_server.port, store.port)
 
 
 class LibUvTCPStoreTest(TCPStoreTest):

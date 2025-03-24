@@ -8,7 +8,7 @@ Usage:
     python3 monitor.py
 
 - To run the script in the local machine with debug mode and customized data collect time, use the following command:
-    python3 monitor.py --debug --log-interval 10 --data-collect-interval 0.5
+    python3 monitor.py --debug --log-interval 10 --data-collect-interval 2
 
 - To log the data to a file, use the following command:
     python3 monitor.py > usage_log.txt 2>&1
@@ -19,11 +19,16 @@ Usage:
 
 from __future__ import annotations
 
+import os
+import sys
+
+
+# adding sys.path makes the monitor script able to import path tools.stats.utilization_stats_lib
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 import argparse
 import copy
 import dataclasses
-import datetime
-import json
+import os
 import signal
 import threading
 import time
@@ -32,11 +37,24 @@ from typing import Any
 
 import psutil  # type: ignore[import]
 
+from tools.stats.utilization_stats_lib import (
+    getDataModelVersion,
+    getTsNow,
+    GpuUsage,
+    RecordData,
+    UtilizationMetadata,
+    UtilizationRecord,
+    UtilizationStats,
+)
+
 
 _HAS_PYNVML = False
 _HAS_AMDSMI = False
 
-_DATA_MODEL_VERSION = 1.0
+_job_name = os.environ.get("JOB_NAME", "")
+_job_id = os.environ.get("JOB_ID", "")
+_workflow_run_id = os.environ.get("WORKFLOW_RUN_ID", "")
+_workflow_name = os.environ.get("WORKFLOW_NAME", "")
 
 
 @dataclasses.dataclass
@@ -99,8 +117,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--data-collect-interval",
         type=float,
-        default=0.5,
-        help="set time interval to collect data, default is 0.5 second, this should not longer than log_interval",
+        default=1,
+        help="set time interval to collect data, default is 1 second, this should not longer than log_interval",
     )
     args = parser.parse_args()
     return args
@@ -145,14 +163,14 @@ class UsageLogger:
     """
     Collect and display usage data, including:
     CPU, memory, GPU memory utilization, and GPU utilization.
-    By default, data is collected every 0.5 seconds, and log
+    By default, data is collected every 1 seconds, and log
     the aggregated result every 5 seconds.
     """
 
     def __init__(
         self,
         log_interval: float = 5,
-        data_collect_interval: float = 0.5,
+        data_collect_interval: float = 1,
         is_debug_mode: bool = False,
         pynvml_enabled: bool = False,
         amdsmi_enabled: bool = False,
@@ -164,16 +182,22 @@ class UsageLogger:
             in a pretty format with more information.
         """
         self._log_interval = log_interval
-        self._summary_info = {
-            "level": "metadata",
-            "interval": self._log_interval,
-            "data_model_version": _DATA_MODEL_VERSION,
-        }
         self._data_collect_interval = data_collect_interval
+        self._metadata = UtilizationMetadata(
+            level="metadata",
+            usage_collect_interval=self._data_collect_interval,
+            data_model_version=getDataModelVersion(),
+            job_id=_job_id,
+            job_name=_job_name,
+            workflow_id=_workflow_run_id,
+            workflow_name=_workflow_name,
+            start_at=getTsNow(),
+        )
+
         self._has_pynvml = pynvml_enabled
         self._has_amdsmi = amdsmi_enabled
         self._gpu_handles: list[Any] = []
-        self._gpu_libs_detected: list[str] = []
+        self._gpu_lib_detected: str = ""
         self._num_of_cpus = 0
         self._debug_mode = is_debug_mode
         self._initial_gpu_handler()
@@ -210,31 +234,36 @@ class UsageLogger:
             finally:
                 time.sleep(self._data_collect_interval)
 
-    def _generate_stats(self, data_list: list[float]) -> dict[str, Any]:
+    def _generate_stats(self, data_list: list[float]) -> UtilizationStats:
         """
         Generate stats from the data list.
         """
         if len(data_list) == 0:
-            return {}
+            return UtilizationStats()
 
         total = sum(data_list)
         avg = total / len(data_list)
         maxi = max(data_list)
-        return {
-            "avg": round(avg, 2),
-            "max": round(maxi, 2),
-        }
+
+        return UtilizationStats(
+            avg=round(avg, 2),
+            max=round(maxi, 2),
+        )
 
     def _output_data(self) -> None:
         """
         output the data.
         """
-        self._summary_info["start_time"] = datetime.datetime.now().timestamp()
-        self.log_json(self._summary_info)
+        self._metadata.start_at = getTsNow()
+        self.log_json(self._metadata.to_json())
 
         while not self.exit_event.is_set():
             collecting_start_time = time.time()
-            stats = {}
+            stats = UtilizationRecord(
+                level="record",
+                timestamp=getTsNow(),
+            )
+
             try:
                 data_list, error_list = self.shared_resource.get_and_reset()
                 if self._debug_mode:
@@ -253,13 +282,6 @@ class UsageLogger:
                     # pass since no data is collected
                     continue
 
-                stats.update(
-                    {
-                        "level": "record",
-                        "time": datetime.datetime.now().timestamp(),
-                    }
-                )
-
                 cpu_stats = self._generate_stats(
                     [data.cpu_percent for data in data_list]
                 )
@@ -271,43 +293,35 @@ class UsageLogger:
                 cmds = {
                     process["cmd"] for data in data_list for process in data.processes
                 }
-                stats.update(
-                    {
-                        "cpu": cpu_stats,
-                        "memory": memory_stats,
-                        "cmds": list(cmds),
-                        "count": len(data_list),
-                    }
-                )
+
+                stats.cmd_names = list(cmds)
+                record = RecordData()
+                record.cpu = cpu_stats
+                record.memory = memory_stats
 
                 # collect gpu metrics
                 if self._has_pynvml or self._has_amdsmi:
                     gpu_list = self._calculate_gpu_utilization(data_list)
-                    stats.update(
-                        {
-                            "gpu_list": gpu_list,
-                        }
-                    )
+                    record.gpu_usage = gpu_list
+                stats.data = record
             except Exception as e:
-                stats = {
-                    "level": "record",
-                    "time": datetime.datetime.now().timestamp(),
-                    "error": str(e),
-                }
+                stats = UtilizationRecord(
+                    level="record",
+                    timestamp=getTsNow(),
+                    error=str(e),
+                )
             finally:
                 collecting_end_time = time.time()
                 time_diff = collecting_end_time - collecting_start_time
                 # verify there is data
-                if stats:
-                    stats["log_duration"] = f"{time_diff * 1000:.2f} ms"
-                    self.log_json(stats)
+                if stats.level:
+                    stats.log_duration = f"{time_diff * 1000:.2f} ms"
+                    self.log_json(stats.to_json())
                 time.sleep(self._log_interval)
         # shut down gpu connections when exiting
         self._shutdown_gpu_connections()
 
-    def _calculate_gpu_utilization(
-        self, data_list: list[UsageData]
-    ) -> list[dict[str, Any]]:
+    def _calculate_gpu_utilization(self, data_list: list[UsageData]) -> list[GpuUsage]:
         """
         Calculates the GPU utilization.
         """
@@ -324,11 +338,11 @@ class UsageLogger:
             gpu_util_stats = self._generate_stats(gpu_utilization[gpu_uuid])
             gpu_mem_util_stats = self._generate_stats(gpu_mem_utilization[gpu_uuid])
             calculate_gpu.append(
-                {
-                    "uuid": gpu_uuid,
-                    "util_percent": gpu_util_stats,
-                    "mem_util_percent": gpu_mem_util_stats,
-                }
+                GpuUsage(
+                    uuid=gpu_uuid,
+                    util_percent=gpu_util_stats,
+                    mem_util_percent=gpu_mem_util_stats,
+                )
             )
         return calculate_gpu
 
@@ -348,10 +362,7 @@ class UsageLogger:
         """
         Logs the stats in json format to stdout.
         """
-        if self._debug_mode:
-            print(json.dumps(stats, indent=4))
-            return
-        print(json.dumps(stats))
+        print(stats)
 
     def _collect_gpu_data(self) -> list[GpuData]:
         gpu_data_list = []
@@ -391,7 +402,7 @@ class UsageLogger:
         """
         try:
             if self._has_pynvml:
-                self._gpu_libs_detected.append("pynvml")
+                self._gpu_lib_detected = "pynvml"
                 # Todo: investigate if we can use device uuid instead of index.
                 # there is chance that the gpu index can change when the gpu is rebooted.
                 self._gpu_handles = [
@@ -399,20 +410,17 @@ class UsageLogger:
                     for i in range(pynvml.nvmlDeviceGetCount())
                 ]
             if self._has_amdsmi:
-                self._gpu_libs_detected.append("amdsmi")
+                self._gpu_lib_detected = "amdsmi"
                 self._gpu_handles = amdsmi.amdsmi_get_processor_handles()
 
-            self._num_of_cpus = psutil.cpu_count(logical=False)
+            self._num_of_cpus = psutil.cpu_count(logical=True)
             # update summary info
-            self._summary_info.update(
-                {
-                    "gpu_libs_detected": self._gpu_libs_detected,
-                    "num_of_gpus": len(self._gpu_handles),
-                    "num_of_cpus": self._num_of_cpus,
-                }
-            )
+            self._metadata.gpu_type = self._gpu_lib_detected
+            self._metadata.gpu_count = len(self._gpu_handles)
+            self._metadata.cpu_count = self._num_of_cpus
+
         except Exception as e:
-            self._summary_info["error"] = str(e)
+            self._metadata.error = str(e)
 
     def _shutdown_gpu_connections(self) -> None:
         if self._has_amdsmi:

@@ -79,7 +79,6 @@
   - .ci/docker/ci_commit_pins/triton.txt
   approved_by:
   - pytorchbot
-  ignore_flaky_failures: false
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -91,7 +90,6 @@
   - test/slow_tests.json
   approved_by:
   - pytorchbot
-  ignore_flaky_failures: false
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -103,12 +101,10 @@
   - .ci/docker/ci_commit_pins/executorch.txt
   approved_by:
   - pytorchbot
-  ignore_flaky_failures: false
   mandatory_checks_name:
   - EasyCLA
   - Lint
-  - pull / linux-jammy-py3-clang12-executorch / build
-  - pull / linux-jammy-py3-clang12-executorch / test (executorch, 1, 1, linux.2xlarge)
+  - pull
 
 - name: OSS CI / pytorchbot / XLA
   patterns:
@@ -119,8 +115,7 @@
   mandatory_checks_name:
   - EasyCLA
   - Lint
-  - pull / linux-focal-py3_9-clang9-xla / build
-  - pull / linux-focal-py3_9-clang9-xla / test (xla, 1, 1, linux.12xlarge)
+  - pull
 
 - name: Documentation
   patterns:
@@ -339,6 +334,7 @@
   - XiaobingSuper
   - jgong5
   - mingfeima
+  - EikanWang
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -371,6 +367,7 @@
   - jgong5
   - vfdev-5
   - leslie-fang-intel
+  - EikanWang
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -384,6 +381,7 @@
   approved_by:
   - leslie-fang-intel
   - jgong5
+  - EikanWang
   mandatory_checks_name:
   - EasyCLA
   - Lint

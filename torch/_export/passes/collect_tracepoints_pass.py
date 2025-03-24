@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import operator
-from typing import Dict, Optional, TYPE_CHECKING, Union
+from typing import Optional, TYPE_CHECKING, Union
 
 import torch
 from torch.export.exported_program import ConstantArgument, TensorArgument
@@ -23,7 +23,7 @@ class CollectTracepointsPass(PassBase):
     """
 
     def __init__(
-        self, specs: Dict[str, ModuleCallSignature], sig: ExportGraphSignature
+        self, specs: dict[str, ModuleCallSignature], sig: ExportGraphSignature
     ) -> None:
         super().__init__()
         self.specs = specs

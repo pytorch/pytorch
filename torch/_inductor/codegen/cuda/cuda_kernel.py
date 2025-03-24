@@ -3,10 +3,14 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Callable, Literal, Optional, TYPE_CHECKING, Union
 
-from sympy import Expr
+from sympy import Expr, symbols
 
 from torch import dtype as torch_dtype
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
+
+
+if TYPE_CHECKING:
+    from .cuda_template import ArgInfo
 
 from ...autotune_process import CUDABenchmarkRequest
 from ...ir import (
@@ -153,7 +157,12 @@ class CUDATemplateKernel(CUDAKernel):
 
     _EXTRA_CPP_ARGS = "size_t* workspace_size, uint8_t* workspace, cudaStream_t stream"
 
-    def __init__(self, kernel_name) -> None:
+    def __init__(
+        self,
+        kernel_name: str,
+        runtime_arg_info: list["ArgInfo"],
+        runtime_arg_values: list[Any],
+    ) -> None:
         """
         Initializes a new instance of the CUDATemplateKernel class.
 
@@ -162,16 +171,8 @@ class CUDATemplateKernel(CUDAKernel):
         """
         super().__init__()
         self.kernel_name = kernel_name
-
-    def arg_name(self, node: IRNode) -> Optional[str]:
-        """
-        Returns arg name of a given input or output node.
-        """
-        if node is None:
-            return None
-        return {**self.args.input_buffers, **self.args.output_buffers}.get(
-            node.get_name(), None
-        )
+        self.runtime_arg_info = runtime_arg_info
+        self.runtime_arg_values = runtime_arg_values
 
     def check_not_null(self, node: IRNode) -> str:
         """
@@ -254,7 +255,13 @@ class CUDATemplateKernel(CUDAKernel):
             f"const int {s}" for s in ("M", "N", "K", "lda", "ldb", "ldc", "ldd")
         ]
 
-        signature = f"int {self.kernel_name}({', '.join(arg_defs + size_args)}, {self._EXTRA_CPP_ARGS})"
+        runtime_arg_decls = ",".join(
+            [f"{arg.ty} {arg.name}" for arg in self.runtime_arg_info]
+        )
+        if runtime_arg_decls:
+            runtime_arg_decls += ", "
+
+        signature = f"int {self.kernel_name}({', '.join(arg_defs + size_args)}, {runtime_arg_decls}{self._EXTRA_CPP_ARGS})"
         self.signature = signature
         return signature
 
@@ -273,6 +280,7 @@ class CUDATemplateKernel(CUDAKernel):
         """
         wrapper = V.graph.wrapper_code
 
+        arg_types: list[Any]
         if V.graph.cpp_wrapper:
             # Make sure we initialize these kernels since they're exported as
             # C-style symbol names.
@@ -286,8 +294,12 @@ class CUDATemplateKernel(CUDAKernel):
             _, call_args, _, arg_types = self.args.python_argdefs()
 
         layout_args = self.get_layout_args()
-        call_args.extend(layout_args)
+        call_args.extend(layout_args)  # type: ignore[arg-type]
+        for arg in self.runtime_arg_values:
+            call_args.append(arg)
         arg_types.extend("int" for a in layout_args)
+        for arg in self.runtime_arg_info:
+            arg_types.append(arg.ty)
         # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
         for i in range(len(call_args)):
             if V.graph.is_unspec_arg(call_args[i]):
@@ -413,6 +425,7 @@ class CUDATemplateKernel(CUDAKernel):
         if len(sizes) == 0:
             return str(default_value)
 
+        sizes = [symbols(v) if isinstance(v, str) else v for v in sizes]
         val = sympy_product(sizes)
         return val
 
@@ -483,7 +496,9 @@ class CUDATemplateCaller(ChoiceCaller):
         make_kernel_render: Callable[[CUDATemplateBuffer, Optional[list[IRNode]]], str],
         bmreq: CUDABenchmarkRequest,
         template: "CUDATemplate",  # type: ignore[name-defined]
-        info_kwargs: Optional[dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]],  # type: ignore[type-arg]
+        info_kwargs: Optional[
+            dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]
+        ],  # type: ignore[type-arg]
         description: str,
     ) -> None:
         super().__init__(name, input_nodes, layout, description)

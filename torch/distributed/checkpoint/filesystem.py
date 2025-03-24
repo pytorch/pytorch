@@ -10,24 +10,12 @@ import threading
 import uuid
 import warnings
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Generator, Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from io import UnsupportedOperation
 from pathlib import Path
-from typing import (
-    Any,
-    Callable,
-    cast,
-    Dict,
-    Generator,
-    IO,
-    Iterable,
-    Iterator,
-    List,
-    Optional,
-    Union,
-)
+from typing import Any, Callable, cast, IO, Optional, Union
 
 # introduced as collections.abc.Buffer in Python 3.12
 from typing_extensions import Buffer
@@ -40,12 +28,7 @@ from torch.distributed.checkpoint._extension import (
     ExtensionRegistry,
     StreamTransformExtension,
 )
-from torch.distributed.checkpoint.metadata import (
-    Metadata,
-    MetadataIndex,
-    STATE_DICT_TYPE,
-    StorageMeta,
-)
+from torch.distributed.checkpoint.metadata import Metadata, STATE_DICT_TYPE, StorageMeta
 from torch.distributed.checkpoint.planner import (
     LoadItemType,
     LoadPlan,
@@ -113,7 +96,7 @@ class _TensorLoader(ABC):
 class _SerialCpuLoader(_TensorLoader):
     def __init__(self, resolve_fun: Callable) -> None:
         self.resolve_fun = resolve_fun
-        self.items: List[tuple[int, object]] = []
+        self.items: list[tuple[int, object]] = []
 
     def add(self, size: int, obj: object) -> None:
         self.items.append((size, obj))
@@ -141,7 +124,7 @@ class _OverlappingCpuLoader(_TensorLoader):
         inflight_threshhold: int = 1_000_000,
     ) -> None:
         self.resolve_fun = resolve_fun
-        self.items: List[tuple[int, object]] = []
+        self.items: list[tuple[int, object]] = []
         self.inflight_threshhold = inflight_threshhold
         self.in_flight_data = 0
         self.current_items: collections.deque = collections.deque()
@@ -161,7 +144,7 @@ class _OverlappingCpuLoader(_TensorLoader):
     def _done(self) -> bool:
         return self.idx >= len(self.items)
 
-    def _drain(self) -> List[tuple[torch.Tensor, object]]:
+    def _drain(self) -> list[tuple[torch.Tensor, object]]:
         drained = []
         if self.in_flight_data >= self.inflight_threshhold:
             self.stream.synchronize()
@@ -243,7 +226,7 @@ class _StorageWriterTransforms:
 
     def transform_save_stream(
         self, write_item: WriteItem, raw_stream: io.IOBase
-    ) -> tuple[IO[bytes], List[str]]:
+    ) -> tuple[IO[bytes], list[str]]:
         # In order to avoid leaking fds, transformers' close must
         # cascade to wrapped streams, but since this function can
         # append to the raw stream, we can't close the actual stream.
@@ -285,14 +268,14 @@ def _item_size(item: WriteItem) -> int:
     return size * torch._utils._element_size(dtype)
 
 
-def _split_by_size_and_type(bins: int, items: List[WriteItem]) -> List[List[WriteItem]]:
+def _split_by_size_and_type(bins: int, items: list[WriteItem]) -> list[list[WriteItem]]:
     if bins == 1:
         return [items]
 
     bytes_w = [wi for wi in items if wi.type == WriteItemType.BYTE_IO]
     tensor_w = [wi for wi in items if wi.type != WriteItemType.BYTE_IO]
 
-    buckets: List[List[WriteItem]] = [[] for _ in range(bins)]
+    buckets: list[list[WriteItem]] = [[] for _ in range(bins)]
     bucket_sizes = [0 for _ in range(bins)]
 
     tensor_w.sort(key=_item_size, reverse=True)
@@ -315,6 +298,7 @@ def _write_item(
     data: Union[io.BytesIO, torch.Tensor],
     write_item: WriteItem,
     storage_key: str,
+    safe_tensors: bool = False,
 ) -> WriteResult:
     offset = stream.tell()
 
@@ -328,10 +312,15 @@ def _write_item(
     else:
         assert isinstance(data, torch.Tensor)
         assert data.device == torch.device("cpu")
-        torch.save(data, transform_to)
+        if not safe_tensors:
+            torch.save(data, transform_to)
+
     transform_to.close()
 
-    length = stream.tell() - offset
+    if not safe_tensors or isinstance(data, io.BytesIO):
+        length = stream.tell() - offset
+    else:
+        length = data.numel() * data.element_size()
 
     # For consistency with earlier versions, leave this field out of the
     # metadata if there are no extensions.
@@ -360,6 +349,7 @@ def _write_files_from_queue(
     inflight_threshhold: int,
     use_fsync: bool,
     thread_count: int,
+    safe_tensors: bool,
 ) -> None:
     try:
         while True:
@@ -401,14 +391,35 @@ def _write_files_from_queue(
                 for write_item in bytes_w:
                     data = planner.resolve_data(write_item)
                     write_results.append(
-                        _write_item(transforms, stream, data, write_item, storage_key)
+                        _write_item(
+                            transforms,
+                            stream,
+                            data,
+                            write_item,
+                            storage_key,
+                            safe_tensors,
+                        )
                     )
 
+                tensor_dict = {}
                 for tensor, write_item in loader.values():
                     assert tensor.is_cpu
                     write_results.append(
-                        _write_item(transforms, stream, tensor, write_item, storage_key)
+                        _write_item(
+                            transforms,
+                            stream,
+                            tensor,
+                            write_item,
+                            storage_key,
+                            safe_tensors,
+                        )
                     )
+                    tensor_dict[write_item.index.fqn] = tensor
+
+                if safe_tensors:
+                    from safetensors.torch import save  # type: ignore[import-not-found]
+
+                    stream.write(save(tensor_dict))
 
                 if use_fsync:
                     try:
@@ -426,41 +437,33 @@ class FileSystemBase(ABC):
     @abstractmethod
     def create_stream(
         self, path: Union[str, os.PathLike], mode: str
-    ) -> Generator[io.IOBase, None, None]:
-        ...
+    ) -> Generator[io.IOBase, None, None]: ...
 
     @abstractmethod
     def concat_path(
         self, path: Union[str, os.PathLike], suffix: str
-    ) -> Union[str, os.PathLike]:
-        ...
+    ) -> Union[str, os.PathLike]: ...
 
     @abstractmethod
     def rename(
         self, path: Union[str, os.PathLike], new_path: Union[str, os.PathLike]
-    ) -> None:
-        ...
+    ) -> None: ...
 
     @abstractmethod
-    def init_path(self, path: Union[str, os.PathLike]) -> Union[str, os.PathLike]:
-        ...
+    def init_path(self, path: Union[str, os.PathLike]) -> Union[str, os.PathLike]: ...
 
     @abstractmethod
-    def mkdir(self, path: Union[str, os.PathLike]) -> None:
-        ...
+    def mkdir(self, path: Union[str, os.PathLike]) -> None: ...
 
     @classmethod
     @abstractmethod
-    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
-        ...
+    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool: ...
 
     @abstractmethod
-    def exists(self, path: Union[str, os.PathLike]) -> bool:
-        ...
+    def exists(self, path: Union[str, os.PathLike]) -> bool: ...
 
     @abstractmethod
-    def rm_file(self, path: Union[str, os.PathLike]) -> None:
-        ...
+    def rm_file(self, path: Union[str, os.PathLike]) -> None: ...
 
 
 class FileSystem(FileSystemBase):
@@ -468,13 +471,17 @@ class FileSystem(FileSystemBase):
     def create_stream(
         self, path: Union[str, os.PathLike], mode: str
     ) -> Generator[io.IOBase, None, None]:
-        with cast(Path, path).open(mode) as stream:
+        if not isinstance(path, Path):
+            path = Path(path)
+        with path.open(mode) as stream:
             yield cast(io.IOBase, stream)
 
     def concat_path(
         self, path: Union[str, os.PathLike], suffix: str
     ) -> Union[str, os.PathLike]:
-        return cast(Path, path) / suffix
+        if not isinstance(path, Path):
+            path = Path(path)
+        return path / suffix
 
     def init_path(self, path: Union[str, os.PathLike]) -> Union[str, os.PathLike]:
         if not isinstance(path, Path):
@@ -484,10 +491,15 @@ class FileSystem(FileSystemBase):
     def rename(
         self, path: Union[str, os.PathLike], new_path: Union[str, os.PathLike]
     ) -> None:
-        cast(Path, path).rename(cast(Path, new_path))
+        if not isinstance(path, Path):
+            path = Path(path)
+
+        path.rename(cast(Path, new_path))
 
     def mkdir(self, path: Union[str, os.PathLike]) -> None:
-        cast(Path, path).mkdir(parents=True, exist_ok=True)
+        if not isinstance(path, Path):
+            path = Path(path)
+        path.mkdir(parents=True, exist_ok=True)
 
     @classmethod
     def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
@@ -504,14 +516,17 @@ class FileSystem(FileSystemBase):
         return False
 
     def exists(self, path: Union[str, os.PathLike]) -> bool:
-        return cast(Path, path).exists()
+        if not isinstance(path, Path):
+            path = Path(path)
+        return path.exists()
 
     def rm_file(self, path: Union[str, os.PathLike]) -> None:
-        cast(Path, path).unlink()
+        if not isinstance(path, Path):
+            path = Path(path)
+        path.unlink()
 
 
 class _FileSystemWriter(StorageWriter):
-
     """
     Basic implementation of StorageWriter using file IO.
 
@@ -584,7 +599,7 @@ class _FileSystemWriter(StorageWriter):
 
         return plan
 
-    def prepare_global_plan(self, plans: List[SavePlan]) -> List[SavePlan]:
+    def prepare_global_plan(self, plans: list[SavePlan]) -> list[SavePlan]:
         new_plans = [
             dataclasses.replace(plan, storage_data=_StoragePrefix(f"__{i}_"))
             for i, plan in enumerate(plans)
@@ -595,7 +610,7 @@ class _FileSystemWriter(StorageWriter):
         self,
         plan: SavePlan,
         planner: SavePlanner,
-    ) -> Future[List[WriteResult]]:
+    ) -> Future[list[WriteResult]]:
         storage_plan: _StoragePrefix = plan.storage_data
         file_count = 0
 
@@ -617,6 +632,14 @@ class _FileSystemWriter(StorageWriter):
                 path = self.fs.concat_path(self.path, file_name)
                 file_queue.put((path, file_name, [item]))
 
+        return self._write_data(planner, file_queue)
+
+    def _write_data(
+        self,
+        planner: SavePlanner,
+        file_queue: queue.Queue,
+        safe_tensors: bool = False,
+    ) -> Future[list[WriteResult]]:
         result_queue: queue.Queue = queue.Queue()
 
         threads = []
@@ -632,6 +655,7 @@ class _FileSystemWriter(StorageWriter):
                     self.per_thread_copy_ahead,
                     self.sync_files,
                     self.thread_count,
+                    safe_tensors,
                 ),
             )
             t.start()
@@ -646,6 +670,7 @@ class _FileSystemWriter(StorageWriter):
             inflight_threshhold=self.per_thread_copy_ahead,
             use_fsync=self.sync_files,
             thread_count=self.thread_count,
+            safe_tensors=safe_tensors,
         )
 
         for t in threads:
@@ -656,11 +681,11 @@ class _FileSystemWriter(StorageWriter):
             while True:
                 res += result_queue.get_nowait()
         except queue.Empty:
-            fut: Future[List[WriteResult]] = Future()
+            fut: Future[list[WriteResult]] = Future()
             fut.set_result(res)
             return fut
 
-    def finish(self, metadata: Metadata, results: List[List[WriteResult]]) -> None:
+    def finish(self, metadata: Metadata, results: list[list[WriteResult]]) -> None:
         storage_md = {}
         for wr_list in results:
             storage_md.update({wr.index: wr.storage_data for wr in wr_list})
@@ -674,7 +699,7 @@ class _FileSystemWriter(StorageWriter):
             if self.sync_files:
                 try:
                     os.fsync(metadata_file.fileno())
-                except AttributeError:
+                except (AttributeError, UnsupportedOperation):
                     os.sync()
 
         # delete in-case other checkpoints were present.
@@ -737,7 +762,7 @@ class FileSystemReader(StorageReader):
         super().__init__()
         self.fs = FileSystem()
         self.path = self.fs.init_path(path)
-        self.storage_data: Dict[MetadataIndex, _StorageInfo] = {}
+        self.storage_data: dict[Any, Any] = {}
         self.load_id = _generate_uuid()
         self.transforms = _StorageReaderTransforms(_extension_registry)
 
@@ -752,9 +777,9 @@ class FileSystemReader(StorageReader):
 
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
         # group requests by file
-        per_file: Dict[str, List[ReadItem]] = {}
+        per_file: dict[str, list[ReadItem]] = {}
         for read_item in plan.items:
-            item_md = self.storage_data[read_item.storage_index]
+            item_md: _StorageInfo = self.storage_data[read_item.storage_index]
             path = item_md.relative_path
             per_file.setdefault(path, []).append(read_item)
 
@@ -799,9 +824,9 @@ class FileSystemReader(StorageReader):
                         )
                         target_tensor = planner.resolve_tensor(req).detach()
 
-                        assert (
-                            target_tensor.size() == tensor.size()
-                        ), f"req {req.storage_index} mismatch sizes {target_tensor.size()} vs {tensor.size()}"
+                        assert target_tensor.size() == tensor.size(), (
+                            f"req {req.storage_index} mismatch sizes {target_tensor.size()} vs {tensor.size()}"
+                        )
                         target_tensor.copy_(tensor)
                         planner.commit_tensor(req, target_tensor)
 
@@ -828,7 +853,7 @@ class FileSystemReader(StorageReader):
     def prepare_local_plan(self, plan: LoadPlan) -> LoadPlan:
         return plan
 
-    def prepare_global_plan(self, plans: List[LoadPlan]) -> List[LoadPlan]:
+    def prepare_global_plan(self, plans: list[LoadPlan]) -> list[LoadPlan]:
         return plans
 
     @property

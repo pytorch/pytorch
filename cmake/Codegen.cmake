@@ -76,7 +76,7 @@ if(INTERN_BUILD_ATEN_OPS)
 
   file(GLOB_RECURSE all_python "${CMAKE_CURRENT_LIST_DIR}/../torchgen/*.py")
 
-  # RowwiseScaled.cu requires sm90a flags
+  # RowwiseScaled.cu requires sm89/sm90a flags
   if(USE_CUDA)
     set(ROWWISE_SCALED_MM_FILE "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/RowwiseScaledMM.cu")
 
@@ -84,11 +84,20 @@ if(INTERN_BUILD_ATEN_OPS)
     torch_cuda_get_nvcc_gencode_flag(EXISTING_ARCH_FLAGS)
 
     # Check NVCC version and existing arch flags
-    if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.0 AND
-      EXISTING_ARCH_FLAGS MATCHES ".*compute_90.*")
-      set_source_files_properties(${ROWWISE_SCALED_MM_FILE}
-        PROPERTIES COMPILE_FLAGS "-gencode arch=compute_90a,code=sm_90a")
+    set(ROWWISE_SCALED_MM_FILE_COMPILE_FLAGS "")
+    if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.0)
+      if(EXISTING_ARCH_FLAGS MATCHES ".*compute_86.*")
+        list(APPEND ROWWISE_SCALED_MM_FILE_COMPILE_FLAGS "-gencode;arch=compute_89,code=sm_89")
+      endif()
+      if(EXISTING_ARCH_FLAGS MATCHES ".*compute_90.*")
+        list(APPEND ROWWISE_SCALED_MM_FILE_COMPILE_FLAGS "-gencode;arch=compute_90a,code=sm_90a")
+      endif()
+      if(EXISTING_ARCH_FLAGS MATCHES ".*compute_100.*")
+        list(APPEND ROWWISE_SCALED_MM_FILE_COMPILE_FLAGS "-gencode;arch=compute_100a,code=sm_100a")
+      endif()
     endif()
+    list(JOIN ROWWISE_SCALED_MM_FILE_COMPILE_FLAGS " " ROWWISE_SCALED_MM_FILE_COMPILE_FLAGS)
+    set_source_files_properties(${ROWWISE_SCALED_MM_FILE} PROPERTIES COMPILE_FLAGS "${ROWWISE_SCALED_MM_FILE_COMPILE_FLAGS}")
   endif()
 
   set(GEN_ROCM_FLAG)
@@ -383,6 +392,12 @@ if(INTERN_BUILD_ATEN_OPS)
       else(MSVC)
         set(EXTRA_FLAGS "-DCPU_CAPABILITY=${CPU_CAPABILITY} -DCPU_CAPABILITY_${CPU_CAPABILITY}")
       endif(MSVC)
+
+      # Only parallelize the SortingKernel for now to avoid side effects
+      if(${NAME} STREQUAL "native/cpu/SortingKernel.cpp" AND NOT MSVC AND USE_OMP)
+        string(APPEND EXTRA_FLAGS " -D_GLIBCXX_PARALLEL")
+      endif()
+
       # Disable certain warnings for GCC-9.X
       if(CMAKE_COMPILER_IS_GNUCXX)
         if(("${NAME}" STREQUAL "native/cpu/GridSamplerKernel.cpp") AND ("${CPU_CAPABILITY}" STREQUAL "DEFAULT"))

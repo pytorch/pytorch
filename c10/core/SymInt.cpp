@@ -196,72 +196,72 @@ struct Convert<SymFloat> {
 #define DEFINE_SYMINT_OP_INTONLY(scalar_t, RetTy) \
   RetTy operator%(const SymInt& a, scalar_t b) {  \
     return Convert<RetTy>()(a) % RetTy(b);        \
-  };                                              \
+  }                                               \
   RetTy operator%(scalar_t a, const SymInt& b) {  \
     return RetTy(a) % Convert<RetTy>()(b);        \
-  };
+  }
 
 #define DEFINE_SYMINT_OP(scalar_t, RetTy)        \
   RetTy operator+(const SymInt& a, scalar_t b) { \
     return Convert<RetTy>()(a) + RetTy(b);       \
-  };                                             \
+  }                                              \
   RetTy operator-(const SymInt& a, scalar_t b) { \
     return Convert<RetTy>()(a) - RetTy(b);       \
-  };                                             \
+  }                                              \
   RetTy operator*(const SymInt& a, scalar_t b) { \
     return Convert<RetTy>()(a) * RetTy(b);       \
-  };                                             \
+  }                                              \
   RetTy operator/(const SymInt& a, scalar_t b) { \
     return Convert<RetTy>()(a) / RetTy(b);       \
-  };                                             \
+  }                                              \
   RetTy operator+(scalar_t a, const SymInt& b) { \
     return RetTy(a) + Convert<RetTy>()(b);       \
-  };                                             \
+  }                                              \
   RetTy operator-(scalar_t a, const SymInt& b) { \
     return RetTy(a) - Convert<RetTy>()(b);       \
-  };                                             \
+  }                                              \
   RetTy operator*(scalar_t a, const SymInt& b) { \
     return RetTy(a) * Convert<RetTy>()(b);       \
-  };                                             \
+  }                                              \
   RetTy operator/(scalar_t a, const SymInt& b) { \
     return RetTy(a) / Convert<RetTy>()(b);       \
-  };                                             \
+  }                                              \
   bool operator==(const SymInt& a, scalar_t b) { \
     return Convert<RetTy>()(a) == RetTy(b);      \
-  };                                             \
+  }                                              \
   bool operator!=(const SymInt& a, scalar_t b) { \
     return Convert<RetTy>()(a) != RetTy(b);      \
-  };                                             \
+  }                                              \
   bool operator<(const SymInt& a, scalar_t b) {  \
     return Convert<RetTy>()(a) < RetTy(b);       \
-  };                                             \
+  }                                              \
   bool operator<=(const SymInt& a, scalar_t b) { \
     return Convert<RetTy>()(a) <= RetTy(b);      \
-  };                                             \
+  }                                              \
   bool operator>(const SymInt& a, scalar_t b) {  \
     return Convert<RetTy>()(a) > RetTy(b);       \
-  };                                             \
+  }                                              \
   bool operator>=(const SymInt& a, scalar_t b) { \
     return Convert<RetTy>()(a) >= RetTy(b);      \
-  };                                             \
+  }                                              \
   bool operator==(scalar_t a, const SymInt& b) { \
     return RetTy(a) == Convert<RetTy>()(b);      \
-  };                                             \
+  }                                              \
   bool operator!=(scalar_t a, const SymInt& b) { \
     return RetTy(a) != Convert<RetTy>()(b);      \
-  };                                             \
+  }                                              \
   bool operator<(scalar_t a, const SymInt& b) {  \
     return RetTy(a) < Convert<RetTy>()(b);       \
-  };                                             \
+  }                                              \
   bool operator<=(scalar_t a, const SymInt& b) { \
     return RetTy(a) <= Convert<RetTy>()(b);      \
-  };                                             \
+  }                                              \
   bool operator>(scalar_t a, const SymInt& b) {  \
     return RetTy(a) > Convert<RetTy>()(b);       \
-  };                                             \
+  }                                              \
   bool operator>=(scalar_t a, const SymInt& b) { \
     return RetTy(a) >= Convert<RetTy>()(b);      \
-  };
+  }
 
 DEFINE_SYMINT_OP_INTONLY(int64_t, SymInt)
 DEFINE_SYMINT_OP_INTONLY(int32_t, SymInt)

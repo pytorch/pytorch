@@ -1,5 +1,5 @@
 import threading
-from typing import Optional, Type
+from typing import Optional
 
 
 __all__ = ["LinearBlockSparsePattern"]
@@ -43,7 +43,7 @@ class LinearBlockSparsePattern:
 
     def __exit__(
         self,
-        exc_type: Optional[Type[BaseException]],
+        exc_type: Optional[type[BaseException]],
         exc_value: Optional[BaseException],
         backtrace: Optional[object],
     ) -> None:

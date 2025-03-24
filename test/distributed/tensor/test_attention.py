@@ -21,6 +21,7 @@ from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import parallelize_module
 from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_CUDNN_ATTENTION,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_FUSED_ATTENTION,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
@@ -41,7 +42,8 @@ if PLATFORM_SUPPORTS_FLASH_ATTENTION:
     backends.append(SDPBackend.FLASH_ATTENTION)
 if PLATFORM_SUPPORTS_MEM_EFF_ATTENTION:
     backends.append(SDPBackend.EFFICIENT_ATTENTION)
-
+if PLATFORM_SUPPORTS_CUDNN_ATTENTION:
+    backends.append(SDPBackend.CUDNN_ATTENTION)
 
 rotater_enum_to_str = {
     _RotateMethod.ALL_GATHER: "allgather",
@@ -73,6 +75,7 @@ class RingAttentionTest(DTensorTestBase):
                 "backend": backends,
                 "load_balance": [True, False],
                 "rotater": [_RotateMethod.ALL_TO_ALL, _RotateMethod.ALL_GATHER],
+                "test_forward_only": [True, False],
             },
             self._test_ring_attention_sdpa,
         )
@@ -84,7 +87,17 @@ class RingAttentionTest(DTensorTestBase):
         backend: SDPBackend,
         load_balance: bool,
         rotater: _RotateMethod,
+        test_forward_only: bool,
     ) -> None:
+        def fn_eval(fn, *args, **kwargs):
+            if test_forward_only:
+                with torch.no_grad():
+                    return fn(*args, **kwargs)
+            else:
+                out = fn(*args, **kwargs)
+                out.sum().backward()
+                return out
+
         if load_balance and not is_causal:
             return
 
@@ -99,7 +112,10 @@ class RingAttentionTest(DTensorTestBase):
         nheads = 8
         torch.manual_seed(10)
         dtype = (
-            torch.bfloat16 if backend == SDPBackend.FLASH_ATTENTION else torch.float32
+            torch.bfloat16
+            if backend == SDPBackend.FLASH_ATTENTION
+            or backend == SDPBackend.CUDNN_ATTENTION
+            else torch.float32
         )
 
         _cp_options.enable_load_balance = load_balance
@@ -130,8 +146,7 @@ class RingAttentionTest(DTensorTestBase):
             dist.broadcast(v, src=0)
 
         with sdpa_kernel(backend):
-            out = F.scaled_dot_product_attention(q, k, v, is_causal=is_causal)
-            out.sum().backward()
+            out = fn_eval(F.scaled_dot_product_attention, q, k, v, is_causal=is_causal)
 
         cp_q = q.detach().clone()
         cp_k = k.detach().clone()
@@ -158,26 +173,23 @@ class RingAttentionTest(DTensorTestBase):
                     else:
                         fn = F.scaled_dot_product_attention
 
-                    cp_out = fn(cp_q, cp_k, cp_v, is_causal=is_causal)
-                    cp_out.sum().backward()
+                    cp_out = fn_eval(fn, cp_q, cp_k, cp_v, is_causal=is_causal)
 
                     if not compiled and rotater == _RotateMethod.ALL_TO_ALL:
                         # Compiler and CommDebugMode do not work well together.
+                        expect_all2all_count = (
+                            self.world_size - 1
+                            if test_forward_only
+                            else self.world_size * 3 - 2
+                        )
                         self.assertDictEqual(
                             comm_mode.get_comm_counts(),
-                            {
-                                c10d_functional.all_to_all_single: self.world_size * 3
-                                - 2
-                            },
+                            {c10d_functional.all_to_all_single: expect_all2all_count},
                         )
 
             # Due to numerical error, we need to choose different atol for different
             # attention kernels
-            cp_out, cp_dq, cp_dk, cp_dv = context_parallel_unshard(
-                device_mesh,
-                [cp_out, cp_q.grad, cp_k.grad, cp_v.grad],
-                [2, 2, 2, 2],
-            )
+            (cp_out,) = context_parallel_unshard(device_mesh, [cp_out], [2])
             atol = (
                 1e-08
                 if backend == SDPBackend.EFFICIENT_ATTENTION
@@ -185,18 +197,25 @@ class RingAttentionTest(DTensorTestBase):
             )
             self.assertTrue(torch.allclose(out, cp_out, atol=atol))
 
-            atol = (
-                2e-06
-                if backend == SDPBackend.EFFICIENT_ATTENTION
-                else 8e-3 * self.world_size
-            )
-            self.assertTrue(torch.allclose(q.grad, cp_dq, atol=atol))
-            self.assertTrue(torch.allclose(k.grad, cp_dk, atol=atol))
-            self.assertTrue(torch.allclose(v.grad, cp_dv, atol=atol))
+            if not test_forward_only:
+                cp_dq, cp_dk, cp_dv = context_parallel_unshard(
+                    device_mesh,
+                    [cp_q.grad, cp_k.grad, cp_v.grad],
+                    [2, 2, 2],
+                )
+                atol = (
+                    2e-06
+                    if backend == SDPBackend.EFFICIENT_ATTENTION
+                    else 8e-3 * self.world_size
+                )
+                self.assertTrue(torch.allclose(q.grad, cp_dq, atol=atol))
+                self.assertTrue(torch.allclose(k.grad, cp_dk, atol=atol))
+                self.assertTrue(torch.allclose(v.grad, cp_dv, atol=atol))
 
-            cp_q.grad = None
-            cp_k.grad = None
-            cp_v.grad = None
+                cp_q.grad = None
+                cp_k.grad = None
+                cp_v.grad = None
+
             cp_q.requires_grad = False
             cp_k.requires_grad = False
             cp_v.requires_grad = False
@@ -346,6 +365,9 @@ class RingAttentionTest(DTensorTestBase):
             self.device_type,
             torch.arange(0, self.world_size),
         )
+        # early init DTensor RNG tracker to avoid broadcast be captuured in comm_mode
+        torch.distributed.tensor._random.manual_seed(10, device_mesh)
+
         dtype = torch.bfloat16
         bs = 2
         args = ModelArgs()

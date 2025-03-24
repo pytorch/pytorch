@@ -4,7 +4,7 @@ import sys
 import unittest
 
 import torch
-from torch.testing._internal.common_utils import NoTest, run_tests, TestCase
+from torch.testing._internal.common_utils import NoTest, run_tests, TEST_MPS, TestCase
 
 
 if not torch.accelerator.is_available():
@@ -101,6 +101,14 @@ class TestAccelerator(TestCase):
         self.assertEqual(torch.accelerator.current_device_index(), src_device)
         self.assertEqual(torch.accelerator.current_stream(), src_prev_stream)
         self.assertEqual(torch.accelerator.current_stream(dst_device), dst_prev_stream)
+
+    @unittest.skipIf(TEST_MPS, "MPS doesn't support pin memory!")
+    def test_pin_memory_on_non_blocking_copy(self):
+        t_acc = torch.randn(100).to(torch.accelerator.current_accelerator())
+        t_host = t_acc.to("cpu", non_blocking=True)
+        torch.accelerator.synchronize()
+        self.assertTrue(t_host.is_pinned())
+        self.assertEqual(t_acc.cpu(), t_host)
 
 
 if __name__ == "__main__":

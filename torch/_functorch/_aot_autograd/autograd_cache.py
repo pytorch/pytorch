@@ -14,7 +14,7 @@ import pickle
 import shutil
 import time
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch._dynamo.trace_rules import torch_non_c_binding_in_graph_functions
@@ -37,6 +37,7 @@ from torch._inductor.utils import should_use_remote_fx_graph_cache
 from torch._logging import LazyString
 from torch._utils_internal import log_cache_bypass
 from torch.compiler._cache import CacheArtifactManager, CacheArtifactType
+from torch.utils._triton import has_triton_package
 from torchgen.utils import dataclass_repr
 
 from .runtime_wrappers import (
@@ -206,10 +207,6 @@ def check_cacheable(gm: torch.fx.GraphModule):
     Checks that the graph module only uses supported operators
     """
     nodes = gm.graph.nodes
-    if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
-        raise BypassAOTAutogradCache(
-            "Cannot cache a graph with compiled autograd enabled"
-        )
     if torch._inductor.config.freezing:
         raise BypassAOTAutogradCache("Cannot cache a graph with freezing enabled")
 
@@ -273,7 +270,7 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
 class AOTAutogradCachePickler(FxGraphCachePickler):
     def __init__(self, gm: torch.fx.GraphModule):
         super().__init__(gm)
-        self.dispatch_table: Dict
+        self.dispatch_table: dict
         self.dispatch_table.update(
             {
                 AOTConfig: functools.partial(self._reduce_aot_config),
@@ -313,11 +310,24 @@ def autograd_cache_key(
     config: AOTConfig,
     fx_config: _CompileFxKwargs,
     # TODO: add args and parameters
-) -> Tuple[str, List[str]]:
+) -> tuple[str, list[str]]:
     """
     Generate a unique hash of the FX graph for caching.
     """
     check_cacheable(gm)
+    if has_triton_package():
+        # Due to https://github.com/triton-lang/triton/issues/3729,
+        # if triton is < 3.2.0, AOTAutogradCache may cause us to
+        # attempt to load a cache entry without initializing
+        # the CUDA context on the autograd thread.
+
+        # Without caching, we naturally do this initialization when
+        # tracing through the graph with the autograd engine.
+        import triton
+
+        if triton.__version__ < "3.2.0":
+            raise BypassAOTAutogradCache("AOTAutogradCache requires triton 3.2.0")
+
     details = AOTAutogradCacheDetails(gm, example_inputs, config, fx_config)
     pickler = AOTAutogradCachePickler(gm)
     # The prefix distinguishes among the other kinds of objects we cache
@@ -399,7 +409,7 @@ class CompiledBackward(FXGraphCacheLoadable):
     """
 
     # Used by AOTDispatchAutograd.post_compile
-    backward_state_indices: List[int]
+    backward_state_indices: list[int]
     num_symints_saved_for_bw_: int
 
     def is_backward(self):
@@ -424,14 +434,14 @@ class AOTAutogradCacheEntry:
     runtime_metadata: ViewAndMutationMeta
 
     # Wrappers that run after each aot_dispatch_* function
-    dispatch_wrappers: List[CompilerWrapper]
+    dispatch_wrappers: list[CompilerWrapper]
 
     # Used by AOTSubclassWrapper
     maybe_subclass_meta: Optional[SubclassMeta]
     num_fw_outs_saved_for_bw: Optional[int]
 
     # Used by RuntimeWrapepr
-    indices_of_inps_to_detach: List[int]
+    indices_of_inps_to_detach: list[int]
 
     # Time taken to trace/compile the forward
     # forward_time_taken includes AOTAutograd tracing time + inductor compilation time
@@ -442,7 +452,7 @@ class AOTAutogradCacheEntry:
     # Turn cache entry into the original callable
     def wrap_post_compile(
         self,
-        args: List[torch.Tensor],
+        args: list[torch.Tensor],
         aot_config: AOTConfig,
         fx_config: _CompileFxKwargs,
     ) -> Callable:
@@ -675,9 +685,9 @@ class AOTAutogradCache:
         gm = mod.gm if isinstance(mod, torch._dynamo.utils.GmWrapper) else mod
         with sanitize_gm_for_cache(gm):
             compiled_fn = None
-            cache_info: Dict[str, Any] = {}
+            cache_info: dict[str, Any] = {}
             cache_key = None
-            debug_lines: List[str] = []
+            debug_lines: list[str] = []
             cache_event_time = time.time_ns()
             cache_state = None
             fx_config: _CompileFxKwargs = {"cudagraphs": cudagraphs}
@@ -790,7 +800,7 @@ class AOTAutogradCache:
             torch._logging.trace_structured(
                 "artifact",
                 metadata_fn=lambda: {
-                    "name": "aotautograd_cache_hash",
+                    "name": f"aotautograd_cache_{cache_state}",
                     "encoding": "json",
                 },
                 payload_fn=lambda: json.dumps(cache_info),
@@ -826,9 +836,7 @@ class AOTAutogradCache:
                         entry: AOTAutogradCacheEntry = pickle.loads(pickled_content)
                         return entry
                 except Exception as e:
-                    log.warning(
-                        "AOTAutograd cache unable to load compiled graph: %s", e
-                    )
+                    log.info("AOTAutograd cache unable to load compiled graph: %s", e)
                     if config.strict_autograd_cache:
                         raise e
 
@@ -853,7 +861,7 @@ class AOTAutogradCache:
                     log_cache_bypass(
                         "bypass_aot_autograd", "Unable to deserialize: " + str(e)
                     )
-                    log.warning(
+                    log.info(
                         "remote autograd cache unable to load compiled graph",
                         exc_info=True,
                     )
@@ -884,12 +892,12 @@ class AOTAutogradCache:
             counters["aot_autograd"]["autograd_cache_saved"] += 1
         except BypassAOTAutogradCache as e:
             counters["aot_autograd"]["autograd_cache_bypass"] += 1
-            log.warning("Bypassing autograd cache due to: %s", e)
+            log.info("Bypassing autograd cache due to: %s", e)
             if remote:
                 log_cache_bypass("bypass_aot_autograd", str(e))
             return None
         except Exception as e:
-            log.warning("AOTAutograd cache unable to serialize compiled graph: %s", e)
+            log.info("AOTAutograd cache unable to serialize compiled graph: %s", e)
             if remote:
                 log_cache_bypass(
                     "bypass_aot_autograd", "Unable to serialize: " + str(e)

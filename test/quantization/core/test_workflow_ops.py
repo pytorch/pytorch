@@ -3,7 +3,6 @@
 
 import torch
 import math
-from typing import Tuple
 from torch.ao.quantization import (
     FakeQuantize,
     MovingAverageMinMaxObserver,
@@ -158,7 +157,7 @@ def _get_tensor_min_max(
         X: torch.Tensor,
         running_min: float = float("inf"),
         running_max: float = float("-inf"),
-        averaging_const: float = 0.01) -> Tuple[float, float]:
+        averaging_const: float = 0.01) -> tuple[float, float]:
     min_val = X.min().to(dtype=torch.float32).item()
     max_val = X.max().to(dtype=torch.float32).item()
 
@@ -174,7 +173,7 @@ def _get_per_row_min_max(
         min_vals: torch.Tensor,
         max_vals: torch.Tensor,
         axis: int = 0,
-        averaging_const: float = 0.01) -> Tuple[torch.Tensor, torch.Tensor]:
+        averaging_const: float = 0.01) -> tuple[torch.Tensor, torch.Tensor]:
     x_dim = x.size()
     new_axis_list = [i for i in range(len(x_dim))]  # noqa: C416
     new_axis_list[axis] = 0
@@ -196,7 +195,7 @@ def _get_scale_zp(
         max_val: float,
         dtype: torch.dtype,
         reduce_range: bool = False,
-        preserve_sparsity: bool = False) -> Tuple[float, int]:
+        preserve_sparsity: bool = False) -> tuple[float, int]:
     """
     Calculate the quantization parameters (scale, zero_point)
     based on the min and max element of the tensor

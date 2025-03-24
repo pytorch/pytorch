@@ -21,7 +21,7 @@ from datetime import timedelta
 from enum import Enum
 from functools import partial, reduce, wraps
 from io import StringIO
-from typing import Dict, NamedTuple, Optional, Union, List, Any, Callable
+from typing import NamedTuple, Optional, Union, Any, Callable
 from unittest.mock import patch
 
 from torch._logging._internal import trace_log
@@ -44,6 +44,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
     run_tests,
     TEST_HPU,
+    TEST_XPU,
 )
 from torch.testing._internal.distributed.multi_threaded_pg import (
     _install_threaded_pg,
@@ -105,6 +106,8 @@ class DistTestCases:
     backend_feature["plugin"] = set()
     if TEST_HPU:
         backend_feature["hpu"] = {"hccl"}
+    if TEST_XPU:
+        backend_feature["xpu"] = {"xccl"}
 
 
 def skip_if_no_gpu(func):
@@ -120,6 +123,8 @@ def skip_if_no_gpu(func):
             sys.exit(TEST_SKIPS[f"multi-gpu-{world_size}"].exit_code)
         if TEST_HPU and torch.hpu.device_count < world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{world_size}"].exit_code)
+        if TEST_XPU and torch.xpu.device_count < world_size:
+            sys.exit(TEST_SKIPS[f"multi-xpu-{world_size}"].exit_code)
 
         return func(*args, **kwargs)
 
@@ -198,6 +203,8 @@ def skip_if_lt_x_gpu(x):
             if torch.cuda.is_available() and torch.cuda.device_count() >= x:
                 return func(*args, **kwargs)
             if TEST_HPU and torch.hpu.device_count() >= x:
+                return func(*args, **kwargs)
+            if TEST_XPU and torch.xpu.device_count() >= x:
                 return func(*args, **kwargs)
             sys.exit(TEST_SKIPS[f"multi-gpu-{x}"].exit_code)
 
@@ -510,7 +517,8 @@ def init_multigpu_helper(world_size: int, backend: str):
     nGPUs = torch.cuda.device_count()
     if TEST_HPU:
         nGPUs = torch.hpu.device_count()
-
+    if TEST_XPU:
+        nGPUs = torch.xpu.device_count()
     visible_devices = range(nGPUs)
 
     # If rank is less than or equal to number of available GPU's
@@ -941,6 +949,8 @@ class DistributedTestBase(MultiProcessTestCase):
             return "nccl"
         elif "hpu" in device :   # intel gaudi
             return "hccl"
+        elif "xpu" in device:
+            return "xccl"
         else :
             return "gloo"
 
@@ -953,8 +963,8 @@ class DistributedTestBase(MultiProcessTestCase):
             rank=self.rank,
             store=store
         )
-        if "nccl" in self.backend(device):
-            torch.cuda.set_device(self.rank)
+        if "nccl" in self.backend(device) or "xccl" in self.backend(device):
+            torch.accelerator.set_device_index(self.rank)
         return torch.distributed.distributed_c10d._get_default_group()
 
     def rank_to_device(self, device):
@@ -963,7 +973,7 @@ class DistributedTestBase(MultiProcessTestCase):
 
 def run_subtests(
     cls_inst,
-    subtest_config: Dict[str, List[Any]],
+    subtest_config: dict[str, list[Any]],
     test_fn: Callable,
     *test_args,
     **test_kwargs: Any,
@@ -982,9 +992,9 @@ def run_subtests(
         test_kwargs: Keyword arguments to pass to ``test_fn``.
     """
     # Convert the config mapping to a list to have a fixed order
-    subtest_config_items: List[tuple[str, List[Any]]] = list(subtest_config.items())
-    subtest_config_keys: List[str] = [item[0] for item in subtest_config_items]
-    subtest_config_values: List[List[Any]] = [item[1] for item in subtest_config_items]
+    subtest_config_items: list[tuple[str, list[Any]]] = list(subtest_config.items())
+    subtest_config_keys: list[str] = [item[0] for item in subtest_config_items]
+    subtest_config_values: list[list[Any]] = [item[1] for item in subtest_config_items]
     for values in itertools.product(*subtest_config_values):
         # Map keyword to chosen value
         subtest_kwargs = dict(zip(subtest_config_keys, values))
@@ -1314,7 +1324,7 @@ class MultiThreadedTestCase(TestCase):
 class SaveForwardInputsModule(nn.Module):
     def __init__(
         self,
-        forward_inputs: Dict[nn.Module, torch.Tensor],
+        forward_inputs: dict[nn.Module, torch.Tensor],
         cast_forward_inputs: bool,
     ) -> None:
         super().__init__()
@@ -1330,7 +1340,7 @@ class SaveForwardInputsModule(nn.Module):
 class SaveForwardInputsModel(nn.Module):
     def __init__(
         self,
-        forward_inputs: Dict[nn.Module, torch.Tensor],
+        forward_inputs: dict[nn.Module, torch.Tensor],
         cast_forward_inputs: bool,
     ) -> None:
         super().__init__()
@@ -1347,7 +1357,7 @@ def _dynamo_dist_per_rank_init(rank, world_size, init_pg=True, fake_pg=False):
     # To avoid multiple inheritance from _dynamo.test_case.TestCase and MultiProcessTestCase,
     # Just manually implement the most important part of the dynamo behavior to reset/clear.
     if not fake_pg:
-        torch.cuda.set_device(rank)
+        torch.accelerator.set_device_index(rank)
     os.environ['MASTER_ADDR'] = 'localhost'
     os.environ['MASTER_PORT'] = '6789'
     if init_pg:

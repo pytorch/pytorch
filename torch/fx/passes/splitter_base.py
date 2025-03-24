@@ -3,8 +3,9 @@ import argparse
 import copy
 import logging
 from collections import defaultdict
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Sequence, Tuple
+from typing import Any, NamedTuple, Optional
 
 import torch
 from torch.fx._compatibility import compatibility
@@ -225,7 +226,7 @@ class SplitResult(NamedTuple):
     """
 
     split_module: torch.fx.GraphModule
-    submodule_inputs: Dict[str, Any]
+    submodule_inputs: dict[str, Any]
     non_acc_submodule_prefix: str
 
 
@@ -235,7 +236,7 @@ def generate_inputs_for_submodules(
     inputs: Sequence[Any],
     target_submodules: Iterable[str],
     deepcopy: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Generate inputs for targeting submdoules in the given model. Note that if two submodules refer to the same obj, this
     function doesn't work.
@@ -365,16 +366,16 @@ class _SplitterBase:
         self.update_deps_for_fusions()
 
         self.non_acc_submodule_name = non_acc_submodule_name
-        self._node_submodule_map: Dict[str, str] = {}
+        self._node_submodule_map: dict[str, str] = {}
         self._return_tuple = return_tuple
 
-        self.tags: List[str] = []
+        self.tags: list[str] = []
 
     # ===============================================================
     # Helpers for ctor and initial state
     # ===============================================================
 
-    def get_node_submodule_map(self) -> Dict[str, str]:
+    def get_node_submodule_map(self) -> dict[str, str]:
         """Returns a map from node name to submodule name, e.g.
         node: main_module_impl_impl_over_arch_unary_multiple_embedding
           _pooling_embedding_pooling_sparse_entity_equivalence_key
@@ -383,7 +384,7 @@ class _SplitterBase:
         """
         return self._node_submodule_map
 
-    def find_deps(self) -> Dict[torch.fx.Node, NodeSet]:
+    def find_deps(self) -> dict[torch.fx.Node, NodeSet]:
         """
         Builds a graph of node dependencies. Leaf nodes don't have any
         dependencies and the "output" node doesn't have nodes depending on it.
@@ -391,7 +392,7 @@ class _SplitterBase:
         Resulting graph has only direct dependencies, i.e. there are no
         transitive dependencies.
         """
-        deps: Dict[torch.fx.Node, NodeSet] = defaultdict(set)
+        deps: dict[torch.fx.Node, NodeSet] = defaultdict(set)
         for node in self.module.graph.nodes:
             if node.op not in CALLABLE_NODE_OPS:
                 continue
@@ -647,12 +648,12 @@ class _SplitterBase:
 
     def find_reverse_deps(
         self, tag_id: Optional[int] = None
-    ) -> Dict[torch.fx.Node, NodeSet]:
+    ) -> dict[torch.fx.Node, NodeSet]:
         """
         Builds reversed topological node dependencies, if tag_id is specified,
         we ignore nodes that are in later subgraph i.e. nodes have greater tag_id.
         """
-        result: Dict[torch.fx.Node, NodeSet] = defaultdict(set)
+        result: dict[torch.fx.Node, NodeSet] = defaultdict(set)
 
         for node in self.module.graph.nodes:
             if node.op not in CALLABLE_NODE_OPS:
@@ -667,7 +668,7 @@ class _SplitterBase:
 
         return result
 
-    def update_reverse_deps_for_fusions(self, deps: Dict[torch.fx.Node, NodeSet]):
+    def update_reverse_deps_for_fusions(self, deps: dict[torch.fx.Node, NodeSet]):
         processed_node = set()
 
         for node, fusion in self.fusions.items():
@@ -757,7 +758,7 @@ class _SplitterBase:
     # Helpers for split() method
     # ===============================================================
 
-    def starter_nodes(self) -> Tuple[NodeSet, NodeSet]:
+    def starter_nodes(self) -> tuple[NodeSet, NodeSet]:
         """
         Finds nodes that consume module inputs or get_attr nodes.
         """
@@ -773,7 +774,7 @@ class _SplitterBase:
                     starter_cpu_nodes.add(user)
         return starter_cpu_nodes, starter_acc_nodes
 
-    def put_nodes_into_subgraphs(self) -> List[Subgraph]:
+    def put_nodes_into_subgraphs(self) -> list[Subgraph]:
         # We start graph traversal from leaf nodes
         current_cpu_nodes, current_acc_nodes = self.starter_nodes()
         visited_nodes: NodeSet = set()
@@ -785,7 +786,7 @@ class _SplitterBase:
         current_subgraph_nodes: NodeList = []
 
         # Result accumulator
-        subgraphs: List[Subgraph] = []
+        subgraphs: list[Subgraph] = []
         while current_cpu_nodes or current_acc_nodes:
             # Find the first node that should belong to the current subgraph and has all dependencies resolved
             current_nodes = current_acc_nodes if acc_subgraph else current_cpu_nodes
@@ -839,12 +840,12 @@ class _SplitterBase:
 
         return subgraphs
 
-    def remove_small_acc_subgraphs(self, subgraphs: List[Subgraph]) -> List[Subgraph]:
+    def remove_small_acc_subgraphs(self, subgraphs: list[Subgraph]) -> list[Subgraph]:
         """
         This pass finds ACC submodules with less than specified size and merges
         them with adjacent CPU submodules.
         """
-        result: List[Subgraph] = []
+        result: list[Subgraph] = []
         for subgraph in subgraphs:
             if subgraph.is_acc:
                 if len(subgraph.nodes) >= self.settings.min_acc_module_size:
@@ -866,7 +867,7 @@ class _SplitterBase:
                     result.append(subgraph)
         return result
 
-    def tag(self, subgraphs: List[Subgraph]):
+    def tag(self, subgraphs: list[Subgraph]):
         self.tags = []
         for subgraph in subgraphs:
             tag = (

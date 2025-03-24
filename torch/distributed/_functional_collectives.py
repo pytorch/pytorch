@@ -2,7 +2,7 @@
 import contextlib
 import sys
 import warnings
-from typing import Any, cast, List, Optional, Type, TYPE_CHECKING, Union
+from typing import Any, cast, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch.distributed as dist
@@ -94,8 +94,8 @@ Functional collectives can accept any of these types to describe the ranks parti
 The different types will be desugared to a canonical format
 """
 RANK_TYPES = Union[
-    List[int],
-    List[List[int]],
+    list[int],
+    list[list[int]],
     dist.ProcessGroup,
     DeviceMesh,
     tuple["dist.tensor.DeviceMesh", int],
@@ -182,7 +182,7 @@ def all_gather_tensor(
     gather_dim: int,
     group: RANK_TYPES,
     tag: str = "",
-):
+) -> torch.Tensor:
     """
     Gather tensor data across from all machines and concatenate over ``gather_dim``.
 
@@ -274,9 +274,9 @@ def reduce_scatter_tensor(
     group_name = _resolve_group_name(group, tag)
     group_size = c10d._get_group_size_by_name(group_name)
 
-    assert (
-        self.size(scatter_dim) % group_size == 0
-    ), f"input dimension 0 ({self.size(0)} must be a multiple of group_size {group_size}"
+    assert self.size(scatter_dim) % group_size == 0, (
+        f"input dimension 0 ({self.size(0)} must be a multiple of group_size {group_size}"
+    )
     if scatter_dim != 0:
         tensor_list = torch.chunk(self, group_size, dim=scatter_dim)
         self = torch.cat(tensor_list)
@@ -313,9 +313,9 @@ def reduce_scatter_tensor_autograd(
     group_name = _resolve_group_name(group, tag)
     group_size = c10d._get_group_size_by_name(group_name)
 
-    assert (
-        self.size(scatter_dim) % group_size == 0
-    ), f"input dimension 0 ({self.size(0)} must be a multiple of group_size {group_size}"
+    assert self.size(scatter_dim) % group_size == 0, (
+        f"input dimension 0 ({self.size(0)} must be a multiple of group_size {group_size}"
+    )
     if scatter_dim != 0:
         tensor_list = torch.chunk(self, group_size, dim=scatter_dim)
         self = torch.cat(tensor_list)
@@ -331,8 +331,8 @@ def reduce_scatter_tensor_autograd(
 
 
 def all_reduce_coalesced(
-    self: List[torch.Tensor], reduceOp: str, group: RANK_TYPES, tag: str = ""
-) -> List[torch.Tensor]:
+    self: list[torch.Tensor], reduceOp: str, group: RANK_TYPES, tag: str = ""
+) -> list[torch.Tensor]:
     """
     Reduces a list of tensors across all machines in such a way that all get
     the final result.
@@ -359,8 +359,8 @@ def all_reduce_coalesced(
 
 
 def all_gather_into_tensor_coalesced(
-    self: List[torch.Tensor], group: RANK_TYPES, tag: str = ""
-) -> List[torch.Tensor]:
+    self: list[torch.Tensor], group: RANK_TYPES, tag: str = ""
+) -> list[torch.Tensor]:
     """
     Gather a list of tensors across from all machines.
 
@@ -388,12 +388,12 @@ def all_gather_into_tensor_coalesced(
 
 
 def reduce_scatter_tensor_coalesced(
-    inputs: List[torch.Tensor],
+    inputs: list[torch.Tensor],
     reduceOp: str,
-    scatter_dim: List[int],
+    scatter_dim: list[int],
     group: RANK_TYPES,
     tag: str = "",
-) -> List[torch.Tensor]:
+) -> list[torch.Tensor]:
     """
     Reduces a list of tensors across all machines in such a way that all get
     the final result, then scatter the results to corresponding ranks.
@@ -414,9 +414,9 @@ def reduce_scatter_tensor_coalesced(
 
     assert len(scatter_dim) == len(inputs)
     for idx, (dim, tensor) in enumerate(zip(scatter_dim, inputs)):
-        assert (
-            tensor.size(dim) % group_size == 0
-        ), f"input dimension {dim} ({tensor.size(dim)} must be a multiple of group_size {group_size} for tensor at index {idx}"
+        assert tensor.size(dim) % group_size == 0, (
+            f"input dimension {dim} ({tensor.size(dim)} must be a multiple of group_size {group_size} for tensor at index {idx}"
+        )
         if dim != 0:
             tensor_list = torch.chunk(tensor, group_size, dim=dim)
             inputs[idx] = torch.cat(tensor_list)
@@ -450,8 +450,8 @@ def _is_view_op(tgt):
 
 def all_to_all_single(
     self: torch.Tensor,
-    output_split_sizes: Optional[List[int]],
-    input_split_sizes: Optional[List[int]],
+    output_split_sizes: Optional[list[int]],
+    input_split_sizes: Optional[list[int]],
     group: RANK_TYPES,
     tag: str = "",
 ) -> torch.Tensor:
@@ -498,8 +498,8 @@ def all_to_all_single(
 
 def all_to_all_single_autograd(
     self: torch.Tensor,
-    output_split_sizes: Optional[List[int]],
-    input_split_sizes: Optional[List[int]],
+    output_split_sizes: Optional[list[int]],
+    input_split_sizes: Optional[list[int]],
     group: RANK_TYPES,
     tag: str = "",
 ) -> torch.Tensor:
@@ -535,7 +535,7 @@ def all_to_all_single_autograd(
 
 def permute_tensor(
     self: torch.Tensor,
-    src_dst: List[int],
+    src_dst: list[int],
     group: RANK_TYPES,
     tag: str = "",
 ) -> torch.Tensor:
@@ -574,6 +574,7 @@ class AsyncCollectiveTensor(torch.Tensor):
         tensor = torch.ops.c10d_functional.{collective}(self, tag, rankset, group_size)
         return _maybe_wrap_tensor(tensor)
     """
+
     elem: torch.Tensor
     completed: bool
 
@@ -608,7 +609,7 @@ class AsyncCollectiveTensor(torch.Tensor):
         return AsyncCollectiveTensor(elem)
 
     def __coerce_same_metadata_as_tangent__(
-        self, expected_metadata: Any, expected_type: Optional[Type] = None
+        self, expected_metadata: Any, expected_type: Optional[type] = None
     ):
         if expected_type is not torch.Tensor:
             return None
@@ -677,7 +678,7 @@ Utils and infrastructure for tracing support
 """
 
 
-def _expand_group(group: RANK_TYPES, tag: str = "") -> tuple[str, List[int], int]:
+def _expand_group(group: RANK_TYPES, tag: str = "") -> tuple[str, list[int], int]:
     """
     _expand_group desugars the different RANK_TYPES types into a canonical format that is traceable.
 
@@ -690,10 +691,10 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> tuple[str, List[int], int
     if TYPE_CHECKING:
 
         def cast_listlistint(x):
-            return cast(List[List[int]], x)
+            return cast(list[list[int]], x)
 
         def cast_listint(x):
-            return cast(List[int], x)
+            return cast(list[int], x)
 
     else:
         # fake cast op for use at runtime since dynamo doesn't support real cast
@@ -705,7 +706,7 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> tuple[str, List[int], int
         def cast_listint(x):
             return x
 
-    rankset: List[int]
+    rankset: list[int]
     if isinstance(group, list):
         if isinstance(group[0], list):
             nested_list = cast_listlistint(group)
@@ -726,9 +727,9 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> tuple[str, List[int], int
         group_size = len(rankset)
         tag = tag or c10d._get_group_tag(group)
     elif isinstance(group, DeviceMesh):
-        assert (
-            group.ndim == 1
-        ), "Only 1D mesh is supported, pass in (DeviceMesh, int) together if mesh > 1D"
+        assert group.ndim == 1, (
+            "Only 1D mesh is supported, pass in (DeviceMesh, int) together if mesh > 1D"
+        )
         # TODO: it should run collective in the whole mesh instead of dim 0
         tag, rankset, _ = group._dim_group_infos[0]
         group_size = len(rankset)
@@ -763,9 +764,9 @@ def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> str:
     elif isinstance(group, str):
         return group
     elif isinstance(group, DeviceMesh):
-        assert (
-            group.ndim == 1
-        ), "Only 1D mesh is supported, pass in (DeviceMesh, int) together if mesh > 1D"
+        assert group.ndim == 1, (
+            "Only 1D mesh is supported, pass in (DeviceMesh, int) together if mesh > 1D"
+        )
         return group._dim_group_infos[0][2]
     elif isinstance(group, tuple):
         if (
@@ -787,7 +788,7 @@ def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> str:
                 FutureWarning,
                 stacklevel=3,
             )
-        return c10d._resolve_group_name_by_ranks_and_tag(cast(List[int], group), tag)
+        return c10d._resolve_group_name_by_ranks_and_tag(cast(list[int], group), tag)
     else:
         raise ValueError(f"Unsupported group type: {type(group)}, {group}")
 
@@ -837,10 +838,12 @@ def allow_inflight_collective_as_graph_input_ctx(value: bool = True):
         req = dist.all_reduce(y, op=dist.ReduceOp.SUM, async_op=True)
         return y
 
+
     @torch.compile(fullgraph=True)
     def all_reduce_wait_compiled(y):
         torch.ops.c10d_functional.wait_tensor(y)
         return y * y
+
 
     x = torch.ones(1280, 1280, device="cuda") + self.rank
     # the context manager ensures that `wait_tensor(y)` will wait on the correct work object
@@ -1052,14 +1055,14 @@ These schemas intentionally match torch.distributed.distributed_c10d.* ops that 
 def all_gather_tensor_inplace(
     output_tensor: torch.Tensor,
     input_tensor: torch.Tensor,
-    group,  # TODO add a type,
+    group=None,  # TODO add a type,
     async_op: bool = False,
     tag: str = "",
     gather_dim: int = 0,
 ):
-    assert (
-        not async_op
-    ), "Can't remap async version of inplace op to functional collective"
+    assert not async_op, (
+        "Can't remap async version of inplace op to functional collective"
+    )
 
     group = group or dist.group.WORLD
     assert group is not None
@@ -1076,9 +1079,9 @@ def reduce_scatter_tensor_inplace(
     scatter_dim: int = 0,
     tag: str = "",
 ):
-    assert (
-        not async_op
-    ), "Can't remap async version of inplace op to functional collective"
+    assert not async_op, (
+        "Can't remap async version of inplace op to functional collective"
+    )
 
     group = group or dist.group.WORLD
     assert group is not None
@@ -1105,9 +1108,9 @@ def all_reduce_inplace(
     async_op: bool = False,
     tag: str = "",
 ):
-    assert (
-        not async_op
-    ), "Can't remap async version of inplace op to functional collective"
+    assert not async_op, (
+        "Can't remap async version of inplace op to functional collective"
+    )
 
     group = group or dist.group.WORLD
     assert group is not None
@@ -1124,9 +1127,9 @@ def all_to_all_inplace(
     async_op=False,
     tag: str = "",
 ):
-    assert (
-        not async_op
-    ), "Can't remap async version of inplace op to functional collective"
+    assert not async_op, (
+        "Can't remap async version of inplace op to functional collective"
+    )
 
     group = group or dist.group.WORLD
     assert group is not None
@@ -1143,18 +1146,18 @@ def all_to_all_inplace(
 
 
 def all_gather_inplace(
-    tensor_list: List[torch.Tensor],
+    tensor_list: list[torch.Tensor],
     tensor: torch.Tensor,
     group=None,
     async_op=False,
     tag: str = "",
 ):
-    assert (
-        not async_op
-    ), "Can't remap async version of inplace op to functional collective"
-    assert all(
-        t.size(0) == tensor.size(0) for t in tensor_list
-    ), "Remapping variable size all_gather is not yet supported"
+    assert not async_op, (
+        "Can't remap async version of inplace op to functional collective"
+    )
+    assert all(t.size(0) == tensor.size(0) for t in tensor_list), (
+        "Remapping variable size all_gather is not yet supported"
+    )
 
     group = group or dist.group.WORLD
     assert group is not None

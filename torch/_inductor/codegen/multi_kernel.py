@@ -26,16 +26,16 @@ log = logging.getLogger(__name__)
 
 def get_kernel_argdefs(kernel):
     arg_defs, _, _, _ = kernel.args.python_argdefs()
-    return arg_defs
+    return [x.name for x in arg_defs]
 
 
 def _get_all_args(args_list, arg_types_list=None):
     all_args = max(args_list, key=len)[:]
     arg_types = max(arg_types_list, key=len)[:] if arg_types_list is not None else None
     for args in args_list:
-        assert OrderedSet(args).issubset(
-            OrderedSet(all_args)
-        ), f"{args} v.s. {all_args}"
+        assert OrderedSet(args).issubset(OrderedSet(all_args)), (
+            f"{args} v.s. {all_args}"
+        )
 
     return all_args, arg_types
 
@@ -149,7 +149,9 @@ class MultiKernel:
     Assume we do codegen for a MultiKernel encapsulating kernel1 and kernel2.
     The generated definition for the multi-kernel will looks like:
     ```
-    multi_kernel_kernel1 = MultiKernelCall([kernel1, kernel2], multi_kernel_definition_code)
+    multi_kernel_kernel1 = MultiKernelCall(
+        [kernel1, kernel2], multi_kernel_definition_code
+    )
     ```
 
     Here is an concrete example: https://gist.github.com/shunting314/d9f3fb6bc6cee3dbae005825ca196d39

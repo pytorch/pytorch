@@ -8,16 +8,7 @@ import functools
 import io
 import threading
 import warnings
-from typing import (
-    Any,
-    cast,
-    Dict as _Dict,
-    Optional as _Optional,
-    Type,
-    TYPE_CHECKING,
-    TypeVar,
-    Union,
-)
+from typing import Any, cast, Optional as _Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import Self
 
 import torch
@@ -42,7 +33,7 @@ except ModuleNotFoundError:
 
 
 _share_memory_lock = threading.Lock()
-_share_memory_map: _Dict[int, threading.RLock] = {}
+_share_memory_map: dict[int, threading.RLock] = {}
 
 T = TypeVar("T", bound="Union[_StorageBase, TypedStorage]")
 
@@ -52,8 +43,12 @@ class _StorageBase:
     is_sparse: _bool = False
     is_sparse_csr: _bool = False
     device: torch.device
-    # Used when stashing FakeTensor device onto storage in torch.save(metadata_only=True)
+    # Used when
+    # (1) stashing FakeTensor device onto storage in torch.serialization.skip_data
+    # (2) stashing device onto storage to propagate to FakeTensor when torch.load under FakeTensorMode
     _fake_device: _Optional[torch.device] = None
+    # Used when loading with FakeTensorMode to give information about offset of storage in torch.saved-file
+    _checkpoint_offset: _Optional[int] = None
 
     def __init__(self, *args, **kwargs):
         pass
@@ -136,35 +131,35 @@ class _StorageBase:
         raise NotImplementedError
 
     @classmethod
-    def _new_using_filename_cpu(cls: Type[T], size: _int) -> T:
+    def _new_using_filename_cpu(cls, size: _int) -> Self:
         raise NotImplementedError
 
     @classmethod
-    def _new_using_fd_cpu(cls: Type[T], size: _int) -> T:
+    def _new_using_fd_cpu(cls, size: _int) -> Self:
         raise NotImplementedError
 
     @classmethod
-    def from_buffer(cls: Type[T], *args, **kwargs) -> T:
+    def from_buffer(cls, *args, **kwargs) -> Self:
         raise NotImplementedError
 
     @classmethod
     def _new_shared_filename_cpu(
-        cls: Type[T],
+        cls,
         manager,
         obj,
         size,
         *,
         device=None,
         dtype=None,
-    ) -> T:
+    ) -> Self:
         raise NotImplementedError
 
     @classmethod
-    def _release_ipc_counter_cuda(cls: Type[T], *args, **kwargs) -> T:
+    def _release_ipc_counter_cuda(cls, *args, **kwargs) -> Self:
         raise NotImplementedError
 
     @classmethod
-    def _new_with_weak_ptr(cls: Type[T], *args, **kwargs) -> T:
+    def _new_with_weak_ptr(cls, *args, **kwargs) -> Self:
         raise NotImplementedError
 
     def _shared_decref(self) -> Union[_StorageBase, TypedStorage]:
@@ -192,7 +187,7 @@ class _StorageBase:
         raise NotImplementedError
 
     @classmethod
-    def _new_shared_cuda(cls: Type[T], *args, **kwargs) -> T:
+    def _new_shared_cuda(cls, *args, **kwargs) -> Self:
         raise NotImplementedError
 
     def _shared_incref(self, *args, **kwargs):
@@ -535,7 +530,7 @@ def _load_from_bytes(b):
     return torch.load(io.BytesIO(b), weights_only=False)
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def _new_dtypes():
     # These are dtypes serialized as UntypedStorage unlike those in
     # _dtype_to_storage_type_map
@@ -544,6 +539,7 @@ def _new_dtypes():
         torch.float8_e4m3fn,
         torch.float8_e5m2fnuz,
         torch.float8_e4m3fnuz,
+        torch.float8_e8m0fnu,
         torch.bits8,
         torch.bits16,
         torch.bits1x8,
@@ -556,7 +552,7 @@ def _new_dtypes():
     }
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def _dtype_to_storage_type_map():
     # NOTE: We should no longer add dtypes to this map. This map
     # is only used for BC/FC with older PyTorch versions. Going forward,
@@ -584,7 +580,7 @@ def _dtype_to_storage_type_map():
     }
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def _storage_type_to_dtype_map():
     dtype_map = {val: key for key, val in _dtype_to_storage_type_map().items()}
     return dtype_map

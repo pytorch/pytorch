@@ -3,7 +3,7 @@ import contextlib
 import itertools
 import math
 import sys
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Optional, Union
 
 import torch
 import torch.distributed.fsdp._traversal_utils as traversal_utils
@@ -55,7 +55,7 @@ class TestUnshardParamsBase(FSDPTest):
         self,
         writeback: bool,
         check_outer: bool,
-        **fsdp_kwargs: Dict[str, Any],
+        **fsdp_kwargs: dict[str, Any],
     ):
         model = nn.Sequential(
             nn.Linear(5, 5, bias=False, device=device_type.type),
@@ -101,7 +101,7 @@ class TestUnshardParamsBase(FSDPTest):
             for param in model.parameters():
                 self.assertEqual(param.device, cpu_device)
 
-    def _get_test_unshard_params_writeback_config(self) -> Dict[str, List[Any]]:
+    def _get_test_unshard_params_writeback_config(self) -> dict[str, list[Any]]:
         return {
             "writeback": [True, False],
             "check_outer": [True, False],
@@ -193,7 +193,7 @@ class TestUnshardParamsBase(FSDPTest):
             num_fsdp_roots += fsdp_state._is_root
         self.assertGreater(num_fsdp_roots, 1)
 
-    def _get_test_unshard_params_param_data_config(self) -> Dict[str, List[Any]]:
+    def _get_test_unshard_params_param_data_config(self) -> dict[str, list[Any]]:
         return {
             "rank0_only": [False, True],
             "offload_to_cpu": [False, True],
@@ -493,7 +493,7 @@ class TestUnshardParams(TestUnshardParamsBase):
         def _check_grads(
             ddp_model: DDP,
             fsdp_model: FSDP,
-            old_fsdp_grads: Optional[List[torch.Tensor]],
+            old_fsdp_grads: Optional[list[torch.Tensor]],
         ):
             """
             Checks that writes to the FSDP parameters' gradients persist or do

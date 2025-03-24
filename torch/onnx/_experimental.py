@@ -1,7 +1,8 @@
 """Experimental classes and functions used by ONNX export."""
 
 import dataclasses
-from typing import Mapping, Optional, Sequence, Set, Type, Union
+from collections.abc import Mapping, Sequence
+from typing import Optional, Union
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -24,4 +25,4 @@ class ExportOptions:
     dynamic_axes: Optional[Mapping[str, Union[Mapping[int, str], Sequence[int]]]] = None
     keep_initializers_as_inputs: Optional[bool] = None
     custom_opsets: Optional[Mapping[str, int]] = None
-    export_modules_as_functions: Union[bool, Set[Type[torch.nn.Module]]] = False
+    export_modules_as_functions: Union[bool, set[type[torch.nn.Module]]] = False

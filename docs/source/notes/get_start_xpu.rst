@@ -24,7 +24,7 @@ Software Prerequisite
 
 To use PyTorch on Intel GPUs, you need to install the Intel GPUs driver first. For installation guide, visit `Intel GPUs Driver Installation <https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu/2-6.html#driver-installation>`_.
 
-Intel GPU Drivers are sufficient for binary installation, while building from source requires both Intel GPU Drivers and Intel® Deep Learning Essentials. Please refer to  `PyTorch Installation Prerequisites for Intel GPUs <https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu/2-6.html>`_ for more information.
+Please skip the Intel® Deep Learning Essentials installation section if you install from binaries. For building from source, please refer to  `PyTorch Installation Prerequisites for Intel GPUs <https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu/2-6.html>`_ for both Intel GPU Driver and Intel® Deep Learning Essentials Installation.
 
 
 Installation
@@ -35,11 +35,11 @@ Binaries
 
 Now that we have `Intel GPU Driver <https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu/2-6.html#driver-installation>`_ installed, use the following commands to install ``pytorch``, ``torchvision``, ``torchaudio`` on Linux.
 
-For preview wheels
+For release wheels
 
 .. code-block::
 
-    pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/test/xpu
+    pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/xpu
 
 For nightly wheels
 
@@ -163,22 +163,22 @@ Inference with ``torch.compile``
    model = model.to("xpu")
    data = data.to("xpu")
 
-    for i in range(ITERS):
-        start = time.time()
-        with torch.no_grad():
-            model(data)
-            torch.xpu.synchronize()
-        end = time.time()
-        print(f"Inference time before torch.compile for iteration {i}: {(end-start)*1000} ms")
+   for i in range(ITERS):
+       start = time.time()
+       with torch.no_grad():
+           model(data)
+           torch.xpu.synchronize()
+       end = time.time()
+       print(f"Inference time before torch.compile for iteration {i}: {(end-start)*1000} ms")
 
-    model = torch.compile(model)
-    for i in range(ITERS):
-        start = time.time()
-        with torch.no_grad():
-            model(data)
-            torch.xpu.synchronize()
-        end = time.time()
-        print(f"Inference time after torch.compile for iteration {i}: {(end-start)*1000} ms")
+   model = torch.compile(model)
+   for i in range(ITERS):
+       start = time.time()
+       with torch.no_grad():
+           model(data)
+           torch.xpu.synchronize()
+       end = time.time()
+       print(f"Inference time after torch.compile for iteration {i}: {(end-start)*1000} ms")
 
    print("Execution finished")
 
@@ -247,6 +247,8 @@ Train with FP32
 Train with AMP
 """"""""""""""
 
+Note: Training with ``GradScaler`` requires hardware support for ``FP64``. ``FP64`` is not natively supported by the Intel® Arc™ A-Series Graphics. If you run your workloads on Intel® Arc™ A-Series Graphics, please disable ``GradScaler``.
+
 .. code-block::
 
    import torch
@@ -277,7 +279,7 @@ Train with AMP
    model = torchvision.models.resnet50()
    criterion = torch.nn.CrossEntropyLoss()
    optimizer = torch.optim.SGD(model.parameters(), lr=LR, momentum=0.9)
-   scaler = torch.amp.GradScaler(enabled=use_amp)
+   scaler = torch.amp.GradScaler(device="xpu", enabled=use_amp)
 
    model.train()
    model = model.to("xpu")

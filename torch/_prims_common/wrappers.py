@@ -1,18 +1,11 @@
 # mypy: allow-untyped-defs
 import inspect
+import types
 import warnings
+from collections.abc import Sequence
 from functools import wraps
 from types import GenericAlias
-from typing import (
-    Callable,
-    List,
-    NamedTuple,
-    Optional,
-    overload,
-    Sequence,
-    Tuple,
-    TypeVar,
-)
+from typing import Callable, NamedTuple, Optional, overload, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -128,6 +121,9 @@ class elementwise_type_promotion_wrapper:
     def __call__(self, fn: Callable) -> Callable:
         sig = inspect.signature(fn)
 
+        # TorchDynamo tracing of inspect causes fake tensor dynamo_wrapped tests to fail
+        # PYTORCH_TEST_WITH_DYNAMO=1 python test/test_fake_tensor.py FakeTensorTest.test_basic
+        @torch._disable_dynamo
         @wraps(fn)
         def _fn(*args, **kwargs):
             bound = sig.bind(*args, **kwargs)
@@ -272,7 +268,9 @@ def out_wrapper(
         bc_out_type = (
             TensorLikeType
             if is_tensor
-            else Tuple[tuple(TensorLikeType for _ in range(len(out_names)))]
+            else types.GenericAlias(
+                tuple, tuple(TensorLikeType for _ in range(len(out_names)))
+            )
         )
         return_type = (
             TensorLikeType
@@ -316,7 +314,7 @@ def out_wrapper(
                 )
                 or (
                     fn.__name__ == "unbind"
-                    and isinstance(result, (List, tuple))  # type: ignore[arg-type]
+                    and isinstance(result, (list, tuple))  # type: ignore[arg-type]
                 )
             )
             # unbind_copy is a special case: see https://github.com/pytorch/pytorch/issues/130829

@@ -16,10 +16,9 @@ from ..loop_body import LoopBody
 from ..select_algorithm import PartialRender
 from ..utils import sympy_index_symbol, sympy_index_symbol_with_prefix
 from ..virtualized import V
-from .common import CppWrapperKernelArgs
+from .common import REMOVED
 from .cpp import CppKernel, CppKernelProxy, KernelGroup
 from .cpp_utils import cexpr_index, DTYPE_TO_CPP, LocalBufferContext
-from .cpp_wrapper_cpu import CppWrapperCpu
 
 
 def parse_expr_with_index_symbols(expr):
@@ -45,8 +44,6 @@ class CppTemplateKernel(CppKernel):
         self.kernel_name = kernel_name
         self.render_hooks = {}
         self.local_buffers = {}
-        if isinstance(V.graph.wrapper_code, CppWrapperCpu):
-            self.args = CppWrapperKernelArgs()
 
     def render(self, template, **kwargs):
         return PartialRender(
@@ -106,9 +103,11 @@ class CppTemplateKernel(CppKernel):
             if aliases is not None:
                 for alias in aliases:
                     if alias in self.args.input_buffers:
-                        self.args.input_buffers[alias] = "REMOVED"
+                        raise AssertionError(
+                            f"input_buffers cannot be removed: {alias}"
+                        )
                     if alias in self.args.output_buffers:
-                        self.args.output_buffers[alias] = "REMOVED"
+                        self.args.output_buffers[alias] = REMOVED
             cpp_argdefs, _, _ = self.args.cpp_argdefs()
             return f"void {function_name}({', '.join(cpp_argdefs)})"
 
@@ -378,7 +377,10 @@ class CppTemplateKernel(CppKernel):
                     )
                     epilogue_nodes = scope.localize_nodes(epilogue_nodes)
                 return self.store_pointwise_nodes(
-                    dst, epilogue_nodes, offsets, reindexers  # type: ignore[arg-type]
+                    dst,
+                    epilogue_nodes,  # type: ignore[arg-type]
+                    offsets,
+                    reindexers,
                 )
         else:
             if dst.get_name() != src.get_name():
@@ -471,7 +473,8 @@ class CppTemplateKernel(CppKernel):
                         multi_output_name = multi_output_buffers[gemm_idx].get_name()
                         if (
                             multi_output_name in self.args.output_buffers
-                            and self.args.output_buffers[multi_output_name] != "REMOVED"
+                            and self.args.output_buffers[multi_output_name]
+                            is not REMOVED
                         ):
                             self.remove_buffer(multi_output_name)
                 return res
@@ -501,6 +504,10 @@ class CppTemplateKernel(CppKernel):
                     for _src, _dst in zip(src, dst)
                 )
                 return ""
+
+    def check_bounds(self, expr, size, lower, upper):
+        # CppTemplateKernel does not need codegen related operations
+        return
 
 
 class CppTemplateCaller(ir.ChoiceCaller):

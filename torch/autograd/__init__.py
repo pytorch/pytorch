@@ -10,7 +10,7 @@ half, float, double and bfloat16) and complex :class:`Tensor` types (cfloat, cdo
 
 import warnings
 from collections.abc import Sequence
-from typing import cast, List, Optional, Tuple, Union
+from typing import cast, Optional, Union
 
 import torch
 from torch import _vmap_internals
@@ -330,7 +330,7 @@ def backward(
 
     if is_tensor_like(tensors) or isinstance(tensors, graph.GradientEdge):
         tensors = cast(
-            Union[Tuple[torch.Tensor], Tuple[graph.GradientEdge]], (tensors,)
+            Union[tuple[torch.Tensor], tuple[graph.GradientEdge]], (tensors,)
         )
     else:
         tensors = tuple(tensors)

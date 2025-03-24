@@ -15,7 +15,7 @@ from torch._inductor import config
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import override_lowering, run_and_get_code
 from torch.testing import FileCheck
-from torch.testing._internal.common_cuda import SM80OrLater
+from torch.testing._internal.common_cuda import SM80OrLater, tf32_on_and_off
 from torch.testing._internal.common_utils import IS_FBCODE, skipIfRocm, skipIfXpu
 
 
@@ -28,7 +28,7 @@ from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inducto
     check_model_gpu,
     copy_tests,
 )
-from torch.testing._internal.common_utils import TEST_WITH_ASAN, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import TEST_WITH_ROCM
 
 
 importlib.import_module("functorch")
@@ -770,6 +770,7 @@ class OptimizeForInferenceTemplate(TestCase):
             self.assertEqual(foo(mod, x), out_eager)
             self.assertEqual(foo(mod, x), out_eager)
 
+    @tf32_on_and_off(0.001)
     def test_conv_layout_convert_with_view(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -887,6 +888,7 @@ class OptimizeForInferenceTemplate(TestCase):
             self.assertEqual(out_eager, out_compiled)
 
     @skipIfRocm
+    @tf32_on_and_off(0.001)
     def test_redundant_clone_for_layout_convert(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -932,10 +934,7 @@ class OptimizeForInferenceTemplate(TestCase):
         for i, actual, expected in zip(
             itertools.count(), actual_outputs, expected_outputs
         ):
-            self.assertTrue(
-                torch.allclose(expected, actual, atol=1e-4, rtol=1e-4),
-                f"{i}th output: expected {expected}, actual {actual}",
-            )
+            self.assertEqual(expected, actual)
 
         if self.device == "cpu":
             # CPU use different convolution implementation, skip the checks below
@@ -969,7 +968,7 @@ if HAS_CPU and not torch.backends.mps.is_available():
 
     copy_tests(OptimizeForInferenceTemplate, FreezingCpuTests, "cpu")
 
-if HAS_GPU and not TEST_WITH_ASAN:
+if HAS_GPU:
 
     class FreezingGpuTests(TestCase):
         common = check_model_gpu

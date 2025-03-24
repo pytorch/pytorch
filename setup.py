@@ -22,6 +22,11 @@
 #     also applies to C++ files (unless CXXFLAGS is set), in contrast to the
 #     default behavior of autogoo and cmake build systems.)
 #
+#     A specific flag that can be used is
+#     -DHAS_TORCH_SHOW_DISPATCH_TRACE
+#       build with dispatch trace that can be enabled with
+#       TORCH_SHOW_DISPATCH_TRACE=1 at runtime.
+#
 #   CC
 #     the C/C++ compiler to use
 #
@@ -414,16 +419,16 @@ def check_submodules():
     # If none of the submodule folders exists, try to initialize them
     if all(not_exists_or_empty(folder) for folder in folders):
         try:
-            print(" --- Trying to initialize submodules")
+            report(" --- Trying to initialize submodules")
             start = time.time()
             subprocess.check_call(
                 ["git", "submodule", "update", "--init", "--recursive"], cwd=cwd
             )
             end = time.time()
-            print(f" --- Submodule initialization took {end - start:.2f} sec")
+            report(f" --- Submodule initialization took {end - start:.2f} sec")
         except Exception:
-            print(" --- Submodule initalization failed")
-            print("Please run:\n\tgit submodule update --init --recursive")
+            report(" --- Submodule initalization failed")
+            report("Please run:\n\tgit submodule update --init --recursive")
             sys.exit(1)
     for folder in folders:
         check_for_files(
@@ -479,7 +484,6 @@ def mirror_files_into_torchgen():
 # all the work we need to do _before_ setup runs
 def build_deps():
     report("-- Building version " + version)
-
     check_submodules()
     check_pydep("yaml", "pyyaml")
     build_python = not BUILD_LIBTORCH_WHL
@@ -567,35 +571,52 @@ class build_ext(setuptools.command.build_ext.build_ext):
                 assert rpath.startswith("path ")
                 rpaths.append(rpath.split(" ", 1)[1].rsplit("(", 1)[0][:-1])
 
-        omp_lib_name = (
-            "libomp.dylib" if os.uname().machine == "arm64" else "libiomp5.dylib"
-        )
-        omp_rpath_lib_path = os.path.join("@rpath", omp_lib_name)
-        if omp_rpath_lib_path not in libs:
+        omplib_path = get_cmake_cache_vars()["OpenMP_libomp_LIBRARY"]
+        omplib_name = get_cmake_cache_vars()["OpenMP_C_LIB_NAMES"] + ".dylib"
+        omplib_rpath_path = os.path.join("@rpath", omplib_name)
+
+        # This logic is fragile and checks only two cases:
+        # - libtorch_cpu depends on `@rpath/libomp.dylib`e (happens when built inside miniconda environment)
+        # - libtorch_cpu depends on `/abs/path/to/libomp.dylib` (happens when built with libomp from homebrew)
+        if not any(c in libs for c in [omplib_path, omplib_rpath_path]):
             return
 
         # Copy libomp/libiomp5 from rpath locations
+        target_lib = os.path.join(self.build_lib, "torch", "lib", omplib_name)
+        libomp_relocated = False
         for rpath in rpaths:
-            source_lib = os.path.join(rpath, omp_lib_name)
+            source_lib = os.path.join(rpath, omplib_name)
             if not os.path.exists(source_lib):
                 continue
-            target_lib = os.path.join(self.build_lib, "torch", "lib", omp_lib_name)
             self.copy_file(source_lib, target_lib)
             # Delete old rpath and add @loader_lib to the rpath
             # This should prevent delocate from attempting to package another instance
             # of OpenMP library in torch wheel as well as loading two libomp.dylib into
             # the address space, as libraries are cached by their unresolved names
-            subprocess.check_call(
-                [
-                    "install_name_tool",
-                    "-rpath",
-                    rpath,
-                    "@loader_path",
-                    libtorch_cpu_path,
-                ]
-            )
+            install_name_tool_args = [
+                "-rpath",
+                rpath,
+                "@loader_path",
+            ]
+            libomp_relocated = True
             break
-
+        if not libomp_relocated and os.path.exists(omplib_path):
+            self.copy_file(omplib_path, target_lib)
+            install_name_tool_args = [
+                "-change",
+                omplib_path,
+                omplib_rpath_path,
+            ]
+            if "@loader_path" not in rpaths:
+                install_name_tool_args += [
+                    "-add_rpath",
+                    "@loader_path",
+                ]
+            libomp_relocated = True
+        if libomp_relocated:
+            install_name_tool_args.insert(0, "install_name_tool")
+            install_name_tool_args.append(libtorch_cpu_path)
+            subprocess.check_call(install_name_tool_args)
         # Copy omp.h from OpenMP_C_FLAGS and copy it into include folder
         omp_cflags = get_cmake_cache_vars()["OpenMP_C_FLAGS"]
         if not omp_cflags:
@@ -1099,7 +1120,7 @@ def main():
         "filelock",
         "typing-extensions>=4.10.0",
         'setuptools ; python_version >= "3.12"',
-        'sympy==1.13.1 ; python_version >= "3.9"',
+        "sympy>=1.13.3",
         "networkx",
         "jinja2",
         "fsspec",
@@ -1285,6 +1306,7 @@ def main():
         "include/torch/csrc/distributed/autograd/rpc_messages/*.h",
         "include/torch/csrc/dynamo/*.h",
         "include/torch/csrc/inductor/*.h",
+        "include/torch/csrc/inductor/aoti_include/*.h",
         "include/torch/csrc/inductor/aoti_package/*.h",
         "include/torch/csrc/inductor/aoti_runner/*.h",
         "include/torch/csrc/inductor/aoti_runtime/*.h",
@@ -1292,6 +1314,8 @@ def main():
         "include/torch/csrc/inductor/aoti_torch/c/*.h",
         "include/torch/csrc/inductor/aoti_torch/generated/*.h",
         "include/torch/csrc/inductor/aoti_torch/generated/extend/*.h",
+        "include/torch/csrc/inductor/cpp_wrapper/*.h",
+        "include/torch/csrc/inductor/cpp_wrapper/device_internal/*.h",
         "include/torch/csrc/jit/*.h",
         "include/torch/csrc/jit/backends/*.h",
         "include/torch/csrc/jit/generated/*.h",
@@ -1339,6 +1363,7 @@ def main():
         "include/sleef.h",
         "_inductor/codegen/*.h",
         "_inductor/codegen/aoti_runtime/*.cpp",
+        "_inductor/script.ld",
         "_export/serde/*.yaml",
         "_export/serde/*.thrift",
         "share/cmake/ATen/*.cmake",
@@ -1430,8 +1455,7 @@ def main():
         name=package_name,
         version=version,
         description=(
-            "Tensors and Dynamic neural networks in "
-            "Python with strong GPU acceleration"
+            "Tensors and Dynamic neural networks in Python with strong GPU acceleration"
         ),
         long_description=long_description,
         long_description_content_type="text/markdown",

@@ -1,15 +1,31 @@
 # mypy: ignore-errors
 
+"""
+Core variable tracking functionality for Dynamo. This module defines the fundamental
+classes and systems used to track and manage variables during Dynamo's operation.
+
+The module provides:
+1. VariableTracker - The base class for tracking variables during compilation
+2. MutationType system - Classes for tracking and managing mutations to variables
+3. Source type management - Utilities for tracking variable origins and scope
+4. Variable state management - Tools for managing variable state and transformations
+
+These components form the foundation of Dynamo's variable handling system,
+enabling accurate tracking and transformation of Python code into optimized
+computations.
+"""
+
 import collections
+from collections.abc import Sequence
 from enum import Enum
 from typing import Any, Callable, Optional, TYPE_CHECKING
 
 from .. import variables
 from ..current_scope_id import current_scope_id
-from ..exc import unimplemented
+from ..exc import unimplemented, unimplemented_v2
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, Source
-from ..utils import istype
+from ..utils import cmp_name_to_op_mapping, istype
 
 
 if TYPE_CHECKING:
@@ -178,6 +194,17 @@ def is_side_effect_safe(m: MutationType):
     return m.scope == scope_id
 
 
+# This helps users of `as_python_constant` to catch unimplemented error with
+# more information; it inherits `NotImplementedError` for backward
+# compatibility reasons.
+class AsPythonConstantNotImplementedError(NotImplementedError):
+    vt: "VariableTracker"
+
+    def __init__(self, vt: "VariableTracker"):
+        super().__init__(self, f"{vt} is not a constant")
+        self.vt = vt
+
+
 class VariableTrackerMeta(type):
     all_subclasses = []
 
@@ -295,9 +322,15 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         except NotImplementedError:
             raise NotImplementedError(f"{self} has no type") from None
 
+    def python_type_name(self):
+        try:
+            return self.python_type().__name__
+        except NotImplementedError:
+            return "<unknown type>"
+
     def as_python_constant(self):
         """For constants"""
-        raise NotImplementedError(f"{self} is not a constant")
+        raise AsPythonConstantNotImplementedError(self)
 
     def guard_as_python_constant(self):
         """Similar to as_python_constant(), but add ID_MATCH guards to try to force things to become constants"""
@@ -382,16 +415,26 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def inspect_parameter_names(self) -> list[str]:
         unimplemented(f"inspect_parameter_names: {self}")
 
-    def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslator", name: str
+    ) -> "VariableTracker":
         unimplemented(f"hasattr {self.__class__.__name__} {name}")
 
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "list[VariableTracker]",
+        args: Sequence["VariableTracker"],
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        unimplemented(f"call_function {self} {args} {kwargs}")
+        unimplemented_v2(
+            gb_type="Unsupported function call",
+            context=f"call_function {self} {args} {kwargs}",
+            explanation=f"Dynamo does not know how to trace the function `{self.debug_repr()}`",
+            hints=[
+                f"Avoid calling `{self.debug_repr()}` in your code.",
+                "Please report an issue to PyTorch.",
+            ],
+        )
 
     def call_method(
         self,
@@ -410,7 +453,50 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             and not kwargs
         ):
             return self.var_getattr(tx, args[0].as_python_constant())
-        unimplemented(f"call_method {self} {name} {args} {kwargs}")
+        elif (
+            name in cmp_name_to_op_mapping
+            and len(args) == 1
+            and self.is_python_constant()
+            and not tx.output.side_effects.has_pending_mutation(self)
+            and not kwargs
+        ):
+            # NB : Checking for mutation is necessary because we compare
+            # constant values
+            other = args[0]
+            if not isinstance(self, type(other)):
+                return variables.ConstantVariable.create(NotImplemented)
+            if (
+                not other.is_python_constant()
+                or tx.output.side_effects.has_pending_mutation(other)
+            ):
+                unimplemented(f"call_method {self} {name} {args} {kwargs}")
+
+            return variables.ConstantVariable.create(
+                cmp_name_to_op_mapping[name](
+                    self.as_python_constant(), other.as_python_constant()
+                )
+            )
+        hints = [
+            f"Avoid calling `{self.python_type_name()}.{name}` in your code.",
+            "Please report an issue to PyTorch.",
+        ]
+        # additional hint for method calls on improperly constructed iterators
+        if isinstance(self, variables.UserDefinedObjectVariable) and name in (
+            "__iter__",
+            "__next__",
+        ):
+            hints.append(
+                "Dynamo does not fully support tracing builtin iterators (e.g. `map`, `zip`, `enumerate`) "
+                "passed in from uncompiled to compiled regions (e.g. `torch.compile(fn)(enumerate(...))`). "
+                "This can happen unintentionally if a previous graph break happens with a builtin iterator "
+                "in the local scope."
+            )
+        unimplemented_v2(
+            gb_type="Unsupported method call",
+            context=f"call_method {self} {name} {args} {kwargs}",
+            explanation=f"Dynamo does not know how to trace method `{name}` of class `{self.python_type_name()}`",
+            hints=hints,
+        )
 
     def set_name_hint(self, name):
         pass

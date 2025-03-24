@@ -2,19 +2,18 @@
 # Owner(s): ["oncall: distributed"]
 
 import itertools
-from typing import cast, List
+from typing import cast
 
 import torch
 import torch.distributed as dist
 from torch import rand, randn, Tensor
-from torch.distributed._tensor import (
+from torch.distributed.tensor import (
     DeviceMesh,
     distribute_tensor,
     init_device_mesh,
     Replicate,
     Shard,
 )
-from torch.distributed._tensor.placement_types import Placement
 from torch.distributed.tensor._ops._view_ops import (
     Broadcast,
     dim_maps,
@@ -26,6 +25,7 @@ from torch.distributed.tensor._ops._view_ops import (
     view_groups,
 )
 from torch.distributed.tensor.debug import CommDebugMode
+from torch.distributed.tensor.placement_types import Placement
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -160,7 +160,7 @@ class TestViewOps(DTensorTestBase):
         if op == torch.unbind:
             no_shard_dims.add(kwargs.get("dim", 0))
 
-        sharding_choices = cast(List[Placement], [Replicate()]) + [
+        sharding_choices = cast(list[Placement], [Replicate()]) + [
             Shard(i) for i, s in enumerate(in_shape) if s > 1 and i not in no_shard_dims
         ]
 
@@ -513,7 +513,7 @@ class TestViewOps(DTensorTestBase):
         # test sharded computation correctness
         # NOTE: For the input to torch.view_as_complex, sharding
         #       on the last two dimensions is not supported.
-        sharding_choices: List[Placement] = [Replicate(), Shard(0)]
+        sharding_choices: list[Placement] = [Replicate(), Shard(0)]
         all_sharding_choices = itertools.product(
             *(self.device_mesh.ndim * [sharding_choices])
         )
@@ -534,6 +534,9 @@ class TestViewOps(DTensorTestBase):
     @with_comms
     def test_dtensor_view_op_uneven(self):
         """
+        When the sharded dimension is unchanged, the view op should not trigger any communication.
+        And the behavior should be the same as operating under single-device.
+
         Test two uneven cases for view op:
             1) the sharded tensor dim is 1 so that only the first rank has an non-empty shard.
             2) the sharded tensor dim is uneven such that some ranks have full shards,
@@ -570,6 +573,27 @@ class TestViewOps(DTensorTestBase):
                     view.to_local().data_ptr(), dtensor.to_local().data_ptr()
                 )
                 self.assertEqual(len(comm_mode.get_comm_counts()), 0)
+
+    @with_comms
+    def test_view_redistribution(self):
+        """
+        This test is added to demonstrate "incorrect" view ops behavior if redistribution happens.
+        #TODO: we need to define the view ops behavior when view on the sharded dimension.
+        """
+
+        x = torch.randn(4, 4)
+        y = x.view(-1, 8)
+
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+        dtensor_x = distribute_tensor(x, mesh, (Shard(0),))
+        dtensor_y = dtensor_x.view(-1, 8)
+
+        self.assertEqual(y, dtensor_y.full_tensor())
+        # TODO: to match up with single device semantics, the data pointer of dtensor_x and dtensor_y
+        # should be the same.
+        self.assertNotEqual(
+            dtensor_x.to_local().data_ptr(), dtensor_y.to_local().data_ptr()
+        )
 
 
 if __name__ == "__main__":

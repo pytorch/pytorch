@@ -1,4 +1,25 @@
 # mypy: ignore-errors
+
+"""
+This file contains a collection of context manager classes used by Dynamo for tracking
+and managing various PyTorch runtime states during graph compilation. These context
+managers handle different aspects of PyTorch's execution environment, including:
+
+- Autograd states (grad mode, inference mode)
+- CUDA streams and events
+- Profiling contexts
+- Deterministic algorithms
+- Forward/backward AD modes
+- SDPA (Scaled Dot Product Attention) kernels
+- FSDP (Fully Sharded Data Parallel) states
+- AMP (Automatic Mixed Precision) autocast states
+
+The context managers ensure proper state transitions during graph compilation by
+tracking enter/exit points and managing cleanup operations. They help maintain
+consistency between eager execution and compiled graph behavior by capturing and
+restoring state changes.
+"""
+
 import dataclasses
 import inspect
 import sys
@@ -8,14 +29,14 @@ from typing import Callable, Optional, TYPE_CHECKING, Union
 import torch._C
 from torch._guards import Guard
 
-from .. import variables
+from .. import graph_break_hints, variables
 from ..bytecode_transformation import (
     create_call_function,
     create_instruction,
     create_setup_with,
 )
 from ..device_interface import get_interface_for_device
-from ..exc import unimplemented, Unsupported
+from ..exc import unimplemented_v2
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GlobalStateSource
 from .base import VariableTracker
@@ -34,7 +55,7 @@ if TYPE_CHECKING:
 
 
 @dataclasses.dataclass
-class ContextMangerState:
+class ContextManagerState:
     """
     Mutating `self` in VariableTracker is not allowed because we copy
     them.  This is a mutable container pointed to by context managers
@@ -69,7 +90,7 @@ class ContextWrappingVariable(VariableTracker):
         super().__init__(**kwargs)
         self.target_values = target_values
         self.initial_values = initial_values
-        self.state = ContextMangerState() if state is None else state
+        self.state = ContextManagerState() if state is None else state
 
     def enter(self, tx):
         self._call_func(tx, self.target_values)
@@ -152,41 +173,28 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
 
     def enter(self, tx):
         source = None if self.source is None else AttrSource(self.source, "__enter__")
-        try:
-            return variables.UserMethodVariable(
-                self.cm_obj.__enter__.__func__,
-                self,
-                source=source,
-            ).call_function(tx, [], {})
-        except Unsupported as e:
-            unimplemented(
-                f"Unsupported context manager {self.cm_obj}'s __enter__ function",
-                from_exc=e,
-            )
+        return variables.UserMethodVariable(
+            self.cm_obj.__enter__.__func__,
+            self,
+            source=source,
+        ).call_function(tx, [], {})
 
     def exit(self, tx: "InstructionTranslator", *args):
         source = None if self.source is None else AttrSource(self.source, "__exit__")
-        try:
-            x = variables.UserMethodVariable(
-                self.cm_obj.__exit__.__func__,
-                self,
-                source=source,
-            ).call_function(
-                tx,
-                [
-                    variables.ConstantVariable.create(None),
-                    variables.ConstantVariable.create(None),
-                    variables.ConstantVariable.create(None),
-                ],
-                {},
-            )
-        except Unsupported as e:
-            unimplemented(
-                f"Unsupported context manager {self.cm_obj}'s __exit__ function",
-                from_exc=e,
-            )
-
-        tx.generic_context_manager_depth -= 1
+        x = variables.UserMethodVariable(
+            self.cm_obj.__exit__.__func__,
+            self,
+            source=source,
+        ).call_function(
+            tx,
+            [
+                variables.ConstantVariable.create(None),
+                variables.ConstantVariable.create(None),
+                variables.ConstantVariable.create(None),
+            ],
+            {},
+        )
+        tx.active_generic_context_managers.pop()
         return x
 
     def supports_graph_breaks(self):
@@ -231,6 +239,42 @@ class GradInplaceRequiresGradCtxManagerVariable(ContextWrappingVariable):
             "call_function",
             torch._C._functorch.set_inplace_requires_grad_allowed,
             (self.prev_state,),
+            {},
+        )
+        return variables.ConstantVariable.create(None)
+
+
+class TemporarilyPopInterpreterStackCtxManagerVariable(ContextWrappingVariable):
+    """represents torch._functorch.pyfunction.temporarily_pop_interpreter_stack()"""
+
+    @staticmethod
+    def create(tx: "InstructionTranslator", target_values, **kwargs):
+        return TemporarilyPopInterpreterStackCtxManagerVariable(
+            target_values=target_values,
+            initial_values=None,
+            **kwargs,
+        )
+
+    def enter(self, tx):
+        self.saved = torch._C._functorch.pop_dynamic_layer_stack()
+        self.set_cleanup_hook(
+            tx,
+            lambda: torch._C._functorch.push_dynamic_layer_stack(self.saved),
+        )
+        self.state.proxy = tx.output.create_node(
+            "call_function",
+            torch._C._functorch.pop_dynamic_layer_stack,
+            (),
+            {},
+        )
+        return variables.ConstantVariable.create(None)
+
+    def exit(self, tx: "InstructionTranslator", *args):
+        self.state.cleanup()
+        tx.output.create_node(
+            "call_function",
+            torch._C._functorch.push_dynamic_layer_stack,
+            (self.state.proxy,),
             {},
         )
         return variables.ConstantVariable.create(None)
@@ -693,9 +737,11 @@ class DeterministicAlgorithmsVariable(ContextWrappingVariable):
     def _call_func(self, tx: "InstructionTranslator", values):
         assert len(values) == 1
         value = values[0]
-        tx.output.create_node(
-            "call_function", torch._C._set_deterministic_algorithms, (value,), {}
-        ),
+        (
+            tx.output.create_node(
+                "call_function", torch._C._set_deterministic_algorithms, (value,), {}
+            ),
+        )
         torch._C._set_deterministic_algorithms(value)
 
     def module_name(self):
@@ -819,8 +865,6 @@ class AutocastModeVariable(ContextWrappingVariable):
 class NullContextVariable(ContextWrappingVariable):
     """
     This class represents Python contextlib.nullcontext.
-    It's used as a placeholder for other context managers that Dynamo doesn't
-    support yet, e.g, torch.autograd.profiler.record_function.
     """
 
     def __init__(self, target_values=None, **kwargs) -> None:
@@ -837,6 +881,41 @@ class NullContextVariable(ContextWrappingVariable):
 
     def fn_name(self):
         return "nullcontext"
+
+
+class ProfilerContextVariable(ContextWrappingVariable):
+    """
+    This class represents a set of torch profiler context objects, where Dynamo
+    ignores all the side-effects in the __init__, __enter__ and __exit__ methods
+    by treating the object mostly as a `contextlib.nullcontext`, except for edge
+    cases like the `__enter__` method which returns the object itself rather
+    than `None`, per implementation of the torch objects.
+    """
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(target_values=None, **kwargs)
+
+    def enter(self, tx):
+        return self
+
+    def exit(self, tx: "InstructionTranslator", *args):
+        return variables.ConstantVariable.create(None)
+
+    def module_name(self):
+        return "contextlib"
+
+    def fn_name(self):
+        return "nullcontext"
+
+    def reconstruct(self, cg):
+        unimplemented_v2(
+            gb_type="torch.profiler object escaped from compiled region",
+            context=str(self),
+            explanation="Dynamo doesn't support compiling a region that returns a torch.profiler context manager.",
+            hints=[
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
 
 
 class StreamContextVariable(ContextWrappingVariable):
@@ -909,19 +988,38 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
     """
 
     @staticmethod
+    def _create_lambda_from_tensors(tx, tensors):
+        if isinstance(tensors, variables.TensorVariable):
+            versions = variables.TupleVariable(
+                [x.var_getattr(tx, "_version") for x in [tensors]]
+            )
+            tensors = variables.TupleVariable([tensors])
+        else:
+            versions = variables.TupleVariable(
+                [x.var_getattr(tx, "_version") for x in tensors.items]
+            )
+        return PreserveVersionContextVariable(tensors, versions)
+
+    @staticmethod
     def constructor(tx):
         return variables.LambdaVariable(
-            lambda tensor: PreserveVersionContextVariable(
-                tensor,
-                tensor.var_getattr(tx, "_version"),
+            lambda tensors: PreserveVersionContextVariable._create_lambda_from_tensors(
+                tx, tensors
             )
         )
 
-    def __init__(self, tensor, prev_version, **kwargs) -> None:
+    def __init__(self, tensors, prev_versions, **kwargs) -> None:
         kwargs.setdefault("target_values", None)
         super().__init__(**kwargs)
-        self.tensor = tensor
-        self.prev_version = prev_version
+        self.tensors = tensors
+        self.prev_versions = prev_versions
+        # The context manager accepts Union[Tensor, Tuple[Tensor]]
+        if isinstance(self.tensors, variables.TensorVariable):
+            self.tensors = variables.TupleVariable([self.tensors])
+        if isinstance(
+            self.prev_versions, (variables.ConstantVariable, variables.SymNodeVariable)
+        ):
+            self.prev_versions = variables.TupleVariable([self.prev_versions])
 
     def enter(self, tx):
         pass
@@ -931,11 +1029,19 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
 
         return variables.TorchInGraphFunctionVariable(
             _unsafe_set_version_counter
-        ).call_function(tx, [self.tensor, self.prev_version], {})
+        ).call_function(tx, [self.tensors, self.prev_versions], {})
 
     def reconstruct(self, codegen):
-        unimplemented(
-            "torch.autograd._unsafe_preserve_version_counter with graph break"
+        unimplemented_v2(
+            gb_type="torch.autograd._unsafe_preserve_version_counter escaped from compiled region",
+            context=str(self),
+            explanation=(
+                "Dynamo doesn't support compiling a region that returns "
+                "a torch.autograd._unsafe_preserve_version_counter context manager."
+            ),
+            hints=[
+                *graph_break_hints.SUPPORTABLE,
+            ],
         )
 
 
@@ -1077,13 +1183,16 @@ class StreamVariable(VariableTracker):
     def __init__(self, proxy, value, device, **kwargs) -> None:
         if proxy is not None and "example_value" in proxy.node.meta:
             assert proxy.node.meta["example_value"] == value
-        assert (
-            value.device.type == device.type
-        ), "stream value is not equal to the passed device"
+        assert value.device.type == device.type, (
+            "stream value is not equal to the passed device"
+        )
         super().__init__(**kwargs)
         self.proxy = proxy
         self.value = value
         self.device = device
+
+    def python_type(self):
+        return torch.Stream
 
     def call_method(
         self,
@@ -1093,15 +1202,8 @@ class StreamVariable(VariableTracker):
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         assert hasattr(self.value, name), f"no stream method found named {name}"
-        assert name in [
-            "wait_stream",
-            "synchronize",
-            "query",
-            "record_event",
-            "wait_event",
-        ], f" unsupported stream method {name}"
 
-        from ..utils import proxy_args_kwargs
+        from ..utils import cmp_name_to_op_mapping, proxy_args_kwargs
         from .builder import wrap_fx_proxy_cls
 
         if name in ("wait_stream", "synchronize", "wait_event"):
@@ -1125,8 +1227,17 @@ class StreamVariable(VariableTracker):
                     "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
                 ),
             )
-        else:
-            unimplemented(self.device + " stream method " + name + " unsupported")
+        elif name in cmp_name_to_op_mapping and len(args) == 1 and not kwargs:
+            # NB : Checking for mutation is necessary because we compare
+            # constant values
+            other = args[0]
+            if not isinstance(other, StreamVariable):
+                return variables.ConstantVariable.create(NotImplemented)
+            return variables.ConstantVariable.create(
+                cmp_name_to_op_mapping[name](self.value, other.value)
+            )
+
+        return super().call_method(tx, name, args, kwargs)
 
     def as_proxy(self):
         return self.proxy
@@ -1178,7 +1289,17 @@ class EventVariable(VariableTracker):
                 ),
             )
         else:
-            unimplemented(f"event method {name} unsupported")
+            unimplemented_v2(
+                gb_type="Unsupported torch.cuda.Event method",
+                context=str(name),
+                explanation=(
+                    f"Dynamo doesn't support tracing the torch.cuda.Event.{name} method. "
+                    f"We currently support wait, record, synchronize, and query.",
+                ),
+                hints=[
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
 
     def as_proxy(self):
         return self.proxy

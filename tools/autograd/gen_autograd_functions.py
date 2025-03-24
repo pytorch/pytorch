@@ -107,6 +107,17 @@ static variable_list ${op}_apply_functional(
   ${body}
   return grad_inputs;
 }
+inline variable_list ${op}_apply_functional_ivalue(const variable_list& grads, const ivalue_list& args)
+{
+#ifdef C10_MOBILE
+  TORCH_INTERNAL_ASSERT(false, "compiled autograd doesn't work on mobile");
+#else
+  auto packed_args = PackedArgs(args);
+  auto needs_input_grad = packed_args.unpack<std::array<bool, ${num_inputs}>>();
+  ${unpack_ivalues}
+  return ${op}_apply_functional(variable_list(grads), needs_input_grad${,apply_functional_args});
+#endif
+}
 
 variable_list ${op}::apply(variable_list&& grads) {
   ${thread_lock}
@@ -120,11 +131,35 @@ void ${op}::compiled_args(CompiledNodeArgs& args) {
     ${compiled_args}
 }
 variable_list ${op}::apply_with_saved(const variable_list& grads, SwapSavedVariables& saved) {
-    ${apply_with_saved_before}
-    variable_list result = apply(variable_list(grads));
-    ${apply_with_saved_after}
-    return result;
+#ifdef C10_MOBILE
+  TORCH_INTERNAL_ASSERT(false, "compiled autograd doesn't work on mobile");
+#else
+  ${apply_with_saved_before}
+
+  static bool called = false;
+  if (!called) {
+    called = true;
+    ${compute_schema}
+    const auto& pyinterface = torch::dynamo::autograd::getPyCompilerInterface();
+    pyinterface->bind_function(saved.get_py_compiler(), name(), ${op}_apply_functional_ivalue, schema);
+  }
+
+  variable_list output_result;
+
+  PackedArgs packed_args;
+  ${asserts}
+  ${unpacks}
+  ${compute_needs_input_grad}
+  packed_args.pack(needs_input_grad);
+  ${get_packed_args}
+
+  output_result = compiled_autograd_apply_functional(packed_args, next_edges(), saved, grads, name());
+
+  ${apply_with_saved_after}
+  return output_result;
+#endif
 }
+
 """
 )
 
@@ -993,14 +1028,35 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
         f"{T} {x}"
         for T, x in zip(apply_functional_args_ref_types, apply_functional_args)
     ]
+    get_packed_args = "\n".join(
+        f"packed_args.pack({name});" for name in apply_functional_args
+    )
+    unpack_ivalues = []
+    for typ, name in zip(apply_functional_args_ref_types, apply_functional_args):
+        typ = typ.removesuffix("&")
+        unpack_ivalues.append(f"auto {name} = packed_args.unpack<{typ}>();")
+
+    schema_args = [f"std::array<bool, {len(input_name_to_idx)}>"]
+    for typ in apply_functional_args_ref_types:
+        typ = typ.removesuffix("&")
+        typ = typ.removeprefix("const")
+        schema_args.append(typ.strip())
+    compute_schema = ["std::vector<at::TypePtr> schema = {"]
+    for schema_arg in schema_args:
+        compute_schema.append(
+            f"  torch::dynamo::autograd::IValuePacker<{schema_arg}>::packed_type(),"
+        )
+    compute_schema.append("};")
 
     return template.substitute(
         unpacks="\n".join(unpack),
         op=info.op,
+        compute_schema="\n".join(compute_schema),
         apply_functional_args=apply_functional_args,
         apply_functional_args_signature=apply_functional_args_signature,
         compute_needs_input_grad=compute_needs_input_grad,
         num_inputs=len(input_name_to_idx),
+        unpack_ivalues="\n".join(unpack_ivalues),
         compute_index_ranges=compute_index_ranges,
         saved_variables=saved_variables,
         release_variables=release_variables,
@@ -1015,4 +1071,5 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
         compiled_args=compiled_args,
         apply_with_saved_before=apply_with_saved_before,
         apply_with_saved_after=apply_with_saved_after,
+        get_packed_args=get_packed_args,
     )

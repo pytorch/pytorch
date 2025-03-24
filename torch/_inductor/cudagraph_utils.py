@@ -1,14 +1,18 @@
-# mypy: allow-untyped-defs
+# mypy: disallow-untyped-defs
 from __future__ import annotations
 
 import dataclasses
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Sequence, Union
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch._dynamo.utils import counters
 from torch._inductor.utils import InputType
 from torch.utils._ordered_set import OrderedSet
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
@@ -17,13 +21,14 @@ static_inputs_log = torch._logging.getArtifactLogger(
 )
 
 
-OutputType = List[Optional[Union[int, torch.Tensor]]]
-ModelType = Callable[[List[InputType]], OutputType]
+OutputType = list[Optional[Union[int, torch.Tensor]]]
+ModelType = Callable[[list[InputType]], OutputType]
 
 
 @dataclasses.dataclass(frozen=True)
 class FunctionID:
     "Unique counter of a function wrapped in cudagraphify_impl"
+
     id: int
 
 
@@ -38,7 +43,7 @@ class PlaceholderInfo:
     name: str
     stack_trace: Optional[str]
     # This field is recursive, but never cyclic (since a node never uses itself)
-    users: List[PlaceholderInfo]
+    users: list[PlaceholderInfo]
     mutating_use_stack_trace: Optional[str]
 
 
@@ -92,7 +97,7 @@ def to_placeholder_info(placeholder_node: torch.fx.Node) -> PlaceholderInfo:
     return PlaceholderInfo(name, stack_trace, users, mutating_use_stack_trace)
 
 
-def get_placeholder_info(graph: torch.fx.Graph) -> List[PlaceholderInfo]:
+def get_placeholder_info(graph: torch.fx.Graph) -> list[PlaceholderInfo]:
     return [
         to_placeholder_info(node) for node in graph.nodes if node.op == "placeholder"
     ]
@@ -123,7 +128,7 @@ def get_mutation_stack_trace(
 
 def check_for_mutation(
     func: WrappedFunction,
-    inputs: List[InputType],
+    inputs: list[InputType],
     is_cuda_graph_recorded_tensor: Callable[[torch.Tensor], bool],
 ) -> Optional[str]:
     # doesnt work for non-trees because the warmup run would apply mutation twice
@@ -152,7 +157,7 @@ def check_for_mutation(
     )
 
 
-def _get_use_stack_trace(node) -> Optional[str]:
+def _get_use_stack_trace(node: torch.fx.Node) -> Optional[str]:
     for use in node.users:
         if stack_trace := use.meta.get("stack_trace", None):
             return stack_trace
@@ -160,7 +165,7 @@ def _get_use_stack_trace(node) -> Optional[str]:
 
 
 def check_multiple_devices_or_any_cpu_nodes(
-    device_node_mapping: Dict[torch.device, torch.fx.Node]
+    device_node_mapping: dict[torch.device, torch.fx.Node],
 ) -> Optional[str]:
     if cpu_node := device_node_mapping.get(torch.device("cpu")):
         msg = f"cpu device ({cpu_node.name})"
@@ -180,12 +185,12 @@ def check_multiple_devices_or_any_cpu_nodes(
 
 
 def check_lowering_disable_cudagraph(
-    device_node_mapping: Dict[torch.device, torch.fx.Node]
-):
+    device_node_mapping: dict[torch.device, torch.fx.Node],
+) -> Optional[str]:
     return check_multiple_devices_or_any_cpu_nodes(device_node_mapping)
 
 
-def log_cudagraph_skip_and_bump_counter(msg):
+def log_cudagraph_skip_and_bump_counter(msg: str) -> None:
     perf_hint_log.warning(msg)
     counters["inductor"]["cudagraph_skips"] += 1
 
@@ -194,13 +199,16 @@ def log_cudagraph_skip_and_bump_counter(msg):
 class BoxedDeviceIndex:
     value: Optional[int]
 
-    def set(self, device_idx: Optional[int]):
+    def set(self, device_idx: Optional[int]) -> None:
         assert device_idx is None or isinstance(device_idx, int)
         self.value = device_idx
 
 
 def check_for_mutation_ignore_cuda_graph_managed_tensor(
-    gm: torch.fx.GraphModule, compiled_graph, static_input_idxs: Sequence[int]
+    gm: torch.fx.GraphModule,
+    mutated_inputs: OrderedSet[str],
+    mutated_input_idxs: OrderedSet[int],
+    static_input_idxs: Sequence[int],
 ) -> Optional[str]:
     default_msg = format_default_skip_message("mutated inputs")
 
@@ -208,9 +216,7 @@ def check_for_mutation_ignore_cuda_graph_managed_tensor(
     if torch._inductor.config.triton.cudagraph_trees:
         unique_idxs = OrderedSet(static_input_idxs)
         # checking if mutation is only on parameters/static inputs
-        mutation_indices = [
-            idx for idx in compiled_graph.mutated_input_idxs if idx not in unique_idxs
-        ]
+        mutation_indices = [idx for idx in mutated_input_idxs if idx not in unique_idxs]
         has_mutation = len(mutation_indices) != 0
         if not has_mutation:
             return None
@@ -218,7 +224,7 @@ def check_for_mutation_ignore_cuda_graph_managed_tensor(
         return get_mutation_stack_trace(placeholders, mutation_indices)
 
     else:
-        has_mutation = len(compiled_graph.mutated_inputs) != 0
+        has_mutation = len(mutated_inputs) != 0
         return None if not has_mutation else default_msg
 
 
@@ -262,7 +268,7 @@ class CheckInvariantStatus(Enum):
 
 def log_data_ptr_mismatch(
     placeholders: Sequence[PlaceholderInfo],
-    inputs: List[InputType],
+    inputs: list[InputType],
     recorded_data_ptr: Sequence[Optional[int]],
     target_idxs: Sequence[int],
     mismatch: CheckInvariantStatus,
@@ -271,9 +277,9 @@ def log_data_ptr_mismatch(
     Logs the mismatch between input data pointers and recorded data pointers.
     This checks only idxs in target_idxs.
     """
-    assert len(inputs) == len(recorded_data_ptr) and len(inputs) == len(
-        placeholders
-    ), "length mismatch between inputs, recorded_data_ptr, and placeholders"
+    assert len(inputs) == len(recorded_data_ptr) and len(inputs) == len(placeholders), (
+        "length mismatch between inputs, recorded_data_ptr, and placeholders"
+    )
 
     t_tensors = [inputs[i] for i in target_idxs]
     t_data_ptrs = [recorded_data_ptr[i] for i in target_idxs]
@@ -292,12 +298,12 @@ def log_data_ptr_mismatch(
 
 
 def maybe_warning_due_to_dynamic_shape(
-    fn_cache: Dict[tuple[int, ...], Callable[..., Any]],
+    fn_cache: dict[tuple[int, ...], Callable[..., Any]],
     new_int_key: Any,
 ) -> bool:
     num_cudagraphs = len(fn_cache.keys()) + 1
 
-    def warn_msg():
+    def warn_msg() -> str:
         return (
             "CUDAGraph supports dynamic shapes by recording a new graph for each "
             "distinct input size. Recording too many CUDAGraphs may lead to "
@@ -327,5 +333,5 @@ class CudagraphCachedInfo:
     """
 
     placeholders: Sequence[PlaceholderInfo]
-    stack_traces: List[Optional[str]]
-    cudagraph_fail_reasons: List[str]
+    stack_traces: list[Optional[str]]
+    cudagraph_fail_reasons: list[str]

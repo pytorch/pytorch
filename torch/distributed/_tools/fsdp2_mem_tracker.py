@@ -1,23 +1,16 @@
 from copy import deepcopy
-from datetime import timedelta
+from enum import auto, Enum
 from functools import partial, wraps
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Type, TypeVar, Union
+from typing import Any, Callable, NamedTuple, Optional, TypeVar, Union
 from typing_extensions import ParamSpec, TypeVarTuple, Unpack
 
 import torch
-import torch.distributed as dist
+import torch.distributed._tools.fake_collectives
 from torch import nn, optim
 from torch._guards import active_fake_mode
 from torch.distributed._tools.mem_tracker import _RefType, _State, MemTracker
-from torch.distributed.distributed_c10d import (
-    _IllegalWork,
-    ProcessGroup,
-    ReduceOp,
-    Work,
-)
 from torch.distributed.fsdp import FSDPModule
 from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
-from torch.futures import Future
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map_only
 from torch.utils.weak import WeakIdKeyDictionary, weakref
@@ -30,6 +23,8 @@ __all__ = ["FSDPMemTracker"]
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
 _Ts = TypeVarTuple("_Ts")
+
+c10d = torch.ops.c10d
 
 
 class _FSDPRefType(_RefType):
@@ -68,13 +63,6 @@ class _SavedFSDPMethods(NamedTuple):
     post_backward: Callable
 
 
-class _SavedCollectives(NamedTuple):
-    all_gather_into_tensor: Callable
-    reduce_scatter_tensor: Callable
-    all_reduce: Callable
-    barrier: Callable
-
-
 class _FSDPModState(_State):
     """
     Enumerates the states of FSDP modules during the forward and backward passes.
@@ -111,10 +99,19 @@ class _FSDPModMemStats:
 
     def __init__(self, mod_fqn: str) -> None:
         self.mod_fqn = mod_fqn
-        self.local_peak: Dict[torch.device, int] = {}
-        self.snapshots: Dict[
-            _FSDPModState, List[Dict[torch.device, Dict[str, int]]]
+        self.local_peak: dict[torch.device, int] = {}
+        self.snapshots: dict[
+            _FSDPModState, list[dict[torch.device, dict[str, int]]]
         ] = {}
+
+
+class _FSDPState(Enum):
+    PRE_FW = auto()
+    FW = auto()
+    POST_FW = auto()
+    PRE_BW = auto()
+    BW = auto()
+    POST_BW = auto()
 
 
 class FSDPMemTracker(MemTracker):
@@ -153,7 +150,7 @@ class FSDPMemTracker(MemTracker):
             loss.backward()
             optimizer.step()
         fmt.display_snapshot("peak")
-        fmt.display_modulewise_snapshots(depth = 3, units = "MB")
+        fmt.display_modulewise_snapshots(depth=3, units="MB")
 
     """
 
@@ -166,10 +163,9 @@ class FSDPMemTracker(MemTracker):
         assert isinstance(mod, FSDPModule), "FSDPMemTracker only supports FSDP modules"
         self._root_mod = mod
         self._optm = optm
-        self._in_fake_mode: bool = False
         self._fsdp_mod_to_saved_methods: WeakIdKeyDictionary = WeakIdKeyDictionary()
-        self._saved_collectives: _SavedCollectives
-        self._ref_class: Type[_RefType] = _FSDPRefType
+        self._fsdp_state: _FSDPState = _FSDPState.PRE_FW
+        self._ref_class: type[_RefType] = _FSDPRefType
 
     def _instrument_fsdp_sharded_params_grads(
         self, fsdp_param_group: FSDPParamGroup
@@ -190,8 +186,8 @@ class FSDPMemTracker(MemTracker):
     def _fsdp_state_pre_forward(
         self,
         fsdp_mod: FSDPModule,
-        orig_fsdp_state_pre_fw: Callable[_P, tuple[tuple[Unpack[_Ts]], Dict[str, Any]]],
-    ) -> Callable[_P, tuple[tuple[Unpack[_Ts]], Dict[str, Any]]]:
+        orig_fsdp_state_pre_fw: Callable[_P, tuple[tuple[Unpack[_Ts]], dict[str, Any]]],
+    ) -> Callable[_P, tuple[tuple[Unpack[_Ts]], dict[str, Any]]]:
         # We capture memory snapshots before and after ``FSDPState._pre_forward`` to attribute the `unsharded` params
         # and `all_gather` buffers.  There are three cases:
         # Case 1: If the module is not in the ``memory_tracking`` dictionary, create a new ``_FSDPModMemStats``
@@ -208,7 +204,8 @@ class FSDPMemTracker(MemTracker):
         @wraps(orig_fsdp_state_pre_fw)
         def inner(
             *args: _P.args, **kwargs: _P.kwargs
-        ) -> tuple[tuple[Unpack[_Ts]], Dict[str, Any]]:
+        ) -> tuple[tuple[Unpack[_Ts]], dict[str, Any]]:
+            self._fsdp_state = _FSDPState.PRE_FW
             mod_fqn = self._mod_tracker.get_known_fqn(fsdp_mod)
             assert mod_fqn is not None
             if fsdp_mod not in self.memory_tracking:
@@ -251,6 +248,7 @@ class FSDPMemTracker(MemTracker):
             else:
                 state = _FSDPModState.AFT_PRE_FW
             mod_stat.snapshots.setdefault(state, []).append(self.get_tracker_snapshot())
+            self._fsdp_state = _FSDPState.FW
             return args, kwargs
 
         return inner
@@ -276,6 +274,7 @@ class FSDPMemTracker(MemTracker):
             else:
                 state = _FSDPModState.BEF_POST_FW
             mod_stat.snapshots.setdefault(state, []).append(self.get_tracker_snapshot())
+            self._fsdp_state = _FSDPState.POST_FW
 
             output = orig_fsdp_state_post_fw(*args, **kwargs)
 
@@ -296,6 +295,7 @@ class FSDPMemTracker(MemTracker):
         # and unsharding of params. We also initialize ``local_peak`` and ``PEAK_BW`` snapshot for the module.
         @wraps(orig_fsdp_param_group_pre_backward)
         def inner(*args: _P.args, **kwargs: _P.kwargs) -> None:
+            self._fsdp_state = _FSDPState.PRE_BW
             mod_stat = self.memory_tracking[fsdp_mod]
             snapshot = self.get_tracker_snapshot()
             mod_stat.local_peak = {
@@ -310,6 +310,7 @@ class FSDPMemTracker(MemTracker):
             mod_stat.snapshots.setdefault(_FSDPModState.AFT_PRE_BW, []).append(
                 self.get_tracker_snapshot()
             )
+            self._fsdp_state = _FSDPState.BW
 
         return inner
 
@@ -338,7 +339,7 @@ class FSDPMemTracker(MemTracker):
             mod_stat.snapshots.setdefault(_FSDPModState.BEF_POST_BW, []).append(
                 self.get_tracker_snapshot()
             )
-
+            self._fsdp_state = _FSDPState.POST_BW
             orig_fsdp_param_group_post_backward(*args, **kwargs)
 
             if fsdp_param_group := fsdp_state._fsdp_param_group:
@@ -453,110 +454,6 @@ class FSDPMemTracker(MemTracker):
                 handle.remove()
             self._optimizer_hook_handles = None
 
-    def _instrument_and_maybe_bypass_collectives(self) -> None:
-        # Monkey-patching collectives is required because they do not work with `FakeTensorMode`
-        # It's also easier to track `all_gather` and `reduce_scatter` buffers faithfully.
-        self._saved_collectives = _SavedCollectives(
-            dist.all_gather_into_tensor,
-            dist.reduce_scatter_tensor,
-            dist.all_reduce,
-            dist.barrier,
-        )
-
-        class FakeWork(Work):
-            def __init__(self) -> None:
-                super().__init__()
-
-            def get_future(self) -> Future:
-                future: Future = Future()
-                future.set_result(None)
-                return future
-
-            def wait(self, timeout: Optional[timedelta] = None) -> bool:
-                return True
-
-        @wraps(dist.all_gather_into_tensor)
-        def all_gather_into_tensor(
-            output_tensor: torch.Tensor,
-            input_tensor: torch.Tensor,
-            group: Union[ProcessGroup, None] = None,
-            async_op: bool = False,
-        ) -> Union[Work, _IllegalWork, None]:
-            self._update_and_maybe_create_winfos(
-                output_tensor,
-                _FSDPRefType.ALL_GATHER,
-                update_existing=True,
-            )
-
-            if self._in_fake_mode:
-                if async_op:
-                    return FakeWork()
-                return None
-            else:
-                return self._saved_collectives.all_gather_into_tensor(
-                    output_tensor, input_tensor, group, async_op
-                )
-
-        @wraps(dist.reduce_scatter_tensor)
-        def reduce_scatter_tensor(
-            output: torch.Tensor,
-            input: torch.Tensor,
-            op: ReduceOp.RedOpType = dist.ReduceOp.SUM,
-            group: Union[ProcessGroup, None] = None,
-            async_op: bool = False,
-        ) -> Union[Work, _IllegalWork, None]:
-            self._update_and_maybe_create_winfos(
-                input,
-                _FSDPRefType.REDUCE_SCATTER,
-                update_existing=True,
-            )
-
-            if self._in_fake_mode:
-                if async_op:
-                    return FakeWork()
-                return None
-            else:
-                return self._saved_collectives.reduce_scatter_tensor(
-                    output, input, op, group, async_op
-                )
-
-        @wraps(dist.all_reduce)
-        def all_reduce(
-            tensor: torch.Tensor,
-            op: ReduceOp.RedOpType = dist.ReduceOp.SUM,
-            group: Union[ProcessGroup, None] = None,
-            async_op: bool = False,
-        ) -> Union[Work, _IllegalWork, None]:
-            if self._in_fake_mode:
-                if async_op:
-                    return FakeWork()
-                return None
-            else:
-                return self._saved_collectives.all_reduce(tensor, op, group, async_op)
-
-        @wraps(dist.barrier)
-        def barrier(
-            group: Union[ProcessGroup, None] = dist.GroupMember.WORLD,
-            async_op: bool = False,
-            device_ids: Union[List[int], None] = None,
-        ) -> Union[Work, None]:
-            if self._in_fake_mode:
-                return None
-            else:
-                return self._saved_collectives.barrier(group, async_op, device_ids)
-
-        dist.all_gather_into_tensor = all_gather_into_tensor
-        dist.reduce_scatter_tensor = reduce_scatter_tensor
-        dist.all_reduce = all_reduce
-        dist.barrier = barrier
-
-    def _restore_collectives(self) -> None:
-        dist.all_gather_into_tensor = self._saved_collectives.all_gather_into_tensor
-        dist.reduce_scatter_tensor = self._saved_collectives.reduce_scatter_tensor
-        dist.all_reduce = self._saved_collectives.all_reduce
-        dist.barrier = self._saved_collectives.barrier
-        del self._saved_collectives
-
     def track_inputs(self, inputs: tuple[Any, ...]) -> None:
         """
         This is used to track the input tensors to the model and annotate them as ``Inputs``.
@@ -579,27 +476,39 @@ class FSDPMemTracker(MemTracker):
         """This is no-op for ``FSDPMemTracker``"""
 
     def __enter__(self) -> "FSDPMemTracker":
-        self._in_fake_mode = True if active_fake_mode() else False
-        self._register_module_and_optimizer_hooks()
-        self._instrument_and_maybe_bypass_collectives()
-        self._track_resize()
-        self._peak_mem_snap = self.get_tracker_snapshot()
-        self._peak_mem = {
-            dev: dev_snap[_TOTAL_KEY] for dev, dev_snap in self._peak_mem_snap.items()
-        }
-        self._mod_tracker.__enter__()
+        if self._depth == 0:
+            self._register_module_and_optimizer_hooks()
+            self._track_resize()
+            self._track_dtensor_dispatch()
+            self._peak_mem_snap = self.get_tracker_snapshot()
+            self._peak_mem = {
+                dev: dev_snap[_TOTAL_KEY]
+                for dev, dev_snap in self._peak_mem_snap.items()
+            }
+            self._mod_tracker.__enter__()
         TorchDispatchMode.__enter__(self)
+        self._depth += 1
         return self
 
     def __exit__(self, *args: Any) -> None:
-        self._deregister_module_and_optimizer_hooks()
-        self._restore_collectives()
-        self._restore_resize()
+        self._depth -= 1
+        if self._depth == 0:
+            self._deregister_module_and_optimizer_hooks()
+            self._restore_resize()
+            self._restore_dtensor_dispatch()
+            self._mod_tracker.__exit__(*args)
         TorchDispatchMode.__exit__(self, *args)
-        self._mod_tracker.__exit__(*args)
 
     def __torch_dispatch__(self, func, types, args=..., kwargs=None):  # type: ignore[no-untyped-def]
-        res = func(*args, **kwargs or {})
+        if (
+            func == torch.ops._c10d_functional.wait_tensor.default
+            and active_fake_mode()
+        ):
+            # N.B: This is a hacky way to override the Meta IMPL of wait_tensor. The original impl returns
+            # a new tensor which does not happen in eager mode, when a wait_tensor is called.
+            res = args[0]
+        else:
+            res = func(*args, **kwargs or {})
         # If we are tracking an optimizer state, we use the optimizer reference type.
         # If we are in backward region and not in AC region, we use the backward reference type.
         # Else we use the forward reference type.
@@ -609,6 +518,27 @@ class FSDPMemTracker(MemTracker):
             reftype = _FSDPRefType.TEMP
         else:
             reftype = _FSDPRefType.ACT
+        if func == c10d._allgather_base_.default and self._fsdp_state in [
+            _FSDPState.PRE_FW,
+            _FSDPState.PRE_BW,
+        ]:
+            output_tensor = args[0]
+            self._update_and_maybe_create_winfos(
+                output_tensor,
+                _FSDPRefType.ALL_GATHER,
+                update_existing=True,
+            )
+        if (
+            func == c10d._reduce_scatter_base_.default
+            and self._fsdp_state == _FSDPState.POST_BW
+        ):
+            input_tensor = args[1]
+            self._update_and_maybe_create_winfos(
+                input_tensor,
+                _FSDPRefType.REDUCE_SCATTER,
+                update_existing=True,
+            )
+
         tree_map_only(torch.Tensor, partial(self._track, reftype), res)
         peak_state = (
             _FSDPModState.PEAK_BW if self._mod_tracker.is_bw else _FSDPModState.PEAK_FW

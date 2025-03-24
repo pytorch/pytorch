@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import typing
-from typing import List, Optional, Union
+from typing import Optional, Union
 
 import torch
 from torch import Tensor, types
@@ -87,7 +87,7 @@ class TestInferSchemaWithAnnotation(TestCase):
         result = torch.library.infer_schema(foo_op_2, mutates_args=mutates_args)
         self.assertEqual(result, "(SymInt[] x) -> SymInt")
 
-        def foo_op_3(x: typing.List[int]) -> int:
+        def foo_op_3(x: list[int]) -> int:
             return 1
 
         result = torch.library.infer_schema(foo_op_3, mutates_args=mutates_args)
@@ -99,7 +99,7 @@ class TestInferSchemaWithAnnotation(TestCase):
         result = torch.library.infer_schema(foo_op_4, mutates_args=mutates_args)
         self.assertEqual(result, "(SymInt[]? x) -> SymInt")
 
-        def foo_op_5(x: typing.Optional[typing.List[int]]) -> int:
+        def foo_op_5(x: typing.Optional[list[int]]) -> int:
             return 1
 
         result = torch.library.infer_schema(foo_op_5, mutates_args=mutates_args)
@@ -136,7 +136,7 @@ class TestInferSchemaWithAnnotation(TestCase):
         result = torch.library.infer_schema(foo_op_3, mutates_args=mutates_args)
         self.assertEqual(result, "(Tensor x) -> Tensor")
 
-        def foo_op_4(x: List[int]) -> types.Number:
+        def foo_op_4(x: list[int]) -> types.Number:
             return x[0]
 
         result = torch.library.infer_schema(foo_op_4, mutates_args=mutates_args)
@@ -154,7 +154,7 @@ class TestInferSchemaWithAnnotation(TestCase):
         result = torch.library.infer_schema(foo_op_6, mutates_args=mutates_args)
         self.assertEqual(result, "(SymInt[] x) -> SymInt")
 
-        def foo_op_7(x: List[int]) -> int:
+        def foo_op_7(x: list[int]) -> int:
             return 1
 
         result = torch.library.infer_schema(foo_op_7, mutates_args=mutates_args)
@@ -166,7 +166,7 @@ class TestInferSchemaWithAnnotation(TestCase):
         result = torch.library.infer_schema(foo_op_8, mutates_args=mutates_args)
         self.assertEqual(result, "(SymInt[]? x) -> SymInt")
 
-        def foo_op_9(x: Optional[List[int]]) -> int:
+        def foo_op_9(x: Optional[list[int]]) -> int:
             return 1
 
         result = torch.library.infer_schema(foo_op_9, mutates_args=mutates_args)

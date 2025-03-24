@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import math
 import warnings
-from numbers import Number
 from typing import Optional, Union
 
 import torch
@@ -10,7 +9,7 @@ from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.multivariate_normal import _precision_to_scale_tril
 from torch.distributions.utils import lazy_property
-from torch.types import _size
+from torch.types import _Number, _size, Number
 
 
 __all__ = ["Wishart"]
@@ -40,7 +39,7 @@ class Wishart(ExponentialFamily):
         >>> # xdoctest: +SKIP("FIXME: scale_tril must be at least two-dimensional")
         >>> m = Wishart(torch.Tensor([2]), covariance_matrix=torch.eye(2))
         >>> m.sample()  # Wishart distributed with mean=`df * I` and
-        >>>             # variance(x_ij)=`df` for i != j and variance(x_ij)=`2 * df` for i == j
+        >>> # variance(x_ij)=`df` for i != j and variance(x_ij)=`2 * df` for i == j
 
     Args:
         df (float or Tensor): real-valued parameter larger than the (dimension of Square matrix) - 1
@@ -64,6 +63,7 @@ class Wishart(ExponentialFamily):
     [4] Odell, P. L. & Feiveson, A. H., 1966. `A Numerical Procedure to Generate a SampleCovariance Matrix`. JASA, 61(313):199-203.
     [5] Ku, Y.-C. & Bloomfield, P., 2010. `Generating Random Wishart Matrices with Fractional Degrees of Freedom in OX`.
     """
+
     arg_constraints = {
         "covariance_matrix": constraints.positive_definite,
         "precision_matrix": constraints.positive_definite,
@@ -84,7 +84,9 @@ class Wishart(ExponentialFamily):
     ):
         assert (covariance_matrix is not None) + (scale_tril is not None) + (
             precision_matrix is not None
-        ) == 1, "Exactly one of covariance_matrix or precision_matrix or scale_tril may be specified."
+        ) == 1, (
+            "Exactly one of covariance_matrix or precision_matrix or scale_tril may be specified."
+        )
 
         param = next(
             p
@@ -97,7 +99,7 @@ class Wishart(ExponentialFamily):
                 "scale_tril must be at least two-dimensional, with optional leading batch dimensions"
             )
 
-        if isinstance(df, Number):
+        if isinstance(df, _Number):
             batch_shape = torch.Size(param.shape[:-2])
             self.df = torch.tensor(df, dtype=param.dtype, device=param.device)
         else:
