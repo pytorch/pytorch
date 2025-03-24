@@ -67,7 +67,7 @@ from ..utils import (
     set_example_value,
     tensortype_to_dtype,
 )
-from .base import AttributeMutationExisting, AttributeMutationNew, VariableTracker
+from .base import VariableTracker
 from .constant import ConstantVariable
 from .lists import SizeVariable
 
@@ -194,13 +194,6 @@ class TensorVariable(VariableTracker):
             # no need to rename inputs
             _is_name_set = self.proxy.node.op == "placeholder"
         self._is_name_set: bool = _is_name_set
-
-        # Enable setting and reading attributes on tensors.
-        if self.mutation_type is None:
-            if self.source is None:
-                self.mutation_type = AttributeMutationNew()
-            else:
-                self.mutation_type = AttributeMutationExisting()
 
     def debug_repr(self):
         # TODO: strip off fake tensor from repr here
