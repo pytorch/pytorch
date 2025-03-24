@@ -68,7 +68,10 @@ from torch.fx.experimental.symbolic_shapes import (
     SymbolicContext,
 )
 from torch.fx.immutable_collections import immutable_dict, immutable_list
-from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+from torch.utils._python_dispatch import (
+    is_traceable_wrapper_subclass,
+    is_traceable_wrapper_subclass_type,
+)
 from torch.utils._sympy.value_ranges import ValueRanges
 from torch.utils.weak import TensorWeakRef
 
@@ -930,9 +933,17 @@ class VariableBuilder:
                 value,
                 source=self.source,
             )
-        elif isinstance(value, torch._C._TensorMeta) and value not in (
-            torch.Tensor,
-            torch.nn.Parameter,
+        elif (
+            isinstance(value, torch._C._TensorMeta)
+            and value
+            not in (
+                torch.Tensor,
+                torch.nn.Parameter,
+            )
+            # `TensorSubclassVariable` would lead to construction of
+            # `TensorWithTFOverrideVariable`, but we don't want that for wrapper
+            # subclasses.
+            and not is_traceable_wrapper_subclass_type(value)
         ):
             return TensorSubclassVariable(value, source=self.source)
         elif (
