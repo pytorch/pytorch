@@ -7,6 +7,7 @@ The current binding options are as follows:
 4. Core-Complex (Called core-complex)
 """
 
+import logging
 import os
 import re
 import shutil
@@ -42,7 +43,7 @@ PHYSICAL_PACKAGE_ID_CMD = (
 )
 POSSIBLE_NODES_CMD = "/sys/devices/system/node/possible"
 
-logger = get_logger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 
 class System:
@@ -573,6 +574,9 @@ def main() -> None:
     elif args.affinity == AffinityMode.EXCLUSIVE.value:
         numa = Exclusive(local_rank, system)
     elif args.affinity == AffinityMode.CORE_COMPLEX.value:
+        logging.info(
+            "Note: core-complex option might not achieve optimal performance on architectures featuring a single L3 cache per socket."
+        )
         numa = CoreComplex(local_rank, system)
     elif args.affinity == AffinityMode.SOCKET.value:
         numa = Socket(local_rank, system)
@@ -582,7 +586,7 @@ def main() -> None:
     numactlargs = numa.get_numactl_args()
     cmd = get_cmd(args, numactlargs, local_rank, is_rank_required)
     print(socket.gethostname(), "Local Rank:", local_rank, "Binding:", cmd)
-    logger.info("%s.Local Rank:%s Binding:%s", socket.gethostname(), local_rank, cmd)
+    logging.info("%s.Local Rank:%s Binding:%s", socket.gethostname(), local_rank, cmd)
     run_cmd(cmd, current_env)
 
 

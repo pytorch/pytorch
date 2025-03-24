@@ -616,7 +616,17 @@ def get_args_parser() -> ArgumentParser:
         action=env,
         type=str,
         default=None,
-        help="Mentioning the NUMA Binding Option to bind rank-processes to cpu-cores (Options: node, socket, core-complex, exclusive)",
+        help='''\
+        Mentioning the NUMA Binding Option to bind rank-processes to cpu-cores. 
+        Available options are:
+          - node: Processes are bound to cpu cores within a NUMA node.
+          - socket: Processes are bound to cpu cores within a socket.
+          - core-complex: Processes are bound to cpu cores in a core-complex.
+          - exclusive: Processes are bound to exclusive sets of cpu cores within a NUMA node.
+
+        Note:
+        1. This argument is only applicable when using GPUs.
+        2. The core-complex option might not achieve optimal performance on architectures featuring a single L3 cache per socket.''',
     )
     #
     # Positional arguments.
