@@ -80,6 +80,11 @@ def simple_reduce_tests(rank, world_size):
             torch.tensor([rank + 1.0]),
             torch.tensor([float(world_size)]),
         ),
+        (
+            c10d.ReduceOp.AVG,
+            torch.tensor([rank + 1.0]),
+            torch.tensor([float((world_size + 1) / 2)]),
+        ),
     ]
 
     # Generate tests for BAND.
