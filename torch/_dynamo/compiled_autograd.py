@@ -948,7 +948,6 @@ class AutogradCompilerInstance:
                     inputs[i] = inputs[i].pin_memory().cuda(non_blocking=True)
 
                 with _disable(), make_compile_context(self.id):
-                    breakpoint()
                     out = compiled_fn(inputs, sizes, scalars, hooks, packed_inputs)
                     if self.nan_checker:
                         self.nan_checker.check(out)
