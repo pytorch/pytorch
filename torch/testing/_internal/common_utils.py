@@ -1406,6 +1406,7 @@ def is_privateuse1_backend_available():
 
 IS_FILESYSTEM_UTF8_ENCODING = sys.getfilesystemencoding() == 'utf-8'
 
+TEST_EASYDICT = _check_module_exists('easydict')
 TEST_NUMPY = _check_module_exists('numpy')
 TEST_FAIRSEQ = _check_module_exists('fairseq')
 TEST_SCIPY = _check_module_exists('scipy')
