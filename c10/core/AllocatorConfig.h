@@ -80,6 +80,8 @@ class C10_API AllocatorConfig {
     return 128;
   }
 
+  virtual void checkMallocAsyncSupport();
+
   virtual void parseArgs(const char* env);
   virtual static void lexArgs(
       const char* env,
@@ -104,7 +106,7 @@ class C10_API AllocatorConfig {
       const std::vector<std::string>& config,
       size_t i,
       bool& used_cudaMallocAsync);
-  virtual size_t parsePinnedUseCudaHostRegister(
+  virtual size_t parsePinnedUseHostRegister(
       const std::vector<std::string>& config,
       size_t i);
   virtual size_t parsePinnedNumRegisterThreads(
@@ -131,7 +133,7 @@ class C10_API AllocatorConfig {
   // A flag to release the lock on device malloc. The default value is false.
   std::atomic<bool> release_lock_on_device_malloc_;
   // Record the last allocator config environment setting.
-  std::mutex last_allocator_settings_mutex;
+  std::mutex last_allocator_settings_mutex_;
   std::string last_allocator_settings_;
   // A flag that determines whether to register a CPU allocation for use by
   // device. The default value is false.
