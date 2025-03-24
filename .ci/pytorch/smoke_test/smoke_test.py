@@ -6,8 +6,8 @@ import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional
 from tempfile import NamedTemporaryFile
+from typing import Optional
 
 import torch
 import torch._dynamo
@@ -195,21 +195,27 @@ def test_cuda_gds_errors_captured() -> None:
             "Expected cuFileHandleRegister failed RuntimeError but have not received!"
         )
 
-def find_pypi_package_version(package : str) -> Optional[str]:
+
+def find_pypi_package_version(package: str) -> Optional[str]:
     from importlib import metadata
+
     dists = metadata.distributions()
     for dist in dists:
         if dist.metadata["Name"].startswith(package):
             return dist.version
     return None
 
+
 def cudnn_to_version_str(cudnn_version: int) -> str:
     patch = int(cudnn_version % 10)
     minor = int((cudnn_version / 100) % 100)
     major = int((cudnn_version / 10000) % 10000)
-    return F"{major}.{minor}.{patch}"
+    return f"{major}.{minor}.{patch}"
 
-def compare_pypi_to_torch_versions(package: str, pypi_version: str, torch_version: str) -> None:
+
+def compare_pypi_to_torch_versions(
+    package: str, pypi_version: str, torch_version: str
+) -> None:
     if pypi_version is None:
         raise RuntimeError(f"Can't find {package} in PyPI for Torch: {torch_version}")
     if pypi_version.startswith(torch_version):
@@ -218,6 +224,7 @@ def compare_pypi_to_torch_versions(package: str, pypi_version: str, torch_versio
         raise RuntimeError(
             f"Wrong {package} version. Torch: {torch_version} PyPI: {pypi_version}"
         )
+
 
 def smoke_test_cuda(
     package: str, runtime_error_check: str, torch_compile_check: str
@@ -254,7 +261,9 @@ def smoke_test_cuda(
         print(f"torch cuda: {torch.version.cuda}")
         print(f"cuDNN enabled? {torch.backends.cudnn.enabled}")
         torch_cudnn_version = cudnn_to_version_str(torch.backends.cudnn.version())
-        compare_pypi_to_torch_versions("cudnn", find_pypi_package_version("nvidia-cudnn"), torch_cudnn_version)
+        compare_pypi_to_torch_versions(
+            "cudnn", find_pypi_package_version("nvidia-cudnn"), torch_cudnn_version
+        )
 
         torch.cuda.init()
         print("CUDA initialized successfully")
@@ -264,8 +273,10 @@ def smoke_test_cuda(
 
         # nccl is availbale only on Linux
         if sys.platform in ["linux", "linux2"]:
-            torch_nccl_version = '.'.join(str(v) for v in torch.cuda.nccl.version())
-            compare_pypi_to_torch_versions("nccl", find_pypi_package_version("nvidia-nccl"), torch_nccl_version)
+            torch_nccl_version = ".".join(str(v) for v in torch.cuda.nccl.version())
+            compare_pypi_to_torch_versions(
+                "nccl", find_pypi_package_version("nvidia-nccl"), torch_nccl_version
+            )
 
         if runtime_error_check == "enabled":
             test_cuda_runtime_errors_captured()
