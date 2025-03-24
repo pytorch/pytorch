@@ -179,6 +179,7 @@ mm_kernel_configs = (
         {"config": (128, 128, 32, 3, 4), "cond": True},
         {"config": (128, 128, 64, 3, 4), "cond": True},
         {"config": (128, 128, 64, 5, 8), "cond": True},
+        {"config": (128, 256, 64, 3, 8), "cond": True},
     ]
     if inductor_config.max_autotune_gemm_search_space != "EXHAUSTIVE"
     else [
