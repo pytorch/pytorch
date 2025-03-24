@@ -40,4 +40,4 @@ component is undesirable). To serve such use cases, we provide the full capabili
 
 Packaging for C++
 ------------------
-For guidance on how to install and link with libtorch (the library that contains all of the above C++ APIs), please see: https://pytorch.org/cppdocs/installing.html. Note that on Linux there are two types of libtorch binaries provided: one compiled with GCC  ABI and the other with GCC cxx11 ABI, and you should make the selection based on the GCC ABI your system is using.
+For guidance on how to install and link with libtorch (the library that contains all of the above C++ APIs), please see: https://pytorch.org/cppdocs/installing.html. Note that on Linux there are two types of libtorch binaries provided: one compiled with GCC pre-cxx11 ABI and the other with GCC cxx11 ABI, and you should make the selection based on the GCC ABI your system is using.
