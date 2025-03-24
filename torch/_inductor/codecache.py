@@ -1761,6 +1761,10 @@ class AotCodeCompiler:
             for custom_obj_idx, (name, constant) in enumerate(
                 graph.torchbind_constants.items()
             ):
+                if isinstance(
+                    constant, torch._library.fake_class_registry.FakeScriptObject
+                ):
+                    constant = constant.real_obj
                 assert isinstance(constant, torch._C.ScriptObject)
                 custom_obj_name = f"{CUSTOM_OBJ_FILENAME_PREFIX}{custom_obj_idx}"
 
@@ -3339,3 +3343,26 @@ class LambdaFuture(CodeCacheFuture):
 
     def result(self) -> Callable[..., Any]:  # type: ignore[override]
         return self.result_fn()
+
+
+class StaticAutotunerFuture(CodeCacheFuture):
+    """
+    A statically launchable CachingAutotuner, loaded from TritonBundler
+    """
+
+    def __init__(self, static_autotuner: CachingAutotuner) -> None:
+        # Pickled version of CachingAutotuner
+        self.static_autotuner = static_autotuner
+        # This needs to be set in AsyncCompile.triton, in case
+        # we need to reload the CachingAutotuner from its source code
+        # We don't store the source code on the CachingAutotuner itself
+        # since it can be very large.
+        self.reload_kernel_from_src: Optional[Callable[[], Any]] = None
+
+    def result(self) -> Callable[..., Any]:
+        assert self.reload_kernel_from_src is not None
+        with dynamo_timed("StaticAutotunerFuture.warm_precompile"):
+            self.static_autotuner.precompile(  # type: ignore[union-attr]
+                warm_cache_only=False, reload_kernel=self.reload_kernel_from_src
+            )
+            return self.static_autotuner
