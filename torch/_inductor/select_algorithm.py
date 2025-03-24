@@ -1893,10 +1893,8 @@ class AlgorithmSelectorCache(PersistentCache):
                 return make_benchmark_fn()(choices)
 
         if config.autotune_in_subproc:
-            from .autotune_process import tuning_pool
-
-            # do the optional warmup
-            tuning_pool.initialize()
+            # Initialize the suprocess pool so it will warmup early.
+            torch._inductor.autotune_process.get_tuning_process_pool()
 
         def do_autotuning(precompile_fn):
             precompile_start_ts = time.time()

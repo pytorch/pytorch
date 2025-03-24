@@ -235,25 +235,18 @@ class TuningProcessPool:
     """
 
     def __init__(self) -> None:
-        self.processes: Optional[queue.Queue[TuningProcess]] = None
-        self.executor: Optional[ThreadPoolExecutor] = None
-
-    def initialize(self) -> None:
         """
         Start the child processes.
         """
-        assert (self.processes is None) == (self.executor is None)
-        if self.processes is not None:
-            return
-
         devices = self.get_device_list()
         autotuning_log.debug("Sub-process autotune device list: %s", devices)
 
         # Launch the child processes.
-        self.processes = queue.Queue()
-        for device in devices:
-            p = TuningProcess(device=device)
-            self.processes.put(p)
+        self.processes = [TuningProcess(device=device) for device in devices]
+
+        self.process_queue: queue.Queue[TuningProcess] = queue.Queue()
+        for p in self.processes:
+            self.process_queue.put(p)
 
         # Use a thread pool to manage distributing work to the subprocesses.
         # Threads block on an available process, so it makes sense to match
@@ -285,16 +278,12 @@ class TuningProcessPool:
         """
         Signal all child processes to exit.
         """
-        if self.executor is not None:
-            self.executor.shutdown()
-            self.executor = None
+        self.executor.shutdown()
 
-        if self.processes is not None:
-            for p in self.processes.queue:
-                p.shutdown(wait=False)
-            for p in self.processes.queue:
-                p.wait()
-            self.processes = None
+        for p in self.processes:
+            p.shutdown(wait=False)
+        for p in self.processes:
+            p.wait()
 
     def target(self, choice: TritonTemplateCaller) -> float:
         """
@@ -303,9 +292,8 @@ class TuningProcessPool:
         the TuningProcess to the queue.
         """
         assert choice.bmreq is not None
-        assert self.processes is not None
 
-        process = self.processes.get()
+        process = self.process_queue.get()
         process.put(choice.bmreq.benchmark)
         try:
             return process.get(
@@ -326,7 +314,7 @@ class TuningProcessPool:
             # Set to INF so this choice will be ignored
             return float("inf")
         finally:
-            self.processes.put(process)
+            self.process_queue.put(process)
 
     def benchmark(
         self,
@@ -335,18 +323,12 @@ class TuningProcessPool:
         """
         Benchmark each choice in a separate process.
         """
-        assert self.processes is not None, "Tuning process pool is not initialized"
-        assert self.executor is not None
 
         # Use a ThreadExecutorPool to spread the work across the subprocesses and
         # to grab subprocesses as soon as they're free.
         results = dict(zip(choices, self.executor.map(self.target, choices)))
 
         return results
-
-
-tuning_pool = TuningProcessPool()
-atexit.register(tuning_pool.shutdown)
 
 
 LayoutOrBuffer = Union[ir.Layout, ir.Buffer]
@@ -893,10 +875,21 @@ class CppBenchmarkRequest(CPUDeviceBenchmarkMixin, BenchmarkRequest):
         return f"{self.kernel_name=}"
 
 
+_TUNING_PROCESS_POOL: Optional[TuningProcessPool] = None
+
+
+def get_tuning_process_pool() -> TuningProcessPool:
+    global _TUNING_PROCESS_POOL
+    if _TUNING_PROCESS_POOL is None:
+        _TUNING_PROCESS_POOL = TuningProcessPool()
+        atexit.register(_TUNING_PROCESS_POOL.shutdown)
+    return _TUNING_PROCESS_POOL
+
+
 def benchmark_in_sub_process(
     choices: list[TritonTemplateCaller],
 ) -> dict[TritonTemplateCaller, float]:
     """
     Do benchmarking in a subprocess and return the perf number (latency).
     """
-    return tuning_pool.benchmark(choices)
+    return get_tuning_process_pool().benchmark(choices)
