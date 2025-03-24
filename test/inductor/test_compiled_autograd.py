@@ -3971,6 +3971,68 @@ class CompiledAutograd1(torch.nn.Module):
         with compiled_autograd._enable(lambda gm: gm):
             loss.backward()
 
+    def test_anomaly_mode_already_nan(self):
+        def fn():
+            with torch.autograd.detect_anomaly():
+                a = torch.randn(5, 5, requires_grad=True)
+                a.grad = torch.full((5, 5), float("nan"))
+                b = torch.randn(5, 5)
+                out = torch.matmul(a, b)
+                loss = out.sum()
+                with torch._dynamo.compiled_autograd._enable(lambda gm: gm):
+                    loss.backward()
+
+        with self.assertRaisesRegex(
+            AssertionError, "already having NaN gradient. This is not supported."
+        ):
+            fn()
+
+    def test_anomaly_mode_backward(self):
+        def fn():
+            class MyFn(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    return x
+
+                @staticmethod
+                def backward(ctx, gO):
+                    return torch.full(gO.size(), float("nan"))
+
+            with torch.autograd.detect_anomaly():
+                a = torch.randn(5, 5, requires_grad=True)
+                out = MyFn.apply(a)
+                loss = out.sum()
+                with torch._dynamo.compiled_autograd._enable(lambda gm: gm):
+                    loss.backward()
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Compiled Autograd returned NaN gradients for parameters"
+        ):
+            fn()
+
+    def test_anomaly_mode_grad(self):
+        def fn():
+            class MyFn(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    return x
+
+                @staticmethod
+                def backward(ctx, gO):
+                    return torch.full(gO.size(), float("nan"))
+
+            with torch.autograd.detect_anomaly():
+                a = torch.randn(5, 5, requires_grad=True)
+                out = MyFn.apply(a)
+                loss = out.sum()
+                with torch._dynamo.compiled_autograd._enable(lambda gm: gm):
+                    torch.autograd.grad(loss, inputs=a)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Compiled Autograd returned NaN gradients for output nodes"
+        ):
+            fn()
+
 
 def load_test_module(name):
     testdir = Path(__file__).absolute().parent.parent
@@ -4103,7 +4165,6 @@ known_failing_tests = {
     "test_reentrant_with_callbacks_depth_0",  # queue_callback
     "test_reentrant_with_callbacks_depth_1",  # queue_callback
     "test_current_graph_task_execution_order",  # nodes are already freed by the time dynamo traces the lifted hook
-    "test_anomaly_grad_warnings",  # does not support anomaly mode
     "test_autograd_inplace_views_cross_dtype",  # view_fn not supported by compiled autograd
     "test_current_node",  # TorchDispatchMode not yet implemented for compiled autograd
     "test_post_accumulate_grad_hook_ordering",  # accuracy error
@@ -4114,7 +4175,6 @@ known_failing_tests = {
     "test_retains_grad_inplace_multiple_outputs",  # retains_grad_hooks
     "test_accumulate_grad",  # create_graph
     "test_anomaly_assign_parent_cleanup",  # create_graph
-    "test_anomaly_mode_no_check_nan",  # anomaly mode
     "test_backward_create_graph_warns",  # create_graph
     "test_backward_with_nonleaf_inputs",  # create_graph
     "test_create_graph_and_full_backward_hook_cycle",  # create_graph
@@ -4146,7 +4206,6 @@ known_failing_tests = {
     "test_select_sum",  # create_graph, also needs graph breaks
     "test_will_engine_execute_node",  # retains_grad_hooks
     "test_backward_to_node",  # retains_grad_hooks NYI
-    "test_anomaly_detect_nan",  # anomaly mode
     "test_custom_autograd_no_early_free",  # create_graph
     "test_custom_function_error",  # vjp
     "test_custom_function_save_for_forward",  # vjp
@@ -4190,6 +4249,9 @@ known_failing_tests = {
     "test_autograd_node_isinstance",  # backward ctx is a fake cls and not directly a Node instance
     "test_backward_hook_relative_ordering",  # compiled autograd collects breadth first, and module backward hook not supported
     "test_checkpointing_without_reentrant_custom_function_works",  # ctx.saved_tensors are cached by CA
+    "test_anomaly_mode_no_check_nan",  # different error messages
+    "test_anomaly_grad_warnings",  # different error messages
+    "test_anomaly_detect_nan",  # fake tensor errors on NaN
     # Uncategorized
     "test_not_implemented_grad",  # Dynamo changes the types of exceptions
 }

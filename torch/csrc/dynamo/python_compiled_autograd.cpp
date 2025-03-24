@@ -730,7 +730,9 @@ static TraceState call_begin_capture(
     CacheNode& cache,
     AutogradCompilerCall& compiler_call,
     size_t num_outputs,
-    std::optional<std::string>&& maybe_compile_reason) {
+    std::optional<std::string>&& maybe_compile_reason,
+    bool accumulate_grad,
+    bool check_nans) {
   static PyObject* method_name = PyUnicode_InternFromString("begin_capture");
   THPObjectPtr py_input(THPVariable_WrapList(compiler_call.tensor_args.inputs));
   THPObjectPtr py_size_input(cache.wrap_dynamic_inputs());
@@ -745,6 +747,8 @@ static TraceState call_begin_capture(
       py_size_input.get(),
       py_ivalue_args_input.get(),
       py_node_origins.get(),
+      PyBool_FromLong(accumulate_grad),
+      PyBool_FromLong(check_nans),
       nullptr)));
 
   PyObject *compile_id_str{nullptr}, *fake_inputs{nullptr},
@@ -914,7 +918,9 @@ static CacheNode* _compiled_autograd_impl(
         *cache,
         compiler_call,
         output_edges.size(),
-        std::move(compile_reason));
+        std::move(compile_reason),
+        accumulate_grad,
+        AnomalyMode::is_enabled() && AnomalyMode::should_check_nan());
     InputBuffers input_buffers;
 
     for (size_t i = 0; i < ordered_calls.size(); i++) {
