@@ -41,11 +41,7 @@ static CPUCapability compute_cpu_capability() {
 #ifdef HAVE_SVE256_CPU_DEFINITION
     if (strcmp(envar, "sve256") == 0) {
       if (sve_vl == 256) {
-#ifdef HAVE_SVE256_BF16_CPU_DEFINITION
-        return CPUCapability::SVE256_BF16;
-#else
         return CPUCapability::SVE256;
-#endif
       }
       TORCH_WARN("SVE256 capability not available on hardware. Falling back to DEFAULT");
       return CPUCapability::DEFAULT;
@@ -106,11 +102,7 @@ static CPUCapability compute_cpu_capability() {
     }
     #ifdef HAVE_SVE256_CPU_DEFINITION
         if (sve_vl == 256) { // Check for SVE256
-          #ifdef HAVE_SVE256_BF16_CPU_DEFINITION
-            return CPUCapability::SVE256_BF16;
-          #else
             return CPUCapability::SVE256;
-          #endif
         }
     #endif
     // Return the default CPU capability.
