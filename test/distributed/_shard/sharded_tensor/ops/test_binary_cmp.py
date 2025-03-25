@@ -129,7 +129,7 @@ class TestShardedTensorBinaryOps(ShardedTensorTestBase):
     def test_torch_equal(self):
         """Test torch.equal(ShardedTensor, ShardedTensor)"""
 
-        spec, alt_spec = self.get_gpu_specs()
+        spec, _ = self.get_gpu_specs()
         st1, st2 = self.get_random_tensors(spec, spec, 10, 10)
         self.assertTrue(torch.equal(st1, st2))
 
@@ -145,7 +145,7 @@ class TestShardedTensorBinaryOps(ShardedTensorTestBase):
     def test_torch_allclose(self):
         """Test torch.allclose(ShardedTensor, ShardedTensor)"""
 
-        spec, alt_spec = self.get_gpu_specs()
+        spec, _ = self.get_gpu_specs()
 
         st1, st2 = self.get_random_tensors(spec, spec, 10, 10)
         self.assertTrue(torch.allclose(st1, st2))

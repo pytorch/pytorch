@@ -315,7 +315,7 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
             model(x)
         self.assertEqual(counter.frame_count, 2)
 
-    @patch.object(torch._dynamo.config, "cache_size_limit", 2)
+    @patch.object(torch._dynamo.config, "recompile_limit", 2)
     def test_no_recursive_compile_after_cache_limit_hit(self):
         def f(x, n):
             x = x + n
@@ -351,7 +351,7 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
             h(torch.randn(5), f(i))
         self.assertEqual(counter.frame_count, 2)
 
-    @patch.object(torch._dynamo.config, "cache_size_limit", 2)
+    @patch.object(torch._dynamo.config, "recompile_limit", 2)
     def test_run_mode_after_cache_limit_hit(self):
         def f(x, n):
             x = x + n
@@ -376,6 +376,102 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         # run mode
         self.assertEqual(opt_f(torch.ones(3), 0), torch.ones(3) + 3)
         self.assertEqual(opt_f(torch.ones(3), 1), torch.ones(3) + 5)
+        self.assertEqual(counter.frame_count, 2)
+
+    @torch._dynamo.config.patch(automatic_dynamic_shapes_mark_as="unbacked")
+    def test_automatic_dynamic_shapes_mark_as_unbacked(self):
+        counter = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=counter)
+        def f(x):
+            return x * x
+
+        f(torch.randn(3))
+        f(torch.randn(2))
+        f(torch.randn(1))
+        f(torch.randn(0))
+
+        self.assertEqual(counter.frame_count, 2)  # not three or four!
+
+    @torch._dynamo.config.patch(automatic_dynamic_shapes_mark_as="oblivious")
+    def test_automatic_dynamic_shapes_mark_as_oblivious(self):
+        counter = torch._dynamo.testing.CompileCounter()
+
+        def f(x):
+            if x.size(0) < 10:
+                return x * 1
+            else:
+                return x + 10
+
+        opt_f = torch.compile(backend=counter, fullgraph=True)(f)
+
+        for i in [3, 2, 1, 0]:
+            self.assertEqual(f(torch.zeros(i)), opt_f(torch.zeros(i)))
+
+        self.assertEqual(counter.frame_count, 2)  # not three or four!
+
+    @torch._dynamo.config.patch(automatic_dynamic_shapes_mark_as="oblivious")
+    def test_automatic_dynamic_shapes_mark_as_oblivious_fail_counterfactual(self):
+        counter = torch._dynamo.testing.CompileCounter()
+
+        def f(x):
+            if x.size(0) < 2:
+                return x * 1
+            else:
+                return x + 10
+
+        opt_f = torch.compile(backend=counter, fullgraph=True)(f)
+
+        opt_f(torch.randn(1))
+        with self.assertRaises(torch._dynamo.exc.UserError):
+            opt_f(torch.randn(0))
+
+    def test_ambient_autocast_recompile(self):
+        weights = torch.randn(10, 10)
+        counter = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+
+        @torch.compile(backend=counter, fullgraph=True)
+        def fn(x):
+            return torch.mm(x, weights)
+
+        x = torch.randn(1, 10)
+
+        self.assertEqual(fn(x).dtype, torch.float32)
+
+        with torch.autocast("cpu", torch.float16):
+            self.assertEqual(fn(x).dtype, torch.float16)
+
+        with torch.autocast("cpu", torch.bfloat16):
+            self.assertEqual(fn(x).dtype, torch.bfloat16)
+
+        # should recompile each time
+        self.assertEqual(counter.frame_count, 3)
+
+    def test_autocast_constant_fold(self):
+        # test that constant-folded autocast functions
+        # work properly - it should work if the global autocast
+        # state is guarded.
+
+        weights = torch.randn(10, 10)
+        counter = torch._dynamo.testing.CompileCounterWithBackend("eager")
+
+        def fn(x):
+            if torch.get_autocast_dtype("cpu") == torch.float16:
+                x = x + 1
+            else:
+                x = x - 1
+            return torch.mm(x, weights)
+
+        opt_fn = torch.compile(fn, backend=counter, fullgraph=True)
+
+        x = torch.randn(1, 10)
+
+        with torch.autocast("cpu", torch.float16):
+            self.assertEqual(fn(x), opt_fn(x))
+
+        with torch.autocast("cpu", torch.bfloat16):
+            self.assertEqual(fn(x), opt_fn(x))
+
         self.assertEqual(counter.frame_count, 2)
 
 

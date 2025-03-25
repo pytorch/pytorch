@@ -15,7 +15,11 @@
 // C ABI defined in torch/csrc/inductor/aoti_torch/c/shim.h. The same rule
 // applies to other files under torch/csrc/inductor/aoti_runtime/.
 #include <torch/csrc/inductor/aoti_runtime/device_utils.h>
+#ifdef USE_XPU
+#include <torch/csrc/inductor/aoti_runtime/utils_xpu.h>
+#else
 #include <torch/csrc/inductor/aoti_runtime/utils.h>
+#endif
 
 #define AOTI_RUNTIME_CHECK(EXPR, MSG) \
   do {                                \
@@ -38,19 +42,46 @@ extern uint8_t _binary_constants_bin_start[];
 // NOLINTNEXTLINE(*array*)
 extern uint8_t _binary_constants_bin_end[];
 
-#define AOTI_CONST_GPU_ALIGNMENT 64
+#if defined(USE_CUDA) || defined(USE_XPU)
+// Compute required blob size with 64-alignment if on GPU.
+#define AOTI_CONST_ALIGNMENT 64
+#else
+// Use 64-alignment (use something >=64)for better performance on CPU.
+#define AOTI_CONST_ALIGNMENT 64
+#endif
 
 namespace {
 
+using RAIIDataPtr = std::unique_ptr<void, std::function<void(void*)>>;
+
 #ifdef USE_CUDA
 
-using CUDAPtr = std::unique_ptr<void, std::function<void(void*)>>;
-
-CUDAPtr RAII_cudaMalloc(size_t num_bytes) {
+RAIIDataPtr RAII_gpuMalloc(size_t num_bytes) {
   void* data_ptr;
   AOTI_RUNTIME_DEVICE_CHECK(cudaMalloc((void**)&data_ptr, num_bytes));
   auto deleter = [](void* ptr) { AOTI_RUNTIME_DEVICE_CHECK(cudaFree(ptr)); };
-  return CUDAPtr(data_ptr, deleter);
+  return RAIIDataPtr(data_ptr, deleter);
+}
+
+#elif defined(USE_XPU)
+
+RAIIDataPtr RAII_gpuMalloc(size_t num_bytes) {
+  sycl::queue* queue_ptr = nullptr;
+  aoti_torch_get_current_sycl_queue((void**)&queue_ptr);
+  void* data_ptr = sycl::malloc_device(num_bytes, *queue_ptr);
+  auto deleter = [queue_ptr](void* ptr) { sycl::free(ptr, *queue_ptr); };
+  return RAIIDataPtr(data_ptr, deleter);
+}
+
+#else
+
+RAIIDataPtr RAII_cpuMalloc(size_t num_bytes) {
+  void* data_ptr = std::malloc(num_bytes);
+  if (!data_ptr) {
+    throw std::bad_alloc();
+  }
+  auto deleter = [](void* ptr) { std::free(ptr); };
+  return RAIIDataPtr(data_ptr, deleter);
 }
 
 #endif // USE_CUDA
@@ -74,7 +105,7 @@ inline void parse_device_str(
     const std::string& device_str,
     int32_t& device_type,
     int32_t& device_idx) {
-  std::regex re("(cpu|cuda)(:([0-9]+))?");
+  std::regex re("(cpu|cuda|xpu)(:([0-9]+))?");
   std::smatch sm;
   bool matched = std::regex_match(device_str, sm, re);
   AOTI_RUNTIME_CHECK(matched, "Invalid device: " + device_str);
@@ -83,6 +114,10 @@ inline void parse_device_str(
     device_type = aoti_torch_device_type_cpu();
   } else if (sm[1].str() == "cuda") {
     device_type = aoti_torch_device_type_cuda();
+#ifdef USE_XPU
+  } else if (sm[1].str() == "xpu") {
+    device_type = aoti_torch_device_type_xpu();
+#endif
   } else {
     AOTI_RUNTIME_CHECK(false, "Invalid device: " + device_str);
   }
@@ -107,11 +142,13 @@ class AOTInductorModelBase {
       size_t num_outputs,
       size_t num_constants,
       const std::string& device_str,
-      std::optional<std::string> cubin_dir)
+      std::optional<std::string> cubin_dir,
+      bool include_weights = true)
       : inputs_info_(num_inputs),
         outputs_info_(num_outputs),
         constants_info_(num_constants),
-        cubin_dir_(std::move(cubin_dir)) {
+        cubin_dir_(std::move(cubin_dir)),
+        include_weights(include_weights) {
     parse_device_str(device_str, device_type_, device_idx_);
 
 #ifdef USE_CUDA
@@ -122,6 +159,13 @@ class AOTInductorModelBase {
       AOTI_RUNTIME_DEVICE_CHECK(cudaSetDevice(device_idx_));
     }
 #endif // USE_CUDA
+#ifdef USE_XPU
+    if (device_idx_ == -1) {
+      aoti_torch_get_current_xpu_device(&device_idx_);
+    } else {
+      aoti_torch_set_current_xpu_device(device_idx_);
+    }
+#endif // USE_XPU
   }
 
   // NOLINTNEXTLINE(modernize-use-equals-default)
@@ -135,6 +179,12 @@ class AOTInductorModelBase {
       }
     }
 #endif // USE_CUDA
+#ifdef USE_XPU
+    if (run_finished_) {
+      (*run_finished_)->wait_and_throw();
+      delete *run_finished_;
+    }
+#endif // USE_XPU
   }
 
   AOTInductorModelBase(AOTInductorModelBase&&) = delete;
@@ -158,16 +208,45 @@ class AOTInductorModelBase {
       AOTI_RUNTIME_DEVICE_CHECK(cudaEventCreate(&run_finished));
       run_finished_.emplace(run_finished);
     }
+#elif defined(USE_XPU)
+    if (run_finished_) {
+      (*run_finished_)->wait_and_throw();
+      delete *run_finished_;
+      run_finished_.reset();
+    }
+#else // !USE_CUDA && !USE_XPU
+    run_finished_ = false;
+#endif
 
     auto* model = static_cast<Model*>(this);
     model->run_impl(input_handles, output_handles, stream, proxy_executor);
+
+#ifdef USE_CUDA
     AOTI_RUNTIME_DEVICE_CHECK(cudaEventRecord(*run_finished_, stream));
-#else // !USE_CUDA
-    run_finished_ = false;
-    auto* model = static_cast<Model*>(this);
-    model->run_impl(input_handles, output_handles, stream, proxy_executor);
+#elif defined(USE_XPU)
+    run_finished_ = std::make_optional<sycl::event*>(new sycl::event(
+        static_cast<sycl::queue*>(stream)->ext_oneapi_submit_barrier()));
+#else // !USE_CUDA && !USE_XPU
     run_finished_ = true;
 #endif // USE_CUDA
+  }
+
+  // Non-thread-aware variant of run(). Obviously unsafe to use in a threaded
+  // environment :)
+  void run_single_threaded(
+      AtenTensorHandle*
+          input_handles, // array of input AtenTensorHandle; handles
+                         // are stolen; the array itself is borrowed
+      AtenTensorHandle*
+          output_handles, // array for writing output AtenTensorHandle; handles
+                          // will be stolen by the caller; the array itself is
+                          // borrowed
+      DeviceStreamType stream,
+      AOTIProxyExecutorHandle proxy_executor) {
+    // don't bother with any of the run_finished stuff; this is unsafe to call
+    // in a threaded context
+    auto* model = static_cast<Model*>(this);
+    model->run_impl(input_handles, output_handles, stream, proxy_executor);
   }
 
   std::unordered_map<std::string, AtenTensorHandle> run_const_fold(
@@ -180,9 +259,15 @@ class AOTInductorModelBase {
       AOTI_RUNTIME_DEVICE_CHECK(cudaEventCreate(&run_finished));
       run_finished_.emplace(run_finished);
     }
-#else // USE_CUDA
+#elif defined(USE_XPU)
+    if (run_finished_) {
+      (*run_finished_)->wait_and_throw();
+      delete *run_finished_;
+      run_finished_.reset();
+    }
+#else // !USE_CUDA && !USE_XPU
     run_finished_ = false;
-#endif // USE_CUDA
+#endif
 
     auto* model = static_cast<Model*>(this);
     auto folded_constants =
@@ -190,7 +275,13 @@ class AOTInductorModelBase {
 
 #ifdef USE_CUDA
     AOTI_RUNTIME_DEVICE_CHECK(cudaEventRecord(*run_finished_, stream));
-#else // USE_CUDA
+#elif defined(USE_XPU)
+    // sycl::queue* queue_ptr = nullptr;
+    // aoti_torch_get_current_sycl_queue((void**)&queue_ptr);
+    run_finished_ = std::make_optional<sycl::event*>(new sycl::event(
+        static_cast<sycl::queue*>(stream)->ext_oneapi_submit_barrier()));
+
+#else // !USE_CUDA && !USE_XPU
     run_finished_ = true;
 #endif // USE_CUDA
 
@@ -202,23 +293,23 @@ class AOTInductorModelBase {
     constants_map_->reserve(num_constants);
 
     std::vector<size_t> constants_internal_offset(num_constants);
-    if (device_type_ != aoti_torch_device_type_cpu()) {
-      size_t blob_size = 0;
-      compute_cuda_constant_blob(blob_size, constants_internal_offset);
-#ifdef USE_CUDA
-      constant_blob_ = RAII_cudaMalloc(blob_size);
+    size_t blob_size = 0;
+    compute_constant_blob(blob_size, constants_internal_offset);
+#if defined(USE_CUDA) || defined(USE_XPU)
+    constant_blob_ = RAII_gpuMalloc(blob_size);
+#else
+    constant_blob_ = RAII_cpuMalloc(blob_size);
 #endif
+    if (!include_weights) {
+      return;
     }
 
     size_t bytes_read = 0;
     for (size_t i = 0; i < num_constants; i++) {
       bool from_folded = this->constant_from_folded(i);
-#ifndef USE_CUDA
       if (from_folded) {
-        // We do not reallocate and copy for CPU.
         continue;
       }
-#endif // USE_CUDA
       std::string name = this->constant_name(i);
       size_t data_size = this->constant_data_size(i);
       uint8_t* internal_ptr = (data_size != 0)
@@ -241,23 +332,6 @@ class AOTInductorModelBase {
       auto opaque_metadata_size = this->opaque_metadata_size(i);
 
       AtenTensorHandle tensor_handle = nullptr;
-#ifdef AOTI_USE_CREATE_TENSOR_FROM_BLOB_V1
-      // When opaque_metadata_size is not 0, we need to have the
-      // aoti_torch_create_tensor_from_blob_v2 available
-      AOTI_RUNTIME_CHECK(
-          opaque_metadata_size == 0,
-          "Expect opaque_metadata_size to be 0 when AOTI_USE_CREATE_TENSOR_FROM_BLOB_V1 is defined");
-      AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_tensor_from_blob(
-          internal_ptr,
-          ndim,
-          size,
-          stride,
-          offset,
-          dtype,
-          device_type_,
-          device_idx_,
-          &tensor_handle));
-#else
       AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_tensor_from_blob_v2(
           internal_ptr,
           ndim,
@@ -271,7 +345,6 @@ class AOTInductorModelBase {
           layout,
           opaque_metadata_ptr,
           opaque_metadata_size));
-#endif // AOTI_USE_CREATE_TENSOR_FROM_BLOB_V1
       constants_map_->emplace(std::move(name), tensor_handle);
     }
     if (constants_map_) {
@@ -279,14 +352,16 @@ class AOTInductorModelBase {
     }
   }
 
-#ifdef USE_CUDA
-  CUDAPtr&& release_constant_blob() {
+  RAIIDataPtr&& release_constant_blob() {
     return std::move(constant_blob_);
   }
-#endif
 
   std::shared_ptr<std::vector<ConstantHandle>> get_constants_array() {
     return constants_;
+  }
+
+  int32_t get_device_type() const {
+    return device_type_;
   }
 
   int32_t get_device_idx() const {
@@ -298,44 +373,43 @@ class AOTInductorModelBase {
       size_t bytes_read,
       size_t data_size,
       bool skip_copy) {
-#ifdef USE_CUDA
     auto* constants_ptr = static_cast<uint8_t*>(constant_blob_.get());
     uint8_t* internal_ptr = constants_ptr + constant_offset;
-    // Copy data to GPU memory
     // TODO: Handle shared storage case.
     if (!skip_copy) {
+#ifdef USE_XPU
+      sycl::queue* queue_ptr = nullptr;
+      aoti_torch_get_current_sycl_queue((void**)&queue_ptr);
+      queue_ptr
+          ->memcpy(internal_ptr, _get_constants_start() + bytes_read, data_size)
+          .wait();
+#elif USE_CUDA
       AOTI_RUNTIME_DEVICE_CHECK(cudaMemcpy(
           internal_ptr,
           _get_constants_start() + bytes_read,
           data_size,
           cudaMemcpyHostToDevice));
+#else
+      memcpy(internal_ptr, _get_constants_start() + bytes_read, data_size);
+#endif
     }
     return internal_ptr;
-
-#else
-    // get pointer to constant which is packed in model during compile time.
-    AOTI_RUNTIME_CHECK(!skip_copy, "pure cpu mode doesn't support skip copy");
-    return _get_constants_start() + bytes_read;
-#endif // USE_CUDA
   }
 
-  void compute_cuda_constant_blob(
+  void compute_constant_blob(
       size_t& blob_size,
       std::vector<size_t>& constants_internal_offset) {
-#ifdef USE_CUDA
     size_t num_constants = this->num_constants();
-    // Compute required blob size with 64-alignment if on GPU.
     blob_size = 0;
     for (size_t i = 0; i < num_constants; i++) {
       size_t data_size = this->constant_data_size(i);
-      if (data_size % AOTI_CONST_GPU_ALIGNMENT) {
-        data_size = AOTI_CONST_GPU_ALIGNMENT +
-            (data_size / AOTI_CONST_GPU_ALIGNMENT) * AOTI_CONST_GPU_ALIGNMENT;
+      if (data_size % AOTI_CONST_ALIGNMENT) {
+        data_size = AOTI_CONST_ALIGNMENT +
+            (data_size / AOTI_CONST_ALIGNMENT) * AOTI_CONST_ALIGNMENT;
       }
       constants_internal_offset[i] = blob_size;
       blob_size += data_size;
     }
-#endif // USE_CUDA
   }
 
   size_t num_inputs() const {
@@ -472,7 +546,15 @@ class AOTInductorModelBase {
     throw std::runtime_error(
         std::string("The model did not finish successfully. Error: ") +
         cudaGetErrorString(cudaGetLastError()));
-#else // !USE_CUDA
+#elif defined(USE_XPU)
+    if (!run_finished_) {
+      throw std::runtime_error{"Model XPU event was not initialized"};
+    }
+    using namespace sycl::info;
+    return (*run_finished_)->get_info<event::command_execution_status>() ==
+        event_command_status::complete;
+
+#else // !USE_CUDA && !USE_XPU
     return run_finished_;
 #endif // USE_CUDA
   }
@@ -486,6 +568,12 @@ class AOTInductorModelBase {
 
     AOTI_RUNTIME_DEVICE_CHECK(cudaEventSynchronize(*run_finished_));
 #endif // USE_CUDA
+#ifdef USE_XPU
+    if (!run_finished_) {
+      throw std::runtime_error{"Model event was not initialized"};
+    }
+    (*run_finished_)->wait_and_throw();
+#endif
   }
 
  protected:
@@ -557,10 +645,9 @@ class AOTInductorModelBase {
   std::shared_ptr<ConstantMap> constants_map_;
   std::shared_ptr<std::vector<ConstantHandle>> constants_;
 
-#ifdef USE_CUDA
-  // Holds the blob storage for constants' at::Tensor for CUDA.
-  CUDAPtr constant_blob_;
-#endif // USE_CUDA
+  // Holds the blob storage for constants' at::Tensor.
+  RAIIDataPtr constant_blob_;
+
 #ifdef USE_MMAP_SELF
   uint8_t* self_mmap = NULL;
 #endif
@@ -568,10 +655,17 @@ class AOTInductorModelBase {
   // A directory with CUDA binary files, e.g. compiled kernels, etc.
   const std::optional<std::string> cubin_dir_;
 
+  // This is the flag that implies whether the weight is included in the model.
+  // If True, we would prepare the weight when loading the model, otherwise the
+  // model will be loaded without weights, and need to be provided by the user.
+  bool include_weights;
+
   // Record if the model finishes an inference run so that its owning
   // AOTModelContainer can re-use this instance.
 #ifdef USE_CUDA
   std::optional<cudaEvent_t> run_finished_;
+#elif defined(USE_XPU)
+  std::optional<sycl::event*> run_finished_;
 #else // !USE_CUDA
   bool run_finished_{};
 #endif
@@ -593,7 +687,8 @@ class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
       std::shared_ptr<ConstantMap> constants_map,
       std::shared_ptr<std::vector<ConstantHandle>> constants_array,
       const std::string& device_str,
-      std::optional<std::string> cubin_dir);
+      std::optional<std::string> cubin_dir,
+      bool include_weights = true);
 
   std::unordered_map<std::string, AtenTensorHandle> const_run_impl(
       DeviceStreamType stream,

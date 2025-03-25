@@ -38,7 +38,6 @@ TEST(ListTestIValueBasedList, whenCallingGetWithExistingPosition_thenReturnsElem
 
 TEST(ListTestIValueBasedList, whenCallingGetWithNonExistingPosition_thenThrowsException) {
   List<string> list({"3", "4"});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   EXPECT_THROW(list.get(2), std::out_of_range);
 }
 
@@ -56,7 +55,6 @@ TEST(ListTestIValueBasedList, whenCallingExtractWithExistingPosition_thenListEle
 
 TEST(ListTestIValueBasedList, whenCallingExtractWithNonExistingPosition_thenThrowsException) {
   List<string> list({"3", "4"});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   EXPECT_THROW(list.extract(2), std::out_of_range);
 }
 
@@ -79,14 +77,12 @@ TEST(ListTestIValueBasedList, whenCallingMovingSetWithExistingPosition_thenChang
 TEST(ListTestIValueBasedList, whenCallingCopyingSetWithNonExistingPosition_thenThrowsException) {
   List<string> list({"3", "4"});
   string value = "5";
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   EXPECT_THROW(list.set(2, value), std::out_of_range);
 }
 
 TEST(ListTestIValueBasedList, whenCallingMovingSetWithNonExistingPosition_thenThrowsException) {
   List<string> list({"3", "4"});
   string value = "5";
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   EXPECT_THROW(list.set(2, std::move(value)), std::out_of_range);
 }
 
@@ -122,7 +118,6 @@ TEST(ListTestIValueBasedList, whenSwappingFromAccessOperator_thenSwapsElements) 
 
 TEST(ListTestIValueBasedList, whenCallingAccessOperatorWithNonExistingPosition_thenThrowsException) {
   List<string> list({"3", "4"});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   EXPECT_THROW(list[2], std::out_of_range);
 }
 
@@ -586,7 +581,6 @@ TEST(ListTestNonIValueBasedList, whenCallingGetWithExistingPosition_thenReturnsE
 
 TEST(ListTestNonIValueBasedList, whenCallingGetWithNonExistingPosition_thenThrowsException) {
   List<int64_t> list({3, 4});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   EXPECT_THROW(list.get(2), std::out_of_range);
 }
 
@@ -598,7 +592,6 @@ TEST(ListTestNonIValueBasedList, whenCallingExtractWithExistingPosition_thenRetu
 
 TEST(ListTestNonIValueBasedList, whenCallingExtractWithNonExistingPosition_thenThrowsException) {
   List<int64_t> list({3, 4});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   EXPECT_THROW(list.extract(2), std::out_of_range);
 }
 
@@ -622,14 +615,12 @@ TEST(ListTestNonIValueBasedList, whenCallingMovingSetWithExistingPosition_thenCh
 TEST(ListTestNonIValueBasedList, whenCallingCopyingSetWithNonExistingPosition_thenThrowsException) {
   List<int64_t> list({3, 4});
   int64_t value = 5;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   EXPECT_THROW(list.set(2, value), std::out_of_range);
 }
 
 TEST(ListTestNonIValueBasedList, whenCallingMovingSetWithNonExistingPosition_thenThrowsException) {
   List<int64_t> list({3, 4});
   int64_t value = 5;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,performance-move-const-arg,hicpp-avoid-goto)
   EXPECT_THROW(list.set(2, std::move(value)), std::out_of_range);
 }
 
@@ -665,7 +656,6 @@ TEST(ListTestNonIValueBasedList, whenSwappingFromAccessOperator_thenSwapsElement
 
 TEST(ListTestNonIValueBasedList, whenCallingAccessOperatorWithNonExistingPosition_thenThrowsException) {
   List<int64_t> list({3, 4});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   EXPECT_THROW(list[2], std::out_of_range);
 }
 
@@ -1134,11 +1124,11 @@ TEST(ListTest, canAccessOptionalStringByReference) {
       "List<std::optional<std::string>> access should be by const reference");
   std::optional<std::string> str1 = list[1];
   std::optional<std::string> str2 = list[2];
-  decltype(auto) strRef1 = listRef[1];
-  decltype(auto) strRef2 = listRef[2];
-  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-  EXPECT_EQ("two", str1.value());
+  auto const& strRef1 = listRef[1];
+  auto const& strRef2 = listRef[2];
+  EXPECT_EQ("two", str1);
   EXPECT_FALSE(str2.has_value());
+  EXPECT_TRUE(strRef1.has_value());
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   EXPECT_EQ("two", strRef1.value().get());
   EXPECT_FALSE(strRef2.has_value());

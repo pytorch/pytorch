@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -ex
+set -ex -o pipefail
 
 # Required environment variable: $BUILD_ENVIRONMENT
 # (This is set by default in the Docker images we build, so you don't
@@ -35,7 +35,7 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
-  if [[ "$BUILD_ENVIRONMENT" != *cuda11.3* && "$BUILD_ENVIRONMENT" != *clang* ]]; then
+  if [[ "$BUILD_ENVIRONMENT" != *clang* ]]; then
     # TODO: there is a linking issue when building with UCC using clang,
     # disable it for now and to be fix later.
     # TODO: disable UCC temporarily to enable CUDA 12.1 in CI
@@ -87,7 +87,7 @@ else
 
   # Workaround required for MKL library linkage
   # https://github.com/pytorch/pytorch/issues/119557
-  if [ "$ANACONDA_PYTHON_VERSION" = "3.12" ]; then
+  if [[ "$ANACONDA_PYTHON_VERSION" = "3.12" || "$ANACONDA_PYTHON_VERSION" = "3.13" ]]; then
     export CMAKE_LIBRARY_PATH="/opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/lib/"
     export CMAKE_INCLUDE_PATH="/opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/include/"
   fi
@@ -173,6 +173,7 @@ if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   source /opt/intel/oneapi/compiler/latest/env/vars.sh
   # XPU kineto feature dependencies are not fully ready, disable kineto build as temp WA
   export USE_KINETO=0
+  export TORCH_XPU_ARCH_LIST=pvc
 fi
 
 # sccache will fail for CUDA builds if all cores are used for compiling
@@ -191,7 +192,7 @@ fi
 
 # We only build FlashAttention files for CUDA 8.0+, and they require large amounts of
 # memory to build and will OOM
-if [[ "$BUILD_ENVIRONMENT" == *cuda* ]] && [[ "$TORCH_CUDA_ARCH_LIST" == *"8.6"* || "$TORCH_CUDA_ARCH_LIST" == *"8.0"* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *cuda* ]] && [[ 1 -eq $(echo "${TORCH_CUDA_ARCH_LIST} >= 8.0" | bc) ]] && [ -z "$MAX_JOBS_OVERRIDE" ]; then
   echo "WARNING: FlashAttention files require large amounts of memory to build and will OOM"
   echo "Setting MAX_JOBS=(nproc-2)/3 to reduce memory usage"
   export MAX_JOBS="$(( $(nproc --ignore=2) / 3 ))"
@@ -228,9 +229,9 @@ if [[ "$BUILD_ENVIRONMENT" == *-debug* ]]; then
   export CMAKE_BUILD_TYPE=RelWithAssert
 fi
 
-# Do not change workspace permissions for ROCm CI jobs
+# Do not change workspace permissions for ROCm and s390x CI jobs
 # as it can leave workspace with bad permissions for cancelled jobs
-if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *s390x* ]]; then
+if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *s390x* && -d /var/lib/jenkins/workspace ]]; then
   # Workaround for dind-rootless userid mapping (https://github.com/pytorch/ci-infra/issues/96)
   WORKSPACE_ORIGINAL_OWNER_ID=$(stat -c '%u' "/var/lib/jenkins/workspace")
   cleanup_workspace() {
@@ -247,10 +248,9 @@ if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *s390x* ]]; then
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
-  set -e
+  set -e -o pipefail
 
   get_bazel
-  install_sccache_nvcc_for_bazel
 
   # Leave 1 CPU free and use only up to 80% of memory to reduce the change of crashing
   # the runner
@@ -277,16 +277,13 @@ else
     # or building non-XLA tests.
     if [[ "$BUILD_ENVIRONMENT" != *rocm*  &&
           "$BUILD_ENVIRONMENT" != *xla* ]]; then
-      if [[ "$BUILD_ENVIRONMENT" != *py3.8* ]]; then
-        # Install numpy-2.0.2 for builds which are backward compatible with 1.X
-        python -mpip install --pre numpy==2.0.2
-      fi
+      # Install numpy-2.0.2 for builds which are backward compatible with 1.X
+      python -mpip install numpy==2.0.2
 
       WERROR=1 python setup.py clean
 
       if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
-        BUILD_LIBTORCH_WHL=1 BUILD_PYTHON_ONLY=0 python setup.py bdist_wheel
-        BUILD_LIBTORCH_WHL=0 BUILD_PYTHON_ONLY=1 python setup.py bdist_wheel --cmake
+        python3 tools/packaging/split_wheel.py bdist_wheel
       else
         WERROR=1 python setup.py bdist_wheel
       fi
@@ -379,8 +376,10 @@ else
     # This is an attempt to mitigate flaky libtorch build OOM error. By default, the build parallelization
     # is set to be the number of CPU minus 2. So, let's try a more conservative value here. A 4xlarge has
     # 16 CPUs
-    MAX_JOBS=$(nproc --ignore=4)
-    export MAX_JOBS
+    if [ -z "$MAX_JOBS_OVERRIDE" ]; then
+      MAX_JOBS=$(nproc --ignore=4)
+      export MAX_JOBS
+    fi
 
     # NB: Install outside of source directory (at the same level as the root
     # pytorch folder) so that it doesn't get cleaned away prior to docker push.
@@ -397,7 +396,7 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* && "$BUILD_ENVIRONMENT" != *bazel* ]]; 
   # don't do this for libtorch as libtorch is C++ only and thus won't have python tests run on its build
   python tools/stats/export_test_times.py
 fi
-
-if [[ "$BUILD_ENVIRONMENT" != *s390x* ]]; then
+# don't do this for bazel or s390x as they don't use sccache
+if [[ "$BUILD_ENVIRONMENT" != *s390x* && "$BUILD_ENVIRONMENT" != *-bazel-* ]]; then
   print_sccache_stats
 fi

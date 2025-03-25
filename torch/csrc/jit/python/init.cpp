@@ -1390,11 +1390,14 @@ void initJITBindings(PyObject* module) {
 
   py::class_<PyTorchStreamWriter>(m, "PyTorchFileWriter")
       .def(
-          py::init<std::string, bool>(),
+          py::init<std::string, bool, uint64_t>(),
           py::arg("file_name"),
-          py::arg("compute_crc32") = true)
+          py::arg("compute_crc32") = true,
+          py::arg("storage_alignment") = 64)
       .def(
-          py::init([](const py::object& buffer, bool compute_crc32 = true) {
+          py::init([](const py::object& buffer,
+                      bool compute_crc32 = true,
+                      uint64_t storage_alignment = 64) {
             auto writer_func = [=](const void* data, size_t size) {
               // Writing an empty file is a noop
               if (size == 0) {
@@ -1413,14 +1416,19 @@ void initJITBindings(PyObject* module) {
               return size;
             };
             return std::make_unique<PyTorchStreamWriter>(
-                std::move(writer_func), compute_crc32);
+                std::move(writer_func), compute_crc32, storage_alignment);
           }),
           py::arg("buffer"),
-          py::arg("compute_crc32") = true)
+          py::arg("compute_crc32") = true,
+          py::arg("storage_alignment") = 64)
       .def(
-          py::init<const std::function<size_t(const void*, size_t)>&, bool>(),
+          py::init<
+              const std::function<size_t(const void*, size_t)>&,
+              bool,
+              uint64_t>(),
           py::arg("writer_func"),
-          py::arg("compute_crc32") = true)
+          py::arg("compute_crc32") = true,
+          py::arg("storage_alignment") = 64)
       // [Note: write_record_metadata]
       // The write_record_metadata function is intended to write metadata (i.e.
       // the zipfile header and end of central directory record) for a file
@@ -1619,6 +1627,21 @@ void initJITBindings(PyObject* module) {
           "get_record_offset",
           [](PyTorchStreamReader& self, const std::string& key) {
             return self.getRecordOffset(key);
+          })
+      .def(
+          "get_record_header_offset",
+          [](PyTorchStreamReader& self, const std::string& key) {
+            return self.getRecordHeaderOffset(key);
+          })
+      .def(
+          "get_record_offset_no_read",
+          [](PyTorchStreamReader& self,
+             size_t zipfile_header_offset,
+             const std::string filename,
+             size_t size,
+             uint64_t storage_alignment) {
+            return self.getRecordOffsetNoRead(
+                zipfile_header_offset, filename, size, storage_alignment);
           });
 
   // Used by torch.Package to coordinate deserialization of storages across
@@ -1695,14 +1718,12 @@ void initJITBindings(PyObject* module) {
                                        c10::DispatchKey dk_,
                                        const py::args& args,
                                        const py::kwargs& kwargs) {
-                    std::optional<c10::DispatchKey> dk =
-                        std::make_optional(dk_);
                     ToIValueAllowNumbersAsTensors g(allow_numbers_as_tensors);
                     return _get_operation_for_overload_or_packet(
-                        {op}, symbol, args, kwargs, /*is_overload*/ true, dk);
+                        {op}, symbol, args, kwargs, /*is_overload*/ true, dk_);
                   });
-              return std::make_optional(
-                  py::make_tuple(func, func_dk, py::cast(op->getTags().vec())));
+              return py::make_tuple(
+                  func, func_dk, py::cast(op->getTags().vec()));
             }
           }
           return std::nullopt;

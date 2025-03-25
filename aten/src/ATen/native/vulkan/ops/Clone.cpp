@@ -8,10 +8,7 @@
 #include <ATen/ops/empty_strided.h>
 #endif
 
-namespace at {
-namespace native {
-namespace vulkan {
-namespace ops {
+namespace at::native::vulkan::ops {
 namespace {
 
 Tensor clone(
@@ -48,7 +45,4 @@ TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
 #endif /* USE_VULKAN_API */
 
 } // namespace
-} // namespace ops
-} // namespace vulkan
-} // namespace native
-} // namespace at
+} // namespace at::native::vulkan::ops

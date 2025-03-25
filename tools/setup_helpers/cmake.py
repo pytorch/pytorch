@@ -8,6 +8,7 @@ import platform
 import sys
 import sysconfig
 from distutils.version import LooseVersion
+from pathlib import Path
 from subprocess import CalledProcessError, check_call, check_output
 from typing import Any, cast
 
@@ -95,7 +96,7 @@ class CMake:
         print(" ".join(command))
         try:
             check_call(command, cwd=self.build_dir, env=env)
-        except (CalledProcessError, KeyboardInterrupt) as e:
+        except (CalledProcessError, KeyboardInterrupt):
             # This error indicates that there was a problem with cmake, the
             # Python backtrace adds no signal here so skip over it by catching
             # the error and exiting manually
@@ -173,9 +174,7 @@ class CMake:
                 toolset_expr = ",".join([f"{k}={v}" for k, v in toolset_dict.items()])
                 args.append("-T" + toolset_expr)
 
-        base_dir = os.path.dirname(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        )
+        base_dir = str(Path(__file__).absolute().parents[2])
         install_dir = os.path.join(base_dir, "torch")
 
         _mkdir_p(install_dir)
@@ -190,7 +189,6 @@ class CMake:
             # Key: environment variable name. Value: Corresponding variable name to be passed to CMake. If you are
             # adding a new build option to this block: Consider making these two names identical and adding this option
             # in the block below.
-            "_GLIBCXX_USE_CXX11_ABI": "GLIBCXX_USE_CXX11_ABI",
             "CUDNN_LIB_DIR": "CUDNN_LIBRARY",
             "USE_CUDA_STATIC_LINK": "CAFFE2_STATIC_LINK_CUDA",
         }
@@ -378,15 +376,6 @@ class CMake:
             # os.sched_getaffinity(0) on platforms that support it.
             max_jobs = max_jobs or str(multiprocessing.cpu_count())
 
-            # This ``if-else'' clause would be unnecessary when cmake
-            # 3.12 becomes minimum, which provides a '-j' option:
-            # build_args += ['-j', max_jobs] would be sufficient by
-            # then. Until then, we use "--" to pass parameters to the
-            # underlying build system.
-            build_args += ["--"]
-            if IS_WINDOWS and not USE_NINJA:
-                # We are likely using msbuild here
-                build_args += [f"/p:CL_MPCount={max_jobs}"]
-            else:
-                build_args += ["-j", max_jobs]
+            # CMake 3.12 provides a '-j' option.
+            build_args += ["-j", max_jobs]
         self.run(build_args, my_env)

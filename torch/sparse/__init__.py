@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 # The Tensor classes are added to this module by python_tensor.cpp
 # A workaround to support both TorchScript and MyPy:
-from typing import Any, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch import Tensor
@@ -19,11 +19,11 @@ from .semi_structured import (
 if TYPE_CHECKING:
     from torch.types import _dtype as DType
 
-    DimOrDims = Optional[Union[int, Tuple[int, ...], List[int]]]
+    DimOrDims = Optional[Union[int, tuple[int, ...], list[int]]]
 else:
     # The JIT doesn't understand Union, nor torch.dtype here
     DType = int
-    DimOrDims = Optional[Tuple[int]]
+    DimOrDims = Optional[tuple[int]]
 
 
 __all__ = [
@@ -54,7 +54,7 @@ When inputs are COO tensors, this function also supports backward for both input
 Supports both CSR and COO storage formats.
 
 .. note::
-    This function doesn't support computing derivaties with respect to CSR matrices.
+    This function doesn't support computing derivatives with respect to CSR matrices.
 
 Args:
     mat (Tensor): a dense matrix to be added
@@ -79,7 +79,7 @@ mm = _add_docstr(
     Supports both CSR and COO storage formats.
 
 .. note::
-    This function doesn't support computing derivaties with respect to CSR matrices.
+    This function doesn't support computing derivatives with respect to CSR matrices.
 
     This function also additionally accepts an optional :attr:`reduce` argument that allows
     specification of an optional reduction operation, mathematically performs the following operation:
@@ -591,7 +591,7 @@ def as_sparse_gradcheck(gradcheck):
             """Convert differentiable non-strided tensors to a representation containing differentiable strided tensors."""
             if not isinstance(args, (list, tuple)):
                 args = (args,)
-            new_args: List[Any] = []
+            new_args: list[Any] = []
             for obj in args:
                 if (
                     isinstance(obj, torch.Tensor)

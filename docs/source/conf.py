@@ -92,6 +92,8 @@ templates_path = ["_templates"]
 
 # TODO: document these and remove them from here.
 
+html_domain_indices = False
+
 coverage_ignore_functions = [
     # torch
     "typename",
@@ -154,7 +156,6 @@ coverage_ignore_functions = [
     "DistributedDataParallelCPU",
     # torch.utils
     "set_module",
-    # torch.utils.model_dump
     "burn_in_info",
     "get_info_and_burn_skeleton",
     "get_inline_skeleton",
@@ -304,6 +305,7 @@ coverage_ignore_functions = [
     "node_arg_is_weight",
     "return_arg_list",
     # torch.ao.quantization.pt2e.graph_utils
+    "bfs_trace_with_node_process",
     "find_sequential_partitions",
     "get_equivalent_types",
     "update_equivalent_types_dict",
@@ -410,6 +412,7 @@ coverage_ignore_functions = [
     "change_current_allocator",
     "empty_cache",
     "get_allocator_backend",
+    "get_per_process_memory_fraction",
     "list_gpu_processes",
     "max_memory_allocated",
     "max_memory_cached",
@@ -421,11 +424,15 @@ coverage_ignore_functions = [
     "memory_snapshot",
     "memory_stats",
     "memory_stats_as_nested_dict",
+    "host_memory_stats",
+    "host_memory_stats_as_nested_dict",
     "memory_summary",
     "reset_accumulated_memory_stats",
+    "reset_accumulated_host_memory_stats",
     "reset_max_memory_allocated",
     "reset_max_memory_cached",
     "reset_peak_memory_stats",
+    "reset_peak_host_memory_stats",
     "set_per_process_memory_fraction",
     # torch.cuda.nccl
     "all_gather",
@@ -2724,6 +2731,7 @@ coverage_ignore_classes = [
     "RelaxedUnspecConstraint",
     "RuntimeAssert",
     "ShapeGuardPrinter",
+    "ShapeGuardPythonPrinter",
     "SymDispatchMode",
     "SymbolicContext",
     # torch.fx.experimental.unification.match
@@ -3358,7 +3366,7 @@ master_doc = "index"
 
 # General information about the project.
 project = "PyTorch"
-copyright = "2024, PyTorch Contributors"
+copyright = "PyTorch Contributors"
 author = "PyTorch Contributors"
 torch_version = str(torch.__version__)
 

@@ -1,32 +1,16 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 """Base optimizer."""
 import functools
 import warnings
 from collections import defaultdict, OrderedDict
+from collections.abc import Hashable, Iterable, Sequence
 from copy import deepcopy
 from itertools import chain
-from typing import (
-    Any,
-    Callable,
-    cast,
-    DefaultDict,
-    Dict,
-    Hashable,
-    Iterable,
-    List,
-    Optional,
-    overload,
-    Set,
-    Tuple,
-    TypeVar,
-    Union,
-)
+from typing import Any, Callable, cast, Optional, overload, TypeVar, Union
 from typing_extensions import ParamSpec, Self, TypeAlias
 
 import torch
 import torch.utils.hooks as hooks
-from torch._utils import is_compiling
 from torch.utils._foreach_utils import (
     _get_foreach_kernels_supported_devices,
     _get_fused_kernels_supported_devices,
@@ -37,15 +21,18 @@ from torch.utils._foreach_utils import (
 from torch.utils.hooks import RemovableHandle
 
 
-Args: TypeAlias = Tuple[Any, ...]
-Kwargs: TypeAlias = Dict[str, Any]
-StateDict: TypeAlias = Dict[str, Any]
-DeviceDict = Dict[Optional[torch.device], torch.Tensor]
-DeviceDtypeDict = Dict[Optional[Tuple[torch.device, torch.dtype]], torch.Tensor]
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
+
+Args: TypeAlias = tuple[Any, ...]
+Kwargs: TypeAlias = dict[str, Any]
+StateDict: TypeAlias = dict[str, Any]
+DeviceDict = dict[Optional[torch.device], torch.Tensor]
+DeviceDtypeDict = dict[Optional[tuple[torch.device, torch.dtype]], torch.Tensor]
 
 
 GlobalOptimizerPreHook: TypeAlias = Callable[
-    ["Optimizer", Args, Kwargs], Optional[Tuple[Args, Kwargs]]
+    ["Optimizer", Args, Kwargs], Optional[tuple[Args, Kwargs]]
 ]
 GlobalOptimizerPostHook: TypeAlias = Callable[["Optimizer", Args, Kwargs], None]
 
@@ -54,8 +41,8 @@ __all__ = [
     "register_optimizer_step_pre_hook",
     "register_optimizer_step_post_hook",
 ]
-_global_optimizer_pre_hooks: Dict[int, GlobalOptimizerPreHook] = OrderedDict()
-_global_optimizer_post_hooks: Dict[int, GlobalOptimizerPostHook] = OrderedDict()
+_global_optimizer_pre_hooks: dict[int, GlobalOptimizerPreHook] = OrderedDict()
+_global_optimizer_post_hooks: dict[int, GlobalOptimizerPostHook] = OrderedDict()
 _foreach_supported_types = [torch.Tensor, torch.nn.parameter.Parameter]
 
 
@@ -101,20 +88,22 @@ def _use_grad_for_differentiable(func):
 
 def _get_value(x):
     # item is significantly faster than a cpu tensor in eager mode
-    if not torch.jit.is_scripting() and is_compiling():
+    if not torch.jit.is_scripting() and torch.compiler.is_compiling():
         return x
     else:
         return x.item() if isinstance(x, torch.Tensor) else x
 
 
 def _stack_if_compiling(x):
-    if not torch.jit.is_scripting() and is_compiling():
+    if not torch.jit.is_scripting() and torch.compiler.is_compiling():
         return torch.stack(x)
     else:
         return x
 
 
-def _disable_dynamo_if_unsupported(single_tensor_fn=None):
+def _disable_dynamo_if_unsupported(
+    single_tensor_fn: Optional[Callable[..., object]] = None
+) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     # workaround for torchscript BC
     # it requires all called functions to be in the
     # global environment at the site at which the
@@ -122,7 +111,7 @@ def _disable_dynamo_if_unsupported(single_tensor_fn=None):
     if single_tensor_fn:
         globals()[single_tensor_fn.__name__] = single_tensor_fn
 
-    def wrapper(func):
+    def wrapper(func: Callable[_P, _T]) -> Callable[_P, _T]:
         import inspect
 
         disabled_func = torch._disable_dynamo(func)
@@ -139,15 +128,18 @@ def _disable_dynamo_if_unsupported(single_tensor_fn=None):
         # but this only occurs in the rare case that the user explicitly deletes
         # the capturable flag. If capturable=True, this is not a problem.
         @functools.wraps(func)
-        def maybe_fallback(*args, **kwargs):
-            if is_compiling() and (
+        def maybe_fallback(*args: _P.args, **kwargs: _P.kwargs):
+            if torch.compiler.is_compiling() and (
                 not kwargs.get("capturable", False)
                 and has_state_steps
-                and (args[state_steps_ind] and args[state_steps_ind][0].is_cuda)
+                and (arg := args[state_steps_ind])
+                and isinstance(arg, Sequence)
+                and arg[0].is_cuda
                 or (
                     "state_steps" in kwargs
-                    and kwargs["state_steps"]
-                    and kwargs["state_steps"][0].is_cuda
+                    and (kwarg := kwargs["state_steps"])
+                    and isinstance(kwarg, Sequence)
+                    and kwarg[0].is_cuda
                 )
             ):
                 return disabled_func(*args, **kwargs)
@@ -166,8 +158,8 @@ def _disable_dynamo_if_unsupported(single_tensor_fn=None):
 # torch.jit.script nor differentiable, so we fall back to the single tensor
 # implementation in those cases.
 def _default_to_fused_or_foreach(
-    params: List[torch.Tensor], differentiable: bool, use_fused: bool = False
-) -> Tuple[bool, bool]:
+    params: list[torch.Tensor], differentiable: bool, use_fused: bool = False
+) -> tuple[bool, bool]:
     if torch.jit.is_scripting() or differentiable:
         return False, False
 
@@ -222,7 +214,7 @@ def _get_scalar_dtype(is_fused=None):
     )
 
 
-def _get_capturable_supported_devices(supports_xla: bool = True) -> List[str]:
+def _get_capturable_supported_devices(supports_xla: bool = True) -> list[str]:
     r"""Return the device type list that supports capturable optimizer."""
     capturable_supported_devices = ["cuda", "xpu", "hpu"]
     if not torch.jit.is_scripting():
@@ -230,6 +222,25 @@ def _get_capturable_supported_devices(supports_xla: bool = True) -> List[str]:
     if supports_xla:
         capturable_supported_devices.append("xla")
     return capturable_supported_devices
+
+
+def _to_scalar(x):
+    r"""This function converts a hyperparameter to a 0-dimension (scalar) tensor
+    if it is a nonzero-dimensions 1-element tensor. If it is not a tensor, it is
+    kept as is.
+
+    Args:
+        x (float or Tensor): A hyperparameter of the optimizer.
+            If it is Tensor, it is needed to be 1-element.
+
+    Returns:
+        float or Tensor:
+            a scalar tensor if x is Tensor otherwise Python scalar (float) value.
+    """
+    if isinstance(x, torch.Tensor) and x.dim() != 0:
+        return x.squeeze()
+    else:
+        return x
 
 
 # Common doc strings among optimizers
@@ -314,10 +325,9 @@ def register_optimizer_step_post_hook(hook: GlobalOptimizerPostHook) -> Removabl
 
 
 ParamsT: TypeAlias = Union[
-    Iterable[torch.Tensor], Iterable[Dict[str, Any]], Iterable[Tuple[str, torch.Tensor]]
+    Iterable[torch.Tensor], Iterable[dict[str, Any]], Iterable[tuple[str, torch.Tensor]]
 ]
 
-_P = ParamSpec("_P")
 R = TypeVar("R")
 T = TypeVar("T")
 
@@ -337,17 +347,17 @@ class Optimizer:
             options (used when a parameter group doesn't specify them).
     """
 
-    OptimizerPreHook: TypeAlias = Callable[[Self, Args, Kwargs], Optional[Tuple[Args, Kwargs]]]  # type: ignore[misc]
+    OptimizerPreHook: TypeAlias = Callable[[Self, Args, Kwargs], Optional[tuple[Args, Kwargs]]]  # type: ignore[misc]
     OptimizerPostHook: TypeAlias = Callable[[Self, Args, Kwargs], None]  # type: ignore[misc]
 
-    _optimizer_step_pre_hooks: Dict[int, OptimizerPreHook]
-    _optimizer_step_post_hooks: Dict[int, OptimizerPostHook]
+    _optimizer_step_pre_hooks: dict[int, OptimizerPreHook]
+    _optimizer_step_post_hooks: dict[int, OptimizerPostHook]
     _optimizer_state_dict_pre_hooks: 'OrderedDict[int, Callable[["Optimizer"], None]]'
     _optimizer_state_dict_post_hooks: 'OrderedDict[int, Callable[["Optimizer", StateDict], Optional[StateDict]]]'
     _optimizer_load_state_dict_pre_hooks: 'OrderedDict[int, Callable[["Optimizer", StateDict], Optional[StateDict]]]'
     _optimizer_load_state_dict_post_hooks: 'OrderedDict[int, Callable[["Optimizer"], None]]'
 
-    def __init__(self, params: ParamsT, defaults: Dict[str, Any]) -> None:  # noqa: D107
+    def __init__(self, params: ParamsT, defaults: dict[str, Any]) -> None:  # noqa: D107
         torch._C._log_api_usage_once("python.optimizer")
         self.defaults = defaults
         self._optimizer_step_pre_hooks = OrderedDict()
@@ -365,8 +375,8 @@ class Optimizer:
                 "an iterable of Tensors or dicts, but got " + torch.typename(params)
             )
 
-        self.state: DefaultDict[torch.Tensor, Any] = defaultdict(dict)
-        self.param_groups: List[Dict[str, Any]] = []
+        self.state: defaultdict[torch.Tensor, Any] = defaultdict(dict)
+        self.param_groups: list[dict[str, Any]] = []
 
         param_groups = list(params)
         if len(param_groups) == 0:
@@ -382,14 +392,14 @@ class Optimizer:
         # https://github.com/pytorch/pytorch/issues/72948
         self._warned_capturable_if_run_uncaptured = True
 
-    def __getstate__(self) -> Dict[str, Any]:  # noqa: D105
+    def __getstate__(self) -> dict[str, Any]:  # noqa: D105
         return {
             "defaults": self.defaults,
             "state": self.state,
             "param_groups": self.param_groups,
         }
 
-    def __setstate__(self, state: Dict[str, Any]) -> None:  # noqa: D105
+    def __setstate__(self, state: dict[str, Any]) -> None:  # noqa: D105
         self.__dict__.update(state)
         if "_optimizer_step_pre_hooks" not in self.__dict__:
             self._optimizer_step_pre_hooks = OrderedDict()
@@ -430,7 +440,7 @@ class Optimizer:
         # Thus, when compiling, inductor will determine if cudagraphs
         # can be enabled based on whether there is input mutation or CPU tensors.
         if (
-            not is_compiling()
+            not torch.compiler.is_compiling()
             and torch.backends.cuda.is_built()
             and torch.cuda.is_available()
         ):
@@ -510,14 +520,14 @@ class Optimizer:
         tensorlistlist: TensorListList,
         with_indices: bool = False,
     ) -> Union[
-        Dict[Tuple[None, None], Tuple[TensorListList, Indices]],
-        Dict[Tuple[torch.device, torch.dtype], Tuple[TensorListList, Indices]],
+        dict[tuple[None, None], tuple[TensorListList, Indices]],
+        dict[tuple[torch.device, torch.dtype], tuple[TensorListList, Indices]],
     ]:
         """Group a list of lists of tensors by device and dtype.
 
         Skips this step if we are compiling since this will occur during inductor lowering.
         """
-        if is_compiling():
+        if torch.compiler.is_compiling():
             return {(None, None): (tensorlistlist, list(range(len(tensorlistlist[0]))))}
         else:
             return _group_tensors_by_device_and_dtype(tensorlistlist, with_indices)  # type: ignore[return-value, arg-type]
@@ -699,10 +709,10 @@ class Optimizer:
             pre_hook(self)
 
         # Save order indices instead of Tensors
-        param_mappings: Dict[int, int] = {}
+        param_mappings: dict[int, int] = {}
         start_index = 0
 
-        def pack_group(group: Dict[str, Any]) -> Dict[str, Any]:
+        def pack_group(group: dict[str, Any]) -> dict[str, Any]:
             nonlocal start_index
             packed = {k: v for k, v in group.items() if k != "params"}
             param_mappings.update(
@@ -739,7 +749,7 @@ class Optimizer:
         param: torch.Tensor,
         value: torch.Tensor,
         param_id: int,
-        param_groups: List[Dict[Any, Any]],
+        param_groups: list[dict[Any, Any]],
         key: Hashable = None,
     ) -> torch.Tensor:
         # Floating-point types are a bit special here. They are the only ones
@@ -873,7 +883,7 @@ class Optimizer:
 
         if len(groups) != len(saved_groups):
             raise ValueError(
-                "loaded state dict has a different number of " "parameter groups"
+                "loaded state dict has a different number of parameter groups"
             )
         param_lens = (len(g["params"]) for g in groups)
         saved_lens = (len(g["params"]) for g in saved_groups)
@@ -912,7 +922,7 @@ class Optimizer:
         # Copy state assigned to params (and cast tensors to appropriate types).
         # State that is not assigned to params is copied as is (needed for
         # backward compatibility).
-        state: DefaultDict[torch.Tensor, Dict[Any, Any]] = defaultdict(dict)
+        state: defaultdict[torch.Tensor, dict[Any, Any]] = defaultdict(dict)
         for k, v in state_dict["state"].items():
             if k in id_map:
                 param = id_map[k]
@@ -924,8 +934,8 @@ class Optimizer:
 
         # Update parameter groups, setting their 'params' value
         def update_group(
-            group: Dict[str, Any], new_group: Dict[str, Any]
-        ) -> Dict[str, Any]:
+            group: dict[str, Any], new_group: dict[str, Any]
+        ) -> dict[str, Any]:
             new_group["params"] = group["params"]
             if "param_names" in group and "param_names" not in new_group:
                 new_group["param_names"] = group["param_names"]
@@ -961,7 +971,7 @@ class Optimizer:
             self._patch_step_function()
 
         per_device_and_dtype_grads: Optional[
-            DefaultDict[torch.device, DefaultDict[torch.dtype, List[torch.Tensor]]]
+            defaultdict[torch.device, defaultdict[torch.dtype, list[torch.Tensor]]]
         ]
         if foreach:
             per_device_and_dtype_grads = defaultdict(lambda: defaultdict(list))
@@ -1010,7 +1020,7 @@ class Optimizer:
         raise NotImplementedError
 
     @torch._disable_dynamo
-    def add_param_group(self, param_group: Dict[str, Any]) -> None:
+    def add_param_group(self, param_group: dict[str, Any]) -> None:
         r"""Add a param group to the :class:`Optimizer` s `param_groups`.
 
         This can be useful when fine tuning a pre-trained network as frozen layers can be made
@@ -1081,7 +1091,7 @@ class Optimizer:
                 stacklevel=3,
             )
 
-        param_set: Set[torch.Tensor] = set()
+        param_set: set[torch.Tensor] = set()
         for group in self.param_groups:
             param_set.update(set(group["params"]))
             if ("param_names" in param_group) != ("param_names" in group):

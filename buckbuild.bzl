@@ -247,6 +247,9 @@ _COMMON_PREPROCESSOR_FLAGS = [
     ["-DDISABLE_WARN"] if get_disable_warn() else []
 )
 
+def get_no_as_needed_linker_flag():
+    return select({"DEFAULT": ["-Wl,--no-as-needed"], "ovr_config//os:macos": []})
+
 def get_aten_preprocessor_flags():
     # read_config is not allowed outside of function in Starlark
     ATEN_PREPROCESSOR_FLAGS = _COMMON_PREPROCESSOR_FLAGS + [
@@ -353,10 +356,10 @@ def get_aten_generated_files(enabled_backends):
     # and is intentionally omitted from here
     src_files = [
         "RegisterBackendSelect.cpp",
-        "RegisterCompositeImplicitAutograd.cpp",
-        "RegisterCompositeImplicitAutogradNestedTensor.cpp",
-        "RegisterCompositeExplicitAutograd.cpp",
-        "RegisterCompositeExplicitAutogradNonFunctional.cpp",
+        "RegisterCompositeImplicitAutograd_0.cpp",
+        "RegisterCompositeImplicitAutogradNestedTensor_0.cpp",
+        "RegisterCompositeExplicitAutograd_0.cpp",
+        "RegisterCompositeExplicitAutogradNonFunctional_0.cpp",
         "CompositeViewCopyKernels.cpp",
         "RegisterSchema.cpp",
         "Declarations.yaml",
@@ -409,20 +412,22 @@ def get_aten_generated_files(enabled_backends):
 
 def get_aten_derived_type_src_rules(aten_rule_name, enabled_backends):
     return [
-        ":{}[{}]".format(aten_rule_name, "Register" + backend + ".cpp")
-        for backend in enabled_backends
-    ]
+        ":{}[{}]".format(aten_rule_name, "Register" + backend + "_0.cpp")
+        for backend in enabled_backends if backend != "CPU"
+    ] + ([
+        ":{}[RegisterCPU_{}.cpp]".format(aten_rule_name, x) for x in range(4)
+    ] if "CPU" in enabled_backends else [])
 
 def get_aten_selective_cpp_rules(aten_rule_name, enabled_backends):
     return [
         ":{}[{}]".format(aten_rule_name, f)
-        for f in ["RegisterCompositeImplicitAutograd.cpp", "RegisterCompositeImplicitAutogradNestedTensor.cpp", "RegisterCompositeExplicitAutograd.cpp", "RegisterCompositeExplicitAutogradNonFunctional.cpp", "RegisterSchema.cpp", "RegisterBackendSelect.cpp", "CompositeViewCopyKernels.cpp"]
+        for f in ["RegisterCompositeImplicitAutograd_0.cpp", "RegisterCompositeImplicitAutogradNestedTensor_0.cpp", "RegisterCompositeExplicitAutograd_0.cpp", "RegisterCompositeExplicitAutogradNonFunctional_0.cpp", "RegisterSchema.cpp", "RegisterBackendSelect.cpp", "CompositeViewCopyKernels.cpp"]
     ] + get_aten_derived_type_src_rules(aten_rule_name, enabled_backends)
 
 def get_aten_derived_type_srcs(enabled_backends):
     return [
-        "Register" + derived_type + ".cpp"
-        for derived_type in enabled_backends
+        "Register" + derived_type + "_0.cpp"
+        for derived_type in enabled_backends if derived_type != "CPU"
     ] + [
         derived_type + "Functions.h"
         for derived_type in enabled_backends
@@ -431,7 +436,9 @@ def get_aten_derived_type_srcs(enabled_backends):
         derived_type + "Functions_inl.h"
         for derived_type in enabled_backends
         if derived_type in PT_BACKEND_HEADERS or derived_type in get_static_dispatch_backend()
-    ]
+    ] + ([
+        "RegisterCPU_{}.cpp".format(x) for x in range(4)
+    ] if "CPU" in enabled_backends else [])
 
 def gen_aten_files(
         name,
@@ -813,9 +820,7 @@ def get_pt_operator_registry_dict(
 
     return dict(
         srcs = code_gen_files["srcs"],
-        linker_flags = [
-            "-Wl,--no-as-needed",
-        ],
+        linker_flags = get_no_as_needed_linker_flag(),
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
         soname = "libtorch-code-gen.$(ext)",
@@ -993,6 +998,7 @@ def define_buck_targets(
             "Config.h": ":generate_aten_config[Config.h]",
         },
         labels = labels,
+        visibility = ["PUBLIC"],
     )
 
     fb_xplat_cxx_library(
@@ -1070,6 +1076,7 @@ def define_buck_targets(
         ],
     )
 
+    # TODO: Enable support for KleidiAI bazel build
     # @lint-ignore BUCKLINT
     fb_native.genrule(
         name = "generate_aten_config",
@@ -1122,6 +1129,9 @@ def define_buck_targets(
             "--replace",
             "@AT_BLAS_USE_CBLAS_DOT@",
             "AT_BLAS_USE_CBLAS_DOT_FBXPLAT",
+            "--replace",
+            "@AT_KLEIDIAI_ENABLED@",
+            "0",
         ]),
         outs = {
             "Config.h": ["Config.h"],
@@ -1239,7 +1249,7 @@ def define_buck_targets(
         # found definied in runtime
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
-        linker_flags = ["-Wl,--no-as-needed"],
+        linker_flags = get_no_as_needed_linker_flag(),
         visibility = ["PUBLIC"],
         exported_deps = [
             ":aten_cpu",
@@ -1271,9 +1281,7 @@ def define_buck_targets(
         },
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
-        linker_flags = [
-            "-Wl,--no-as-needed",
-        ],
+        linker_flags = get_no_as_needed_linker_flag(),
         visibility = ["PUBLIC"],
         exported_deps = [
             ":aten_cpu",
@@ -1304,9 +1312,7 @@ def define_buck_targets(
         header_namespace = "",
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
-        linker_flags = [
-            "-Wl,--no-as-needed",
-        ],
+        linker_flags = get_no_as_needed_linker_flag(),
         visibility = ["PUBLIC"],
         deps = [
             ":torch_mobile_deserialize",
@@ -1326,9 +1332,7 @@ def define_buck_targets(
         exported_preprocessor_flags = get_pt_preprocessor_flags() + (["-DSYMBOLICATE_MOBILE_DEBUG_HANDLE"] if get_enable_eager_symbolication() else []),
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
-        linker_flags = [
-            "-Wl,--no-as-needed",
-        ],
+        linker_flags = get_no_as_needed_linker_flag(),
         visibility = ["PUBLIC"],
         deps = [
             ":generated-autograd-headers",
@@ -1365,9 +1369,7 @@ def define_buck_targets(
         # found definied in runtime
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
-        linker_flags = [
-            "-Wl,--no-as-needed",
-        ],
+        linker_flags = get_no_as_needed_linker_flag(),
         visibility = ["PUBLIC"],
         exported_deps = [
             ":aten_cpu",
@@ -1396,9 +1398,7 @@ def define_buck_targets(
         # operators, registerations and other few symbols are need in runtime
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
-        linker_flags = [
-            "-Wl,--no-as-needed",
-        ],
+        linker_flags = get_no_as_needed_linker_flag(),
         visibility = ["PUBLIC"],
         deps = [
             ":generated-autograd-headers",
@@ -1646,9 +1646,7 @@ def define_buck_targets(
         # operators, registerations and other few symbols are need in runtime
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
-        linker_flags = [
-            "-Wl,--no-as-needed",
-        ],
+        linker_flags = get_no_as_needed_linker_flag(),
         visibility = ["PUBLIC"],
         deps = [
             ":caffe2_serialize",
@@ -1677,9 +1675,7 @@ def define_buck_targets(
         exported_preprocessor_flags = get_pt_preprocessor_flags() + (["-DSYMBOLICATE_MOBILE_DEBUG_HANDLE"] if get_enable_eager_symbolication() else []),
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
-        linker_flags = [
-            "-Wl,--no-as-needed",
-        ],
+        linker_flags = get_no_as_needed_linker_flag(),
         visibility = ["PUBLIC"],
         deps = [
             ":generated-autograd-headers",
@@ -1702,9 +1698,7 @@ def define_buck_targets(
         fbandroid_compiler_flags = c2_fbandroid_xplat_compiler_flags,
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
-        linker_flags = [
-            "-Wl,--no-as-needed",
-        ],
+        linker_flags = get_no_as_needed_linker_flag(),
         visibility = ["PUBLIC"],
         exported_deps = [
             ":aten_cpu",
@@ -1724,9 +1718,7 @@ def define_buck_targets(
         ],
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
-        linker_flags = [
-            "-Wl,--no-as-needed",
-        ],
+        linker_flags = get_no_as_needed_linker_flag(),
         visibility = ["PUBLIC"],
         deps = [
             third_party("glog"),
@@ -1748,9 +1740,7 @@ def define_buck_targets(
         ],
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
-        linker_flags = [
-            "-Wl,--no-as-needed",
-        ],
+        linker_flags = get_no_as_needed_linker_flag(),
         visibility = ["PUBLIC"],
         exported_deps = [
             ":torch_common",
@@ -1844,9 +1834,7 @@ def define_buck_targets(
         # found definied in runtime
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
-        linker_flags = [
-            "-Wl,--no-as-needed",
-        ],
+        linker_flags = get_no_as_needed_linker_flag(),
         visibility = ["PUBLIC"],
         deps = [
             ":mobile_bytecode",
@@ -1872,9 +1860,7 @@ def define_buck_targets(
         srcs = [
             "torch/csrc/jit/serialization/flatbuffer_serializer_jit.cpp",
         ],
-        linker_flags = [
-            "-Wl,--no-as-needed",
-        ],
+        linker_flags = get_no_as_needed_linker_flag(),
         visibility = ["PUBLIC"],
         deps = [
             ":flatbuffer_loader",
@@ -1916,9 +1902,7 @@ def define_buck_targets(
         exported_preprocessor_flags = get_pt_preprocessor_flags() + (["-DSYMBOLICATE_MOBILE_DEBUG_HANDLE"] if get_enable_eager_symbolication() else []),
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
-        linker_flags = [
-            "-Wl,--no-as-needed",
-        ],
+        linker_flags = get_no_as_needed_linker_flag(),
         visibility = ["PUBLIC"],
         deps = [],
         exported_deps = [
@@ -2056,9 +2040,7 @@ def define_buck_targets(
         exported_preprocessor_flags = get_pt_preprocessor_flags() + [
             "-DMIN_EDGE_RUNTIME",
         ],
-        linker_flags = [
-            "-Wl,--no-as-needed",
-        ] + select({
+        linker_flags = get_no_as_needed_linker_flag() + select({
             "DEFAULT": [],
             "ovr_config//os:macos": [
                 "-dead_strip",
@@ -2108,9 +2090,7 @@ def define_buck_targets(
         }),
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
-        linker_flags = [
-            "-Wl,--no-as-needed",
-        ],
+        linker_flags = get_no_as_needed_linker_flag(),
         visibility = ["PUBLIC"],
         exported_deps = [
             ":generated_aten_config_header",
@@ -2172,9 +2152,7 @@ def define_buck_targets(
         }),
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
-        linker_flags = [
-            "-Wl,--no-as-needed",
-        ],
+        linker_flags = get_no_as_needed_linker_flag(),
         visibility = ["PUBLIC"],
         exported_deps = [
             ":min_runtime_lib",
@@ -2233,9 +2211,7 @@ def define_buck_targets(
         }),
         # @lint-ignore BUCKLINT link_whole
         link_whole = True,
-        linker_flags = [
-            "-Wl,--no-as-needed",
-        ],
+        linker_flags = get_no_as_needed_linker_flag(),
         visibility = ["PUBLIC"],
         exported_deps = [
             ":aten_header",

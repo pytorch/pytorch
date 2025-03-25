@@ -3,15 +3,15 @@
 import logging
 import operator
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, cast, Optional, Union
 
 import torch
 import torch.distributed as dist
 import torch.fx as fx
 import torch.nn as nn
 from torch._subclasses.fake_tensor import FakeTensor
-from torch.distributed._composable.fsdp.fully_shard import FSDPModule, fully_shard
-from torch.fx.node import map_aggregate
+from torch.distributed.fsdp import FSDPModule, fully_shard
+from torch.fx.node import Argument, map_aggregate
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils._pytree import tree_map_only
 
@@ -28,7 +28,7 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 
-def _normalize_model_output_as_tuple(output: Any) -> Tuple[Any]:
+def _normalize_model_output_as_tuple(output: Any) -> tuple[Any]:
     """[Note: pipeline model output type]
 
     The output of the model passed to pipelining can be any type, controlled by the user.
@@ -136,14 +136,13 @@ class _PipelineStageBase(ABC):
             group (Optional[dist.ProcessGroup]): The process group to use for communication.
                 If `None`, the default process group will be used.
                 Default: `None`.
-            dw_builder (Optional[Callable[[], Callable[..., None]]): If provided, dw_runner is a builder function
+            dw_builder (Optional[Callable[[], Callable[..., None]]): If provided, dw_builder is a builder function
                 that will build a new dw_runner function that will run parts of module backward that were intentionally
                 skipped during the module's actual backward pass. The builder must be invoked by stage after stage runs
-                model backwards, and stage should save the latest dw_runner to run during weight pass.
+                model backwards, and stage should save the latest dw_runner to run during weight pas (W).
                 If not provided, a dw_runner will be generated automatically by traversing the autograd graph.
                 When used with schedules that only have F and B steps, the fresh dw_runner function will be called as
-                part of B.
-                When used with F,B,W schedules, the dw_runner function implements 'W'.
+                part of I (input backwards). When used with F,I,W schedules, the dw_runner function implements 'W'.
         """
         super().__init__()
         if stage_index >= num_stages:
@@ -160,10 +159,10 @@ class _PipelineStageBase(ABC):
         self.dw_builder = dw_builder
 
         # backward state
-        self.backward_state: Dict[int, Tuple[Any, ...]] = {}
+        self.backward_state: dict[int, tuple[Any, ...]] = {}
 
         # store dw_runner per microbatch_id
-        self.dw_runner: Dict[int, Callable[..., None]] = {}
+        self.dw_runner: dict[int, Callable[..., None]] = {}
 
         # `group_rank` is rank in process group `group`.
         self.group_rank = dist.get_rank(self.group)
@@ -174,13 +173,13 @@ class _PipelineStageBase(ABC):
             )
 
         # Run time states
-        self._outputs_meta: Optional[Tuple[torch.Tensor, ...]] = None
+        self._outputs_meta: Optional[tuple[torch.Tensor, ...]] = None
         # map microbatch ID to list of forward tensor args
-        self.fwd_cache: Dict[int, Tuple[Any, List[torch.Tensor]]] = {}
+        self.fwd_cache: dict[int, tuple[Any, list[torch.Tensor]]] = {}
         # map microbatch ID to list of backward grad tensor args
-        self.bwd_cache: Dict[int, Tuple[Optional[torch.Tensor], ...]] = {}
+        self.bwd_cache: dict[int, tuple[Optional[torch.Tensor], ...]] = {}
         # Caching chunk outputs for final output merge or reduction
-        self.output_chunks: List[Any] = []
+        self.output_chunks: list[Any] = []
 
         # Initialize has_backward to false; this will be set to true if loss
         # function is passed to pipeline schedule
@@ -189,16 +188,16 @@ class _PipelineStageBase(ABC):
         self.log_prefix = f"[Stage {self.stage_index}]"
 
         # Forward infra
-        self.args_recv_info: Dict[int, Tuple[InputInfo, ...]] = {}
-        self.act_send_info: Dict[int, List] = {}
+        self.args_recv_info: dict[int, tuple[InputInfo, ...]] = {}
+        self.act_send_info: dict[int, list] = {}
 
         # Backward infra will created lazily
-        self.grad_recv_info: Dict = {}
-        self.grad_send_info: Optional[List] = None
+        self.grad_recv_info: dict = {}
+        self.grad_send_info: Optional[list] = None
 
         # To be populated later by the Schedule
         self.chunks: Optional[int] = None
-        self.stage_index_to_group_rank: Dict[int, int] = {
+        self.stage_index_to_group_rank: dict[int, int] = {
             i: i % self.group_size for i in range(self.num_stages)
         }
 
@@ -237,33 +236,33 @@ class _PipelineStageBase(ABC):
                 f"Chunk id {chunk_id} is out of range [0, {self.chunks})"
             )
 
-    def _configure_outputs_meta(self, outputs_meta: Tuple[torch.Tensor, ...]):
+    def _configure_outputs_meta(self, outputs_meta: tuple[torch.Tensor, ...]):
         """
         Track the output shapes/dtype of this stage since they determine the send operation(s) which must match
         recv operations of the next stage.  The next stage _will_ be freezing its recv buffers based on its initial
         configuration, so it's important to also freeze/validate the output side to avoid any send/recv mismatches
         which could show up as hangs, silent corruption, or other errors.
         """
-        assert (
-            self._outputs_meta is None
-        ), "Attempting to reconfigure output_meta, which is not supported"
+        assert self._outputs_meta is None, (
+            "Attempting to reconfigure output_meta, which is not supported"
+        )
         self._outputs_meta = tuple(outputs_meta)  # type: ignore[assignment]
 
-    def get_outputs_meta(self) -> Tuple[torch.Tensor, ...]:
+    def get_outputs_meta(self) -> tuple[torch.Tensor, ...]:
         """Get the output metadata (meta tensors) reprensenting the outputs of this stage"""
-        assert (
-            self._outputs_meta is not None
-        ), "Attempted to get_outputs_meta() without configuring output meta"
+        assert self._outputs_meta is not None, (
+            "Attempted to get_outputs_meta() without configuring output meta"
+        )
         return self._outputs_meta
 
     def _create_grad_send_info(
         self,
-        args_recv_info: Tuple,
-    ) -> List[Optional[int]]:
+        args_recv_info: tuple,
+    ) -> list[Optional[int]]:
         """
         Create a list of stage indices to send gradients to.
         """
-        grad_send_info: List[Optional[int]] = []
+        grad_send_info: list[Optional[int]] = []
 
         def map_recv_to_send(a):
             # Note: we send gradients back to previous stage as long as in
@@ -285,9 +284,9 @@ class _PipelineStageBase(ABC):
     def _prepare_forward_infra(
         self,
         num_microbatches: int,
-        args: Tuple[Any, ...],
-        kwargs: Optional[Dict[str, Any]] = None,
-    ) -> Tuple[Any, ...]:
+        args: tuple[Any, ...],
+        kwargs: Optional[dict[str, Any]] = None,
+    ) -> tuple[Any, ...]:
         raise NotImplementedError
 
     def _prepare_backward_infra(self, num_microbatches: int):
@@ -303,19 +302,19 @@ class _PipelineStageBase(ABC):
     @abstractmethod
     def _create_grad_recv_info(
         self,
-        act_send_info: Dict,
-    ) -> Tuple[_RecvInfo, ...]:
+        act_send_info: dict,
+    ) -> tuple[_RecvInfo, ...]:
         raise NotImplementedError
 
     def _get_recv_ops(
         self,
-        recv_infos: Tuple[InputInfo, ...],
-    ) -> List[dist.P2POp]:
+        recv_infos: tuple[InputInfo, ...],
+    ) -> list[dist.P2POp]:
         """
         Helper function shared by `get_fwd_recv_ops` and `get_bwd_recv_ops`.
         Returns a list of ops that correspond to the recv infos.
         """
-        ops: List[dist.P2POp] = []
+        ops: list[dist.P2POp] = []
         for info in recv_infos:
             if not isinstance(info, _RecvInfo):
                 continue
@@ -325,7 +324,7 @@ class _PipelineStageBase(ABC):
                 peer_rank
                 if self.group is None
                 else dist.get_global_rank(self.group, peer_rank)
-            )  # TODO
+            )
             ops.append(
                 dist.P2POp(dist.irecv, info.buffer, peer_global_rank, self.group)
             )
@@ -353,18 +352,18 @@ class _PipelineStageBase(ABC):
         copying tensor data or using send/recv op.  Detaches original tensor and sets requires_grad so the
         tensor can serve as a leaf for autograd and gradients can be collected from it during backward.
         """
-        recv_infos: Tuple[InputInfo, ...] = self.args_recv_info[mb_index]
+        recv_infos: tuple[InputInfo, ...] = self.args_recv_info[mb_index]
 
         # See [Note: pipeline model output type]
         prev_stage_outputs = _normalize_model_output_as_tuple(prev_stage_outputs)
 
         for info, tensor in zip(recv_infos, prev_stage_outputs):
-            assert isinstance(
-                tensor, torch.Tensor
-            ), f"expected tensor values as outputs from prev stage, got {type(tensor)}"
-            assert isinstance(
-                info, _RecvInfo
-            ), "set_local_Fwd_input should only be called on non-first stage, which should always have RecvInfo"
+            assert isinstance(tensor, torch.Tensor), (
+                f"expected tensor values as outputs from prev stage, got {type(tensor)}"
+            )
+            assert isinstance(info, _RecvInfo), (
+                "set_local_Fwd_input should only be called on non-first stage, which should always have RecvInfo"
+            )
 
             # We don't need to do a data copy here, since we can directly pass the activation tensor reference from
             # one stage to the next.  However, we do need to mark the activation as a leaf tensor since it will serve
@@ -377,49 +376,49 @@ class _PipelineStageBase(ABC):
         """
         Returns the input grad tensors for this stage, which correspond to the stage inputs during forward.
         """
-        assert (
-            self.has_backward
-        ), "can't steal_bwd_input if this stage doesn't have backward"
+        assert self.has_backward, (
+            "can't steal_bwd_input if this stage doesn't have backward"
+        )
         assert not self.is_first, "can't get bwd output if this stage is first"
 
         self._check_chunk_id(mb_index)
         return self.bwd_cache.pop(mb_index)
 
     def set_local_bwd_input(
-        self, next_stage_bwd_outputs: Tuple[Optional[torch.Tensor], ...], mb_index: int
+        self, next_stage_bwd_outputs: tuple[Optional[torch.Tensor], ...], mb_index: int
     ) -> None:
         """
         Moves 'grad input' tensors from the next stage to 'grad_output' on this stage, avoiding a copy or send/recv.
         Does not detach or set '_requires_grad'.
         """
-        assert isinstance(
-            next_stage_bwd_outputs, tuple
-        ), f"Expected tuple, got {type(next_stage_bwd_outputs)}"
+        assert isinstance(next_stage_bwd_outputs, tuple), (
+            f"Expected tuple, got {type(next_stage_bwd_outputs)}"
+        )
 
-        assert (
-            self.has_backward
-        ), "can't set bwd input if this stage doesn't have backward"
+        assert self.has_backward, (
+            "can't set bwd input if this stage doesn't have backward"
+        )
         assert not self.is_last, "can't set bwd input if this stage is last"
         recv_infos = self.grad_recv_info[mb_index]
         for info, tensor in zip(recv_infos, next_stage_bwd_outputs):
-            assert isinstance(
-                tensor, torch.Tensor
-            ), f"expected tensor values as outputs from prev stage, got {type(tensor)}"
-            assert isinstance(
-                info, _RecvInfo
-            ), f"Expected a recv info, got {type(info)}"
+            assert isinstance(tensor, torch.Tensor), (
+                f"expected tensor values as outputs from prev stage, got {type(tensor)}"
+            )
+            assert isinstance(info, _RecvInfo), (
+                f"Expected a recv info, got {type(info)}"
+            )
             info.buffer = tensor
 
-    def get_fwd_recv_ops(self, fwd_chunk_id: int) -> List[dist.P2POp]:
+    def get_fwd_recv_ops(self, fwd_chunk_id: int) -> list[dist.P2POp]:
         """
         Returns a list of ops that are needed to receive the input arguments
         for this stage.
         """
-        recv_infos: Tuple[InputInfo, ...] = self.args_recv_info[fwd_chunk_id]
+        recv_infos: tuple[InputInfo, ...] = self.args_recv_info[fwd_chunk_id]
 
         return self._get_recv_ops(recv_infos)
 
-    def get_bwd_recv_ops(self, bwd_chunk_id: int) -> List[dist.P2POp]:
+    def get_bwd_recv_ops(self, bwd_chunk_id: int) -> list[dist.P2POp]:
         """
         Returns a list of ops that are needed to receive the gradients
         for this stage.
@@ -430,7 +429,7 @@ class _PipelineStageBase(ABC):
         recv_infos = self.grad_recv_info[bwd_chunk_id]
         return self._get_recv_ops(recv_infos)
 
-    def get_fwd_send_ops(self, fwd_chunk_id: int) -> List[dist.P2POp]:
+    def get_fwd_send_ops(self, fwd_chunk_id: int) -> list[dist.P2POp]:
         """
         Get the activation send ops for current stage's forward.
         """
@@ -439,7 +438,7 @@ class _PipelineStageBase(ABC):
         # `act_send_info`
         output_tuple = output if type(output) is tuple else (output,)
 
-        ops: List[dist.P2POp] = []
+        ops: list[dist.P2POp] = []
 
         for idx, out in enumerate(output_tuple):
             dst_stages = self.act_send_info[idx]
@@ -457,12 +456,12 @@ class _PipelineStageBase(ABC):
                     peer_rank
                     if self.group is None
                     else dist.get_global_rank(self.group, peer_rank)
-                )  # TODO
+                )
                 ops.append(dist.P2POp(dist.isend, out, peer_global_rank, self.group))
 
         return ops
 
-    def get_bwd_send_ops(self, bwd_chunk_id: int) -> List[dist.P2POp]:
+    def get_bwd_send_ops(self, bwd_chunk_id: int) -> list[dist.P2POp]:
         """
         Get the gradient send ops for current stage's backward.
         """
@@ -479,7 +478,7 @@ class _PipelineStageBase(ABC):
             # `grad_send_info` is a mirror of `args_recv_info`
             self.grad_send_info = self._create_grad_send_info(self.args_recv_info[0])
 
-        ops: List[dist.P2POp] = []
+        ops: list[dist.P2POp] = []
         grads_input = self.bwd_cache.pop(bwd_chunk_id)
         for grad, grad_recv_stage in zip(grads_input, self.grad_send_info):
             if isinstance(grad, torch.Tensor) and grad_recv_stage is not None:
@@ -494,7 +493,7 @@ class _PipelineStageBase(ABC):
                     peer_rank
                     if self.group is None
                     else dist.get_global_rank(self.group, peer_rank)
-                )  # TODO
+                )
                 ops.append(dist.P2POp(dist.isend, grad, peer_global_rank, self.group))
             else:
                 if not (grad is None and grad_recv_stage is None):
@@ -526,7 +525,7 @@ class _PipelineStageBase(ABC):
 
     def _map_tensor_from_recv_info(
         self,
-        recv_infos: Tuple[InputInfo, ...],
+        recv_infos: tuple[InputInfo, ...],
     ):
         """
         Map tensors from recv infos to a list.
@@ -538,12 +537,7 @@ class _PipelineStageBase(ABC):
             else:
                 raise AssertionError(f"Expected _RecvInfo but got {type(info)}")
 
-        tensors = map_aggregate(
-            recv_infos,
-            get_recv_tensor,
-        )
-
-        return tensors
+        return map_aggregate(cast(Argument, recv_infos), get_recv_tensor)
 
     def _retrieve_recv_activations(self, fwd_chunk_id: int):
         """
@@ -574,9 +568,28 @@ class _PipelineStageBase(ABC):
             out_val = self.submod(*args, **kwargs)
         return out_val
 
+    def scale_grads(self, grad_scale_factor: int) -> None:
+        """Scale gradients model gradients by `grad_scale_factor`, which should be specified in coordination with the
+        loss function used with pipelining.  For loss functions which perform 'mean' loss reduction, `grad_scale_factor`
+        should be set to num_microbatches.  For loss functions that use `sum` reduction, `grad_scale_factor` should
+        be set to 1.
+
+        Should only be called once per pipeline schedule step, after all backwards passes have completed.
+        """
+
+        # PP scales only for its own contribution (microbatches), but relies on DP to scale further
+        # for DP degree.
+        if grad_scale_factor != 1:
+            for p in self.submod.parameters():
+                if p.grad is not None:
+                    p.grad.div_(grad_scale_factor)
+
     def backward_maybe_with_nosync(
-        self, backward_type, bwd_kwargs: Dict, last_backward=False
-    ) -> Tuple[Tuple[Optional[torch.Tensor], ...], Optional[List[Dict[str, Any]]]]:
+        self,
+        backward_type,
+        bwd_kwargs: dict,
+        last_backward: bool = False,
+    ) -> tuple[tuple[Optional[torch.Tensor], ...], Optional[list[dict[str, Any]]]]:
         """
         Whether using PP with FSDP or DDP, there are some runtime differences between the last backward step and the
         other steps.  Namely, we need to accumulate gradients on previous steps and reduce them on the last step, but
@@ -588,7 +601,7 @@ class _PipelineStageBase(ABC):
             backward_type,
         ) -> Callable[
             [],
-            Tuple[Tuple[Optional[torch.Tensor], ...], Optional[List[Dict[str, Any]]]],
+            tuple[tuple[Optional[torch.Tensor], ...], Optional[list[dict[str, Any]]]],
         ]:
             if backward_type == "full":
                 return lambda: (
@@ -644,12 +657,18 @@ class _PipelineStageBase(ABC):
                     fsdp_module.set_is_last_backward(True)
                     fsdp_module.set_reshard_after_backward(True)
                     fsdp_module.set_requires_gradient_sync(True)
-                    fsdp_state = fully_shard.state(fsdp_module)
+                    fsdp_state = fully_shard.state(fsdp_module)  # type: ignore[attr-defined]
                     for state in fsdp_state._state_ctx.all_states:
                         if state._fsdp_param_group:
                             state._fsdp_param_group.post_backward()
 
+                    # it would be much better if pipelining backward invoked .backward so autograd hooks
+                    # worked and modules like DDP/FSDP behaved as expected.  Working around this for the time being,
+                    # we need to call this too to ensure FSDP syncs its grad reduction ops back to the default stream.
+                    fsdp_state._root_post_backward_final_callback()
+
                 run_post_backward(self.submod)
+
         else:
             # Non-DP submodule, regular backward
             result = perform_backward(backward_type)()
@@ -660,8 +679,8 @@ class _PipelineStageBase(ABC):
     def forward_one_chunk(
         self,
         fwd_chunk_id: int,
-        args: Tuple[Any, ...],
-        kwargs: Optional[Dict[str, Any]] = None,
+        args: tuple[Any, ...],
+        kwargs: Optional[dict[str, Any]] = None,
     ):
         """
         Perform forward pass on the stage with one microbatch.
@@ -771,14 +790,16 @@ class _PipelineStageBase(ABC):
                 "input_values": input_values,
             }
 
-        grads_input: Tuple[Optional[torch.Tensor], ...] = ()
+        grads_input: tuple[Optional[torch.Tensor], ...] = ()
 
         # Custom backward function
         if self.dw_builder:
             # TODO: We may want to change our semantics so we are allowed to ignore
             # the 'dw_builder' and call full_backward directly when it is a full_backward op.
             grads_input, _ = self.backward_maybe_with_nosync(
-                "full", bwd_kwargs, last_backward=last_backward
+                "full",
+                bwd_kwargs,
+                last_backward=last_backward,
             )
             if full_backward:
                 self.dw_builder()()
@@ -790,7 +811,7 @@ class _PipelineStageBase(ABC):
                     "full", bwd_kwargs, last_backward=last_backward
                 )
             else:
-                param_groups: List[Dict[str, Any]] | None = None
+                param_groups: list[dict[str, Any]] | None = None
                 # Skip the backward for the first stage since we will perform the weight update with
                 # autograd.backward in backward_weight_one_chunk
                 if not self.is_first:
@@ -822,7 +843,8 @@ class _PipelineStageBase(ABC):
             # to return to the user in merge_output_chunks, therefore
             # this should be detached to release autograd graph context and free memory earlier
             for t in stage_output:
-                t.detach_()
+                if not t._is_view():  # views are not detachable in-place
+                    t.detach_()
 
         logger.debug("%s Backwarded chunk %s", self.log_prefix, bwd_chunk_id)
 
@@ -896,7 +918,7 @@ class _PipelineStageBase(ABC):
             f"Stage {self.stage_index} forward inputs", expected_tensors_meta, args
         )
 
-    def _validate_fwd_outputs(self, outputs: Tuple[torch.Tensor, ...]):
+    def _validate_fwd_outputs(self, outputs: tuple[torch.Tensor, ...]):
         """Raises a RuntimeError if this stage produces an output of unexpected shape/dtype.
         Most likely, this could be cause either by incorrect user specification of output shapes, or becuase
         shape inference was done on the original model but then at runtime the model is wrapped with something like
@@ -958,7 +980,7 @@ class _PipelineStage(_PipelineStageBase):
         )
 
         # Create mapping from stage name to stage index
-        self.submod_to_stage_index: Dict[str, int] = {}
+        self.submod_to_stage_index: dict[str, int] = {}
         for i, node in enumerate(submod_nodes):
             self.submod_to_stage_index.setdefault(node.name, i)
 
@@ -981,9 +1003,9 @@ class _PipelineStage(_PipelineStageBase):
     def _prepare_forward_infra(
         self,
         num_microbatches: int,
-        args: Tuple[Any, ...],
-        kwargs: Optional[Dict[str, Any]] = None,
-    ) -> Tuple[Any, ...]:
+        args: tuple[Any, ...],
+        kwargs: Optional[dict[str, Any]] = None,
+    ) -> tuple[Any, ...]:
         """
         Create send/recv infrastructures for activations (during forward)
         """
@@ -1031,9 +1053,9 @@ class _PipelineStage(_PipelineStageBase):
                 # If the input is a getitem, we need to go deeper
                 arg_node = arg_node.args[0]
 
-            assert (
-                arg_node.op == "call_module"
-            ), f"Expecting call_module, got {arg_node.op}"
+            assert arg_node.op == "call_module", (
+                f"Expecting call_module, got {arg_node.op}"
+            )
             src_stage = self.get_stage_index_of_submod(arg_node.name)
 
             # Create a receive buffer for this placeholder
@@ -1056,10 +1078,11 @@ class _PipelineStage(_PipelineStageBase):
                 buffer,
             )
 
-        args_recv_info: List[InputInfo] = []
+        args_recv_info: list[InputInfo] = []
         # Filter out placeholder nodes from `self.submod` (a GraphModule)
         placeholders = filter(  # type: ignore[var-annotated]
-            lambda node: node.op == "placeholder", self.submod.graph.nodes  # type: ignore[arg-type, union-attr]
+            lambda node: node.op == "placeholder",  # type: ignore[arg-type]
+            self.submod.graph.nodes,  # type: ignore[arg-type,union-attr]
         )
         # `placeholders` are nodes internal to submod.
         # `self.node.args` are dependency nodes in the outer graph.
@@ -1106,7 +1129,7 @@ class _PipelineStage(_PipelineStageBase):
         be consumed by multiple stages.
         """
         # Output index: List of receiver ranks
-        act_send_info: Dict[int, List] = {}
+        act_send_info: dict[int, list] = {}
         out_idx = 0
 
         for user in self.node.users:
@@ -1127,7 +1150,7 @@ class _PipelineStage(_PipelineStageBase):
                     dsts.append(dst_rank)
 
         output_node = self._get_output_node()
-        output_vals: Tuple[torch.Tensor] = tuple(
+        output_vals: tuple[torch.Tensor] = tuple(
             v.meta["val"] for v in flatten_args(output_node.args)
         )
         self._configure_outputs_meta(output_vals)
@@ -1143,13 +1166,13 @@ class _PipelineStage(_PipelineStageBase):
 
     def _create_grad_recv_info(
         self,
-        act_send_info: Dict,
-    ) -> Tuple[_RecvInfo, ...]:
+        act_send_info: dict,
+    ) -> tuple[_RecvInfo, ...]:
         """
         Create a tuple of `_RecvInfo` for gradients.
         """
         # Dict[output_index, _RecvInfo]
-        grad_recv_info: Dict[int, _RecvInfo] = {}
+        grad_recv_info: dict[int, _RecvInfo] = {}
         output_node = self._get_output_node()
 
         # The output node may take multiple args, meaning the submod having multiple output values.
@@ -1232,7 +1255,8 @@ class PipelineStage(_PipelineStageBase):
         input_args (Union[torch.Tensor, Tuple[torch.tensor]], optional): The input arguments for the submodule.
         output_args (Union[torch.Tensor, Tuple[torch.tensor]], optional): The output arguments for the submodule.
         group (dist.ProcessGroup, optional): The process group for distributed training. If None, default group.
-        dw_builder: TODO clean up comments
+        dw_builder (Optional[Callable[[], Callable[..., None]]): If provided, dw_builder will build a new dw_runner function
+            that will the W action (input weights) for F, I, W (Fwd, Input, Weight) zero bubble schedules.
     """
 
     def __init__(
@@ -1241,14 +1265,14 @@ class PipelineStage(_PipelineStageBase):
         stage_index: int,
         num_stages: int,
         device: torch.device,
-        input_args: Optional[Union[torch.Tensor, Tuple[torch.Tensor, ...]]] = None,
-        output_args: Optional[Union[torch.Tensor, Tuple[torch.Tensor, ...]]] = None,
+        input_args: Optional[Union[torch.Tensor, tuple[torch.Tensor, ...]]] = None,
+        output_args: Optional[Union[torch.Tensor, tuple[torch.Tensor, ...]]] = None,
         group: Optional[dist.ProcessGroup] = None,
         dw_builder: Optional[Callable[[], Callable[..., None]]] = None,
     ):
         super().__init__(submodule, stage_index, num_stages, device, group, dw_builder)
-        self.inputs: Optional[List[torch.Tensor]] = None
-        self.inputs_meta: Optional[Tuple[torch.Tensor, ...]] = None
+        self.inputs: Optional[list[torch.Tensor]] = None
+        self.inputs_meta: Optional[tuple[torch.Tensor, ...]] = None
         # Note: inputs and submod should ideally be on meta device. We decided not to assert this (yet) becuase it
         # might be breaking for existing users.
         if input_args is None:
@@ -1277,25 +1301,15 @@ class PipelineStage(_PipelineStageBase):
                     raise RuntimeError(
                         "Failed to perform pipeline shape inference- are your inputs on the same device as your module?"
                     ) from e
-            assert (
-                output_args is not None
-            ), "If passing input_args, also pass output_args to override shape inference"
+            assert output_args is not None, (
+                "If passing input_args, also pass output_args to override shape inference"
+            )
             self._configure_outputs_meta(
                 (output_args,) if isinstance(output_args, torch.Tensor) else output_args
             )
 
         # these are the buffers used in backwards send/recv, they are allocated later
-        self.outputs_grad: List[torch.Tensor] = []
-
-        def stage_global_rank(peer_rank):
-            return (
-                peer_rank
-                if self.group is None
-                else dist.get_global_rank(self.group, peer_rank)
-            )
-
-        self.prev_rank = stage_global_rank((self.group_rank - 1) % self.group_size)
-        self.next_rank = stage_global_rank((self.group_rank + 1) % self.group_size)
+        self.outputs_grad: list[torch.Tensor] = []
 
         dbg_str = (
             f"Finished pipeline stage init, {self.stage_index=}, {self.is_first=}, "  # noqa: G004
@@ -1313,8 +1327,8 @@ class PipelineStage(_PipelineStageBase):
 
     def _shape_inference(
         self,
-        args: Tuple[Any, ...],
-        kwargs: Optional[Dict[str, Any]] = None,
+        args: tuple[Any, ...],
+        kwargs: Optional[dict[str, Any]] = None,
     ):
         if kwargs is None:
             kwargs = {}
@@ -1333,9 +1347,9 @@ class PipelineStage(_PipelineStageBase):
             )
             args = tree_map_only(torch.Tensor, lambda x: x.to("meta"), args)
         else:
-            assert (
-                len(args) == 0
-            ), "Can't supply input args for shape inference on non-first stage"
+            assert len(args) == 0, (
+                "Can't supply input args for shape inference on non-first stage"
+            )
             objects = [None]
             logger.debug(
                 "Shape inference: stage %s receiving from stage %s",
@@ -1343,7 +1357,13 @@ class PipelineStage(_PipelineStageBase):
                 self.stage_index - 1,
             )
             dist.recv_object_list(
-                objects, src=self.prev_rank, group=self.group, device=self.device
+                objects,
+                src=dist.get_global_rank(
+                    self.group or dist.distributed_c10d._get_default_group(),
+                    self.stage_index_to_group_rank[self.stage_index - 1],
+                ),
+                group=self.group,
+                device=self.device,
             )
             recv_args = objects[0]
             assert isinstance(recv_args, tuple), type(recv_args)
@@ -1357,7 +1377,6 @@ class PipelineStage(_PipelineStageBase):
 
         # set attributes needed for forward
         with torch.no_grad():
-            logger.debug("Shape inference: stage %s running forward", self.stage_index)
             outputs = self.submod(*args, **kwargs)
 
         # if single tensor, convert so it is always a list
@@ -1369,6 +1388,12 @@ class PipelineStage(_PipelineStageBase):
         # 2 - avoid activating a cuda context for the src rank when unpickling on the recv end!
         outputs_meta = tuple(
             tree_map_only(torch.Tensor, lambda x: x.to("meta"), outputs)
+        )
+        logger.debug(
+            "Shape inference: stage %s inputs %s, outputs %s",
+            self.stage_index,
+            self.inputs_meta,
+            outputs_meta,
         )
         self._configure_outputs_meta(outputs_meta)
 
@@ -1398,7 +1423,10 @@ class PipelineStage(_PipelineStageBase):
             )
             dist.send_object_list(
                 [outputs_meta],
-                dst=self.next_rank,
+                dst=dist.get_global_rank(
+                    self.group or dist.distributed_c10d._get_default_group(),
+                    self.stage_index_to_group_rank[self.stage_index + 1],
+                ),
                 group=self.group,
                 device=self.device,
             )
@@ -1409,13 +1437,13 @@ class PipelineStage(_PipelineStageBase):
     def _prepare_forward_infra(
         self,
         num_microbatches: int,
-        args: Tuple[Any, ...],
-        kwargs: Optional[Dict[str, Any]] = None,
-    ) -> Tuple[Any, ...]:
+        args: tuple[Any, ...],
+        kwargs: Optional[dict[str, Any]] = None,
+    ) -> tuple[Any, ...]:
         # TODO move self.device to an argument from step API (from its input tensors)?
         assert num_microbatches is not None, "TODO fix num_microbatches"
 
-        outputs: Tuple[Any, ...] = tuple()
+        outputs: tuple[Any, ...] = tuple()
         if self.inputs_meta is None:
             outputs = self._shape_inference(args, kwargs)
 
@@ -1448,7 +1476,7 @@ class PipelineStage(_PipelineStageBase):
 
         # Send info during forward for each activation
         # only need the rank that is being sent to
-        self.act_send_info: Dict[int, List] = {}
+        self.act_send_info: dict[int, list] = {}
 
         for idx in range(len(self.get_outputs_meta())):
             # We assume we always send to stage + 1
@@ -1461,9 +1489,9 @@ class PipelineStage(_PipelineStageBase):
 
     def _create_grad_recv_info(
         self,
-        act_send_info: Dict,
-    ) -> Tuple[_RecvInfo, ...]:
-        grad_recv_info: Tuple[_RecvInfo, ...] = ()
+        act_send_info: dict,
+    ) -> tuple[_RecvInfo, ...]:
+        grad_recv_info: tuple[_RecvInfo, ...] = ()
         if not self.is_last:
             # Receiving gradients from multiple sources is not supported
             # hence we only take the first destination
@@ -1480,27 +1508,3 @@ class PipelineStage(_PipelineStageBase):
                 ]
             )
         return grad_recv_info
-
-    def _init_p2p_neighbors(self):
-        """
-        Set up p2p communitors between previous and next stages
-        by sending a dummy tensor.
-
-        If this is used, must be called for all pipeline stages.
-        """
-        ops = []
-        recv_tensor = torch.zeros(1, device="cuda")
-        send_tensor = torch.ones(1, device="cuda")
-        # forward
-        if not self.is_first:
-            ops.append(dist.P2POp(dist.irecv, recv_tensor, self.prev_rank, self.group))
-        if not self.is_last:
-            ops.append(dist.P2POp(dist.isend, send_tensor, self.next_rank, self.group))
-
-        # backward
-        if not self.is_first:
-            ops.append(dist.P2POp(dist.isend, send_tensor, self.prev_rank, self.group))
-        if not self.is_last:
-            ops.append(dist.P2POp(dist.irecv, recv_tensor, self.next_rank, self.group))
-
-        return True

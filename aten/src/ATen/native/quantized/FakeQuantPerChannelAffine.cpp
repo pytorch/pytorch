@@ -36,9 +36,9 @@ Tensor fake_quantize_per_channel_affine(
     int64_t axis,
     int64_t quant_min,
     int64_t quant_max) {
-  const auto res = at::fake_quantize_per_channel_affine_cachemask(
+  auto res = at::fake_quantize_per_channel_affine_cachemask(
       self, scale, zero_point, axis, quant_min, quant_max);
-  return std::get<0>(res);
+  return std::get<0>(std::move(res));
 }
 
 std::tuple<Tensor, Tensor> fake_quantize_per_channel_affine_cachemask(

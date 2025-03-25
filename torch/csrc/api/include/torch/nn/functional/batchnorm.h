@@ -15,7 +15,7 @@ inline Tensor batch_norm(
     Tensor weight,
     Tensor bias,
     bool training,
-    std::optional<double> momentum,
+    double momentum,
     double eps) {
   TORCH_CHECK(
       input.dim() >= 2,
@@ -40,7 +40,7 @@ inline Tensor batch_norm(
       running_mean,
       running_var,
       training,
-      momentum.value(),
+      momentum,
       eps,
       at::globalContext().userEnabledCuDNN());
 }

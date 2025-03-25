@@ -11,6 +11,8 @@ import os
 import sys
 from typing import Optional, TYPE_CHECKING
 
+from torch.utils._config_module import Config, install_config_module
+
 
 # Converts torch rng ops to their functional philox rng equivalents. Note that
 # we functionalize only CUDA rng ops today.
@@ -27,23 +29,30 @@ debug_assert = False
 
 debug_partitioner = os.environ.get("AOT_PARTITIONER_DEBUG", "0") != "0"
 
-# Today, if you are in a situation where there is "false aliasing"
-# (e.g. you have a bunch of model parameters that all alias the same underlying buffer),
-# our checks for this situation are very slow if these inputs have dynamic shapes.
-# This config is set to ensure that there aren't too many aliased inputs in this situation,
-# so that we error loudly instead of compiling forever.
-# Eventually, we should make these checks faster.
-# For now, however, you can simply turn off dynamic shapes by marking your inputs static
-# when you run into this situation.
-_max_aliased_inputs_with_dynamic_shapes_enabled = 5
+# See # NOTE [Export custom triton op]
+decompose_custom_triton_ops = True
 
 static_weight_shapes = True
+
+# See https://github.com/pytorch/pytorch/issues/141881
+# Tells partitioner that parameters are free to save for backward.
+treat_parameters_as_free_to_save = True
 
 # Applies CSE to the graph before partitioning
 cse = True
 
+from torch._inductor.config import is_fbcode
 
-enable_autograd_cache = os.environ.get("TORCHINDUCTOR_AUTOGRAD_CACHE", "0") == "1"
+
+enable_autograd_cache: bool = Config(
+    justknob="pytorch/remote_cache:enable_local_autograd_cache",
+    env_name_force="TORCHINDUCTOR_AUTOGRAD_CACHE",
+    default=True,
+)
+
+autograd_cache_allow_custom_autograd_functions: bool = Config(
+    env_name_force="TORCHINDUCTOR_AUTOGRAD_CACHE_ALLOW_CUSTOM_AUTOGRAD", default=False
+)
 
 
 def remote_autograd_cache_default() -> Optional[bool]:
@@ -73,13 +82,12 @@ enable_remote_autograd_cache = remote_autograd_cache_default()
 # eventually: either default this config to false completely
 # once XLA pin update works,
 # or default config to true and fix relevant bugs
-from torch._inductor.config import is_fbcode
 
 
 # View replay is currently not compatible with AOTAutogradCache, since
 # FunctionalTensors are not serializable. We'll need to make them
 # serializable before enabling warm cache with this config turned on.
-view_replay_for_aliased_outputs = (not is_fbcode()) and (not enable_autograd_cache)
+view_replay_for_aliased_outputs = not is_fbcode()
 
 # Restricts the amount of computation AOTAutograd can do.
 # NB: We have essentially disabled this heuristic now. However, this is kept
@@ -137,13 +145,17 @@ activation_memory_budget_runtime_estimator = "flops"
 # (which has a scipy dependency).
 activation_memory_budget_solver = "dp"
 
-# This dumps out a png visualization of the expected runtime vs. activation
+# This dumps out a SVG visualization of the expected runtime vs. activation
 # memory tradeoffs for all memory budget values from 0 to 1 in increments of
 # 0.5. See an example here:
 # https://github.com/pytorch/pytorch/pull/126320#discussion_r1625104015
 visualize_memory_budget_pareto = (
     os.environ.get("PARTITIONER_MEMORY_BUDGET_PARETO", "0") == "1"
 )
+
+# This controls the directory in which to dump the SVG plot with the pareto
+# frontier of the activation checkpointing memory-vs-runtime tradeoffs.
+memory_budget_pareto_dir = os.environ.get("PARTITIONER_MEMORY_BUDGET_PARETO_DIR")
 
 # Sets all of the ban_recompute heuristics to False except ban_recompute_reductions
 # Generally, this will probably result in some memory improvement, but at the
@@ -210,15 +222,45 @@ torch_compile_graph_format = os.environ.get("TORCH_COMPILE_GRAPH_FORMAT", "svg")
 # real tensor outputs.
 generate_fake_kernels_from_real_mismatches = False
 
+# CUDAGraph save run_with_rng functionalization.
+# TODO: turn on by default
+graphsafe_rng_functionalization = True
+
 
 # Error on BypassAOTAutogradCache instead of just a warning
 # Used for tests
 strict_autograd_cache = False
 
+# Note [Recomputing collectives in the partitioner]
+# The purpose of this config is as follows:
+# - We have many passes in the compiler (min-cut partitioning, DCE, etc)
+#   which can reorder or ,delete duplicate nodes in the graph
+# - If any of these passes reorder/delete/duplicate a collective
+#   in a setting where the compiler is being run independently on multiple
+#   ranks, we run the risk that the compiler will make a different decison on
+#   different ranks, resulting in a NCCL hang when using torch.compile
+# To handle this, we will (by default) ensure that collectives are not modified
+# by the compiler.
+#
+# A few examples:
+# - don't dead-code-eliminate collectives
+#   (in case they are dead on rank i but not rank j)
+# - don't recompute collectives in partitioning
+#   (in case we recompute on rank i but not rank j)
+#
+# Today this flag **must** be set to false, but eventually
+# we want the option to set it to true.
+# In order to potentially optimize collectives, we'll need the compiler
+# to broadcast information across ranks at compile time to ensure
+# that any decisions on collectives are made consistently.
+unsafe_allow_optimization_of_collectives = False
+
+# See Note [AOTAutograd Tangent Subclassness for mutated inputs]
+# TODO(ivankobzarev): Remove this config, being able to deduce it compile time.
+disable_guess_zero_tangent_for_mutated_input_subclass = False
+
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
-
-from torch.utils._config_module import install_config_module
 
 
 # adds patch, save_config, invalid config checks, etc

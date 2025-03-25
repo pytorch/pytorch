@@ -145,6 +145,17 @@ class PgoTest(torch._dynamo.test_case.TestCase):
                 mock_cache.global_stats.dynamo_pgo, mock_cache.Stats(2, 1, 1)
             )
 
+            self.reset()
+            cnts.clear()
+
+            with torch.compiler.config.patch({"cache_key_tag": "test"}):
+                f(torch.randn(2, 7))
+                f(torch.randn(2, 8))
+                self.assertEqual(cnts.frame_count, 2)
+                self.assertEqual(
+                    mock_cache.global_stats.dynamo_pgo, mock_cache.Stats(4, 1, 2)
+                )
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

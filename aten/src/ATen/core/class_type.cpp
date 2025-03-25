@@ -76,7 +76,7 @@ std::string ClassType::getForwardPreHookErrorMessage(size_t pre_hook_idx) const 
   std::string input_types = getSchemaInputTypesString(forward_schema);
   const std::vector<Argument>& forward_args = forward_schema.arguments();
 
-  std::string single_output = "";
+  std::string single_output;
   if (forward_args.size() == 2 &&
       forward_args[1].type()->cast<TupleType>() == nullptr) {
     // if the output type is a single tuple, it needs to be wrapped in an outer tuple

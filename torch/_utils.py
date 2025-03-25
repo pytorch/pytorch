@@ -1,13 +1,15 @@
 # mypy: allow-untyped-defs
 import copyreg
 import functools
+import importlib
 import logging
 import sys
 import traceback
 import warnings
 from collections import defaultdict
-from typing import Any, Callable, DefaultDict, Generic, List, Optional
-from typing_extensions import ParamSpec
+from types import ModuleType
+from typing import Any, Callable, Generic, Optional, TYPE_CHECKING
+from typing_extensions import deprecated, ParamSpec
 
 import torch
 
@@ -79,9 +81,9 @@ def _to(self, device, non_blocking=False):
         return untyped_storage
 
     device_module = getattr(torch, device.type, None)
-    assert (
-        device_module is not None
-    ), f"{device.type.upper()} device module is not loaded"
+    assert device_module is not None, (
+        f"{device.type.upper()} device module is not loaded"
+    )
     with device_module.device(device):
         if self.is_sparse and hasattr(device_module, "sparse"):
             new_type = getattr(device_module.sparse, self.__class__.__name__)
@@ -93,9 +95,9 @@ def _to(self, device, non_blocking=False):
             )
             return new_type(indices, values, self.size())
         else:
-            assert (
-                not self.is_sparse
-            ), f"sparse storage is not supported for {device.type.upper()} tensors"
+            assert not self.is_sparse, (
+                f"sparse storage is not supported for {device.type.upper()} tensors"
+            )
             untyped_storage = torch.UntypedStorage(self.size(), device=device)
             untyped_storage.copy_(self, non_blocking)
             return untyped_storage
@@ -201,6 +203,16 @@ def set_tensor_metadata(tensor, metadata):
     torch._C._set_tensor_metadata(tensor, metadata)  # type: ignore[attr-defined]
 
 
+def _restore_device_fake_mode(tensor):
+    if torch._guards.detect_fake_mode(None) is not None:
+        if tensor.untyped_storage()._fake_device is not None:
+            device = _get_restore_location(tensor.untyped_storage()._fake_device)
+            if not isinstance(device, torch.device):
+                device = torch.device(device)
+            tensor.fake_device = torch.device(device)
+    return tensor
+
+
 def _rebuild_tensor_v2(
     storage,
     storage_offset,
@@ -219,6 +231,8 @@ def _rebuild_tensor_v2(
     # general expectation is that backward_hooks is an empty
     # OrderedDict.  See Note [Don't serialize hooks]
     tensor._backward_hooks = backward_hooks
+
+    tensor = _restore_device_fake_mode(tensor)
     return tensor
 
 
@@ -242,10 +256,11 @@ def _rebuild_tensor_v3(
     if metadata:
         set_tensor_metadata(t, metadata)
     t._backward_hooks = backward_hooks
+    t = _restore_device_fake_mode(t)
     return t
 
 
-_sparse_tensors_to_validate: List["torch.Tensor"] = []
+_sparse_tensors_to_validate: list["torch.Tensor"] = []
 
 
 # In _legacy_load() in serialization.py we unpickle storages after the sparse
@@ -635,7 +650,7 @@ def _take_tensors(tensors, size_limit):
         Blocks of tensors of same type and within size_limit. The yielded
         tensors are only ordered as the original sequence within its types.
     """
-    buf_dict: DefaultDict[str, List] = defaultdict(lambda: [[], 0])
+    buf_dict: defaultdict[str, list] = defaultdict(lambda: [[], 0])
     for tensor in tensors:
         t = tensor.type()
         if tensor.is_sparse:
@@ -674,7 +689,7 @@ def render_call(fn, args, kwargs):
     if str_fn is None:
         str_fn = str(fn)
 
-    str_args: List[str] = []
+    str_args: list[str] = []
     with torch._tensor_str.printoptions(threshold=0, edgeitems=0):
         str_args.extend(repr(a) for a in args)
         str_args.extend(f"{k}={repr(v)}" for k, v in kwargs.items())
@@ -693,6 +708,8 @@ def render_call(fn, args, kwargs):
 
 class KeyErrorMessage(str):
     r"""str subclass that returns itself in repr"""
+
+    __slots__ = ()
 
     def __repr__(self):
         return self
@@ -726,9 +743,9 @@ class ExceptionWrapper:
             raise self.exc_type(message=msg)
         try:
             exception = self.exc_type(msg)
-        except TypeError:
-            # If the exception takes multiple arguments, don't try to
-            # instantiate since we don't know how to
+        except Exception:
+            # If the exception takes multiple arguments or otherwise can't
+            # be constructed, don't try to instantiate since we don't know how to
             raise RuntimeError(msg) from None
         raise exception
 
@@ -754,6 +771,8 @@ def _get_device_attr(get_member):
     device_type = _get_available_device_type()
     if device_type and device_type.lower() == "cuda":
         return get_member(torch.cuda)
+    if device_type and device_type.lower() == "mps":
+        return get_member(torch.mps)
     if device_type and device_type.lower() == "xpu":
         return get_member(torch.xpu)  # type: ignore[attr-defined]
     if device_type and device_type.lower() == "mtia":
@@ -884,13 +903,28 @@ def classproperty(func):
     return _ClassPropertyDescriptor(func)
 
 
-def is_compiling() -> bool:
-    """
-    Indicates whether we are tracing/compiling with torch.compile() or torch.export().
+if TYPE_CHECKING:
+    # TorchScript does not support `@deprecated`
+    # This is a workaround to avoid breaking TorchScript
+    @deprecated(
+        "`torch._utils.is_compiling` is deprecated. Use `torch.compiler.is_compiling` instead.",
+        category=FutureWarning,
+    )
+    def is_compiling() -> bool:
+        return torch.compiler.is_compiling()
 
-    TODO(khabinov): we should deprecate this function and use torch.compiler.is_compiling().
-    """
-    return torch.compiler.is_compiling()
+else:
+
+    def is_compiling() -> bool:
+        """
+        Indicates whether we are tracing/compiling with torch.compile() or torch.export().
+        """
+        warnings.warn(  # use `warnings.warn` instead of `@deprecated`
+            "`torch._utils.is_compiling` is deprecated. Use `torch.compiler.is_compiling` instead.",
+            # FutureWarning,  # TorchScript does not support Warning type
+            stacklevel=2,
+        )
+        return torch.compiler.is_compiling()
 
 
 def _functionalize_sync(t):
@@ -969,7 +1003,7 @@ class _LazySeedTracker:
         # update seed to be latest
         self.call_order = [self.manual_seed_all_cb, self.manual_seed_cb]
 
-    def get_calls(self) -> List:
+    def get_calls(self) -> list:
         return self.call_order
 
 
@@ -980,7 +1014,7 @@ P = ParamSpec("P")
 class CallbackRegistry(Generic[P]):
     def __init__(self, name: str):
         self.name = name
-        self.callback_list: List[Callable[P, None]] = []
+        self.callback_list: list[Callable[P, None]] = []
 
     def add_callback(self, cb: Callable[P, None]) -> None:
         self.callback_list.append(cb)
@@ -989,10 +1023,29 @@ class CallbackRegistry(Generic[P]):
         for cb in self.callback_list:
             try:
                 cb(*args, **kwargs)
-            except Exception as e:
+            except Exception:
                 logger.exception(
                     "Exception in callback for %s registered with gpu trace", self.name
                 )
+
+
+def try_import(module_name: str) -> Optional[ModuleType]:
+    # Implementation based on
+    # https://docs.python.org/3/library/importlib.html#checking-if-a-module-can-be-imported
+    if (module := sys.modules.get(module_name, None)) is not None:
+        return module
+
+    if (spec := importlib.util.find_spec(module_name)) is not None:
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+
+        # https://docs.python.org/3/library/importlib.html#importlib.machinery.ModuleSpec.loader
+        # "The finder should always set this attribute"
+        assert spec.loader is not None, "The loader attribute should always be set"
+        spec.loader.exec_module(module)
+        return module
+
+    return None
 
 
 # IMPORT_MAPPING and NAME_MAPPING are adapted from https://github.com/python/cpython/blob/main/Lib/_compat_pickle.py

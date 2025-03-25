@@ -47,7 +47,7 @@ inline PyObject* wrap(c10::complex<double> value) {
 }
 
 inline PyObject* wrap(void* value) {
-  return THPUtils_packInt64(reinterpret_cast<intptr_t>(value));
+  return PyLong_FromVoidPtr(value);
 }
 
 inline PyObject* wrap(THPDtype* dtype) {

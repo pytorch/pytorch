@@ -366,11 +366,8 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cpu(
   }
 #endif
   // shape: 3 x [B, num_head, T, dim_per_head]
-  auto q_k_v = _transform_bias_rescale_qkv(qkv, qkv_bias, num_head);
+  auto [q, k, v] = _transform_bias_rescale_qkv(qkv, qkv_bias, num_head);
   qkv = Tensor(); // Not used any more, allow free
-  auto& q = std::get<0>(q_k_v);
-  const auto& k = std::get<1>(q_k_v);
-  const auto& v = std::get<2>(q_k_v);
 #ifndef NDEBUG
   debug_assert_shape(__LINE__, q, {B, num_head, T, dim_per_head});
   debug_assert_shape(__LINE__, k, {B, num_head, T, dim_per_head});
@@ -732,7 +729,7 @@ Tensor scaled_dot_product_attention(
         // We need to calculate the scale based off the OG head dim size
         auto og_scale = sdp::calculate_scale(query_, scale);
         auto out_lse_softmax = at::_scaled_dot_product_flash_attention(
-            query_padded, key_padded, value_padded, dropout_p, is_causal, false /*return_debug_mask*/, og_scale.as_float_unchecked());
+            query_padded, key_padded, value_padded, dropout_p, is_causal, false /*return_debug_mask*/, og_scale.guard_float("attention.cpp", 735));
         return post_process_flash_output(std::get<0>(out_lse_softmax), og_size);
       }
       // For the CPU case we do not need to pad the last dim
@@ -762,6 +759,28 @@ Tensor scaled_dot_product_attention(
           && !(GradMode::is_enabled() && any_inputs_require_grad)
           && (all_contiguous || mps::is_macos_13_or_newer(mps::MacOSVersion::MACOS_VER_15_0_PLUS))
           && !any_nested) {
+        if (enable_gqa) {
+          int64_t q_heads = query_.size(-3);
+          int64_t k_heads = key.size(-3);
+          int64_t repeat_factor = q_heads / k_heads;
+
+          if (repeat_factor > 1) {
+            TORCH_CHECK(q_heads % k_heads == 0,
+                          "For GQA, the query tensor's head dimension (" + std::to_string(q_heads) +
+                                    ") must be divisible by the key tensor's head dimension (" + std::to_string(k_heads) + ").");
+            auto repeated_key = key.repeat_interleave(repeat_factor, /*dim=*/-3);
+            auto repeated_value = value.repeat_interleave(repeat_factor, /*dim=*/-3);
+            return std::get<0>(at::_scaled_dot_product_attention_math_for_mps(
+              query_,
+              repeated_key,
+              repeated_value,
+              attn_mask,
+              dropout_p,
+              is_causal,
+              std::nullopt, /*dropout_mask*/
+              scale));
+          }
+        }
         return std::get<0>(at::_scaled_dot_product_attention_math_for_mps(
             query_,
             key,

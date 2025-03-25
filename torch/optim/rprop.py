@@ -1,7 +1,6 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 r"""Implementation for the Resilient backpropagation."""
-from typing import cast, List, Optional, Tuple, Union
+from typing import cast, Optional, Union
 
 import torch
 from torch import Tensor
@@ -16,6 +15,7 @@ from .optimizer import (
     _get_scalar_dtype,
     _maximize_doc,
     _params_doc,
+    _to_scalar,
     _use_grad_for_differentiable,
     _view_as_real,
     Optimizer,
@@ -31,8 +31,8 @@ class Rprop(Optimizer):  # noqa: D101
         self,
         params: ParamsT,
         lr: Union[float, Tensor] = 1e-2,
-        etas: Tuple[float, float] = (0.5, 1.2),
-        step_sizes: Tuple[float, float] = (1e-6, 50),
+        etas: tuple[float, float] = (0.5, 1.2),
+        step_sizes: tuple[float, float] = (1e-6, 50),
         *,
         capturable: bool = False,
         foreach: Optional[bool] = None,
@@ -106,7 +106,7 @@ class Rprop(Optimizer):  # noqa: D101
                         grad, complex(group["lr"], group["lr"])
                     )
                 else:
-                    state["step_size"] = torch.full_like(grad, group["lr"])
+                    state["step_size"] = torch.full_like(grad, _to_scalar(group["lr"]))
 
             prevs.append(state["prev"])
             step_sizes.append(state["step_size"])
@@ -130,11 +130,11 @@ class Rprop(Optimizer):  # noqa: D101
                 loss = closure()
 
         for group in self.param_groups:
-            params: List[Tensor] = []
-            grads: List[Tensor] = []
-            prevs: List[Tensor] = []
-            step_sizes: List[Tensor] = []
-            state_steps: List[Tensor] = []
+            params: list[Tensor] = []
+            grads: list[Tensor] = []
+            prevs: list[Tensor] = []
+            step_sizes: list[Tensor] = []
+            state_steps: list[Tensor] = []
 
             etaminus, etaplus = group["etas"]
             step_size_min, step_size_max = group["step_sizes"]
@@ -220,11 +220,11 @@ Rprop.__doc__ = (
 
 
 def _single_tensor_rprop(
-    params: List[Tensor],
-    grads: List[Tensor],
-    prevs: List[Tensor],
-    step_sizes: List[Tensor],
-    state_steps: List[Tensor],
+    params: list[Tensor],
+    grads: list[Tensor],
+    prevs: list[Tensor],
+    step_sizes: list[Tensor],
+    state_steps: list[Tensor],
     *,
     step_size_min: float,
     step_size_max: float,
@@ -243,7 +243,7 @@ def _single_tensor_rprop(
         step = state_steps[i]
 
         # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
-        if not torch._utils.is_compiling() and capturable:
+        if not torch.compiler.is_compiling() and capturable:
             capturable_supported_devices = _get_capturable_supported_devices()
             assert (
                 param.device.type == step.device.type
@@ -288,11 +288,11 @@ def _single_tensor_rprop(
 
 
 def _multi_tensor_rprop(
-    params: List[Tensor],
-    grads: List[Tensor],
-    prevs: List[Tensor],
-    step_sizes: List[Tensor],
-    state_steps: List[Tensor],
+    params: list[Tensor],
+    grads: list[Tensor],
+    prevs: list[Tensor],
+    step_sizes: list[Tensor],
+    state_steps: list[Tensor],
     *,
     step_size_min: float,
     step_size_max: float,
@@ -309,7 +309,7 @@ def _multi_tensor_rprop(
     assert not differentiable, "_foreach ops don't support autograd"
 
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
-    if not torch._utils.is_compiling() and capturable:
+    if not torch.compiler.is_compiling() and capturable:
         capturable_supported_devices = _get_capturable_supported_devices()
         assert all(
             p.device.type == step.device.type
@@ -327,17 +327,17 @@ def _multi_tensor_rprop(
         grouped_step_sizes_,
         grouped_state_steps_,
     ), _ in grouped_tensors.values():
-        grouped_params = cast(List[Tensor], grouped_params_)
-        grouped_grads = cast(List[Tensor], grouped_grads_)
-        grouped_prevs = cast(List[Tensor], grouped_prevs_)
-        grouped_step_sizes = cast(List[Tensor], grouped_step_sizes_)
-        grouped_state_steps = cast(List[Tensor], grouped_state_steps_)
+        grouped_params = cast(list[Tensor], grouped_params_)
+        grouped_grads = cast(list[Tensor], grouped_grads_)
+        grouped_prevs = cast(list[Tensor], grouped_prevs_)
+        grouped_step_sizes = cast(list[Tensor], grouped_step_sizes_)
+        grouped_state_steps = cast(list[Tensor], grouped_state_steps_)
 
         # Update steps
         # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
         # and over. 1 will then be wrapped into a Tensor over and over again, which is slower than if we just
         # wrapped it once now. The alpha is required to assure we go to the right overload.
-        if not torch._utils.is_compiling() and grouped_state_steps[0].is_cpu:
+        if not torch.compiler.is_compiling() and grouped_state_steps[0].is_cpu:
             torch._foreach_add_(
                 grouped_state_steps, torch.tensor(1.0, device="cpu"), alpha=1.0
             )
@@ -403,11 +403,11 @@ def _multi_tensor_rprop(
 
 @_disable_dynamo_if_unsupported(single_tensor_fn=_single_tensor_rprop)
 def rprop(
-    params: List[Tensor],
-    grads: List[Tensor],
-    prevs: List[Tensor],
-    step_sizes: List[Tensor],
-    state_steps: List[Tensor],
+    params: list[Tensor],
+    grads: list[Tensor],
+    prevs: list[Tensor],
+    step_sizes: list[Tensor],
+    state_steps: list[Tensor],
     # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
     # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
     foreach: Optional[bool] = None,
@@ -427,7 +427,7 @@ def rprop(
     """
     # this check is slow during compilation, so we skip it
     # if it's strictly needed we can add this check back in dynamo
-    if not torch._utils.is_compiling() and not all(
+    if not torch.compiler.is_compiling() and not all(
         isinstance(t, torch.Tensor) for t in state_steps
     ):
         raise RuntimeError(

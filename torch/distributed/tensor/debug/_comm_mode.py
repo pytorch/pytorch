@@ -4,7 +4,7 @@ import json
 import re
 import weakref
 from collections import defaultdict
-from typing import Any, Dict
+from typing import Any
 
 import torch
 import torch.nn
@@ -226,7 +226,7 @@ class CommDebugMode(TorchDispatchMode):
     functional collectives within its context. It does this using a
     ``TorchDispatchMode``.
 
-    .. note: Not all collectives are supported yet.
+    .. note:: Not all collectives are supported yet.
 
     Example usage
 
@@ -240,7 +240,7 @@ class CommDebugMode(TorchDispatchMode):
     """
 
     def __init__(self):
-        self.comm_counts: Dict[Any, int] = defaultdict(int)
+        self.comm_counts: dict[Any, int] = defaultdict(int)
         self.comm_module_counts = {}
         self.comm_module_operation_counts = {}
         self.comm_registry = set()
@@ -283,9 +283,9 @@ class CommDebugMode(TorchDispatchMode):
                 "module_type" in self.advanced_module_tracker.module_helper_dict[fqn]
                 and include_module_data
             ):
-                json_dict[
-                    "module_type"
-                ] = self.advanced_module_tracker.module_helper_dict[fqn]["module_type"]
+                json_dict["module_type"] = (
+                    self.advanced_module_tracker.module_helper_dict[fqn]["module_type"]
+                )
 
                 if "parameters" in self.advanced_module_tracker.module_helper_dict[fqn]:
                     for (
@@ -392,7 +392,7 @@ class CommDebugMode(TorchDispatchMode):
 
             return json_dict
 
-        json_dict: Dict[str, Any] = {}
+        json_dict: dict[str, Any] = {}
         add_json_information(json_dict, "Global")
 
         # converts dictonary into json file
@@ -567,7 +567,7 @@ class CommDebugMode(TorchDispatchMode):
     def get_total_counts(self) -> int:
         return sum(self.comm_counts.values())
 
-    def get_comm_counts(self) -> Dict[Any, int]:
+    def get_comm_counts(self) -> dict[Any, int]:
         """Returns the communication counts as a dictionary.
 
         Returns:
@@ -575,10 +575,10 @@ class CommDebugMode(TorchDispatchMode):
         """
         return self.comm_counts
 
-    def get_parameter_info(self) -> Dict[str, Dict[str, Any]]:
+    def get_parameter_info(self) -> dict[str, dict[str, Any]]:
         return self.advanced_module_tracker.module_parameters_dict
 
-    def get_sharding_info(self) -> Dict[str, Dict[str, Any]]:
+    def get_sharding_info(self) -> dict[str, dict[str, Any]]:
         return self.advanced_module_tracker.sharding_dict
 
     def __enter__(self):
@@ -659,9 +659,9 @@ class CommDebugMode(TorchDispatchMode):
         operation_dict["is_bw"] = self.advanced_module_tracker.is_bw
 
         # tracks if the operation is part of activation checkpointing
-        operation_dict[
-            "is_activation_checkpointing"
-        ] = self.advanced_module_tracker.activation_checkpointing
+        operation_dict["is_activation_checkpointing"] = (
+            self.advanced_module_tracker.activation_checkpointing
+        )
 
         if any(t == DTensor for t in types):
             for ele in args:

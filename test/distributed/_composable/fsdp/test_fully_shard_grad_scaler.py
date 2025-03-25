@@ -4,8 +4,8 @@ import copy
 import torch
 import torch.nn as nn
 from torch.amp.grad_scaler import GradScaler, OptState
-from torch.distributed._composable.fsdp import fully_shard
 from torch.distributed._tensor import init_device_mesh
+from torch.distributed.fsdp import fully_shard
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,

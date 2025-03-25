@@ -2,10 +2,14 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional, Sequence
+from typing import Optional, TYPE_CHECKING
 
 import torch
 from torch import _prims, Tensor
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 log = logging.getLogger(__name__)
@@ -49,6 +53,11 @@ def eager_force_stride(input_tensor: Tensor, stride) -> Tensor:
     return new_tensor
 
 
+def eager_prepare_softmax(x: Tensor, dim: int) -> tuple[Tensor, Tensor]:
+    amax = torch.amax(x, dim, keepdim=True)
+    return amax, torch.sum(torch.exp(x - amax), dim, keepdim=True)
+
+
 # Custom prims used for handling randomness
 seed = make_prim(
     "inductor_seed(Device device) -> Tensor",
@@ -65,7 +74,7 @@ seeds = make_prim(
 lookup_seed = make_prim(
     # if inductor_lookup_seed changes, update partitioners.py
     "inductor_lookup_seed(Tensor seeds, int index) -> Tensor",
-    lambda seeds, index: seeds[index],
+    lambda seeds, index: seeds[index].clone(),
     doc="Extract a single seed from the result of inductor_seeds()",
 )
 # inductor_random() doesn't accept a dtype.
@@ -102,6 +111,12 @@ fma = make_prim(
     lambda a, b, c: (a * b) + c,
     doc="Fused multiply add: fma(a, b, c) -> (a * b) + c without rounding after the multiplication",
 )
+prepare_softmax_online = make_prim(
+    "prepare_softmax_online(Tensor a, int dim) -> (Tensor, Tensor)",
+    eager_prepare_softmax,
+    return_type=(_prims.RETURN_TYPE.NEW, _prims.RETURN_TYPE.NEW),
+    doc="Prepare the softmax by computing the max and sum.",
+)
 
 
 def _low_memory_max_pool2d_with_offsets_aten(
@@ -137,8 +152,8 @@ def _low_memory_max_pool2d_with_offsets_aten(
     ih = indices // input_width
     iw = indices - (ih * input_width)
 
-    h_inc = ih - hbase
-    w_inc = iw - wbase
+    h_inc = (ih - hbase) // dilation[0]
+    w_inc = (iw - wbase) // dilation[1]
 
     offsets = h_inc * kernel_width + w_inc
 
@@ -146,7 +161,12 @@ def _low_memory_max_pool2d_with_offsets_aten(
 
 
 def _low_memory_max_pool2d_offsets_to_indices_aten(
-    offsets, kernel_width, input_width, stride, padding
+    offsets,
+    kernel_width,
+    input_width,
+    stride,
+    padding,
+    dilation,
 ):
     offsets = offsets.to(torch.int64)
     h_inc = offsets // kernel_width
@@ -167,8 +187,8 @@ def _low_memory_max_pool2d_offsets_to_indices_aten(
     hbase = bh * stride[0] - padding[0]
     wbase = bw * stride[1] - padding[1]
 
-    ih = hbase + h_inc
-    iw = wbase + w_inc
+    ih = hbase + h_inc * dilation[0]
+    iw = wbase + w_inc * dilation[1]
     return ih * input_width + iw
 
 
@@ -180,7 +200,7 @@ _low_memory_max_pool2d_with_offsets = make_prim(
 )
 
 _low_memory_max_pool2d_offsets_to_indices = make_prim(
-    "_low_memory_max_pool2d_offsets_to_indices(Tensor self, SymInt kernel_w, SymInt input_w, SymInt[2] stride, SymInt[2] padding) -> Tensor",  # noqa: B950
+    "_low_memory_max_pool2d_offsets_to_indices(Tensor self, SymInt kernel_w, SymInt input_w, SymInt[2] stride, SymInt[2] padding, SymInt[2] dilation) -> Tensor",  # noqa: B950
     _low_memory_max_pool2d_offsets_to_indices_aten,
     doc="Convert small int offsets to regular indices.",
 )

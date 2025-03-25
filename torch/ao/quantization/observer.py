@@ -1,5 +1,8 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
+# temporarily skip RUF for this file for now, we can re-enable
+# after move the affine quantization related things to torchao
+# noqa: RUF
 """
 This module implements observers which are used to collect statistics about
 the values observed during calibration (PTQ) or training (QAT).
@@ -10,7 +13,7 @@ import warnings
 from abc import ABCMeta, abstractmethod
 from collections import OrderedDict
 from functools import partial
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional
 
 import torch
 import torch.nn as nn
@@ -54,6 +57,18 @@ __all__ = [
     "RecordingObserver",
     "ReuseInputObserver",
     "UniformQuantizationObserverBase",
+    "AffineQuantizedObserverBase",
+    "Granularity",
+    "MappingType",
+    "PerAxis",
+    "PerBlock",
+    "PerGroup",
+    "PerRow",
+    "PerTensor",
+    "PerToken",
+    "TorchAODType",
+    "ZeroPointDomain",
+    "get_block_size",
 ]
 
 
@@ -146,7 +161,7 @@ class ObserverBase(ABC, nn.Module):
         or static quantization
     """
 
-    def __init__(self, dtype, is_dynamic=False):
+    def __init__(self, dtype, is_dynamic: bool = False):
         super().__init__()
         self.dtype = dtype
         self.is_dynamic = is_dynamic
@@ -324,7 +339,7 @@ class UniformQuantizationObserverBase(ObserverBase):
     @torch.jit.export
     def _calculate_qparams(
         self, min_val: torch.Tensor, max_val: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         r"""Calculates the quantization parameters, given min and max
         value tensors. Works for both per tensor and per channel cases
 
@@ -774,13 +789,13 @@ class PerChannelMinMaxObserver(UniformQuantizationObserverBase):
 
     def _load_from_state_dict(
         self,
-        state_dict: Dict[str, Any],
+        state_dict: dict[str, Any],
         prefix: str,
-        local_metadata: Dict[str, torch.Tensor],
+        local_metadata: dict[str, torch.Tensor],
         strict: bool,
-        missing_keys: List[str],
-        unexpected_keys: List[str],
-        error_msgs: List[str],
+        missing_keys: list[str],
+        unexpected_keys: list[str],
+        error_msgs: list[str],
     ):
         version = local_metadata.get("version", None)
         if version is not None and version < 3:
@@ -834,13 +849,13 @@ class PerChannelMinMaxObserver(UniformQuantizationObserverBase):
 
     def _load_from_state_dict_script(
         self,
-        state_dict: Dict[str, Any],
+        state_dict: dict[str, Any],
         prefix: str,
-        local_metadata: Dict[str, torch.Tensor],
+        local_metadata: dict[str, torch.Tensor],
         strict: bool,
-        missing_keys: List[str],
-        unexpected_keys: List[str],
-        error_msgs: List[str],
+        missing_keys: list[str],
+        unexpected_keys: list[str],
+        error_msgs: list[str],
     ):
         self._load_from_state_dict(
             state_dict,
@@ -1098,7 +1113,7 @@ class HistogramObserver(UniformQuantizationObserverBase):
 
         return norm.sum().item()
 
-    def _non_linear_param_search(self) -> Tuple[torch.Tensor, torch.Tensor]:
+    def _non_linear_param_search(self) -> tuple[torch.Tensor, torch.Tensor]:
         r"""Non-linear parameter search.
 
         An approximation for L2 error minimization for selecting min/max.
@@ -1507,10 +1522,10 @@ class RecordingObserver(ObserverBase):
         qscheme: Quantization scheme to be used
         reduce_range: Reduces the range of the quantized data type by 1 bit
     """
-    __annotations__ = {"tensor_val": List[Optional[torch.Tensor]]}
+    __annotations__ = {"tensor_val": list[Optional[torch.Tensor]]}
 
     def __init__(self, dtype=torch.quint8):
-        super().__init__(dtype=dtype, is_dynamic=False)  # type: ignore[call-arg]
+        super().__init__(dtype=dtype, is_dynamic=False)
         self.tensor_val = []
 
     def forward(self, x):
@@ -1584,6 +1599,258 @@ class ReuseInputObserver(ObserverBase):
         )
 
 
+"""
+# Experimental Affine Quantization Feature START
+We plan to merge the following with torchao repo after we move pt2e flow to torchao
+copied from https://github.com/pytorch/ao/blob/main/torchao/quantization/observer.py
+"""
+from dataclasses import dataclass
+from enum import auto, Enum
+
+
+class MappingType(Enum):
+    """How floating point number is mapped to integer number
+
+    symmetric mapping means floating point range is symmetrically mapped to integer range
+    let's say we have floating point range (-3.5, 10.2) and integer range (-8, 7) (int4)
+    we'll use (-10.2, 10.2) as the range for floating point and map that to (-8, 7)
+    e.g. scale = (10.2 - (-10.2)) / (7 - (-8))
+
+    SYMMETRIC_NO_CLIPPING_ERR is a variant of symmetric mapping, where the scale is the max of smin
+    and smax, where smin = min_val_neg / quant_min, and smax = max_val_pos / quant_max. By calculating
+    smin and smax individually, there can be less round error on negative values, and no out-of-range
+    of all floating point values.
+
+    asymmetric mapping means we just directly map the floating point range to integer range,
+    for the above example, we will map (-3.5, 10.2) to (-8, 7) and calculate quantization parameter
+    based on this mapping
+    e.g. scale = (10.2 - (-3.5)) / (7 - (-8))
+    """
+
+    SYMMETRIC = auto()
+    SYMMETRIC_NO_CLIPPING_ERR = auto()
+    ASYMMETRIC = auto()
+
+
+class ZeroPointDomain(Enum):
+    """Enum that indicate whether zero_point is in integer domain or floating point domain
+
+    integer domain: quantized_val = (float_val / scale) (integer) + zero_point (integer)
+    float domain: quantized_val = (float_val - (zero_point (float) - scale * mid_point)) / scale
+    none domain: quantized_val = (float_val / scale)
+    """
+
+    INT = auto()
+    FLOAT = auto()
+    NONE = auto()
+
+
+class TorchAODType(Enum):
+    """
+    Placeholder for dtypes that do not exist in PyTorch core yet.
+    """
+
+    # torch.int1 to torch.int7 will be added to PyTorch 2.6
+    # These will remain here for BC with older PyTorch versions
+    INT1 = auto()
+    INT2 = auto()
+    INT3 = auto()
+    INT4 = auto()
+    INT5 = auto()
+    INT6 = auto()
+    INT7 = auto()
+
+
+@dataclass(frozen=True)
+class Granularity:
+    """
+    Base class for representing the granularity of quantization.
+
+    This class serves as a parent for specific granularity types used in
+    quantization operations, such as per-tensor or per-axis quantization.
+    """
+
+
+@dataclass(frozen=True)
+class PerBlock(Granularity):
+    """
+    Represents per-block granularity in quantization. See
+    :func:`~torchao.quantization.quant_primitives.quantize_affine` for docs for
+    `block_size`
+
+    Attributes:
+        block_size (Tuple[int, ...]): The size of each quantization group
+    """
+
+    block_size: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class PerTensor(Granularity):
+    """
+    Represents per-tensor granularity in quantization.
+
+    This granularity type calculates the quantization parameters
+    based off the entire tensor.
+
+    """
+
+
+@dataclass(frozen=True)
+class PerAxis(Granularity):
+    """
+    Represents per-axis granularity in quantization.
+
+    This granularity type calculates different quantization parameters
+    along a specified axis of the tensor.
+
+    For example if the input tensor is shape [8, 16] and axis=0, then
+    the quantization parameters are calculated for each row of the tensor.
+    Giving a total of 8 quantization parameters.
+
+    Attributes:
+        axis (int): The axis along which reduction is performed.
+    """
+
+    axis: int
+
+
+@dataclass(frozen=True)
+class PerGroup(Granularity):
+    """
+    Represents per-channel group granularity in quantization.
+
+    This granularity type calculates different quantization parameters
+    for each group of <group_size> elements.
+
+    For example if the input tensor is shape [8, 16], and the group size is 4, then
+    the input tensor is reshaped to [64, 4]
+    quantization parameters are calculated for each group of 4 elements,
+    giving a total of 64 quantization parameters.
+
+    Attributes:
+        group_size (int): The size of each quantization group
+
+    """
+
+    group_size: int
+
+
+class PerRow(Granularity):
+    """
+    Represents row-wise granularity in quantization.
+
+    This is a special case of per-axis quantization and is unique to Float8 matmuls
+    where the input is quantized with a block_size of (1, ..., input.shape[-1]). And the weight
+    is quantized with a block_size of (1, weight.shape[1]).
+    """
+
+
+class PerToken(Granularity):
+    """
+    Represents per-token granularity in quantization.
+
+    This granularity type calculates a different set of quantization parameters
+    for each token, which is represented as the last dimension of the tensor.
+
+    For example, if the input tensor has shape [2, 3, 4], then there are 6 tokens
+    with 4 elements each, and we will calculate 6 sets of quantization parameters,
+    one for each token.
+
+    If the input tensor has only two dimensions, e.g. [8, 16], then this is
+    equivalent to `PerAxis(axis=0)`, which yields 8 sets of quantization parameters.
+    """
+
+
+def get_block_size(
+    input_shape: tuple[int, ...], granularity: Granularity
+) -> tuple[int, ...]:
+    """Get the block size based on the input shape and granularity type.
+
+    Args:
+        input_shape: The input tensor shape possibly more than 2 dimensions
+        granularity: The granularity type of the quantization
+    """
+    assert isinstance(
+        granularity, Granularity
+    ), "Please provide an instance of Granularity, not subclass of it"
+    if isinstance(granularity, PerTensor):
+        return input_shape
+    elif isinstance(granularity, PerAxis):
+        block_size = list(input_shape)
+        block_size[granularity.axis] = 1
+        return tuple(block_size)
+    elif isinstance(granularity, PerRow):
+        return (1,) * (len(input_shape) - 1) + (input_shape[-1],)
+    elif isinstance(granularity, PerGroup):
+        assert (
+            len(input_shape) == 2
+        ), f"Expecting input shape dim to be 2 for per group quantization, gotinput shape: {input_shape}"
+        return (1, granularity.group_size)
+    elif isinstance(granularity, PerToken):
+        block_size = list(input_shape)
+        block_size[-1] = input_shape[-1]
+        return tuple(block_size)
+    raise ValueError(f"Unsupported Granularity: {granularity}")
+
+
+class AffineQuantizedObserverBase(ABC, torch.nn.Module):
+    """Observer module for affine quantization (https://github.com/pytorch/ao/tree/main/torchao/quantization#affine-quantization)
+
+    Args:
+      `granularity` and `block_size`: The granularity of the quantization,
+        must specify at least one, if both are specified `block_size` takes precedence
+        Current supported granularity type are `PerTensor` and `PerAxis`
+      other args: please see `:class:torchao.dtypes.AffineQuantizedTensor`
+    """
+
+    with_args = classmethod(_with_args)
+
+    def __init__(
+        self,
+        mapping_type: MappingType,
+        target_dtype: torch.dtype,
+        granularity: Granularity,
+        quant_min: Optional[int] = None,
+        quant_max: Optional[int] = None,
+        eps: Optional[float] = None,
+        scale_dtype: Optional[torch.dtype] = None,
+        zero_point_dtype: Optional[torch.dtype] = None,
+        preserve_zero: bool = True,
+        zero_point_domain: Optional[ZeroPointDomain] = ZeroPointDomain.INT,
+        # there could be some extra args that's ignored
+        **kwargs,
+    ):
+        super().__init__()
+        assert granularity is not None, "granularity is None"
+
+        self.mapping_type = mapping_type
+        self.target_dtype = target_dtype
+        self.granularity = granularity
+        self.quant_min = quant_min
+        self.quant_max = quant_max
+        self.eps = eps
+        self.scale_dtype = scale_dtype
+        self.zero_point_dtype = zero_point_dtype
+        self.preserve_zero = preserve_zero
+        self.zero_point_domain = zero_point_domain
+        # populatd during forward
+        self.block_size = None
+        self.original_dtype = None
+
+    @abstractmethod
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        """forward function should take the input tensor
+        and updates internal stats and return the original input Tensor
+        """
+
+    @abstractmethod
+    def calculate_qparams(self) -> tuple[torch.Tensor, torch.Tensor]:
+        """Calculate quantization parameter based on the stats attached to the observer module
+        and returns a tuple of scale and zero_point Tensor
+        """
+
+
 def _is_observer_script_module(mod, obs_type_name):
     """Returns true if given mod is an instance of Observer script module."""
     if isinstance(mod, torch.jit.RecursiveScriptModule):
@@ -1594,10 +1861,17 @@ def _is_observer_script_module(mod, obs_type_name):
     return False
 
 
+# Experimental Affine Quantization Feature END
+
+
 def _is_activation_post_process(module):
     return isinstance(
         module,
-        (torch.ao.quantization.ObserverBase, torch.ao.quantization.FakeQuantizeBase),
+        (
+            torch.ao.quantization.ObserverBase,
+            torch.ao.quantization.FakeQuantizeBase,
+            AffineQuantizedObserverBase,
+        ),
     ) or _is_observer_script_module(module, "quantization.observer")
 
 
@@ -1636,8 +1910,8 @@ def load_observer_state_dict(mod, obs_dict):
     load the stats back into the model. The observer state_dict can be saved
     using torch.ao.quantization.get_observer_state_dict
     """
-    missing_keys: List[str] = []
-    unexpected_keys: List[str] = []
+    missing_keys: list[str] = []
+    unexpected_keys: list[str] = []
     for name, module in mod.named_modules():
         prefix = name + "."
         if _is_activation_post_process(module):

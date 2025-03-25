@@ -785,11 +785,6 @@ if(HAVE_SOVERSION)
 endif()
 torch_compile_options(torch_cpu)  # see cmake/public/utils.cmake
 
-# Ignore Wdeprecated-XXX errors from third-party libraries
-if(NOT MSVC)
-  set_source_files_properties(${PROJECT_SOURCE_DIR}/torch/csrc/distributed/c10d/socket.cpp PROPERTIES COMPILE_OPTIONS "-Wno-error=deprecated")
-endif()
-
 if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND NOT USE_IOS AND NOT USE_COREML_DELEGATE)
   target_compile_options_if_supported(torch_cpu "-Wmissing-prototypes")
   target_compile_options_if_supported(torch_cpu "-Werror=missing-prototypes")
@@ -985,7 +980,16 @@ elseif(USE_CUDA)
     target_compile_definitions(torch_cuda PRIVATE USE_UCC)
   endif()
   if(USE_FLASH_ATTENTION)
-    target_compile_definitions(torch_cuda PRIVATE USE_FLASH_ATTENTION)
+    target_compile_definitions(torch_cuda PRIVATE
+        USE_FLASH_ATTENTION
+        FLASHATTENTION_DISABLE_ALIBI    # Disable alibi attention as it's not currently used
+        FLASHATTENTION_DISABLE_SOFTCAP
+        FLASH_NAMESPACE=pytorch_flash
+        UNFUSE_FMA                      # Addressing issue #121558
+      )
+    target_include_directories(torch_cuda PRIVATE
+        ${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc/flash_attn/src/
+    )
   endif()
   if(USE_MEM_EFF_ATTENTION)
     target_compile_definitions(torch_cuda PRIVATE USE_MEM_EFF_ATTENTION)
@@ -1050,12 +1054,11 @@ endif()
 
 if(USE_XPU)
   list(APPEND Caffe2_XPU_SRCS ${GENERATED_CXX_TORCH_XPU})
+  list(APPEND Caffe2_XPU_SRCS ${TORCH_SRC_DIR}/csrc/inductor/aoti_torch/shim_xpu.cpp)
+  list(APPEND Caffe2_XPU_SRCS ${TORCH_SRC_DIR}/csrc/inductor/aoti_runner/model_container_runner_xpu.cpp)
   add_library(torch_xpu ${Caffe2_XPU_SRCS})
   torch_compile_options(torch_xpu)  # see cmake/public/utils.cmake
   target_compile_definitions(torch_xpu PRIVATE USE_XPU)
-  if(WIN32)
-    target_compile_options(torch_xpu PRIVATE /permissive-)
-  endif()
 
   # ATen XPU implementation
   set(TORCH_XPU_OPS_DIR ${TORCH_ROOT}/third_party/torch-xpu-ops)
@@ -1104,6 +1107,10 @@ if(USE_XPU)
     message(WARNING "Failed to include ATen XPU implementation target")
   else()
     target_link_libraries(torch_xpu PRIVATE torch_xpu_ops)
+    # USE_C10D_XCCL to decide if XCCL backend is enabled in torch-xpu-ops build.
+    if(USE_C10D_XCCL)
+      target_compile_definitions(torch_xpu PUBLIC USE_C10D_XCCL)
+    endif()
     if(MSVC)
       # Windows
       target_link_options(torch_xpu PRIVATE
@@ -1220,6 +1227,11 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
   set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/quantized/qlinear_unpack.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
 endif()
 
+if(USE_MKLDNN_ACL)
+  find_package(ACL REQUIRED)
+  target_include_directories(torch_cpu PRIVATE ${ACL_INCLUDE_DIRS})
+endif()
+
 target_include_directories(torch_cpu PRIVATE ${ATen_CPU_INCLUDE})
 
 target_include_directories(torch_cpu PRIVATE
@@ -1305,10 +1317,6 @@ if(BUILD_TEST)
   endif()
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-  include(../cmake/CheckAbi.cmake)
-endif()
-
 # CMake config for external projects.
 configure_file(
   ${PROJECT_SOURCE_DIR}/cmake/TorchConfigVersion.cmake.in
@@ -1372,10 +1380,19 @@ if(USE_ROCM)
     ${ROCM_SOURCE_DIR}/include/rccl/
     )
   if(USE_FLASH_ATTENTION)
-    target_compile_definitions(torch_hip PRIVATE USE_FLASH_ATTENTION)
+    target_compile_definitions(torch_hip PRIVATE
+        USE_FLASH_ATTENTION
+        FLASHATTENTION_DISABLE_ALIBI    # Disable alibi attention as it's not currently used
+        FLASHATTENTION_DISABLE_SOFTCAP
+        FLASH_NAMESPACE=pytorch_flash
+        UNFUSE_FMA                      # Addressing issue #121558
+      )
   endif()
   if(USE_MEM_EFF_ATTENTION)
     target_compile_definitions(torch_hip PRIVATE USE_MEM_EFF_ATTENTION)
+  endif()
+  if(USE_CK_FLASH_ATTENTION)
+    target_compile_definitions(torch_hip PRIVATE USE_CK_FLASH_ATTENTION)
   endif()
 endif()
 
@@ -1556,7 +1573,7 @@ if(USE_CUDA)
   # FIXME: If kineto is linked with CUPTI it pollutes torch_cpu with CUDA dependencies
   # Even worse, it never declares that it depends on cudart, but calls the API, see
   # https://github.com/pytorch/kineto/blob/aef2f5c0f15e3be52406ac0b885e8689de6bc9f6/libkineto/src/CudaDeviceProperties.cpp#L24
-  if(USE_KINETO AND NOT MSVC AND NOT LIBKINETO_NOCUPTI)
+  if(USE_KINETO AND NOT LIBKINETO_NOCUPTI)
     target_link_libraries(torch_cpu PRIVATE torch::cudart)
   endif()
   target_link_libraries(torch_cuda INTERFACE torch::cudart)
@@ -1758,10 +1775,7 @@ if(BUILD_TEST)
           endif()
         else()
           add_executable(${test_name}_${CPU_CAPABILITY} "${test_src}")
-          target_link_libraries(${test_name}_${CPU_CAPABILITY} torch_library gtest_main)
-          if(NOT CMAKE_SYSTEM_PROCESSOR STREQUAL "ARM64")
-            target_link_libraries(${test_name}_${CPU_CAPABILITY} sleef)
-          endif()
+          target_link_libraries(${test_name}_${CPU_CAPABILITY} torch_library sleef gtest_main)
         endif()
         target_include_directories(${test_name}_${CPU_CAPABILITY} PRIVATE $<INSTALL_INTERFACE:include>)
         target_include_directories(${test_name}_${CPU_CAPABILITY} PRIVATE $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>)
@@ -1787,7 +1801,7 @@ if(BUILD_TEST)
     target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE})
     add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
     if(INSTALL_TEST)
-        set_target_properties(${test_name} PROPERTIES INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${_rpath_portable_origin}/../lib")
+      set_target_properties(${test_name} PROPERTIES INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${_rpath_portable_origin}/../lib")
       install(TARGETS ${test_name} DESTINATION test)
       # Install PDB files for MSVC builds
       if(MSVC AND BUILD_SHARED_LIBS)
@@ -1830,7 +1844,7 @@ if(BUILD_TEST)
       target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE})
       add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
       if(INSTALL_TEST)
-      set_target_properties(${test_name} PROPERTIES INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${_rpath_portable_origin}/../lib")
+        set_target_properties(${test_name} PROPERTIES INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${_rpath_portable_origin}/../lib")
         install(TARGETS ${test_name} DESTINATION test)
         # Install PDB files for MSVC builds
         if(MSVC AND BUILD_SHARED_LIBS)

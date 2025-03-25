@@ -12,9 +12,10 @@ contain configuration options that affect only a specific part of the compiler:
 * :mod:`torch.fx.experimental.config`
 """
 
-import os
 import sys
 from typing import Optional
+
+from torch.utils._config_module import Config, install_config_module
 
 
 __all__ = [
@@ -28,7 +29,7 @@ __all__ = [
 # FB-internal note: you do NOT have to specify this explicitly specify this if
 # you run on MAST, we will automatically default this to
 # mast:MAST_JOB_NAME:MAST_JOB_VERSION.
-job_id: Optional[str] = os.environ.get("TORCH_COMPILE_JOB_ID", None)
+job_id: Optional[str] = Config(env_name_default="TORCH_COMPILE_JOB_ID", default=None)
 """
 Semantically, this should be an identifier that uniquely identifies, e.g., a
 training job.  You might have multiple attempts of the same job, e.g., if it was
@@ -56,7 +57,22 @@ consistent profiles across all ranks.
 """
 
 
-from torch.utils._config_module import install_config_module
+cache_key_tag: str = Config(env_name_default="TORCH_COMPILE_CACHE_KEY_TAG", default="")
+"""
+Tag to be included in the cache key generation for all torch compile caching.
+A common use case for such a tag is to break caches.
+"""
+
+dynamic_sources: str = Config(
+    env_name_default="TORCH_COMPILE_DYNAMIC_SOURCES", default=""
+)
+"""
+Comma delimited list of sources that should be marked as dynamic. Primarily useful for large
+models with graph breaks where you need intermediate tensors and ints to be marked dynamic.
+
+This whitelist is dominant over all other flags dynamic=False, force_nn_module_property_static_shapes
+and force_parameter_static_shapes.
+"""
 
 
 install_config_module(sys.modules[__name__])

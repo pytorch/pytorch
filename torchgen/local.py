@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import threading
 from contextlib import contextmanager
-from typing import Iterator
+from typing import TYPE_CHECKING
+
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 
 # Simple dynamic scoping implementation.  The name "parametrize" comes
@@ -36,8 +40,7 @@ def use_const_ref_for_mutable_tensors() -> bool:
 
 def use_ilistref_for_tensor_lists() -> bool:
     assert _locals.use_ilistref_for_tensor_lists is not None, (
-        "need to initialize local.use_ilistref_for_tensor_lists with "
-        "local.parametrize"
+        "need to initialize local.use_ilistref_for_tensor_lists with local.parametrize"
     )
     return _locals.use_ilistref_for_tensor_lists
 

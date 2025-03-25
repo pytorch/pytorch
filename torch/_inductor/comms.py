@@ -7,10 +7,11 @@ import logging
 import operator
 import sys
 from collections import defaultdict
-from typing import Dict, List, Set, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch.multiprocessing.reductions import StorageWeakRef
+from torch.utils._ordered_set import OrderedSet
 
 from . import config, ir
 from .dependencies import WeakDep
@@ -32,7 +33,7 @@ if TYPE_CHECKING:
     from .scheduler import BaseSchedulerNode
 
 
-def sink_waits(snodes: List[BaseSchedulerNode]) -> List[BaseSchedulerNode]:
+def sink_waits(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
     """
     Greedily schedules waits as late as possible.
     """
@@ -41,7 +42,7 @@ def sink_waits(snodes: List[BaseSchedulerNode]) -> List[BaseSchedulerNode]:
     )
 
 
-def raise_comms(snodes: List[BaseSchedulerNode]) -> List[BaseSchedulerNode]:
+def raise_comms(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
     """
     Greedily schedules comms as early as possible.
     """
@@ -51,8 +52,8 @@ def raise_comms(snodes: List[BaseSchedulerNode]) -> List[BaseSchedulerNode]:
 
 
 def reorder_compute_for_overlap(
-    snodes: List[BaseSchedulerNode],
-) -> List[BaseSchedulerNode]:
+    snodes: list[BaseSchedulerNode],
+) -> list[BaseSchedulerNode]:
     """
     This achieves the following overall scheduling procedure:
         Step 1: Given that we've currently scheduled comm N, we now schedule all compute nodes
@@ -70,11 +71,11 @@ def reorder_compute_for_overlap(
 
 
 def _schedule_for_comm(
-    snodes: List[BaseSchedulerNode],
+    snodes: list[BaseSchedulerNode],
     raise_comms: bool,
     sink_waits: bool,
     reorder_for_overlap: bool,
-) -> List[BaseSchedulerNode]:
+) -> list[BaseSchedulerNode]:
     """
     Schedule `snodes` for various comm optimization objectives.
 
@@ -148,12 +149,13 @@ def _schedule_for_comm(
         def __lt__(self, other):
             return self.score < other.score
 
-    unmet_deps: Dict[BaseSchedulerNode, Set[str]] = {
-        snode: {dep.name for dep in snode.unmet_dependencies} for snode in snodes
+    unmet_deps: dict[BaseSchedulerNode, OrderedSet[str]] = {
+        snode: OrderedSet(dep.name for dep in snode.unmet_dependencies)
+        for snode in snodes
     }
 
-    ready: List[Runnable] = []
-    buffer_users: Dict[str, Set[BaseSchedulerNode]] = defaultdict(set)
+    ready: list[Runnable] = []
+    buffer_users: dict[str, OrderedSet[BaseSchedulerNode]] = defaultdict(OrderedSet)
     snode_to_cost = {snode: estimate_op_runtime(snode) for snode in snodes}
 
     for snode, deps in unmet_deps.items():
@@ -217,32 +219,21 @@ def _schedule_for_comm(
 
     for snode, deps in unmet_deps.items():
         assert len(deps) == 0, (
-            "Detected unscheduled nodes. "
-            f"Nodes with unmet dependencies: {unmet_deps}"
+            f"Detected unscheduled nodes. Nodes with unmet dependencies: {unmet_deps}"
         )
     return scheduled
 
 
 def decide_global_ordering_of_comms(
-    nodes: List[BaseSchedulerNode], name_to_buf, name_to_fused_node
-) -> List[BaseSchedulerNode]:
+    nodes: list[BaseSchedulerNode], name_to_buf, name_to_fused_node
+) -> list[BaseSchedulerNode]:
     """
     Decide global ordering of comms, by just enforcing the ordering that's in the input graph
     (might not be the same ordering as the eager mode program).
     TODO: Come up with a better approach
     """
-    # If FSDP2 is used, we apply FSDP-specific passes.
-    if any(
-        is_fallback_op(
-            x.node,
-            {
-                torch.ops.fsdp.all_gather_copy_in.default,
-                torch.ops.fsdp.chunk_cat.default,
-            },
-        )
-        for x in nodes
-    ):
-        nodes = enforce_comm_ordering_for_fsdp(nodes, name_to_buf, name_to_fused_node)
+    if not torch.distributed.is_available():
+        return nodes
 
     comm_nodes = [n for n in nodes if contains_collective(n)]
 
@@ -311,8 +302,8 @@ def visualize_overlap(order):
 
 
 def reorder_compute_and_comm_for_overlap(
-    snodes: List[BaseSchedulerNode],
-) -> List[BaseSchedulerNode]:
+    snodes: list[BaseSchedulerNode],
+) -> list[BaseSchedulerNode]:
     order = snodes
 
     for p in config.reorder_for_compute_comm_overlap_passes:
@@ -362,9 +353,7 @@ def remove_fsdp2_unsharded_param_graph_input_usage(graph: torch.fx.Graph):
             node.op == "call_function"
             and node.target == torch.ops.inductor.resize_storage_bytes_.default
         ):
-            assert (
-                node.args[0].op == "placeholder"
-            ), f"""\
+            assert node.args[0].op == "placeholder", f"""\
 Resize can only operate on graph inputs, but got {node} which is resizing non-graph-input {node.args[0]}
 """
             graph_input = node.args[0]
@@ -416,9 +405,7 @@ Skipping `remove_fsdp2_unsharded_param_graph_input_usage` FX graph pass for that
         if node.op == "call_function" and node.target == torch.ops.fsdp.copy_.default:
             fsdp_copy_node = node
             unsharded_param = node.args[0]
-            assert (
-                unsharded_param.op == "placeholder"
-            ), f"""
+            assert unsharded_param.op == "placeholder", f"""
 Assumed all FSDP2 `unsharded_param`s to be graph input, but it's not true!
 Offending node: {unsharded_param}. Graph: {graph}
 """
@@ -442,14 +429,18 @@ Offending node: {unsharded_param}. Graph: {graph}
             if isinstance(node.target, torch._ops.OpOverload)
             else []
         )
-        mutated_node_arg_storages = {
-            StorageWeakRef(node.args[i].meta["val"].untyped_storage())
-            for i in mutated_arg_idxes
-        }
-        storages_of_unsharded_params = {
-            StorageWeakRef(unsharded_param.meta["val"].untyped_storage())
-            for unsharded_param in unsharded_params
-        }
+        mutated_node_arg_storages = OrderedSet(
+            [
+                StorageWeakRef(node.args[i].meta["val"].untyped_storage())
+                for i in mutated_arg_idxes
+            ]
+        )
+        storages_of_unsharded_params = OrderedSet(
+            [
+                StorageWeakRef(unsharded_param.meta["val"].untyped_storage())
+                for unsharded_param in unsharded_params
+            ]
+        )
         return len(mutated_node_arg_storages & storages_of_unsharded_params) > 0
 
     # Check no user mutation on any unsharded_param
@@ -536,7 +527,7 @@ Graph: {graph}
 
 def reinplace_fsdp_all_gather(graph: torch.fx.Graph) -> None:
     try:
-        import torch.distributed._composable.fsdp._fsdp_collectives
+        import torch.distributed.fsdp._fully_shard._fsdp_collectives
 
         assert torch.distributed.is_available()
         # Assert existence of these ops
@@ -657,14 +648,14 @@ def get_op_idx(snode):
 
 
 def enforce_comm_ordering_for_fsdp(
-    snodes: List[torch._inductor.scheduler.BaseSchedulerNode],
-    name_to_buf: Dict[str, torch._inductor.scheduler.SchedulerBuffer],
-    name_to_fused_node: Dict[str, BaseSchedulerNode],
-) -> List[torch._inductor.scheduler.BaseSchedulerNode]:
+    snodes: list[torch._inductor.scheduler.BaseSchedulerNode],
+    name_to_buf: dict[str, torch._inductor.scheduler.SchedulerBuffer],
+    name_to_fused_node: dict[str, BaseSchedulerNode],
+) -> list[torch._inductor.scheduler.BaseSchedulerNode]:
     from . import scheduler
 
     new_order: list[BaseSchedulerNode] = []
-    scheduled = set()
+    scheduled = OrderedSet[Any]()
     ag_exists = False
     rs_exists = False
     ag_grouped_node_to_wait_grouped_node = {}
@@ -691,7 +682,7 @@ def enforce_comm_ordering_for_fsdp(
         ):
             ag_exists = True
             ag_snode = snode
-            ag_related_snode_set: set[scheduler.BaseSchedulerNode] = set()
+            ag_related_snode_set: OrderedSet[scheduler.BaseSchedulerNode] = OrderedSet()
 
             # Find the "cast + copy_in + getitem + all_gather" code block
             find_recursive_deps_of_node(
@@ -702,11 +693,13 @@ def enforce_comm_ordering_for_fsdp(
             )
 
             # Find the "all_gather + all_gather_wait_tensor + copy_out" code block
-            allowed_ops = {
-                torch.ops._c10d_functional.all_gather_into_tensor_out.default,
-                torch.ops._c10d_functional.wait_tensor.default,
-                torch.ops.fsdp.split_with_sizes_copy.default,
-            }
+            allowed_ops = OrderedSet(
+                [
+                    torch.ops._c10d_functional.all_gather_into_tensor_out.default,
+                    torch.ops._c10d_functional.wait_tensor.default,
+                    torch.ops.fsdp.split_with_sizes_copy.default,
+                ]
+            )
             find_recursive_users_of_node(
                 ag_snode,
                 ag_related_snode_set,
@@ -762,7 +755,7 @@ def enforce_comm_ordering_for_fsdp(
             rs_snode = snode
 
             # Find the "reduce_scatter copy-in + reduce_scatter comm + reduce_scatter wait" code block
-            rs_related_snode_set: set[scheduler.BaseSchedulerNode] = set()
+            rs_related_snode_set: OrderedSet[scheduler.BaseSchedulerNode] = OrderedSet()
             find_recursive_users_of_node(
                 rs_snode,
                 rs_related_snode_set,

@@ -7,27 +7,29 @@ namespace torch::inductor {
 // We provide NO BC guarantee for these APIs
 AOTIModelContainerRunnerCpu::AOTIModelContainerRunnerCpu(
     const std::string& model_so_path,
-    size_t num_models)
-    : AOTIModelContainerRunner(model_so_path, num_models, "cpu", "") {}
+    size_t num_models,
+    bool run_single_threaded)
+    : AOTIModelContainerRunner(
+          model_so_path,
+          num_models,
+          "cpu",
+          "",
+          run_single_threaded) {}
 
 AOTIModelContainerRunnerCpu::~AOTIModelContainerRunnerCpu() = default;
-
-std::vector<at::Tensor> AOTIModelContainerRunnerCpu::run(
-    const std::vector<at::Tensor>& inputs) {
-  return AOTIModelContainerRunner::run(inputs);
-}
 
 namespace {
 std::unique_ptr<AOTIModelContainerRunner> create_aoti_runner_cpu(
     const std::string& model_so_path,
     size_t num_models,
     const std::string& device_str,
-    const std::string& cubin_dir) {
+    const std::string& cubin_dir,
+    const bool run_single_threaded) {
   if (device_str != "cpu") {
     throw std::runtime_error("Incorrect device passed to aoti_runner_cpu");
   }
   return std::make_unique<AOTIModelContainerRunnerCpu>(
-      model_so_path, num_models);
+      model_so_path, num_models, run_single_threaded);
 }
 } // namespace
 

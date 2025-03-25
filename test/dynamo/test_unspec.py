@@ -11,6 +11,7 @@ import torch._dynamo.testing
 import torch.nn.functional as F
 from torch._dynamo.comptime import comptime
 from torch._dynamo.testing import CompileCounter, CompileCounterWithBackend, same
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import skipIfWindows
 from torch.testing._internal.logging_utils import logs_to_string
 
@@ -44,7 +45,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         z = np.int64(12)
         res1 = fn(x, y, z)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         res2 = opt_fn(x, y, z)
         self.assertEqual(res1, res2)
 
@@ -55,7 +56,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
 
         x = torch.tensor([[1.0, 2.0], [3.0, 4.0]], dtype=torch.float64)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         for i in range(10):
             opt_fn(x, np.int64(i))
         self.assertEqual(cnts.frame_count, 1)
@@ -72,7 +73,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         z = torch.tensor([[1.0, 2.0], [3.0, 4.0]], dtype=torch.float64)
         res1 = fn(x, y, z)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         res2 = opt_fn(x, y, z)
         self.assertTrue(same(res1, res2, relax_numpy_equality=True))
 
@@ -86,7 +87,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         random.seed(1)
         res1 = fn(shape)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         random.seed(1)
         res2 = opt_fn(shape)
 
@@ -105,7 +106,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         random.seed(1)
         res1 = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         random.seed(1)
         res2 = opt_fn(x)
         self.assertTrue(same(res1, res2))
@@ -130,7 +131,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         random.seed(1)
         res1 = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         random.seed(1)
         res2 = opt_fn(x)
         self.assertTrue(same(res1, res2))
@@ -160,7 +161,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(4)
         random.seed(1)
         res1 = fn(x)
-        opt_fn = torch._dynamo.optimize("eager")(fn)
+        opt_fn = torch.compile(fn, backend="eager")
         random.seed(1)
         res2 = opt_fn(x)
         self.assertTrue(same(res1, res2))
@@ -262,7 +263,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         x = list(range(50))
         ref = fn(x, 48)  # 48 is unspecialized
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         res = opt_fn(x, 48)
         self.assertTrue(same(ref, res))
 
@@ -315,22 +316,6 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 1)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_builtin_functions_on_cuda(self):
-        def fn(x, scaler):
-            m = torch.nn.ReLU()
-            y = m(x) * scaler
-            return y
-
-        x = torch.randn([3, 6], device="cuda")
-        scaler = 0.23  # 0.23 is unspecialized
-        ref = fn(x, scaler)
-        cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
-        res = opt_fn(x, scaler)
-        self.assertTrue(same(ref, res))
-        self.assertEqual(ref.device, res.device)
-
     def test_unspec_float_precision(self):
         def fn(image, scale_factor):
             image = torch.nn.functional.interpolate(
@@ -348,7 +333,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         scale_factor = 1.873536229133606
         ref = fn(x, scale_factor)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         res = opt_fn(x, scale_factor)
         self.assertTrue(same(ref, res))
 
@@ -363,7 +348,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
                 return x - 1
 
         x = torch.rand(4)
-        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         for t in [np.float16, np.float32, np.float64]:
             y = t(1.23)
             ref = fn(x, y)
@@ -388,7 +373,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
             return x + torch.randn(x_shape)
 
         x = torch.randn(20)
-        opt_fn = torch._dynamo.optimize("eager")(fn)
+        opt_fn = torch.compile(fn, backend="eager")
         opt_fn(x)
 
     def test_isinstance_symint(self):
@@ -397,7 +382,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
             return x * 2
 
         x = torch.randn(20)
-        opt_fn = torch._dynamo.optimize("eager")(fn)
+        opt_fn = torch.compile(fn, backend="eager")
         opt_fn(x)
         y = torch.randn(30)
         torch._dynamo.mark_dynamic(y, 0)
@@ -409,7 +394,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(1)
         torch._dynamo.mark_dynamic(x, 0)
-        opt_fn = torch._dynamo.optimize("eager")(fn)
+        opt_fn = torch.compile(fn, backend="eager")
         # This will fail to compile a generic kernel, but we should not
         # complain about it (mark dynamic will try its best but 0/1
         # specialization is allowed)
@@ -562,7 +547,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
     def test_symbol_guard_limit_before_specialize(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
-        @torch._dynamo.optimize(cnts, dynamic=True)
+        @torch.compile(backend=cnts, dynamic=True)
         def fn(x):
             torch._check(x.size(0) != 3)
             torch._check(x.size(0) != 4)
@@ -641,30 +626,33 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         cf = torch.compile(backend=cnts, fullgraph=True)(f)
 
         x = torch.randn(3)
-        self.assertEqual(f(x, 3.0), cf(x, 3.0))
+        self.assertEqual(f(x, 2.0), cf(x, 2.0))
+        self.assertEqual(f(x, 3.0), cf(x, 3.0))  # automatic dynamic kicks in here
         self.assertEqual(f(x, 4.0), cf(x, 4.0))
-        self.assertExpectedInline(cnts.frame_count, """1""")  # no recompile
+        self.assertExpectedInline(cnts.frame_count, """2""")  # no recompile
         self.assertEqual(f(x, 5.0), cf(x, 5.0))
-        self.assertExpectedInline(cnts.frame_count, """2""")  # guard worked
+        self.assertExpectedInline(cnts.frame_count, """3""")  # guard worked
         self.assertEqual(f(x, math.nan), cf(x, math.nan))
-        self.assertExpectedInline(cnts.frame_count, """3""")  # nan always recompiles
+        self.assertExpectedInline(cnts.frame_count, """4""")  # nan always recompiles
 
     @torch._dynamo.config.patch(specialize_float=False, capture_scalar_outputs=True)
     def test_unspecialized_float_multiply_precision(self):
         dtypes = [torch.bfloat16, torch.float16, torch.float32, torch.float64]
-        for dtype in dtypes:
+        for i, dtype in enumerate(dtypes):
 
             def fn(x, y):
                 return x * y
 
             cnt = CompileCounterWithBackend("aot_eager")
-            fn_opt = torch._dynamo.optimize(cnt)(fn)
+            fn_opt = torch.compile(fn, backend=cnt)
             x = torch.randn(5, dtype=dtype, requires_grad=True)
             y1 = 1.00048828125
             y2 = 1.00048828126
+            y3 = 1.00048828127
 
             self.assertEqual(fn_opt(x, y1), fn(x, y1))
             self.assertEqual(fn_opt(x, y2), fn(x, y2))
+            self.assertEqual(fn_opt(x, y3), fn(x, y3))
             self.assertEqual(cnt.frame_count, 1)
 
     @torch._dynamo.config.patch(specialize_float=False, assume_static_by_default=False)
@@ -708,7 +696,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
             else:
                 return False
 
-        @torch._dynamo.optimize(cnts)
+        @torch.compile(backend=cnts)
         def fn(x):
             x = x + 1
             y = x.item()
@@ -832,6 +820,27 @@ def forward(self):
         o1_2 = opt_model(x2, 2)
         self.assertEqual(o1_2_ref, o1_2)
 
+
+class UnspecTestsDevice(torch._dynamo.test_case.TestCase):
+    def test_builtin_functions_on_device(self, device):
+        def fn(x, scaler):
+            m = torch.nn.ReLU()
+            m.to(device)
+            y = m(x) * scaler
+            return y
+
+        x = torch.randn([3, 6], device=device)
+        scaler = 0.23  # 0.23 is unspecialized
+        ref = fn(x, scaler)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        res = opt_fn(x, scaler)
+        self.assertTrue(same(ref, res))
+        self.assertEqual(ref.device, res.device)
+
+
+devices = ["cuda", "hpu"]
+instantiate_device_type_tests(UnspecTestsDevice, globals(), only_for=devices)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

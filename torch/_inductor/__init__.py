@@ -1,26 +1,25 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
+import io
 import logging
 import os
-from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Any, IO, Optional, TYPE_CHECKING, Union
 
 import torch._inductor.config
 import torch.fx
-import torch.utils._pytree as pytree
 
 
 if TYPE_CHECKING:
     from torch._inductor.utils import InputType
     from torch.export import ExportedProgram
-
+    from torch.types import FileLike
 
 __all__ = [
     "compile",
     "list_mode_options",
     "list_options",
     "cudagraph_mark_step_begin",
-    "_aoti_compile_and_package_inner",
 ]
 
 
@@ -29,8 +28,8 @@ log = logging.getLogger(__name__)
 
 def compile(
     gm: torch.fx.GraphModule,
-    example_inputs: List[InputType],
-    options: Optional[Dict[str, Any]] = None,
+    example_inputs: list[InputType],
+    options: Optional[dict[str, Any]] = None,
 ):
     """
     Compile a given FX graph with TorchInductor.  This allows compiling
@@ -54,28 +53,44 @@ def aoti_compile_and_package(
     _deprecated_unused_args=None,
     _deprecated_unused_kwargs=None,
     *,
-    package_path: Optional[str] = None,
-    inductor_configs: Optional[Dict[str, Any]] = None,
+    package_path: Optional[FileLike] = None,
+    inductor_configs: Optional[dict[str, Any]] = None,
 ) -> str:
     """
     Compiles the exported program with AOTInductor, and packages it into a .pt2
     artifact specified by the input package_path. To load the package, you can
-    call `torch._inductor.aoti_load_package(package_path)`.
+    call ``torch._inductor.aoti_load_package(package_path)``.
 
-    To compile and save multiple models into a single .pt2 artifact, you can do
+    An example usage is as follows:
+
+    .. code-block:: python
+
+        ep = torch.export.export(M(), ...)
+        aoti_file = torch._inductor.aoti_compile_and_package(
+            ep, package_path="my_package.pt2"
+        )
+        compiled_model = torch._inductor.aoti_load_package("my_package.pt2")
+
+    To compile and save multiple models into a single ``.pt2`` artifact, you can do
     the following:
-    ```
-    ep1 = torch.export.export(M1(), ...)
-    aoti_file1 = torch._inductor.aot_compile(ep1, ...)
-    ep2 = torch.export.export(M2(), ...)
-    aoti_file2 = torch._inductor.aot_compile(ep2, ...)
 
-    from torch._inductor.package import package_aoti, load_package
-    package_aoti("my_package.pt2", {"model1": aoti_file1, "model2": aoti_file2})
+    .. code-block:: python
 
-    compiled_model1 = load_package("my_package.pt2", "model1")
-    compiled_model2 = load_package("my_package.pt2", "model2")
-    ```
+        ep1 = torch.export.export(M1(), ...)
+        aoti_file1 = torch._inductor.aot_compile(
+            ep1, ..., options={"aot_inductor.package": True}
+        )
+        ep2 = torch.export.export(M2(), ...)
+        aoti_file2 = torch._inductor.aot_compile(
+            ep2, ..., options={"aot_inductor.package": True}
+        )
+
+        from torch._inductor.package import package_aoti, load_package
+
+        package_aoti("my_package.pt2", {"model1": aoti_file1, "model2": aoti_file2})
+
+        compiled_model1 = load_package("my_package.pt2", "model1")
+        compiled_model2 = load_package("my_package.pt2", "model2")
 
     Args:
         exported_program: An exported program created through a call from torch.export
@@ -86,6 +101,8 @@ def aoti_compile_and_package(
         Path to the generated artifact
     """
     from torch.export import ExportedProgram
+
+    from .debug import aot_inductor_minifier_wrapper
 
     if not isinstance(exported_program, ExportedProgram):
         raise ValueError("Only ExportedProgram is supported")
@@ -102,11 +119,23 @@ def aoti_compile_and_package(
             "as we can get this information from exported_program.example_inputs."
         )
 
-    assert package_path is None or package_path.endswith(
-        ".pt2"
-    ), f"Expect package path to end with .pt2, got {package_path}"
+    assert (
+        package_path is None
+        or (
+            isinstance(package_path, (io.IOBase, IO))
+            and package_path.writable()
+            and package_path.seekable()
+        )
+        or (
+            isinstance(package_path, (str, os.PathLike))
+            and os.fspath(package_path).endswith(".pt2")
+        )
+    ), (
+        f"Expect package path to be a file ending in .pt2, is None, or is a buffer. Instead got {package_path}"
+    )
 
     inductor_configs = inductor_configs or {}
+    inductor_configs["aot_inductor.package"] = True
 
     if inductor_configs.get("aot_inductor.output_path"):
         raise RuntimeError(
@@ -114,39 +143,51 @@ def aoti_compile_and_package(
             "of setting the aot_inductor.output_path config."
         )
 
-    args, kwargs = exported_program.example_inputs
-
     # a wrapper around aoti_compile_and_package_inner.
-    return aoti_compile_and_package_debug_wrapper(
+    return aot_inductor_minifier_wrapper(
+        _aoti_compile_and_package_inner,
         exported_program,
-        args,
-        kwargs,
         package_path=package_path,
         inductor_configs=inductor_configs,
     )
 
 
 def _aoti_compile_and_package_inner(
-    m,
-    args: Tuple[Any],
-    kwargs: Optional[Dict[str, Any]] = None,
+    gm: torch.nn.Module,
+    # flat_example_inputs: List[Any],
+    args: tuple[Any],
+    kwargs: Optional[dict[str, Any]] = None,
     *,
     load_and_run: bool = False,
-    package_path: Optional[str] = None,
-    inductor_configs: Optional[Dict[str, Any]] = None,
+    check_accuracy: Optional[str] = None,
+    package_path: Optional[Union[str, io.BytesIO]] = None,
+    inductor_configs: Optional[dict[str, Any]] = None,
 ):
     """
     See docstring for aoti_compile_and_package.
 
     If `load_and_run` is True, this function will load the compiled model and run it.
     This is for the minifier to check the correctness of the compiled model.
+
+    If `check_accuracy` is set, this function will check the accuracy of the compiled
+    model against gm. kwargs must be None if check_accuracy is set.
+    "strict_accuracy" means "we will minify any time we see anything that
+     diverges", whereas "accuracy" is more conservative, and will only minify if there
+     is a meaningful fp64 divergence
     """
-    from torch._inductor.package import package_aoti
 
-    inductor_configs = inductor_configs or {}
-    inductor_configs["aot_inductor.package"] = True
+    if check_accuracy:
+        assert kwargs is None or len(kwargs) == 0, (
+            "when checking for accuracy, the inputs must have been flattened and kwargs is None"
+        )
 
-    aoti_files = aot_compile(m, args, kwargs, options=inductor_configs)  # type: ignore[arg-type]
+    from .package import package_aoti
+
+    assert isinstance(gm, torch.fx.GraphModule)
+
+    kwargs = kwargs or {}
+
+    aoti_files = aot_compile(gm, args, kwargs, options=inductor_configs)
     assert isinstance(aoti_files, list)
 
     if package_path is None:
@@ -166,79 +207,63 @@ def _aoti_compile_and_package_inner(
     res = package_aoti(package_path, aoti_files)
     assert res == package_path
 
-    if load_and_run:
+    if load_and_run or check_accuracy:
         compiled_model = aoti_load_package(package_path)
-        aoti_result = compiled_model(*args)
+        if check_accuracy:
+            from torch._dynamo.debug_utils import AccuracyError, same_two_models
+
+            # This might look inverted but it's not.  strict_accuracy means "we will
+            # minify any time we see anything that diverges", whereas accuracy is more
+            # conservative, and will only minify if there is a meaningful fp64
+            # divergence
+            not_strict_accuracy = check_accuracy == "accuracy"
+            if not same_two_models(
+                gm,
+                compiled_model,
+                args,
+                only_fwd=True,
+                require_fp64=not_strict_accuracy,
+                ignore_non_fp=not_strict_accuracy,
+            ):
+                raise AccuracyError("Bad accuracy detected")
+        else:
+            compiled_model(*args, **kwargs)
+
     return package_path
 
 
-def aoti_compile_and_package_debug_wrapper(
-    exported_program,
-    args: Tuple[Any],
-    kwargs: Optional[Dict[str, Any]] = None,
-    *,
-    package_path: Optional[str] = None,
-    inductor_configs: Optional[Dict[str, Any]] = None,
-):
-    m = exported_program.module()
-    assert isinstance(m, torch.fx.GraphModule)
-
-    use_minifier = torch._inductor.config.aot_inductor.dump_aoti_minifier
-
-    try:
-        return _aoti_compile_and_package_inner(
-            m,
-            args,
-            kwargs,
-            load_and_run=use_minifier,
-            package_path=package_path,
-            inductor_configs=inductor_configs,
-        )
-
-    except Exception as e:
-        if use_minifier:
-            # TODO: check accuracy and re-direct to minifier
-            from torch._dynamo.repro.aoti import dump_to_minify
-
-            exported_program._example_inputs = (args, kwargs)
-
-            dump_to_minify(
-                exported_program,
-                "compile_fx_aot",
-                options=inductor_configs,
-            )
-
-        raise e
-
-
-def aoti_load_package(path: str) -> Any:  # type: ignore[type-arg]
+def aoti_load_package(path: FileLike, run_single_threaded: bool = False) -> Any:  # type: ignore[type-arg]
     """
     Loads the model from the PT2 package.
 
     If multiple models were packaged into the PT2, this will load the default
     model. To load a specific model, you can directly call the load API
-    ```
-    from torch._inductor.package import load_package
 
-    compiled_model1 = load_package("my_package.pt2", "model1")
-    compiled_model2 = load_package("my_package.pt2", "model2")
-    ```
+    .. code-block:: python
+
+        from torch._inductor.package import load_package
+
+        compiled_model1 = load_package("my_package.pt2", "model1")
+        compiled_model2 = load_package("my_package.pt2", "model2")
 
     Args:
         path: Path to the .pt2 package
+        run_single_threaded (bool): Whether the model should be run without
+            thread synchronization logic. This is useful to avoid conflicts with
+            CUDAGraphs.
     """
     from torch._inductor.package import load_package
 
-    return load_package(path)
+    return load_package(path, run_single_threaded=run_single_threaded)
 
 
 def aot_compile(
     gm: torch.fx.GraphModule,
-    args: Tuple[Any],
-    kwargs: Optional[Dict[str, Any]] = None,
+    args: tuple[Any],
+    kwargs: Optional[dict[str, Any]] = None,
     *,
-    options: Optional[Dict[str, Any]] = None,
-) -> Union[str, List[str]]:
+    options: Optional[dict[str, Any]] = None,
+) -> Union[str, list[str]]:
     """
     Ahead-of-time compile a given FX graph with TorchInductor into a shared library.
 
@@ -253,67 +278,10 @@ def aot_compile(
         AOTI if aot_inductor.package=True.
         TODO: make it return a list by default
     """
-    from .compile_fx import compile_fx_aot, graph_returns_tuple
+    from .compile_fx import _aoti_flatten_inputs, compile_fx_aot
 
-    assert graph_returns_tuple(gm), (
-        "Graph output must be a tuple(). This is so that we can avoid "
-        "pytree processing of the outputs. Please change the module to "
-        "have tuple outputs."
-    )
-
-    # We will serialize the pytree info into the .so as constant strings
-    in_spec = None
-    out_spec = None
-    if isinstance(gm.graph._codegen, torch.fx.graph._PyTreeCodeGen):
-        codegen = gm.graph._codegen
-        gm.graph._codegen = torch.fx.graph.CodeGen()
-        gm.recompile()
-
-        if codegen.pytree_info.in_spec is not None:
-            in_spec = codegen.pytree_info.in_spec
-        if codegen.pytree_info.out_spec is not None:
-            out_spec = codegen.pytree_info.out_spec
-
-    else:
-        if hasattr(gm, "_in_spec"):
-            in_spec = gm._in_spec
-        if hasattr(gm, "_out_spec"):
-            out_spec = gm._out_spec
-
-    serialized_in_spec = pytree.treespec_dumps(in_spec) if in_spec is not None else ""
-    serialized_out_spec = (
-        pytree.treespec_dumps(out_spec) if out_spec is not None else ""
-    )
-
-    flat_args_with_path, received_spec = pytree.tree_flatten_with_path(
-        (args, kwargs or {})
-    )
-
-    # Replace non-tensor (constant) inputs with Nones, since these are not being
-    # used anyways by the graph
-    flat_example_inputs = [
-        x[1] if isinstance(x[1], torch.Tensor) else None for x in flat_args_with_path
-    ]
-
-    if in_spec is not None and received_spec != in_spec:
-        raise ValueError(  # noqa: B904
-            "Trying to flatten user inputs with exported input tree spec: \n"
-            f"{in_spec}\n"
-            "but actually got inputs with tree spec of: \n"
-            f"{received_spec}"
-        )
-
-    options = (
-        {
-            "aot_inductor.serialized_in_spec": serialized_in_spec,
-            "aot_inductor.serialized_out_spec": serialized_out_spec,
-        }
-        if options is None
-        else {
-            **options,
-            "aot_inductor.serialized_in_spec": serialized_in_spec,
-            "aot_inductor.serialized_out_spec": serialized_out_spec,
-        }
+    flat_example_inputs, options = _aoti_flatten_inputs(
+        gm, args, kwargs, options=options
     )
 
     return compile_fx_aot(
@@ -325,7 +293,7 @@ def aot_compile(
 
 def list_mode_options(
     mode: Optional[str] = None, dynamic: Optional[bool] = None
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     r"""Returns a dictionary describing the optimizations that each of the available
     modes passed to `torch.compile()` performs.
 
@@ -338,7 +306,7 @@ def list_mode_options(
         >>> torch._inductor.list_mode_options()
     """
 
-    mode_options: Dict[str, Dict[str, bool]] = {
+    mode_options: dict[str, dict[str, bool]] = {
         "default": {},
         # enable cudagraphs
         "reduce-overhead": {
@@ -357,10 +325,15 @@ def list_mode_options(
             "coordinate_descent_tuning": True,
         },
     }
-    return mode_options[mode] if mode else mode_options  # type: ignore[return-value]
+    try:
+        return mode_options[mode] if mode else mode_options
+    except KeyError as e:
+        raise RuntimeError(
+            f"Unrecognized mode={mode}, should be one of: {', '.join(mode_options.keys())}"
+        ) from e
 
 
-def list_options() -> List[str]:
+def list_options() -> list[str]:
     r"""Returns a dictionary describing the optimizations and debug configurations
     that are available to `torch.compile()`.
 
@@ -373,7 +346,7 @@ def list_options() -> List[str]:
 
     from torch._inductor import config
 
-    current_config: Dict[str, Any] = config.get_config_copy()
+    current_config: dict[str, Any] = config.get_config_copy()
 
     return list(current_config.keys())
 

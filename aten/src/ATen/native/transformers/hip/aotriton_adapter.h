@@ -9,28 +9,6 @@
 // Common macros copied from cuda/mem_eff_attention/gemm_kernel_utils.h
 ////////////////////////////////////////////////////////////////////////////////
 
-#define CHECK_NOSPARSE_CONTIGUOUS_CUDA(TENSOR)                            \
-  TORCH_CHECK(TENSOR.is_cuda(), #TENSOR " must be a CUDA tensor");     \
-  TORCH_CHECK(!TENSOR.is_sparse(), #TENSOR " must be a dense tensor"); \
-  TORCH_CHECK(TENSOR.is_contiguous());
-
-#define CHECK_NOSPARSE_LASTCONTIGUOUS_CUDA(TENSOR)                        \
-  TORCH_CHECK(TENSOR.is_cuda(), #TENSOR " must be a CUDA tensor");     \
-  TORCH_CHECK(!TENSOR.is_sparse(), #TENSOR " must be a dense tensor"); \
-  TORCH_CHECK(                                                         \
-      TENSOR.stride(-1) == 1, #TENSOR ": last dimension must be contiguous");
-
-#define CHECK_ALIGNED_PTR(PTR, ALIGNMENT) \
-  TORCH_CHECK(                         \
-      uint64_t(PTR) % ALIGNMENT == 0, #PTR " is not correctly aligned")
-
-#define ASSIGN_CHECK_OVERFLOW(A, B)                                    \
-  {                                                                    \
-    A = B;                                                             \
-    TORCH_CHECK(                                                    \
-        B < std::numeric_limits<decltype(A)>::max(), #B " overflows"); \
-  }
-
 namespace sdp {
 
 namespace aotriton_adapter {
@@ -100,7 +78,7 @@ struct IntArrayRefCaster<TargetType, 4> {
 
 
 template<int Rank = 4>
-aotriton::TensorView<Rank> mk_aotensor(const at::Tensor& q, c10::string_view tensor_name)
+aotriton::TensorView<Rank> mk_aotensor(const at::Tensor& q, std::string_view tensor_name)
 {
   const auto strides = q.strides();
   int real_rank = strides.size();
@@ -124,7 +102,13 @@ inline aotriton::TensorView<0> mk_aoscalartensor(const at::Tensor& q)
 inline aotriton::TensorView<0> mk_philoxtensor(const int64_t* ptr)
 {
   return aotriton::TensorView<0>(reinterpret_cast<intptr_t>(ptr),
-                                 aotriton::DType::kUInt64);  // AOTriton excepts unsigned int64
+                                 aotriton::DType::kUInt64);  // AOTriton accepts unsigned int64
+}
+
+inline aotriton::TensorView<0> mk_atomictensor(const int32_t* ptr)
+{
+  return aotriton::TensorView<0>(reinterpret_cast<intptr_t>(ptr),
+                                 aotriton::DType::kInt32);
 }
 
 } // namespace aotriton_adapter

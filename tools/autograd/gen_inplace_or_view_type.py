@@ -575,7 +575,7 @@ def gen_formals(f: NativeFunction) -> str:
         # See Note [Plumbing Keys Through The Dispatcher] for details.
         ["c10::DispatchKeySet ks"]
         + [
-            f'{cpp.argument_type(a, binds="__placeholder__", symint=True).cpp_type()} {a.name}'
+            f"{cpp.argument_type(a, binds='__placeholder__', symint=True).cpp_type()} {a.name}"
             for a in f.func.schema_order_arguments()
         ]
     )
@@ -653,7 +653,6 @@ def gen_inplace_or_view_type(
 ) -> None:
     # NOTE: see Note [Sharded File] at the top of the VariableType.cpp
     # template regarding sharding of the generated files.
-    num_shards = 2
 
     fm = FileManager(install_dir=out, template_dir=template_path, dry_run=False)
     fm.write_sharded(

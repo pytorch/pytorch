@@ -399,16 +399,15 @@ class AHTrainRegressionTree(AHTrain):
 
         def dt_to_python(node, depth):
             indent = "    " * (depth + 1)
-            false_predicate = ""
             if tree_.feature[node] != -2:
                 name = feature_name[node]
                 threshold = tree_.threshold[node]
                 if name in dummy_col_2_col_val:
                     (orig_name, value) = dummy_col_2_col_val[name]
                     predicate = f"{indent}if str(context.get_value('{orig_name}')) != '{value}':"
-                    assert (
-                        threshold == 0.5
-                    ), f"expected threshold to be 0.5 but is {threshold}"
+                    assert threshold == 0.5, (
+                        f"expected threshold to be 0.5 but is {threshold}"
+                    )
                 else:
                     predicate = (
                         f"{indent}if context.get_value('{name}') <= {threshold}:"

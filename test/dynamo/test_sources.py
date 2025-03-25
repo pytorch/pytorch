@@ -72,7 +72,7 @@ class SourceTests(torch._dynamo.test_case.TestCase):
             lambda x, _: CausalLMOutputWithPast(),
         )
 
-        torch.export.export(Model(), ())
+        torch.export.export(Model(), (), strict=True)
 
 
 if __name__ == "__main__":

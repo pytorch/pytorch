@@ -8,7 +8,7 @@ import argparse
 import ast
 import os
 import sys
-from typing import Any, Dict, List, Set, Tuple  # type: ignore[attr-defined]
+from typing import Any  # type: ignore[attr-defined]
 
 from tools.flight_recorder.components.fr_logger import FlightRecorderLogger
 from tools.flight_recorder.components.types import (
@@ -16,6 +16,7 @@ from tools.flight_recorder.components.types import (
     Database,
     EntryState,
     Group,
+    MatchInfo,
     MatchState,
     Membership,
     NCCLCall,
@@ -57,12 +58,12 @@ Flat DB builder
 
 def build_groups_memberships(
     pg_config: Any,
-) -> Tuple[
-    List[Group],
-    Dict[Any, Group],
-    List[Membership],
-    Dict[str, Set[Any]],
-    Dict[Tuple[str, int], str],
+) -> tuple[
+    list[Group],
+    dict[Any, Group],
+    list[Membership],
+    dict[str, set[Any]],
+    dict[tuple[str, int], str],
 ]:
     """
     pg_config: {
@@ -116,22 +117,22 @@ def build_groups_memberships(
                 _memberships[pg_guid] = set(ranks)
             else:
                 # validation across ranks
-                assert (
-                    _groups[pg_guid].desc == desc
-                ), f"mismatch in desc {_groups[pg_guid].desc} vs {desc} for group {pg_guid}"
-                assert (
-                    _memberships[pg_guid] == set(ranks)
-                ), f"mismatch in membership for group {pg_guid} {_memberships[pg_guid]} vs {set(ranks)}"
+                assert _groups[pg_guid].desc == desc, (
+                    f"mismatch in desc {_groups[pg_guid].desc} vs {desc} for group {pg_guid}"
+                )
+                assert _memberships[pg_guid] == set(ranks), (
+                    f"mismatch in membership for group {pg_guid} {_memberships[pg_guid]} vs {set(ranks)}"
+                )
     return groups, _groups, memberships, _memberships, _pg_guids
 
 
 def build_collectives(
-    all_entries: Dict[int, List[Dict[str, Any]]],
-    _groups: Dict[str, Group],
-    _memberships: Dict[str, Set[Any]],
-    _pg_guids: Dict[Tuple[str, int], str],
+    all_entries: dict[int, list[dict[str, Any]]],
+    _groups: dict[str, Group],
+    _memberships: dict[str, set[Any]],
+    _pg_guids: dict[tuple[str, int], str],
     version: str,
-) -> Tuple[List[Traceback], List[Collective], List[NCCLCall]]:
+) -> tuple[list[Traceback], list[Collective], list[NCCLCall]]:
     """
     groups, memberships are the non-flat dicts that are indexable
     all_entries is a raw dict from the original dumps:
@@ -161,10 +162,10 @@ def build_collectives(
     }
     """
     major_v, minor_v = get_version_detail(version)
-    tracebacks: List[Traceback] = []
+    tracebacks: list[Traceback] = []
 
-    collectives: List[Collective] = []
-    nccl_calls: List[NCCLCall] = []
+    collectives: list[Collective] = []
+    nccl_calls: list[NCCLCall] = []
 
     # once we find one mismatch, we stop pairing up collectives since the pairing is possibly incorrect
     # instead, just record the remaining ops as NCCLCalls
@@ -265,21 +266,23 @@ def build_collectives(
                         and e["process_group"][1] == desc
                         and e["collective_seq_id"] == entry_state.collective_seq_id
                     ):
-                        match_state = match_one_event(
+                        match_info = match_one_event(
                             entries[0], e, _memberships, pg_name
                         )
                         if (
-                            match_state
+                            match_info.state
                             in [MatchState.FULLY_MATCHED, MatchState.UNDECIDED]
                             and mismatch[pg_name] == 0
                         ):
                             found_ranks.add(o)
                             found_idx[o] = i
-                            has_undecided_case = match_state == MatchState.UNDECIDED
+                            has_undecided_case = (
+                                match_info.state == MatchState.UNDECIDED
+                            )
                         else:
                             candidate_ranks.add(o)
                             candidate_idx[o] = i
-                            if match_state not in [
+                            if match_info.state not in [
                                 MatchState.FULLY_MATCHED,
                                 MatchState.UNDECIDED,
                             ]:
@@ -287,7 +290,7 @@ def build_collectives(
                                 # But it's possible that the current rank is the culprit, then users will
                                 # see lots of normal ranks reported as culprit.
                                 # TODO: we need to figure out a better way to handle the case mentioned above.
-                                errors.add((o, match_state))
+                                errors.add((o, match_info))
                         break
 
             # case one: not every rank join the collective or in the flight recorder.
@@ -331,7 +334,9 @@ def build_collectives(
                         candidate_idx.update(found_idx)
                         found_idx.clear()
                         found_ranks.clear()
-                        errors.add((first_rank, MatchState.SIZE_OR_SYNTAX_MISMATCH))
+                        errors.add(
+                            (first_rank, MatchInfo(MatchState.SIZE_OR_SYNTAX_MISMATCH))
+                        )
                     else:
                         found_ranks.update(candidate_ranks)
                         found_idx.update(candidate_idx)
@@ -358,13 +363,19 @@ def build_collectives(
                 candidate_idx.update(found_idx)
                 found_idx.clear()
                 found_ranks.clear()
-                mismatch[pg_name] += 1
-                logger.info(
-                    "We cannot decide what's wrong with this collective entry "
-                    "because we missed FR dumps from ranks (%s) so we don't have enough "
-                    "information. If you want to debug further use -j to dump all raw trace",
-                    str(expected_ranks - dumps_ranks),
-                )
+                if expected_ranks - dumps_ranks:
+                    mismatch[pg_name] += 1
+                    logger.info(
+                        "We cannot decide what's wrong with this collective entry "
+                        "because we missed FR dumps from ranks (%s) so we don't have enough "
+                        "information. If you want to debug further use -j to dump all raw trace",
+                        str(expected_ranks - dumps_ranks),
+                    )
+                else:
+                    logger.info(
+                        "No errors found for this collective entry, There could be some "
+                        "other reasons why we see collective timeout."
+                    )
 
             # at this point there are 3 possibilities
             # 1. we found a match on all the ranks that are members of the group
@@ -414,7 +425,7 @@ def build_collectives(
 
 
 def build_db(
-    details: Dict[str, Dict[str, Any]], args: argparse.Namespace, version: str
+    details: dict[str, dict[str, Any]], args: argparse.Namespace, version: str
 ) -> Database:
     if args.verbose:
         os.environ["FR_TRACE_VERBOSE_OUTPUT"] = "1"

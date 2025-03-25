@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import cast, List, Optional, Union
+from typing import cast, Optional, Union
 
 import torch
 from torch import Tensor
@@ -13,6 +13,7 @@ from .optimizer import (
     _get_value,
     _maximize_doc,
     _params_doc,
+    _to_scalar,
     _use_grad_for_differentiable,
     _view_as_real,
     Optimizer,
@@ -157,10 +158,10 @@ class Adagrad(Optimizer):
                 loss = closure()
 
         for group in self.param_groups:
-            params_with_grad: List[Tensor] = []
-            grads: List[Tensor] = []
-            state_sums: List[Tensor] = []
-            state_steps: List[Tensor] = []
+            params_with_grad: list[Tensor] = []
+            grads: list[Tensor] = []
+            state_sums: list[Tensor] = []
+            state_steps: list[Tensor] = []
 
             has_sparse_grad, has_complex = self._init_group(
                 group, params_with_grad, grads, state_sums, state_steps
@@ -240,10 +241,10 @@ Adagrad.__doc__ = (
 
 
 def adagrad(
-    params: List[Tensor],
-    grads: List[Tensor],
-    state_sums: List[Tensor],
-    state_steps: List[Tensor],
+    params: list[Tensor],
+    grads: list[Tensor],
+    state_sums: list[Tensor],
+    state_steps: list[Tensor],
     fused: Optional[bool] = None,
     grad_scale: Optional[Tensor] = None,
     found_inf: Optional[Tensor] = None,
@@ -319,10 +320,10 @@ def _make_sparse(grad, grad_indices, values):
 
 
 def _single_tensor_adagrad(
-    params: List[Tensor],
-    grads: List[Tensor],
-    state_sums: List[Tensor],
-    state_steps: List[Tensor],
+    params: list[Tensor],
+    grads: list[Tensor],
+    state_sums: list[Tensor],
+    state_steps: list[Tensor],
     grad_scale: Optional[Tensor],
     found_inf: Optional[Tensor],
     *,
@@ -336,6 +337,10 @@ def _single_tensor_adagrad(
     has_complex: bool,
 ):
     assert grad_scale is None and found_inf is None
+
+    if not torch.jit.is_scripting():
+        lr = _to_scalar(lr)
+
     for param, grad, state_sum, step_t in zip(params, grads, state_sums, state_steps):
         # update step
         step_t += 1
@@ -380,10 +385,10 @@ def _single_tensor_adagrad(
 
 
 def _multi_tensor_adagrad(
-    params: List[Tensor],
-    grads: List[Tensor],
-    state_sums: List[Tensor],
-    state_steps: List[Tensor],
+    params: list[Tensor],
+    grads: list[Tensor],
+    state_sums: list[Tensor],
+    state_steps: list[Tensor],
     grad_scale: Optional[Tensor],
     found_inf: Optional[Tensor],
     *,
@@ -403,6 +408,8 @@ def _multi_tensor_adagrad(
     if len(params) == 0:
         return
 
+    lr = _to_scalar(lr)
+
     grouped_tensorlists = Optimizer._group_tensors_by_device_and_dtype(
         [params, grads, state_sums, state_steps]  # type: ignore[list-item]
     )
@@ -412,10 +419,10 @@ def _multi_tensor_adagrad(
         device_state_sums_,
         device_state_steps_,
     ), _ in grouped_tensorlists.values():
-        device_params = cast(List[Tensor], device_params_)
-        device_grads = cast(List[Tensor], device_grads_)
-        device_state_sums = cast(List[Tensor], device_state_sums_)
-        device_state_steps = cast(List[Tensor], device_state_steps_)
+        device_params = cast(list[Tensor], device_params_)
+        device_grads = cast(list[Tensor], device_grads_)
+        device_state_sums = cast(list[Tensor], device_state_sums_)
+        device_state_steps = cast(list[Tensor], device_state_steps_)
 
         device_has_sparse_grad = has_sparse_grad and any(
             grad.is_sparse for grad in device_grads
@@ -451,7 +458,7 @@ def _multi_tensor_adagrad(
         # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
         # and over. 1 will then be wrapped into a Tensor over and over again, which is slower than if we just
         # wrapped it once now. The alpha is required to assure we go to the right overload.
-        if not torch._utils.is_compiling() and device_state_steps[0].is_cpu:
+        if not torch.compiler.is_compiling() and device_state_steps[0].is_cpu:
             torch._foreach_add_(
                 device_state_steps, torch.tensor(1.0, device="cpu"), alpha=1.0
             )
@@ -487,10 +494,10 @@ def _multi_tensor_adagrad(
 
 
 def _fused_adagrad(
-    params: List[Tensor],
-    grads: List[Tensor],
-    state_sums: List[Tensor],
-    state_steps: List[Tensor],
+    params: list[Tensor],
+    grads: list[Tensor],
+    state_sums: list[Tensor],
+    state_steps: list[Tensor],
     grad_scale: Optional[Tensor],
     found_inf: Optional[Tensor],
     *,
@@ -513,6 +520,8 @@ def _fused_adagrad(
             "adagrad with fused=True does not support differentiable=True"
         )
 
+    lr = _to_scalar(lr)
+
     grad_scale_dict = (
         {grad_scale.device: grad_scale} if grad_scale is not None else None
     )
@@ -530,10 +539,10 @@ def _fused_adagrad(
         ),
         _,
     ) in grouped_tensors.items():
-        device_params = cast(List[Tensor], device_params_)
-        device_grads = cast(List[Tensor], device_grads_)
-        device_state_sums = cast(List[Tensor], device_state_sums_)
-        device_state_steps = cast(List[Tensor], device_state_steps_)
+        device_params = cast(list[Tensor], device_params_)
+        device_grads = cast(list[Tensor], device_grads_)
+        device_state_sums = cast(list[Tensor], device_state_sums_)
+        device_state_steps = cast(list[Tensor], device_state_steps_)
 
         device_grad_scale, device_found_inf = None, None
         if grad_scale is not None and grad_scale_dict is not None:

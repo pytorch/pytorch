@@ -31,7 +31,11 @@
 
 // for validators
 #ifdef USE_ROCM
+#ifdef _WIN32
+#include <hip/hip_version.h>
+#else
 #include <rocm-core/rocm_version.h>
+#endif
 #define ROCBLAS_BETA_FEATURES_API
 #include <rocblas/rocblas.h>
 #include <hipblaslt/hipblaslt.h>
@@ -46,7 +50,13 @@ TuningContext* getTuningContext() {
 }
 
 std::ostream& operator<<(std::ostream& stream, const ResultEntry& entry) {
-  return stream << entry.key_ << "," << entry.time_;
+  static const bool blaslog = c10::utils::get_env("PYTORCH_TUNABLEOP_BLAS_LOG") == "1";
+  if (!blaslog) {
+    return stream << entry.key_ << "," << entry.time_;
+  }
+  else {
+    return stream << entry.key_ << "," << entry.time_ << ",BLAS_PARAMS: " << entry.blas_sig_;
+  }
 }
 
 // TuningResultsManager
@@ -107,7 +117,8 @@ void TuningResultsManager::Add(const std::string& op_signature, const std::strin
   AddImpl(op_signature, params_signature, std::move(best), it->second);
 }
 
-void TuningResultsManager::RecordUntuned( std::ofstream& untuned_file, const std::string& op_signature, const std::string& params_signature) {
+void TuningResultsManager::RecordUntuned( std::ofstream& untuned_file, const std::string& op_signature,
+    const std::string& params_signature, const std::string& blas_signature) {
   std::scoped_lock l{lock_};
   if (!untuned_file.good()) {
     TORCH_WARN_ONCE("failed to open file for writing; untuned gemm will not be saved");
@@ -127,7 +138,13 @@ void TuningResultsManager::RecordUntuned( std::ofstream& untuned_file, const std
     }
 
     if (isNew) {
-      untuned_file << op_signature << "," << params_signature << std::endl;
+      static const bool blaslog = c10::utils::get_env("PYTORCH_TUNABLEOP_BLAS_LOG") == "1";
+      if (!blaslog) {
+        untuned_file << op_signature << "," << params_signature << std::endl;
+      }
+      else {
+        untuned_file << op_signature << "," << params_signature << ",BLAS_PARAMS: " << blas_signature << std::endl;
+      }
       TUNABLE_LOG3("Untuned,", op_signature, ",", params_signature);
     }
   }
@@ -205,7 +222,11 @@ TuningResultsValidator::TuningResultsValidator() {
 #ifdef USE_ROCM
   // rocm
   {
+#ifdef _WIN32
+    std::string rocm_version = HIP_VERSION_BUILD_NAME;
+#else
     std::string rocm_version = ROCM_BUILD_INFO;
+#endif
     RegisterValidator(
        "ROCM_VERSION",
        [rocm_version]() { return rocm_version; },
@@ -227,15 +248,10 @@ TuningResultsValidator::TuningResultsValidator() {
   }
   // rocblas
   {
-#define STRINGIFY(s) #s
-#define XSTRINGIFY(s) STRINGIFY(s)
-    std::string rocblas_version = c10::str(
-        XSTRINGIFY(ROCBLAS_VERSION_MAJOR), ".",
-        XSTRINGIFY(ROCBLAS_VERSION_MINOR), ".",
-        XSTRINGIFY(ROCBLAS_VERSION_PATCH), "-",
-        XSTRINGIFY(ROCBLAS_VERSION_TWEAK));
-#undef XSTRINGIFY
-#undef STRINGIFY
+    size_t rocblas_version_size;
+    rocblas_get_version_string_size(&rocblas_version_size);
+    std::string rocblas_version(rocblas_version_size - 1, '\0');
+    rocblas_get_version_string(rocblas_version.data(), rocblas_version_size);
     RegisterValidator(
         "ROCBLAS_VERSION",
         [rocblas_version]() { return rocblas_version; },
@@ -392,11 +408,13 @@ TuningContext::TuningContext() :
     rotating_buffer_size_{-1},
     filename_{},
     untuned_file_{},
-    results_count_from_input_file_{0}
+    results_count_from_input_file_{0},
+    is_shutting_down_{false}
 {
 }
 
 TuningContext::~TuningContext() {
+  is_shutting_down_ = true;
   if (!manager_initialized_) {
     // TuningResultsManager was never initialized, no tuning requested or performed.
     // This can happen in a DDP job where a python process spawns other workers
@@ -434,8 +452,8 @@ void TuningContext::EnableTunableOp(bool value) {
 }
 
 bool TuningContext::IsTunableOpEnabled() const {
-  static const auto env = c10::utils::get_env("PYTORCH_TUNABLEOP_ENABLED");
-  if (env == "1") {
+  static const bool eval = c10::utils::get_env("PYTORCH_TUNABLEOP_ENABLED") == "1";
+  if (eval) {
     return true;
   }
   return enable_;
@@ -457,20 +475,22 @@ void TuningContext::EnableRecordUntuned(bool value) {
     TUNABLE_LOG1("Enable Record Untuned for TunableOp");
   } else {
     TUNABLE_LOG1("Disable Record Untuned for TunableOp");
+    TUNABLE_LOG1("Closing Untuned GEMM Results File");
+    untuned_file_.close();
   }
 }
 
 bool TuningContext::IsTuningEnabled() const {
-  static const auto env = c10::utils::get_env("PYTORCH_TUNABLEOP_TUNING");
-  if (env == "0") {
+  static const bool eval = c10::utils::get_env("PYTORCH_TUNABLEOP_TUNING") == "0";
+  if (eval) {
     return false;
   }
   return tuning_enable_;
 }
 
 bool TuningContext::IsRecordUntunedEnabled() const {
-  static const auto env = c10::utils::get_env("PYTORCH_TUNABLEOP_RECORD_UNTUNED");
-  if (env == "1") {
+  static const bool eval = c10::utils::get_env("PYTORCH_TUNABLEOP_RECORD_UNTUNED") == "1";
+  if (eval) {
     return true;
   }
   return record_untuned_enable_;
@@ -576,20 +596,28 @@ bool TuningContext::IsICacheFlushEnabled() const {
 }
 
 void TuningContext::SetRotatingBufferSize(int size) {
-  rotating_buffer_size_ = size < 0 ? 0 : size;
+  // Any negative rotating buffer size means l2_cache_size
+  // see GetRotatingBufferSize
+  //
+  // size is set in MB like the environment variable
+  constexpr int MB = 1024 * 1024;
+  rotating_buffer_size_ = size * MB;
 }
 
 int TuningContext::GetRotatingBufferSize() const {
+  // If the environment variable is negative or not set, return the L2 cache size.
+  // The default rotating_buffer_size is -1, but this member function will
+  // return l2_cache size.
+  // This member function will always return a zero or a positive integer.
   static const auto env = c10::utils::get_env("PYTORCH_TUNABLEOP_ROTATING_BUFFER_SIZE");
-  if (env.has_value()) {
+  int l2_cache_size = at::cuda::getCurrentDeviceProperties()->l2CacheSize;
+  if (env.has_value()) {  // env variable is set
     constexpr int MB = 1024 * 1024;
     int val = stoi(env.value());
-    return val < 0 ? 0 : val * MB;  // env var is specified as MB, returned as bytes
+    return val < 0 ? l2_cache_size : val * MB;  // env var is specified as MB, returned as bytes
   }
-  else {
+  else {  // env variable is not set
     if (rotating_buffer_size_ < 0) {
-      // negative buffer size (default) means query for L2 cache size
-      int l2_cache_size = at::cuda::getCurrentDeviceProperties()->l2CacheSize;
       return l2_cache_size;
     }
     else {
@@ -739,6 +767,50 @@ bool TuningContext::WriteFile(const std::string& filename_) {
   }
   file.close();
   return true;
+}
+
+namespace {
+
+struct MaybeDelete {
+  bool owns_pointer;
+  void operator()(std::ostream* os) const { if (owns_pointer) delete os; }
+};
+
+using OstreamPtr = std::unique_ptr<std::ostream, MaybeDelete>;
+
+inline OstreamPtr get_stream(const std::string& filename) {
+  if (filename == "out") {
+    return OstreamPtr { &std::cout, MaybeDelete {false} };
+  }
+  else if (filename == "err") {
+    return OstreamPtr { &std::cerr, MaybeDelete {false} };
+  }
+  else {
+    return OstreamPtr { new std::ofstream {filename.c_str()}, MaybeDelete {true} };
+  }
+}
+
+} // anonymous namespace
+
+std::string TuningContext::GetLogFilename() const {
+  static const auto env_file = c10::utils::get_env("PYTORCH_TUNABLEOP_VERBOSE_FILENAME");
+  static std::string val_file = env_file.has_value() ? env_file.value() : "err";
+  return val_file;
+}
+
+int TuningContext::GetLogLevel() const {
+  static const auto env_verbose = c10::utils::get_env("PYTORCH_TUNABLEOP_VERBOSE");
+  static int val_verbose = env_verbose.has_value() ? stoi(env_verbose.value()) : 0;
+  return val_verbose;
+}
+
+bool TuningContext::GetLogOkay() const {
+  return !is_shutting_down_;
+}
+
+std::ostream& TuningContext::GetLog() const {
+  static auto streamptr = get_stream(GetLogFilename());
+  return *streamptr;
 }
 
 } // namespace at::cuda::tunable

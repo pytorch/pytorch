@@ -23,9 +23,9 @@ class QConvoneDNN final {
       double output_scale,
       int64_t output_zero_point,
       std::optional<c10::ScalarType> output_dtype,
-      c10::string_view attr,
+      std::string_view attr,
       torch::List<std::optional<at::Scalar>> scalars,
-      std::optional<c10::string_view> algorithm);
+      std::optional<std::string_view> algorithm);
 
   C10_API static at::Tensor run_pointwise_tensor(
       at::Tensor act, // contains quantized values but not QTensor
@@ -42,9 +42,9 @@ class QConvoneDNN final {
       double output_scale,
       int64_t output_zero_point,
       std::optional<c10::ScalarType> output_dtype,
-      c10::string_view attr,
+      std::string_view attr,
       torch::List<std::optional<at::Scalar>> scalars,
-      std::optional<c10::string_view> algorithm);
+      std::optional<std::string_view> algorithm);
 
   C10_API static at::Tensor run_pointwise_binary(
       at::Tensor act, // contains quantized values but not QTensor
@@ -64,11 +64,11 @@ class QConvoneDNN final {
       std::optional<c10::ScalarType> output_dtype,
       double accum_scale,
       int64_t accum_zero_point,
-      c10::string_view binary_attr,
+      std::string_view binary_attr,
       std::optional<at::Scalar> alpha,
-      std::optional<c10::string_view> unary_attr,
+      std::optional<std::string_view> unary_attr,
       torch::List<std::optional<at::Scalar>> unary_scalars,
-      std::optional<c10::string_view> unary_algorithm);
+      std::optional<std::string_view> unary_algorithm);
 
   C10_API static at::Tensor run_pointwise_binary_tensor(
       at::Tensor act, // contains quantized values but not QTensor
@@ -88,11 +88,11 @@ class QConvoneDNN final {
       std::optional<c10::ScalarType> output_dtype,
       double accum_scale,
       int64_t accum_zero_point,
-      c10::string_view binary_attr,
+      std::string_view binary_attr,
       std::optional<at::Scalar> alpha,
-      std::optional<c10::string_view> unary_attr,
+      std::optional<std::string_view> unary_attr,
       torch::List<std::optional<at::Scalar>> unary_scalars,
-      std::optional<c10::string_view> unary_algorithm);
+      std::optional<std::string_view> unary_algorithm);
 
 };
 

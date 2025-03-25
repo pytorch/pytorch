@@ -38,10 +38,6 @@ using at::Tensor;
 using at::TensorList;
 using at::TensorOptions;
 using at::Quantizer;
-// This is temporary typedef to enable Quantizer in aten native function API
-// we'll remove them when we are actually exposing Quantizer class
-// to frontend
-using ConstQuantizerPtr = const c10::intrusive_ptr<Quantizer>&;
 using std::optional;
 
 namespace VariableType {

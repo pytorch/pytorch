@@ -48,6 +48,7 @@ static std::unordered_map<std::string, ParameterType> type_map = {
     {"std::string", ParameterType::STRING},
     {"c10::string_view", ParameterType::STRING},
     {"std::string_view", ParameterType::STRING},
+    {"::std::string_view", ParameterType::STRING},
     {"Dimname", ParameterType::DIMNAME},
     {"DimnameList", ParameterType::DIMNAME_LIST},
     {"ScalarList", ParameterType::SCALAR_LIST},
@@ -87,16 +88,37 @@ static const std::unordered_map<std::string, std::vector<std::string>>
 // functions.)
 bool should_allow_numbers_as_tensors(const std::string& name) {
   static std::unordered_set<std::string> allowed = {
-      "add",          "add_",          "add_out",
-      "div",          "div_",          "div_out",
-      "divide",       "divide_",       "divide_out", // alias of div
-      "mul",          "mul_",          "mul_out",
-      "multiply",     "multiply_",     "multiply_out", // alias of mul
-      "sub",          "sub_",          "sub_out",
-      "subtract",     "subtract_",     "subtract_out", // alias of sub
-      "true_divide",  "true_divide_",  "true_divide_out",
-      "to",           "_to_copy",      "copy_",
-      "floor_divide", "floor_divide_", "floor_divide_out",
+      "add",
+      "add_",
+      "add_out",
+      "div",
+      "div_",
+      "div_out",
+      "divide",
+      "divide_",
+      "divide_out", // alias of div
+      "mul",
+      "mul_",
+      "mul_out",
+      "multiply",
+      "multiply_",
+      "multiply_out", // alias of mul
+      "sub",
+      "sub_",
+      "sub_out",
+      "subtract",
+      "subtract_",
+      "subtract_out", // alias of sub
+      "true_divide",
+      "true_divide_",
+      "true_divide_out",
+      "to",
+      "_to_copy",
+      "copy_",
+      "copy",
+      "floor_divide",
+      "floor_divide_",
+      "floor_divide_out",
       "_conj"}; // _conj needed because mul.Tensor backward calls it
   return allowed.find(name) != allowed.end();
 }
@@ -531,15 +553,13 @@ auto handle_torch_function_no_python_arg_parser(
   if (is_mode_active()) {
     // Step 1: Try to dispatch on any user TorchDispatchModes (including infra
     // modes, which will always be at the bottom of the mode stack).
-    auto ret_ = dispatch_on_mode(
+    std::tie(ret, mode_obj) = dispatch_on_mode(
         args,
         kwargs,
         py_types,
         torch_api_function,
         is_torch_function,
         torch_function_name_str);
-    ret = std::get<0>(ret_);
-    mode_obj = std::get<1>(ret_);
   }
 
   // Step 2: Try to dispatch based on any user subclasses,
@@ -993,7 +1013,15 @@ auto FunctionParameter::check(
     case ParameterType::PYOBJECT:
       return true;
     case ParameterType::SCALARTYPE:
-      return THPDtype_Check(obj) || THPPythonScalarType_Check(obj);
+      if (THPDtype_Check(obj) || THPPythonScalarType_Check(obj)) {
+        return true;
+      }
+      if (check_has_torch_function(obj, /*ignore_mode*/ true)) {
+        // tensor subclasses and unrelated objects with __torch_function__
+        append_overloaded_arg(&overloaded_args, obj, /*obj_is_type*/ false);
+        return true;
+      }
+      return false;
     case ParameterType::LAYOUT:
       return THPLayout_Check(obj);
     case ParameterType::MEMORY_FORMAT:

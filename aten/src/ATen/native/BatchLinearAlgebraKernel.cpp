@@ -137,6 +137,25 @@ Tensor& cholesky_inverse_kernel_impl(Tensor& result, Tensor& infos, bool upper) 
 }
 
 /*
+ LAPACK query functions return workspace size as floating point value, which means
+ that it might not be accurately represented if it's size exceed mantissa of the
+ corresponding type. Fix it by adding 1ULP to the value before casting to it
+ For more info see https://github.com/pytorch/pytorch/issues/145801#issuecomment-2631781776
+*/
+template <typename T>
+static inline
+std::enable_if_t<std::is_floating_point_v<T>, int> lapack_work_to_int(const T val) {
+    const auto next_after = std::nextafter(val, std::numeric_limits<T>::infinity());
+    return std::max<int>(1, std::ceil(next_after));
+}
+template <typename T>
+static inline
+std::enable_if_t<c10::is_complex<T>::value, int> lapack_work_to_int(const T val) {
+    return lapack_work_to_int(val.real());
+}
+
+
+/*
   Computes the eigenvalues and eigenvectors of n-by-n matrix 'input'.
   This is an in-place routine, content of 'input', 'values', 'vectors' is overwritten.
   'infos' is an int Tensor containing error codes for each matrix in the batched input.
@@ -178,7 +197,7 @@ void apply_linalg_eig(Tensor& values, Tensor& vectors, Tensor& input, Tensor& in
   lapackEig<scalar_t, value_t>(jobvl, jobvr, n, input_data, lda, values_data,
     lvectors_data, ldvl, rvectors_data, ldvr, &work_query, -1, rwork_data, &infos_data[0]);
 
-  int lwork = std::max<int>(1, static_cast<int>(real_impl<scalar_t, value_t>(work_query)));
+  int lwork = lapack_work_to_int(work_query);
   Tensor work = at::empty({lwork}, input.dtype());
   auto work_data = work.mutable_data_ptr<scalar_t>();
 
@@ -218,6 +237,8 @@ void linalg_eig_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos,
   'compute_eigenvectors' controls whether eigenvectors should be computed.
   This function doesn't do any error checks and it's assumed that every argument is valid.
 */
+
+
 template <typename scalar_t>
 void apply_lapack_eigh(const Tensor& values, const Tensor& vectors, const Tensor& infos, bool upper, bool compute_eigenvectors) {
 #if !AT_BUILD_WITH_LAPACK()
@@ -250,14 +271,14 @@ void apply_lapack_eigh(const Tensor& values, const Tensor& vectors, const Tensor
   int liwork = -1;
   scalar_t lwork_query;
   value_t rwork_query;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int iwork_query;
+  int iwork_query = 0;
 
   // call lapackSyevd once to get the optimal size for work data
   lapackSyevd<scalar_t, value_t>(jobz, uplo, n, vectors_data, lda, values_data,
     &lwork_query, lwork, &rwork_query, lrwork, &iwork_query, liwork, infos_data);
 
-  lwork = std::max<int>(1, real_impl<scalar_t, value_t>(lwork_query));
+  lwork = lapack_work_to_int(lwork_query);
+
   Tensor work = at::empty({lwork}, vectors.options());
   auto work_data = work.mutable_data_ptr<scalar_t>();
 
@@ -268,7 +289,7 @@ void apply_lapack_eigh(const Tensor& values, const Tensor& vectors, const Tensor
   Tensor rwork;
   value_t* rwork_data = nullptr;
   if (vectors.is_complex()) {
-    lrwork = std::max<int>(1, rwork_query);
+    lrwork = lapack_work_to_int(rwork_query);
     rwork = at::empty({lrwork}, values.options());
     rwork_data = rwork.mutable_data_ptr<value_t>();
   }
@@ -329,7 +350,6 @@ static void apply_geqrf(const Tensor& input, const Tensor& tau) {
       "Calling torch.geqrf on a CPU tensor requires compiling ",
       "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
 #else
-  using value_t = typename c10::scalar_value_type<scalar_t>::type;
   auto input_data = input.data_ptr<scalar_t>();
   auto tau_data = tau.data_ptr<scalar_t>();
   auto input_matrix_stride = matrixStride(input);
@@ -339,8 +359,7 @@ static void apply_geqrf(const Tensor& input, const Tensor& tau) {
   auto n = input.size(-1);
   auto lda = std::max<int64_t>(1, m);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int info;
+  int info = 0;
   // Run once, first to get the optimum work size.
   // Since we deal with batches of matrices with the same dimensions, doing this outside
   // the loop saves (batch_size - 1) workspace queries which would provide the same result
@@ -352,7 +371,7 @@ static void apply_geqrf(const Tensor& input, const Tensor& tau) {
 
   // if lwork is less than 'n' then a warning is printed:
   // Intel MKL ERROR: Parameter 7 was incorrect on entry to SGEQRF.
-  lwork = std::max<int>({1, static_cast<int>(n), static_cast<int>(real_impl<scalar_t, value_t>(wkopt))});
+  lwork = std::max<int>(static_cast<int>(n), lapack_work_to_int(wkopt));
   Tensor work = at::empty({lwork}, input.options());
 
   for (const auto i : c10::irange(batch_size)) {
@@ -400,7 +419,6 @@ inline void apply_orgqr(Tensor& self, const Tensor& tau) {
     return;
   }
 
-  using value_t = typename c10::scalar_value_type<scalar_t>::type;
   auto self_data = self.data_ptr<scalar_t>();
   auto tau_data = tau.const_data_ptr<scalar_t>();
   auto self_matrix_stride = matrixStride(self);
@@ -410,8 +428,7 @@ inline void apply_orgqr(Tensor& self, const Tensor& tau) {
   auto n = self.size(-1);
   auto k = tau.size(-1);
   auto lda = std::max<int64_t>(1, m);
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int info;
+  int info = 0;
 
   // LAPACK's requirement
   TORCH_INTERNAL_ASSERT(m >= n);
@@ -425,7 +442,7 @@ inline void apply_orgqr(Tensor& self, const Tensor& tau) {
   scalar_t wkopt;
   lapackOrgqr<scalar_t>(m, n, k, self_data, lda, const_cast<scalar_t*>(tau_data), &wkopt, lwork, &info);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info == 0);
-  lwork = std::max<int>(1, real_impl<scalar_t, value_t>(wkopt));
+  lwork = lapack_work_to_int(wkopt);
   Tensor work = at::empty({lwork}, self.options());
 
   for (const auto i : c10::irange(batch_size)) {
@@ -544,7 +561,7 @@ void apply_lstsq(const Tensor& A, Tensor& B, Tensor& rank, Tensor& singular_valu
     s_working_ptr,
     &iwork_opt);
 
-  lwork = std::max<int>(1, real_impl<scalar_t, value_t>(work_opt));
+  lwork = lapack_work_to_int(work_opt);
   Tensor work = at::empty({lwork}, A.options());
   scalar_t* work_data = work.mutable_data_ptr<scalar_t>();
 
@@ -609,7 +626,7 @@ void apply_lstsq(const Tensor& A, Tensor& B, Tensor& rank, Tensor& singular_valu
 // This is a type and driver dispatching helper function for 'apply_lstsq'
 void lstsq_kernel(const Tensor& a, Tensor& b, Tensor& rank, Tensor& singular_values, Tensor& infos, double rcond, std::string driver_name) {
 
-  static auto driver_string_to_type = std::unordered_map<c10::string_view, LapackLstsqDriverType>({
+  static auto driver_string_to_type = std::unordered_map<std::string_view, LapackLstsqDriverType>({
     {"gels", at::native::LapackLstsqDriverType::Gels},
     {"gelsy", at::native::LapackLstsqDriverType::Gelsy},
     {"gelsd", at::native::LapackLstsqDriverType::Gelsd},
@@ -1066,7 +1083,7 @@ static void apply_svd(const Tensor& A,
   {
     scalar_t wkopt;
     lapackSvd<scalar_t, value_t>(jobz, m, n, A_data, lda, S_data, U_data, ldu, Vh_data, ldvh, &wkopt, lwork, rwork_data, iwork_data, info_data);
-    lwork = std::max<int>(1, real_impl<scalar_t, value_t>(wkopt));
+    lwork = lapack_work_to_int(wkopt);
   }
   auto work = std::vector<scalar_t>(lwork);
   auto* const work_data = work.data();
@@ -1087,7 +1104,7 @@ static void apply_svd(const Tensor& A,
 void svd_kernel(const Tensor& A,
                 const bool full_matrices,
                 const bool compute_uv,
-                const std::optional<c10::string_view>& driver,
+                const std::optional<std::string_view>& driver,
                 const Tensor& U,
                 const Tensor& S,
                 const Tensor& Vh,

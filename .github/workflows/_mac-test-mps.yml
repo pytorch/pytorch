@@ -66,10 +66,10 @@ jobs:
           sysctl machdep.cpu.brand_string kern.osproductversion
 
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          quiet-checkout: true
+          show-progress: false
 
       - name: Clean checkout
         run: |
@@ -152,12 +152,21 @@ jobs:
           set -e
 
           ${CONDA_RUN} python3 test/run_test.py --mps --verbose
+          MTL_CAPTURE_ENABLED=1 ${CONDA_RUN} python3 test/test_mps.py --verbose -k test_metal_capture
 
       - name: Print remaining test logs
         shell: bash
         if: always() && steps.test.conclusion
         run: |
           cat test/**/*_toprint.log || true
+
+      - name: Run OP benchmark
+        run: |
+          if [[ -n "$CONDA_ENV" ]]; then
+            # Use binaries under conda environment
+            export PATH="$CONDA_ENV/bin":$PATH
+          fi
+          ${CONDA_RUN} python3 test/bench_mps_ops.py
 
       - name: Upload test artifacts
         uses: ./.github/actions/upload-test-artifacts

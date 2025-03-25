@@ -12,6 +12,7 @@
 #include <iostream>
 
 #ifndef _WIN32
+#include <dirent.h>
 #include <sys/stat.h>
 #else
 #include <filesystem>
@@ -69,7 +70,7 @@ namespace torch::inductor {
 namespace {
 const nlohmann::json& load_json_file(std::string json_path) {
   if (!file_exists(json_path)) {
-    throw std::runtime_error("File found: " + json_path);
+    throw std::runtime_error("File not found: " + json_path);
   }
 
   std::ifstream json_file(json_path);
@@ -90,47 +91,60 @@ std::tuple<std::string, std::string> get_cpp_compile_command(
   std::string compiler = compile_options["compiler"].get<std::string>();
   bool compile_only = compile_options["compile_only"].get<bool>();
 
-  std::string source_args = "";
+  std::string source_args;
   for (const std::string& source : sources) {
     source_args += source + " ";
   }
 
   std::string file_ext = compile_only ? ".o" : ".so";
   std::string target_file = output_dir + filename + file_ext;
+  std::string target_dir = output_dir;
+  if (target_dir.empty()) {
+    size_t parent_path_idx = filename.find_last_of(k_separator);
+    target_dir = filename.substr(0, parent_path_idx);
+  }
 
-  std::string cflags_args = "";
+  std::string cflags_args;
   for (auto& arg : compile_options["cflags"]) {
     cflags_args += "-" + arg.get<std::string>() + " ";
   }
 
-  std::string definitions_args = "";
+  std::string definitions_args;
   for (auto& arg : compile_options["definitions"]) {
     definitions_args += "-D " + arg.get<std::string>() + " ";
   }
 
-  std::string include_dirs_args = "";
+  std::string include_dirs_args;
   for (auto& arg : compile_options["include_dirs"]) {
     include_dirs_args += "-I" + arg.get<std::string>() + " ";
   }
 
-  std::string ldflags_args = "";
+  std::string ldflags_args;
   for (auto& arg : compile_options["ldflags"]) {
     ldflags_args += "-" + arg.get<std::string>() + " ";
   }
 
-  std::string libraries_dirs_args = "";
+  std::string libraries_dirs_args;
   for (auto& arg : compile_options["libraries_dirs"]) {
     libraries_dirs_args += "-L" + arg.get<std::string>() + " ";
   }
 
-  std::string libraries_args = "";
+  std::string libraries_args;
   for (auto& arg : compile_options["libraries"]) {
     libraries_args += "-l" + arg.get<std::string>() + " ";
   }
 
-  std::string passthrough_parameters_args = "";
+  std::string passthrough_parameters_args;
   for (auto& arg : compile_options["passthrough_args"]) {
-    passthrough_parameters_args += arg.get<std::string>() + " ";
+    std::string arg_str = arg.get<std::string>();
+    std::string target = "script.ld";
+    std::string replacement = target_dir;
+    replacement.append(k_separator).append(target);
+    size_t pos = arg_str.find(target);
+    if (pos != std::string::npos) {
+      arg_str.replace(pos, target.length(), replacement);
+    }
+    passthrough_parameters_args += arg_str + " ";
   }
 
   std::string compile_only_arg = compile_only ? "-c" : "";
@@ -192,6 +206,62 @@ bool recursive_mkdir(const std::string& dir) {
   return ret == 0;
 }
 
+bool recursive_rmdir(const std::string& path) {
+#ifdef _WIN32
+  std::error_code ec;
+  return fs::remove_all(path, ec) != static_cast<std::uintmax_t>(-1);
+#else
+  DIR* dir = opendir(path.c_str());
+  if (!dir) {
+    return false;
+  }
+
+  struct dirent* entry = nullptr;
+  struct stat statbuf {};
+  bool success = true;
+
+  // Iterate through directory entries
+  while ((entry = readdir(dir)) != nullptr) {
+    std::string name = entry->d_name;
+
+    // Skip "." and ".."
+    if (name == "." || name == "..") {
+      continue;
+    }
+
+    std::string full_path = path;
+    full_path.append("/").append(name);
+
+    // Get file status
+    if (stat(full_path.c_str(), &statbuf) != 0) {
+      success = false;
+      continue;
+    }
+
+    if (S_ISDIR(statbuf.st_mode)) {
+      // Recursively delete subdirectory
+      if (!recursive_rmdir(full_path)) {
+        success = false;
+      }
+    } else {
+      // Delete file
+      if (unlink(full_path.c_str()) != 0) {
+        success = false;
+      }
+    }
+  }
+
+  closedir(dir);
+
+  // Remove the directory itself
+  if (rmdir(path.c_str()) != 0) {
+    success = false;
+  }
+
+  return success;
+#endif
+}
+
 std::string compile_so(
     const std::string& cpp_filename,
     const std::string& consts_filename) {
@@ -203,19 +273,15 @@ std::string compile_so(
   std::string compile_flags_path = filename + "_compile_flags.json";
   const nlohmann::json compile_flags = load_json_file(compile_flags_path);
 
-  auto compile_result =
+  auto [compile_cmd, output_o] =
       get_cpp_compile_command(filename, {cpp_filename}, compile_flags);
-  std::string compile_cmd = std::get<0>(compile_result);
-  std::string output_o = std::get<1>(compile_result);
 
   std::string linker_flags_path =
       cpp_filename.substr(0, lastindex) + "_linker_flags.json";
   const nlohmann::json linker_flags = load_json_file(linker_flags_path);
 
-  auto link_result = get_cpp_compile_command(
+  auto [link_cmd, output_so] = get_cpp_compile_command(
       filename, {output_o, consts_filename}, linker_flags);
-  std::string link_cmd = std::get<0>(link_result);
-  std::string output_so = std::get<1>(link_result);
 
   // Run the commands to generate a .so file
   int status = system(compile_cmd.c_str());
@@ -273,12 +339,22 @@ void AOTIModelPackageLoader::load_metadata(const std::string& cpp_filename) {
 }
 
 AOTIModelPackageLoader::AOTIModelPackageLoader(
-    const std::string& model_package_path)
-    : AOTIModelPackageLoader(model_package_path, "model") {}
-
-AOTIModelPackageLoader::AOTIModelPackageLoader(
     const std::string& model_package_path,
-    const std::string& model_name = "model") {
+    const std::string& model_name,
+    const bool run_single_threaded,
+    const size_t num_runners) {
+  if (run_single_threaded) {
+    if (num_runners != 1) {
+      throw std::runtime_error(
+          "num_runners must be 1 when run_single_threaded is true");
+    }
+  } else {
+    if (num_runners < 1) {
+      throw std::runtime_error(
+          "num_runners must be >=1 when run_single_threaded is false");
+    }
+  }
+
   // Extract all files within the zipfile to a temporary directory
   mz_zip_archive zip_archive;
   memset(&zip_archive, 0, sizeof(zip_archive));
@@ -289,11 +365,11 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
         mz_zip_get_error_string(mz_zip_get_last_error(&zip_archive)));
   }
 
-  std::string temp_dir = create_temp_dir();
-  std::string so_filename = "";
-  std::string cpp_filename = "";
-  std::string consts_filename = "";
-  std::string found_filenames = ""; // Saving for bookkeeping
+  temp_dir_ = create_temp_dir();
+  std::string so_filename;
+  std::string cpp_filename;
+  std::string consts_filename;
+  std::string found_filenames; // Saving for bookkeeping
   std::string model_directory =
       "data" + k_separator + "aotinductor" + k_separator + model_name;
 
@@ -315,7 +391,7 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
     // Only compile files in the specified model directory
     if (filename_str.length() >= model_directory.length() &&
         filename_str.substr(0, model_directory.length()) == model_directory) {
-      std::string output_path_str = temp_dir;
+      std::string output_path_str = temp_dir_;
       output_path_str += k_separator;
       output_path_str += filename_str;
 
@@ -326,7 +402,7 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
             "Failed to find parent path in " + output_path_str);
       }
       std::string parent_path = output_path_str.substr(0, parent_path_idx);
-      if (!recursive_mkdir(parent_path.c_str())) {
+      if (!recursive_mkdir(parent_path)) {
         throw std::runtime_error(fmt::format(
             "Failed to create directory {}: {}",
             parent_path,
@@ -354,7 +430,8 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
     }
   }
 
-  // Close the zip archive as we have extracted all files to the temp directory
+  // Close the zip archive as we have extracted all files to the temp
+  // directory
   if (!mz_zip_reader_end(&zip_archive)) {
     throw std::runtime_error(
         std::string("Failed to close zip archive: {}") +
@@ -389,10 +466,16 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
     throw std::runtime_error("Unsupported device found: " + device);
   }
 
-  std::string cubin_dir = temp_dir + k_separator + model_directory;
-  runner_ = registered_aoti_runner[device](so_path, 1, device, cubin_dir);
+  std::string cubin_dir = temp_dir_ + k_separator + model_directory;
+  runner_ = registered_aoti_runner[device](
+      so_path, num_runners, device, cubin_dir, run_single_threaded);
+}
 
-  std::remove(temp_dir.c_str());
+AOTIModelPackageLoader::~AOTIModelPackageLoader() {
+  // Clean up the temporary directory
+  if (!temp_dir_.empty()) {
+    recursive_rmdir(temp_dir_);
+  }
 }
 
 AOTIModelContainerRunner* AOTIModelPackageLoader::get_runner() {
@@ -400,8 +483,15 @@ AOTIModelContainerRunner* AOTIModelPackageLoader::get_runner() {
 }
 
 std::vector<at::Tensor> AOTIModelPackageLoader::run(
-    const std::vector<at::Tensor>& inputs) {
-  return runner_->run(inputs);
+    const std::vector<at::Tensor>& inputs,
+    void* stream_handle) {
+  return runner_->run(inputs, stream_handle);
+}
+
+std::vector<at::Tensor> AOTIModelPackageLoader::boxed_run(
+    std::vector<at::Tensor>&& inputs,
+    void* stream_handle) {
+  return runner_->boxed_run(std::move(inputs), stream_handle);
 }
 
 std::unordered_map<std::string, std::string> AOTIModelPackageLoader::
@@ -413,5 +503,47 @@ std::vector<std::string> AOTIModelPackageLoader::get_call_spec() {
   return runner_->get_call_spec();
 }
 
+void AOTIModelPackageLoader::load_constants(
+    std::unordered_map<std::string, at::Tensor>& constants_map,
+    bool use_inactive,
+    bool check_full_update) {
+  std::unordered_map<std::string, std::string> constant_name_to_fqn =
+      runner_->getConstantNamesToOriginalFQNs();
+  std::unordered_map<std::string, at::string> fqn_to_constant_name;
+  for (const auto& it : constant_name_to_fqn) {
+    fqn_to_constant_name.emplace(it.second, it.first);
+  }
+
+  std::unordered_map<std::string, at::Tensor> updated_constants_map;
+  for (const auto& it : constants_map) {
+    if (fqn_to_constant_name.find(it.first) != fqn_to_constant_name.end()) {
+      updated_constants_map.emplace(fqn_to_constant_name[it.first], it.second);
+    } else {
+      throw std::runtime_error("Constant not found: " + it.first);
+    }
+  }
+
+  return runner_->update_constant_buffer(
+      updated_constants_map, use_inactive, check_full_update);
+}
+
+std::vector<std::string> AOTIModelPackageLoader::get_constant_fqns() {
+  std::unordered_map<std::string, std::string> constant_name_to_fqn =
+      runner_->getConstantNamesToOriginalFQNs();
+  std::vector<std::string> constant_fqns;
+  constant_fqns.reserve(constant_name_to_fqn.size());
+  for (const auto& it : constant_name_to_fqn) {
+    constant_fqns.push_back(it.second);
+  }
+  return constant_fqns;
+}
+
+void AOTIModelPackageLoader::update_constant_buffer(
+    std::unordered_map<std::string, at::Tensor>& tensor_map,
+    bool use_inactive,
+    bool validate_full_updates) {
+  runner_->update_constant_buffer(
+      tensor_map, use_inactive, validate_full_updates);
+}
 } // namespace torch::inductor
 #endif

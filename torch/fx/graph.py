@@ -9,32 +9,22 @@ import keyword
 import math
 import os
 import re
+import typing
 import warnings
 from collections import defaultdict
+from collections.abc import Iterable
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    FrozenSet,
-    Iterable,
-    List,
-    NamedTuple,
-    Optional,
-    Set,
-    Tuple,
-    Type,
-    TYPE_CHECKING,
-)
+from typing import Any, Callable, Literal, NamedTuple, Optional, TYPE_CHECKING
 
 import torch
 import torch.utils._pytree as pytree
-from torch._C import _NodeIter
+from torch._C import _fx_map_arg as map_arg, _NodeIter
 
 from . import _pytree as fx_pytree
 from ._compatibility import compatibility
-from .node import _get_qualified_name, _type_repr, Argument, map_arg, Node, Target
+from .immutable_collections import immutable_dict
+from .node import _get_qualified_name, _type_repr, Argument, Node, Target
 
 
 __all__ = ["PythonCode", "CodeGen", "Graph"]
@@ -45,12 +35,13 @@ if TYPE_CHECKING:
 
 
 # Mapping of builtins to their `typing` equivalent.
+# (PEP585: See D68459095 test plan)
 _origin_type_map = {
-    list: List,
-    dict: Dict,
-    set: Set,
-    frozenset: FrozenSet,
-    tuple: Tuple,
+    list: typing.List,  # noqa: UP006
+    dict: typing.Dict,  # noqa: UP006
+    set: typing.Set,  # noqa: UP006
+    frozenset: typing.FrozenSet,  # noqa: UP006
+    tuple: typing.Tuple,  # noqa: UP006
 }
 
 _legal_ops = dict.fromkeys(
@@ -60,7 +51,7 @@ _legal_ops = dict.fromkeys(
 
 # Signature for functions thattransforms the body (`list[str]`) of the
 # generated code
-TransformCodeFunc = Callable[[List[str]], List[str]]
+TransformCodeFunc = Callable[[list[str]], list[str]]
 
 
 class _CustomBuiltin(NamedTuple):
@@ -77,11 +68,16 @@ class _CustomBuiltin(NamedTuple):
     obj: Any
 
 
-_custom_builtins: Dict[str, _CustomBuiltin] = {}
+# Combined dict of disallowed variable names so we can check with one lookup
+_illegal_names = {k: object() for k in keyword.kwlist}
+_illegal_names.update(builtins.__dict__)  # can't shadow a builtin name
+
+_custom_builtins: dict[str, _CustomBuiltin] = {}
 
 
 def _register_custom_builtin(name: str, import_str: str, obj: Any):
     _custom_builtins[name] = _CustomBuiltin(import_str, obj)
+    _illegal_names[name] = obj
 
 
 _register_custom_builtin("inf", "from math import inf", math.inf)
@@ -112,16 +108,26 @@ def _snake_case(s: str) -> str:
 # Replace occurrences where a lowercase letter is followed by an uppercase letter
 _snake_case_sub = functools.partial(re.compile(r"(?<=[a-z])([A-Z])").sub, r"_\1")
 
+# Find chars that can't be in a Python identifier
+_illegal_char_regex = re.compile("[^0-9a-zA-Z_]+")
+
+# Combined check for variable names:
+# 1) Checks name is not empty
+# 2) Checks first character is not a digit
+# 3) Checks name has no illegal characters (_illegal_char_regex)
+# 3) Splits off the number suffix (if present)
+_name_regex = re.compile(r"^([a-zA-Z_][0-9a-zA-Z_]*?)(?:_(\d+))?$")
+
+# starts with torch but does not start with torch._dynamo. or torch._inductor.
+_torch_but_not_dynamo = re.compile(
+    r"^torch(?:\.(?!_dynamo\.|_inductor\.)[^.]+)*$"
+).fullmatch
+
 
 def _is_from_torch(obj: Any) -> bool:
     module_name = getattr(obj, "__module__", None)
     if module_name is not None:
-        base_module = module_name.partition(".")[0]
-        return (
-            base_module == "torch"
-            and not module_name.startswith("torch._dynamo.")
-            and not module_name.startswith("torch._inductor.")
-        )
+        return _torch_but_not_dynamo(module_name) is not None
 
     name = getattr(obj, "__name__", None)
     # exclude torch because torch.torch.torch.torch works. idk mang
@@ -143,13 +149,9 @@ class _Namespace:
     """
 
     def __init__(self):
-        self._obj_to_name: Dict[Any, str] = {}
-        self._unassociated_names = set()
-        self._used_names: Set[str] = set()
-        self._base_count: Dict[str, int] = defaultdict(int)
-
-        self._illegal_char_regex = re.compile("[^0-9a-zA-Z_]+")
-        self._name_suffix_regex = re.compile(r"(.*)_(\d+)$")
+        self._obj_to_name: dict[Any, str] = {}
+        self._used_names: set[str] = set()
+        self._base_count: dict[str, int] = {}
 
     def create_name(self, candidate: str, obj: Optional[Any]) -> str:
         """Create a unique name.
@@ -161,36 +163,38 @@ class _Namespace:
         if obj is not None and obj in self._obj_to_name:
             return self._obj_to_name[obj]
 
-        # delete all characters that are illegal in a Python identifier
-        candidate = self._illegal_char_regex.sub("_", candidate)
-
-        if not candidate:
-            candidate = "_unnamed"
-
-        if candidate[0].isdigit():
-            candidate = f"_{candidate}"
-
-        match = self._name_suffix_regex.match(candidate)
+        # optimistically check if candidate is already a valid name
+        match = _name_regex.match(candidate)
         if match is None:
-            base = candidate
-            num = None
+            # delete all characters that are illegal in a Python identifier
+            candidate = _illegal_char_regex.sub("_", candidate)
+
+            if not candidate:
+                candidate = "_unnamed"
+
+            if candidate[0].isdigit():
+                candidate = f"_{candidate}"
+
+            match = _name_regex.match(candidate)
+            assert match is not None
+
+        base, num = match.group(1, 2)
+        if num is None or candidate in self._used_names:
+            num = self._base_count.get(candidate, 0)
+            if _illegal_names.get(candidate, obj) is not obj:
+                num += 1
+                candidate = f"{base}_{num}"
+                # assume illegal names don't end in _\d so no need to check again
         else:
-            base, num_str = match.group(1, 2)
-            num = int(num_str)
+            num = int(num)
 
-        candidate = base if num is None else f"{base}_{num}"
-        if not num:
-            num = self._base_count[base]
-
-        while candidate in self._used_names or self._is_illegal_name(candidate, obj):
+        while candidate in self._used_names:
             num += 1
             candidate = f"{base}_{num}"
 
         self._used_names.add(candidate)
         self._base_count[base] = num
-        if obj is None:
-            self._unassociated_names.add(candidate)
-        else:
+        if obj is not None:
             self._obj_to_name[obj] = candidate
         return candidate
 
@@ -199,25 +203,8 @@ class _Namespace:
 
         Neither `name` nor `obj` should be associated already.
         """
-        assert obj not in self._obj_to_name
-        assert name in self._unassociated_names
-        self._obj_to_name[obj] = name
-        self._unassociated_names.remove(name)
-
-    def _is_illegal_name(self, name: str, obj: Any) -> bool:
-        # 1. keywords are never allowed as names.
-        if name in keyword.kwlist:
-            return True
-
-        # 2. Can't shadow a builtin name, unless you *are* that builtin.
-        if name in builtins.__dict__:
-            return obj is not builtins.__dict__[name]
-
-        # 3. Can't shadow our custom builtins either
-        if name in _custom_builtins:
-            return obj is not _custom_builtins[name].obj
-
-        return False
+        maybe_existing = self._obj_to_name.setdefault(obj, name)
+        assert maybe_existing is name, "obj is already associated"
 
     def _rename_object(self, obj: Any, name: str):
         assert obj in self._obj_to_name
@@ -234,6 +221,7 @@ dtype_abbrs = {
     torch.float8_e5m2: "f8e5m2",
     torch.float8_e4m3fnuz: "f8e4m3fnuz",
     torch.float8_e5m2fnuz: "f8e5m2fnuz",
+    torch.float8_e8m0fnu: "f8e8m0fnu",
     torch.complex32: "c32",
     torch.complex64: "c64",
     torch.complex128: "c128",
@@ -247,6 +235,7 @@ dtype_abbrs = {
     torch.uint32: "u32",
     torch.uint64: "u64",
     torch.bits16: "b16",
+    torch.bits1x8: "b1x8",
 }
 
 
@@ -260,10 +249,10 @@ class PythonCode:
     # Python source code for the forward function definition.
     src: str
     # Values in global scope during execution of `src_def`.
-    globals: Dict[str, Any]
+    globals: dict[str, Any]
     # Optional mapping from the forward function's line number to
     # node index.
-    _lineno_map: Optional[Dict[int, Optional[int]]]
+    _lineno_map: Optional[dict[int, Optional[int]]]
 
 
 def _format_target(base: str, target: str) -> str:
@@ -290,8 +279,8 @@ class _InsertPoint:
 
 
 class _node_list:
-    def __init__(self, graph: "Graph", direction: str = "_next"):
-        assert direction in ["_next", "_prev"]
+    def __init__(self, graph: "Graph", direction: Literal["_prev", "_next"] = "_next"):
+        assert direction in ("_next", "_prev")
         self.graph = graph
         self.direction = direction
 
@@ -299,8 +288,7 @@ class _node_list:
         return self.graph._len
 
     def __iter__(self):
-        assert self.direction == "_prev" or self.direction == "_next"
-        yield from _NodeIter(self.graph._root, self.direction == "_prev")
+        return _NodeIter(self.graph._root, self.direction == "_prev")
 
     def __reversed__(self):
         return _node_list(self.graph, "_next" if self.direction == "_prev" else "_prev")
@@ -311,7 +299,7 @@ class _PyTreeInfo(NamedTuple):
     Contains extra info stored when we're using Pytrees
     """
 
-    orig_args: List[str]
+    orig_args: list[str]
     in_spec: pytree.TreeSpec
     out_spec: Optional[pytree.TreeSpec]
 
@@ -359,7 +347,7 @@ class CodeGen:
         self._body_transformer: Optional[TransformCodeFunc] = None
         self._func_name: str = "forward"
 
-    def gen_fn_def(self, free_vars: List[str], maybe_return_annotation: str) -> str:
+    def gen_fn_def(self, free_vars: list[str], maybe_return_annotation: str) -> str:
         """
         Given the free variables and a return annotation, generates the beginning of the FX function.
         By default, `gen_fn_def(['a', 'b'], '') == 'def {self._func_name}(a, b):'`
@@ -398,7 +386,7 @@ class CodeGen:
         """
         return outputs
 
-    def additional_globals(self) -> List[Tuple[str, Any]]:
+    def additional_globals(self) -> list[tuple[str, Any]]:
         """
         If your codegen uses extra global values, add tuples of (identifier,reference to the value) here.
         For example, return ['List', typing.List] if you need ``List`` in the global context.
@@ -416,13 +404,13 @@ class CodeGen:
         include_device: bool = False,
         colored: bool = False,
     ) -> PythonCode:
-        free_vars: List[str] = []
-        body: List[str] = []
-        globals_: Dict[str, Any] = {}
-        wrapped_fns: Dict[str, None] = {}
+        free_vars: list[str] = []
+        body: list[str] = []
+        globals_: dict[str, Any] = {}
+        wrapped_fns: dict[str, None] = {}
 
         # Wrap string in list to pass by reference
-        maybe_return_annotation: List[str] = [""]
+        maybe_return_annotation: list[str] = [""]
         include_stride = include_stride or (
             os.environ.get("FX_GRAPH_SHOW_STRIDE", "0") == "1"
         )
@@ -466,9 +454,13 @@ class CodeGen:
 
             typename = _type_repr(o)
 
-            if hasattr(o, "__origin__"):
-                # This is a generic type, e.g. typing.List[torch.Tensor]
-                origin_type = _origin_type_map.get(o.__origin__, o.__origin__)
+            if origin_type := getattr(o, "__origin__", None):
+                # list[...], typing.List[...], TensorType[...]
+
+                if isinstance(o, typing._GenericAlias):  # type: ignore[attr-defined]
+                    # This is a generic pre-PEP585 type, e.g. typing.List[torch.Tensor]
+                    origin_type = _origin_type_map.get(origin_type, origin_type)
+
                 origin_typename = add_global(_type_repr(origin_type), origin_type)
 
                 if hasattr(o, "__args__"):
@@ -489,38 +481,24 @@ class CodeGen:
             # Common case: this is a regular module name like 'foo.bar.baz'
             return add_global(typename, o)
 
-        codes = {
-            "yellow": "\033[33m",
-            "cyan": "\033[36m",
-            "green": "\033[32m",
-            "blue": "\033[34m",
-            "red": "\033[31m",
-            "dim": "\033[2m",
-            "dim_blue": "\033[2m\033[34m",
-            "dim_green": "\033[2m\033[32m",
-            "reset": "\033[0m",
-        }
-
-        def make_wrapper_func(name):
-            def f(s):
-                if colored:
-                    return f"{codes[name]}{s}{codes['reset']}"
-                return s
-
-            return f
-
-        yellow = make_wrapper_func("yellow")  # noqa: F841
-        cyan = make_wrapper_func("cyan")  # noqa: F841
-        red = make_wrapper_func("red")
-        green = make_wrapper_func("green")  # noqa: F841
-        dim_green = make_wrapper_func("dim_green")
-        dim = make_wrapper_func("dim")
-        dim_blue = make_wrapper_func("dim_blue")
-        blue = make_wrapper_func("blue")
+        if colored:
+            red = _color_fns["red"]
+            dim_green = _color_fns["dim_green"]
+            dim = _color_fns["dim"]
+            dim_blue = _color_fns["dim_blue"]
+            blue = _color_fns["blue"]
+        else:
+            red = _identity
+            dim_green = _identity
+            dim = _identity
+            dim_blue = _identity
+            blue = _identity
 
         def _get_repr(arg: Any) -> str:
-            # Handle NamedTuples (if it has `_fields`) via add_global.
-            if isinstance(arg, tuple) and hasattr(arg, "_fields"):
+            if isinstance(arg, Node):  # first because common
+                return repr(arg)
+            elif isinstance(arg, tuple) and hasattr(arg, "_fields"):
+                # Handle NamedTuples (if it has `_fields`) via add_global.
                 qualified_name = _get_qualified_name(type(arg))
                 global_name = add_global(qualified_name, type(arg))
                 return f"{global_name}{repr(tuple(arg))}"
@@ -534,8 +512,6 @@ class CodeGen:
                 cls = arg.__class__
                 clsname = add_global(cls.__name__, cls)
                 return f"{clsname}.{arg.name}"
-            elif isinstance(arg, Node):
-                return repr(arg)
             elif isinstance(arg, torch.Tensor):
                 size = list(arg.size())
                 dtype = str(arg.dtype).split(".")[-1]
@@ -553,20 +529,18 @@ class CodeGen:
                 return blue(repr(arg))
 
         def _format_args(
-            args: Tuple[Argument, ...], kwargs: Dict[str, Argument]
+            args: tuple[Argument, ...], kwargs: dict[str, Argument]
         ) -> str:
-            args_s = ", ".join(_get_repr(a) for a in args)
-            kwargs_s = ", ".join(f"{k} = {_get_repr(v)}" for k, v in kwargs.items())
-            if args_s and kwargs_s:
-                return f"{args_s}, {kwargs_s}"
-            return args_s or kwargs_s
+            res = [_get_repr(a) for a in args]
+            res.extend([f"{k} = {_get_repr(v)}" for k, v in kwargs.items()])
+            return ", ".join(res)
 
         # Run through reverse nodes and record the first instance of a use
         # of a given node. This represents the *last* use of the node in the
         # execution order of the program, which we will use to free unused
         # values
-        node_to_last_use: Dict[Node, Node] = {}
-        user_to_last_uses: Dict[Node, List[Node]] = {}
+        node_to_last_use: dict[Node, Node] = {}
+        user_to_last_uses: dict[Node, list[Node]] = {}
 
         def register_last_uses(n: Node, user: Node):
             if n not in node_to_last_use:
@@ -574,8 +548,8 @@ class CodeGen:
                 user_to_last_uses.setdefault(user, []).append(n)
 
         for node in reversed(nodes):
-            map_arg(node.args, lambda n: register_last_uses(n, node))
-            map_arg(node.kwargs, lambda n: register_last_uses(n, node))
+            for input_node in node._input_nodes:
+                register_last_uses(input_node, node)
 
         def delete_unused_values(user: Node):
             """
@@ -614,22 +588,22 @@ class CodeGen:
             nonlocal prev_stacktrace
 
             if node.op not in {"placeholder", "output"}:
-                if node.stack_trace:
-                    if node.stack_trace != prev_stacktrace:
-                        prev_stacktrace = node.stack_trace
-                        summary_str = ""
-
-                        if parsed_stack_trace := _parse_stack_trace(node.stack_trace):
+                stack_trace = node.stack_trace
+                if stack_trace:
+                    if stack_trace != prev_stacktrace:
+                        prev_stacktrace = stack_trace
+                        if parsed_stack_trace := _parse_stack_trace(stack_trace):
                             summary_str = parsed_stack_trace.get_summary_str()
-
-                        body.append(f'\n {dim("# " + summary_str)}\n')
+                        else:
+                            summary_str = ""
+                        body.append(f'\n {dim(f"# {summary_str}")}\n')
                 elif prev_stacktrace != "":
                     prev_stacktrace = ""
                     no_stacktrace_msg = "# No stacktrace found for following nodes"
                     body.append(f"\n{dim(no_stacktrace_msg)}\n")
 
         def stringify_shape(shape: Iterable) -> str:
-            return f"[{', '.join(str(x) for x in shape)}]"
+            return f"[{', '.join([str(x) for x in shape])}]"
 
         def emit_node(node: Node):
             maybe_type_annotation = (
@@ -646,8 +620,10 @@ class CodeGen:
                     node.meta.get("tensor_meta", node.meta.get("example_value", None)),
                 )
                 # use string as annotation, to make it valid python code
-
-                if isinstance(meta_val, torch.Tensor):
+                if isinstance(meta_val, torch.Tensor) and meta_val.layout not in (
+                    torch.sparse_csc,
+                    torch.sparse_csr,
+                ):
                     stride_annotation = (
                         f"{stringify_shape(meta_val.stride())}"
                         if include_stride
@@ -782,13 +758,13 @@ class CodeGen:
         prologue = self.gen_fn_def(free_vars, maybe_return_annotation[0])
 
         # remove counter and generate lineno to node index mapping
-        lineno_map: Dict[int, Optional[int]] = {}
+        lineno_map: dict[int, Optional[int]] = {}
         prologue_len = prologue.count("\n") + 1
-        new_lines: List[str] = []
+        new_lines: list[str] = []
         cur_idx = None
         for line in "".join(body).split("\n"):
-            counter = re.search(r"# COUNTER: (\d+)", line)
-            if counter and counter.group(1) is not None:
+            counter = _counter_regexp.search(line)
+            if counter is not None:
                 cur_idx = int(counter.group(1))
             else:
                 lineno_map[len(new_lines) + prologue_len] = cur_idx
@@ -904,11 +880,11 @@ class _FindNodesLookupTable:
     """
 
     def __init__(self):
-        self.table: Dict[Tuple[str, Optional[Target]], Dict[Node, None]] = defaultdict(
+        self.table: dict[tuple[str, Optional[Target]], dict[Node, None]] = defaultdict(
             dict
         )
 
-    def _key(self, node) -> Tuple[str, Optional[Target]]:
+    def _key(self, node) -> tuple[str, Optional[Target]]:
         return (node.op, node.target if node.op == "call_function" else None)
 
     def __contains__(self, node) -> bool:
@@ -985,14 +961,14 @@ class Graph:
     def __init__(
         self,
         owning_module: Optional["GraphModule"] = None,
-        tracer_cls: Optional[Type["Tracer"]] = None,
-        tracer_extras: Optional[Dict[str, Any]] = None,
+        tracer_cls: Optional[type["Tracer"]] = None,
+        tracer_extras: Optional[dict[str, Any]] = None,
     ):
         """
         Construct an empty Graph.
         """
         self._root: Node = Node(self, "", "root", "", (), {})
-        self._used_names: Dict[str, int] = {}  # base name -> number
+        self._used_names: dict[str, int] = {}  # base name -> number
         self._insert = self._root.prepend
         self._len = 0
         self._graph_namespace = _Namespace()
@@ -1000,7 +976,7 @@ class Graph:
         self._tracer_cls = tracer_cls
         self._tracer_extras = tracer_extras
         self._codegen = CodeGen()
-        self._co_fields: Dict[str, Any] = {}
+        self._co_fields: dict[str, Any] = {}
         self._find_nodes_lookup_table = _FindNodesLookupTable()
 
     @property
@@ -1060,7 +1036,7 @@ class Graph:
 
     @compatibility(is_backward_compatible=True)
     def graph_copy(
-        self, g: "Graph", val_map: Dict[Node, Node], return_output_node=False
+        self, g: "Graph", val_map: dict[Node, Node], return_output_node=False
     ) -> "Optional[Argument]":
         """
         Copy all nodes from a given graph into ``self``.
@@ -1099,12 +1075,13 @@ class Graph:
         g = Graph(tracer_cls=self._tracer_cls)
         output_vals = g.graph_copy(self, val_map=memo, return_output_node=True)
         g._codegen = copy.deepcopy(self._codegen)
-        assert isinstance(output_vals, tuple)
-        output_val, old_output_node = output_vals
-        new_output_node = g.output(
-            output_val, type_expr=getattr(old_output_node, "type", None)
-        )
-        new_output_node.meta = copy.copy(old_output_node.meta)
+        if output_vals is not None:
+            assert isinstance(output_vals, tuple)
+            output_val, old_output_node = output_vals
+            new_output_node = g.output(
+                output_val, type_expr=getattr(old_output_node, "type", None)
+            )
+            new_output_node.meta = copy.copy(old_output_node.meta)
         return g
 
     @compatibility(is_backward_compatible=True)
@@ -1112,8 +1089,8 @@ class Graph:
         self,
         op: str,
         target: "Target",
-        args: Optional[Tuple["Argument", ...]] = None,
-        kwargs: Optional[Dict[str, "Argument"]] = None,
+        args: Optional[tuple["Argument", ...]] = None,
+        kwargs: Optional[dict[str, "Argument"]] = None,
         name: Optional[str] = None,
         type_expr: Optional[Any] = None,
     ) -> Node:
@@ -1142,11 +1119,15 @@ class Graph:
 
             The newly-created and inserted node.
         """
-        assert op in _legal_ops
-        args = () if args is None else args
-        kwargs = {} if kwargs is None else kwargs
-        assert isinstance(args, tuple), "args must be a tuple"
-        assert isinstance(kwargs, dict), "kwargs must be a dict"
+        # `target in _legal_ops` is checked in Node.__init__
+        if not args:
+            args = ()
+        else:
+            assert isinstance(args, tuple), "args must be a tuple"
+        if not kwargs:
+            kwargs = immutable_dict()
+        else:
+            assert isinstance(kwargs, dict), "kwargs must be a dict"
 
         candidate = name if name is not None else self._target_to_str(target)
         name = self._graph_namespace.create_name(candidate, None)
@@ -1212,12 +1193,10 @@ class Graph:
 
         # Null out this Node's argument nodes so that the Nodes referred to
         # can update their ``users`` accordingly
-        new_args = map_arg(to_erase.args, lambda n: None)
-        assert isinstance(new_args, tuple)
-        to_erase.args = new_args
-        new_kwargs = map_arg(to_erase.kwargs, lambda n: None)
-        assert isinstance(new_kwargs, dict)
-        to_erase.kwargs = new_kwargs
+        to_erase._update_args_kwargs(
+            map_arg(to_erase._args, lambda n: None),
+            map_arg(to_erase._kwargs, lambda n: None),
+        )
 
     @compatibility(is_backward_compatible=True)
     def inserting_before(self, n: Optional[Node] = None):
@@ -1372,8 +1351,8 @@ class Graph:
     def call_module(
         self,
         module_name: str,
-        args: Optional[Tuple["Argument", ...]] = None,
-        kwargs: Optional[Dict[str, "Argument"]] = None,
+        args: Optional[tuple["Argument", ...]] = None,
+        kwargs: Optional[dict[str, "Argument"]] = None,
         type_expr: Optional[Any] = None,
     ) -> Node:
         """
@@ -1422,8 +1401,8 @@ class Graph:
     def call_method(
         self,
         method_name: str,
-        args: Optional[Tuple["Argument", ...]] = None,
-        kwargs: Optional[Dict[str, "Argument"]] = None,
+        args: Optional[tuple["Argument", ...]] = None,
+        kwargs: Optional[dict[str, "Argument"]] = None,
         type_expr: Optional[Any] = None,
     ) -> Node:
         """
@@ -1461,8 +1440,8 @@ class Graph:
     def call_function(
         self,
         the_function: Callable[..., Any],
-        args: Optional[Tuple["Argument", ...]] = None,
-        kwargs: Optional[Dict[str, "Argument"]] = None,
+        args: Optional[tuple["Argument", ...]] = None,
+        kwargs: Optional[dict[str, "Argument"]] = None,
         type_expr: Optional[Any] = None,
     ) -> Node:
         """
@@ -1667,10 +1646,10 @@ class Graph:
         Return a human-readable (not machine-readable) string representation
         of this Graph
         """
-        placeholder_names: List[str] = []
+        placeholder_names: list[str] = []
         # This is a one-element array just so ``format_node`` can modify the closed
         # over value
-        maybe_return_typename: List[str] = [""]
+        maybe_return_typename: list[str] = [""]
 
         node_strs = [node.format_node(placeholder_names) for node in self.nodes]
         param_str = ", ".join(placeholder_names)
@@ -1728,24 +1707,17 @@ class Graph:
                     f"defined! Please check that Nodes in the graph are topologically ordered\n{self}"
                 )
 
-        seen_names: Set[str] = set()
-        seen_values: Set[Node] = set()
+        seen_names: set[str] = set()
+        seen_values: set[Node] = set()
         for node in self.nodes:
-            if node.op not in [
-                "placeholder",
-                "call_method",
-                "call_module",
-                "call_function",
-                "get_attr",
-                "output",
-            ]:
+            if node.op not in _legal_ops:
                 raise RuntimeError(f"Node {node} had unknown opcode {node.op}!")
             if node.graph is not self:
                 raise RuntimeError(f"Node '{node}' does not belong to this Graph!")
             if node not in self._find_nodes_lookup_table:
                 raise RuntimeError(f"Node '{node}' is not added to the side table")
-            map_arg(node.args, lambda arg: check_arg(arg, node))
-            map_arg(node.kwargs, lambda arg: check_arg(arg, node))
+            for arg in node._input_nodes:
+                check_arg(arg, node)
             seen_values.add(node)
 
             if node.name in seen_names:
@@ -1754,8 +1726,6 @@ class Graph:
 
         # Check targets are legit
         if self.owning_module:
-            num_warnings = 0
-            MAX_WARNINGS = 5
             for node in self.nodes:
                 if node.op == "call_function":
                     if not callable(node.target):
@@ -1787,34 +1757,13 @@ class Graph:
                                 f"Node {node} target {node.target} {atom} of {seen_qualname} does "
                                 "not reference an nn.Module"
                             )
-                        elif (
-                            node.op == "get_attr"
-                            and not isinstance(new_m_itr, torch.nn.Module)
-                            and not isinstance(new_m_itr, torch.nn.Parameter)
-                            and atom not in m_itr._buffers
-                        ):
-                            if num_warnings < MAX_WARNINGS:
-                                # Don't emit this warning too frequently,
-                                # for very large graphs this can become very expensive
-                                # from a performance perspective.
-                                warnings.warn(
-                                    f"Node {node} target {node.target} {atom} of {seen_qualname} does "
-                                    "not reference an nn.Module, nn.Parameter, or buffer, which is "
-                                    "what 'get_attr' Nodes typically target"
-                                )
-                            num_warnings += 1
-                        else:
-                            m_itr = new_m_itr
-            if num_warnings > MAX_WARNINGS:
-                warnings.warn(
-                    f"Additional {num_warnings - MAX_WARNINGS} warnings "
-                    "suppressed about get_attr references"
-                )
+
+                        m_itr = new_m_itr
 
     @compatibility(is_backward_compatible=True)
     def eliminate_dead_code(
         self, is_impure_node: Optional[Callable[[Node], bool]] = None
-    ):
+    ) -> bool:
         """
         Remove all dead code from the graph, based on each node's number of
         users, and whether the nodes have any side effects. The graph must be
@@ -1964,6 +1913,32 @@ class Graph:
         return on_generate_code_context_manager()
 
 
+def _identity(x):
+    return x
+
+
+def _make_color_fn(code):
+    def f(s):
+        reset = "\033[0m"
+        return f"{code}{s}{reset}"
+
+    return f
+
+
+_color_codes = {
+    "yellow": "\033[33m",
+    "cyan": "\033[36m",
+    "green": "\033[32m",
+    "blue": "\033[34m",
+    "red": "\033[31m",
+    "dim": "\033[2m",
+    "dim_blue": "\033[2m\033[34m",
+    "dim_green": "\033[2m\033[32m",
+}
+_color_fns = {k: _make_color_fn(v) for k, v in _color_codes.items()}
+_counter_regexp = re.compile(r"# COUNTER: (\d+)")
+
+
 reflectable_magic_methods = {
     "add": "{} + {}",
     "sub": "{} - {}",
@@ -1982,20 +1957,18 @@ reflectable_magic_methods = {
     "matmul": "{} @ {}",
 }
 
-magic_methods = dict(
-    {
-        "eq": "{} == {}",
-        "ne": "{} != {}",
-        "lt": "{} < {}",
-        "gt": "{} > {}",
-        "le": "{} <= {}",
-        "ge": "{} >= {}",
-        "pos": "+{}",
-        "neg": "-{}",
-        "invert": "~{}",
-    },
+magic_methods = {
+    "eq": "{} == {}",
+    "ne": "{} != {}",
+    "lt": "{} < {}",
+    "gt": "{} > {}",
+    "le": "{} <= {}",
+    "ge": "{} >= {}",
+    "pos": "+{}",
+    "neg": "-{}",
+    "invert": "~{}",
     **reflectable_magic_methods,
-)
+}
 
 inplace_methods = {
     "iadd": "{} += {}",

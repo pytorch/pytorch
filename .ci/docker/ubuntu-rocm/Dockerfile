@@ -14,21 +14,20 @@ ENV PYTORCH_ROCM_ARCH ${PYTORCH_ROCM_ARCH}
 COPY ./common/install_base.sh install_base.sh
 RUN bash ./install_base.sh && rm install_base.sh
 
-# Install clang
-ARG LLVMDEV
-ARG CLANG_VERSION
-COPY ./common/install_clang.sh install_clang.sh
-RUN bash ./install_clang.sh && rm install_clang.sh
-
 # Install user
 COPY ./common/install_user.sh install_user.sh
 RUN bash ./install_user.sh && rm install_user.sh
 
+# Install katex
+ARG KATEX
+COPY ./common/install_docs_reqs.sh install_docs_reqs.sh
+RUN bash ./install_docs_reqs.sh && rm install_docs_reqs.sh
+
 # Install conda and other packages (e.g., numpy, pytest)
 ARG ANACONDA_PYTHON_VERSION
-ARG CONDA_CMAKE
 ENV ANACONDA_PYTHON_VERSION=$ANACONDA_PYTHON_VERSION
 ENV PATH /opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/bin:/opt/conda/bin:$PATH
+ARG CONDA_CMAKE
 COPY requirements-ci.txt /opt/conda/requirements-ci.txt
 COPY ./common/install_conda.sh install_conda.sh
 COPY ./common/common_utils.sh common_utils.sh
@@ -39,19 +38,17 @@ ARG GCC_VERSION
 COPY ./common/install_gcc.sh install_gcc.sh
 RUN bash ./install_gcc.sh && rm install_gcc.sh
 
+# Install clang
+ARG CLANG_VERSION
+COPY ./common/install_clang.sh install_clang.sh
+RUN bash ./install_clang.sh && rm install_clang.sh
+
 # (optional) Install protobuf for ONNX
 ARG PROTOBUF
 COPY ./common/install_protobuf.sh install_protobuf.sh
 RUN if [ -n "${PROTOBUF}" ]; then bash ./install_protobuf.sh; fi
 RUN rm install_protobuf.sh
 ENV INSTALLED_PROTOBUF ${PROTOBUF}
-
-# (optional) Install database packages like LMDB and LevelDB
-ARG DB
-COPY ./common/install_db.sh install_db.sh
-RUN if [ -n "${DB}" ]; then bash ./install_db.sh; fi
-RUN rm install_db.sh
-ENV INSTALLED_DB ${DB}
 
 # (optional) Install vision packages like OpenCV
 ARG VISION
@@ -85,6 +82,32 @@ COPY ./common/install_amdsmi.sh install_amdsmi.sh
 RUN bash ./install_amdsmi.sh
 RUN rm install_amdsmi.sh
 
+# (optional) Install UCC
+ARG UCX_COMMIT
+ARG UCC_COMMIT
+ENV UCX_COMMIT $UCX_COMMIT
+ENV UCC_COMMIT $UCC_COMMIT
+ENV UCX_HOME /usr
+ENV UCC_HOME /usr
+ADD ./common/install_ucc.sh install_ucc.sh
+RUN if [ -n "${UCX_COMMIT}" ] && [ -n "${UCC_COMMIT}" ]; then bash ./install_ucc.sh; fi
+RUN rm install_ucc.sh
+
+COPY ./common/install_openssl.sh install_openssl.sh
+ENV OPENSSL_ROOT_DIR /opt/openssl
+RUN bash ./install_openssl.sh
+ENV OPENSSL_DIR /opt/openssl
+
+ARG INDUCTOR_BENCHMARKS
+ARG ANACONDA_PYTHON_VERSION
+ENV ANACONDA_PYTHON_VERSION=$ANACONDA_PYTHON_VERSION
+COPY ./common/install_inductor_benchmark_deps.sh install_inductor_benchmark_deps.sh
+COPY ./common/common_utils.sh common_utils.sh
+COPY ci_commit_pins/huggingface.txt huggingface.txt
+COPY ci_commit_pins/timm.txt timm.txt
+RUN if [ -n "${INDUCTOR_BENCHMARKS}" ]; then bash ./install_inductor_benchmark_deps.sh; fi
+RUN rm install_inductor_benchmark_deps.sh common_utils.sh timm.txt huggingface.txt
+
 # (optional) Install non-default CMake version
 ARG CMAKE_VERSION
 COPY ./common/install_cmake.sh install_cmake.sh
@@ -107,17 +130,16 @@ COPY triton_version.txt triton_version.txt
 RUN if [ -n "${TRITON}" ]; then bash ./install_triton.sh; fi
 RUN rm install_triton.sh common_utils.sh triton.txt triton_version.txt
 
-# Install AOTriton
-COPY ./aotriton_version.txt aotriton_version.txt
-COPY ./common/common_utils.sh common_utils.sh
-COPY ./common/install_aotriton.sh install_aotriton.sh
-RUN ["/bin/bash", "-c", "./install_aotriton.sh /opt/rocm && rm -rf install_aotriton.sh aotriton_version.txt common_utils.sh"]
-ENV AOTRITON_INSTALLED_PREFIX /opt/rocm/aotriton
 
 # Install ccache/sccache (do this last, so we get priority in PATH)
 COPY ./common/install_cache.sh install_cache.sh
 ENV PATH /opt/cache/bin:$PATH
 RUN bash ./install_cache.sh && rm install_cache.sh
+
+# Install Open MPI for ROCm
+COPY ./common/install_openmpi.sh install_openmpi.sh
+RUN if [ -n "${CUDA_VERSION}" ]; then bash install_openmpi.sh; fi
+RUN rm install_openmpi.sh
 
 # Include BUILD_ENVIRONMENT environment variable in image
 ARG BUILD_ENVIRONMENT

@@ -54,22 +54,6 @@ class TestCppWrapperHipify(TestCase):
                 }                                              \\
             } while (0);
 
-            namespace {
-
-            struct Grid {
-                Grid(uint32_t x, uint32_t y, uint32_t z)
-                  : grid_x(x), grid_y(y), grid_z(z) {}
-                uint32_t grid_x;
-                uint32_t grid_y;
-                uint32_t grid_z;
-
-                bool is_non_zero() {
-                    return grid_x > 0 && grid_y > 0 && grid_z > 0;
-                }
-            };
-
-            }  // anonymous namespace
-
             static inline hipFunction_t loadKernel(
                     std::string filePath,
                     const std::string &funcName,
@@ -110,7 +94,11 @@ class TestCppWrapperHipify(TestCase):
             }
         """
         if torch.version.hip is not None:
-            expected = expected.replace("32*numWarps", "64*numWarps")
+            # Adjusting the warp size to GPU supported wavefront size on AMD GPU
+            prop = torch.cuda.get_device_properties(torch.cuda.current_device())
+            expected = expected.replace(
+                "32*numWarps", str(prop.warp_size) + "*numWarps"
+            )
         result = maybe_hipify_code_wrapper(header, True)
         self.assertEqual(result.rstrip(), expected.rstrip())
 

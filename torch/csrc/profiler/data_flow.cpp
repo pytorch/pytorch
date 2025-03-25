@@ -128,7 +128,7 @@ void calculateUniqueTensorIDs(
     for (const auto& t : tensors) {
       if (t.impl_ != NoTensorImpl) {
         // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-        tensor_set.insert(*t.allocation_id_ref_.get());
+        tensor_set.insert(t.allocation_id_ref_.get().value());
       }
     }
     tensors.erase(
@@ -136,7 +136,7 @@ void calculateUniqueTensorIDs(
             tensors.begin(),
             tensors.end(),
             [&tensor_set](const auto& i) {
-              auto it = tensor_set.find(*i.allocation_id_ref_.get());
+              auto it = tensor_set.find(i.allocation_id_ref_.get().value());
               return it == tensor_set.end();
             }),
         tensors.end());
@@ -188,7 +188,7 @@ void calculateUniqueTensorIDs(
   // --------------------------------------------------------------------------
   for (const auto& t : tensors) {
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    const auto id = id_map.at(*t.allocation_id_ref_.get());
+    const auto id = id_map.at(t.allocation_id_ref_.get().value());
     t.id_ref_.get().emplace(TensorID(id));
   }
 }

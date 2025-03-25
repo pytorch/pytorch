@@ -9,6 +9,7 @@ import numpy
 
 import torch
 import torch.optim as optim
+from torch.utils._ordered_set import OrderedSet
 
 from .. import config
 
@@ -42,7 +43,7 @@ def clean_memory() -> None:
 # We compare the numerical results before and after pre/post grad fx passes
 # transformation to make sure the numerical results are the same.
 def compare_dict_tensors(dict_base, dict_control, precision):
-    if len(set(dict_base.keys())) != len(set(dict_control.keys())):
+    if len(OrderedSet(dict_base.keys())) != len(OrderedSet(dict_control.keys())):
         logger.warning("Mismatch keys found before and after pre/post grad fx passes.")
         logger.debug("keys before pre/post grad fx passes %s", dict_base.keys())
         logger.debug("keys after pre/post grad fx passes %s", dict_control.keys())
@@ -172,7 +173,7 @@ def run_model(
                     "compare parameters with optimizer added. Numerical result : %s",
                     res,
                 )
-            except Exception as e:
+            except Exception:
                 logger.exception(
                     "Exception when optimizer is added to check parameter names"
                 )

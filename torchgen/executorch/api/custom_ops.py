@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Sequence, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from torchgen import dest
 
@@ -15,6 +15,8 @@ from torchgen.utils import concatMap, Target
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from torchgen.executorch.model import ETKernelIndex
     from torchgen.selective_build.selector import SelectiveBuilder
 
@@ -63,9 +65,9 @@ class ComputeNativeFunctionStub:
                 {comma.join([r.name for r in f.func.arguments.out])}
             )"""
         else:
-            assert all(
-                a.type == BaseType(BaseTy.Tensor) for a in f.func.returns
-            ), f"Only support tensor returns but got {f.func.returns}"
+            assert all(a.type == BaseType(BaseTy.Tensor) for a in f.func.returns), (
+                f"Only support tensor returns but got {f.func.returns}"
+            )
             # Returns a tuple of empty tensors
             tensor_type = "at::Tensor"
             comma = ", "

@@ -1,13 +1,18 @@
-# mypy: allow-untyped-defs
+# mypy: disallow-untyped-defs
 from __future__ import annotations
 
 import dataclasses
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import torch
-from torch._dynamo.utils import counters
-from torch._inductor.utils import InputType
+from torch._dynamo.utils import counters, get_metrics_context
+from torch._inductor.utils import GraphPartitionMap, InputType
+from torch.utils._ordered_set import OrderedSet
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
@@ -16,13 +21,14 @@ static_inputs_log = torch._logging.getArtifactLogger(
 )
 
 
-OutputType = List[Optional[Union[int, torch.Tensor]]]
-ModelType = Callable[[List[InputType]], OutputType]
+OutputType = list[Optional[Union[int, torch.Tensor]]]
+ModelType = Callable[[list[InputType]], OutputType]
 
 
 @dataclasses.dataclass(frozen=True)
 class FunctionID:
     "Unique counter of a function wrapped in cudagraphify_impl"
+
     id: int
 
 
@@ -37,7 +43,7 @@ class PlaceholderInfo:
     name: str
     stack_trace: Optional[str]
     # This field is recursive, but never cyclic (since a node never uses itself)
-    users: List[PlaceholderInfo]
+    users: list[PlaceholderInfo]
     mutating_use_stack_trace: Optional[str]
 
 
@@ -52,7 +58,7 @@ class WrappedFunction:
     model: Callable[..., Any]
     static_input_idxs: Sequence[int]
     id: FunctionID
-    constants: Tuple[torch.Tensor, ...]
+    constants: tuple[torch.Tensor, ...]
     placeholders: Sequence[PlaceholderInfo]
     mutated_input_idxs: Sequence[int]
 
@@ -91,7 +97,7 @@ def to_placeholder_info(placeholder_node: torch.fx.Node) -> PlaceholderInfo:
     return PlaceholderInfo(name, stack_trace, users, mutating_use_stack_trace)
 
 
-def get_placeholder_info(graph: torch.fx.Graph) -> List[PlaceholderInfo]:
+def get_placeholder_info(graph: torch.fx.Graph) -> list[PlaceholderInfo]:
     return [
         to_placeholder_info(node) for node in graph.nodes if node.op == "placeholder"
     ]
@@ -122,7 +128,7 @@ def get_mutation_stack_trace(
 
 def check_for_mutation(
     func: WrappedFunction,
-    inputs: List[InputType],
+    inputs: list[InputType],
     is_cuda_graph_recorded_tensor: Callable[[torch.Tensor], bool],
 ) -> Optional[str]:
     # doesnt work for non-trees because the warmup run would apply mutation twice
@@ -151,7 +157,7 @@ def check_for_mutation(
     )
 
 
-def _get_use_stack_trace(node) -> Optional[str]:
+def _get_use_stack_trace(node: torch.fx.Node) -> Optional[str]:
     for use in node.users:
         if stack_trace := use.meta.get("stack_trace", None):
             return stack_trace
@@ -159,8 +165,12 @@ def _get_use_stack_trace(node) -> Optional[str]:
 
 
 def check_multiple_devices_or_any_cpu_nodes(
-    device_node_mapping: Dict[torch.device, torch.fx.Node]
+    device_node_mapping: dict[torch.device, torch.fx.Node],
 ) -> Optional[str]:
+    if torch._inductor.config.graph_partition:
+        # graph partition supports splitting on cpu op. So we can ignore cpu nodes.
+        device_node_mapping.pop(torch.device("cpu"), None)
+
     if cpu_node := device_node_mapping.get(torch.device("cpu")):
         msg = f"cpu device ({cpu_node.name})"
         if stack_trace := _get_use_stack_trace(cpu_node):
@@ -179,37 +189,41 @@ def check_multiple_devices_or_any_cpu_nodes(
 
 
 def check_lowering_disable_cudagraph(
-    device_node_mapping: Dict[torch.device, torch.fx.Node]
-):
+    device_node_mapping: dict[torch.device, torch.fx.Node],
+) -> Optional[str]:
     return check_multiple_devices_or_any_cpu_nodes(device_node_mapping)
 
 
-def log_cudagraph_skip_and_bump_counter(msg):
+def log_cudagraph_skip_and_bump_counter(msg: str) -> None:
     perf_hint_log.warning(msg)
     counters["inductor"]["cudagraph_skips"] += 1
+    metrics_context = get_metrics_context()
+    if metrics_context.in_progress():
+        metrics_context.set("cudagraph_skip_reason", msg, overwrite=True)
 
 
 @dataclasses.dataclass
 class BoxedDeviceIndex:
     value: Optional[int]
 
-    def set(self, device_idx: Optional[int]):
+    def set(self, device_idx: Optional[int]) -> None:
         assert device_idx is None or isinstance(device_idx, int)
         self.value = device_idx
 
 
 def check_for_mutation_ignore_cuda_graph_managed_tensor(
-    gm: torch.fx.GraphModule, compiled_graph, static_input_idxs: Sequence[int]
+    gm: torch.fx.GraphModule,
+    mutated_inputs: OrderedSet[str],
+    mutated_input_idxs: OrderedSet[int],
+    static_input_idxs: Sequence[int],
 ) -> Optional[str]:
     default_msg = format_default_skip_message("mutated inputs")
 
     # doesnt work for non-trees because the warmup run would apply mutation twice
     if torch._inductor.config.triton.cudagraph_trees:
-        unique_idxs = set(static_input_idxs)
+        unique_idxs = OrderedSet(static_input_idxs)
         # checking if mutation is only on parameters/static inputs
-        mutation_indices = [
-            idx for idx in compiled_graph.mutated_input_idxs if idx not in unique_idxs
-        ]
+        mutation_indices = [idx for idx in mutated_input_idxs if idx not in unique_idxs]
         has_mutation = len(mutation_indices) != 0
         if not has_mutation:
             return None
@@ -217,7 +231,7 @@ def check_for_mutation_ignore_cuda_graph_managed_tensor(
         return get_mutation_stack_trace(placeholders, mutation_indices)
 
     else:
-        has_mutation = len(compiled_graph.mutated_inputs) != 0
+        has_mutation = len(mutated_inputs) != 0
         return None if not has_mutation else default_msg
 
 
@@ -261,7 +275,7 @@ class CheckInvariantStatus(Enum):
 
 def log_data_ptr_mismatch(
     placeholders: Sequence[PlaceholderInfo],
-    inputs: List[InputType],
+    inputs: list[InputType],
     recorded_data_ptr: Sequence[Optional[int]],
     target_idxs: Sequence[int],
     mismatch: CheckInvariantStatus,
@@ -270,9 +284,9 @@ def log_data_ptr_mismatch(
     Logs the mismatch between input data pointers and recorded data pointers.
     This checks only idxs in target_idxs.
     """
-    assert len(inputs) == len(recorded_data_ptr) and len(inputs) == len(
-        placeholders
-    ), "length mismatch between inputs, recorded_data_ptr, and placeholders"
+    assert len(inputs) == len(recorded_data_ptr) and len(inputs) == len(placeholders), (
+        "length mismatch between inputs, recorded_data_ptr, and placeholders"
+    )
 
     t_tensors = [inputs[i] for i in target_idxs]
     t_data_ptrs = [recorded_data_ptr[i] for i in target_idxs]
@@ -291,12 +305,12 @@ def log_data_ptr_mismatch(
 
 
 def maybe_warning_due_to_dynamic_shape(
-    fn_cache: Dict[Tuple[int, ...], Callable[..., Any]],
+    fn_cache: dict[tuple[int, ...], Callable[..., Any]],
     new_int_key: Any,
 ) -> bool:
     num_cudagraphs = len(fn_cache.keys()) + 1
 
-    def warn_msg():
+    def warn_msg() -> str:
         return (
             "CUDAGraph supports dynamic shapes by recording a new graph for each "
             "distinct input size. Recording too many CUDAGraphs may lead to "
@@ -326,5 +340,72 @@ class CudagraphCachedInfo:
     """
 
     placeholders: Sequence[PlaceholderInfo]
-    stack_traces: List[Optional[str]]
-    cudagraph_fail_reasons: List[str]
+    stack_traces: list[Optional[str]]
+    cudagraph_fail_reasons: list[str]
+
+
+@dataclasses.dataclass(frozen=True)
+class CudagraphMetadata:
+    """
+    Metadata for recording a CUDA graph.
+    """
+
+    placeholders: Sequence[PlaceholderInfo]
+    static_input_idxs: OrderedSet[int]
+    mutated_input_idxs: OrderedSet[int]
+    stack_traces: list[Optional[str]]
+    constants: dict[str, torch.Tensor]
+
+
+def get_partition_cudagraph_metadata(
+    partition_map: GraphPartitionMap,
+    metadata: CudagraphMetadata,
+) -> CudagraphMetadata:
+    """
+    Convert the cudagraph metadata at the graph level to the graph partition level,
+    given the graph partition info (i.e., mapping from partition input/output index
+    to graph input/output index).
+    """
+
+    partition_placeholders = []
+    partition_static_input_idxs: OrderedSet[int] = OrderedSet()
+    partition_mutated_input_idxs: OrderedSet[int] = OrderedSet()
+    for partition_input_idx, graph_input_idx in enumerate(
+        partition_map.input_index_mapping
+    ):
+        if graph_input_idx in metadata.static_input_idxs:
+            partition_static_input_idxs.add(partition_input_idx)
+
+        if graph_input_idx in metadata.mutated_input_idxs:
+            partition_mutated_input_idxs.add(partition_input_idx)
+
+        if graph_input_idx is not None:
+            placeholder = metadata.placeholders[graph_input_idx]
+        else:
+            # create a dummy placeholder info since this partition input is not a graph input
+            placeholder = PlaceholderInfo(
+                name=f"partition_{partition_map.id}_placeholder_{partition_input_idx}",
+                stack_trace=None,
+                users=[],
+                mutating_use_stack_trace=None,
+            )
+        partition_placeholders.append(placeholder)
+
+    partition_stack_traces = []
+    for graph_output_idx in partition_map.output_index_mapping:
+        if graph_output_idx is not None:
+            partition_stack_traces.append(metadata.stack_traces[graph_output_idx])
+        else:
+            partition_stack_traces.append(None)
+
+    partition_constants = {
+        name: metadata.constants[name] for name in partition_map.constant_names
+    }
+
+    return CudagraphMetadata(
+        partition_placeholders,
+        partition_static_input_idxs,
+        partition_mutated_input_idxs,
+        partition_stack_traces,
+        partition_constants,
+    )

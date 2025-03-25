@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import collections
 from collections import defaultdict
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Optional
 
 import torch
 import torch.utils._pytree as pytree
@@ -49,12 +49,12 @@ def replace_node_with_constant(gm, node, constant, name=None):
 class ConstantFolder(torch.fx.Interpreter):
     def __init__(
         self,
-        gm,
-        skip_constructors=False,
+        gm: torch.fx.GraphModule,
+        skip_constructors: bool = False,
     ):
         super().__init__(gm)
-        self.node_replacements: Dict[torch.fx.Node, Any] = {}
-        self.replaced_uses: Dict[torch.fx.Node, int] = collections.Counter()
+        self.node_replacements: dict[torch.fx.Node, Any] = {}
+        self.replaced_uses: dict[torch.fx.Node, int] = collections.Counter()
         self.unknown_value = object()
         self.skip_constructors: bool = skip_constructors
 
@@ -62,7 +62,7 @@ class ConstantFolder(torch.fx.Interpreter):
         # is the output
         self.user_to_last_uses = self.node_to_last_non_output_use()
 
-    def is_impure(self, node: torch.fx.node.Node):
+    def is_impure(self, node: torch.fx.Node) -> bool:
         if (
             node.target == torch.ops.prims.convert_element_type.default
             and node.args[0].op == "get_attr"  # type: ignore[union-attr]
@@ -75,6 +75,7 @@ class ConstantFolder(torch.fx.Interpreter):
             torch.ops.quantized_decomposed.dequantize_per_channel.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.tensor,
+            torch.ops.pt2e_quant.dequantize_affine,
         ]:
             # For the pattern fp32_weight -> q -> dq
             # We only folding fp32_weight -> q
@@ -202,7 +203,10 @@ class ConstantFolder(torch.fx.Interpreter):
         return super().run(initial_env=env)
 
 
-def constant_fold(gm, constraint_fn: Optional[Callable[[torch.fx.Node], bool]] = None):
+def constant_fold(
+    gm: torch.fx.GraphModule,
+    constraint_fn: Optional[Callable[[torch.fx.Node], bool]] = None,
+):
     with torch.utils._python_dispatch._disable_current_modes():
         cf = ConstantFolder(gm, skip_constructors=True)
         cf.run()
@@ -242,7 +246,7 @@ def constant_fold(gm, constraint_fn: Optional[Callable[[torch.fx.Node], bool]] =
         gm.recompile()
 
 
-def constant_graph_tag(gm: torch.fx.GraphModule):
+def constant_graph_tag(gm: torch.fx.GraphModule) -> None:
     with torch.utils._python_dispatch._disable_current_modes():
         cf = ConstantFolder(gm, skip_constructors=True)
         cf.run()
@@ -278,7 +282,7 @@ def run_and_get_constant_graph(gm: torch.fx.GraphModule) -> torch.fx.GraphModule
 
     new_graph = torch.fx.Graph()
 
-    node_remapping: Dict[torch.fx.Node, torch.fx.Node] = {}
+    node_remapping: dict[torch.fx.Node, torch.fx.Node] = {}
     output_nodes = []
     for node in gm.graph.nodes:
         if node.meta[META_TAG] == MODULE_TAG:

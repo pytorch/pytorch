@@ -34,7 +34,7 @@ try:
             copy_tests,
             TestFailure,
         )
-except (unittest.SkipTest, ImportError) as e:
+except (unittest.SkipTest, ImportError):
     if __name__ == "__main__":
         sys.exit(0)
     raise
@@ -63,19 +63,23 @@ CPU_TEST_FAILURES = {
     "test_add_complex": fail_minimal_arrayref_interface(is_skip=True),
     "test_conv_freezing": fail_minimal_arrayref_interface(is_skip=True),
     "test_deconv_freezing": fail_minimal_arrayref_interface(is_skip=True),
-    "test_addmm_multiple_dynamic": fail_minimal_arrayref_interface(),
-    "test_bmm_multiple_dynamic": fail_minimal_arrayref_interface(),
     "test_cond_nested": fail_minimal_arrayref_interface(),
     "test_cond_simple": fail_minimal_arrayref_interface(),
     "test_cond_symint_input": fail_minimal_arrayref_interface(),
     "test_cond_use_buffers_from_outer_scope": fail_minimal_arrayref_interface(),
     "test_cond_with_multiple_outputs": fail_minimal_arrayref_interface(),
-    "test_cond_with_outer_code_before_after": fail_minimal_arrayref_interface(),
     "test_cond_with_parameters": fail_minimal_arrayref_interface(),
     "test_cond_with_reinterpret_view_inputs_outputs": fail_minimal_arrayref_interface(),
-    "test_foreach_multiple_dynamic": fail_minimal_arrayref_interface(),
-    "test_nested_tensor_from_jagged": fail_minimal_arrayref_interface(),
-    "test_poi_multiple_dynamic": fail_minimal_arrayref_interface(),
+    "test_cond_share_predicte": fail_stack_allocation(is_skip=True),
+    "test_cond_unbacked_symint_closure_dynamic_True": fail_minimal_arrayref_interface(),
+    "test_while_loop_with_unbacked_symint_closure_dynamic_True": fail_minimal_arrayref_interface(),
+    "test_while_loop_with_unbacked_symint_closure_dynamic_False": fail_minimal_arrayref_interface(),
+    "test_while_loop_with_mixed_device_dynamic_True": fail_stack_allocation(),
+    "test_while_loop_with_mixed_device_dynamic_False": fail_stack_allocation(),
+    "test_while_loop_with_sym_expr_cond_dynamic_True": fail_minimal_arrayref_interface(),
+    "test_while_loop_with_sym_expr_cond_dynamic_False": fail_minimal_arrayref_interface(),
+    "test_while_loop_with_conv_dynamic_True": fail_minimal_arrayref_interface(),
+    "test_while_loop_with_conv_dynamic_False": fail_minimal_arrayref_interface(),
     "test_while_loop_with_parameters": fail_minimal_arrayref_interface(),
     "test_while_loop_with_pytree_inputs": fail_stack_allocation(),
     # FIXME: failed with Segfault while exiting the Python runtime
@@ -87,8 +91,6 @@ CPU_TEST_FAILURES = {
     "test_dup_unbacked_sym_decl_with_refinement": fail_minimal_arrayref_interface(
         is_skip=True
     ),
-    # TODO:  error: cannot convert ArrayRefTensor<float> to AtenTensorHandle
-    "test_dynamic_cat": fail_minimal_arrayref_interface(),
     # https://github.com/pytorch/pytorch/issues/129550
     # https://github.com/pytorch/pytorch/issues/123691
     "test_dynamic_scalar": fail_minimal_arrayref_interface(is_skip=True),
@@ -103,13 +105,8 @@ CPU_TEST_FAILURES = {
     "test_multi_device": fail_minimal_arrayref_interface(is_skip=True),
     # TODO: AssertionError: unsupported Optional type in convert_arg_type: Generator
     "test_normal_functional": fail_stack_allocation(is_skip=True),
-    # TODO: The same issue as https://github.com/pytorch/pytorch/issues/122978
-    # error: cannot convert ArrayRefTensor<float> to AtenTensorHandle
-    "test_reuse_kernel_dynamic": fail_minimal_arrayref_interface(is_skip=True),
     # the test segfaults
     "test_repeat_output": fail_stack_allocation(is_skip=True),
-    # TODO: failed internally
-    "test_multiple_output_alias": fail_stack_allocation(is_skip=True),
     # segfault
     "test_buffer_mutation_1": fail_stack_allocation(is_skip=True),
     # segfault
@@ -136,7 +133,6 @@ CPU_TEST_FAILURES = {
     "test_shifted_constraint_ranges": fail_stack_allocation(is_skip=True),
     # https://github.com/pytorch/pytorch/issues/123691
     "test_amp_fallback_random": fail_minimal_arrayref_interface(is_skip=True),
-    "test_simple_dynamic": fail_minimal_arrayref_interface(),
     # https://github.com/pytorch/pytorch/issues/123691
     "test_zero_grid_with_unbacked_symbols": fail_minimal_arrayref_interface(
         is_skip=True
@@ -149,6 +145,12 @@ CPU_TEST_FAILURES = {
     ),
     # same issue as https://github.com/pytorch/pytorch/issues/122990
     "test_cond_non_tensor_predicates_dynamic_True": fail_stack_allocation(is_skip=True),
+    "test_cond_mismatched_branch_output_dynamic_True": fail_stack_allocation(
+        is_skip=True
+    ),
+    "test_cond_mismatched_branch_output_dynamic_False": fail_stack_allocation(
+        is_skip=True
+    ),
     # https://github.com/pytorch/pytorch/issues/122991
     "test_runtime_checks_complex": fail_stack_allocation(is_skip=True),
     "test_runtime_checks_fp8": fail_stack_allocation(is_skip=True),
@@ -160,13 +162,13 @@ CPU_TEST_FAILURES = {
     # TODO: use of undeclared identifier 'float8_e4m3fn' and 'half'
     "test_fp8": fail_minimal_arrayref_interface(is_skip=True),
     "test_size_from_multi_output": fail_stack_allocation(is_skip=True),
-    "test_masked_select_dynamic": fail_stack_allocation(is_skip=True),
     "test_torchvision_transforms_functional_tensor_resize": fail_minimal_arrayref_interface(),
     # TODO: AttributeError: 'ShapeAsConstantBuffer' object has no attribute 'dtype'
     "test_symint_item": fail_minimal_arrayref_interface(is_skip=True),
     # TODO: AttributeError: 'ShapeAsConstantBuffer' object has no attribute 'dtype'
     "test_symbool_item": fail_minimal_arrayref_interface(is_skip=True),
-    "test_issue_140766": fail_minimal_arrayref_interface(),
+    # TODO: AttributeError: 'ShapeAsConstantBuffer' object has no attribute 'dtype'
+    "test_symfloat_item": fail_minimal_arrayref_interface(is_skip=True),
 }
 
 

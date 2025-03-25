@@ -2,8 +2,9 @@
 import operator
 import pickle
 from collections import defaultdict
+from collections.abc import Sequence
 from itertools import chain
-from typing import Any, Callable, Dict, List, no_type_check, Sequence, TYPE_CHECKING
+from typing import Any, Callable, no_type_check, TYPE_CHECKING
 
 import torch
 import torch.nn as nn
@@ -72,12 +73,12 @@ class MemoryTracker:
 
     def __init__(self) -> None:
         torch._C._log_api_usage_once("torch.distributed.memory_tracker")
-        self._hooks: List[RemovableHandle] = []
-        self._operator_names: Dict[str, int] = defaultdict(int)
-        self.memories_allocated: Dict[int, Dict[str, float]] = defaultdict()
-        self.memories_active: Dict[int, Dict[str, float]] = defaultdict()
-        self.memories_reserved: Dict[int, Dict[str, float]] = defaultdict()
-        self._markers: Dict[str, int] = defaultdict(int)
+        self._hooks: list[RemovableHandle] = []
+        self._operator_names: dict[str, int] = defaultdict(int)
+        self.memories_allocated: dict[int, dict[str, float]] = defaultdict()
+        self.memories_active: dict[int, dict[str, float]] = defaultdict()
+        self.memories_reserved: dict[int, dict[str, float]] = defaultdict()
+        self._markers: dict[str, int] = defaultdict(int)
         self._cur_module_name: str = ""
         self._op_index: int = 0
         self._num_cuda_retries: int = 0
@@ -133,7 +134,7 @@ class MemoryTracker:
 
         The number of the top operators can be configured.
         """
-        op_diff: Dict[str, float] = defaultdict(float)
+        op_diff: dict[str, float] = defaultdict(float)
         op_name, previous_allocated_memory = self.memories_allocated[0]
         for i in range(1, self._op_index):
             op_name, current_allocated_memory = self.memories_allocated[i]
@@ -154,8 +155,8 @@ class MemoryTracker:
         import matplotlib.pyplot as plt
 
         def _plot_figure(x, y_values, labels):
-            min_val = min(list(chain(*y_values))) * 0.999
-            max_val = max(list(chain(*y_values))) * 1.001
+            min_val = min(chain.from_iterable(y_values)) * 0.999
+            max_val = max(chain.from_iterable(y_values)) * 1.001
             plt.figure()
             for y, label in zip(y_values, labels):
                 plt.plot(x, y, label=label)

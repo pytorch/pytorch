@@ -246,9 +246,10 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
   STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.TCPStore__init);
 
   if (opts.useLibUV) {
-    TORCH_CHECK(
+    TORCH_CHECK_WITH(
+        DistStoreError,
         ::c10d::detail::is_libuv_tcpstore_backend_available(),
-        "use_libuv was requested but PyTorch was build without libuv support");
+        "use_libuv was requested but PyTorch was built without libuv support, run with USE_LIBUV=0 to disable it.");
 
     if (opts.masterListenFd.has_value()) {
       // TODO(xilunwu): support this init method after testing
@@ -264,10 +265,26 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
 
   Socket::initialize();
 
+  addr_.port = opts.port;
+
   if (opts.isServer) {
-    server_ = detail::TCPServer::start(opts);
-    // server successfully started
-    C10D_DEBUG("The server has started on port = {}.", server_->port());
+    try {
+      server_ = detail::TCPServer::start(opts);
+      // server successfully started
+      C10D_DEBUG("The server has started on port = {}.", server_->port());
+      addr_.port = server_->port();
+    } catch (const SocketError& e) {
+      bool useAgentStore = getCvarBool({"TORCHELASTIC_USE_AGENT_STORE"}, false);
+      int masterPort = getCvarInt({"MASTER_PORT"}, 0);
+      if (useAgentStore && masterPort == opts.port) {
+        C10D_ERROR(
+            "The server socket on {} has failed to bind. "
+            "TORCHELASTIC_USE_AGENT_STORE is enabled so ignoring the error.",
+            opts.port);
+      } else {
+        throw;
+      }
+    }
 
     std::ifstream maxconnFile("/proc/sys/net/core/somaxconn");
     if (maxconnFile.good() && numWorkers_.has_value()) {
@@ -287,10 +304,6 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
         C10D_INFO("failed to parse somaxconn proc file due to {}", e.what());
       }
     }
-
-    addr_.port = server_->port();
-  } else {
-    addr_.port = opts.port;
   }
 
   // Try connecting several times -- if the server listen backlog is full it may
@@ -350,7 +363,7 @@ TCPStore::~TCPStore() = default;
 
 void TCPStore::waitForWorkers() {
   STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.TCPStore__waitForWorkers);
-  if (numWorkers_ == std::nullopt) {
+  if (!numWorkers_.has_value()) {
     return;
   }
 
@@ -509,7 +522,8 @@ bool TCPStore::check(const std::vector<std::string>& keys) {
   if (response == detail::CheckResponseType::NOT_READY) {
     return false;
   }
-  TORCH_CHECK(false, "ready or not_ready response expected");
+  TORCH_CHECK_WITH(
+      DistStoreError, false, "ready or not_ready response expected");
 }
 
 void TCPStore::wait(const std::vector<std::string>& keys) {
@@ -546,7 +560,8 @@ void TCPStore::doWait(
       client_->receiveValueWithTimeout<detail::WaitResponseType>(timeout);
   if (response_opt.has_value()) {
     if (response_opt != detail::WaitResponseType::STOP_WAITING) {
-      TORCH_CHECK(false, "Stop_waiting response is expected");
+      TORCH_CHECK_WITH(
+          DistStoreError, false, "Stop_waiting response is expected");
     }
     return;
   }
@@ -561,12 +576,14 @@ void TCPStore::doWait(
   // this can happen if the server responds before we cancel, just ignore it
   if (response != detail::WaitResponseType::WAIT_CANCELED) {
     if (response != detail::WaitResponseType::STOP_WAITING) {
-      TORCH_CHECK(false, "Stop_waiting response is expected");
+      TORCH_CHECK_WITH(
+          DistStoreError, false, "Stop_waiting response is expected");
     }
 
     response = client_->receiveValue<detail::WaitResponseType>(); // ignore
     if (response != detail::WaitResponseType::WAIT_CANCELED) {
-      TORCH_CHECK(false, "wait_canceled response is expected");
+      TORCH_CHECK_WITH(
+          DistStoreError, false, "wait_canceled response is expected");
     }
   }
   C10_THROW_ERROR(
@@ -618,7 +635,8 @@ void TCPStore::multiSet(
     const std::vector<std::string>& keys,
     const std::vector<std::vector<uint8_t>>& values) {
   STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.TCPStore__multiSet);
-  TORCH_CHECK(
+  TORCH_CHECK_WITH(
+      DistStoreError,
       keys.size() == values.size(),
       "multiSet keys and values vectors must be of same size");
   const std::lock_guard<std::mutex> lock(activeOpLock_);

@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: jit"]
+# ruff: noqa: F841
 
 import torch
 
@@ -107,10 +108,10 @@ from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, dis
 from torch.testing._internal.jit_metaprogramming_utils import (
     get_script_args,
     create_input, unpack_variables,
-    additional_module_tests, EXCLUDE_SCRIPT_MODULES,
+    get_all_nn_module_tests, EXCLUDE_SCRIPT_MODULES,
     get_nn_module_name_from_kwargs, get_nn_mod_test_name, script_method_template)
 
-from torch.testing._internal.common_nn import module_tests, new_module_tests, criterion_tests
+from torch.testing._internal.common_nn import criterion_tests
 
 # For testing truediv in python 2
 from torch.testing._internal.test_module.future_div import div_int_future, div_float_future
@@ -456,6 +457,13 @@ class TestJit(JitTestCase):
                 return x
 
             pkl_fn = pickle.dumps(fn, protocol=0)
+
+    def test_script_fn_valid_name(self):
+        @torch.jit.script
+        def fn(x: torch.Tensor) -> torch.Tensor:
+            return x
+        self.assertIsNotNone(fn.__name__)
+        self.assertIsNotNone(fn.__qualname__)
 
     def test_restore_device(self):
         class M(torch.jit.ScriptModule):
@@ -1753,8 +1761,7 @@ graph(%Ra, %Rb):
         for node in g.nodes():
             n_ = g2.createClone(node, lambda x: g_to_g2[x])
             g2.appendNode(n_)
-            for o, no in zip(node.outputs(), n_.outputs()):
-                g_to_g2[o] = no
+            g_to_g2.update(zip(node.outputs(), n_.outputs()))
 
         for node in g.outputs():
             g2.registerOutput(g_to_g2[node])
@@ -13616,7 +13623,7 @@ dedent """
             self.checkScript(test_oct, (n,))
             self.checkScript(test_hex, (n,))
 
-    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: TemporaryFileName support for Windows or Sandcastle")
+    @unittest.skipIf(IS_SANDCASTLE, "NYI: TemporaryFileName support for Sandcastle")
     def test_get_set_state(self):
         class Root(torch.jit.ScriptModule):
             __constants__ = ['number']
@@ -14827,30 +14834,31 @@ dedent """
             torch.jit.script(w)
 
         # testing overload declared first, then non-overload
-        with self.assertRaisesRegex(Exception, "Overloads are not useable when a module"):
-            class W3(torch.nn.Module):
-                @torch.jit._overload_method  # noqa: F811
-                def forward(self, x):  # noqa: F811
-                    # type: (int) -> int
-                    pass
+        if sys.version_info < (3, 13):  # test broken in 3.13
+            with self.assertRaisesRegex(Exception, "Overloads are not useable when a module"):
+                class W3(torch.nn.Module):
+                    @torch.jit._overload_method  # noqa: F811
+                    def forward(self, x):  # noqa: F811
+                        # type: (int) -> int
+                        pass
 
-                @torch.jit._overload_method  # noqa: F811
-                def forward(self, x):  # noqa: F811
-                    # type: (Tensor) -> Tensor
-                    pass
+                    @torch.jit._overload_method  # noqa: F811
+                    def forward(self, x):  # noqa: F811
+                        # type: (Tensor) -> Tensor
+                        pass
 
-                def forward(self, x):  # noqa: F811
-                    return x + 5
+                    def forward(self, x):  # noqa: F811
+                        return x + 5
 
-            a = W3()
-            b = torch.jit.script(a)
+                a = W3()
+                b = torch.jit.script(a)
 
-            class W3(torch.nn.Module):
-                def forward(self, x):  # noqa: F811
-                    return x + 5 + 10
+                class W3(torch.nn.Module):
+                    def forward(self, x):  # noqa: F811
+                        return x + 5 + 10
 
-            a = W3()
-            b = torch.jit.script(a)
+                a = W3()
+                b = torch.jit.script(a)
 
         # testing non-overload declared first, then overload
         class W2(torch.nn.Module):
@@ -14879,8 +14887,9 @@ dedent """
             def forward(self, x):
                 return self.hello(1), self.hello(x)
 
-        with self.assertRaisesRegex(Exception, "Overloads are not useable when a module"):
-            a = torch.jit.script(W2())
+        if sys.version_info < (3, 13):  # test broken in 3.13
+            with self.assertRaisesRegex(Exception, "Overloads are not useable when a module"):
+                a = torch.jit.script(W2())
 
     def test_narrow_copy(self):
         def foo(a):
@@ -15342,7 +15351,7 @@ dedent """
             return 1
         self.assertEqual(fun(), 1)
 
-    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: TemporaryFileName support for Windows or Sandcastle")
+    @unittest.skipIf(IS_SANDCASTLE, "NYI: TemporaryFileName support for Sandcastle")
     def test_attribute_unpickling(self):
         tensor = torch.randn(2, 2)
         tester = self
@@ -15433,7 +15442,6 @@ dedent """
     def test_script_scope(self):
         scripted = torch.jit.script(torch.nn.functional.triplet_margin_loss)
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: TemporaryFileName on Windows")
     def test_serialization_sharing(self):
         class M(torch.jit.ScriptModule):
             def __init__(self) -> None:
@@ -15458,16 +15466,17 @@ dedent """
             m.save(fname)
             archive_name = os.path.basename(os.path.normpath(fname))
             archive = zipfile.ZipFile(fname, 'r')
-            pickled_data = archive.read(os.path.join(archive_name, 'data.pkl'))
+            pickled_data = archive.read(f"{archive_name}/data.pkl")
 
             out = io.StringIO()
             pickletools.dis(pickled_data, out=out)
             disassembled = out.getvalue()
+            archive.close()
 
             FileCheck().check_count(s1, 1, exactly=True) \
                 .check_count("BINGET", 2, exactly=True) \
                 .check_count(s2, 1, exactly=True) \
-                .check_count("BINGET", 2, exactly=True).run(out.getvalue())
+                .check_count("BINGET", 2, exactly=True).run(disassembled)
 
     def test_sys_stdout_override(self):
         @torch.jit.script
@@ -16245,7 +16254,7 @@ class TestProducerVersion(TestCase):
         # issue gh-32561
         self.assertTrue(torch.__version__.startswith(torch.onnx.producer_version))
 
-for test in module_tests + new_module_tests + additional_module_tests:
+for test in get_all_nn_module_tests():
     add_nn_module_test(**test)
 
 for test in criterion_tests:

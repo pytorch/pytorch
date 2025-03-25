@@ -79,7 +79,7 @@ if is_available():
             finally:
                 sys.stdin = _stdin
 
-    _breakpoint_cache: typing.Dict[int, typing.Any] = {}
+    _breakpoint_cache: dict[int, typing.Any] = {}
 
     def breakpoint(rank: int = 0, skip: int = 0):
         """
@@ -133,6 +133,7 @@ if is_available():
         _get_process_group_name,
         _rank_not_in_group,
         _reduce_scatter_base,
+        _time_estimator,
         get_node_local_rank,
     )
     from .remote_device import _remote_device

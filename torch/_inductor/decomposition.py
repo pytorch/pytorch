@@ -4,7 +4,8 @@ import logging
 import math
 import sys
 import typing
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Optional, TypeVar, Union
+from typing_extensions import ParamSpec
 
 import torch
 import torch._decomp as decomp
@@ -17,10 +18,12 @@ from torch._decomp import (
 )
 from torch._decomp.decompositions import (
     _grid_sampler_2d as decomp_grid_sampler_2d,
+    _index_add,
     pw_cast_for_opmath,
 )
 from torch._decomp.decompositions_for_rng import extra_random_decomps
 from torch._dynamo.utils import counters
+from torch._environment import is_fbcode
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._inductor.utils import pad_listlike
 from torch._prims_common import (
@@ -38,6 +41,9 @@ from .utils import (
 )
 
 
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
+
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
 prims = torch.ops.prims
@@ -48,17 +54,18 @@ quantized_decomposed = torch.ops.quantized_decomposed
 inductor_decompositions = get_decompositions(
     [
         aten._adaptive_avg_pool2d_backward,
+        aten.index_select,
         aten.addmv,
         aten.arange,
         aten.bitwise_and_,
         aten.bitwise_or_,
         aten.clamp_min_,
         aten.dist,
+        aten.elu,
         aten.empty_like,
         aten.flip,
         aten.gelu,
         aten.hardtanh,
-        aten.index_select,
         aten.lcm,
         aten.leaky_relu,
         aten.linalg_vector_norm,
@@ -76,6 +83,7 @@ inductor_decompositions = get_decompositions(
         aten.native_layer_norm,
         aten.nll_loss2d_backward,
         aten.permute_copy,
+        aten.rrelu_with_noise_backward,
         aten._softmax,
         aten.sin_,
         aten.sqrt_,
@@ -83,6 +91,7 @@ inductor_decompositions = get_decompositions(
         aten._to_copy,
         aten.tril_indices,
         aten.triu_indices,
+        aten.unbind_copy.int,
         aten.upsample_bilinear2d.vec,
         quantized.linear_dynamic_fp16_unpacked_weight,
         _quantized.wrapped_quantized_linear,
@@ -100,6 +109,7 @@ decomps_to_exclude = [
     aten._softmax_backward_data,
     aten.clamp_max,
     aten.clamp_min,
+    aten.index_add,  # we conditionally call this decomp
     aten.glu,  # inductor lowers this directly
     aten.select_scatter,  # need to be in the ATen graph in order for it to work with the re-inplacing pass
     aten.slice_scatter,  # need to be in the ATen graph in order for it to work with the re-inplacing pass
@@ -114,8 +124,8 @@ remove_decompositions(decompositions, decomps_to_exclude)
 
 
 def register_decomposition(
-    ops: List[Union[torch._ops.OperatorBase, torch._ops.OpOverloadPacket]]
-) -> Callable[..., Any]:
+    ops: list[Union[torch._ops.OperatorBase, torch._ops.OpOverloadPacket]],
+) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     for op in [ops] if callable(ops) else ops:  # type: ignore[attr-defined]
         if op in decompositions:
             log.warning("duplicate decomp: %s", ops)
@@ -161,7 +171,7 @@ def clamp(
 
 @register_decomposition([aten.full])
 def full(
-    size: List[Union[int, torch.SymInt]],
+    size: list[Union[int, torch.SymInt]],
     fill_value: torch.types.Number,
     **kwargs: Any,
 ) -> torch.Tensor:
@@ -172,14 +182,32 @@ def full(
     return NotImplemented
 
 
+@register_decomposition([aten.index_add])
+def index_add(
+    x: torch.Tensor,
+    dim: int,
+    index: torch.Tensor,
+    tensor: torch.Tensor,
+    *,
+    alpha: torch.types.Number = 1,
+) -> torch.Tensor:
+    # If we are not in fbcode and dtype is bfloat16
+    # fallback to index_add kernel
+    # see https://github.com/pytorch/pytorch/issues/137425 for details
+    if not is_fbcode() and x.dtype == torch.bfloat16:
+        return NotImplemented
+    else:
+        return _index_add(x, dim, index, tensor, inplace=False, alpha=alpha)
+
+
 # Not really sure how to put this into the main library.  PrimTorch wants
 # empty_permuted to go to the prim, and typically users don't really want
 # to decompose to empty_strided (but inductor is OK with it, because we are
 # cool with strides and everything goes to empty_strided)
 @register_decomposition([aten.empty_permuted.default])
 def empty_permuted(
-    size: List[Union[int, torch.SymInt]],
-    physical_layout: List[int],
+    size: list[Union[int, torch.SymInt]],
+    physical_layout: list[int],
     **kwargs: Any,
 ) -> torch.Tensor:
     perm = [0] * len(size)
@@ -193,15 +221,15 @@ def convolution_backward(
     grad_output: torch.Tensor,
     input: torch.Tensor,
     weight: torch.Tensor,
-    bias_sizes: List[int],
-    stride: Union[int, List[int]],
-    padding: Union[int, List[int]],
-    dilation: Union[int, List[int]],
+    bias_sizes: list[int],
+    stride: Union[int, list[int]],
+    padding: Union[int, list[int]],
+    dilation: Union[int, list[int]],
     transposed: bool,
-    output_padding: List[int],
+    output_padding: list[int],
     groups: int,
-    output_mask: List[bool],
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    output_mask: list[bool],
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     if not output_mask[2] or not is_gpu(grad_output.device.type):
         return NotImplemented
     grad_bias = aten.sum(grad_output, [0] + list(range(2, grad_output.dim())))
@@ -318,7 +346,7 @@ def mm(
 #   don't remove ALL empty tensors, only the naughty ones)
 @register_decomposition([aten.cat.default])
 def cat(
-    tensors: List[torch.Tensor],
+    tensors: list[torch.Tensor],
     dim: int = 0,
 ) -> torch.Tensor:
     from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
@@ -488,7 +516,7 @@ def narrow_copy(
 @register_decomposition([aten.view_copy.default])
 def view_copy_default(
     self: torch.Tensor,
-    size: List[Union[int, torch.SymInt]],
+    size: list[Union[int, torch.SymInt]],
 ) -> torch.Tensor:
     return aten.view(self, size).clone()
 
@@ -612,7 +640,7 @@ def randint_like_low(
 @register_decomposition(aten.randint.default)
 def randint(
     high: int,
-    size: List[Union[int, torch.SymInt]],
+    size: list[Union[int, torch.SymInt]],
     **kwargs: Any,
 ) -> torch.Tensor:
     return aten.randint.low(0, high, size, **kwargs)
@@ -704,11 +732,11 @@ def grid_sampler_2d(
 
 @register_decomposition(aten._foreach_addcmul.Scalar)
 def _foreach_addcmul_scalar(
-    self: List[torch.Tensor],
-    left_tensors: List[torch.Tensor],
-    right_tensors: List[torch.Tensor],
+    self: list[torch.Tensor],
+    left_tensors: list[torch.Tensor],
+    right_tensors: list[torch.Tensor],
     scalar: float = 1,
-) -> List[torch.Tensor]:
+) -> list[torch.Tensor]:
     return aten._foreach_add.List(
         self, aten._foreach_mul.List(left_tensors, right_tensors), alpha=scalar
     )
@@ -716,11 +744,11 @@ def _foreach_addcmul_scalar(
 
 @register_decomposition(aten._foreach_addcdiv.Scalar)
 def _foreach_addcdiv_scalar(
-    self: List[torch.Tensor],
-    left_tensors: List[torch.Tensor],
-    right_tensors: List[torch.Tensor],
+    self: list[torch.Tensor],
+    left_tensors: list[torch.Tensor],
+    right_tensors: list[torch.Tensor],
     scalar: float = 1,
-) -> List[torch.Tensor]:
+) -> list[torch.Tensor]:
     return aten._foreach_add.List(
         self, aten._foreach_div.List(left_tensors, right_tensors), alpha=scalar
     )
@@ -728,10 +756,10 @@ def _foreach_addcdiv_scalar(
 
 @register_decomposition(aten._foreach_lerp.Scalar)
 def _foreach_lerp_scalar(
-    start_tensors: List[torch.Tensor],
-    end_tensors: List[torch.Tensor],
+    start_tensors: list[torch.Tensor],
+    end_tensors: list[torch.Tensor],
     weight: torch.types.Number,
-) -> List[torch.Tensor]:
+) -> list[torch.Tensor]:
     return aten._foreach_add.List(
         start_tensors,
         aten._foreach_mul.Scalar(
@@ -742,10 +770,10 @@ def _foreach_lerp_scalar(
 
 @register_decomposition(aten._foreach_lerp.ScalarList)
 def _foreach_lerp_scalarlist(
-    start_tensors: List[torch.Tensor],
-    end_tensors: List[torch.Tensor],
-    scalars: List[torch.types.Number],
-) -> List[torch.Tensor]:
+    start_tensors: list[torch.Tensor],
+    end_tensors: list[torch.Tensor],
+    scalars: list[torch.types.Number],
+) -> list[torch.Tensor]:
     return aten._foreach_add.List(
         start_tensors,
         aten._foreach_mul.ScalarList(
@@ -765,7 +793,7 @@ def miopen_batch_norm(
     training: bool,
     exponential_average_factor: float,
     epsilon: float,
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     a, b, c = aten.native_batch_norm(
         input,
         weight,
@@ -787,13 +815,13 @@ def miopen_batch_norm(
 
 
 @functools.lru_cache(None)
-def fast_random_decomps() -> Dict[Any, Callable[..., Any]]:
+def fast_random_decomps() -> dict[Any, Callable[..., Any]]:
     return {**decompositions, **extra_random_decomps}
 
 
 # TODO(aakhundov): replace this (and the above) Any by more
 # specific type and fix all the cascading mypy errors
-def select_decomp_table() -> Dict[Any, Callable[..., Any]]:
+def select_decomp_table() -> dict[Any, Callable[..., Any]]:
     """decomps can change based on config"""
     if config.fallback_random:
         return decompositions
@@ -826,7 +854,7 @@ def choose_qparams_tensor(
     quant_max: int,
     eps: float,
     dtype: torch.dtype,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     min_val, max_val = torch.aminmax(input)
     scale = (max_val - min_val) / float(quant_max - quant_min)
     scale = torch.max(scale, torch.Tensor([eps]))
@@ -938,12 +966,12 @@ def index_reduce(
 @register_decomposition(aten.max_pool2d_with_indices)
 def max_pool2d_with_indices(
     x: torch.Tensor,
-    kernel_size: List[int],
-    stride: Optional[Union[int, List[int]]] = None,
-    padding: Union[int, List[int]] = 0,
-    dilation: Union[int, List[int]] = 1,
+    kernel_size: list[int],
+    stride: Optional[Union[int, list[int]]] = None,
+    padding: Union[int, list[int]] = 0,
+    dilation: Union[int, list[int]] = 1,
     ceil_mode: bool = False,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     if dilation == 1:
         dilation = [1, 1]
 
@@ -959,11 +987,9 @@ def max_pool2d_with_indices(
     stride = pad_listlike(stride, 2)
 
     window_size = kernel_size[0] * kernel_size[1]
-    # We fallback when using non-default dilation or when the window size is too large
+    # We fallback when the window size is too large
     if (
-        torch._inductor.lowering.should_fallback_max_pool2d_with_indices(
-            kernel_size, dilation
-        )
+        torch._inductor.lowering.should_fallback_max_pool2d_with_indices(kernel_size)
         or window_size > torch.iinfo(torch.int8).max
     ):
         return NotImplemented
@@ -982,14 +1008,15 @@ def max_pool2d_with_indices(
         x.size(-1),
         stride,
         padding,
+        dilation,
     )
     return vals, indices
 
 
 @register_decomposition(aten.adaptive_max_pool2d)
 def adaptive_max_pool2d(
-    x: torch.Tensor, output_size: List[int]
-) -> Tuple[torch.Tensor, torch.Tensor]:
+    x: torch.Tensor, output_size: list[int]
+) -> tuple[torch.Tensor, torch.Tensor]:
     *batch, h_in, w_in = x.shape
     h_out, w_out = output_size
 
@@ -1022,3 +1049,23 @@ def searchsorted_scalar(
         side=side,
         sorter=sorter,
     )[0]
+
+
+@register_decomposition(aten.rrelu_with_noise_functional)
+def rrelu_with_noise_functional(
+    self: torch.Tensor,
+    noise: torch.Tensor,
+    lower: float = 0.125,
+    upper: float = 0.3333333333333333,
+    training: bool = False,
+    generator: Optional[torch.Generator] = None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    if training:
+        not_positive = self <= 0
+        r = aten.uniform(self, lower, upper, generator=generator)
+        output = torch.where(not_positive, self * r, self)
+        noise_out = torch.where(not_positive, r, 1)
+        return output, noise_out
+    else:
+        negative_slope = (lower + upper) / 2
+        return aten.leaky_relu(self, negative_slope), torch.Tensor()

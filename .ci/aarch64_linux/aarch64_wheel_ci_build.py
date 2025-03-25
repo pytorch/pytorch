@@ -4,12 +4,9 @@
 import os
 import shutil
 from subprocess import check_call, check_output
-from typing import List
-
-from pygit2 import Repository
 
 
-def list_dir(path: str) -> List[str]:
+def list_dir(path: str) -> list[str]:
     """'
     Helper for getting paths for Python
     """
@@ -42,7 +39,7 @@ def build_ArmComputeLibrary() -> None:
             "clone",
             "https://github.com/ARM-software/ComputeLibrary.git",
             "-b",
-            "v24.09",
+            "v25.02",
             "--depth",
             "1",
             "--shallow-submodules",
@@ -58,7 +55,7 @@ def build_ArmComputeLibrary() -> None:
         shutil.copytree(f"{acl_checkout_dir}/{d}", f"{acl_install_dir}/{d}")
 
 
-def update_wheel(wheel_path) -> None:
+def update_wheel(wheel_path, desired_cuda) -> None:
     """
     Update the cuda wheel libraries
     """
@@ -80,7 +77,6 @@ def update_wheel(wheel_path) -> None:
         "/usr/local/cuda/lib64/libnvToolsExt.so.1",
         "/usr/local/cuda/lib64/libnvJitLink.so.12",
         "/usr/local/cuda/lib64/libnvrtc.so.12",
-        "/usr/local/cuda/lib64/libnvrtc-builtins.so.12.4",
         "/usr/local/cuda/lib64/libcudnn_adv.so.9",
         "/usr/local/cuda/lib64/libcudnn_cnn.so.9",
         "/usr/local/cuda/lib64/libcudnn_graph.so.9",
@@ -100,6 +96,18 @@ def update_wheel(wheel_path) -> None:
             "/usr/local/lib/libnvpl_lapack_core.so.0",
             "/usr/local/lib/libnvpl_blas_core.so.0",
         ]
+        if "126" in desired_cuda:
+            libs_to_copy += [
+                "/usr/local/cuda/lib64/libnvrtc-builtins.so.12.6",
+                "/usr/local/cuda/lib64/libcufile.so.0",
+                "/usr/local/cuda/lib64/libcufile_rdma.so.1",
+            ]
+        elif "128" in desired_cuda:
+            libs_to_copy += [
+                "/usr/local/cuda/lib64/libnvrtc-builtins.so.12.8",
+                "/usr/local/cuda/lib64/libcufile.so.0",
+                "/usr/local/cuda/lib64/libcufile_rdma.so.1",
+            ]
     else:
         libs_to_copy += [
             "/opt/OpenBLAS/lib/libopenblas.so.0",
@@ -171,22 +179,22 @@ if __name__ == "__main__":
     args = parse_arguments()
     enable_mkldnn = args.enable_mkldnn
     enable_cuda = args.enable_cuda
-    repo = Repository("/pytorch")
-    branch = repo.head.name
-    if branch == "HEAD":
-        branch = "master"
+    branch = check_output(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd="/pytorch"
+    ).decode()
 
     print("Building PyTorch wheel")
     build_vars = "MAX_JOBS=5 CMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=0x10000 "
     os.system("cd /pytorch; python setup.py clean")
 
     override_package_version = os.getenv("OVERRIDE_PACKAGE_VERSION")
+    desired_cuda = os.getenv("DESIRED_CUDA")
     if override_package_version is not None:
         version = override_package_version
         build_vars += (
             f"BUILD_TEST=0 PYTORCH_BUILD_VERSION={version} PYTORCH_BUILD_NUMBER=1 "
         )
-    elif branch in ["nightly", "master"]:
+    elif branch in ["nightly", "main"]:
         build_date = (
             check_output(["git", "log", "--pretty=format:%cs", "-1"], cwd="/pytorch")
             .decode()
@@ -196,12 +204,11 @@ if __name__ == "__main__":
             check_output(["cat", "version.txt"], cwd="/pytorch").decode().strip()[:-2]
         )
         if enable_cuda:
-            desired_cuda = os.getenv("DESIRED_CUDA")
             build_vars += f"BUILD_TEST=0 PYTORCH_BUILD_VERSION={version}.dev{build_date}+{desired_cuda} PYTORCH_BUILD_NUMBER=1 "
         else:
             build_vars += f"BUILD_TEST=0 PYTORCH_BUILD_VERSION={version}.dev{build_date} PYTORCH_BUILD_NUMBER=1 "
     elif branch.startswith(("v1.", "v2.")):
-        build_vars += f"BUILD_TEST=0 PYTORCH_BUILD_VERSION={branch[1:branch.find('-')]} PYTORCH_BUILD_NUMBER=1 "
+        build_vars += f"BUILD_TEST=0 PYTORCH_BUILD_VERSION={branch[1 : branch.find('-')]} PYTORCH_BUILD_NUMBER=1 "
 
     if enable_mkldnn:
         build_ArmComputeLibrary()
@@ -225,6 +232,6 @@ if __name__ == "__main__":
         print("Updating Cuda Dependency")
         filename = os.listdir("/pytorch/dist/")
         wheel_path = f"/pytorch/dist/{filename[0]}"
-        update_wheel(wheel_path)
+        update_wheel(wheel_path, desired_cuda)
     pytorch_wheel_name = complete_wheel("/pytorch/")
     print(f"Build Complete. Created {pytorch_wheel_name}..")

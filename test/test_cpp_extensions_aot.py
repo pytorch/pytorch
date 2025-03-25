@@ -2,8 +2,10 @@
 
 import os
 import re
+import subprocess
 import unittest
 from itertools import repeat
+from pathlib import Path
 from typing import get_args, get_origin, Union
 
 import torch
@@ -14,6 +16,7 @@ from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     skipIfTorchDynamo,
+    TEST_XPU,
     xfailIfTorchDynamo,
 )
 
@@ -22,7 +25,7 @@ try:
     import pytest
 
     HAS_PYTEST = True
-except ImportError as e:
+except ImportError:
     HAS_PYTEST = False
 
 # TODO: Rewrite these tests so that they can be collected via pytest without
@@ -109,6 +112,22 @@ class TestCppExtensionAOT(common.TestCase):
 
         self.assertEqual(cpu_output, mps_output.to("cpu"))
 
+    @unittest.skipIf(not TEST_XPU, "XPU not found")
+    @unittest.skipIf(
+        os.getenv("USE_NINJA", "0") == "0",
+        "sycl extension requires ninja to build",
+    )
+    def test_sycl_extension(self):
+        import torch_test_cpp_extension.sycl as sycl_extension
+
+        x = torch.zeros(100, device="xpu", dtype=torch.float32)
+        y = torch.zeros(100, device="xpu", dtype=torch.float32)
+
+        z = sycl_extension.sigmoid_add(x, y).cpu()
+
+        # 2 * sigmoid(0) = 2 * 0.5 = 1
+        self.assertEqual(z, torch.ones_like(z))
+
     @common.skipIfRocm
     @unittest.skipIf(common.IS_WINDOWS, "Windows not supported")
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
@@ -164,6 +183,120 @@ class TestCppExtensionAOT(common.TestCase):
         test = cuda_dlink.add(a, b)
         self.assertEqual(test, ref)
 
+    @unittest.skipIf(not TEST_CUDA, "python_agnostic is a CUDA extension + needs CUDA")
+    @unittest.skipIf(not common.IS_LINUX, "test requires linux tools ldd and nm")
+    def test_python_agnostic(self):
+        # For this test, run_test.py will call `python setup.py bdist_wheel` in the
+        # cpp_extensions/python_agnostic_extension folder, where the extension and
+        # setup calls specify py_limited_api to `True`. To approximate that the
+        # extension is indeed python agnostic, we test
+        #   a. The extension wheel name contains "cp39-abi3", meaning the wheel
+        # should be runnable for any Python 3 version after and including 3.9
+        #   b. The produced shared library does not have libtorch_python.so as a
+        # dependency from the output of "ldd _C.so"
+        #   c. The .so does not need any python related symbols. We approximate
+        # this by running "nm -u _C.so" and grepping that nothing starts with "Py"
+
+        dist_root = os.path.join("cpp_extensions", "python_agnostic_extension", "dist")
+        matches = list(Path(dist_root).glob("*.whl"))
+        self.assertEqual(len(matches), 1, msg=str(matches))
+        whl_file = matches[0]
+        self.assertRegex(str(whl_file), r".*python_agnostic-0\.0-cp39-abi3-.*\.whl")
+
+        build_root = os.path.join(
+            "cpp_extensions", "python_agnostic_extension", "build"
+        )
+        matches = list(Path(build_root).glob("**/*.so"))
+        self.assertEqual(len(matches), 1, msg=str(matches))
+        so_file = matches[0]
+        lddtree = subprocess.check_output(["ldd", so_file]).decode("utf-8")
+        self.assertFalse("torch_python" in lddtree)
+
+        missing_symbols = subprocess.check_output(["nm", "-u", so_file]).decode("utf-8")
+        self.assertFalse("Py" in missing_symbols)
+
+    @unittest.skipIf(not TEST_CUDA, "some aspects of this test require CUDA")
+    def test_libtorch_agnostic(self):
+        import libtorch_agnostic
+
+        # (1) first test that SGD CPU kernel works
+        param = torch.rand(5, device="cpu")
+        grad = torch.rand_like(param)
+        weight_decay = 0.01
+        lr = 0.001
+        maximize = False
+
+        new_param = libtorch_agnostic.ops.sgd_out_of_place(
+            param, grad, weight_decay, lr, maximize
+        )
+        torch._fused_sgd_(
+            (param,),
+            (grad,),
+            (),
+            weight_decay=weight_decay,
+            momentum=0.0,
+            lr=lr,
+            dampening=0.0,
+            nesterov=False,
+            maximize=maximize,
+            is_first_step=False,
+        )
+        self.assertEqual(new_param, param)
+
+        # (2) then test that we don't hog unnecessary memory
+        def _run_identity(prior_mem, device):
+            t = torch.rand(32, 32, device=device)
+            self.assertGreater(torch.cuda.memory_allocated(device), prior_mem)
+            identi_t = libtorch_agnostic.ops.identity(t)
+            assert identi_t is t
+
+        device = torch.cuda.current_device()
+        init_mem = torch.cuda.memory_allocated(device)
+
+        for _ in range(3):
+            _run_identity(init_mem, device)
+            curr_mem = torch.cuda.memory_allocated(device)
+            self.assertEqual(curr_mem, init_mem)
+
+        # (3a) test calling our dispatcher on easy API like abs
+        t = torch.rand(32, 16, device=device) - 0.5
+
+        def _make_cuda_tensors(prior_mem):
+            cuda_t = libtorch_agnostic.ops.my_abs(t)
+            self.assertGreater(torch.cuda.memory_allocated(device), prior_mem)
+            self.assertEqual(cuda_t, torch.abs(t))
+
+        init_mem = torch.cuda.memory_allocated(device)
+        for _ in range(3):
+            _make_cuda_tensors(init_mem)
+            curr_mem = torch.cuda.memory_allocated(device)
+            self.assertEqual(curr_mem, init_mem)
+
+        # (3b) and on factory API like ones_like
+        cpu_t = libtorch_agnostic.ops.my_ones_like(t, "cpu")
+        self.assertEqual(cpu_t, torch.ones_like(t, device="cpu"))
+
+        def _make_cuda_tensors(prior_mem):
+            cuda_t = libtorch_agnostic.ops.my_ones_like(t, t.device)
+            self.assertGreater(torch.cuda.memory_allocated(device), prior_mem)
+            self.assertEqual(cuda_t, torch.ones_like(t, device=t.device))
+
+        init_mem = torch.cuda.memory_allocated(device)
+        for _ in range(3):
+            _make_cuda_tensors(init_mem)
+            curr_mem = torch.cuda.memory_allocated(device)
+            self.assertEqual(curr_mem, init_mem)
+
+        # (4) test multiple returns
+        t1 = torch.rand(2, 3, device="cuda")
+        t2 = torch.rand(3, 2, device="cpu")
+        t3 = torch.rand(2, device="cpu")
+
+        exp, neg, is_leaf = libtorch_agnostic.ops.exp_neg_is_leaf(t1, t2, t3)
+        self.assertEqual(exp, torch.exp(t1))
+        self.assertEqual(neg, torch.neg(t2))
+        self.assertEqual(is_leaf, t3.is_leaf)
+
 
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestPybindTypeCasters(common.TestCase):
@@ -185,7 +318,7 @@ class TestPybindTypeCasters(common.TestCase):
         Our Pybind functions have a signature of the form `() -> return_type`.
         """
         # Imports needed for the `eval` below.
-        from typing import List, Tuple  # noqa: F401
+        from typing import List, Tuple  # noqa: F401, UP035
 
         return eval(re.search("-> (.*)\n", func.__doc__).group(1))
 
@@ -265,9 +398,9 @@ class TestPybindTypeCasters(common.TestCase):
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestMAIATensor(common.TestCase):
     def test_unregistered(self):
-        a = torch.arange(0, 10, device="cpu")
+        torch.arange(0, 10, device="cpu")
         with self.assertRaisesRegex(RuntimeError, "Could not run"):
-            b = torch.arange(0, 10, device="maia")
+            torch.arange(0, 10, device="maia")
 
     @skipIfTorchDynamo("dynamo cannot model maia device")
     def test_zeros(self):
@@ -290,7 +423,7 @@ class TestMAIATensor(common.TestCase):
         b = torch.empty(5, 5, device="maia")
         self.assertEqual(maia_extension.get_test_int(), 0)
 
-        c = a + b
+        a + b
         self.assertEqual(maia_extension.get_test_int(), 1)
 
     def test_conv_backend_override(self):
@@ -312,6 +445,38 @@ class TestMAIATensor(common.TestCase):
         grad = torch.autograd.grad(out, input, out, create_graph=True)
         self.assertEqual(maia_extension.get_test_int(), 3)
         self.assertEqual(grad[0].shape, input.shape)
+
+    def test_autocast_apis_for_maia_device(self):
+        # Default low-precision type in MAIA's autocast.
+        fast_dtype = torch.get_autocast_dtype("maia")
+        self.assertEqual(fast_dtype, torch.bfloat16)
+        self.assertTrue(torch._C._is_autocast_available("maia"))
+
+    @skipIfTorchDynamo(
+        "dynamo cannot handle maia device. Output tensor may have wrong dtype."
+    )
+    def test_matmul_autocast_float16_precision(self):
+        # Ensure we can change low precision dtype.
+        x = torch.empty((2, 4), dtype=torch.float, device="maia")
+        w = torch.empty((4, 2), dtype=torch.float, device="maia")
+        with torch.autocast(device_type="maia", dtype=torch.float16):
+            self.assertTrue(torch.is_autocast_enabled("maia"))
+            y = torch.ops.aten.matmul(x, w)
+            self.assertEqual(y.dtype, torch.float16)
+            self.assertEqual(y.shape, (2, 2))
+
+    @skipIfTorchDynamo(
+        "dynamo cannot handle maia device. Output tensor may have wrong dtype."
+    )
+    def test_matmul_autocast_default_precision(self):
+        # Use default lower precision dtype, bfloat16.
+        x = torch.empty((2, 4), dtype=torch.float, device="maia")
+        w = torch.empty((4, 2), dtype=torch.float, device="maia")
+        with torch.autocast(device_type="maia"):
+            self.assertTrue(torch.is_autocast_enabled("maia"))
+            y = torch.ops.aten.matmul(x, w)
+            self.assertEqual(y.dtype, torch.bfloat16)
+            self.assertEqual(y.shape, (2, 2))
 
 
 @torch.testing._internal.common_utils.markDynamoStrictTest

@@ -2,7 +2,6 @@
 """Adds docstrings to functions defined in the torch._C module."""
 
 import re
-from typing import Dict
 
 import torch._C
 from torch._C import _add_docstr as add_docstr
@@ -72,6 +71,11 @@ output tensor having 1 (or ``len(dim)``) fewer dimension(s).
         "opt_dim": """
     dim (int or tuple of ints, optional): the dimension or dimensions to reduce.
         If ``None``, all dimensions are reduced.
+"""
+    },
+    {
+        "opt_keepdim": """
+    keepdim (bool, optional): whether the output tensor has :attr:`dim` retained or not. Default: ``False``.
 """
     },
 )
@@ -170,7 +174,7 @@ rocm_fp16_notes = {
 :ref:`different precision<fp16_on_mi200>` for backward."""
 }
 
-reproducibility_notes: Dict[str, str] = {
+reproducibility_notes: dict[str, str] = {
     "forward_reproducibility_note": """This operation may behave nondeterministically when given tensors on \
 a CUDA device. See :doc:`/notes/randomness` for more information.""",
     "backward_reproducibility_note": """This operation may produce nondeterministic gradients when given tensors on \
@@ -396,7 +400,7 @@ and :attr:`out` will be a :math:`(n \times p)` tensor.
 .. math::
     out = \beta\ \text{input} + \alpha\ (\sum_{i=0}^{b-1} \text{batch1}_i \mathbin{@} \text{batch2}_i)
 
-If :attr:`beta` is 0, then :attr:`input` will be ignored, and `nan` and `inf` in
+If :attr:`beta` is 0, then the content of :attr:`input` will be ignored, and `nan` and `inf` in
 it will not be propagated.
 """
     + r"""
@@ -408,12 +412,12 @@ must be real numbers, otherwise they should be integers.
 {rocm_fp16_note}
 
 Args:
+    input (Tensor): matrix to be added
     batch1 (Tensor): the first batch of matrices to be multiplied
     batch2 (Tensor): the second batch of matrices to be multiplied
 
 Keyword args:
     beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
-    input (Tensor): matrix to be added
     alpha (Number, optional): multiplier for `batch1 @ batch2` (:math:`\alpha`)
     {out}
 
@@ -537,7 +541,7 @@ and :attr:`out` will be a :math:`(n \times p)` tensor.
 .. math::
     \text{out} = \beta\ \text{input} + \alpha\ (\text{mat1}_i \mathbin{@} \text{mat2}_i)
 
-If :attr:`beta` is 0, then :attr:`input` will be ignored, and `nan` and `inf` in
+If :attr:`beta` is 0, then the content of :attr:`input` will be ignored, and `nan` and `inf` in
 it will not be propagated.
 """
     + r"""
@@ -658,7 +662,7 @@ size `m`, then :attr:`input` must be
 .. math::
     \text{out} = \beta\ \text{input} + \alpha\ (\text{mat} \mathbin{@} \text{vec})
 
-If :attr:`beta` is 0, then :attr:`input` will be ignored, and `nan` and `inf` in
+If :attr:`beta` is 0, then the content of :attr:`input` will be ignored, and `nan` and `inf` in
 it will not be propagated.
 """
     + r"""
@@ -700,7 +704,7 @@ outer product between :attr:`vec1` and :attr:`vec2` and the added matrix
 .. math::
     \text{out} = \beta\ \text{input} + \alpha\ (\text{vec1} \otimes \text{vec2})
 
-If :attr:`beta` is 0, then :attr:`input` will be ignored, and `nan` and `inf` in
+If :attr:`beta` is 0, then the content of :attr:`input` will be ignored, and `nan` and `inf` in
 it will not be propagated.
 """
     + r"""
@@ -914,13 +918,15 @@ Create a view of an existing `torch.Tensor` :attr:`input` with specified
 :attr:`size`, :attr:`stride` and :attr:`storage_offset`.
 
 .. warning::
-    Prefer using other view functions, like :meth:`torch.Tensor.expand`,
-    to setting a view's strides manually with `as_strided`, as this
-    function's behavior depends on the implementation of a tensor's storage.
-    The constructed view of the storage must only refer to elements within
-    the storage or a runtime error will be thrown, and if the view is
-    "overlapped" (with multiple indices referring to the same element in
-    memory) its behavior is undefined.
+    Prefer using other view functions, like :meth:`torch.Tensor.view` or
+    :meth:`torch.Tensor.expand`, to setting a view's strides manually with
+    `as_strided`, as this function will throw an error on non-standard Pytorch
+    backends (that do not have a concept of stride) and the result will depend
+    on the current layout in memory. The constructed view must only refer to
+    elements within the Tensor's storage or a runtime error will be thrown.
+    If the generated view is "overlapped" (with multiple indices referring to
+    the same element in memory), the behavior of inplace operations on this view
+    is undefined (and might not throw runtime errors).
 
 Args:
     {input}
@@ -1321,7 +1327,7 @@ same as the scaling factors used in :meth:`torch.addbmm`.
 .. math::
     \text{out}_i = \beta\ \text{input}_i + \alpha\ (\text{batch1}_i \mathbin{@} \text{batch2}_i)
 
-If :attr:`beta` is 0, then :attr:`input` will be ignored, and `nan` and `inf` in
+If :attr:`beta` is 0, then the content of :attr:`input` will be ignored, and `nan` and `inf` in
 it will not be propagated.
 """
     + r"""
@@ -2293,9 +2299,9 @@ and :func:`torch.chunk`.
     :func:`torch.stack` concatenates the given sequence along a new dimension.
 
 Args:
-    tensors (sequence of Tensors): any python sequence of tensors of the same type.
-        Non-empty tensors provided must have the same shape, except in the
-        cat dimension.
+    tensors (sequence of Tensors): Non-empty tensors provided must have the same shape,
+        except in the cat dimension.
+
     dim (int, optional): the dimension over which the tensors are concatenated
 
 Keyword args:
@@ -3612,13 +3618,20 @@ Examples::
             [ 0.6927, -0.3735, -0.4945]])
 
 
-    >>> torch.diagonal(a, 0)
+    >>> torch.diagonal(a)
     tensor([-1.0854, -0.0905, -0.4945])
 
 
     >>> torch.diagonal(a, 1)
     tensor([ 1.1431,  0.0360])
 
+    >>> b = torch.randn(2, 5)
+    >>> b
+    tensor([[-1.7948, -1.2731, -0.3181,  2.0200, -1.6745],
+            [ 1.8262, -1.5049,  0.4114,  1.0704, -1.2607]])
+
+    >>> torch.diagonal(b, 1, 1, 0)
+    tensor([1.8262])
 
     >>> x = torch.randn(2, 5, 4, 2)
     >>> torch.diagonal(x, offset=-1, dim1=1, dim2=2)
@@ -4001,7 +4014,11 @@ equal(input, other) -> bool
 
 ``True`` if two tensors have the same size and elements, ``False`` otherwise.
 
-Note that tensors containing NaNs are never equal to each other.
+.. note::
+
+    Tensors containing NaNs are never equal to each other. Additionally, this function does not
+    differentiate between the data types of the tensors during comparison. For more thorough tensor checks,
+    use :meth:`torch.testing.assert_close`.
 
 Example::
 
@@ -4009,6 +4026,8 @@ Example::
     True
     >>> torch.equal(torch.tensor([3, torch.nan]), torch.tensor([3, torch.nan]))
     False
+    >>> torch.equal(torch.tensor([1, 2, 3], dtype=torch.int32), torch.tensor([1, 2, 3], dtype=torch.float32))
+    True
 """,
 )
 
@@ -6448,9 +6467,6 @@ max(input) -> Tensor
 
 Returns the maximum value of all elements in the ``input`` tensor.
 
-.. warning::
-    This function produces deterministic (sub)gradients unlike ``max(dim=0)``
-
 Args:
     {input}
 
@@ -6480,8 +6496,8 @@ in the output tensors having 1 fewer dimension than ``input``.
 
 Args:
     {input}
-    {dim}
-    {keepdim} Default: ``False``.
+    {opt_dim}
+    {opt_keepdim}
 
 Keyword args:
     out (tuple, optional): the result tuple of two output tensors (max, max_indices)
@@ -6496,13 +6512,22 @@ Example::
             [-0.6172,  1.0036, -0.6060, -0.2432]])
     >>> torch.max(a, 1)
     torch.return_types.max(values=tensor([0.8475, 1.1949, 1.5717, 1.0036]), indices=tensor([3, 0, 0, 1]))
+    >>> a = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
+    >>> a.max(dim=1, keepdim=True)
+    torch.return_types.max(
+    values=tensor([[2.], [4.]]),
+    indices=tensor([[1], [1]]))
+    >>> a.max(dim=1, keepdim=False)
+    torch.return_types.max(
+    values=tensor([2., 4.]),
+    indices=tensor([1, 1]))
 
 .. function:: max(input, other, *, out=None) -> Tensor
    :noindex:
 
 See :func:`torch.maximum`.
 
-""".format(**single_dim_common),
+""".format(**multi_dim_common),
 )
 
 add_docstr(
@@ -6696,6 +6721,12 @@ add_docstr(
     torch.mean,
     r"""
 mean(input, *, dtype=None) -> Tensor
+
+.. note::
+    If the `input` tensor is empty, ``torch.mean()`` returns ``nan``.
+    This behavior is consistent with NumPy and follows the definition
+    that the mean over an empty set is undefined.
+
 
 Returns the mean value of all elements in the :attr:`input` tensor. Input must be floating point or complex.
 
@@ -7050,9 +7081,6 @@ add_docstr(
 min(input) -> Tensor
 
 Returns the minimum value of all elements in the :attr:`input` tensor.
-
-.. warning::
-    This function produces deterministic (sub)gradients unlike ``min(dim=0)``
 
 Args:
     {input}
@@ -9028,8 +9056,8 @@ Constructs a tensor with no autograd history (also known as a "leaf tensor", see
     When working with tensors prefer using :func:`torch.Tensor.clone`,
     :func:`torch.Tensor.detach`, and :func:`torch.Tensor.requires_grad_` for
     readability. Letting `t` be a tensor, ``torch.tensor(t)`` is equivalent to
-    ``t.clone().detach()``, and ``torch.tensor(t, requires_grad=True)``
-    is equivalent to ``t.clone().detach().requires_grad_(True)``.
+    ``t.detach().clone()``, and ``torch.tensor(t, requires_grad=True)``
+    is equivalent to ``t.detach().clone().requires_grad_(True)``.
 
 .. seealso::
 
@@ -9089,9 +9117,9 @@ the gap between two values in the tensor.
     Python's range builtin. Instead, use :func:`torch.arange`, which produces values in [start, end).
 
 Args:
-    start (float): the starting value for the set of points. Default: ``0``.
+    start (float, optional): the starting value for the set of points. Default: ``0``.
     end (float): the ending value for the set of points
-    step (float): the gap between each pair of adjacent points. Default: ``1``.
+    step (float, optional): the gap between each pair of adjacent points. Default: ``1``.
 
 Keyword args:
     {out}
@@ -9122,6 +9150,12 @@ Returns a 1-D tensor of size :math:`\left\lceil \frac{\text{end} - \text{start}}
 with values from the interval ``[start, end)`` taken with common difference
 :attr:`step` beginning from `start`.
 
+Note: When using floating-point dtypes (especially reduced precision types like ``bfloat16``),
+the results may be affected by floating-point rounding behavior. Some values in the sequence
+might not be exactly representable in certain floating-point formats, which can lead to
+repeated values or unexpected rounding. For precise sequences, it is recommended to use
+integer dtypes instead of floating-point dtypes.
+
 Note that non-integer :attr:`step` is subject to floating point rounding errors when
 comparing against :attr:`end`; to avoid inconsistency, we advise subtracting a small epsilon from :attr:`end`
 in such cases.
@@ -9131,9 +9165,9 @@ in such cases.
 """
     + r"""
 Args:
-    start (Number): the starting value for the set of points. Default: ``0``.
+    start (Number, optional): the starting value for the set of points. Default: ``0``.
     end (Number): the ending value for the set of points
-    step (Number): the gap between each pair of adjacent points. Default: ``1``.
+    step (Number, optional): the gap between each pair of adjacent points. Default: ``1``.
 
 Keyword args:
     {out}
@@ -11088,8 +11122,8 @@ are designed to work with this function. See the examples below.
 
 Args:
     {input}
-    indices (tensor): the indices into :attr:`input`. Must have long dtype.
-    dim (int, optional): dimension to select along.
+    indices (LongTensor): the indices into :attr:`input`. Must have long dtype.
+    dim (int, optional): dimension to select along. Default: 0
 
 Keyword args:
     {out}
@@ -11190,6 +11224,10 @@ given dimension `dim`.
 
 The boolean option :attr:`sorted` if ``True``, will make sure that the returned
 `k` elements are themselves sorted
+
+.. note::
+    When using `torch.topk`, the indices of tied elements are not guaranteed to be stable
+    and may vary across different invocations.
 
 Args:
     {input}
@@ -12673,14 +12711,14 @@ the default computation is
 
 .. math::
     \begin{aligned}
-        \sum_{i = 1}^{n-1} \frac{1}{2} (y_i + y_{i-1})
+        \sum_{i = 1}^{n} \frac{1}{2} (y_i + y_{i-1})
     \end{aligned}
 
 When :attr:`dx` is specified the computation becomes
 
 .. math::
     \begin{aligned}
-        \sum_{i = 1}^{n-1} \frac{\Delta x}{2} (y_i + y_{i-1})
+        \sum_{i = 1}^{n} \frac{\Delta x}{2} (y_i + y_{i-1})
     \end{aligned}
 
 effectively multiplying the result by :attr:`dx`. When :attr:`x` is specified,
@@ -12689,7 +12727,7 @@ elements :math:`{x_0, x_1, ..., x_n}`, the computation becomes
 
 .. math::
     \begin{aligned}
-        \sum_{i = 1}^{n-1} \frac{(x_i - x_{i-1})}{2} (y_i + y_{i-1})
+        \sum_{i = 1}^{n} \frac{(x_i - x_{i-1})}{2} (y_i + y_{i-1})
     \end{aligned}
 
 When :attr:`x` and :attr:`y` have the same size, the computation is as described above and no broadcasting is needed.
@@ -13199,7 +13237,8 @@ Stream(device, *, priority) -> Stream
 
 An in-order queue of executing the respective tasks asynchronously in first in first out (FIFO) order.
 It can control or synchronize the execution of other Stream or block the current host thread to ensure
-the correct task sequencing.
+the correct task sequencing. It supports with statement as a context manager to ensure the operators
+within the with block are running on the corresponding stream.
 
 See in-depth description of the CUDA behavior at :ref:`cuda-semantics` for details
 on the exact semantic that applies to all devices.
@@ -13216,7 +13255,10 @@ Returns:
 Example::
 
     >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
-    >>> s_cuda = torch.Stream(device='cuda')
+    >>> with torch.Stream(device='cuda') as s_cuda:
+    >>>     a = torch.randn(10, 5, device='cuda')
+    >>>     b = torch.randn(5, 10, device='cuda')
+    >>>     c = torch.mm(a, b)
 """,
 )
 
@@ -13770,12 +13812,7 @@ Args:
 Keyword args:
     out_int32 (bool, optional): indicate the output data type. torch.int32 if True, torch.int64 otherwise.
                                 Default value is False, i.e. default output data type is torch.int64.
-    right (bool, optional): if False, return the first suitable location that is found. If True, return the
-                            last such index. If no suitable index found, return 0 for non-numerical value
-                            (eg. nan, inf) or the size of :attr:`boundaries` (one pass the last index).
-                            In other words, if False, gets the lower bound index for each value in :attr:`input`
-                            from :attr:`boundaries`. If True, gets the upper bound index instead.
-                            Default value is False.
+    right (bool, optional): determines the behavior for values in :attr:`boundaries`. See the table above.
     out (Tensor, optional): the output tensor, must be the same size as :attr:`input` if provided.
 
 

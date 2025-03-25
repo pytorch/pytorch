@@ -120,7 +120,6 @@ class TestHSDPCheckpoint(DTensorTestBase):
         )
         model.load_state_dict(state_dict_to_save["model"])
 
-        state_dict_after_load = model.state_dict()
         # After loading, the current model state dict should be the same as state_dict_to_save.
         for (k1, v1), (k2, v2) in zip(
             state_dict_to_save["model"].items(), model.state_dict().items()

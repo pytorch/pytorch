@@ -6,6 +6,10 @@ body:
   - type: markdown
     attributes:
       value: >
+        #### Note: Please write your bug report in English to ensure it can be understood and addressed by the development team.
+  - type: markdown
+    attributes:
+      value: >
         #### Before submitting a bug, please make sure the issue hasn't been already addressed by searching through [the
         existing and past issues](https://github.com/pytorch/pytorch/issues)
         It's likely that your bug will be resolved by checking our FAQ or troubleshooting guide [documentation](https://pytorch.org/docs/main/dynamo/index.html)
@@ -17,6 +21,8 @@ body:
         - Don't compare indices of max/min etc, because that avoids the above requirement
 
         - If comparing eager and torch.compile at fp16/bf16, you should use fp32 as baseline
+
+        - Ensure rng state used to compare results is equivalent. Use `torch._inductor.config.fallback_random=True` and reset the torch rng seed between comparisons
 
         If the above requirements are met, add the label "topic: fuzzer" to your issue.
 

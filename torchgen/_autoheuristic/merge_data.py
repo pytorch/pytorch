@@ -1,14 +1,13 @@
 import sys
-from typing import List
 
 
-def merge_txt_files(file_list: List[str], output_file: str) -> None:
+def merge_txt_files(file_list: list[str], output_file: str) -> None:
     if not file_list:
         print("No input files provided.")
         return
 
-    metadata: List[str] = []
-    content: List[str] = []
+    metadata: list[str] = []
+    content: list[str] = []
 
     # Read metadata and content from all files
     for file_path in file_list:

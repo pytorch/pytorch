@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: quantization"]
+# ruff: noqa: F841
 
 
 import copy
@@ -6,8 +7,9 @@ import itertools
 import numpy as np
 import operator
 import random
+import sys
 import unittest
-from typing import NamedTuple, List
+from typing import NamedTuple
 
 import torch
 from torch import _VF
@@ -23,7 +25,7 @@ hu.assert_deadline_disabled()
 
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_utils import TestCase
-from torch.testing._internal.common_utils import IS_PPC, TEST_WITH_UBSAN, IS_MACOS, IS_SANDCASTLE, IS_FBCODE
+from torch.testing._internal.common_utils import IS_PPC, IS_MACOS, IS_SANDCASTLE, IS_FBCODE, IS_ARM64
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM, skipIfNoQNNPACK, skipIfNoONEDNN
 from torch.testing._internal.common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
     override_quantized_engine, supported_qengines, override_qengines, _snr
@@ -52,7 +54,7 @@ class PointwisePostOp(NamedTuple):
     binary_attr : str = "none"
     alpha : float = 1.0
     unary_attr : str = "none"
-    scalars : List = []
+    scalars : list = []
     algorithm : str = ""
 
 # Make sure we won't have overflows from vpmaddubsw instruction used in FBGEMM.
@@ -64,6 +66,8 @@ class PointwisePostOp(NamedTuple):
 def avoid_vpmaddubsw_overflow_linear(
     batch_size, input_channels, output_channels, X, X_min, X_max, W, W_min, W_max
 ):
+    if sys.version_info >= (3, 13):
+        raise unittest.SkipTest("numpy 2.1 overflow error")
     for i, j in np.ndindex((batch_size, output_channels)):
         for k in range(0, input_channels // 2 * 2, 2):
             x0 = X[i, k] - X_min
@@ -2917,6 +2921,11 @@ class TestQuantizedOps(TestCase):
 
     @override_qengines
     def test_custom_module_lstm(self):
+        class QuantizableLSTMSplitGates(torch.ao.nn.quantizable.LSTM):
+            @classmethod
+            def from_float(cls, other, qconfig=None):
+                return super().from_float(other, qconfig, split_gates=True)
+
         qengine = torch.backends.quantized.engine
 
         batch_size = 4
@@ -2931,6 +2940,7 @@ class TestQuantizedOps(TestCase):
         Bias = [False, True]
         Batch_first = [False, True]
         Bidirectional = [False, True]
+        Split_gates = [False, True]
 
         dtype = np.uint8
         qtype = torch.quint8
@@ -2943,8 +2953,8 @@ class TestQuantizedOps(TestCase):
         x = qx.dequantize()
 
         with torch.no_grad():
-            for bias, batch_first, bidirectional in itertools.product(
-                    Bias, Batch_first, Bidirectional):
+            for bias, batch_first, bidirectional, split_gates in itertools.product(
+                    Bias, Batch_first, Bidirectional, Split_gates):
                 # Assume 12dB is sufficient for functional equivalence
                 # Without the bias, linear performs poorly
                 min_power = 10 if bias else 5
@@ -2968,17 +2978,36 @@ class TestQuantizedOps(TestCase):
 
                 # Prepare
                 lstm.qconfig = torch.ao.quantization.get_default_qconfig(qengine)
-                lstm_prepared = torch.ao.quantization.prepare(lstm)
+                custom_config_dict = (
+                    None
+                    if not split_gates
+                    else {  # switch to class with split_gates True via from_float
+                        "float_to_observed_custom_module_class": {
+                            torch.nn.LSTM: QuantizableLSTMSplitGates
+                        },
+                        "observed_to_quantized_custom_module_class": {
+                            QuantizableLSTMSplitGates: torch.ao.nn.quantized.LSTM,
+                        },
+                    }
+                )
+                lstm_prepared = torch.ao.quantization.prepare(
+                    lstm, prepare_custom_config_dict=custom_config_dict
+                )
                 self.assertTrue(hasattr(lstm_prepared[0], 'layers'))
                 self.assertEqual(num_layers, len(lstm_prepared[0].layers))
-                assert type(lstm_prepared[0]) == torch.ao.nn.quantizable.LSTM
+                self.assertEqual(
+                    lstm_prepared[0].layers[0].layer_fw.cell.split_gates, split_gates
+                )
+                assert isinstance(lstm_prepared[0], torch.ao.nn.quantizable.LSTM)
 
                 # Calibrate
                 y = lstm_prepared(x)
                 self.assertEqual(y_ref, y)
 
                 # Quantize
-                lstm_quantized = torch.ao.quantization.convert(lstm_prepared)
+                lstm_quantized = torch.ao.quantization.convert(
+                    lstm_prepared, convert_custom_config_dict=custom_config_dict
+                )
                 assert type(lstm_quantized[0]) == torch.ao.nn.quantized.LSTM
                 qy = lstm_quantized(qx)
 
@@ -3669,7 +3698,7 @@ class TestDynamicQuantizedOps(TestCase):
         # The goal here is to show that the dynamic op is the same as
         # calc params->quantize_input->quantized op->dequantize output
 
-        if qengine_is_qnnpack() and (IS_PPC or TEST_WITH_UBSAN):
+        if qengine_is_qnnpack() and IS_PPC:
             return  # not supported by QNNPACK
 
         if qengine_is_qnnpack():
@@ -3800,10 +3829,12 @@ class TestQuantizedLinear(TestCase):
             if torch.backends.xnnpack.enabled:
                 dtypes.append(torch.qint8)
 
+        if qengine_is_onednn() and IS_ARM64:
+            dtypes.append(torch.qint8)
+
         for dtype in dtypes:
             # No support for channelwise in xnnpack (int8)
-            # ONEDNN does not support qint8
-            if dtype == torch.qint8 and (use_channelwise or qengine_is_onednn()):
+            if dtype == torch.qint8 and use_channelwise:
                 return
 
             nptype = np_dtype[dtype]
@@ -3849,7 +3880,7 @@ class TestQuantizedLinear(TestCase):
                 np.random.rand(output_channels) *
                 (b_value_max - b_value_min) + b_value_min
             ).astype(np.int32) if use_bias else None
-            if torch.backends.quantized.engine in ('x86', 'fbgemm', 'onednn'):
+            if torch.backends.quantized.engine in ('x86', 'fbgemm', 'onednn') and not IS_ARM64:
                 avoid_vpmaddubsw_overflow_linear(
                     batch_size,
                     input_channels,
@@ -5689,7 +5720,7 @@ class TestQuantizedConv(TestCase):
     def test_qconv_transpose1d(self):
         if not qengine_is_qnnpack():
             return  # Currently only the QNNPACK is supported
-        if qengine_is_qnnpack() and (IS_PPC or TEST_WITH_UBSAN):
+        if qengine_is_qnnpack() and IS_PPC:
             return  # QNNPACK doesn't support these
         batch_size = 2
         input_channels_per_group_list = [2, 32]
@@ -5834,7 +5865,7 @@ class TestQuantizedConv(TestCase):
             Y_scale,
             Y_zero_point,
             use_bias):
-        if qengine_is_qnnpack() and (IS_PPC or TEST_WITH_UBSAN):
+        if qengine_is_qnnpack() and IS_PPC:
             return  # QNNPACK doesn't support these
         # ONEDNN does not support output paddings
         if qengine_is_onednn() and (o_pad_h, o_pad_w) != (0, 0):

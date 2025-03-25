@@ -115,7 +115,7 @@ static void min_kernel_impl(
         scalar_t min_number = c10::load(self_data);
         int64_t index = 0;
         for (const auto i : c10::irange(self_dim_size)) {
-          scalar_t value = self_data[i * self_dim_stride];
+          scalar_t value = c10::load(&self_data[i * self_dim_stride]);
           if (!(zabs_(value) >= zabs_(min_number))) {
             min_number = value;
             index = i;
@@ -213,14 +213,15 @@ static void aminmax_kernel(
 }
 
 static void where_kernel_impl(TensorIterator &iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kHalf, kBFloat16, kBool,
+  AT_DISPATCH_V2(
     iter.dtype(), "where_cpu", [&] {
       cpu_kernel(
         iter,
         [=](bool cond_val, scalar_t self_val, scalar_t other_val) -> scalar_t {
           return cond_val ? self_val : other_val;
         });
-  });
+  },
+  kComplexHalf, kHalf, kBFloat16, kBool, AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_FLOAT8_TYPES));
 }
 
 static void isposinf_kernel_impl(TensorIteratorBase& iter) {

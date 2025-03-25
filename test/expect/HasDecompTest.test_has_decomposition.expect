@@ -75,6 +75,7 @@ aten::_ctc_loss.out
 aten::_ctc_loss_backward
 aten::_ctc_loss_backward.Tensor
 aten::_ctc_loss_backward.out
+aten::_cudnn_attention_forward
 aten::_cudnn_ctc_loss
 aten::_cudnn_ctc_loss.Tensor
 aten::_cudnn_ctc_loss.out
@@ -92,6 +93,8 @@ aten::_dimI
 aten::_dimV
 aten::_dirichlet_grad
 aten::_dirichlet_grad.out
+aten::_dyn_quant_matmul_4bit
+aten::_dyn_quant_pack_4bit_weight
 aten::_efficient_attention_backward
 aten::_efficient_attention_forward
 aten::_efficientzerotensor
@@ -515,6 +518,7 @@ aten::_scaled_dot_product_flash_attention_backward
 aten::_scaled_dot_product_flash_attention_for_cpu_backward
 aten::_scaled_dot_product_fused_attention_overrideable
 aten::_scaled_dot_product_fused_attention_overrideable_backward
+aten::_scaled_grouped_mm
 aten::_scaled_mm
 aten::_scaled_mm.out
 aten::_segment_reduce_backward
@@ -649,6 +653,7 @@ aten::_weight_int4pack_mm_for_cpu
 aten::_weight_int8pack_mm
 aten::_weight_norm_interface_backward
 aten::_weight_norm_interface_backward.out
+aten::adaptive_avg_pool1d.out
 aten::adaptive_avg_pool2d.out
 aten::adaptive_avg_pool3d.out
 aten::adaptive_avg_pool3d_backward.grad_input
@@ -672,6 +677,7 @@ aten::argmin
 aten::argmin.out
 aten::as_strided
 aten::as_strided_
+aten::avg_pool1d.out
 aten::avg_pool2d
 aten::avg_pool2d.out
 aten::avg_pool2d_backward
@@ -702,6 +708,7 @@ aten::bernoulli.Tensor
 aten::bernoulli.Tensor_out
 aten::bernoulli.float_out
 aten::bernoulli.out
+aten::bernoulli.p
 aten::bernoulli_.Tensor
 aten::bernoulli_.float
 aten::bincount
@@ -1123,6 +1130,10 @@ aten::resize_as_sparse_
 aten::row_indices
 aten::row_indices_copy
 aten::row_indices_copy.out
+aten::rrelu_with_noise
+aten::rrelu_with_noise.out
+aten::rrelu_with_noise_
+aten::rrelu_with_noise_functional
 aten::scalar_tensor
 aten::scalar_tensor.out
 aten::scatter.reduce
@@ -1299,8 +1310,6 @@ aten::topk.values
 aten::transpose_
 aten::triangular_solve
 aten::triangular_solve.X
-aten::unbind_copy.int
-aten::unbind_copy.int_out
 aten::unique_consecutive
 aten::unique_consecutive.out
 aten::unique_dim
@@ -1312,12 +1321,14 @@ aten::unsafe_split_with_sizes.out
 aten::unsqueeze_
 aten::upsample_bicubic2d_backward
 aten::upsample_bicubic2d_backward.grad_input
+aten::upsample_bilinear2d.vec_out
 aten::upsample_bilinear2d_backward
 aten::upsample_bilinear2d_backward.grad_input
 aten::upsample_linear1d_backward
 aten::upsample_linear1d_backward.grad_input
 aten::upsample_nearest1d_backward
 aten::upsample_nearest1d_backward.grad_input
+aten::upsample_nearest2d.vec_out
 aten::upsample_nearest2d_backward
 aten::upsample_nearest2d_backward.grad_input
 aten::upsample_nearest3d_backward

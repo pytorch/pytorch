@@ -16,6 +16,7 @@ from torch.testing._internal.common_device_type import (
     dtypesIfCPU,
     dtypesIfCUDA,
     instantiate_device_type_tests,
+    largeTensorTest,
     onlyCPU,
     onlyCUDA,
     onlyNativeDeviceTypes,
@@ -40,10 +41,10 @@ from torch.testing._internal.common_methods_invocations import (
 from torch.testing._internal.common_utils import (
     gradcheck,
     is_iterable_of_tensors,
-    IS_WINDOWS,
     numpy_to_torch_dtype_dict,
     run_tests,
     skipIfNoSciPy,
+    skipIfRocm,
     slowTest,
     suppress_warnings,
     TEST_SCIPY,
@@ -547,9 +548,7 @@ class TestUnaryUfuncs(TestCase):
         x = torch.tensor(0.0 - 1.0e20j, dtype=dtype, device=device)
         self.compare_with_numpy(torch.sqrt, np.sqrt, x)
         # acos test reference: https://github.com/pytorch/pytorch/issue/42952
-        # Skip on Windows, as CUDA acos  returns conjugate value
-        # see https://github.com/pytorch/pytorch/issues/52299
-        if not (IS_WINDOWS and dtype == torch.cdouble and "cuda" in device):
+        if not (dtype == torch.cdouble and "cuda" in device):
             self.compare_with_numpy(torch.acos, np.arccos, x)
 
         x = torch.tensor(
@@ -684,7 +683,7 @@ class TestUnaryUfuncs(TestCase):
         for dtype in (torch.half, torch.float, torch.double):
             a = torch.zeros(10, dtype=dtype)
             with self.assertRaises(TypeError):
-                b = ~a
+                ~a
 
     @dtypes(torch.complex64, torch.complex128)
     def test_abs_angle_complex_to_float(self, device, dtype):
@@ -1555,7 +1554,190 @@ class TestUnaryUfuncs(TestCase):
         self.assertEqual(1, len(z))
         self.assertEqual(torch.empty(0, dtype=torch.long), z[0])
 
+    @onlyCUDA
+    @dtypes(torch.int8)
+    @largeTensorTest("8GB")
+    @skipIfRocm(msg="ROCM tries to allocate 60GB")
+    def test_nonzero_large(self, device, dtype):
+        indices = (
+            torch.tensor((0, 2, 3, 4, 6, 100, 103, 2**30, 2**31 - 3, 2**31 - 2)),
+            torch.tensor((0, 1, 1, 1, 0, 1, 0, 1, 0, 0)),
+        )
+
+        x = torch.zeros(2**31 - 1, 2, device=device, dtype=dtype)
+        x[indices[0], indices[1]] = 1
+        y = torch.nonzero(x, as_tuple=True)
+        self.assertEqual(y, indices)
+        x = x.view(-1).fill_(0)
+        indices = indices[0] * 2
+        x[indices] = 1
+        y = torch.nonzero(x)
+        self.assertEqual(y.view(-1), indices)
+
+    def test_nonzero_static(self, device):
+        # invalid size
+        with self.assertRaisesRegex(
+            RuntimeError, "nonzero_static: 'size' must be an non-negative integer"
+        ):
+            torch.nonzero_static(torch.tensor([8], device=device), size=-2)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "nonzero_static: 'size' must be an non-negative integer"
+        ):
+            torch.nonzero_static(
+                torch.tensor([8], device=device),
+                size=-2,
+                out=torch.tensor(0, device=device),
+            )
+
+        # nonzero_static.out: out dtype mismatch
+        input_tensor = torch.tensor([8], device=device)
+        static_size = 1
+        out_tensor = torch.empty(
+            (static_size, input_tensor.dim()), dtype=torch.float, device=device
+        )
+        with self.assertRaisesRegex(
+            RuntimeError, "nonzero_static: Expected out tensor to have scalar type Long"
+        ):
+            torch.nonzero_static(input_tensor, size=static_size, out=out_tensor)
+
+        # nonzero_static.out: out resize (shrink)
+        input_tensor = torch.tensor([8], device=device)
+        static_size = 1
+        out_tensor = torch.empty((10, 10, 10, 10), dtype=torch.long, device=device)
+        ref = torch.tensor([[0]], device=device)
+        self.assertEqual(
+            torch.nonzero_static(input_tensor, size=static_size, out=out_tensor), ref
+        )
+        self.assertEqual(out_tensor, ref)
+
+        # nonzero_static.out: out resize (enlarge)
+        input_tensor = torch.tensor([8], device=device)
+        static_size = 1
+        out_tensor = torch.empty((0), dtype=torch.long, device=device)
+        self.assertEqual(
+            torch.nonzero_static(input_tensor, size=static_size, out=out_tensor), ref
+        )
+        self.assertEqual(out_tensor, ref)
+
+        # 0 rank
+        input_tensor = torch.tensor(6, device=device)
+        static_size = 2
+        self.assertEqual(
+            torch.nonzero_static(input_tensor, size=static_size),
+            torch.empty(
+                (static_size, input_tensor.dim()), device=device, dtype=torch.long
+            ),
+        )
+
+        # 0 size
+        input_tensor = torch.tensor([[[1]]], device=device)
+        static_size = 0
+        self.assertEqual(
+            torch.nonzero_static(input_tensor, size=static_size),
+            torch.empty(
+                (static_size, input_tensor.dim()), device=device, dtype=torch.long
+            ),
+        )
+
+        # 1D input
+        input_tensor = torch.tensor([0, 8], device=device)
+        static_size = 1
+        self.assertEqual(
+            torch.nonzero_static(input_tensor, size=static_size),
+            torch.tensor([[1]], device=device),
+        )
+
+        input_tensor = torch.tensor([8, 0], device=device)
+        static_size = 2
+        self.assertEqual(
+            torch.nonzero_static(input_tensor, size=static_size),
+            torch.tensor(
+                [[0], [-1]], device=device
+            ),  # padded with default fill_value "-1"
+        )
+
+        # 2D input
+        input_tensor = torch.tensor([[1.2, 0], [3.4, 5.6]], device=device)
+        static_size = 5
+        fill_value = -100
+        self.assertEqual(
+            torch.nonzero_static(input_tensor, size=static_size, fill_value=fill_value),
+            torch.tensor(
+                [
+                    [0, 0],
+                    [1, 0],
+                    [1, 1],
+                    [fill_value, fill_value],
+                    [fill_value, fill_value],
+                ],
+                device=device,
+            ),
+        )
+        input_tensor = torch.tensor([[1.2, 0], [3.4, 5.6]], device=device)
+        static_size = 2
+        fill_value = -100
+        self.assertEqual(
+            torch.nonzero_static(input_tensor, size=static_size, fill_value=fill_value),
+            torch.tensor([[0, 0], [1, 0]], device=device),
+        )
+
+        # 3D input
+        input_tensor = torch.tensor(
+            [[[0, 0], [0, -3]], [[0, 0], [5, 0]]], device=device
+        )
+        static_size = 4
+        fill_value = -999
+        self.assertEqual(
+            torch.nonzero_static(
+                input_tensor,
+                size=static_size,
+                fill_value=fill_value,
+            ),
+            torch.tensor(
+                [
+                    [0, 1, 1],
+                    [1, 1, 0],
+                    [fill_value, fill_value, fill_value],
+                    [fill_value, fill_value, fill_value],
+                ],
+                device=device,
+            ),
+        )
+
+    @onlyCUDA
+    def test_nonzero_static_large(self, device):
+        # large enough to have multiple iters per SM even on H100
+        # with 132 sms
+        size_inp = 1024 * 16 * 132 + 1024 * 16
+        x = torch.zeros(size_inp, device=device)
+        # unique indices
+        indices = torch.randperm(size_inp, device=device)[: size_inp // 2]
+        sorted, _ = torch.sort(indices)
+        x[sorted] = 1
+        res = torch.nonzero_static(x, size=size_inp // 2).view(-1)
+        self.assertEqual(res, sorted)
+        # no oob writes
+        out = torch.full((size_inp,), 10, device=device, dtype=torch.int64)
+        res = torch.nonzero_static(x, size=size_inp // 4, out=out[: size_inp // 2])
+        self.assertEqual(out[: size_inp // 4], sorted[: size_inp // 4])
+        self.assertEqual(
+            out[size_inp // 4 :],
+            torch.tensor(10, device="cuda").expand_as(out[size_inp // 4 :]),
+        )
+        # correct fill for 2d
+        x = x.view(2, size_inp // 2)
+        ref = x.nonzero()
+        res = x.nonzero_static(size=size_inp // 2 + 2)
+        self.assertEqual(res.shape, [size_inp // 2 + 2, 2])
+        self.assertEqual(ref, res[: size_inp // 2])
+        self.assertEqual(
+            res[size_inp // 2 :],
+            torch.tensor(-1, device="cuda").expand_as(res[size_inp // 2 :]),
+        )
+
     # TODO: rationalize with exp OpInfo
+
     @dtypes(*floating_and_complex_types_and(torch.bfloat16))
     @dtypesIfCUDA(*floating_and_complex_types_and(torch.half, torch.bfloat16))
     def test_exp(self, device, dtype):

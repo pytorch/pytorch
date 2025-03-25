@@ -4,19 +4,26 @@ import functools
 import logging
 import os
 import re
+import unittest
 import unittest.mock
 
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.distributed as dist
-from torch._dynamo.testing import empty_line_normalizer, skipIfNotPy311
+from torch._dynamo.testing import (
+    empty_line_normalizer,
+    extract_graph_and_tracker,
+    skipIfNotPy311,
+)
 from torch._dynamo.trace_rules import _as_posix_path
 from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_utils import (
     find_free_port,
     munge_exc,
     skipIfTorchDynamo,
+    xfailIfS390X,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.testing._internal.logging_utils import (
@@ -33,10 +40,32 @@ requires_distributed = functools.partial(
 
 
 def munge_shape_guards(s: str) -> str:
-    def munge(s):
-        return re.sub(r"[^ ]+:\d+ in [^ ]+", "#:# in #", s)
+    SHAPE_GUARD = (
+        "SYMBOLIC_SHAPE_GUARD"
+        if torch._dynamo.config.enable_cpp_symbolic_shape_guards
+        else "LAMBDA_GUARD"
+    )
+    SHAPE_GUARD_REGEX = (
+        r"[| ]* \+- SYMBOLIC_SHAPE_GUARD"
+        if torch._dynamo.config.enable_cpp_symbolic_shape_guards
+        else r"\+- LAMBDA_GUARD"
+    )
 
-    return "\n".join([munge(l) for l in s.splitlines() if "LAMBDA_GUARD" in l])
+    def munge(s):
+        return re.sub(
+            SHAPE_GUARD_REGEX,
+            "+- __SHAPE_GUARD__",
+            re.sub(r"[^ ]+:\d+ in [^ ]+", "#:# in #", s),
+        )
+
+    lines = [munge(l) for l in s.splitlines() if SHAPE_GUARD in l]
+
+    if torch._dynamo.config.enable_cpp_symbolic_shape_guards:
+        # Since we can have multiple guard accessors for one guard, the shape guard
+        # printing will have duplicates. We remove duplicates whie preserving order.
+        lines = list(dict.fromkeys(lines))
+
+    return "\n".join(lines)
 
 
 def example_fn(a):
@@ -67,7 +96,7 @@ ARGS = (torch.ones(1000, 1000, requires_grad=True),)
 def multi_record_test(num_records, **kwargs):
     @make_logging_test(**kwargs)
     def fn(self, records):
-        fn_opt = torch._dynamo.optimize("inductor")(example_fn)
+        fn_opt = torch.compile(example_fn, backend="inductor")
         fn_opt(*ARGS)
         self.assertEqual(len(records), num_records)
 
@@ -77,7 +106,7 @@ def multi_record_test(num_records, **kwargs):
 def within_range_record_test(num_records_lower, num_records_higher, **kwargs):
     @make_logging_test(**kwargs)
     def fn(self, records):
-        fn_opt = torch._dynamo.optimize("inductor")(example_fn)
+        fn_opt = torch.compile(example_fn, backend="inductor")
         fn_opt(*ARGS)
         self.assertGreaterEqual(len(records), num_records_lower)
         self.assertLessEqual(len(records), num_records_higher)
@@ -91,13 +120,13 @@ def single_record_test(**kwargs):
 
 class LoggingTests(LoggingTestCase):
     test_bytecode = multi_record_test(2, bytecode=True)
-    test_output_code = multi_record_test(2, output_code=True)
+    test_output_code = multi_record_test(3, output_code=True)
     test_aot_graphs = multi_record_test(3, aot_graphs=True)
 
     @requires_cuda
     @make_logging_test(schedule=True)
     def test_schedule(self, records):
-        fn_opt = torch._dynamo.optimize("inductor")(inductor_schedule_fn)
+        fn_opt = torch.compile(inductor_schedule_fn, backend="inductor")
         fn_opt(torch.ones(1000, 1000, device="cuda"))
         self.assertGreater(len(records), 0)
         self.assertLess(len(records), 5)
@@ -105,7 +134,7 @@ class LoggingTests(LoggingTestCase):
     @requires_cuda
     @make_logging_test(fusion=True)
     def test_fusion(self, records):
-        fn_opt = torch._dynamo.optimize("inductor")(inductor_schedule_fn)
+        fn_opt = torch.compile(inductor_schedule_fn, backend="inductor")
         fn_opt(torch.ones(1000, 1000, device="cuda"))
         self.assertGreater(len(records), 0)
         self.assertLess(len(records), 8)
@@ -123,7 +152,7 @@ class LoggingTests(LoggingTestCase):
         def fn(x, y):
             return torch.add(x, y)
 
-        fn_opt = torch._dynamo.optimize("inductor")(fn)
+        fn_opt = torch.compile(fn, backend="inductor")
         fn_opt(torch.ones(1000, 1000), torch.ones(1000, 1000))
         fn_opt(torch.ones(1000, 1000), 1)
         self.assertGreater(len(records), 0)
@@ -134,7 +163,7 @@ class LoggingTests(LoggingTestCase):
     @skipIfTorchDynamo("too slow")
     @make_logging_test(dynamo=logging.DEBUG)
     def test_dynamo_debug_default_off_artifacts(self, records):
-        fn_opt = torch._dynamo.optimize("inductor")(example_fn)
+        fn_opt = torch.compile(example_fn, backend="inductor")
         fn_opt(torch.ones(1000, 1000))
         self.assertEqual(len([r for r in records if ".__bytecode" in r.name]), 0)
         self.assertEqual(len([r for r in records if ".__output_code" in r.name]), 0)
@@ -142,7 +171,7 @@ class LoggingTests(LoggingTestCase):
     @make_logging_test()
     def test_dynamo_error(self, records):
         try:
-            fn_opt = torch._dynamo.optimize("inductor")(dynamo_error_fn)
+            fn_opt = torch.compile(dynamo_error_fn, backend="inductor")
             fn_opt(*ARGS)
         except Exception:
             pass
@@ -153,8 +182,7 @@ class LoggingTests(LoggingTestCase):
 WON'T CONVERT dynamo_error_fn test_logging.py line N
 due to:
 Traceback (most recent call last):
-torch._dynamo.exc.TorchRuntimeError: Failed running call_method add(*(FakeTensor(..., size=(1000, 1000), grad_fn=<MulBackward0>), FakeTensor(..., size=(10, 10))), **{}):
-Attempting to broadcast a dimension of length 10 at -1! Mismatching argument at index 1 had torch.Size([10, 10]); but expected shape should be broadcastable to [1000, 1000]
+torch._dynamo.exc.TorchRuntimeError: Dynamo failed to run FX node with fake tensors: call_method add(*(FakeTensor(..., size=(1000, 1000), grad_fn=<MulBackward0>), FakeTensor(..., size=(10, 10))), **{}): got RuntimeError('Attempting to broadcast a dimension of length 10 at -1! Mismatching argument at index 1 had torch.Size([10, 10]); but expected shape should be broadcastable to [1000, 1000]')
 
 from user code:
    File "test_logging.py", line N, in dynamo_error_fn
@@ -162,8 +190,8 @@ from user code:
         )
 
     test_aot = within_range_record_test(2, 6, aot=logging.INFO)
-    test_inductor_debug = within_range_record_test(3, 22, inductor=logging.DEBUG)
-    test_inductor_info = within_range_record_test(2, 9, inductor=logging.INFO)
+    test_inductor_debug = within_range_record_test(3, 26, inductor=logging.DEBUG)
+    test_inductor_info = within_range_record_test(2, 10, inductor=logging.INFO)
 
     @make_logging_test()
     def test_inductor_error(self, records):
@@ -184,7 +212,7 @@ from user code:
         )
 
         try:
-            fn_opt = torch._dynamo.optimize("inductor")(inductor_error_fn)
+            fn_opt = torch.compile(inductor_error_fn, backend="inductor")
             fn_opt(*ARGS)
         except Exception:
             pass
@@ -226,9 +254,8 @@ LoweringException: AssertionError:
         os.environ["MASTER_PORT"] = str(find_free_port())
         dist.init_process_group("gloo", rank=0, world_size=1)
 
-        ddp_model = torch._dynamo.optimize("inductor")(
-            DDP(ToyModel().to("cuda:0"), device_ids=[0], bucket_cap_mb=4)
-        )
+        model = DDP(ToyModel().to("cuda:0"), device_ids=[0], bucket_cap_mb=4)
+        ddp_model = torch.compile(model, backend="inductor")
 
         ddp_model(torch.randn(1024, 1024, device="cuda:0"))
 
@@ -283,7 +310,7 @@ LoweringException: AssertionError:
 
     @make_logging_test(graph_breaks=True)
     def test_graph_breaks(self, records):
-        @torch._dynamo.optimize("inductor")
+        @torch.compile(backend="inductor")
         def fn(x):
             torch._dynamo.graph_break()
             return x + 1
@@ -294,7 +321,7 @@ LoweringException: AssertionError:
 
     @make_settings_test("torch._dynamo.utils")
     def test_dump_compile_times(self, records):
-        fn_opt = torch._dynamo.optimize("inductor")(example_fn)
+        fn_opt = torch.compile(example_fn, backend="inductor")
         fn_opt(torch.ones(1000, 1000))
         # This function runs during exit via atexit.register.
         # We're not actually going to run atexit._run_exit_funcs() here,
@@ -372,7 +399,7 @@ LoweringException: AssertionError:
                 return x * 2
             return x * 3
 
-        fn_opt = torch._dynamo.optimize("eager")(fn)
+        fn_opt = torch.compile(fn, backend="eager")
         fn_opt(torch.ones(3, 3))
 
         found_x2 = False
@@ -400,7 +427,7 @@ LoweringException: AssertionError:
         def fn3(x):
             return x * 4
 
-        fn_opt = torch._dynamo.optimize("eager")(fn1)
+        fn_opt = torch.compile(fn1, backend="eager")
         fn_opt(torch.ones(3, 3))
 
         found_x2 = False
@@ -437,7 +464,7 @@ LoweringException: AssertionError:
         def outer(pred, x):
             return inner(pred, x)
 
-        fn_opt = torch._dynamo.optimize("eager")(outer)
+        fn_opt = torch.compile(outer, backend="eager")
         fn_opt(torch.tensor(True), torch.ones(3, 3))
 
         found_x2 = False
@@ -465,7 +492,7 @@ LoweringException: AssertionError:
 
             return fn2()
 
-        fn_opt = torch._dynamo.optimize("eager")(fn1)
+        fn_opt = torch.compile(fn1, backend="eager")
         fn_opt()
 
         found_funcname = False
@@ -484,7 +511,7 @@ LoweringException: AssertionError:
     def test_distributed_rank_logging(self):
         env = dict(os.environ)
         env["TORCH_LOGS"] = "dynamo"
-        stdout, stderr = self.run_process_no_exception(
+        _, stderr = self.run_process_no_exception(
             """\
 import torch.distributed as dist
 import logging
@@ -505,7 +532,7 @@ print("arf")
         def fn(x, y):
             return (x * 2) @ (y * 3)
 
-        fn_opt = torch._dynamo.optimize("eager")(fn)
+        fn_opt = torch.compile(fn, backend="eager")
         fn_opt(torch.randn(10, 20), torch.randn(20, 30))
 
         self.assertEqual(len(records), 3)
@@ -538,7 +565,7 @@ print("arf")
         def fn(x, y):
             return (x * 2) @ (y * 3)
 
-        fn_opt = torch._dynamo.optimize("eager")(fn)
+        fn_opt = torch.compile(fn, backend="eager")
         fn_opt(torch.randn(10, 20), torch.randn(20, 30))
 
         msg0 = munge_exc(records[0].getMessage())
@@ -559,7 +586,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
         def f(x):
             return g(g(x))
 
-        fn_opt = torch._dynamo.optimize("eager")(f)
+        fn_opt = torch.compile(f, backend="eager")
         fn_opt(torch.randn(3, 3))
 
         self.assertEqual(len(records), 4)
@@ -601,7 +628,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
             torch._dynamo.graph_break()
             return x * 3
 
-        fn_opt = torch._dynamo.optimize("eager")(fn)
+        fn_opt = torch.compile(fn, backend="eager")
         fn_opt(torch.randn(3, 3))
 
         self.assertEqual(len(records), 3)
@@ -635,7 +662,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
         zs = [3.0]
         x = torch.tensor([1.0])
 
-        fn_opt = torch._dynamo.optimize("eager")(fn)
+        fn_opt = torch.compile(fn, backend="eager")
         fn_opt(x, ys, zs)
         fn_opt(x, ys[:1], zs)
 
@@ -666,10 +693,10 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
         self.assertExpectedInline(
             munge_shape_guards(record.getMessage()),
             """\
-+- LAMBDA_GUARD: L['x'].size()[0] == 2*L['z'].size()[0]  # return x + torch.cat([y, z])  # #:# in # #:# in #
-+- LAMBDA_GUARD: L['y'].size()[0] == L['z'].size()[0]  # duck sizing added this equality because these variables had the same size 3 (to avoid this specialization, set torch.fx.experimental._config.use_duck_shape = False)
-+- LAMBDA_GUARD: Eq(Mod(2*L['z'].size()[0], 3), 0)  # if x.size(0) % 3 == 0:  # #:# in # #:# in #
-+- LAMBDA_GUARD: 2 <= L['z'].size()[0]  # return x + torch.cat([y, z])  # #:# in # (user code shown is first use of this value--the guard itself is not due user code but due to 0/1 specialization in the framework; to avoid specialization try torch._dynamo.mark_unbacked(tensor, dim))""",  # noqa: B950
++- __SHAPE_GUARD__: L['x'].size()[0] == 2*L['z'].size()[0]  # return x + torch.cat([y, z])  # #:# in # #:# in #
++- __SHAPE_GUARD__: L['y'].size()[0] == L['z'].size()[0]  # duck sizing added this equality because these variables had the same size 3 (to avoid this specialization, set torch.fx.experimental._config.use_duck_shape = False)
++- __SHAPE_GUARD__: ((2*L['z'].size()[0]) % 3) == 0  # if x.size(0) % 3 == 0:  # #:# in # #:# in #
++- __SHAPE_GUARD__: 2 <= L['z'].size()[0]  # return x + torch.cat([y, z])  # #:# in # (user code shown is first use of this value--the guard itself is not due user code but due to 0/1 specialization in the framework; to avoid specialization try torch._dynamo.mark_unbacked(tensor, dim))""",  # noqa: B950
         )
 
     @make_logging_test(guards=True)
@@ -684,8 +711,8 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
         self.assertExpectedInline(
             munge_shape_guards(record.getMessage()),
             """\
-+- LAMBDA_GUARD: L['x'].size()[0] == 2*L['y'].size()[0]  # return any([x.size(0) == y.size(0) * 2])  # #:# in # #:# in #
-+- LAMBDA_GUARD: 2 <= L['y'].size()[0]  # return any([x.size(0) == y.size(0) * 2])  # #:# in # (user code shown is first use of this value--the guard itself is not due user code but due to 0/1 specialization in the framework; to avoid specialization try torch._dynamo.mark_unbacked(tensor, dim))""",  # noqa: B950
++- __SHAPE_GUARD__: L['x'].size()[0] == 2*L['y'].size()[0]  # return any([x.size(0) == y.size(0) * 2])  # #:# in # #:# in #
++- __SHAPE_GUARD__: 2 <= L['y'].size()[0]  # return any([x.size(0) == y.size(0) * 2])  # #:# in # (user code shown is first use of this value--the guard itself is not due user code but due to 0/1 specialization in the framework; to avoid specialization try torch._dynamo.mark_unbacked(tensor, dim))""",  # noqa: B950
         )
 
     @make_logging_test(guards=True)
@@ -703,9 +730,8 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
         self.assertExpectedInline(
             munge_shape_guards(record.getMessage()),
             """\
-+- LAMBDA_GUARD: L['x'].size()[0] == 2*L['y'].size()[0]  # torch._check(x.size(0) == y.size(0) * 2)  # #:# in # #:# in #
-+- LAMBDA_GUARD: 3 <= L['y'].size()[0]  # torch._check(x.size(0) > 5)  # #:# in # #:# in #
-+- LAMBDA_GUARD: L['y'].size()[0] <= 14  # torch._check(x.size(0) < 30)  # #:# in # #:# in #""",  # noqa: B950
++- __SHAPE_GUARD__: L['x'].size()[0] == 2*L['y'].size()[0]  # torch._check(x.size(0) == y.size(0) * 2)  # #:# in # #:# in #
++- __SHAPE_GUARD__: 3 <= L['y'].size()[0] <= 14  # torch._check(x.size(0) > 5)  # #:# in # #:# in # and torch._check(x.size(0) < 30)  # #:# in # #:# in #""",  # noqa: B950
         )
 
     @make_logging_test(cudagraph_static_inputs=True)
@@ -732,6 +758,43 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
         self.assertGreater(len(records), 0)
         self.assertLess(len(records), 3)
 
+    @make_logging_test(autotuning=True)
+    @requires_cuda
+    @unittest.skipIf(not SM90OrLater, "requires H100+ GPU")
+    def test_autotuning(self, records):
+        with torch._inductor.utils.fresh_inductor_cache():
+
+            def f(a, b):
+                return torch.mm(a, b)
+
+            f = torch.compile(f, mode="max-autotune-no-cudagraphs")
+            f(torch.randn(10, 10, device="cuda"), torch.randn(10, 10, device="cuda"))
+            self.assertGreater(len(records), 0)
+            self.assertLess(len(records), 40)
+
+    @make_logging_test(graph_region_expansion=True)
+    def test_graph_region_expansion(self, records):
+        with torch._dynamo.config.patch("track_nodes_for_deduplication", True):
+
+            def inner_fn(x, y):
+                x0 = x + 1
+                y0 = y + 2
+                z = x0.sum() + y0.sum()
+                return z
+
+            def fn(x, y):
+                o0 = inner_fn(x, y)
+                o1 = torch.sin(o0)
+                o2 = inner_fn(x, o1)
+                o3 = inner_fn(x, y)
+                return o2 * o3 * o3
+
+            graph, tracker = extract_graph_and_tracker(
+                fn, torch.randn(10, 10), torch.randn(10, 10)
+            )
+            tracker.get_identical_regions(graph)
+            self.assertGreater(len(records), 0)
+
     @skipIfTorchDynamo("too slow")
     @make_logging_test(**torch._logging.DEFAULT_LOGGING)
     def test_default_logging(self, records):
@@ -743,7 +806,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
             print("hello")
             return a + 1
 
-        fn_opt = torch._dynamo.optimize("eager")(fn)
+        fn_opt = torch.compile(fn, backend="eager")
         fn_opt(torch.ones(10, 10))
         fn_opt(-torch.ones(10, 5))
 
@@ -755,6 +818,8 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
             len([r for r in records if "return a + 1" in r.getMessage()]), 0
         )
 
+    # there are some additional deprecation warnings in stderr, probably due to newer dependencies used on s390x
+    @xfailIfS390X
     def test_logs_out(self):
         import tempfile
 
@@ -770,7 +835,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
             env = dict(os.environ)
             env["TORCH_LOGS"] = "dynamo"
             env["TORCH_LOGS_OUT"] = file_path
-            stdout, stderr = self.run_process_no_exception(
+            _, stderr = self.run_process_no_exception(
                 """\
 import torch
 @torch.compile(backend="eager")
@@ -796,6 +861,8 @@ fn(torch.randn(5))
 
     @make_settings_test("torch._dynamo.eval_frame")
     def test_log_traced_frames(self, records):
+        torch._dynamo.eval_frame.clear_dynamo_tls()
+
         # Test program
         @torch.compile()
         def foo():
@@ -829,7 +896,7 @@ TorchDynamo attempted to trace the following frames: [
         )
 
 
-# single record tests
+# non single record tests
 exclusions = {
     "bytecode",
     "cudagraphs",
@@ -839,7 +906,10 @@ exclusions = {
     "overlap",
     "aot_graphs",
     "aot_graphs_effects",
+    "pre_grad_graphs",
     "post_grad_graphs",
+    "ir_pre_fusion",
+    "ir_post_fusion",
     "compiled_autograd",
     "compiled_autograd_verbose",
     "recompiles",
@@ -865,6 +935,8 @@ exclusions = {
     "cudagraph_static_inputs",
     "benchmarking",
     "loop_ordering",
+    "autotuning",
+    "graph_region_expansion",
 }
 for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:

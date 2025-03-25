@@ -1,5 +1,24 @@
 # mypy: allow-untyped-defs
 # mypy: disable-error-code="method-assign"
+
+"""
+Debug utilities for TorchDynamo compilation and execution.
+
+This module provides various debugging tools and utilities for TorchDynamo, including:
+
+- Minification support for reducing test cases while preserving bugs
+- Input/output handling via InputReader and InputWriter for reproducible testing
+- Accuracy checking between original and compiled models
+- Neural network module string conversion via NNModuleToString
+- Profiling tools and system information collection
+- Buck build system integration for Meta-internal testing
+
+Key classes:
+- InputReader/InputWriter: Handle serialization of model inputs/outputs
+- NNModuleToString: Converts nn.Modules to string representations
+- BuckTargetWriter: Manages Buck build system integration
+"""
+
 import atexit
 import copy
 import cProfile
@@ -16,7 +35,7 @@ import tempfile
 import textwrap
 from collections import Counter
 from importlib import import_module
-from typing import Any, Callable, Dict, List, Optional, TypeVar
+from typing import Any, Callable, Optional, TypeVar
 
 import torch
 import torch._prims_common as utils
@@ -65,7 +84,7 @@ class BuckTargetWriter:
         self.target = self.py_file.replace(".py", "")
 
         # Get main_module path from fbcode
-        self.path = f'{self.subdir.replace("/", ".")}.{self.target}'
+        self.path = f"{self.subdir.replace('/', '.')}.{self.target}"
         self.path = self.path[self.path.find("fbcode.") :]
         self.path = self.path[7:]
 
@@ -86,6 +105,7 @@ python_binary(
     compile = False,
     deps = [
         "//caffe2:torch",
+        "//caffe2:libtorch",
         "//caffe2/functorch:functorch",
         "//triton:triton",
         "{cur_target}",
@@ -184,7 +204,7 @@ class NNModuleToString:
             example_param = next(module.parameters(), None)
             if example_param is not None and example_param.is_cuda:
                 module_str = f"{module_str}.cuda()"
-            model_str += f"{tab*2}self.{module_name} = {module_str}\n"
+            model_str += f"{tab * 2}self.{module_name} = {module_str}\n"
 
         for buffer_name, buffer in gm._buffers.items():
             if buffer is None:
@@ -203,7 +223,9 @@ class NNModuleToString:
                 )
             if buffer.is_cuda:
                 tensor_str = f"{tensor_str}.cuda()"
-            model_str += f"{tab*2}self.register_buffer('{buffer_name}', {tensor_str})\n"
+            model_str += (
+                f"{tab * 2}self.register_buffer('{buffer_name}', {tensor_str})\n"
+            )
 
         for param_name, param in gm._parameters.items():
             if param is None:
@@ -212,7 +234,7 @@ class NNModuleToString:
             if param.is_cuda:
                 maybe_device = ', device="cuda"'
             tensor_str = f"torch.nn.Parameter(torch.randn({list(param.shape)}, dtype={param.dtype}{maybe_device}))"
-            model_str += f"{tab*2}self.{param_name} = {tensor_str}\n"
+            model_str += f"{tab * 2}self.{param_name} = {tensor_str}\n"
 
         # TODO - Keep this code for now. But, I don't think we will need this.
         # attrs = dir(gm)
@@ -248,6 +270,31 @@ def _cuda_system_info_comment():
         model_str += f"# {name} : {count} \n"
     model_str += "\n"
     return model_str
+
+
+def generate_env_vars_string(*, stable_output=False):
+    """
+    Generate a string configuration for environment variables related to Dynamo, Inductor, and Triton.
+    """
+    if stable_output:
+        return "# env var omitted due to stable_output=True"
+
+    allow_list = ["TORCH", "DYNAMO", "INDUCTOR", "TRITON"]
+    skip_list = ["TRITON_LIBDEVICE_PATH", "TRITON_PTXAS_PATH", "TRITON_LIBCUDA_PATH"]
+
+    def filter(key):
+        return any(string in key for string in allow_list) and key not in skip_list
+
+    config_lines = [
+        f"os.environ['{key}'] = '{value}'"
+        for key, value in os.environ.items()
+        if filter(key)
+    ]
+    config_string = "\n".join(config_lines)
+    return f"""\
+import os
+{config_string}
+    """
 
 
 def generate_config_string(*, stable_output=False):
@@ -370,7 +417,7 @@ def same_two_models(
 
     try:
         res = run_fwd_maybe_bwd(opt_gm, example_inputs, only_fwd)
-    except Exception as e:
+    except Exception:
         # This means that the minified graph is bad/exposes a different problem.
         # As we are checking accuracy here, lets log the exception and return True.
         log.exception(
@@ -455,7 +502,7 @@ def backend_accuracy_fails(
             require_fp64=require_fp64,
             ignore_non_fp=ignore_non_fp,
         )
-    except Exception as e:
+    except Exception:
         # This means that the minified graph is bad/exposes a different problem.
         # As we are checking accuracy here, lets log the exception and return False.
         log.exception(
@@ -651,14 +698,16 @@ class InputWriter:
         return v
 
     def tensor(self, name, t) -> None:
-        from torch.fx.experimental.symbolic_shapes import statically_known_true
+        from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 
         storage = self.storage(
             t.untyped_storage(), dtype_hint=t.dtype, device_hint=t.device
         )
         args = []
         # NB: this is positional, must come first
-        if _stride_or_default(None, shape=t.shape) != t.stride():
+        if not statically_known_true(
+            sym_eq(_stride_or_default(None, shape=t.shape), t.stride())
+        ):
             args.append(str(tuple(t.stride())))
         if _dtype_or_default(None) != t.dtype:
             args.append(f"dtype={t.dtype!r}")
@@ -711,11 +760,11 @@ class InputWriter:
 
 
 def aot_graph_input_parser(
-    func: Callable[[List[Tensor]], List[Tensor]],
+    func: Callable[[list[Tensor]], list[Tensor]],
     device: str = "cuda",
-    sym_shapes: Optional[Dict[str, int]] = None,
+    sym_shapes: Optional[dict[str, int]] = None,
     default_sym_shape: Optional[int] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Takes in a function which has been printed with print_readable() and constructs kwargs to run it.
 
@@ -748,7 +797,7 @@ def aot_graph_input_parser(
         "Container for tensors as attributes"
 
     # Dictionary for tensors from annotations
-    kwargs: Dict[str, Any] = {}
+    kwargs: dict[str, Any] = {}
 
     sym_shapes = sym_shapes or {}
 

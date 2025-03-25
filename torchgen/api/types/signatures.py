@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterator, Sequence, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from torchgen.api.types.types_base import Binding, CType, Expr
 
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator, Sequence
+
     from torchgen.model import (
         BackendIndex,
         FunctionSchema,
@@ -364,9 +366,9 @@ class FunctionalizationLambda:
             e.expr for e in translate.translate(full_ctx, call_bindings, method=False)
         ]
         if not self.is_reverse and maybe_index is not None:
-            return f'{inner_call_name}({", ".join(call_exprs)})[{maybe_index.name}];'
+            return f"{inner_call_name}({', '.join(call_exprs)})[{maybe_index.name}];"
         else:
-            return f'{inner_call_name}({", ".join(call_exprs)});'
+            return f"{inner_call_name}({', '.join(call_exprs)});"
 
     @staticmethod
     def from_func(
@@ -406,7 +408,9 @@ def kernel_signature(
     meta = backend_index.get_kernel(f)
     symint = meta is not None and meta.supports_symint()
     if symint:
-        assert f.func.has_symint(), f"attempted to define symint kernel for {backend_index.dispatch_key} without SymInt in schema"
+        assert f.func.has_symint(), (
+            f"attempted to define symint kernel for {backend_index.dispatch_key} without SymInt in schema"
+        )
     if backend_index.external:
         return DispatcherSignature.from_schema(f.func, prefix=prefix, symint=symint)
     else:

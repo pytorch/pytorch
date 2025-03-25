@@ -236,8 +236,6 @@ git submodule update --init --recursive
 
 ```bash
 conda install cmake ninja
-# Run this command on native Windows
-conda install rust
 # Run this command from the PyTorch directory after cloning the source code using the “Get the PyTorch Source“ section below
 pip install -r requirements.txt
 ```
@@ -276,13 +274,6 @@ conda install -c conda-forge libuv=1.39
 #### Install PyTorch
 **On Linux**
 
-If you would like to compile PyTorch with [new C++ ABI](https://gcc.gnu.org/onlinedocs/libstdc++/manual/using_dual_abi.html) enabled, then first run this command:
-```bash
-export _GLIBCXX_USE_CXX11_ABI=1
-```
-
-Please **note** that starting from PyTorch 2.5, the PyTorch build with XPU supports both new and old C++ ABIs. Previously, XPU only supported the new C++ ABI. If you want to compile with Intel GPU support, please follow [Intel GPU Support](#intel-gpu-support).
-
 If you're compiling for AMD ROCm then first run this command:
 ```bash
 # Only run this if you're compiling for ROCm
@@ -307,7 +298,7 @@ If you want to build legacy python code, please refer to [Building on legacy cod
 
 **CPU-only builds**
 
-In this mode PyTorch computations will run on your CPU, not your GPU
+In this mode PyTorch computations will run on your CPU, not your GPU.
 
 ```cmd
 python setup.py develop
@@ -353,6 +344,18 @@ set CUDAHOSTCXX=C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC
 
 python setup.py develop
 
+```
+
+**Intel GPU builds**
+
+In this mode PyTorch with Intel GPU support will be built.
+
+Please make sure [the common prerequisites](#prerequisites) as well as [the prerequisites for Intel GPU](#intel-gpu-support) are properly installed and the environment variables are configured prior to starting the build. For build tool support, `Visual Studio 2022` is required.
+
+Then PyTorch can be built with the command:
+
+```cmd
+python setup.py develop
 ```
 
 ##### Adjust Build Options (Optional)
@@ -417,9 +420,11 @@ readthedocs theme.
 ```bash
 cd docs/
 pip install -r requirements.txt
+make html
+make serve
 ```
-You can then build the documentation by running `make <format>` from the
-`docs/` folder. Run `make` to get a list of all available output formats.
+
+Run `make` to get a list of all available output formats.
 
 If you get a katex error run `npm install katex`.  If it persists, try
 `npm install -g katex`

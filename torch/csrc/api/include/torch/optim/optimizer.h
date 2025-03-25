@@ -85,6 +85,7 @@ class TORCH_API OptimizerParamGroup {
         options_(
             param_group.has_options() ? param_group.options().clone()
                                       : nullptr) {}
+  OptimizerParamGroup(OptimizerParamGroup&& param_group) = default;
   OptimizerParamGroup(std::vector<Tensor> params)
       : params_(std::move(params)) {}
   OptimizerParamGroup(
@@ -94,6 +95,9 @@ class TORCH_API OptimizerParamGroup {
 
   OptimizerParamGroup& operator=(const OptimizerParamGroup& param_group) =
       delete;
+  OptimizerParamGroup& operator=(OptimizerParamGroup&& param_group) noexcept =
+      default;
+  ~OptimizerParamGroup() = default;
   bool has_options() const;
   OptimizerOptions& options();
   const OptimizerOptions& options() const;
@@ -112,6 +116,8 @@ class TORCH_API Optimizer {
   // `state_dict` / `load_state_dict` API to copy an optimizer instead.
   Optimizer(const Optimizer& optimizer) = delete;
   Optimizer(Optimizer&& optimizer) = default;
+  Optimizer& operator=(const Optimizer& optimizer) = delete;
+  Optimizer& operator=(Optimizer&& optimizer) = default;
 
   explicit Optimizer(
       const std::vector<OptimizerParamGroup>& param_groups,

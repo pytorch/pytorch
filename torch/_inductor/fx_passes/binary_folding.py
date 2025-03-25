@@ -5,6 +5,7 @@ import itertools
 import torch
 
 from ..._dynamo.utils import counters
+from .. import config
 from ..pattern_matcher import Arg, CallFunction, KeywordArg
 from .freezing_patterns import register_binary_folding_pattern
 
@@ -297,7 +298,10 @@ def binary_folding_init():
         if computation_node.target == aten.convolution.default:
             return _check_conv_and_broadcast_op(computation_node, other)
         elif computation_node.target in [aten.addmm.default, aten.mm.default]:
-            return _check_linear_and_broadcast_op(computation_node, other, has_reshape)
+            return (
+                config.enable_linear_binary_folding
+                and _check_linear_and_broadcast_op(computation_node, other, has_reshape)
+            )
 
         return False
 
@@ -480,6 +484,7 @@ def binary_folding_init():
             with graph.inserting_before(reshape_node if reshape_node else binary_node):
                 assert computation_node.target in _computation_ops
                 if computation_node.target == aten.convolution.default:
+                    counters["inductor"]["binary_folding_conv"] += 1
                     new_computation_node = _create_new_conv_node(
                         graph, computation_node, binary_node, other
                     )

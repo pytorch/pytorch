@@ -50,7 +50,7 @@
 /*
 https://learn.microsoft.com/en-us/cpp/overview/compiler-versions?view=msvc-170
 Use _MSC_FULL_VER to identify current compiler is msvc,
-Windows llvm will not have this defination.
+Windows llvm will not have this definition.
 */
 #define __msvc_cl__
 #endif
@@ -197,7 +197,7 @@ public:
     return vector;
   }
 // Workaround for https: //gcc.gnu.org/bugzilla/show_bug.cgi?id=117001
-#if __GNUC__ <= 12 && defined(__ARM_FEATURE_SVE)
+#if __GNUC__ <= 12 && !defined(__clang__) && defined(__ARM_FEATURE_SVE)
   static Vectorized<T>  __attribute__ ((optimize("-fno-tree-loop-vectorize"))) blendv(const Vectorized<T>& a,
 #else
   static Vectorized<T> blendv(const Vectorized<T>& a,
@@ -206,6 +206,9 @@ public:
     Vectorized vector;
     int_same_size_t<T> buffer[size()];
     mask.store(buffer);
+#if defined(__clang__) && __ARM_FEATURE_SVE
+    #pragma clang loop vectorize(disable)
+#endif
     for (const auto i : c10::irange(size())) {
       if (buffer[i] & 0x01)
        {
@@ -282,15 +285,24 @@ public:
     }
     return false;
   }
-// TODO: Remove this once the issue with MSVC is fixed
+// MSVC versions between 14.36 and 14.42 has a loop unrolling bug on Windows Arm64
 //       See https://developercommunity.visualstudio.com/t/MSVC-loop-unrolling-problem-194033813-/10720692
-#if defined(_WIN32) && defined(__aarch64__)
+#if defined(_WIN32) && defined(__aarch64__) && ((_MSVC_VER >= 1936) && (_MSVC_VER <= 1942))
   Vectorized<T> map(T (*const f)(T)) const {
     Vectorized<T> ret;
     for (int64_t i = 0; i < size(); i++) {
       ret[i] = f(values[i]);
       if (++i < size())
         ret[i] = f(values[i]);
+    }
+    return ret;
+  }
+  T reduce(T (*const f)(T)) const {
+    T ret = 0;
+    for (int64_t i = 0; i < size(); i++) {
+      ret = f(ret, values[i]);
+      if (++i < size())
+        ret = f(ret, values[i]);
     }
     return ret;
   }
@@ -302,11 +314,25 @@ public:
     }
     return ret;
   }
+  T reduce(T (*const f)(T)) const {
+    T ret = 0;
+    for (int64_t i = 0; i != size(); i++) {
+      ret = f(ret, values[i]);
+    }
+    return ret;
+  }
 #endif
   Vectorized<T> map(T (*const f)(const T &)) const {
     Vectorized<T> ret;
     for (int64_t i = 0; i != size(); i++) {
       ret[i] = f(values[i]);
+    }
+    return ret;
+  }
+  T reduce(T (*const f)(const T &)) const {
+    T ret = 0;
+    for (int64_t i = 0; i != size(); i++) {
+      ret = f(ret, values[i]);
     }
     return ret;
   }
@@ -405,6 +431,9 @@ public:
   }
   Vectorized<T> asin() const {
     return map(std::asin);
+  }
+  Vectorized<T> asinh() const {
+    return map(std::asinh);
   }
   Vectorized<T> atan() const {
     return map(std::atan);
@@ -581,6 +610,12 @@ public:
       ret[i] = std::pow(values[i], exp[i]);
     }
     return ret;
+  }
+   T reduce_add() const {
+    return reduce([](T x, T y) -> T { return x + y; });
+  }
+  T reduce_max() const {
+    return reduce(std::max);
   }
 private:
   template <typename Op>

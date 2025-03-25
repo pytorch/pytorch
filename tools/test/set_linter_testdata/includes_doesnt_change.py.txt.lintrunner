@@ -1,0 +1,5 @@
+tools/test/set_linter_testdata/includes_doesnt_change.py.txt:24:21: Builtin `set` is deprecated
+   22 |
+   23 | class BaseListVariable(VariableTrackerContainer):
+   24 |     our_container = set
+                            ^^^

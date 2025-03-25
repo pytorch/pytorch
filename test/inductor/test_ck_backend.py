@@ -106,7 +106,6 @@ class TestCKBackend(TestCase):
         ):
             if use_aoti:
                 Y_compiled = AOTIRunnerUtil.run(
-                    device="cuda",
                     model=mm,
                     example_inputs=(a, b),
                 )
@@ -409,10 +408,52 @@ class TestCKBackend(TestCase):
 
             torch.testing.assert_close(Y_compiled, Y_eager, atol=2e-4, rtol=2e-4)
 
+    @unittest.skipIf(not torch.version.hip, "ROCM only")
+    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    @parametrize("max_autotune_gemm_backends", ("CK", "ATen,Triton,CK"))
+    def test_max_autotune_precompile_bmm(
+        self,
+        max_autotune_gemm_backends,
+    ):
+        """
+        Test gemm-max-autotune torch.bmm with CK backend
+        """
+
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+
+        def bmm(a, b):
+            return torch.bmm(a, b)
+
+        tensor_options = {"device": "cuda", "dtype": torch.bfloat16}
+
+        a = torch.randn(16, 2240, 256, **tensor_options)
+        b = torch.randn(16, 2048, 256, **tensor_options).transpose(1, 2)
+
+        assert "rocm" in dir(config)
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                "compile_threads": 2,
+                "rocm.n_max_profiling_configs": 2,
+                "rocm.ck_dir": self.ck_dir,
+            }
+        ):
+
+            @torch.compile(dynamic=False)
+            def compiled_bmm(x, w):
+                return bmm(x, w)
+
+            Y_compiled = compiled_bmm(a, b)
+
+            Y_eager = bmm(a=a, b=b)
+            torch.testing.assert_close(Y_compiled, Y_eager)
+
 
 if __name__ == "__main__":
     from torch._inductor.utils import is_big_gpu
 
     # Set env to make it work in CI.
-    if HAS_CUDA and HAS_CPU and is_big_gpu(0):
+    if HAS_CUDA and HAS_CPU and is_big_gpu():
         run_tests()

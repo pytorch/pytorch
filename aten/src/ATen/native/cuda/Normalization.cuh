@@ -581,7 +581,7 @@ __global__ void batch_norm_backward_elemt_kernel(
 
 template <typename scalar_t, int64_t dim, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
 static GenericPackedTensorAccessor<scalar_t, dim, PtrTraits, index_t> get_packed_accessor(
-    const Tensor& t, c10::string_view var_name) {
+    const Tensor& t, std::string_view var_name) {
   constexpr auto expect_type = c10::CppTypeToScalarType<typename std::remove_const_t<scalar_t>>::value;
   const auto actual_type = t.scalar_type();
   TORCH_CHECK(actual_type == expect_type, "Expected ", var_name,
@@ -591,7 +591,7 @@ static GenericPackedTensorAccessor<scalar_t, dim, PtrTraits, index_t> get_packed
 
 template <typename scalar_t, int64_t dim, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
 static GenericPackedTensorAccessor<scalar_t, dim, PtrTraits, index_t> packed_accessor_or_dummy(
-    const Tensor& t, c10::string_view var_name) {
+    const Tensor& t, std::string_view var_name) {
   if (!t.defined()) {
     const std::array<index_t, dim> zeros{{0}};
     return GenericPackedTensorAccessor<scalar_t, dim, PtrTraits, index_t>(nullptr, zeros.data(), zeros.data());

@@ -3,19 +3,12 @@
 import copy
 import itertools
 import unittest
-from typing import List, Optional
+from typing import cast, Optional
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._composable import replicate
-from torch.distributed._composable.fsdp import fully_shard
-from torch.distributed._composable.fsdp._fsdp_init import (
-    _get_managed_modules,
-    _get_managed_states,
-)
-from torch.distributed._composable.fsdp._fsdp_param import ParamModuleInfo
-from torch.distributed._composable.fsdp._fsdp_param_group import _get_param_module_infos
 from torch.distributed._tensor import (
     DeviceMesh,
     distribute_tensor,
@@ -24,6 +17,16 @@ from torch.distributed._tensor import (
     Shard,
 )
 from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.fsdp import fully_shard
+from torch.distributed.fsdp._fully_shard._fsdp_init import (
+    _get_managed_modules,
+    _get_managed_states,
+)
+from torch.distributed.fsdp._fully_shard._fsdp_param import ParamModuleInfo
+from torch.distributed.fsdp._fully_shard._fsdp_param_group import (
+    _get_param_module_infos,
+)
+from torch.distributed.fsdp._fully_shard._fully_shard import FSDPModule
 from torch.distributed.fsdp._init_utils import (
     _init_inter_node_process_group,
     _init_intra_node_process_group,
@@ -59,6 +62,19 @@ class TestFullyShardDeviceTensor(FSDPTestMultiThread):
         fully_shard(model)
         cuda_device = torch.device("cuda", torch.cuda.current_device())
         for tensor in itertools.chain(model.parameters(), model.buffers()):
+            self.assertEqual(tensor.device, cuda_device)
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_move_states_to_device_ignored_param_device(self):
+        cpu_device = torch.device("cpu")
+        model = MLP(8, cpu_device, with_buffer=True)
+        ignored_params = [model.out_proj.weight, model.out_proj.bias]
+        fully_shard(model, ignored_params=set(ignored_params))
+        for tensor in ignored_params:
+            self.assertEqual(tensor.device, cpu_device)
+        cuda_device = torch.device("cuda", torch.cuda.current_device())
+        model.to(torch.device("cuda"))
+        for tensor in ignored_params:
             self.assertEqual(tensor.device, cuda_device)
 
 
@@ -209,8 +225,8 @@ class TestFullyShardManagedModulesAndStates(FSDPTestMultiThread):
 
     def _check_managed_modules(
         self,
-        managed_modules: List[nn.Module],
-        expected_managed_modules: List[nn.Module],
+        managed_modules: list[nn.Module],
+        expected_managed_modules: list[nn.Module],
     ):
         self.assertEqual(len(managed_modules), len(expected_managed_modules))
         # Check set comparison since we do not require anything about the order
@@ -260,10 +276,10 @@ class TestFullyShardManagedModulesAndStates(FSDPTestMultiThread):
 
     def _check_managed_states(
         self,
-        managed_params: List[nn.Parameter],
-        managed_buffers: List[torch.Tensor],
-        expected_managed_params: List[nn.Parameter],
-        expected_managed_buffers: List[torch.Tensor],
+        managed_params: list[nn.Parameter],
+        managed_buffers: list[torch.Tensor],
+        expected_managed_params: list[nn.Parameter],
+        expected_managed_buffers: list[torch.Tensor],
     ):
         self.assertEqual(len(managed_params), len(expected_managed_params))
         self.assertEqual(len(managed_buffers), len(expected_managed_buffers))
@@ -368,7 +384,7 @@ class TestFullyShardShardedParameterTensor(FSDPTestMultiThread):
         self._check_1d_sharded_parameters(orig_params, sharded_params)
 
     def _check_1d_sharded_parameters(
-        self, orig_params: List[nn.Parameter], sharded_params: List[nn.Parameter]
+        self, orig_params: list[nn.Parameter], sharded_params: list[nn.Parameter]
     ):
         self.assertEqual(len(orig_params), len(sharded_params))
         global_mesh = init_device_mesh("cuda", (self.world_size,))
@@ -902,7 +918,7 @@ class TestFullyShardProcessGroupInit(FSDPTestMultiThread):
         )
         self.assertEqual(mesh.mesh, ref_mesh.mesh)
         self.assertEqual(mesh._coordinate_on_dim, ref_mesh._coordinate_on_dim)
-        for (tag, ranks, group_name), (ref_tag, ref_ranks, ref_group_name) in zip(
+        for (_, ranks, _), (_, ref_ranks, _) in zip(
             mesh._dim_group_infos, ref_mesh._dim_group_infos
         ):
             # Since we manually constructed new subgroups, the test and ref
@@ -1011,6 +1027,111 @@ class TestFullyShardHSDPBroadcast(FSDPTestMultiThread):
         # Check that we can run an iteration without erroring
         inp = torch.randint(0, model_args.vocab_size, (2, 16), device="cuda")
         model(inp).sum().backward()
+
+
+class TestHSDPWithCustomHook(FSDPTestMultiThread):
+    @property
+    def world_size(self) -> int:
+        return 4
+
+    def perThreadSetUp(self) -> None:
+        super().perThreadSetUp()
+        torch.set_default_device("cuda")
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_custom_hook_custom_stream(self):
+        hsdp_mesh = init_device_mesh(
+            "cuda", (2, 2), mesh_dim_names=("replicate", "shard")
+        )
+        model = MLP(10, bias=False)
+        fully_shard(model, mesh=hsdp_mesh)
+        model = cast(FSDPModule, model)
+        custom_stream = torch.cuda.Stream()
+
+        # native HSDP should reject
+        with self.assertRaises(ValueError) as cm:
+            model.set_all_reduce_hook(lambda output: output, stream=custom_stream)
+
+        ex = cm.exception
+        self.assertEqual(str(ex), "stream cannot be set when using native HSDP")
+
+        # FSDP + hook in custom stream is ok
+        intra_pg = _init_intra_node_process_group(2)
+        fsdp_mesh = DeviceMesh.from_group(
+            intra_pg,
+            "cuda",
+            dist.get_process_group_ranks(intra_pg),
+            mesh_dim_names=("shard",),
+        )
+        hook_used_stream = None
+
+        def _hook(_output: torch.Tensor) -> None:
+            nonlocal hook_used_stream
+            hook_used_stream = torch.cuda.current_stream()
+
+        model = MLP(10, bias=False)
+        fully_shard(model, mesh=fsdp_mesh)
+        model = cast(FSDPModule, model)
+        model.set_all_reduce_hook(_hook, stream=custom_stream)
+
+        inp = torch.arange(10, dtype=torch.float32, requires_grad=True).view(1, 10)
+        out = model(inp)
+        out.sum().backward()
+        torch.cuda.synchronize()
+        self.assertEqual(hook_used_stream, custom_stream)
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_custom_hsdp_all_reduce_hook(self):
+        world_pg = dist.distributed_c10d._get_default_group()
+        intra_pg = _init_intra_node_process_group(2)
+        inter_pg = _init_inter_node_process_group(world_pg, 2)
+        mesh = DeviceMesh.from_group(
+            intra_pg,
+            "cuda",
+            dist.get_process_group_ranks(intra_pg),
+            mesh_dim_names=("shard",),
+        )
+        model = MLP(10, bias=False)
+        rank = dist.get_rank()
+        rank_group = rank // 2
+
+        # init the weights to be constant within each group
+        # this is just to simplify the test numeric check when we do bwd
+        torch.nn.init.constant_(model.in_proj.weight, 1.0 * rank_group)
+        torch.nn.init.constant_(model.out_proj.weight, 2.0 * rank_group)
+
+        model = fully_shard(model, mesh=mesh)
+
+        hook_called: bool = False
+
+        def _custom_hook(output: torch.Tensor) -> None:
+            nonlocal hook_called
+            dist.all_reduce(output, group=inter_pg, op=dist.ReduceOp.AVG)
+            hook_called = True
+
+        model.set_all_reduce_hook(_custom_hook)
+
+        inp = torch.arange(10, dtype=torch.float32, requires_grad=True).view(1, 10)
+        out = model(inp)
+        out.sum().backward()
+        torch.cuda.synchronize()
+        # custom hook was fired
+        self.assertTrue(hook_called)
+        # within each replica, FSDP shards the weights at dim 0
+        # so half of MLP weights with 2x2 setup
+        out_proj_local_grad = model.out_proj.weight.grad.to_local().cpu()
+        in_proj_local_grad = model.in_proj.weight.grad.to_local().cpu()
+
+        # grad is halved in custom bwd all reduce hook during avg
+        # as replica 0 weights are 0
+        self.assertEqual(
+            out_proj_local_grad,
+            torch.full((5, 40), 22.5, dtype=torch.float32, device="cpu"),
+        )
+        self.assertEqual(
+            in_proj_local_grad,
+            torch.arange(0, 100, 10, dtype=torch.float32, device="cpu").repeat(20, 1),
+        )
 
 
 class TestFullyShardShardPlacementFn(FSDPTestMultiThread):
@@ -1154,6 +1275,32 @@ class TestFullyShardShardPlacementFn(FSDPTestMultiThread):
             AssertionError, "Shard dim 1 is invalid for 1D tensor"
         ):
             fully_shard(model, shard_placement_fn=shard_placement_fn)
+
+
+# TODO: Remove this test class once we remove the old import path:
+# torch/distributed/_composable/fsdp
+class TestFullyShardOldImport(FSDPTestMultiThread):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_old_import_training(self):
+        from torch.distributed._composable.fsdp import fully_shard, MixedPrecisionPolicy
+        from torch.distributed._composable.fsdp.fully_shard import FSDPModule
+
+        model = nn.Sequential(nn.Linear(16, 16), nn.Linear(16, 16))
+        mp_policy = MixedPrecisionPolicy(param_dtype=torch.bfloat16)
+        fully_shard(model[0], mp_policy=mp_policy)
+        fully_shard(model[1], mp_policy=mp_policy)
+        fully_shard(model, mp_policy=mp_policy)
+
+        self.assertIsInstance(model[0], FSDPModule)
+        self.assertIsInstance(model[1], FSDPModule)
+        self.assertIsInstance(model, FSDPModule)
+
+        inp = torch.randn((8, 16), device="cuda")
+        model(inp).sum().backward()
 
 
 if __name__ == "__main__":

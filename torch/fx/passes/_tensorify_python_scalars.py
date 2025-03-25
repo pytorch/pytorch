@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, List, Union
+from typing import Any, Union
 
 from sympy import Integer, Number, Symbol
 from sympy.logic.boolalg import BooleanAtom
@@ -11,6 +11,7 @@ import torch
 import torch.fx as fx
 from torch._dynamo.exc import TensorifyScalarRestartAnalysis
 from torch._dynamo.symbolic_convert import TensorifyState
+from torch._dynamo.utils import get_metrics_context
 from torch._prims_common import get_computation_dtype
 from torch._subclasses import fake_tensor  # noqa: TCH001
 from torch._subclasses.fake_tensor import FakeTensor
@@ -27,7 +28,7 @@ from torch.utils._sympy.reference import TensorReferenceAnalysis
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 
-__all__: List[str] = []
+__all__: list[str] = []
 
 log = logging.getLogger(__name__)
 graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
@@ -73,10 +74,16 @@ graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
 
 
 SUPPORTED_OPS = {
-    torch.ops.aten.mul.Tensor,
-    torch.ops.aten.add.Tensor,
-    torch.ops.aten.sub.Tensor,
-    torch.ops.aten.div.Tensor,
+    torch.ops.aten.mul.Tensor: torch.ops.aten.mul.Tensor,
+    torch.ops.aten.add.Tensor: torch.ops.aten.add.Tensor,
+    torch.ops.aten.sub.Tensor: torch.ops.aten.sub.Tensor,
+    torch.ops.aten.div.Tensor: torch.ops.aten.div.Tensor,
+    torch.ops.aten.gt.Scalar: torch.ops.aten.gt.Tensor,
+    torch.ops.aten.lt.Scalar: torch.ops.aten.lt.Tensor,
+    torch.ops.aten.ge.Scalar: torch.ops.aten.ge.Tensor,
+    torch.ops.aten.le.Scalar: torch.ops.aten.le.Tensor,
+    torch.ops.aten.eq.Scalar: torch.ops.aten.eq.Tensor,
+    torch.ops.aten.ne.Scalar: torch.ops.aten.ne.Tensor,
 }
 
 
@@ -232,8 +239,10 @@ def tensorify_python_scalars(
                                 should_restart = True
 
             # Look for functions to convert
-            if node.op == "call_function" and node.target in SUPPORTED_OPS:
-                args: List[Any] = []
+            if node.op == "call_function" and (
+                replacement_op := SUPPORTED_OPS.get(node.target)
+            ):
+                args: list[Any] = []
                 transform = False
                 compute_dtype = get_computation_dtype(node.meta["val"].dtype)
 
@@ -253,7 +262,13 @@ def tensorify_python_scalars(
                         # We use _expr instead of expr b/c we want the symbol not the replacement
                         tensorified_symbols.add(a.meta["val"].node._expr)
 
-                        if proxy.node.meta["val"].dtype != compute_dtype:
+                        # The upcasting is irrelevant when the compute dtype is bool. This happens
+                        # in cases where we are tensorifying a comparison operator such as
+                        # torch.ops.aten.gt.Tensor
+                        if (
+                            compute_dtype != torch.bool
+                            and proxy.node.meta["val"].dtype != compute_dtype
+                        ):
                             proxy = torch.ops.prims.convert_element_type.default(
                                 proxy, compute_dtype
                             )
@@ -265,7 +280,7 @@ def tensorify_python_scalars(
                         args.append(a)
 
                 if transform:
-                    replacement_proxy = node.target(*args)
+                    replacement_proxy = replacement_op(*args)
 
                     if compute_dtype != node.meta["val"].dtype:
                         replacement_proxy = (
@@ -277,6 +292,14 @@ def tensorify_python_scalars(
 
                     node.replace_all_uses_with(replacement_proxy.node)
                     graph.erase_node(node)
+
+                    metrics_context = get_metrics_context()
+                    if metrics_context.in_progress():
+                        metrics_context.set(
+                            "tensorify_float_success", True, overwrite=True
+                        )
+
+    failed_tensorify_ops: set[str] = set()
 
     # Now do one more pass that specializes all symfloats we didn't manage
     # to tensorify away.
@@ -305,6 +328,8 @@ def tensorify_python_scalars(
                     #
                     # It's better to guard on zf // 2 == 2.0 than zf == 5.0
 
+                    failed_tensorify_ops.update(str(key) for key in node.users.keys())
+
                     node.replace_all_uses_with(guard_scalar(val))
                     graph.erase_node(node)
 
@@ -328,6 +353,12 @@ def tensorify_python_scalars(
         # Sledgehammer time. Restart dynamo analysis, keeping track of which input sources
         # are no longer needed and should be specialized. Restarting analysis is necessary
         # because we need to instruct Dynamo to NOT make these as inputs.
+        metrics_context = get_metrics_context()
+        if metrics_context.in_progress():
+            metrics_context.set(
+                "tensorify_float_failure", failed_tensorify_ops, overwrite=True
+            )
+            metrics_context.set("tensorify_float_success", True, overwrite=True)
         raise TensorifyScalarRestartAnalysis
 
     graph_code_log.debug(

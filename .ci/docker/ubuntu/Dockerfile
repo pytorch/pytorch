@@ -36,7 +36,8 @@ ENV DOCS=$DOCS
 COPY requirements-ci.txt requirements-docs.txt /opt/conda/
 COPY ./common/install_conda.sh install_conda.sh
 COPY ./common/common_utils.sh common_utils.sh
-RUN bash ./install_conda.sh && rm install_conda.sh common_utils.sh /opt/conda/requirements-ci.txt /opt/conda/requirements-docs.txt
+COPY ./common/install_magma_conda.sh install_magma_conda.sh
+RUN bash ./install_conda.sh && rm install_conda.sh install_magma_conda.sh common_utils.sh /opt/conda/requirements-ci.txt /opt/conda/requirements-docs.txt
 RUN if [ -n "${UNINSTALL_DILL}" ]; then pip uninstall -y dill; fi
 
 # Install gcc
@@ -73,31 +74,12 @@ RUN if [ -n "${PROTOBUF}" ]; then bash ./install_protobuf.sh; fi
 RUN rm install_protobuf.sh
 ENV INSTALLED_PROTOBUF ${PROTOBUF}
 
-# (optional) Install database packages like LMDB and LevelDB
-ARG DB
-COPY ./common/install_db.sh install_db.sh
-RUN if [ -n "${DB}" ]; then bash ./install_db.sh; fi
-RUN rm install_db.sh
-ENV INSTALLED_DB ${DB}
-
 # (optional) Install vision packages like OpenCV
 ARG VISION
 COPY ./common/install_vision.sh ./common/cache_vision_models.sh ./common/common_utils.sh ./
 RUN if [ -n "${VISION}" ]; then bash ./install_vision.sh; fi
 RUN rm install_vision.sh cache_vision_models.sh common_utils.sh
 ENV INSTALLED_VISION ${VISION}
-
-# (optional) Install Vulkan SDK
-ARG VULKAN_SDK_VERSION
-COPY ./common/install_vulkan_sdk.sh install_vulkan_sdk.sh
-RUN if [ -n "${VULKAN_SDK_VERSION}" ]; then bash ./install_vulkan_sdk.sh; fi
-RUN rm install_vulkan_sdk.sh
-
-# (optional) Install swiftshader
-ARG SWIFTSHADER
-COPY ./common/install_swiftshader.sh install_swiftshader.sh
-RUN if [ -n "${SWIFTSHADER}" ]; then bash ./install_swiftshader.sh; fi
-RUN rm install_swiftshader.sh
 
 # (optional) Install non-default CMake version
 ARG CMAKE_VERSION

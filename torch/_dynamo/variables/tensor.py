@@ -1,5 +1,22 @@
 # mypy: ignore-errors
 
+"""
+This module contains variable tracker classes for handling tensors and tensor-related operations in Dynamo.
+
+The main class is TensorVariable which represents torch.Tensor inputs and intermediate values in the FX graph.
+It handles tensor operations, method calls, and maintains metadata about tensor properties like dtype, device, etc.
+
+Other key classes include:
+- SymNodeVariable: Represents symbolic scalars (int/float/bool) used for size computation and unspecialized values
+- NumpyNdarrayVariable: Handles numpy array interop through torch._numpy
+- UnspecializedPythonVariable: Represents unspecialized Python numeric values as 1-element tensors
+- TensorSubclassVariable: Handles tensor subclasses with __torch_function__ overrides
+- UntypedStorageVariable: Represents tensor storage objects
+- DataPtrVariable: Handles tensor data pointer operations
+
+These classes work together to track tensor operations and properties during Dynamo's tracing process.
+"""
+
 import functools
 import inspect
 import logging
@@ -8,7 +25,7 @@ import textwrap
 import traceback
 import types
 import unittest
-from typing import Dict, List, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import sympy
 
@@ -26,9 +43,15 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
-from .. import config, variables
+from .. import config, graph_break_hints, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
-from ..exc import unimplemented, UserError, UserErrorType
+from ..exc import (
+    unimplemented,
+    unimplemented_v2,
+    UnknownPropertiesDuringBackwardTrace,
+    UserError,
+    UserErrorType,
+)
 from ..external_utils import call_hook_from_backward_state
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource
@@ -241,8 +264,7 @@ class TensorVariable(VariableTracker):
         # (1) the tensor is a traceable tensor subclass
         # (2) We are getattr'ing an inner tensor from that subclass
         if not self.source and is_traceable_wrapper_subclass(fake_val):
-            fake_val = self.proxy.node.meta["example_value"]
-            attrs, ctx = fake_val.__tensor_flatten__()
+            attrs, _ctx = fake_val.__tensor_flatten__()
             proxy = getattr(self.as_proxy(), name)
             example_value = getattr(fake_val, name)
             if name in attrs:
@@ -345,6 +367,9 @@ class TensorVariable(VariableTracker):
         if self.is_nested is not None:
             return ConstantVariable.create(self.is_nested)
 
+    def method_attr_retain_grad(self, tx):
+        unimplemented("retain_grad does not work with AOTDispatcher")
+
     def method_attr_data(self, tx):
         return variables.TorchInGraphFunctionVariable(
             torch._C._autograd._get_data_attr
@@ -363,7 +388,7 @@ class TensorVariable(VariableTracker):
             tx, [self], {}
         )
 
-    def call_hasattr(self, tx: "InstructionTranslator", name):
+    def call_obj_hasattr(self, tx: "InstructionTranslator", name):
         from . import GetAttrVariable
         from .builtin import BuiltinVariable
 
@@ -387,8 +412,15 @@ class TensorVariable(VariableTracker):
     def var_getattr(self, tx: "InstructionTranslator", name):
         from . import UserDefinedClassVariable
 
-        if self.is_strict_mode(tx) and name in self._strict_mode_banned_ops():
-            unimplemented(f"Illegal getattr invocation {name} in strict mode")
+        if self.is_strict_mode(tx):
+            if name in self._strict_mode_banned_ops():
+                unimplemented(
+                    f"Getattr invocation {name} in strict mode is not supported"
+                )
+            elif name in self._strict_mode_conditional_banned_ops():
+                raise UnknownPropertiesDuringBackwardTrace(
+                    f"Unknown property {name} during speculating backward, dynamo will insert contiguous call ahead and speculate it again"  # noqa: B950
+                )
 
         if name == "__class__":
             return UserDefinedClassVariable(self.python_type())
@@ -512,9 +544,9 @@ class TensorVariable(VariableTracker):
         if idxes is None:
             idxes = range(length)
         else:
-            assert (
-                len(idxes) == length
-            ), f"Can't unpack a tensor of {length} rows into a tuple of {len(idxes)} elements."
+            assert len(idxes) == length, (
+                f"Can't unpack a tensor of {length} rows into a tuple of {len(idxes)} elements."
+            )
         return [
             wrap_fx_proxy_cls(target_cls=type(self), tx=tx, proxy=self.as_proxy()[i])
             for i in idxes
@@ -531,12 +563,17 @@ class TensorVariable(VariableTracker):
     def _strict_mode_banned_ops(self):
         return torch._dynamo.config._autograd_backward_strict_mode_banned_ops
 
+    def _strict_mode_conditional_banned_ops(self):
+        return (
+            torch._dynamo.config._autograd_backward_strict_mode_conditional_banned_ops
+        )
+
     def call_method(
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from .builder import SourcelessBuilder, VariableBuilder
         from .torch_function import can_dispatch_torch_function, dispatch_torch_function
@@ -574,6 +611,11 @@ class TensorVariable(VariableTracker):
         handler returns None (or doesn't exist) we put the method call
         in the graph.
         """
+
+        # This is seen in inspect signature where we check if the value is a default value
+        if name == "__eq__" and isinstance(args[0], variables.UserDefinedClassVariable):
+            return variables.ConstantVariable(False)
+
         try:
             handler_method = getattr(self, f"method_{name}")
         except AttributeError:
@@ -667,6 +709,16 @@ class TensorVariable(VariableTracker):
             return ConstantVariable.create(self.dtype.is_floating_point)
 
     def method_is_inference(self):
+        if config.fake_tensor_disable_inference_mode:
+            unimplemented_v2(
+                gb_type="Encountered tensor.is_inference() during tracing",
+                context="",
+                explanation="tensor.is_inference() is not supported",
+                hints=[
+                    *graph_break_hints.FUNDAMENTAL,
+                    *graph_break_hints.INFERENCE_MODE,
+                ],
+            )
         if (fake := self.proxy.node.meta.get("example_value")) is not None:
             return ConstantVariable.create(fake.is_inference())
 
@@ -735,20 +787,9 @@ class TensorVariable(VariableTracker):
             from .torch_function import TensorWithTFOverrideVariable
 
             tx = InstructionTranslator.current_tx()
-
-            # [Note: __torch_function__] coerce this tensor variable into a TensorWithTFOverrideVariable
-            # in eager, this is just a type change. This isn't sound if a __torch_function__ tensor subclass
-            # defines a constructor, but if only a __torch_function__ impl is defined, this is okay to call.
-            # It is up to the user whether this is correct behavior or not.
             py_cls = cls.as_python_constant()
-            torch_fn = VariableTracker.build(
-                tx,
-                py_cls.__torch_function__.__func__,
-                AttrSource(AttrSource(cls.source, "__torch_function__"), "__func__"),
-            )
-
             return TensorWithTFOverrideVariable.from_tensor_var(
-                tx, self, py_cls, torch_fn
+                tx, self, py_cls, cls.source
             )
 
     def method_get_device(self):
@@ -846,10 +887,13 @@ class TensorVariable(VariableTracker):
             # Standard indexing will force specialization due to
             # __index__.  Rewrite as a regular torch op which will
             # trace fine
-            fn, args = torch.select, [
-                variables.ConstantVariable.create(0),
-                args[0],
-            ]
+            fn, args = (
+                torch.select,
+                [
+                    variables.ConstantVariable.create(0),
+                    args[0],
+                ],
+            )
         else:
             fn = operator.getitem
 
@@ -1200,6 +1244,9 @@ class SymNodeVariable(VariableTracker):
         try:
             return guard_scalar(self.sym_num)
         except GuardOnDataDependentSymNode as e:
+            if torch.fx.experimental._config.no_data_dependent_graph_break:
+                raise
+
             raise UserError(  # noqa: B904
                 UserErrorType.ANTI_PATTERN,
                 f"Consider annotating your code using torch._check*(). {str(e)}",
@@ -1210,8 +1257,8 @@ class SymNodeVariable(VariableTracker):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from .builder import wrap_fx_proxy
 
@@ -1314,8 +1361,8 @@ class NumpyNdarrayVariable(TensorVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from ..utils import numpy_method_wrapper
 
@@ -1392,17 +1439,14 @@ class TensorSubclassVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: List[VariableTracker],
-        kwargs: Dict[str, VariableTracker],
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if len(args) == 1 and isinstance(args[0], TensorVariable):
             from .torch_function import TensorWithTFOverrideVariable
 
-            source = AttrSource(self.source, "__torch_function__")
-            torch_fn = VariableTracker.build(tx, self.value.__torch_function__, source)
-
             return TensorWithTFOverrideVariable.from_tensor_var(
-                tx, args[0], self.value, torch_fn
+                tx, args[0], self.value, self.source
             )
 
         return super().call_function(tx, args, kwargs)
@@ -1423,7 +1467,7 @@ class UntypedStorageVariable(VariableTracker):
         example_value: torch.UntypedStorage,
         **kwargs,
     ) -> None:
-        super().__init__(**kwargs),
+        super().__init__(**kwargs)
         self.from_tensor = from_tensor
         # Example_value will always have device="meta"
         self.example_value = example_value
@@ -1432,8 +1476,8 @@ class UntypedStorageVariable(VariableTracker):
         self,
         tx,
         name,
-        args: List[VariableTracker],
-        kwargs: Dict[str, VariableTracker],
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name == "size":
             assert not args
@@ -1479,7 +1523,7 @@ class DataPtrVariable(VariableTracker):
         from_tensor: TensorVariable,
         **kwargs,
     ) -> None:
-        super().__init__(**kwargs),
+        super().__init__(**kwargs)
         self.from_tensor = from_tensor
 
     def reconstruct(self, codegen):

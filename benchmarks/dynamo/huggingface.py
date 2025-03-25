@@ -37,6 +37,10 @@ log = logging.getLogger(__name__)
 if "TORCHINDUCTOR_FX_GRAPH_CACHE" not in os.environ:
     torch._inductor.config.fx_graph_cache = True
 
+# Enable Autograd caching
+if "TORCHINDUCTOR_AUTOGRAD_CACHE" not in os.environ:
+    torch._functorch.config.enable_autograd_cache = True
+
 
 def pip_install(package):
     subprocess.check_call([sys.executable, "-m", "pip", "install", package])
@@ -363,6 +367,12 @@ class HuggingfaceRunner(BenchmarkRunner):
     @property
     def skip_models_due_to_control_flow(self):
         return self._skip["control_flow"]
+
+    def use_larger_multiplier_for_smaller_tensor(self, name):
+        return name in [
+            "ElectraForQuestionAnswering",
+            "MegatronBertForQuestionAnswering",
+        ]
 
     def _get_model_cls_and_config(self, model_name):
         if model_name not in EXTRA_MODELS:

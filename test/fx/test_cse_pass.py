@@ -235,7 +235,7 @@ class TestCSEPass(TestCase):
             return a + b
 
         t = torch.randn(2, 2)
-        P_ban_add = P = CSEPass(banned_ops=[torch.ops.aten.add])
+        P_ban_add = CSEPass(banned_ops=[torch.ops.aten.add])
         check(self, f, t, 0, P=P_ban_add)  # check that add is banned
         check(self, f, t, 1)  # check that add is not banned by default
 

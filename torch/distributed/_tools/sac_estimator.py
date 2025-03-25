@@ -1,16 +1,16 @@
 import math
 import os
 import sys
-import warnings
 from collections import OrderedDict
 from dataclasses import astuple, dataclass
-from typing import Any, Dict, List, NamedTuple, Optional, Set, Tuple
+from typing import Any, NamedTuple, Optional
 from typing_extensions import Self
 
 import torch
 from torch import nan, nn, UntypedStorage
 from torch._guards import active_fake_mode
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.distributed._tools.common_utils import get_untyped_storages
 from torch.distributed._tools.mod_tracker import ModTracker
 from torch.distributed._tools.runtime_estimator import RuntimeEstimator
 from torch.testing._internal.composite_compliance import (
@@ -18,10 +18,7 @@ from torch.testing._internal.composite_compliance import (
     is_inplace_view_fn,
     is_view_fn,
 )
-from torch.utils._python_dispatch import (
-    is_traceable_wrapper_subclass,
-    TorchDispatchMode,
-)
+from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten
 from torch.utils.checkpoint import SAC_IGNORED_OPS
 
@@ -42,39 +39,7 @@ _PYTORCH_MIN_ALLOCATE = (
 )
 
 
-def _get_untyped_storages(t: torch.Tensor) -> Set[torch.UntypedStorage]:
-    """
-    Retrieves untyped storages from a `torch.Tensor` or one of its traceable wrapper-subclass.
-
-    Args:
-       t (torch.Tensor): Input `torch.Tensor` or traceable wrapper-subclass of `torch.Tensor`.
-
-    Returns:
-        Set[torch.UntypedStorage]: Set of untyped storages.
-
-    Warns:
-        UserWarning: If the flattened input is not a tensor or traceable wrapper-subclass.
-    """
-    unflattened_tensors = [t]
-    flattened_tensor_storages = set()
-    while len(unflattened_tensors) > 0:
-        obj = unflattened_tensors.pop()
-        if is_traceable_wrapper_subclass(obj):
-            attrs, _ = obj.__tensor_flatten__()  # type: ignore[attr-defined]
-            unflattened_tensors.extend([getattr(obj, attr) for attr in attrs])
-        else:
-            if not hasattr(obj, "untyped_storage"):
-                warnings.warn(
-                    f"Expected a tensor or a traceable wrapper-subclass of tensor, but got {type(obj)}",
-                    category=UserWarning,
-                    stacklevel=2,
-                )
-            else:
-                flattened_tensor_storages.add(obj.untyped_storage())
-    return flattened_tensor_storages
-
-
-def _display_stats_tabular(headers: List[str], table_data: List[List[Any]]) -> None:
+def _display_stats_tabular(headers: list[str], table_data: list[list[Any]]) -> None:
     try:
         from tabulate import tabulate
     except ImportError as err:
@@ -106,8 +71,8 @@ class _SACMetadata:
     time_taken: float
     memory_used: float
     curr_idx: int
-    output_ids: Tuple[int, ...]
-    inplace_info: Tuple[int, ...]
+    output_ids: tuple[int, ...]
+    inplace_info: tuple[int, ...]
     is_view_like: bool
     is_rand_op: bool
 
@@ -125,7 +90,7 @@ class _SACModMetadata:
 
     start_idx: int
     force_store_random: bool
-    sac_metadata: List[_SACMetadata]
+    sac_metadata: list[_SACMetadata]
 
 
 @dataclass
@@ -144,13 +109,13 @@ class SACStats:
         force_store_random (bool): Whether to force store random operator results.
     """
 
-    func_names: List[str]
-    runtimes: List[float]
-    memory: List[int]
-    view_like_ops: List[int]
-    rand_ops: List[int]
-    saved_autograd_ops: List[int]
-    inplace_ops: List[Tuple[int, int]]
+    func_names: list[str]
+    runtimes: list[float]
+    memory: list[int]
+    view_like_ops: list[int]
+    rand_ops: list[int]
+    saved_autograd_ops: list[int]
+    inplace_ops: list[tuple[int, int]]
     force_store_random: bool
 
 
@@ -159,14 +124,14 @@ class MSPS(NamedTuple):
     Represents Memory and Runtime Statistics for an operator/operator group.
 
     Attributes:
-        func_names (Set[str]): Set of operator/operator group names.
+        func_names (set[str]): Set of operator/operator group names.
         op_idx (int): Operator index (group head index incase of operator groups).
         memory (int): Memory usage in bytes.
         runtime (float): Runtime in milliseconds.
         msps (float): Memory per second calculated as memory/runtime.
     """
 
-    func_names: Set[str]
+    func_names: set[str]
     op_idx: int
     memory: int
     runtime: float
@@ -189,9 +154,9 @@ class SACTradeOffStats:
     """
 
     n_segments: int
-    slopes: List[float]
-    intercepts: List[float]
-    fit_breaks: List[float]
+    slopes: list[float]
+    intercepts: list[float]
+    fit_breaks: list[float]
     tradeoff_curve: OrderedDict[float, float]
     sac_memory: int
     sac_runtime: float
@@ -203,18 +168,18 @@ class SACGreedyOrderMeta:
     Stores metadata for Greedy-order SAC.
 
     Attributes:
-        recomputed_ops (Set[int]): Set of operator indices to be recomputed.
-        stored_ops (Set[int]): Set of operator indices to be stored.
-        inplace_op_groups (Dict[int, Set[int]]): Dictionary of inplace operator groups from group-head to operators.
-        random_ops_group (Dict[int, Set[int]]): Dictionary of random op group head to random ops.
-        msps_meta (List[MSPS]): List of Memory and Runtime Statistics for operators.
+        recomputed_ops (set[int]): Set of operator indices to be recomputed.
+        stored_ops (set[int]): Set of operator indices to be stored.
+        inplace_op_groups (dict[int, set[int]]): Dictionary of inplace operator groups from group-head to operators.
+        random_ops_group (dict[int, set[int]]): Dictionary of random op group head to random ops.
+        msps_meta (list[MSPS]): List of Memory and Runtime Statistics for operators.
     """
 
-    recomputed_ops: Set[int]
-    stored_ops: Set[int]
-    inplace_op_groups: Dict[int, Set[int]]
-    random_ops_group: Dict[int, Set[int]]
-    msps_meta: List[MSPS]
+    recomputed_ops: set[int]
+    stored_ops: set[int]
+    inplace_op_groups: dict[int, set[int]]
+    random_ops_group: dict[int, set[int]]
+    msps_meta: list[MSPS]
 
 
 class SACEstimator(TorchDispatchMode):
@@ -245,30 +210,30 @@ class SACEstimator(TorchDispatchMode):
             with FakeTensorMode():
                 module = ...
                 inp = ...
-                with sac_estimator('operator-level-cost-model'):
+                with sac_estimator("operator-level-cost-model"):
                     output = module(inp)
                 sac_estimator.display_modulewise_sac_stats(depth=4, print_tabular=True)
     """
 
     def __init__(self) -> None:
-        self.sac_mod_stats: Dict[str, SACStats] = {}
-        self.sac_mod_tradeoff_stats: Dict[str, SACTradeOffStats] = {}
-        self.sac_mod_greedy_order_meta: Dict[str, SACGreedyOrderMeta] = {}
+        self.sac_mod_stats: dict[str, SACStats] = {}
+        self.sac_mod_tradeoff_stats: dict[str, SACTradeOffStats] = {}
+        self.sac_mod_greedy_order_meta: dict[str, SACGreedyOrderMeta] = {}
         self._mod_tracker = ModTracker()
-        self._sac_metadata: List[_SACMetadata] = []
-        self._sac_mod_metadata: Dict[str, _SACModMetadata] = {}
-        self._leaf_modules: Set[str] = set()
+        self._sac_metadata: list[_SACMetadata] = []
+        self._sac_mod_metadata: dict[str, _SACModMetadata] = {}
+        self._leaf_modules: set[str] = set()
         self._saved_tensor_hook_ctx = torch.autograd.graph.saved_tensors_hooks(
             self._pack_hook, lambda x: x
         )
-        self._saved_tensor_ids: Set[int] = set()
+        self._saved_tensor_ids: set[int] = set()
         self._estimate_runtime = RuntimeEstimator._roofline_estimate
 
     def _pack_hook(self, x: torch.Tensor) -> torch.Tensor:
         # Hook function to track underlying storage IDs of tensors
         # Updates the _saved_tensor_ids set with the IDs of the tensor's storages
         # Used in conjunction with torch.autograd.graph.saved_tensors_hooks
-        untyped_storages = _get_untyped_storages(x)
+        untyped_storages = get_untyped_storages(x)
         storage_ids = (hash(st) for st in untyped_storages)
         self._saved_tensor_ids.update(storage_ids)
         return x
@@ -313,7 +278,7 @@ class SACEstimator(TorchDispatchMode):
         return all(not isinstance(x, torch.Tensor) for x in flat_inputs)
 
     def _get_sac_stats(
-        self, data: List[_SACMetadata], force_store_random: bool
+        self, data: list[_SACMetadata], force_store_random: bool
     ) -> SACStats:
         # 1. Ignore the operations that should be skipped by SAC such as aten.detach.default because autograd
         # inserts those during backward and it breaks the fwd-bwd alignment
@@ -381,12 +346,12 @@ class SACEstimator(TorchDispatchMode):
         )
 
     def _get_inplace_metadata(
-        self, func: Any, out_storages: Set[UntypedStorage]
-    ) -> Tuple[int, Tuple[int, ...], Dict[str, Tuple[int, ...]]]:
+        self, func: Any, out_storages: set[UntypedStorage]
+    ) -> tuple[int, tuple[int, ...], dict[str, tuple[int, ...]]]:
         # 1. Get the current index of the metadata obtained so far
         curr_idx = len(self._sac_metadata)
         # 2. Get the set of active modules that are not leaf
-        active_mod_fqns: Set[str] = {
+        active_mod_fqns: set[str] = {
             par for par in self._mod_tracker.parents if par not in self._leaf_modules
         }
         # 3. Output ids are the identifies of the storage objects corresponding to the tensors
@@ -397,7 +362,7 @@ class SACEstimator(TorchDispatchMode):
 
         op_idx = curr_idx
         # 5. Initialize the parent op ids of the inplace op for each of the active modules
-        mod_op_parent_idxs: Dict[str, int] = {
+        mod_op_parent_idxs: dict[str, int] = {
             mod_fqn: -1 for mod_fqn in active_mod_fqns
         }
         for i, d in enumerate(self._sac_metadata):
@@ -430,21 +395,21 @@ class SACEstimator(TorchDispatchMode):
         # 1. Get the runtime estimate
         out, op_time = self._estimate_runtime(func, args, kwargs)
         flat_outs, _ = tree_flatten(out)
-        out_storages_cuda: Set[UntypedStorage] = set()
-        out_storages_cpu: Set[UntypedStorage] = set()
-        cuda_devices: Set[torch.device] = set()
+        out_storages_cuda: set[UntypedStorage] = set()
+        out_storages_cpu: set[UntypedStorage] = set()
+        cuda_devices: set[torch.device] = set()
         for o in flat_outs:
             if isinstance(o, torch.Tensor):
                 if o.device.type == "cuda":
-                    out_storages_cuda.update(_get_untyped_storages(o))
+                    out_storages_cuda.update(get_untyped_storages(o))
                     cuda_devices.add(o.device)
                 else:
-                    out_storages_cpu.update(_get_untyped_storages(o))
+                    out_storages_cpu.update(get_untyped_storages(o))
 
         # Check if there's more than 1 CUDA device
-        assert (
-            len(cuda_devices) <= 1
-        ), f"{func.__name__}'s output has more than 1 CUDA devices {cuda_devices}"
+        assert len(cuda_devices) <= 1, (
+            f"{func.__name__}'s output has more than 1 CUDA devices {cuda_devices}"
+        )
 
         # 2. Get the memory consumed by output
         nbytes_cuda = sum(
@@ -484,9 +449,9 @@ class SACEstimator(TorchDispatchMode):
             if acm_stats := self._sac_mod_metadata.get(mod_fqn, None):
                 acm_stats.sac_metadata.append(acm)
             else:
-                assert (
-                    mod_fqn == "Global"
-                ), f"Module {mod_fqn} not found in AC Mod Stats"
+                assert mod_fqn == "Global", (
+                    f"Module {mod_fqn} not found in AC Mod Stats"
+                )
                 self._sac_metadata.append(acm)
 
         return out
@@ -496,8 +461,8 @@ class SACEstimator(TorchDispatchMode):
         # 1. inplace_op_groups: A dictionary from the top-most parent of inplace-ops to the inplace-ops in the group
         #   The top-most op can itself be an inplace-op or can be a non-inplace op.
         # 2. inplace_op_to_group_head: A dictionary that maps all the inplace-ops to their respective group heads.
-        inplace_op_groups: Dict[int, Set[int]] = {}
-        inplace_op_to_group_head: Dict[int, int] = dict(sac_stats.inplace_ops)
+        inplace_op_groups: dict[int, set[int]] = {}
+        inplace_op_to_group_head: dict[int, int] = dict(sac_stats.inplace_ops)
 
         # Initialize inplace_op_groups using inplace_op_to_group_head
         for op_idx, group_head_idx in inplace_op_to_group_head.items():
@@ -508,7 +473,7 @@ class SACEstimator(TorchDispatchMode):
         # as a group. This is because, they affect the ranom seed generator. If force_store_random is set True,
         # all of the random ops will be stored by default. For easy of manageability, we store the top-most random op
         # as the leader of the random_ops_group.
-        random_ops_group: Dict[int, Set[int]] = {}
+        random_ops_group: dict[int, set[int]] = {}
         random_group_head_idx = min(sac_stats.rand_ops, default=-1)
         has_rand_ops = bool(sac_stats.rand_ops)
         if has_rand_ops:
@@ -521,8 +486,8 @@ class SACEstimator(TorchDispatchMode):
         #   b) If any op in the group is random and force_store_random is set, then entire group will be stored.
         #   c) If none of ops in the group are random and the head of the group is not an in-place op, then
         #       this group can be considered for recomputation in its entireity
-        stored_ops: Set[int] = set()
-        recomputed_ops: Set[int] = set()
+        stored_ops: set[int] = set()
+        recomputed_ops: set[int] = set()
         # Case 1:
         if has_rand_ops and sac_stats.force_store_random:
             stored_ops.add(random_group_head_idx)
@@ -541,7 +506,7 @@ class SACEstimator(TorchDispatchMode):
                 stored_ops.add(group_head_idx)
 
         # The potential recompute candidates are populated as:
-        recompute_candidates: Set[int] = set()
+        recompute_candidates: set[int] = set()
         # 1) The random group head if it is not stored
         if has_rand_ops and random_group_head_idx not in stored_ops:
             recompute_candidates.add(random_group_head_idx)
@@ -557,7 +522,7 @@ class SACEstimator(TorchDispatchMode):
         )
 
         # We define msps for a recomp candidate as the ratio of memory/runtime aka memory savings per second
-        msps_meta: List[MSPS] = []
+        msps_meta: list[MSPS] = []
         for cand_idx in recompute_candidates:
             op_indices = {cand_idx}
             if cand_idx in inplace_op_groups:
@@ -598,7 +563,7 @@ class SACEstimator(TorchDispatchMode):
             greedy_order_meta.msps_meta,
         )
         # 1. Intitialize the discarded memory and recomputation runtime to sum of already chosen recomputed_ops
-        recomp_indices: Set[int] = set()
+        recomp_indices: set[int] = set()
         for r_idx in recomputed_ops:
             recomp_indices.add(r_idx)
             if r_idx in inplace_op_groups:
@@ -628,7 +593,7 @@ class SACEstimator(TorchDispatchMode):
                 recomp_runtime / sac_runtime
             )
         # 6. Finally, we add the memory and recomputation time of the always stored ops.
-        stored_indices: Set[int] = set()
+        stored_indices: set[int] = set()
         for s_idx in stored_ops:
             stored_indices.add(s_idx)
             if s_idx in inplace_op_groups:
@@ -653,7 +618,7 @@ class SACEstimator(TorchDispatchMode):
 
         # save prediction graph
         def save_prediction_graph(
-            pwlf_: pwlf.PiecewiseLinFit, x: List[float], y: List[float], filename: str
+            pwlf_: pwlf.PiecewiseLinFit, x: list[float], y: list[float], filename: str
         ) -> None:
             try:
                 import matplotlib.pyplot as plt  # type: ignore[import-not-found]
@@ -697,8 +662,8 @@ class SACEstimator(TorchDispatchMode):
         return SACTradeOffStats(
             n_segments=n_segments,
             slopes=slopes,
-            intercepts=intercepts,
-            fit_breaks=fit_breaks,
+            intercepts=intercepts,  # type: ignore[arg-type]
+            fit_breaks=fit_breaks,  # type: ignore[arg-type]
             tradeoff_curve=tradeoff_curve,
             sac_memory=sac_memory,
             sac_runtime=sac_runtime,
@@ -811,8 +776,8 @@ class SACEstimator(TorchDispatchMode):
         recomp_runtime: float = 0.0
 
         def append_row(
-            op_indices: Set[int],
-            func_names: Set[str],
+            op_indices: set[int],
+            func_names: set[str],
             msps: Optional[float] = None,
             stored: Optional[bool] = False,
             recomputed: Optional[bool] = False,
@@ -839,7 +804,7 @@ class SACEstimator(TorchDispatchMode):
         )
 
         for op_idx in recomputed_ops:
-            op_indices: Set[int] = {op_idx}
+            op_indices: set[int] = {op_idx}
             if op_idx in inplace_op_groups:
                 op_indices.update(inplace_op_groups[op_idx])
             if op_idx in random_ops_group:
@@ -979,9 +944,9 @@ class SACEstimator(TorchDispatchMode):
 
     def __enter__(self) -> Self:  # type: ignore[no-untyped-def]
         fake_mode = active_fake_mode()
-        assert isinstance(
-            fake_mode, FakeTensorMode
-        ), "SAC Estimator should be called in FakeTensorMode"
+        assert isinstance(fake_mode, FakeTensorMode), (
+            "SAC Estimator should be called in FakeTensorMode"
+        )
         RuntimeEstimator.fake_mode = fake_mode
         self._mod_tracker.register_user_hooks(
             pre_fw_hook=self._pre_fw_hook,

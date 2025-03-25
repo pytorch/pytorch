@@ -18,12 +18,14 @@ retry () {
     $*  || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
 }
 
+PLATFORM="manylinux2014_x86_64"
 # TODO move this into the Docker images
 OS_NAME=$(awk -F= '/^NAME/{print $2}' /etc/os-release)
 if [[ "$OS_NAME" == *"CentOS Linux"* ]]; then
     retry yum install -q -y zip openssl
 elif [[ "$OS_NAME" == *"AlmaLinux"* ]]; then
     retry yum install -q -y zip openssl
+    PLATFORM="manylinux_2_28_x86_64"
 elif [[ "$OS_NAME" == *"Red Hat Enterprise Linux"* ]]; then
     retry dnf install -q -y zip openssl
 elif [[ "$OS_NAME" == *"Ubuntu"* ]]; then
@@ -108,12 +110,6 @@ case ${DESIRED_PYTHON} in
     retry pip install -q --pre numpy==2.0.2
     ;;
 esac
-
-if [[ "$DESIRED_DEVTOOLSET" == *"cxx11-abi"* ]]; then
-    export _GLIBCXX_USE_CXX11_ABI=1
-else
-    export _GLIBCXX_USE_CXX11_ABI=0
-fi
 
 if [[ "$DESIRED_CUDA" == *"rocm"* ]]; then
     echo "Calling build_amd.py at $(date)"
@@ -207,12 +203,6 @@ if [[ -n "$BUILD_PYTHONLESS" ]]; then
 
     mkdir -p /tmp/$LIBTORCH_HOUSE_DIR
 
-    if [[ "$DESIRED_DEVTOOLSET" == *"cxx11-abi"* ]]; then
-        LIBTORCH_ABI="cxx11-abi-"
-    else
-        LIBTORCH_ABI=
-    fi
-
     zip -rq /tmp/$LIBTORCH_HOUSE_DIR/libtorch-$LIBTORCH_ABI$LIBTORCH_VARIANT-$PYTORCH_BUILD_VERSION.zip libtorch
     cp /tmp/$LIBTORCH_HOUSE_DIR/libtorch-$LIBTORCH_ABI$LIBTORCH_VARIANT-$PYTORCH_BUILD_VERSION.zip \
        /tmp/$LIBTORCH_HOUSE_DIR/libtorch-$LIBTORCH_ABI$LIBTORCH_VARIANT-latest.zip
@@ -253,11 +243,11 @@ make_wheel_record() {
     FPATH=$1
     if echo $FPATH | grep RECORD >/dev/null 2>&1; then
         # if the RECORD file, then
-        echo "$FPATH,,"
+        echo "\"$FPATH\",,"
     else
         HASH=$(openssl dgst -sha256 -binary $FPATH | openssl base64 | sed -e 's/+/-/g' | sed -e 's/\//_/g' | sed -e 's/=//g')
         FSIZE=$(ls -nl $FPATH | awk '{print $5}')
-        echo "$FPATH,sha256=$HASH,$FSIZE"
+        echo "\"$FPATH\",sha256=$HASH,$FSIZE"
     fi
 }
 
@@ -377,6 +367,12 @@ for pkg in /$WHEELHOUSE_DIR/torch_no_python*.whl /$WHEELHOUSE_DIR/torch*linux*.w
         $PATCHELF_BIN --print-rpath $sofile
     done
 
+    # create Manylinux 2_28 tag this needs to happen before regenerate the RECORD
+    if [[ $PLATFORM == "manylinux_2_28_x86_64" && $GPU_ARCH_TYPE != "cpu-s390x" && $GPU_ARCH_TYPE != "xpu" ]]; then
+        wheel_file=$(echo $(basename $pkg) | sed -e 's/-cp.*$/.dist-info\/WHEEL/g')
+        sed -i -e s#linux_x86_64#"${PLATFORM}"# $wheel_file;
+    fi
+
     # regenerate the RECORD file with new hashes
     record_file=$(echo $(basename $pkg) | sed -e 's/-cp.*$/.dist-info\/RECORD/g')
     if [[ -e $record_file ]]; then
@@ -416,12 +412,20 @@ for pkg in /$WHEELHOUSE_DIR/torch_no_python*.whl /$WHEELHOUSE_DIR/torch*linux*.w
         popd
     fi
 
-    # zip up the wheel back
-    zip -rq $(basename $pkg) $PREIX*
+    # Rename wheel for Manylinux 2_28
+    if [[ $PLATFORM == "manylinux_2_28_x86_64" && $GPU_ARCH_TYPE != "cpu-s390x" && $GPU_ARCH_TYPE != "xpu" ]]; then
+        pkg_name=$(echo $(basename $pkg) | sed -e s#linux_x86_64#"${PLATFORM}"#)
+        zip -rq $pkg_name $PREIX*
+        rm -f $pkg
+        mv $pkg_name $(dirname $pkg)/$pkg_name
+    else
+        # zip up the wheel back
+        zip -rq $(basename $pkg) $PREIX*
+        # remove original wheel
+        rm -f $pkg
+        mv $(basename $pkg) $pkg
+    fi
 
-    # replace original wheel
-    rm -f $pkg
-    mv $(basename $pkg) $pkg
     cd ..
     rm -rf tmp
 done
@@ -474,9 +478,9 @@ if [[ -z "$BUILD_PYTHONLESS" ]]; then
   echo "$(date) :: Running tests"
   pushd "$PYTORCH_ROOT"
 
-  #TODO: run_tests.sh and check_binary.sh should be moved to pytorch/pytorch project
+
   LD_LIBRARY_PATH=/usr/local/nvidia/lib64 \
-          "/builder/run_tests.sh" manywheel "${py_majmin}" "$DESIRED_CUDA"
+          "${PYTORCH_ROOT}/.ci/pytorch/run_tests.sh" manywheel "${py_majmin}" "$DESIRED_CUDA"
   popd
   echo "$(date) :: Finished tests"
 fi

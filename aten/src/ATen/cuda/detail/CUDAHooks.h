@@ -23,6 +23,8 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   bool isPinnedPtr(const void* data) const override;
   const Generator& getDefaultGenerator(
       DeviceIndex device_index = -1) const override;
+  Generator getNewGenerator(
+      DeviceIndex device_index = -1) const override;
   bool hasCUDA() const override;
   bool hasMAGMA() const override;
   bool hasCuDNN() const override;
@@ -31,6 +33,8 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   bool hasROCM() const override;
   const at::cuda::NVRTC& nvrtc() const override;
   DeviceIndex current_device() const override;
+  bool isBuilt() const override {return true;}
+  bool isAvailable() const override {return hasCUDA();}
   bool hasPrimaryContext(DeviceIndex device_index) const override;
   Allocator* getCUDADeviceAllocator() const override;
   Allocator* getPinnedMemoryAllocator() const override;

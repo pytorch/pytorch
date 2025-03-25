@@ -153,11 +153,11 @@ void makeStreamsWaitOnOthers(
 
 C10_DEFINE_REGISTRY_WITHOUT_WARNING(
     TensorPipeTransportRegistry,
-    TransportRegistration);
+    TransportRegistration)
 
 C10_DEFINE_REGISTRY_WITHOUT_WARNING(
     TensorPipeChannelRegistry,
-    ChannelRegistration);
+    ChannelRegistration)
 
 const std::string& TensorPipeAgent::guessAddress() {
   static const std::string uvAddress = []() {
@@ -284,7 +284,7 @@ std::unique_ptr<ChannelRegistration> makeMultiplexedUvChannel() {
 C10_REGISTER_CREATOR(
     TensorPipeChannelRegistry,
     mpt_uv,
-    makeMultiplexedUvChannel);
+    makeMultiplexedUvChannel)
 
 } // namespace
 

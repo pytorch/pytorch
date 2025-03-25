@@ -235,7 +235,7 @@ def test(db, net, device, epoch, log):
 
     qry_losses = torch.cat(qry_losses).mean().item()
     qry_accs = 100.0 * torch.cat(qry_accs).float().mean().item()
-    print(f"[Epoch {epoch+1:.2f}] Test Loss: {qry_losses:.2f} | Acc: {qry_accs:.2f}")
+    print(f"[Epoch {epoch + 1:.2f}] Test Loss: {qry_losses:.2f} | Acc: {qry_accs:.2f}")
     log.append(
         {
             "epoch": epoch + 1,

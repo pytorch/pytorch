@@ -1,54 +1,61 @@
 # mypy: ignore-errors
 
+"""
+Constant and enum variable tracking in Dynamo.
+
+This module is fundamental to Dynamo's ability to track and propagate constant
+values during compilation, ensuring proper handling of Python literals and
+maintaining type safety through the compilation process.
+"""
+
 import operator
-from typing import Dict, List, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torch
-from torch._dynamo.source import GetItemSource
+from torch._dynamo.source import AttrSource, GetItemSource
 
-from .. import variables
-from ..exc import unimplemented, UserError, UserErrorType
-from ..guards import GuardBuilder, install_guard
-from ..utils import common_constant_types, istype, np
-from .base import typestr, VariableTracker
+from .. import graph_break_hints, variables
+from ..exc import raise_observed_exception, unimplemented_v2
+from ..utils import cmp_name_to_op_mapping, common_constant_types, istype, np
+from .base import VariableTracker
 
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
-_type_to_assert_reason = {
-    # NB - We CAN have ConstantVariable.create(set) because of how sets interact with guards.
-    # A locally created set should always become a SetVariable, as the items in the set will already either be sourced
-    # from somewhere else, or unsourced. An input set would imply sources derived from set contents. For example, an
-    # input list's contents will have a source like some_list[0], some_list[1][1], etc. For a set, arbitrary access is
-    # not possible. This is a solvable problem, but one we have not taken on yet. As such, input sets are not allowed to
-    # become SetVariables. The solution here is to create a ConstantSetVariable that is more like a ConstantVariable.
-    # As this does not exist, we cannot add sets to this invariant.
-    list: "List types must use ListVariable.",
-    dict: "Dict types must use ConstDictVariable.",
-    torch.Tensor: "Tensor types must use TensorVariable.",
-    torch.SymInt: "SymInts must use SymNodeVariable. "
-    "If the underlying value is static, we will create a ConstantVariable and specialize.",
-    torch.SymFloat: "SymInts must use SymNodeVariable",
-}
-
-
 class ConstantVariable(VariableTracker):
+    """
+    Variable tracker for Python literals and basic immutable types, with automatic
+    routing support for collection types (lists, tuples, sets, etc.).
+
+    The create() method intelligently constructs appropriate variable types for
+    nested collections.
+    """
+
     @staticmethod
     def create(value, **kwargs) -> VariableTracker:
+        """
+        Create a `ConstantVariable` based on the given value, and supports
+        automatic routing for collection types like `tuple` (in which case we'd
+        create `ConstantVariable` for the leaf items).
+
+        NOTE: the caller must install the proper guards if needed; most often
+        the guard will be `CONSTANT_MATCH`.
+        """
         source = kwargs.get("source", None)
 
         # Routing for supported collection literals.
-        if isinstance(value, (set, frozenset)):
+        if isinstance(value, set):
             items = [ConstantVariable.create(x) for x in value]
             return variables.SetVariable(items, **kwargs)
+        elif isinstance(value, frozenset):
+            items = [ConstantVariable.create(x) for x in value]
+            return variables.FrozensetVariable(items, **kwargs)
         elif isinstance(value, (list, tuple)):
             items = []
             for i, x in enumerate(value):
                 item_source = GetItemSource(source, i) if source else None
-                if item_source:
-                    install_guard(item_source.make_guard(GuardBuilder.CONSTANT_MATCH))
                 items.append(
                     ConstantVariable.create(
                         x,
@@ -61,10 +68,15 @@ class ConstantVariable(VariableTracker):
 
     def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
-        if not ConstantVariable.is_base_literal(value):
-            for disallowed_type, reason in _type_to_assert_reason.items():
-                assert not isinstance(value, disallowed_type), reason
+        assert ConstantVariable.is_base_literal(value), f"""
+Cannot construct `ConstantVariable` for value of type {type(value)}.
 
+This failure likely due to PyTorch-internal use of `ConstantVariable` on
+non-literal python values, please try using `VariableTracker.build` instead. If
+you believe it's a necessary and legitimate use case (the value is immutable and
+can't easily be represented with another `VariableTracker` class), please add
+its type to `common_constant_types`.
+"""
         if np is not None and isinstance(value, np.number):
             self.value = value.item()
         else:
@@ -112,13 +124,8 @@ class ConstantVariable(VariableTracker):
             raise NotImplementedError from e
 
     def const_getattr(self, tx: "InstructionTranslator", name):
-        if isinstance(self.value, type):
-            raise UserError(
-                UserErrorType.ANTI_PATTERN,
-                "Can't access members of type(obj) for a generated custom object. "
-                "Please use __class__ instead",
-                case_name="type_reflection_method",
-            )
+        if not hasattr(self.value, name):
+            raise NotImplementedError
         member = getattr(self.value, name)
         if callable(member):
             raise NotImplementedError
@@ -128,8 +135,8 @@ class ConstantVariable(VariableTracker):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from .tensor import SymNodeVariable
 
@@ -160,7 +167,10 @@ class ConstantVariable(VariableTracker):
 
         if isinstance(self.value, str) and name in str.__dict__.keys():
             method = getattr(self.value, name)
-            return ConstantVariable.create(method(*const_args, **const_kwargs))
+            try:
+                return ConstantVariable.create(method(*const_args, **const_kwargs))
+            except Exception as e:
+                raise_observed_exception(type(e), tx)
         elif isinstance(self.value, (float, int)):
             if not (args or kwargs):
                 return ConstantVariable.create(getattr(self.value, name)())
@@ -189,22 +199,29 @@ class ConstantVariable(VariableTracker):
             return ConstantVariable.create(len(self.value))
         elif name == "__round__" and len(args) == 1 and args[0].is_python_constant():
             return ConstantVariable.create(
-                round(self.value, args[0].is_python_constant())
+                round(self.value, args[0].as_python_constant())
             )
         elif name == "__contains__" and len(args) == 1 and args[0].is_python_constant():
             assert not kwargs
             search = args[0].as_python_constant()
             result = search in self.value
             return ConstantVariable.create(result)
+        return super().call_method(tx, name, args, kwargs)
 
-        unimplemented(f"const method call {typestr(self.value)}.{name}")
-
-    def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslator", name: str
+    ) -> "VariableTracker":
         result = hasattr(self.value, name)
         return variables.ConstantVariable.create(result)
 
 
 class EnumVariable(VariableTracker):
+    """VariableTracker for enum.Enum and enum.IntEnum instances
+
+    Provides specialized handling for Python enum types, supporting
+    both standard Enum and IntEnum with proper value tracking and comparison.
+    """
+
     def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
         self.value = value
@@ -215,7 +232,14 @@ class EnumVariable(VariableTracker):
             for member in list(cls_type):
                 if member.value == value_vt.as_python_constant():
                     return cls(member, **options)
-        unimplemented("Enum variable is constructed with non constant values")
+        unimplemented_v2(
+            gb_type="Failed to construct Enum variable",
+            context=f"value: {value_vt}, allowed enum values: {list(cls_type)}",
+            explanation="Attempted to construct an Enum value that is non-constant (e.g. int, string) "
+            "or is not an acceptable value for the Enum. "
+            f"Acceptable values for Enum `{cls_type}`: {list(cls_type)}.",
+            hints=[*graph_break_hints.USER_ERROR, *graph_break_hints.SUPPORTABLE],
+        )
 
     def as_proxy(self):
         if isinstance(self.value, int):
@@ -228,8 +252,11 @@ class EnumVariable(VariableTracker):
     def as_python_constant(self):
         return self.value
 
-    def const_getattr(self, tx: "InstructionTranslator", name):
-        member = getattr(self.value, name)
-        if callable(member):
+    def var_getattr(self, tx: "InstructionTranslator", name):
+        if not hasattr(self.value, name):
             raise NotImplementedError
-        return member
+        if name in cmp_name_to_op_mapping:
+            return variables.GetAttrVariable(self, name)
+        member = getattr(self.value, name)
+        source = self.source and AttrSource(self.source, name)
+        return VariableTracker.build(tx, member, source=source)

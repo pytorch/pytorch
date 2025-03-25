@@ -88,6 +88,14 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
 
+      - name: Start monitoring script
+        id: monitor-script
+        if: ${{ !inputs.disable-monitor }}
+        continue-on-error: true
+        run: |
+          ${CONDA_RUN} python3 -m tools.stats.monitor > usage_log.txt 2>&1 &
+          echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
+
       - name: Download build artifacts
         uses: ./.github/actions/download-build-artifacts
         with:
@@ -106,14 +114,6 @@ jobs:
           python-version: ${{ inputs.python-version }}
           environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
           pip-requirements-file: .github/requirements/pip-requirements-${{ runner.os }}.txt
-
-      - name: Start monitoring script
-        id: monitor-script
-        if: ${{ !inputs.disable-monitor }}
-        continue-on-error: true
-        run: |
-          ${CONDA_RUN} python3 -m tools.stats.monitor > usage_log.txt 2>&1 &
-          echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
       - name: Parse ref
         id: parse-ref

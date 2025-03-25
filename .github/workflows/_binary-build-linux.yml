@@ -18,7 +18,7 @@ on:
         description: prefix for runner label
       runs_on:
         required: false
-        default: linux.12xlarge.ephemeral
+        default: linux.12xlarge.memory.ephemeral
         type: string
         description: Hardware to run this "build" job on, linux.12xlarge or linux.arm64.2xlarge.
       timeout-minutes:
@@ -42,10 +42,6 @@ on:
         required: true
         type: string
         description: Root directory for the pytorch/pytorch repository
-      BUILDER_ROOT:
-        required: true
-        type: string
-        description: Root directory for the pytorch/builder repository
       PACKAGE_TYPE:
         required: true
         type: string
@@ -74,10 +70,6 @@ on:
         required: false
         type: string
         description: Desired libtorch variant (for libtorch builds only)
-      DESIRED_DEVTOOLSET:
-        required: false
-        type: string
-        description: Desired dev toolset
       DESIRED_PYTHON:
         required: false
         type: string
@@ -98,7 +90,6 @@ jobs:
     timeout-minutes: ${{ inputs.timeout-minutes }}
     env:
       PYTORCH_ROOT: ${{ inputs.PYTORCH_ROOT }}
-      BUILDER_ROOT: ${{ inputs.BUILDER_ROOT }}
       PACKAGE_TYPE: ${{ inputs.PACKAGE_TYPE }}
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -109,12 +100,9 @@ jobs:
       SKIP_ALL_TESTS: 1
       LIBTORCH_CONFIG: ${{ inputs.LIBTORCH_CONFIG }}
       LIBTORCH_VARIANT: ${{ inputs.LIBTORCH_VARIANT }}
-      DESIRED_DEVTOOLSET: ${{ inputs.DESIRED_DEVTOOLSET }}
       DESIRED_PYTHON: ${{ inputs.DESIRED_PYTHON }}
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: ${{ inputs.PYTORCH_EXTRA_INSTALL_REQUIREMENTS }}
-      # Needed for conda builds
       ALPINE_IMAGE: ${{ inputs.ALPINE_IMAGE }}
-      ANACONDA_USER: pytorch
       AWS_DEFAULT_REGION: us-east-1
       BINARY_ENV_FILE: /tmp/env
       BUILD_ENVIRONMENT: ${{ inputs.build_environment }}
@@ -129,7 +117,6 @@ jobs:
         run: |
           {
             echo "PYTORCH_ROOT=${{ env.PYTORCH_ROOT }}"
-            echo "BUILDER_ROOT=${{ env.BUILDER_ROOT }}"
             echo "PACKAGE_TYPE=${{ env.PACKAGE_TYPE }}"
             echo "DESIRED_CUDA=${{ env.DESIRED_CUDA }}"
             echo "GPU_ARCH_VERSION=${{ env.GPU_ARCH_VERSION }}"
@@ -138,11 +125,9 @@ jobs:
             echo "SKIP_ALL_TESTS=${{ env.SKIP_ALL_TESTS }}"
             echo "LIBTORCH_CONFIG=${{ env.LIBTORCH_CONFIG }}"
             echo "LIBTORCH_VARIANT=${{ env.LIBTORCH_VARIANT }}"
-            echo "DESIRED_DEVTOOLSET=${{ env.DESIRED_DEVTOOLSET }}"
             echo "DESIRED_PYTHON=${{ env.DESIRED_PYTHON }}"
             echo "PYTORCH_EXTRA_INSTALL_REQUIREMENTS=${{ env.PYTORCH_EXTRA_INSTALL_REQUIREMENTS }}"
             echo "ALPINE_IMAGE=${{ env.ALPINE_IMAGE }}"
-            echo "ANACONDA_USER=${{ env.ANACONDA_USER }}"
             echo "AWS_DEFAULT_REGION=${{ env.AWS_DEFAULT_REGION }}"
             echo "BINARY_ENV_FILE=${{ env.BINARY_ENV_FILE }}"
             echo "BUILD_ENVIRONMENT=${{ env.BUILD_ENVIRONMENT }}"
@@ -193,33 +178,18 @@ jobs:
           fi
 
       - name: Checkout PyTorch to pytorch dir
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
 
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-
-      - name: Checkout pytorch/builder to builder dir
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-          quiet-checkout: true
-
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
 
       - name: Check if the job is disabled
         id: filter
@@ -246,10 +216,8 @@ jobs:
           mkdir -p artifacts/
           container_name=$(docker run \
             -e BINARY_ENV_FILE \
-            -e BUILDER_ROOT \
             -e BUILD_ENVIRONMENT \
             -e DESIRED_CUDA \
-            -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
             -e GITHUB_ACTIONS \
             -e GPU_ARCH_TYPE \
@@ -264,7 +232,6 @@ jobs:
             --tty \
             --detach \
             -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
             -v "${RUNNER_TEMP}/artifacts:/artifacts" \
             -w / \
             "${DOCKER_IMAGE}"
@@ -272,10 +239,8 @@ jobs:
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
           if [[ ${BUILD_ENVIRONMENT} == *"aarch64"* ]]; then
             docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /pytorch/.ci/aarch64_linux/aarch64_ci_build.sh"
-          elif [[ ${{ inputs.PACKAGE_TYPE }} == "manywheel" || ${{ inputs.PACKAGE_TYPE }} == "libtorch" ]]; then
-            docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /pytorch/.ci/${{ inputs.PACKAGE_TYPE }}/build.sh"
           else
-            docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/${{ inputs.PACKAGE_TYPE }}/build.sh"
+            docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /pytorch/.ci/${{ inputs.PACKAGE_TYPE }}/build.sh"
           fi
 
       - name: Chown artifacts

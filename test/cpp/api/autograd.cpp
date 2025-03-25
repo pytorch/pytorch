@@ -5,6 +5,7 @@
 #include <torch/torch.h>
 
 #include <torch/csrc/autograd/FunctionsManual.h>
+#include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
 
 #include <test/cpp/api/support.h>
@@ -1666,6 +1667,36 @@ TEST(TestAutogradNotImplementedFallback, TensorlistOp) {
       torch::autograd::grad({out}, {vec[1]}), "is not implemented");
 
   ASSERT_TRUE(at::allclose(op(a, vec), tensorlist_op(a, vec)));
+}
+
+static std::string test_format_error(const std::string& s) {
+  return s;
+}
+
+TEST(TestAutogradUtils, ValidateOutputsReduce) {
+  auto input = torch::ones({}, {torch::kFloat32});
+  auto grad = torch::ones({2, 3}, {torch::kFloat32});
+
+  std::vector<std::optional<InputMetadata>> input_metadata;
+  input_metadata.emplace_back(InputMetadata(input));
+  std::vector<torch::Tensor> grads;
+  grads.emplace_back(grad);
+
+  torch::autograd::validate_outputs(input_metadata, grads, test_format_error);
+  ASSERT_TRUE(at::allclose(grads[0], grad.sum()));
+}
+
+TEST(TestAutogradUtils, ValidateOutputsBasic) {
+  auto input = torch::zeros({2, 3}, {torch::kFloat32});
+  auto grad = torch::ones({2, 3}, {torch::kFloat32});
+
+  std::vector<std::optional<InputMetadata>> input_metadata;
+  input_metadata.emplace_back(InputMetadata(input));
+  std::vector<torch::Tensor> grads;
+  grads.emplace_back(grad);
+
+  torch::autograd::validate_outputs(input_metadata, grads, test_format_error);
+  ASSERT_TRUE(at::allclose(grad, torch::ones({2, 3})));
 }
 
 // TODO add these tests if needed

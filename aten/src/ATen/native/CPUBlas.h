@@ -193,6 +193,7 @@ void copy(int64_t n, const c10::complex<float> *x, int64_t incx, c10::complex<fl
 // A Base pointer to a tensor A.
 // B Base pointer to a tensor B.
 // C Pointer to a tensor C (accumulation buffer).
+// Note only batch size 1 is used currently
 TORCH_API void brgemm(
     int64_t M,
     int64_t N,
@@ -203,13 +204,66 @@ TORCH_API void brgemm(
     const bool add_C,
     const at::Half* A,
     const at::Half* B,
-    float* C);
+    float* C,
+    bool is_vnni = true);
+
+TORCH_API void brgemm(
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t ld_a,
+    int64_t ld_b,
+    int64_t ld_c,
+    const bool add_C,
+    const at::BFloat16* A,
+    const at::BFloat16* B,
+    float* C,
+    bool is_vnni = true);
+
+TORCH_API void brgemm(
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t ld_a,
+    int64_t ld_b,
+    int64_t ld_c,
+    const bool add_C,
+    const float* A,
+    const float* B,
+    float* C,
+    bool is_vnni = false);
+
+TORCH_API void brgemm(
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t ld_a,
+    int64_t ld_b,
+    int64_t ld_c,
+    const bool add_C,
+    const unsigned char* A,
+    const unsigned char* B,
+    int32_t* C,
+    bool is_vnni = true);
+
+TORCH_API void brgemm(
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t ld_a,
+    int64_t ld_b,
+    int64_t ld_c,
+    const bool add_C,
+    const unsigned char* A,
+    const signed char* B,
+    int32_t* C,
+    bool is_vnni = true);
 
 // Release brgemm hardware context
-TORCH_API void brgemm_release();
+TORCH_API void brgemm_release(bool is_vnni = true);
 
 // Pack B matrix to get better performance if needed
-void pack(
+TORCH_API void pack(
     int64_t K,
     int64_t N,
     int64_t ld_in,
@@ -219,7 +273,7 @@ void pack(
     const void* in,
     void* out);
 
-// Whether pack is needed in the platform.
-bool need_pack(ScalarType dt_in);
+// Whether pack is supported in the platform.
+TORCH_API bool could_pack(ScalarType dt_in);
 
 } // namespace at::native::cpublas

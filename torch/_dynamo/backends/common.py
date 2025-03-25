@@ -1,5 +1,23 @@
 # mypy: ignore-errors
 
+"""
+This module provides common utilities and base classes for TorchDynamo backends.
+
+Key components:
+- AotAutograd: Base class for implementing AOT (Ahead-of-Time) autograd backends
+- Backend utilities for handling:
+  - Fake tensor conversion
+  - Device/dtype detection from inputs
+  - Memory efficient fusion
+  - Graph flattening
+  - Common compiler configurations
+
+The utilities here are used by various backend implementations to handle
+common operations and provide consistent behavior across different backends.
+AOT autograd functionality is particularly important as it enables ahead-of-time
+optimization of both forward and backward passes.
+"""
+
 import contextlib
 import functools
 import logging
@@ -9,7 +27,10 @@ import torch
 from torch._dynamo import disable
 from torch._dynamo.exc import TensorifyScalarRestartAnalysis
 from torch._dynamo.utils import counters, defake, flatten_graph_inputs
-from torch._functorch.aot_autograd import aot_module_simplified
+from torch._functorch.aot_autograd import (
+    aot_module_simplified,
+    SerializableAOTDispatchCompiler,
+)
 from torch.utils._python_dispatch import _disable_current_modes
 
 
@@ -45,14 +66,21 @@ class AotAutograd:
             counters["aot_autograd"]["not_ok"] += 1
             return gm
 
-        # OK attempt to compile
+        def wrap_bw_compiler(bw_compiler_fn):
+            def _wrapped_bw_compiler(*args, **kwargs):
+                # stop TorchDynamo from trying to compile our generated backwards pass
+                return disable(disable(bw_compiler_fn)(*args, **kwargs))
 
-        def _wrapped_bw_compiler(*args, **kwargs):
-            # stop TorchDynamo from trying to compile our generated backwards pass
-            return disable(disable(bw_compiler)(*args, **kwargs))
+            return _wrapped_bw_compiler
 
         bw_compiler = self.kwargs.get("bw_compiler") or self.kwargs["fw_compiler"]
-        self.kwargs["bw_compiler"] = _wrapped_bw_compiler
+
+        if isinstance(bw_compiler, SerializableAOTDispatchCompiler):
+            bw_compiler.compiler_fn = wrap_bw_compiler(bw_compiler.compiler_fn)
+        else:
+            bw_compiler = wrap_bw_compiler(bw_compiler)
+
+        self.kwargs["bw_compiler"] = bw_compiler
         self.kwargs["inference_compiler"] = (
             self.kwargs.get("inference_compiler") or self.kwargs["fw_compiler"]
         )

@@ -2,7 +2,7 @@
 import logging
 from functools import wraps
 from inspect import unwrap
-from typing import Callable, List, Optional
+from typing import Callable, Optional
 
 
 logger = logging.getLogger(__name__)
@@ -121,7 +121,7 @@ def loop_pass(
 # Implemented as 'depends on' operators. A constraint is satisfied iff a list
 # has a valid partial ordering according to this comparison operator.
 def _validate_pass_schedule_constraint(
-    constraint: Callable[[Callable, Callable], bool], passes: List[Callable]
+    constraint: Callable[[Callable, Callable], bool], passes: list[Callable]
 ):
     for i, a in enumerate(passes):
         for j, b in enumerate(passes[i + 1 :]):
@@ -191,8 +191,8 @@ class PassManager:
             `this_before_that_pass_constraint` for example.
     """
 
-    passes: List[Callable]
-    constraints: List[Callable]
+    passes: list[Callable]
+    constraints: list[Callable]
     _validated: bool = False
 
     def __init__(
@@ -217,7 +217,7 @@ class PassManager:
         self.constraints.append(constraint)
         self._validated = False
 
-    def remove_pass(self, _passes: List[str]):
+    def remove_pass(self, _passes: list[str]):
         if _passes is None:
             return
         passes_left = [ps for ps in self.passes if ps.__name__ not in _passes]

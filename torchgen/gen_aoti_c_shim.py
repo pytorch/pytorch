@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import textwrap
 from dataclasses import dataclass
-from typing import Sequence
+from typing import TYPE_CHECKING
 
 from torchgen.api.types import DispatcherSignature
 from torchgen.api.types.signatures import CppSignature, CppSignatureGroup
@@ -22,6 +22,10 @@ from torchgen.model import (
     Type,
 )
 from torchgen.utils import mapMaybe
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 base_type_to_c_type = {
@@ -55,7 +59,7 @@ base_type_to_aten_type = {
 }
 
 base_type_to_callsite_expr = {
-    BaseTy.Tensor: "*tensor_handle_to_tensor_pointer",
+    BaseTy.Tensor: "resolve_tensor_dispatch_flags",
     BaseTy.bool: "",
     BaseTy.int: "",
     BaseTy.SymInt: "",
@@ -71,21 +75,30 @@ base_type_to_callsite_expr = {
 
 
 # convert args to C types, names in declarations, and expressions in function bodies
-def convert_arg_type_and_name(  # type: ignore[return]
+def convert_arg_type_and_name(
     typ: Type,
     name: str,
+    is_write: bool = False,
 ) -> tuple[list[str], list[str], list[str], list[str]]:
     if isinstance(typ, BaseType):
         if typ.name in base_type_to_c_type:
+            if typ.name == BaseTy.Tensor and is_write:
+                # For output tensors, our normal call to resolve_tensor_dispatch_flags
+                # results in an rvalue tensor, which can't be passed to at::Tensor&.
+                # Override this case specifically.
+                callsite_expr = [f"*tensor_handle_to_tensor_pointer({name})"]
+            else:
+                callsite_expr = [
+                    f"{base_type_to_callsite_expr[typ.name]}({name})"
+                    if base_type_to_callsite_expr[typ.name]
+                    else name
+                ]
+
             return (
                 [base_type_to_c_type[typ.name]],
                 [name],
                 [base_type_to_aten_type[typ.name]],
-                [
-                    f"{base_type_to_callsite_expr[typ.name]}({name})"
-                    if base_type_to_callsite_expr[typ.name]
-                    else name
-                ],
+                callsite_expr,
             )
         elif typ.name == BaseTy.Device:
             return (
@@ -114,16 +127,20 @@ def convert_arg_type_and_name(  # type: ignore[return]
                 new_aten_types.append(f"::std::optional<{aten_type}>")
                 base_type = aten_type[len("c10::ArrayRef<") : -1]
                 new_callsite_exprs.append(
-                    f"pointer_to_optional_list<{base_type}>({names[j]}, {names[j+1]})"
+                    f"pointer_to_optional_list<{base_type}>({names[j]}, {names[j + 1]})"
                 )
                 j += 2
             elif aten_type == "c10::Device":
                 # Device is passed as device_type + device_index
                 new_aten_types.append("::std::optional<c10::Device>")
                 new_callsite_exprs.append(
-                    f"pointer_to_optional_device({names[j]}, {names[j+1]})"
+                    f"pointer_to_optional_device({names[j]}, {names[j + 1]})"
                 )
                 j += 2
+            elif aten_type == "at::Tensor":
+                new_aten_types.append(f"::std::optional<{aten_type}>")
+                new_callsite_exprs.append(f"resolve_tensor_dispatch_flags({names[j]})")
+                j += 1
             else:
                 new_aten_types.append(f"::std::optional<{aten_type}>")
                 new_callsite_exprs.append(
@@ -138,7 +155,7 @@ def convert_arg_type_and_name(  # type: ignore[return]
             new_callsite_exprs,
         )
     elif isinstance(typ, ListType):
-        # Need to explictly pass the list as pointer + length
+        # Need to explicitly pass the list as pointer + length
         c_types, names, aten_types, _ = convert_arg_type_and_name(typ.elem, name)
         assert len(c_types) == 1, "ListType with unsupported element type " + repr(typ)
 
@@ -155,10 +172,14 @@ def convert_arg_type_and_name(  # type: ignore[return]
             # construct std::array<bool, N> instead
             assert typ.size is not None
             callsite_exprs.append(f"pointer_to_list<{typ.size}>({name})")
+        elif atype == "at::Tensor" and not is_write:
+            callsite_exprs.append(
+                f"resolve_tensor_list_dispatch_flags({name}, {name}_len_)"
+            )
         elif atype == "::std::optional<at::Tensor>":
             # convert from std::vector<::std::optional<at::Tensor>> to c10::List<::std::optional<at::Tensor>>
             callsite_exprs.append(
-                f"c10::List<{atype}>(c10::ArrayRef<{atype}>(pointer_to_list<{atype}>({name}, {name}_len_)))"
+                f"c10::List<{atype}>(c10::ArrayRef<{atype}>(resolve_tensor_list_dispatch_flags({name}, {name}_len_)))"
             )
         else:
             callsite_exprs.append(f"pointer_to_list<{atype}>({name}, {name}_len_)")
@@ -170,6 +191,7 @@ def convert_arg_type_and_name(  # type: ignore[return]
             aten_types,
             callsite_exprs,
         )
+    raise NotImplementedError(f"Argument type {repr(typ)} not supported!")
 
 
 def zip_type_and_name(types: list[str], names: list[str]) -> list[str]:
@@ -183,7 +205,7 @@ def gen_arguments(flat_arguments: Sequence[Argument]) -> tuple[list[str], list[s
     callsite_exprs = []
     for arg in flat_arguments:
         new_types, names, _, new_callsite_exprs = convert_arg_type_and_name(
-            arg.type, arg.name
+            arg.type, arg.name, arg.is_write
         )
         types.extend(new_types)
         new_names.extend(names)
@@ -222,6 +244,7 @@ def gen_returns(schema: FunctionSchema) -> tuple[list[str], list[str]]:
         "_scaled_dot_product_flash_attention",
         "_scaled_dot_product_efficient_attention",
         "_scaled_dot_product_cudnn_attention",
+        "_scaled_dot_product_fused_attention_overrideable",
         "convolution_backward",
     ]:
         if name in unambiguous_name:
@@ -277,7 +300,7 @@ def gen_declaration_and_definition(
 {declaration} {{
     AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({{
         {tmp_result}{backend_call}(
-{textwrap.indent(', '.join(callsite_exprs), "            ")}
+{textwrap.indent(", ".join(callsite_exprs), "            ")}
         );{textwrap.indent(ret_assignments_str, "        ")}
     }});
 }}
@@ -484,9 +507,6 @@ extern "C" {{
 """
 
     else:
-        c_shim_include = (
-            f"#include <torch/csrc/inductor/aoti_torch/generated/c_shim_{device}.h>"
-        )
         return f"""
 {warning}
 

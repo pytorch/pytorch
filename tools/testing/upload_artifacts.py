@@ -4,7 +4,7 @@ import time
 import zipfile
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, List
+from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -18,7 +18,7 @@ def get_s3_resource() -> Any:
     return boto3.client("s3")
 
 
-def zip_artifact(file_name: str, paths: List[str]) -> None:
+def zip_artifact(file_name: str, paths: list[str]) -> None:
     """Zip the files in the paths listed into file_name. The paths will be used
     in a glob and should be relative to REPO_ROOT."""
 

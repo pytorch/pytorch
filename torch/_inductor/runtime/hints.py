@@ -1,8 +1,13 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import collections
+import functools
 import typing
 from enum import auto, Enum
-from typing import Dict, List, Optional, Union
+from typing import Optional, Union
+
+from torch.utils._triton import has_triton_package
 
 
 # The following maximums only apply to runtime autotuning, when using FixedTritonConfig one may see larger values
@@ -11,7 +16,8 @@ TRITON_MAX_BLOCK = {
     "X": 4096,
     "Y": 1024,
     "Z": 1024,
-    "R": 4096 * 16,  # * 16 is multi-kernel only
+    "R0_": 4096 * 16,  # * 16 is multi-kernel only
+    "R1_": 2048 * 16,  # * 16 is multi-kernel only
 }
 TRITON_MAX_RSPLIT = 64
 
@@ -28,18 +34,14 @@ class TileHint(Enum):
     DEFAULT = 1
 
 
-def _is_triton_available():
-    try:
-        import triton  # noqa: F401
-
-        return True
-    except ImportError:
-        return False
-
-
 # Define `AttrsDescriptorWrapper` function with clear conditional handling
-if _is_triton_available():
-    try:
+if has_triton_package():
+    import triton
+    import triton.backends.compiler
+    import triton.compiler.compiler
+
+    if hasattr(triton.backends.compiler, "AttrsDescriptor"):
+        # Triton 3.2.0 - the second implementation
         from triton.backends.compiler import AttrsDescriptor
 
         def AttrsDescriptorWrapper(
@@ -60,7 +62,8 @@ if _is_triton_available():
             assert res.property_values["tt.equal_to"] == 1
             return res
 
-    except ImportError:
+    elif hasattr(triton.compiler.compiler, "AttrsDescriptor"):
+        # Triton 3.0.0 - the original implementation
         from triton.compiler.compiler import AttrsDescriptor
 
         def AttrsDescriptorWrapper(
@@ -75,6 +78,18 @@ if _is_triton_available():
 
             # Instantiate AttrsDescriptor with the prepared arguments
             return AttrsDescriptor(**kwargs)
+
+    else:
+        # Triton in 2025:
+        # note: there's also a range of triton commits not currently supported
+        # from ~Dec 9, 2024 to Jan 1 2025, in which AttrsDescriptors are still
+        # used, but the contents are different.
+
+        def AttrsDescriptorWrapper(
+            divisible_by_16=None,
+            equal_to_1=None,
+        ):
+            return {(x,): [["tt.divisibility", 16]] for x in divisible_by_16}
 
 else:
     # Define a namedtuple as a fallback when AttrsDescriptor is not available
@@ -113,15 +128,16 @@ class DeviceProperties(typing.NamedTuple):
 
     type: str  # type: ignore[assignment]
     index: int  # type: ignore[assignment]
+    multi_processor_count: int
     cc: int
     major: Optional[int] = None
     regs_per_multiprocessor: Optional[int] = None
     max_threads_per_multi_processor: Optional[int] = None
-    multi_processor_count: Optional[int] = None
     warp_size: Optional[int] = None
 
     @classmethod
-    def create(cls, device):
+    @functools.lru_cache(None)
+    def create(cls, device) -> DeviceProperties:
         import torch
         from torch._dynamo.device_interface import get_interface_for_device
 
@@ -131,66 +147,66 @@ class DeviceProperties(typing.NamedTuple):
             device_type = "hip"
 
         device_interface = get_interface_for_device(device)
-        if device_type in ["cuda", "hip", "xpu"]:
-            props = device_interface.get_device_properties(device)
-            return cls(
-                type=device_type,
-                index=device.index,
-                cc=device_interface.get_compute_capability(device),
-                major=props.major if hasattr(props, "major") else None,
-                regs_per_multiprocessor=props.regs_per_multiprocessor
-                if hasattr(props, "regs_per_multiprocessor")
-                else None,
-                max_threads_per_multi_processor=props.max_threads_per_multi_processor
-                if hasattr(props, "max_threads_per_multi_processor")
-                else None,
-                multi_processor_count=props.multi_processor_count
-                if hasattr(props, "multi_processor_count")
-                else None,
-                warp_size=props.warp_size if hasattr(props, "warp_size") else 32,
-            )
+        props = device_interface.get_device_properties(device)
+        try:
+            multi_processor_count = props.multi_processor_count
+        except AttributeError:
+            if device_type == "xpu":
+                multi_processor_count = props.gpu_subslice_count
+            elif device_type == "mps":
+                # TODO: Fetch the actual value from ioreg
+                multi_processor_count = 8
+            else:
+                raise
         return cls(
             type=device_type,
             index=device.index,
+            multi_processor_count=multi_processor_count,
             cc=device_interface.get_compute_capability(device),
+            major=getattr(props, "major", None),
+            regs_per_multiprocessor=getattr(props, "regs_per_multiprocessor", None),
+            max_threads_per_multi_processor=getattr(
+                props, "max_threads_per_multi_processor", None
+            ),
+            warp_size=getattr(props, "warp_size", 32 if device_type != "cpu" else None),
         )
 
 
 class HalideInputSpec(typing.NamedTuple):
     ctype: str
     name: str
-    shape: Optional[List[str]] = None
-    stride: Optional[List[str]] = None
+    shape: Optional[list[str]] = None
+    stride: Optional[list[str]] = None
     offset: Optional[str] = None
     alias_of: Optional[str] = None
 
-    def bindings_type(self):
+    def bindings_type(self) -> str:
         if self.ctype in ("half*", "bfloat16*"):
             return "uint16_t*"  # half not defined
         return self.ctype
 
-    def halide_type(self):
+    def halide_type(self) -> str:
         if self.ctype == "half*":
             return "halide_type_t(halide_type_float, 16)"  # half not defined
         if self.ctype == "bfloat16*":
             return "halide_type_t(halide_type_bfloat, 16)"  # half not defined
         return f"halide_type_of<{self.ctype.replace('*', '')}>()"
 
-    def is_scalar(self):
+    def is_scalar(self) -> bool:
         return self.shape is None
 
-    def is_buffer(self):
+    def is_buffer(self) -> bool:
         return self.shape is not None
 
 
 class HalideMeta(typing.NamedTuple):
-    argtypes: List[HalideInputSpec]
+    argtypes: list[HalideInputSpec]
     target: str
     scheduler: Optional[str] = None
-    scheduler_flags: Optional[Dict[str, Union[int, str]]] = None
+    scheduler_flags: Optional[dict[str, Union[int, str]]] = None
     cuda_device: Optional[int] = None
 
-    def args(self):
+    def args(self) -> list[str]:
         """Command line args to pass to halide generator"""
         args = [f"target={self.target}"]
         if self.scheduler:
@@ -201,5 +217,5 @@ class HalideMeta(typing.NamedTuple):
                 args.append(f"autoscheduler.{k}={v}")
         return args
 
-    def is_cuda(self):
+    def is_cuda(self) -> bool:
         return self.cuda_device is not None

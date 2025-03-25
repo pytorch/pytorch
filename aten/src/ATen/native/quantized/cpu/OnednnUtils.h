@@ -5,7 +5,9 @@
 #include <ATen/Tensor.h>
 #include <ATen/native/quantized/PackedParams.h>
 #include <ideep.hpp>
+#if !defined(__powerpc__)
 #include <cpuinfo.h>
+#endif
 
 #include <c10/util/CallOnce.h>
 
@@ -61,8 +63,8 @@ struct LinearPrimitiveCache : PrimitiveCache {
   // are set at execution time. So we only need to compare
   // the rest part of key.
   bool hit_dynamic(const PrimitiveCacheKey& new_key) {
-    auto cached_input_shape = std::get<InputShape>(this->key);
-    auto new_input_shape = std::get<InputShape>(new_key);
+    auto const& cached_input_shape = std::get<InputShape>(this->key);
+    auto const& new_input_shape = std::get<InputShape>(new_key);
     return (
         cached_input_shape == new_input_shape &&
         std::get<NumOfThreads>(this->key) == std::get<NumOfThreads>(new_key));
@@ -310,14 +312,14 @@ struct PackedConvWeightsOnednn : public ConvPackedParamsBase<kSpatialDim> {
 namespace onednn_utils {
 
 inline ideep::attr_t create_attr_by_post_op(
-    const c10::string_view& binary_post_op,
+    const std::string_view& binary_post_op,
     double binary_alpha,
     double input1_scale,
     int64_t input1_zero_point,
     const ideep::tensor::desc& input1_desc,
-    const c10::string_view& unary_post_op,
+    const std::string_view& unary_post_op,
     const torch::List<std::optional<at::Scalar>>& unary_post_op_args,
-    const c10::string_view& unary_post_op_algorithm) {
+    const std::string_view& unary_post_op_algorithm) {
   using ideep::tensor;
   if (binary_post_op == "none") {
     if (unary_post_op == "relu") {
@@ -432,7 +434,11 @@ inline bool should_use_onednn_quant(
 #if !defined(__linux__)
   return false;
 #else
-  bool vnni_available = cpuinfo_has_x86_avx512vnni();
+#if defined(__powerpc__)
+  constexpr auto vnni_available = true;
+#else
+  const auto vnni_available = cpuinfo_has_x86_avx512vnni();
+#endif
   bool w_sym_quant =
       is_weight_symmetric_quant(weight, is_transposed_conv);
   bool opad_all_zero =
