@@ -445,8 +445,6 @@ jobs:
       - name: Check NVIDIA driver installation step
         if: failure() && steps.install-nvidia-driver.outcome && steps.install-nvidia-driver.outcome != 'skipped'
         shell: bash
-        env:
-          RUNNER_WORKSPACE: ${{ runner.workspace }}
         run: |
           set +e
           set -x
