@@ -204,7 +204,7 @@ def find_all_gather_patterns(graph: torch.fx.Graph):
 class _ReduceScatterMatch:
     match: Match
     input_node: torch.fx.Node
-    rs_node: torch.fx.Node
+    reduce_scatter_node: torch.fx.Node
     res_node: torch.fx.Node
     reduce_op: str
     scatter_dim: int
@@ -223,12 +223,12 @@ class _ReduceScatterMatch:
         result is saved for backward), this method will update the output node to use the fused node instead.
         """
         output_node = None
-        for user in self.rs_node.users:
+        for user in self.reduce_scatter_node.users:
             if user.target == "output":
                 output_node = user
                 break
         if output_node is not None:
-            output_node.replace_input_with(self.rs_node, new_node)
+            output_node.replace_input_with(self.reduce_scatter_node, new_node)
 
     def erase(self) -> None:
         for node in reversed(self.match.nodes):
@@ -313,7 +313,7 @@ def find_reduce_scatter_patterns(graph: torch.fx.Graph):
                     _ReduceScatterMatch(
                         match=match,
                         input_node=match.kwargs["input"],
-                        rs_node=match.nodes[-2],
+                        reduce_scatter_node=match.nodes[-2],
                         res_node=node,
                         reduce_op=match.kwargs["reduce_op"],
                         scatter_dim=match.kwargs["scatter_dim"],
@@ -326,7 +326,7 @@ def find_reduce_scatter_patterns(graph: torch.fx.Graph):
                     _ReduceScatterMatch(
                         match=match,
                         input_node=match.kwargs["input"],
-                        rs_node=match.nodes[0],
+                        reduce_scatter_node=match.nodes[0],
                         res_node=node,
                         reduce_op=match.kwargs["reduce_op"],
                         scatter_dim=0,
@@ -339,7 +339,7 @@ def find_reduce_scatter_patterns(graph: torch.fx.Graph):
                     _ReduceScatterMatch(
                         match=match,
                         input_node=match.kwargs["input"],
-                        rs_node=match.nodes[-2],
+                        reduce_scatter_node=match.nodes[-2],
                         res_node=node,
                         reduce_op=match.kwargs["reduce_op"],
                         scatter_dim=match.kwargs["scatter_dim"],
@@ -352,7 +352,7 @@ def find_reduce_scatter_patterns(graph: torch.fx.Graph):
                     _ReduceScatterMatch(
                         match=match,
                         input_node=match.kwargs["input"],
-                        rs_node=match.nodes[0],
+                        reduce_scatter_node=match.nodes[0],
                         res_node=node,
                         reduce_op=match.kwargs["reduce_op"],
                         scatter_dim=0,
@@ -853,9 +853,16 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
         restride_A_for_fused_matmul_reduce_scatter,
     )
 
-    input_node, _rs_node, rs_res_node, reduce_op, orig_scatter_dim, group_name = (
+    (
+        input_node,
+        _reduce_scatter_node,
+        rs_res_node,
+        reduce_op,
+        orig_scatter_dim,
+        group_name,
+    ) = (
         reduce_scatter.input_node,
-        reduce_scatter.rs_node,
+        reduce_scatter.reduce_scatter_node,
         reduce_scatter.res_node,
         reduce_scatter.reduce_op,
         reduce_scatter.scatter_dim,
@@ -1048,7 +1055,9 @@ def micro_pipeline_tp_pass(graph: torch.fx.Graph):
         unexposed_collectives = _get_unexposed_collectives(graph)
         all_gathers = [x for x in all_gathers if x.ag_node not in unexposed_collectives]
         reduce_scatters = [
-            x for x in reduce_scatters if x.rs_node not in unexposed_collectives
+            x
+            for x in reduce_scatters
+            if x.reduce_scatter_node not in unexposed_collectives
         ]
 
     if not all_gathers and not reduce_scatters:
