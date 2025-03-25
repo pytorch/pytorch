@@ -1,3 +1,4 @@
+import importlib
 import itertools
 import logging
 import pickle
@@ -6,7 +7,7 @@ import signal
 import string
 import sys
 import traceback
-from collections.abc import KeysView
+from collections.abc import KeysView, Sequence
 from enum import Enum
 from functools import partial, wraps
 from types import FrameType
@@ -99,6 +100,21 @@ class TypeExemplars:
         return t.__name__ in TypeExemplars.TYPE_EXEMPLARS
 
 
+def check_halide_import() -> bool:
+    """checks if we have halide available"""
+    try:
+        importlib.import_module("halide")
+        return True
+    except ModuleNotFoundError:
+        return False
+
+
+if check_halide_import():
+    CUDA_BACKEND = ["triton", "halide"]
+else:
+    CUDA_BACKEND = ["triton"]
+
+
 class Status(Enum):
     """
     The Status return value enum for Config Fuzzer
@@ -132,7 +148,9 @@ class Status(Enum):
 
 # Sometime the types of configs aren't expressive enough to be captured by python type system, so the options can be
 # manually specified here:
+# TODO this needs to be indexed to the module, like inductor or dynamo, for name collisions
 TYPE_OVERRIDES: dict[str, list[Any]] = {
+    "cuda_backend": CUDA_BACKEND,
     "post_grad_fusion_options": [
         {
             "batch_linear_post_grad": {
@@ -155,6 +173,7 @@ TYPE_OVERRIDES: dict[str, list[Any]] = {
     ],
     "autoheuristic_collect": ["pad_mm", "mixed_mm"],
     "autoheuristic_use": ["pad_mm", "mixed_mm"],
+    "traceable_tensor_subclasses": [OrderedSet()],
 }
 SamplingType = Callable[[str, type[Any], Any], Any]
 
@@ -420,6 +439,72 @@ FactoryOutputType = Callable[[], bool]
 # input function factory
 FactoryType = Callable[[], FactoryOutputType]
 
+# Why are some configs disabled by default? Because if we don't the fuzzer produces uninteresting results.
+# It will always hone-in on these failures, even with the most basic model, making it useless for
+#   debugging more complex models.
+#
+# More explicit explanations are below:
+# Out of Scope: We can't fuzz, say, the cuda version because that comes from the environment and will
+#   produce a failure if not aligned with env.
+# Known Failure: Disabled due to known failure. Hopefully re-enable. Known failures are listed in the
+#   docstring of this file.
+# Required: Required for the fuzzer to operate (removing caching, etc.)
+# FSDP: Flag meant for FSDP that fails in non FSDP envs. Re-enable these if you're testing FSDP.
+# Typing: disabled because the type annotation of the config isn't constrained enough to produce
+#   meaningful fuzz values. These could be improved.
+# Timing: These take too long to compile, feel free to enable.
+MODULE_DEFAULTS: dict[str, ConfigType] = {
+    "torch._inductor.config": {
+        "force_disable_caches": True,  # Required
+        "cpp.cxx": DEFAULT,  # Out of Scope
+        "TYPE_CHECKING": DEFAULT,  # Not a config
+        "max_autotune_pointwise": DEFAULT,  # Timing
+        "max_autotune_gemm": DEFAULT,  # Timing, re-enable when autotune speed improvements merged.
+        "max_autotune_gemm_backends": DEFAULT,  # Timing
+        "max_autotune_conv_backends": DEFAULT,  # Timing
+        "max_autotune_gemm_search_space": DEFAULT,  # Timing
+        "max_autotune_subproc_result_timeout_seconds": DEFAULT,  # Timing
+        "max_autotune_subproc_graceful_timeout_seconds": DEFAULT,  # Timing
+        "max_autotune_subproc_terminate_timeout_seconds": DEFAULT,  # Timing
+        "aot_inductor.presets": DEFAULT,  # Typing
+        "cuda.arch": DEFAULT,  # Out of Scope
+        "cuda.version": DEFAULT,  # Out of Scope
+        "cuda.cutlass_dir": DEFAULT,  # Out of Scope
+        "cuda.cuda_cxx": DEFAULT,  # Out of Scope
+        "rocm.arch": DEFAULT,  # Out of Scope
+        "rocm.ck_supported_arch": DEFAULT,  # Out of Scope
+        "rocm.ck_dir": DEFAULT,  # Out of Scope
+        "rocm.rocm_home": DEFAULT,  # Out of Scope
+        "check_stack_no_cycles_TESTING_ONLY": DEFAULT,  # Testing
+        "sleep_sec_TESTING_ONLY": DEFAULT,  # Testing
+        "triton.inject_relu_bug_TESTING_ONLY": DEFAULT,  # Testing
+        "reorder_for_compute_comm_overlap": DEFAULT,  # FSDP
+        "enabled_metric_tables": DEFAULT,  # Typing
+        "triton.debug_sync_graph": DEFAULT,  # Known Failure
+        "triton.debug_sync_kernel": DEFAULT,  # Known Failure
+        "profile_bandwidth_regex": DEFAULT,  # Known Failure
+        "disable_cpp_codegen": DEFAULT,  # Known Failure
+        "trace.save_real_tensors": DEFAULT,  # Known Failure
+        "pre_grad_fusion_options": DEFAULT,  # Typing
+        "external_matmul": DEFAULT,  # Typing, need to add this to type overrides or type exemplars.
+        "test_configs.autotune_choice_name_regex": DEFAULT,  # Typing
+        "test_configs.autotune_choice_desc_regex": DEFAULT,  # Typing
+        "cpp.enable_floating_point_contract_flag": DEFAULT,  # Typing
+        "post_grad_custom_pre_pass": DEFAULT,  # Typing
+        "post_grad_custom_post_pass": DEFAULT,  # Typing
+        "reorder_for_compute_comm_overlap_passes": DEFAULT,  # Typing
+        "joint_custom_post_pass": DEFAULT,  # Typing
+        "joint_custom_pre_pass": DEFAULT,  # Typing
+        "pre_grad_custom_pass": DEFAULT,  # Typing
+    },
+    "torch._dynamo.config": {
+        "traceable_tensor_subclasses": DEFAULT,  # Typing
+        "compiled_autograd_kwargs_override": DEFAULT,  # Typing
+        "fail_on_recompile_limit_hit": DEFAULT,  # fails in combo with suppress_errors
+        "suppress_errors": DEFAULT,
+    },
+}
+
 
 class ConfigFuzzer:
     """
@@ -441,6 +526,7 @@ class ConfigFuzzer:
     ```python
     import torch._inductor.config as cfg
 
+
     def create_simple_test_model_gpu() -> FactoryOutputType:
         batch_size = 32
         seq_length = 50
@@ -454,6 +540,8 @@ class ConfigFuzzer:
             return True
 
         return test_fn
+
+
     fuzzer = ConfigFuzzer(cfg, create_simple_test_model_gpu, seed=2)
 
     # Test every pair of configs:
@@ -465,7 +553,9 @@ class ConfigFuzzer:
     ret = fuzzer.bisect(num_attempts=10)
 
     # reproduce a failing config
-    fuzzer.reproduce([{"triton.autotune_pointwise": ..., "coordinate_descent_tuning": ...}])
+    fuzzer.reproduce(
+        [{"triton.autotune_pointwise": ..., "coordinate_descent_tuning": ...}]
+    )
     ```
 
     The list of known failures on inductor config are:
@@ -477,6 +567,7 @@ class ConfigFuzzer:
     """
 
     sample: SamplingType
+    default: ConfigType
 
     def __init__(
         self,
@@ -509,54 +600,8 @@ class ConfigFuzzer:
         self.sample = SamplingMethod.dispatch(sm)
 
         if default is None:
-            if self.config_module.__name__ == "torch._inductor.config":
-                # Why are some configs disabled by default? Because if we don't the fuzzer produces uninteresting results.
-                # It will always hone-in on these failures, even with the most basic model, making it useless for
-                #   debugging more complex models.
-                #
-                # More explicit explanations are below:
-                # Out of Scope: We can't fuzz, say, the cuda version because that comes from the environment and will
-                #   produce a failure if not aligned with env.
-                # Known Failure: Disabled due to known failure. Hopefully re-enable. Known failures are listed in the
-                #   docstring of this file.
-                # Required: Required for the fuzzer to operate (removing caching, etc.)
-                # FSDP: Flag meant for FSDP that fails in non FSDP envs. Re-enable these if you're testing FSDP.
-                # Typing: disabled because the type annotation of the config isn't constrained enough to produce
-                #   meaningful fuzz values. These could be improved.
-                # Timing: These take too long to compile, feel free to enable.
-                self.default = {
-                    "force_disable_caches": True,  # Required
-                    "cpp.cxx": DEFAULT,  # Out of Scope
-                    "TYPE_CHECKING": DEFAULT,  # Not a config
-                    "max_autotune_pointwise": DEFAULT,  # Timing
-                    "max_autotune_gemm": DEFAULT,  # Timing, re-enable when autotune speed improvements merged.
-                    "max_autotune_gemm_backends": DEFAULT,  # Timing
-                    "max_autotune_conv_backends": DEFAULT,  # Timing
-                    "max_autotune_gemm_search_space": DEFAULT,  # Timing
-                    "max_autotune_subproc_result_timeout_seconds": DEFAULT,  # Timing
-                    "max_autotune_subproc_graceful_timeout_seconds": DEFAULT,  # Timing
-                    "max_autotune_subproc_terminate_timeout_seconds": DEFAULT,  # Timing
-                    "aot_inductor.presets": DEFAULT,  # Typing
-                    "cuda.arch": DEFAULT,  # Out of Scope
-                    "cuda.version": DEFAULT,  # Out of Scope
-                    "cuda.cutlass_dir": DEFAULT,  # Out of Scope
-                    "cuda.cuda_cxx": DEFAULT,  # Out of Scope
-                    "rocm.arch": DEFAULT,  # Out of Scope
-                    "rocm.ck_supported_arch": DEFAULT,  # Out of Scope
-                    "rocm.ck_dir": DEFAULT,  # Out of Scope
-                    "rocm.rocm_home": DEFAULT,  # Out of Scope
-                    "check_stack_no_cycles_TESTING_ONLY": DEFAULT,  # Testing
-                    "sleep_sec_TESTING_ONLY": DEFAULT,  # Testing
-                    "reorder_for_compute_comm_overlap": DEFAULT,  # FSDP
-                    "enabled_metric_tables": DEFAULT,  # Typing
-                    "triton.debug_sync_graph": DEFAULT,  # Known Failure
-                    "triton.debug_sync_kernel": DEFAULT,  # Known Failure
-                    "triton.inject_relu_bug_TESTING_ONLY": DEFAULT,  # Testing
-                    "profile_bandwidth_regex": DEFAULT,  # Known Failure
-                    "disable_cpp_codegen": DEFAULT,  # Known Failure
-                    "trace.save_real_tensors": DEFAULT,  # Known Failure
-                    "pre_grad_fusion_options": DEFAULT,  # Typing
-                }
+            if self.config_module.__name__ in MODULE_DEFAULTS:
+                self.default = MODULE_DEFAULTS[self.config_module.__name__]
             else:
                 raise ValueError("No default passed to ConfigFuzzer.")
         else:
@@ -585,15 +630,23 @@ class ConfigFuzzer:
         }
         return ret
 
-    def reproduce(self, configs: list[ConfigType]) -> ResultType:
+    def reproduce(self, configs: Sequence[ConfigType]) -> ResultType:
         """entrypoint to reproduce any failure"""
         results = ResultType()
         for conf in configs:
-            print(f"Starting repro of {conf}")
-            new_config = self.new_config()
-            new_config.update(conf)
-            self.test_config(results, new_config)
-            print(f"Status of {conf}:\n{results.lookup(tuple(conf.keys()))}")
+            self._reproduce_single_helper(conf, results)
+        return results
+
+    def _reproduce_single_helper(self, conf: ConfigType, results: ResultType) -> None:
+        print(f"Starting repro of {conf}")
+        new_config = self.new_config()
+        new_config.update(conf)
+        self.test_config(results, new_config)
+        print(f"Status of {conf}:\n{results.lookup(tuple(conf.keys()))}")
+
+    def reproduce_single(self, config: ConfigType) -> ResultType:
+        results = ResultType()
+        self._reproduce_single_helper(config, results)
         return results
 
     def _fuzz_helper(self, results: ResultType, combo: ComboType) -> Status:
@@ -758,6 +811,7 @@ class ConfigFuzzer:
                 if (
                     field_name not in config
                     and not field_name.startswith("_")
+                    and "TESTING_ONLY" not in field_name
                     and random.random() < p
                 ):
                     value = self.sample(

@@ -37,7 +37,7 @@ install_conda_dependencies() {
 
 install_pip_dependencies() {
   pushd executorch
-  as_jenkins bash install_requirements.sh --pybind xnnpack
+  as_jenkins bash install_executorch.sh
 
   # A workaround, ExecuTorch has moved to numpy 2.0 which is not compatible with the current
   # numba and scipy version used in PyTorch CI
@@ -53,7 +53,7 @@ setup_executorch() {
   export EXECUTORCH_BUILD_PYBIND=ON
   export CMAKE_ARGS="-DEXECUTORCH_BUILD_XNNPACK=ON -DEXECUTORCH_BUILD_KERNELS_QUANTIZED=ON"
 
-  as_jenkins .ci/scripts/setup-linux.sh cmake || true
+  as_jenkins .ci/scripts/setup-linux.sh --build-tool cmake || true
   popd
 }
 

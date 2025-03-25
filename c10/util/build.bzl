@@ -80,6 +80,18 @@ def define_targets(rules):
         ],
     )
 
+    rules.cc_library(
+        name = "base_headers",
+        hdrs = rules.glob(
+            ["*.h"],
+            exclude = [
+                "bit_cast.h",
+                "ssize.h",
+            ],
+        ),
+        visibility = ["//visibility:public"],
+    )
+
     rules.filegroup(
         name = "headers",
         srcs = rules.glob(

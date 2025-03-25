@@ -4,8 +4,10 @@
 #include <cusparse.h>
 #include <c10/macros/Export.h>
 
-#ifdef CUDART_VERSION
+#if !defined(USE_ROCM)
 #include <cusolver_common.h>
+#else
+#include <hipsolver/hipsolver.h>
 #endif
 
 #if defined(USE_CUDSS)
@@ -104,10 +106,9 @@ C10_EXPORT const char* cudssGetErrorMessage(cudssStatus_t error);
 #define TORCH_CUDSS_CHECK(EXPR) EXPR
 #endif
 
-// cusolver related headers are only supported on cuda now
-#ifdef CUDART_VERSION
-
 namespace at::cuda::solver {
+#if !defined(USE_ROCM)
+
 C10_EXPORT const char* cusolverGetErrorMessage(cusolverStatus_t status);
 
 constexpr const char* _cusolver_backend_suggestion =            \
@@ -115,8 +116,6 @@ constexpr const char* _cusolver_backend_suggestion =            \
   "`torch.backends.cuda.preferred_linalg_library()` to try "    \
   "linear algebra operators with other supported backends. "    \
   "See https://pytorch.org/docs/stable/backends.html#torch.backends.cuda.preferred_linalg_library";
-
-} // namespace at::cuda::solver
 
 // When cuda < 11.5, cusolver raises CUSOLVER_STATUS_EXECUTION_FAILED when input contains nan.
 // When cuda >= 11.5, cusolver normally finishes execution and sets info array indicating convergence issue.
@@ -144,9 +143,38 @@ constexpr const char* _cusolver_backend_suggestion =            \
     }                                                                   \
   } while (0)
 
-#else
-#define TORCH_CUSOLVER_CHECK(EXPR) EXPR
+#else // defined(USE_ROCM)
+
+C10_EXPORT const char* hipsolverGetErrorMessage(hipsolverStatus_t status);
+
+constexpr const char* _hipsolver_backend_suggestion =           \
+  "If you keep seeing this error, you may use "                 \
+  "`torch.backends.cuda.preferred_linalg_library()` to try "    \
+  "linear algebra operators with other supported backends. "    \
+  "See https://pytorch.org/docs/stable/backends.html#torch.backends.cuda.preferred_linalg_library";
+
+#define TORCH_CUSOLVER_CHECK(EXPR)                                      \
+  do {                                                                  \
+    hipsolverStatus_t __err = EXPR;                                     \
+    if (__err == HIPSOLVER_STATUS_INVALID_VALUE) {                      \
+      TORCH_CHECK_LINALG(                                               \
+          false,                                                        \
+          "hipsolver error: ",                                          \
+          at::cuda::solver::hipsolverGetErrorMessage(__err),            \
+          ", when calling `" #EXPR "`",                                 \
+          ". This error may appear if the input matrix contains NaN. ", \
+          at::cuda::solver::_hipsolver_backend_suggestion);             \
+    } else {                                                            \
+      TORCH_CHECK(                                                      \
+          __err == HIPSOLVER_STATUS_SUCCESS,                            \
+          "hipsolver error: ",                                          \
+          at::cuda::solver::hipsolverGetErrorMessage(__err),            \
+          ", when calling `" #EXPR "`. ",                               \
+          at::cuda::solver::_hipsolver_backend_suggestion);             \
+    }                                                                   \
+  } while (0)
 #endif
+} // namespace at::cuda::solver
 
 #define AT_CUDA_CHECK(EXPR) C10_CUDA_CHECK(EXPR)
 

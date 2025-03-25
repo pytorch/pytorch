@@ -36,7 +36,7 @@ from torch.testing._internal.common_optimizers import (
 
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     MI300_ARCH, TEST_WITH_TORCHINDUCTOR, TEST_WITH_ROCM, run_tests, IS_JETSON,
-    IS_WINDOWS, IS_FILESYSTEM_UTF8_ENCODING, NO_MULTIPROCESSING_SPAWN,
+    IS_FILESYSTEM_UTF8_ENCODING,
     IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, skipIfRocmArch, skipIfTorchInductor, load_tests, slowTest, slowTestIf,
     skipIfCrossRef, TEST_WITH_CROSSREF, skipIfTorchDynamo, skipRocmIfTorchInductor, set_default_dtype,
     skipCUDAMemoryLeakCheckIf, BytesIOContext,
@@ -56,7 +56,7 @@ from torch.testing._internal.common_device_type import (
 import torch.backends.quantized
 import torch.testing._internal.data
 from torch.testing._internal.common_cuda import (
-    tf32_on_and_off, tf32_is_not_fp32, TEST_CUDNN, TEST_MULTIGPU,
+    tf32_on_and_off, TEST_CUDNN, TEST_MULTIGPU,
     _create_scaling_case, _create_scaling_models_optimizers)
 from torch.testing._internal.common_mkldnn import bf32_on_and_off
 from torch.testing._internal.common_dtype import (
@@ -79,7 +79,7 @@ assert torch.get_default_dtype() is torch.float32
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
 
-AMPERE_OR_ROCM = TEST_WITH_ROCM or tf32_is_not_fp32()
+AMPERE_OR_ROCM = TEST_WITH_ROCM or torch.cuda.is_tf32_supported()
 
 @contextlib.contextmanager
 def torch_vital_set(value):
@@ -173,6 +173,18 @@ class TestTorchDeviceType(TestCase):
             bytes_list = [rand_byte() for _ in range(element_size)]
             scalar = bytes_to_scalar(bytes_list, dtype, device)
             self.assertEqual(scalar.storage().untyped().tolist(), bytes_list)
+
+    # For testing in64 support in upsample_nearest3d
+    @onlyCUDA
+    @largeTensorTest('56GB', device='cuda')
+    @dtypes(torch.bfloat16)
+    @unittest.skipIf(IS_JETSON, "Large tensor tests are too large for Jetson.")
+    def test_int64_upsample3d(self, device, dtype):
+        x = torch.ones((1, 256, 16, 720, 1280), dtype=dtype, device=device)
+        try:
+            torch.nn.functional.interpolate(x, scale_factor=2, mode='nearest')
+        except Exception as e:
+            self.fail(f"Unexpected exception raised: {e}")
 
     @dtypes(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64,
             torch.bool, torch.float32, torch.complex64, torch.float64,
@@ -1213,9 +1225,7 @@ class TestTorchDeviceType(TestCase):
             (':16:8', True)]
 
         cublas_var_name = 'CUBLAS_WORKSPACE_CONFIG'
-        is_cuda10_2_or_higher = (
-            (torch.version.cuda is not None)
-            and ([int(x) for x in torch.version.cuda.split(".")] >= [10, 2]))
+        is_cuda10_2_or_higher = (torch.version.cuda is not None)
 
         def test_case_info(fn_name, config):
             return f'function "{fn_name}" with config "{"" if config is None else config}"'
@@ -1620,18 +1630,6 @@ else:
             'reflection_pad1d_backward_out_cuda',
             torch.device(device).type == 'cuda')
 
-    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    def test_nondeterministic_alert_ReflectionPad2d(self, device):
-        module = torch.nn.ReflectionPad2d((1, 2, 3, 4))
-        input = torch.randn(2, 3, 8, 8, device=device, requires_grad=True)
-        res = module(input)
-        grad = torch.ones_like(res)
-
-        self.check_nondeterministic_alert(
-            lambda: res.backward(grad, retain_graph=True),
-            'reflection_pad2d_backward_cuda',
-            torch.device(device).type == 'cuda')
-
     @skipIfMPS
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_ReflectionPad3d(self, device):
@@ -1779,8 +1777,7 @@ else:
             self.assertEqual(res0, res_cpu, atol=1e-3, rtol=1e-2)
 
     @onlyCUDA
-    @largeTensorTest('24GB', device='cuda')
-    @largeTensorTest('24GB', device='cpu')
+    @largeTensorTest('49GB')
     def test_cumsum_64bit_indexing(self, device):
         b = torch.ones(2 * 4096 * 8, 100000, dtype=torch.float, device='cuda')
         b /= 100000
@@ -6111,7 +6108,6 @@ else:
         self._run_scaling_case(device.type, run, unskipped=3, skipped=1)
 
     @onlyNativeDeviceTypes
-    @unittest.skipIf(IS_WINDOWS, 'FIXME: fix this test for Windows')
     def test_grad_scaling_penalty(self, device):
         device = torch.device(device)
 
@@ -6469,6 +6465,11 @@ else:
             self.skipTest('uint16,32,64,float8 not implemented on XLA')
         t = torch.ones((), device=device, dtype=dtype)
         self.assertEqual(1, t.item())
+
+    def test__local_scalar_dense_with_empty_tensor(self, device):
+        input = torch.randn(0, device=device)
+        with self.assertRaisesRegex(RuntimeError, "Empty tensor not supported"):
+            torch.ops.aten._local_scalar_dense(input)
 
     @onlyNativeDeviceTypes
     def test_masked_scatter_inplace_noncontiguous(self, device):
@@ -7167,6 +7168,18 @@ class TestTorch(TestCase):
     def test_tensor_set_errors(self):
         f_cpu = torch.randn((2, 3), dtype=torch.float32)
         d_cpu = torch.randn((2, 3), dtype=torch.float64)
+
+        storage_offset = 0x41414141
+        with self.assertRaisesRegex(RuntimeError, "out of bounds for storage of size"):
+            t = torch.randn(1)
+            t.set_(t.untyped_storage(), storage_offset, t.size())
+
+        # if size changes, set_ will resize the storage inplace
+        t = torch.randn(1)
+        size = torch.Size([2, 3])
+        t.set_(t.untyped_storage(), storage_offset, size)
+        self.assertEqual(t.storage_offset(), storage_offset)
+        self.assertEqual(t.untyped_storage().nbytes(), (storage_offset + size[0] * size[1]) * 4)
 
         # change dtype
         self.assertRaises(RuntimeError, lambda: f_cpu.set_(d_cpu.storage()))
@@ -8793,6 +8806,13 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         with self.assertRaises(TypeError):
             torch.empty((1, 2, 3, 4)).dim_order(ambiguity_check="ILLEGAL_STR")
 
+        # sparse tensor does not support dim order
+        with self.assertRaises(AttributeError):
+            indices = torch.tensor([[0, 1, 2], [0, 1, 2]])  # (row, column) indices
+            values = torch.tensor([1.0, 2.0, 3.0])  # values at those indices
+            sparse_tensor = torch.sparse_coo_tensor(indices, values, size=(3, 3))
+            sparse_tensor.dim_order()
+
     def test_subclass_tensors(self):
         # raise an error when trying to subclass FloatTensor
         with self.assertRaisesRegex(TypeError, "type 'torch.FloatTensor' is not an acceptable base type"):
@@ -9427,10 +9447,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
     def test_to(self):
         self._test_to_with_layout(torch.strided)
-        is_cuda10_2_or_higher = (
-            (torch.version.cuda is not None)
-            and ([int(x) for x in torch.version.cuda.split(".")] >= [10, 2]))
-        if is_cuda10_2_or_higher:  # in cuda10_1 sparse_csr is beta
+        if torch.version.cuda is not None:
             self._test_to_with_layout(torch.sparse_csr)
 
     # FIXME: describe this test
@@ -9584,11 +9601,8 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertNotEqual(output, None)
         self.assertIn('Unhandled exception caught in c10/util/AbortHandler.h', output)
 
-    # FIXME: port to a distributed test suite -- also... how could this be OOMing on Windows CUDA?
+    # FIXME: port to a distributed test suite
     @slowTest
-    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
-                        don't support multiprocessing with spawn start method")
-    @unittest.skipIf(IS_WINDOWS, 'FIXME: CUDA OOM error on Windows')
     def test_multinomial_invalid_probs(self):
         def _spawn_method(self, method, arg):
             try:

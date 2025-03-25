@@ -112,6 +112,7 @@
 #include <ATen/ROCmFABackend.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/native/transformers/cuda/sdp_utils.h>
+#include <torch/csrc/inductor/static_cuda_launcher.h>
 #ifdef __HIP_PLATFORM_AMD__
 #include <ATen/native/cudnn/hip/BatchNorm.h>
 #else
@@ -947,6 +948,29 @@ static PyObject* THPModule_setDeterministicAlgorithms(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPModule_setAllowTF32OneDNN(
+    PyObject* _unsued,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      PyBool_Check(arg),
+      "_set_onednn_allow_tf32 expects a bool, "
+      "but got ",
+      THPUtils_typename(arg));
+  at::globalContext().setAllowTF32OneDNN(arg == Py_True);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPModule_allowTF32OneDNN(
+    PyObject* _unused,
+    PyObject* noargs) {
+  if (at::globalContext().allowTF32OneDNN())
+    Py_RETURN_TRUE;
+  else
+    Py_RETURN_FALSE;
+}
+
 static PyObject* THPModule_deterministicAlgorithms(
     PyObject* _unused,
     PyObject* noargs) {
@@ -1128,6 +1152,29 @@ static PyObject* THPModule_allowBF16ReductionCuBLAS(
     PyObject* _unused,
     PyObject* noargs) {
   if (at::globalContext().allowBF16ReductionCuBLAS()) {
+    Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
+}
+
+static PyObject* THPModule_setAllowFP16AccumulationCuBLAS(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      PyBool_Check(arg),
+      "set_allow_fp16_accumulation_cublas expects a bool, "
+      "but got ",
+      THPUtils_typename(arg));
+  at::globalContext().setAllowFP16AccumulationCuBLAS(arg == Py_True);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPModule_allowFP16AccumulationCuBLAS(
+    PyObject* _unused,
+    PyObject* noargs) {
+  if (at::globalContext().allowFP16AccumulationCuBLAS()) {
     Py_RETURN_TRUE;
   }
   Py_RETURN_FALSE;
@@ -1504,6 +1551,8 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
     {"_set_mkldnn_enabled", THPModule_setUserEnabledMkldnn, METH_O, nullptr},
     {"_get_cudnn_allow_tf32", THPModule_allowTF32CuDNN, METH_NOARGS, nullptr},
     {"_set_cudnn_allow_tf32", THPModule_setAllowTF32CuDNN, METH_O, nullptr},
+    {"_get_onednn_allow_tf32", THPModule_allowTF32OneDNN, METH_NOARGS, nullptr},
+    {"_set_onednn_allow_tf32", THPModule_setAllowTF32OneDNN, METH_O, nullptr},
     {"_get_cudnn_benchmark", THPModule_benchmarkCuDNN, METH_NOARGS, nullptr},
     {"_set_cudnn_benchmark", THPModule_setBenchmarkCuDNN, METH_O, nullptr},
     {"_get_cudnn_deterministic",
@@ -1572,6 +1621,14 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      nullptr},
     {"_set_cublas_allow_bf16_reduced_precision_reduction",
      THPModule_setAllowBF16ReductionCuBLAS,
+     METH_O,
+     nullptr},
+    {"_get_cublas_allow_fp16_accumulation",
+     THPModule_allowFP16AccumulationCuBLAS,
+     METH_NOARGS,
+     nullptr},
+    {"_set_cublas_allow_fp16_accumulation",
+     THPModule_setAllowFP16AccumulationCuBLAS,
      METH_O,
      nullptr},
     {"_get_cpu_allow_fp16_reduced_precision_reduction",
@@ -1825,6 +1882,9 @@ PyObject* initModule() {
 #endif
 #ifdef USE_CUDA
   torch::cuda::initModule(module);
+#endif
+#if defined(USE_CUDA) && !defined(USE_ROCM)
+  ASSERT_TRUE(StaticCudaLauncher_init(module));
 #endif
 #ifdef USE_MPS
   torch::mps::initModule(module);
@@ -2207,6 +2267,14 @@ Call this whenever a new thread is created in order to propagate values from
   });
 
   py_module.def(
+      "_set_sm_carveout_experimental", [](std::optional<int32_t> val) {
+        at::globalContext()._setSMCarveout_EXPERIMENTAL(val);
+      });
+  py_module.def("_get_sm_carveout_experimental", []() {
+    return at::globalContext()._SMCarveout_EXPERIMENTAL();
+  });
+
+  py_module.def(
       "_construct_storage_from_data_pointer",
       [](int64_t data_ptr, c10::Device device, size_t size_bytes) {
         return c10::Storage(
@@ -2291,10 +2359,17 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def(
       "_get_accelerator",
       [](std::optional<bool> check = std::nullopt) {
-        return c10::Device(
-            at::getAccelerator(check.value_or(false))
-                .value_or(c10::DeviceType::CPU),
-            -1);
+        auto acc = at::getAccelerator(check.value_or(false));
+        if (acc.has_value()) {
+          bool is_available = at::globalContext()
+                                  .getAcceleratorHooksInterface(acc.value())
+                                  .isAvailable();
+
+          if (!is_available) {
+            acc = std::nullopt;
+          }
+        }
+        return c10::Device(acc.value_or(c10::DeviceType::CPU), -1);
       },
       py::arg("check") = nullptr);
 

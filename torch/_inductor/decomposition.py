@@ -123,7 +123,7 @@ remove_decompositions(decompositions, decomps_to_exclude)
 
 
 def register_decomposition(
-    ops: list[Union[torch._ops.OperatorBase, torch._ops.OpOverloadPacket]]
+    ops: list[Union[torch._ops.OperatorBase, torch._ops.OpOverloadPacket]],
 ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     for op in [ops] if callable(ops) else ops:  # type: ignore[attr-defined]
         if op in decompositions:
@@ -986,11 +986,9 @@ def max_pool2d_with_indices(
     stride = pad_listlike(stride, 2)
 
     window_size = kernel_size[0] * kernel_size[1]
-    # We fallback when using non-default dilation or when the window size is too large
+    # We fallback when the window size is too large
     if (
-        torch._inductor.lowering.should_fallback_max_pool2d_with_indices(
-            kernel_size, dilation
-        )
+        torch._inductor.lowering.should_fallback_max_pool2d_with_indices(kernel_size)
         or window_size > torch.iinfo(torch.int8).max
     ):
         return NotImplemented
@@ -1009,6 +1007,7 @@ def max_pool2d_with_indices(
         x.size(-1),
         stride,
         padding,
+        dilation,
     )
     return vals, indices
 

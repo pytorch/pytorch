@@ -926,7 +926,6 @@ inline DeviceIndex get_device(const TensorBase& self) {
 }
 
 template <typename T>
-// NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
 auto TensorBase::register_hook(T&& hook) const -> TensorBase::hook_return_void_t<T> {
   // Return the grad argument in case of a hook with void return type to have an
   // std::function with Tensor return type

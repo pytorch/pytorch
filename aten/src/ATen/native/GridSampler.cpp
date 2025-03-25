@@ -777,8 +777,7 @@ _grid_sampler_2d_cpu_fallback_backward(const Tensor& grad_output,
           scalar_t y = grid_ptr_NHW[grid_sCoor];
 
           // multipliers for gradients on ix, iy
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-          scalar_t gix_mult, giy_mult;
+          scalar_t gix_mult{}, giy_mult{};
           scalar_t ix = grid_sampler_compute_source_index_set_grad(x, inp_W, padding_mode, align_corners, &gix_mult);
           scalar_t iy = grid_sampler_compute_source_index_set_grad(y, inp_H, padding_mode, align_corners, &giy_mult);
 
