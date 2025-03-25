@@ -2739,24 +2739,18 @@ class Scheduler:
         device = node_list_fused[0].get_device()
         assert device is not None
 
-        epilogue_fusion = node1.get_template_node() is not None
-
         def log_fusion(ms_fused: float, ms1: float, ms2: float) -> None:
             if fusion_log.isEnabledFor(logging.DEBUG):
                 if ms_fused < ms1 + ms2:
-                    if not epilogue_fusion:
-                        breakpoint()
                     fusion_log.debug(
                         "can fuse %s (benchmark): fusing %s with %s cause %sx speedup",
-                        "epilogue" if epilogue_fusion else "prologue",
                         node1.get_buffer_names(),
                         node2.get_buffer_names(),
                         green_text(f"{(ms1 + ms2) / ms_fused:.3f}"),
                     )
                 else:
                     fusion_log.debug(
-                        "cannot fuse  %s benchmark): fusing %s with %s cause %sx slowdown",
-                        "epilogue" if epilogue_fusion else "prologue",
+                        "cannot fuse (benchmark): fusing %s with %s cause %sx speedup",
                         node1.get_buffer_names(),
                         node2.get_buffer_names(),
                         red_text(f"{ms_fused / (ms1 + ms2):.3f}"),
