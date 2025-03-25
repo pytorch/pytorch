@@ -1,7 +1,5 @@
 #include <torch/csrc/DeviceAccelerator.h>
-#include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/device_lazy_init.h>
-#include <torch/csrc/utils/object_ptr.h>
 
 namespace torch::accelerator {
 
