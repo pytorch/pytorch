@@ -26,6 +26,7 @@ ciflow_push_tags:
 - ciflow/torchbench
 - ciflow/autoformat
 - ciflow/win-arm64
+- ciflow/op-benchmark
 retryable_workflows:
 - pull
 - trunk
