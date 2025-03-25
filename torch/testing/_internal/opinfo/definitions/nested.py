@@ -966,6 +966,94 @@ def reference_bmm(op, sample):
     return unbind_reference(matmul_op, modified_sample)
 
 
+def sample_inputs_cat(op_info, device, dtype, requires_grad, op_kwargs=None, **kwargs):
+    for sample_input in sample_inputs_unary_dimwise(
+        op_info, device, dtype, requires_grad, **kwargs
+    ):
+        dim = sample_input.kwargs["dim"]
+        if dim == 0:
+            # skip batch dim since we don't expect to support this
+            continue
+        if dim == sample_input.input._ragged_idx:
+            # vary ragged structure but keep other dims the same
+            other_shape = list(sample_input.input.shape)
+            other_shape[sample_input.input._ragged_idx] = None
+            tensors = [_clone(sample_input.input)]
+            for _ in range(2):
+                other = random_nt_from_dims(
+                    other_shape,
+                    device=device,
+                    dtype=dtype,
+                    requires_grad=requires_grad,
+                    layout=torch.jagged,
+                )
+                tensors.append(other)
+            yield SampleInput(
+                tensors,
+                kwargs=dict(sample_input.kwargs),
+                name=sample_input.name,
+            )
+
+            # add dense tensor to sequence
+            dense_shape = list(sample_input.input.shape)
+            dense_shape[sample_input.input._ragged_idx] = _rnd()
+            dense = torch.randn(
+                dense_shape, device=device, dtype=dtype, requires_grad=requires_grad
+            )
+            tensors = [_clone(sample_input.input), dense]
+            yield SampleInput(
+                tensors,
+                kwargs=dict(sample_input.kwargs),
+                name=f"{sample_input.name} with dense",
+            )
+        else:
+            # vary specified dim but keep ragged structure and other dims the same
+            tensors = [_clone(sample_input.input)]
+            other_shape = list(sample_input.input.shape)
+            other_shape[dim] = _rnd()
+            for _ in range(2):
+                other = torch.randn_like(sample_input.input)
+                other = (
+                    other.sum(dim=sample_input.kwargs["dim"], keepdim=True)
+                    .expand(other_shape)
+                    .clone()
+                    .detach_()
+                )
+                tensors.append(other)
+            sample_input.input = tensors
+            yield sample_input
+
+
+def reference_cat(op, sample):
+    tensors = sample.input
+    tensors = [
+        t if t.is_nested else torch.nested.as_nested_tensor(t, layout=torch.jagged)
+        for t in tensors
+    ]
+    dim = sample.kwargs.get("dim", None)
+    # batch dim is not supported for cat() or this reference
+    assert dim != 0
+    # expect all inputs to be nested
+    assert all(t.is_nested for t in tensors)
+    nt_inp = tensors[0]
+    # expect all ragged indices to be the same
+    assert all(t._ragged_idx for t in tensors)
+    # expect all dims to be the same
+    assert all(t.dim() == nt_inp.dim() for t in tensors)
+    # expect all batch sizes to be the same
+    assert all(t.shape[0] == nt_inp.shape[0] for t in tensors)
+    unbound = [t.unbind() for t in tensors]
+
+    from torch.nested._internal.ops import _outer_to_inner_dim
+
+    dim = _outer_to_inner_dim(nt_inp.dim(), dim, nt_inp._ragged_idx, canonicalize=True)
+
+    out_ref_components = [
+        torch.cat([u[i] for u in unbound], dim=dim) for i in range(nt_inp.shape[0])
+    ]
+    return torch.nested.as_nested_tensor(out_ref_components, layout=torch.jagged)
+
+
 def sample_inputs_chunk(op_info, device, dtype, requires_grad, **kwargs):
     for sample_input in sample_inputs_unary_dimwise(
         op_info, device, dtype, requires_grad, **kwargs
@@ -1495,6 +1583,7 @@ def sample_inputs_where(op_info, device, dtype, requires_grad, **kwargs):
 # in alphabetical order!
 njt_sample_inputs = {
     "bmm": sample_inputs_bmm,
+    "cat": sample_inputs_cat,
     "chunk": sample_inputs_chunk,
     "clone": sample_inputs_clone,
     "count_nonzero": partial(sample_inputs_njt_reduction, supports_keepdim=False),
@@ -1527,6 +1616,7 @@ njt_sample_inputs = {
 
 njt_references = {
     "bmm": reference_bmm,
+    "cat": reference_cat,
     "chunk": partial(
         unary_dimwise_reference, batchwise_reference=batchwise_reference_chunk
     ),
