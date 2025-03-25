@@ -14209,9 +14209,6 @@ if RUN_GPU:
             self.assertEqual(compiled_out, f(x, y))
 
         @dynamo_config.patch("capture_dynamic_output_shape_ops", True)
-        # https://github.com/halide/Halide/issues/8308
-        @config.patch("halide.scheduler_cpu", "Mullapudi2016")
-        @config.patch("halide.scheduler_cuda", "Li2018")
         @config.patch(implicit_fallbacks=True)
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_symint_from_nested_indirect_indexing(self):
