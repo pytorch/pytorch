@@ -34,3 +34,5 @@ sed -i 's/^FOPENMP/#FOPENMP/g' make.inc
 make -f make.gen.hipMAGMA -j $(nproc)
 LANG=C.UTF-8 make lib/libmagma.so -j $(nproc) MKLROOT="${MKLROOT}"
 make testing/testing_dgemm -j $(nproc) MKLROOT="${MKLROOT}"
+cp -R lib ${INSTALL_DIR}
+cp -R include ${INSTALL_DIR}
