@@ -15,6 +15,7 @@ from .optimizer import (
     _get_scalar_dtype,
     _maximize_doc,
     _params_doc,
+    _to_scalar,
     _use_grad_for_differentiable,
     _view_as_real,
     Optimizer,
@@ -105,7 +106,7 @@ class Rprop(Optimizer):  # noqa: D101
                         grad, complex(group["lr"], group["lr"])
                     )
                 else:
-                    state["step_size"] = torch.full_like(grad, group["lr"])
+                    state["step_size"] = torch.full_like(grad, _to_scalar(group["lr"]))
 
             prevs.append(state["prev"])
             step_sizes.append(state["step_size"])

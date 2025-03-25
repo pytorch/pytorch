@@ -91,7 +91,7 @@ class TestMemoryPlanning(TestCase):
         dim0_x = Dim("dim0_x", min=1, max=2048)
         dynamic_shapes = ({0: dim0_x}, None, None)
         result, code = run_and_get_cpp_code(
-            lambda: AOTIRunnerUtil.run(GPU_TYPE, f, args, dynamic_shapes=dynamic_shapes)
+            lambda: AOTIRunnerUtil.run(f, args, dynamic_shapes=dynamic_shapes)
         )
 
         FileCheck().check(

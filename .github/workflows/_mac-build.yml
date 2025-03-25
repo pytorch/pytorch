@@ -33,10 +33,6 @@ on:
         default: "3.9"
         description: |
           The python version to be used. Will be 3.9 by default
-      environment-file:
-        required: false
-        type: string
-        description: Set the conda environment file used to setup macOS build.
       test-matrix:
         required: false
         type: string
@@ -86,21 +82,10 @@ jobs:
           fi
 
       - name: Setup miniconda
-        if: inputs.environment-file == ''
         uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
           python-version: ${{ inputs.python-version }}
           environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
-          pip-requirements-file: .github/requirements/pip-requirements-${{ runner.os }}.txt
-
-      # This option is used when cross-compiling arm64 from x86-64. Specifically, we need arm64 conda
-      # environment even though the arch is x86-64
-      - name: Setup miniconda using the provided environment file
-        if: inputs.environment-file != ''
-        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
-        with:
-          python-version: ${{ inputs.python-version }}
-          environment-file: ${{ inputs.environment-file }}
           pip-requirements-file: .github/requirements/pip-requirements-${{ runner.os }}.txt
 
       - name: Install sccache (only for non-forked PRs, and pushes to trunk)
