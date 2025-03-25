@@ -3,7 +3,7 @@ import functools
 import itertools
 import logging
 from collections.abc import Iterable, Sequence
-from typing import Any, Callable, cast, Optional, Sequence, TYPE_CHECKING, Union
+from typing import Any, Callable, cast, Optional, TYPE_CHECKING, Union
 
 import sympy
 from sympy import Expr

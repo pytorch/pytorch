@@ -610,7 +610,7 @@ def extract_read_writes(
             fn,
             [*args, *hidden_args],  # type: ignore[list-item]
             var_ranges,
-            normalize
+            normalize,
         )
     else:
         # Slow path tracing the function

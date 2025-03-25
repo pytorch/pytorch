@@ -133,10 +133,7 @@ class MetalShaderLibrary {
       TensorIteratorBase& iter,
       const std::string& name,
       std::optional<int64_t> extra = std::nullopt);
-  void exec_binary_kernel(
-      TensorIteratorBase& iter,
-      const std::string& name,
-      const bool supports_dense = true);
+  void exec_binary_kernel(TensorIteratorBase& iter, const std::string& name);
 
  protected:
   virtual MTLLibrary_t getLibrary();

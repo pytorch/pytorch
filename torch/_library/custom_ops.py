@@ -338,9 +338,10 @@ class CustomOpDef:
                             fn = self._backend_fns[device_type]
                             return inspect.getmodule(fn)
 
-                        utils.check_aliasing_constraint(
+                        utils._c_check_aliasing_constraint(
                             self._name,
-                            utils.iter_tensors(args, kwargs),
+                            args,
+                            kwargs,
                             result,
                             get_module,
                         )

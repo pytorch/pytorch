@@ -114,7 +114,7 @@ def _get_data(x: ir.TensorBox) -> ir.IRNode:
     if isinstance(x.data, ir.BaseView):
         # TensorBox -> *View -> StorageBox -> IRNode
         node = x.data.unwrap_view()
-        assert isinstance(node, ir.DataNode)
+        assert isinstance(node, (ir.BaseView, ir.MutableBox))
         return node.data
     elif isinstance(x.data, ir.StorageBox):
         # TensorBox -> StorageBox -> IRNode
