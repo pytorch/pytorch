@@ -2481,14 +2481,14 @@ class TestSDPACudaOnly(NNTestCase):
         key = torch.rand(batch, 8, seq_len_kv, D, device='cuda', dtype=torch.bfloat16)
         value = torch.rand(batch, 8, seq_len_kv, D, device='cuda', dtype=torch.bfloat16)
         with sdpa_kernel([SDPBackend.MATH]):
-           output_math = scaled_dot_product_attention(query, key, value, is_causal=True, enable_gqa=True)
+            output_math = scaled_dot_product_attention(query, key, value, is_causal=True, enable_gqa=True)
 
         with self.assertRaisesRegex(RuntimeError, "No available kernel."):
             with sdpa_kernel([SDPBackend.CUDNN_ATTENTION]):
-               output_cudnn = scaled_dot_product_attention(query, key, value, is_causal=True, enable_gqa=False)
+                output_cudnn = scaled_dot_product_attention(query, key, value, is_causal=True, enable_gqa=False)
 
         with sdpa_kernel([SDPBackend.CUDNN_ATTENTION]):
-           output_cudnn = scaled_dot_product_attention(query, key, value, is_causal=True, enable_gqa=True)
+            output_cudnn = scaled_dot_product_attention(query, key, value, is_causal=True, enable_gqa=True)
 
         self.assertEqual(output_math, output_cudnn)
 
