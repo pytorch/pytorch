@@ -427,8 +427,8 @@ class MetalOverrides(OpOverrides):
         return f"c10::metal::scaled_modified_bessel_k1_forward({x})"
 
     @staticmethod
-    def chebyshev_polynomial_t(x: CSEVariable) -> str:
-        return f"c10::metal::chebyshev_polynomial_t_forward({x})"
+    def chebyshev_polynomial_t(x: CSEVariable, n: CSEVariable) -> str:
+        return f"c10::metal::chebyshev_polynomial_t_forward({x}, {n})"
 
 
 MetalOverrides._initialize_pointwise_overrides("mps")

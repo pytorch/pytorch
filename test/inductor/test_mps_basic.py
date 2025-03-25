@@ -102,7 +102,6 @@ class MPSBasicTests(TestCase):
         "modified_bessel_k1",
         "scaled_modified_bessel_k0",
         "scaled_modified_bessel_k1",
-        "chebyshev_polynomial_t",
         "entr",
     ]
 
@@ -134,6 +133,13 @@ class MPSBasicTests(TestCase):
     def test_pointwise_xlog1py(self):
         self.common(
             torch.special.xlog1py,
+            (torch.rand(128, 128), torch.rand(128, 128)),
+            check_lowp=False,
+        )
+
+    def chebyshev_polynomial_t(self):
+        self.common(
+            torch.special.chebyshev_polynomial_t,
             (torch.rand(128, 128), torch.rand(128, 128)),
             check_lowp=False,
         )
