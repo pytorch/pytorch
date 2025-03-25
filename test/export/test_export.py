@@ -6834,7 +6834,7 @@ def forward(self, b_a_buffer, x):
 
         inp = torch.randn(3)
         init, xs = torch.ones(3), ({"moo": torch.ones(3), "moo2": torch.ones(3)},)
-        ep = torch.export.export(M(), (init, xs))
+        ep = export(M(), (init, xs))
         self.assertEqual(ep.module()(init, xs), M()(init, xs))
 
     # map_fn references module outside the module hierarchy
