@@ -25,7 +25,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
 
   CUDAGuardImpl() = default;
   explicit CUDAGuardImpl(DeviceType t) {
-    TORCH_INTERNAL_ASSERT(
+    TORCH_CHECK(
         t == DeviceType::CUDA,
         "CUDAGuardImpl initialized with non-CUDA DeviceType: ",
         t);
@@ -34,7 +34,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     return DeviceType::CUDA;
   }
   Device exchangeDevice(Device d) const override {
-    TORCH_INTERNAL_ASSERT(d.is_cuda(), "Expected a CUDA device, but got ", d);
+    TORCH_CHECK(d.is_cuda(), "Expected a CUDA device, but got ", d);
     auto old_device_index = c10::cuda::ExchangeDevice(d.index());
     return Device(DeviceType::CUDA, old_device_index);
   }
@@ -53,7 +53,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     return Device(DeviceType::CUDA, device);
   }
   void setDevice(Device d) const override {
-    TORCH_INTERNAL_ASSERT(d.is_cuda(), "Expected a CUDA device, but got ", d);
+    TORCH_CHECK(d.is_cuda(), "Expected a CUDA device, but got ", d);
     C10_CUDA_CHECK(c10::cuda::SetDevice(d.index()));
   }
   void uncheckedSetDevice(Device d) const noexcept override {
