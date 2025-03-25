@@ -4061,9 +4061,13 @@ class Scheduler:
                     | free_symbols(layout.stride)
                     | free_symbols(layout.offset)
                 )
-            if isinstance(layout, ir.MutationLayoutSHOULDREMOVE):
+            elif isinstance(layout, ir.MutationLayoutSHOULDREMOVE):
                 # symint may be used as index in layout.target
                 free_symbol_uses.update(get_layout_symints(layout.target))
+            else:
+                assert layout is None, (
+                    f"Expect layout to be None but found layout={layout}"
+                )
             return free_symbol_uses
 
         def get_scheduler_node_symbol_uses(
@@ -4117,9 +4121,6 @@ class Scheduler:
                         SymT.UNBACKED_INT,
                         SymT.UNBACKED_FLOAT,
                         SymT.PRECOMPUTED_SIZE,
-                        SymT.XBLOCK,
-                        SymT.YBLOCK,
-                        SymT.ZBLOCK,
                     ),
                 )
             )
