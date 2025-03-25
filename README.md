@@ -146,7 +146,7 @@ No wrapper code needs to be written. You can see [a tutorial here](https://pytor
 ## Installation
 
 ### Binaries
-Commands to install binaries via Conda or pip wheels are on our website: [https://pytorch.org/get-started/locally/](https://pytorch.org/get-started/locally/)
+Commands to install binaries via pip wheels are on our website: [https://pytorch.org/get-started/locally/](https://pytorch.org/get-started/locally/)
 
 
 #### NVIDIA Jetson Platforms
@@ -169,26 +169,7 @@ Professional, or Community Editions. You can also install the build tools from
 https://visualstudio.microsoft.com/visual-cpp-build-tools/. The build tools *do not*
 come with Visual Studio Code by default.
 
-\* We highly recommend installing an [Anaconda](https://www.anaconda.com/download) environment. You will get a high-quality BLAS library (MKL) and you get controlled dependency versions regardless of your Linux distro.
 
-An example of environment setup is shown below:
-
-* Linux:
-
-```bash
-$ source <CONDA_INSTALL_DIR>/bin/activate
-$ conda create -y -n <CONDA_NAME>
-$ conda activate <CONDA_NAME>
-```
-
-* Windows:
-
-```bash
-$ source <CONDA_INSTALL_DIR>\Scripts\activate.bat
-$ conda create -y -n <CONDA_NAME>
-$ conda activate <CONDA_NAME>
-$ call "C:\Program Files\Microsoft Visual Studio\<VERSION>\Community\VC\Auxiliary\Build\vcvarsall.bat" x64
-```
 
 ##### NVIDIA CUDA Support
 If you want to compile with CUDA support, [select a supported version of CUDA from our support matrix](https://pytorch.org/get-started/locally/), then install the following:
@@ -235,7 +216,6 @@ git submodule update --init --recursive
 **Common**
 
 ```bash
-conda install cmake ninja
 # Run this command from the PyTorch directory after cloning the source code using the “Get the PyTorch Source“ section below
 pip install -r requirements.txt
 ```
@@ -245,7 +225,6 @@ pip install -r requirements.txt
 ```bash
 pip install mkl-static mkl-include
 # CUDA only: Add LAPACK support for the GPU if needed
-conda install -c pytorch magma-cuda121  # or the magma-cuda* that matches your CUDA version from https://anaconda.org/pytorch/repo
 
 # (optional) If using torch.compile with inductor/triton, install the matching version of triton
 # Run from the pytorch directory after cloning
@@ -259,7 +238,6 @@ make triton
 # Add this package on intel x86 processor machines only
 pip install mkl-static mkl-include
 # Add these packages if torch.distributed is needed
-conda install pkg-config libuv
 ```
 
 **On Windows**
@@ -268,7 +246,6 @@ conda install pkg-config libuv
 pip install mkl-static mkl-include
 # Add these packages if torch.distributed is needed.
 # Distributed package support on Windows is a prototype feature and is subject to changes.
-conda install -c conda-forge libuv=1.39
 ```
 
 #### Install PyTorch
@@ -288,6 +265,7 @@ python tools/amd_build/build_amd.py
 ```
 
 Install PyTorch
+# TODO: Update this.
 ```bash
 export CMAKE_PREFIX_PATH="${CONDA_PREFIX:-'$(dirname $(which conda))/../'}:${CMAKE_PREFIX_PATH}"
 python setup.py develop
@@ -373,6 +351,7 @@ with such a step.
 
 On Linux
 ```bash
+# TODO: Update this.
 export CMAKE_PREFIX_PATH="${CONDA_PREFIX:-'$(dirname $(which conda))/../'}:${CMAKE_PREFIX_PATH}"
 python setup.py build --cmake-only
 ccmake build  # or cmake-gui build
@@ -380,6 +359,7 @@ ccmake build  # or cmake-gui build
 
 On macOS
 ```bash
+# TODO: Update this.
 export CMAKE_PREFIX_PATH="${CONDA_PREFIX:-'$(dirname $(which conda))/../'}:${CMAKE_PREFIX_PATH}"
 MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py build --cmake-only
 ccmake build  # or cmake-gui build
@@ -402,7 +382,7 @@ should increase shared memory size either with `--ipc=host` or `--shm-size` comm
 #### Building the image yourself
 
 **NOTE:** Must be built with a docker version > 18.06
-
+# TODO: Update this.
 The `Dockerfile` is supplied to build images with CUDA 11.1 support and cuDNN v8.
 You can pass `PYTHON_VERSION=x.y` make variable to specify which Python version is to be used by Miniconda, or leave it
 unset to use the default.
