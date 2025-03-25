@@ -3,11 +3,12 @@ from __future__ import annotations
 import contextlib
 import dataclasses
 import functools
+import threading
 import typing
 import warnings
 import weakref
 from abc import abstractmethod
-from contextlib import AbstractContextManager
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from typing import (
     Any,
@@ -45,6 +46,8 @@ from torch.utils.weak import WeakIdKeyDictionary
 
 
 if TYPE_CHECKING:
+    from collections.abc import Generator
+
     from torch._C._functorch import CInterpreter
     from torch._guards import Source
     from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
@@ -92,6 +95,23 @@ def assert_eq(a: _T, b: _T) -> None:
     assert a == b, f"{a} != {b}"
 
 
+tls = threading.local()
+# Turns off inference mode for fake tensor propagation. This is turned to True
+# only for `torch.compile`. Also look at
+# _dynamo.config.fake_tensor_disable_inference_mode
+tls.disable_inference_mode = False
+
+
+@contextmanager
+def disable_inference_mode_for_fake_prop() -> Generator[None, None, None]:
+    prior = getattr(tls, "disable_inference_mode", False)
+    tls.disable_inference_mode = True
+    try:
+        yield
+    finally:
+        tls.disable_inference_mode = prior
+
+
 def assert_metadata_eq(
     assert_eq: Callable[[object, object], None],
     m1: Union[MetaTensorDesc, torch.Tensor],
@@ -116,7 +136,10 @@ def assert_metadata_eq(
         # MetaTensorDesc doesn't store grad_fn; inferred from leaf
         # assert_eq(m1.grad_fn is None, m2.grad_fn is None)
         assert_eq(m1.is_sparse, m2.is_sparse)
-        assert_eq(m1.is_inference, m2.is_inference())
+        if not getattr(tls, "disable_inference_mode", False):
+            assert_eq(m1.is_inference, m2.is_inference())
+        else:
+            assert_eq(m1.is_inference, False)
         assert_eq(m1.is_conj, m2.is_conj())
         assert_eq(m1.is_neg, m2.is_neg())
         assert_eq(m1.grad is not None, safe_grad(m2) is not None)
@@ -354,10 +377,11 @@ class MetaTensorDescriber:
 
         # TODO: Is it important to enable torch.inference_mode before querying
         # these values?
+        is_inference_mode_disabled = getattr(tls, "disable_inference_mode", False)
         r: MetaTensorDesc = MetaTensorDesc(
             id=self.get_tensor_id(t),
             storage=storage,
-            is_inference=t.is_inference(),
+            is_inference=False if is_inference_mode_disabled else t.is_inference(),
             is_leaf=is_leaf,
             requires_grad=t.requires_grad,
             # NB: ndim should be OK too but there is a disaster at

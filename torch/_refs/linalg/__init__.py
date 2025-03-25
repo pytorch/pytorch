@@ -61,6 +61,7 @@ def _check_norm_dtype(dtype: Optional[torch.dtype], x_dtype: torch.dtype, fn_nam
 
 
 import operator
+from operator import or_ as sym_or
 
 # Utilities should come BEFORE this import
 from torch._decomp import register_decomposition
@@ -107,7 +108,7 @@ def vector_norm(
     *,
     dtype: Optional[torch.dtype] = None,
 ) -> Tensor:
-    from torch.fx.experimental.symbolic_shapes import guard_or_false
+    from torch.fx.experimental.symbolic_shapes import guard_or_true
 
     # Checks
     check_fp_or_complex(x.dtype, "linalg.vector_norm")
@@ -115,28 +116,28 @@ def vector_norm(
     if isinstance(dim, Dim):
         dim = [dim]  # type: ignore[assignment]
 
-    # The effect of guard_or_false(x.numel() == 0) here is avoid having the additional 
-    # checks that we do when x.numel() == 0.
-
-    # Alternatively, we could append to all those checks sym_or(x.numel()!= 0, ...) 
-    # by doing so we would convert the check x.numel() == 0 to a runtime checks they 
-    # checks will always be running without any deviation from backed semantics when 
-    # (x.numel() == 0)
-    if (ord < 0.0 or ord == float("inf")) and guard_or_false(x.numel() == 0):
-        torch._check(
-            dim is not None and len(dim) != 0,
-            lambda: f"linalg.vector_norm cannot compute the {ord} norm on an empty tensor "
-            "because the operation does not have an identity",
-        )
-        shape = x.shape
-        assert dim is not None  # mypy does not seem to be able to see through check?
-        for d in dim:
+    if ord < 0.0 or ord == float("inf"):
+        # No need to do the checks bellow if we can identify at compile time that
+        # x.numel() != 0.
+        # x.numel() != 0 is repeated in the checks on purpose to handle the situation
+        # where x.numel() == 0 is data dependent. In such case it will be checked at runtime.
+        if guard_or_true(x.numel() == 0):
             torch._check(
-                shape[d] != 0,
-                lambda: f"linalg.vector_norm cannot compute the {ord} norm on the "
-                f"dimension {d} because this dimension is empty and the "
-                "operation does not have an identity",
+                sym_or(x.numel() != 0, dim is not None and len(dim) != 0),
+                lambda: f"linalg.vector_norm cannot compute the {ord} norm on an empty tensor "
+                "because the operation does not have an identity",
             )
+            shape = x.shape
+            assert (
+                dim is not None
+            )  # mypy does not seem to be able to see through check?
+            for d in dim:
+                torch._check(
+                    sym_or(x.numel() != 0, shape[d] != 0),
+                    lambda: f"linalg.vector_norm cannot compute the {ord} norm on the "
+                    f"dimension {d} because this dimension is empty and the "
+                    "operation does not have an identity",
+                )
     _check_norm_dtype(dtype, x.dtype, "linalg.vector_norm")
 
     computation_dtype, result_dtype = utils.reduction_dtypes(
