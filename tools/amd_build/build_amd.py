@@ -199,6 +199,7 @@ for hip_platform_file in hip_platform_files:
                     sources.write(line)
             print(f"{hip_platform_file} updated")
 
+
 hipify_python.hipify(
     project_directory=proj_dir,
     output_directory=out_dir,

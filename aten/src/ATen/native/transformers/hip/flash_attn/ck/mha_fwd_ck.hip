@@ -7,7 +7,6 @@
 #include <mask.hpp>
 
 
-
 namespace pytorch_flash {
 
 
@@ -16,7 +15,7 @@ fmha_fwd_traits get_ck_fmha_fwd_traits(const mask_info &mask,
                                        int head_size,
                                        bool has_dropout,
                                        bool has_lse,
-                                       bool enable_alibi)
+                                       bool enable_bias)
 {
     return fmha_fwd_traits{head_size,
                            head_size,
@@ -24,7 +23,7 @@ fmha_fwd_traits get_ck_fmha_fwd_traits(const mask_info &mask,
                            false, // is_group_mode
                            true,  // is_v_rowmajor
                            mask.type,
-                           enable_alibi ? bias_enum::alibi : bias_enum::no_bias,
+                           enable_bias ? bias_enum::elementwise_bias : bias_enum::no_bias,
                            has_lse,
                            has_dropout,
                            false}; // do_fp8_static_quant
@@ -44,7 +43,7 @@ fmha_fwd_args get_ck_fmha_fwd_args(bool has_lse,
                                    const at::Tensor q,
                                    const at::Tensor k,
                                    const at::Tensor v,
-                                   std::optional<at::Tensor> &alibi_slopes_,
+                                   std::optional<at::Tensor> &attn_bias_,
                                    at::Tensor out,
                                    at::Tensor softmax_lse,
                                    at::Tensor dropout_randval,
@@ -57,7 +56,7 @@ fmha_fwd_args get_ck_fmha_fwd_args(bool has_lse,
     // v: (batch_size, seqlen_k, nheads_k, d)
     // o: (batch_size, seqlen_q, nheads, d)
 
-    // alibi_slopes:(batch_size, nheads) or (nhead)
+    // attn_bias: (batch_size, nheads, seqlen_q, seqlen_k)
     // lse: (batch_size, nheads, seqlen_q)
     // randval: (batch_size, nheads, seqlen_q, seqlen_k)
 
@@ -82,56 +81,58 @@ fmha_fwd_args get_ck_fmha_fwd_args(bool has_lse,
     ck_tile::index_t batch_stride_lse = has_lse ? softmax_lse.stride(0) : 0;
     ck_tile::index_t batch_stride_randval = has_dropout_randval ? dropout_randval.stride(0) : 0;
 
-    void *alibi_slopes_ptr = nullptr;
-    ck_tile::index_t stride_alibi_slopes = 0;
-
-    if (alibi_slopes_.has_value()) {
-        auto alibi_slopes = alibi_slopes_.value();
-        CHECK_DEVICE(alibi_slopes);
-        TORCH_CHECK(alibi_slopes.stride(-1) == 1, "ALiBi slopes tensor must have contiguous last dimension");
-        TORCH_CHECK(alibi_slopes.sizes() == at::IntArrayRef({h}) || alibi_slopes.sizes() == at::IntArrayRef({b, h}));
-        alibi_slopes_ptr = alibi_slopes.data_ptr();
-        stride_alibi_slopes = alibi_slopes.dim() == 2 ? alibi_slopes.stride(0) : 0;
+    void *attn_bias_ptr = nullptr;
+    ck_tile::index_t stride_attn_bias = 0;
+    ck_tile::index_t batch_stride_bias = 0;
+    ck_tile::index_t nhead_stride_bias = 0;
+    if (attn_bias_.has_value()) {
+        auto a_b = attn_bias_.value();
+        CHECK_DEVICE(a_b);
+        TORCH_CHECK(a_b.stride(-1) == 1, "attention bias tensor must have contiguous last dimension");
+        attn_bias_ptr = a_b.data_ptr();
+        stride_attn_bias = a_b.stride(2);
+        nhead_stride_bias = a_b.stride(1);
+        batch_stride_bias = a_b.stride(0);
     }
 
     return fmha_fwd_args{q.data_ptr(),
                          k.data_ptr(),
                          v.data_ptr(),
-                         alibi_slopes_ptr, // bias
+                         attn_bias_ptr, // bias
                          has_dropout_randval ? dropout_randval.data_ptr() : nullptr,
                          has_lse ? softmax_lse.data_ptr() : nullptr,
                          out.data_ptr(),
-                         nullptr, // seqstart_q
-                         nullptr, // seqstart_k
+                         nullptr,                           // seqstart_q
+                         nullptr,                           // seqstart_k
                          nullptr,
                          seqlen_q,
                          seqlen_k,
                          b,
-                         seqlen_q,      // max_seqlen_q
-                         d,             // hdim_q
-                         d,             // hdim_v
-                         h,             // nhead
-                         h_k,           // nhead_k
-                         softmax_scale, // scale_s
-                         1,             // scale_p
-                         1,             // scale_o
+                         seqlen_q,                          // max_seqlen_q
+                         d,                                 // hdim_q
+                         d,                                 // hdim_v
+                         h,                                 // nhead
+                         h_k,                               // nhead_k
+                         softmax_scale,                     // scale_s
+                         1,                                 // scale_p
+                         1,                                 // scale_o
                          stride_q,
                          stride_k,
                          stride_v,
-                         stride_alibi_slopes,
+                         stride_attn_bias,
                          stride_randval,
                          stride_o,
                          nhead_stride_q,
                          nhead_stride_k,
                          nhead_stride_v,
-                         0, // nhead_stride_bias, FA without bias
+                         nhead_stride_bias,                 // nhead_stride_bias
                          nhead_stride_randval,
                          nhead_stride_lse,
                          nhead_stride_o,
                          batch_stride_q,
                          batch_stride_k,
                          batch_stride_v,
-                         0, // batch_stride_bias, FA without bias
+                         batch_stride_bias,                 // batch_stride_bias
                          batch_stride_randval,
                          batch_stride_lse,
                          batch_stride_o,
@@ -146,15 +147,15 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tenso
 mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x num_heads x head_size
            const at::Tensor &k,                      // batch_size x seqlen_k x num_heads_k x head_size
            const at::Tensor &v,                      // batch_size x seqlen_k x num_heads_k x head_size
-           c10::optional<at::Tensor> &out_,          // batch_size x seqlen_q x num_heads xhead_size
-           c10::optional<at::Tensor> &alibi_slopes_, // num_heads or batch_size x num_heads
+           std::optional<at::Tensor> &out_,          // batch_size x seqlen_q x num_heads xhead_size
            const float p_dropout,
            const float softmax_scale,
            bool is_causal,
            int window_size_left,
            int window_size_right,
            const bool return_dropout_randval,
-           c10::optional<at::Generator> gen_)
+           std::optional<at::Generator> gen_,
+           const std::optional<at::Tensor>& attn_bias_) // batch_size x nheads x seqlen_q x seqlen_k
 {
     auto q_dtype = q.dtype();
     TORCH_CHECK(q_dtype == at::kHalf || q_dtype == at::kBFloat16,
@@ -188,7 +189,7 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
     if (window_size_right >= seqlen_k) { window_size_right = -1; }
 
     // causal=true is the same as causal=false in this case
-    if (seqlen_q == 1 && !alibi_slopes_.has_value()) { is_causal = false; }
+    if (seqlen_q == 1 && !attn_bias_.has_value()) { is_causal = false; }
 
     mask_info mask;
     if (is_causal) {
@@ -208,7 +209,7 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
 
     // Faster to transpose q from (b, 1, (nheads_kv ngroups), d) to (b, ngroups, nheads_kv, d) in this case
     // H/t Daniel Haziza
-    const int seqlenq_ngroups_swapped = seqlen_q == 1 && num_heads > num_heads_k && window_size_left < 0 && window_size_right < 0 && p_dropout == 0.f && head_size % 8 == 0 && !alibi_slopes_.has_value();
+    const int seqlenq_ngroups_swapped = seqlen_q == 1 && num_heads > num_heads_k && window_size_left < 0 && window_size_right < 0 && p_dropout == 0.f && head_size % 8 == 0 && !attn_bias_.has_value();
     const int ngroups = num_heads / num_heads_k;
     at::Tensor temp_q = q;
     if (seqlenq_ngroups_swapped) {
@@ -304,6 +305,12 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
         offset_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
     }
 
+    std::optional<at::Tensor> attn_bias;
+    if( attn_bias_.has_value())
+    {
+      attn_bias = attn_bias_;
+    }
+
     if (seqlen_k > 0) {
         auto drop_seed_offset = std::make_pair(rng_state_ptr, rng_state_ptr + 1);
         auto stream = at::cuda::getCurrentHIPStream().stream();
@@ -316,7 +323,7 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
                 head_size_8x,
                 has_dropout,
                 has_lse,
-                alibi_slopes_.has_value());
+                attn_bias_.has_value());
 
         auto args =
             get_ck_fmha_fwd_args(
@@ -332,17 +339,15 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
                 q,
                 k,
                 v,
-                alibi_slopes_,
+                attn_bias,
                 out,
                 softmax_lse,
                 p,
                 softmax_scale,
                 p_dropout,
                 drop_seed_offset);
-#if (defined(__gfx90a__) || defined(__gfx942__))
         float t = fmha_fwd(traits, args, stream_config);
         TORCH_CHECK(t >= 0, "invalid argument for fmha_fwd");
-#endif
     }
     else {
         // If seqlen_k == 0, then we have an empty tensor. We need to set the output to 0.

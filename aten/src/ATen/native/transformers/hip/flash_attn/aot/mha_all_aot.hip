@@ -743,4 +743,4 @@ mha_varlen_bwd_aot(const at::Tensor &dout,  // total_q x num_heads, x head_size
 }
 } // namespace pytorch_flash
 
-#endif
+#endif  // USE_FLASH_ATTENTION
