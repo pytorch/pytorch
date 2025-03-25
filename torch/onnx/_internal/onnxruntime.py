@@ -12,6 +12,7 @@ import torch._C
 import torch._ops
 import torch._prims.executor
 import torch.fx
+import torch.onnx._internal._lazy_import
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx._compatibility import compatibility
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
@@ -496,6 +497,8 @@ def _run_onnx_session_with_ortvaluevector(
         _nvtx_range_pop()
         return pth_outputs
     else:
+        import onnxruntime.training
+
         # Profile the two ORT-to-PyTorch type casts below
         _nvtx_range_push("after run_with_ortvaluevector")
         # Map ORTValue to torch.Tensor.
@@ -724,9 +727,6 @@ class OrtBackendOptions:
     sub-graphs are compiled by ``OrtBackend``.
     """
 
-    export_options: Optional["torch.onnx.ExportOptions"] = None
-    """Options for the TorchDynamo-based ONNX exporter used by the ``OrtBackend``."""
-
     ort_session_options: Optional["onnxruntime.SessionOptions"] = None
     """Options for the ``onnxruntime.InferenceSession`` used by the ``OrtBackend``."""
 
@@ -771,11 +771,7 @@ class OrtBackend:
         # - self._resolved_onnx_exporter_options.onnx_registry records what
         #   aten/prim ops are supported by exporter and their exporters (type: callable).
         self._resolved_onnx_exporter_options = (
-            torch.onnx._internal._exporter_legacy.ResolvedExportOptions(
-                torch.onnx.ExportOptions()
-                if self._options.export_options is None
-                else self._options.export_options
-            )
+            torch.onnx._internal._exporter_legacy.ResolvedExportOptions()
         )
 
         #  Given DORT's computation flow:
@@ -1176,22 +1172,7 @@ class OrtBackend:
             if a.ort_session_options is not None or b.ort_session_options is not None:
                 return False
 
-            if a.export_options is b.export_options:
-                return True
-
-            # Similarly, some objects in ExportOptions are too stateful to use for
-            # caching. We should revisit this.
-            if a.export_options is not None and b.export_options is not None:
-                return (
-                    a.export_options.dynamic_shapes == b.export_options.dynamic_shapes
-                    and a.export_options.diagnostic_options
-                    == b.export_options.diagnostic_options
-                    and a.export_options.onnx_registry is b.export_options.onnx_registry
-                    and a.export_options.fake_context is b.export_options.fake_context
-                )
-
-            # We can't account for how the two option sets may differ, so it's not safe to reuse.
-            return False
+            return True
 
         if not isinstance(options, OrtBackendOptions):
             options = OrtBackendOptions(**(options or {}))
