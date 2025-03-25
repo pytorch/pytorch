@@ -1595,14 +1595,14 @@ class VariableBuilder:
                 if (
                     callable(value.named_parameters)
                     and value.named_parameters.__func__
-                    == og_module_named_parameters_fn_ptr
+                    is og_module_named_parameters_fn_ptr
                 ):
                     for _, p in value.named_parameters():
                         self.mark_static_input(p, guard=freezing)
 
                 if (
                     callable(value.named_buffers)
-                    and value.named_buffers.__func__ == og_module_named_buffers_fn_ptr
+                    and value.named_buffers.__func__ is og_module_named_buffers_fn_ptr
                 ):
                     for _, b in value.named_buffers():
                         self.mark_static_input(b, guard=freezing)
