@@ -43,7 +43,7 @@ from torch import Tensor
 from torch.nn.utils import rnn as rnn_utils
 from torch.onnx import errors, verification
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_utils import skipIfNoLapack
+from torch.testing._internal.common_utils import skipIfNoLapack, IS_S390X
 
 
 def _init_test_generalized_rcnn_transform():
@@ -12763,6 +12763,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     # NOTE: For quantization tests, choose scale and zero point carefully
     #       such that inputs and outputs do not always overflow/underflow.
     #       Otherwise test results could be inaccurate.
+    @unittest.skipIf(IS_S390X, "No quantization support on s390x")
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_quantized_linear(self):
         model = torch.ao.nn.quantized.Linear(4, 8)
@@ -12779,6 +12780,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         input_tensor = torch.quantize_per_tensor(input, 0.5, 128, torch.quint8)
         self.run_test(model, input_tensor)
 
+    @unittest.skipIf(IS_S390X, "No quantization support on s390x")
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_quantized_conv1d(self):
         model = torch.ao.nn.quantized.Conv1d(16, 33, 3, stride=2)
@@ -12793,6 +12795,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         q_input = torch.quantize_per_tensor(input, 0.5, 128, torch.quint8)
         self.run_test(model, q_input)
 
+    @unittest.skipIf(IS_S390X, "No quantization support on s390x")
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_quantized_conv2d(self):
         model = torch.ao.nn.quantized.Conv2d(16, 33, 3, stride=2)
@@ -12807,6 +12810,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         q_input = torch.quantize_per_tensor(input, 0.5, 128, torch.quint8)
         self.run_test(model, q_input)
 
+    @unittest.skipIf(IS_S390X, "No quantization support on s390x")
     @skipIfUnsupportedMinOpsetVersion(10)
     @skipIfQuantizationBackendQNNPack
     def test_quantized_conv3d(self):
@@ -12829,6 +12833,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         q_input = torch.quantize_per_tensor(input, 0.2, 128, torch.quint8)
         self.run_test(model, q_input)
 
+    @unittest.skipIf(IS_S390X, "No quantization support on s390x")
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_quantized_conv1d_relu(self):
         model = torch.ao.nn.intrinsic.quantized.ConvReLU1d(16, 33, 3, stride=2)
@@ -12843,6 +12848,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         q_input = torch.quantize_per_tensor(input, 0.5, 128, torch.quint8)
         self.run_test(model, q_input)
 
+    @unittest.skipIf(IS_S390X, "No quantization support on s390x")
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_quantized_conv2d_relu(self):
         model = torch.ao.nn.intrinsic.quantized.ConvReLU2d(16, 33, 3, stride=2)
@@ -12857,6 +12863,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         q_input = torch.quantize_per_tensor(input, 0.5, 128, torch.quint8)
         self.run_test(model, q_input)
 
+    @unittest.skipIf(IS_S390X, "No quantization support on s390x")
     @skipIfUnsupportedMinOpsetVersion(10)
     @skipIfQuantizationBackendQNNPack
     def test_quantized_conv3d_relu(self):
@@ -12874,6 +12881,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         q_input = torch.quantize_per_tensor(input, 0.5, 128, torch.quint8)
         self.run_test(model, q_input)
 
+    @unittest.skipIf(IS_S390X, "No quantization support on s390x")
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_quantized_conv_transpose1d(self):
         model = torch.ao.nn.quantized.ConvTranspose1d(
@@ -12890,6 +12898,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         q_input = torch.quantize_per_tensor(input, 0.5, 128, torch.quint8)
         self.run_test(model, q_input)
 
+    @unittest.skipIf(IS_S390X, "No quantization support on s390x")
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_quantized_conv_transpose2d(self):
         model = torch.ao.nn.quantized.ConvTranspose2d(
@@ -12906,6 +12915,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         q_input = torch.quantize_per_tensor(input, 0.5, 128, torch.quint8)
         self.run_test(model, q_input)
 
+    @unittest.skipIf(IS_S390X, "No quantization support on s390x")
     @skipIfUnsupportedMinOpsetVersion(10)
     @skipIfQuantizationBackendQNNPack
     def test_quantized_conv_transpose3d(self):
@@ -13152,6 +13162,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.quantize_per_tensor(torch.randn(3, 4), 0.2, 0, torch.qint8)
         self.run_test(Module(), x)
 
+    @unittest.skipIf(IS_S390X, "No quantization support on s390x")
     @skipIfUnsupportedMinOpsetVersion(13)
     def test_qat_linear_per_channel(self):
         class M(torch.nn.Module):
@@ -13227,6 +13238,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         input = torch.randn(8, 4)
         self.run_test(model, input)
 
+    @unittest.skipIf(IS_S390X, "No quantization support on s390x")
     @skipIfUnsupportedMinOpsetVersion(13)
     def test_qat_conv2d(self):
         class M(torch.nn.Module):
@@ -13258,6 +13270,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
         self.run_test(model, input)
 
+    @unittest.skipIf(IS_S390X, "No quantization support on s390x")
     @skipIfUnsupportedMinOpsetVersion(13)
     def test_qat_conv2d_relu(self):
         class M(torch.nn.Module):
@@ -13291,6 +13304,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
         self.run_test(model, input)
 
+    @unittest.skipIf(IS_S390X, "No quantization support on s390x")
     @skipIfUnsupportedMinOpsetVersion(13)
     def test_qat_conv2d_relu_fused(self):
         class M(torch.nn.Module):
@@ -13325,6 +13339,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
         self.run_test(model, input)
 
+    @unittest.skipIf(IS_S390X, "No quantization support on s390x")
     @skipIfUnsupportedMinOpsetVersion(13)
     def test_qat_linear_relu_fused(self):
         class M(torch.nn.Module):

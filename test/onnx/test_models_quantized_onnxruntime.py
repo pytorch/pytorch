@@ -10,6 +10,7 @@ import torchvision
 
 import torch
 from torch import nn
+from torch.testing._internal.common_utils import IS_S390X
 
 
 def _get_test_image_tensor():
@@ -42,6 +43,7 @@ class _TopPredictor(nn.Module):
         return topk_id
 
 
+@unittest.skipIf(IS_S390X, "No quantization support on s390x")
 # TODO: All torchvision quantized model test can be written as single parameterized test case,
 # after per-parameter test decoration is supported via #79979, or after they are all enabled,
 # whichever is first.

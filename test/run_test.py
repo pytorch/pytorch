@@ -199,9 +199,6 @@ S390X_BLOCKLIST = [
     "inductor/test_torchinductor_opinfo",
     # these tests fail when cuda is not available
     "inductor/test_best_config",
-    # lacks quantization support
-    "onnx/test_models_quantized_onnxruntime",
-    "onnx/test_pytorch_onnx_onnxruntime",
     # sysctl -n hw.memsize is not available
     "test_mps",
     # https://github.com/pytorch/pytorch/issues/102078
