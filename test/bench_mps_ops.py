@@ -66,6 +66,7 @@ def bench_binary(
     rc.append(bench_binary_op(binary_func, x, y.t(), "dense-transp"))
     rc.append(bench_binary_op(binary_func, x.t(), y, "transp-dense"))
     rc.append(bench_binary_op(binary_func, x, s, "dense-scalar"))
+    rc.append(bench_binary_op(binary_func, x, y[0], "dense-bcast"))
     return rc
 
 
