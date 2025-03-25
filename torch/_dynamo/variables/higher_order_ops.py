@@ -107,6 +107,7 @@ def check_meta_consistency_vt(
     vars2: list[VariableTracker],
     lhs_name: str,
     rhs_name: str,
+    include_contiguity: bool = True
 ) -> None:
     from torch._higher_order_ops.utils import check_meta_consistency
 
@@ -125,7 +126,7 @@ def check_meta_consistency_vt(
     unwrapped1 = [_unwrap_var(var) for var in vars1]
     unwrapped2 = [_unwrap_var(var) for var in vars2]
 
-    return check_meta_consistency(unwrapped1, unwrapped2, lhs_name, rhs_name)
+    return check_meta_consistency(unwrapped1, unwrapped2, lhs_name, rhs_name, include_contiguity=include_contiguity)
 
 
 @contextlib.contextmanager
@@ -1199,11 +1200,17 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
         validate_subgraph_output_types(body_r)
 
+        # We set include contiguity=False because we have vmap x HOP tests, where if
+        # include_contiguity=True will call t.is_contiguous inside of vmap and get an error
+        # "querying is_contiguous inside of vmap for memory_format other than
+        # torch.contiguous_format is not yet implemented". This is okay because stride
+        # is still checked.
         check_meta_consistency_vt(
             body_r.unpack_var_sequence(tx),
             operands_seq,
             "body_fn_output",
             "carried_inputs",
+            include_contiguity=False
         )
 
         (
@@ -1403,11 +1410,17 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 f"xs: {xs_treespec.as_python_constant()} vs output: {_combine_treespec.as_python_constant()}."
             )
 
+        # We set include contiguity=False because we have vmap x HOP tests, where if
+        # include_contiguity=True will call t.is_contiguous inside of vmap and get an error
+        # "querying is_contiguous inside of vmap for memory_format other than
+        # torch.contiguous_format is not yet implemented". This is okay because stride
+        # is still checked.
         check_meta_consistency_vt(
             [_make_inlined(tx, first_slice_copy)(t) for t in xs_vars],
             results.items,
             "initial_xs",
             "combine_fn_output",
+            include_contiguity=False
         )
 
         combine_gm = torch.fx.GraphModule(dict(tx.output.nn_modules), combine_graph)
@@ -1645,12 +1658,18 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
 
         # Check meta data of carries and inits. If we pass this stage, we are sure that the init and carries
-        # have the same tree structure
+        # have the same tree structure.
+        # We set include contiguity=False because we have vmap x HOP tests, where if
+        # include_contiguity=True will call t.is_contiguous inside of vmap and get an error
+        # "querying is_contiguous inside of vmap for memory_format other than
+        # torch.contiguous_format is not yet implemented". This is okay because stride
+        # is still checked.
         check_meta_consistency_vt(
             init_vars,
             carry_vars,
             "init",
             "carry",
+            include_contiguity=False
         )
 
         # Compute the proxies

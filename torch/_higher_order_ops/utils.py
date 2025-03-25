@@ -147,6 +147,7 @@ def check_meta_consistency(
     rhs_list: list[Union[torch.Tensor, torch.SymInt, int]],
     lhs_name: str,
     rhs_name: str,
+    include_contiguity: bool = True
 ) -> None:
     def diff_meta_pairs(
         lhs_list: list[Union[torch.Tensor, torch.SymInt, int]],
@@ -159,13 +160,8 @@ def check_meta_consistency(
             if isinstance(lhs, torch.Tensor) and isinstance(rhs, torch.Tensor):
                 return ", ".join(
                     diff_tensor_meta(
-                        # We set include contiguity=False because we have vmap x cond tests, where if
-                        # include_contiguity=True will call t.is_contiguous inside of vmap and get an error
-                        # "querying is_contiguous inside of vmap for memory_format other than
-                        # torch.contiguous_format is not yet implemented". This is good for because stride
-                        # is still checked.
-                        _extract_tensor_metadata(lhs, include_contiguity=False),
-                        _extract_tensor_metadata(rhs, include_contiguity=False),
+                        _extract_tensor_metadata(lhs, include_contiguity=include_contiguity),
+                        _extract_tensor_metadata(rhs, include_contiguity=include_contiguity),
                         check_grad=False,
                     )
                 )

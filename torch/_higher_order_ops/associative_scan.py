@@ -387,7 +387,7 @@ def trace_associative_scan(
     output_fake_tensors: list[torch.Tensor | torch.SymInt | int] = [
         c.meta["val"] for c in outputs
     ]
-    check_meta_consistency(xs_fake_tensors, output_fake_tensors, "init", "carry")
+    check_meta_consistency(xs_fake_tensors, output_fake_tensors, "init", "carry", include_contiguity=False)
 
     _, combine_graph_name = unique_graph_id(
         proxy_mode, prefix="associative_scan_combine_graph"

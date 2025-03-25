@@ -321,7 +321,7 @@ def trace_scan(
     carry_fake_tensors: list[torch.Tensor | torch.SymInt | int] = [
         c.meta["val"] for c in carry
     ]
-    check_meta_consistency(init_fake_tensors, carry_fake_tensors, "init", "carry")
+    check_meta_consistency(init_fake_tensors, carry_fake_tensors, "init", "carry", include_contiguity=False)
 
     _, combine_graph_name = unique_graph_id(proxy_mode, prefix="scan_combine_graph")
 

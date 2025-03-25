@@ -380,7 +380,7 @@ def while_loop_fake_tensor_mode(
             # so we could just return the output after one iteration.
             body_outs = body_fn(*carried_inputs, *additional_inputs)
             check_meta_consistency(
-                carried_inputs, body_outs, "carried_inputs", "body_output"
+                carried_inputs, body_outs, "carried_inputs", "body_output", include_contiguity=False
             )
         # See NOTE [unspecialize int carry with unbacked symints]
         return pytree.tree_map_only(
