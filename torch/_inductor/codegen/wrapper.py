@@ -74,6 +74,8 @@ if TYPE_CHECKING:
     from ..graph import GraphLowering
 
 
+log = logging.getLogger(__name__)
+
 pexpr = PythonPrinter().doprint
 
 
@@ -472,6 +474,59 @@ class ExitDeviceContextManagerLine(WrapperLine):
 
 
 @dataclasses.dataclass
+class ExternKernelAllocLine(WrapperLine):
+    wrapper: PythonWrapperCodegen
+    node: ir.ExternKernelAlloc
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        node = self.node
+        node.codegen_comment(self.wrapper)
+        args = [*node.codegen_args(), *node.codegen_kwargs()]
+        V.graph.wrapper_code._generate_extern_kernel_alloc_helper(self, args)
+        if isinstance(node.layout, ir.Layout):
+            node.codegen_size_asserts(self.wrapper)
+
+
+@dataclasses.dataclass
+class ExternKernelOutLine(WrapperLine):
+    wrapper: PythonWrapperCodegen
+    node: ir.ExternKernelOut
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        self.codegen_comment(self.wrapper)
+        node = self.node
+        args = [*node.codegen_args(), *node.codegen_kwargs(skip_out=True)]
+        kernel_name = node.get_kernel_name()
+        if (
+            V.graph.cpp_wrapper
+            and node.cpp_kernel_name == "torch::inductor::_mm_plus_mm"
+        ):
+            # For https://github.com/pytorch/pytorch/issues/128474
+            kernel_name = "aoti_torch__mm_plus_mm_out"
+        else:
+            kernel_name = node.get_kernel_name()
+        device = d.type if (d := node.get_device()) else V.graph.device_type
+        self.wrapper._generate_extern_kernel_out_helper(
+            kernel_name,
+            node.codegen_reference(),
+            node.output_view.codegen_reference() if node.output_view else None,
+            args,
+            device,
+        )
+
+
+@dataclasses.dataclass
+class FallbackKernelLine(WrapperLine):
+    wrapper: PythonWrapperCodegen
+    node: ir.FallbackKernel
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        node = self.node
+        args = [*node.codegen_args(), *node.codegen_kwargs()]
+        self.wrapper._generate_fallback_kernel_line(node, args)
+
+
+@dataclasses.dataclass
 class MemoryPlanningLine(WrapperLine):
     wrapper: PythonWrapperCodegen
 
@@ -529,7 +584,7 @@ class AllocateLine(MemoryPlanningLine):
 
 @dataclasses.dataclass
 class FreeLine(MemoryPlanningLine):
-    node: BufferLike
+    node: Union[BufferLike, ir.TorchBindObject]
 
     def plan(self, state: MemoryPlanningState) -> MemoryPlanningLine:
         return self
@@ -566,15 +621,13 @@ class FreeIfNotReusedLine(MemoryPlanningLine):
 class ReinterpretLine(MemoryPlanningLine):
     node: BufferLike
     reused_as: BufferLike
-    layout: ir.Layout
+    layout: ir.NonOwningLayout
 
     def plan(self, state: MemoryPlanningState) -> MemoryPlanningLine:
         return self
 
     def codegen(self, code: IndentedBuffer) -> None:
-        code.writeline(
-            self.wrapper.codegen_deferred_allocation(self.node.get_name(), self.layout)
-        )
+        self.wrapper.codegen_deferred_allocation(self.node.get_name(), self.layout.view)
 
 
 @dataclasses.dataclass
@@ -1160,10 +1213,16 @@ class PythonWrapperCodegen(CodeGen):
     def generate_end(self, result: IndentedBuffer) -> None:
         return
 
-    def generate_fallback_kernel(self, fallback_kernel, args):
-        self.generate_extern_kernel_alloc(fallback_kernel, args)
+    def generate_fallback_kernel(self, node: ir.FallbackKernel):
+        self.writeline(FallbackKernelLine(self, node))
 
-    def generate_extern_kernel_alloc(self, extern_kernel, args):
+    def _generate_fallback_kernel_line(self, fallback_kernel, args):
+        self._generate_extern_kernel_alloc_helper(fallback_kernel, args)
+
+    def generate_extern_kernel_alloc(self, node: ir.ExternKernelAlloc):
+        self.writeline(ExternKernelAllocLine(self, node))
+
+    def _generate_extern_kernel_alloc_helper(self, extern_kernel, args):
         # If it's a NoneLayout then the extern_kernel should essentially be
         # treated as if it doesn't return anything
         no_return = isinstance(extern_kernel.layout, ir.NoneLayout)
@@ -1194,12 +1253,17 @@ class PythonWrapperCodegen(CodeGen):
 
     def generate_extern_kernel_out(
         self,
+        node: ir.ExternKernelOut,
+    ) -> None:
+        self.writeline(ExternKernelOutLine(self, node))
+
+    def _generate_extern_kernel_out_helper(
+        self,
         kernel: str,
         out: str,
         out_view: Optional[str],
         args: list[str],
         device: str,
-        node: ir.ExternKernelOut,
     ) -> None:
         # add debug printer code for triton kernel calls at (jit) inductor level
         debug_printer_manager = V.graph.wrapper_code.debug_printer
@@ -2430,10 +2494,12 @@ class PythonWrapperCodegen(CodeGen):
         )
         return f"{self.declare}{new_name} = {reinterpret_view}{del_line}  {self.comment} reuse"
 
-    def codegen_deferred_allocation(self, name, layout) -> DeferredLine:
-        return DeferredLine(
-            name,
-            f"{self.declare}{name} = {view.codegen_reference()}{self.ending}  {self.comment} alias",
+    def codegen_deferred_allocation(self, name: str, view: ir.ReinterpretView) -> None:
+        self.writeline(
+            DeferredLine(
+                name,
+                f"{self.declare}{name} = {view.codegen_reference()}{self.ending}  {self.comment} alias",
+            )
         )
 
     def codegen_allocation(self, buffer: ir.Buffer):

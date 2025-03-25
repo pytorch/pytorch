@@ -1134,7 +1134,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         if not is_inplace:
             self.writeline(f"RAIIAtenTensorHandle {name}({output_handle_name});")
 
-    def generate_extern_kernel_alloc(self, extern_kernel, args):
+    def _generate_extern_kernel_alloc_helper(self, extern_kernel, args):
         if getattr(extern_kernel, "outputs", None):
             # ir.ExternKernelAlloc may have outputs if it returns a tuple
             self.generate_c_shim_fallback_kernel(extern_kernel, args)
@@ -1183,10 +1183,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
         for raii_handle in output_raii_handles:
             self.writeline(raii_handle)
 
-    def generate_fallback_kernel(self, fallback_kernel, args):
+    def _generate_fallback_kernel_line(self, fallback_kernel, args):
         self.generate_c_shim_fallback_kernel(fallback_kernel, args)
 
-    def generate_extern_kernel_out(
+    def _generate_extern_kernel_out_helper(
         self,
         kernel: str,
         out: str,

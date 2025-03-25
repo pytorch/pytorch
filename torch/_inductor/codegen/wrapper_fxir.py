@@ -5,7 +5,7 @@ import random
 import textwrap
 import types
 from collections import Counter
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 import sympy
 
@@ -38,6 +38,9 @@ from .wrapper import (
     EnterSubgraphLine,
     ExitDeviceContextManagerLine,
     ExitSubgraphLine,
+    ExternKernelAllocLine,
+    ExternKernelOutLine,
+    FallbackKernelLine,
     FreeIfNotReusedLine,
     FreeLine,
     Line,
@@ -75,14 +78,6 @@ class WrapperIRLine(MemoryPlanningLine):
 
     def codegen(self, code: IndentedBuffer) -> None:
         raise NotImplementedError("Python codegen not supported")
-
-
-@dataclasses.dataclass
-class ExternKernelLine(WrapperIRLine):
-    kernel: str
-    result: Optional[str]
-    args: tuple[Any, ...]
-    kwargs: dict[Any, Any]
 
 
 @dataclasses.dataclass
@@ -155,6 +150,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         kernel_body: str,
         metadata: Optional[str] = None,
         gpu=True,
+        cpp_definition: Optional[str] = None,
     ):
         """
         Generates Wrapper IR for a kernel definition.
@@ -188,7 +184,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         assert node not in self.buffer_to_node
         self.buffer_to_node[buffer.name] = node
 
-    def _free(self, buffer: BufferLike) -> None:
+    def _free(self, buffer: Union[BufferLike, ir.TorchBindObject]) -> None:
         """
         Generates FX IR to delete a buffer.
         Removes the buffer from the symbol table.
@@ -288,8 +284,10 @@ class WrapperFxCodegen(PythonWrapperCodegen):
                 EnterDeviceContextManagerLine: self._generate_enter_device_context_manager,
                 ExitDeviceContextManagerLine: self._generate_exit_device_context_manager,
                 EnterSubgraphLine: self._generate_enter_subgraph,
-                ExternKernelLine: self._generate_extern_kernel,
+                ExternKernelAllocLine: self._generate_extern_kernel_alloc,
+                ExternKernelOutLine: self._generate_extern_kernel_out,
                 ExitSubgraphLine: self._generate_exit_subgraph,
+                FallbackKernelLine: self._generate_fallback_kernel,
                 FreeLine: self._generate_free,
                 FreeIfNotReusedLine: self._generate_free_if_not_reused,
                 LineContext: self._generate_line_context,
@@ -541,50 +539,24 @@ class WrapperFxCodegen(PythonWrapperCodegen):
             },
         )
 
-    def generate_extern_kernel_out(
+    def _generate_extern_kernel_alloc(self, line: Line) -> None:
+        assert isinstance(line, ExternKernelAllocLine)
+        node = line.node
+        self._generate_extern_kernel_common(node, node)
+
+    def _generate_extern_kernel_out(
         self,
-        kernel: str,
-        out: str,
-        out_view: Optional[str],
-        args: list[str],
-        device: str,
-        node: ir.ExternKernelOut,
+        line: Line,
     ) -> None:
-        # TODO: refactor the codegen from ir.ExternKernelOut into various wrapper codegen
-        # classes. We should only need to pass the node here.
-        out = out_view if out_view else out
-        self._generate_extern_kernel_line(node, out_kwarg=out)
+        assert isinstance(line, ExternKernelOutLine)
+        node = line.node
+        out_node = node.output_view if node.output_view else node
+        self._generate_extern_kernel_common(node, out_node)
 
-    def _generate_extern_kernel_line(
-        self,
-        kernel: ir.ExternKernel,
-        out_kwarg: Optional[str] = None,
-    ) -> None:
-        # Get the call args in their original types.
-        tensor_args = tuple(x.codegen_reference() for x in kernel.inputs)
-        call_args = tensor_args + tuple(kernel.constant_args)
-
-        # Get the result buffer.
-        # Some kernels write to a pre-existing output tensor via the "out" kwarg.
-        kwargs = kernel.kwargs
-        result: Optional[str] = None
-        if out_kwarg:
-            kwargs["out"] = out_kwarg
-        elif not isinstance(kernel.layout, ir.NoneLayout):
-            result = kernel.get_name()
-
-        self.writeline(
-            ExternKernelLine(
-                self,
-                kernel=kernel.get_kernel_name(),
-                result=result,
-                args=call_args,
-                kwargs=kwargs,
-            )
-        )
-
-    def generate_extern_kernel_alloc(self, extern_kernel: ir.ExternKernelAlloc, args):
-        self._generate_extern_kernel_line(extern_kernel, None)
+    def _generate_fallback_kernel(self, line: Line) -> None:
+        assert isinstance(line, FallbackKernelLine)
+        node = line.node
+        self._generate_extern_kernel_common(node, node)
 
     def generate_kernel_call(
         self,
@@ -609,41 +581,52 @@ class WrapperFxCodegen(PythonWrapperCodegen):
             )
         )
 
-    def _generate_extern_kernel(self, line: Line) -> None:
-        assert isinstance(line, ExternKernelLine)
+    def _generate_extern_kernel_common(
+        self, kernel: ir.ExternKernel, out_ir_node: ir.IRNode
+    ) -> None:
+        """
+        Generates FX IR from either ExternKernelAlloc or ExternKernelOut.
+        """
+
+        # Get the call args in their original types.
+        tensor_args = tuple(x.codegen_reference() for x in kernel.inputs)
+        call_args = tensor_args + tuple(kernel.constant_args)
+
+        # Get the result buffer.
+        # Some kernels write to a pre-existing output tensor via the "out" kwarg.
+        kwargs = kernel.kwargs
+        result_buffer: Optional[str] = None
+        if isinstance(kernel, ir.ExternKernelOut):
+            kwargs["out"] = self.buffer_to_node[out_ir_node.codegen_reference()]
+        elif not isinstance(kernel.layout, ir.NoneLayout):
+            result_buffer = kernel.get_name()
 
         # Look up the kernel function from its name.
-        module_name, kernel_name = line.kernel.split(".", 1)
+        kernel_name = kernel.get_kernel_name()
+        module_name, kernel_name = kernel_name.split(".", 1)
         op = globals()[module_name]  # E.g. extern_kernels, aten, etc.
         for subname in kernel_name.split("."):
             op = getattr(op, subname)  # E.g. extern_kernels.addmm
 
-        # Separate args from kwargs.
-        arg_nodes = self._lookup_args(line.args)
-        kwargs = line.kwargs
-
-        # Look up the output kwarg.
-        if "out" in kwargs:
-            kwargs["out"] = self.buffer_to_node[kwargs["out"]]
-
-        node = self.gm.graph.call_function(op, args=arg_nodes, kwargs=kwargs)
+        # Look up FX nodes corresponding to call args.
+        arg_fx_nodes = self._lookup_args(call_args)
+        fx_node = self.gm.graph.call_function(op, args=arg_fx_nodes, kwargs=kwargs)
 
         # Assign the result to the given name.
-        result = line.result
-        if result:
-            assert "out" not in line.kwargs, (
-                f"Extern kernel '{line}' has both result and out kwarg. Expected only one."
+        if result_buffer:
+            assert "out" not in kwargs, (
+                f"Extern kernel '{kernel}' has both result and out kwarg. Expected only one."
             )
-            node.name = result
-            self.buffer_to_node[result] = node
+            fx_node.name = result_buffer
+            self.buffer_to_node[result_buffer] = fx_node
 
             arg_tensors = [
                 arg.meta["val"] if isinstance(arg, torch.fx.Node) else arg
-                for arg in arg_nodes
+                for arg in arg_fx_nodes
             ]
 
             # Run the operation to propagate metadata.
-            node.meta["val"] = op(*arg_tensors, **kwargs)
+            fx_node.meta["val"] = op(*arg_tensors, **kwargs)
 
     def _generate_kernel_call(self, line: Line) -> None:
         assert isinstance(line, KernelCallLine)

@@ -5648,26 +5648,7 @@ class ExternKernel(InputsKernel):
 @ir_dataclass(frozen=False)
 class ExternKernelOut(ExternKernel):
     def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
-        self.codegen_comment(wrapper)
-        args = [*self.codegen_args(), *self.codegen_kwargs(skip_out=True)]
-        kernel_name = self.get_kernel_name()
-        if (
-            V.graph.cpp_wrapper
-            and self.cpp_kernel_name == "torch::inductor::_mm_plus_mm"
-        ):
-            # For https://github.com/pytorch/pytorch/issues/128474
-            kernel_name = "aoti_torch__mm_plus_mm_out"
-        else:
-            kernel_name = self.get_kernel_name()
-        device = d.type if (d := self.get_device()) else V.graph.device_type
-        wrapper.generate_extern_kernel_out(
-            kernel_name,
-            self.codegen_reference(),
-            self.output_view.codegen_reference() if self.output_view else None,
-            args,
-            device,
-            self,
-        )
+        wrapper.generate_extern_kernel_out(self)
 
     def __init__(  # type: ignore[no-untyped-def]
         self,
@@ -5722,11 +5703,7 @@ class RandomSeeds(ExternKernelOut):
 
 class ExternKernelAlloc(ExternKernel):
     def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
-        self.codegen_comment(wrapper)
-        args = [*self.codegen_args(), *self.codegen_kwargs()]
-        V.graph.wrapper_code.generate_extern_kernel_alloc(self, args)
-        if isinstance(self.layout, Layout):
-            self.codegen_size_asserts(wrapper)
+        wrapper.generate_extern_kernel_alloc(self)
 
     def __init__(  # type: ignore[no-untyped-def]
         self,
@@ -6769,7 +6746,7 @@ class FallbackKernel(ExternKernelAlloc):
                 # dispatch.
                 do_runtime_dispatch()
             else:
-                V.graph.wrapper_code.generate_fallback_kernel(self, args)
+                wrapper.generate_fallback_kernel(self)
                 if isinstance(self.layout, Layout):
                     self.codegen_size_asserts(wrapper)
 
