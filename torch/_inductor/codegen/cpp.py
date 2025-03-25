@@ -5111,7 +5111,7 @@ class CppScheduling(BaseScheduling):
         flag_template_buffer_has_other_users = template_buffer_has_other_users(
             ctb, template_node.outputs_by_name, epilogue_ir_nodes
         )
-        kernel, render = ctb.make_kernel_render(
+        kernel, render = ctb.make_kernel_render(  # type: ignore[misc]
             ctb,
             flag_template_buffer_has_other_users=flag_template_buffer_has_other_users,
             epilogue_nodes=epilogue_ir_nodes,

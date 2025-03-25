@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import logging
-from typing import cast
 
 import torch
 import torch.utils._pytree as pytree
@@ -114,10 +113,12 @@ def realize_as_comm_buffer(
 def _get_data(x: ir.TensorBox) -> ir.IRNode:
     if isinstance(x.data, ir.BaseView):
         # TensorBox -> *View -> StorageBox -> IRNode
-        return x.data.unwrap_view().data
+        node = x.data.unwrap_view()
+        assert isinstance(node, (ir.BaseView, ir.MutableBox))
+        return node.data
     elif isinstance(x.data, ir.StorageBox):
         # TensorBox -> StorageBox -> IRNode
-        return cast(ir.Buffer, x.data.data)
+        return x.data.data
     else:
         raise AssertionError(
             "Expect the data attr of a `TensorBox` to be either "
