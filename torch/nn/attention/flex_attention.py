@@ -953,8 +953,10 @@ def _nested_mod_func_adapter(
 
     q_offsets = q_nt._offsets  # type: ignore[attr-defined]
     kv_offsets = kv_nt._offsets  # type: ignore[attr-defined]
-    q_lengths = q_nt._lengths  # type: ignore[attr-defined]
-    kv_lengths = kv_nt._lengths  # type: ignore[attr-defined]
+    q_lengths = q_nt._lengths if q_nt._lengths is not None else q_offsets.diff()  # type: ignore[attr-defined]
+    q_lengths = torch.cat([q_lengths, torch.zeros((1,), device=q_lengths.device, dtype=torch.int32)], dim=0)
+    kv_lengths = kv_nt._lengths if kv_nt._lengths is not None else kv_offsets.diff()  # type: ignore[attr-defined]
+    kv_lengths = torch.cat([kv_lengths, torch.zeros((1,), device=kv_lengths.device, dtype=torch.int32)], dim=0)
     q_seq_idx = _build_seq_idx(q_offsets, q_nt._values.shape[q_nt._ragged_idx - 1])  # type: ignore[attr-defined]
     if q_nt is kv_nt:
         kv_seq_idx = q_seq_idx
@@ -962,9 +964,6 @@ def _nested_mod_func_adapter(
         # cross attention case
         kv_seq_idx = _build_seq_idx(kv_offsets, kv_nt._values.shape[kv_nt._ragged_idx - 1])  # type: ignore[attr-defined]
 
-    torch.set_printoptions(profile="full")
-    print(q_seq_idx, q_offsets, q_lengths)
-    print(kv_seq_idx, kv_offsets, kv_lengths)
     # Converts q_idx / kv_idx from [0, total_length) -> [0, S), where S refers
     # to the sequence length for each sequence in the NJT, for use in given
     # score_mod. This allows the user to write a score_mod as if it were
@@ -978,13 +977,10 @@ def _nested_mod_func_adapter(
             kv_nested = kv_idx - kv_offsets[kv_seq_idx[kv_idx]]
             is_same_sequence = q_seq_idx[q_idx] == kv_seq_idx[kv_idx]
             # don't allow attn in holes for non-contiguous nested tensors
-            is_within_sequence = True
-            if q_lengths is not None:
-                is_within_sequence = is_within_sequence and (q_seq_idx[q_idx] < q_lengths.size(0)) and (q_nested < q_lengths[q_seq_idx[q_idx]])
-            if kv_lengths is not None:
-                is_within_sequence = is_within_sequence and (kv_seq_idx[kv_idx] < kv_lengths.size(0)) and (kv_nested < kv_lengths[kv_seq_idx[kv_idx]])
+            is_within_sequence_q = q_nested < q_lengths[q_seq_idx[q_idx]]
+            is_within_sequence_kv = kv_nested < kv_lengths[kv_seq_idx[kv_idx]]
             return torch.where(
-                is_same_sequence and is_within_sequence,
+                is_same_sequence and is_within_sequence_q and is_within_sequence_kv,
                 orig_mod_func(score, b_nested, h, q_nested, kv_nested),  # type: ignore[call-arg]
                 # don't allow inter-sequence attention
                 float("-inf"),
@@ -1000,12 +996,9 @@ def _nested_mod_func_adapter(
             # don't allow inter-sequence attention
             is_same_sequence = q_seq_idx[q_idx] == kv_seq_idx[kv_idx]
             # don't allow attn in holes for non-contiguous nested tensors
-            is_within_sequence = True
-            if q_lengths is not None:
-                is_within_sequence = is_within_sequence and (q_seq_idx[q_idx] < q_lengths.size(0)) and (q_nested < q_lengths[q_seq_idx[q_idx]])
-            if kv_lengths is not None:
-                is_within_sequence = is_within_sequence and (kv_seq_idx[kv_idx] < kv_lengths.size(0)) and (kv_nested < kv_lengths[kv_seq_idx[kv_idx]])
-            return orig_mod_func(b_nested, h, q_nested, kv_nested) & is_same_sequence & is_within_sequence # type: ignore[call-arg]
+            is_within_sequence_q = q_nested < q_lengths[q_seq_idx[q_idx]]
+            is_within_sequence_kv = kv_nested < kv_lengths[kv_seq_idx[kv_idx]]
+            return orig_mod_func(b_nested, h, q_nested, kv_nested) & is_same_sequence & is_within_sequence_q & is_within_sequence_kv  # type: ignore[call-arg]
 
         return nt_mask_mod
 
