@@ -1,5 +1,7 @@
 #include <torch/csrc/DeviceAccelerator.h>
+#include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/device_lazy_init.h>
+#include <torch/csrc/utils/object_ptr.h>
 
 namespace torch::accelerator {
 
@@ -31,7 +33,8 @@ void initModule(PyObject* module) {
     // 3. To maintain consistency, we delegate the device count retrieval to the
     // Python implementation.
 
-    std::string module_name = "torch." + at::DeviceTypeName(device_type, true);
+    std::string module_name =
+        "torch." + at::DeviceTypeName(device_type.value(), true);
     auto module = THPObjectPtr(PyImport_ImportModule(module_name.c_str()));
     if (!module) {
       throw python_error();
