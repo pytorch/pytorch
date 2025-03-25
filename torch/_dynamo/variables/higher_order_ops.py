@@ -108,7 +108,7 @@ def check_meta_consistency_vt(
     lhs_name: str,
     rhs_name: str,
 ) -> None:
-    from torch._higher_order_ops.while_loop import check_meta_consistency
+    from torch._higher_order_ops.utils import check_meta_consistency
 
     from . import TensorVariable
 
@@ -977,7 +977,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             true_node,
             false_node,
             # We pick true_shared but it shouldn't matter
-            true_shared + unique_true + unique_false,
+            tuple(true_shared + unique_true + unique_false),
         )
 
         return _call_function_and_unflatten_output(
@@ -3061,6 +3061,7 @@ class BaseHOPVariable(WrapHigherOrderVariable):
             for node in body_gmod.graph.nodes
             if node.op == "placeholder"
         ]
+
         if has_potential_input_alias_or_mutation(body_gmod, fake_inputs):
             raise RuntimeError(
                 f"{self.value._name} where the inputs are mutated or the "
