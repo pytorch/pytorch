@@ -45,7 +45,9 @@ from ..runtime import triton_heuristics
 from ..runtime.hints import DeviceProperties
 from ..utils import (
     cache_on_self,
+    DelayReplaceLine,
     get_benchmark_name,
+    IndentedBuffer,
     LineContext,
     sympy_product,
     sympy_str,
@@ -57,7 +59,6 @@ from .common import (
     ArgName,
     CodeGen,
     DeferredLine,
-    IndentedBuffer,
     PythonPrinter,
     WorkspaceArg,
     WorkspaceZeroMode,
@@ -122,72 +123,6 @@ def can_match_buffer_size(input_buf: BufferLike, output_buf: BufferLike):
         return True
 
     return False
-
-
-def convert_arg_type(arg: torch.Argument) -> str:
-    from .cpp import CONTAINER_PYTHON_TO_CPP, PYTHON_TO_CPP
-
-    # use x.real_type instead of x.type so that we get ScalarType instead of int
-    python_type = repr(arg.real_type)  # type: ignore[attr-defined]
-
-    if python_type == "Tensor":
-        # Conversions rules follow https://github.com/pytorch/pytorch/tree/main/aten/src/ATen/native#func
-        if arg.alias_info is not None and arg.alias_info.is_write:
-            return f"at::{python_type}&"
-        else:
-            return f"at::{python_type} const&"
-
-    if python_type in PYTHON_TO_CPP:
-        cpp_type = PYTHON_TO_CPP[python_type]
-        return cpp_type
-
-    # Convert args of container types e.g. Optional[*]
-    for py_container, cpp_container in CONTAINER_PYTHON_TO_CPP.items():
-        container_match = re.findall(py_container + r"\[([a-zA-Z_]+)]", python_type)
-        if len(container_match) == 1:
-            contained_type = container_match[0]
-            assert contained_type in PYTHON_TO_CPP, (
-                f"unsupported {py_container} type in convert_arg_type: {contained_type}"
-            )
-            cpp_contained_type = PYTHON_TO_CPP[contained_type]
-            return f"{cpp_container}<{cpp_contained_type}>"
-
-    raise AssertionError(f"unsupport python_type: {python_type}")
-
-
-def convert_return_type(ret: torch.Argument) -> str:
-    # use x.real_type instead of x.type so that we get ScalarType instead of int
-    python_type = repr(ret.real_type)  # type: ignore[attr-defined]
-    python_to_cpp = {
-        "Tensor": "at::Tensor",
-        "List[Tensor]": "std::vector<at::Tensor>",
-    }
-
-    cpp_type = python_to_cpp.get(python_type, None)
-    assert cpp_type is not None, f"NYI return type: {python_type}"
-    # An output aliasing an input is returned by reference only when it's a
-    # Tensor, not when it's a Tensor[]. For example, aten.split.Tensor's output
-    # aliases the input tensor, but the op returns a vector by value.
-    if python_type == "Tensor" and ret.alias_info is not None:
-        cpp_type += "&"
-    return cpp_type
-
-
-def get_cpp_op_schema(kernel: torch._ops.OpOverload) -> str:
-    args = kernel._schema.arguments
-    returns = kernel._schema.returns
-
-    num_returns = len(returns)
-    assert num_returns > 0, "must have at least one return value"
-
-    if num_returns == 1:
-        cpp_return_value = convert_return_type(returns[0])
-    elif num_returns > 1:
-        tuple_returns = ", ".join([convert_return_type(r) for r in returns])
-        cpp_return_value = f"std::tuple<{tuple_returns}>"
-
-    cpp_arg_type = [f"{convert_arg_type(arg)} {arg.name}" for arg in args]
-    return f"{cpp_return_value}({', '.join(cpp_arg_type)})"  # type: ignore[possibly-undefined]
 
 
 # TODO: Move to a well known place
@@ -667,6 +602,9 @@ class PythonWrapperCodegen(CodeGen):
         self.kernel_autotune_calls = IndentedBuffer()
         self.subgraph_definitions = IndentedBuffer()
         self.kernel_autotune_names = OrderedSet[str]()
+        # Map key is the kernel argument name; value is a tuple of the resulting example
+        # tensor name with the kernel where that tensor was most recently used.
+        self.kernel_autotune_example_args: dict[str, tuple[str, str]] = {}
         # If the generated source code is exactly the same, reuse the
         # pre-existing kernel for it
         self.src_to_kernel: dict[str, str] = {}
@@ -2169,7 +2107,20 @@ class PythonWrapperCodegen(CodeGen):
                 "call_args and arg_types do not match"
             )
 
-            tensor_args = {}
+            def get_autotune_deletion_call() -> str:
+                """After all the autotune kernel calls have been written (i.e.
+                self.kernel_autotune_example_args is complete), returns a deletion call
+                for all autotune example tensors that are unnecessary after kernel_name
+                is called."""
+                tensors_to_delete = [
+                    tensor
+                    for tensor, kn in self.kernel_autotune_example_args.values()
+                    if kn == kernel_name
+                ]
+                if tensors_to_delete:
+                    return f"del {', '.join(tensors_to_delete)}\n"
+                return ""
+
             all_args = []
             if raw_args is None:
                 # create a dummy raw_args for uniform behavior in the following loop
@@ -2192,14 +2143,13 @@ class PythonWrapperCodegen(CodeGen):
                     # in `TritonKernel.call_kernel()`.
                     if re.match(r"^(workspace|semaphore)", arg):
                         arg_str = arg
-                        tensor_args[arg] = arg_str
-                    elif arg not in tensor_args:
+                    elif arg not in self.kernel_autotune_example_args:
                         arg_str = self.generate_example_arg_value(
                             arg, arg_type, raw_arg, i
                         )
-                        tensor_args[arg] = arg_str
                     else:
-                        arg_str = tensor_args[arg]
+                        arg_str = self.kernel_autotune_example_args[arg][0]
+                    self.kernel_autotune_example_args[arg] = (arg_str, kernel_name)
                 else:
                     arg_str = self.generate_example_arg_value(arg, arg_type, raw_arg, i)
                 all_args.append(arg_str if key is None else f"{key}={arg_str}")
@@ -2208,7 +2158,7 @@ class PythonWrapperCodegen(CodeGen):
                 f"{kernel_name}.run({', '.join(all_args)}, stream={stream_name})"
             )
             self.kernel_autotune_calls.writeline(
-                f"del {', '.join(arg for arg in tensor_args.values())}\n",
+                DelayReplaceLine("<del_call>", get_autotune_deletion_call, "<del_call>")
             )
             self.kernel_autotune_names.add(kernel_name)
             if V.graph.cpp_wrapper:

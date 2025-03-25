@@ -109,7 +109,7 @@ def check_meta_consistency_vt(
     lhs_name: str,
     rhs_name: str,
 ) -> None:
-    from torch._higher_order_ops.while_loop import check_meta_consistency
+    from torch._higher_order_ops.utils import check_meta_consistency
 
     from . import TensorVariable
 
@@ -507,8 +507,8 @@ def speculate_subgraph(
     restore_side_effects=True,
     should_flatten_outputs=False,
     under_activation_checkpoint=False,
-    supports_input_mutation=True,
-    supports_aliasing=True,
+    supports_input_mutation=False,
+    supports_aliasing=False,
     # Pass in an originating tracer - this is needed for preserving context
     # across fwd-bwd for autograd.Function
     tracer=None,
@@ -1008,7 +1008,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             true_node,
             false_node,
             # We pick true_shared but it shouldn't matter
-            true_shared + unique_true + unique_false,
+            tuple(true_shared + unique_true + unique_false),
         )
 
         return _call_function_and_unflatten_output(
@@ -1820,8 +1820,8 @@ class FunctionalCallVariable(FunctorchHigherOrderVariable):
 class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.supports_input_mutation = True
-        self.supports_aliasing = True
+        self.supports_input_mutation = False
+        self.supports_aliasing = False
 
     def install_subgraph_in_output_graph(
         self, tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name="wrap_body"
@@ -2242,6 +2242,12 @@ class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Checkpoint HOP is desugared and does not see dispatcher
+        self.supports_input_mutation = True
+        self.supports_aliasing = True
+
     def call_function(
         self,
         tx: "InstructionTranslator",
@@ -3091,19 +3097,6 @@ class BaseHOPVariable(WrapHigherOrderVariable):
             tx, args[0], args[1:], {}, self.value._name, subgraph_name="subgraph"
         )
         assert len(p_kwargs) == 0
-
-        from torch._higher_order_ops.utils import _has_potential_branch_input_alias
-
-        fake_inputs = [
-            node.meta["example_value"]
-            for node in body_gmod.graph.nodes
-            if node.op == "placeholder"
-        ]
-        if _has_potential_branch_input_alias(body_gmod, fake_inputs):
-            raise RuntimeError(
-                f"{self.value._name} where the inputs are mutated or the "
-                f"outputs are aliases of the inputs. Please ensure that this doesn't happen."
-            )
 
         flat_example_value = pytree.tree_map_only(
             torch.fx.Proxy,
