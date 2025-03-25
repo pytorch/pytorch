@@ -23,6 +23,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
     IS_LINUX,
+    IS_S390X,
     IS_X86,
     MI300_ARCH,
     parametrize,
@@ -124,6 +125,7 @@ def cal_conv_generated_kernel_number(mod, input, dtype, dim=4):
     return input_kernel + output_kernel
 
 
+@unittest.skipIf(IS_S390X, "mkldnn not supported on s390x")
 @config.patch({"freezing": True})
 class TestPatternMatcherBase(TestCase):
     def _check_unary_is_decomposed(self, unary_fn):
@@ -233,6 +235,7 @@ class TestPatternMatcherBase(TestCase):
                 torch.testing.assert_close(actual, expected, atol=atol, rtol=rtol)
 
 
+@unittest.skipIf(IS_S390X, "mkldnn not supported on s390x")
 class TestPatternMatcher(TestPatternMatcherBase):
     def _test_conv_unary_cpu_base(self, dim=4):
         assert dim == 4 or dim == 5
@@ -4123,6 +4126,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
 # we end up reusing the same compiled region across tests. Thus we purposely specialize floats
 # here since we primarily care about number of kernels generated in the absence of compile
 # caching.
+@unittest.skipIf(IS_S390X, "mkldnn not supported on s390x")
 @dynamo_config.patch(
     {
         "dynamic_shapes": True,
